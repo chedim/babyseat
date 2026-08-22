@@ -89,6 +89,8 @@ class Cell:
         curiosity_on: bool = True,
         curiosity_min: float = CURIOSITY_MIN,
         curiosity_keep_fraction: float | None = None,
+        orientation: np.ndarray | None = None,
+        orientation_strength: float = 0.0,
         fresh: bool = True,
     ) -> None:
         self.tag = tag
@@ -96,6 +98,20 @@ class Cell:
         self.curiosity_min = curiosity_min
         self.curiosity_keep_fraction = curiosity_keep_fraction
         self._cur_dup_sim = dedup_sim
+        # ``orientation`` (stage 4, budding): a unit direction in embed space the cell is
+        # biased toward -- inherited from a parent cell's distinct experienced direction
+        # (see ``bud`` / ``variety.orient_dirs``). Acts on curiosity TWO ways, both
+        # default-off: a HARD alignment gate (curious only if aligned beyond
+        # ``strength/(1+strength)`` -- load-bearing for specialists) and a soft ranking
+        # factor on the score. Biases the PULL decision only (curiosity), never the gate /
+        # boundary / observer mode. ``orientation=None`` / ``orientation_strength=0.0`` ->
+        # no bias (identity: the cell is a plain generalist, bit-identical to stage 3).
+        self.orientation = orientation
+        self.orientation_strength = orientation_strength
+        # the veil seed, stored on the cell so ``bud`` can read it off the parent
+        # (Membrane consumes it into an RNG it doesn't expose back; the cell is where
+        # the operator-supplied seed is recoverable for inheritance).
+        self.nudge_seed = nudge_seed
         # ``fresh`` controls the boot-time field/audit: the experiment starts each
         # cell from an empty field (delete any existing field+audit on construct, the
         # stage-1 default). The LIVE proxy passes ``fresh=False`` so the Membrane
@@ -129,6 +145,76 @@ class Cell:
             nudge_seed=nudge_seed,
         )
 
+    # ---- budding (stage 4): inherited orientation -> a specialist -----------
+    @classmethod
+    def bud(cls, parent: "Cell", tag: str, field_path: str | Path,
+            audit_path: str | Path, direction_index: int = 0,
+            orientation_strength: float = 2.0, cos_sep: float = 0.5,
+            nudge_seed: int | None = None) -> "Cell":
+        """Bud a CHILD cell oriented toward the parent's ``direction_index``-th distinct
+        experienced direction -- the inherited orientation that makes a specialist.
+
+        DECENTRALIZED BY CONSTRUCTION (the anti-control guardrail, held): the
+        orientation comes from the PARENT's OWN field geometry
+        (``variety.orient_dirs`` -- one unit vector per mutually-``cos_sep``-apart
+        region of the parent's field, i.e. the distinct directions the parent actually
+        grew along), not from a central router assigning skills. A generalist parent
+        (grew along several distinct directions) buds specialist children, each
+        oriented toward one of those directions; the children diverge in SKILL
+        emergently from the parent's own variety, with no central input -- the same
+        architecture as the cell pool (no orchestrator), now across generations.
+
+        Why ``orient_dirs`` (representative directions) and not ``principal_dirs``
+        (SVD variance axes): a generalist's centered field has ~isotropic variance, so
+        its principal directions are DEGENERATE (arbitrary rotations of the skill
+        subspace) and point at no single skill. The parent's representative exemplars
+        ARE ~its skill axes (each is one base direction plus veil noise), well-defined
+        for any parent -- so a child oriented at one inherits a clean single-skill aim.
+
+        The child starts BLANK (its own fresh empty field -- ``fresh=True``). What a
+        child INHERITS here is ONLY the DIRECTION (the orientation vector); a seed slice
+        of the parent's field / the parent's safe-variety is the stage-5 energy economy
+        (when a cell has earned enough to bud, and what it carries forward). The child's
+        veil diverges from the parent's (a new ``nudge_seed``) so its realized variety
+        trajectory is its own, not the parent's replayed.
+
+        ``direction_index`` selects which distinct direction (0 = the one most aligned
+        with the field mean, i.e. a central real cluster). If the parent has fewer than
+        ``direction_index + 1`` separable directions, the child boots UNORIENTED (the
+        budding is a no-op -- the parent hasn't grown in that direction yet; this is the
+        honest "not ready to bud" state, whose TRIGGER is stage 5).
+        ``orientation_strength=0.0`` would likewise make the child a plain generalist
+        (no alignment gate, no ranking bias -- identity).
+
+        Guardrails are untouched by budding: the child is still observer-mode (never
+        authors), still holds only a ``BufferView`` (cannot feed itself), still has no
+        safe-mutator -- the orientation biases the PULL decision only (curiosity), never
+        the gate / boundary / observer. Verified in ``experiments/multi_bud.py`` (sig 5)."""
+        from .variety import orient_dirs
+        dirs = orient_dirs(parent.membrane.store, direction_index + 1, cos_sep)
+        if len(dirs) <= direction_index:
+            orientation = None             # parent has not grown in that direction yet
+        else:
+            orientation = np.asarray(dirs[direction_index], dtype=float)
+        m = parent.membrane
+        seed = (nudge_seed if nudge_seed is not None
+                else int(parent.nudge_seed) + direction_index + 1)
+        return cls(
+            tag=tag,
+            responder=m.responder,
+            field_path=field_path, audit_path=audit_path,
+            embedder=m.embedder, judge=m.judge,
+            sim_min=m.sim_min, consensus_min=m.consensus_min, dedup_sim=m.dedup_sim,
+            observer=m.observer,            # the never-authors guardrail -- inherited, do NOT flip
+            vague_filter=m.vague_filter, variety_gate=m.variety_gate,
+            variety_temp=m.variety_temp, temp_driver=m.temp_driver, temp_tau=m.temp_tau,
+            sim_min_floor=m.sim_min_floor, nudge_sigma=m.nudge_sigma, nudge_seed=seed,
+            curiosity_on=parent.curiosity_on, curiosity_min=parent.curiosity_min,
+            curiosity_keep_fraction=parent.curiosity_keep_fraction,
+            orientation=orientation, orientation_strength=orientation_strength,
+            fresh=True,                     # child starts blank (no seed field -- stage 5)
+        )
+
     # ---- the pull decision --------------------------------------------------
 
     def _situation_vec(self, text: str) -> np.ndarray:
@@ -141,11 +227,15 @@ class Cell:
 
     def _assess(self, vec: np.ndarray) -> tuple[bool, float]:
         """Curious? and how curious -- in ONE novelty computation, against THIS
-        cell's own field (``self.membrane.store``), so the verdict is cell-specific."""
+        cell's own field (``self.membrane.store``), so the verdict is cell-specific.
+        Threads the cell's inherited ``orientation`` (stage 4) into ``assess`` so the
+        curiosity score is biased toward the cell's oriented skill."""
         return assess(vec, self.membrane.store,
                       curiosity_min=self.curiosity_min,
                       dup_sim=self._cur_dup_sim,
-                      keep_fraction=self.curiosity_keep_fraction)
+                      keep_fraction=self.curiosity_keep_fraction,
+                      orientation=self.orientation,
+                      orientation_strength=self.orientation_strength)
 
     def curious(self, text: str) -> bool:
         """Should this cell pull ``text``? Field-relative, self-extinguishing."""

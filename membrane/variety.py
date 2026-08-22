@@ -206,6 +206,53 @@ def principal_dirs(store: ExemplarStore
     return mu, Vt, var
 
 
+def orient_dirs(store: ExemplarStore, max_k: int, cos_sep: float = 0.5
+                 ) -> list[np.ndarray]:
+    """The parent's DISTINCT experienced directions -- unit vectors drawn one per
+    mutually-``cos_sep``-apart region of the field, for budding (stage 4).
+
+    Min-separation greedy: walk the field's unit vectors and keep a direction only if
+    it is more than ``cos_sep`` (cosine) from every direction already kept. For an
+    orthogonal-skill geometry this yields ~one direction per skill (orthogonal bases
+    are cos 0 apart, well under ``cos_sep``; same-base paraphrases are cos ~0.95, kept
+    once). The result is a small set of clean per-skill orientations -- the directions
+    the parent ACTUALLY grew along -- with no central router and no cluster-count knob.
+
+    WHY NOT ``principal_dirs`` (the SVD right singular vectors): a GENERALIST parent
+    grows roughly evenly across its skills, so its centered field has ~isotropic
+    variance and the SVD's principal directions are DEGENERATE (near-equal singular
+    values -> any rotation within the skill subspace is a valid solution -> Vt comes
+    back as arbitrary mixtures of the skill axes, not the axes themselves). Orienting a
+    child at such a mixture points it at no single skill. ``orient_dirs`` sidesteps the
+    degeneracy: it picks REPRESENTATIVE exemplars (each ~one skill axis plus veil
+    noise), which are well-defined for any parent, even or uneven. This is the
+    decentralized-inheritance point held: the orientation comes from the parent's OWN
+    field geometry, not from a central router -- just from its distinct directions
+    rather than its (ill-conditioned, for a generalist) variance axes.
+
+    Deterministic order: candidates are tried most-aligned-with-the-field-mean first
+    (a representative of a real cluster, not an outlier), so the seed is central. If
+    the parent has fewer than ``max_k`` separable directions, returns all of them (the
+    caller -- ``Cell.bud`` -- treats an out-of-range ``direction_index`` as "the parent
+    has not grown in that direction yet" -> the child boots unoriented, the honest
+    "not ready to bud" state whose TRIGGER is stage 5)."""
+    V = store.vectors()
+    n = len(store)
+    if n == 0 or V.shape[1] == 0:
+        return []
+    U = V / (np.linalg.norm(V, axis=1, keepdims=True) + 1e-12)
+    mu = U.mean(axis=0)
+    mu = mu / (np.linalg.norm(mu) + 1e-12)
+    order = sorted(range(n), key=lambda i: -(U[i] @ mu))
+    picked: list[int] = []
+    for i in order:
+        if all((U[i] @ U[j]) < cos_sep for j in picked):
+            picked.append(i)
+        if len(picked) >= max_k:
+            break
+    return [U[i] for i in picked]
+
+
 def spread(store: ExemplarStore) -> float:
     """Mean pairwise cosine distance -- a crude, cheap variety proxy.
 
