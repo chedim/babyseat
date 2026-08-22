@@ -36,7 +36,7 @@ from pathlib import Path
 
 from .field import ExemplarStore
 from .review import _load, compute_metrics, _fmt_metrics
-from .variety import effective_rank, spread
+from .variety import effective_rank, spread, spectrum_entropy, free_energy
 
 # mirror gate.decide: the null-space novelty veto fires only below this rank ratio.
 NOVELTY_RANK_RATIO_MAX = 0.5
@@ -121,6 +121,8 @@ class State:
         self.last_n = -1          # effective_rank is cached by field size (vecs are immutable)
         self.eff_rank = 0.0
         self.spread = 0.0
+        self.spec_entropy = 0.0    # Shannon entropy of the variance spectrum (bits)
+        self.free_energy = 0.0     # safe-weighted variety minus disorder tax (the VALUE number)
         self.last_error = ""
         self._backfill()
 
@@ -186,6 +188,8 @@ class State:
             try:
                 self.eff_rank = effective_rank(store) if n >= 2 else 0.0
                 self.spread = spread(store) if n >= 2 else 0.0
+                self.spec_entropy = spectrum_entropy(store) if n >= 2 else 0.0
+                self.free_energy = free_energy(store) if n >= 2 else 0.0
             except Exception as e:
                 self.last_error = f"variety: {e}"
             self.last_n = n
@@ -258,6 +262,8 @@ def _draw_memory(win, store, st: State) -> None:
         (f"field:      {n} exemplars", C_DIM, 0),
         (f"safe: {safe}   unsafe: {unsafe}", C_SAFE if not unsafe else C_WARN, 0),
         (f"variety:    eff_rank {st.eff_rank:.2f} / {n}  (ratio {ratio:.2f})", 0, 0),
+        (f"entropy:    {st.spec_entropy:.3f} nats  (log eff_rank; the field's entropy)", C_DIM, 0),
+        (f"free energy:{st.free_energy:.3f}  (safe-weighted variety - disorder tax)", C_HINT, 0),
         (f"novelty:    {'ON  (low-rank -> null-space veto fires)' if nov_on else 'OFF (high-rank -> cosine only)'}",
          C_HINT if nov_on else C_DIM, 0),
         (f"spread:     {st.spread:.3f}  (mean pairwise cos distance)", C_DIM, 0),

@@ -189,6 +189,176 @@ PYTHONPATH=. .venv/bin/python -m membrane.proxy --listen 11435
 
 ---
 
+## The Anthropic adapter — Claude Code, observer-only
+
+Membrane can also sit in front of **Anthropic** (`/v1/messages`) instead of
+Ollama, so **Claude Code** drives the field:
+
+```
+Claude Code --> Membrane (proxy, observer-only) --> api.anthropic.com
+```
+
+Point Claude Code at the proxy and it works as a drop-in:
+
+```bash
+export ANTHROPIC_BASE_URL=http://127.0.0.1:11435
+export ANTHROPIC_API_KEY=sk-ant-...        # a real key; subscription OAuth won't route through a custom base URL
+./run.sh anthropic                         # TUI + proxy, --anthropic + observer implied
+```
+
+### Observer-only: never replay, always forward + learn + label
+
+Claude Code turns are huge, tool-using context windows. Replaying a stored
+answer for that is unsafe — the right action depends on the *full transcript*,
+not a cosine match on the latest message. So in `--anthropic` mode (and whenever
+`--observer` is set) the delivery layer **never replays**: every turn is
+forwarded to Anthropic and learned, and the gate's would-be absorb is audited as
+`would_absorb=true` (observability — see what *would* have cached, for a future
+absorb switch behind `--absorb`). The field's value is its accumulated, labeled
+**variety**, not token savings. The SSE stream is teed to the client verbatim
+while `text_delta` text is accumulated into the field; on `message_stop` the
+exemplar is learned. `--absorb` re-enables replay for future chat-window use
+(off by default — replaying a coding answer is unsafe).
+
+### Ambient quality signals — the "no dislike button" philosophy
+
+Observer-only has no replays, so the re-ask-after-absorb demotion loop is
+dormant. Two ambient signals (gated to `--observer`, so the Ollama path is
+untouched) make the judge fire and label the field from *what happened*, not
+from a button the user presses:
+
+- **tool-error** — a `tool_result` block with `is_error: true` in the next
+  request means a tool the model invoked failed in the world. The environment
+  pushed back through what happened. Membrane demotes the most-recent ring
+  exemplar (the action that led to the erroring call), `signal=tool-error`, and
+  the judge adjudicates.
+- **re-ask-after-escalate** — a near-duplicate (cosine ≥ `reask_sim`) of a
+  recently *escalated* turn: the forwarded answer didn't satisfy, the user is
+  asking again. Demotes that stored exemplar, `signal=reask-after-escalate`,
+  judge adjudicates. (In normal mode only an `act` counts as a re-ask; a repeat
+  after an escalate is the legitimate first absorb. Observer inverts that —
+  there are no absorbs.)
+
+Both reuse the existing `_demote → judge.contest → self.contest` path; the judge
+stays Ollama (`granite3.3:8b`, local) — a model-agnostic adjudicator.
+
+### Information-gated learning — the entropy-based value
+
+Two learn-time guards stop the field filling with junk (the disease the live
+Ollama test exposed — a 19-exemplar field of `beep`/`sigh`/`nice` one-offs):
+
+- **vague filter** (default on) — a low-information situation (`yes`/`ok`/`
+  beep`-class: short, no `?`, no path/digit/identifier/info-stem) is skipped
+  before dedup. Conservative: a false negative just learns (the safe side).
+- **variety gate** (`--variety-gate`, default **off**) — the principled half:
+  only append an exemplar if it grows the field's `effective_rank` (adds
+  variety, not just count). 2× SVD per learn on a big field, so off by default;
+  the cheap vague+dedup cover most cases. Subsumes dedup (a cosine-dup adds no
+  rank) but also drops a novel-but-subspace-redundant exemplar.
+
+### The field's thermodynamic value — entropy & free energy
+
+The user's "simple entropy-based value / enthalpy / temperature" riff, made
+concrete in `variety.py`:
+
+- **entropy** = `effective_rank` (`exp(Shannon entropy of the variance spectrum)`),
+  with `spectrum_entropy = log(effective_rank)` as the raw-nats form.
+- **temperature** = the gate's eagerness (`sim_min` / `consensus_min`).
+- **free energy** = `free_energy(store)` — safe-weighted variety *minus* a
+  disorder tax: `(safe fraction)·effective_rank − ¼·(unsafe fraction)·rank`.
+  The *one number* that says whether the field is getting richer or just bigger.
+  Surfaced in the TUI's memory panel and `review.py`, so an observer-only run is
+  judged on "is the variety growing, or just the count?"
+
+The one-SVD thermodynamic record is `thermo_state(store)` — `{eff_rank,
+spectrum_entropy, free_energy, rank_ratio, safe_frac, n}` from a single SVD. The
+gate already pays for that SVD every turn (for the novelty on/off boolean), so
+`gate_turn` records `thermo_state` once and hands `eff_rank` into `gate.decide`,
+avoiding a second eigensolve. Every audited decision now carries the
+thermodynamic state it was made under (`eff_rank` / `spectrum_entropy` /
+`free_energy` / `rank_ratio` / `safe_frac` / `sim_min_eff`) — variety recorded per
+decision, not thrown away.
+
+### Only variety can absorb variety — "variety is life"
+
+This is the project's principle, in plain words. It is Ashby's Law of Requisite
+Variety with the control-theory skin peeled off. Control theory's telos is
+*anti-variety*: the regulator exists to **collapse** the disturbance's variety
+down to a controlled, low-variety output ("destroy variety") — variety is the
+adversary to be neutralized into order. The membrane inverts the ethics: variety
+is not the threat to be contained, it is the **life to be grown**. `free_energy`
+(safe variety) is the field's vitality — a field with no safe variety is inert
+(it escalates everything, acts on nothing: dead). Same law, opposite telos:
+control theory says "grow enough control variety to *keep the output controlled*";
+the membrane says "grow enough field variety to *absorb more of the world*."
+
+In the code:
+
+- **`effective_rank`** = the field's requisite variety, *measured* not assumed. A
+  query off the experienced manifold (high `novelty`) can't be absorbed → escalate.
+  Only a field with variety *in that direction* can absorb a query in it.
+- **adaptive temperature** (`--variety-temp`, default off) is the field *spending*
+  its requisite variety: `sim_min` eases toward `--sim-min-floor` (0.70, the
+  validated safe cutoff) as `free_energy` grows. "Only **safe** variety absorbs
+  variety" — a junk field (variety but all demoted) pays the disorder tax, keeps
+  `free_energy` low, and stays conservative. The driver is `free_energy` by
+  default (the safe-weighted value), not raw `spectrum_entropy` (which ignores
+  safety — the reckless option). Low-variety field → conservative; grown-safe
+  field → relax toward the floor → absorb more.
+- **the veil** (`--nudge-sigma`, default 0 = identity) is the per-instance
+  perturbation of the incoming situation embedding: Gaussian noise added then
+  renormalized, applied to **everything that transits this membrane** — both the
+  gate's matching query and the exemplar vec that gets stored. The forwarded
+  prompt text is **never** garbled; only the field's representation is veiled. A
+  low-variety workload can't grow a varied field on its own (dedup collapses
+  paraphrases to one point); the nudge *injects* the variety it lacks, spreading
+  each intent into a cloud so `effective_rank` grows past the workload's intrinsic
+  base count. Each membrane seeds its own RNG (`--nudge-seed`) so independent
+  membranes realize divergent variety trajectories from the same traffic — with
+  no central input and no orchestrator.
+
+### Multi-veil — autonomous membranes, no central brain
+
+"Run multiple of them" is **decentralized**, not orchestrated. There is no
+central input and no live router (a central oracle is a rank-1 field — one
+perspective, one bar — and rank-1 cannot absorb variety). Each membrane is an
+**autonomous** instance — own field, own audit, own nudge seed, own temperature —
+that pulls the same public workload on its own. `--tag <name>` defaults the
+field/audit paths to `membrane-field-<tag>.json` / `membrane-audit-<tag>.jsonl` so
+independent membranes own independent fields. Comparison is **offline**, reading
+each membrane's saved audit afterward — never a live central comparison.
+
+```bash
+# launch several autonomous membranes at different temperatures/veils, then
+# compare their thermodynamic trajectories offline (each wrote its own audit):
+PYTHONPATH=. .venv/bin/python experiments/multi_veil.py
+```
+
+The experiment runs four autonomous membranes over the same low-intrinsic-variety
+workload and reads each one's saved audit offline. The `free_energy` column is
+the principle in numbers: the **static** membrane (no nudge) is stuck at the
+workload's intrinsic variety with `free_energy` going **negative** (its lone
+exemplars demote each other — dead); the **veiled** ones grow `effective_rank`
+past the base count and stay safe (`free_energy` ~ +4 — alive). The **adaptive**
+membrane (same nudge as the loose one, only the temperature knob differs) eases
+`sim_min` 0.85 → 0.58 as its safe variety grows and *spends* it — would-absorbing
+the traffic the cold-bar membrane escalates. Variety grown is variety spent.
+
+### API-key discipline
+
+The `ANTHROPIC_API_KEY` is **passthrough only**: read from the client's
+`x-api-key` header per request, threaded to the responder, forwarded to
+`api.anthropic.com`, and **never stored on the instance, written to the field or
+audit, or printed** (the same discipline as the cortex-experiment token). The
+judge stays Ollama on `localhost:11434` even in `--anthropic` mode.
+
+The adapter is verified end-to-end by a fake-Anthropic SSE test suite (no real
+key or Ollama needed): observer forwards+never-replays (`would_absorb`), tool-error
++ reask-after-escalate demotions fire the judge, the vague filter drops `yes`,
+the key never reaches disk, and `effective_rank`/`free_energy` compute.
+
+---
+
 ## The training loop (passive self-train on re-asks)
 
 The decision loop (absorb/escalate) is built. The **training** loop is how the

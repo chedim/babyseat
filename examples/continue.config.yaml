@@ -1,0 +1,61 @@
+# Continue config for the membrane proxy.
+#
+# Drop into ~/.continue/config.yaml (global) or .continue/config.yaml (project-local).
+# Requires Continue >= 0.9 (the config.yaml / schema: v1 format; config.json is deprecated).
+#
+# Topology:
+#   Cursor/your-editor (Continue) --[chat+edit]--> membrane proxy :11435 --[gate]--> Ollama :11434
+#   Cursor/your-editor (Continue) --[autocomplete+embed]-------------> Ollama :11434  (direct)
+#
+# CHAT + EDIT models go through the membrane proxy (127.0.0.1:11435). The proxy gates
+# /api/chat (stream AND non-stream): a routine repeat is ABSORBED (the recalled answer is
+# replayed as a stream, NO model call), a novel question is ESCALATED to the model and the
+# turn is logged to the field. Re-asks self-train (the replayed answer is demoted). So
+# Continue's streamed chats drive the field for real.
+#
+# Tab autocomplete + embeddings go DIRECT to Ollama (11434), bypassing the proxy:
+#   - autocomplete is low-value repetition you do NOT want polluting the field;
+#   - bulk codebase embedding has nothing to gate and shouldn't pay the proxy hop.
+# This keeps the field capturing high-value chat/edit turns, not autocomplete noise.
+
+name: Membrane
+version: 0.0.1
+schema: v1
+
+models:
+  - name: Qwen Coder (membrane)
+    provider: ollama
+    model: qwen2.5-coder:7b
+    apiBase: http://127.0.0.1:11435        # the proxy -- GATED (chat + edit)
+    roles: [chat, edit]
+    defaultCompletionOptions:
+      contextLength: 32768                 # Ollama defaults to 4-8k; editors send 30k+
+
+  # optional second chat model through the same proxy
+  - name: Granite (membrane)
+    provider: ollama
+    model: granite3.3:8b
+    apiBase: http://127.0.0.1:11435
+    roles: [chat]
+
+# Autocomplete: direct to Ollama, OFF the field (repetitive, low-value).
+tabAutocompleteModel:
+  name: Qwen Autocomplete
+  provider: ollama
+  model: qwen2.5-coder:7b
+  apiBase: http://127.0.0.1:11434          # direct Ollama, bypass the proxy
+
+# Embeddings: direct to Ollama, bypass the proxy (bulk indexing, nothing to gate).
+embeddingsProvider:
+  provider: ollama
+  model: mxbai-embed-large
+  apiBase: http://127.0.0.1:11434          # direct Ollama
+
+# ---- run the proxy first ----------------------------------------------------
+#   cd ~/projects/membrane
+#   PYTHONPATH=. .venv/bin/python -m membrane.proxy --listen 11435
+#
+# To enable the live model-judge on demotions, add:  --judge --judge-model granite3.3:8b
+# Then watch what the field learned:
+#   PYTHONPATH=. .venv/bin/python -m membrane.review \
+#     --audit membrane-audit.jsonl --field membrane-field.json

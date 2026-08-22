@@ -61,16 +61,119 @@ def effective_rank(store: ExemplarStore, eps: float = 1e-9) -> float:
     This generalizes rosetta-check's fixed-``rank`` lesson: instead of picking a
     magic k, we measure how many directions the field has actually seen.
     """
-    V = store.vectors()
-    if len(store) < 2 or V.shape[1] == 0:
+    return _effective_rank_vectors(store.vectors(), eps)
+
+
+def _effective_rank_vectors(V: np.ndarray, eps: float = 1e-9) -> float:
+    """``effective_rank`` on a raw (N, D) array instead of a store (shared core)."""
+    if V.shape[0] < 2 or V.shape[1] == 0:
         return 0.0
     Y = V - V.mean(axis=0)
     # SVD (not DxD covariance) so this scales to D=1024 real embeddings without
     # forming a 1024x1024 matrix. var_i = S_i^2/n are the covariance eigenvalues;
     # entropy is scale-invariant under normalization, so this == eigvalsh(C).
     _, S, _ = np.linalg.svd(Y, full_matrices=False)
-    var = (S ** 2) / len(store)
+    var = (S ** 2) / V.shape[0]
     return _entropy_rank(var, eps)
+
+
+def effective_rank_with(store: ExemplarStore, vec: np.ndarray,
+                        eps: float = 1e-9) -> float:
+    """What ``effective_rank`` WOULD be if ``vec`` were appended -- without mutating
+    the store. Used by the variety-learn-gate: only append an exemplar if it grows
+    the field's effective rank (adds variety, not just count). Cheap path is a 2x
+    SVD per learn, so the gate is OFF by default."""
+    V = store.vectors()
+    q = np.asarray(vec, dtype=float).reshape(1, -1)
+    if V.shape[1] == 0:
+        aug = q
+    elif V.shape[1] != q.shape[1]:
+        # dimension mismatch (shouldn't happen with one embedder) -- be safe
+        return _effective_rank_vectors(V, eps)
+    else:
+        aug = np.vstack([V, q])
+    return _effective_rank_vectors(aug, eps)
+
+
+def spectrum_entropy(store: ExemplarStore, eps: float = 1e-9) -> float:
+    """The raw Shannon entropy of the variance spectrum = ``log(effective_rank)``.
+
+    ``effective_rank`` is ``exp(entropy)``, i.e. it lives on the *count* axis
+    (1..D, "how many directions"); ``spectrum_entropy`` lives on the *bits* axis
+    (0..log D). Both describe the same flatness-of-spectrum; surfacing the log
+    form makes the thermodynamic reading direct: this IS the field's entropy.
+    Returns 0.0 for <2 exemplars (no spectrum to speak of)."""
+    r = effective_rank(store, eps)
+    return float(np.log(r)) if r > 0 else 0.0
+
+
+def free_energy(store: ExemplarStore, eps: float = 1e-9) -> float:
+    """The field's thermodynamic VALUE -- one number.
+
+    Reliable, non-redundant knowledge the field holds, MINUS a disorder tax:
+
+        F = (safe fraction) * effective_rank  -  disorder
+
+    where ``disorder`` is the unsafe/junk fraction times a small multiple of the
+    rank. Intuition: a field of many safe, spread-out exemplars is high-value; a
+    field cluttered with demoted (unsafe) or near-duplicate exemplars pays a tax
+    -- the same answer repeated doesn't add variety, and answers the environment
+    voted against subtract from confidence. ``effective_rank`` already penalizes
+    redundancy (duplicates don't grow it), so this is the safe-weighted variety
+    with an explicit penalty for the *wrong* answers the field has accrued.
+
+    This is the user's "entropy-based value / free energy" riff: entropy =
+    ``effective_rank`` (the variety), temperature = the gate's eagerness
+    (``sim_min``/``consensus_min``), and this is the free energy -- the one number
+    that says whether the field is getting richer or just bigger."""
+    n = len(store)
+    if n < 2:
+        return 0.0
+    rank = effective_rank(store, eps)
+    safe = sum(1 for e in store.exemplars if e.safe)
+    safe_frac = safe / n
+    unsafe_frac = 1.0 - safe_frac
+    disorder = 0.25 * unsafe_frac * rank       # the tax: a quarter of rank per unit disorder
+    return float(safe_frac * rank - disorder)
+
+
+def thermo_state(store: ExemplarStore, eps: float = 1e-9) -> dict:
+    """The field's thermodynamic state from ONE SVD -- the membrane-level variety
+    record. This is the variety the membrane records per decision and (opt-in)
+    uses to steer its threshold (the temperature). Computing it once and handing
+    the ``eff_rank`` to ``gate.decide`` reuses the SVD the gate already pays for,
+    so recording variety at the membrane level adds no eigensolve -- only an O(N)
+    safe-count.
+
+    Returns ``{eff_rank, spectrum_entropy, free_energy, rank_ratio, safe_frac, n}``:
+
+      - ``eff_rank``        = exp(Shannon entropy of the variance spectrum) -- the variety
+      - ``spectrum_entropy``= log(eff_rank) -- the field's entropy in nats
+      - ``free_energy``     = safe_frac*eff_rank - 0.25*unsafe_frac*eff_rank -- the VALUE number
+      - ``rank_ratio``      = eff_rank / n -- the gate's novelty on/off signal
+      - ``safe_frac``       = safe exemplars / n
+      - ``n``               = field size
+
+    All zero/0 for <2 exemplars (no spectrum to speak of). This is the single
+    place the SVD is done for a gate turn; ``effective_rank``/``free_energy``/
+    ``spectrum_entropy`` (used by the TUI/review, cached by field size) are the
+    same measures exposed individually for the view layer."""
+    n = len(store)
+    V = store.vectors()
+    if n < 2 or V.shape[1] == 0:
+        return {"eff_rank": 0.0, "spectrum_entropy": 0.0, "free_energy": 0.0,
+                "rank_ratio": 0.0, "safe_frac": 0.0, "n": n}
+    Y = V - V.mean(axis=0)
+    _, S, _ = np.linalg.svd(Y, full_matrices=False)
+    var = (S ** 2) / n
+    er = _entropy_rank(var, eps)
+    se = float(np.log(er)) if er > 0 else 0.0
+    safe = sum(1 for e in store.exemplars if e.safe)
+    safe_frac = safe / n
+    disorder = 0.25 * (1.0 - safe_frac) * er
+    return {"eff_rank": er, "spectrum_entropy": se,
+            "free_energy": float(safe_frac * er - disorder),
+            "rank_ratio": er / n, "safe_frac": safe_frac, "n": n}
 
 
 def spread(store: ExemplarStore) -> float:

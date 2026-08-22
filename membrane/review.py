@@ -248,6 +248,33 @@ def summarize(audit_path: str | Path, field_path: str | Path) -> str:
     lines.append("")
     m = compute_metrics(decisions, outcomes, contests, field)
     lines.extend(_fmt_metrics(m))
+
+    # ---- variety / thermodynamic VALUE (is the field getting richer, or just bigger?) ----
+    # In observer-only mode (Claude Code) there are no absorbs, so the efficiency
+    # metrics above are flat by design -- the field's value IS its variety. Entropy =
+    # effective_rank (the variety), free energy = safe-weighted variety minus a
+    # disorder tax (the one number that says whether the field is growing knowledge
+    # or accruing junk). Logged so an observer-only run is judged on variety, not count.
+    try:
+        from .field import Exemplar, ExemplarStore
+        from .variety import effective_rank, spectrum_entropy, free_energy, spread
+        store = ExemplarStore()
+        for d in field:
+            store.append(Exemplar(**{k: d.get(k) for k in
+                         ("situation", "action", "outcome", "vec", "safe",
+                          "reask_count", "contest_count")}))
+        n = len(store)
+        if n >= 2:
+            er = effective_rank(store)
+            lines.append("")
+            lines.append("variety -- is the field getting richer, or just bigger?")
+            lines.append("-" * 40)
+            lines.append(f"effective rank: {er:.2f} / {n}  (ratio {er / n:.2f})  -- entropy of the spectrum")
+            lines.append(f"spectrum entropy: {spectrum_entropy(store):.3f} nats  -- the field's entropy (log eff_rank)")
+            lines.append(f"free energy:    {free_energy(store):.3f}  -- safe-weighted variety - disorder tax (the VALUE)")
+            lines.append(f"spread:         {spread(store):.3f}  -- mean pairwise cosine distance")
+    except Exception as e:
+        lines.append(f"(variety metrics unavailable: {e})")
     return "\n".join(lines)
 
 
