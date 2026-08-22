@@ -32,10 +32,10 @@ from __future__ import annotations
 import numpy as np
 
 from experiments.real_knee import FIELD, NOISE, BORDERLINE, NOVEL
-from cortex.embed import OllamaEmbedder
-from cortex.field import Exemplar, ExemplarStore
-from cortex.variety import novelty, effective_rank
-from cortex.knee import valley_knee, valley_knee_robust, confusion, ascii_hist
+from membrane.embed import OllamaEmbedder
+from membrane.field import Exemplar, ExemplarStore
+from membrane.variety import novelty, effective_rank
+from membrane.knee import valley_knee, valley_knee_robust, confusion, ascii_hist
 
 
 def med(a): return float(np.median(a)) if len(a) else float("nan")

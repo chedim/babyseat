@@ -1,4 +1,4 @@
-# cortex-core
+# membrane
 
 A runtime memory and decision substrate for an agent (Claude) — **field-first**:
 the field is the *default actor*, the LLM is the *escalation*.
@@ -7,7 +7,7 @@ This is a sibling of `rosetta-check` (the Java linter) and `cortex-experiment`
 (the docs/proposals). It is a **Python lab**, not a production system. Its first
 job is to answer one open question the design left hanging:
 
-> **How do we measure "variety" for the Cortex process?**
+> **How do we measure "variety" for the Membrane process?**
 
 Variety calibrates the confidence gate. A field that has only experienced a few
 kinds of situation cannot be *sure* about a query off its experienced manifold,
@@ -105,7 +105,7 @@ field actually experienced" is the effective-rank / null-space question, and
 "how far off the experienced manifold is this query" is the Mahalanobis
 residual. The math earns its keep **here**.
 
-So the variety measures (in `cortex/variety.py`):
+So the variety measures (in `membrane/variety.py`):
 
 - **`effective_rank(store)`** — the entropy of the covariance eigenvalue
   spectrum. Low -> exemplars cluster along a few axes -> low variety. This
@@ -125,7 +125,7 @@ while a high-variety store treats the *same* query as in-manifold (-> confident
 ### What this project deliberately is NOT (yet)
 
 - No Ollama dependency on the hot experimental path — the toy uses synthetic
-  vectors so it runs instantly. The real embedder (`cortex/embed.py`, to be
+  vectors so it runs instantly. The real embedder (`membrane/embed.py`, to be
   wired) slots in behind the same `field` interface.
 - No MCP server / no agent integration — this is a lab. A CLI an agent calls via
   Bash is the obvious first seam; an MCP server is the cleaner seam if this
@@ -147,7 +147,7 @@ while a high-variety store treats the *same* query as in-manifold (-> confident
    general gate. The one "it collapsed" finding was partly a knee-finder
    artifact; the cosine-primary conclusion was right, now for the right reason.
 4. **The training loop** — *landed* (passive self-train + live model-judge; see "The
-   training loop" below): Cortex watches how you use the chat and learns from **re-asks** —
+   training loop" below): Membrane watches how you use the chat and learns from **re-asks** —
    asking the same thing again right after an absorb means the replay was wrong. A re-ask is
    an evidential, reversible **vote** (`reask_count`), not a hard flip: `safe` is derived from
    the net of re-ask votes (usefulness, the environment) vs contest votes (correctness, the
@@ -160,17 +160,17 @@ while a high-variety store treats the *same* query as in-manifold (-> confident
 
 ## The proxy (the runtime skeleton)
 
-Cortex is a **local proxy** between the chat window and the model server:
+Membrane is a **local proxy** between the chat window and the model server:
 
 ```
-you (chat window) --> Cortex (proxy, owns the field) --> model server (Ollama)
+you (chat window) --> Membrane (proxy, owns the field) --> model server (Ollama)
 ```
 
-The window used to call the model directly. Cortex slides in: it embeds each
+The window used to call the model directly. Membrane slides in: it embeds each
 `/api/chat` request (local `mxbai-embed-large`), runs the gate, and either
 **replays a recalled action** (no model call — the absorb) or **forwards to the
 model** (the novel) and logs the turn to the field + audit. Local-first
-(127.0.0.1 only). Skeleton in `cortex/proxy.py`; the in-process loop (no chat
+(127.0.0.1 only). Skeleton in `membrane/proxy.py`; the in-process loop (no chat
 model needed) is proven in `experiments/proxy_demo.py`.
 
 ```bash
@@ -179,7 +179,7 @@ model needed) is proven in `experiments/proxy_demo.py`.
 PYTHONPATH=. .venv/bin/python experiments/proxy_demo.py
 
 # run the real proxy (drop-in front of Ollama; point a client at :11435):
-PYTHONPATH=. .venv/bin/python -m cortex.proxy --listen 11435
+PYTHONPATH=. .venv/bin/python -m membrane.proxy --listen 11435
 ```
 
 ---
@@ -188,12 +188,12 @@ PYTHONPATH=. .venv/bin/python -m cortex.proxy --listen 11435
 
 The decision loop (absorb/escalate) is built. The **training** loop is how the
 outcome — *was an absorb correct?* — flows back and updates the field. The key
-property: **it is passive.** You use the chat normally; Cortex learns from how you
+property: **it is passive.** You use the chat normally; Membrane learns from how you
 naturally use it. You never "teach" it.
 
 The strongest outcome signal is a **re-ask**: you ask the same thing again right
 after the field *absorbed* (replayed) it — meaning the replay did not satisfy, the
-absorb was wrong. Cortex sees that re-ask because every request flows through it; it
+absorb was wrong. Membrane sees that re-ask because every request flows through it; it
 needs no notification and no model call. (A same-Q repeat right after an *escalate* is
 the legitimate first absorb — not a re-ask — so only repeats *after an absorb* count.)
 
@@ -227,10 +227,10 @@ permanent; only the evidence counts (and the derived `safe`) change — nothing 
 deleted or rewritten.
 
 The model's contest is the **live** model-side authority: when a re-ask demotes an
-exemplar, Cortex asks a fresh model (independent of the responder) — "was the replayed
+exemplar, Membrane asks a fresh model (independent of the responder) — "was the replayed
 answer actually correct?" CONTEST (it was right; the re-ask was a misunderstanding) or
 ACCEPT (it was wrong; the demotion stands). This is the "LLM-as-MCP-server" inversion
-made real: Cortex is the host, the model is a backend it calls only to adjudicate.
+made real: Membrane is the host, the model is a backend it calls only to adjudicate.
 
 The judge is **opt-in** (default `StubJudge` never contests — zero behavior change, zero
 extra calls). Pass `judge=OllamaJudge(model=...)` to enable it; the demo uses a
@@ -247,14 +247,14 @@ repeated re-ask wins the action — the boundary cannot collapse to the model si
 supervisor can `contest(..., force_restore=True)` to override (the higher bar).
 
 The honest "notify you in this window" mechanism: an outside process cannot push into
-the Claude Code window, so Cortex notifies by appending to the audit log, and I read
-it on demand — `python -m cortex.review` prints what the training loop did, **both
+the Claude Code window, so Membrane notifies by appending to the audit log, and I read
+it on demand — `python -m membrane.review` prints what the training loop did, **both
 sides**: decisions, the re-ask votes, the contests (judge vs supervisor, restored vs
 record-only), and the net-evidence state of each exemplar.
 
 ```bash
-# review what Cortex learned (the in-window training-loop surface):
-PYTHONPATH=. .venv/bin/python -m cortex.review --audit cortex-audit.jsonl --field cortex-field.json
+# review what Membrane learned (the in-window training-loop surface):
+PYTHONPATH=. .venv/bin/python -m membrane.review --audit membrane-audit.jsonl --field membrane-field.json
 ```
 
 ---
@@ -270,7 +270,7 @@ See also the experiment files in `experiments/`.
 ## Run the toy
 
 ```bash
-cd /Users/dmitrii.chechetkin/projects/cortex-core
+cd /Users/dmitrii.chechetkin/projects/membrane
 pip install -r requirements.txt   # numpy only
 python experiments/variety_toy.py
 ```

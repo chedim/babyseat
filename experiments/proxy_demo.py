@@ -1,7 +1,7 @@
-"""End-to-end demo of the Cortex absorb/escalate loop WITH passive self-training
+"""End-to-end demo of the Membrane absorb/escalate loop WITH passive self-training
 AND the live two-authority boundary (re-ask vs an automatic model-judge).
 
-Drives the in-process Cortex runtime with a StubResponder (so it runs anywhere --
+Drives the in-process Membrane runtime with a StubResponder (so it runs anywhere --
 only needs local Ollama/mxbai for embeddings) through a sequence that proves the
 decision loop, the training loop, AND the boundary with the model-side authority
 engaging AUTOMATICALLY (no manual contest call -- the judge fires on its own):
@@ -35,8 +35,8 @@ from __future__ import annotations
 
 import os
 
-from cortex import Cortex, StubResponder, ScriptedJudge
-from cortex.review import summarize
+from membrane import Membrane, StubResponder, ScriptedJudge
+from membrane.review import summarize
 
 # field + audit into the bg-job tmp dir so parallel jobs don't clobber each other
 TMP = os.environ.get("CLAUDE_JOB_DIR", "/tmp") + "/tmp"
@@ -60,8 +60,8 @@ def chat(user: str, model: str = "demo") -> dict:
 
 
 def main() -> None:
-    field = os.path.join(TMP, "cortex-demo-field.json")
-    audit = os.path.join(TMP, "cortex-demo-audit.jsonl")
+    field = os.path.join(TMP, "membrane-demo-field.json")
+    audit = os.path.join(TMP, "membrane-demo-audit.jsonl")
     # clean slate
     for p in (field, audit):
         if os.path.exists(p):
@@ -80,7 +80,7 @@ def main() -> None:
         "answer was correct; the re-ask was a misunderstanding",   # 1st contest -> restores
         "answer still holds; the repeated re-ask does not change that",  # 2nd -> record-only
     ])
-    cortex = Cortex(responder=responder, field_path=field, audit_path=audit,
+    membrane = Membrane(responder=responder, field_path=field, audit_path=audit,
                     sim_min=0.85, consensus_min=0.0, demote_threshold=1, judge=judge)
 
     q1 = "how do I upsert a document in Couchbase Java SDK?"
@@ -88,21 +88,21 @@ def main() -> None:
 
     def turn(tag, q):
         before = responder.calls
-        resp, dec = cortex.handle(chat(q))
+        resp, dec = membrane.handle(chat(q))
         called = responder.calls - before
         content = resp["message"]["content"]
         mark = "ABSORBED (no model call)" if called == 0 else f"escalated ({called} model call)"
         sim = dec.get("sim")
         sim_s = f"{sim:.3f}" if isinstance(sim, (int, float)) else "  -  "
-        e0 = cortex.store.exemplars[0]
+        e0 = membrane.store.exemplars[0]
         print(f"[{tag:9s}] verdict={dec['verdict']:18s} sim={sim_s:>5}  "
-              f"field={len(cortex.store):>2d}  responder_calls={responder.calls:>2d}  {mark}  "
+              f"field={len(membrane.store):>2d}  responder_calls={responder.calls:>2d}  {mark}  "
               f"| E0 reask={e0.reask_count} contest={e0.contest_count} safe={e0.safe}")
         print(f"            -> {content[:80]}")
 
-    print(f"sim_min={cortex.sim_min}  consensus_min={cortex.consensus_min} (chat: sim-primary)  "
-          f"demote_threshold={cortex.demote_threshold}  judge=ScriptedJudge (live=OllamaJudge)")
-    print(f"field starts at {len(cortex.store)} exemplars\n")
+    print(f"sim_min={membrane.sim_min}  consensus_min={membrane.consensus_min} (chat: sim-primary)  "
+          f"demote_threshold={membrane.demote_threshold}  judge=ScriptedJudge (live=OllamaJudge)")
+    print(f"field starts at {len(membrane.store)} exemplars\n")
 
     turn("novel",  q1)   # 1 -> escalate, E0 logged
     turn("REPEAT", q1)   # 2 -> ABSORB (first repeat, correct)

@@ -2,7 +2,7 @@
 mxbai-embed-large embeddings of real code, or is the bimodal/valley a synthetic
 artifact?
 
-The honest test. A field of real Java Couchbase-SDK snippets (what Cortex
+The honest test. A field of real Java Couchbase-SDK snippets (what Membrane
 "solved"). A workload of: more Couchbase (routine noise), other Java libs
 (borderline -- same language/domain, off the specific manifold), and
 Python/Go/SQL/infra (clearly novel). Embed all with the local Ollama model,
@@ -20,12 +20,12 @@ from __future__ import annotations
 
 import numpy as np
 
-from cortex.field import Exemplar, ExemplarStore
-from cortex.variety import novelty, effective_rank, spread
-from cortex.embed import OllamaEmbedder
-from cortex.knee import valley_knee, otsu_threshold, ascii_hist, confusion
+from membrane.field import Exemplar, ExemplarStore
+from membrane.variety import novelty, effective_rank, spread
+from membrane.embed import OllamaEmbedder
+from membrane.knee import valley_knee, otsu_threshold, ascii_hist, confusion
 
-# ---- the field: Java Couchbase SDK patterns Cortex has "solved" ----
+# ---- the field: Java Couchbase SDK patterns Membrane has "solved" ----
 FIELD = [
     'Cluster cluster = Cluster.connect(host, username, password); Bucket bucket = cluster.bucket("travel");',
     'Collection collection = bucket.defaultCollection(); collection.upsert("doc1", JsonObject.create().put("name","alice"));',
@@ -105,7 +105,7 @@ def main() -> None:
     wvecs = emb.embed(wtexts)
     print(f"embedding dim = {fvecs.shape[1]}\n")
 
-    # build the field store (what Cortex has solved)
+    # build the field store (what Membrane has solved)
     store = ExemplarStore()
     for v in fvecs:
         store.append(Exemplar("couchbase-java", "actA", "ok", v.tolist(), safe=True))

@@ -1,7 +1,7 @@
-"""Filter-knee experiment: prove Cortex's novelty filter has a real cutoff to find,
+"""Filter-knee experiment: prove Membrane's novelty filter has a real cutoff to find,
 not a threshold we impose -- and that the right finder matters on a real workload.
 
-Setup: a field that has experienced a k-dimensional manifold (what Cortex "can
+Setup: a field that has experienced a k-dimensional manifold (what Membrane "can
 solve"). The incoming workload is TRIMODAL -- the realistic shape:
 
     clear-noise  : on-manifold (the field can solve these)            -> low novelty  (absorb)
@@ -34,8 +34,8 @@ from __future__ import annotations
 
 import numpy as np
 
-from cortex.field import Exemplar, ExemplarStore
-from cortex.variety import novelty
+from membrane.field import Exemplar, ExemplarStore
+from membrane.variety import novelty
 
 D = 16
 K = 4

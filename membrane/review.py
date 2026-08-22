@@ -1,15 +1,15 @@
 """The in-window review surface + metrics -- what I (Claude, in the window) run to see
-what Cortex learned and whether it is working. Passive supervision, not user labeling.
+what Membrane learned and whether it is working. Passive supervision, not user labeling.
 
 The honest "notify you in this window" mechanism: an outside process cannot push into
-the Claude Code window, so Cortex "notifies" by appending to the audit log, and I notice
+the Claude Code window, so Membrane "notifies" by appending to the audit log, and I notice
 by reading it -- on demand. This module is that read: it joins the audit log (decisions +
 re-ask outcomes + contests) to the field and prints what the training loop did -- the
 two authorities (re-ask vs contest) AND the metrics that say whether the proxy is earning
 its keep (the hit/miss ratio, the detected wrong-absorb rate, the absorb rate, the
 token savings, and the judge's precision).
 
-THE GROUND-TRUTH ASYMMETRY (the one honesty constraint that shapes the metrics): Cortex's
+THE GROUND-TRUTH ASYMMETRY (the one honesty constraint that shapes the metrics): Membrane's
 only ground-truth signal is the re-ask. A re-ask is a HARD NEGATIVE (the absorb was wrong --
 proven). The absence of a re-ask is a SOFT POSITIVE (the user was probably satisfied -- but
 silence is not approval). So:
@@ -21,8 +21,8 @@ The "is it working" number is the PRODUCT of efficiency and safety: a high absor
 that is ALSO a low detected-miss rate. The wrong-absorb rate is reported as a lower bound.
 
 Run:
-  python -m cortex.review --audit cortex-audit.jsonl --field cortex-field.json          # narrative
-  python -m cortex.review --audit ... --field ... --metrics                              # numbers only
+  python -m membrane.review --audit membrane-audit.jsonl --field membrane-field.json          # narrative
+  python -m membrane.review --audit ... --field ... --metrics                              # numbers only
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ def _load(audit_path: str | Path, field_path: str | Path):
 
 
 def compute_metrics(decisions, outcomes, contests, field):
-    """The numbers that say whether Cortex is working. All rates are over the audit log.
+    """The numbers that say whether Membrane is working. All rates are over the audit log.
 
     Two authorities -> two miss axes (this is the subtlety a single ratio hides):
       - USEFULNESS miss (env axis): the user re-asked -> the absorb didn't satisfy. ANY re-ask.
@@ -186,7 +186,7 @@ def summarize(audit_path: str | Path, field_path: str | Path) -> str:
     contested = [(i, e) for i, e in enumerate(field) if e.get("contest_count", 0) > 0]
 
     lines = []
-    lines.append("cortex training-loop review")
+    lines.append("membrane training-loop review")
     lines.append("=" * 40)
     lines.append(f"field:        {len(field)} exemplars")
     lines.append(f"decisions:    {len(decisions)} "
@@ -258,9 +258,9 @@ def metrics(audit_path: str | Path, field_path: str | Path) -> str:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Review what the Cortex training loop learned.")
-    ap.add_argument("--audit", default="cortex-audit.jsonl", help="path to the audit log")
-    ap.add_argument("--field", default="cortex-field.json", help="path to the exemplar field")
+    ap = argparse.ArgumentParser(description="Review what the Membrane training loop learned.")
+    ap.add_argument("--audit", default="membrane-audit.jsonl", help="path to the audit log")
+    ap.add_argument("--field", default="membrane-field.json", help="path to the exemplar field")
     ap.add_argument("--metrics", action="store_true", help="print only the metrics readout")
     args = ap.parse_args()
     print(metrics(args.audit, args.field) if args.metrics else summarize(args.audit, args.field))

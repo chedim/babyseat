@@ -19,9 +19,9 @@ from __future__ import annotations
 
 import numpy as np
 
-from cortex.field import Exemplar, ExemplarStore
-from cortex.variety import effective_rank, spread, novelty
-from cortex.gate import decide
+from membrane.field import Exemplar, ExemplarStore
+from membrane.variety import effective_rank, spread, novelty
+from membrane.gate import decide
 
 # n > D so there are no literally-zero-variance directions (real dense embeddings
 # are like this; pure synthetic 1-D data is not, which would make gamma collapse).

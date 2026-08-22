@@ -24,9 +24,9 @@ from __future__ import annotations
 import re
 import numpy as np
 
-from cortex.embed import OllamaEmbedder
-from cortex.field import Exemplar, ExemplarStore
-from cortex.variety import effective_rank
+from membrane.embed import OllamaEmbedder
+from membrane.field import Exemplar, ExemplarStore
+from membrane.variety import effective_rank
 
 CORPUS = "/Users/dmitrii.chechetkin/projects/rosetta-check/src/test/resources/cortex-corpus/python"
 CALL_RE = re.compile(r"\w+\.\w+\(")          # a method call: foo.bar(

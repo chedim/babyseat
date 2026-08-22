@@ -1,13 +1,13 @@
 # Variety, novelty, and the gate — the math findings
 
-This documents the math we ran in `cortex-core` and what it settled. It is a
+This documents the math we ran in `membrane` and what it settled. It is a
 narrative of three experiments, one of which **corrected an earlier one**, and a
 final conclusion that is honest about being self-correcting. No formal-math
 background is assumed; every term is explained when it first appears.
 
 The one question that started all of it, from the README:
 
-> **How do we measure "variety" for the Cortex process?**
+> **How do we measure "variety" for the Membrane process?**
 
 Variety calibrates the confidence gate. A field that has only experienced a few
 kinds of situation cannot be *sure* about a query off its experienced manifold,
@@ -16,7 +16,7 @@ that turns a brittle cosine threshold into a calibrated `not-sure` signal.
 
 ---
 
-## The measures (in `cortex/variety.py`)
+## The measures (in `membrane/variety.py`)
 
 Three quantities, all built on the exemplar field (a set of past
 `situation → action → outcome` judgments, each with a local embedding vector).
@@ -50,7 +50,7 @@ cross-check on `effective_rank` with no eigensolve.
 
 ---
 
-## The filter cutoff — where absorb ends and escalate begins (`cortex/knee.py`)
+## The filter cutoff — where absorb ends and escalate begins (`membrane/knee.py`)
 
 A real workload is **trimodal**: a clear-routine mass (low novelty), a
 borderline band (medium), and a clear-novel mass (high). The absorb/escalate
@@ -90,7 +90,7 @@ max-cos 0.86, novel 0.57; cosine filter FN 9% / FP 0%).
 
 Conclusion as first drawn: **novelty is wrong for dense/high-rank fields; cosine
 is the primary gate; novelty retires to a narrow low-rank specialist.** The gate
-(`cortex/gate.py`) was rebuilt **cosine-primary**, with novelty as a *conditional
+(`membrane/gate.py`) was rebuilt **cosine-primary**, with novelty as a *conditional
 veto* firing only when `rank_ratio = effective_rank / len(field) < 0.5` (a
 genuinely low-rank field). Validated in `experiments/real_gate.py`: noise 100%
 absorbed, novel 100% escalated, borderline 20% absorbed (the real acquisition
@@ -119,7 +119,7 @@ null-space novelty has no general role on situation fields by growth alone.
 The honest home for the null-space operator is one place it was already landed:
 rosetta-check's linter, where the field is **atomic code events** (a receiver
 member access) — far more redundant, so the trained 20-file field *was* low-rank,
-the null space *was* the asset, the operator hit 18/18 (in-sample). Cortex-core's
+the null space *was* the asset, the operator hit 18/18 (in-sample). Membrane-core's
 field is **situations** (rich, high-rank) where the operator doesn't earn its
 place. Same math, different embedding unit, opposite verdict.
 
@@ -182,7 +182,7 @@ gap's overlap with the noise tail, not the field's rank.
 
 - **The gate is cosine-primary**: nearest-similarity + the reversibility guard
   (confident+safe → act; confident+risky → escalate-with-hint; not-sure →
-  escalate). `cortex/gate.py`.
+  escalate). `membrane/gate.py`.
 - **Novelty** is a real signal but a **narrow specialist**, not a general gate:
   conditionally useful on genuinely low-rank fields, and a marginal
   high-veto on top of cosine *if* a threshold can be set. It does not replace or
@@ -202,23 +202,23 @@ decision; the one "it collapsed" finding was partly a finder artifact, but the
 
 ## What is NOT math (the runtime, still open)
 
-These are about *where Cortex lives and how it learns*, not the gate math.
+These are about *where Membrane lives and how it learns*, not the gate math.
 
-**The proxy / substrate (decided).** Cortex is a **local proxy process** between
+**The proxy / substrate (decided).** Membrane is a **local proxy process** between
 the chat window and the model server — the window used to call the model
-directly; Cortex slides in, embeds each request, gates it, and either replays a
+directly; Membrane slides in, embeds each request, gates it, and either replays a
 recalled action (no model call) or forwards to the model and logs the turn. The
 field is a **local file the proxy owns** (local-first; a shared Core would be a
 later move where several proxies point at the same store). Skeleton in
-`cortex/proxy.py` (intercepts non-streaming `/api/chat`, forwards everything
+`membrane/proxy.py` (intercepts non-streaming `/api/chat`, forwards everything
 else); loop proven in `experiments/proxy_demo.py`.
 
 **The training loop (Tier 1 landed — passive self-train on re-asks; boundary softening
 landed).** The decision loop (absorb/escalate) is built. The **training** loop is how the
 *outcome* — was an absorb correct? — flows back. The key property: **it is passive.** You use
-the chat normally; Cortex learns from how you naturally use it, with no extra labor. The
+the chat normally; Membrane learns from how you naturally use it, with no extra labor. The
 strongest outcome signal is a **re-ask**: asking the same thing again right after the field
-*absorbed* (replayed) it means the replay was wrong. Cortex sees the re-ask because it is in
+*absorbed* (replayed) it means the replay was wrong. Membrane sees the re-ask because it is in
 the path — no notification, no model call.
 
 A re-ask is now a **vote, not a verdict** — the environment is not treated as infallible.
@@ -239,13 +239,13 @@ is self-limiting, not compounding, even though the model's weights stay frozen. 
 self-correcting cache of how *you* use the model: cheaper and self-correcting, not smarter.
 
 The proxy is stateful across turns (an in-memory ring of recent decisions; the durable evidence
-is written to the field file). The audit log (`cortex-audit.jsonl`) records every decision
+is written to the field file). The audit log (`membrane-audit.jsonl`) records every decision
 (`event: decision`) plus a re-ask vote (`event: outcome`) and a contest (`event: contest`),
 each joinable by `ex_idx` and carrying the net evidence + the contest's source/restore flag.
-The in-window review surface (`python -m cortex.review`) reads the audit + field and prints
+The in-window review surface (`python -m membrane.review`) reads the audit + field and prints
 **both sides** of the boundary — the honest "notify you in this window" mechanism, on demand.
 
-The *model-judges-the-audit* half (Cortex calling a fresh model per demotion — the
+The *model-judges-the-audit* half (Membrane calling a fresh model per demotion — the
 "LLM-as-MCP-server" inversion) is **live**: `OllamaJudge` asks a fresh model "was the replayed
 answer correct?" and CONTESTS or ACCEPTS. It is opt-in (default `StubJudge` no-ops, zero behavior
 change); the demo uses a `ScriptedJudge` so it runs without a chat model. The anti-collapse rule

@@ -32,8 +32,8 @@ from __future__ import annotations
 import os
 import textwrap
 
-from cortex import Cortex, OllamaChatResponder, OllamaJudge
-from cortex.review import summarize
+from membrane import Membrane, OllamaChatResponder, OllamaJudge
+from membrane.review import summarize
 
 TMP = os.environ.get("CLAUDE_JOB_DIR", "/tmp") + "/tmp"
 RESPONDER_MODEL = os.environ.get("RESPONDER_MODEL", "qwen2.5-coder:7b")
@@ -52,8 +52,8 @@ def show(label: str, text: str, width: int = 76) -> None:
 
 
 def main() -> None:
-    field = os.path.join(TMP, "cortex-live-field.json")
-    audit = os.path.join(TMP, "cortex-live-audit.jsonl")
+    field = os.path.join(TMP, "membrane-live-field.json")
+    audit = os.path.join(TMP, "membrane-live-audit.jsonl")
     for p in (field, audit):
         if os.path.exists(p):
             os.remove(p)
@@ -65,7 +65,7 @@ def main() -> None:
 
     responder = OllamaChatResponder()
     judge = OllamaJudge(model=JUDGE_MODEL, timeout=120)
-    cortex = Cortex(responder=responder, field_path=field, audit_path=audit,
+    membrane = Membrane(responder=responder, field_path=field, audit_path=audit,
                     sim_min=0.85, consensus_min=0.0, demote_threshold=1, judge=judge)
 
     q = "how do I upsert a document in Couchbase Java SDK?"
@@ -73,25 +73,25 @@ def main() -> None:
     print("=" * 78)
     print("TURN 1 -- novel question: the responder (real model) answers; E0 logged")
     print("=" * 78)
-    resp, dec = cortex.handle(chat(q, RESPONDER_MODEL))
-    e0 = cortex.store.exemplars[0]
-    print(f"verdict={dec['verdict']}  field={len(cortex.store)}  E0 reask={e0.reask_count} "
+    resp, dec = membrane.handle(chat(q, RESPONDER_MODEL))
+    e0 = membrane.store.exemplars[0]
+    print(f"verdict={dec['verdict']}  field={len(membrane.store)}  E0 reask={e0.reask_count} "
           f"contest={e0.contest_count} safe={e0.safe}")
     show("E0 answer (the model's proposal)", e0.action)
 
     print("\n" + "=" * 78)
     print("TURN 2 -- REPEAT: the gate ABSORBS (replays E0's answer, NO model call)")
     print("=" * 78)
-    resp, dec = cortex.handle(chat(q, RESPONDER_MODEL))
-    print(f"verdict={dec['verdict']}  field={len(cortex.store)}  E0 reask={e0.reask_count} "
+    resp, dec = membrane.handle(chat(q, RESPONDER_MODEL))
+    print(f"verdict={dec['verdict']}  field={len(membrane.store)}  E0 reask={e0.reask_count} "
           f"contest={e0.contest_count} safe={e0.safe}")
     show("replayed (E0's answer, no model call)", resp["message"]["content"])
 
     print("\n" + "=" * 78)
     print("TURN 3 -- RE-ASK: E0 demoted -> the LIVE JUDGE adjudicates (real model)")
     print("=" * 78)
-    resp, dec = cortex.handle(chat(q, RESPONDER_MODEL))
-    print(f"verdict={dec['verdict']}  field={len(cortex.store)}")
+    resp, dec = membrane.handle(chat(q, RESPONDER_MODEL))
+    print(f"verdict={dec['verdict']}  field={len(membrane.store)}")
     print(f"E0 final state: reask={e0.reask_count} contest={e0.contest_count} safe={e0.safe}")
     if e0.contest_count > 0:
         effect = "RESTORED (judge vetoed the demotion -- answer was correct)" if e0.safe \

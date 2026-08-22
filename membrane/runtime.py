@@ -1,10 +1,10 @@
-"""Cortex runtime: the absorb/escalate loop over the field, with passive self-training.
+"""Membrane runtime: the absorb/escalate loop over the field, with passive self-training.
 
-This is the in-process core the HTTP proxy (cortex/proxy.py) wraps. Given a query
+This is the in-process core the HTTP proxy (membrane/proxy.py) wraps. Given a query
 (text, not a pre-embedded vector) it:
 
   1. embeds the query (local Ollama / mxbai-embed-large),
-  2. runs the confidence gate against the permanent exemplar field (cortex/gate.py),
+  2. runs the confidence gate against the permanent exemplar field (membrane/gate.py),
   3. routes:
        act                -> replay the recalled action (NO model call -- the absorb),
        escalate-with-hint -> call the responder with the recalled action as a HINT
@@ -18,14 +18,14 @@ PASSIVE SELF-TRAINING (the training loop -- no user labor). The proxy process li
 across requests, so it keeps a small in-memory ring of recent decisions. The
 strongest outcome signal is a **re-ask**: the user asks the same thing again right
 after the field *absorbed* it. That means the replay did not satisfy -> the absorb
-was wrong (the dangerous ``absorb_signal`` error). Cortex sees the re-ask because it
+was wrong (the dangerous ``absorb_signal`` error). Membrane sees the re-ask because it
 is in the path; it needs no notification and no model call.
 
 The re-ask is a VOTE, not a verdict. A re-ask increments ``reask_count`` (the
 environment's vote against); the exemplar's ``safe`` flag is derived from the net
 evidence (``reask_count - contest_count < demote_threshold``), so demotion accumulates
 and is reversible -- it does not treat the environment as infallible. The model checks
-the environment back via a **contest** (``Cortex.contest``): "my answer was correct
+the environment back via a **contest** (``Membrane.contest``): "my answer was correct
 anyway; that re-ask was a misunderstanding." A contest increments ``contest_count`` and
 may *restore* ``safe``. This is the boundary, in code: two authorities (usefulness =
 the environment, correctness = the model), each a veto on the other, neither with a
@@ -44,9 +44,9 @@ Only a repeat *after an absorb* means the replay was wrong. This distinction kee
 the legitimate "first repeat -> absorb" working while catching the "second repeat ->
 the replay was bad."
 
-The in-window review surface is ``cortex/review.py`` -- the honest "notify you in
-this window" mechanism is on-demand: I run ``python -m cortex.review`` and read what
-Cortex learned. An outside process cannot push into the Claude Code window, so the
+The in-window review surface is ``membrane/review.py`` -- the honest "notify you in
+this window" mechanism is on-demand: I run ``python -m membrane.review`` and read what
+Membrane learned. An outside process cannot push into the Claude Code window, so the
 audit log + an on-demand read is the channel. The model-judges-the-audit half (the
 MCP inversion, a fresh me per judgment) is deferred -- it needs the custom harness.
 
@@ -79,10 +79,10 @@ from .gate import decide
 
 
 class Responder(Protocol):
-    """The escalation backend: the model server Cortex calls when it won't absorb.
+    """The escalation backend: the model server Membrane calls when it won't absorb.
 
-    This is the "LLM-as-MCP-server" inversion: Cortex is the host/front-door; the
-    model is a backend Cortex calls only for the novel. ``request_body`` is the
+    This is the "LLM-as-MCP-server" inversion: Membrane is the host/front-door; the
+    model is a backend Membrane calls only for the novel. ``request_body`` is the
     caller's original request (so a real responder forwards the full multi-turn
     context); ``hint`` is a recalled prior action injected as context, not an
     instruction (the reversibility guard -- recall without trigger).
@@ -149,8 +149,8 @@ class Judge(Protocol):
     anyway -- that re-ask was a misunderstanding"). The judge returns a truthy reason
     (contest) or None (accept the demotion). The judge decides ONLY whether to contest;
     whether a contest RESTORES ``safe`` (vs. recording the disagreement while leaving the
-    demotion standing) is Cortex's policy -- the "environment wins the action on
-    irreducible disagreement, model wins the record" rule lives in ``Cortex.contest``,
+    demotion standing) is Membrane's policy -- the "environment wins the action on
+    irreducible disagreement, model wins the record" rule lives in ``Membrane.contest``,
     not here. See ``OllamaJudge`` for the live implementation, ``StubJudge`` for the no-op.
     """
 
@@ -192,7 +192,7 @@ class OllamaJudge:
     """The live model-side authority: calls a fresh model to adjudicate a demotion.
 
     This is the "LLM-as-MCP-server" inversion made real: when the environment re-asks
-    (demotes an absorb), Cortex asks a fresh model -- independent of the responder --
+    (demotes an absorb), Membrane asks a fresh model -- independent of the responder --
     "was the replayed answer actually correct?" CONTEST (it was right; the re-ask was a
     misunderstanding) or ACCEPT (it was wrong; the demotion stands). The judge decides on
     CORRECTNESS only; the prompt biases it toward skepticism about its own prior answer
@@ -202,7 +202,7 @@ class OllamaJudge:
     On any error or timeout: ACCEPT (return None) -- the boundary degrades toward the
     ENVIRONMENT, the safe one-sided direction, never toward the model judging itself
     unopposed. The judge is a peer of the responder (both call the model server directly;
-    Cortex orchestrates; the judge call does NOT flow through ``Cortex.handle``, so there
+    Membrane orchestrates; the judge call does NOT flow through ``Membrane.handle``, so there
     is no recursion).
     """
 
@@ -242,7 +242,7 @@ class OllamaJudge:
             with urllib.request.urlopen(req, timeout=self.timeout) as r:
                 content = json.loads(r.read()).get("message", {}).get("content", "")
         except Exception as e:  # noqa: BLE001 -- any failure -> accept the demotion
-            print(f"[cortex] judge call failed ({e!r}); accepting demotion "
+            print(f"[membrane] judge call failed ({e!r}); accepting demotion "
                   f"(boundary degrades toward the environment)", file=sys.stderr)
             return None
         lines = [ln for ln in content.strip().splitlines() if ln.strip()]
@@ -262,20 +262,20 @@ def _chat_response(model: str, content: str) -> dict:
     }
 
 
-class Cortex:
+class Membrane:
     """The absorb/escalate runtime over a local exemplar field, with passive self-training.
 
     Usage:
-        cortex = Cortex(field_path="cortex-field.json", audit_path="cortex-audit.jsonl",
+        membrane = Membrane(field_path="membrane-field.json", audit_path="membrane-audit.jsonl",
                         responder=OllamaChatResponder())
-        resp, decision = cortex.handle(request_body)
+        resp, decision = membrane.handle(request_body)
     """
 
     def __init__(
         self,
         responder: Responder,
-        field_path: str | Path = "cortex-field.json",
-        audit_path: str | Path = "cortex-audit.jsonl",
+        field_path: str | Path = "membrane-field.json",
+        audit_path: str | Path = "membrane-audit.jsonl",
         embedder: OllamaEmbedder | None = None,
         sim_min: float = 0.85,        # conservative for the bootstrap; loosen once audit proves safe
         consensus_min: float = 0.60,
@@ -348,7 +348,7 @@ class Cortex:
 
     def _act(self, verdict: dict, request_body: dict) -> dict:
         # absorb: replay the recalled action -- NO responder/model call.
-        model = request_body.get("model", "cortex")
+        model = request_body.get("model", "membrane")
         return _chat_response(model, verdict["action"])
 
     def _escalate(self, request_body: dict, query: str, hint: str | None, vec,
@@ -444,11 +444,11 @@ class Cortex:
                            ex.reask_count, ex.contest_count, ex.safe)
         kind = "first-veto" if first else ("supervisor" if source == "supervisor" else "record-only")
         if ex.safe != was_safe:
-            print(f"[cortex] CONTEST ({source}, {kind}) restored exemplar #{ex_idx} "
+            print(f"[membrane] CONTEST ({source}, {kind}) restored exemplar #{ex_idx} "
                   f"(reask={ex.reask_count} contest={ex.contest_count} safe={ex.safe}); "
                   f"replayable again", file=sys.stderr)
         else:
-            print(f"[cortex] CONTEST ({source}, {kind}) filed on exemplar #{ex_idx} "
+            print(f"[membrane] CONTEST ({source}, {kind}) filed on exemplar #{ex_idx} "
                   f"(reask={ex.reask_count} contest={ex.contest_count} safe={ex.safe}); "
                   f"demotion stands", file=sys.stderr)
 
@@ -497,7 +497,7 @@ class Cortex:
             self._audit_outcome(ex_idx, "reask", query, sim,
                                ex.reask_count, ex.contest_count, ex.safe)
             if ex.safe != was_safe:
-                print(f"[cortex] RE-ASK demoted exemplar #{ex_idx} "
+                print(f"[membrane] RE-ASK demoted exemplar #{ex_idx} "
                       f"(reask={ex.reask_count} contest={ex.contest_count} sim={sim:.3f}); "
                       f"next time it escalates-with-hint", file=sys.stderr)
                 # the model-side authority: ask the judge whether to contest this demotion.
@@ -508,7 +508,7 @@ class Cortex:
                 if reason:
                     self.contest(ex_idx, reason, source="judge")
             else:
-                print(f"[cortex] re-ask vote on exemplar #{ex_idx} "
+                print(f"[membrane] re-ask vote on exemplar #{ex_idx} "
                       f"(reask={ex.reask_count}, not yet demoted at threshold={self.demote_threshold})",
                       file=sys.stderr)
             return ex_idx

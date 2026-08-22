@@ -17,10 +17,10 @@ from __future__ import annotations
 import numpy as np
 
 from experiments.real_knee import FIELD, NOISE, BORDERLINE, NOVEL
-from cortex.embed import OllamaEmbedder
-from cortex.field import Exemplar, ExemplarStore
-from cortex.gate import decide
-from cortex.variety import effective_rank
+from membrane.embed import OllamaEmbedder
+from membrane.field import Exemplar, ExemplarStore
+from membrane.gate import decide
+from membrane.variety import effective_rank
 
 
 def main() -> None:

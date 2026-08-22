@@ -1,28 +1,28 @@
-"""The HTTP proxy: Cortex as a drop-in front of the Ollama model server.
+"""The HTTP proxy: Membrane as a drop-in front of the Ollama model server.
 
 Topology (see README): the chat window used to call the model server directly.
 
     you (chat window) --[today]--> model server (Ollama /api/chat)
 
-  You slide Cortex in between:
+  You slide Membrane in between:
 
-    you (chat window) --> Cortex (proxy, owns the field) --> model server (Ollama)
+    you (chat window) --> Membrane (proxy, owns the field) --> model server (Ollama)
 
-  The window now talks to Cortex. Cortex embeds each /api/chat query (local
+  The window now talks to Membrane. Membrane embeds each /api/chat query (local
   Ollama/mxbai), runs the gate, and either REPLAYS a recalled action (no model
   call -- the absorb) or FORWARDS to the real model server (the novel) and logs
-  the turn to the field + audit. Cortex is local-first (127.0.0.1 only).
+  the turn to the field + audit. Membrane is local-first (127.0.0.1 only).
 
 Everything that is NOT /api/chat (e.g. /api/embed, /api/tags, /api/generate) is
 forwarded transparently, so the proxy is a true drop-in: point any Ollama client
 at http://127.0.0.1:11435 instead of :11434 and the field starts self-building.
 
 Skeleton limitation: only NON-STREAMING /api/chat is gated (stream:true is
-forwarded transparently). Set stream:false to route through Cortex. Streaming
+forwarded transparently). Set stream:false to route through Membrane. Streaming
 support is a follow-up.
 
 Run:
-  PYTHONPATH=. .venv/bin/python -m cortex.proxy --listen 11435
+  PYTHONPATH=. .venv/bin/python -m membrane.proxy --listen 11435
   # then point a client at http://127.0.0.1:11435 (e.g. OLLAMA_HOST=127.0.0.1:11435)
 """
 
@@ -34,7 +34,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .cortex import Cortex, OllamaChatResponder
+from .runtime import Membrane, OllamaChatResponder
 
 HOP_BY_HOP = {"host", "content-length", "connection", "transfer-encoding",
               "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -72,9 +72,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._forward_raw(raw)
             return
         try:
-            resp, decision = self.server.cortex.handle(body)
+            resp, decision = self.server.membrane.handle(body)
         except Exception as e:                       # never break the chat on a gate error
-            print(f"[cortex] gate error, forwarding raw: {e}", file=sys.stderr)
+            print(f"[membrane] gate error, forwarding raw: {e}", file=sys.stderr)
             self._forward_raw(raw)
             return
         out = json.dumps(resp).encode()
@@ -85,7 +85,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.wfile.write(out)
         sim = decision.get("sim")
         sim_s = f"{sim:.2f}" if isinstance(sim, (int, float)) else "  -  "
-        print(f"[cortex] {decision['verdict']:18s} sim={sim_s}  field={len(self.server.cortex.store)}",
+        print(f"[membrane] {decision['verdict']:18s} sim={sim_s}  field={len(self.server.membrane.store)}",
               file=sys.stderr)
 
     # ---- transparent forward (everything else + stream + gate errors) ----
@@ -123,17 +123,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     import argparse
-    ap = argparse.ArgumentParser(description="Cortex proxy: a field-first front door in front of Ollama.")
+    ap = argparse.ArgumentParser(description="Membrane proxy: a field-first front door in front of Ollama.")
     ap.add_argument("--listen", type=int, default=11435, help="port to listen on (127.0.0.1 only)")
     ap.add_argument("--backend", default="http://localhost:11434", help="upstream Ollama URL")
-    ap.add_argument("--field", default="cortex-field.json", help="path to the exemplar field store")
-    ap.add_argument("--audit", default="cortex-audit.jsonl", help="path to the append-only audit log")
+    ap.add_argument("--field", default="membrane-field.json", help="path to the exemplar field store")
+    ap.add_argument("--audit", default="membrane-audit.jsonl", help="path to the append-only audit log")
     ap.add_argument("--sim-min", type=float, default=0.85,
                     help="cosine cutoff for absorb (conservative for the bootstrap; loosen once audit proves safe)")
     ap.add_argument("--consensus-min", type=float, default=0.60)
     args = ap.parse_args()
 
-    cortex = Cortex(
+    membrane = Membrane(
         responder=OllamaChatResponder(args.backend),
         field_path=args.field,
         audit_path=args.audit,
@@ -141,17 +141,17 @@ def main() -> None:
         consensus_min=args.consensus_min,
     )
     srv = ThreadingHTTPServer(("127.0.0.1", args.listen), ProxyHandler)
-    srv.cortex = cortex
+    srv.membrane = membrane
     srv.backend = args.backend.rstrip("/")
-    print(f"cortex proxy  http://127.0.0.1:{args.listen}  ->  {args.backend}\n"
+    print(f"membrane proxy  http://127.0.0.1:{args.listen}  ->  {args.backend}\n"
           f"  field={args.field}  audit={args.audit}  sim_min={args.sim_min}  "
-          f"field_size={len(cortex.store)}\n"
+          f"field_size={len(membrane.store)}\n"
           f"  (gate the /api/chat NON-STREAM path; stream:true and all other routes pass through)",
           file=sys.stderr)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
-        print("\n[cortex] bye", file=sys.stderr)
+        print("\n[membrane] bye", file=sys.stderr)
 
 
 if __name__ == "__main__":
