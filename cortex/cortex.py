@@ -19,10 +19,23 @@ across requests, so it keeps a small in-memory ring of recent decisions. The
 strongest outcome signal is a **re-ask**: the user asks the same thing again right
 after the field *absorbed* it. That means the replay did not satisfy -> the absorb
 was wrong (the dangerous ``absorb_signal`` error). Cortex sees the re-ask because it
-is in the path; it needs no notification and no model call. It flips that exemplar's
-``safe`` flag to False, so the *next* time the field recalls it as a **hint**
-(``escalate-with-hint``) instead of replaying the bad answer. The raw store stays
-permanent; only the ``safe`` bit flips.
+is in the path; it needs no notification and no model call.
+
+The re-ask is a VOTE, not a verdict. A re-ask increments ``reask_count`` (the
+environment's vote against); the exemplar's ``safe`` flag is derived from the net
+evidence (``reask_count - contest_count < demote_threshold``), so demotion accumulates
+and is reversible -- it does not treat the environment as infallible. The model checks
+the environment back via a **contest** (``Cortex.contest``): "my answer was correct
+anyway; that re-ask was a misunderstanding." A contest increments ``contest_count`` and
+may *restore* ``safe``. This is the boundary, in code: two authorities (usefulness =
+the environment, correctness = the model), each a veto on the other, neither with a
+monopoly. The live judge is deferred (StubJudge today); the seam is the ``Judge``
+protocol. The raw store stays permanent; only the evidence counts (and the derived
+``safe``) change.
+
+A re-ask also forces THIS turn to escalate-with-hint (we never replay right after the
+user just told us the replay was wrong), regardless of whether the lasting demotion
+has crossed the threshold yet.
 
 Crucially, a re-ask is a near-duplicate that follows an **act** (an absorb), NOT one
 that follows an **escalate**: after an escalate, a same-Q repeat is the *first* time
@@ -128,6 +141,35 @@ def _last_user(request_body: dict) -> str | None:
     return None
 
 
+class Judge(Protocol):
+    """The model-side authority at the boundary: decides whether to CONTEST a demotion.
+
+    The environment (the user) checks the model via the re-ask ("this replay was not
+    useful"); the model checks the environment via the contest ("my answer was correct
+    anyway -- that re-ask was a misunderstanding"). Neither has a monopoly; each is a
+    veto on the other. ``contest`` is called right after a re-ask demotes an exemplar.
+    Returning a truthy reason files a contest (cancels the re-ask's vote, may restore
+    ``safe``); returning None accepts the demotion.
+
+    DEFERRED (live): a real judge asks a fresh model per demotion -- the "LLM-as-MCP-
+    server" inversion, which needs the custom harness. The ``StubJudge`` never contests,
+    so today the model-side authority is exercised out-of-band (the demo simulates it by
+    calling ``Cortex.contest`` directly; a future live judge plugs in here, no other code
+    changes).
+    """
+
+    def contest(self, situation: str, action: str, query: str,
+                reask_count: int) -> str | None: ...
+
+
+class StubJudge:
+    """Never contests -- the demotion stands. The no-op judge for the lab/demo."""
+
+    def contest(self, situation: str, action: str, query: str,
+                reask_count: int) -> str | None:
+        return None
+
+
 def _chat_response(model: str, content: str) -> dict:
     return {
         "model": model, "created_at": "1970-01-01T00:00:00Z",
@@ -155,6 +197,8 @@ class Cortex:
         k: int = 5,
         reask_sim: float = 0.95,       # near-duplicate cosine that counts as a re-ask
         reask_window_s: float = 300.0, # a re-ask outside this window after the absorb isn't a "wrong replay"
+        demote_threshold: int = 1,     # net (reask - contest) votes needed to demote; 1 = one re-ask, raise for noise-robustness
+        judge: Judge | None = None,    # the model-side authority (StubJudge = no contests; live judge deferred)
     ) -> None:
         self.responder = responder
         self.field_path = Path(field_path)
@@ -166,6 +210,8 @@ class Cortex:
         self.k = k
         self.reask_sim = reask_sim
         self.reask_window_s = reask_window_s
+        self.demote_threshold = demote_threshold
+        self.judge = judge or StubJudge()
         # in-memory ring of recent decisions -- the state that lets the proxy detect a
         # re-ask across turns. Lost on restart; fine, the durable change (the safe flip)
         # is written to the field file, and the re-ask window is short.
@@ -182,13 +228,23 @@ class Cortex:
 
         vec = self.embedder.embed([query])[0]
         # passive self-train: if this query re-asks something the field just absorbed,
-        # that replay was wrong -- flip the exemplar's safe flag BEFORE running the gate,
-        # so this turn escalates-with-hint instead of replaying the bad answer again.
-        self._detect_reask(vec, query)
+        # that replay was wrong -- record a vote (evidential demotion), and ask the
+        # model-side judge whether to contest it (the boundary's two authorities).
+        reasked_idx = self._detect_reask(vec, query)
 
         verdict = decide(vec, self.store, k=self.k, sim_min=self.sim_min,
                         consensus_min=self.consensus_min)
         v = verdict["verdict"]
+
+        # a re-ask means "do not replay THIS turn" even if the lasting demotion hasn't
+        # crossed the threshold yet (e.g. demote_threshold > 1): the user just told us
+        # the replay was wrong, so give them a fresh model answer with the bad replay as a hint.
+        if reasked_idx is not None and v == "act":
+            ex = self.store.exemplars[reasked_idx]
+            verdict = {"verdict": "escalate-with-hint", "action": ex.action,
+                       "hint": ex.action, "sim": verdict.get("sim"), "nov": verdict.get("nov"),
+                       "reason": "re-ask forced escalation", "ex_idx": reasked_idx}
+            v = "escalate-with-hint"
 
         if v == "act":
             resp = self._act(verdict, request_body)
@@ -249,12 +305,48 @@ class Cortex:
         with self.audit_path.open("a") as f:
             f.write(json.dumps(rec) + "\n")
 
-    def _audit_outcome(self, ex_idx: int, outcome: str, query: str, sim: float) -> None:
+    def _audit_outcome(self, ex_idx: int, outcome: str, query: str, sim: float,
+                       reask: int, contest: int, safe: bool) -> None:
         """Append an outcome record -- a self-correction, joinable to a decision by ex_idx."""
         rec = {"event": "outcome", "ex_idx": ex_idx, "outcome": outcome,
-               "query": query, "sim": sim}
+               "query": query, "sim": sim,
+               "reask_count": reask, "contest_count": contest, "safe": safe}
         with self.audit_path.open("a") as f:
             f.write(json.dumps(rec) + "\n")
+
+    def _audit_contest(self, ex_idx: int, reason: str, reask: int,
+                       contest: int, safe: bool) -> None:
+        """Append a contest record -- the model-side veto, the other half of the boundary."""
+        rec = {"event": "contest", "ex_idx": ex_idx, "reason": reason,
+               "reask_count": reask, "contest_count": contest, "safe": safe}
+        with self.audit_path.open("a") as f:
+            f.write(json.dumps(rec) + "\n")
+
+    def contest(self, ex_idx: int, reason: str = "") -> None:
+        """The model-side veto: file a contest on a (demoted) exemplar.
+
+        "My answer was correct; that re-ask was the environment's misunderstanding." A
+        contest cancels a re-ask's vote (increments ``contest_count``) and recomputes
+        ``safe`` -- it may *restore* a demoted exemplar to replayable. The boundary holds
+        both: the environment's re-ask is recorded (usefulness), the model's contest is
+        recorded (correctness); whoever is engaging gets the last word on the action, and
+        the record keeps both. Out-of-band today (no live judge); a future MCP judge calls this.
+        """
+        if not (0 <= ex_idx < len(self.store)):
+            return
+        ex = self.store.exemplars[ex_idx]
+        was_safe = ex.safe
+        self.store.add_contest(ex_idx)
+        ex.recompute_safe(self.demote_threshold)
+        self.store.save(self.field_path)
+        self._audit_contest(ex_idx, reason, ex.reask_count, ex.contest_count, ex.safe)
+        if ex.safe != was_safe:
+            print(f"[cortex] CONTEST restored exemplar #{ex_idx} "
+                  f"(reask={ex.reask_count} contest={ex.contest_count}); replayable again",
+                  file=sys.stderr)
+        else:
+            print(f"[cortex] contest filed on exemplar #{ex_idx} "
+                  f"(reask={ex.reask_count} contest={ex.contest_count})", file=sys.stderr)
 
     def _remember(self, query: str, vec: np.ndarray, verdict: dict,
                   ex_idx: int | None) -> None:
@@ -265,17 +357,20 @@ class Cortex:
             "ts": time.monotonic(),
         })
 
-    def _detect_reask(self, vec: np.ndarray, query: str) -> None:
-        """If the new query re-asks something the field just ABSORBED, the replay was wrong.
+    def _detect_reask(self, vec: np.ndarray, query: str) -> int | None:
+        """If the new query re-asks something the field just ABSORBED, record a vote.
 
         A re-ask is a near-duplicate (cosine >= reask_sim) of a recent decision whose
-        verdict was ``act`` -- i.e. the field replayed an answer and the user is asking
-        again. Escalations are NOT matched: a same-Q repeat after an escalate is the
-        legitimate first absorb. Flips that exemplar's ``safe`` flag (-> next time it
-        escalates-with-hint), saves the field, and writes an outcome event to the audit.
+        verdict was ``act`` -- the field replayed an answer and the user is asking again.
+        Escalations are NOT matched: a same-Q repeat after an escalate is the legitimate
+        first absorb. The re-ask is a VOTE, not a verdict: it increments ``reask_count``
+        and recomputes ``safe`` from the net evidence (evidence accumulates, is reversible,
+        and is contestable). Saves the field, writes an outcome event, and asks the
+        model-side judge whether to contest. Returns the re-asked exemplar's index (so
+        ``handle`` can force this turn to escalate-with-hint), or None.
         """
         if not self._recent:
-            return
+            return None
         qn = vec / (np.linalg.norm(vec) + 1e-12)
         now = time.monotonic()
         for r in self._recent:
@@ -289,17 +384,29 @@ class Cortex:
                 continue
             ex_idx = r["ex_idx"]
             if ex_idx is None or not (0 <= ex_idx < len(self.store)):
-                return
+                return None
             ex = self.store.exemplars[ex_idx]
-            if not ex.safe:
-                # already demoted by an earlier re-ask; don't double-log.
-                return
-            self.store.set_safe(ex_idx, False)
+            was_safe = ex.safe
+            self.store.add_reask(ex_idx)
+            ex.recompute_safe(self.demote_threshold)
             self.store.save(self.field_path)
-            self._audit_outcome(ex_idx, "wrong-absorb", query, sim)
-            print(f"[cortex] RE-ASK after absorb: exemplar #{ex_idx} flipped safe=False "
-                  f"(sim={sim:.3f}); next time it escalates-with-hint", file=sys.stderr)
-            return
+            self._audit_outcome(ex_idx, "reask", query, sim,
+                               ex.reask_count, ex.contest_count, ex.safe)
+            if ex.safe != was_safe:
+                print(f"[cortex] RE-ASK demoted exemplar #{ex_idx} "
+                      f"(reask={ex.reask_count} contest={ex.contest_count} sim={sim:.3f}); "
+                      f"next time it escalates-with-hint", file=sys.stderr)
+            else:
+                print(f"[cortex] re-ask vote on exemplar #{ex_idx} "
+                      f"(reask={ex.reask_count}, not yet demoted at threshold={self.demote_threshold})",
+                      file=sys.stderr)
+            # the model-side authority: ask the judge whether to contest this demotion.
+            # StubJudge never contests; a live judge (deferred) calls a fresh model here.
+            reason = self.judge.contest(ex.situation, ex.action, query, ex.reask_count)
+            if reason:
+                self.contest(ex_idx, reason)
+            return ex_idx
+        return None
 
 
 def _unit_list(v: np.ndarray) -> list[float]:

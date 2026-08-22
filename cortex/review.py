@@ -4,14 +4,17 @@ Cortex learned. Passive supervision, not user labeling.
 The honest "notify you in this window" mechanism: an outside process cannot push into
 the Claude Code window, so Cortex "notifies" by appending to the audit log, and I notice
 by reading it -- on demand, when the user asks (or, later, on a scheduled poll). This
-module is that read: it joins the audit log (decisions + outcome events) to the field
-and prints what the training loop did -- how many absorbed vs escalated, which absorbs
-got flipped to unsafe by a re-ask, and the current state of the field.
+module is that read: it joins the audit log (decisions + outcome events + contest
+events) to the field and prints what the training loop did -- how many absorbed vs
+escalated, which absorbs drew a re-ask vote, which demotions the model contested, and
+the current state of the field's two-authority evidence (reask vs contest counts).
 
-The model-judges-the-audit half (Cortex calling a fresh me per outcome via the MCP
-inversion) is deferred; until then this on-demand read is the channel, and the passive
-re-ask self-train (cortex/cortex.py ``_detect_reask``) is what keeps the field honest
-without anyone reading it.
+The boundary is two authorities: the environment (re-ask = "this replay was not useful")
+and the model (contest = "my answer was correct anyway"). `safe` is derived from the net
+of their votes; the review shows both sides so neither can silently overrule the other.
+The live model-judge (Cortex calling a fresh me per outcome via the MCP inversion) is
+deferred; until then this on-demand read is the channel, and the passive re-ask self-train
+(cortex/cortex.py ``_detect_reask``) keeps the field honest without anyone reading it.
 
 Run:
   python -m cortex.review --audit cortex-audit.jsonl --field cortex-field.json
@@ -31,6 +34,7 @@ def summarize(audit_path: str | Path, field_path: str | Path) -> str:
 
     decisions = []
     outcomes = []
+    contests = []
     if audit_path.exists():
         for ln in audit_path.read_text().splitlines():
             ln = ln.strip()
@@ -43,6 +47,8 @@ def summarize(audit_path: str | Path, field_path: str | Path) -> str:
             ev = rec.get("event", "decision")          # old audit lines have no event -> decision
             if ev == "outcome":
                 outcomes.append(rec)
+            elif ev == "contest":
+                contests.append(rec)
             else:
                 decisions.append(rec)
 
@@ -59,6 +65,7 @@ def summarize(audit_path: str | Path, field_path: str | Path) -> str:
     learned = sum(1 for d in decisions if d.get("learned"))
 
     unsafe = [(i, e) for i, e in enumerate(field) if not e.get("safe", True)]
+    contested = [(i, e) for i, e in enumerate(field) if e.get("contest_count", 0) > 0]
 
     lines = []
     lines.append("cortex training-loop review")
@@ -67,25 +74,47 @@ def summarize(audit_path: str | Path, field_path: str | Path) -> str:
     lines.append(f"decisions:    {len(decisions)} "
                  f"(absorbed {n_act} / with-hint {n_hint} / escalated {n_esc})")
     lines.append(f"learned:      {learned} exemplars appended from escalations")
-    lines.append(f"self-trains:  {len(outcomes)} (re-asks that flipped an absorb to unsafe)")
+    lines.append(f"re-asks:      {len(outcomes)} (environment votes against an absorb)")
+    lines.append(f"contests:     {len(contests)} (model votes for a demoted answer)")
     lines.append("")
     if outcomes:
-        lines.append("outcome events (the field self-correcting):")
+        lines.append("re-ask votes (the environment checking the model):")
         for o in outcomes:
             ex = o.get("ex_idx")
             s = o.get("sim")
             sim_s = f"{s:.3f}" if isinstance(s, (int, float)) else "?"
-            lines.append(f"  - exemplar #{ex} -> {o.get('outcome')} "
-                         f"(re-ask sim={sim_s})  q={str(o.get('query'))[:60]!r}")
+            safe_s = "demoted" if not o.get("safe", True) else "still-safe"
+            lines.append(f"  - exemplar #{ex}: reask={o.get('reask_count')} "
+                         f"contest={o.get('contest_count')} -> {safe_s} "
+                         f"(sim={sim_s})  q={str(o.get('query'))[:50]!r}")
     else:
-        lines.append("outcome events: none (no wrong absorbs caught yet)")
+        lines.append("re-ask votes: none (no wrong absorbs caught yet)")
+    lines.append("")
+    if contests:
+        lines.append("contests (the model checking the environment):")
+        for c in contests:
+            ex = c.get("ex_idx")
+            safe_s = "restored" if c.get("safe", True) else "still-demoted"
+            lines.append(f"  - exemplar #{ex}: reask={c.get('reask_count')} "
+                         f"contest={c.get('contest_count')} -> {safe_s}  "
+                         f"reason={str(c.get('reason'))[:50]!r}")
+    else:
+        lines.append("contests: none (the model has not vetoed a demotion)")
     lines.append("")
     if unsafe:
         lines.append(f"unsafe exemplars now ({len(unsafe)}) -- escalate-with-hint, not replayed:")
         for i, e in unsafe:
-            lines.append(f"  - #{i}  q={str(e.get('situation'))[:60]!r}")
+            lines.append(f"  - #{i}  reask={e.get('reask_count',0)} "
+                         f"contest={e.get('contest_count',0)}  q={str(e.get('situation'))[:50]!r}")
     else:
         lines.append("unsafe exemplars: none (every exemplar is safe-to-replay)")
+    if contested:
+        lines.append("")
+        lines.append(f"contested exemplars ({len(contested)}) -- the model stood by these:")
+        for i, e in contested:
+            lines.append(f"  - #{i}  reask={e.get('reask_count',0)} "
+                         f"contest={e.get('contest_count',0)}  safe={e.get('safe',True)}  "
+                         f"q={str(e.get('situation'))[:50]!r}")
     return "\n".join(lines)
 
 

@@ -8,7 +8,7 @@ from .field import Exemplar, ExemplarStore
 from .variety import effective_rank, spread, novelty
 from .gate import decide
 from .embed import OllamaEmbedder
-from .cortex import Cortex, Responder, StubResponder, OllamaChatResponder
+from .cortex import Cortex, Responder, StubResponder, OllamaChatResponder, Judge, StubJudge
 from .review import summarize
 
 __all__ = [
@@ -23,5 +23,7 @@ __all__ = [
     "Responder",
     "StubResponder",
     "OllamaChatResponder",
+    "Judge",
+    "StubJudge",
     "summarize",
 ]

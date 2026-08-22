@@ -213,33 +213,41 @@ later move where several proxies point at the same store). Skeleton in
 `cortex/proxy.py` (intercepts non-streaming `/api/chat`, forwards everything
 else); loop proven in `experiments/proxy_demo.py`.
 
-**The training loop (Tier 1 landed — passive self-train on re-asks).** The decision
-loop (absorb/escalate) is built. The **training** loop is how the *outcome* — was an
-absorb correct? — flows back. The key property: **it is passive.** You use the chat
-normally; Cortex learns from how you naturally use it, with no extra labor. The
-strongest outcome signal is a **re-ask**: asking the same thing again right after the
-field *absorbed* (replayed) it means the replay was wrong. Cortex sees the re-ask
-because it is in the path — no notification, no model call — and flips that exemplar's
-`safe` flag, so the next time the field recalls it as a **hint** to the model
-(`escalate-with-hint`) instead of replaying the bad answer. The raw store stays
-permanent; only the `safe` bit flips. (A same-Q repeat right after an *escalate* is
-the legitimate first absorb, not a re-ask — only repeats *after an absorb* count.)
+**The training loop (Tier 1 landed — passive self-train on re-asks; boundary softening
+landed).** The decision loop (absorb/escalate) is built. The **training** loop is how the
+*outcome* — was an absorb correct? — flows back. The key property: **it is passive.** You use
+the chat normally; Cortex learns from how you naturally use it, with no extra labor. The
+strongest outcome signal is a **re-ask**: asking the same thing again right after the field
+*absorbed* (replayed) it means the replay was wrong. Cortex sees the re-ask because it is in
+the path — no notification, no model call.
 
-This is the safety-critical half: a wrong absorb is the dangerous `absorb_signal`
-error (a bad answer with no LLM net), and the re-ask catches it the moment it hurts —
-so the error rate is self-limiting, not compounding, even though the model's weights
-stay frozen. The field is a self-correcting cache of how *you* use the model: cheaper
-and self-correcting, not smarter.
+A re-ask is now a **vote, not a verdict** — the environment is not treated as infallible.
+Each exemplar carries two evidence counters; `safe` is *derived*:
+`safe = (reask_count - contest_count) < demote_threshold`. A re-ask increments
+`reask_count` (the environment's usefulness vote); a contest increments `contest_count`
+(the model's correctness vote — "my answer was right anyway, that re-ask was a
+misunderstanding"). Each side checks the other; neither has a monopoly; both keep a veto.
+Demotion accumulates (raise the threshold to require multiple re-asks) and is reversible
+(a contest cancels a re-ask's vote and may restore `safe`). A re-ask also forces *that turn*
+to escalate-with-hint (never replay the answer just rejected), even before the lasting
+demotion crosses the threshold. The raw store stays permanent; only the evidence counts (and
+the derived `safe`) change.
 
-The proxy is now stateful across turns (an in-memory ring of recent decisions; the
-durable `safe` flip is written to the field file). The audit log (`cortex-audit.jsonl`)
-records every decision (`event: decision`) plus a self-correction line
-(`event: outcome`, joinable by `ex_idx`). The in-window review surface
-(`python -m cortex.review`) reads the audit + field and prints what the training loop
-did — the honest "notify you in this window" mechanism, on demand (an outside process
-cannot push into the Claude Code window). The *model-judges-the-audit* half (Cortex
-calling a fresh me per outcome to label the ambiguous cases — the "LLM-as-MCP-server"
-inversion) is deferred; the passive re-ask self-train keeps the field honest without it.
+This is the safety-critical half: a wrong absorb is the dangerous `absorb_signal` error (a
+bad answer with no LLM net), and the re-ask catches it the moment it hurts — so the error rate
+is self-limiting, not compounding, even though the model's weights stay frozen. The field is a
+self-correcting cache of how *you* use the model: cheaper and self-correcting, not smarter.
+
+The proxy is stateful across turns (an in-memory ring of recent decisions; the durable evidence
+is written to the field file). The audit log (`cortex-audit.jsonl`) records every decision
+(`event: decision`) plus a re-ask vote (`event: outcome`) and a contest (`event: contest`),
+each joinable by `ex_idx` and carrying the net evidence. The in-window review surface
+(`python -m cortex.review`) reads the audit + field and prints **both sides** of the boundary —
+the honest "notify you in this window" mechanism, on demand (an outside process cannot push
+into the Claude Code window). The *model-judges-the-audit* half (Cortex calling a fresh me per
+demotion to file a contest — the "LLM-as-MCP-server" inversion) is **deferred**; the seam is the
+`Judge` protocol (`StubJudge` no-ops; the demo simulates the contest out-of-band). The passive
+re-ask self-train keeps the field honest without it.
 
 **Bootstrap conservatism (open, now concrete).** A fresh field has no
 exemplars → every query escalates (the "variance first" bootstrap) → the field

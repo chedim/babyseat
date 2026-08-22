@@ -146,13 +146,15 @@ while a high-variety store treats the *same* query as in-manifold (-> confident
    the primary gate; null-space novelty is a narrow low-rank specialist, not a
    general gate. The one "it collapsed" finding was partly a knee-finder
    artifact; the cosine-primary conclusion was right, now for the right reason.
-4. **The training loop** — *Tier 1 landed* (passive self-train; see "The training loop" below): Cortex
-   watches how you use the chat and learns from **re-asks** — asking the same thing
-   again right after an absorb means the replay was wrong, so it flips that
-   exemplar's `safe` flag (next time it escalates-with-hint instead of replaying the
-   bad answer). No user labor — a re-ask is something you'd do anyway. The
-   *model-judges-the-audit* half (Cortex calling a fresh me to label the ambiguous
-   outcomes) is still *deferred* — it needs the custom harness.
+4. **The training loop** — *Tier 1 landed* (passive self-train; see "The training
+   loop" below): Cortex watches how you use the chat and learns from **re-asks** —
+   asking the same thing again right after an absorb means the replay was wrong. A
+   re-ask is an evidential, reversible **vote** (`reask_count`), not a hard flip: `safe`
+   is derived from the net of re-ask votes (usefulness, the environment) vs contest
+   votes (correctness, the model) — each side a veto on the other. The model's
+   *contest* is the **deferred** half (live judge = a fresh me per demotion via the MCP
+   inversion; seam is `Judge` / `StubJudge`); until it lands the model-side authority is
+   exercised out-of-band. No user labor — a re-ask is something you'd do anyway.
 
 ---
 
@@ -192,24 +194,50 @@ naturally use it. You never "teach" it.
 The strongest outcome signal is a **re-ask**: you ask the same thing again right
 after the field *absorbed* (replayed) it — meaning the replay did not satisfy, the
 absorb was wrong. Cortex sees that re-ask because every request flows through it; it
-needs no notification and no model call. It flips that exemplar's `safe` flag, so the
-*next* time the field recalls it as a **hint** to the model (`escalate-with-hint`)
-instead of replaying the bad answer. The raw store stays permanent; only the `safe`
-bit flips. (A same-Q repeat right after an *escalate* is the legitimate first absorb —
-not a re-ask — so only repeats *after an absorb* count.)
+needs no notification and no model call. (A same-Q repeat right after an *escalate* is
+the legitimate first absorb — not a re-ask — so only repeats *after an absorb* count.)
+
+### The boundary: two authorities, not one oracle
+
+A re-ask is a **vote, not a verdict.** It does not treat the environment (you) as
+infallible. Each exemplar carries two evidence counters, and `safe` is *derived* from
+their net:
+
+```
+safe = (reask_count - contest_count) < demote_threshold
+```
+
+- **`reask_count`** — the environment's vote: "this replay was not *useful*." A re-ask
+  increments it. The authority axis is **usefulness**.
+- **`contest_count`** — the model's vote: "my answer was *correct* anyway; that re-ask
+  was a misunderstanding." A contest increments it. The authority axis is **correctness**.
+
+Each side checks the other; neither has a monopoly; both keep a veto. Demotion
+*accumulates* (raise `demote_threshold` to require more than one re-ask before an
+exemplar stops being replayed) and is *reversible* (a contest cancels a re-ask's vote
+and may restore `safe`). A re-ask also forces *that turn* to escalate-with-hint — we
+never replay the answer the user just told us was wrong, even before the lasting
+demotion crosses the threshold.
 
 This is the safety-critical half: a wrong absorb is the dangerous `absorb_signal`
 error (a bad answer with no LLM net), and the re-ask catches it the moment it hurts.
-The field is a self-correcting cache of how *you* use the model — it makes the model
-cheaper and self-correcting, not smarter (the model's weights stay frozen).
+The field is a self-correcting cache of how *you* use the model — cheaper and
+self-correcting, not smarter (the model's weights stay frozen). The raw store stays
+permanent; only the evidence counts (and the derived `safe`) change — nothing is ever
+deleted or rewritten.
+
+The model's contest is the **deferred** half: a live judge asks a fresh model per
+demotion (the "LLM-as-MCP-server" inversion, which needs the custom harness). The
+seam is the `Judge` protocol; `StubJudge` never contests, so today the model-side
+authority is exercised out-of-band (the demo calls `cortex.contest(...)` directly to
+show it working; a future live judge plugs in with no other code changes).
 
 The honest "notify you in this window" mechanism: an outside process cannot push into
 the Claude Code window, so Cortex notifies by appending to the audit log, and I read
-it on demand — `python -m cortex.review` prints what the training loop did (decisions,
-self-trains, the now-unsafe exemplars). The *model-judges-the-audit* half (Cortex
-calling a fresh me per outcome to label the ambiguous cases — the "LLM-as-MCP-server"
-inversion) is deferred; until then, the passive re-ask self-train keeps the field honest
-without anyone reading it.
+it on demand — `python -m cortex.review` prints what the training loop did, **both
+sides**: decisions, the re-ask votes, the contests, and the net-evidence state of each
+exemplar. Until the live judge lands, the passive re-ask self-train keeps the field
+honest without anyone reading it.
 
 ```bash
 # review what Cortex learned (the in-window training-loop surface):

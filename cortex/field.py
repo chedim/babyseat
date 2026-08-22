@@ -6,7 +6,20 @@ An exemplar is a judgment the agent (or a batch judge) recorded:
     action    : str        a REPLAYABLE structured action (tool calls / edit / decision)
     outcome   : str        what happened when that action ran
     vec       : list[float]  unit situation embedding (local Ollama, mxbai-embed-large)
-    safe      : bool       is replaying this action low-risk (read / idempotent)?
+    safe      : bool       derived: (reask_count - contest_count) < demote_threshold.
+                          Replaying a safe action is low-risk; an unsafe one is only a hint.
+    reask_count  : int     how many times the environment re-asked after this was absorbed
+                          (the usefulness authority voting "this replay did not satisfy").
+    contest_count: int    how many times the model contested a demotion of this exemplar
+                          (the correctness authority voting "my answer was right anyway").
+
+`safe` is a TWO-AUTHORITY boundary, not a single oracle. A re-ask (the environment)
+votes against; a contest (the model) votes for. The gate reads `safe` unchanged; the
+counts are the evidence, and `safe` is recomputed from them -- so demotion is
+evidential and reversible, not a hard one-shot flip that treats the environment as
+infallible. Neither authority has a monopoly: each re-ask adds a vote, each contest
+cancels one, and a contested-but-reasked exemplar holds the disagreement in the record
+rather than resolving it one way silently.
 
 The store is permanent: no decay, no EMA, no averaging. Within-session context is
 the conversation; old lessons must not fade. It grows by append at judgment time;
@@ -30,6 +43,18 @@ class Exemplar:
     outcome: str
     vec: list[float]
     safe: bool = True
+    reask_count: int = 0
+    contest_count: int = 0
+
+    def recompute_safe(self, demote_threshold: int) -> None:
+        """Re-derive `safe` from the evidence: net votes against must reach the threshold.
+
+        safe = (reask_count - contest_count) < demote_threshold. Default threshold 1 ->
+        one un-contested re-ask demotes (the environment's single strong signal), but a
+        contest cancels it (the model's veto). Raise the threshold for noise-robustness
+        (require accumulated re-asks before demoting); the boundary itself is the counts.
+        """
+        self.safe = (self.reask_count - self.contest_count) < demote_threshold
 
 
 def _unit(v: np.ndarray) -> np.ndarray:
@@ -47,14 +72,21 @@ class ExemplarStore:
         self.exemplars.append(ex)
 
     def set_safe(self, index: int, value: bool) -> None:
-        """Flip an existing exemplar's `safe` flag.
+        """Manually override an exemplar's `safe` (the review surface / a supervisor).
 
         The store stays append-only: no exemplar is added, removed, or rewritten --
-        only this one mutable bit changes (the training loop uses it to mark a replay
-        that did not satisfy, so the field escalates-with-hint next time instead of
-        replaying the bad answer).
+        only this one mutable bit changes. The normal path mutates the *evidence*
+        (`add_reask` / `add_contest`) and recomputes `safe`; this is the escape hatch.
         """
         self.exemplars[index].safe = value
+
+    def add_reask(self, index: int) -> None:
+        """The environment votes against this exemplar (a re-ask after an absorb)."""
+        self.exemplars[index].reask_count += 1
+
+    def add_contest(self, index: int) -> None:
+        """The model votes for this exemplar (it contests a demotion -- it stands by its answer)."""
+        self.exemplars[index].contest_count += 1
 
     def index_of(self, ex: Exemplar) -> int | None:
         """Identity lookup of an exemplar the gate recalled (``e is ex``).
