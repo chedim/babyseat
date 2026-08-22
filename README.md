@@ -262,6 +262,22 @@ record-only), and the net-evidence state of each exemplar.
 PYTHONPATH=. .venv/bin/python -m membrane.review --audit membrane-audit.jsonl --field membrane-field.json
 ```
 
+### Live TUI
+
+While the proxy runs, `membrane.tui` is a live ncurses view of the same field +
+audit — metrics, memory/field state, a per-exemplar field visualizer, and a
+colored audit-log tail that updates as the proxy writes. It only reads the files
+(the proxy owns them), so run it in a second terminal:
+
+```bash
+PYTHONPATH=. .venv/bin/python -m membrane.tui --field membrane-field.json --audit membrane-audit.jsonl
+# keys: q quit · ↑/↓ (or k/j) scroll the field · g/G top/bottom · r force refresh
+```
+
+The **memory** panel shows the field's `effective_rank` (variety) and rank ratio
+live — including whether the null-space novelty veto is **ON** (low-rank field) or
+**OFF** (high-rank field, cosine-only), the gate's rank-ratio toggle made visible.
+
 ---
 
 ## The math findings

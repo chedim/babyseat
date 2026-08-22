@@ -9,6 +9,9 @@ venv/
 # IDE
 .idea/
 
-# the proxy's default field + audit (local runtime state, not source)
+# the proxy's default field + audit + launcher log (local runtime state, not source)
+membrane-field.json
+membrane-audit.jsonl
+membrane-proxy.log
 cortex-field.json
 cortex-audit.jsonl

@@ -131,6 +131,17 @@ class ExemplarStore:
         store = cls()
         p = Path(path)
         if p.exists():
-            for rec in json.loads(p.read_text()):
+            text = p.read_text()
+            try:
+                recs = json.loads(text) if text.strip() else []
+            except json.JSONDecodeError as e:
+                # empty / truncated / corrupt field -- degrade to an empty store
+                # rather than killing the proxy on startup. Nothing is lost: the
+                # raw file is untouched, and the next save() overwrites cleanly.
+                import sys
+                print(f"[membrane] warning: field {p} unreadable ({e}); "
+                      f"starting empty", file=sys.stderr)
+                recs = []
+            for rec in recs:
                 store.append(Exemplar(**rec))
         return store
