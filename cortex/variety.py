@@ -1,0 +1,157 @@
+"""Variety measures for the exemplar store, and per-query novelty.
+
+Variety = how much of the situation-space the field has actually experienced.
+It calibrates the confidence gate: a store with low variety cannot be *sure*
+about a query off its experienced manifold, no matter the nearest cosine.
+
+This is the covariance / null-space work from rosetta-check, in its correct home.
+In the linter it was a solution hunting for a problem; here the confidence gate
+genuinely needs a variety-calibrated novelty signal, so the math earns its keep.
+
+Notes:
+  - Direct DxD covariance / SVD is used here (small D in the toy). At D=1024 (real
+    mxbai embeddings) you'd form the small NxN Gram matrix instead of the 1024x1024
+    covariance -- exactly the Gram trick rosetta-check's PCA.java already uses. The
+    measures below are written on the centered data Y so the Gram swap is a one-line
+    change later.
+  - novelty deliberately keeps FEWER principal directions than the effective rank
+    (KEEP_FRACTION below), so the residual null space has a real, nonzero scale
+    gamma. This under-keeping IS the "null space is the asset" choice: it is what
+    lets novelty catch a query that is near the centroid (high cosine) but OFF the
+    manifold. Choosing KEEP_FRACTION is the calibration knob that is this project's
+    open problem -- it is exposed, not hidden.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+from .field import ExemplarStore
+
+# Keep this fraction of the effective rank as the "experienced manifold"; the
+# rest forms the null space whose variance (gamma) scales novelty. <1 so there
+# is always a real null space (the asset). Tuning this is the open calibration
+# problem -- see README "Variety calibration".
+KEEP_FRACTION = 0.8
+
+
+def _entropy_rank(var: np.ndarray, eps: float = 1e-12) -> float:
+    """Effective rank = exp(Shannon entropy of the normalized variance spectrum.
+
+    One dominant direction -> spectrum is one big spike -> entropy ~0 -> rank ~1.
+    Variance spread evenly across many directions -> flat spectrum -> rank ~ D.
+    """
+    var = np.clip(var, 0.0, None)
+    s = var.sum()
+    if s < eps:
+        return 0.0
+    p = var[var > eps] / s
+    return float(np.exp(-np.sum(p * np.log(p))))
+
+
+def effective_rank(store: ExemplarStore, eps: float = 1e-9) -> float:
+    """Entropy of the covariance eigenvalue spectrum (a.k.a. effective dimensionality).
+
+    Intuition: if every exemplar points the same way, all variance is along one
+    axis -> the spectrum is one big eigenvalue and the rest near zero -> entropy
+    ~0 -> rank ~1 (low variety). If exemplars spread evenly across many axes, the
+    spectrum is flat -> entropy ~ D (high variety). Low effective rank -> low
+    variety.
+
+    This generalizes rosetta-check's fixed-``rank`` lesson: instead of picking a
+    magic k, we measure how many directions the field has actually seen.
+    """
+    V = store.vectors()
+    if len(store) < 2 or V.shape[1] == 0:
+        return 0.0
+    Y = V - V.mean(axis=0)
+    # SVD (not DxD covariance) so this scales to D=1024 real embeddings without
+    # forming a 1024x1024 matrix. var_i = S_i^2/n are the covariance eigenvalues;
+    # entropy is scale-invariant under normalization, so this == eigvalsh(C).
+    _, S, _ = np.linalg.svd(Y, full_matrices=False)
+    var = (S ** 2) / len(store)
+    return _entropy_rank(var, eps)
+
+
+def spread(store: ExemplarStore) -> float:
+    """Mean pairwise cosine distance -- a crude, cheap variety proxy.
+
+    ~0 means every exemplar is (nearly) identical; larger means more spread out.
+    Cheaper than effective_rank (no eigensolve) and a good sanity cross-check.
+    """
+    V = store.vectors()
+    if len(store) < 2:
+        return 0.0
+    Vn = V / (np.linalg.norm(V, axis=1, keepdims=True) + 1e-12)
+    G = Vn @ Vn.T
+    n = len(store)
+    iu = np.triu_indices(n, k=1)        # each unordered pair once
+    return float(np.mean(1.0 - G[iu]))
+
+
+def _principal_dirs(Y: np.ndarray):
+    """SVD of centered data Y (n, D) -> (variances, right-singular directions Vt).
+
+    The principal directions in FEATURE space are the RIGHT singular vectors (Vt),
+    not U. U spans the row space (n-dim); using it is the classic SVD-on-samples
+    footgun (gives a dimension mismatch against a D-dim query).
+    """
+    U, S, Vt = np.linalg.svd(Y, full_matrices=False)
+    var = (S ** 2) / max(Y.shape[0], 1)   # variance along each principal direction
+    return var, Vt
+
+
+def novelty(
+    query: np.ndarray,
+    store: ExemplarStore,
+    eps: float = 1e-9,
+    keep_fraction: float | None = None,
+    keep: int | None = None,
+) -> float:
+    """How far the query sits OFF the store's experienced manifold.
+
+    Returns the query's off-subspace residual divided by sqrt(gamma), where gamma
+    is the mean variance in the DELIBERATELY DROPPED directions (the null-space
+    width). High -> the query is in a direction the field has little variety in
+    -> the gate should escalate, *even if its cosine to a neighbor is high*.
+
+    This is the rosetta-check Mahalanobis idea, done simply and correctly. The
+    under-keeping (KEEP_FRACTION < 1) is load-bearing: with full effective rank
+    kept, gamma -> 0 and novelty blows up; the deliberately dropped directions are
+    what give the null space a real scale to measure against.
+
+    Consolidation knob (the "massage" parameter): by default the field keeps
+    KEEP_FRACTION of its effective rank. ``keep_fraction`` scales that fraction;
+    ``keep`` pins an exact number of kept directions. Keeping FEWER directions =
+    compressing the field harder into its essential shape = a larger null space.
+    That is exactly what the consolidate experiment sweeps: does some compression
+    level produce a usable absorb/escalate valley where the default (0.8) blob
+    had none? The default call is unchanged (uses KEEP_FRACTION).
+    """
+    V = store.vectors()
+    n = len(store)
+    if n < 2:
+        return 1.0                       # nothing experienced -> maximally novel
+    mu = V.mean(axis=0)
+    Y = V - mu
+    var, Vt = _principal_dirs(Y)
+
+    # how many directions count as "experienced" -- always drop at least one so
+    # the null space has a real gamma.
+    if keep is not None:
+        r = int(keep)
+    else:
+        frac = KEEP_FRACTION if keep_fraction is None else keep_fraction
+        r = int(round(frac * _entropy_rank(var)))
+    r = max(1, min(len(var) - 1, r))
+
+    dropped_var = var[r:]
+    gamma = float(np.mean(dropped_var)) if dropped_var.size else 0.0
+    gamma = max(gamma, eps)
+
+    # off-subspace residual of the query
+    q = np.asarray(query, dtype=float) - mu
+    basis = Vt[:r].T                    # (D, r)
+    recon = basis @ (basis.T @ q)
+    resid = float(np.linalg.norm(q - recon))
+    return float(resid / np.sqrt(gamma))
