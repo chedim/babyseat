@@ -241,13 +241,20 @@ self-correcting cache of how *you* use the model: cheaper and self-correcting, n
 The proxy is stateful across turns (an in-memory ring of recent decisions; the durable evidence
 is written to the field file). The audit log (`cortex-audit.jsonl`) records every decision
 (`event: decision`) plus a re-ask vote (`event: outcome`) and a contest (`event: contest`),
-each joinable by `ex_idx` and carrying the net evidence. The in-window review surface
-(`python -m cortex.review`) reads the audit + field and prints **both sides** of the boundary —
-the honest "notify you in this window" mechanism, on demand (an outside process cannot push
-into the Claude Code window). The *model-judges-the-audit* half (Cortex calling a fresh me per
-demotion to file a contest — the "LLM-as-MCP-server" inversion) is **deferred**; the seam is the
-`Judge` protocol (`StubJudge` no-ops; the demo simulates the contest out-of-band). The passive
-re-ask self-train keeps the field honest without it.
+each joinable by `ex_idx` and carrying the net evidence + the contest's source/restore flag.
+The in-window review surface (`python -m cortex.review`) reads the audit + field and prints
+**both sides** of the boundary — the honest "notify you in this window" mechanism, on demand.
+
+The *model-judges-the-audit* half (Cortex calling a fresh model per demotion — the
+"LLM-as-MCP-server" inversion) is **live**: `OllamaJudge` asks a fresh model "was the replayed
+answer correct?" and CONTESTS or ACCEPTS. It is opt-in (default `StubJudge` no-ops, zero behavior
+change); the demo uses a `ScriptedJudge` so it runs without a chat model. The anti-collapse rule
+that keeps the boundary two-sided even with a live judge: the model's **first** contest restores
+(one veto), a **later** contest is **record-only** (the environment re-asserted by re-asking
+again = irreducible disagreement → environment wins the action, model wins the record). On any
+judge error/timeout the verdict is ACCEPT — the boundary degrades toward the environment, never
+toward the model judging itself unopposed. The passive re-ask self-train keeps the field honest
+regardless.
 
 **Bootstrap conservatism (open, now concrete).** A fresh field has no
 exemplars → every query escalates (the "variance first" bootstrap) → the field

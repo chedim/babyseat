@@ -146,16 +146,12 @@ class Judge(Protocol):
 
     The environment (the user) checks the model via the re-ask ("this replay was not
     useful"); the model checks the environment via the contest ("my answer was correct
-    anyway -- that re-ask was a misunderstanding"). Neither has a monopoly; each is a
-    veto on the other. ``contest`` is called right after a re-ask demotes an exemplar.
-    Returning a truthy reason files a contest (cancels the re-ask's vote, may restore
-    ``safe``); returning None accepts the demotion.
-
-    DEFERRED (live): a real judge asks a fresh model per demotion -- the "LLM-as-MCP-
-    server" inversion, which needs the custom harness. The ``StubJudge`` never contests,
-    so today the model-side authority is exercised out-of-band (the demo simulates it by
-    calling ``Cortex.contest`` directly; a future live judge plugs in here, no other code
-    changes).
+    anyway -- that re-ask was a misunderstanding"). The judge returns a truthy reason
+    (contest) or None (accept the demotion). The judge decides ONLY whether to contest;
+    whether a contest RESTORES ``safe`` (vs. recording the disagreement while leaving the
+    demotion standing) is Cortex's policy -- the "environment wins the action on
+    irreducible disagreement, model wins the record" rule lives in ``Cortex.contest``,
+    not here. See ``OllamaJudge`` for the live implementation, ``StubJudge`` for the no-op.
     """
 
     def contest(self, situation: str, action: str, query: str,
@@ -168,6 +164,95 @@ class StubJudge:
     def contest(self, situation: str, action: str, query: str,
                 reask_count: int) -> str | None:
         return None
+
+
+class ScriptedJudge:
+    """Deterministic judge for the demo/tests -- replays a scripted verdict sequence.
+
+    Stands in for the live ``OllamaJudge`` so the boundary seam (the judge fires
+    automatically on a demotion) is proven end-to-end without a chat model.
+    ``verdicts`` is a list of reason-strings (contest) or None (accept), consumed in
+    order; once exhausted it accepts (returns None).
+    """
+
+    def __init__(self, verdicts: list) -> None:
+        self.verdicts = list(verdicts)
+        self.i = 0
+
+    def contest(self, situation: str, action: str, query: str,
+                reask_count: int) -> str | None:
+        if self.i >= len(self.verdicts):
+            return None
+        v = self.verdicts[self.i]
+        self.i += 1
+        return v
+
+
+class OllamaJudge:
+    """The live model-side authority: calls a fresh model to adjudicate a demotion.
+
+    This is the "LLM-as-MCP-server" inversion made real: when the environment re-asks
+    (demotes an absorb), Cortex asks a fresh model -- independent of the responder --
+    "was the replayed answer actually correct?" CONTEST (it was right; the re-ask was a
+    misunderstanding) or ACCEPT (it was wrong; the demotion stands). The judge decides on
+    CORRECTNESS only; the prompt biases it toward skepticism about its own prior answer
+    (the guard against the one-sided collapse: a reflexively-defensive judge that always
+    contests would make the environment's re-ask toothless).
+
+    On any error or timeout: ACCEPT (return None) -- the boundary degrades toward the
+    ENVIRONMENT, the safe one-sided direction, never toward the model judging itself
+    unopposed. The judge is a peer of the responder (both call the model server directly;
+    Cortex orchestrates; the judge call does NOT flow through ``Cortex.handle``, so there
+    is no recursion).
+    """
+
+    def __init__(self, backend: str = "http://localhost:11434", model: str = "judge",
+                 timeout: int = 60) -> None:
+        self.backend = backend.rstrip("/")
+        self.model = model
+        self.timeout = timeout
+
+    def contest(self, situation: str, action: str, query: str,
+                reask_count: int) -> str | None:
+        import urllib.request
+        sys_prompt = (
+            "You are an independent adjudicator at a boundary between two authorities: "
+            "the environment judges usefulness, you judge correctness. A question was asked, "
+            "the following answer was given and replayed, and the asker then repeated the same "
+            "question immediately (a 're-ask') -- which the system reads as 'the replay did not "
+            "satisfy'. Your job is to judge ONLY whether the answer was CORRECT for the question, "
+            "NOT whether the asker was satisfied. Do not defer to the re-ask; evaluate the answer "
+            "on its merits. Be skeptical of your own prior answer -- if it is incomplete, "
+            "misleading, or misses the point, the re-ask was justified.\n\n"
+            "Reply on the FIRST line exactly one word:\n"
+            "  CONTEST  -- the answer was correct/complete; the re-ask was likely a misunderstanding.\n"
+            "  ACCEPT   -- the answer was wrong/incomplete; the demotion should stand.\n"
+            "Then on the SECOND line, one sentence justifying it. Nothing else."
+        )
+        user_msg = (f"Question:\n\"\"\"\n{situation}\n\"\"\"\n\n"
+                    f"Answer that was replayed:\n\"\"\"\n{action[:2000]}\n\"\"\"\n\n"
+                    f"(The asker re-asked this {reask_count} time(s).)")
+        body = {"model": self.model, "stream": False, "options": {"temperature": 0.0},
+                "messages": [{"role": "system", "content": sys_prompt},
+                             {"role": "user", "content": user_msg}]}
+        try:
+            data = json.dumps(body).encode()
+            req = urllib.request.Request(f"{self.backend}/api/chat", data=data,
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                content = json.loads(r.read()).get("message", {}).get("content", "")
+        except Exception as e:  # noqa: BLE001 -- any failure -> accept the demotion
+            print(f"[cortex] judge call failed ({e!r}); accepting demotion "
+                  f"(boundary degrades toward the environment)", file=sys.stderr)
+            return None
+        lines = [ln for ln in content.strip().splitlines() if ln.strip()]
+        if not lines:
+            return None
+        first = lines[0].strip().upper()
+        if first.startswith("CONTEST"):
+            reason = lines[1].strip() if len(lines) > 1 else "answer was correct"
+            return f"judge: {reason}"
+        return None  # ACCEPT or unparseable -> accept the demotion
 
 
 def _chat_response(model: str, content: str) -> dict:
@@ -314,39 +399,58 @@ class Cortex:
         with self.audit_path.open("a") as f:
             f.write(json.dumps(rec) + "\n")
 
-    def _audit_contest(self, ex_idx: int, reason: str, reask: int,
-                       contest: int, safe: bool) -> None:
+    def _audit_contest(self, ex_idx: int, reason: str, source: str, restore: bool,
+                       first: bool, reask: int, contest: int, safe: bool) -> None:
         """Append a contest record -- the model-side veto, the other half of the boundary."""
-        rec = {"event": "contest", "ex_idx": ex_idx, "reason": reason,
+        rec = {"event": "contest", "ex_idx": ex_idx, "reason": reason, "source": source,
+               "restore": restore, "first": first,
                "reask_count": reask, "contest_count": contest, "safe": safe}
         with self.audit_path.open("a") as f:
             f.write(json.dumps(rec) + "\n")
 
-    def contest(self, ex_idx: int, reason: str = "") -> None:
+    def contest(self, ex_idx: int, reason: str = "", source: str = "supervisor",
+                force_restore: bool = False) -> None:
         """The model-side veto: file a contest on a (demoted) exemplar.
 
         "My answer was correct; that re-ask was the environment's misunderstanding." A
-        contest cancels a re-ask's vote (increments ``contest_count``) and recomputes
-        ``safe`` -- it may *restore* a demoted exemplar to replayable. The boundary holds
-        both: the environment's re-ask is recorded (usefulness), the model's contest is
-        recorded (correctness); whoever is engaging gets the last word on the action, and
-        the record keeps both. Out-of-band today (no live judge); a future MCP judge calls this.
+        contest always increments ``contest_count`` (the record -- the model's
+        correctness claim is preserved). Whether it RESTORES ``safe`` follows the boundary
+        rule -- *each side has a veto; on irreducible disagreement the environment wins the
+        action, the model wins the record*:
+
+          - the model's FIRST contest restores (one veto -- the model can cancel one
+            demotion; ``safe`` is recomputed from the net votes);
+          - a LATER contest is record-only (the environment re-asserted by re-asking again
+            despite the first contest = irreducible disagreement -> the demotion stands,
+            the model's continued claim is logged but no longer overrides the action);
+          - a supervisor (``force_restore=True``) can always restore (the higher bar).
+
+        This is what keeps a live judge from collapsing the boundary: a reflexively-
+        defensive judge gets ONE veto per exemplar, and the environment's repeated re-ask
+        wins the action -- the model supplements, never substitutes. ``source`` is
+        ``"judge"`` (the live/automatic path) or ``"supervisor"`` (a manual/override path).
         """
         if not (0 <= ex_idx < len(self.store)):
             return
         ex = self.store.exemplars[ex_idx]
+        first = ex.contest_count == 0
         was_safe = ex.safe
         self.store.add_contest(ex_idx)
-        ex.recompute_safe(self.demote_threshold)
+        restore = force_restore or first
+        if restore:
+            ex.recompute_safe(self.demote_threshold)
         self.store.save(self.field_path)
-        self._audit_contest(ex_idx, reason, ex.reask_count, ex.contest_count, ex.safe)
+        self._audit_contest(ex_idx, reason, source, restore, first,
+                           ex.reask_count, ex.contest_count, ex.safe)
+        kind = "first-veto" if first else ("supervisor" if source == "supervisor" else "record-only")
         if ex.safe != was_safe:
-            print(f"[cortex] CONTEST restored exemplar #{ex_idx} "
-                  f"(reask={ex.reask_count} contest={ex.contest_count}); replayable again",
-                  file=sys.stderr)
+            print(f"[cortex] CONTEST ({source}, {kind}) restored exemplar #{ex_idx} "
+                  f"(reask={ex.reask_count} contest={ex.contest_count} safe={ex.safe}); "
+                  f"replayable again", file=sys.stderr)
         else:
-            print(f"[cortex] contest filed on exemplar #{ex_idx} "
-                  f"(reask={ex.reask_count} contest={ex.contest_count})", file=sys.stderr)
+            print(f"[cortex] CONTEST ({source}, {kind}) filed on exemplar #{ex_idx} "
+                  f"(reask={ex.reask_count} contest={ex.contest_count} safe={ex.safe}); "
+                  f"demotion stands", file=sys.stderr)
 
     def _remember(self, query: str, vec: np.ndarray, verdict: dict,
                   ex_idx: int | None) -> None:
@@ -396,15 +500,17 @@ class Cortex:
                 print(f"[cortex] RE-ASK demoted exemplar #{ex_idx} "
                       f"(reask={ex.reask_count} contest={ex.contest_count} sim={sim:.3f}); "
                       f"next time it escalates-with-hint", file=sys.stderr)
+                # the model-side authority: ask the judge whether to contest this demotion.
+                # Fires ONLY on an actual demotion (a safe flip) -- the rare, high-value
+                # moment where adjudication matters, never every turn. StubJudge no-ops;
+                # a live OllamaJudge calls a fresh model; a ScriptedJudge stands in for the demo.
+                reason = self.judge.contest(ex.situation, ex.action, query, ex.reask_count)
+                if reason:
+                    self.contest(ex_idx, reason, source="judge")
             else:
                 print(f"[cortex] re-ask vote on exemplar #{ex_idx} "
                       f"(reask={ex.reask_count}, not yet demoted at threshold={self.demote_threshold})",
                       file=sys.stderr)
-            # the model-side authority: ask the judge whether to contest this demotion.
-            # StubJudge never contests; a live judge (deferred) calls a fresh model here.
-            reason = self.judge.contest(ex.situation, ex.action, query, ex.reask_count)
-            if reason:
-                self.contest(ex_idx, reason)
             return ex_idx
         return None
 

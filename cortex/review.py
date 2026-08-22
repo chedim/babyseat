@@ -94,10 +94,21 @@ def summarize(audit_path: str | Path, field_path: str | Path) -> str:
         lines.append("contests (the model checking the environment):")
         for c in contests:
             ex = c.get("ex_idx")
-            safe_s = "restored" if c.get("safe", True) else "still-demoted"
-            lines.append(f"  - exemplar #{ex}: reask={c.get('reask_count')} "
-                         f"contest={c.get('contest_count')} -> {safe_s}  "
-                         f"reason={str(c.get('reason'))[:50]!r}")
+            source = c.get("source", "?")
+            restore = c.get("restore", True)
+            first = c.get("first", True)
+            if c.get("safe", True):
+                effect = "restored (replayable)"
+            elif restore:
+                effect = "filed, net votes still demote"
+            else:
+                effect = "record-only, demotion stands"
+            tag = f"{source}"
+            if source == "judge":
+                tag += "/first-veto" if first else "/record-only"
+            lines.append(f"  - exemplar #{ex} [{tag}]: reask={c.get('reask_count')} "
+                         f"contest={c.get('contest_count')} -> {effect}  "
+                         f"reason={str(c.get('reason'))[:45]!r}")
     else:
         lines.append("contests: none (the model has not vetoed a demotion)")
     lines.append("")

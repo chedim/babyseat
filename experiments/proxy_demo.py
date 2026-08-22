@@ -1,30 +1,32 @@
 """End-to-end demo of the Cortex absorb/escalate loop WITH passive self-training
-and the two-authority boundary (re-ask vs contest).
+AND the live two-authority boundary (re-ask vs an automatic model-judge).
 
 Drives the in-process Cortex runtime with a StubResponder (so it runs anywhere --
 only needs local Ollama/mxbai for embeddings) through a sequence that proves the
-decision loop, the training loop, AND the boundary that keeps it honest:
+decision loop, the training loop, AND the boundary with the model-side authority
+engaging AUTOMATICALLY (no manual contest call -- the judge fires on its own):
 
   1. a NOVEL query      -> escalate, responder called, exemplar E0 logged
   2. REPEAT of query 1  -> ABSORB: gate recalls E0, replays it; responder NOT called
                            (first repeat, correct)
   3. REPEAT of query 1  -> RE-ASK: the field just absorbed this and the user asks again
-                           -> the replay was wrong -> a VOTE (reask_count=1) -> E0 demoted
-                           (safe=False) -> this turn ESCALATES-WITH-HINT. The environment
-                           has now checked the model.
-  4. [model-contest]    -> the model checks the environment back: "my answer was correct;
-                           that re-ask was a misunderstanding." A VOTE the other way
-                           (contest_count=1) -> E0 RESTORED (safe=True). Out-of-band here
-                           (no live judge yet -- the Judge seam is wired, StubJudge no-ops,
-                           so the demo simulates the model-side authority by calling
-                           cortex.contest directly). This is the deferred half, made visible.
+                           -> the replay was wrong -> a VOTE (reask=1) -> E0 DEMOTED -> this
+                           turn ESCALATES-WITH-HINT. THEN the LIVE JUDGE fires automatically:
+                           "was my answer correct?" -> CONTESTS (its FIRST veto) -> E0
+                           RESTORED (safe=true). The model checked the environment back.
+  4. REPEAT of query 1  -> RE-ASK again (reask=2) -> E0 DEMOTED again -> judge fires AGAIN
+                           -> CONTESTS, but this is its SECOND contest -> RECORD-ONLY (the
+                           environment re-asserted despite the first contest = irreducible
+                           disagreement -> environment WINS THE ACTION, demotion stands; the
+                           model WINS THE RECORD, its claim is logged). This is the anti-
+                           collapse rule: the judge gets ONE veto per exemplar.
   5. another NOVEL one  -> escalate, field grows
   6. REPEAT of query 2  -> ABSORB (first repeat, correct)
 
-The CountingResponder wraps the stub and counts respond() calls, so the absorb is
-visible: the count rises on escalations and stays flat on the replay. The review
-summary at the end shows BOTH sides of the boundary: the re-ask vote (turn 3), the
-contest (turn 4), and E0's net evidence (reask=1 contest=1 -> safe=true, restored).
+The judge here is a ScriptedJudge (deterministic) standing in for the live OllamaJudge
+(which calls a real chat model) -- so the seam is proven without a chat model. Swapping
+in OllamaJudge() is the only change for real use. The CountingResponder counts respond()
+calls, so the absorb is visible: the count rises on escalations, stays flat on replays.
 
 Run:  PYTHONPATH=. .venv/bin/python experiments/proxy_demo.py   (needs local Ollama + mxbai-embed-large)
 """
@@ -33,7 +35,7 @@ from __future__ import annotations
 
 import os
 
-from cortex import Cortex, StubResponder
+from cortex import Cortex, StubResponder, ScriptedJudge
 from cortex.review import summarize
 
 # field + audit into the bg-job tmp dir so parallel jobs don't clobber each other
@@ -72,8 +74,14 @@ def main() -> None:
     # degenerate here -- neighbors are different responses by construction. The chat gate is
     # effectively sim-primary (cosine), which is exactly the #3 finding (cosine-primary).
     # demote_threshold=1: one un-contested re-ask demotes; a contest cancels it (the boundary).
+    # The judge is a ScriptedJudge (contests twice, then accepts) standing in for the live
+    # OllamaJudge. Swap for OllamaJudge(model=...) to use a real chat model.
+    judge = ScriptedJudge([
+        "answer was correct; the re-ask was a misunderstanding",   # 1st contest -> restores
+        "answer still holds; the repeated re-ask does not change that",  # 2nd -> record-only
+    ])
     cortex = Cortex(responder=responder, field_path=field, audit_path=audit,
-                    sim_min=0.85, consensus_min=0.0, demote_threshold=1)
+                    sim_min=0.85, consensus_min=0.0, demote_threshold=1, judge=judge)
 
     q1 = "how do I upsert a document in Couchbase Java SDK?"
     q2 = "what's the difference between a bucket and a scope?"
@@ -86,23 +94,24 @@ def main() -> None:
         mark = "ABSORBED (no model call)" if called == 0 else f"escalated ({called} model call)"
         sim = dec.get("sim")
         sim_s = f"{sim:.3f}" if isinstance(sim, (int, float)) else "  -  "
+        e0 = cortex.store.exemplars[0]
         print(f"[{tag:9s}] verdict={dec['verdict']:18s} sim={sim_s:>5}  "
-              f"field={len(cortex.store):>2d}  responder_calls={responder.calls:>2d}  {mark}")
-        print(f"            -> {content[:90]}")
+              f"field={len(cortex.store):>2d}  responder_calls={responder.calls:>2d}  {mark}  "
+              f"| E0 reask={e0.reask_count} contest={e0.contest_count} safe={e0.safe}")
+        print(f"            -> {content[:80]}")
 
     print(f"sim_min={cortex.sim_min}  consensus_min={cortex.consensus_min} (chat: sim-primary)  "
-          f"demote_threshold={cortex.demote_threshold}  field starts at {len(cortex.store)} exemplars\n")
+          f"demote_threshold={cortex.demote_threshold}  judge=ScriptedJudge (live=OllamaJudge)")
+    print(f"field starts at {len(cortex.store)} exemplars\n")
 
-    turn("novel",  q1)                 # 1 -> escalate, E0 logged
-    turn("REPEAT", q1)                 # 2 -> ABSORB (first repeat, correct)
-    turn("REPEAT", q1)                 # 3 -> RE-ASK -> vote -> demote E0 -> escalate-with-hint
-    # 4 -- the model-side authority (deferred live judge, simulated out-of-band):
-    print("[contest  ] the model stands by exemplar #0: 'my answer was correct; the re-ask was a misunderstanding'")
-    cortex.contest(0, "my answer was correct; the re-ask was a misunderstanding")
-    turn("novel",  q2)                 # 5 -> escalate, E1 logged
-    turn("REPEAT", q2)                 # 6 -> ABSORB (first repeat, correct)
+    turn("novel",  q1)   # 1 -> escalate, E0 logged
+    turn("REPEAT", q1)   # 2 -> ABSORB (first repeat, correct)
+    turn("REPEAT", q1)   # 3 -> RE-ASK demotes E0 -> judge 1st contest RESTORES -> esc-w-hint
+    turn("REPEAT", q1)   # 4 -> RE-ASK demotes E0 again -> judge 2nd contest RECORD-ONLY -> esc-w-hint
+    turn("novel",  q2)   # 5 -> escalate, E1 logged
+    turn("REPEAT", q2)   # 6 -> ABSORB (first repeat, correct)
 
-    n_turns = 5  # handle() turns (the contest is out-of-band, not a turn)
+    n_turns = 6
     print(f"\nresponder was called {responder.calls} times for {n_turns} turns "
           f"({n_turns - responder.calls} absorbed with NO model call).")
 

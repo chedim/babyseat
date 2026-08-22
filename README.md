@@ -146,15 +146,15 @@ while a high-variety store treats the *same* query as in-manifold (-> confident
    the primary gate; null-space novelty is a narrow low-rank specialist, not a
    general gate. The one "it collapsed" finding was partly a knee-finder
    artifact; the cosine-primary conclusion was right, now for the right reason.
-4. **The training loop** — *Tier 1 landed* (passive self-train; see "The training
-   loop" below): Cortex watches how you use the chat and learns from **re-asks** —
-   asking the same thing again right after an absorb means the replay was wrong. A
-   re-ask is an evidential, reversible **vote** (`reask_count`), not a hard flip: `safe`
-   is derived from the net of re-ask votes (usefulness, the environment) vs contest
-   votes (correctness, the model) — each side a veto on the other. The model's
-   *contest* is the **deferred** half (live judge = a fresh me per demotion via the MCP
-   inversion; seam is `Judge` / `StubJudge`); until it lands the model-side authority is
-   exercised out-of-band. No user labor — a re-ask is something you'd do anyway.
+4. **The training loop** — *landed* (passive self-train + live model-judge; see "The
+   training loop" below): Cortex watches how you use the chat and learns from **re-asks** —
+   asking the same thing again right after an absorb means the replay was wrong. A re-ask is
+   an evidential, reversible **vote** (`reask_count`), not a hard flip: `safe` is derived from
+   the net of re-ask votes (usefulness, the environment) vs contest votes (correctness, the
+   model) — each side a veto on the other. The model's contest is **live** (`OllamaJudge`, a
+   fresh model per demotion; opt-in, default `StubJudge`), with an anti-collapse rule: the
+   model's first contest restores, later contests are record-only (the environment wins the
+   action on irreducible disagreement). No user labor — a re-ask is something you'd do anyway.
 
 ---
 
@@ -226,18 +226,31 @@ self-correcting, not smarter (the model's weights stay frozen). The raw store st
 permanent; only the evidence counts (and the derived `safe`) change — nothing is ever
 deleted or rewritten.
 
-The model's contest is the **deferred** half: a live judge asks a fresh model per
-demotion (the "LLM-as-MCP-server" inversion, which needs the custom harness). The
-seam is the `Judge` protocol; `StubJudge` never contests, so today the model-side
-authority is exercised out-of-band (the demo calls `cortex.contest(...)` directly to
-show it working; a future live judge plugs in with no other code changes).
+The model's contest is the **live** model-side authority: when a re-ask demotes an
+exemplar, Cortex asks a fresh model (independent of the responder) — "was the replayed
+answer actually correct?" CONTEST (it was right; the re-ask was a misunderstanding) or
+ACCEPT (it was wrong; the demotion stands). This is the "LLM-as-MCP-server" inversion
+made real: Cortex is the host, the model is a backend it calls only to adjudicate.
+
+The judge is **opt-in** (default `StubJudge` never contests — zero behavior change, zero
+extra calls). Pass `judge=OllamaJudge(model=...)` to enable it; the demo uses a
+`ScriptedJudge` so it runs without a chat model. On any judge error/timeout the verdict
+is ACCEPT — the boundary degrades toward the *environment*, the safe one-sided
+direction, never toward the model judging itself unopposed.
+
+**The anti-collapse rule** (the model supplements, never substitutes): the model's
+**first** contest restores (one veto — it can cancel one demotion); a **later** contest
+is **record-only** (the environment re-asserted by re-asking again = irreducible
+disagreement → the demotion stands, the model's claim is logged). So a reflexively-
+defensive judge that always contests gets ONE veto per exemplar, and the environment's
+repeated re-ask wins the action — the boundary cannot collapse to the model side. A
+supervisor can `contest(..., force_restore=True)` to override (the higher bar).
 
 The honest "notify you in this window" mechanism: an outside process cannot push into
 the Claude Code window, so Cortex notifies by appending to the audit log, and I read
 it on demand — `python -m cortex.review` prints what the training loop did, **both
-sides**: decisions, the re-ask votes, the contests, and the net-evidence state of each
-exemplar. Until the live judge lands, the passive re-ask self-train keeps the field
-honest without anyone reading it.
+sides**: decisions, the re-ask votes, the contests (judge vs supervisor, restored vs
+record-only), and the net-evidence state of each exemplar.
 
 ```bash
 # review what Cortex learned (the in-window training-loop surface):
