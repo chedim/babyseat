@@ -34,7 +34,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from .runtime import Membrane, OllamaChatResponder
+from .runtime import Membrane, OllamaChatResponder, OllamaJudge, StubJudge
 
 HOP_BY_HOP = {"host", "content-length", "connection", "transfer-encoding",
               "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -131,21 +131,40 @@ def main() -> None:
     ap.add_argument("--sim-min", type=float, default=0.85,
                     help="cosine cutoff for absorb (conservative for the bootstrap; loosen once audit proves safe)")
     ap.add_argument("--consensus-min", type=float, default=0.60)
+    ap.add_argument("--demote-threshold", type=int, default=1,
+                    help="re-asks needed to demote an exemplar (raise to require more than one re-ask)")
+    # ---- live model-judge (opt-in; default off = StubJudge, zero behavior change) ----
+    ap.add_argument("--judge", action="store_true",
+                    help="enable the live model-judge: on each demotion a fresh model adjudicates "
+                         "(CONTEST restores a correct answer; ACCEPT lets the demotion stand). "
+                         "Off by default -- no extra model calls unless you ask.")
+    ap.add_argument("--judge-model", default="granite3.3:8b",
+                    help="model that adjudicates demotions (independent of the responder; override with JUDGE_MODEL)")
+    ap.add_argument("--judge-timeout", type=int, default=120, help="judge call timeout (seconds)")
+    ap.add_argument("--judge-backend", default=None,
+                    help="Ollama URL for the judge (defaults to --backend)")
     args = ap.parse_args()
 
+    judge = (OllamaJudge(backend=args.judge_backend or args.backend,
+                        model=args.judge_model, timeout=args.judge_timeout)
+             if args.judge else StubJudge())
     membrane = Membrane(
         responder=OllamaChatResponder(args.backend),
         field_path=args.field,
         audit_path=args.audit,
         sim_min=args.sim_min,
         consensus_min=args.consensus_min,
+        demote_threshold=args.demote_threshold,
+        judge=judge,
     )
     srv = ThreadingHTTPServer(("127.0.0.1", args.listen), ProxyHandler)
     srv.membrane = membrane
     srv.backend = args.backend.rstrip("/")
+    judge_s = f"ON (model={args.judge_model}, timeout={args.judge_timeout}s)" if args.judge else "off (StubJudge)"
     print(f"membrane proxy  http://127.0.0.1:{args.listen}  ->  {args.backend}\n"
           f"  field={args.field}  audit={args.audit}  sim_min={args.sim_min}  "
-          f"field_size={len(membrane.store)}\n"
+          f"demote_threshold={args.demote_threshold}  field_size={len(membrane.store)}\n"
+          f"  judge: {judge_s}\n"
           f"  (gate the /api/chat NON-STREAM path; stream:true and all other routes pass through)",
           file=sys.stderr)
     try:
