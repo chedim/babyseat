@@ -31,13 +31,19 @@ Run:
 from __future__ import annotations
 
 import json
+import signal
 import sys
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from .runtime import (Membrane, OllamaChatResponder, AnthropicMessagesResponder,
-                      OllamaJudge, StubJudge, hint_system_message)
+                      OllamaJudge, StubJudge, StubResponder, _last_user, _response_text,
+                      hint_system_message)
+from .buffer import BufferView, SituationBuffer
+from .cell import Cell
+from .curiosity import CURIOSITY_MIN
+from .pool import CellPool
 
 HOP_BY_HOP = {"host", "content-length", "connection", "transfer-encoding",
               "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -131,6 +137,37 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 auth[h] = v
         return auth
 
+    # ---- the feeding boundary (stage 2: multi-cell) -------------------------
+    def _maybe_deposit(self, body: dict) -> int | None:
+        """Deposit this turn's user text into the shared buffer for the background cell
+        pool. Only a REAL human turn enters: ``_last_user`` returns None for
+        tool_result-only / empty turns, so the buffer never sees self-generated or
+        non-conversational traffic (the safe=given-not-taken guardrail -- situations
+        enter only through the boundary). Called only when ``self.server.buffer is not
+        None`` (i.e. ``--cells`` on); when off the caller's guard short-circuits before
+        here, so the live single-Membrane path pays only one ``is not None`` check.
+
+        Stage 3: deposits with ``meta={"pending": True}`` and returns the situation's
+        index -- a handle the caller stores on ``self._deposit_id`` and later passes to
+        ``_maybe_attach`` once the forward returns, so the real response is teed into the
+        same situation (``attach_response`` -> ``complete=True``). The cell pulls complete
+        pairs and learns the real action; the boundary stays one-way."""
+        q = _last_user(body)
+        if q:
+            return self.server.buffer.deposit(q, meta={"pending": True})
+        return None
+
+    def _maybe_attach(self, content: str) -> None:
+        """Tee the real assistant response into the deposited situation (stage 3). Called
+        after the response is produced -- never before -- so the gate/decide/replay path is
+        untouched (this is a post-response side-effect). No-op when ``--cells`` is off or
+        when this request had nothing to deposit (empty/tool_result turn -> ``_deposit_id``
+        is None) or when there is no response text. The cell learns whatever the user
+        received (real forward OR a replayed cached action); the response is model output
+        only, never auth/keys (``_response_text`` reads only ``content``)."""
+        if self._deposit_id is not None and self.server.buffer is not None and content:
+            self.server.buffer.attach_response(self._deposit_id, content)
+
     # ---- the gate path ----------------------------------------------------
     def _chat(self):
         length = int(self.headers.get("Content-Length", 0))
@@ -140,6 +177,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._forward_raw(raw)
             return
+        # the feeding boundary (stage 2): deposit the real user turn into the shared
+        # buffer for the background cell pool. No-op when --cells is off (srv.buffer is
+        # None); only _last_user-non-empty turns enter. One deposit per request,
+        # before the stream/non-stream split, so both paths feed the buffer exactly once.
+        # Stage 3: the returned id is the handle for the later attach (the response tee);
+        # None means nothing was deposited (empty/tool_result turn -> nothing to attach).
+        self._deposit_id = None
+        if self.server.buffer is not None:
+            self._deposit_id = self._maybe_deposit(body)
         # Ollama defaults stream=true; gate the stream path too now (absorb synthesizes
         # NDJSON from the recalled action, escalate tees the backend stream + learns).
         if body.get("stream", True):
@@ -157,6 +203,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(out)))
         self.end_headers()
         self.wfile.write(out)
+        self._maybe_attach(_response_text(resp))   # stage 3: tee the real response to the cell buffer
         sim = decision.get("sim")
         sim_s = f"{sim:.2f}" if isinstance(sim, (int, float)) else "  -  "
         print(f"[membrane] {decision['verdict']:18s} sim={sim_s}  field={len(self.server.membrane.store)}",
@@ -208,6 +255,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.wfile.write((json.dumps(chunk) + "\n").encode())
         self.wfile.flush()
         mem.record_act(query, vec, verdict, model)
+        self._maybe_attach(verdict.get("action", ""))   # stage 3: tee the replayed action to the cell buffer
         sim = verdict.get("sim")
         sim_s = f"{sim:.2f}" if isinstance(sim, (int, float)) else "  -  "
         print(f"[membrane] act(stream)        sim={sim_s}  field={len(mem.store)}",
@@ -250,6 +298,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         content = "".join(parts)
         model = done_obj.get("model") or body.get("model") or "membrane"
         mem.record_escalation(query, vec, verdict, content, model, False)
+        self._maybe_attach(content)                # stage 3: tee the real response to the cell buffer
         sim = verdict.get("sim")
         sim_s = f"{sim:.2f}" if isinstance(sim, (int, float)) else "  -  "
         tag = f"{verdict['verdict']}(stream)"
@@ -285,6 +334,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             self._forward_raw(raw)
             return
+        # the feeding boundary (stage 2): one deposit per request, before the
+        # stream/non-stream split. No-op when --cells is off; only real user turns enter.
+        # Stage 3: the returned id is the handle for the later attach (the response tee).
+        self._deposit_id = None
+        if self.server.buffer is not None:
+            self._deposit_id = self._maybe_deposit(body)
         auth = self._anthropic_auth()
         if body.get("stream", False):
             self._messages_stream(raw, body, auth)
@@ -302,6 +357,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(out)))
         self.end_headers()
         self.wfile.write(out)
+        self._maybe_attach(_response_text(resp))   # stage 3: tee the real response to the cell buffer
         self._log_messages(decision)
 
     def _messages_stream(self, raw: bytes, body: dict, auth: dict) -> None:
@@ -349,6 +405,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self.wfile.write(ev)
         self.wfile.flush()
         mem.record_act(query, vec, verdict, model)
+        self._maybe_attach(verdict.get("action", ""))   # stage 3: tee the replayed action to the cell buffer
         self._log_messages(verdict)
 
     def _messages_escalate_stream(self, verdict, body, query, vec, mem, auth) -> None:
@@ -405,6 +462,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         content = "".join(parts)
         model = body.get("model", "membrane")
         mem.record_escalation(query, vec, verdict, content, model, False)
+        self._maybe_attach(content)                # stage 3: tee the real response to the cell buffer
         self._log_messages(verdict)
 
     def _messages_forward_stream(self, body: dict, auth: dict) -> None:
@@ -574,6 +632,12 @@ def main() -> None:
                          "default to membrane-field-<tag>.json / membrane-audit-<tag>.jsonl so "
                          "independent veils own independent fields. Overridden by explicit "
                          "--field/--audit. Also shown in the banner.")
+    ap.add_argument("--cells", type=int, default=0,
+                    help="run N curiosity-driven cells in the background that pull real user turns "
+                         "from a shared buffer and grow per-cell fields (observer mode, never author "
+                         "a response). 0 = off (default): the live single-Membrane path is unchanged "
+                         "except one cheap guard per request. Cells persist across boots (fresh=False) "
+                         "and are read-only on the buffer (the feeding boundary).")
     args = ap.parse_args()
 
     # --tag defaults the field/audit paths so independent veils own independent fields
@@ -618,9 +682,45 @@ def main() -> None:
         nudge_sigma=args.nudge_sigma,
         nudge_seed=args.nudge_seed,
     )
+    # ---- the feeding boundary + background cell pool (stage 2) ----------------
+    # When --cells is off (default), buf/pool stay None and the live single-Membrane
+    # path pays only one ``if srv.buffer is not None`` guard per request (never taken).
+    # When on, real user turns are deposited into a shared thread-safe buffer and N
+    # curiosity-driven cells pull from a read-only view in daemon threads, growing
+    # per-cell fields. Cells never serve live requests (observer mode) and never feed
+    # back (one-way feed). The gate/decide/replay path (runtime.py/gate.py) is untouched.
+    pool = None
+    buf = None
+    if args.cells > 0:
+        buf = SituationBuffer()
+        view = BufferView(buf)
+        cells = []
+        for i in range(args.cells):
+            cells.append(Cell(
+                tag=f"cell-{i}",
+                responder=StubResponder(tag=f"cell-{i}"),
+                field_path=f"membrane-field-cell-{i}.json",
+                audit_path=f"membrane-audit-cell-{i}.jsonl",
+                sim_min=args.sim_min,
+                consensus_min=args.consensus_min,
+                dedup_sim=args.dedup_sim,
+                observer=True,            # the never-authors guardrail -- do NOT flip
+                vague_filter=False,        # isolate curiosity+veil (the experiment config)
+                variety_gate=False,
+                variety_temp=False,
+                nudge_sigma=0.25,          # the veil: cells diverge (experiment-proven)
+                nudge_seed=i + 1,          # per-cell seed -> different manifolds -> specialization
+                curiosity_on=True,
+                curiosity_min=CURIOSITY_MIN,
+                fresh=False,              # persist across boots (load existing field, keep growing)
+            ))
+        pool = CellPool(cells, view, interval=2.0)
+        pool.start()
     srv = ThreadingHTTPServer(("127.0.0.1", args.listen), ProxyHandler)
     srv.membrane = membrane
     srv.backend = backend.rstrip("/")
+    srv.buffer = buf          # None when OFF (the off sentinel the deposit guard checks)
+    srv.cell_pool = pool      # None when OFF (nothing for the shutdown finally to stop)
     judge_s = f"ON (model={args.judge_model}, timeout={args.judge_timeout}s)" if args.judge else "off (StubJudge)"
     neg_s = "on (complaint follow-up demotes; --no-neg-followup to disable)" if args.neg_followup else "off (verbatim re-ask only)"
     mode_s = ("Anthropic /v1/messages" if anthropic else "Ollama /api/chat")
@@ -635,6 +735,9 @@ def main() -> None:
     nudge_s = (f"ON (sigma={args.nudge_sigma}, seed={args.nudge_seed}; "
                f"every transit veiled, prompt text untouched)" if args.nudge_sigma > 0
                else "off (identity veil)")
+    cells_s = (f"ON ({args.cells} cells, sigma=0.25, curiosity_min={CURIOSITY_MIN}, "
+               f"observer/fresh-persist/teed; per-cell field-cell-<i>; pool cadence 2s)"
+               if args.cells > 0 else "off (single-Membrane path, unchanged)")
     tag_s = f"  tag={args.tag}" if args.tag else ""
     print(f"membrane proxy  http://127.0.0.1:{args.listen}  ->  {backend}  [{mode_s}]\n"
           f"  field={args.field}  audit={args.audit}  sim_min={args.sim_min}  "
@@ -646,13 +749,25 @@ def main() -> None:
           f"  variety gate: {variety_s}\n"
           f"  adaptive temp: {vtemp_s}\n"
           f"  veil nudge: {nudge_s}\n"
+          f"  cells: {cells_s}\n"
           f"  judge: {judge_s}\n"
           f"  (API key: passthrough only, never stored/logged; gates {mode_s} stream + non-stream)",
           file=sys.stderr)
+    # SIGTERM (run.sh's TERM trap, or `kill`) -> KeyboardInterrupt so the except
+    # catches it cleanly. Today nothing closes the socket; the finally also joins
+    # the cell pool so a background cell mid-pull cannot hang the exit (the daemon
+    # threads would die with the process anyway, but joining is bounded and clean).
+    def _term(signum, frame):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, _term)
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
         print("\n[membrane] bye", file=sys.stderr)
+    finally:
+        if srv.cell_pool is not None:
+            srv.cell_pool.stop()
+        srv.server_close()
 
 
 if __name__ == "__main__":

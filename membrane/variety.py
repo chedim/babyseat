@@ -176,6 +176,36 @@ def thermo_state(store: ExemplarStore, eps: float = 1e-9) -> dict:
             "rank_ratio": er / n, "safe_frac": safe_frac, "n": n}
 
 
+def principal_dirs(store: ExemplarStore
+                   ) -> tuple["np.ndarray | None", "np.ndarray | None", "np.ndarray | None"]:
+    """The field's center, principal directions, and variance spectrum -- the SVD
+    of the centered data, exposed for two downstream uses:
+
+      - CROSS-CELL SPECIALIZATION (the hatchery test, signature 2): which directions
+        has THIS cell actually grown along? Comparing the top principal directions
+        across sibling cells shows whether they DIVERSIFIED (different directions)
+        or HOMOGENIZED (same field, the farm signature). The directions in FEATURE
+        space are the RIGHT singular vectors (Vt), not U (the _principal_dirs
+        footgun guard).
+      - SHARED SVD for novelty/curiosity: ``novelty`` currently does its own SVD
+        (variety.py:240), so a curiosity-everywhere mode pays a second SVD per turn.
+        Refactoring ``novelty`` to accept this precomputed (mu, Vt, var) is the
+        one-line move that removes that doubling -- noted, not required for the
+        small-D experiment.
+
+    Returns ``(mu, Vt, var)`` or ``(None, None, None)`` for a field with <2 exemplars
+    (no spectrum). Does NOT change ``thermo_state`` (which keeps only ``S``) -- this
+    is additive, so the existing per-decision path is untouched.
+    """
+    V = store.vectors()
+    if len(store) < 2 or V.shape[1] == 0:
+        return None, None, None
+    mu = V.mean(axis=0)
+    Y = V - mu
+    var, Vt = _principal_dirs(Y)
+    return mu, Vt, var
+
+
 def spread(store: ExemplarStore) -> float:
     """Mean pairwise cosine distance -- a crude, cheap variety proxy.
 

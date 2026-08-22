@@ -737,6 +737,41 @@ class Membrane:
         self._remember(query, vec, verdict, ex_idx)
         return ex_idx
 
+    def learn_pair(self, situation: str, action: str, unsafe: bool = False) -> int | None:
+        """Absorb a PRE-COMPLETED ``(situation, action)`` pair -- the action is the REAL
+        response teed from the live proxy (membrane/buffer.py ``attach_response``), not a
+        responder/model call. This is the cell's teed-intake path: it learns the exemplar
+        directly, with no forward and no model call, reusing the same ``_learn`` pipeline
+        (vague / dedup / variety guards, append, save, audit) the observer path uses.
+
+        Stage 3 of the multi-cell build. PURELY ADDITIVE: it does not touch ``handle``,
+        ``gate_turn``, ``_observe_forward``, ``_act``, ``_escalate``, ``_learn``, ``decide``
+        or any rule path. It composes existing helpers (``embedder.embed`` + ``_nudge`` to
+        match ``gate_turn``'s veiled vec at rt:623/630; ``_chat_response`` to wrap the
+        action so ``_response_text`` extracts it; ``_learn`` to append+audit; ``_remember``
+        for re-ask-ring parity with ``handle``/``_observe_forward``).
+
+        The ``vec`` is embedded + veiled exactly as ``gate_turn`` does, so the stored
+        ``Exemplar.vec`` is consistent with the rest of the field (dedup / top_k / decide
+        assume veiled vectors). The cross-pull self-extinguishing guard (text-based, in
+        membrane/cell.py ``pull``) still prevents a situation being re-absorbed; ``_learn``'s
+        vec-dedup is the secondary guard, as in stage 2.
+
+        ``verdict`` is a minimal synthetic dict: ``_audit`` reads ``verdict["verdict"]``
+        directly (rt:837, so the key must be a string) and every other field via ``.get``
+        (rt:838-849 -> None when absent). ``"teed-pair"`` distinguishes these decisions in
+        the audit from ``act``/``escalate``. Returns the new exemplar index, a dup index
+        ``_learn`` merged into, or None when a guard skipped the append.
+        """
+        vec = self._nudge(self.embedder.embed([situation])[0])
+        verdict = {"verdict": "teed-pair", "reason": "pre-completed pair",
+                   "sim": None, "nov": None, "ex_idx": None}
+        resp = _chat_response("teed", action)
+        ex_idx = self._learn(situation, vec, verdict, resp, unsafe, would_absorb=False)
+        if ex_idx is not None:
+            self._remember(situation, vec, verdict, ex_idx)
+        return ex_idx
+
     # ---- internals ----------------------------------------------------------
 
     def _act(self, verdict: dict, request_body: dict) -> dict:
