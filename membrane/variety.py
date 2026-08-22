@@ -253,6 +253,43 @@ def orient_dirs(store: ExemplarStore, max_k: int, cos_sep: float = 0.5
     return [U[i] for i in picked]
 
 
+def aligned_safe_slice(store: ExemplarStore, orientation: np.ndarray,
+                       align_min: float = 0.5, max_n: int = 8) -> list:
+    """The parent's SAFE exemplars aligned with a budding orientation -- the SEED a
+    child inherits (stage 5, the energy economy).
+
+    Filters ``store.exemplars`` to those that are (1) ``safe`` (proven by the
+    two-authority boundary -- the environment did not vote them down) and (2)
+    aligned with ``orientation`` beyond ``align_min`` (cosine), then takes the
+    ``max_n`` MOST aligned. The seed is the child's starting competence in its
+    inherited skill: proven-safe forwards the parent produced WHILE SERVING, not a
+    harvest of the shared buffer. This is sig 3 (byproduct-not-extraction): the
+    child inherits the parent's BYPRODUCT (the safe variety it grew by forwarding
+    real turns), not an EXTRACTION (buffer content taken without serving).
+
+    The exemplars are returned as-is (the parent's veiled ``vec`` + its safety
+    evidence ``safe``/``reask_count``/``contest_count`` kept) -- the child inherits a
+    PROVEN-safe perspective and does not re-litigate the parent's safety. Its own
+    forwards add child-veiled exemplars, so the grown field is inheritance + growth.
+    ``max_n`` caps the seed so the child still has room to grow its own variety
+    (a full-saturation seed would leave it nothing to be curious about).
+
+    ``orientation`` is (re)normalized to unit length so ``align`` is a true cosine.
+    Returns ``[]`` for an empty store or an orientation nothing aligns with."""
+    n = len(store)
+    if n == 0 or orientation is None:
+        return []
+    V = store.vectors()
+    on = np.asarray(orientation, dtype=float)
+    on = on / (np.linalg.norm(on) + 1e-12)
+    Vn = V / (np.linalg.norm(V, axis=1, keepdims=True) + 1e-12)
+    sims = Vn @ on
+    # most-aligned first; keep only safe + aligned; cap at max_n
+    order = sorted(range(n), key=lambda i: -float(sims[i]))
+    return [store.exemplars[i] for i in order
+            if store.exemplars[i].safe and float(sims[i]) >= align_min][:max_n]
+
+
 def spread(store: ExemplarStore) -> float:
     """Mean pairwise cosine distance -- a crude, cheap variety proxy.
 

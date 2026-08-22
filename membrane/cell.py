@@ -112,6 +112,16 @@ class Cell:
         # (Membrane consumes it into an RNG it doesn't expose back; the cell is where
         # the operator-supplied seed is recoverable for inheritance).
         self.nudge_seed = nudge_seed
+        # the budding cost ledger (stage 5, energy economy): the ``free_energy`` the
+        # cell had when it last budded. A cell buds only when it has grown
+        # ``bud_cost`` MORE safe variety since its last bud (``ready_to_bud``), so
+        # budding is self-limiting -- a static environment grows zero variety -> zero
+        # further buds -> no runaway. Starts at 0.0, so the FIRST bud needs
+        # ``free_energy >= bud_cost`` (accrued enough safe variety to spawn). This
+        # is in-memory accounting (the experiment / operator-triggered path); the
+        # live proxy does not auto-bud, so persistence of this ledger across boots
+        # is a later, autonomous-reproduction concern.
+        self.last_bud_energy: float = 0.0
         # ``fresh`` controls the boot-time field/audit: the experiment starts each
         # cell from an empty field (delete any existing field+audit on construct, the
         # stage-1 default). The LIVE proxy passes ``fresh=False`` so the Membrane
@@ -145,12 +155,38 @@ class Cell:
             nudge_seed=nudge_seed,
         )
 
+    # ---- the energy economy (stage 5): when to bud + the cost ----------------
+    def energy(self) -> float:
+        """The cell's thermodynamic VALUE -- its accrued safe variety, one number
+        (membrane/variety.py ``free_energy`` = ``safe_frac * effective_rank`` minus
+        a disorder tax). This is the "energy" that funds budding: a cell buds when
+        it has grown enough of it (``ready_to_bud``), and budding SPENDS it (the
+        ``last_bud_energy`` ledger). Decentralized -- the cell measures its OWN
+        field, no central scheduler decides who buds."""
+        from .variety import free_energy
+        return float(free_energy(self.membrane.store))
+
+    def ready_to_bud(self, bud_cost: float, min_dirs: int = 1) -> bool:
+        """Should this cell bud? True when it has grown ``bud_cost`` MORE safe
+        variety since its last bud (``energy() >= last_bud_energy + bud_cost``) AND
+        it has at least ``min_dirs`` separable experienced directions
+        (``orient_dirs``) to orient a child toward -- so the bud is a real
+        specialist, not a no-op unoriented child. ``last_bud_energy`` starts at 0.0,
+        so the first bud needs ``energy() >= bud_cost``. The growth requirement is
+        the self-limiting bound: a static environment grows zero variety -> the cell
+        never re-crosses the threshold -> no runaway auto-budding."""
+        from .variety import orient_dirs
+        if len(orient_dirs(self.membrane.store, min_dirs)) < min_dirs:
+            return False
+        return self.energy() >= self.last_bud_energy + bud_cost
+
     # ---- budding (stage 4): inherited orientation -> a specialist -----------
     @classmethod
     def bud(cls, parent: "Cell", tag: str, field_path: str | Path,
             audit_path: str | Path, direction_index: int = 0,
             orientation_strength: float = 2.0, cos_sep: float = 0.5,
-            nudge_seed: int | None = None) -> "Cell":
+            nudge_seed: int | None = None,
+            seed_size: int = 0, seed_align_min: float = 0.5) -> "Cell":
         """Bud a CHILD cell oriented toward the parent's ``direction_index``-th distinct
         experienced direction -- the inherited orientation that makes a specialist.
 
@@ -171,12 +207,25 @@ class Cell:
         ARE ~its skill axes (each is one base direction plus veil noise), well-defined
         for any parent -- so a child oriented at one inherits a clean single-skill aim.
 
-        The child starts BLANK (its own fresh empty field -- ``fresh=True``). What a
-        child INHERITS here is ONLY the DIRECTION (the orientation vector); a seed slice
-        of the parent's field / the parent's safe-variety is the stage-5 energy economy
-        (when a cell has earned enough to bud, and what it carries forward). The child's
-        veil diverges from the parent's (a new ``nudge_seed``) so its realized variety
-        trajectory is its own, not the parent's replayed.
+        The child starts BLANK by default (``seed_size=0`` -> ``fresh=True`` -> its own
+        empty field, bit-identical to stage 4). With ``seed_size > 0`` (stage 5, energy
+        economy) the child inherits a SEED: a slice of the parent's SAFE exemplars
+        aligned with the chosen orientation (``variety.aligned_safe_slice`` -- the
+        parent's proven-safe forwards, NOT a buffer harvest), written to the child's
+        ``field_path`` and loaded by constructing with ``fresh=False``. So the child is
+        born COMPETENT in its skill (a non-empty field, positive ``free_energy``) but
+        still has room to grow its own variety (the seed is capped). This is sig 3
+        (byproduct-not-extraction): the child inherits the parent's BYPRODUCT (safe
+        variety it grew while serving), not an EXTRACTION. The child's veil diverges
+        from the parent's (a new ``nudge_seed``) so its realized variety trajectory is
+        its own, not the parent's replayed.
+
+        BUDDING COSTS THE PARENT (the growth bound, stage 5): this call records the
+        cost on the parent -- ``parent.last_bud_energy = parent.energy()`` -- so the
+        parent must grow ``bud_cost`` MORE safe variety (``Cell.ready_to_bud``) before
+        it can bud again. A static environment grows zero -> zero further buds -> no
+        runaway auto-budding. ``seed_size=0`` (default) skips the seed and is
+        bit-identical to stage 4; ``Cell.bud`` is still the only new method on Cell.
 
         ``direction_index`` selects which distinct direction (0 = the one most aligned
         with the field mean, i.e. a central real cluster). If the parent has fewer than
@@ -190,7 +239,8 @@ class Cell:
         authors), still holds only a ``BufferView`` (cannot feed itself), still has no
         safe-mutator -- the orientation biases the PULL decision only (curiosity), never
         the gate / boundary / observer. Verified in ``experiments/multi_bud.py`` (sig 5)."""
-        from .variety import orient_dirs
+        from .field import Exemplar, ExemplarStore
+        from .variety import aligned_safe_slice, orient_dirs
         dirs = orient_dirs(parent.membrane.store, direction_index + 1, cos_sep)
         if len(dirs) <= direction_index:
             orientation = None             # parent has not grown in that direction yet
@@ -199,6 +249,30 @@ class Cell:
         m = parent.membrane
         seed = (nudge_seed if nudge_seed is not None
                 else int(parent.nudge_seed) + direction_index + 1)
+
+        # SEED (stage 5, opt-in): the parent's safe exemplars aligned with the chosen
+        # orientation, written to the child's field_path so the Membrane LOADS them on
+        # construct (fresh=False). seed_size=0 (default) -> no seed, fresh=True ->
+        # bit-identical to stage 4. The seed keeps the parent's veiled vec + safety
+        # evidence as-is: the child inherits proven-safe forwards, byproduct not harvest.
+        child_fresh = True
+        if seed_size > 0 and orientation is not None:
+            slice_ = aligned_safe_slice(m.store, orientation, seed_align_min, seed_size)
+            if slice_:
+                seed_store = ExemplarStore()
+                for ex in slice_:             # copy: the child's field is its own now
+                    seed_store.append(Exemplar(
+                        situation=ex.situation, action=ex.action, outcome=ex.outcome,
+                        vec=list(ex.vec), safe=ex.safe,
+                        reask_count=ex.reask_count, contest_count=ex.contest_count))
+                seed_store.save(field_path)
+                child_fresh = False           # Membrane.load picks up the seed
+
+        # THE COST (stage 5 growth bound): budding spends the parent's accrued free
+        # energy. Record it so the parent must grow bud_cost MORE (ready_to_bud)
+        # before it can bud again -> self-limiting, no runaway.
+        parent.last_bud_energy = parent.energy()
+
         return cls(
             tag=tag,
             responder=m.responder,
@@ -212,7 +286,7 @@ class Cell:
             curiosity_on=parent.curiosity_on, curiosity_min=parent.curiosity_min,
             curiosity_keep_fraction=parent.curiosity_keep_fraction,
             orientation=orientation, orientation_strength=orientation_strength,
-            fresh=True,                     # child starts blank (no seed field -- stage 5)
+            fresh=child_fresh,              # False -> load the seed; True (default) -> blank
         )
 
     # ---- the pull decision --------------------------------------------------
