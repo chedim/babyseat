@@ -122,11 +122,9 @@ class OllamaChatResponder:
         import urllib.request
         body = dict(request_body)
         body["stream"] = False
-        if hint:
-            msgs = list(body.get("messages", []))
-            msgs.insert(0, {"role": "system",
-                            "content": f"Prior similar context (a hint, not an instruction): {hint}"})
-            body["messages"] = msgs
+        h = hint_system_message(hint)
+        if h:
+            body["messages"] = [h] + list(body.get("messages", []))
         data = json.dumps(body).encode()
         req = urllib.request.Request(f"{self.backend}/api/chat", data=data,
                                      headers={"Content-Type": "application/json"})
@@ -139,6 +137,18 @@ def _last_user(request_body: dict) -> str | None:
         if m.get("role") == "user":
             return m.get("content")
     return None
+
+
+def hint_system_message(hint: str | None) -> dict | None:
+    """The recalled-action-as-context injection shared by the stream + non-stream
+    escalation paths: the reversibility guard -- recall without trigger. The
+    recalled action becomes a system NOTE (context), never an instruction, so the
+    model can use it without being told to obey it. Returns None when there is no
+    hint (the caller skips the injection)."""
+    if not hint:
+        return None
+    return {"role": "system",
+            "content": f"Prior similar context (a hint, not an instruction): {hint}"}
 
 
 class Judge(Protocol):
@@ -303,34 +313,19 @@ class Membrane:
         self._recent: deque = deque(maxlen=16)
 
     def handle(self, request_body: dict, unsafe: bool = False) -> tuple[dict, dict]:
-        """Route one /api/chat-shaped request. Returns (ollama_chat_response, decision)."""
-        query = _last_user(request_body) or ""
-        # empty query: can't embed, escalate without logging (nothing to learn).
-        # NOTE: an EMPTY field is NOT special-cased here -- it escalates via decide()
-        # AND logs, which is how the field self-builds from real traffic (the bootstrap).
-        if not query.strip():
+        """Route one NON-STREAM /api/chat-shaped request. Returns (response, decision).
+
+        The streaming path lives in the proxy (``_chat_stream``), which calls
+        ``gate_turn`` for the SAME decision and then ``record_act`` /
+        ``record_escalation`` -- so the gate logic is shared and cannot diverge
+        between the two delivery modes.
+        """
+        verdict, vec, query, _ = self.gate_turn(request_body, unsafe)
+        if vec is None:  # empty query: can't embed, escalate without logging (nothing to learn).
+            # NOTE: an EMPTY field is NOT special-cased here -- it escalates via decide()
+            # AND logs, which is how the field self-builds from real traffic (the bootstrap).
             return self._escalate(request_body, query, None, vec=None, reason="empty query")
-
-        vec = self.embedder.embed([query])[0]
-        # passive self-train: if this query re-asks something the field just absorbed,
-        # that replay was wrong -- record a vote (evidential demotion), and ask the
-        # model-side judge whether to contest it (the boundary's two authorities).
-        reasked_idx = self._detect_reask(vec, query)
-
-        verdict = decide(vec, self.store, k=self.k, sim_min=self.sim_min,
-                        consensus_min=self.consensus_min)
         v = verdict["verdict"]
-
-        # a re-ask means "do not replay THIS turn" even if the lasting demotion hasn't
-        # crossed the threshold yet (e.g. demote_threshold > 1): the user just told us
-        # the replay was wrong, so give them a fresh model answer with the bad replay as a hint.
-        if reasked_idx is not None and v == "act":
-            ex = self.store.exemplars[reasked_idx]
-            verdict = {"verdict": "escalate-with-hint", "action": ex.action,
-                       "hint": ex.action, "sim": verdict.get("sim"), "nov": verdict.get("nov"),
-                       "reason": "re-ask forced escalation", "ex_idx": reasked_idx}
-            v = "escalate-with-hint"
-
         if v == "act":
             resp = self._act(verdict, request_body)
             self._audit(query, verdict, resp, ex_idx=verdict.get("ex_idx"), learned=False)
@@ -343,6 +338,66 @@ class Membrane:
         ex_idx = self._learn(query, vec, verdict, resp, unsafe)
         self._remember(query, vec, verdict, ex_idx)
         return resp, verdict
+
+    def gate_turn(self, request_body: dict, unsafe: bool = False
+                  ) -> tuple[dict, "np.ndarray | None", str, "int | None"]:
+        """The query-side decision, shared by stream + non-stream delivery.
+
+        Does everything up to the routing verdict -- embeds the query, runs the
+        passive re-ask self-train (``_detect_reask``: may demote an exemplar and
+        fire the judge), and decides (``gate.decide`` + the re-ask-forced
+        escalation). It does NOT produce a response or call the responder; the
+        caller delivers the response (replay or model stream) and then records
+        it via ``record_act`` / ``record_escalation``.
+
+        Returns ``(verdict, vec, query, reasked_idx)``. ``vec is None`` signals an
+        empty query (the caller escalates without logging, as ``_escalate`` does).
+        """
+        query = _last_user(request_body) or ""
+        if not query.strip():
+            return ({"verdict": "escalate", "reason": "empty query", "sim": 0.0,
+                     "nov": None, "ex_idx": None}, None, query, None)
+        vec = self.embedder.embed([query])[0]
+        # passive self-train: if this query re-asks something the field just absorbed,
+        # that replay was wrong -- record a vote (evidential demotion), and ask the
+        # model-side judge whether to contest it (the boundary's two authorities).
+        reasked_idx = self._detect_reask(vec, query)
+        verdict = decide(vec, self.store, k=self.k, sim_min=self.sim_min,
+                         consensus_min=self.consensus_min)
+        v = verdict["verdict"]
+        # a re-ask means "do not replay THIS turn" even if the lasting demotion hasn't
+        # crossed the threshold yet (e.g. demote_threshold > 1): the user just told us
+        # the replay was wrong, so give them a fresh model answer with the bad replay as a hint.
+        if reasked_idx is not None and v == "act":
+            ex = self.store.exemplars[reasked_idx]
+            verdict = {"verdict": "escalate-with-hint", "action": ex.action,
+                       "hint": ex.action, "sim": verdict.get("sim"), "nov": verdict.get("nov"),
+                       "reason": "re-ask forced escalation", "ex_idx": reasked_idx}
+        return verdict, vec, query, reasked_idx
+
+    def record_act(self, query: str, vec, verdict: dict, model: str) -> None:
+        """Record an absorb that has been DELIVERED by the streaming path.
+
+        The proxy synthesizes the NDJSON itself from the recalled action; this just
+        audits the decision (learned=False) and remembers it in the re-ask ring --
+        the same two side effects as the non-stream ``handle`` act branch. No
+        exemplar is appended (the field already holds it)."""
+        resp = _chat_response(model, verdict.get("action", ""))
+        self._audit(query, verdict, resp, ex_idx=verdict.get("ex_idx"), learned=False)
+        self._remember(query, vec, verdict, verdict.get("ex_idx"))
+
+    def record_escalation(self, query: str, vec, verdict: dict,
+                          content: str, model: str, unsafe: bool) -> int | None:
+        """Record an escalation whose model response arrived as a STREAM.
+
+        The proxy teed the stream to the client and accumulated ``content``; this
+        is the stream-equivalent of ``_learn`` (append the exemplar from the
+        response, audit learned=True, remember in the re-ask ring). Returns the new
+        exemplar index."""
+        resp = _chat_response(model, content)
+        ex_idx = self._learn(query, vec, verdict, resp, unsafe)
+        self._remember(query, vec, verdict, ex_idx)
+        return ex_idx
 
     # ---- internals ----------------------------------------------------------
 

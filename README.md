@@ -170,8 +170,13 @@ The window used to call the model directly. Membrane slides in: it embeds each
 `/api/chat` request (local `mxbai-embed-large`), runs the gate, and either
 **replays a recalled action** (no model call — the absorb) or **forwards to the
 model** (the novel) and logs the turn to the field + audit. Local-first
-(127.0.0.1 only). Skeleton in `membrane/proxy.py`; the in-process loop (no chat
-model needed) is proven in `experiments/proxy_demo.py`.
+(127.0.0.1 only). The proxy gates `/api/chat` in **both stream and non-stream**
+modes: an absorb synthesizes an NDJSON stream from the recalled action (no model
+call), an escalation tees the backend stream to the client while accumulating the
+response into the field. So any GUI/IDE Ollama client (Continue, Open WebUI, …)
+pointed at the proxy drives the field for real, not just scripted clients. The
+in-process loop (no chat model needed) is proven in `experiments/proxy_demo.py`;
+the streaming path is proven by a real-Ollama smoke test.
 
 ```bash
 # run the loop end-to-end (needs local Ollama + mxbai-embed-large for embeddings;

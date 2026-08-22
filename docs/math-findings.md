@@ -209,9 +209,13 @@ the chat window and the model server — the window used to call the model
 directly; Membrane slides in, embeds each request, gates it, and either replays a
 recalled action (no model call) or forwards to the model and logs the turn. The
 field is a **local file the proxy owns** (local-first; a shared Core would be a
-later move where several proxies point at the same store). Skeleton in
-`membrane/proxy.py` (intercepts non-streaming `/api/chat`, forwards everything
-else); loop proven in `experiments/proxy_demo.py`.
+later move where several proxies point at the same store). In `membrane/proxy.py`:
+the proxy gates `/api/chat` in **both** stream and non-stream modes — an absorb
+synthesizes an NDJSON stream from the recalled action (no model call), an
+escalation tees the backend stream to the client while accumulating the response
+into the field; all other routes pass through. So any GUI/IDE Ollama client
+(Continue, Open WebUI, …) pointed at the proxy drives the field for real. Loop
+proven in `experiments/proxy_demo.py` (non-stream) and the streaming smoke test.
 
 **The training loop (Tier 1 landed — passive self-train on re-asks; boundary softening
 landed).** The decision loop (absorb/escalate) is built. The **training** loop is how the
