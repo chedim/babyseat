@@ -10,7 +10,7 @@ from .gate import decide
 from .embed import OllamaEmbedder
 from .cortex import (Cortex, Responder, StubResponder, OllamaChatResponder,
                      Judge, StubJudge, ScriptedJudge, OllamaJudge)
-from .review import summarize
+from .review import summarize, metrics, compute_metrics
 
 __all__ = [
     "Exemplar",
@@ -29,4 +29,6 @@ __all__ = [
     "ScriptedJudge",
     "OllamaJudge",
     "summarize",
+    "metrics",
+    "compute_metrics",
 ]
