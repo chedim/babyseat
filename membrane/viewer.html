@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Membrane — talk to a world</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+  :root{--ink:#dfe6e0;--muted:#8a958e;--bg:#05070a;--panel:rgba(12,18,22,.8);
+       --green:#5fd47a;--red:#e05a4a;--gold:#e6c34a;--blue:#6cb0e0;
+       --line:rgba(120,140,130,.25)}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace}
+  #c{position:fixed;inset:0}
+  .hud{position:fixed;backdrop-filter:blur(6px);background:var(--panel);
+       border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+  #top{top:14px;left:14px;min-width:230px}
+  #top .t{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+  #top .fe{font-size:34px;font-weight:600;line-height:1;margin:6px 0 2px;
+    font-variant-numeric:tabular-nums}
+  #top .fe small{font-size:12px;color:var(--muted);font-weight:400}
+  #top .row{font-size:11px;color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums}
+  #top .row b{color:var(--ink)}
+  .bar{position:relative;height:7px;width:100%;background:rgba(255,255,255,.05);
+       border-radius:4px;overflow:hidden;margin-top:8px}
+  .bar > i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--green),var(--gold));
+           width:0%;transition:width .3s ease}
+  #legend{top:14px;right:14px;font-size:11px;line-height:1.7}
+  #legend .d{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+  .dg{background:var(--green)}.dr{background:var(--red)}.db{background:var(--blue)}.do{background:var(--gold)}
+  #tick{left:14px;bottom:14px;width:300px;max-height:34vh;display:flex;flex-direction:column}
+  #tick .h{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
+  #tick .list{flex:1;overflow-y:auto;font-size:11.5px;line-height:1.5}
+  #tick .list::-webkit-scrollbar{width:6px}
+  #tick .list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:3px}
+  .vrow{display:flex;gap:8px;align-items:baseline;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.04)}
+  .vrow .tag{font-weight:600;min-width:96px}
+  .vrow .sim{color:var(--muted);min-width:34px;text-align:right;font-variant-numeric:tabular-nums}
+  .vrow .q{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+  .vrow.new{animation:flash 1.2s ease}
+  @keyframes flash{0%{background:rgba(95,212,122,.16)}100%{background:transparent}}
+  #chat{right:14px;top:14px;bottom:14px;width:360px;display:flex;flex-direction:column;gap:8px}
+  #chat .h{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
+  #chat .msgs{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;
+    font-size:13px;line-height:1.55;padding-right:2px}
+  #chat .msgs::-webkit-scrollbar{width:6px}
+  #chat .msgs::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:3px}
+  .m{padding:9px 11px;border-radius:9px;white-space:pre-wrap;word-wrap:break-word}
+  .m.u{background:rgba(95,212,122,.1);border:1px solid rgba(95,212,122,.25);margin-left:22px}
+  .m.a{background:rgba(255,255,255,.04);border:1px solid var(--line);margin-right:22px}
+  .m.sys{font-size:11px;color:var(--muted);text-align:center;border:none;background:none;font-style:italic}
+  #chat .irow{display:flex;gap:6px;align-items:center}
+  #chat select,#chat input{background:rgba(255,255,255,.05);border:1px solid var(--line);
+    border-radius:6px;padding:7px 9px;color:var(--ink);font:inherit;font-size:12px}
+  #chat select{max-width:120px}
+  #chat input{flex:1;font-size:13px}
+  #chat input:focus,#chat select:focus{outline:none;border-color:rgba(95,212,122,.4)}
+  #chat button{background:rgba(95,212,122,.16);color:var(--green);border:1px solid rgba(95,212,122,.3);
+    border-radius:6px;padding:8px 14px;font:inherit;font-size:13px;cursor:pointer}
+  #chat button:hover{background:rgba(95,212,122,.26)}
+  .hint{position:fixed;bottom:14px;left:330px;font-size:10px;color:var(--muted);max-width:330px}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div class="hud" id="top">
+  <div class="t">a membrane world · live</div>
+  <div class="fe" id="fe">0.00 <small>free_energy</small></div>
+  <div class="bar"><i id="febar"></i></div>
+  <div class="row"><b id="n">0</b> exemplars · <b id="ns">0</b> safe · <b id="nu">0</b> demoted</div>
+  <div class="row" id="wait">waiting for the proxy…</div>
+</div>
+
+<div class="hud" id="legend">
+  <div class="d"><span class="dot dg"></span> safe exemplar</div>
+  <div class="d"><span class="dot dr"></span> demoted (unsafe)</div>
+  <div class="d"><span class="dot db"></span> absorb · escalate</div>
+  <div class="d"><span class="dot do"></span> contest / rescue</div>
+</div>
+
+<div class="hud" id="tick">
+  <div class="h">what the cell just did</div>
+  <div class="list" id="ticklist"></div>
+</div>
+
+<div class="hud" id="chat">
+  <div class="h">talk to it</div>
+  <div class="msgs" id="msgs"></div>
+  <div class="irow" style="margin-bottom:3px">
+    <input id="skipn" type="number" value="25" min="1" max="500"
+           title="how many offscreen events" style="max-width:54px">
+    <button id="skip"
+      title="let the world live offscreen (one palette call, then no-model absorptions)">⏩ let time pass</button>
+  </div>
+  <div class="irow">
+    <select id="model" title="model for escalations"></select>
+    <input id="cin" placeholder="say something to the cell…" autocomplete="off">
+    <button id="send">send</button>
+  </div>
+</div>
+<div class="hint">drag to orbit · scroll to zoom · your message runs through the real gate — re-ask to demote a star (watch it turn red)</div>
+
+<script>
+const C=[0.36,0.83,0.48],R=[0.94,0.35,0.29];
+const VC={absorb:"#5fd47a",escalate:"#6cb0e0","escalate-with-hint":"#6cb0e0",
+          demote:"#e05a4a","act→fwd":"#6cb0e0",contest:"#e6c34a",
+          "contest-restore":"#e6c34a","re-ask":"#e05a4a","teed-pair":"#e6c34a"};
+
+// ---- three scene -----------------------------------------------------------
+const scene=new THREE.Scene();scene.fog=new THREE.FogExp2(0x05070a,0.02);
+const renderer=new THREE.WebGLRenderer({canvas:document.getElementById("c"),antialias:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+const camera=new THREE.PerspectiveCamera(55,1,0.1,200);
+let theta=0.6,phi=1.0,rad=16,tgt=new THREE.Vector3(0,0,0);
+function cam(){const p=new THREE.Vector3(rad*Math.sin(phi)*Math.sin(theta),
+  rad*Math.cos(phi),rad*Math.sin(phi)*Math.cos(theta));camera.position.copy(p).add(tgt);camera.lookAt(tgt);}
+function resize(){const w=innerWidth,h=innerHeight;renderer.setSize(w,h);camera.aspect=w/h;camera.updateProjectionMatrix();}
+addEventListener("resize",resize);resize();cam();
+function sprite(){const c=document.createElement("canvas");c.width=c.height=64;const g=c.getContext("2d");
+  const grd=g.createRadialGradient(32,32,0,32,32,32);grd.addColorStop(0,"rgba(255,255,255,1)");
+  grd.addColorStop(.4,"rgba(255,255,255,.6)");grd.addColorStop(1,"rgba(255,255,255,0)");
+  g.fillStyle=grd;g.fillRect(0,0,64,64);return new THREE.CanvasTexture(c);}
+const tex=sprite();
+let cloud=null;
+function renderCloud(exs){
+  if(cloud){scene.remove(cloud);cloud.geometry.dispose();cloud.material.dispose();}
+  if(!exs.length){cloud=null;return;}
+  const pos=new Float32Array(exs.length*3),col=new Float32Array(exs.length*3);
+  for(let i=0;i<exs.length;i++){const p=exs[i].p;pos[i*3]=p[0];pos[i*3+1]=p[1];pos[i*3+2]=p[2];
+    const c=exs[i].safe?C:R;col[i*3]=c[0];col[i*3+1]=c[1];col[i*3+2]=c[2];}
+  const g=new THREE.BufferGeometry();
+  g.setAttribute("position",new THREE.BufferAttribute(pos,3));
+  g.setAttribute("color",new THREE.BufferAttribute(col,3));
+  const m=new THREE.PointsMaterial({size:0.5,sizeAttenuation:true,map:tex,vertexColors:true,
+    transparent:true,depthWrite:false,blending:THREE.AdditiveBlending});
+  cloud=new THREE.Points(g,m);scene.add(cloud);
+}
+// a faint reference plane
+const plane=new THREE.Mesh(new THREE.RingGeometry(3,3.04,64),
+  new THREE.MeshBasicMaterial({color:0x1c2a24,side:THREE.DoubleSide,transparent:true,opacity:.4}));
+plane.rotation.x=Math.PI/2;plane.position.y=-3;scene.add(plane);
+
+// orbit (manual)
+let drag=false,lx=0,ly=0;
+renderer.domElement.addEventListener("mousedown",e=>{drag=true;lx=e.clientX;ly=e.clientY});
+addEventListener("mouseup",()=>drag=false);
+addEventListener("mousemove",e=>{if(!drag)return;theta-=(e.clientX-lx)*0.01;
+  phi=Math.max(0.15,Math.min(Math.PI-0.15,phi+(e.clientY-ly)*0.01));lx=e.clientX;ly=e.clientY;cam();});
+renderer.domElement.addEventListener("wheel",e=>{rad=Math.max(6,Math.min(36,rad+e.deltaY*0.02));cam();});
+
+// ---- state polling ---------------------------------------------------------
+let seenVerdicts=0, feMax=1;
+async function poll(){
+  try{
+    const r=await fetch("/state");const j=await r.json();
+    document.getElementById("wait").textContent="live · polling the field";
+    document.getElementById("wait").style.color="var(--green)";
+    renderCloud(j.exemplars||[]);
+    const fe=j.free_energy||0; feMax=Math.max(feMax,Math.abs(fe),1);
+    document.getElementById("fe").innerHTML=fe.toFixed(2)+" <small>free_energy</small>";
+    document.getElementById("febar").style.width=Math.max(0,Math.min(100,(fe/feMax)*100))+"%";
+    document.getElementById("n").textContent=j.n;
+    document.getElementById("ns").textContent=j.n_safe;
+    document.getElementById("nu").textContent=j.n-j.n_safe;
+    // verdict ticker
+    const vs=j.verdicts||[];
+    if(vs.length>seenVerdicts){
+      const list=document.getElementById("ticklist");
+      const fresh=vs.slice(seenVerdicts);
+      seenVerdicts=vs.length;
+      // rebuild (server gives last-24 tail; keep that order)
+      list.innerHTML="";
+      vs.slice().reverse().forEach(v=>{
+        const d=document.createElement("div");d.className="vrow";
+        const tag=v.verdict, col=VC[tag]||"#8a958e";
+        d.innerHTML=`<span class="tag" style="color:${col}">${tag}</span>`+
+          `<span class="sim">${v.sim==null?"":v.sim.toFixed(2)}</span>`+
+          `<span class="q">${escapeHtml(v.q||"")}</span>`;
+        list.appendChild(d);
+      });
+      fresh.forEach(()=>{});
+    }
+  }catch(e){document.getElementById("wait").textContent="proxy unreachable — start it with --viewer";}
+}
+function escapeHtml(s){return s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+setInterval(poll,1000);poll();
+
+// ---- chat ------------------------------------------------------------------
+const conv=[],msgs=document.getElementById("msgs"),cin=document.getElementById("cin");
+function addMsg(role,text){const d=document.createElement("div");d.className="m "+role;
+  d.textContent=text;msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;return d;}
+async function send(text){
+  if(!text.trim())return;
+  conv.push({role:"user",content:text});addMsg("u",text);cin.value="";
+  const think=addMsg("sys","the cell is deciding…");
+  try{
+    const model=document.getElementById("model").value||"llama3.1:8b";
+    const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({model,messages:conv,stream:false})});
+    const j=await r.json();
+    think.remove();
+    const c=(j&&j.message&&j.message.content)||(j&&j.error&&("error: "+j.error))||"(no reply)";
+    addMsg("a",c);conv.push({role:"assistant",content:c});
+    setTimeout(poll,150);   // the field likely just changed — refresh early
+  }catch(e){think.textContent="(could not reach /api/chat — is the proxy up?)";}
+}
+document.getElementById("send").onclick=()=>send(cin.value);
+cin.addEventListener("keydown",e=>{if(e.key=="Enter"&&!e.shiftKey){e.preventDefault();send(cin.value);}});
+
+// ---- time-skipper: let the world live offscreen, then refresh the cloud -------
+const skip=document.getElementById("skip"),skipn=document.getElementById("skipn");
+if(skip){skip.onclick=async()=>{
+  const n=parseInt(skipn.value,10)||25;
+  skip.disabled=true;const old=skip.textContent;skip.textContent="skipping time…";
+  try{
+    const r=await fetch("/warmup",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({n})});
+    const j=await r.json();
+    if(!r.ok){skip.textContent=j.error||"warmup failed";
+      setTimeout(()=>{skip.textContent=old;skip.disabled=false;},2500);return;}
+    skip.textContent=`+${j.added||0} (field ${j.field_size||0})`;
+    setTimeout(poll,60);setTimeout(poll,400);
+    setTimeout(()=>{skip.textContent=old;skip.disabled=false;},1800);
+  }catch(e){skip.textContent="proxy unreachable";
+    setTimeout(()=>{skip.textContent=old;skip.disabled=false;},2500);}
+};}
+
+// model dropdown from the backend's /api/tags (forwarded transparently by the proxy)
+(async()=>{try{
+  const r=await fetch("/api/tags");const j=await r.json();const sel=document.getElementById("model");
+  const names=(j.models||[]).map(m=>m.name).filter(n=>!/embed|whisper|minilm|coding-math/i.test(n));
+  (names.length?names:["llama3.1:8b"]).forEach(n=>{const o=document.createElement("option");o.value=n;o.textContent=n;sel.appendChild(o);});
+}catch(e){const sel=document.getElementById("model");const o=document.createElement("option");o.value="llama3.1:8b";o.textContent="llama3.1:8b";sel.appendChild(o);}})();
+
+function loop(){renderer.render(scene,camera);requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

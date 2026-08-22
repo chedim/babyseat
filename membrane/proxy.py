@@ -116,14 +116,201 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._chat()
         elif self.path.startswith("/v1/messages"):
             self._messages()
+        elif self.path in ("/warmup", "/warmup/"):
+            self._warmup()
         else:
             self._forward()
 
     def do_GET(self):
+        if getattr(self.server, "viewer", False):
+            if self.path in ("/viewer", "/viewer/"):
+                self._serve_viewer(); return
+            if self.path in ("/state", "/state/"):
+                self._state(); return
         self._forward()
 
     def do_DELETE(self):
         self._forward()
+
+    # ---- the world premise (--system) + the time-skipper (/warmup) ------------
+    def _apply_system(self, body: dict) -> None:
+        """Inject the opt-in ``--system`` world premise so it actually reaches the
+        model. Backend-aware (the two servers take the premise in different shapes):
+
+          * Anthropic ``/v1/messages``: a top-level ``system`` field (only when the
+            client sent none -- client over proxy-default). The Anthropic responder
+            forwards it; on escalate-with-hint it prepends the hint to this field.
+          * Ollama ``/api/chat``: a ``role: system`` MESSAGE prepended to ``messages``
+            -- Ollama's /api/chat SILENTLY IGNORES a top-level ``system`` field (that
+            field belongs to /api/generate), so the premise must ride as a system
+            message or it never reaches the model. Prepended only when the client's
+            first message isn't already a system message (a client that sets its own
+            system wins, the same client-over-proxy precedence).
+
+        Either way the gate is unaffected: it embeds ``_last_user`` (user messages
+        only), so a system message/field never enters the field's situations. The
+        premise authors *what world this is* (a constant ground, outside the field,
+        re-sent every escalate so it never scrolls off the context window); the
+        wandering authors *where you've been* (the field's variety). No-op when
+        ``--system`` is unset."""
+        sp = getattr(self.server, "system_prompt", None)
+        if not sp:
+            return
+        if getattr(self.server, "anthropic", False):
+            if not body.get("system"):
+                body["system"] = sp
+            return
+        msgs = body.get("messages")
+        if isinstance(msgs, list) and (not msgs or msgs[0].get("role") != "system"):
+            body["messages"] = [{"role": "system", "content": sp}] + list(msgs)
+
+    def _json_err(self, code: int, msg: str) -> None:
+        out = json.dumps({"error": msg}).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    def _warmup(self) -> None:
+        """The time-skipper on demand: ONE model call reads the ``--system``
+        premise and builds a world palette, then N ``learn_pair`` absorptions of
+        premise-grounded ``(situation, stub-action)`` pairs -- NO per-event model
+        calls, local mxbai embeddings only. The field becomes the memory of the
+        world having lived offscreen, so when the user arrives the cloud is
+        populated and the gate has real variety to act on. Requires ``--system``
+        (the premise grounds the palette); returns 400 otherwise. The gate path is
+        untouched -- this only writes exemplars through the existing ``learn_pair``
+        teed-intake seam (runtime.py)."""
+        srv = self.server
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length)
+        try:
+            body = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            body = {}
+        n = int(body.get("n", 25))
+        if n < 1:
+            self._json_err(400, "n must be >= 1"); return
+        premise = getattr(srv, "system_prompt", None)
+        if not premise:
+            self._json_err(400, "warmup needs a --system premise to ground the "
+                                 "world (launch with --system \"...\")"); return
+        model = body.get("model") or getattr(srv, "warmup_model", None)
+        seed = int(body.get("seed", getattr(srv, "warmup_seed", 0)))
+        from .warmup import run_warmup
+        stats = run_warmup(srv.membrane, srv.backend, model, premise, n, seed)
+        out = json.dumps(stats).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    # ---- the live 3D viewer (opt-in via --viewer) -----------------------------
+    # Read-only surface: GET /viewer serves the static page, GET /state returns a
+    # JSON snapshot read IN-PROCESS from the live store (+ the audit tail). The gate
+    # path (_chat/_messages/_forward) is untouched -- the page chats through the real
+    # /api/chat. The page is same-origin, so no CORS, no key handling, no second server.
+    def _serve_viewer(self):
+        srv = self.server
+        html = getattr(srv, "_viewer_html", None)
+        if html is None:
+            import os
+            p = os.path.join(os.path.dirname(__file__), "viewer.html")
+            try:
+                with open(p, "rb") as f:
+                    html = f.read()
+            except OSError:
+                self.send_response(404); self.send_header("Content-Type", "text/plain")
+                self.end_headers(); self.wfile.write(b"viewer.html not found"); return
+            srv._viewer_html = html
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(html)))
+        self.end_headers()
+        self.wfile.write(html)
+
+    def _state(self):
+        import numpy as np
+        from .variety import free_energy
+        mem = self.server.membrane
+        exs = mem.store.exemplars
+        n = len(exs)
+        srv = self.server
+        pts = []
+        if n:
+            V = np.array([np.asarray(e.vec, dtype=float) for e in exs])
+            mu = V.mean(0)
+            basis = getattr(srv, "_v_basis", None)
+            if basis is None and n >= 4:          # fit once -> a stable cloud that grows, never spins
+                try:
+                    _, _, Vt = np.linalg.svd(V - mu, full_matrices=False)
+                    basis = Vt[:3]; srv._v_basis = basis
+                except Exception:
+                    basis = None
+            if basis is not None:
+                coords = (V - mu) @ basis.T
+            else:                                  # too few for PCA: spread on first 3 raw dims
+                k = min(3, V.shape[1]); coords = np.zeros((n, 3))
+                if k:
+                    coords[:, :k] = (V - mu)[:, :k] * 3.0
+            for i, e in enumerate(exs):
+                pts.append({"p": [round(float(coords[i, 0]), 4),
+                                  round(float(coords[i, 1]), 4),
+                                  round(float(coords[i, 2]), 4)],
+                            "safe": bool(e.safe),
+                            "reask": int(getattr(e, "reask_count", 0)),
+                            "contest": int(getattr(e, "contest_count", 0))})
+        n_safe = sum(1 for e in exs if e.safe)
+        out = json.dumps({"n": n, "n_safe": n_safe,
+                          "free_energy": float(free_energy(mem.store)) if n >= 2 else 0.0,
+                          "exemplars": pts,
+                          "verdicts": self._audit_tail(24)}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    def _audit_tail(self, k):
+        """Last k audit records as a flat {verdict, sim, q} list for the ticker.
+        Maps all three record shapes (decision / outcome / contest)."""
+        p = getattr(self.server.membrane, "audit_path", None)
+        if not p:
+            return []
+        try:
+            with open(p, "rb") as f:
+                lines = f.readlines()[-k:]
+        except OSError:
+            return []
+        out = []
+        for ln in lines:
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                rec = json.loads(ln)
+            except json.JSONDecodeError:
+                continue
+            ev = rec.get("event")
+            if ev == "decision":
+                tag, sim, q = rec.get("verdict"), rec.get("sim"), rec.get("query", "")
+            elif ev == "outcome":
+                oc = rec.get("outcome", "outcome")
+                tag = {"demote": "demote", "re-ask": "re-ask"}.get(oc, oc)
+                sim, q = rec.get("sim"), rec.get("query", "")
+            elif ev == "contest":
+                tag = "contest-restore" if rec.get("restore") else "contest"
+                sim, q = None, rec.get("reason") or ""
+            else:
+                continue
+            if not tag:
+                continue
+            out.append({"verdict": str(tag),
+                        "sim": (round(float(sim), 2) if isinstance(sim, (int, float)) else None),
+                        "q": str(q)[:48]})
+        return out
 
     def _anthropic_auth(self) -> dict:
         """Passthrough auth headers for the Anthropic backend, read per-request
@@ -183,6 +370,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # before the stream/non-stream split, so both paths feed the buffer exactly once.
         # Stage 3: the returned id is the handle for the later attach (the response tee);
         # None means nothing was deposited (empty/tool_result turn -> nothing to attach).
+        self._apply_system(body)   # the --system premise (constant ground; client's own wins)
         self._deposit_id = None
         if self.server.buffer is not None:
             self._deposit_id = self._maybe_deposit(body)
@@ -249,17 +437,21 @@ class ProxyHandler(BaseHTTPRequestHandler):
             print(f"[membrane] stream delivery error: {e}", file=sys.stderr)
 
     def _stream_replay(self, verdict, body, query, vec, mem) -> None:
-        """Absorb, delivered as a synthesized NDJSON stream of the recalled action."""
+        """Absorb, delivered as a synthesized NDJSON stream -- Fork C: the boundary
+        GENERATES its response from the field-grown n-gram (conditioned on the
+        nearest memory), not a verbatim replay of the stored action."""
         model = body.get("model", "membrane")
-        for chunk in _ndjson_chunks(model, verdict.get("action", "")):
+        content = mem.generate(query, verdict, vec=vec)
+        for chunk in _ndjson_chunks(model, content):
             self.wfile.write((json.dumps(chunk) + "\n").encode())
         self.wfile.flush()
-        mem.record_act(query, vec, verdict, model)
-        self._maybe_attach(verdict.get("action", ""))   # stage 3: tee the replayed action to the cell buffer
+        mem.record_act(query, vec, verdict, model, content)
+        self._maybe_attach(content)   # stage 3: tee what the boundary actually said to the cell buffer
         sim = verdict.get("sim")
         sim_s = f"{sim:.2f}" if isinstance(sim, (int, float)) else "  -  "
-        print(f"[membrane] act(stream)        sim={sim_s}  field={len(mem.store)}",
-              file=sys.stderr)
+        gen = content != verdict.get("action", "")
+        print(f"[membrane] act(stream)        sim={sim_s}  field={len(mem.store)}"
+              f"  {'generated' if gen else 'replay'}", file=sys.stderr)
 
     def _stream_escalate(self, verdict, body, query, vec, mem) -> None:
         """Escalate: stream the backend response to the client verbatim while teeing
@@ -337,6 +529,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         # the feeding boundary (stage 2): one deposit per request, before the
         # stream/non-stream split. No-op when --cells is off; only real user turns enter.
         # Stage 3: the returned id is the handle for the later attach (the response tee).
+        self._apply_system(body)   # the --system premise (constant ground; client's own wins)
         self._deposit_id = None
         if self.server.buffer is not None:
             self._deposit_id = self._maybe_deposit(body)
@@ -397,15 +590,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
             print(f"[membrane] /v1/messages stream delivery error: {e}", file=sys.stderr)
 
     def _messages_replay(self, verdict, body, query, vec, mem) -> None:
-        """Absorb under ``--absorb``: synthesize Anthropic SSE from the recalled
-        action (NO model call), then record the act. Off by default (replaying a
-        coding answer is unsafe); kept for future chat-window use."""
+        """Absorb under ``--absorb``: synthesize Anthropic SSE from the boundary's
+        GENERATED response (Fork C: field-grown n-gram, NO model call), then record
+        the act. Off by default (speaking a coding answer is unsafe); kept for
+        future chat-window use."""
         model = body.get("model", "membrane")
-        for ev in _anthropic_sse_events(model, verdict.get("action", "")):
+        content = mem.generate(query, verdict, vec=vec)
+        for ev in _anthropic_sse_events(model, content):
             self.wfile.write(ev)
         self.wfile.flush()
-        mem.record_act(query, vec, verdict, model)
-        self._maybe_attach(verdict.get("action", ""))   # stage 3: tee the replayed action to the cell buffer
+        mem.record_act(query, vec, verdict, model, content)
+        self._maybe_attach(content)   # stage 3: tee what the boundary actually said to the cell buffer
         self._log_messages(verdict)
 
     def _messages_escalate_stream(self, verdict, body, query, vec, mem, auth) -> None:
@@ -638,6 +833,33 @@ def main() -> None:
                          "a response). 0 = off (default): the live single-Membrane path is unchanged "
                          "except one cheap guard per request. Cells persist across boots (fresh=False) "
                          "and are read-only on the buffer (the feeding boundary).")
+    # ---- the live 3D viewer (off by default; opt-in, read-only) ----------------
+    # Serves GET /viewer (the static Three.js page) and GET /state (a JSON snapshot
+    # of the live field, read in-process). The gate path is untouched -- the page
+    # chats through the real /api/chat, so you talk to the live cell and watch its
+    # field respond in 3D. Local-first (the proxy is 127.0.0.1 only); no key, no
+    # new remote calls from the proxy (the browser loads Three.js from a CDN).
+    ap.add_argument("--viewer", action="store_true",
+                    help="serve the 3D live viewer at /viewer and a field snapshot at /state "
+                         "(off by default). Open http://127.0.0.1:<port>/viewer; the page polls "
+                         "/state and chats through the real /api/chat gate.")
+    ap.add_argument("--system", default=None,
+                    help="the world premise -- a constant ground injected as the model's "
+                         "`system` field on every escalate (only when the client sent none). "
+                         "Authors WHAT world this is; the wandering authors where you've been. "
+                         "Durable: unlike a premise in the opening message, it never scrolls "
+                         "off the context window. Also the seed for --warmup.")
+    ap.add_argument("--warmup", type=int, default=0, metavar="N",
+                    help="the time-skipper: at startup, populate the field with N premise-"
+                         "grounded offscreen events (one model call for a world palette + N "
+                         "no-model-call learn_pair absorptions). Lets the world 'live' before "
+                         "you arrive so the cloud is populated and the gate has real variety. "
+                         "Requires --system. 0 = off (default).")
+    ap.add_argument("--warmup-model", default=None, metavar="MODEL",
+                    help="Ollama model for the ONE warm-up palette call (default: the judge "
+                         "model). The N absorptions make no model calls -- local embeddings only.")
+    ap.add_argument("--warmup-seed", type=int, default=0, metavar="SEED",
+                    help="RNG seed for warm-up situation composition (reproducible).")
     args = ap.parse_args()
 
     # --tag defaults the field/audit paths so independent veils own independent fields
@@ -716,11 +938,32 @@ def main() -> None:
             ))
         pool = CellPool(cells, view, interval=2.0)
         pool.start()
+    # ---- the time-skipper (--warmup): let the world live before you arrive -----
+    # Runs BEFORE the banner so the banner's field_size reflects the populated
+    # field. ONE model call for a premise palette + N no-model-call learn_pair
+    # absorptions. Requires --system (the premise grounds the palette). The gate
+    # path is untouched -- only learn_pair (the teed-intake seam) writes exemplars.
+    if args.warmup > 0:
+        if not args.system:
+            print("[membrane] --warmup needs --system (the premise to ground the world); "
+                  "skipping warm-up", file=sys.stderr)
+        else:
+            from .warmup import run_warmup
+            run_warmup(membrane, backend, args.warmup_model or args.judge_model,
+                       args.system, args.warmup, args.warmup_seed)
+
     srv = ThreadingHTTPServer(("127.0.0.1", args.listen), ProxyHandler)
     srv.membrane = membrane
     srv.backend = backend.rstrip("/")
     srv.buffer = buf          # None when OFF (the off sentinel the deposit guard checks)
     srv.cell_pool = pool      # None when OFF (nothing for the shutdown finally to stop)
+    srv.viewer = args.viewer  # off by default; /viewer + /state are read-only
+    srv._viewer_html = None   # lazy-loaded + cached on first GET /viewer
+    srv._v_basis = None       # PCA basis, fit once for a stable 3D cloud
+    srv.system_prompt = args.system   # opt-in world premise (--system); injected into forwards
+    srv.warmup_model = args.warmup_model or args.judge_model   # the one warm-up palette call
+    srv.warmup_seed = args.warmup_seed
+    srv.anthropic = anthropic         # which system-prompt shape _apply_system uses (msg vs field)
     judge_s = f"ON (model={args.judge_model}, timeout={args.judge_timeout}s)" if args.judge else "off (StubJudge)"
     neg_s = "on (complaint follow-up demotes; --no-neg-followup to disable)" if args.neg_followup else "off (verbatim re-ask only)"
     mode_s = ("Anthropic /v1/messages" if anthropic else "Ollama /api/chat")
@@ -739,6 +982,10 @@ def main() -> None:
                f"observer/fresh-persist/teed; per-cell field-cell-<i>; pool cadence 2s)"
                if args.cells > 0 else "off (single-Membrane path, unchanged)")
     tag_s = f"  tag={args.tag}" if args.tag else ""
+    system_s = ("ON (injected as `system` on every escalate; the world's constant ground)"
+                if args.system else "off (no --system; world seeded by its opening message)")
+    warmup_s = (f"ON ({args.warmup} offscreen events at startup, model="
+                f"{args.warmup_model or args.judge_model})" if args.warmup > 0 else "off")
     print(f"membrane proxy  http://127.0.0.1:{args.listen}  ->  {backend}  [{mode_s}]\n"
           f"  field={args.field}  audit={args.audit}  sim_min={args.sim_min}  "
           f"dedup_sim={args.dedup_sim}  demote_threshold={args.demote_threshold}  "
@@ -750,6 +997,8 @@ def main() -> None:
           f"  adaptive temp: {vtemp_s}\n"
           f"  veil nudge: {nudge_s}\n"
           f"  cells: {cells_s}\n"
+          f"  premise: {system_s}\n"
+          f"  warmup: {warmup_s}\n"
           f"  judge: {judge_s}\n"
           f"  (API key: passthrough only, never stored/logged; gates {mode_s} stream + non-stream)",
           file=sys.stderr)

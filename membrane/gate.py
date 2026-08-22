@@ -41,6 +41,7 @@ def decide(
     consensus_min: float = 0.60,
     novelty_max: float = 2.0,
     novelty_rank_ratio_max: float = 0.5,
+    novelty_sim_max: float = 0.95,
     eff_rank: float | None = None,
 ) -> dict:
     """Route `query` against `store` to one of: act / escalate-with-hint / escalate.
@@ -82,10 +83,23 @@ def decide(
     nov = novelty(query, store) if use_novelty else None
 
     sure = sim >= sim_min and consensus >= consensus_min
-    if use_novelty:
+    # the acquisition gap (high-cosine yet off-manifold) is only meaningful for a
+    # NEAR-but-not-identical match. At sim >= novelty_sim_max (the dedup boundary)
+    # the query is a near-duplicate of a stored exemplar -> on-manifold by
+    # construction; a high novelty reading there is the kept-subspace approximation
+    # error, not a real gap. Escalating an exact/near-duplicate safe match would
+    # re-ask the model for something the field already holds and trusts. So the
+    # veto applies only below the dedup line -- the act-zone's near-but-different
+    # band where "high-cosine but off-manifold" is a genuine question.
+    if use_novelty and sim < novelty_sim_max:
         sure = sure and nov <= novelty_max
 
-    signals = f"sim={sim:.2f} cons={consensus:.2f}" + (f" nov={nov:.2f}" if use_novelty else " nov=off(rank)")
+    vetoed = use_novelty and sim < novelty_sim_max
+    if use_novelty:
+        nov_lbl = f" nov={nov:.2f}" + ("" if vetoed else "(skip-dup)")
+    else:
+        nov_lbl = " nov=off(rank)"
+    signals = f"sim={sim:.2f} cons={consensus:.2f}" + nov_lbl
     common = {"sim": sim, "nov": nov, "eff_rank": er, "rank_ratio": rank_ratio,
               "sim_min": sim_min}
     if not sure:

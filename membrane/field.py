@@ -88,6 +88,49 @@ class ExemplarStore:
         """The model votes for this exemplar (it contests a demotion -- it stands by its answer)."""
         self.exemplars[index].contest_count += 1
 
+    def repair_action(self, index: int, new_action: str, new_outcome: str = "pending") -> None:
+        """Overwrite a DEMOTED exemplar's action with the corrected answer (repair, not abandon).
+
+        The re-ask demotion path makes a wrong exemplar ``unsafe`` but leaves its wrong
+        ``action`` in place; the learn-time dedup guard (``_find_dup``) then blocks
+        appending the correct answer the model returned on the re-ask, so the slot
+        escalates-with-hint on the WRONG action forever (abandonment). ``repair_action``
+        overwrites the action with the corrected one -- the hint becomes correct, and
+        IF the slot re-promotes it will replay the right answer.
+
+        Evidence handling (the probation model -- NOT a clean reset):
+          - ``reask_count`` is KEPT. The re-ask was against the old (wrong) action;
+            after overwrite it is no longer a vote against the new action, but it is
+            carried as PROBATION: "this slot has been wrong before, so the corrected
+            answer must earn its way back." So ``safe`` stays False after repair --
+            the slot does NOT replay yet (not the harsh immediate-trust of a cosine
+            cache, which is the carelessness this boundary exists to avoid).
+          - ``contest_count`` is RESET to 0. Any prior contests were about the old
+            action and are moot. (In practice an unsafe dup always has contest_count 0
+            anyway -- a prior ``contest()`` would have restored ``safe`` -- but reset
+            is the honest invariant.)
+
+        Re-promotion is NOT done here. It happens later, on the CONFIRM path: when the
+        model stands by the corrected action on a subsequent escalation, that is a
+        ``contest`` (``add_contest`` + ``recompute_safe``): the first contest cancels
+        the probation re-ask -> ``safe`` flips to True -> the slot is replayable again.
+        The environment keeps the final say: a further re-ask (reask=2) out-votes the
+        single contest -> the demotion stands. That is the existing ``contest()``
+        boundary rule, unchanged.
+
+        The store stays append-only in COUNT: no exemplar is added or removed -- only
+        this one exemplar's mutable fields (``action``/``outcome``/``contest_count``)
+        change, the same fields ``add_reask``/``add_contest``/``set_safe`` mutate. Call
+        only on an UNSAFE exemplar (a safe one is a proven-good answer -- never overwrite).
+        """
+        ex = self.exemplars[index]
+        ex.action = new_action
+        ex.outcome = new_outcome
+        ex.contest_count = 0
+        # reask_count is intentionally kept (probation); safe is intentionally left
+        # as-is (already False on the unsafe dup). recompute_safe is NOT called here --
+        # the confirm path (a later contest) does it when the model stands by the fix.
+
     def index_of(self, ex: Exemplar) -> int | None:
         """Identity lookup of an exemplar the gate recalled (``e is ex``).
 

@@ -64,7 +64,9 @@ model server (the thing the chat window used to call directly) for real use.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import random
 import sys
 import time
 from collections import deque
@@ -76,6 +78,7 @@ import numpy as np
 from .embed import OllamaEmbedder
 from .field import Exemplar, ExemplarStore
 from .gate import decide
+from .generator import FieldNGram, MIN_ACTIONS as _GEN_MIN_ACTIONS, _tok as _gen_tokens
 from .variety import thermo_state
 
 
@@ -537,6 +540,12 @@ class Membrane:
         # re-ask across turns. Lost on restart; fine, the durable change (the safe flip)
         # is written to the field file, and the re-ask window is short.
         self._recent: deque = deque(maxlen=16)
+        # Fork C: the boundary's generative organ, lazily grown from the field.
+        # ``_gen_lm`` caches the n-gram built from the field's actions; ``_gen_size``
+        # is the field length it was built at (rebuild when the field grows). None
+        # until first use. See ``generate`` and membrane/generator.py.
+        self._gen_lm: FieldNGram | None = None
+        self._gen_size: int = -1
 
     def handle(self, request_body: dict, unsafe: bool = False,
                auth: dict | None = None) -> tuple[dict, dict]:
@@ -564,7 +573,7 @@ class Membrane:
                 # observer-only: NEVER replay a coding answer -- forward + learn,
                 # and audit what WOULD have absorbed (for a future absorb switch).
                 return self._observe_forward(verdict, request_body, query, vec, unsafe, auth)
-            resp = self._act(verdict, request_body)
+            resp = self._act(verdict, request_body, query, vec)
             self._audit(query, verdict, resp, ex_idx=verdict.get("ex_idx"), learned=False)
             self._remember(query, vec, verdict, verdict.get("ex_idx"))
             return resp, verdict
@@ -642,7 +651,8 @@ class Membrane:
         # (sim_min); grown-safe field -> relax toward sim_min_floor. OFF by default.
         sim_min_eff = self._adaptive_sim_min(thermo) if self.variety_temp else self.sim_min
         verdict = decide(vec, self.store, k=self.k, sim_min=sim_min_eff,
-                         consensus_min=self.consensus_min, eff_rank=thermo["eff_rank"])
+                         consensus_min=self.consensus_min, eff_rank=thermo["eff_rank"],
+                         novelty_sim_max=self.dedup_sim)
         # stamp the thermodynamic state this decision was made under (for audit/TUI).
         verdict["spectrum_entropy"] = thermo["spectrum_entropy"]
         verdict["free_energy"] = thermo["free_energy"]
@@ -705,18 +715,22 @@ class Membrane:
         return max(self.sim_min_floor,
                    self.sim_min - (self.sim_min - self.sim_min_floor) * eagerness)
 
-    def record_act(self, query: str, vec, verdict: dict, model: str) -> None:
+    def record_act(self, query: str, vec, verdict: dict, model: str,
+                    content: str | None = None) -> None:
         """Record an absorb that has been DELIVERED by the streaming path.
 
-        The proxy synthesizes the NDJSON itself from the recalled action; this just
-        audits the decision (learned=False) and remembers it in the re-ask ring --
-        the same two side effects as the non-stream ``handle`` act branch. No
-        exemplar is appended (the field already holds it).
+        The proxy synthesizes the NDJSON itself from the recalled action -- or, with
+        Fork C, from the GENERATED action (``content``); this just audits the
+        decision (learned=False, auditing what the boundary actually said) and
+        remembers it in the re-ask ring -- the same two side effects as the
+        non-stream ``handle`` act branch. No exemplar is appended (the field
+        already holds it).
 
         OBSERVER mode never reaches here (the proxy forwards instead of replaying);
         ``record_escalation`` is the observer's stream path for both act and
         escalate verdicts."""
-        resp = _chat_response(model, verdict.get("action", ""))
+        text = content if content is not None else verdict.get("action", "")
+        resp = _chat_response(model, text)
         self._audit(query, verdict, resp, ex_idx=verdict.get("ex_idx"), learned=False)
         self._remember(query, vec, verdict, verdict.get("ex_idx"))
 
@@ -774,10 +788,63 @@ class Membrane:
 
     # ---- internals ----------------------------------------------------------
 
-    def _act(self, verdict: dict, request_body: dict) -> dict:
-        # absorb: replay the recalled action -- NO responder/model call.
+    def _act(self, verdict: dict, request_body: dict, query: str, vec=None) -> dict:
+        # absorb: the boundary SPEAKS for itself (Fork C) -- generate from the
+        # field-grown n-gram, conditioned on the nearest memory of the query. No
+        # responder/model call. Falls back to the verbatim replay (the repeater)
+        # when the field is too thin to speak from or generation comes up empty.
         model = request_body.get("model", "membrane")
-        return _chat_response(model, verdict["action"])
+        return _chat_response(model, self.generate(query, verdict, vec=vec))
+
+    def generate(self, query: str, verdict: dict, vec=None) -> str:
+        """Fork C: generate a response from the field-grown n-gram, conditioned on
+        the nearest memory of the query. Replaces the verbatim ``act`` replay.
+
+        The organ is a word-level n-gram language model trained on the field's
+        own stored actions (membrane/generator.py ``FieldNGram``) -- nothing
+        downloaded, no borrowed brain; the counts ARE the field's memory of what
+        it has said. Conditioning is kNN: seed the generation with the nearest
+        action's lead, so the response starts from the closest memory and then
+        DIVERGES via sampling -- a fresh draw from the field's joint statistics,
+        not a verbatim replay.
+
+        Determinism: a query seeds the RNG stably (sha256 of query + nearest
+        action), so a RE-ASK of the same query generates the SAME output -- the
+        re-ask detector then demotes the seed exactly as it demoted the old
+        replay, so the green->red->green self-correction arc is inherited.
+
+        Graceful fallback: below ``MIN_ACTIONS`` distinct stored actions, or if
+        generation comes up empty/whitespace, return ``verdict["action"]`` (the
+        verbatim replay) -- the cell does not stammer until it has lived enough.
+        ``vec`` (the nudged query vector) is reused when the caller has it
+        (gate_turn); when None it is recomputed from ``query``.
+        """
+        replay = verdict.get("action", "")
+        try:
+            if vec is None:
+                vec = self._nudge(self.embedder.embed([query])[0])
+            # rebuild the n-gram only when the field grew since last build
+            if self._gen_lm is None or len(self.store) != self._gen_size:
+                actions = [e.action for e in self.store.exemplars if e.action]
+                if len(set(actions)) < _GEN_MIN_ACTIONS:
+                    return replay
+                self._gen_lm = FieldNGram(actions)
+                self._gen_size = len(self.store)
+            lm = self._gen_lm
+            if lm.size == 0:
+                return replay
+            qn = vec / (np.linalg.norm(vec) + 1e-12)
+            nbrs = self.store.top_k(qn, k=self.k)
+            near = nbrs[0][0]
+            seed = _gen_tokens(near.action)[:2]            # kNN lead: nearest action's first 2 tokens
+            digest = hashlib.sha256((query + "\x00" + near.action).encode()).digest()
+            rng = random.Random(int.from_bytes(digest[:8], "big"))
+            out = lm.generate(seed, rng)
+            out = out.strip()
+            return out if out else replay
+        except Exception as e:
+            print(f"[membrane] generate failed ({e}); replaying", file=sys.stderr)
+            return replay
 
     def _escalate(self, request_body: dict, query: str, hint: str | None, vec,
                   reason: str, auth: dict | None = None) -> tuple[dict, dict]:
@@ -826,6 +893,30 @@ class Membrane:
             return None
         dup_idx = self._find_dup(vec)
         if dup_idx is not None:
+            # repair, not abandon: a demoted (unsafe) dup is a slot the environment
+            # already voted against. The dedup guard blocks appending the corrected
+            # answer the model just returned -- without intervention the slot would
+            # escalate-with-hint on the WRONG action forever. Two halves of the fix:
+            #   REPAIR  -- the model's new action DIFFERS from the demoted one: overwrite
+            #     the stored action (so the hint becomes correct), keep the demotion as
+            #     PROBATION (reask stays, safe stays False). The slot does not replay yet
+            #     (not the harsh immediate-trust of a cosine cache).
+            #   CONFIRM -- the model's new action EQUALS the stored (corrected) one: the
+            #     model stands by its fix -> a contest (the model's first-veto authority)
+            #     cancels the probation re-ask -> safe re-promotes. The environment keeps
+            #     the final say: if it re-asked again (reask=2), the first contest does
+            #     NOT restore (net 1 >= threshold) -> the demotion stands (boundary rule).
+            dup = self.store.exemplars[dup_idx]
+            if not dup.safe:
+                if content != dup.action:
+                    self.store.repair_action(dup_idx, content)
+                    self.store.save(self.field_path)
+                    self._audit(query, verdict, resp, ex_idx=dup_idx, learned=False,
+                                dup=True, repaired=True, would_absorb=would_absorb)
+                    return dup_idx
+                self.contest(dup_idx,
+                             reason="repair-confirm: model stood by corrected action",
+                             source="judge")
             self._audit(query, verdict, resp, ex_idx=dup_idx, learned=False,
                         dup=True, would_absorb=would_absorb)
             return dup_idx
@@ -861,18 +952,21 @@ class Membrane:
     def _audit(self, query: str, verdict: dict, resp: dict,
                ex_idx: int | None, learned: bool, dup: bool = False,
                would_absorb: bool = False, vague: bool = False,
-               variety_skip: bool = False) -> None:
+               variety_skip: bool = False, repaired: bool = False) -> None:
         """Append a decision record to the audit log (the training data).
 
         Observer-only flags: ``would_absorb`` (the gate said ``act`` but we
         forwarded instead of replaying -- what WOULD have cached), ``vague`` (the
         situation was too low-information to learn), ``variety_skip`` (the
-        exemplar added no effective-rank variety, dropped by the variety gate)."""
+        exemplar added no effective-rank variety, dropped by the variety gate),
+        ``repaired`` (a demoted dup's action was overwritten with the corrected
+        answer -- repair, not abandon)."""
         content = _response_text(resp)
         rec = {"event": "decision", "verdict": verdict["verdict"], "sim": verdict.get("sim"),
                "nov": verdict.get("nov"), "reason": verdict.get("reason"),
                "ex_idx": ex_idx, "learned": learned, "dup": dup,
                "would_absorb": would_absorb, "vague": vague, "variety_skip": variety_skip,
+               "repaired": repaired,
                "query": query, "response": content, "field_size": len(self.store),
                # the per-veil thermodynamic state at decision time (the variety
                # record). None on the empty-query / pre-gate paths.

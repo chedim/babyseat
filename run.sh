@@ -66,7 +66,8 @@ while [ $# -gt 0 ]; do
     --no-vague-filter|--variety-gate|--variety-temp) proxy_args+=("$a"); shift ;;
     --listen|--backend|--sim-min|--consensus-min|--dedup-sim|--demote-threshold|\
     --judge-model|--judge-timeout|--judge-backend|--vague-min-tokens|\
-    --temp-driver|--temp-tau|--sim-min-floor|--nudge-sigma|--nudge-seed|--tag|--cells)
+    --temp-driver|--temp-tau|--sim-min-floor|--nudge-sigma|--nudge-seed|\
+    --system|--warmup|--warmup-model|--warmup-seed|--tag|--cells)
       proxy_args+=("$a"); shift
       if [ $# -gt 0 ]; then proxy_args+=("$1"); shift; fi ;;
     --refresh)

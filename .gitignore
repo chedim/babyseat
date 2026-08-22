@@ -16,3 +16,6 @@ membrane-proxy.log
 cortex-field.json
 cortex-audit.jsonl
 *.old
+
+# personal worlds — embedded private conversations, never commit
+worlds/

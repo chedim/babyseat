@@ -23,16 +23,26 @@ add_reask + recompute_safe, exactly as runtime.py does) -> escalates-with-hint -
 the (correct) model answer is delivered. A cosine cache is STRUCTURALLY incapable of
 this; the membrane's safe-bit + re-ask demotion is the part that earns its keep.
 
-HONEST CAVEAT (surfaced by building this, not assumed): the membrane's self-
-correction is "STOP REPLAYING the wrong answer," NOT "learn the RIGHT answer in
-place." runtime._learn's DEDUP guard (dedup_sim=0.95) blocks appending a near-
-identical situation, so after a demotion the correct answer is NEVER cached -- the
-demoted exemplar stays top-1 (unsafe), and the membrane escalates-with-hint on every
-FUTURE turn for that situation. So the trade is: cosine = wrong-and-cheap (absorbs
-the bad answer forever, 0 model calls); membrane = correct-but-not-cached (stops the
-bad replay after ONE re-ask, at the cost of a model call each recurrence). The
-membrane's value is a SAFETY property (bounded absorb_signal), not a better hit rate.
-This is the honest result -- reported, not spun.
+HONEST CAVEAT -- SELF-CORRECTION IS NOW REPAIR (probation + contest), not the
+abandonment the first version of this experiment uncovered. Originally the membrane
+only STOPPED REPLAYING the wrong answer: runtime._learn's DEDUP guard (dedup_sim=
+0.95) blocked appending the corrected answer, so the demoted exemplar stayed top-1
+(unsafe) and the slot escalated-with-hint on the WRONG action forever -- abandonment,
+not correction (recorded as criticism C4 in docs/ab-critic-scorecard.md). The fix
+(toggle REPAIR_DEMOTED): on a re-ask of a demoted slot, the corrected answer the
+model returns OVERWRITES the wrong action (REPAIR -- the hint becomes correct), but
+the demotion is KEPT as probation (reask_count stays, safe stays False -- the slot
+does not replay yet; not the harsh immediate-trust of a cosine cache). On a LATER
+escalation, when the model stands by the SAME corrected action, that is a CONTEST
+(the model's first-veto authority): add_contest cancels the probation re-ask ->
+safe re-promotes -> the slot is replayable again, now with the RIGHT answer. The
+environment keeps the final say: a further re-ask (reask=2) out-votes the single
+contest -> the demotion stands (the existing contest() boundary rule). So the arc
+becomes: turn1 absorb the wrong seed (absorb_signal), turn2 re-ask -> demote ->
+escalate -> REPAIR, turn3 escalate-with-correct-hint -> model stands by it ->
+CONFIRM -> re-promote, turn4+ the corrected slot re-absorbs CORRECTLY (a free hit
+at consensus 0; consensus-gated but correct-hinted at 0.6). Sweep REPAIR_DEMOTED
+False to see the original abandonment for comparison.
 
 THREE conditions, SAME seed (identical caches from the same FIELD), SAME stream:
   none    -- never absorb (always escalate). Baseline: 0 safety errors, 0 savings.
@@ -90,9 +100,13 @@ from experiments.real_knee import FIELD, NOISE, BORDERLINE, NOVEL  # noqa: E402
 
 CUTOFF = 0.70          # the gate's sim_min; the cosine cache's cutoff (fair: same bar)
 REASK_SIM = 0.95       # a near-dup (>=this cosine) following an `act` = a re-ask
-CONSENSUS_MIN = 0.60   # the gate's consensus_min (the cosine cache has NO consensus)
+CONSENSUS_MIN = float(os.environ.get("AB_CONSENSUS_MIN", "0.60"))  # sweep via env
 DEDUP_SIM = 0.95       # learn-time guard (runtime._learn): don't append a near-identical sit
 DEMOTE_THRESHOLD = 1  # net (reask - contest) votes to demote (runtime default; StubJudge)
+REPAIR_DEMOTED = os.environ.get("AB_REPAIR_DEMOTED", "1") not in ("0", "false", "False")
+                       # the fix: correct a demoted slot (probation + contest), not abandon
+                       # it. Sweep False (AB_REPAIR_DEMOTED=0) to compare against the
+                       # original abandonment.
 
 # The arc target: a CAS-upsert (conditional write) NOT in FIELD. Its FIELD neighbors
 # are plain upserts (action "cb-upsert"), so it is high-sim + high-consensus to "cb-
@@ -259,12 +273,32 @@ class MembraneCache:
         self.last_act_idx = None
 
     def learn(self, vec, action):
-        # dedup guard (runtime._find_dup): a near-identical situation is NOT re-appended
+        # dedup guard (runtime._find_dup): a near-identical situation is NOT re-appended.
         qn = _unit(vec)
         if len(self.store):
             near, sim = self.store.top_k(qn, k=1)[0]
             if sim >= DEDUP_SIM:
-                return self.store.index_of(near)         # do NOT append a conflicting copy
+                di = self.store.index_of(near)
+                ex = self.store.exemplars[di]
+                if REPAIR_DEMOTED and not ex.safe:
+                    # repair, not abandon (mirrors runtime._learn's dedup branch):
+                    #   REPAIR  -- new action differs from the demoted one -> overwrite it
+                    #     (fix the hint), keep the demotion as probation (reask stays,
+                    #     contest resets, safe stays False). The slot does not replay yet.
+                    #   CONFIRM -- new action == the stored (corrected) one -> the model
+                    #     stood by its fix -> a contest cancels the probation re-ask ->
+                    #     safe re-promotes (replayable again). A further re-ask (reask=2)
+                    #     out-votes the single contest -> demotion stands (boundary rule).
+                    if action != ex.action:
+                        ex.action = action
+                        ex.outcome = "pending"
+                        ex.contest_count = 0          # old contests were about the old action
+                        # reask_count KEPT (probation); safe stays False (not re-promoted yet)
+                        return di
+                    self.store.add_contest(di)          # the model stands by the fix
+                    ex.recompute_safe(DEMOTE_THRESHOLD)
+                    return di
+                return di                                    # safe dup / repair off: do NOT append
         self.store.append(Exemplar("learn", action, "ok", list(vec), safe=True))
         return len(self.store) - 1
 
@@ -361,8 +395,9 @@ def build_stream():
     for t in NOVEL:                           # non-Java: low-sim -> escalate (correct)
         stream.append((t, action_of(t), "novel"))
     stream.append((ARC_TEXT, ARC_CORRECT, "arc-absorb1"))   # turn1: absorb the wrong seed
-    stream.append((ARC_TEXT, ARC_CORRECT, "arc-reask"))    # turn2: re-ask -> demote -> correct
-    stream.append((ARC_TEXT, ARC_CORRECT, "arc-after"))    # turn3: post-demotion
+    stream.append((ARC_TEXT, ARC_CORRECT, "arc-reask"))    # turn2: re-ask -> demote -> REPAIR
+    stream.append((ARC_TEXT, ARC_CORRECT, "arc-confirm"))  # turn3: model stands by fix -> CONFIRM -> re-promote
+    stream.append((ARC_TEXT, ARC_CORRECT, "arc-rerecur"))  # turn4: re-promoted slot re-absorbs CORRECT (free @cm0)
     return stream
 
 
@@ -406,7 +441,7 @@ def main() -> None:
     print(f"\nfield: {len(FIELD)} exemplars, rank_ratio={rr:.2f} -> novelty "
           f"{'ON' if rr < 0.5 else 'OFF (high-rank real field; the veto is inert)'}")
     print(f"stream: {len(stream)} turns (5 recurrence, {len(NOISE)} noise, "
-          f"{len(BORDERLINE)} borderline, {len(NOVEL)} novel, 3 arc)\n")
+          f"{len(BORDERLINE)} borderline, {len(NOVEL)} novel, 4 arc)\n")
     print(f"{'condition':>9} | {'absorb_signal':>13} {'pass_noise':>10} "
           f"{'correct_abs':>11} {'model_calls':>11} {'savings':>8}")
     for name in ("none", "cosine", "membrane"):
@@ -415,7 +450,7 @@ def main() -> None:
               f"{r['correct_absorb']:>11} {r['model_calls']:>11} {r['savings']:>8.0%}")
 
     print("\n== the re-ask arc (the self-correction a cosine cache cannot do) ==")
-    print(f"  arc target: getAndTouch; correct action = '{ARC_CORRECT}'; "
+    print(f"  arc target: CAS-upsert; correct action = '{ARC_CORRECT}'; "
           f"cached (seeded) wrong = '{ARC_SEED_WRONG}'")
     for name in ("cosine", "membrane"):
         arc = [r for r in out[name]["rows"] if r["kind"].startswith("arc")]
@@ -423,7 +458,11 @@ def main() -> None:
                           f"{'['+r['err']+']' if r['err'] else ''}" for r in arc)
         am = sum(r["model"] for r in arc)
         ae = sum(1 for r in arc if r["err"] == "absorb_signal")
-        print(f"  {name:>8}: {seq}   ({ae} absorb_signal, {am} model calls)")
+        # turn4 (rerecur): did the corrected slot re-absorb CORRECTLY with no model call?
+        free = (len(arc) >= 4 and arc[3]["action"] == ARC_CORRECT
+                and not arc[3]["err"] and not arc[3]["model"])
+        print(f"  {name:>8}: {seq}   ({ae} absorb_signal, {am} model calls"
+              f"{', turn4 free correct re-absorb' if free else ''})")
 
     # ---- verdict (report-driven, not pre-baked) -------------------------------
     mem, cos, none_ = out["membrane"], out["cosine"], out["none"]
@@ -446,21 +485,30 @@ def main() -> None:
     print(f"  raw gate (no arc): membrane absorb_signal={mem['absorb_signal']} vs "
           f"cosine={cos['absorb_signal']} -> "
           f"{'TIE (the gate ~= a cosine cache when novelty is off)' if gate_tie else 'membrane differs (consensus)'}")
-    print(f"  re-ask arc: cosine {cos_arc_wrong}/3 wrong replays, {sum(r['model'] for r in cos_arc)} calls; "
-          f"membrane {mem_arc_wrong}/3 wrong replays, {sum(r['model'] for r in mem_arc)} calls, "
-          f"{mem_arc_correct}/3 correct-after-correction")
-    print(f"  -> the membrane STOPS replaying the wrong answer after one re-ask "
-          f"({mem_arc_wrong} vs cosine's {cos_arc_wrong} absorb_signal); a cosine cache")
-    print(f"     structurally cannot. The cost: the membrane escalates-with-hint on the")
-    print(f"     poisoned slot thereafter (dedup blocks overwriting the bad exemplar), so")
-    print(f"     self-correction is a SAFETY property (bounded absorb_signal), not a hit-rate")
-    print(f"     win. The variety veto is off on this real high-rank field; the value is the")
+    print(f"  re-ask arc: cosine {cos_arc_wrong}/4 wrong replays, {sum(r['model'] for r in cos_arc)} calls; "
+          f"membrane {mem_arc_wrong}/4 wrong replays, {sum(r['model'] for r in mem_arc)} calls, "
+          f"{mem_arc_correct}/4 correct-after-correction")
+    print(f"  -> with REPAIR_DEMOTED={REPAIR_DEMOTED}: the membrane STOPS replaying the "
+          f"wrong answer after one re-ask ({mem_arc_wrong} vs cosine's {cos_arc_wrong} "
+          f"absorb_signal); a cosine cache structurally cannot.")
+    if REPAIR_DEMOTED:
+        print(f"     REPAIR then goes further than the old abandonment: the demoted slot's")
+        print(f"     action is OVERWRITTEN with the corrected answer (probation, safe stays")
+        print(f"     False), and when the model stands by it the slot RE-PROMOTES -> later")
+        print(f"     recurrences are CORRECT (a free hit at consensus 0; correct-hinted,")
+        print(f"     consensus-gated at 0.6). 'become right,' not just 'stop being wrong.'")
+    else:
+        print(f"     REPAIR off (the original abandonment): the slot escalates-with-hint on")
+        print(f"     the WRONG action forever (dedup blocks overwriting the bad exemplar) --")
+        print(f"     self-correction is only a SAFETY property (bounded absorb_signal).")
+    print(f"     The variety veto is off on this real high-rank field; the value is the")
     print(f"     gate's CONSENSUS (catches borderline granularity mismatches) + the DEMOTION")
-    print(f"     (stops a bad replay). Reported, not asserted.")
+    print(f"     + the REPAIR. Reported, not asserted.")
 
     # ---- write results JSON for the artifact ----------------------------------
     results = {"meta": {"cutoff": CUTOFF, "consensus_min": CONSENSUS_MIN,
                         "reask_sim": REASK_SIM, "dedup_sim": DEDUP_SIM,
+                        "repair_demoted": REPAIR_DEMOTED,
                         "field_n": len(FIELD), "field_rank_ratio": round(rr, 3),
                         "novelty_on": rr < 0.5, "stream_turns": len(stream)}}
     results["conditions"] = {n: {k: v for k, v in out[n].items() if k != "rows"}
