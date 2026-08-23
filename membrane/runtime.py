@@ -977,8 +977,9 @@ class Membrane:
         from .variety import cells_rank, free_energy
         vec = np.asarray(self.embedder.embed([story])[0], dtype=float)  # raw, no _nudge
         level = cells_rank(self.store)
-        # tag the scene to its cast (walking each tagged char's state_vec)
-        tags = self.cast.tag(vec, cycle)
+        # tag the scene to its cast (walking each tagged char's state_vec and
+        # recording the scene text as each tagged char's last_scene / situation)
+        tags = self.cast.tag(vec, cycle, text=story)
         verdict = {"verdict": "feed", "reason": "story-fed growth (raw embed)",
                    "sim": None, "nov": None, "ex_idx": None}
         resp = _chat_response("feed", story)

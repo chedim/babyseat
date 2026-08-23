@@ -18,10 +18,27 @@
   }
   *{box-sizing:border-box; image-rendering:pixelated}
   html,body{margin:0;height:100%;overflow:hidden;background:#05070a;color:#fff;font-family:var(--vt)}
-  /* the cosmos is the WORLD MAP (right), chat is the main feature (left) */
-  #c{position:fixed;right:10px;top:10px;width:calc(34vw - 14px);height:calc(100vh - 20px);
-    z-index:5;border:2px solid var(--ink);
+  /* the cosmos is the WORLD MAP (right column), chat is the main feature (left).
+     #right is a flex column: the (shrunk) 3D canvas on top, a per-turn SITUATION
+     snapshot of the POV character in the middle, and a control bar at the bottom. */
+  #right{position:fixed;right:10px;top:10px;width:calc(34vw - 14px);height:calc(100vh - 20px);
+    z-index:5;display:flex;flex-direction:column;gap:8px}
+  #c{flex:0 0 56%;display:block;width:100%;border:2px solid var(--ink);
     box-shadow:inset 2px 2px 0 rgba(0,0,0,.5),4px 4px 0 rgba(0,0,0,.45);background:#05070a}
+  #situation{flex:1 1 auto;min-height:0;overflow-y:auto;
+    background:rgba(0,0,0,.6);border:2px solid var(--ink);
+    box-shadow:inset 2px 2px 0 rgba(0,0,0,.4);padding:8px;
+    font-family:var(--vt);font-size:18px;line-height:1.35}
+  #situation .sit-head{font-family:var(--px);font-size:9px;color:#8a958e;letter-spacing:1px;margin-bottom:5px}
+  #situation .sit-name{font-family:var(--px);font-size:12px;color:#e9d8a6;letter-spacing:1px;margin-bottom:6px;text-shadow:1px 1px #000}
+  #situation .sit-body{color:#f4ecd8;border-left:2px solid rgba(255,255,255,.22);padding-left:8px}
+  #situation .sit-empty{color:#8a958e;font-style:italic}
+  #ctrl{flex:none;display:flex;flex-direction:column;gap:5px;
+    background:rgba(0,0,0,.5);border:2px solid var(--ink);
+    box-shadow:inset 2px 2px 0 rgba(0,0,0,.4);padding:6px}
+  .ctrl-row{display:flex;gap:4px}
+  .mc-btn.sm{font-size:9px;padding:7px 6px;letter-spacing:.5px;flex:1;min-width:0}
+  .mc-btn.sm.on{background:var(--green)}
 
   /* ---- MC bevel helpers --------------------------------------------------- */
   .mc-btn{font-family:var(--px);font-size:12px;color:#fff;text-shadow:2px 2px var(--ink);
@@ -254,7 +271,31 @@
 </style>
 </head>
 <body>
-<canvas id="c"></canvas>
+<!-- the right column: the (shrunk) world map, the POV's situation, and controls -->
+<div id="right">
+  <canvas id="c"></canvas>
+  <div id="situation">
+    <div class="sit-head">SITUATION</div>
+    <div class="sit-empty" id="sit-empty">no one is in focus yet — the world seeds a cast on its first chapter.</div>
+    <div id="sit-body" style="display:none">
+      <div class="sit-name" id="sit-name">—</div>
+      <div class="sit-body" id="sit-text"></div>
+    </div>
+  </div>
+  <div id="ctrl">
+    <div class="ctrl-row">
+      <button id="pp" class="mc-btn sm" title="play / pause the world's own clock">&#x25B6;</button>
+      <button class="mc-btn sm spd on" data-spd="1" title="world clock: normal speed">1×</button>
+      <button class="mc-btn sm spd" data-spd="2" title="world clock: double speed">2×</button>
+      <button class="mc-btn sm spd" data-spd="4" title="world clock: quadruple speed">4×</button>
+    </div>
+    <div class="ctrl-row">
+      <button class="mc-btn sm diet" data-fr="0" title="digest only — no new scenes absorb">STARVE</button>
+      <button class="mc-btn sm diet" data-fr="2" title="a measured feed rate">BALANCE</button>
+      <button class="mc-btn sm diet" data-fr="8" title="feed the world fast">FEED</button>
+    </div>
+  </div>
+</div>
 
 <!-- the world map is the cosmos (right); the cast's named pins overlay it -->
 <div id="cast-marks"></div>
@@ -535,6 +576,7 @@ async function poll(){
     if(entropy && document.activeElement!==entropy){
       entropy.value=Math.max(0,Math.min(32,fr));
       if(entropyv) entropyv.textContent=(+fr).toFixed(2)+"/cycle";
+      syncDiet();
     }
     // narrative mode — sync the toggle to the server's source of truth
     if(j.story_mode && j.story_mode!==curMode){
@@ -546,7 +588,11 @@ async function poll(){
       if(cputargetv) cputargetv.textContent=cputarget.value+"%";
     }
     if(j.consolidating!=null && j.consolidating!==consolidating){
-      consolidating=j.consolidating; syncPlay();
+      consolidating=j.consolidating; syncPlay(); syncPp();
+    }
+    // world-clock speed (1x/2x/4x) — sync the main-UI buttons to the server truth
+    if(j.cycle_speed!=null && Math.abs(j.cycle_speed-cycleSpeed)>1e-6){
+      cycleSpeed=j.cycle_speed; syncSpeed();
     }
     const con=j.consolidation||{};
     set("ccpu",Math.round((con.cpu_actual||0)*100)+"%");
@@ -591,7 +637,7 @@ async function poll(){
       });
     }
     // ---- the cast: named walking-regions of the field ------------------------
-    castList=j.cast||[]; renderRoster(); syncPov();
+    castList=j.cast||[]; renderRoster(); syncPov(); renderSituation(con);
     // ---- settings: keep the SETTINGS panel + storyModel in sync with the server
     // truth, without clobbering fields the user is actively editing ----------------
     if(j.backend!=null) curBackend=j.backend;
@@ -661,6 +707,34 @@ function syncPov(){
   const nm=document.querySelector("#chat .info-name");
   if(povChar){nm.textContent=povChar.name;cin.placeholder="what does "+povChar.name+" think?";}
   else{nm.textContent="THE WORLD";cin.placeholder="speak to the cell…";}
+}
+// the SITUATION snapshot: the POV character's current scene (their last_scene),
+// refreshed every poll. Falls back to the latest chronicle scene if the POV has
+// no tagged scene yet, so the panel is never blank while the world is narrating.
+function renderSituation(con){
+  const empty=document.getElementById("sit-empty");
+  const body=document.getElementById("sit-body");
+  const nm=document.getElementById("sit-name");
+  const txt=document.getElementById("sit-text");
+  let sceneText="", who="";
+  if(povChar){
+    who=povChar.name+(povChar.role?" — "+povChar.role:"");
+    sceneText=povChar.last_scene||"";
+  }
+  if(!sceneText){
+    // no tagged scene for the POV yet -> show the most recent chronicle scene
+    const st=(con&&con.stories)||[];
+    for(let i=st.length-1;i>=0;i--){const t=(st[i]&&st[i].text)||"";if(t){sceneText=t;break;}}
+  }
+  if(!sceneText && !povChar){
+    if(empty) empty.style.display="block";
+    if(body) body.style.display="none";
+    return;
+  }
+  if(empty) empty.style.display="none";
+  if(body) body.style.display="block";
+  if(nm) nm.textContent=who||"THE WORLD";
+  if(txt) txt.textContent=sceneText||"(the world is quiet…)";
 }
 setInterval(poll,1000);
 
@@ -774,6 +848,7 @@ const play=document.getElementById("play"),pause=document.getElementById("pause"
 let floodTimer=null;
 let curMode="story";                          // 'story' = continuing chronicle; 'variety' = vignettes
 let consolidating=false;                      // arm/disarm the world's own clock (server-side consolidator)
+let cycleSpeed=1.0;                           // world-clock multiplier (1x/2x/4x from the main-UI buttons)
 
 function ceilDisp(){const v=parseFloat(ceiling.value)||0;
   return (v*100).toFixed(1)+"% · cap "+Math.max(0,Math.round(v*theoMax));}
@@ -789,7 +864,8 @@ function persistDials(){
   const cpu=(parseFloat(cputarget.value)||0)/100;
   fetch("/feed",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({feeds:0, entropy_ceiling:ceil, mode:curMode,
-                         feed_rate:fr, cpu_target:cpu, consolidating:consolidating})})
+                         feed_rate:fr, cpu_target:cpu, consolidating:consolidating,
+                         cycle_speed:cycleSpeed})})
     .then(r=>r.json()).then(()=>poll()).catch(()=>{});
 }
 function queuePersist(){if(dialTimer) clearTimeout(dialTimer);dialTimer=setTimeout(persistDials,120);}
@@ -816,7 +892,8 @@ async function liveTick(){
   try{
     const r=await fetch("/feed",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({feeds:1, entropy_ceiling:ceil, mode:curMode,
-                           feed_rate:fr, cpu_target:cpu, consolidating:consolidating})});
+                           feed_rate:fr, cpu_target:cpu, consolidating:consolidating,
+                           cycle_speed:cycleSpeed})});
     const j=await r.json();
     if(!r.ok){stopFlood();return false;}
     if((j.fed||0)>0) floatText("+"+j.fed+" story","#e6c34a");
@@ -852,6 +929,47 @@ step.onclick=()=>liveTick();
 play.onclick=()=>setPlaying(true);
 pause.onclick=()=>setPlaying(false);
 syncPlay();
+
+// ---- main-UI playback controls (mirror the menu's PLAY/PAUSE + add 1x/2x/4x) -
+const pp=document.getElementById("pp");
+function syncPp(){
+  if(!pp) return;
+  pp.textContent=consolidating?"⏸":"▶";
+  pp.classList.toggle("on",consolidating);
+  pp.title=consolidating?"pause the world's own clock":"play the world's own clock";
+}
+pp.onclick=()=>setPlaying(!consolidating);
+// world-clock speed: 1x/2x/4x scales the consolidation cycle rate (the whole
+// world — feeding + digestion + the day/night clock — moves faster together).
+function syncSpeed(){
+  document.querySelectorAll(".spd").forEach(b=>{
+    b.classList.toggle("on",Math.abs((+b.dataset.spd)-cycleSpeed)<1e-6);
+  });
+}
+document.querySelectorAll(".spd").forEach(b=>{
+  b.onclick=()=>{cycleSpeed=+b.dataset.spd;syncSpeed();queuePersist();};
+});
+syncPp();syncSpeed();
+// ---- starve / balance / feed: three inter-connected feed-rate presets -------
+// They share the #entropy slider as backing state, so the menu slider + these
+// buttons stay in sync. A manual slider drag clears the active preset.
+function syncDiet(){
+  const fr=parseFloat(entropy.value)||0;
+  document.querySelectorAll(".diet").forEach(b=>{
+    b.classList.toggle("on",Math.abs((+b.dataset.fr)-fr)<1e-6);
+  });
+}
+document.querySelectorAll(".diet").forEach(b=>{
+  b.onclick=()=>{
+    const v=+b.dataset.fr;
+    entropy.value=Math.max(0,Math.min(32,v));
+    entropyv.textContent=(+entropy.value).toFixed(2)+"/cycle";
+    syncDiet();queuePersist();
+  };
+});
+syncDiet();
+// a manual slider drag releases the starve/balance/feed preset (the user took over)
+entropy.addEventListener("input",syncDiet);
 
 // ---- narrative mode toggle (story = continuing; variety = random vignettes) -
 modeBtn.onclick=()=>{
@@ -907,7 +1025,8 @@ async function loadWorlds(){
     const r=await fetch("/worlds");const j=await r.json();const ws=j.worlds||[];
     if(!ws.length){worldList.innerHTML='<div class="none">no saved worlds yet</div>';return;}
     worldList.innerHTML=ws.map(n=>'<div class="world-slot"><span class="wnm">'+escapeHtml(n)+'</span>'
-      +'<button data-load="'+escapeHtml(n)+'">LOAD</button></div>').join("");
+      +'<button data-load="'+escapeHtml(n)+'">LOAD</button>'
+      +'<button class="del" data-del="'+escapeHtml(n)+'" title="delete this saved world">&#x2715;</button></div>').join("");
     worldList.querySelectorAll("button[data-load]").forEach(b=>{
       b.onclick=async()=>{b.disabled=true;const old=b.textContent;b.textContent="…";
         try{const r=await fetch("/world",{method:"POST",headers:{"Content-Type":"application/json"},
@@ -917,6 +1036,18 @@ async function loadWorlds(){
           castList=j.cast||[];renderRoster();syncPov();renderCastMarks();
           floatText("loaded: "+b.dataset.load,"#5fd47a");
           loadWorlds();poll();menu.classList.remove("open");
+        }catch(e){b.textContent="×";setTimeout(()=>{b.textContent=old;b.disabled=false;},2500);}
+      };
+    });
+    worldList.querySelectorAll("button[data-del]").forEach(b=>{
+      b.onclick=async()=>{const name=b.dataset.del;
+        if(!confirm('delete the saved world "'+name+'"? this cannot be undone.'))return;
+        b.disabled=true;const old=b.textContent;b.textContent="…";
+        try{const r=await fetch("/world",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({action:"delete",name})});
+          const j=await r.json();
+          if(!r.ok||!j.ok){b.textContent=j.error||"failed";setTimeout(()=>{b.textContent=old;b.disabled=false;},2500);return;}
+          floatText("deleted: "+name,"#e05a4a");loadWorlds();
         }catch(e){b.textContent="×";setTimeout(()=>{b.textContent=old;b.disabled=false;},2500);}
       };
     });

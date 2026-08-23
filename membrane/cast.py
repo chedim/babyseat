@@ -49,12 +49,16 @@ class Character:
     # falls back to these defaults.
     role: str = ""
     voice: str = ""
+    # the text of the most recent scene that tagged this character -- their
+    # "current situation", surfaced in the viewer's snapshot panel. Updated by
+    # Cast.tag on every feed that touches them. Empty until first tagged.
+    last_scene: str = ""
 
 
 class Cast:
     """The cast list + the tagging/state machinery."""
 
-    def __init__(self, decay: float = 0.6, admit_threshold: float = 0.40,
+    def __init__(self, decay: float = 0.6, admit_threshold: float = 0.32,
                  cap: int = 12, embedder=None) -> None:
         self.chars: list[Character] = []
         self._next_id = 0
@@ -109,9 +113,11 @@ class Cast:
         return c
 
     # ---- the core: tag a scene to its cast + walk each tagged state -------
-    def tag(self, vec, cycle: int) -> list[int]:
+    def tag(self, vec, cycle: int, text: str = "") -> list[int]:
         """Tag ``vec`` (a scene embedding) to every character it sits close to,
-        EMA-updating each tagged character's ``state_vec`` toward the scene.
+        EMA-updating each tagged character's ``state_vec`` toward the scene, and
+        recording ``text`` as the character's ``last_scene`` (their current
+        situation, shown in the viewer's snapshot panel).
 
         Returns the list of character ids tagged (possibly empty). Does NOT
         auto-admit: a scene far from the whole cast returns ``[]`` and the cast
@@ -131,6 +137,8 @@ class Cast:
                 c.state_vec = walked.tolist()
                 c.scene_count += 1
                 c.last_cycle = cycle
+                if text:
+                    c.last_scene = text
                 tagged.append(c.id)
         return tagged
 
@@ -206,7 +214,7 @@ class Cast:
 
     @classmethod
     def load(cls, path: str | Path, decay: float = 0.6,
-             admit_threshold: float = 0.40, cap: int = 12, embedder=None) -> "Cast":
+             admit_threshold: float = 0.32, cap: int = 12, embedder=None) -> "Cast":
         cast = cls(decay=decay, admit_threshold=admit_threshold, cap=cap,
                    embedder=embedder)
         p = Path(path)

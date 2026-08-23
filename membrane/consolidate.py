@@ -174,5 +174,17 @@ class Consolidator:
             "cache": len(getattr(srv, "story_cache", [])),
             "stories": stories,
         }
-        # cap spin: never cycle faster than ~5/s when both phases are tiny
-        return max(0.05, 0.2 - t_cycle)
+        # ---- initial training burst: run a few cycles after the first chapter
+        # lands, then auto-pause so the world is "trained" and waits for PLAY.
+        # Gated on story_history so a model-down boot keeps retrying until a scene
+        # actually feeds before the countdown starts. --initial-burst 0 disables.
+        if getattr(srv, "initial_burst", 0) > 0 and getattr(srv, "story_history", None):
+            srv.initial_burst -= 1
+            if srv.initial_burst <= 0:
+                srv.consolidating = False          # training burst done -> auto-pause
+        # cap spin: never cycle faster than ~5/s when both phases are tiny.
+        # cycle_speed (set from the viewer's 1x/2x/4x playback controls) scales
+        # the target cycle period -- 2x -> 0.1s, 4x -> 0.05s (the floor). 1x is
+        # the default ~5 cycles/s.
+        speed = float(getattr(srv, "cycle_speed", 1.0)) or 1.0
+        return max(0.05, (0.2 / speed) - t_cycle)

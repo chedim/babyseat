@@ -220,7 +220,7 @@ _STORY_SYSTEM_STORY = (
 # in bulk. The cache refills (one call) when it runs below _LOW_WATER.
 _GENESIS_SYSTEM = (
     "You are the chronicler of this world. Narrate its history as a sequence of "
-    "distinct, substantial SCENES, each one paragraph (3 to 6 sentences), advancing "
+    "distinct, substantial SCENES, each 2 to 3 sentences, advancing "
     "the chronicle forward through time: the cosmology and the first land, then the "
     "life, then the people and the world they make. Each scene must stand on its own "
     "as a coherent piece of the one ongoing story. Separate every scene with a line "
@@ -237,7 +237,7 @@ _GENESIS_SYSTEM_SEED = (
     "exactly ONE character as the protagonist -- the character the reader IS -- by "
     "prefixing their name with a star (★). Begin the block with a line that is only "
     "'cast:'. Then narrate the history as a sequence of distinct, substantial SCENES, "
-    "each one paragraph (3 to 6 sentences), advancing the chronicle forward through "
+    "each 2 to 3 sentences, advancing the chronicle forward through "
     "time: the cosmology and the first land, then the life, then the people and the "
     "world they make. Separate every scene with a line that contains only ---. Write "
     "ONLY the cast block then the scenes, no headings, no commentary, no recaps.")
@@ -250,7 +250,7 @@ _GENESIS_SYSTEM_SEED = (
 # chronicle about the characters the reader is here for.
 _GENESIS_SYSTEM_CAST = (
     "You are the chronicler of this world. Narrate it as a sequence of distinct, "
-    "substantial SCENES, each one paragraph (3 to 6 sentences), each scene "
+    "substantial SCENES, each 2 to 3 sentences, each scene "
     "FEATURING the named characters -- their schemes, dialogue, conflicts, and what "
     "goes sideways for them. This world begins with its people: do NOT narrate "
     "cosmology, the formation of stars or planets, the origin of life, or any "
@@ -422,7 +422,7 @@ def _genesis(srv) -> list:
         user = (premise + "\n\nBegin the chronicle from the big bang: first give the "
                 "cast block (cast: then one 'Name — role — voice' line per character, "
                 "marking one protagonist with a leading ★), then narrate the FIRST "
-                + str(_CHAPTER) + " scenes in order, each one paragraph, each separated "
+                + str(_CHAPTER) + " scenes in order, each 2 to 3 sentences, each separated "
                 "by a line with only ---.")
     elif history:
         # continuing an existing chronicle: stay character-driven when the cast
@@ -430,7 +430,7 @@ def _genesis(srv) -> list:
         sys_prompt = _GENESIS_SYSTEM_CAST if cast.chars else _GENESIS_SYSTEM
         user = (premise + "\n\n" + cast_block + "The chronicle so far:\n\n" +
                 "\n\n".join(history) + "\n\nContinue the chronicle: narrate the NEXT "
-                + str(_CHAPTER) + " scenes featuring the cast, each one paragraph, "
+                + str(_CHAPTER) + " scenes featuring the cast, each 2 to 3 sentences, "
                 "each separated by a line with only ---.")
     else:
         # no history yet + a pre-seeded cast -> character-driven FIRST chapter
@@ -440,7 +440,7 @@ def _genesis(srv) -> list:
         user = (premise + "\n\n" + cast_block +
                 "Begin the chronicle with these characters in the middle of their "
                 "lives: narrate the FIRST " + str(_CHAPTER) + " scenes featuring "
-                "them, each one paragraph, each separated by a line with only ---.")
+                "them, each 2 to 3 sentences, each separated by a line with only ---.")
     messages = [{"role": "system", "content": sys_prompt},
                 {"role": "user", "content": user}]
     temperature = float(getattr(srv, "story_temperature", 0.7))
@@ -560,6 +560,40 @@ def _feed_snapshot(srv, mem) -> dict:
             "cache_depth": len(getattr(srv, "story_cache", [])),
             "free_energy": float(free_energy(mem.store)) if len(exs) >= 2 else 0.0,
             "entropy_count": 0, "stories": []}
+
+
+def _fresh_consolidation_stats(srv) -> dict:
+    """The full consolidation-stats shape -- boot, NEW WORLD, and LOAD all use
+    this so /state's `consolidation` field is populated immediately (the old NEW
+    /LOAD path wrote a thin {cycles,cpu_actual} dict that left the HUD blank
+    until the next consolidator cycle)."""
+    return {"cycles": 0, "cpu_actual": 0.0,
+            "cpu_target": round(float(getattr(srv, "cpu_target", 0.0)), 3),
+            "swept": 0, "budget": 0.0, "mean_novelty": 0.0,
+            "settled": 0, "eff_rank": 0.0, "free_energy": 0.0,
+            "fed": 0, "cache": 0, "stories": []}
+
+
+def _reset_world_runtime(srv, mem, rearm_burst: bool = True) -> None:
+    """Clear the per-world runtime state that NEW / LOAD must reset but the old
+    paths left stale: the PCA basis, the re-ask ring, the n-gram cache, the
+    chronicle cache + cycle clock, and (optionally) re-arm the initial training
+    burst. The field/cast/audit are replaced by the caller."""
+    srv._v_basis = None                       # force /state to refit a fresh cloud
+    srv.story_history = []
+    srv.story_cache = []
+    srv.cache_depth = 0
+    srv.consolidation_stats = _fresh_consolidation_stats(srv)
+    srv.cycle_speed = 1.0                     # playback speed back to 1x
+    srv.consolidating = False                 # a fresh/loaded world waits for PLAY
+    if rearm_burst:
+        srv.initial_burst = getattr(srv, "_initial_burst_arg", 0)
+    rec = getattr(mem, "_recent", None)
+    if rec is not None:
+        try: rec.clear()
+        except Exception: pass
+    mem._gen_lm = None
+    mem._gen_key = None
 
 
 def _run_feeds(srv, mem, feeds: int) -> dict:
@@ -903,6 +937,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
         srv.cpu_target = max(0.0, min(1.0, cpu_target))  # target CPU fraction for digestion
         consolidating = bool(body.get("consolidating", getattr(srv, "consolidating", False)))
         srv.consolidating = consolidating               # arm/disarm the world's own clock
+        if "cycle_speed" in body:                       # 1x/2x/4x playback -> world clock rate
+            try:
+                srv.cycle_speed = max(0.25, min(8.0, float(body.get("cycle_speed", 1.0)))) or 1.0
+            except (TypeError, ValueError):
+                pass
         # ---- the feed itself --------------------------------------------------
         feeds = int(body.get("feeds", 0))
         if feeds < 0:
@@ -1073,13 +1112,23 @@ class ProxyHandler(BaseHTTPRequestHandler):
                             shutil.copy2(src / "audit.jsonl", ap)
                         except Exception:
                             ap.write_text("")
-                        # the rolling chronicle + cache belong to the OLD world
-                        srv.story_history = []
-                        srv.story_cache = []
-                        srv.consolidation_stats = {"cycles": 0, "cpu_actual": 0.0}
+                        _reset_world_runtime(srv, mem, rearm_burst=True)
                         ok = True
                     except Exception as e:
                         err = f"load failed: {e}"
+            elif action == "delete":
+                src = wd / safe
+                live_dir = Path(mem.field_path).resolve().parent
+                if not safe or not (src / "field.json").exists():
+                    err = "no such saved world"
+                elif src.exists() and src.resolve() == live_dir:
+                    err = "refuse to delete the live world"
+                else:
+                    try:
+                        shutil.rmtree(src)
+                        ok = True
+                    except Exception as e:
+                        err = f"delete failed: {e}"
             elif action == "new":
                 try:
                     mem.store = ExemplarStore()             # empty field
@@ -1087,14 +1136,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     mem.store.save(mem.field_path)
                     mem.cast.save(mem.cast_path)
                     Path(mem.audit_path).write_text("")
-                    srv.story_history = []
-                    srv.story_cache = []
-                    srv.consolidation_stats = {"cycles": 0, "cpu_actual": 0.0}
+                    _reset_world_runtime(srv, mem, rearm_burst=True)
                     ok = True
                 except Exception as e:
                     err = f"new failed: {e}"
             else:
-                err = "unknown action (save|load|new)"
+                err = "unknown action (save|load|new|delete)"
         _view = [dict(c, pov=(mem.cast.pov_id == c["id"]))
                  for c in mem.cast.to_json()]
         out = json.dumps({"ok": ok, "error": err, "cast": _view}).encode()
@@ -1265,6 +1312,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         "last_cycle": int(c.last_cycle),
                         "anchor_idx": c.anchor_idx, "pinned": bool(c.pinned),
                         "pov": ccast.pov_id == c.id,
+                        "last_scene": getattr(c, "last_scene", "") or "",
                         "p": [round(float(ccoords[i, 0]), 4),
                               round(float(ccoords[i, 1]), 4),
                               round(float(ccoords[i, 2]), 4)]})
@@ -1303,6 +1351,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
                           "backend": str(getattr(self.server, "backend", "")),
                           "story_model": getattr(self.server, "warmup_model", None) or "",
                           "has_token": bool(getattr(self.server, "ollama_token", None)),
+                          "cycle_speed": float(getattr(self.server, "cycle_speed", 1.0) or 1.0),
+                          "initial_burst": int(getattr(self.server, "initial_burst", 0)),
+                          "trained": not bool(getattr(self.server, "initial_burst", 0)),
                           "verdicts": tail, "n_verdicts": n_verd}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -2031,6 +2082,10 @@ def main() -> None:
     ap.add_argument("--consolidate", action="store_true",
                     help="arm the consolidation thread at startup (the world feeds + digests on "
                          "its own clock; otherwise the viewer's PLAY arms it).")
+    ap.add_argument("--initial-burst", dest="initial_burst", type=int, default=3, metavar="N",
+                    help="consolidation: auto-PAUSE after N cycles run past the first chapter "
+                         "(the 'initial training' burst; 0 = never auto-pause, runs forever). "
+                         "Only meaningful with --consolidate. NEW WORLD / LOAD re-arms it.")
     args = ap.parse_args()
 
     # --tag defaults the field/audit paths so independent veils own independent fields
@@ -2180,11 +2235,10 @@ def main() -> None:
     srv.feed_rate = max(0.0, min(32.0, float(getattr(args, "feed_rate", 1.0))))  # feeds/cycle (continuous; the ENTROPY dial)
     srv.cpu_target = max(0.0, min(1.0, float(getattr(args, "cpu_target", 0.2))))  # target CPU fraction for digestion
     srv.consolidating = bool(getattr(args, "consolidate", False))       # arm the world's own clock at boot
-    srv.consolidation_stats = {"cycles": 0, "cpu_actual": 0.0,
-                               "cpu_target": round(srv.cpu_target, 3),
-                               "swept": 0, "budget": 0.0, "mean_novelty": 0.0,
-                               "settled": 0, "eff_rank": 0.0, "free_energy": 0.0,
-                               "fed": 0, "cache": 0, "stories": []}
+    srv.cycle_speed = 1.0                                               # world-clock multiplier (1x/2x/4x from the viewer)
+    srv.initial_burst = int(getattr(args, "initial_burst", 0))         # auto-pause after N post-first-chapter cycles
+    srv._initial_burst_arg = int(getattr(args, "initial_burst", 0))   # re-arm value for NEW WORLD / LOAD
+    srv.consolidation_stats = _fresh_consolidation_stats(srv)
     from .consolidate import Consolidator
     srv.consolidator = Consolidator(srv)
     srv.consolidator.start()
