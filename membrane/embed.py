@@ -21,10 +21,12 @@ DEFAULT_MODEL = "mxbai-embed-large"
 
 
 class OllamaEmbedder:
-    def __init__(self, base_url: str = DEFAULT_URL, model: str = DEFAULT_MODEL, timeout: int = 120):
+    def __init__(self, base_url: str = DEFAULT_URL, model: str = DEFAULT_MODEL,
+                 timeout: int = 120, token: str | None = None):
         self.base_url = base_url.rstrip("/")
         self.model = model
         self.timeout = timeout
+        self.token = token        # optional bearer token; in-memory only, never persisted
 
     def embed(self, texts) -> np.ndarray:
         """Embed a list of strings -> (N, D) float array. One /api/embed batch."""
@@ -32,10 +34,13 @@ class OllamaEmbedder:
         if not texts:
             return np.zeros((0, 0), dtype=float)
         body = json.dumps({"model": self.model, "input": texts}).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if self.token:
+            headers["Authorization"] = "Bearer " + self.token
         req = urllib.request.Request(
             self.base_url + "/api/embed",
             data=body,
-            headers={"Content-Type": "application/json"},
+            headers=headers,
         )
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as r:

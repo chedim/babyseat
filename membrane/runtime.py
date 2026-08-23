@@ -127,9 +127,11 @@ class OllamaChatResponder:
     not an instruction) so the model can use it without being told to obey it.
     """
 
-    def __init__(self, backend: str = "http://localhost:11434", timeout: int = 300) -> None:
+    def __init__(self, backend: str = "http://localhost:11434", timeout: int = 300,
+                 token: str | None = None) -> None:
         self.backend = backend.rstrip("/")
         self.timeout = timeout
+        self.token = token        # optional bearer token; in-memory only, never persisted
 
     def respond(self, request_body: dict, hint: str | None,
                 auth: dict | None = None) -> dict:
@@ -140,8 +142,11 @@ class OllamaChatResponder:
         if h:
             body["messages"] = [h] + list(body.get("messages", []))
         data = json.dumps(body).encode()
+        headers = {"Content-Type": "application/json"}
+        if self.token:
+            headers["Authorization"] = "Bearer " + self.token
         req = urllib.request.Request(f"{self.backend}/api/chat", data=data,
-                                     headers={"Content-Type": "application/json"})
+                                     headers=headers)
         with urllib.request.urlopen(req, timeout=self.timeout) as r:
             return json.loads(r.read())
 

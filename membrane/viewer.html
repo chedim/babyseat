@@ -169,6 +169,18 @@
     background:var(--ink);color:#fff;border:2px solid var(--ink);
     box-shadow:inset 2px 2px 0 var(--dark),inset -2px -2px 0 var(--light);padding:6px}
 
+  /* ---- settings: ollama server + token + story model --------------------- */
+  .set-row{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
+  .set-lbl{font-family:var(--px);font-size:9px;letter-spacing:1px;color:var(--ink)}
+  .set-input,.set-select{font-family:var(--vt);font-size:17px;color:#fff;background:var(--ink);
+    border:2px solid var(--ink);box-shadow:inset 2px 2px 0 var(--dark),inset -2px -2px 0 var(--light);
+    padding:6px 7px;width:100%;box-sizing:border-box}
+  .set-select{appearance:none}
+  .set-token-row{display:flex;gap:6px;align-items:center}
+  .set-token-row .set-input{flex:1}
+  .set-token-row .mc-btn{flex:none;padding:6px 10px}
+  .set-tok-flag{color:var(--gold);font-weight:bold}
+
   .bestiary{font-family:var(--vt);font-size:19px;line-height:1.6;color:var(--ink)}
   .bestiary .d{display:flex;align-items:center;gap:8px}
   .dot{width:10px;height:10px;display:inline-block;box-shadow:0 0 4px currentColor}
@@ -280,7 +292,6 @@
     </div>
   </div>
   <div class="irow">
-    <select id="model" title="model for escalations"></select>
     <input id="cin" placeholder="speak to the cell…" autocomplete="off">
     <button id="send">say</button>
   </div>
@@ -296,6 +307,28 @@
 <div id="menu">
   <div class="menu-panel">
     <div class="menu-title">WORLD OPTIONS</div>
+
+    <div class="menu-section">SETTINGS — ollama server · token · story model</div>
+    <div class="set-row">
+      <span class="set-lbl">OLLAMA SERVER</span>
+      <input id="set-backend" class="set-input" type="text" placeholder="http://localhost:11434"
+             autocomplete="off" spellcheck="false"
+             title="the Ollama server the world embeds + tells its chronicle through. Persists across restarts.">
+    </div>
+    <div class="set-row">
+      <span class="set-lbl">OLLAMA TOKEN <span id="set-tok-flag" class="set-tok-flag"></span></span>
+      <div class="set-token-row">
+        <input id="set-token" class="set-input" type="password" placeholder="none (optional)" autocomplete="off"
+               title="an optional bearer token for an authed Ollama proxy. In-memory only — never written to disk, never shown again. Leave blank to keep; type to set; ✕ to clear.">
+        <button id="set-token-clear" class="mc-btn" title="clear the saved token (in-memory only)">&#x2715;</button>
+      </div>
+    </div>
+    <div class="set-row">
+      <span class="set-lbl">STORY MODEL — the chronicle</span>
+      <select id="set-model" class="set-select"
+              title="the local Ollama model that writes the world's chronicle (the gardener). Persists across restarts."></select>
+    </div>
+    <div class="btn-row"><button id="set-save" class="mc-btn" title="apply the server, token, and story model to the world">&#x2713; SAVE SETTINGS</button></div>
 
     <div class="menu-section">STATS</div>
     <div class="stats">
@@ -559,6 +592,12 @@ async function poll(){
     }
     // ---- the cast: named walking-regions of the field ------------------------
     castList=j.cast||[]; renderRoster(); syncPov();
+    // ---- settings: keep the SETTINGS panel + storyModel in sync with the server
+    // truth, without clobbering fields the user is actively editing ----------------
+    if(j.backend!=null) curBackend=j.backend;
+    if(j.story_model!=null) storyModel=j.story_model;
+    curHasToken=!!j.has_token;
+    syncSettingsUI();
   }catch(e){const w=document.getElementById("wait");w.textContent="proxy unreachable — start it with --viewer";w.style.color="var(--red)";}
 }
 function escapeHtml(s){return s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
@@ -645,7 +684,7 @@ async function send(text){
   conv.push({role:"user",content:text});addMsg("u",text);cin.value="";
   const think=addMsg("sys","the cell is deciding…");
   try{
-    const model=document.getElementById("model").value||"llama3.1:8b";
+    const model=storyModel||"llama3.1:8b";
     const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({model,messages:conv,stream:false})});
     const j=await r.json();
@@ -907,12 +946,69 @@ worldNew.onclick=async()=>{
   }catch(e){worldNew.textContent="×";setTimeout(()=>{worldNew.textContent=old;worldNew.disabled=false;},2500);}
 };
 
-// model dropdown from the backend's /api/tags
-(async()=>{try{
-  const r=await fetch("/api/tags");const j=await r.json();const sel=document.getElementById("model");
-  const names=(j.models||[]).map(m=>m.name).filter(n=>!/embed|whisper|minilm|coding-math/i.test(n));
-  (names.length?names:["llama3.1:8b"]).forEach(n=>{const o=document.createElement("option");o.value=n;o.textContent=n;sel.appendChild(o);});
-}catch(e){const sel=document.getElementById("model");const o=document.createElement("option");o.value="llama3.1:8b";o.textContent="llama3.1:8b";sel.appendChild(o);}})();
+// ---- settings: ollama server + token + story model (moved out of the chat bar) --
+let storyModel="",curBackend="",curHasToken=false;
+async function refreshModels(){
+  // populate the SETTINGS story-model <select> from the backend's /api/tags. The
+  // current story model is kept selectable even if it isn't listed by /api/tags.
+  const sel=document.getElementById("set-model"); if(!sel) return;
+  let names=[];
+  try{
+    const r=await fetch("/api/tags");const j=await r.json();
+    names=(j.models||[]).map(m=>m.name).filter(n=>!/embed|whisper|minilm|coding-math/i.test(n));
+  }catch(e){}
+  if(!names.length) names=["llama3.1:8b"];
+  if(storyModel && !names.includes(storyModel)) names=[storyModel].concat(names);
+  const prev=sel.value;
+  sel.innerHTML="";
+  names.forEach(n=>{const o=document.createElement("option");o.value=n;o.textContent=n;sel.appendChild(o);});
+  sel.value=storyModel||prev||names[0];
+}
+function syncSettingsUI(){
+  // mirror the server truth into the SETTINGS inputs, but never overwrite a field
+  // the user is mid-edit (dataset.dirty), and never reveal the token (blank = keep).
+  const be=document.getElementById("set-backend");
+  if(be && document.activeElement!==be && !be.dataset.dirty) be.value=curBackend;
+  const sm=document.getElementById("set-model");
+  if(sm && document.activeElement!==sm && !sm.dataset.dirty){
+    if(storyModel && ![...sm.options].some(o=>o.value===storyModel)){
+      const o=document.createElement("option");o.value=storyModel;o.textContent=storyModel;sm.appendChild(o);
+    }
+    sm.value=storyModel;
+  }
+  const tf=document.getElementById("set-tok-flag");
+  if(tf) tf.textContent=curHasToken?"· set":"";
+  const tk=document.getElementById("set-token");
+  if(tk && document.activeElement!==tk && !tk.dataset.dirty) tk.value="";
+}
+async function saveSettings(clearToken){
+  const be=document.getElementById("set-backend");
+  const tk=document.getElementById("set-token");
+  const sm=document.getElementById("set-model");
+  const body={backend:be.value.trim(), story_model:sm.value||""};
+  if(clearToken) body.clear_token=true;
+  else if(tk.value) body.token=tk.value;
+  try{
+    const r=await fetch("/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+    const j=await r.json();
+    if(j && j.ok){
+      curBackend=j.backend; storyModel=j.story_model; curHasToken=j.has_token;
+      tk.value=""; delete tk.dataset.dirty; delete be.dataset.dirty; delete sm.dataset.dirty;
+      floatText("settings saved","#5fd47a");
+      refreshModels();              // the server may have changed -> repopulate the list
+      poll();
+    }else floatText("settings ✕","#f0593f");
+  }catch(e){floatText("settings ✕","#f0593f");}
+}
+(function wireSettings(){
+  const save=document.getElementById("set-save");
+  if(save) save.onclick=()=>saveSettings(false);
+  const clr=document.getElementById("set-token-clear");
+  if(clr) clr.onclick=()=>{const tk=document.getElementById("set-token");if(tk)tk.value="";saveSettings(true);};
+  ["set-backend","set-token"].forEach(id=>{const e=document.getElementById(id);if(e)e.addEventListener("input",()=>e.dataset.dirty="1");});
+  const sm=document.getElementById("set-model"); if(sm) sm.addEventListener("change",()=>sm.dataset.dirty="1");
+})();
+refreshModels();
 
 function loop(){renderer.render(scene,camera);renderCastMarks();requestAnimationFrame(loop);}
 requestAnimationFrame(loop);

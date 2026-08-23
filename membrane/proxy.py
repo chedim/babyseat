@@ -31,6 +31,7 @@ Run:
 from __future__ import annotations
 
 import json
+import os
 import random
 import re
 import signal
@@ -55,6 +56,73 @@ HOP_BY_HOP = {"host", "content-length", "connection", "transfer-encoding",
 # auth-shaped headers we forward to Anthropic but NEVER log or persist. The
 # cortex-experiment-token discipline: the API key is passthrough only.
 AUTH_HEADERS = {"x-api-key", "authorization", "anthropic-version"}
+
+
+def _ollama_headers(srv) -> dict:
+    """Headers for an Ollama /api/* call: always JSON, plus a bearer token when
+    one is set on the server (the optional /settings token -- in-memory only,
+    never persisted). The Anthropic path uses per-request passthrough auth
+    instead, so this helper is Ollama-only."""
+    h = {"Content-Type": "application/json"}
+    if getattr(srv, "ollama_token", None):
+        h["Authorization"] = "Bearer " + srv.ollama_token
+    return h
+
+
+# ---- /settings: runtime Ollama server + story model + optional token ----------
+# The NON-secret parts (backend URL + story model) persist to settings.json next
+# to the field, so a chosen server/model survives restarts. The optional bearer
+# token is in-memory ONLY -- never written to disk, never returned by GET
+# /settings or /state -- the same discipline as the passthrough API key.
+
+def _settings_path(srv) -> str:
+    return os.path.join(getattr(srv, "worlds_dir", "worlds"), "settings.json")
+
+
+def _load_settings(srv) -> dict:
+    """Read persisted {backend, story_model} from settings.json, or {} if absent.
+    Never holds a token -- the token is in-memory only."""
+    try:
+        with open(_settings_path(srv), "r", encoding="utf-8") as f:
+            d = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+    out = {}
+    if isinstance(d.get("backend"), str) and d["backend"].strip():
+        out["backend"] = d["backend"].strip().rstrip("/")
+    if isinstance(d.get("story_model"), str) and d["story_model"].strip():
+        out["story_model"] = d["story_model"].strip()
+    return out
+
+
+def _save_settings(srv, backend: str, story_model: str | None) -> None:
+    """Persist the non-secret settings (backend + story model). The token is
+    deliberately NOT written -- in-memory only."""
+    p = _settings_path(srv)
+    try:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump({"backend": backend, "story_model": story_model or ""}, f)
+    except OSError as e:
+        print(f"[settings] could not persist settings.json ({e})", file=sys.stderr)
+
+
+def _sync_ollama_clients(srv) -> None:
+    """Point the embedder + Ollama responder at the live srv.backend + token.
+    Updates attrs IN PLACE so every holder of the shared instances (Cast.load,
+    cells, the live chat path) sees the new backend/token without a restart.
+    The Anthropic responder is left alone (its key is per-request passthrough)."""
+    mem = getattr(srv, "membrane", None)
+    if mem is None:
+        return
+    emb = getattr(mem, "embedder", None)
+    if emb is not None:
+        emb.base_url = srv.backend.rstrip("/")
+        emb.token = getattr(srv, "ollama_token", None)
+    resp = getattr(mem, "responder", None)
+    if isinstance(resp, OllamaChatResponder):
+        resp.backend = srv.backend.rstrip("/")
+        resp.token = getattr(srv, "ollama_token", None)
 
 
 def _ndjson_chunks(model: str, content: str):
@@ -381,7 +449,7 @@ def _genesis(srv) -> list:
     try:
         data = json.dumps(body).encode()
         req = urllib.request.Request(backend + "/api/chat", data=data,
-                                     headers={"Content-Type": "application/json"})
+                                     headers=_ollama_headers(srv))
         with urllib.request.urlopen(req, timeout=180) as r:
             resp = json.loads(r.read())
     except Exception as e:
@@ -416,7 +484,8 @@ def _feed_count(rate: float) -> int:
 
 def _tell_story(backend: str, model: str | None, premise: str, seed: str,
                 timeout: int = 120, temperature: float = 0.9,
-                mode: str = "story", history: list | None = None) -> str:
+                mode: str = "story", history: list | None = None,
+                token: str | None = None) -> str:
     """ONE model call for a world scene. Mirrors ``warmup.generate_palette``
     (urllib POST to /api/chat, stream=False).
 
@@ -449,8 +518,11 @@ def _tell_story(backend: str, model: str | None, premise: str, seed: str,
             "messages": messages}
     try:
         data = json.dumps(body).encode()
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = "Bearer " + token
         req = urllib.request.Request(backend + "/api/chat", data=data,
-                                     headers={"Content-Type": "application/json"})
+                                     headers=headers)
         with urllib.request.urlopen(req, timeout=timeout) as r:
             resp = json.loads(r.read())
     except Exception as e:
@@ -563,6 +635,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._live()
         elif self.path in ("/feed", "/feed/"):
             self._feed()
+        elif self.path in ("/settings", "/settings/"):
+            self._settings()
         elif self.path in ("/cast", "/cast/"):
             self._cast()
         elif self.path in ("/world", "/world/"):
@@ -578,6 +652,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self._serve_asset("three.min.js", "application/javascript"); return
             if self.path in ("/state", "/state/"):
                 self._state(); return
+            if self.path in ("/settings", "/settings/"):
+                self._settings(); return
             if self.path.split("?")[0] in ("/neighbors", "/neighbors/"):
                 self._neighbors(); return
             if self.path.split("?")[0] in ("/worlds", "/worlds/"):
@@ -1076,6 +1152,54 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def _settings(self):
+        """GET  /settings         -> {backend, story_model, has_token}  (token masked).
+        POST /settings {backend?, token?, story_model?}
+                            -> apply + persist (token in-memory only)
+                            -> {ok, backend, story_model, has_token}.
+        The token is never echoed, logged, or written to disk. An explicit empty
+        ``token`` clears it; an absent ``token`` key leaves the existing one."""
+        srv = self.server
+        if self.command == "POST":
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length) if length else b""
+            try:
+                body = json.loads(raw) if raw else {}
+            except json.JSONDecodeError:
+                self._json_err(400, "settings body is not JSON"); return
+            if isinstance(body.get("backend"), str) and body["backend"].strip():
+                b = body["backend"].strip().rstrip("/")
+                if not (b.startswith("http://") or b.startswith("https://")):
+                    self._json_err(400, "backend must be an http(s) URL"); return
+                srv.backend = b
+            if isinstance(body.get("story_model"), str) and body["story_model"].strip():
+                srv.warmup_model = body["story_model"].strip()
+            # token: a non-empty string SETS it; clear_token=true CLEARS it; neither
+            # (both absent) leaves the existing token untouched. Never echoed/logged.
+            if isinstance(body.get("token"), str) and body["token"].strip():
+                srv.ollama_token = body["token"].strip()
+            if body.get("clear_token"):
+                srv.ollama_token = None
+            _sync_ollama_clients(srv)
+            _save_settings(srv, srv.backend, getattr(srv, "warmup_model", None))
+            out = json.dumps({"ok": True, "backend": srv.backend,
+                              "story_model": getattr(srv, "warmup_model", None) or "",
+                              "has_token": bool(getattr(srv, "ollama_token", None))}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+            return
+        out = json.dumps({"backend": srv.backend,
+                          "story_model": getattr(srv, "warmup_model", None) or "",
+                          "has_token": bool(getattr(srv, "ollama_token", None))}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
     def _state(self):
         import numpy as np
         from .variety import free_energy, cells_rank, entropy_count as _entropy_count
@@ -1176,6 +1300,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
                           "exemplars": pts,
                           "cast": cast_view,
                           "pov_id": mem.cast.pov_id,
+                          "backend": str(getattr(self.server, "backend", "")),
+                          "story_model": getattr(self.server, "warmup_model", None) or "",
+                          "has_token": bool(getattr(self.server, "ollama_token", None)),
                           "verdicts": tail, "n_verdicts": n_verd}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -1459,7 +1586,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             up["messages"] = [h] + list(up.get("messages", []))
         data = json.dumps(up).encode()
         req = urllib.request.Request(self.server.backend + "/api/chat", data=data,
-                                     method="POST", headers={"Content-Type": "application/json"})
+                                     method="POST", headers=_ollama_headers(self.server))
         parts: list[str] = []
         done_obj: dict = {}
         with urllib.request.urlopen(req, timeout=300) as r:
@@ -1498,7 +1625,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         up["stream"] = True
         data = json.dumps(up).encode()
         req = urllib.request.Request(self.server.backend + "/api/chat", data=data,
-                                     method="POST", headers={"Content-Type": "application/json"})
+                                     method="POST", headers=_ollama_headers(self.server))
         with urllib.request.urlopen(req, timeout=300) as r:
             while True:
                 chunk = r.read(4096)
@@ -1697,6 +1824,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
         backend = self.server.backend
         url = backend + self.path
         headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP_BY_HOP}
+        # the optional /settings token: inject it for proxied Ollama calls (e.g.
+        # the viewer's /api/tags) when the client didn't already send its own auth.
+        token = getattr(self.server, "ollama_token", None)
+        if token and not any(k.lower() == "authorization" for k in headers):
+            headers["Authorization"] = "Bearer " + token
         req = urllib.request.Request(url, data=raw, method=self.command, headers=headers)
         try:
             r = urllib.request.urlopen(req, timeout=300)
@@ -2024,6 +2156,18 @@ def main() -> None:
     srv.system_prompt = args.system   # opt-in world premise (--system); injected into forwards
     srv.worlds_dir = args.worlds_dir  # where the viewer's save/load/new-world buttons keep slots
     srv.warmup_model = args.warmup_model or args.judge_model   # the one warm-up palette call
+    srv.ollama_token = None                                    # optional bearer; in-memory only, never persisted
+    # apply persisted settings.json (backend + story model) over the CLI defaults;
+    # the token is in-memory only, so it starts cleared each boot. Then sync the
+    # shared embedder + responder to the resolved backend so /api/embed + /api/chat
+    # agree (also fixes the old latent mismatch where the embedder hardcoded
+    # localhost:11434 regardless of --backend).
+    _persisted = _load_settings(srv)
+    if _persisted.get("backend"):
+        srv.backend = _persisted["backend"]
+    if _persisted.get("story_model"):
+        srv.warmup_model = _persisted["story_model"]
+    _sync_ollama_clients(srv)
     srv.warmup_seed = args.warmup_seed
     srv.palette = srv_palette        # cached palette (built at startup warm-up); the no-model /live loop reuses it
     srv.entropy_ceiling = max(0.0, min(1.0, args.entropy_ceiling))   # inert for growth now (nudging removed); kept for the viewer's variety display
