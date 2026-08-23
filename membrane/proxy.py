@@ -574,6 +574,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if getattr(self.server, "viewer", False):
             if self.path in ("/viewer", "/viewer/"):
                 self._serve_viewer(); return
+            if self.path.split("?")[0] in ("/three.min.js",):
+                self._serve_asset("three.min.js", "application/javascript"); return
             if self.path in ("/state", "/state/"):
                 self._state(); return
             if self.path.split("?")[0] in ("/neighbors", "/neighbors/"):
@@ -1053,6 +1055,26 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(html)))
         self.end_headers()
         self.wfile.write(html)
+
+    def _serve_asset(self, name: str, ctype: str):
+        # serve a vendored file from the package dir (e.g. three.min.js) so the
+        # viewer is self-contained and never depends on a CDN -- a CDN load
+        # failure used to leave THREE undefined, halting the whole script at the
+        # top-level 3D init BEFORE the chat wiring, so the chat showed nothing.
+        import os as _os
+        p = _os.path.join(_os.path.dirname(__file__), name)
+        try:
+            with open(p, "rb") as f:
+                data = f.read()
+        except OSError:
+            self.send_response(404); self.send_header("Content-Type", "text/plain")
+            self.end_headers(); self.wfile.write((name + " not found").encode()); return
+        self.send_response(200)
+        self.send_header("Content-Type", ctype + "; charset=utf-8")
+        self.send_header("Cache-Control", "no-store, max-age=0")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
     def _state(self):
         import numpy as np
