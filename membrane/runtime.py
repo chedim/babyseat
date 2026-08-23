@@ -584,6 +584,7 @@ class Membrane:
         # until first use. See ``generate`` and membrane/generator.py.
         self._gen_lm: FieldNGram | None = None
         self._gen_size: int = -1
+        self._gen_key: tuple | None = None   # (field size, pov_id) the n-gram was built at
 
     def handle(self, request_body: dict, unsafe: bool = False,
                auth: dict | None = None) -> tuple[dict, dict]:
@@ -989,6 +990,27 @@ class Membrane:
         model = request_body.get("model", "membrane")
         return _chat_response(model, self.generate(query, verdict, vec=vec))
 
+    def _pov_aware_nbrs(self, qn: np.ndarray) -> list:
+        """The neighbours the narrator should speak FROM. When a POV character
+        is designated (``cast.pov_id``), restrict recall to that character's
+        tagged exemplars -- the scenes they LIVED -- so the narration comes
+        from their region of the field (their voice). Falls back to the global
+        nearest when the protagonist has fewer than three tagged scenes (they
+        haven't lived enough yet to carry the narration)."""
+        pov = getattr(self.cast, "pov_id", None)
+        if pov is None:
+            return self.store.top_k(qn, k=self.k)
+        pov_exs = [e for e in self.store.exemplars
+                   if pov in getattr(e, "tags", [])]
+        if len(pov_exs) < 3:
+            return self.store.top_k(qn, k=self.k)
+        V = np.array([np.asarray(e.vec, dtype=float) for e in pov_exs])
+        Vn = V / (np.linalg.norm(V, axis=1, keepdims=True) + 1e-12)
+        sims = Vn @ qn
+        k = min(self.k, len(pov_exs))
+        idx = np.argsort(-sims)[:k]
+        return [(pov_exs[i], float(sims[i])) for i in idx]
+
     def generate(self, query: str, verdict: dict, vec=None) -> str:
         """The self-author SPEAK organ: what the cell says on its own (no LLM).
 
@@ -1025,9 +1047,10 @@ class Membrane:
             if vec is None:
                 vec = self._nudge(self.embedder.embed([query])[0])
             qn = vec / (np.linalg.norm(vec) + 1e-12)
-            nbrs = self.store.top_k(qn, k=self.k)
+            nbrs = self._pov_aware_nbrs(qn)
             if not nbrs:
                 return replay
+            near = nbrs[0][0]
             # ---- COHESIVE RECALL (default): recite the nearest COHESIVE lived
             # scene. The field mixes cohesive chronicle scenes (~50-80 words)
             # with legacy telegraphic fragments (<15 words; early stub/warm-up
@@ -1045,13 +1068,24 @@ class Membrane:
                     best = (nbrs[0][0].action or "").strip()
                 return best if best else replay
             # ---- n-gram generation (opt-in): a fresh draw from the field's ----
-            # joint statistics, conditioned on the nearest memory's lead.
-            if self._gen_lm is None or len(self.store) != self._gen_size:
-                actions = [e.action for e in self.store.exemplars if e.action]
+            # joint statistics, conditioned on the nearest memory's lead. When a
+            # POV is set, train on the POV character's own actions -> their voice.
+            pov = getattr(self.cast, "pov_id", None)
+            gen_key = (len(self.store), pov)
+            if self._gen_lm is None or getattr(self, "_gen_key", None) != gen_key:
+                if pov is None:
+                    base = self.store.exemplars
+                else:
+                    base = [e for e in self.store.exemplars
+                            if pov in getattr(e, "tags", [])]
+                    if len(base) < _GEN_MIN_ACTIONS:
+                        base = self.store.exemplars     # too few lived scenes -> whole field
+                actions = [e.action for e in base if e.action]
                 if len(set(actions)) < _GEN_MIN_ACTIONS:
                     return replay
                 self._gen_lm = FieldNGram(actions)
                 self._gen_size = len(self.store)
+                self._gen_key = gen_key
             lm = self._gen_lm
             if lm.size == 0:
                 return replay

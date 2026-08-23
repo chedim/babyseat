@@ -567,15 +567,18 @@ path is untouched — the page chats through the real `/api/chat`, same-origin.
 
 ```bash
 # a self-running, self-authoring, explorable world (night-market fiction,
-# gemma3:12b writes the chronicle; mxbai-embed-large for embeddings):
+# gemma3:12b writes the chronicle; mxbai-embed-large for embeddings).
+# --protagonist writes YOU a character to be: Vell, the courier who stayed.
 PYTHONPATH=. .venv/bin/python -m membrane.proxy --listen 8770 \
   --backend http://127.0.0.1:11434 \
   --system "A night market at the edge of a desert city where the known world ends. ..." \
   --warmup-model gemma3:12b --entropy-ceiling 0.05 \
   --self-author --no-judge --viewer \
+  --protagonist "Vell — a courier who came to the edge of the known world to deliver a letter no one claimed, and stayed — clipped, watchful sentences; notices hands and exits before faces; a dry humor about being stranded somewhere beautiful; never wastes a word" \
   --field worlds/story-field.json --audit worlds/story-audit.jsonl
 # then open http://127.0.0.1:8770/viewer and hit PLAY (or add --consolidate
-# --feed-rate 4 --cpu-target 0.3 to arm the world's clock at boot).
+# --feed-rate 4 --cpu-target 0.3 to arm the world's clock at boot). The chat
+# renders your words as Vell's thoughts and narrates from Vell's lived scenes.
 ```
 
 What it is, honestly: a **self-growing memory field you probe by association,
@@ -629,6 +632,47 @@ acting character's state) → **cells act** (the world authors its own history b
 sampling from a character's region) → **thermodynamic drive** (steer genesis
 toward the starving character region) — is the next build, on top of this
 addressable state.
+
+### The narrator — a voiced POV character (you are a character in the book)
+
+The spine named the cast, but the chat still read "you (green) talk to the cell
+(white)" — no one was *in* the world. The narrator makes the chat a **novel**:
+you *are* a character (a protagonist with a defined voice), your typed messages
+render as that character's **thoughts**, and the narration speaks *from that
+person* — in `--self-author` mode by reciting the scenes that character **lived**
+(the field memory tagged to them), on the LLM-escalate path by a system-prompt
+reframe in their voice.
+
+- **A character with a voice** — `Character` gains `role` and `voice` (how they
+  speak/think, in a phrase). The genesis SEED now authors `Name — role — voice`
+  per character and designates a **protagonist** (the reader's character) with a
+  leading `★`; the seed admits the voiced cast and sets the protagonist as the
+  POV. You can also inject one with `--protagonist "Name — role — voice"` (admits
+  at boot if absent, sets POV, retro-tags the existing field so the protagonist
+  colors it at once).
+- **The narrator speaks from that person** — `generate()` (the self-author
+  SPEAK organ) restricts recall to the POV character's **tagged** exemplars when
+  a POV is set, so the recited scene is one the protagonist *lived* — the
+  narration comes from their region of the field, which *is* their voice. It
+  falls back to the global nearest when the protagonist has fewer than three
+  tagged scenes (they haven't lived enough yet). On the LLM-escalate path the
+  system prompt is reframed: "you are the narrator; the reader IS {name}; their
+  messages are their thoughts; narrate in third person in {name}'s voice."
+- **The chat reads as a novel** (viewer) — when a POV is set, your messages
+  render as the protagonist's **thoughts** (italic, indented, `❝ name · …`); the
+  reply renders as **narrator prose** (a left border, no attribution). The chat
+  header shows the protagonist's name; the input prompt becomes *what does
+  {name} think?*. The cast roster gains a **POV** button per row (POST `/cast
+  {action:"pov",id}`) and a `★ POV` badge — click it to switch whose eyes the
+  world is seen through. No POV → the chat stays green/white (unchanged).
+- **Persistence** — `pov_id` rides in the `-cast.json` wrapper
+  (`{pov_id, chars}`); old bare-list cast files load with `pov_id=None` and
+  `role`/`voice=""` (backward-compatible).
+
+This is the **narrator** only — a voiced POV you *are*. The consistency gate
+(acts must be on-manifold with the acting character's state) and full
+cells-act (a cell authors new beats, not just recites its lived scenes) are the
+next build on top of this.
 
 ---
 

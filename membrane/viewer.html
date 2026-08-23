@@ -88,6 +88,14 @@
   .m.u{color:var(--green-hi)}
   .m.a{color:#fff}
   .m.sys{color:#8a958e;font-style:italic;text-align:center}
+  /* the narrator + the protagonist's thoughts (when a POV is set) */
+  .m.u.thought{color:#c7b8ff;font-style:italic;border-left:3px solid #6a5acd;
+    padding:2px 4px 2px 9px;margin:2px 0 2px 14px;opacity:.92}
+  .m.u.thought .who{font-style:normal;font-weight:bold;color:#9a86ff;opacity:.7;margin-right:4px}
+  .m.u.thought .gl{font-style:normal;opacity:.6;margin-right:3px}
+  .m.a.narr{color:#f4ecd8;border-left:2px solid rgba(255,255,255,.22);
+    padding:2px 4px 2px 8px;margin:2px 0}
+  .m.a.narr .gl{opacity:.45;margin-right:4px}
   #chat .irow{display:flex;gap:4px}
   #chat select,#chat input,#chat button{font-family:var(--vt);font-size:18px;
     background:rgba(0,0,0,.6);color:#fff;border:2px solid var(--ink);
@@ -229,6 +237,12 @@
     padding:4px 6px;cursor:pointer;letter-spacing:1px}
   .roster-row .rbtn:hover{background:var(--face-hi)}
   .roster-row .rbtn.pin.on{background:var(--gold);color:var(--ink)}
+  .roster-row .rbtn.pov.on{background:#6a5acd;color:#fff}
+  .roster-row.pov{border-color:#6a5acd;background:rgba(106,90,205,.12)}
+  .roster-row.pov .rnm:after{content:" ★ POV";color:#9a86ff;font-size:13px}
+  .roster-row .rrole{font-family:var(--px);font-size:9px;color:#777;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+  .roster-row .rnwrap{display:flex;flex-direction:column;flex:1;min-width:0}
   .roster-empty{font-family:var(--vt);font-size:18px;color:#666;padding:6px}
 
   .hint{position:fixed;top:8px;left:50%;transform:translateX(-50%);
@@ -550,7 +564,7 @@ async function poll(){
       });
     }
     // ---- the cast: named walking-regions of the field ------------------------
-    castList=j.cast||[]; renderRoster();
+    castList=j.cast||[]; renderRoster(); syncPov();
   }catch(e){const w=document.getElementById("wait");w.textContent="proxy unreachable — start it with --viewer";w.style.color="var(--red)";}
 }
 function escapeHtml(s){return s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
@@ -582,10 +596,12 @@ function renderCastMarks(){
 function renderRoster(){
   const el=document.getElementById("cast-roster");if(!el)return;
   if(!castList.length){el.innerHTML='<div class="roster-empty">no cast yet — the world seeds one on its first chapter</div>';return;}
-  el.innerHTML=castList.map(ch=>'<div class="roster-row" data-id="'+ch.id+'">'
+  el.innerHTML=castList.map(ch=>'<div class="roster-row'+(ch.pov?' pov':'')+'" data-id="'+ch.id+'">'
     +'<span class="rdot" style="background:'+castRGB(ch.id)+'"></span>'
-    +'<span class="rnm">'+escapeHtml(ch.name)+'</span>'
+    +'<span class="rnwrap"><span class="rnm">'+escapeHtml(ch.name)+'</span>'
+    +(ch.role?'<span class="rrole">'+escapeHtml(ch.role)+'</span>':'')+'</span>'
     +'<span class="rmeta">'+ch.scene_count+' · c'+ch.last_cycle+'</span>'
+    +'<button class="rbtn pov'+(ch.pov?' on':'')+'" data-act="pov">POV</button>'
     +'<button class="rbtn pin'+(ch.pinned?' on':'')+'" data-act="pin">'+(ch.pinned?'PINNED':'PIN')+'</button>'
     +'<button class="rbtn" data-act="retire">RETIRE</button></div>').join("");
   el.querySelectorAll(".roster-row").forEach(row=>{
@@ -603,14 +619,33 @@ function zoomToChar(id){
 function castAction(act,id){
   fetch("/cast",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({action:act,id:id})})
-    .then(r=>r.json()).then(j=>{castList=j.cast||[];renderRoster();poll();}).catch(()=>{});
+    .then(r=>r.json()).then(j=>{castList=j.cast||[];renderRoster();syncPov();poll();}).catch(()=>{});
+}
+// ---- the POV protagonist: who the reader IS --------------------------------
+let povChar=null;          // the castList entry with pov:true (or null -> no POV)
+function syncPov(){
+  povChar=(castList||[]).find(c=>c.pov)||null;
+  const nm=document.querySelector("#chat .info-name");
+  if(povChar){nm.textContent=povChar.name;cin.placeholder="what does "+povChar.name+" think?";}
+  else{nm.textContent="THE WORLD";cin.placeholder="speak to the cell…";}
 }
 setInterval(poll,1000);
 
 // ---- chat --------------------------------------------------------------------
 const conv=[],msgs=document.getElementById("msgs"),cin=document.getElementById("cin");
-function addMsg(role,text){const d=document.createElement("div");d.className="m "+role;
-  d.textContent=text;msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;return d;}
+function addMsg(role,text){
+  const d=document.createElement("div");d.className="m "+role;
+  if(povChar&&role==="u"){                       // your words -> the protagonist's thoughts
+    d.className="m u thought";
+    d.innerHTML='<span class="gl">❝</span><span class="who">'+escapeHtml(povChar.name)+' ·</span> '+escapeHtml(String(text));
+  }else if(povChar&&role==="a"){                 // the reply -> narrator prose (no attribution)
+    d.className="m a narr";
+    d.textContent=text;
+  }else{
+    d.textContent=text;
+  }
+  msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;return d;
+}
 async function send(text){
   if(!text.trim())return;
   conv.push({role:"user",content:text});addMsg("u",text);cin.value="";

@@ -41,6 +41,14 @@ class Character:
     last_cycle: int
     scene_count: int
     pinned: bool = False
+    # a one-line role + a VOICE description (how this character speaks/thinks).
+    # Empty for legacy / chat-seeded chars; populated by the genesis seed (which
+    # names the ensemble "Name — role — voice") or the --protagonist flag. The
+    # POV character's voice is what the narrator speaks in. Backward-compatible:
+    # old ad521bb cast records lack the keys -> Exemplar(**rec)... Character(**rec)
+    # falls back to these defaults.
+    role: str = ""
+    voice: str = ""
 
 
 class Cast:
@@ -54,6 +62,7 @@ class Cast:
         self.admit_threshold = admit_threshold
         self.cap = cap
         self.embedder = embedder      # set by the Membrane after construction
+        self.pov_id: int | None = None   # the protagonist (who the reader IS)
 
     # ---- addressing ------------------------------------------------------
     def by_id(self, cid: int) -> Character | None:
@@ -67,8 +76,24 @@ class Cast:
         self._next_id += 1
         return cid
 
+    def by_name(self, name: str) -> Character | None:
+        n = (name or "").strip().strip("\"'.,;:")
+        for c in self.chars:
+            if c.name == n:
+                return c
+        return None
+
+    def set_pov(self, cid: int) -> bool:
+        """Designate ``cid`` the protagonist (who the reader IS). The narrator
+        speaks from this character's region of the field, in their voice."""
+        if self.by_id(cid) is None:
+            return False
+        self.pov_id = cid
+        return True
+
     # ---- admission -------------------------------------------------------
-    def admit(self, name: str, vec, anchor_idx: int | None, cycle: int) -> Character | None:
+    def admit(self, name: str, vec, anchor_idx: int | None, cycle: int,
+              role: str = "", voice: str = "") -> Character | None:
         """Create a new character seeded by ``vec`` (a description or scene embedding).
 
         Respects ``cap``: a full cast refuses admission. The caller (genesis seed
@@ -79,7 +104,7 @@ class Cast:
         sv = _unit(np.asarray(vec, dtype=float)).tolist()
         c = Character(id=self._fresh_id(), name=name, state_vec=sv,
                       anchor_idx=anchor_idx, born_cycle=cycle,
-                      last_cycle=cycle, scene_count=0)
+                      last_cycle=cycle, scene_count=0, role=role, voice=voice)
         self.chars.append(c)
         return c
 
@@ -136,6 +161,8 @@ class Cast:
         for ex in store.exemplars:
             if cid in ex.tags:
                 ex.tags = [t for t in ex.tags if t != cid]
+        if self.pov_id == cid:        # retiring the protagonist -> narrator falls back
+            self.pov_id = None
         return True
 
     def pin(self, cid: int) -> bool:
@@ -150,7 +177,11 @@ class Cast:
         return [asdict(c) for c in self.chars]
 
     def save(self, path: str | Path) -> None:
-        Path(path).write_text(json.dumps(self.to_json(), indent=2))
+        # wrapper shape so the protagonist pointer (pov_id) persists alongside
+        # the cast. ``to_json`` (the /state + /cast response) stays the bare list
+        # the viewer already reads; only the on-disk file gains the wrapper.
+        Path(path).write_text(json.dumps(
+            {"pov_id": self.pov_id, "chars": self.to_json()}, indent=2))
 
     @classmethod
     def load(cls, path: str | Path, decay: float = 0.6,
@@ -161,13 +192,20 @@ class Cast:
         if p.exists():
             text = p.read_text()
             try:
-                recs = json.loads(text) if text.strip() else []
+                data = json.loads(text) if text.strip() else []
             except json.JSONDecodeError:
-                recs = []
+                data = []
+            # tolerate BOTH the new wrapper {"pov_id":..,"chars":[..]} and the
+            # bare list (old ad521bb cast files) -> no migration needed.
+            recs = data["chars"] if isinstance(data, dict) else data
+            pov_id = data.get("pov_id") if isinstance(data, dict) else None
             for rec in recs:
                 try:
                     cast.chars.append(Character(**rec))
                 except TypeError:
                     continue
             cast._next_id = (max((c.id for c in cast.chars), default=-1) + 1)
+            # validate the protagonist pointer AFTER the cast is loaded (a retired
+            # char's stale pointer -> drop it, so the narrator falls back to global)
+            cast.pov_id = pov_id if (pov_id is not None and cast.by_id(pov_id)) else None
         return cast

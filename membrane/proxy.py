@@ -164,13 +164,15 @@ _GENESIS_SYSTEM = (
 _GENESIS_SYSTEM_SEED = (
     "You are the chronicler of this world. First, in a CAST block, name the "
     "characters you are about to introduce -- one line per character, in the form "
-    "'Name — a one-line role' (3 to 6 characters, the ensemble this world is about). "
-    "Begin the block with a line that is only 'cast:'. Then narrate the history as a "
-    "sequence of distinct, substantial SCENES, each one paragraph (3 to 6 sentences), "
-    "advancing the chronicle forward through time: the cosmology and the first land, "
-    "then the life, then the people and the world they make. Separate every scene "
-    "with a line that contains only ---. Write ONLY the cast block then the scenes, "
-    "no headings, no commentary, no recaps.")
+    "'Name — a one-line role — a one-line voice' (3 to 6 characters, the ensemble "
+    "this world is about; the voice is HOW they speak or think, in a phrase). Mark "
+    "exactly ONE character as the protagonist -- the character the reader IS -- by "
+    "prefixing their name with a star (★). Begin the block with a line that is only "
+    "'cast:'. Then narrate the history as a sequence of distinct, substantial SCENES, "
+    "each one paragraph (3 to 6 sentences), advancing the chronicle forward through "
+    "time: the cosmology and the first land, then the life, then the people and the "
+    "world they make. Separate every scene with a line that contains only ---. Write "
+    "ONLY the cast block then the scenes, no headings, no commentary, no recaps.")
 _CHAPTER = 8        # scenes per genesis call (one model call -> ~8 cached feeds)
 _LOW_WATER = 3      # refill the cache (one model call) when fewer scenes remain
 
@@ -201,40 +203,94 @@ def _parse_seed(txt: str):
 
 def _seed_cast(srv, cast_lines: list) -> None:
     """Seed the [[cast]] ledger from a genesis cast block: one batched embed of the
-    'Name — role' lines -> admit each as a character, then retro-tag the whole
-    existing field so the cosmos colors by character immediately. Saves the cast
-    and the field. No-op when the block is empty or the cast is already seeded."""
+    'Name — role — voice' lines -> admit each as a character, then retro-tag the
+    whole existing field so the cosmos colors by character immediately. A line
+    whose name begins with a star (★) marks the PROTAGONIST (the character the
+    reader IS); that character becomes the POV (the narrator speaks from their
+    region, in their voice). Saves the cast and the field. No-op when the block
+    is empty or the cast is already seeded."""
     import numpy as np
     mem = srv.membrane
     cast = mem.cast
     if cast.chars:                       # already seeded -- never re-seed (keep cast short)
         return
-    entries: list = []
+    entries: list = []          # (name, role, voice, is_protagonist)
     for line in cast_lines:
-        m = re.split(r"[—–\-:]\s*", line, maxsplit=1)
+        is_pov = line.lstrip().startswith("★")
+        body = line.lstrip().lstrip("★").strip()
+        # split into Name — role — voice (up to three em-dash parts)
+        m = re.split(r"\s*[—–]\s*", body, maxsplit=2)
         name = m[0].strip().strip("\"'.,;:")
         role = m[1].strip() if len(m) > 1 else ""
+        voice = m[2].strip() if len(m) > 2 else ""
         if name:
-            entries.append((name, role))
+            entries.append((name, role, voice, is_pov))
     if not entries:
         return
-    descs = [f"{n} — {r}" if r else n for n, r in entries]
+    descs = [f"{n} — {r} — {v}" if (r or v) else n for n, r, v, _ in entries]
     try:
         vecs = mem.embedder.embed(descs)
     except Exception as e:
         print(f"[genesis] cast embed failed ({e}); cast unseeded", file=sys.stderr)
         return
     cycle = int(getattr(srv, "consolidation_stats", {}).get("cycles", 0))
-    for (name, _role), v in zip(entries, vecs):
-        cast.admit(name, np.asarray(v, dtype=float), anchor_idx=None, cycle=cycle)
+    pov_char = None
+    for (name, role, voice, is_pov), v in zip(entries, vecs):
+        c = cast.admit(name, np.asarray(v, dtype=float), anchor_idx=None,
+                       cycle=cycle, role=role, voice=voice)
+        if is_pov and c is not None:
+            pov_char = c
+    if pov_char is not None:
+        cast.set_pov(pov_char.id)
     try:
         tagged = cast.retro_tag(mem.store)       # color the existing field at once
         mem.store.save(mem.field_path)
         cast.save(mem.cast_path)
+        pov_name = f" (POV: {pov_char.name})" if pov_char else ""
         print(f"[genesis] cast seeded: {len(cast.chars)} characters, "
-              f"{tagged} scenes tagged", file=sys.stderr)
+              f"{tagged} scenes tagged{pov_name}", file=sys.stderr)
     except Exception as e:
         print(f"[genesis] retro-tag failed ({e})", file=sys.stderr)
+
+
+def _apply_protagonist(mem, spec: str) -> None:
+    """Apply ``--protagonist "Name — role — voice"``: admit the character to the
+    cast if absent (seeded from the embedded 'Name — role — voice' string), set
+    them POV, save. If a character of that name already exists, just (re)set them
+    POV. Retro-tags the existing field so the protagonist colors it immediately."""
+    import numpy as np
+    parts = re.split(r"\s*[—–]\s*", spec.strip(), maxsplit=2)
+    name = parts[0].strip().strip("\"'.,;:")
+    role = parts[1].strip() if len(parts) > 1 else ""
+    voice = parts[2].strip() if len(parts) > 2 else ""
+    if not name:
+        return
+    existing = mem.cast.by_name(name)
+    if existing is None:
+        seed_text = f"{name} — {role} — {voice}" if (role or voice) else name
+        try:
+            v = mem.embedder.embed([seed_text])[0]
+        except Exception as e:
+            print(f"[protagonist] embed failed ({e}); not admitted", file=sys.stderr)
+            return
+        c = mem.cast.admit(name, np.asarray(v, dtype=float), anchor_idx=None,
+                           cycle=0, role=role, voice=voice)
+        if c is None:
+            print(f"[protagonist] cast is full (cap {mem.cast.cap}); {name} not admitted",
+                  file=sys.stderr)
+            return
+        try:
+            mem.cast.retro_tag(mem.store)        # color the existing field at once
+            mem.store.save(mem.field_path)
+        except Exception as e:
+            print(f"[protagonist] retro-tag failed ({e})", file=sys.stderr)
+    else:
+        c = existing
+    mem.cast.set_pov(c.id)
+    mem.cast.save(mem.cast_path)
+    print(f"[protagonist] POV = {c.name}"
+          + (f" — {c.role}" if c.role else "")
+          + (f" — {c.voice}" if c.voice else ""), file=sys.stderr)
 
 
 def _genesis(srv) -> list:
@@ -255,9 +311,10 @@ def _genesis(srv) -> list:
     if seed:
         sys_prompt = _GENESIS_SYSTEM_SEED
         user = (premise + "\n\nBegin the chronicle from the big bang: first give the "
-                "cast block (cast: then one 'Name — role' line per character), then "
-                "narrate the FIRST " + str(_CHAPTER) + " scenes in order, each one "
-                "paragraph, each separated by a line with only ---.")
+                "cast block (cast: then one 'Name — role — voice' line per character, "
+                "marking one protagonist with a leading ★), then narrate the FIRST "
+                + str(_CHAPTER) + " scenes in order, each one paragraph, each separated "
+                "by a line with only ---.")
     elif history:
         user = (premise + "\n\nThe chronicle so far:\n\n" + "\n\n".join(history) +
                 "\n\nContinue the chronicle: narrate the NEXT " + str(_CHAPTER) +
@@ -478,6 +535,28 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self._forward()
 
     # ---- the world premise (--system) + the time-skipper (/warmup) ------------
+    def _narrator_frame(self) -> str:
+        """The narrator frame for the LLM-escalate path: when a POV protagonist is
+        designated, tell the model to narrate in third person from their
+        perspective, in their voice, treating the user's messages as their
+        thoughts. Empty string when no POV (no-op). Inert in --self-author (the
+        escalate path generates from the field there, no backend call)."""
+        mem = self.server.membrane
+        cid = getattr(mem.cast, "pov_id", None)
+        if cid is None:
+            return ""
+        c = mem.cast.by_id(cid)
+        if c is None:
+            return ""
+        bits = [f"You are the narrator of this world. The reader IS {c.name}"]
+        if c.role:
+            bits[0] += f", {c.role}"
+        bits.append("the user's messages are their thoughts and intent")
+        bits.append(f"narrate the world in third person from {c.name}'s perspective")
+        if c.voice:
+            bits.append(f"write in {c.name}'s voice: {c.voice}")
+        return ". ".join(bits) + "."
+
     def _apply_system(self, body: dict) -> None:
         """Inject the opt-in ``--system`` world premise so it actually reaches the
         model. Backend-aware (the two servers take the premise in different shapes):
@@ -499,8 +578,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
         wandering authors *where you've been* (the field's variety). No-op when
         ``--system`` is unset."""
         sp = getattr(self.server, "system_prompt", None)
-        if not sp:
+        frame = self._narrator_frame()
+        if not sp and not frame:
             return
+        if frame:
+            sp = (sp + "\n\n" + frame) if sp else frame
         if getattr(self.server, "anthropic", False):
             if not body.get("system"):
                 body["system"] = sp
@@ -744,18 +826,26 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     mem.cast.save(mem.cast_path)
             elif action == "admit":
                 name = str(body.get("name", "")).strip()
+                role = str(body.get("role", "")).strip()
+                voice = str(body.get("voice", "")).strip()
                 if name:
                     try:
-                        v = mem.embedder.embed([name])[0]
+                        seed_text = f"{name} — {role} — {voice}" if (role or voice) else name
+                        v = mem.embedder.embed([seed_text])[0]
                         c = mem.cast.admit(name, np.asarray(v, dtype=float),
                                            anchor_idx=None,
                                            cycle=int(getattr(srv, "consolidation_stats",
-                                                            {}).get("cycles", 0)))
+                                                            {}).get("cycles", 0)),
+                                           role=role, voice=voice)
                         ok = c is not None
                         if ok:
                             mem.cast.save(mem.cast_path)
                     except Exception:
                         ok = False
+            elif action == "pov":
+                ok = mem.cast.set_pov(cid)
+                if ok:
+                    mem.cast.save(mem.cast_path)
         out = json.dumps({"ok": ok, "cast": mem.cast.to_json()}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -839,10 +929,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
                             ccoords[:, :kk] = (CV - mu)[:, :kk] * 3.0
                     for i, c in enumerate(ccast.chars):
                         cast_view.append({
-                            "id": c.id, "name": c.name,
+                            "id": c.id, "name": c.name, "role": c.role,
+                            "voice": c.voice,
                             "scene_count": int(c.scene_count),
                             "last_cycle": int(c.last_cycle),
                             "anchor_idx": c.anchor_idx, "pinned": bool(c.pinned),
+                            "pov": ccast.pov_id == c.id,
                             "p": [round(float(ccoords[i, 0]), 4),
                                   round(float(ccoords[i, 1]), 4),
                                   round(float(ccoords[i, 2]), 4)]})
@@ -877,6 +969,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                           "entropy_count": ec,
                           "exemplars": pts,
                           "cast": cast_view,
+                          "pov_id": mem.cast.pov_id,
                           "verdicts": tail, "n_verdicts": n_verd}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -1487,6 +1580,12 @@ def main() -> None:
                          "memory (no LLM). 'ngram': the word-trigram fragment (a fresh stochastic "
                          "draw from the field's own stats) -- more generative but incoherent past a "
                          "few tokens (the 'gibberish'). Both keep the re-ask->demote self-correction.")
+    ap.add_argument("--protagonist", default=None,
+                    help="the character the reader IS: 'Name — role — voice' (em-dash "
+                         "separated). Admitted to the cast at boot if absent and set as the "
+                         "POV protagonist -- the narrator speaks from their region of the "
+                         "field, in their voice, and your chat messages render as their "
+                         "thoughts. Optional; off -> no POV (chat unchanged).")
     ap.add_argument("--vague-min-tokens", type=int, default=4,
                     help="learn-time vague filter: skip situations shorter than this many words "
                          "(with no ?/path/digit/identifier/stem) -- stops 'yes'/'ok'/'beep'-class "
@@ -1632,6 +1731,12 @@ def main() -> None:
         nudge_sigma=args.nudge_sigma,
         nudge_seed=args.nudge_seed,
     )
+    # ---- the protagonist: the character the reader IS (--protagonist) ---------
+    # Admit 'Name — role — voice' to the cast if absent, then set them POV. Runs
+    # BEFORE warmup/genesis so retro_tag colors the protagonist into the existing
+    # field at once and the narrator speaks from their region from the first beat.
+    if args.protagonist:
+        _apply_protagonist(membrane, args.protagonist)
     # ---- the feeding boundary + background cell pool (stage 2) ----------------
     # When --cells is off (default), buf/pool stay None and the live single-Membrane
     # path pays only one ``if srv.buffer is not None`` guard per request (never taken).
