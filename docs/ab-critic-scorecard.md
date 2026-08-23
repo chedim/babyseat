@@ -1,5 +1,10 @@
 # A/B critic scorecard — the membrane vs the cosine cache
 
+> **Phase note.** This is a **substrate-phase** experiment (the gate's hit/miss
+> readout). membrane has since become a self-authoring world; the gate/field this
+> measures is now the world's substrate, not the project's identity — see
+> `README.md`. This scorecard stays the dated record of the A/B it was.
+
 **Date:** 2026-08-22
 **Experiment:** `experiments/ab_cache.py` (commit `77275e1`)
 **Corpus:** real mxbai-embed-large D=1024 via Ollama — 15 Couchbase Java (FIELD), 15
