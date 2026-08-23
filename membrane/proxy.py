@@ -285,6 +285,7 @@ _REACTIVE_SYSTEM = (
     "headings, no labels, no --- separators.")
 _CHAPTER = 8        # scenes per genesis call (one model call -> ~8 cached feeds)
 _LOW_WATER = 3      # refill the cache (one model call) when fewer scenes remain
+_EVENTS_CAP = 2000  # /events ring buffer cap (opt-in client action recorder)
 
 
 def _parse_seed(txt: str):
@@ -883,6 +884,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._cast()
         elif self.path in ("/world", "/world/"):
             self._world()
+        elif self.path in ("/events", "/events/"):
+            self._post_events()
         else:
             self._forward()
 
@@ -896,6 +899,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self._state(); return
             if self.path in ("/settings", "/settings/"):
                 self._settings(); return
+            if self.path.split("?")[0] in ("/events", "/events/"):
+                self._get_events(); return
             if self.path.split("?")[0] in ("/neighbors", "/neighbors/"):
                 self._neighbors(); return
             if self.path.split("?")[0] in ("/worlds", "/worlds/"):
@@ -903,6 +908,20 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self._forward()
 
     def do_DELETE(self):
+        if getattr(self.server, "viewer", False) and self.path.split("?")[0] in ("/events", "/events/"):
+            lock = getattr(self.server, "_events_lock", None)
+            if lock is not None:
+                with lock:
+                    self.server._events = []
+            else:
+                self.server._events = []
+            out = json.dumps({"ok": True, "cleared": True}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(out)))
+            self.end_headers()
+            self.wfile.write(out)
+            return
         self._forward()
 
     # ---- the world premise (--system) + the time-skipper (/warmup) ------------
@@ -965,6 +984,59 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def _json_err(self, code: int, msg: str) -> None:
         out = json.dumps({"error": msg}).encode()
         self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    # ---- /events: an opt-in client action recorder (debug) ----------------------
+    # The viewer page, when opened with ?rec=1, captures keyboard/mouse actions and
+    # POSTs them here. The proxy keeps an in-memory ring buffer (cap _EVENTS_CAP)
+    # that a developer reads back via GET /events ON REQUEST (not streamed, not
+    # monitored live). The page redacts password fields so the Ollama token is
+    # never logged. DELETE /events clears the buffer. No field/audit persistence,
+    # no model call -- pure debug scratch.
+    def _post_events(self) -> None:
+        srv = self.server
+        try:
+            n = int(self.headers.get("Content-Length", "0") or "0")
+            raw = self.rfile.read(n).decode("utf-8", "replace") if n else "{}"
+            body = json.loads(raw) if raw.strip() else {}
+        except Exception:
+            self._json_err(400, "events body is not JSON"); return
+        evs = body.get("events") if isinstance(body, dict) else None
+        if not isinstance(evs, list):
+            self._json_err(400, "events must be {events: [...]}"); return
+        lock = getattr(srv, "_events_lock", None)
+        buf = getattr(srv, "_events", None)
+        if buf is None or lock is None:
+            self._json_err(503, "event recorder not initialized"); return
+        with lock:
+            buf.extend(evs)
+            if len(buf) > _EVENTS_CAP:
+                del buf[: len(buf) - _EVENTS_CAP]
+        out = json.dumps({"ok": True, "buffered": len(evs),
+                          "total": len(buf)}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    def _get_events(self) -> None:
+        srv = self.server
+        lock = getattr(srv, "_events_lock", None)
+        buf = getattr(srv, "_events", None)
+        evs = []
+        if lock is not None and buf is not None:
+            with lock:
+                evs = list(buf)
+        # ?clear=1 drains the buffer after reading (a one-shot "read-and-reset")
+        if (self.path.split("?")[1:2] or [""])[0].split("&").count("clear=1") and lock is not None and buf is not None:
+            with lock:
+                buf.clear()
+        out = json.dumps({"events": evs, "count": len(evs)}).encode()
+        self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(out)))
         self.end_headers()
@@ -2486,6 +2558,8 @@ def main() -> None:
     srv.story_cache = []                                             # the genesis cache: pending chronicle scenes (one LLM chapter -> ~8 feeds)
     srv.cache_depth = 0
     srv.feed_lock = threading.Lock()                                   # serializes feeders (HTTP /feed + the consolidator)
+    srv._events = []                                                   # opt-in client action recorder buffer (?rec=1 viewer)
+    srv._events_lock = threading.Lock()                                # guards _events (POST/GET/DELETE from the page)
     srv.feed_rate = max(0.0, min(32.0, float(getattr(args, "feed_rate", 1.0))))  # feeds/cycle (continuous; the ENTROPY dial)
     srv.cpu_target = max(0.0, min(1.0, float(getattr(args, "cpu_target", 0.2))))  # target CPU fraction for digestion
     srv.consolidating = bool(getattr(args, "consolidate", False))       # arm the world's own clock at boot

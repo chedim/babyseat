@@ -964,7 +964,7 @@ async function liveTick(){
 // cycle, reading feed_rate / cpu_target from the server each cycle.
 function setPlaying(on){
   consolidating=on;
-  syncPlay();
+  syncPlay(); syncPp(); syncSpeed();   // mirror into ALL three control groups: menu + #pp + speeds
   userDialTs=Date.now();        // grace: poll won't revert the play/pause within ~700ms
   queuePersist();
 }
@@ -1246,6 +1246,46 @@ function loop(){
   renderer.render(scene,camera);renderCastMarks();requestAnimationFrame(loop);}
 requestAnimationFrame(loop);
 poll();   // first fetch after all dial/mode refs are defined
+
+// ---- opt-in client action recorder (?rec=1) --------------------------------
+// OFF unless the page is opened with ?rec=1. Captures keyboard/mouse actions
+// into a buffer POSTed to /events; a developer reads them back via GET /events
+// ON REQUEST (not streamed, not watched live). Password fields are redacted so
+// the Ollama token is never logged. No field/audit write, no model call.
+(function eventRecorder(){
+  if(!new URLSearchParams(location.search).has("rec")) return;
+  const buf=[], MAX=400, FLUSH_MS=4000, FLUSH_AT=50;
+  let lastMove=0;
+  const dot=document.createElement("div");
+  dot.textContent="● REC";
+  dot.style.cssText="position:fixed;top:6px;right:8px;z-index:9999;background:#200;color:#f55;font:bold 11px/1.4 ui-monospace,monospace;padding:3px 7px;border-radius:5px;border:1px solid #f55;pointer-events:none";
+  document.body.appendChild(dot);
+  function tgt(e){
+    const el=e.target;
+    if(!el) return "";
+    if(el.id) return "#"+el.id;
+    if(el.classList&&el.classList.length) return el.tagName.toLowerCase()+"."+el.classList[0];
+    return el.tagName.toLowerCase()+(el.name?("@"+el.name):"");
+  }
+  function redact(e){
+    const el=e.target;
+    return (el && el.type==="password") ? "***" : null;   // null = "log normally"
+  }
+  function push(ev){ buf.push(Object.assign({t:Date.now()},ev)); if(buf.length>=FLUSH_AT) flush(); }
+  function flush(){
+    if(!buf.length) return;
+    const batch=buf.splice(0,buf.length);
+    fetch("/events",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({events:batch})}).catch(()=>{});
+  }
+  addEventListener("keydown",e=>{const r=redact(e);push({type:"keydown",tgt:tgt(e),key:r==="***"?"***":e.key,code:e.code,mod:(e.shiftKey?"S":"")+(e.ctrlKey?"C":"")+(e.metaKey?"M":"")+(e.altKey?"A":"")})},true);
+  addEventListener("click",e=>push({type:"click",tgt:tgt(e),btn:e.button,x:Math.round(e.clientX),y:Math.round(e.clientY)}),true);
+  addEventListener("mousemove",e=>{const now=Date.now();if(now-lastMove<250)return;lastMove=now;push({type:"move",x:Math.round(e.clientX),y:Math.round(e.clientY)})},true);
+  addEventListener("wheel",e=>push({type:"wheel",tgt:tgt(e),dx:e.deltaX,dy:e.deltaY}),true);
+  addEventListener("change",e=>{const r=redact(e);push({type:"change",tgt:tgt(e),val:r==="***"?"***":(e.target&&(e.target.value||"").slice(0,40))})},true);
+  setInterval(flush,FLUSH_MS);
+  addEventListener("beforeunload",flush);
+  addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden")flush();});
+})();
 </script>
 </body>
 </html>
