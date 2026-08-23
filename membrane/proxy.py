@@ -158,15 +158,91 @@ _GENESIS_SYSTEM = (
     "as a coherent piece of the one ongoing story. Separate every scene with a line "
     "that contains only ---. Write ONLY the scenes separated by ---, no headings, no "
     "labels, no commentary, no recaps.")
+# The SEED system prompt (first call only): also name the cast before the scenes.
+# A short, bounded ensemble (the [[cast]] ledger) is seeded once from this block;
+# thereafter the cast grows only by manual admission, so it stays short.
+_GENESIS_SYSTEM_SEED = (
+    "You are the chronicler of this world. First, in a CAST block, name the "
+    "characters you are about to introduce -- one line per character, in the form "
+    "'Name — a one-line role' (3 to 6 characters, the ensemble this world is about). "
+    "Begin the block with a line that is only 'cast:'. Then narrate the history as a "
+    "sequence of distinct, substantial SCENES, each one paragraph (3 to 6 sentences), "
+    "advancing the chronicle forward through time: the cosmology and the first land, "
+    "then the life, then the people and the world they make. Separate every scene "
+    "with a line that contains only ---. Write ONLY the cast block then the scenes, "
+    "no headings, no commentary, no recaps.")
 _CHAPTER = 8        # scenes per genesis call (one model call -> ~8 cached feeds)
 _LOW_WATER = 3      # refill the cache (one model call) when fewer scenes remain
+
+
+def _parse_seed(txt: str):
+    """Split a SEED genesis response into (cast_lines, scenes). The cast block is
+    the chunk before the first ``---`` (introduced by a ``cast:`` line); the scenes
+    are the remaining ``---``-separated chunks. Returns ([], scenes) when the LLM
+    omitted the cast block (a graceful fallback -- seeding just does nothing)."""
+    parts = re.split(r"(?m)^\s*-{2,}\s*$", txt)
+    first = parts[0] if parts else ""
+    if not re.search(r"(?im)^\s*cast\s*:", first):
+        return [], [s.strip() for s in parts if s.strip()]
+    seen_marker = False
+    cast_lines: list = []
+    for line in first.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        if re.match(r"(?im)^\s*cast\s*:\s*$", s):
+            seen_marker = True
+            continue
+        if seen_marker:
+            cast_lines.append(s)
+    scenes = [s.strip() for s in parts[1:] if s.strip()]
+    return cast_lines, scenes
+
+
+def _seed_cast(srv, cast_lines: list) -> None:
+    """Seed the [[cast]] ledger from a genesis cast block: one batched embed of the
+    'Name — role' lines -> admit each as a character, then retro-tag the whole
+    existing field so the cosmos colors by character immediately. Saves the cast
+    and the field. No-op when the block is empty or the cast is already seeded."""
+    import numpy as np
+    mem = srv.membrane
+    cast = mem.cast
+    if cast.chars:                       # already seeded -- never re-seed (keep cast short)
+        return
+    entries: list = []
+    for line in cast_lines:
+        m = re.split(r"[—–\-:]\s*", line, maxsplit=1)
+        name = m[0].strip().strip("\"'.,;:")
+        role = m[1].strip() if len(m) > 1 else ""
+        if name:
+            entries.append((name, role))
+    if not entries:
+        return
+    descs = [f"{n} — {r}" if r else n for n, r in entries]
+    try:
+        vecs = mem.embedder.embed(descs)
+    except Exception as e:
+        print(f"[genesis] cast embed failed ({e}); cast unseeded", file=sys.stderr)
+        return
+    cycle = int(getattr(srv, "consolidation_stats", {}).get("cycles", 0))
+    for (name, _role), v in zip(entries, vecs):
+        cast.admit(name, np.asarray(v, dtype=float), anchor_idx=None, cycle=cycle)
+    try:
+        tagged = cast.retro_tag(mem.store)       # color the existing field at once
+        mem.store.save(mem.field_path)
+        cast.save(mem.cast_path)
+        print(f"[genesis] cast seeded: {len(cast.chars)} characters, "
+              f"{tagged} scenes tagged", file=sys.stderr)
+    except Exception as e:
+        print(f"[genesis] retro-tag failed ({e})", file=sys.stderr)
 
 
 def _genesis(srv) -> list:
     """ONE model call: narrate the next chapter of the world's chronicle (several
     substantial scenes separated by ``---``) and return them as a list. Continues
     the cohesive story from the last scenes absorbed (``srv.story_history``); the
-    first call begins "from the big bang". Returns ``[]`` on any failure (the
+    first call begins "from the big bang" and ALSO seeds the [[cast]] ledger (the
+    SEED prompt asks for a cast block). Returns ``[]`` on any failure (the
     caller skips that feed). Temperature is the fixed cohesive value on ``srv``."""
     backend = srv.backend
     model = getattr(srv, "warmup_model", None)
@@ -174,16 +250,26 @@ def _genesis(srv) -> list:
     if not model or not backend or not premise:
         return []
     history = list(getattr(srv, "story_history", []))[-6:]
-    if history:
+    # the SEED call: first chapter + an empty cast -> name the ensemble once
+    seed = (not history) and not srv.membrane.cast.chars
+    if seed:
+        sys_prompt = _GENESIS_SYSTEM_SEED
+        user = (premise + "\n\nBegin the chronicle from the big bang: first give the "
+                "cast block (cast: then one 'Name — role' line per character), then "
+                "narrate the FIRST " + str(_CHAPTER) + " scenes in order, each one "
+                "paragraph, each separated by a line with only ---.")
+    elif history:
         user = (premise + "\n\nThe chronicle so far:\n\n" + "\n\n".join(history) +
                 "\n\nContinue the chronicle: narrate the NEXT " + str(_CHAPTER) +
                 " scenes in order, each one paragraph, each separated by a line "
                 "with only ---.")
+        sys_prompt = _GENESIS_SYSTEM
     else:
         user = (premise + "\n\nBegin the chronicle from the big bang: narrate the "
                 "FIRST " + str(_CHAPTER) + " scenes in order, each one paragraph, "
                 "each separated by a line with only ---.")
-    messages = [{"role": "system", "content": _GENESIS_SYSTEM},
+        sys_prompt = _GENESIS_SYSTEM
+    messages = [{"role": "system", "content": sys_prompt},
                 {"role": "user", "content": user}]
     temperature = float(getattr(srv, "story_temperature", 0.7))
     body = {"model": model, "stream": False, "temperature": temperature,
@@ -205,9 +291,13 @@ def _genesis(srv) -> list:
             c = msg.get("content")
             if isinstance(c, str):
                 txt = c
-    # split on lines that are only dashes (the scene delimiter); keep non-empty scenes
-    scenes = re.split(r"(?m)^\s*-{2,}\s*$", txt)
-    return [s.strip() for s in scenes if s.strip()]
+    if seed:
+        cast_lines, scenes = _parse_seed(txt)
+        if cast_lines:
+            _seed_cast(srv, cast_lines)
+    else:
+        scenes = [s.strip() for s in re.split(r"(?m)^\s*-{2,}\s*$", txt) if s.strip()]
+    return scenes
 
 
 def _feed_count(rate: float) -> int:
@@ -312,6 +402,7 @@ def _run_feeds(srv, mem, feeds: int) -> dict:
     if not premise or feeds <= 0:
         return stats
     ceiling = float(getattr(srv, "entropy_ceiling", 0.05))   # inert for growth (kept)
+    cycle = int(getattr(srv, "consolidation_stats", {}).get("cycles", 0))
     stories: list = []
     with srv.feed_lock:
         history = list(getattr(srv, "story_history", []))
@@ -331,7 +422,7 @@ def _run_feeds(srv, mem, feeds: int) -> dict:
                     stories.append({"seed": "", "text": "", "result": "no-story"})
                     break
             passage = cache.pop(0)
-            r = mem.feed(passage, ceiling)     # raw embed + absorb (no nudging)
+            r = mem.feed(passage, ceiling, cycle=cycle)     # raw embed + absorb (no nudging)
             stats["fed"] += int(r.get("fed", 0))
             if r.get("fed"):
                 res = "fed"
@@ -368,6 +459,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._live()
         elif self.path in ("/feed", "/feed/"):
             self._feed()
+        elif self.path in ("/cast", "/cast/"):
+            self._cast()
         else:
             self._forward()
 
@@ -622,6 +715,54 @@ class ProxyHandler(BaseHTTPRequestHandler):
     # JSON snapshot read IN-PROCESS from the live store (+ the audit tail). The gate
     # path (_chat/_messages/_forward) is untouched -- the page chats through the real
     # /api/chat. The page is same-origin, so no CORS, no key handling, no second server.
+    def _cast(self) -> None:
+        """Manage the [[cast]] ledger from the menu: retire / pin / admit. Retire
+        removes a character AND strips its id from every exemplar's tags (its stars
+        revert to neutral). Pin toggles a character's protection. Admit (manual)
+        names a new character. Serialized on ``feed_lock`` so it can't race a feed."""
+        import numpy as np
+        srv = self.server
+        mem = srv.membrane
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length)
+        try:
+            body = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            body = {}
+        action = str(body.get("action", ""))
+        cid = int(body.get("id", -1))
+        ok = False
+        with srv.feed_lock:
+            if action == "retire":
+                ok = mem.cast.retire(cid, mem.store)
+                if ok:
+                    mem.store.save(mem.field_path)
+                    mem.cast.save(mem.cast_path)
+            elif action == "pin":
+                ok = mem.cast.pin(cid)
+                if ok:
+                    mem.cast.save(mem.cast_path)
+            elif action == "admit":
+                name = str(body.get("name", "")).strip()
+                if name:
+                    try:
+                        v = mem.embedder.embed([name])[0]
+                        c = mem.cast.admit(name, np.asarray(v, dtype=float),
+                                           anchor_idx=None,
+                                           cycle=int(getattr(srv, "consolidation_stats",
+                                                            {}).get("cycles", 0)))
+                        ok = c is not None
+                        if ok:
+                            mem.cast.save(mem.cast_path)
+                    except Exception:
+                        ok = False
+        out = json.dumps({"ok": ok, "cast": mem.cast.to_json()}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
     def _serve_viewer(self):
         # serve the viewer, but never a stale one: re-read when the file's mtime
         # advances (so editing viewer.html while the proxy runs is picked up without
@@ -658,6 +799,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         n = len(exs)
         srv = self.server
         pts = []
+        cast_view: list = []
         if n:
             V = np.array([np.asarray(e.vec, dtype=float) for e in exs])
             mu = V.mean(0)
@@ -680,7 +822,32 @@ class ProxyHandler(BaseHTTPRequestHandler):
                                   round(float(coords[i, 2]), 4)],
                             "safe": bool(e.safe),
                             "reask": int(getattr(e, "reask_count", 0)),
-                            "contest": int(getattr(e, "contest_count", 0))})
+                            "contest": int(getattr(e, "contest_count", 0)),
+                            "tags": list(getattr(e, "tags", []))})
+            # ---- the cast: project each character's state_vec into the same 3D
+            # basis so the viewer can mark each character's "where" in the cosmos
+            ccast = mem.cast
+            if ccast.chars:
+                try:
+                    CV = np.array([np.asarray(c.state_vec, dtype=float)
+                                   for c in ccast.chars])
+                    if basis is not None:
+                        ccoords = (CV - mu) @ basis.T
+                    else:
+                        kk = min(3, CV.shape[1]); ccoords = np.zeros((len(ccast.chars), 3))
+                        if kk:
+                            ccoords[:, :kk] = (CV - mu)[:, :kk] * 3.0
+                    for i, c in enumerate(ccast.chars):
+                        cast_view.append({
+                            "id": c.id, "name": c.name,
+                            "scene_count": int(c.scene_count),
+                            "last_cycle": int(c.last_cycle),
+                            "anchor_idx": c.anchor_idx, "pinned": bool(c.pinned),
+                            "p": [round(float(ccoords[i, 0]), 4),
+                                  round(float(ccoords[i, 1]), 4),
+                                  round(float(ccoords[i, 2]), 4)]})
+                except Exception:
+                    pass
         n_safe = sum(1 for e in exs if e.safe)
         theo = len(exs[0].vec) if exs else 1024
         ceiling = float(getattr(self.server, "entropy_ceiling", 0.01))
@@ -709,6 +876,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                           "cells_level": round(float(cl), 2),
                           "entropy_count": ec,
                           "exemplars": pts,
+                          "cast": cast_view,
                           "verdicts": tail, "n_verdicts": n_verd}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")

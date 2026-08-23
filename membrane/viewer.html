@@ -18,7 +18,10 @@
   }
   *{box-sizing:border-box; image-rendering:pixelated}
   html,body{margin:0;height:100%;overflow:hidden;background:#05070a;color:#fff;font-family:var(--vt)}
-  #c{position:fixed;inset:0;z-index:0}
+  /* the cosmos is the WORLD MAP (right), chat is the main feature (left) */
+  #c{position:fixed;right:10px;top:10px;width:calc(34vw - 14px);height:calc(100vh - 20px);
+    z-index:5;border:2px solid var(--ink);
+    box-shadow:inset 2px 2px 0 rgba(0,0,0,.5),4px 4px 0 rgba(0,0,0,.45);background:#05070a}
 
   /* ---- MC bevel helpers --------------------------------------------------- */
   .mc-btn{font-family:var(--px);font-size:12px;color:#fff;text-shadow:2px 2px var(--ink);
@@ -31,8 +34,8 @@
   .mc-btn.on{background:var(--green);box-shadow:inset 2px 2px 0 var(--green-hi),inset -2px -2px 0 #2e6026}
   .mc-btn.on:hover{background:#6cd95a}
 
-  /* ---- top-left info ------------------------------------------------------ */
-  .mc-info{position:fixed;top:10px;left:10px;z-index:20;display:flex;flex-direction:column;gap:3px;
+  /* ---- top-left info (now the chat column header, horizontal) ------------ */
+  .mc-info{display:flex;flex-direction:row;align-items:center;gap:12px;flex-wrap:wrap;
     background:rgba(0,0,0,.55);border:2px solid var(--ink);
     box-shadow:inset 2px 2px 0 rgba(0,0,0,.4);padding:6px 10px}
   .info-name{font-family:var(--px);font-size:12px;color:#fff;text-shadow:2px 2px #000;letter-spacing:1px}
@@ -43,9 +46,12 @@
     text-shadow:2px 2px #000;white-space:nowrap}
   .info-date .ph{font-size:20px;vertical-align:-2px;margin-right:4px}
 
-  /* ---- bottom cluster: level / hearts / xp / hotbar ----------------------- */
-  .hud-bottom{position:fixed;bottom:10px;left:50%;transform:translateX(-50%);z-index:20;
-    display:flex;flex-direction:column;align-items:center;gap:4px}
+  /* ---- bottom cluster: demoted to a compact strip inside the chat column - */
+  .hud-bottom{display:flex;flex-direction:column;align-items:center;gap:4px;
+    padding:4px;background:rgba(0,0,0,.42);border:2px solid var(--ink);
+    box-shadow:inset 2px 2px 0 rgba(0,0,0,.4);overflow-x:auto}
+  /* the gamey hearts/xp are hidden — this is a text RPG, not minecraft */
+  .hud-bottom .xplvl,.hud-bottom .hearts,.hud-bottom .xp{display:none}
   .xplvl{font-family:var(--px);font-size:14px;color:#7cff5a;text-shadow:2px 2px var(--ink)}
   .hearts{display:flex;gap:1px}
   .heart{position:relative;display:inline-block;width:16px;height:16px;
@@ -69,13 +75,13 @@
   #slot-menu{cursor:pointer}
   #slot-menu:hover{background:var(--face-hi)}
 
-  /* ---- chat (bottom-left) ------------------------------------------------ */
-  #chat{position:fixed;left:10px;bottom:10px;width:380px;max-width:50vw;
+  /* ---- chat = the MAIN feature (left column, full height) ---------------- */
+  #chat{position:fixed;left:10px;top:10px;width:calc(62vw - 16px);height:calc(100vh - 20px);
     display:flex;flex-direction:column;gap:6px;z-index:20}
-  #chat .msgs{min-height:120px;max-height:34vh;overflow-y:auto;
+  #chat .msgs{flex:1;min-height:0;overflow-y:auto;
     background:rgba(0,0,0,.6);border:2px solid var(--ink);
-    box-shadow:inset 2px 2px 0 rgba(0,0,0,.4);padding:6px;
-    font-family:var(--vt);font-size:19px;line-height:1.35}
+    box-shadow:inset 2px 2px 0 rgba(0,0,0,.4);padding:8px;
+    font-family:var(--vt);font-size:21px;line-height:1.4}
   #chat .msgs::-webkit-scrollbar{width:8px}
   #chat .msgs::-webkit-scrollbar-thumb{background:var(--dark)}
   .m{padding:2px 4px;white-space:pre-wrap;word-wrap:break-word}
@@ -93,7 +99,7 @@
   #chat button:hover{background:var(--green-hi)}
 
   /* ---- the neighborhood panel (explore the field's association graph) ------ */
-  #hood{position:fixed;right:10px;top:10px;width:340px;max-width:42vw;max-height:84vh;
+  #hood{position:fixed;right:10px;bottom:10px;width:340px;max-width:42vw;max-height:46vh;
     display:flex;flex-direction:column;z-index:20;background:rgba(0,0,0,.62);
     border:2px solid var(--ink);box-shadow:inset 2px 2px 0 rgba(0,0,0,.4);font-family:var(--vt)}
   #hood.hidden{display:none}
@@ -203,6 +209,28 @@
   .con-scene.massaged .meta{color:var(--purple)}
   .con-scene.fed .meta{color:var(--green-hi)}
 
+  /* ---- the cast: named pins on the world map + roster in the menu --------- */
+  #cast-marks{position:fixed;inset:0;pointer-events:none;z-index:8;overflow:hidden}
+  .cast-pin{position:absolute;transform:translate(-50%,-100%);text-align:center;
+    font-family:var(--vt);font-size:15px;color:#fff;text-shadow:1px 1px #000;white-space:nowrap}
+  .cast-pin .dot{display:inline-block;width:9px;height:9px;border-radius:50%;
+    box-shadow:0 0 5px currentColor,1px 1px #000}
+  .cast-pin .nm{background:rgba(0,0,0,.62);padding:0 5px;border:1px solid #000}
+  .roster{display:flex;flex-direction:column;gap:4px}
+  .roster-row{display:flex;align-items:center;gap:8px;padding:5px 7px;
+    background:rgba(0,0,0,.06);border:1px solid rgba(0,0,0,.18);cursor:pointer}
+  .roster-row:hover{background:rgba(0,0,0,.13)}
+  .roster-row .rdot{width:11px;height:11px;border-radius:50%;box-shadow:1px 1px #000;flex:none}
+  .roster-row .rnm{font-family:var(--vt);font-size:19px;color:var(--ink);flex:1;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .roster-row .rmeta{font-family:var(--px);font-size:9px;color:#666}
+  .roster-row .rbtn{font-family:var(--px);font-size:9px;color:#fff;background:var(--face);
+    border:2px solid var(--ink);box-shadow:inset 1px 1px 0 var(--light),inset -1px -1px 0 var(--dark);
+    padding:4px 6px;cursor:pointer;letter-spacing:1px}
+  .roster-row .rbtn:hover{background:var(--face-hi)}
+  .roster-row .rbtn.pin.on{background:var(--gold);color:var(--ink)}
+  .roster-empty{font-family:var(--vt);font-size:18px;color:#666;padding:6px}
+
   .hint{position:fixed;top:8px;left:50%;transform:translateX(-50%);
     font-family:var(--vt);font-size:16px;color:#c6c6c6;text-shadow:1px 1px #000;z-index:20}
 </style>
@@ -210,19 +238,41 @@
 <body>
 <canvas id="c"></canvas>
 
-<!-- top-left: the world -->
-<div class="mc-info">
-  <span class="info-name">THE WORLD</span>
-  <span class="info-date" id="wdate"><span class="ph">&#x1F311;</span>Day 1 · 00:00 · cycle 0</span>
-  <span class="info-lvl">Lv <b id="cl">0</b></span>
-  <span class="info-status" id="wait">waiting for the proxy…</span>
-</div>
+<!-- the world map is the cosmos (right); the cast's named pins overlay it -->
+<div id="cast-marks"></div>
 
-<div class="hint">drag to orbit · scroll to zoom · esc for menu · backtick for the story console</div>
+<div class="hint">drag the map to orbit · scroll to zoom · esc menu · H neighbours · backtick story</div>
 
-<!-- chat -->
+<!-- chat = the MAIN feature (a text RPG) -->
 <div id="chat">
+  <div class="mc-info">
+    <span class="info-name">THE WORLD</span>
+    <span class="info-date" id="wdate"><span class="ph">&#x1F311;</span>Day 1 · 00:00 · cycle 0</span>
+    <span class="info-lvl">Lv <b id="cl">0</b></span>
+    <span class="info-status" id="wait">waiting for the proxy…</span>
+  </div>
   <div class="msgs" id="msgs"></div>
+  <div class="hud-bottom">
+    <div class="xplvl" id="xplvl">0</div>
+    <div class="hearts" id="hearts">
+      <span class="heart">&#x2665;</span><span class="heart">&#x2665;</span><span class="heart">&#x2665;</span>
+      <span class="heart">&#x2665;</span><span class="heart">&#x2665;</span><span class="heart">&#x2665;</span>
+      <span class="heart">&#x2665;</span><span class="heart">&#x2665;</span><span class="heart">&#x2665;</span>
+      <span class="heart">&#x2665;</span>
+    </div>
+    <div class="xp"><i id="xpf"></i></div>
+    <div class="hotbar">
+      <div class="slot" id="slot-menu"><span class="hk">1</span><span class="ico">&#x2699;</span><span class="sl">menu</span></div>
+      <div class="slot stat"><span class="ico" id="hb-ceil">5%</span><span class="sl">ceil</span></div>
+      <div class="slot stat"><span class="ico" id="hb-wlvl">0%</span><span class="sl">level</span></div>
+      <div class="slot stat"><span class="ico" id="hb-lvl">0</span><span class="sl">rank</span></div>
+      <div class="slot stat"><span class="ico" id="hb-n">0</span><span class="sl">cells</span></div>
+      <div class="slot stat"><span class="ico" id="hb-fe">0</span><span class="sl">fe</span></div>
+      <div class="slot stat"><span class="ico" id="hb-var">0/0</span><span class="sl">var</span></div>
+      <div class="slot stat"><span class="ico" id="hb-safe">0</span><span class="sl">safe</span></div>
+      <div class="slot stat"><span class="ico" id="hb-entropy">1.0</span><span class="sl">rate</span></div>
+    </div>
+  </div>
   <div class="irow">
     <select id="model" title="model for escalations"></select>
     <input id="cin" placeholder="speak to the cell…" autocomplete="off">
@@ -234,29 +284,6 @@
 <div id="hood" class="hidden">
   <div class="hhead">NEIGHBORHOOD · <b id="hood-anchor">—</b><button id="hood-close" title="hide (H)">✕</button></div>
   <div id="hood-body"></div>
-</div>
-
-<!-- bottom cluster: xp level, hearts, xp bar, hotbar -->
-<div class="hud-bottom">
-  <div class="xplvl" id="xplvl">0</div>
-  <div class="hearts" id="hearts">
-    <span class="heart">&#x2665;</span><span class="heart">&#x2665;</span><span class="heart">&#x2665;</span>
-    <span class="heart">&#x2665;</span><span class="heart">&#x2665;</span><span class="heart">&#x2665;</span>
-    <span class="heart">&#x2665;</span><span class="heart">&#x2665;</span><span class="heart">&#x2665;</span>
-    <span class="heart">&#x2665;</span>
-  </div>
-  <div class="xp"><i id="xpf"></i></div>
-  <div class="hotbar">
-    <div class="slot" id="slot-menu"><span class="hk">1</span><span class="ico">&#x2699;</span><span class="sl">menu</span></div>
-    <div class="slot stat"><span class="ico" id="hb-ceil">5%</span><span class="sl">ceil</span></div>
-    <div class="slot stat"><span class="ico" id="hb-wlvl">0%</span><span class="sl">level</span></div>
-    <div class="slot stat"><span class="ico" id="hb-lvl">0</span><span class="sl">rank</span></div>
-    <div class="slot stat"><span class="ico" id="hb-n">0</span><span class="sl">cells</span></div>
-    <div class="slot stat"><span class="ico" id="hb-fe">0</span><span class="sl">fe</span></div>
-    <div class="slot stat"><span class="ico" id="hb-var">0/0</span><span class="sl">var</span></div>
-    <div class="slot stat"><span class="ico" id="hb-safe">0</span><span class="sl">safe</span></div>
-    <div class="slot stat"><span class="ico" id="hb-entropy">1.0</span><span class="sl">rate</span></div>
-  </div>
 </div>
 
 <!-- THE MENU — all world controls -->
@@ -324,6 +351,9 @@
       <button id="skip" class="mc-btn" title="let the world live offscreen (one palette call, then no-model absorptions)">&#x23ED; SKIP</button>
     </div>
 
+    <div class="menu-section">CAST — who is in the world (click a name to find them on the map)</div>
+    <div id="cast-roster" class="roster"><div class="roster-empty">no cast yet — the world seeds one on its first chapter</div></div>
+
     <div class="menu-section">BESTIARY</div>
     <div class="bestiary">
       <div class="d"><span class="dot dg"></span> safe exemplar</div>
@@ -372,7 +402,8 @@ const camera=new THREE.PerspectiveCamera(55,1,0.1,200);
 let theta=0.6,phi=1.0,rad=16,tgt=new THREE.Vector3(0,0,0);
 function cam(){const p=new THREE.Vector3(rad*Math.sin(phi)*Math.sin(theta),
   rad*Math.cos(phi),rad*Math.sin(phi)*Math.cos(theta));camera.position.copy(p).add(tgt);camera.lookAt(tgt);}
-function resize(){const w=innerWidth,h=innerHeight;renderer.setSize(w,h);camera.aspect=w/h;camera.updateProjectionMatrix();}
+function resize(){const el=document.getElementById("c");const w=el.clientWidth||innerWidth,h=el.clientHeight||innerHeight;
+  renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
 addEventListener("resize",resize);resize();cam();
 function sprite(){const c=document.createElement("canvas");c.width=c.height=64;const g=c.getContext("2d");
   const grd=g.createRadialGradient(32,32,0,32,32,32);grd.addColorStop(0,"rgba(255,255,255,1)");
@@ -380,12 +411,23 @@ function sprite(){const c=document.createElement("canvas");c.width=c.height=64;c
   g.fillStyle=grd;g.fillRect(0,0,64,64);return new THREE.CanvasTexture(c);}
 const tex=sprite();
 let cloud=null;
+// the cast palette: stars color by character (exemplar.tags[0]); untagged stars
+// stay green/red by safe. demoted tagged stars dim, so a fallen character reads
+// as a faded cluster, not a missing one.
+const CAST_COLORS=[[0.36,0.83,0.48],[0.94,0.35,0.29],[0.42,0.69,0.88],[0.90,0.76,0.29],
+ [0.69,0.45,0.85],[0.29,0.80,0.80],[0.96,0.55,0.40],[0.50,0.90,0.55],
+ [0.85,0.55,0.80],[0.66,0.66,0.70],[0.55,0.80,0.95],[0.95,0.75,0.45]];
+function castColor(id){return CAST_COLORS[(id|0)%CAST_COLORS.length];}
+function castRGB(id){const c=castColor(id);return "rgb("+(c[0]*255|0)+","+(c[1]*255|0)+","+(c[2]*255|0)+")";}
 function renderCloud(exs){
   if(cloud){scene.remove(cloud);cloud.geometry.dispose();cloud.material.dispose();}
   if(!exs.length){cloud=null;return;}
   const pos=new Float32Array(exs.length*3),col=new Float32Array(exs.length*3);
   for(let i=0;i<exs.length;i++){const p=exs[i].p;pos[i*3]=p[0];pos[i*3+1]=p[1];pos[i*3+2]=p[2];
-    const c=exs[i].safe?[0.36,0.83,0.48]:[0.94,0.35,0.29];col[i*3]=c[0];col[i*3+1]=c[1];col[i*3+2]=c[2];}
+    let c;const tg=exs[i].tags;
+    if(tg&&tg.length){c=castColor(tg[0]);if(!exs[i].safe)c=[c[0]*0.5,c[1]*0.5,c[2]*0.5];}
+    else{c=exs[i].safe?[0.36,0.83,0.48]:[0.94,0.35,0.29];}
+    col[i*3]=c[0];col[i*3+1]=c[1];col[i*3+2]=c[2];}
   const g=new THREE.BufferGeometry();
   g.setAttribute("position",new THREE.BufferAttribute(pos,3));
   g.setAttribute("color",new THREE.BufferAttribute(col,3));
@@ -507,9 +549,62 @@ async function poll(){
         list.appendChild(d);
       });
     }
+    // ---- the cast: named walking-regions of the field ------------------------
+    castList=j.cast||[]; renderRoster();
   }catch(e){const w=document.getElementById("wait");w.textContent="proxy unreachable — start it with --viewer";w.style.color="var(--red)";}
 }
 function escapeHtml(s){return s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+
+// ---- the cast: named pins on the world map + the roster in the menu ----------
+let castList=[];
+const castMarksEl=document.getElementById("cast-marks");
+function renderCastMarks(){
+  if(!castList.length){if(castMarksEl.childElementCount)castMarksEl.innerHTML="";return;}
+  while(castMarksEl.childElementCount<castList.length){
+    const d=document.createElement("div");d.className="cast-pin";
+    d.innerHTML='<span class="dot"></span><span class="nm"></span>';
+    castMarksEl.appendChild(d);
+  }
+  while(castMarksEl.childElementCount>castList.length) castMarksEl.removeChild(castMarksEl.lastChild);
+  const el=renderer.domElement;const rect=el.getBoundingClientRect();
+  for(let i=0;i<castList.length;i++){
+    const ch=castList[i];const pin=castMarksEl.children[i];
+    const v=new THREE.Vector3(ch.p[0],ch.p[1],ch.p[2]).project(camera);
+    if(v.z>1){pin.style.display="none";continue;}
+    const x=(v.x*0.5+0.5)*rect.width+rect.left;
+    const y=(-v.y*0.5+0.5)*rect.height+rect.top;
+    pin.style.display="block";pin.style.left=x+"px";pin.style.top=y+"px";
+    const rgb=castRGB(ch.id);
+    const dot=pin.querySelector(".dot");dot.style.background=rgb;dot.style.color=rgb;
+    pin.querySelector(".nm").textContent=ch.name+(ch.pinned?" ★":"");
+  }
+}
+function renderRoster(){
+  const el=document.getElementById("cast-roster");if(!el)return;
+  if(!castList.length){el.innerHTML='<div class="roster-empty">no cast yet — the world seeds one on its first chapter</div>';return;}
+  el.innerHTML=castList.map(ch=>'<div class="roster-row" data-id="'+ch.id+'">'
+    +'<span class="rdot" style="background:'+castRGB(ch.id)+'"></span>'
+    +'<span class="rnm">'+escapeHtml(ch.name)+'</span>'
+    +'<span class="rmeta">'+ch.scene_count+' · c'+ch.last_cycle+'</span>'
+    +'<button class="rbtn pin'+(ch.pinned?' on':'')+'" data-act="pin">'+(ch.pinned?'PINNED':'PIN')+'</button>'
+    +'<button class="rbtn" data-act="retire">RETIRE</button></div>').join("");
+  el.querySelectorAll(".roster-row").forEach(row=>{
+    const id=parseInt(row.dataset.id,10);
+    row.onclick=(ev)=>{if(ev.target.tagName==="BUTTON")return;zoomToChar(id);};
+    row.querySelectorAll(".rbtn").forEach(b=>{
+      b.onclick=(ev)=>{ev.stopPropagation();castAction(b.dataset.act,id);};
+    });
+  });
+}
+function zoomToChar(id){
+  const ch=castList.find(c=>c.id===id);if(!ch)return;
+  tgt=new THREE.Vector3(ch.p[0],ch.p[1],ch.p[2]);rad=Math.max(6,rad*0.6);cam();
+}
+function castAction(act,id){
+  fetch("/cast",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({action:act,id:id})})
+    .then(r=>r.json()).then(j=>{castList=j.cast||[];renderRoster();poll();}).catch(()=>{});
+}
 setInterval(poll,1000);
 
 // ---- chat --------------------------------------------------------------------
@@ -761,7 +856,7 @@ syncAutoflood();
   (names.length?names:["llama3.1:8b"]).forEach(n=>{const o=document.createElement("option");o.value=n;o.textContent=n;sel.appendChild(o);});
 }catch(e){const sel=document.getElementById("model");const o=document.createElement("option");o.value="llama3.1:8b";o.textContent="llama3.1:8b";sel.appendChild(o);}})();
 
-function loop(){renderer.render(scene,camera);requestAnimationFrame(loop);}
+function loop(){renderer.render(scene,camera);renderCastMarks();requestAnimationFrame(loop);}
 requestAnimationFrame(loop);
 poll();   // first fetch after all dial/mode refs are defined
 </script>

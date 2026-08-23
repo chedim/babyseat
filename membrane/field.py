@@ -29,7 +29,7 @@ at runtime the agent queries it by cosine to the current task's embedding.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Optional
 
@@ -45,6 +45,11 @@ class Exemplar:
     safe: bool = True
     reask_count: int = 0
     contest_count: int = 0
+    # character ids this scene belongs to (the [[cast]] ledger). Empty for legacy
+    # exemplars and chat-learned turns; populated by story-fed growth (the
+    # chronicle scenes). Backward-compatible: old field records lack the key ->
+    # Exemplar(**rec) falls back to this default.
+    tags: list[int] = field(default_factory=list)
 
     def recompute_safe(self, demote_threshold: int) -> None:
         """Re-derive `safe` from the evidence: net votes against must reach the threshold.

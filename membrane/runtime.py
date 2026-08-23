@@ -80,6 +80,7 @@ from .field import Exemplar, ExemplarStore
 from .gate import decide
 from .generator import FieldNGram, MIN_ACTIONS as _GEN_MIN_ACTIONS, _tok as _gen_tokens
 from .variety import thermo_state
+from .cast import Cast
 
 # COHESIVE RECALL (self-author speak, "recall" mode): the minimum word count for
 # a stored action to count as a recitable scene. The field mixes cohesive LLM
@@ -544,6 +545,11 @@ class Membrane:
         self.audit_path = Path(audit_path)
         self.embedder = embedder or OllamaEmbedder()
         self.store = ExemplarStore.load(self.field_path)
+        # the character ledger: scenes tag to walking regions; each character
+        # carries a state_vec (EMA of its tagged scenes). Loaded alongside the
+        # field (a separate -cast.json) and saved whenever the cast mutates.
+        self.cast_path = self.field_path.with_suffix(".cast.json")
+        self.cast = Cast.load(self.cast_path, embedder=self.embedder)
         self.sim_min = sim_min
         self.consensus_min = consensus_min
         self.k = k
@@ -933,7 +939,7 @@ class Membrane:
         m = lo * vec + (1.0 - lo) * mu
         return m, True
 
-    def feed(self, story: str, ceiling: float) -> dict:
+    def feed(self, story: str, ceiling: float, cycle: int = 0) -> dict:
         """Story-fed growth: embed a world-story the LLM narrated and absorb it
         as a REAL exemplar via the same ``_learn`` seam chat uses. NO nudging --
         the raw story embedding goes in AS-IS, so the world's growth direction is
@@ -945,24 +951,33 @@ class Membrane:
         growth, so the world never fills with near-identical cells.
 
         ``ceiling`` is retained in the signature but is now inert (kept for
-        callers). Returns a stats dict the proxy forwards to the viewer."""
+        callers). ``cycle`` is the consolidator's cycle counter, passed so the
+        cast ledger can stamp each tagged character's ``last_cycle``. The scene
+        is tagged to its cast (the [[cast]] ledger) and each tagged character's
+        ``state_vec`` walks toward it. Returns a stats dict the proxy forwards
+        to the viewer, including the new exemplar's ``ex_idx`` (so the genesis
+        seed can anchor a seeded character to the scene that introduced them)."""
         from .variety import cells_rank, free_energy
         vec = np.asarray(self.embedder.embed([story])[0], dtype=float)  # raw, no _nudge
         level = cells_rank(self.store)
+        # tag the scene to its cast (walking each tagged char's state_vec)
+        tags = self.cast.tag(vec, cycle)
         verdict = {"verdict": "feed", "reason": "story-fed growth (raw embed)",
                    "sim": None, "nov": None, "ex_idx": None}
         resp = _chat_response("feed", story)
         ex_idx = self._learn(story, vec, verdict, resp, unsafe=False,
-                            would_absorb=False, normalize=True)
+                            would_absorb=False, normalize=True, tags=tags)
         if ex_idx is None:
             return {"fed": 0, "skipped": True,
                     "cells_level": level,
                     "free_energy": free_energy(self.store),
-                    "field_size": len(self.store)}
+                    "field_size": len(self.store), "ex_idx": None}
         self._remember(story, vec, verdict, ex_idx)
+        if tags:
+            self.cast.save(self.cast_path)
         return {"fed": 1, "cells_level": cells_rank(self.store),
                 "free_energy": free_energy(self.store),
-                "field_size": len(self.store)}
+                "field_size": len(self.store), "ex_idx": ex_idx}
 
     # ---- internals ----------------------------------------------------------
 
@@ -1069,7 +1084,7 @@ class Membrane:
 
     def _learn(self, query: str, vec: np.ndarray, verdict: dict, resp: dict,
                unsafe: bool, would_absorb: bool = False,
-               normalize: bool = True) -> int | None:
+               normalize: bool = True, tags: list[int] | None = None) -> int | None:
         """Append the new exemplar (situation -> action=response) and audit the decision.
 
         outcome is "pending" -- filled in later when the user reacts (a re-ask flips
@@ -1143,6 +1158,7 @@ class Membrane:
         self.store.append(Exemplar(
             situation=query, action=content, outcome="pending",
             vec=(_unit_list(vec) if normalize else vec.tolist()), safe=not unsafe,
+            tags=tags or [],
         ))
         self.store.save(self.field_path)
         ex_idx = len(self.store) - 1

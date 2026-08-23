@@ -587,6 +587,49 @@ structure (which memories associate, what survives your pruning). It grows
 into a *bigger memory*, not a *smarter world* — turning drift into drive
 (state + causality + an intrinsic thermodynamic goal) is the next build.
 
+### The character ledger + state — the "spine" (landed)
+
+The world grows a bigger memory, but until now it had no persistent *entities* —
+no people, no state, no causality. The first increment toward turning drift
+into drive is a **character spine**: the chronicle's scenes tag to *characters*,
+and each character carries a persistent `state_vec` — an EMA of the scenes
+tagged to it, the tip of its walk through the field.
+
+A character is **not a row in a table; it is a walking region of the field.**
+The scenes are real exemplars (a new `Exemplar.tags: list[int]` records which
+characters a scene belongs to); `state_vec` is the EMA of a character's tagged
+scenes. State lives in the field — the ledger (`membrane/cast.py`) only makes the
+cast *addressable* by name and tracks each character's rolling state.
+
+- **Geometric tagging** — a scene is tagged to every character whose `state_vec`
+  it sits close to (cosine ≥ `admit_threshold` 0.40). Each tagged character's
+  `state_vec` EMA-walks toward the scene (`decay` 0.6). There is **no
+  auto-admit**: a scene far from the whole cast is left untagged, so the cast
+  stays short (capped at 12; admission is seed-or-manual only).
+- **Genesis seed** — the *first* chronicle chapter also emits a `cast:` block
+  naming the ensemble (3–6 characters). One batched embed admits each, then a
+  one-time `retro_tag` colors the *entire* existing field by character
+  immediately. Continuation chapters tag geometrically thereafter; new
+  characters are menu-admitted only (the cast never balloons).
+- **The roster (Esc/⚙ menu)** — an RPG-style cast list: each row shows the
+  name, `scene_count · last_cycle`, and a colour dot; **Retire** removes a
+  character (its stars revert to neutral — its id is stripped from every
+  exemplar's `tags`) and **Pin** protects one from accidental retire. Click a
+  row → the camera flies to that character's region of the cosmos. `POST /cast`
+  (`{action: retire|pin|admit, id, name?}`) is the menu's endpoint.
+- **Cast marks on the map** — each character's projected `state_vec` is marked
+  and labelled in the world map; stars are tinted by their `tags[0]` from a
+  12-colour palette (demoted tagged stars dim). The cast persists in a sibling
+  `-cast.json` file; old field files load cleanly (legacy exemplars default to
+  `tags: []`).
+
+This is the **spine only**: it lets characters emerge and walk. The arc it
+unlocks — state spine → **consistency gate** (acts must be on-manifold with the
+acting character's state) → **cells act** (the world authors its own history by
+sampling from a character's region) → **thermodynamic drive** (steer genesis
+toward the starving character region) — is the next build, on top of this
+addressable state.
+
 ---
 
 ## The math findings
