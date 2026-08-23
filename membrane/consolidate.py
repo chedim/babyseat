@@ -134,18 +134,20 @@ class Consolidator:
         mem = srv.membrane
         from .proxy import _run_feeds, _feed_count  # lazy: avoid a circular import
         t0 = time.time()
-        # ---- FEED phase: the world feeds itself from the genesis cache on its own
-        # clock. feed_rate is a CONTINUOUS rate (feeds/cycle); _feed_count resolves
-        # the fractional tail to an integer count this cycle. Each feed is a cached
-        # chronicle scene -> a cheap embed, not a model call (the model is called
-        # only when the cache runs low, ~1 call per _CHAPTER feeds). --
-        fr = _feed_count(float(getattr(srv, "feed_rate", 0.0)))
+        # ---- FEED phase: only in POV-FOLLOW world-drive does the world feed itself
+        # autonomously (the chronicle that follows the protagonist). In REACTIVE the
+        # world writes a beat after each player move (not here); in EXPLORE it grows
+        # only from chat. Both still DIGEST below. abort_if_disarmed so a PAUSE takes
+        # effect within a feed or two, not after a whole genesis chapter. --
+        wd = str(getattr(srv, "world_drive", "reactive"))
         stories: list = []
         fed = 0
-        if fr > 0:
-            st = _run_feeds(srv, mem, fr)
-            stories = st.get("stories", [])
-            fed = int(st.get("fed", 0))
+        if wd == "pov-follow":
+            fr = _feed_count(float(getattr(srv, "feed_rate", 0.0)))
+            if fr > 0:
+                st = _run_feeds(srv, mem, fr, abort_if_disarmed=True)
+                stories = st.get("stories", [])
+                fed = int(st.get("fed", 0))
         # ---- DIGEST phase: CPU consolidation (no model, no field mutation) -----
         t_d0 = time.time()
         digest = _digest(srv, mem, self._budget)

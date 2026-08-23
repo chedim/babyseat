@@ -989,13 +989,13 @@ class Membrane:
             return {"fed": 0, "skipped": True,
                     "cells_level": level,
                     "free_energy": free_energy(self.store),
-                    "field_size": len(self.store), "ex_idx": None}
+                    "field_size": len(self.store), "ex_idx": None, "tags": tags}
         self._remember(story, vec, verdict, ex_idx)
         if tags:
             self.cast.save(self.cast_path)
         return {"fed": 1, "cells_level": cells_rank(self.store),
                 "free_energy": free_energy(self.store),
-                "field_size": len(self.store), "ex_idx": ex_idx}
+                "field_size": len(self.store), "ex_idx": ex_idx, "tags": tags}
 
     # ---- internals ----------------------------------------------------------
 

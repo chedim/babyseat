@@ -80,8 +80,8 @@ def _settings_path(srv) -> str:
 
 
 def _load_settings(srv) -> dict:
-    """Read persisted {backend, story_model} from settings.json, or {} if absent.
-    Never holds a token -- the token is in-memory only."""
+    """Read persisted {backend, story_model, world_drive} from settings.json, or {}
+    if absent. Never holds a token -- the token is in-memory only."""
     try:
         with open(_settings_path(srv), "r", encoding="utf-8") as f:
             d = json.load(f)
@@ -92,17 +92,23 @@ def _load_settings(srv) -> dict:
         out["backend"] = d["backend"].strip().rstrip("/")
     if isinstance(d.get("story_model"), str) and d["story_model"].strip():
         out["story_model"] = d["story_model"].strip()
+    if isinstance(d.get("world_drive"), str) and d["world_drive"].strip():
+        out["world_drive"] = d["world_drive"].strip()
     return out
 
 
-def _save_settings(srv, backend: str, story_model: str | None) -> None:
-    """Persist the non-secret settings (backend + story model). The token is
-    deliberately NOT written -- in-memory only."""
+def _save_settings(srv, backend: str, story_model: str | None,
+                   world_drive: str | None = None) -> None:
+    """Persist the non-secret settings (backend + story model + world drive). The
+    token is deliberately NOT written -- in-memory only."""
     p = _settings_path(srv)
     try:
         os.makedirs(os.path.dirname(p), exist_ok=True)
+        d = {"backend": backend, "story_model": story_model or ""}
+        wd = world_drive if world_drive is not None else getattr(srv, "world_drive", "reactive")
+        d["world_drive"] = wd
         with open(p, "w", encoding="utf-8") as f:
-            json.dump({"backend": backend, "story_model": story_model or ""}, f)
+            json.dump(d, f)
     except OSError as e:
         print(f"[settings] could not persist settings.json ({e})", file=sys.stderr)
 
@@ -260,6 +266,18 @@ _GENESIS_SYSTEM_CAST = (
     "own as a coherent piece of the one ongoing story. Separate every scene with a "
     "line that contains only ---. Write ONLY the scenes separated by ---, no "
     "headings, no labels, no commentary, no recaps.")
+# The REACTIVE narrator (one-scene beat that follows a player move). The world
+# writes itself AROUND the explorer: after the protagonist acts/speaks, narrate
+# the SINGLE next scene (2 to 3 sentences) that follows from it -- what happens
+# next, featuring the protagonist and the cast they're with. No ---, no list of
+# scenes, no commentary -- just the one beat.
+_REACTIVE_SYSTEM = (
+    "You are the chronicler of this world. Narrate ONE scene (2 to 3 sentences) "
+    "that follows immediately from what just happened -- the next beat of the "
+    "ongoing story, featuring the protagonist and whoever they're with. Show what "
+    "happens next: action, dialogue, consequence. Stay in the world's voice; keep "
+    "the named cast on stage; do not recap or comment. Write ONLY the scene, no "
+    "headings, no labels, no --- separators.")
 _CHAPTER = 8        # scenes per genesis call (one model call -> ~8 cached feeds)
 _LOW_WATER = 3      # refill the cache (one model call) when fewer scenes remain
 
@@ -415,6 +433,15 @@ def _genesis(srv) -> list:
         cast_block = ("The cast (write about THESE people):\n" +
                       "\n".join(f"- {c.name} — {c.role} — {c.voice}"
                                 for c in cast.chars if c.name) + "\n\n")
+    # pov-follow: the autonomous chronicle FOLLOWS the protagonist. Seed the
+    # chapter with the POV's current situation (their last tagged scene) so the
+    # LLM continues from where the explorer IS, not where its own thread drifted.
+    pov_block = ""
+    if getattr(srv, "world_drive", "reactive") == "pov-follow":
+        pov = cast.by_id(getattr(cast, "pov_id", None)) if cast.pov_id is not None else None
+        if pov is not None and getattr(pov, "last_scene", ""):
+            pov_block = (f"The protagonist {pov.name} is currently here:\n"
+                         + pov.last_scene + "\n\nContinue from this point.\n\n")
     # the SEED call: first chapter + an empty cast -> name the ensemble once
     seed = (not history) and not cast.chars
     if seed:
@@ -428,7 +455,8 @@ def _genesis(srv) -> list:
         # continuing an existing chronicle: stay character-driven when the cast
         # is seeded (don't drift back into cosmology), else the world-arc voice.
         sys_prompt = _GENESIS_SYSTEM_CAST if cast.chars else _GENESIS_SYSTEM
-        user = (premise + "\n\n" + cast_block + "The chronicle so far:\n\n" +
+        user = (premise + "\n\n" + cast_block + pov_block +
+                "The chronicle so far:\n\n" +
                 "\n\n".join(history) + "\n\nContinue the chronicle: narrate the NEXT "
                 + str(_CHAPTER) + " scenes featuring the cast, each 2 to 3 sentences, "
                 "each separated by a line with only ---.")
@@ -596,7 +624,7 @@ def _reset_world_runtime(srv, mem, rearm_burst: bool = True) -> None:
     mem._gen_key = None
 
 
-def _run_feeds(srv, mem, feeds: int) -> dict:
+def _run_feeds(srv, mem, feeds: int, abort_if_disarmed: bool = False) -> dict:
     """Run ``feeds`` story-feeds from the GENESIS CACHE and return the stats dict
     (with ``stories`` for the console). Each feed pops one cached chronicle scene
     and embeds+absorbs it (a cheap ``/api/embed``, NOT a ``/api/chat`` call); the
@@ -606,30 +634,46 @@ def _run_feeds(srv, mem, feeds: int) -> dict:
 
     Serializes on ``srv.feed_lock`` so the HTTP ``/feed`` path and the background
     consolidator never race the rolling narrative (``srv.story_history``) or the
-    cache. Absorbs the RAW story embedding (``mem.feed`` no longer nudges)."""
+    cache. Absorbs the RAW story embedding (``mem.feed`` no longer nudges).
+
+    ``abort_if_disarmed`` (the consolidator sets it): bail before a new genesis
+    call and between feeds when ``srv.consolidating`` flips False, so a PAUSE
+    takes effect within a feed or two instead of waiting on a whole chapter. The
+    HTTP STEP path leaves it False (a STEP feeds regardless of arm state).
+
+    Each story is tagged ``pov`` when it tagged the POV character, so the viewer
+    can narrate only the protagonist's thread (``storyPush`` POV filter)."""
     stats = _feed_snapshot(srv, mem)
     premise = getattr(srv, "system_prompt", None)
     if not premise or feeds <= 0:
         return stats
     ceiling = float(getattr(srv, "entropy_ceiling", 0.05))   # inert for growth (kept)
     cycle = int(getattr(srv, "consolidation_stats", {}).get("cycles", 0))
+    pov_id = getattr(mem.cast, "pov_id", None)
     stories: list = []
     with srv.feed_lock:
+        if abort_if_disarmed and not getattr(srv, "consolidating", True):
+            stats["stories"] = stories           # paused before we start -- no genesis call
+            return stats
         history = list(getattr(srv, "story_history", []))
         cache = getattr(srv, "story_cache", None)
         if cache is None:
             cache = []
             srv.story_cache = cache
         # refill the genesis cache if low -- ONE model call -> ~CHAPTER cached feeds
-        if len(cache) < _LOW_WATER:
+        if len(cache) < _LOW_WATER and not (abort_if_disarmed and not getattr(srv, "consolidating", True)):
             cache.extend(_genesis(srv))
             srv.story_cache = cache
         for _ in range(feeds):
+            if abort_if_disarmed and not getattr(srv, "consolidating", True):
+                break                           # paused between feeds -- stop, don't spin
             if not cache:                       # drained; one more chapter before giving up
+                if abort_if_disarmed and not getattr(srv, "consolidating", True):
+                    break
                 cache.extend(_genesis(srv))
                 srv.story_cache = cache
                 if not cache:                   # model unavailable -- stop, don't spin
-                    stories.append({"seed": "", "text": "", "result": "no-story"})
+                    stories.append({"seed": "", "text": "", "result": "no-story", "pov": False})
                     break
             passage = cache.pop(0)
             r = mem.feed(passage, ceiling, cycle=cycle)     # raw embed + absorb (no nudging)
@@ -639,7 +683,9 @@ def _run_feeds(srv, mem, feeds: int) -> dict:
             else:                               # dropped by the dedup/vague guard
                 res = "skipped"
                 stats["skipped"] += 1
-            stories.append({"seed": "", "text": passage, "result": res})
+            tags = r.get("tags") or []
+            stories.append({"seed": "", "text": passage, "result": res,
+                            "pov": pov_id is not None and pov_id in tags})
             history.append(passage)             # advance the chronicle (last 8 scenes)
             if len(history) > 8:
                 history = history[-8:]
@@ -650,6 +696,94 @@ def _run_feeds(srv, mem, feeds: int) -> dict:
             stats["free_energy"] = float(r.get("free_energy", stats["free_energy"]))
     stats["stories"] = stories
     srv.cache_depth = len(getattr(srv, "story_cache", []))
+    return stats
+
+
+def _reactive_beat(srv, mem, prompt: str) -> dict:
+    """ONE reactive beat: the world writes a single scene that follows from the
+    protagonist's last move (REACTIVE world-drive). Unlike the autonomous genesis
+    (which narrates a whole chapter from its own rolling thread), this continues
+    the story FROM where the explorer IS -- the POV's current situation plus, when
+    present, what the player just did/said (``prompt``). One LLM call -> one scene
+    (2 to 3 sentences) -> embed + absorb + tag the cast. Returns the /feed stats
+    shape with the beat in ``stories`` (marked ``pov``).
+
+    An empty ``prompt`` (the STEP button in reactive mode) asks for the next beat
+    from the POV's situation alone. No premise -> no beat (the world has nothing
+    to tell)."""
+    stats = _feed_snapshot(srv, mem)
+    backend = srv.backend
+    model = getattr(srv, "warmup_model", None)
+    premise = getattr(srv, "system_prompt", "")
+    if not model or not backend or not premise:
+        stats["stories"] = []
+        return stats
+    cast = mem.cast
+    pov = cast.by_id(getattr(cast, "pov_id", None)) if cast.pov_id is not None else None
+    cast_block = ""
+    if cast.chars:
+        cast_block = ("The cast:\n" +
+                      "\n".join(f"- {c.name} — {c.role} — {c.voice}"
+                                for c in cast.chars if c.name) + "\n\n")
+    pov_line = ""
+    if pov is not None and getattr(pov, "last_scene", ""):
+        pov_line = f"{pov.name} is currently here:\n{pov.last_scene}\n\n"
+    elif pov is not None:
+        pov_line = f"{pov.name} is the protagonist.\n\n"
+    move = (prompt or "").strip()
+    move_line = (f"What {pov.name} just did/said: {move}\n\n"
+                 "Narrate the next scene that follows from it.\n\n"
+                 if pov is not None and move else
+                 "Narrate the next scene from where things stand.\n\n")
+    user = (premise + "\n\n" + cast_block + pov_line + move_line +
+            "Write ONE scene (2 to 3 sentences), no --- separators.")
+    messages = [{"role": "system", "content": _REACTIVE_SYSTEM},
+                {"role": "user", "content": user}]
+    body = {"model": model, "stream": False,
+            "temperature": float(getattr(srv, "story_temperature", 0.7)),
+            "messages": messages}
+    try:
+        data = json.dumps(body).encode()
+        req = urllib.request.Request(backend + "/api/chat", data=data,
+                                     headers=_ollama_headers(srv))
+        with urllib.request.urlopen(req, timeout=180) as r:
+            resp = json.loads(r.read())
+    except Exception as e:
+        print(f"[reactive] beat call failed ({e})", file=sys.stderr)
+        stats["stories"] = []
+        return stats
+    txt = ""
+    if isinstance(resp, dict):
+        msg = resp.get("message")
+        if isinstance(msg, dict) and isinstance(msg.get("content"), str):
+            txt = msg["content"].strip()
+    # the model may still emit a --- list; take the first scene only
+    if "---" in txt:
+        txt = [s.strip() for s in re.split(r"(?m)^\s*-{2,}\s*$", txt) if s.strip()]
+        txt = txt[0] if txt else ""
+    if not txt:
+        stats["stories"] = []
+        return stats
+    ceiling = float(getattr(srv, "entropy_ceiling", 0.05))
+    cycle = int(getattr(srv, "consolidation_stats", {}).get("cycles", 0))
+    with srv.feed_lock:
+        r = mem.feed(txt, ceiling, cycle=cycle)
+        stats["fed"] += int(r.get("fed", 0))
+        res = "fed" if r.get("fed") else "skipped"
+        if not r.get("fed"):
+            stats["skipped"] += 1
+        tags = r.get("tags") or []
+        pov_id = getattr(cast, "pov_id", None)
+        # a reactive beat is narrated FROM the POV's situation + the player's move,
+        # so it is a POV scene BY CONSTRUCTION -- mark it pov so storyPush always
+        # shows the world's response (independent of whether the embedding
+        # geometrically tagged the protagonist this beat).
+        stats["stories"] = [{"seed": "", "text": txt, "result": res,
+                             "pov": pov_id is not None}]
+        stats["field_size"] = r.get("field_size", stats["field_size"])
+        if "cells_level" in r:
+            stats["cells_level"] = round(float(r["cells_level"]), 2)
+        stats["free_energy"] = float(r.get("free_energy", stats["free_energy"]))
     return stats
 
 
@@ -946,13 +1080,29 @@ class ProxyHandler(BaseHTTPRequestHandler):
         feeds = int(body.get("feeds", 0))
         if feeds < 0:
             self._json_err(400, "feeds must be >= 0"); return
-        if feeds == 0:
+        wd = str(getattr(srv, "world_drive", "reactive"))
+        if body.get("reactive"):
+            # a reactive beat (REACTIVE world-drive): one scene following the
+            # protagonist's move (the chat path posts the player's message as
+            # `prompt`; an empty prompt = a STEP continue-beat).
+            if not getattr(srv, "system_prompt", None):
+                self._json_err(400, "/feed needs a --system premise"); return
+            stats = _reactive_beat(srv, mem, str(body.get("prompt", "")))
+        elif feeds == 0:
             stats = _feed_snapshot(srv, mem)            # dial-only persistence, no LLM call
         else:
             if not getattr(srv, "system_prompt", None):
                 self._json_err(400, "/feed needs a --system premise (the world it tells "
                                      "stories of)"); return
-            stats = _run_feeds(srv, mem, feeds)
+            if wd == "explore":
+                # EXPLORE: no feeding at all -- the world grows only from the
+                # player's chat (walk_pov). STEP is a no-op here.
+                stats = _feed_snapshot(srv, mem)
+            elif wd == "reactive":
+                # REACTIVE: a STEP is a continue-beat from the POV's situation.
+                stats = _reactive_beat(srv, mem, "")
+            else:                                       # pov-follow: autonomous chronicle
+                stats = _run_feeds(srv, mem, feeds)
         out = json.dumps(stats).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -1221,6 +1371,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 srv.backend = b
             if isinstance(body.get("story_model"), str) and body["story_model"].strip():
                 srv.warmup_model = body["story_model"].strip()
+            # world drive: reactive (default) / pov-follow / explore -- how the world's
+            # self-writing relates to the explorer (see _reactive_beat + the consolidator)
+            if isinstance(body.get("world_drive"), str) and body["world_drive"].strip():
+                wd = body["world_drive"].strip().lower()
+                if wd in ("reactive", "pov-follow", "explore"):
+                    srv.world_drive = wd
             # token: a non-empty string SETS it; clear_token=true CLEARS it; neither
             # (both absent) leaves the existing token untouched. Never echoed/logged.
             if isinstance(body.get("token"), str) and body["token"].strip():
@@ -1231,7 +1387,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             _save_settings(srv, srv.backend, getattr(srv, "warmup_model", None))
             out = json.dumps({"ok": True, "backend": srv.backend,
                               "story_model": getattr(srv, "warmup_model", None) or "",
-                              "has_token": bool(getattr(srv, "ollama_token", None))}).encode()
+                              "has_token": bool(getattr(srv, "ollama_token", None)),
+                              "world_drive": getattr(srv, "world_drive", "reactive")}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(out)))
@@ -1240,7 +1397,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return
         out = json.dumps({"backend": srv.backend,
                           "story_model": getattr(srv, "warmup_model", None) or "",
-                          "has_token": bool(getattr(srv, "ollama_token", None))}).encode()
+                          "has_token": bool(getattr(srv, "ollama_token", None)),
+                          "world_drive": getattr(srv, "world_drive", "reactive")}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(out)))
@@ -1354,6 +1512,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                           "cycle_speed": float(getattr(self.server, "cycle_speed", 1.0) or 1.0),
                           "initial_burst": int(getattr(self.server, "initial_burst", 0)),
                           "trained": not bool(getattr(self.server, "initial_burst", 0)),
+                          "world_drive": str(getattr(self.server, "world_drive", "reactive")),
                           "verdicts": tail, "n_verdicts": n_verd}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -2212,16 +2371,19 @@ def main() -> None:
     srv.worlds_dir = args.worlds_dir  # where the viewer's save/load/new-world buttons keep slots
     srv.warmup_model = args.warmup_model or args.judge_model   # the one warm-up palette call
     srv.ollama_token = None                                    # optional bearer; in-memory only, never persisted
-    # apply persisted settings.json (backend + story model) over the CLI defaults;
-    # the token is in-memory only, so it starts cleared each boot. Then sync the
-    # shared embedder + responder to the resolved backend so /api/embed + /api/chat
-    # agree (also fixes the old latent mismatch where the embedder hardcoded
+    srv.world_drive = "reactive"                               # default: the world writes a beat after each move
+    # apply persisted settings.json (backend + story model + world drive) over the
+    # CLI defaults; the token is in-memory only, so it starts cleared each boot. Then
+    # sync the shared embedder + responder to the resolved backend so /api/embed +
+    # /api/chat agree (also fixes the old latent mismatch where the embedder hardcoded
     # localhost:11434 regardless of --backend).
     _persisted = _load_settings(srv)
     if _persisted.get("backend"):
         srv.backend = _persisted["backend"]
     if _persisted.get("story_model"):
         srv.warmup_model = _persisted["story_model"]
+    if _persisted.get("world_drive") in ("reactive", "pov-follow", "explore"):
+        srv.world_drive = _persisted["world_drive"]
     _sync_ollama_clients(srv)
     srv.warmup_seed = args.warmup_seed
     srv.palette = srv_palette        # cached palette (built at startup warm-up); the no-model /live loop reuses it

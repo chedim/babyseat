@@ -88,6 +88,10 @@ The key flags:
 You **are Rick**: your words render as Rick's thoughts, the narrator speaks from
 Rick's lived scenes, Morty is the co-lead, and the world is *about them*.
 
+> **Want to just play?** [`docs/exploration-game.md`](docs/exploration-game.md) is
+> a player's manual — the screen, the three world-drive modes, the controls, and
+> how to explore — written for a gamer, not an engineer.
+
 > **A fresh world needs seeding.** With the cast pre-seeded the field starts empty
 > and grows from **feeds** (the consolidator, or the viewer's STEP). Until it has a
 > few scenes the chat has nothing to recall — so arm the clock and let it run (or

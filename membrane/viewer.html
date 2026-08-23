@@ -48,6 +48,7 @@
   .mc-btn:hover{background:var(--face-hi)}
   .mc-btn:active{box-shadow:inset 2px 2px 0 var(--dark),inset -2px -2px 0 var(--light)}
   .mc-btn:disabled{opacity:.45;cursor:default}
+  .mc-btn.dim{opacity:.4;cursor:not-allowed}
   .mc-btn.on{background:var(--green);box-shadow:inset 2px 2px 0 var(--green-hi),inset -2px -2px 0 #2e6026}
   .mc-btn.on:hover{background:#6cd95a}
 
@@ -369,7 +370,16 @@
       <select id="set-model" class="set-select"
               title="the local Ollama model that writes the world's chronicle (the gardener). Persists across restarts."></select>
     </div>
-    <div class="btn-row"><button id="set-save" class="mc-btn" title="apply the server, token, and story model to the world">&#x2713; SAVE SETTINGS</button></div>
+    <div class="set-row">
+      <span class="set-lbl">WORLD DRIVE — how the world writes itself</span>
+      <select id="set-drive" class="set-select"
+              title="reactive (default): after each move you make, the world writes ONE scene that follows from it. pov-follow: the world writes its own chronicle, but it follows the protagonist (press PLAY). explore: the world does not write itself -- it only grows from your chat.">
+        <option value="reactive">reactive — world writes a beat after each move</option>
+        <option value="pov-follow">pov-follow — autonomous chronicle follows the protagonist</option>
+        <option value="explore">explore — no self-writing; world grows from your chat</option>
+      </select>
+    </div>
+    <div class="btn-row"><button id="set-save" class="mc-btn" title="apply the server, token, story model, and world drive to the world">&#x2713; SAVE SETTINGS</button></div>
 
     <div class="menu-section">STATS</div>
     <div class="stats">
@@ -487,8 +497,12 @@ function resize(){const el=document.getElementById("c");const w=el.clientWidth||
   renderer.setSize(w,h,false);camera.aspect=w/h;camera.updateProjectionMatrix();}
 addEventListener("resize",resize);resize();cam();
 function sprite(){const c=document.createElement("canvas");c.width=c.height=64;const g=c.getContext("2d");
+  // a tight bright nucleus + soft halo: at 10x point size the halos overlap into a
+  // bloom, but each star keeps a crisp visible core so the network reads as stars,
+  // not one blob.
   const grd=g.createRadialGradient(32,32,0,32,32,32);grd.addColorStop(0,"rgba(255,255,255,1)");
-  grd.addColorStop(.4,"rgba(255,255,255,.6)");grd.addColorStop(1,"rgba(255,255,255,0)");
+  grd.addColorStop(.12,"rgba(255,255,255,.95)");grd.addColorStop(.32,"rgba(255,255,255,.45)");
+  grd.addColorStop(.7,"rgba(255,255,255,.12)");grd.addColorStop(1,"rgba(255,255,255,0)");
   g.fillStyle=grd;g.fillRect(0,0,64,64);return new THREE.CanvasTexture(c);}
 const tex=sprite();
 let cloud=null;
@@ -512,7 +526,7 @@ function renderCloud(exs){
   const g=new THREE.BufferGeometry();
   g.setAttribute("position",new THREE.BufferAttribute(pos,3));
   g.setAttribute("color",new THREE.BufferAttribute(col,3));
-  const m=new THREE.PointsMaterial({size:3.4,sizeAttenuation:true,map:tex,vertexColors:true,
+  const m=new THREE.PointsMaterial({size:34,sizeAttenuation:true,map:tex,vertexColors:true,
     transparent:true,depthWrite:false,blending:THREE.AdditiveBlending});
   cloud=new THREE.Points(g,m);scene.add(cloud);
 }
@@ -573,7 +587,7 @@ async function poll(){
     // FEED RATE (the entropy dial) — sync the slider + hotbar from the server truth
     const fr=j.feed_rate!=null?j.feed_rate:1.0;
     set("hb-entropy",(+fr).toFixed(2));
-    if(entropy && document.activeElement!==entropy){
+    if(entropy && document.activeElement!==entropy && Date.now()-userDialTs>700){
       entropy.value=Math.max(0,Math.min(32,fr));
       if(entropyv) entropyv.textContent=(+fr).toFixed(2)+"/cycle";
       syncDiet();
@@ -582,16 +596,22 @@ async function poll(){
     if(j.story_mode && j.story_mode!==curMode){
       curMode=j.story_mode; syncMode();
     }
+    // world-drive (reactive | pov-follow | explore) — sync from the server truth.
+    // In reactive/explore the autonomous chronicle is off, so AUTO-FLOOD is forced
+    // off + disabled (it only makes sense when the world writes on its own clock).
+    if(j.world_drive!=null && j.world_drive!==worldDrive){
+      worldDrive=j.world_drive; syncDriveUI(); applyAutofloodGate();
+    }
     // ---- consolidation: sync dials + arm state, surface stats + autonomous stories
     if(j.cpu_target!=null && cputarget && document.activeElement!==cputarget){
       cputarget.value=Math.max(0,Math.min(100,Math.round(j.cpu_target*100)));
       if(cputargetv) cputargetv.textContent=cputarget.value+"%";
     }
-    if(j.consolidating!=null && j.consolidating!==consolidating){
+    if(j.consolidating!=null && j.consolidating!==consolidating && Date.now()-userDialTs>700){
       consolidating=j.consolidating; syncPlay(); syncPp();
     }
     // world-clock speed (1x/2x/4x) — sync the main-UI buttons to the server truth
-    if(j.cycle_speed!=null && Math.abs(j.cycle_speed-cycleSpeed)>1e-6){
+    if(j.cycle_speed!=null && Math.abs(j.cycle_speed-cycleSpeed)>1e-6 && Date.now()-userDialTs>700){
       cycleSpeed=j.cycle_speed; syncSpeed();
     }
     const con=j.consolidation||{};
@@ -774,11 +794,30 @@ async function send(text){
       if(rec) am.textContent=c+"   ⟂  sim "+rec.sim.toFixed(2)+(rec.safe?"":" · demoted");
     });
     setTimeout(poll,150);
-    if(autoflood && autoflood.checked) flood();
+    // REACTIVE world-drive: after the protagonist's move, the world writes ONE
+    // scene that follows from it -- the self-writing follows the explorer. The
+    // beat is narrated into the chat as the world's response to the move.
+    if(worldDrive==="reactive") reactiveBeat(text);
+    else if(worldDrive==="pov-follow" && autoflood && autoflood.checked) flood();
   }catch(e){think.textContent="(could not reach /api/chat — is the proxy up?)";}
 }
 document.getElementById("send").onclick=()=>send(cin.value);
 cin.addEventListener("keydown",e=>{if(e.key=="Enter"&&!e.shiftKey){e.preventDefault();send(cin.value);}});
+// REACTIVE world-drive beat: the world writes ONE scene that follows the
+// protagonist's move (feeds:0 + reactive:true -> proxy._reactive_beat). The beat
+// is narrated into the chat as the world's response, the same channel autonomous
+// chronicle scenes use. No-op in pov-follow (the consolidator writes) / explore.
+function reactiveBeat(text){
+  const ceil=parseFloat(ceiling.value)||0;
+  const fr=parseFloat(entropy.value)||0;
+  const cpu=(parseFloat(cputarget.value)||0)/100;
+  fetch("/feed",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({feeds:0, reactive:true, prompt:String(text||""),
+      entropy_ceiling:ceil, mode:curMode, feed_rate:fr, cpu_target:cpu,
+      consolidating:consolidating, cycle_speed:cycleSpeed})})
+    .then(r=>r.json()).then(j=>{ storyPush(j.stories||[]); poll(); })
+    .catch(()=>{});
+}
 
 // ---- the neighborhood: explore the field's association graph -----------------
 const hood=document.getElementById("hood"),hoodBody=document.getElementById("hood-body"),
@@ -849,6 +888,8 @@ let floodTimer=null;
 let curMode="story";                          // 'story' = continuing chronicle; 'variety' = vignettes
 let consolidating=false;                      // arm/disarm the world's own clock (server-side consolidator)
 let cycleSpeed=1.0;                           // world-clock multiplier (1x/2x/4x from the main-UI buttons)
+let worldDrive="reactive";                    // reactive | pov-follow | explore (server is source of truth)
+let userDialTs=0;                             // last manual dial click; poll ignores stale server dials within a grace window
 
 function ceilDisp(){const v=parseFloat(ceiling.value)||0;
   return (v*100).toFixed(1)+"% · cap "+Math.max(0,Math.round(v*theoMax));}
@@ -877,7 +918,7 @@ ceiling.oninput=()=>{
   queuePersist();
 };
 ceiling.oninput();
-entropy.oninput=()=>{entropyv.textContent=(parseFloat(entropy.value)||0).toFixed(2)+"/cycle";queuePersist();};
+entropy.oninput=()=>{entropyv.textContent=(parseFloat(entropy.value)||0).toFixed(2)+"/cycle";userDialTs=Date.now();queuePersist();};
 entropy.oninput();
 cputarget.oninput=()=>{cputargetv.textContent=(cputarget.value)+"%";queuePersist();};
 cputarget.oninput();
@@ -908,6 +949,7 @@ async function liveTick(){
 function setPlaying(on){
   consolidating=on;
   syncPlay();
+  userDialTs=Date.now();        // grace: poll won't revert the play/pause within ~700ms
   queuePersist();
 }
 function syncPlay(){
@@ -947,7 +989,7 @@ function syncSpeed(){
   });
 }
 document.querySelectorAll(".spd").forEach(b=>{
-  b.onclick=()=>{cycleSpeed=+b.dataset.spd;syncSpeed();queuePersist();};
+  b.onclick=()=>{cycleSpeed=+b.dataset.spd;syncSpeed();userDialTs=Date.now();queuePersist();};
 });
 syncPp();syncSpeed();
 // ---- starve / balance / feed: three inter-connected feed-rate presets -------
@@ -964,7 +1006,7 @@ document.querySelectorAll(".diet").forEach(b=>{
     const v=+b.dataset.fr;
     entropy.value=Math.max(0,Math.min(32,v));
     entropyv.textContent=(+entropy.value).toFixed(2)+"/cycle";
-    syncDiet();queuePersist();
+    syncDiet();userDialTs=Date.now();queuePersist();
   };
 });
 syncDiet();
@@ -988,17 +1030,21 @@ function syncMode(){
 syncMode();
 
 // ---- the world's chronicle, narrated into the MAIN CHAT ---------------------
-// The consolidator feeds the world on its own clock (and STEP feeds it on
-// demand). Each chronicle scene the LLM produces is dropped into the main chat
-// (#msgs) as narrator prose -- the same place replies land -- so the world's
-// story reads where the reader lives. No separate console panel. A scene that
-// was absorbed cleanly is plain prose; one that was massaged/skipped/full gets
-// a dim "⟂ <status>" suffix. Empty / no-story entries are silent.
+// The consolidator feeds the world on its own clock (POV-FOLLOW mode) and a
+// reactive beat follows each move (REACTIVE mode); STEP feeds on demand. Each
+// scene is dropped into the main chat (#msgs) as narrator prose -- the same
+// place replies land -- so the world's story reads where the reader lives. No
+// separate console panel. A scene that was absorbed cleanly is plain prose; one
+// that was skipped gets a dim "⟂ <status>" suffix. Empty / no-story entries are
+// silent. When a POV protagonist is set, only scenes that TAGGED the POV are
+// narrated -- the chat reads as the protagonist's thread, not an omniscient
+// chronicle (so it stays coherent with the SITUATION panel). No POV -> all.
 function storyPush(stories){
   if(!stories||!stories.length) return;
   stories.forEach(s=>{
     const text=(s&&s.text)||"", result=(s&&s.result)||"";
     if(!text) return;                          // no text -> nothing to narrate
+    if(povChar && s.pov===false) return;       // a POV is set + this scene isn't theirs -> skip
     const d=addMsg("a", text);                 // the chronicle scene -> narrator prose
     if(result && result!=="fed") d.textContent+="   ⟂ "+result;
   });
@@ -1015,6 +1061,25 @@ function syncAutoflood(){autofloodBtn.textContent="↻ AUTO-FLOOD: "+(autoflood.
   autofloodBtn.classList.toggle("on",autoflood.checked);}
 autofloodBtn.onclick=()=>{autoflood.checked=!autoflood.checked;syncAutoflood();};
 syncAutoflood();
+// ---- world-drive: mirror the SETTINGS selector + gate AUTO-FLOOD ----------------
+// AUTO-FLOOD (the autonomous chronicle burst) only makes sense when the world
+// writes on its own clock (pov-follow). In reactive the world writes one beat per
+// player move; in explore it never writes. So in those modes the toggle is forced
+// off + greyed so it can't be arm-restled into flooding.
+function syncDriveUI(){
+  const dr=document.getElementById("set-drive"); if(!dr) return;
+  if(document.activeElement!==dr) dr.value=worldDrive;
+}
+function applyAutofloodGate(){
+  const allow = worldDrive==="pov-follow";
+  if(!allow){ autoflood.checked=false; syncAutoflood(); }
+  autofloodBtn.disabled=!allow;
+  autofloodBtn.classList.toggle("dim",!allow);
+  autofloodBtn.title = allow ? "grow the world between your messages"
+    : (worldDrive==="reactive" ? "reactive: the world writes one beat per move"
+       : "explore: the world grows only from chat");
+}
+applyAutofloodGate();
 
 // ---- save / load / new world (the whole field + cast + audit) ----------------
 const worldSave=document.getElementById("world-save"),
@@ -1111,12 +1176,15 @@ function syncSettingsUI(){
   if(tf) tf.textContent=curHasToken?"· set":"";
   const tk=document.getElementById("set-token");
   if(tk && document.activeElement!==tk && !tk.dataset.dirty) tk.value="";
+  const dr=document.getElementById("set-drive");
+  if(dr && document.activeElement!==dr) dr.value=worldDrive;
 }
 async function saveSettings(clearToken){
   const be=document.getElementById("set-backend");
   const tk=document.getElementById("set-token");
   const sm=document.getElementById("set-model");
-  const body={backend:be.value.trim(), story_model:sm.value||""};
+  const dr=document.getElementById("set-drive");
+  const body={backend:be.value.trim(), story_model:sm.value||"", world_drive:dr?dr.value:worldDrive};
   if(clearToken) body.clear_token=true;
   else if(tk.value) body.token=tk.value;
   try{
@@ -1124,6 +1192,7 @@ async function saveSettings(clearToken){
     const j=await r.json();
     if(j && j.ok){
       curBackend=j.backend; storyModel=j.story_model; curHasToken=j.has_token;
+      if(j.world_drive){ worldDrive=j.world_drive; applyAutofloodGate(); }
       tk.value=""; delete tk.dataset.dirty; delete be.dataset.dirty; delete sm.dataset.dirty;
       floatText("settings saved","#5fd47a");
       refreshModels();              // the server may have changed -> repopulate the list
@@ -1141,7 +1210,16 @@ async function saveSettings(clearToken){
 })();
 refreshModels();
 
-function loop(){renderer.render(scene,camera);renderCastMarks();requestAnimationFrame(loop);}
+function loop(){
+  // keep the camera centered on the POV protagonist: the reader's eye stays on
+  // who they ARE. Orbit (theta/phi/rad) is independent of tgt, so this never
+  // fights the user's drag/zoom -- it just re-centers the turntable on the hero.
+  if(povChar){
+    const tp=new THREE.Vector3(povChar.p[0],povChar.p[1],povChar.p[2]);
+    tgt.lerp(tp,0.06);            // ease toward the protagonist each frame
+    cam();
+  }
+  renderer.render(scene,camera);renderCastMarks();requestAnimationFrame(loop);}
 requestAnimationFrame(loop);
 poll();   // first fetch after all dial/mode refs are defined
 </script>
