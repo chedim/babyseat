@@ -140,9 +140,13 @@ class Consolidator:
         # only from chat. Both still DIGEST below. abort_if_disarmed so a PAUSE takes
         # effect within a feed or two, not after a whole genesis chapter. --
         wd = str(getattr(srv, "world_drive", "reactive"))
+        # the initial training burst feeds LLM chapters REGARDLESS of world_drive
+        # (it is the seeding phase, not subject to the drive gating), so a world
+        # that boots reactive can still train via --consolidate --initial-burst.
+        training = getattr(srv, "initial_burst", 0) > 0
         stories: list = []
         fed = 0
-        if wd == "pov-follow":
+        if wd == "pov-follow" or training:
             fr = _feed_count(float(getattr(srv, "feed_rate", 0.0)))
             if fr > 0:
                 st = _run_feeds(srv, mem, fr, abort_if_disarmed=True)
@@ -184,6 +188,23 @@ class Consolidator:
             srv.initial_burst -= 1
             if srv.initial_burst <= 0:
                 srv.consolidating = False          # training burst done -> auto-pause
+                # the default lifecycle after training: the autonomous chronicle
+                # follows the protagonist (pov-follow) and is authored by the
+                # on-stage characters' own n-gram voices (cells) -- no LLM. The
+                # user can override either via SETTINGS anytime (persisted, takes
+                # effect immediately). This realizes "pov-follow as default mode
+                # after training" + cells-act auto-engaged.
+                srv.world_drive = "pov-follow"
+                srv.beat_author = "cells"
+                try:
+                    from .proxy import _save_settings
+                    _save_settings(srv, srv.backend,
+                                   getattr(srv, "warmup_model", None))
+                except Exception as e:
+                    print(f"[consolidate] post-training settings persist failed "
+                          f"({e})", file=sys.stderr)
+                print("[consolidate] training complete -> pov-follow + cells "
+                      "(auto-paused; press PLAY)", file=sys.stderr)
         # cap spin: never cycle faster than ~5/s when both phases are tiny.
         # cycle_speed (set from the viewer's 1x/2x/4x playback controls) scales
         # the target cycle period -- 2x -> 0.1s, 4x -> 0.05s (the floor). 1x is

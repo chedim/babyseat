@@ -285,7 +285,7 @@
   </div>
   <div id="ctrl">
     <div class="ctrl-row">
-      <button id="pp" class="mc-btn sm" title="play / pause the world's own clock">&#x25B6;</button>
+      <button id="pp" class="mc-btn sm" title="pause / resume the world's own clock">&#x23F8;</button>
       <button class="mc-btn sm spd on" data-spd="1" title="world clock: normal speed">1×</button>
       <button class="mc-btn sm spd" data-spd="2" title="world clock: double speed">2×</button>
       <button class="mc-btn sm spd" data-spd="4" title="world clock: quadruple speed">4×</button>
@@ -377,6 +377,14 @@
         <option value="reactive">reactive — world writes a beat after each move</option>
         <option value="pov-follow">pov-follow — autonomous chronicle follows the protagonist</option>
         <option value="explore">explore — no self-writing; world grows from your chat</option>
+      </select>
+    </div>
+    <div class="set-row">
+      <span class="set-lbl">BEAT AUTHOR — who writes the autonomous chronicle</span>
+      <select id="set-beat-author" class="set-select"
+              title="llm (default): the story model writes each pov-follow beat. cells: the on-stage character's own n-gram voice authors the beat (no model) -- the autonomous chronicle after training. Reactive beats are always LLM regardless.">
+        <option value="llm">llm — the story model writes each beat</option>
+        <option value="cells">cells — the on-stage character's n-gram authors</option>
       </select>
     </div>
     <div class="btn-row"><button id="set-save" class="mc-btn" title="apply the server, token, story model, and world drive to the world">&#x2713; SAVE SETTINGS</button></div>
@@ -602,13 +610,20 @@ async function poll(){
     if(j.world_drive!=null && j.world_drive!==worldDrive){
       worldDrive=j.world_drive; syncDriveUI(); applyAutofloodGate();
     }
+    // beat_author (llm | cells) — who writes the autonomous chronicle. Mirror the
+    // server truth into the SETTINGS select (unless the user is mid-edit there).
+    if(j.beat_author!=null && j.beat_author!==beatAuthor){
+      beatAuthor=j.beat_author;
+      const ba=document.getElementById("set-beat-author");
+      if(ba && document.activeElement!==ba) ba.value=beatAuthor;
+    }
     // ---- consolidation: sync dials + arm state, surface stats + autonomous stories
     if(j.cpu_target!=null && cputarget && document.activeElement!==cputarget){
       cputarget.value=Math.max(0,Math.min(100,Math.round(j.cpu_target*100)));
       if(cputargetv) cputargetv.textContent=cputarget.value+"%";
     }
     if(j.consolidating!=null && j.consolidating!==consolidating && Date.now()-userDialTs>700){
-      consolidating=j.consolidating; syncPlay(); syncPp();
+      consolidating=j.consolidating; syncPlay(); syncPp(); syncSpeed();
     }
     // world-clock speed (1x/2x/4x) — sync the main-UI buttons to the server truth
     if(j.cycle_speed!=null && Math.abs(j.cycle_speed-cycleSpeed)>1e-6 && Date.now()-userDialTs>700){
@@ -889,6 +904,7 @@ let curMode="story";                          // 'story' = continuing chronicle;
 let consolidating=false;                      // arm/disarm the world's own clock (server-side consolidator)
 let cycleSpeed=1.0;                           // world-clock multiplier (1x/2x/4x from the main-UI buttons)
 let worldDrive="reactive";                    // reactive | pov-follow | explore (server is source of truth)
+let beatAuthor="llm";                         // llm | cells — who writes the autonomous (pov-follow) chronicle (server truth)
 let userDialTs=0;                             // last manual dial click; poll ignores stale server dials within a grace window
 
 function ceilDisp(){const v=parseFloat(ceiling.value)||0;
@@ -976,20 +992,24 @@ syncPlay();
 const pp=document.getElementById("pp");
 function syncPp(){
   if(!pp) return;
-  pp.textContent=consolidating?"⏸":"▶";
-  pp.classList.toggle("on",consolidating);
-  pp.title=consolidating?"pause the world's own clock":"play the world's own clock";
+  // #pp is a PAUSE button: it highlights (on) when the world is PAUSED — the
+  // affordance is "press to resume" while paused, "press to pause" while live.
+  pp.textContent="⏸";
+  pp.classList.toggle("on",!consolidating);
+  pp.title=consolidating?"pause the world's own clock":"resume the world's own clock";
 }
 pp.onclick=()=>setPlaying(!consolidating);
 // world-clock speed: 1x/2x/4x scales the consolidation cycle rate (the whole
 // world — feeding + digestion + the day/night clock — moves faster together).
 function syncSpeed(){
+  // a speed only highlights while the world is RUNNING; paused -> none highlight
+  // (pausing deselects the speeds). When resumed, the matching speed re-lights.
   document.querySelectorAll(".spd").forEach(b=>{
-    b.classList.toggle("on",Math.abs((+b.dataset.spd)-cycleSpeed)<1e-6);
+    b.classList.toggle("on",consolidating && Math.abs((+b.dataset.spd)-cycleSpeed)<1e-6);
   });
 }
 document.querySelectorAll(".spd").forEach(b=>{
-  b.onclick=()=>{cycleSpeed=+b.dataset.spd;syncSpeed();userDialTs=Date.now();queuePersist();};
+  b.onclick=()=>{cycleSpeed=+b.dataset.spd;setPlaying(true);syncSpeed();userDialTs=Date.now();queuePersist();};
 });
 syncPp();syncSpeed();
 // ---- starve / balance / feed: three inter-connected feed-rate presets -------
@@ -1178,13 +1198,16 @@ function syncSettingsUI(){
   if(tk && document.activeElement!==tk && !tk.dataset.dirty) tk.value="";
   const dr=document.getElementById("set-drive");
   if(dr && document.activeElement!==dr) dr.value=worldDrive;
+  const ba=document.getElementById("set-beat-author");
+  if(ba && document.activeElement!==ba) ba.value=beatAuthor;
 }
 async function saveSettings(clearToken){
   const be=document.getElementById("set-backend");
   const tk=document.getElementById("set-token");
   const sm=document.getElementById("set-model");
   const dr=document.getElementById("set-drive");
-  const body={backend:be.value.trim(), story_model:sm.value||"", world_drive:dr?dr.value:worldDrive};
+  const ba=document.getElementById("set-beat-author");
+  const body={backend:be.value.trim(), story_model:sm.value||"", world_drive:dr?dr.value:worldDrive, beat_author:ba?ba.value:beatAuthor};
   if(clearToken) body.clear_token=true;
   else if(tk.value) body.token=tk.value;
   try{
@@ -1193,6 +1216,7 @@ async function saveSettings(clearToken){
     if(j && j.ok){
       curBackend=j.backend; storyModel=j.story_model; curHasToken=j.has_token;
       if(j.world_drive){ worldDrive=j.world_drive; applyAutofloodGate(); }
+      if(j.beat_author){ beatAuthor=j.beat_author; }
       tk.value=""; delete tk.dataset.dirty; delete be.dataset.dirty; delete sm.dataset.dirty;
       floatText("settings saved","#5fd47a");
       refreshModels();              // the server may have changed -> repopulate the list

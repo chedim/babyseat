@@ -980,6 +980,16 @@ class Membrane:
         # tag the scene to its cast (walking each tagged char's state_vec and
         # recording the scene text as each tagged char's last_scene / situation)
         tags = self.cast.tag(vec, cycle, text=story)
+        # a beat that tagged NO existing character is a "stranger": track it, and
+        # if its region recurs, auto-admit it as a character -- the field's own
+        # emergence, no model (the name is the field's most-repeated salient word
+        # about that region). On admission, re-tag THIS beat to the new char so
+        # it counts as their first lived scene (they "start thinking" once they
+        # have lived _VOICE_MIN). The cast save below (``if tags``) persists it.
+        if not tags:
+            admitted = self.cast.note_stranger(vec, cycle, story)
+            if admitted is not None:
+                tags = self.cast.tag(vec, cycle, text=story)
         verdict = {"verdict": "feed", "reason": "story-fed growth (raw embed)",
                    "sim": None, "nov": None, "ex_idx": None}
         resp = _chat_response("feed", story)

@@ -12,14 +12,23 @@ a scene far from all characters is left untagged, so the cast stays short.
 Characters are seeded once by the genesis chapter (the LLM names who it
 introduced) and thereafter managed by hand from the menu (retire / pin).
 
-This is the SPINE only: it lets characters emerge and walk. It does not yet steer
-genesis (the drive), gate acts by consistency, or have cells author beats -- those
-come later, on top of this addressable state.
+This is the SPINE + the emergence/voice layer on top of it:
+
+  * characters emerge and walk (the EMA ``tag`` below);
+  * a stranger that recurs becomes a character (``note_stranger`` -- the field's
+    own emergence, no model; the name is the field's most-repeated salient word);
+  * a character that has lived enough "starts thinking" -- its own per-character
+    n-gram voice (``voice_for``), which cells-act authors beats from;
+  * the on-stage character (``on_stage``) is whoever the narrative is freshest in
+    -- the fade is just "stop POVing a character that fell out of the narrative,"
+    * not* retirement.
 """
 
 from __future__ import annotations
 
 import json
+import sys
+from collections import Counter
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
@@ -29,6 +38,33 @@ import numpy as np
 def _unit(v: np.ndarray) -> np.ndarray:
     n = np.linalg.norm(v)
     return v / n if n > 1e-12 else v
+
+
+# ---- emergence thresholds (the two-stage "a stranger becomes a character that
+# starts thinking") -----------------------------------------------------------
+# A beat that tags NO existing character is a "stranger"; it accumulates in an
+# in-memory scratch buffer. When a recurring region (a cluster of strangers
+# within ``_STRANGER_BAND`` cosine) reaches ``_ADMIT_RECURRENCE`` scenes, it is
+# auto-admitted as a character -- the field's own emergence, no model. The name
+# is the field's most-repeated salient word about that region (see ``_field_name``).
+# A character "starts thinking" (authors beats in cells-act from its own
+# per-character n-gram) only once it has lived ``_VOICE_MIN`` tagged scenes;
+# until then it is just narrated.
+_ADMIT_RECURRENCE = 3
+_STRANGER_BAND = 0.55
+_STRANGER_CAP = 64
+_VOICE_MIN = 5
+# words the field says a lot but that are not a figure's name -- dropped before
+# the salient-noun frequency count names a stranger.
+_NAME_STOP = frozenset("""
+the a an and or but if then else of to in on at by for with from into over under
+is are was were be been being am do does did done have has had having will would
+can could should may might must shall i you he she it we they him her them us me
+my your his its our their this that these those there here where when why how what
+who whom which all any some no not yes very just only also too more most much many
+said says say tell told asks asked one two three him her she he they them
+out up down back away off again still now then soon later here there
+""".split())
 
 
 @dataclass
@@ -67,6 +103,14 @@ class Cast:
         self.cap = cap
         self.embedder = embedder      # set by the Membrane after construction
         self.pov_id: int | None = None   # the protagonist (who the reader IS)
+        # ---- emergence (in-memory, never serialized) ----
+        # untagged beats accumulate here; a recurring region is auto-admitted.
+        self._strangers: list[dict] = []
+        # per-character n-gram voices: cid -> FieldNGram, rebuilt when the char
+        # lives more. A character "starts thinking" once it has >= _VOICE_MIN
+        # tagged scenes; ``_voice_size`` tracks the scene_count each was built at.
+        self._voices: dict[int, object] = {}
+        self._voice_size: dict[int, int] = {}
 
     # ---- addressing ------------------------------------------------------
     def by_id(self, cid: int) -> Character | None:
@@ -177,6 +221,115 @@ class Cast:
                 ex.tags = ids
                 n += 1
         return n
+
+    # ---- emergence: a stranger becomes a character ----------------------
+    def note_stranger(self, vec, cycle: int, text: str = "") -> "Character | None":
+        """A beat that tagged NO existing character (``tag`` returned ``[]``).
+        Track it in the scratch ``_strangers`` buffer; if a recurring region (a
+        cluster of strangers within ``_STRANGER_BAND`` cosine) reaches
+        ``_ADMIT_RECURRENCE`` scenes, auto-admit it as a character -- the field's
+        own emergence, NO model. The name is the field's most-repeated salient
+        word about that region (``_field_name``): the field has already named the
+        figure by saying it over and over, so we read that back. Returns the new
+        Character (and evicts the graduated cluster), or None. Respects ``cap``;
+        a full cast simply keeps accumulating strangers without admitting.
+
+        No retro-tag of past scenes: the new char's ``state_vec`` is the region's
+        centroid, so FUTURE beats in that region tag to it and it accrues from
+        here -- it "starts thinking" once it has lived ``_VOICE_MIN`` of them."""
+        sv = _unit(np.asarray(vec, dtype=float))
+        self._strangers.append({"vec": sv.tolist(), "cycle": int(cycle),
+                                 "text": text or ""})
+        if len(self._strangers) > _STRANGER_CAP:
+            self._strangers = self._strangers[-_STRANGER_CAP:]
+        # need both a seeded cast and enough accumulated strangers to cluster
+        if not self.chars or len(self._strangers) < _ADMIT_RECURRENCE:
+            return None
+        M = np.array([s["vec"] for s in self._strangers], dtype=float)
+        Mn = M / (np.linalg.norm(M, axis=1, keepdims=True) + 1e-12)
+        sims = Mn @ sv
+        cluster_idx = [i for i, s in enumerate(sims)
+                       if float(s) >= _STRANGER_BAND]
+        if len(cluster_idx) < _ADMIT_RECURRENCE or len(self.chars) >= self.cap:
+            return None
+        cluster = [self._strangers[i] for i in cluster_idx]
+        centroid = _unit(np.mean(
+            [np.asarray(c["vec"], dtype=float) for c in cluster], axis=0))
+        name = self._field_name(cluster)
+        c = self.admit(name, centroid, anchor_idx=None, cycle=cycle,
+                       role="", voice="")
+        if c is not None:
+            # the region graduated into a character; drop its strangers
+            gone = set(cluster_idx)
+            self._strangers = [s for i, s in enumerate(self._strangers)
+                               if i not in gone]
+            print(f"[cast] stranger admitted: {c.name} "
+                  f"(recurrence {len(cluster)}); cast={len(self.chars)}",
+                  file=sys.stderr)
+        return c
+
+    def _field_name(self, cluster: list[dict]) -> str:
+        """The field's name for a recurring region: the most-repeated salient word
+        across the cluster's scene texts (NO model). The field has named the
+        figure by saying it; we tokenize, drop the stoplist + existing cast names
+        + short tokens, and take the winner, title-cased. Falls back to a
+        positional 'Stranger {next_id}' when nothing salient remains."""
+        from .generator import _tok as _gen_tokens
+        existing = {c.name.lower().strip() for c in self.chars if c.name}
+        counts: Counter = Counter()
+        for s in cluster:
+            for tok in _gen_tokens(s.get("text", "")):
+                if len(tok) < 3 or tok in _NAME_STOP or tok in existing:
+                    continue
+                counts[tok] += 1
+        if counts:
+            winner = counts.most_common(1)[0][0]
+            return winner[:1].upper() + winner[1:]
+        return f"Stranger {self._next_id}"
+
+    # ---- the on-stage character + per-character voice (cells-act) -------
+    def on_stage(self) -> "Character | None":
+        """The freshest character -- the one most recently in the narrative
+        (``max last_cycle``), tiebreak the POV. This IS the fade: when the POV's
+        ``last_cycle`` goes stale (it fell out of the narrative), the chronicle
+        follows whoever is freshest instead -- 'stopping POVing them' without
+        retiring them (the POV stays in the cast, its stars keep their color;
+        it is simply no longer seeded/authored-from). When nothing has been
+        tagged yet (all ``last_cycle == 0``), follow the POV (or None)."""
+        if not self.chars:
+            return None
+        freshest = max(self.chars, key=lambda c: c.last_cycle)
+        if freshest.last_cycle == 0:
+            pov = self.by_id(self.pov_id) if self.pov_id is not None else None
+            return pov
+        pov = self.by_id(self.pov_id) if self.pov_id is not None else None
+        if pov is not None and pov.last_cycle == freshest.last_cycle:
+            return pov
+        return freshest
+
+    def voice_for(self, cid: int, store) -> "object | None":
+        """The per-character n-gram voice (cells-act). A character 'starts
+        thinking' only once it has lived enough (``>= _VOICE_MIN`` tagged
+        scenes); before that returns None -- 'until then we just narrate it'.
+        Trained on the character's own tagged ``Exemplar.action``s (the chronicle
+        scenes they lived), cached and rebuilt when they live more. Reuses
+        ``FieldNGram`` unchanged. Returns None too when the lived scenes are too
+        few distinct actions to speak from."""
+        from .generator import FieldNGram, MIN_ACTIONS
+        c = self.by_id(cid)
+        if c is None or c.scene_count < _VOICE_MIN:
+            return None
+        size = c.scene_count
+        if self._voice_size.get(cid, -1) == size and cid in self._voices:
+            return self._voices[cid]
+        actions = [e.action for e in store.exemplars
+                   if cid in getattr(e, "tags", []) and e.action]
+        if len(set(actions)) < MIN_ACTIONS:
+            return None
+        lm = FieldNGram(actions)
+        self._voices[cid] = lm
+        self._voice_size[cid] = size
+        return lm
 
     # ---- management (menu) ----------------------------------------------
     def retire(self, cid: int, store) -> bool:

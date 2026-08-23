@@ -80,8 +80,8 @@ def _settings_path(srv) -> str:
 
 
 def _load_settings(srv) -> dict:
-    """Read persisted {backend, story_model, world_drive} from settings.json, or {}
-    if absent. Never holds a token -- the token is in-memory only."""
+    """Read persisted {backend, story_model, world_drive, beat_author} from
+    settings.json, or {} if absent. Never holds a token -- the token is in-memory only."""
     try:
         with open(_settings_path(srv), "r", encoding="utf-8") as f:
             d = json.load(f)
@@ -94,19 +94,24 @@ def _load_settings(srv) -> dict:
         out["story_model"] = d["story_model"].strip()
     if isinstance(d.get("world_drive"), str) and d["world_drive"].strip():
         out["world_drive"] = d["world_drive"].strip()
+    if isinstance(d.get("beat_author"), str) and d["beat_author"].strip():
+        out["beat_author"] = d["beat_author"].strip()
     return out
 
 
 def _save_settings(srv, backend: str, story_model: str | None,
-                   world_drive: str | None = None) -> None:
-    """Persist the non-secret settings (backend + story model + world drive). The
-    token is deliberately NOT written -- in-memory only."""
+                   world_drive: str | None = None,
+                   beat_author: str | None = None) -> None:
+    """Persist the non-secret settings (backend + story model + world drive +
+    beat author). The token is deliberately NOT written -- in-memory only."""
     p = _settings_path(srv)
     try:
         os.makedirs(os.path.dirname(p), exist_ok=True)
         d = {"backend": backend, "story_model": story_model or ""}
         wd = world_drive if world_drive is not None else getattr(srv, "world_drive", "reactive")
         d["world_drive"] = wd
+        ba = beat_author if beat_author is not None else getattr(srv, "beat_author", "llm")
+        d["beat_author"] = ba
         with open(p, "w", encoding="utf-8") as f:
             json.dump(d, f)
     except OSError as e:
@@ -433,15 +438,23 @@ def _genesis(srv) -> list:
         cast_block = ("The cast (write about THESE people):\n" +
                       "\n".join(f"- {c.name} — {c.role} — {c.voice}"
                                 for c in cast.chars if c.name) + "\n\n")
-    # pov-follow: the autonomous chronicle FOLLOWS the protagonist. Seed the
-    # chapter with the POV's current situation (their last tagged scene) so the
-    # LLM continues from where the explorer IS, not where its own thread drifted.
+    # pov-follow: the autonomous chronicle follows the ON-STAGE character (the
+    # freshest in the narrative, ``cast.on_stage``), not always the POV -- so when
+    # the POV fell out of the narrative (faded) the chronicle follows whoever is
+    # in the scene ("only follow their POV when they are in the scene"). on_stage
+    # returns the POV when it is live (recently tagged), so the usual case is
+    # unchanged; the fade is just "stop POVing a stale POV." Seed the chapter with
+    # that character's current situation so the LLM continues from where the
+    # narrative IS, not where its own thread drifted.
     pov_block = ""
     if getattr(srv, "world_drive", "reactive") == "pov-follow":
-        pov = cast.by_id(getattr(cast, "pov_id", None)) if cast.pov_id is not None else None
-        if pov is not None and getattr(pov, "last_scene", ""):
-            pov_block = (f"The protagonist {pov.name} is currently here:\n"
-                         + pov.last_scene + "\n\nContinue from this point.\n\n")
+        onstage = cast.on_stage() or (cast.by_id(getattr(cast, "pov_id", None))
+                                      if cast.pov_id is not None else None)
+        if onstage is not None and getattr(onstage, "last_scene", ""):
+            pov_block = (f"{onstage.name} is currently here:\n"
+                         + onstage.last_scene + "\n\nContinue from this point.\n\n")
+        elif onstage is not None:
+            pov_block = f"{onstage.name} is the protagonist.\n\n"
     # the SEED call: first chapter + an empty cast -> name the ensemble once
     seed = (not history) and not cast.chars
     if seed:
@@ -642,7 +655,15 @@ def _run_feeds(srv, mem, feeds: int, abort_if_disarmed: bool = False) -> dict:
     HTTP STEP path leaves it False (a STEP feeds regardless of arm state).
 
     Each story is tagged ``pov`` when it tagged the POV character, so the viewer
-    can narrate only the protagonist's thread (``storyPush`` POV filter)."""
+    can narrate only the protagonist's thread (``storyPush`` POV filter).
+
+    CELLS-ACT: when ``beat_author == "cells"`` and training is done
+    (``initial_burst`` spent), each feed is authored INLINE by the on-stage
+    character's own per-character n-gram voice (``_cells_beat``, no LLM) -- the
+    closed loop (generate -> feed -> absorb -> re-tag -> next beat). When no
+    character can speak yet (none has lived >= _VOICE_MIN) ``_cells_beat`` returns
+    None and we fall back to the LLM genesis cache ("we just narrate it"). Reactive
+    beats are never cells-authored -- this path is pov-follow only."""
     stats = _feed_snapshot(srv, mem)
     premise = getattr(srv, "system_prompt", None)
     if not premise or feeds <= 0:
@@ -660,22 +681,38 @@ def _run_feeds(srv, mem, feeds: int, abort_if_disarmed: bool = False) -> dict:
         if cache is None:
             cache = []
             srv.story_cache = cache
-        # refill the genesis cache if low -- ONE model call -> ~CHAPTER cached feeds
-        if len(cache) < _LOW_WATER and not (abort_if_disarmed and not getattr(srv, "consolidating", True)):
+        # cells-act: after training (initial_burst spent), the autonomous chronicle
+        # is authored by the on-stage character's own n-gram voice -- no LLM. When no
+        # character can speak yet (none has lived >= _VOICE_MIN) _cells_beat returns
+        # None and we fall back to the LLM genesis cache ("until then we just narrate
+        # it"). This path is pov-follow only; reactive beats are never cells-authored.
+        cells_act = (str(getattr(srv, "beat_author", "llm")) == "cells"
+                     and not bool(getattr(srv, "initial_burst", 0)))
+        # refill the genesis cache if low -- ONE model call -> ~CHAPTER cached feeds.
+        # Skipped in cells-act (the n-gram authors; the cache is only the no-speaker
+        # fallback, refilled on demand inside the loop).
+        if (not cells_act and len(cache) < _LOW_WATER
+                and not (abort_if_disarmed and not getattr(srv, "consolidating", True))):
             cache.extend(_genesis(srv))
             srv.story_cache = cache
         for _ in range(feeds):
             if abort_if_disarmed and not getattr(srv, "consolidating", True):
                 break                           # paused between feeds -- stop, don't spin
-            if not cache:                       # drained; one more chapter before giving up
-                if abort_if_disarmed and not getattr(srv, "consolidating", True):
-                    break
-                cache.extend(_genesis(srv))
-                srv.story_cache = cache
-                if not cache:                   # model unavailable -- stop, don't spin
-                    stories.append({"seed": "", "text": "", "result": "no-story", "pov": False})
-                    break
-            passage = cache.pop(0)
+            passage = None
+            if cells_act:
+                passage = _cells_beat(srv, mem)    # the on-stage char's n-gram voice (no LLM)
+            if passage is None:
+                # LLM path: training, or the cells-act "narrate it" fallback when no
+                # character can speak yet.
+                if not cache:                       # drained; one more chapter before giving up
+                    if abort_if_disarmed and not getattr(srv, "consolidating", True):
+                        break
+                    cache.extend(_genesis(srv))
+                    srv.story_cache = cache
+                    if not cache:                   # model unavailable -- stop, don't spin
+                        stories.append({"seed": "", "text": "", "result": "no-story", "pov": False})
+                        break
+                passage = cache.pop(0)
             r = mem.feed(passage, ceiling, cycle=cycle)     # raw embed + absorb (no nudging)
             stats["fed"] += int(r.get("fed", 0))
             if r.get("fed"):
@@ -785,6 +822,43 @@ def _reactive_beat(srv, mem, prompt: str) -> dict:
             stats["cells_level"] = round(float(r["cells_level"]), 2)
         stats["free_energy"] = float(r.get("free_energy", stats["free_energy"]))
     return stats
+
+
+def _cells_beat(srv, mem) -> str | None:
+    """The cells-act author: the on-stage character's own per-character n-gram
+    voice writes the next beat (NO LLM). The on-stage character is the freshest in
+    the narrative (``cast.on_stage`` -- the POV when it is live, whoever is in the
+    scene when the POV faded); their ``voice_for`` n-gram is trained on the
+    chronicle scenes they lived. A character only authors once it has lived enough
+    (>= _VOICE_MIN tagged scenes); until then this returns None and the caller
+    falls back to the LLM genesis ("we just narrate it"). The beat is seeded from
+    the on-stage char's last_scene tokens; the RNG is deterministic per (char,
+    cycle, field size) so a re-feed within a cycle is stable. Returns the passage,
+    or None when no character can speak yet (or the cast is empty)."""
+    import hashlib
+    import random
+    from .generator import _tok as _gen_tokens
+    cast = mem.cast
+    onstage = cast.on_stage()
+    if onstage is None:
+        return None
+    lm = cast.voice_for(onstage.id, mem.store)
+    if lm is None:
+        return None
+    seed = _gen_tokens(getattr(onstage, "last_scene", ""))[:2]
+    cycle = int(getattr(srv, "consolidation_stats", {}).get("cycles", 0))
+    digest = hashlib.sha256(
+        f"{onstage.id}\x00{cycle}\x00{len(mem.store)}".encode()).digest()
+    rng = random.Random(int.from_bytes(digest[:8], "big"))
+    try:
+        out = lm.generate(seed, rng, max_tokens=24)
+    except Exception as e:
+        print(f"[cells] beat generation failed ({e})", file=sys.stderr)
+        return None
+    out = (out or "").strip()
+    if out:
+        print(f"[cells] {onstage.name} authors: {out[:120]}", file=sys.stderr)
+    return out if out else None
 
 
 class ProxyHandler(BaseHTTPRequestHandler):
@@ -1377,6 +1451,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 wd = body["world_drive"].strip().lower()
                 if wd in ("reactive", "pov-follow", "explore"):
                     srv.world_drive = wd
+            # beat author: llm (genesis model) | cells (on-stage char's n-gram voice)
+            if isinstance(body.get("beat_author"), str) and body["beat_author"].strip():
+                ba = body["beat_author"].strip().lower()
+                if ba in ("llm", "cells"):
+                    srv.beat_author = ba
             # token: a non-empty string SETS it; clear_token=true CLEARS it; neither
             # (both absent) leaves the existing token untouched. Never echoed/logged.
             if isinstance(body.get("token"), str) and body["token"].strip():
@@ -1388,7 +1467,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             out = json.dumps({"ok": True, "backend": srv.backend,
                               "story_model": getattr(srv, "warmup_model", None) or "",
                               "has_token": bool(getattr(srv, "ollama_token", None)),
-                              "world_drive": getattr(srv, "world_drive", "reactive")}).encode()
+                              "world_drive": getattr(srv, "world_drive", "reactive"),
+                              "beat_author": getattr(srv, "beat_author", "llm")}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(out)))
@@ -1398,7 +1478,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         out = json.dumps({"backend": srv.backend,
                           "story_model": getattr(srv, "warmup_model", None) or "",
                           "has_token": bool(getattr(srv, "ollama_token", None)),
-                          "world_drive": getattr(srv, "world_drive", "reactive")}).encode()
+                          "world_drive": getattr(srv, "world_drive", "reactive"),
+                          "beat_author": getattr(srv, "beat_author", "llm")}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(out)))
@@ -1513,6 +1594,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                           "initial_burst": int(getattr(self.server, "initial_burst", 0)),
                           "trained": not bool(getattr(self.server, "initial_burst", 0)),
                           "world_drive": str(getattr(self.server, "world_drive", "reactive")),
+                          "beat_author": str(getattr(self.server, "beat_author", "llm")),
                           "verdicts": tail, "n_verdicts": n_verd}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -2245,6 +2327,13 @@ def main() -> None:
                     help="consolidation: auto-PAUSE after N cycles run past the first chapter "
                          "(the 'initial training' burst; 0 = never auto-pause, runs forever). "
                          "Only meaningful with --consolidate. NEW WORLD / LOAD re-arms it.")
+    ap.add_argument("--beat-author", dest="beat_author", default="llm",
+                    choices=("llm", "cells"),
+                    help="who authors the autonomous pov-follow chronicle beats: "
+                         "'llm' (default; the genesis model) or 'cells' (the on-stage "
+                         "character's own per-character n-gram voice -- no LLM; engages "
+                         "after training). Reactive beats are always LLM. The post-training "
+                         "flip sets this to 'cells'.")
     args = ap.parse_args()
 
     # --tag defaults the field/audit paths so independent veils own independent fields
@@ -2372,9 +2461,10 @@ def main() -> None:
     srv.warmup_model = args.warmup_model or args.judge_model   # the one warm-up palette call
     srv.ollama_token = None                                    # optional bearer; in-memory only, never persisted
     srv.world_drive = "reactive"                               # default: the world writes a beat after each move
-    # apply persisted settings.json (backend + story model + world drive) over the
-    # CLI defaults; the token is in-memory only, so it starts cleared each boot. Then
-    # sync the shared embedder + responder to the resolved backend so /api/embed +
+    srv.beat_author = str(getattr(args, "beat_author", "llm"))  # llm | cells (who authors the autonomous chronicle)
+    # apply persisted settings.json (backend + story model + world drive + beat author)
+    # over the CLI defaults; the token is in-memory only, so it starts cleared each boot.
+    # Then sync the shared embedder + responder to the resolved backend so /api/embed +
     # /api/chat agree (also fixes the old latent mismatch where the embedder hardcoded
     # localhost:11434 regardless of --backend).
     _persisted = _load_settings(srv)
@@ -2384,6 +2474,8 @@ def main() -> None:
         srv.warmup_model = _persisted["story_model"]
     if _persisted.get("world_drive") in ("reactive", "pov-follow", "explore"):
         srv.world_drive = _persisted["world_drive"]
+    if _persisted.get("beat_author") in ("llm", "cells"):
+        srv.beat_author = _persisted["beat_author"]
     _sync_ollama_clients(srv)
     srv.warmup_seed = args.warmup_seed
     srv.palette = srv_palette        # cached palette (built at startup warm-up); the no-model /live loop reuses it
