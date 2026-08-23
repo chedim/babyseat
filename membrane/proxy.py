@@ -173,6 +173,25 @@ _GENESIS_SYSTEM_SEED = (
     "time: the cosmology and the first land, then the life, then the people and the "
     "world they make. Separate every scene with a line that contains only ---. Write "
     "ONLY the cast block then the scenes, no headings, no commentary, no recaps.")
+# Character-driven chronicle (used when the cast is ALREADY seeded at boot via
+# --protagonist/--character). A world that begins with named people should be
+# narrated about THOSE people -- their schemes, dialogue, and what goes sideways --
+# not a cosmogenesis arc. Left to "narrate from the big bang", a small model
+# (gemma3:12b) ignores the premise and writes a generic planet-evolution story
+# (primordial soup -> a world -> its people); leading with the cast keeps the
+# chronicle about the characters the reader is here for.
+_GENESIS_SYSTEM_CAST = (
+    "You are the chronicler of this world. Narrate it as a sequence of distinct, "
+    "substantial SCENES, each one paragraph (3 to 6 sentences), each scene "
+    "FEATURING the named characters -- their schemes, dialogue, conflicts, and what "
+    "goes sideways for them. This world begins with its people: do NOT narrate "
+    "cosmology, the formation of stars or planets, the origin of life, or any "
+    "prehistory before the cast appears. Start in the middle of their lives and move "
+    "forward through what they DO and what happens to them. Keep the same characters "
+    "on stage across scenes; name them, let them talk. Each scene must stand on its "
+    "own as a coherent piece of the one ongoing story. Separate every scene with a "
+    "line that contains only ---. Write ONLY the scenes separated by ---, no "
+    "headings, no labels, no commentary, no recaps.")
 _CHAPTER = 8        # scenes per genesis call (one model call -> ~8 cached feeds)
 _LOW_WATER = 3      # refill the cache (one model call) when fewer scenes remain
 
@@ -320,8 +339,16 @@ def _genesis(srv) -> list:
     if not model or not backend or not premise:
         return []
     history = list(getattr(srv, "story_history", []))[-6:]
+    cast = srv.membrane.cast
+    # the cast block the model writes FROM (only when the cast is already seeded;
+    # an empty cast uses the SEED path below to NAME the ensemble itself).
+    cast_block = ""
+    if cast.chars:
+        cast_block = ("The cast (write about THESE people):\n" +
+                      "\n".join(f"- {c.name} — {c.role} — {c.voice}"
+                                for c in cast.chars if c.name) + "\n\n")
     # the SEED call: first chapter + an empty cast -> name the ensemble once
-    seed = (not history) and not srv.membrane.cast.chars
+    seed = (not history) and not cast.chars
     if seed:
         sys_prompt = _GENESIS_SYSTEM_SEED
         user = (premise + "\n\nBegin the chronicle from the big bang: first give the "
@@ -330,16 +357,22 @@ def _genesis(srv) -> list:
                 + str(_CHAPTER) + " scenes in order, each one paragraph, each separated "
                 "by a line with only ---.")
     elif history:
-        user = (premise + "\n\nThe chronicle so far:\n\n" + "\n\n".join(history) +
-                "\n\nContinue the chronicle: narrate the NEXT " + str(_CHAPTER) +
-                " scenes in order, each one paragraph, each separated by a line "
-                "with only ---.")
-        sys_prompt = _GENESIS_SYSTEM
-    else:
-        user = (premise + "\n\nBegin the chronicle from the big bang: narrate the "
-                "FIRST " + str(_CHAPTER) + " scenes in order, each one paragraph, "
+        # continuing an existing chronicle: stay character-driven when the cast
+        # is seeded (don't drift back into cosmology), else the world-arc voice.
+        sys_prompt = _GENESIS_SYSTEM_CAST if cast.chars else _GENESIS_SYSTEM
+        user = (premise + "\n\n" + cast_block + "The chronicle so far:\n\n" +
+                "\n\n".join(history) + "\n\nContinue the chronicle: narrate the NEXT "
+                + str(_CHAPTER) + " scenes featuring the cast, each one paragraph, "
                 "each separated by a line with only ---.")
-        sys_prompt = _GENESIS_SYSTEM
+    else:
+        # no history yet + a pre-seeded cast -> character-driven FIRST chapter
+        # (NOT "from the big bang", which makes small models ignore the cast and
+        # write a generic cosmogenesis). Empty cast can't happen here (seed=True).
+        sys_prompt = _GENESIS_SYSTEM_CAST
+        user = (premise + "\n\n" + cast_block +
+                "Begin the chronicle with these characters in the middle of their "
+                "lives: narrate the FIRST " + str(_CHAPTER) + " scenes featuring "
+                "them, each one paragraph, each separated by a line with only ---.")
     messages = [{"role": "system", "content": sys_prompt},
                 {"role": "user", "content": user}]
     temperature = float(getattr(srv, "story_temperature", 0.7))
