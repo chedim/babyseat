@@ -198,25 +198,6 @@
     text-shadow:2px 2px #000;will-change:transform,opacity;
     transition:transform 1.3s cubic-bezier(.2,.6,.3,1),opacity 1.3s ease}
 
-  /* ---- counter-strike style console (backtick) ---------------------------- */
-  #console{position:fixed;top:0;left:0;right:0;height:46vh;z-index:90;display:none;
-    flex-direction:column;background:rgba(8,8,12,.92);border-bottom:3px solid var(--ink);
-    box-shadow:inset 0 -3px 0 rgba(0,0,0,.5);font-family:var(--vt);font-size:18px;color:#b8e6a0}
-  #console.open{display:flex}
-  #conhead{font-family:var(--px);font-size:10px;color:#8a958e;padding:7px 12px;
-    border-bottom:1px solid rgba(255,255,255,.08);letter-spacing:1px}
-  #conbody{flex:1;overflow-y:auto;padding:7px 12px;line-height:1.4;
-    text-shadow:1px 1px #000}
-  #conbody::-webkit-scrollbar{width:10px}
-  #conbody::-webkit-scrollbar-thumb{background:var(--dark)}
-  .con-scene{padding:4px 0;border-bottom:1px dashed rgba(255,255,255,.06)}
-  .con-scene .meta{color:#8a958e;font-size:15px}
-  .con-scene .txt{color:#dfe6dc;white-space:pre-wrap;word-wrap:break-word}
-  .con-scene.full .meta{color:var(--red)}
-  .con-scene.skipped .meta{color:#8a958e}
-  .con-scene.massaged .meta{color:var(--purple)}
-  .con-scene.fed .meta{color:var(--green-hi)}
-
   /* ---- the cast: named pins on the world map + roster in the menu --------- */
   #cast-marks{position:fixed;inset:0;pointer-events:none;z-index:8;overflow:hidden}
   .cast-pin{position:absolute;transform:translate(-50%,-100%);text-align:center;
@@ -266,7 +247,7 @@
 <!-- the world map is the cosmos (right); the cast's named pins overlay it -->
 <div id="cast-marks"></div>
 
-<div class="hint">drag the map to orbit · scroll to zoom · esc menu · H neighbours · backtick story</div>
+<div class="hint">drag the map to orbit · scroll to zoom · esc menu · H neighbours</div>
 
 <!-- chat = the MAIN feature (a text RPG) -->
 <div id="chat">
@@ -402,12 +383,6 @@
 </div>
 
 <div id="floats"></div>
-
-<!-- counter-strike style console (backtick) — what the LLM is telling the world -->
-<div id="console">
-  <div id="conhead">THE WORLD'S STORY — what the LLM is feeding it (backtick to close)</div>
-  <div id="conbody"></div>
-</div>
 
 <script>
 const VC={absorb:"#5fd47a",escalate:"#6cb0e0","escalate-with-hint":"#6cb0e0",
@@ -561,10 +536,11 @@ async function poll(){
       if(wd) wd.innerHTML='<span class="ph">'+ph+'</span>Day '+day+' · '+hh+':00 · '+pl+' · cycle '+cyc;
     }
     // the consolidator feeds the world on its own clock — pipe those stories into
-    // the console too, so backtick shows what the LLM is sending autonomously.
+    // the MAIN CHAT as narrator prose, so the world's chronicle reads where the
+    // reader lives (no separate console panel).
     if((con.cycles||0)>lastConCycle){
       lastConCycle=con.cycles||0;
-      conPush(con.stories||[]);
+      storyPush(con.stories||[]);
     }
     const tickEl=document.getElementById("drowntick");
     if(tickEl) tickEl.style.left=Math.min(100,((cl/theo)/0.25*100))+"%";
@@ -806,7 +782,7 @@ async function liveTick(){
     if(!r.ok){stopFlood();return false;}
     if((j.fed||0)>0) floatText("+"+j.fed+" story","#e6c34a");
     else if((j.skipped||0)>0) floatText("skipped","#8a958e");
-    conPush(j.stories||[]);
+    storyPush(j.stories||[]);
     return true;
   }catch(e){stopFlood();return false;}
 }
@@ -854,41 +830,22 @@ function syncMode(){
 }
 syncMode();
 
-// ---- counter-strike style console (backtick) — the raw LLM story passages ----
-const consoleEl=document.getElementById("console"),conbody=document.getElementById("conbody");
-let conScenes=[];
-function conPush(stories){
+// ---- the world's chronicle, narrated into the MAIN CHAT ---------------------
+// The consolidator feeds the world on its own clock (and STEP feeds it on
+// demand). Each chronicle scene the LLM produces is dropped into the main chat
+// (#msgs) as narrator prose -- the same place replies land -- so the world's
+// story reads where the reader lives. No separate console panel. A scene that
+// was absorbed cleanly is plain prose; one that was massaged/skipped/full gets
+// a dim "⟂ <status>" suffix. Empty / no-story entries are silent.
+function storyPush(stories){
   if(!stories||!stories.length) return;
   stories.forEach(s=>{
-    conScenes.push({seed:s.seed||"", text:s.text||"", result:s.result||""});
+    const text=(s&&s.text)||"", result=(s&&s.result)||"";
+    if(!text) return;                          // no text -> nothing to narrate
+    const d=addMsg("a", text);                 // the chronicle scene -> narrator prose
+    if(result && result!=="fed") d.textContent+="   ⟂ "+result;
   });
-  if(conScenes.length>200) conScenes=conScenes.slice(-200);
-  renderCon();
 }
-function renderCon(){
-  conbody.innerHTML="";
-  conScenes.forEach(s=>{
-    const d=document.createElement("div");
-    d.className="con-scene "+(s.result||"");
-    const meta=s.result==="no-story"?"(no story)":
-               s.result==="full"?"FULL — at the ceiling, skipped":
-               s.result==="skipped"?"skipped — vague or duplicate":
-               s.result==="massaged"?"massaged — pulled toward the field mean, absorbed":
-               s.result==="fed"?"absorbed":s.result;
-    d.innerHTML=`<span class="meta">[${meta}]</span> `+
-                `<span class="txt">${escapeHtml(s.text)}</span>`;
-    conbody.appendChild(d);
-  });
-  conbody.scrollTop=conbody.scrollHeight;
-}
-addEventListener("keydown",e=>{
-  if(e.key==="`"||e.key==="Backquote"){
-    const t=e.target.tagName;
-    if(t==="INPUT"||t==="TEXTAREA"||t==="SELECT") return;  // don't hijack typing
-    e.preventDefault();
-    consoleEl.classList.toggle("open");
-  }
-});
 
 // ---- menu + autoflood toggle -------------------------------------------------
 const menu=document.getElementById("menu");
