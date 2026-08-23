@@ -253,39 +253,53 @@ def _seed_cast(srv, cast_lines: list) -> None:
         print(f"[genesis] retro-tag failed ({e})", file=sys.stderr)
 
 
-def _apply_protagonist(mem, spec: str) -> None:
-    """Apply ``--protagonist "Name — role — voice"``: admit the character to the
-    cast if absent (seeded from the embedded 'Name — role — voice' string), set
-    them POV, save. If a character of that name already exists, just (re)set them
-    POV. Retro-tags the existing field so the protagonist colors it immediately."""
+def _admit_character(mem, spec: str, tag: str = "character"):
+    """Admit one ``"Name — role — voice"`` character to the cast at boot (if absent),
+    retro-tag the existing field so it colors in at once, and save. Returns the
+    Character (existing or newly admitted) or None on failure. Does NOT set POV --
+    that's ``_apply_protagonist``'s job. Shared by --protagonist and --character."""
     import numpy as np
     parts = re.split(r"\s*[—–]\s*", spec.strip(), maxsplit=2)
     name = parts[0].strip().strip("\"'.,;:")
     role = parts[1].strip() if len(parts) > 1 else ""
     voice = parts[2].strip() if len(parts) > 2 else ""
     if not name:
-        return
+        return None
     existing = mem.cast.by_name(name)
-    if existing is None:
-        seed_text = f"{name} — {role} — {voice}" if (role or voice) else name
-        try:
-            v = mem.embedder.embed([seed_text])[0]
-        except Exception as e:
-            print(f"[protagonist] embed failed ({e}); not admitted", file=sys.stderr)
-            return
-        c = mem.cast.admit(name, np.asarray(v, dtype=float), anchor_idx=None,
-                           cycle=0, role=role, voice=voice)
-        if c is None:
-            print(f"[protagonist] cast is full (cap {mem.cast.cap}); {name} not admitted",
-                  file=sys.stderr)
-            return
-        try:
-            mem.cast.retro_tag(mem.store)        # color the existing field at once
-            mem.store.save(mem.field_path)
-        except Exception as e:
-            print(f"[protagonist] retro-tag failed ({e})", file=sys.stderr)
-    else:
-        c = existing
+    if existing is not None:
+        return existing
+    seed_text = f"{name} — {role} — {voice}" if (role or voice) else name
+    try:
+        v = mem.embedder.embed([seed_text])[0]
+    except Exception as e:
+        print(f"[{tag}] embed failed ({e}); {name} not admitted", file=sys.stderr)
+        return None
+    c = mem.cast.admit(name, np.asarray(v, dtype=float), anchor_idx=None,
+                       cycle=0, role=role, voice=voice)
+    if c is None:
+        print(f"[{tag}] cast is full (cap {mem.cast.cap}); {name} not admitted",
+              file=sys.stderr)
+        return None
+    try:
+        mem.cast.retro_tag(mem.store)        # color the existing field at once
+        mem.store.save(mem.field_path)
+    except Exception as e:
+        print(f"[{tag}] retro-tag failed ({e})", file=sys.stderr)
+    mem.cast.save(mem.cast_path)
+    print(f"[{tag}] {c.name}"
+          + (f" — {c.role}" if c.role else "")
+          + (f" — {c.voice}" if c.voice else ""), file=sys.stderr)
+    return c
+
+
+def _apply_protagonist(mem, spec: str) -> None:
+    """Apply ``--protagonist "Name — role — voice"``: admit the character to the
+    cast if absent (seeded from the embedded 'Name — role — voice' string), set
+    them POV, save. If a character of that name already exists, just (re)set them
+    POV. Retro-tags the existing field so the protagonist colors it immediately."""
+    c = _admit_character(mem, spec, tag="protagonist")
+    if c is None:
+        return
     mem.cast.set_pov(c.id)
     mem.cast.save(mem.cast_path)
     print(f"[protagonist] POV = {c.name}"
@@ -518,6 +532,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._feed()
         elif self.path in ("/cast", "/cast/"):
             self._cast()
+        elif self.path in ("/world", "/world/"):
+            self._world()
         else:
             self._forward()
 
@@ -529,6 +545,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self._state(); return
             if self.path.split("?")[0] in ("/neighbors", "/neighbors/"):
                 self._neighbors(); return
+            if self.path.split("?")[0] in ("/worlds", "/worlds/"):
+                self._list_worlds(); return
         self._forward()
 
     def do_DELETE(self):
@@ -846,7 +864,129 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 ok = mem.cast.set_pov(cid)
                 if ok:
                     mem.cast.save(mem.cast_path)
-        out = json.dumps({"ok": ok, "cast": mem.cast.to_json()}).encode()
+        # the viewer's castAction re-renders from THIS response (before the next
+        # /state poll), so it must carry the `pov` flag per char -- bare to_json()
+        # omits it (pov is a Cast-level pointer, not a Character field) and the
+        # POV badge + syncPov() would blank until the next poll tick. Enrich here.
+        _view = [dict(c, pov=(mem.cast.pov_id == c["id"]))
+                 for c in mem.cast.to_json()]
+        out = json.dumps({"ok": ok, "cast": _view}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    def _list_worlds(self) -> None:
+        """GET /worlds -> the saved world slots (dirs under --worlds-dir that
+        hold a field.json). Used to populate the viewer's LOAD list."""
+        from pathlib import Path
+        srv = self.server
+        wd = Path(getattr(srv, "worlds_dir", "worlds"))
+        names = []
+        if wd.is_dir():
+            for d in sorted(wd.iterdir()):
+                if d.is_dir() and (d / "field.json").exists():
+                    names.append(d.name)
+        out = json.dumps({"worlds": names}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    def _world(self) -> None:
+        """save/load/new the whole world (field + cast + audit).
+
+        POST JSON {action:"save"|"load"|"new", name:"<slot>"}.
+          save -> copy the live field/cast/audit to ``worlds/<name>/``.
+          load -> swap the live store + cast in from a saved world (under
+                  ``feed_lock`` so it can't race the consolidator) and reset the
+                  rolling chronicle; the loaded world is persisted to the LIVE
+                  paths so a restart keeps it.
+          new  -> empty field + cast + audit (a blank slate; the protagonist is
+                  gone -- re-seed with --protagonist/--character on next launch).
+        Responds with the post-action cast (enriched with ``pov``) so the viewer
+        re-renders immediately."""
+        import shutil
+        from pathlib import Path
+        from .field import ExemplarStore
+        from .cast import Cast
+        srv = self.server
+        mem = srv.membrane
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length)
+        try:
+            body = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            body = {}
+        action = str(body.get("action", ""))
+        name = str(body.get("name", "")).strip()
+        # a safe slot name (no path traversal): keep alnum/dash/underscore/space
+        safe = re.sub(r"[^\w \-]", "", name).strip()
+        wd = Path(getattr(srv, "worlds_dir", "worlds"))
+        ok = False
+        err = ""
+        with srv.feed_lock:
+            if action == "save":
+                if not safe:
+                    err = "save needs a name"
+                else:
+                    try:
+                        dest = wd / safe
+                        dest.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(mem.field_path, dest / "field.json")
+                        shutil.copy2(mem.cast_path, dest / "cast.json")
+                        ap = Path(mem.audit_path)
+                        if ap.exists():
+                            shutil.copy2(ap, dest / "audit.jsonl")
+                        else:
+                            (dest / "audit.jsonl").touch()
+                        ok = True
+                    except Exception as e:
+                        err = f"save failed: {e}"
+            elif action == "load":
+                src = wd / safe
+                if not safe or not (src / "field.json").exists():
+                    err = "no such saved world"
+                else:
+                    try:
+                        mem.store = ExemplarStore.load(src / "field.json")
+                        mem.cast = Cast.load(src / "cast.json", embedder=mem.embedder)
+                        # persist the loaded world to the LIVE paths (next mutation
+                        # + a restart keep it); reset the audit too.
+                        mem.store.save(mem.field_path)
+                        mem.cast.save(mem.cast_path)
+                        ap = Path(mem.audit_path)
+                        try:
+                            shutil.copy2(src / "audit.jsonl", ap)
+                        except Exception:
+                            ap.write_text("")
+                        # the rolling chronicle + cache belong to the OLD world
+                        srv.story_history = []
+                        srv.story_cache = []
+                        srv.consolidation_stats = {"cycles": 0, "cpu_actual": 0.0}
+                        ok = True
+                    except Exception as e:
+                        err = f"load failed: {e}"
+            elif action == "new":
+                try:
+                    mem.store = ExemplarStore()             # empty field
+                    mem.cast = Cast(embedder=mem.embedder)   # empty cast (no POV)
+                    mem.store.save(mem.field_path)
+                    mem.cast.save(mem.cast_path)
+                    Path(mem.audit_path).write_text("")
+                    srv.story_history = []
+                    srv.story_cache = []
+                    srv.consolidation_stats = {"cycles": 0, "cpu_actual": 0.0}
+                    ok = True
+                except Exception as e:
+                    err = f"new failed: {e}"
+            else:
+                err = "unknown action (save|load|new)"
+        _view = [dict(c, pov=(mem.cast.pov_id == c["id"]))
+                 for c in mem.cast.to_json()]
+        out = json.dumps({"ok": ok, "error": err, "cast": _view}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(out)))
@@ -890,10 +1030,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
         srv = self.server
         pts = []
         cast_view: list = []
+        mu = None
+        basis = getattr(srv, "_v_basis", None)
         if n:
             V = np.array([np.asarray(e.vec, dtype=float) for e in exs])
             mu = V.mean(0)
-            basis = getattr(srv, "_v_basis", None)
             if basis is None and n >= 4:          # fit once -> a stable cloud that grows, never spins
                 try:
                     _, _, Vt = np.linalg.svd(V - mu, full_matrices=False)
@@ -914,32 +1055,42 @@ class ProxyHandler(BaseHTTPRequestHandler):
                             "reask": int(getattr(e, "reask_count", 0)),
                             "contest": int(getattr(e, "contest_count", 0)),
                             "tags": list(getattr(e, "tags", []))})
-            # ---- the cast: project each character's state_vec into the same 3D
-            # basis so the viewer can mark each character's "where" in the cosmos
-            ccast = mem.cast
-            if ccast.chars:
-                try:
-                    CV = np.array([np.asarray(c.state_vec, dtype=float)
-                                   for c in ccast.chars])
-                    if basis is not None:
-                        ccoords = (CV - mu) @ basis.T
-                    else:
-                        kk = min(3, CV.shape[1]); ccoords = np.zeros((len(ccast.chars), 3))
-                        if kk:
-                            ccoords[:, :kk] = (CV - mu)[:, :kk] * 3.0
-                    for i, c in enumerate(ccast.chars):
-                        cast_view.append({
-                            "id": c.id, "name": c.name, "role": c.role,
-                            "voice": c.voice,
-                            "scene_count": int(c.scene_count),
-                            "last_cycle": int(c.last_cycle),
-                            "anchor_idx": c.anchor_idx, "pinned": bool(c.pinned),
-                            "pov": ccast.pov_id == c.id,
-                            "p": [round(float(ccoords[i, 0]), 4),
-                                  round(float(ccoords[i, 1]), 4),
-                                  round(float(ccoords[i, 2]), 4)]})
-                except Exception:
-                    pass
+        # ---- the cast: project each character's state_vec into the same 3D
+        # basis so the viewer can mark each character's "where" in the cosmos.
+        # Runs EVEN when the field is empty (n==0): a freshly booted world with
+        # --protagonist/--character but no scenes yet still shows its cast --
+        # placed on a small ring (no basis to project against); the marks snap
+        # to real positions once scenes land and the PCA basis is fit.
+        ccast = mem.cast
+        if ccast.chars:
+            try:
+                CV = np.array([np.asarray(c.state_vec, dtype=float)
+                               for c in ccast.chars])
+                m = len(ccast.chars)
+                if basis is not None and mu is not None:
+                    ccoords = (CV - mu) @ basis.T
+                elif mu is not None:                # small field, no PCA fit yet
+                    kk = min(3, CV.shape[1]); ccoords = np.zeros((m, 3))
+                    if kk:
+                        ccoords[:, :kk] = (CV - mu)[:, :kk] * 3.0
+                else:                               # empty field: ring spread by index
+                    ang = np.linspace(0, 2*np.pi, m, endpoint=False) if m else []
+                    ccoords = (np.stack([0.25*np.cos(ang), 0.25*np.sin(ang),
+                                         np.zeros(m)], axis=1)
+                               if m else np.zeros((0, 3)))
+                for i, c in enumerate(ccast.chars):
+                    cast_view.append({
+                        "id": c.id, "name": c.name, "role": c.role,
+                        "voice": c.voice,
+                        "scene_count": int(c.scene_count),
+                        "last_cycle": int(c.last_cycle),
+                        "anchor_idx": c.anchor_idx, "pinned": bool(c.pinned),
+                        "pov": ccast.pov_id == c.id,
+                        "p": [round(float(ccoords[i, 0]), 4),
+                              round(float(ccoords[i, 1]), 4),
+                              round(float(ccoords[i, 2]), 4)]})
+            except Exception:
+                pass
         n_safe = sum(1 for e in exs if e.safe)
         theo = len(exs[0].vec) if exs else 1024
         ceiling = float(getattr(self.server, "entropy_ceiling", 0.01))
@@ -1521,6 +1672,8 @@ def main() -> None:
                          "https://api.anthropic.com with --anthropic)")
     ap.add_argument("--field", default="membrane-field.json", help="path to the exemplar field store")
     ap.add_argument("--audit", default="membrane-audit.jsonl", help="path to the append-only audit log")
+    ap.add_argument("--worlds-dir", default="worlds", help="directory for saved worlds (the viewer's "
+                     "save/load buttons copy field+cast+audit here under one slot name)")
     ap.add_argument("--sim-min", type=float, default=0.85,
                     help="cosine cutoff for absorb (conservative for the bootstrap; loosen once audit proves safe)")
     ap.add_argument("--consensus-min", type=float, default=0.60)
@@ -1586,6 +1739,12 @@ def main() -> None:
                          "POV protagonist -- the narrator speaks from their region of the "
                          "field, in their voice, and your chat messages render as their "
                          "thoughts. Optional; off -> no POV (chat unchanged).")
+    ap.add_argument("--character", action="append", default=None, metavar='"Name — role — voice"',
+                    help="admit a character to the cast at boot (repeatable): 'Name — "
+                         "role — voice' (em-dash separated), same shape as --protagonist "
+                         "but WITHOUT setting them POV. Use to seed the ensemble around "
+                         "the protagonist (e.g. the sidekick). Retro-tags the existing "
+                         "field so they color in at once. Optional; repeat for more than one.")
     ap.add_argument("--vague-min-tokens", type=int, default=4,
                     help="learn-time vague filter: skip situations shorter than this many words "
                          "(with no ?/path/digit/identifier/stem) -- stops 'yes'/'ok'/'beep'-class "
@@ -1731,10 +1890,17 @@ def main() -> None:
         nudge_sigma=args.nudge_sigma,
         nudge_seed=args.nudge_seed,
     )
-    # ---- the protagonist: the character the reader IS (--protagonist) ---------
-    # Admit 'Name — role — voice' to the cast if absent, then set them POV. Runs
-    # BEFORE warmup/genesis so retro_tag colors the protagonist into the existing
-    # field at once and the narrator speaks from their region from the first beat.
+    # ---- the cast: seed the ensemble (--character) then the protagonist --------
+    # Admit each --character 'Name — role — voice' to the cast if absent, then the
+    # --protagonist (admit + set POV). All run BEFORE warmup/genesis so retro_tag
+    # colors the whole cast into the existing field at once and the narrator
+    # speaks from the protagonist's region from the first beat. Seeding the cast
+    # here also means genesis SKIPS its own cast block (_seed_cast bails on a
+    # non-empty cast) -- so the cast is exactly the authored characters, not
+    # LLM-chosen -- and just narrates the chronicle (grounded in --system).
+    if args.character:
+        for spec in args.character:
+            _admit_character(membrane, spec, tag="character")
     if args.protagonist:
         _apply_protagonist(membrane, args.protagonist)
     # ---- the feeding boundary + background cell pool (stage 2) ----------------
@@ -1801,6 +1967,7 @@ def main() -> None:
     srv._viewer_html = None   # lazy-loaded + cached on first GET /viewer
     srv._v_basis = None       # PCA basis, fit once for a stable 3D cloud
     srv.system_prompt = args.system   # opt-in world premise (--system); injected into forwards
+    srv.worlds_dir = args.worlds_dir  # where the viewer's save/load/new-world buttons keep slots
     srv.warmup_model = args.warmup_model or args.judge_model   # the one warm-up palette call
     srv.warmup_seed = args.warmup_seed
     srv.palette = srv_palette        # cached palette (built at startup warm-up); the no-model /live loop reuses it

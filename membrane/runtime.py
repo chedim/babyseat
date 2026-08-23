@@ -694,6 +694,17 @@ class Membrane:
         # prompt text is never garbled (only the field's representation is veiled).
         # Default sigma=0 is the identity veil -- zero behaviour change.
         vec = self._nudge(vec)
+        # the I is the ground: when a POV protagonist is set the user IS that
+        # character, so their thought walks the POV's state_vec toward it
+        # unconditionally (bypassing the cosine admit_threshold that gates every
+        # other scene). Rick's state becomes the running trace of what the user
+        # has expressed AS him -- the field follows the I, it doesn't check it.
+        # Cheap (one EMA update), no exemplar appended (no recall loop), no model
+        # call. The state moves now; the gardener's future scenes accrue where
+        # the user steered and the narrator speaks from there.
+        if getattr(self.cast, "pov_id", None) is not None:
+            if self.cast.walk_pov(vec, cycle=len(self.store)):
+                self.cast.save(self.cast_path)
         # passive self-train: if this query re-asks something the field just absorbed,
         # that replay was wrong -- record a vote (evidential demotion), and ask the
         # model-side judge whether to contest it (the boundary's two authorities).

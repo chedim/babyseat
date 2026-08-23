@@ -566,19 +566,22 @@ path is untouched — the page chats through the real `/api/chat`, same-origin.
 ### Launch
 
 ```bash
-# a self-running, self-authoring, explorable world (night-market fiction,
-# gemma3:12b writes the chronicle; mxbai-embed-large for embeddings).
-# --protagonist writes YOU a character to be: Vell, the courier who stayed.
+# a self-running, self-authoring, explorable world (the game is Rick & Morty;
+# gemma3:12b writes the chronicle, mxbai-embed-large for embeddings).
+# --protagonist writes YOU a character to be: Rick. --character seeds the
+# ensemble around him (Morty). --system is the world premise the LLM narrates.
 PYTHONPATH=. .venv/bin/python -m membrane.proxy --listen 8770 \
   --backend http://127.0.0.1:11434 \
-  --system "A night market at the edge of a desert city where the known world ends. ..." \
+  --system "The dimension-hopping misadventures of Rick and Morty. Rick is a young, broke, bitterly brilliant garage scientist who builds portal technology from salvaged junk and runs cons across realities to keep the lights on; Morty is his anxious fourteen-year-old kid brother, dragged along on every scheme. They portal between fractured worlds — dead planets, weird markets, broken civilizations — barely escaping what Rick's hubris stirs up. Dark, fast sci-fi: cynicism and wonder tangled, danger played for gallows humor, affection buried under contempt. Narrate their adventures; Rick drives, Morty worries, things go sideways." \
   --warmup-model gemma3:12b --entropy-ceiling 0.05 \
   --self-author --no-judge --viewer \
-  --protagonist "Vell — a courier who came to the edge of the known world to deliver a letter no one claimed, and stayed — clipped, watchful sentences; notices hands and exits before faces; a dry humor about being stranded somewhere beautiful; never wastes a word" \
+  --protagonist "Rick — a young, broke, bitterly brilliant garage scientist who builds portal tech from junk and runs cons across dimensions to make rent; nihilistic and grandiose, drinks to keep the quiet out, buries affection under contempt — clipped, rapid, sarcastic sentences; names the ugly truth nobody asked for; a running bitter mutter to himself; never admits he cares" \
+  --character "Morty — Rick's anxious fourteen-year-old kid brother, dragged into every scheme; earnest, stammering, the one with a conscience — hesitant, runaway sentences that trip over themselves; asks the question Rick won't; brave only when someone's about to get hurt" \
   --field worlds/story-field.json --audit worlds/story-audit.jsonl
 # then open http://127.0.0.1:8770/viewer and hit PLAY (or add --consolidate
-# --feed-rate 4 --cpu-target 0.3 to arm the world's clock at boot). The chat
-# renders your words as Vell's thoughts and narrates from Vell's lived scenes.
+# --feed-rate 4 --cpu-target 0.3 to arm the world's clock at boot). You ARE Rick:
+# your words render as Rick's thoughts, the narrator speaks from Rick's lived
+# scenes, and Morty is the co-lead the chronicle follows. The world is about them.
 ```
 
 What it is, honestly: a **self-growing memory field you probe by association,
@@ -673,6 +676,49 @@ This is the **narrator** only — a voiced POV you *are*. The consistency gate
 (acts must be on-manifold with the acting character's state) and full
 cells-act (a cell authors new beats, not just recites its lived scenes) are the
 next build on top of this.
+
+### The ensemble (`--character`) + save / load / new world
+
+- **`--character "Name — role — voice"`** (repeatable) admits a character to the
+  cast at boot *without* setting them POV — it seeds the ensemble around the
+  protagonist. `--protagonist "Rick — …"` makes you Rick; `--character "Morty — …"`
+  seeds his co-lead. Both run before warmup/genesis, so `retro_tag` colors the
+  whole cast into the existing field at once. Seeding the cast at boot also
+  means genesis **skips its own cast block** (the cast is already non-empty) and
+  just narrates the chronicle grounded in `--system` — so the cast is exactly the
+  authored characters, not LLM-chosen.
+- **Save / load / new world** (viewer's WORLD menu): `SAVE` copies the current
+  field + cast + audit to a named slot under `worlds/<name>/`; the `LOAD` list
+  (fetched from `GET /worlds`) swaps the live store + cast in from a saved world
+  under `feed_lock` (so it can't race the consolidator) and resets the rolling
+  chronicle; `NEW` empties the field + cast + audit to a blank slate. The
+  endpoints are `POST /world {action:"save"|"load"|"new", name}`; the slot name
+  is sanitized (no path traversal). `--worlds-dir` (default `worlds`) sets the
+  directory. A loaded world is persisted to the live paths, so a restart keeps it.
+
+### The I as ground — the POV state-walk
+
+The narrator says "you ARE the character" — but until this, the user's thoughts
+didn't actually shape the character: they were cosine-gated like every other
+scene, so the **gardener's** scenes defined the character, not the user. The
+I-grounding closes that gap. When a POV is set, each of the user's chat thoughts
+**unconditionally** EMA-walks the POV's `state_vec` toward it (`Cast.walk_pov`,
+wired into `gate_turn` — the one mode-independent point every message passes
+through), bypassing the cosine `admit_threshold` that gates every other scene.
+The user IS the POV character, so their thought moves the character *by fiat*,
+not by similarity. **The field follows the I; it doesn't check it.**
+
+No exemplar is appended (no recall loop, no echo of the user's own words), no
+model call — one cheap EMA update per thought. The effect: the POV's region
+tracks where the user steers; the gardener's future scenes accrue there; the
+narrator speaks from there; the viewer's character pin moves as you think. This
+is the foundation of **replacing an LLM consistency gate with the I-grounded
+field** (reasoned out in `../cortex-experiment/membrane.md`): the model's
+"would this character do this?" is a *generic, parametric* character — not your
+specific, voiced one — so it would flatten your character back toward the
+archetype. The gate, when it comes (for authored acts), measures acts against
+*your* character's manifold — the I-shaped state — not the model's. The model
+stays the gardener; the user is the ground.
 
 ---
 

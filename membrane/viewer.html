@@ -245,6 +245,17 @@
   .roster-row .rnwrap{display:flex;flex-direction:column;flex:1;min-width:0}
   .roster-empty{font-family:var(--vt);font-size:18px;color:#666;padding:6px}
 
+  .world-row{display:flex;gap:8px;flex-wrap:wrap}
+  .world-list{margin-top:6px;display:flex;flex-direction:column;gap:4px}
+  .world-slot{display:flex;gap:6px;align-items:center;font-family:var(--vt);
+    font-size:15px;color:var(--ink);background:var(--face-hi);padding:4px 8px;border-radius:3px}
+  .world-slot .wnm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .world-slot button{font-family:var(--px);font-size:10px;border:none;border-radius:2px;
+    padding:3px 7px;cursor:pointer;background:var(--dark);color:#fff}
+  .world-slot button.del{background:#5a2a2a}
+  .world-slot button:hover{filter:brightness(1.2)}
+  .world-list .none{font-family:var(--vt);font-size:14px;color:#666;padding:4px}
+
   .hint{position:fixed;top:8px;left:50%;transform:translateX(-50%);
     font-family:var(--vt);font-size:16px;color:#c6c6c6;text-shadow:1px 1px #000;z-index:20}
 </style>
@@ -364,6 +375,13 @@
       <input id="skipn" type="number" value="25" min="1" max="500" class="mc-num" title="how many offscreen events">
       <button id="skip" class="mc-btn" title="let the world live offscreen (one palette call, then no-model absorptions)">&#x23ED; SKIP</button>
     </div>
+
+    <div class="menu-section">WORLD — save · load · new (the whole field + cast + audit)</div>
+    <div class="world-row">
+      <button id="world-save" class="mc-btn" title="save the current world (field + cast + audit) to a named slot under worlds/">&#x1F4BE; SAVE WORLD</button>
+      <button id="world-new" class="mc-btn" title="empty the field + cast + audit — a blank slate (the protagonist is gone; re-seed on next launch)">&#x2795; NEW WORLD</button>
+    </div>
+    <div id="world-list" class="world-list"></div>
 
     <div class="menu-section">CAST — who is in the world (click a name to find them on the map)</div>
     <div id="cast-roster" class="roster"><div class="roster-empty">no cast yet — the world seeds one on its first chapter</div></div>
@@ -874,7 +892,7 @@ addEventListener("keydown",e=>{
 
 // ---- menu + autoflood toggle -------------------------------------------------
 const menu=document.getElementById("menu");
-function toggleMenu(){menu.classList.toggle("open");}
+function toggleMenu(){const open=menu.classList.toggle("open"); if(open) loadWorlds();}
 document.getElementById("slot-menu").onclick=toggleMenu;
 document.getElementById("backbtn").onclick=()=>menu.classList.remove("open");
 addEventListener("keydown",e=>{if(e.key==="Escape"){toggleMenu();}});
@@ -883,6 +901,54 @@ function syncAutoflood(){autofloodBtn.textContent="↻ AUTO-FLOOD: "+(autoflood.
   autofloodBtn.classList.toggle("on",autoflood.checked);}
 autofloodBtn.onclick=()=>{autoflood.checked=!autoflood.checked;syncAutoflood();};
 syncAutoflood();
+
+// ---- save / load / new world (the whole field + cast + audit) ----------------
+const worldSave=document.getElementById("world-save"),
+      worldNew=document.getElementById("world-new"),
+      worldList=document.getElementById("world-list");
+async function loadWorlds(){
+  try{
+    const r=await fetch("/worlds");const j=await r.json();const ws=j.worlds||[];
+    if(!ws.length){worldList.innerHTML='<div class="none">no saved worlds yet</div>';return;}
+    worldList.innerHTML=ws.map(n=>'<div class="world-slot"><span class="wnm">'+escapeHtml(n)+'</span>'
+      +'<button data-load="'+escapeHtml(n)+'">LOAD</button></div>').join("");
+    worldList.querySelectorAll("button[data-load]").forEach(b=>{
+      b.onclick=async()=>{b.disabled=true;const old=b.textContent;b.textContent="…";
+        try{const r=await fetch("/world",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({action:"load",name:b.dataset.load})});
+          const j=await r.json();
+          if(!r.ok||!j.ok){b.textContent=j.error||"failed";setTimeout(()=>{b.textContent=old;b.disabled=false;},2500);return;}
+          castList=j.cast||[];renderRoster();syncPov();renderCastMarks();
+          floatText("loaded: "+b.dataset.load,"#5fd47a");
+          loadWorlds();poll();menu.classList.remove("open");
+        }catch(e){b.textContent="×";setTimeout(()=>{b.textContent=old;b.disabled=false;},2500);}
+      };
+    });
+  }catch(e){worldList.innerHTML='<div class="none">unreachable</div>';}
+}
+worldSave.onclick=async()=>{
+  const name=prompt("save world as:","rick-morty");if(!name)return;
+  const old=worldSave.textContent;worldSave.disabled=true;worldSave.textContent="…";
+  try{const r=await fetch("/world",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({action:"save",name})});
+    const j=await r.json();
+    if(!r.ok||!j.ok){worldSave.textContent=j.error||"failed";setTimeout(()=>{worldSave.textContent=old;worldSave.disabled=false;},2500);return;}
+    floatText("saved: "+name,"#5fd47a");loadWorlds();
+    setTimeout(()=>{worldSave.textContent=old;worldSave.disabled=false;},1200);
+  }catch(e){worldSave.textContent="×";setTimeout(()=>{worldSave.textContent=old;worldSave.disabled=false;},2500);}
+};
+worldNew.onclick=async()=>{
+  if(!confirm("start a NEW world? the current field + cast + audit will be cleared (save first if you want to keep it)."))return;
+  const old=worldNew.textContent;worldNew.disabled=true;worldNew.textContent="…";
+  try{const r=await fetch("/world",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({action:"new"})});
+    const j=await r.json();
+    if(!r.ok||!j.ok){worldNew.textContent=j.error||"failed";setTimeout(()=>{worldNew.textContent=old;worldNew.disabled=false;},2500);return;}
+    castList=j.cast||[];renderRoster();syncPov();renderCastMarks();
+    floatText("new world","#5fd47a");poll();
+    setTimeout(()=>{worldNew.textContent=old;worldNew.disabled=false;},1200);
+  }catch(e){worldNew.textContent="×";setTimeout(()=>{worldNew.textContent=old;worldNew.disabled=false;},2500);}
+};
 
 // model dropdown from the backend's /api/tags
 (async()=>{try{

@@ -134,6 +134,27 @@ class Cast:
                 tagged.append(c.id)
         return tagged
 
+    def walk_pov(self, vec, cycle: int) -> bool:
+        """The I is the ground: unconditionally EMA-walk the POV protagonist's
+        ``state_vec`` toward ``vec`` -- bypassing the cosine ``admit_threshold``
+        that gates every OTHER scene. The user IS the POV character, so their
+        thought walks the character's state *by fiat*, not by similarity. The
+        field FOLLOWS the I; it does not check it. No exemplar is appended here
+        (no recall loop, no echo of the user's own words); this only moves the
+        POV's region, so the gardener's future scenes accrue where the user
+        steers and the narrator speaks from there. Returns False when no POV."""
+        if self.pov_id is None:
+            return False
+        c = self.by_id(self.pov_id)
+        if c is None:
+            return False
+        sv = _unit(np.asarray(vec, dtype=float))
+        old = np.asarray(c.state_vec, dtype=float)
+        c.state_vec = _unit(self.decay * old + (1.0 - self.decay) * sv).tolist()
+        c.scene_count += 1
+        c.last_cycle = cycle
+        return True
+
     def retro_tag(self, store) -> int:
         """One-time, after the genesis seed: tag every existing exemplar to the
         cast from its STORED vec (no embed call), in field order (oldest first,
