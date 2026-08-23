@@ -176,6 +176,30 @@ def _fallback_palette(premise: str) -> dict:
     }
 
 
+def build_palette(backend: str | None, model: str | None, premise: str):
+    """ONE model call (or the premise-words fallback) -> a COMPLETE category->list
+    palette: every ``_KEYS`` category backfilled so every template fills. Returns
+    ``(palette, src)`` where src is ``'model'`` | ``'premise-fallback'``.
+
+    Factored out of ``run_warmup`` so the proxy can build the palette ONCE (the one
+    warm-up model call -- the only place the LLM is used) and cache it. The
+    no-model ``/live`` loop then reuses the cached palette indefinitely: the world
+    keeps living offscreen with zero LLM calls, the way the stripped (self-author)
+    world requires. Warm-up never hard-fails -- a missing model/backend/premise or a
+    network/parse error falls back to premise words (``src='premise-fallback'``)."""
+    palette = generate_palette(backend, model, premise)
+    if palette and len(palette) >= 3:
+        src = "model"
+    else:
+        palette = _fallback_palette(premise)
+        src = "premise-fallback"
+    fb = _fallback_palette(premise)
+    for k in _KEYS:
+        if k not in palette or not palette.get(k):
+            palette[k] = fb[k]
+    return palette, src
+
+
 def _fill(tmpl: str, p: dict, rng: random.Random) -> str | None:
     """Fill a template by sampling palette ingredients. Returns None if any
     needed category is missing (caller retries with another template)."""
@@ -319,13 +343,23 @@ def _clear_reask_ring(membrane) -> None:
 
 
 def run_warmup(membrane, backend: str, model: str | None, premise: str, n: int,
-              seed: int = 0, curriculum: bool = True) -> dict:
+              seed: int = 0, curriculum: bool = True,
+              palette: dict | None = None) -> dict:
     """Populate the field with ``n`` premise-grounded situations.
 
     ONE model call builds the palette (or the premise-words fallback), then
     ``n`` ``Membrane.learn_pair`` calls absorb ``(situation, stub-action)`` pairs
     -- no per-event model calls, local mxbai embeddings only. The gate path is
     untouched (``learn_pair`` is the existing teed-intake seam). Returns stats.
+
+    ``palette`` (optional): a pre-built category->phrase-list dict. If given,
+    the model palette call is SKIPPED entirely -- the caller owns the
+    ingredients. This is how the random-text experiment runs: the field is seeded
+    from a random-word palette (no narrative premise, no authorship, no model
+    call), to see whether a "world" emerges inside the field unannounced. The
+    warm-up's own docstring argues AGAINST random text (it spreads the field in
+    a region no real query visits -> the gate never acts); this path lets the
+    caller test that claim deliberately.
 
     ``curriculum`` (default) ramps low -> high complexity, the way you train:
     build act-able CLUSTERS first, then spread variety. Phase 1 seeds tight
@@ -336,17 +370,14 @@ def run_warmup(membrane, backend: str, model: str | None, premise: str, n: int,
     palette to grow ``free_energy`` / effective rank. ``curriculum=False`` keeps
     the original uniform-complexity path."""
     rng = random.Random(seed)
-    palette = generate_palette(backend, model, premise)
-    src = "model"
-    if not palette or len(palette) < 3:
-        palette = _fallback_palette(premise)
-        src = "premise-fallback"
-    # a model palette may omit some categories -- backfill so every template fills
-    if src == "model":
-        fb = _fallback_palette(premise)
+    if palette:
+        src = "provided"
+        fb = _fallback_palette(premise or " ")
         for k in _KEYS:
-            if k not in palette:
+            if k not in palette or not palette[k]:
                 palette[k] = fb[k]
+    else:
+        palette, src = build_palette(backend, model, premise)
     cats = sorted(palette)
     sizes = ", ".join(f"{k}={len(palette[k])}" for k in cats)
     sched = "curriculum" if curriculum else "uniform"

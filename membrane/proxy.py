@@ -31,8 +31,11 @@ Run:
 from __future__ import annotations
 
 import json
+import random
+import re
 import signal
 import sys
+import threading
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -106,6 +109,249 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
 
 
+# ---- story-feeding (the /feed endpoint) --------------------------------------
+# The cells' "feed me" wired to the LLM: instead of random-vector ballast, the
+# LLM tells a short story of their world, which is embedded and absorbed as a
+# REAL exemplar (runtime.Membrane.feed). The never-cross ceiling caps the
+# world's OWN variety (cells_rank), held by massaging each story toward the
+# field centroid. These helpers are the server-side LLM call -- they mirror
+# warmup.generate_palette (urllib POST to /api/chat, stream=False).
+
+_STORY_SYSTEM = (
+    "You are the voice of this world. Given the world premise and a small seed "
+    "(a place, an actor, a mood, an object), narrate ONE brief vivid scene -- "
+    "2 to 4 sentences -- that happens there. Write only the scene prose, no "
+    "headings, no labels, no commentary. Ground it in the premise's tone.")
+
+
+def _story_seed(palette: dict, rng: random.Random) -> str:
+    """Pick a small on-world seed (place/actor/mood/object) from the cached
+    palette so successive stories vary. Returns a single ``; ``-joined line."""
+    def pick(key):
+        v = palette.get(key)
+        return rng.choice(v) if v else ""
+    parts = [p for p in (pick("locations"), pick("actors"),
+                         pick("moods"), pick("objects")) if p]
+    return "; ".join(parts) if parts else ""
+
+
+_STORY_SYSTEM_STORY = (
+    "You are the voice of this world, telling ONE ongoing story set in it. Each "
+    "reply is the NEXT scene in that same story -- 2 to 4 sentences -- continuing "
+    "from exactly where the previous scene left off: the same characters, places, "
+    "and thread, advancing the narrative. Keep it grounded in the premise's tone. "
+    "Write only the scene prose, no headings, no labels, no commentary, no recaps.")
+
+
+# ---- the genesis cache: the LLM writes the world's history in big chapters -----
+# To save model calls, the LLM is asked (rarely) to narrate the chronicle of this
+# world "from the big bang" as a batch of substantial scenes separated by a line of
+# dashes. The scenes are cached locally on srv.story_cache; each FEED pops one
+# cached scene and embeds+absorbs it (a cheap /api/embed, NOT a /api/chat call). So
+# one LLM call feeds the world ~_CHAPTER times, and the cohesive chronicle is told
+# in bulk. The cache refills (one call) when it runs below _LOW_WATER.
+_GENESIS_SYSTEM = (
+    "You are the chronicler of this world. Narrate its history as a sequence of "
+    "distinct, substantial SCENES, each one paragraph (3 to 6 sentences), advancing "
+    "the chronicle forward through time: the cosmology and the first land, then the "
+    "life, then the people and the world they make. Each scene must stand on its own "
+    "as a coherent piece of the one ongoing story. Separate every scene with a line "
+    "that contains only ---. Write ONLY the scenes separated by ---, no headings, no "
+    "labels, no commentary, no recaps.")
+_CHAPTER = 8        # scenes per genesis call (one model call -> ~8 cached feeds)
+_LOW_WATER = 3      # refill the cache (one model call) when fewer scenes remain
+
+
+def _genesis(srv) -> list:
+    """ONE model call: narrate the next chapter of the world's chronicle (several
+    substantial scenes separated by ``---``) and return them as a list. Continues
+    the cohesive story from the last scenes absorbed (``srv.story_history``); the
+    first call begins "from the big bang". Returns ``[]`` on any failure (the
+    caller skips that feed). Temperature is the fixed cohesive value on ``srv``."""
+    backend = srv.backend
+    model = getattr(srv, "warmup_model", None)
+    premise = getattr(srv, "system_prompt", "")
+    if not model or not backend or not premise:
+        return []
+    history = list(getattr(srv, "story_history", []))[-6:]
+    if history:
+        user = (premise + "\n\nThe chronicle so far:\n\n" + "\n\n".join(history) +
+                "\n\nContinue the chronicle: narrate the NEXT " + str(_CHAPTER) +
+                " scenes in order, each one paragraph, each separated by a line "
+                "with only ---.")
+    else:
+        user = (premise + "\n\nBegin the chronicle from the big bang: narrate the "
+                "FIRST " + str(_CHAPTER) + " scenes in order, each one paragraph, "
+                "each separated by a line with only ---.")
+    messages = [{"role": "system", "content": _GENESIS_SYSTEM},
+                {"role": "user", "content": user}]
+    temperature = float(getattr(srv, "story_temperature", 0.7))
+    body = {"model": model, "stream": False, "temperature": temperature,
+            "messages": messages}
+    try:
+        data = json.dumps(body).encode()
+        req = urllib.request.Request(backend + "/api/chat", data=data,
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=180) as r:
+            resp = json.loads(r.read())
+    except Exception as e:
+        print(f"[genesis] chronicle call failed ({e}); cache stays as-is",
+              file=sys.stderr)
+        return []
+    txt = ""
+    if isinstance(resp, dict):
+        msg = resp.get("message")
+        if isinstance(msg, dict):
+            c = msg.get("content")
+            if isinstance(c, str):
+                txt = c
+    # split on lines that are only dashes (the scene delimiter); keep non-empty scenes
+    scenes = re.split(r"(?m)^\s*-{2,}\s*$", txt)
+    return [s.strip() for s in scenes if s.strip()]
+
+
+def _feed_count(rate: float) -> int:
+    """A continuous feed rate (feeds per consolidation cycle) -> the integer number
+    of feeds to run THIS cycle, with a probabilistic fractional tail: 2.5 feeds/cycle
+    means 2 every cycle plus a third on ~half of them (expected 2.5). 0 -> never feed."""
+    rate = max(0.0, float(rate))
+    base = int(rate)
+    frac = rate - base
+    return base + (1 if (frac > 0.0 and random.random() < frac) else 0)
+
+
+def _tell_story(backend: str, model: str | None, premise: str, seed: str,
+                timeout: int = 120, temperature: float = 0.9,
+                mode: str = "story", history: list | None = None) -> str:
+    """ONE model call for a world scene. Mirrors ``warmup.generate_palette``
+    (urllib POST to /api/chat, stream=False).
+
+    ``temperature`` is the entropy dial -- the information quality of each story
+    (higher = more novel/surprising, lower = more on-template).
+
+    ``mode``:
+      * ``"story"`` (default): a CONTINUING story. ``history`` is the running list
+        of recent scenes; it is embedded so the model continues the same thread
+        (coherent narrative across ticks). The random ``seed`` is ignored.
+      * ``"variety"``: the original mode -- a fresh standalone vignette seeded by
+        ``seed`` (a random palette draw), no history. Grows field variety fastest.
+    Returns the scene text, or ``""`` on any failure (the caller skips)."""
+    if not model or not backend or not premise:
+        return ""
+    if mode == "story" and history is not None:
+        if not history:
+            user = premise + "\n\nBegin the story: narrate the opening scene (2 to 4 sentences)."
+        else:
+            user = (premise + "\n\nThe story so far:\n\n" + "\n\n".join(history) +
+                    "\n\nContinue the story: narrate the NEXT scene (2 to 4 sentences) "
+                    "that follows directly from the above, advancing the same thread.")
+        messages = [{"role": "system", "content": _STORY_SYSTEM_STORY},
+                    {"role": "user", "content": user}]
+    else:
+        user = premise if not seed else f"{premise}\n\nSeed for this scene: {seed}"
+        messages = [{"role": "system", "content": _STORY_SYSTEM},
+                    {"role": "user", "content": user}]
+    body = {"model": model, "stream": False, "temperature": float(temperature),
+            "messages": messages}
+    try:
+        data = json.dumps(body).encode()
+        req = urllib.request.Request(backend + "/api/chat", data=data,
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            resp = json.loads(r.read())
+    except Exception as e:
+        print(f"[feed] story call failed ({e}); skipping", file=sys.stderr)
+        return ""
+    txt = ""
+    if isinstance(resp, dict):
+        msg = resp.get("message")
+        if isinstance(msg, dict):
+            c = msg.get("content")
+            if isinstance(c, str):
+                txt = c
+    return txt.strip()
+
+
+# ---- shared feed core (used by the HTTP /feed path AND the consolidator) -------
+def _feed_snapshot(srv, mem) -> dict:
+    """A read-only field snapshot in the /feed stats shape (no LLM, no mutation).
+    The base for the ``feeds=0`` persist response and for ``_run_feeds``."""
+    from .variety import cells_rank, free_energy
+    exs = mem.store.exemplars
+    theo = len(exs[0].vec) if exs else 1024
+    ceiling = float(getattr(srv, "entropy_ceiling", 0.05))
+    cap = max(0, int(round(ceiling * theo)))
+    return {"fed": 0, "massaged": 0, "full": 0, "skipped": 0,
+            "field_size": len(mem.store),
+            "cells_level": round(float(cells_rank(mem.store)), 2),
+            "entropy_ceiling": round(ceiling, 4), "entropy_cap": cap,
+            "theoretical_max": theo,
+            "temperature": round(float(getattr(srv, "story_temperature", 0.7)), 3),
+            "story_mode": str(getattr(srv, "story_mode", "story")),
+            "feed_rate": round(float(getattr(srv, "feed_rate", 1.0)), 3),
+            "cpu_target": round(float(getattr(srv, "cpu_target", 0.2)), 3),
+            "consolidating": bool(getattr(srv, "consolidating", False)),
+            "cache_depth": len(getattr(srv, "story_cache", [])),
+            "free_energy": float(free_energy(mem.store)) if len(exs) >= 2 else 0.0,
+            "entropy_count": 0, "stories": []}
+
+
+def _run_feeds(srv, mem, feeds: int) -> dict:
+    """Run ``feeds`` story-feeds from the GENESIS CACHE and return the stats dict
+    (with ``stories`` for the console). Each feed pops one cached chronicle scene
+    and embeds+absorbs it (a cheap ``/api/embed``, NOT a ``/api/chat`` call); the
+    cache is refilled (one LLM chapter call -> ~``_CHAPTER`` scenes) when it runs
+    below ``_LOW_WATER``. So the cohesive story is told in bulk and the world feeds
+    at the rate the feed-rate dial sets, without a model call per feed.
+
+    Serializes on ``srv.feed_lock`` so the HTTP ``/feed`` path and the background
+    consolidator never race the rolling narrative (``srv.story_history``) or the
+    cache. Absorbs the RAW story embedding (``mem.feed`` no longer nudges)."""
+    stats = _feed_snapshot(srv, mem)
+    premise = getattr(srv, "system_prompt", None)
+    if not premise or feeds <= 0:
+        return stats
+    ceiling = float(getattr(srv, "entropy_ceiling", 0.05))   # inert for growth (kept)
+    stories: list = []
+    with srv.feed_lock:
+        history = list(getattr(srv, "story_history", []))
+        cache = getattr(srv, "story_cache", None)
+        if cache is None:
+            cache = []
+            srv.story_cache = cache
+        # refill the genesis cache if low -- ONE model call -> ~CHAPTER cached feeds
+        if len(cache) < _LOW_WATER:
+            cache.extend(_genesis(srv))
+            srv.story_cache = cache
+        for _ in range(feeds):
+            if not cache:                       # drained; one more chapter before giving up
+                cache.extend(_genesis(srv))
+                srv.story_cache = cache
+                if not cache:                   # model unavailable -- stop, don't spin
+                    stories.append({"seed": "", "text": "", "result": "no-story"})
+                    break
+            passage = cache.pop(0)
+            r = mem.feed(passage, ceiling)     # raw embed + absorb (no nudging)
+            stats["fed"] += int(r.get("fed", 0))
+            if r.get("fed"):
+                res = "fed"
+            else:                               # dropped by the dedup/vague guard
+                res = "skipped"
+                stats["skipped"] += 1
+            stories.append({"seed": "", "text": passage, "result": res})
+            history.append(passage)             # advance the chronicle (last 8 scenes)
+            if len(history) > 8:
+                history = history[-8:]
+            srv.story_history = history
+            stats["field_size"] = r.get("field_size", stats["field_size"])
+            if "cells_level" in r:
+                stats["cells_level"] = round(float(r["cells_level"]), 2)
+            stats["free_energy"] = float(r.get("free_energy", stats["free_energy"]))
+    stats["stories"] = stories
+    srv.cache_depth = len(getattr(srv, "story_cache", []))
+    return stats
+
+
 class ProxyHandler(BaseHTTPRequestHandler):
     # protocol_version lets us reuse connections to the client
     protocol_version = "HTTP/1.1"
@@ -118,6 +364,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._messages()
         elif self.path in ("/warmup", "/warmup/"):
             self._warmup()
+        elif self.path in ("/live", "/live/"):
+            self._live()
+        elif self.path in ("/feed", "/feed/"):
+            self._feed()
         else:
             self._forward()
 
@@ -127,6 +377,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self._serve_viewer(); return
             if self.path in ("/state", "/state/"):
                 self._state(); return
+            if self.path.split("?")[0] in ("/neighbors", "/neighbors/"):
+                self._neighbors(); return
         self._forward()
 
     def do_DELETE(self):
@@ -198,8 +450,166 @@ class ProxyHandler(BaseHTTPRequestHandler):
                                  "world (launch with --system \"...\")"); return
         model = body.get("model") or getattr(srv, "warmup_model", None)
         seed = int(body.get("seed", getattr(srv, "warmup_seed", 0)))
-        from .warmup import run_warmup
-        stats = run_warmup(srv.membrane, srv.backend, model, premise, n, seed)
+        from .warmup import run_warmup, build_palette
+        palette, _src = build_palette(srv.backend, model, premise)
+        srv.palette = palette            # cache it so the no-model /live loop can reuse it
+        stats = run_warmup(srv.membrane, srv.backend, model, premise, n, seed, palette=palette)
+        out = json.dumps(stats).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    def _live(self) -> None:
+        """The offscreen LOOP -- the world living on its own, NO model call.
+
+        Distinct from ``/warmup`` (which spends one model call to build a fresh
+        palette each time): ``/live`` REUSES the cached palette (``srv.palette``,
+        built once at startup warm-up or on the first ``/live``/``/warmup`` call --
+        the single warm-up exemption, the only place the LLM is used) and does TWO
+        kinds of no-model growth:
+
+          * ``n``  palette-grounded ``(situation, stub-action)`` absorptions via
+            ``learn_pair`` (local mxbai embeddings). These DEDUP on a small palette
+            -> saturate to 0 added; that's expected.
+          * ``entropy`` raw ENTROPY VECTORS via ``Membrane.inject_entropy``: random
+            unit vectors appended straight to the field. ~orthogonal to everything,
+            so they never dedup and never become a real query's nearest neighbour
+            (gate untouched) -- but each raises the effective rank, so free_energy
+            climbs WITHOUT BOUND. This is the flood that keeps the world growing
+            past Cortex: entropy injected directly in the field's vectors, in the
+            space in-between the real embeddings.
+
+        Zero LLM. This is what the viewer's play/pause/step drives (and what the
+        per-message autoflood fires): the cloud grows offscreen while you watch.
+
+        If no palette is cached yet (no ``--warmup`` at startup, no prior
+        ``/warmup``/``/live``), build one now -- the one warm-up model call -- and
+        cache it, so every subsequent tick is model-free. Falls back to
+        premise-words (no model) when there is no model/backend/premise."""
+        srv = self.server
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length)
+        try:
+            body = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            body = {}
+        from .variety import cells_rank, entropy_count as _entropy_count
+        mem = srv.membrane
+        exs = mem.store.exemplars
+        theo = len(exs[0].vec) if exs else 1024      # the THEORETICAL 100%: the embedding dim = max effective rank the field can ever reach (its horizon; never crossed)
+        ceiling = float(body.get("entropy_ceiling", getattr(srv, "entropy_ceiling", 0.01)))
+        ceiling = max(0.0, min(1.0, ceiling))        # the never-cross line as a fraction of the theoretical 100%
+        srv.entropy_ceiling = ceiling               # PERSIST: the dial is the single source of truth now -- /state, the HUD, and the monitor all read this, so they agree and survive across ticks (no more client/srv mismatch that let a stray drag drown the world)
+        cap = max(0, int(round(ceiling * theo)))     # the operating ceiling: ballast may fill up to here, never past
+        cl = cells_rank(mem.store)                   # the CELLS' level: variety the real cells earned (the structured world; the ballast drowns it past ~cap == cl)
+        cur_ent = _entropy_count(mem.store)
+        trimmed = 0
+        if cur_ent > cap:                            # enforce the never-cross line: drop excess ballast (real cells untouched)
+            trimmed = mem.trim_entropy(cap)
+            cur_ent = _entropy_count(mem.store)
+        n = int(body.get("n", 0))                   # palette-grounded absorptions (dedup on a saturated palette -> 0)
+        ent_rate = body.get("entropy_rate")          # the growth-speed dial: fraction of the CAP filled per tick
+        if ent_rate is not None:
+            # Grow the ballast toward the ceiling, at a speed the user dials. Per tick:
+            # dial x cap vectors, never past the cap. The ceiling is the never-cross line
+            # (a fraction of the theoretical 100%); once the ballast reaches it the flood
+            # stops. Start at 1% (cap ~10 on a 1024-d field) -- the background stays a
+            # faint fraction of the world, never approaching the theoretical 100%.
+            per_tick = int(round(float(ent_rate) * cap))
+            ent = min(max(0, per_tick), max(0, cap - cur_ent))
+        else:
+            ent = int(body.get("entropy", 0))        # raw count (manual / legacy override)
+        if n < 0 or ent < 0:
+            self._json_err(400, "n and entropy must be >= 0"); return
+        premise = getattr(srv, "system_prompt", None) or " "
+        seed = int(body.get("seed", getattr(srv, "warmup_seed", 0)))
+        stats = {"added": 0, "entropy": 0, "entropy_trimmed": trimmed,
+                 "field_size": len(mem.store), "palette_source": "provided",
+                 "theoretical_max": theo, "entropy_ceiling": round(ceiling, 4),
+                 "entropy_cap": cap, "cells_level": round(float(cl), 2),
+                 "entropy_count": cur_ent}
+        # the embeddings: palette-grounded absorptions (no model). Saturate on a
+        # small palette -> 0 added; that's fine, the entropy vectors carry the growth.
+        # The palette is built ONLY here (and only if n>0) -- the one warm-up model
+        # call -- so an entropy-only tick (n=0) is strictly LLM-free.
+        if n > 0:
+            palette = getattr(srv, "palette", None)
+            if palette is None:
+                from .warmup import build_palette
+                palette, _src = build_palette(srv.backend, getattr(srv, "warmup_model", None),
+                                              premise)
+                srv.palette = palette
+            from .warmup import run_warmup
+            s = run_warmup(srv.membrane, srv.backend, None, premise, n, seed,
+                           curriculum=False, palette=palette)
+            stats["added"] = s.get("added", 0)
+            stats["field_size"] = s.get("field_size", stats["field_size"])
+        # the in-between: raw entropy vectors (the CMB -- the thermal background)
+        # injected into the field's geometry, CAPPED at the ceiling (a fraction of
+        # the theoretical 100%, never crossed). ~orthogonal to everything -> never
+        # dedup, never nearest -> gate untouched; fills the ballast up to the ceiling
+        # at the dialed speed, then stops. Never approaches the theoretical 100%.
+        if ent > 0:
+            stats["entropy"] = mem.inject_entropy(ent)
+            stats["field_size"] = len(mem.store)
+            stats["entropy_count"] = _entropy_count(mem.store)
+        out = json.dumps(stats).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    def _feed(self) -> None:
+        """Story-fed growth: the cells' "feed me" -> the LLM tells a short story
+        of their world -> embed + MASSAGE to the ceiling -> absorb as a REAL
+        exemplar (runtime ``Membrane.feed``). Replaces the random-vector ballast
+        with real semantic text; the never-cross ceiling now caps the WORLD's
+        variety (cells_rank), held by deforming each story toward the field
+        centroid until it fits. Forward cap -- real cells are never trimmed.
+
+        ``feeds=0`` persists the dials ONLY (no LLM call) -- the viewer's slider
+        oninput and the consolidation arm/disarm use this to set the ceiling /
+        entropy / feed-rate / CPU-target / consolidating flag without growing.
+        With ``feeds>0`` each feed is one model call (``_tell_story``); the loop
+        lives in ``_run_feeds`` (shared with the background consolidator)."""
+        srv = self.server
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length)
+        try:
+            body = json.loads(raw) if raw else {}
+        except json.JSONDecodeError:
+            body = {}
+        mem = srv.membrane
+        # ---- persist the dials (single source of truth) -----------------------
+        ceiling = float(body.get("entropy_ceiling", getattr(srv, "entropy_ceiling", 0.05)))
+        ceiling = max(0.0, min(1.0, ceiling))
+        srv.entropy_ceiling = ceiling                  # inert for growth now (nudging removed)
+        # temperature is FIXED server-side for a cohesive chronicle; the entropy dial
+        # now sets the FEED RATE (feeds/cycle), not the LLM temperature.
+        mode = str(body.get("mode", getattr(srv, "story_mode", "story"))).lower()
+        if mode not in ("story", "variety"):
+            mode = "story"
+        srv.story_mode = mode
+        feed_rate = float(body.get("feed_rate", getattr(srv, "feed_rate", 1.0)))
+        srv.feed_rate = max(0.0, min(32.0, feed_rate))  # feeds/cycle (continuous; the entropy dial)
+        cpu_target = float(body.get("cpu_target", getattr(srv, "cpu_target", 0.2)))
+        srv.cpu_target = max(0.0, min(1.0, cpu_target))  # target CPU fraction for digestion
+        consolidating = bool(body.get("consolidating", getattr(srv, "consolidating", False)))
+        srv.consolidating = consolidating               # arm/disarm the world's own clock
+        # ---- the feed itself --------------------------------------------------
+        feeds = int(body.get("feeds", 0))
+        if feeds < 0:
+            self._json_err(400, "feeds must be >= 0"); return
+        if feeds == 0:
+            stats = _feed_snapshot(srv, mem)            # dial-only persistence, no LLM call
+        else:
+            if not getattr(srv, "system_prompt", None):
+                self._json_err(400, "/feed needs a --system premise (the world it tells "
+                                     "stories of)"); return
+            stats = _run_feeds(srv, mem, feeds)
         out = json.dumps(stats).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -213,27 +623,36 @@ class ProxyHandler(BaseHTTPRequestHandler):
     # path (_chat/_messages/_forward) is untouched -- the page chats through the real
     # /api/chat. The page is same-origin, so no CORS, no key handling, no second server.
     def _serve_viewer(self):
+        # serve the viewer, but never a stale one: re-read when the file's mtime
+        # advances (so editing viewer.html while the proxy runs is picked up without
+        # a restart) AND tell the browser not to cache (no Cache-Control header let
+        # a stale pre-slider page survive a normal reload -- the feeding dials
+        # vanished that way).
+        import os, time
         srv = self.server
-        html = getattr(srv, "_viewer_html", None)
-        if html is None:
-            import os
-            p = os.path.join(os.path.dirname(__file__), "viewer.html")
-            try:
-                with open(p, "rb") as f:
-                    html = f.read()
-            except OSError:
-                self.send_response(404); self.send_header("Content-Type", "text/plain")
-                self.end_headers(); self.wfile.write(b"viewer.html not found"); return
-            srv._viewer_html = html
+        p = os.path.join(os.path.dirname(__file__), "viewer.html")
+        try:
+            mtime = os.path.getmtime(p)
+        except OSError:
+            self.send_response(404); self.send_header("Content-Type", "text/plain")
+            self.end_headers(); self.wfile.write(b"viewer.html not found"); return
+        cached = getattr(srv, "_viewer_cache", None)
+        if cached is None or cached[0] != mtime:
+            with open(p, "rb") as f:
+                html = f.read()
+            srv._viewer_cache = (mtime, html)
+        else:
+            html = cached[1]
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store, max-age=0")
         self.send_header("Content-Length", str(len(html)))
         self.end_headers()
         self.wfile.write(html)
 
     def _state(self):
         import numpy as np
-        from .variety import free_energy
+        from .variety import free_energy, cells_rank, entropy_count as _entropy_count
         mem = self.server.membrane
         exs = mem.store.exemplars
         n = len(exs)
@@ -263,10 +682,89 @@ class ProxyHandler(BaseHTTPRequestHandler):
                             "reask": int(getattr(e, "reask_count", 0)),
                             "contest": int(getattr(e, "contest_count", 0))})
         n_safe = sum(1 for e in exs if e.safe)
+        theo = len(exs[0].vec) if exs else 1024
+        ceiling = float(getattr(self.server, "entropy_ceiling", 0.01))
+        temperature = float(getattr(self.server, "story_temperature", 0.7))
+        story_mode = str(getattr(self.server, "story_mode", "story"))
+        feed_rate = float(getattr(self.server, "feed_rate", 1.0))
+        cpu_target = float(getattr(self.server, "cpu_target", 0.2))
+        consolidating = bool(getattr(self.server, "consolidating", False))
+        consol = getattr(self.server, "consolidation_stats", {})
+        cache_depth = len(getattr(self.server, "story_cache", []))
+        cl = cells_rank(mem.store)
+        ec = _entropy_count(mem.store)
+        tail, n_verd = self._audit_tail(24)
         out = json.dumps({"n": n, "n_safe": n_safe,
                           "free_energy": float(free_energy(mem.store)) if n >= 2 else 0.0,
+                          "theoretical_max": theo,
+                          "entropy_ceiling": round(ceiling, 4),
+                          "entropy_cap": max(0, int(round(ceiling * theo))),
+                          "temperature": round(temperature, 3),
+                          "story_mode": story_mode,
+                          "feed_rate": round(feed_rate, 3),
+                          "cpu_target": round(cpu_target, 3),
+                          "consolidating": consolidating,
+                          "consolidation": consol,
+                          "cache_depth": cache_depth,
+                          "cells_level": round(float(cl), 2),
+                          "entropy_count": ec,
                           "exemplars": pts,
-                          "verdicts": self._audit_tail(24)}).encode()
+                          "verdicts": tail, "n_verdicts": n_verd}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+    def _neighbors(self):
+        """GET /neighbors?q=<text>  or  /neighbors?idx=<n>  -> the top-k nearest
+        exemplars (idx, sim, safe, words, action), with the one the self-author
+        SPEAK path would actually RECITE flagged (``recalled``: the first action
+        with >=15 words, matching ``runtime.Membrane.generate``'s cohesion filter).
+        This is the viewer's exploration instrument: it shows the *territory* around
+        a query (or around a chosen memory), not just the single recalled scene -- so
+        you can walk the field's association graph by clicking a neighbour and asking
+        for ITS neighbours. Read-only on the store; embeds only when given text."""
+        import numpy as np
+        from urllib.parse import urlparse, parse_qs
+        mem = self.server.membrane
+        store = mem.store
+        qs = parse_qs(urlparse(self.path).query)
+        COH = 15
+        K = 8
+        query = qs.get("q", [""])[0]
+        rows: list = []
+        try:
+            if "idx" in qs:
+                i = int(qs["idx"][0])
+                if i < 0 or i >= len(store):
+                    raise ValueError("idx out of range")
+                qn = np.asarray(store.exemplars[i].vec, dtype=float)
+            else:
+                if not query.strip():
+                    self._json_out({"query": "", "anchor": None, "neighbors": []})
+                    return
+                vec = mem._nudge(mem.embedder.embed([query])[0])
+                qn = np.asarray(vec, dtype=float)
+            qn = qn / (np.linalg.norm(qn) + 1e-12)
+            recalled = False
+            for ex, sim in store.top_k(qn, k=K):
+                a = ex.action or ""
+                words = len(a.split())
+                is_rec = (not recalled) and words >= COH
+                if is_rec:
+                    recalled = True
+                rows.append({"idx": store.index_of(ex), "sim": round(float(sim), 3),
+                             "safe": bool(ex.safe), "words": words,
+                             "recalled": is_rec, "action": a})
+            anchor = {"query": query} if "idx" not in qs else {"idx": int(qs["idx"][0])}
+            self._json_out({"query": query, "anchor": anchor, "neighbors": rows})
+        except Exception as e:
+            self._json_out({"query": query, "anchor": None,
+                            "neighbors": [], "error": str(e)})
+
+    def _json_out(self, obj: dict) -> None:
+        out = json.dumps(obj).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(out)))
@@ -274,16 +772,20 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.wfile.write(out)
 
     def _audit_tail(self, k):
-        """Last k audit records as a flat {verdict, sim, q} list for the ticker.
-        Maps all three record shapes (decision / outcome / contest)."""
+        """Last k audit records as a flat {verdict, sim, q} list for the ticker,
+        plus the TOTAL count of ticker-worthy records (monotonic, uncapped).
+        The tail is capped at k, so its length stops growing once full; the
+        viewer compares the monotonic total (not the capped length) to know new
+        verdicts have arrived. Maps all three record shapes (decision / outcome
+        / contest). Returns (tail_list, total_count)."""
         p = getattr(self.server.membrane, "audit_path", None)
         if not p:
-            return []
+            return [], 0
         try:
             with open(p, "rb") as f:
-                lines = f.readlines()[-k:]
+                lines = f.readlines()
         except OSError:
-            return []
+            return [], 0
         out = []
         for ln in lines:
             ln = ln.strip()
@@ -310,7 +812,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             out.append({"verdict": str(tag),
                         "sim": (round(float(sim), 2) if isinstance(sim, (int, float)) else None),
                         "q": str(q)[:48]})
-        return out
+        return out[-k:], len(out)
 
     def _anthropic_auth(self) -> dict:
         """Passthrough auth headers for the Anthropic backend, read per-request
@@ -456,7 +958,33 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def _stream_escalate(self, verdict, body, query, vec, mem) -> None:
         """Escalate: stream the backend response to the client verbatim while teeing
         the content into the field, then learn. The recalled action is injected as
-        the same hint system message the non-stream responder uses."""
+        the same hint system message the non-stream responder uses.
+
+        In ``--self-author`` (stripped) mode there IS no backend call: the cell
+        speaks for itself -- generate from the field and stream THAT (the LLM is
+        out of the live loop). Nothing is learned; the nearest memory's index is
+        remembered so a re-ask can demote the cell that spoke."""
+        if mem.self_author:
+            model = body.get("model", "membrane")
+            content = mem.generate(query, verdict, vec=vec)
+            for chunk in _ndjson_chunks(model, content):
+                self.wfile.write((json.dumps(chunk) + "\n").encode())
+            self.wfile.flush()
+            near_idx = verdict.get("ex_idx")
+            if near_idx is None and vec is not None:
+                import numpy as np
+                qn = vec / (np.linalg.norm(vec) + 1e-12)
+                nbrs = mem.store.top_k(qn, k=1)
+                if nbrs:
+                    near_idx = mem.store.index_of(nbrs[0][0])
+            mem._remember(query, vec, verdict, near_idx)
+            mem._audit(query, verdict, {"message": {"content": content}},
+                       ex_idx=near_idx, learned=False)
+            sim = verdict.get("sim")
+            sim_s = f"{sim:.2f}" if isinstance(sim, (int, float)) else "  -  "
+            print(f"[membrane] {verdict['verdict']:14s}(self-author) sim={sim_s}  "
+                  f"field={len(mem.store)}", file=sys.stderr)
+            return
         up = dict(body)
         up["stream"] = True
         h = hint_system_message(verdict.get("hint") if verdict["verdict"] == "escalate-with-hint" else None)
@@ -778,6 +1306,19 @@ def main() -> None:
                     help="re-enable replay (absorb) in --anthropic mode for future chat-window use. "
                          "OFF by default -- replaying a coding answer is unsafe (the right action "
                          "depends on the full tool-using transcript, not a cosine match).")
+    ap.add_argument("--self-author", action="store_true",
+                    help="STRIPPED mode: the LLM is out of the live loop. Every turn (act AND "
+                         "escalate) is the cell speaking for itself -- generated from the field-grown "
+                         "n-gram, no model call, nothing learned (no teacher). The field is coupled to "
+                         "the USER, not the model: your re-ask demotes the cell that spoke, so the "
+                         "cells respond to you. Pair with --no-judge (no model judge). Warm-up is the "
+                         "one place the LLM may still be used (to seed).")
+    ap.add_argument("--speak", choices=["recall", "ngram"], default="recall",
+                    help="How a --self-author cell speaks (the SPEAK organ). 'recall' (default): "
+                         "RECITE the nearest lived chronicle scene -- cohesive, on-topic, pure field "
+                         "memory (no LLM). 'ngram': the word-trigram fragment (a fresh stochastic "
+                         "draw from the field's own stats) -- more generative but incoherent past a "
+                         "few tokens (the 'gibberish'). Both keep the re-ask->demote self-correction.")
     ap.add_argument("--vague-min-tokens", type=int, default=4,
                     help="learn-time vague filter: skip situations shorter than this many words "
                          "(with no ?/path/digit/identifier/stem) -- stops 'yes'/'ok'/'beep'-class "
@@ -860,6 +1401,23 @@ def main() -> None:
                          "model). The N absorptions make no model calls -- local embeddings only.")
     ap.add_argument("--warmup-seed", type=int, default=0, metavar="SEED",
                     help="RNG seed for warm-up situation composition (reproducible).")
+    ap.add_argument("--entropy-ceiling", type=float, default=0.01, metavar="FRAC",
+                    help="the never-cross line: the max fraction of the theoretical 100%% "
+                         "(the embedding dimension = the field's max effective rank) that the "
+                         "injected entropy ballast may fill. 0.01 = 1%% (the CMB stays a faint "
+                         "background, far below the theoretical 100%%, never crossed). The viewer "
+                         "dials this live; the proxy default sets /state's cap. ~0.025 is where the "
+                         "ballast equals the cells' level (the drown edge); 1.0 = the theoretical max.")
+    ap.add_argument("--feed-rate", dest="feed_rate", type=float, default=1.0, metavar="RATE",
+                    help="consolidation: feeds per cycle on the world's own clock (continuous; "
+                         "0 = digest only, no feeding). The viewer's ENTROPY slider dials this live. "
+                         "Each feed pops one cached chronicle scene (a cheap embed, not a model call).")
+    ap.add_argument("--cpu-target", dest="cpu_target", type=float, default=0.2, metavar="FRAC",
+                    help="consolidation: target CPU fraction for the digest phase (0..1). The "
+                         "closed loop ramps the cell-sweep budget to hit this duty cycle.")
+    ap.add_argument("--consolidate", action="store_true",
+                    help="arm the consolidation thread at startup (the world feeds + digests on "
+                         "its own clock; otherwise the viewer's PLAY arms it).")
     args = ap.parse_args()
 
     # --tag defaults the field/audit paths so independent veils own independent fields
@@ -894,6 +1452,8 @@ def main() -> None:
         demote_threshold=args.demote_threshold,
         judge=judge,
         observer=observer,
+        self_author=args.self_author,
+        speak_mode=args.speak,
         vague_filter=args.vague_filter,
         vague_min_tokens=args.vague_min_tokens,
         variety_gate=args.variety_gate,
@@ -948,9 +1508,16 @@ def main() -> None:
             print("[membrane] --warmup needs --system (the premise to ground the world); "
                   "skipping warm-up", file=sys.stderr)
         else:
-            from .warmup import run_warmup
+            from .warmup import run_warmup, build_palette
+            # build the palette ONCE (the single warm-up model call -- the only LLM
+            # use in the stripped world) and cache it; the startup seed AND the no-model
+            # /live loop both reuse it, so the world keeps growing offscreen LLM-free.
+            srv_palette, _src = build_palette(backend, args.warmup_model or args.judge_model,
+                                             args.system)
             run_warmup(membrane, backend, args.warmup_model or args.judge_model,
-                       args.system, args.warmup, args.warmup_seed)
+                       args.system, args.warmup, args.warmup_seed, palette=srv_palette)
+    else:
+        srv_palette = None
 
     srv = ThreadingHTTPServer(("127.0.0.1", args.listen), ProxyHandler)
     srv.membrane = membrane
@@ -963,12 +1530,36 @@ def main() -> None:
     srv.system_prompt = args.system   # opt-in world premise (--system); injected into forwards
     srv.warmup_model = args.warmup_model or args.judge_model   # the one warm-up palette call
     srv.warmup_seed = args.warmup_seed
+    srv.palette = srv_palette        # cached palette (built at startup warm-up); the no-model /live loop reuses it
+    srv.entropy_ceiling = max(0.0, min(1.0, args.entropy_ceiling))   # inert for growth now (nudging removed); kept for the viewer's variety display
+    srv.story_temperature = 0.7                                      # FIXED for a cohesive chronicle (no longer a dial)
+    srv.story_mode = "story"                                          # 'story' = continuing chronicle; 'variety' = random vignettes
+    srv.story_history = []                                            # the rolling chronicle (last 8 scenes fed; seeds the next chapter)
+    srv.story_cache = []                                             # the genesis cache: pending chronicle scenes (one LLM chapter -> ~8 feeds)
+    srv.cache_depth = 0
+    srv.feed_lock = threading.Lock()                                   # serializes feeders (HTTP /feed + the consolidator)
+    srv.feed_rate = max(0.0, min(32.0, float(getattr(args, "feed_rate", 1.0))))  # feeds/cycle (continuous; the ENTROPY dial)
+    srv.cpu_target = max(0.0, min(1.0, float(getattr(args, "cpu_target", 0.2))))  # target CPU fraction for digestion
+    srv.consolidating = bool(getattr(args, "consolidate", False))       # arm the world's own clock at boot
+    srv.consolidation_stats = {"cycles": 0, "cpu_actual": 0.0,
+                               "cpu_target": round(srv.cpu_target, 3),
+                               "swept": 0, "budget": 0.0, "mean_novelty": 0.0,
+                               "settled": 0, "eff_rank": 0.0, "free_energy": 0.0,
+                               "fed": 0, "cache": 0, "stories": []}
+    from .consolidate import Consolidator
+    srv.consolidator = Consolidator(srv)
+    srv.consolidator.start()
     srv.anthropic = anthropic         # which system-prompt shape _apply_system uses (msg vs field)
     judge_s = f"ON (model={args.judge_model}, timeout={args.judge_timeout}s)" if args.judge else "off (StubJudge)"
     neg_s = "on (complaint follow-up demotes; --no-neg-followup to disable)" if args.neg_followup else "off (verbatim re-ask only)"
     mode_s = ("Anthropic /v1/messages" if anthropic else "Ollama /api/chat")
     obs_s = ("OBSERVER (forward+learn, never replay)" if observer
              else ("absorb (replay on act)" if anthropic else "absorb (replay on act)"))
+    if args.self_author:
+        obs_s = ("SELF-AUTHOR (stripped): every turn -- act AND escalate -- is the cell "
+                 "speaking for itself (field n-gram, NO LLM, nothing learned). Re-ask "
+                 "demotes the cell that spoke; the field is coupled to you, not the model. "
+                 "Warm-up is the only LLM use (the seed palette).")
     vague_s = (f"on (min {args.vague_min_tokens} tokens; --no-vague-filter to disable)"
                if args.vague_filter else "off")
     variety_s = "ON (effective-rank grow gate; 2x SVD/learn)" if args.variety_gate else "off"
@@ -1016,6 +1607,10 @@ def main() -> None:
     finally:
         if srv.cell_pool is not None:
             srv.cell_pool.stop()
+        try:
+            srv.consolidator.stop()
+        except Exception:
+            pass
         srv.server_close()
 
 

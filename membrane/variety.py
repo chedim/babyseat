@@ -95,6 +95,34 @@ def effective_rank_with(store: ExemplarStore, vec: np.ndarray,
     return _effective_rank_vectors(aug, eps)
 
 
+def cells_rank(store: ExemplarStore, eps: float = 1e-9) -> float:
+    """Effective rank of the REAL cells -- the variety the field actually EARNED
+    by finding the user's entropy, EXCLUDING the injected entropy vectors
+    (``outcome == 'entropy'``). This is the cells' *level*: the part of the
+    field's geometry the cells grew into themselves.
+
+    The entropy flood is capped at this level -- 'we don't raise entropy
+    variety in the feedstock above their level'. The cap only rises when the
+    cells find more of the user's entropy (real absorptions add to the real
+    cells), so the field grows WITH the cells, not past them: the flood fills
+    up to the cells' level and then waits for the cells to earn a higher one.
+    """
+    real = [e for e in store.exemplars if getattr(e, "outcome", "") != "entropy"]
+    if len(real) < 2:
+        return float(len(real))                  # 0 or 1 real cell -> level is just the count
+    V = np.array([np.asarray(e.vec, dtype=float) for e in real])
+    if V.shape[1] == 0:
+        return 0.0
+    return _effective_rank_vectors(V, eps)
+
+
+def entropy_count(store: ExemplarStore) -> int:
+    """How many injected entropy vectors (``outcome == 'entropy'``) the field
+    holds right now. The flood is capped at ``round(cells_rank(store))`` -- the
+    entropy's own variety never exceeds the cells' level."""
+    return sum(1 for e in store.exemplars if getattr(e, "outcome", "") == "entropy")
+
+
 def spectrum_entropy(store: ExemplarStore, eps: float = 1e-9) -> float:
     """The raw Shannon entropy of the variance spectrum = ``log(effective_rank)``.
 

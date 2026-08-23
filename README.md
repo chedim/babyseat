@@ -450,6 +450,145 @@ live — including whether the null-space novelty veto is **ON** (low-rank field
 
 ---
 
+## The self-running, self-authoring world (landed)
+
+The proxy is no longer just a gate in front of a model. It can run a **world on
+its own clock** that **speaks for itself** and that you can **explore as a
+graph**. All of it stays field-first: the LLM is a *gardener* (writes the
+chronicle in big cached chapters, rarely) and an *escalation* (adjudicates
+demotions); it is never on the receiving end of a live message.
+
+### The world's own clock — consolidation cycles (`membrane/consolidate.py`)
+
+A daemon thread (the `Consolidator`, mirroring the cell-pool stop/join pattern)
+runs the world independently of any viewer. When armed (the viewer's PLAY, or
+`--consolidate` at boot), each cycle has two phases:
+
+- **FEED** — the world feeds itself `feed_rate` times from the **genesis cache**
+  (below). Each feed is a cached chronicle scene → a cheap local embed + absorb,
+  *not* a model call. `feed_rate` is a **continuous** float (0–32/cycle); the
+  fractional tail resolves probabilistically (`_feed_count`). This is the dial
+  that "controls the models": rate > 0 makes real embed calls every cycle; the
+  model itself is called only when the cache runs low.
+- **DIGEST** — CPU consolidation, no model, no field mutation: refresh the global
+  `thermo_state` (one SVD), sweep a `budget` of cells recomputing each one's
+  `novelty` (one SVD per cell), and rebuild the `FieldNGram` when the field grew.
+
+The `budget` (cells swept/cycle) is ramped by a **closed loop** targeting
+`cpu_target` — the fraction of each cycle's wall time spent digesting. Measure
+the digest time, compare to the smoothed cycle time, nudge the budget up if
+under target, down if over. So the CPU slider truly ramps the consolidation
+speed against a real duty fraction. `consolidation_stats` (cycles / cpu_actual
+/ cpu_target / swept / budget / mean_novelty / eff_rank / free_energy / fed /
+cache / stories) is echoed on `/state` and the viewer.
+
+### Genesis cache — one LLM call feeds the world ~8×
+
+`_genesis` asks the LLM *rarely* to narrate the world's history "from the big
+bang" as a batch of `--CHAPTER`=8 substantial scenes separated by a `---` line;
+the scenes are cached on `srv.story_cache`. Each FEED pops one cached scene
+(cheap `/api/embed` + absorb); the cache refills with one model call when it
+drops below `_LOW_WATER`=3. The chronicle is told in bulk, continuing from
+`srv.story_history` (the last 8 scenes) for a cohesive running narrative.
+`_run_feeds(srv, mem, feeds)` (shared by HTTP `/feed` and the consolidator) is
+the cache consumer, serialized on `srv.feed_lock`.
+
+### No-nudge raw-embed feed; feed-rate = the entropy dial
+
+`runtime.Membrane.feed` absorbs the **raw** story embedding (dropped `_nudge`
+and the `_limit_rank` ceiling-massage): growth is **rate-controlled** (the
+feed-rate dial + the cache), not variety-capped. The `entropy_ceiling`/cap is
+now **inert for growth** (kept for the viewer's variety display); only the
+dedup/vague guard limits it. The old entropy/temperature slider is repurposed:
+**FEED RATE** (0–32/cycle). The story `temperature` is fixed at 0.7 server-side
+for a cohesive chronicle.
+
+### Self-author stripped mode — the cell speaks for itself
+
+`--self-author` takes the LLM out of the live loop entirely: every turn (act
+AND escalate) is the cell speaking from its own memory, no model call, nothing
+learned (no teacher). The field is coupled to the *user*, not the model — your
+re-ask is the only channel back in, and it demotes the cell that spoke (the
+nearest memory the speech was conditioned on), so the cells respond to you.
+Pair with `--no-judge` (StubJudge, so demotions stand with no model call).
+Warm-up is the one place the LLM may still be used (to seed).
+
+The SPEAK organ (`runtime.Membrane.generate`, selected by `--speak`):
+
+- **`recall` (default, cohesive)** — the cell RECITES its most relevant lived
+  scene: the nearest stored action to the query (kNN). The field is grown from
+  cohesive LLM-written chronicle passages (~50–80 words), so the nearest
+  neighbour IS a cohesive, on-topic story. Legacy telegraphic fragments
+  (`< _COHESIVE_MIN_WORDS`=15; early stub/warm-up junk) are SKIPPED — they were
+  the "gibberish". This replaced the word-trigram fragment, which was locally
+  fluent but globally rambling and capped at `_MAX` tokens.
+- **`ngram` (opt-in)** — the Fork-C word-trigram: a fresh stochastic draw from a
+  trigram trained on the field's own stored actions, conditioned on the nearest
+  memory's lead. More "generative" but incoherent past a few tokens; kept as an
+  escape hatch.
+
+Determinism holds in both modes (a query maps to a fixed nearest passage / a
+query-seeded RNG), so a re-ask produces the SAME output and the re-ask detector
+demotes the seed — the green→red→green self-correction arc inherits. In
+practice every chat turn is an `escalate` verdict (the nearest memory sits at
+sim ~0.69 < `sim_min` 0.85, so the gate escalates; self-author turns that
+escalation into speaking from memory). The `act`/absorb path is dormant in
+stripped mode and would speak identically.
+
+### The live 3D viewer — explore the field as a graph
+
+`--viewer` serves `membrane/viewer.html` (a Minecraft-styled Three.js cosmos)
+and `/state` (a JSON snapshot read in-process from the live field). The gate
+path is untouched — the page chats through the real `/api/chat`, same-origin.
+
+- **Cosmos** — stars = exemplars, PCA-projected to 3D (green safe / red
+  demoted); drag to orbit, scroll to zoom. The field's geometry rendered as
+  space.
+- **Menu (Esc / ⚙)** — all world controls: ceiling, feed-rate, CPU target,
+  PLAY/PAUSE (their clock), time-skip, the legend, the activity log (the
+  verdict ticker: escalate = new territory, absorb = ground it knows).
+- **Story console (backtick)** — the chronicle scenes being fed live, the
+  world's own thread, tagged fed/skipped.
+- **Date/time/cycle HUD** — `Day N · HH:00 · <phase> · cycle C`, derived from
+  `consolidation.cycles` (2h/cycle, 12 cycles/day; phase icon for the
+  night-market's midnight lamps). A paused world freezes the clock; PLAY moves
+  it. (Cycle resets on proxy restart; the field/cells persist.)
+- **Neighborhood panel (`/neighbors`, press H)** — the exploration instrument.
+  `GET /neighbors?q=<text>|idx=<n>` returns the top-8 nearest exemplars
+  `{idx,sim,safe,words,recalled,action}` (read-only on the store; `recalled`
+  flags the one the SPEAK path would recite). After each chat send the panel
+  renders the top-8 as clickable rows (dot, sim, snippet, sim bar); click a
+  row → re-render with *that* memory's neighbours → walk the field's
+  association graph instead of getting one answer. Each chat reply is annotated
+  with the recalled `sim` (the strength of association) and whether it's
+  demoted. The viewer hot-reloads (`Cache-Control: no-store` + mtime re-read).
+
+### Launch
+
+```bash
+# a self-running, self-authoring, explorable world (night-market fiction,
+# gemma3:12b writes the chronicle; mxbai-embed-large for embeddings):
+PYTHONPATH=. .venv/bin/python -m membrane.proxy --listen 8770 \
+  --backend http://127.0.0.1:11434 \
+  --system "A night market at the edge of a desert city where the known world ends. ..." \
+  --warmup-model gemma3:12b --entropy-ceiling 0.05 \
+  --self-author --no-judge --viewer \
+  --field worlds/story-field.json --audit worlds/story-audit.jsonl
+# then open http://127.0.0.1:8770/viewer and hit PLAY (or add --consolidate
+# --feed-rate 4 --cpu-target 0.3 to arm the world's clock at boot).
+```
+
+What it is, honestly: a **self-growing memory field you probe by association,
+walk as a graph, and steer by pruning** — not a chatbot, not a game, not a
+search box. The cell does not reason; it recites the memory most semantically
+similar to your words, and the `sim` is the honest version of how "right" that
+feels. The LLM grows the content (the chronicle); the field supplies the
+structure (which memories associate, what survives your pruning). It grows
+into a *bigger memory*, not a *smarter world* — turning drift into drive
+(state + causality + an intrinsic thermodynamic goal) is the next build.
+
+---
+
 ## The math findings
 
 `docs/math-findings.md` is the full narrative of the three experiments (real

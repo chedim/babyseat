@@ -81,6 +81,12 @@ from .gate import decide
 from .generator import FieldNGram, MIN_ACTIONS as _GEN_MIN_ACTIONS, _tok as _gen_tokens
 from .variety import thermo_state
 
+# COHESIVE RECALL (self-author speak, "recall" mode): the minimum word count for
+# a stored action to count as a recitable scene. The field mixes cohesive LLM
+# chronicle passages (~50-80 words) with legacy telegraphic fragments (<15 words;
+# early stub/warm-up junk). Recite only real scenes; skip the fragments.
+_COHESIVE_MIN_WORDS = 15
+
 
 class Responder(Protocol):
     """The escalation backend: the model server Membrane calls when it won't absorb.
@@ -459,6 +465,30 @@ class Membrane:
         # quality signals (gated to observer so the Ollama path is untouched): a
         # ``tool_result is_error`` demotion and a re-ask after an ESCALATE.
         observer: bool = False,
+        # ---- self-author (stripped) mode: the LLM is out of the live loop ----
+        # The cell speaks for itself on EVERY turn -- act AND escalate generate
+        # from the field-grown n-gram; the responder (the LLM) is NEVER called
+        # after warm-up, and nothing is learned (no teacher). The field is coupled
+        # to the USER, not the model: your re-ask is the only channel back in, and
+        # it demotes the cell that spoke (the nearest memory the generation was
+        # conditioned on) -- so the cells respond to you. The judge is a no-op
+        # (pass StubJudge via --no-judge) so demotions stand with no model call.
+        # Warm-up is exempt: the one palette call may still use the LLM to seed.
+        self_author: bool = False,
+        # ---- how the self-author cell speaks (the SPEAK organ) ----
+        # "recall" (default): the cell RECITES its most relevant lived scene -- the
+        #   nearest stored action to the query. The field is grown from cohesive
+        #   LLM-written chronicle passages, so the nearest neighbour IS a cohesive,
+        #   on-topic story; no model call, pure field memory (self-author). This
+        #   replaced the word-trigram fragment, which was locally fluent but
+        #   globally rambling and capped at _MAX tokens -- gibberish.
+        # "ngram": the Fork-C word-trigram -- a fresh stochastic draw from the
+        #   field's joint statistics, conditioned on the nearest memory. More
+        #   "generative" but incoherent past a few tokens; kept as an opt-in.
+        # Re-ask determinism holds in BOTH modes (the nearest passage / the seeded
+        #   RNG are fixed by the query), so the re-ask detector demotes the cell
+        #   that spoke -- the green->red->green self-correction arc inherits.
+        speak_mode: str = "recall",
         # ---- information-gated learning (the cheap entropy-based value half) ----
         # vague_filter: drop low-information situations ("yes", "ok", "beep") before
         #   dedup -- they pull inconsistent boilerplate and fill the field with junk.
@@ -525,6 +555,8 @@ class Membrane:
         self.demote_threshold = demote_threshold
         self.judge = judge or StubJudge()
         self.observer = observer
+        self.self_author = self_author
+        self.speak_mode = speak_mode
         self.vague_filter = vague_filter
         self.vague_min_tokens = vague_min_tokens
         self.variety_gate = variety_gate
@@ -578,8 +610,26 @@ class Membrane:
             self._remember(query, vec, verdict, verdict.get("ex_idx"))
             return resp, verdict
 
-        # escalate-with-hint or escalate: call the responder, learn from the response.
+        # escalate-with-hint or escalate.
         hint = verdict.get("hint") if v == "escalate-with-hint" else None
+        if self.self_author:
+            # STRIPPED: no model. The cell speaks for itself from the field, the
+            # user's re-ask is the only channel back in. The cell that speaks is
+            # the nearest memory the generation was conditioned on -- record its
+            # index so a re-ask demotes IT (the field responds to you). Nothing is
+            # learned (no teacher); the field evolves only via re-ask demotion.
+            near_idx = verdict.get("ex_idx")
+            if near_idx is None and vec is not None:
+                qn = vec / (np.linalg.norm(vec) + 1e-12)
+                nbrs = self.store.top_k(qn, k=1)
+                if nbrs:
+                    near_idx = self.store.index_of(nbrs[0][0])
+            resp = _chat_response(request_body.get("model", "membrane"),
+                                  self.generate(query, verdict, vec=vec))
+            self._audit(query, verdict, resp, ex_idx=near_idx, learned=False)
+            self._remember(query, vec, verdict, near_idx)
+            return resp, verdict
+        # call the responder, learn from the response.
         resp = self.responder.respond(request_body, hint=hint, auth=auth)
         ex_idx = self._learn(query, vec, verdict, resp, unsafe)
         self._remember(query, vec, verdict, ex_idx)
@@ -786,6 +836,134 @@ class Membrane:
             self._remember(situation, vec, verdict, ex_idx)
         return ex_idx
 
+    def inject_entropy(self, n: int = 1, safe: bool = True) -> int:
+        """Flood the field with raw ENTROPY VECTORS -- random unit vectors in the
+        embedding space, appended DIRECTLY (no embed call, no gate, no dedup).
+
+        A random vector in 1024-d is ~orthogonal to every existing vec, so it never
+        dedups and never becomes a real query's nearest neighbour: the gate (act /
+        escalate / consensus) is UNTOUCHED -- these are inert to live turns. What
+        they DO is expand the field's GEOMETRY: each near-orthogonal direction
+        raises the effective rank, and with ``safe=True`` (operator-given variety,
+        a boundary injection -- the same "given not taken" status as a situation
+        that entered through the boundary) the disorder tax is zero, so
+        ``free_energy`` climbs without bound. The world's complexity grows without
+        saturating -- the way palette-grounded absorptions (which dedup on a small
+        palette) cannot. This is ``../mirror``'s entropy injection done DIRECTLY
+        in the field's own vectors.
+
+        Audit: one ``entropy`` decision record per call (carrying the count), so
+        the viewer's ticker shows the flood. Returns ``n`` (every vector is kept --
+        nothing dedups a random direction)."""
+        exs = self.store.exemplars
+        dim = len(exs[0].vec) if exs else 1024
+        rng = np.random.default_rng()       # fresh, nondeterministic: entropy is new each call
+        for _ in range(n):
+            v = rng.standard_normal(dim)
+            self.store.append(Exemplar(situation="⟂", action="", outcome="entropy",
+                                       vec=_unit_list(v), safe=safe))
+        self.store.save(self.field_path)
+        verdict = {"verdict": "entropy", "reason": f"entropy-vector flood +{n}",
+                   "sim": None, "nov": None, "ex_idx": None}
+        self._audit(f"⟂ ×{n}", verdict, {"message": {"content": ""}},
+                    ex_idx=None, learned=True)
+        return n
+
+    def trim_entropy(self, keep: int) -> int:
+        """Enforce the never-cross ceiling: drop injected ENTROPY vectors
+        (``outcome == 'entropy'``) beyond the first ``keep``, newest first.
+
+        Only the operator-injected ballast is ever trimmed -- the real cells
+        (the knowledge the field earned by finding the user's entropy) are NEVER
+        touched, so the append-only-in-count invariant holds for everything that
+        matters. Ballast is given, not taken; it may be withdrawn. Returns the
+        count dropped (0 when the ballast is already within ``keep``)."""
+        exs = self.store.exemplars
+        ent_idx = [i for i, e in enumerate(exs)
+                   if getattr(e, "outcome", "") == "entropy"]
+        drop = len(ent_idx) - max(0, keep)
+        if drop <= 0:
+            return 0
+        drop_set = set(ent_idx[len(ent_idx) - drop:])   # newest (last-appended) first
+        self.store.exemplars = [e for i, e in enumerate(exs) if i not in drop_set]
+        self.store.save(self.field_path)
+        return drop
+
+    def _limit_rank(self, vec: np.ndarray, cap: float
+                    ) -> tuple[np.ndarray | None, bool]:
+        """Entropy-limiting massage for story-feeding: deform ``vec`` toward the
+        field centroid until appending it would NOT push the world's effective
+        rank past ``cap``. Returns ``(massaged_vec, massaged)`` -- ``(vec,
+        False)`` when the raw story already fits, ``(massaged, True)`` when it
+        had to be blended toward the center, or ``(None, True)`` when the field
+        is already at/over the ceiling (the cell is full -- raise the ceiling).
+
+        On a story-fed world the never-cross line caps the world's OWN variety
+        (the cells' effective rank), not a separate ballast counter. A story is
+        real semantic text, so it tends to ADD rank; blending it toward the
+        centroid (alpha=1 -> the raw story, alpha=0 -> the center, which adds
+        no rank) dials that contribution down until it fits. Binary search over
+        alpha (~7 SVDs via ``effective_rank_with``); a feed is an LLM call
+        anyway, so the cost is negligible. If even the centroid (alpha=0) would
+        leave the field over cap, the field is already full -> None (skip)."""
+        from .variety import effective_rank_with
+        store = self.store
+        if effective_rank_with(store, vec) <= cap:
+            return vec, False
+        V = store.vectors()
+        if V.shape[0] < 1 or V.shape[1] == 0:
+            return vec, False                  # nothing to blend toward; rank ~0
+        mu = V.mean(axis=0)
+        # alpha=0 is the LITERAL mean: appending it adds no rank (the new point == the
+        # new mean -> a zero row in the centered SVD), so effective_rank_with(store,
+        # mu) == cells_rank. If even that exceeds cap, the field is already over the
+        # ceiling -> skip. The blend is stored unnormalized (normalize=False in the
+        # _learn call), so a collapsed story stays sub-unit and truly limits rank
+        # (re-normalizing it back to unit would re-inflate the very rank we removed).
+        if effective_rank_with(store, mu) > cap:
+            return None, True                  # field already over the ceiling
+        lo, hi = 0.0, 1.0
+        for _ in range(7):
+            a = (lo + hi) / 2.0
+            m = a * vec + (1.0 - a) * mu        # raw blend; alpha=0 == mu (no rank add)
+            if effective_rank_with(store, m) <= cap:
+                lo = a                         # fits -> push alpha up
+            else:
+                hi = a
+        m = lo * vec + (1.0 - lo) * mu
+        return m, True
+
+    def feed(self, story: str, ceiling: float) -> dict:
+        """Story-fed growth: embed a world-story the LLM narrated and absorb it
+        as a REAL exemplar via the same ``_learn`` seam chat uses. NO nudging --
+        the raw story embedding goes in AS-IS, so the world's growth direction is
+        exactly the direction the LLM's chronicle points (coherent story ->
+        coherent geometry). Growth is rate-controlled (the feed-rate dial + the
+        genesis cache), not variety-capped: the ``_limit_rank`` massage that
+        blended each story toward the field centroid to respect a never-cross
+        ceiling is gone. Only the dedup/vague guard (inside ``_learn``) limits
+        growth, so the world never fills with near-identical cells.
+
+        ``ceiling`` is retained in the signature but is now inert (kept for
+        callers). Returns a stats dict the proxy forwards to the viewer."""
+        from .variety import cells_rank, free_energy
+        vec = np.asarray(self.embedder.embed([story])[0], dtype=float)  # raw, no _nudge
+        level = cells_rank(self.store)
+        verdict = {"verdict": "feed", "reason": "story-fed growth (raw embed)",
+                   "sim": None, "nov": None, "ex_idx": None}
+        resp = _chat_response("feed", story)
+        ex_idx = self._learn(story, vec, verdict, resp, unsafe=False,
+                            would_absorb=False, normalize=True)
+        if ex_idx is None:
+            return {"fed": 0, "skipped": True,
+                    "cells_level": level,
+                    "free_energy": free_energy(self.store),
+                    "field_size": len(self.store)}
+        self._remember(story, vec, verdict, ex_idx)
+        return {"fed": 1, "cells_level": cells_rank(self.store),
+                "free_energy": free_energy(self.store),
+                "field_size": len(self.store)}
+
     # ---- internals ----------------------------------------------------------
 
     def _act(self, verdict: dict, request_body: dict, query: str, vec=None) -> dict:
@@ -797,33 +975,62 @@ class Membrane:
         return _chat_response(model, self.generate(query, verdict, vec=vec))
 
     def generate(self, query: str, verdict: dict, vec=None) -> str:
-        """Fork C: generate a response from the field-grown n-gram, conditioned on
-        the nearest memory of the query. Replaces the verbatim ``act`` replay.
+        """The self-author SPEAK organ: what the cell says on its own (no LLM).
 
-        The organ is a word-level n-gram language model trained on the field's
-        own stored actions (membrane/generator.py ``FieldNGram``) -- nothing
-        downloaded, no borrowed brain; the counts ARE the field's memory of what
-        it has said. Conditioning is kNN: seed the generation with the nearest
-        action's lead, so the response starts from the closest memory and then
-        DIVERGES via sampling -- a fresh draw from the field's joint statistics,
-        not a verbatim replay.
+        Two modes (``self.speak_mode``):
 
-        Determinism: a query seeds the RNG stably (sha256 of query + nearest
-        action), so a RE-ASK of the same query generates the SAME output -- the
-        re-ask detector then demotes the seed exactly as it demoted the old
-        replay, so the green->red->green self-correction arc is inherited.
+        "recall" (default, COHESIVE): the cell RECITES its most relevant lived
+        scene -- the nearest COHESIVE stored action to the query. The field is
+        grown from cohesive LLM-written chronicle passages (~50-80 words each),
+        so the nearest cohesive neighbour IS a cohesive, on-topic story (e.g.
+        "what happened to the courier" -> the courier scene at sim 0.71). Legacy
+        telegraphic fragments (<``_COHESIVE_MIN_WORDS``; leftover from an early
+        stub/warm-up phase) are SKIPPED -- they are the "gibberish". This replaced
+        the word-trigram fragment, which was locally fluent but globally rambling
+        and capped at _MAX tokens.
 
-        Graceful fallback: below ``MIN_ACTIONS`` distinct stored actions, or if
-        generation comes up empty/whitespace, return ``verdict["action"]`` (the
-        verbatim replay) -- the cell does not stammer until it has lived enough.
-        ``vec`` (the nudged query vector) is reused when the caller has it
-        (gate_turn); when None it is recomputed from ``query``.
+        "ngram" (opt-in, --speak ngram): Fork C -- a fresh stochastic draw from a
+        word-trigram trained on the field's own stored actions
+        (membrane/generator.py ``FieldNGram``), conditioned on the nearest
+        memory's lead. More "generative" (a fresh draw, not a verbatim replay)
+        but incoherent past a few tokens; kept as an escape hatch.
+
+        Determinism in BOTH modes: a query maps to a fixed nearest passage (and,
+        in ngram mode, a query-seeded RNG), so a RE-ASK produces the SAME output
+        -- the re-ask detector then demotes the seed exactly as it demoted the
+        old replay, so the green->red->green self-correction arc is inherited.
+
+        Graceful fallback: no neighbours, an empty nearest action, a too-thin
+        field (<``_GEN_MIN_ACTIONS`` distinct actions, ngram mode), or an empty
+        n-gram draw -> return ``verdict["action"]`` (the verbatim replay). The
+        cell does not stammer until it has lived enough.
         """
         replay = verdict.get("action", "")
         try:
             if vec is None:
                 vec = self._nudge(self.embedder.embed([query])[0])
-            # rebuild the n-gram only when the field grew since last build
+            qn = vec / (np.linalg.norm(vec) + 1e-12)
+            nbrs = self.store.top_k(qn, k=self.k)
+            if not nbrs:
+                return replay
+            # ---- COHESIVE RECALL (default): recite the nearest COHESIVE lived
+            # scene. The field mixes cohesive chronicle scenes (~50-80 words)
+            # with legacy telegraphic fragments (<15 words; early stub/warm-up
+            # junk). Skip the fragments -- they are the "gibberish" -- and recite
+            # the nearest real scene. Falls back to the raw nearest action (best
+            # effort) if, unusually, every neighbour is a fragment. ----
+            if getattr(self, "speak_mode", "recall") != "ngram":
+                best = ""
+                for ex, _sim in nbrs:
+                    a = (ex.action or "").strip()
+                    if len(a.split()) >= _COHESIVE_MIN_WORDS:
+                        best = a
+                        break
+                if not best:
+                    best = (nbrs[0][0].action or "").strip()
+                return best if best else replay
+            # ---- n-gram generation (opt-in): a fresh draw from the field's ----
+            # joint statistics, conditioned on the nearest memory's lead.
             if self._gen_lm is None or len(self.store) != self._gen_size:
                 actions = [e.action for e in self.store.exemplars if e.action]
                 if len(set(actions)) < _GEN_MIN_ACTIONS:
@@ -833,9 +1040,6 @@ class Membrane:
             lm = self._gen_lm
             if lm.size == 0:
                 return replay
-            qn = vec / (np.linalg.norm(vec) + 1e-12)
-            nbrs = self.store.top_k(qn, k=self.k)
-            near = nbrs[0][0]
             seed = _gen_tokens(near.action)[:2]            # kNN lead: nearest action's first 2 tokens
             digest = hashlib.sha256((query + "\x00" + near.action).encode()).digest()
             rng = random.Random(int.from_bytes(digest[:8], "big"))
@@ -850,6 +1054,13 @@ class Membrane:
                   reason: str, auth: dict | None = None) -> tuple[dict, dict]:
         verdict = {"verdict": "escalate", "reason": reason, "sim": 0.0, "nov": None,
                    "ex_idx": None}
+        if self.self_author:
+            # STRIPPED: no model on this path either -- the cell speaks for itself.
+            resp = _chat_response(request_body.get("model", "membrane"),
+                                  self.generate(query, verdict, vec=vec))
+            if vec is not None:
+                self._remember(query, vec, verdict, None)
+            return resp, verdict
         resp = self.responder.respond(request_body, hint=hint, auth=auth)
         if vec is not None:
             ex_idx = self._learn(query, vec, verdict, resp, False)
@@ -857,7 +1068,8 @@ class Membrane:
         return resp, verdict
 
     def _learn(self, query: str, vec: np.ndarray, verdict: dict, resp: dict,
-               unsafe: bool, would_absorb: bool = False) -> int | None:
+               unsafe: bool, would_absorb: bool = False,
+               normalize: bool = True) -> int | None:
         """Append the new exemplar (situation -> action=response) and audit the decision.
 
         outcome is "pending" -- filled in later when the user reacts (a re-ask flips
@@ -930,7 +1142,7 @@ class Membrane:
                 return None
         self.store.append(Exemplar(
             situation=query, action=content, outcome="pending",
-            vec=_unit_list(vec), safe=not unsafe,
+            vec=(_unit_list(vec) if normalize else vec.tolist()), safe=not unsafe,
         ))
         self.store.save(self.field_path)
         ex_idx = len(self.store) - 1
@@ -1082,9 +1294,15 @@ class Membrane:
         # 1) cosine re-ask. In OBSERVER mode there are no absorbs, so a near-dup
         # repeat after an ESCALATE is also a re-ask signal (the forwarded answer
         # didn't satisfy -- the user is asking again). In normal mode only an ``act``
-        # counts (a repeat after an escalate is the legitimate first absorb).
-        match_verdicts = ({"act"} if not self.observer
-                          else {"act", "escalate", "escalate-with-hint"})
+        # counts (a repeat after an escalate is the legitimate first absorb) --
+        # EXCEPT in self-author (stripped) mode, where an escalate is the cell
+        # SPEAKING for itself (no model answered), so a repeat is the same "that was
+        # wrong" signal as an act: demote the cell that spoke. The field is coupled
+        # to the user, not the model.
+        if self.observer or self.self_author:
+            match_verdicts = {"act", "escalate", "escalate-with-hint"}
+        else:
+            match_verdicts = {"act"}
         for r in self._recent:
             if r["verdict"] not in match_verdicts:
                 continue

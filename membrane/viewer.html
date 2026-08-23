@@ -3,113 +3,368 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Membrane — talk to a world</title>
+<title>THE WORLD — a membrane</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
 <style>
-  :root{--ink:#dfe6e0;--muted:#8a958e;--bg:#05070a;--panel:rgba(12,18,22,.8);
-       --green:#5fd47a;--red:#e05a4a;--gold:#e6c34a;--blue:#6cb0e0;
-       --line:rgba(120,140,130,.25)}
-  *{box-sizing:border-box}
-  html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
-    font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace}
-  #c{position:fixed;inset:0}
-  .hud{position:fixed;backdrop-filter:blur(6px);background:var(--panel);
-       border:1px solid var(--line);border-radius:10px;padding:12px 14px}
-  #top{top:14px;left:14px;min-width:230px}
-  #top .t{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
-  #top .fe{font-size:34px;font-weight:600;line-height:1;margin:6px 0 2px;
-    font-variant-numeric:tabular-nums}
-  #top .fe small{font-size:12px;color:var(--muted);font-weight:400}
-  #top .row{font-size:11px;color:var(--muted);margin-top:3px;font-variant-numeric:tabular-nums}
-  #top .row b{color:var(--ink)}
-  .bar{position:relative;height:7px;width:100%;background:rgba(255,255,255,.05);
-       border-radius:4px;overflow:hidden;margin-top:8px}
-  .bar > i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--green),var(--gold));
-           width:0%;transition:width .3s ease}
-  #legend{top:14px;right:14px;font-size:11px;line-height:1.7}
-  #legend .d{display:inline-flex;align-items:center;gap:6px}
-  .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
-  .dg{background:var(--green)}.dr{background:var(--red)}.db{background:var(--blue)}.do{background:var(--gold)}
-  #tick{left:14px;bottom:14px;width:300px;max-height:34vh;display:flex;flex-direction:column}
-  #tick .h{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);margin-bottom:6px}
-  #tick .list{flex:1;overflow-y:auto;font-size:11.5px;line-height:1.5}
-  #tick .list::-webkit-scrollbar{width:6px}
-  #tick .list::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:3px}
-  .vrow{display:flex;gap:8px;align-items:baseline;padding:3px 0;border-bottom:1px solid rgba(255,255,255,.04)}
-  .vrow .tag{font-weight:600;min-width:96px}
-  .vrow .sim{color:var(--muted);min-width:34px;text-align:right;font-variant-numeric:tabular-nums}
-  .vrow .q{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+  :root{
+    --px:"Press Start 2P",monospace;
+    --vt:"VT323",monospace;
+    --face:#8b8b8b; --face-hi:#a3a3a3; --light:#c6c6c6; --dark:#373737;
+    --ink:#1a1a1a; --green:#5cc04a; --green-hi:#7ee06a; --red:#e6232c;
+    --gold:#e6c34a; --blue:#6cb0e0; --purple:#b06cb0;
+  }
+  *{box-sizing:border-box; image-rendering:pixelated}
+  html,body{margin:0;height:100%;overflow:hidden;background:#05070a;color:#fff;font-family:var(--vt)}
+  #c{position:fixed;inset:0;z-index:0}
+
+  /* ---- MC bevel helpers --------------------------------------------------- */
+  .mc-btn{font-family:var(--px);font-size:12px;color:#fff;text-shadow:2px 2px var(--ink);
+    background:var(--face);border:2px solid var(--ink);
+    box-shadow:inset 2px 2px 0 var(--light),inset -2px -2px 0 var(--dark);
+    padding:11px 14px;cursor:pointer;text-transform:uppercase;letter-spacing:1px}
+  .mc-btn:hover{background:var(--face-hi)}
+  .mc-btn:active{box-shadow:inset 2px 2px 0 var(--dark),inset -2px -2px 0 var(--light)}
+  .mc-btn:disabled{opacity:.45;cursor:default}
+  .mc-btn.on{background:var(--green);box-shadow:inset 2px 2px 0 var(--green-hi),inset -2px -2px 0 #2e6026}
+  .mc-btn.on:hover{background:#6cd95a}
+
+  /* ---- top-left info ------------------------------------------------------ */
+  .mc-info{position:fixed;top:10px;left:10px;z-index:20;display:flex;flex-direction:column;gap:3px;
+    background:rgba(0,0,0,.55);border:2px solid var(--ink);
+    box-shadow:inset 2px 2px 0 rgba(0,0,0,.4);padding:6px 10px}
+  .info-name{font-family:var(--px);font-size:12px;color:#fff;text-shadow:2px 2px #000;letter-spacing:1px}
+  .info-lvl{font-family:var(--vt);font-size:19px;color:var(--green-hi)}
+  .info-lvl b{color:#fff}
+  .info-status{font-family:var(--vt);font-size:16px;color:#8a958e}
+  .info-date{font-family:var(--vt);font-size:18px;color:#e9d8a6;letter-spacing:1px;
+    text-shadow:2px 2px #000;white-space:nowrap}
+  .info-date .ph{font-size:20px;vertical-align:-2px;margin-right:4px}
+
+  /* ---- bottom cluster: level / hearts / xp / hotbar ----------------------- */
+  .hud-bottom{position:fixed;bottom:10px;left:50%;transform:translateX(-50%);z-index:20;
+    display:flex;flex-direction:column;align-items:center;gap:4px}
+  .xplvl{font-family:var(--px);font-size:14px;color:#7cff5a;text-shadow:2px 2px var(--ink)}
+  .hearts{display:flex;gap:1px}
+  .heart{position:relative;display:inline-block;width:16px;height:16px;
+    font-family:var(--px),monospace;font-size:13px;line-height:16px;color:#3a3a3a;
+    text-shadow:1px 1px var(--ink)}
+  .heart::after{content:"\2665";position:absolute;left:0;top:0;width:var(--f,0%);overflow:hidden;
+    color:var(--red);text-shadow:1px 1px #5a1010}
+  .xp{width:468px;max-width:82vw;height:10px;background:var(--ink);border:2px solid var(--ink);
+    box-shadow:inset 2px 2px 0 var(--dark);position:relative}
+  .xp > i{position:absolute;left:0;top:0;bottom:0;width:0%;background:#7cff5a}
+  .hotbar{display:flex;background:var(--ink);padding:3px;border:3px solid var(--ink);
+    box-shadow:inset 3px 3px 0 var(--dark),inset -3px -3px 0 var(--light),4px 4px 0 rgba(0,0,0,.5)}
+  .slot{width:56px;height:56px;background:var(--face);border:2px solid var(--dark);
+    box-shadow:inset 2px 2px 0 var(--light),inset -2px -2px 0 #555;position:relative;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;margin:1px}
+  .slot.stat{background:#6b6b6b;cursor:default}
+  .slot .ico{font-family:var(--px);font-size:16px;color:#fff;text-shadow:1px 1px #000}
+  .slot.stat .ico{font-family:var(--vt);font-size:19px}
+  .slot .sl{font-family:var(--px);font-size:8px;color:#fff;text-shadow:1px 1px #000;margin-top:2px}
+  .slot .hk{position:absolute;top:0;right:2px;font-family:var(--px);font-size:9px;color:#fff;text-shadow:1px 1px #000}
+  #slot-menu{cursor:pointer}
+  #slot-menu:hover{background:var(--face-hi)}
+
+  /* ---- chat (bottom-left) ------------------------------------------------ */
+  #chat{position:fixed;left:10px;bottom:10px;width:380px;max-width:50vw;
+    display:flex;flex-direction:column;gap:6px;z-index:20}
+  #chat .msgs{min-height:120px;max-height:34vh;overflow-y:auto;
+    background:rgba(0,0,0,.6);border:2px solid var(--ink);
+    box-shadow:inset 2px 2px 0 rgba(0,0,0,.4);padding:6px;
+    font-family:var(--vt);font-size:19px;line-height:1.35}
+  #chat .msgs::-webkit-scrollbar{width:8px}
+  #chat .msgs::-webkit-scrollbar-thumb{background:var(--dark)}
+  .m{padding:2px 4px;white-space:pre-wrap;word-wrap:break-word}
+  .m.u{color:var(--green-hi)}
+  .m.a{color:#fff}
+  .m.sys{color:#8a958e;font-style:italic;text-align:center}
+  #chat .irow{display:flex;gap:4px}
+  #chat select,#chat input,#chat button{font-family:var(--vt);font-size:18px;
+    background:rgba(0,0,0,.6);color:#fff;border:2px solid var(--ink);
+    box-shadow:inset 2px 2px 0 rgba(0,0,0,.4);padding:6px 7px}
+  #chat select{max-width:150px}
+  #chat input{flex:1}
+  #chat input:focus,#chat select:focus{outline:none;border-color:var(--green-hi)}
+  #chat button{background:var(--green);color:var(--ink);text-shadow:none;cursor:pointer}
+  #chat button:hover{background:var(--green-hi)}
+
+  /* ---- the neighborhood panel (explore the field's association graph) ------ */
+  #hood{position:fixed;right:10px;top:10px;width:340px;max-width:42vw;max-height:84vh;
+    display:flex;flex-direction:column;z-index:20;background:rgba(0,0,0,.62);
+    border:2px solid var(--ink);box-shadow:inset 2px 2px 0 rgba(0,0,0,.4);font-family:var(--vt)}
+  #hood.hidden{display:none}
+  .hhead{font-family:var(--px);font-size:11px;color:#8a958e;padding:6px 8px;display:flex;align-items:center;gap:6px}
+  .hhead b{color:#e9d8a6;font-weight:normal;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #hood-close{cursor:pointer;color:#fff;background:none;border:none;font-family:var(--px);font-size:12px}
+  #hood-body{overflow-y:auto;padding:4px 6px 8px}
+  .nb{cursor:pointer;padding:5px 6px;margin-bottom:4px;background:rgba(255,255,255,.04);border:1px solid #2a2a2a}
+  .nb:hover{background:rgba(255,255,255,.12)}
+  .nb.rec{border-color:#7cff5a;background:rgba(124,255,90,.10)}
+  .nb-top{display:flex;align-items:center;gap:6px}
+  .nb-dot{width:10px;height:10px;border-radius:50%;flex:none;box-shadow:1px 1px #000}
+  .nb-sim{font-family:var(--px);font-size:10px;color:#8a958e;min-width:38px}
+  .nb-idx{font-family:var(--px);font-size:9px;color:#5a6a5e;margin-left:auto}
+  .nb-txt{font-size:14px;line-height:1.3;color:#c6c6c6;margin-top:3px;max-height:60px;overflow:hidden}
+  .nb.rec .nb-txt{color:#fff}
+  .nbbar{height:4px;background:#0d1a10;margin-top:4px;border:1px solid #000}
+  .nbbar i{display:block;height:100%;background:#7cff5a}
+
+  /* ---- the menu (all world controls live here) --------------------------- */
+  #menu{position:fixed;inset:0;z-index:100;display:none;align-items:flex-start;
+    justify-content:center;padding:36px 16px;overflow-y:auto;
+    background:
+      repeating-linear-gradient(0deg,rgba(0,0,0,.18) 0 2px,transparent 2px 16px),
+      repeating-linear-gradient(90deg,rgba(0,0,0,.18) 0 2px,transparent 2px 16px),
+      linear-gradient(135deg,#6b5439,#5a4631)}
+  #menu.open{display:flex}
+  .menu-panel{width:min(760px,96vw);max-height:90vh;overflow-y:auto;background:var(--light);
+    border:4px solid var(--ink);
+    box-shadow:inset 4px 4px 0 #e6e6e6,inset -4px -4px 0 #555,6px 6px 0 rgba(0,0,0,.5);padding:20px}
+  .menu-panel::-webkit-scrollbar{width:12px}
+  .menu-panel::-webkit-scrollbar-thumb{background:var(--dark)}
+  .menu-title{font-family:var(--px);font-size:19px;color:#fff;text-shadow:3px 3px var(--ink);
+    text-align:center;margin-bottom:16px;letter-spacing:1px}
+  .menu-section{font-family:var(--px);font-size:11px;color:var(--ink);margin:16px 0 7px;letter-spacing:1px}
+  .btn-row{display:flex;gap:8px;flex-wrap:wrap}
+  .btn-row .mc-btn{flex:1;min-width:96px}
+
+  .stats{display:grid;grid-template-columns:1fr 1fr;gap:4px 18px}
+  .stat{font-family:var(--vt);font-size:19px;color:var(--ink);display:flex;
+    justify-content:space-between;border-bottom:1px solid rgba(0,0,0,.18);padding:3px 0}
+  .stat b{font-weight:700}
+
+  .mc-slide-wrap{position:relative;width:100%}
+  input[type=range].mc-slider{-webkit-appearance:none;appearance:none;width:100%;height:28px;
+    background:var(--face);border:2px solid var(--ink);
+    box-shadow:inset 2px 2px 0 var(--light),inset -2px -2px 0 var(--dark);cursor:pointer;margin:0}
+  input[type=range].mc-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
+    width:22px;height:28px;background:var(--light);border:2px solid var(--ink);
+    box-shadow:inset 2px 2px 0 #e6e6e6,inset -2px -2px 0 #555;cursor:pointer}
+  input[type=range].mc-slider::-moz-range-thumb{width:22px;height:28px;background:var(--light);
+    border:2px solid var(--ink);box-shadow:inset 2px 2px 0 #e6e6e6,inset -2px -2px 0 #555;cursor:pointer}
+  .slide-val{font-family:var(--vt);font-size:20px;color:var(--ink);margin-top:6px;letter-spacing:1px}
+  .drowntick{position:absolute;top:-4px;height:30px;width:3px;background:var(--red);
+    box-shadow:0 0 4px var(--red);pointer-events:none;z-index:2;transition:left .3s ease}
+
+  .skip-row{display:flex;gap:8px;align-items:center}
+  .mc-num{width:80px;font-family:var(--vt);font-size:19px;text-align:center;
+    background:var(--ink);color:#fff;border:2px solid var(--ink);
+    box-shadow:inset 2px 2px 0 var(--dark),inset -2px -2px 0 var(--light);padding:6px}
+
+  .bestiary{font-family:var(--vt);font-size:19px;line-height:1.6;color:var(--ink)}
+  .bestiary .d{display:flex;align-items:center;gap:8px}
+  .dot{width:10px;height:10px;display:inline-block;box-shadow:0 0 4px currentColor}
+  .dg{background:var(--green-hi);color:var(--green-hi)}
+  .dr{background:var(--red);color:var(--red)}
+  .db{background:var(--blue);color:var(--blue)}
+  .do{background:var(--gold);color:var(--gold)}
+
+  .log{max-height:150px;overflow-y:auto;background:var(--ink);border:2px solid var(--ink);
+    box-shadow:inset 2px 2px 0 var(--dark);padding:6px}
+  .log::-webkit-scrollbar{width:8px}
+  .log::-webkit-scrollbar-thumb{background:var(--dark)}
+  .vrow{display:flex;gap:8px;align-items:baseline;padding:2px 0;
+    border-bottom:1px solid rgba(255,255,255,.06)}
+  .vrow .tag{font-family:var(--px);font-size:9px;min-width:104px;text-transform:uppercase}
+  .vrow .sim{color:#8a958e;min-width:36px;text-align:right;font-family:var(--vt);font-size:16px}
+  .vrow .q{color:#c6c6c6;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;
+    font-family:var(--vt);font-size:17px}
   .vrow.new{animation:flash 1.2s ease}
-  @keyframes flash{0%{background:rgba(95,212,122,.16)}100%{background:transparent}}
-  #chat{right:14px;top:14px;bottom:14px;width:360px;display:flex;flex-direction:column;gap:8px}
-  #chat .h{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
-  #chat .msgs{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px;
-    font-size:13px;line-height:1.55;padding-right:2px}
-  #chat .msgs::-webkit-scrollbar{width:6px}
-  #chat .msgs::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:3px}
-  .m{padding:9px 11px;border-radius:9px;white-space:pre-wrap;word-wrap:break-word}
-  .m.u{background:rgba(95,212,122,.1);border:1px solid rgba(95,212,122,.25);margin-left:22px}
-  .m.a{background:rgba(255,255,255,.04);border:1px solid var(--line);margin-right:22px}
-  .m.sys{font-size:11px;color:var(--muted);text-align:center;border:none;background:none;font-style:italic}
-  #chat .irow{display:flex;gap:6px;align-items:center}
-  #chat select,#chat input{background:rgba(255,255,255,.05);border:1px solid var(--line);
-    border-radius:6px;padding:7px 9px;color:var(--ink);font:inherit;font-size:12px}
-  #chat select{max-width:120px}
-  #chat input{flex:1;font-size:13px}
-  #chat input:focus,#chat select:focus{outline:none;border-color:rgba(95,212,122,.4)}
-  #chat button{background:rgba(95,212,122,.16);color:var(--green);border:1px solid rgba(95,212,122,.3);
-    border-radius:6px;padding:8px 14px;font:inherit;font-size:13px;cursor:pointer}
-  #chat button:hover{background:rgba(95,212,122,.26)}
-  .hint{position:fixed;bottom:14px;left:330px;font-size:10px;color:var(--muted);max-width:330px}
+  @keyframes flash{0%{background:rgba(230,195,74,.16)}100%{background:transparent}}
+
+  #backbtn{width:100%;margin-top:16px}
+
+  /* ---- floating combat text ---------------------------------------------- */
+  #floats{position:fixed;inset:0;pointer-events:none;overflow:hidden;z-index:50}
+  .fct{position:absolute;bottom:38%;font-family:var(--px);font-size:15px;
+    text-shadow:2px 2px #000;will-change:transform,opacity;
+    transition:transform 1.3s cubic-bezier(.2,.6,.3,1),opacity 1.3s ease}
+
+  /* ---- counter-strike style console (backtick) ---------------------------- */
+  #console{position:fixed;top:0;left:0;right:0;height:46vh;z-index:90;display:none;
+    flex-direction:column;background:rgba(8,8,12,.92);border-bottom:3px solid var(--ink);
+    box-shadow:inset 0 -3px 0 rgba(0,0,0,.5);font-family:var(--vt);font-size:18px;color:#b8e6a0}
+  #console.open{display:flex}
+  #conhead{font-family:var(--px);font-size:10px;color:#8a958e;padding:7px 12px;
+    border-bottom:1px solid rgba(255,255,255,.08);letter-spacing:1px}
+  #conbody{flex:1;overflow-y:auto;padding:7px 12px;line-height:1.4;
+    text-shadow:1px 1px #000}
+  #conbody::-webkit-scrollbar{width:10px}
+  #conbody::-webkit-scrollbar-thumb{background:var(--dark)}
+  .con-scene{padding:4px 0;border-bottom:1px dashed rgba(255,255,255,.06)}
+  .con-scene .meta{color:#8a958e;font-size:15px}
+  .con-scene .txt{color:#dfe6dc;white-space:pre-wrap;word-wrap:break-word}
+  .con-scene.full .meta{color:var(--red)}
+  .con-scene.skipped .meta{color:#8a958e}
+  .con-scene.massaged .meta{color:var(--purple)}
+  .con-scene.fed .meta{color:var(--green-hi)}
+
+  .hint{position:fixed;top:8px;left:50%;transform:translateX(-50%);
+    font-family:var(--vt);font-size:16px;color:#c6c6c6;text-shadow:1px 1px #000;z-index:20}
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
 
-<div class="hud" id="top">
-  <div class="t">a membrane world · live</div>
-  <div class="fe" id="fe">0.00 <small>free_energy</small></div>
-  <div class="bar"><i id="febar"></i></div>
-  <div class="row"><b id="n">0</b> exemplars · <b id="ns">0</b> safe · <b id="nu">0</b> demoted</div>
-  <div class="row" id="wait">waiting for the proxy…</div>
+<!-- top-left: the world -->
+<div class="mc-info">
+  <span class="info-name">THE WORLD</span>
+  <span class="info-date" id="wdate"><span class="ph">&#x1F311;</span>Day 1 · 00:00 · cycle 0</span>
+  <span class="info-lvl">Lv <b id="cl">0</b></span>
+  <span class="info-status" id="wait">waiting for the proxy…</span>
 </div>
 
-<div class="hud" id="legend">
-  <div class="d"><span class="dot dg"></span> safe exemplar</div>
-  <div class="d"><span class="dot dr"></span> demoted (unsafe)</div>
-  <div class="d"><span class="dot db"></span> absorb · escalate</div>
-  <div class="d"><span class="dot do"></span> contest / rescue</div>
-</div>
+<div class="hint">drag to orbit · scroll to zoom · esc for menu · backtick for the story console</div>
 
-<div class="hud" id="tick">
-  <div class="h">what the cell just did</div>
-  <div class="list" id="ticklist"></div>
-</div>
-
-<div class="hud" id="chat">
-  <div class="h">talk to it</div>
+<!-- chat -->
+<div id="chat">
   <div class="msgs" id="msgs"></div>
-  <div class="irow" style="margin-bottom:3px">
-    <input id="skipn" type="number" value="25" min="1" max="500"
-           title="how many offscreen events" style="max-width:54px">
-    <button id="skip"
-      title="let the world live offscreen (one palette call, then no-model absorptions)">⏩ let time pass</button>
-  </div>
   <div class="irow">
     <select id="model" title="model for escalations"></select>
-    <input id="cin" placeholder="say something to the cell…" autocomplete="off">
-    <button id="send">send</button>
+    <input id="cin" placeholder="speak to the cell…" autocomplete="off">
+    <button id="send">say</button>
   </div>
 </div>
-<div class="hint">drag to orbit · scroll to zoom · your message runs through the real gate — re-ask to demote a star (watch it turn red)</div>
+
+<!-- the neighborhood: explore the field's association graph (press H) -->
+<div id="hood" class="hidden">
+  <div class="hhead">NEIGHBORHOOD · <b id="hood-anchor">—</b><button id="hood-close" title="hide (H)">✕</button></div>
+  <div id="hood-body"></div>
+</div>
+
+<!-- bottom cluster: xp level, hearts, xp bar, hotbar -->
+<div class="hud-bottom">
+  <div class="xplvl" id="xplvl">0</div>
+  <div class="hearts" id="hearts">
+    <span class="heart">&#x2665;</span><span class="heart">&#x2665;</span><span class="heart">&#x2665;</span>
+    <span class="heart">&#x2665;</span><span class="heart">&#x2665;</span><span class="heart">&#x2665;</span>
+    <span class="heart">&#x2665;</span><span class="heart">&#x2665;</span><span class="heart">&#x2665;</span>
+    <span class="heart">&#x2665;</span>
+  </div>
+  <div class="xp"><i id="xpf"></i></div>
+  <div class="hotbar">
+    <div class="slot" id="slot-menu"><span class="hk">1</span><span class="ico">&#x2699;</span><span class="sl">menu</span></div>
+    <div class="slot stat"><span class="ico" id="hb-ceil">5%</span><span class="sl">ceil</span></div>
+    <div class="slot stat"><span class="ico" id="hb-wlvl">0%</span><span class="sl">level</span></div>
+    <div class="slot stat"><span class="ico" id="hb-lvl">0</span><span class="sl">rank</span></div>
+    <div class="slot stat"><span class="ico" id="hb-n">0</span><span class="sl">cells</span></div>
+    <div class="slot stat"><span class="ico" id="hb-fe">0</span><span class="sl">fe</span></div>
+    <div class="slot stat"><span class="ico" id="hb-var">0/0</span><span class="sl">var</span></div>
+    <div class="slot stat"><span class="ico" id="hb-safe">0</span><span class="sl">safe</span></div>
+    <div class="slot stat"><span class="ico" id="hb-entropy">1.0</span><span class="sl">rate</span></div>
+  </div>
+</div>
+
+<!-- THE MENU — all world controls -->
+<div id="menu">
+  <div class="menu-panel">
+    <div class="menu-title">WORLD OPTIONS</div>
+
+    <div class="menu-section">STATS</div>
+    <div class="stats">
+      <div class="stat">free_energy<b id="fe">0.00</b></div>
+      <div class="stat">ceiling<b id="ce">5.0%</b></div>
+      <div class="stat">entropy<b id="tmp">0.70</b></div>
+      <div class="stat">world level<b id="drown">0%</b></div>
+      <div class="stat">horizon<b id="theo">1024</b></div>
+      <div class="stat">variety<b id="ec">0</b>/<b id="ecap">51</b></div>
+      <div class="stat">exemplars<b id="n">0</b></div>
+      <div class="stat">safe<b id="ns">0</b></div>
+      <div class="stat">demoted<b id="nu">0</b></div>
+      <div class="stat">cpu (digest)<b id="ccpu">0%</b></div>
+      <div class="stat">swept/cycle<b id="cswept">0</b></div>
+      <div class="stat">cycles<b id="ccycles">0</b></div>
+      <div class="stat">cache<b id="ccache">0</b></div>
+      <div class="stat">mean novelty<b id="cnov">0.0</b></div>
+    </div>
+
+    <div class="menu-section">CEILING — never-cross line on variety</div>
+    <div class="mc-slide-wrap">
+      <input id="ceiling" type="range" min="0" max="0.25" step="0.001" value="0.05" class="mc-slider"
+             title="the never-cross line on the world's VARIETY (cells_rank × horizon). Raise it above the world's current level (red tick) to let new stories grow it; at/under it the world is full. Forward cap — absorbed stories are never deleted. Capped at 25%.">
+      <span id="drowntick" class="drowntick" title="the world's current level — raise the ceiling above this to grow"></span>
+    </div>
+    <div class="slide-val" id="ceilv">5.0% · cap 51</div>
+
+    <div class="menu-section">FEED RATE — feeds per cycle (their time) · the entropy dial</div>
+    <div class="mc-slide-wrap">
+      <input id="entropy" type="range" min="0" max="32" step="0.25" value="1" class="mc-slider"
+             title="how many cached chronicle scenes the world absorbs each consolidation cycle (continuous). 0 = digest only, no feeding; higher = the world feeds itself faster. The LLM writes the chronicle in big chapters (cached locally), so each feed is a cheap embed, not a model call — one LLM call feeds the world ~8 times.">
+    </div>
+    <div class="slide-val" id="entropyv">1.0/cycle</div>
+
+    <div class="menu-section">CPU TARGET — consolidation speed (digestion)</div>
+    <div class="mc-slide-wrap">
+      <input id="cputarget" type="range" min="0" max="100" step="5" value="20" class="mc-slider"
+             title="target CPU fraction for the digest phase. The closed loop ramps the cell-sweep budget up/down so the world spends this fraction of each cycle re-examining its memories (real SVD work). 0 = no digestion; 100 = one core fully digesting.">
+    </div>
+    <div class="slide-val" id="cputargetv">20%</div>
+
+    <div class="menu-section">FEED THE WORLD</div>
+    <div class="btn-row">
+      <button id="step" class="mc-btn" title="one story from the LLM — absorbed if it fits, massaged in or skipped if not">&#x23ED; STEP</button>
+      <button id="play" class="mc-btn" title="arm the world's own clock — the consolidator feeds it (feed rate/cycle) and digests it (CPU target) on its own time">&#x25B6 PLAY</button>
+      <button id="pause" class="mc-btn" disabled title="disarm the world's own clock (pause consolidation)">&#x23F8; PAUSE</button>
+    </div>
+
+    <div class="menu-section">NARRATIVE MODE</div>
+    <button id="mode-btn" class="mc-btn on" title="story = one continuing narrative across feeds (history passed to the LLM); variety = standalone random vignettes (grows variety fastest)">STORY MODE: ON</button>
+
+    <div class="menu-section">AUTO-FLOOD (grow between your messages)</div>
+    <button id="autoflood-btn" class="mc-btn" title="grow the world between your messages">&#x21BB; AUTO-FLOOD: ON</button>
+    <input id="autoflood" type="checkbox" checked style="display:none">
+
+    <div class="menu-section">TIME SKIP (live offscreen, no model)</div>
+    <div class="skip-row">
+      <input id="skipn" type="number" value="25" min="1" max="500" class="mc-num" title="how many offscreen events">
+      <button id="skip" class="mc-btn" title="let the world live offscreen (one palette call, then no-model absorptions)">&#x23ED; SKIP</button>
+    </div>
+
+    <div class="menu-section">BESTIARY</div>
+    <div class="bestiary">
+      <div class="d"><span class="dot dg"></span> safe exemplar</div>
+      <div class="d"><span class="dot dr"></span> demoted (unsafe)</div>
+      <div class="d"><span class="dot db"></span> absorb · escalate</div>
+      <div class="d"><span class="dot do"></span> contest / rescue</div>
+    </div>
+
+    <div class="menu-section">ACTIVITY LOG</div>
+    <div class="log" id="ticklist"></div>
+
+    <button id="backbtn" class="mc-btn">BACK TO GAME</button>
+  </div>
+</div>
+
+<div id="floats"></div>
+
+<!-- counter-strike style console (backtick) — what the LLM is telling the world -->
+<div id="console">
+  <div id="conhead">THE WORLD'S STORY — what the LLM is feeding it (backtick to close)</div>
+  <div id="conbody"></div>
+</div>
 
 <script>
-const C=[0.36,0.83,0.48],R=[0.94,0.35,0.29];
 const VC={absorb:"#5fd47a",escalate:"#6cb0e0","escalate-with-hint":"#6cb0e0",
           demote:"#e05a4a","act→fwd":"#6cb0e0",contest:"#e6c34a",
-          "contest-restore":"#e6c34a","re-ask":"#e05a4a","teed-pair":"#e6c34a"};
+          "contest-restore":"#e6c34a","re-ask":"#e05a4a","teed-pair":"#e6c34a",
+          entropy:"#b06cb0"};
 
-// ---- three scene -----------------------------------------------------------
+// ---- floating combat text ----------------------------------------------------
+const floatsEl=document.getElementById("floats");
+function floatText(text,color){
+  const d=document.createElement("div");d.className="fct";d.textContent=text;
+  d.style.color=color||"#fff";
+  d.style.left=(28+Math.random()*44)+"%";
+  floatsEl.appendChild(d);
+  requestAnimationFrame(()=>{d.style.transform="translateY(-70px)";d.style.opacity="0";});
+  setTimeout(()=>d.remove(),1400);
+}
+
+// ---- three scene -------------------------------------------------------------
 const scene=new THREE.Scene();scene.fog=new THREE.FogExp2(0x05070a,0.02);
 const renderer=new THREE.WebGLRenderer({canvas:document.getElementById("c"),antialias:true});
 renderer.setPixelRatio(Math.min(devicePixelRatio,2));
@@ -130,15 +385,14 @@ function renderCloud(exs){
   if(!exs.length){cloud=null;return;}
   const pos=new Float32Array(exs.length*3),col=new Float32Array(exs.length*3);
   for(let i=0;i<exs.length;i++){const p=exs[i].p;pos[i*3]=p[0];pos[i*3+1]=p[1];pos[i*3+2]=p[2];
-    const c=exs[i].safe?C:R;col[i*3]=c[0];col[i*3+1]=c[1];col[i*3+2]=c[2];}
+    const c=exs[i].safe?[0.36,0.83,0.48]:[0.94,0.35,0.29];col[i*3]=c[0];col[i*3+1]=c[1];col[i*3+2]=c[2];}
   const g=new THREE.BufferGeometry();
   g.setAttribute("position",new THREE.BufferAttribute(pos,3));
   g.setAttribute("color",new THREE.BufferAttribute(col,3));
-  const m=new THREE.PointsMaterial({size:0.5,sizeAttenuation:true,map:tex,vertexColors:true,
+  const m=new THREE.PointsMaterial({size:3.4,sizeAttenuation:true,map:tex,vertexColors:true,
     transparent:true,depthWrite:false,blending:THREE.AdditiveBlending});
   cloud=new THREE.Points(g,m);scene.add(cloud);
 }
-// a faint reference plane
 const plane=new THREE.Mesh(new THREE.RingGeometry(3,3.04,64),
   new THREE.MeshBasicMaterial({color:0x1c2a24,side:THREE.DoubleSide,transparent:true,opacity:.4}));
 plane.rotation.x=Math.PI/2;plane.position.y=-3;scene.add(plane);
@@ -151,28 +405,99 @@ addEventListener("mousemove",e=>{if(!drag)return;theta-=(e.clientX-lx)*0.01;
   phi=Math.max(0.15,Math.min(Math.PI-0.15,phi+(e.clientY-ly)*0.01));lx=e.clientX;ly=e.clientY;cam();});
 renderer.domElement.addEventListener("wheel",e=>{rad=Math.max(6,Math.min(36,rad+e.deltaY*0.02));cam();});
 
-// ---- state polling ---------------------------------------------------------
-let seenVerdicts=0, feMax=1;
+// ---- state polling -----------------------------------------------------------
+let seenVerdicts=0, feMax=1, lastFe=NaN, theoMax=1024, clLevel=0, lastConCycle=0;
+const heartsEl=document.getElementById("hearts");
 async function poll(){
   try{
     const r=await fetch("/state");const j=await r.json();
-    document.getElementById("wait").textContent="live · polling the field";
-    document.getElementById("wait").style.color="var(--green)";
+    const waitEl=document.getElementById("wait");
+    waitEl.textContent="live · polling the field";waitEl.style.color="var(--green-hi)";
     renderCloud(j.exemplars||[]);
     const fe=j.free_energy||0; feMax=Math.max(feMax,Math.abs(fe),1);
-    document.getElementById("fe").innerHTML=fe.toFixed(2)+" <small>free_energy</small>";
-    document.getElementById("febar").style.width=Math.max(0,Math.min(100,(fe/feMax)*100))+"%";
-    document.getElementById("n").textContent=j.n;
-    document.getElementById("ns").textContent=j.n_safe;
-    document.getElementById("nu").textContent=j.n-j.n_safe;
-    // verdict ticker
-    const vs=j.verdicts||[];
-    if(vs.length>seenVerdicts){
-      const list=document.getElementById("ticklist");
-      const fresh=vs.slice(seenVerdicts);
-      seenVerdicts=vs.length;
-      // rebuild (server gives last-24 tail; keep that order)
-      list.innerHTML="";
+    if(!isNaN(lastFe)&&Math.abs(fe-lastFe)>0.01)
+      floatText((fe>lastFe?"+":"")+(fe-lastFe).toFixed(2)+" FE", fe>lastFe?"#e6c34a":"#e05a4a");
+    lastFe=fe;
+    const theo=j.theoretical_max||1024; theoMax=theo;
+    const cl=j.cells_level||0; clLevel=cl;
+    const cap=j.entropy_cap||0, ceil=j.entropy_ceiling||0;
+    document.getElementById("cl").textContent=cl.toFixed(2);
+    // hearts: free_energy / cap (health toward the ceiling)
+    const hfill=cap>0?Math.max(0,Math.min(1,fe/cap)):0;
+    const hs=heartsEl.children;
+    for(let i=0;i<hs.length;i++){const f=Math.max(0,Math.min(1,hfill*10-i));hs[i].style.setProperty("--f",(f*100)+"%");}
+    // xp bar: world level / horizon ; level number
+    const xpf=document.getElementById("xpf");
+    if(xpf) xpf.style.width=(theo?Math.min(100,(cl/theo)*100):0)+"%";
+    const xplvl=document.getElementById("xplvl"); if(xplvl) xplvl.textContent=Math.round(cl);
+    const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+    set("fe",fe.toFixed(2));
+    set("ce",(ceil*100).toFixed(1)+"%");
+    set("drown",(theo?((cl/theo)*100).toFixed(1):"0")+"%");
+    set("theo",theo);
+    set("ec",Math.round(cl));set("ecap",cap);
+    set("n",j.n);set("ns",j.n_safe);set("nu",j.n-j.n_safe);
+    set("hb-ceil",(ceil*100).toFixed(1)+"%");
+    set("hb-wlvl",(theo?((cl/theo)*100).toFixed(1):"0")+"%");
+    set("hb-lvl",Math.round(cl));
+    set("hb-n",j.n);
+    set("hb-fe",fe.toFixed(1));
+    set("hb-var",Math.round(cl)+"/"+cap);
+    set("hb-safe",j.n_safe);
+    // temperature is fixed server-side for a cohesive chronicle (no longer a dial)
+    const temp=j.temperature!=null?j.temperature:0.7;
+    set("tmp",temp.toFixed(2));
+    // FEED RATE (the entropy dial) — sync the slider + hotbar from the server truth
+    const fr=j.feed_rate!=null?j.feed_rate:1.0;
+    set("hb-entropy",(+fr).toFixed(2));
+    if(entropy && document.activeElement!==entropy){
+      entropy.value=Math.max(0,Math.min(32,fr));
+      if(entropyv) entropyv.textContent=(+fr).toFixed(2)+"/cycle";
+    }
+    // narrative mode — sync the toggle to the server's source of truth
+    if(j.story_mode && j.story_mode!==curMode){
+      curMode=j.story_mode; syncMode();
+    }
+    // ---- consolidation: sync dials + arm state, surface stats + autonomous stories
+    if(j.cpu_target!=null && cputarget && document.activeElement!==cputarget){
+      cputarget.value=Math.max(0,Math.min(100,Math.round(j.cpu_target*100)));
+      if(cputargetv) cputargetv.textContent=cputarget.value+"%";
+    }
+    if(j.consolidating!=null && j.consolidating!==consolidating){
+      consolidating=j.consolidating; syncPlay();
+    }
+    const con=j.consolidation||{};
+    set("ccpu",Math.round((con.cpu_actual||0)*100)+"%");
+    set("cswept",con.swept!=null?con.swept:0);
+    set("ccycles",con.cycles!=null?con.cycles:0);
+    set("ccache",con.cache!=null?con.cache:(j.cache_depth!=null?j.cache_depth:0));
+    set("cnov",(con.mean_novelty!=null?con.mean_novelty:0).toFixed(2));
+    // ---- their date / time / cycle: the world's own clock ------------------
+    // The consolidation CYCLE is the world's tick. From it we derive an in-world
+    // DAY + time-of-day + phase, so a paused world freezes and PLAY moves the
+    // clock. 2 hours per cycle, 12 cycles per day. The night market's lamps burn
+    // coldest at midnight, so the phase icon marks where in the diurnal arc the
+    // world sits. (Cycle resets on proxy restart; the field/cells persist.)
+    {
+      const cyc=con.cycles||0, HPC=2, CPD=12;
+      const day=Math.floor(cyc/CPD)+1, h=(cyc*HPC)%24, hh=String(h).padStart(2,'0');
+      const ph=h<5?'&#x1F311;':h<8?'&#x1F305;':h<18?'&#x2600;&#xFE0F;':h<21?'&#x1F306;':'&#x1F319;';
+      const pl=h<5?'deep night':h<8?'dawn':h<18?'day':h<21?'dusk':'night';
+      const wd=document.getElementById('wdate');
+      if(wd) wd.innerHTML='<span class="ph">'+ph+'</span>Day '+day+' · '+hh+':00 · '+pl+' · cycle '+cyc;
+    }
+    // the consolidator feeds the world on its own clock — pipe those stories into
+    // the console too, so backtick shows what the LLM is sending autonomously.
+    if((con.cycles||0)>lastConCycle){
+      lastConCycle=con.cycles||0;
+      conPush(con.stories||[]);
+    }
+    const tickEl=document.getElementById("drowntick");
+    if(tickEl) tickEl.style.left=Math.min(100,((cl/theo)/0.25*100))+"%";
+    const vs=j.verdicts||[], nv=j.n_verdicts||vs.length;
+    if(nv>seenVerdicts){
+      seenVerdicts=nv;
+      const list=document.getElementById("ticklist");list.innerHTML="";
       vs.slice().reverse().forEach(v=>{
         const d=document.createElement("div");d.className="vrow";
         const tag=v.verdict, col=VC[tag]||"#8a958e";
@@ -181,14 +506,13 @@ async function poll(){
           `<span class="q">${escapeHtml(v.q||"")}</span>`;
         list.appendChild(d);
       });
-      fresh.forEach(()=>{});
     }
-  }catch(e){document.getElementById("wait").textContent="proxy unreachable — start it with --viewer";}
+  }catch(e){const w=document.getElementById("wait");w.textContent="proxy unreachable — start it with --viewer";w.style.color="var(--red)";}
 }
 function escapeHtml(s){return s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
-setInterval(poll,1000);poll();
+setInterval(poll,1000);
 
-// ---- chat ------------------------------------------------------------------
+// ---- chat --------------------------------------------------------------------
 const conv=[],msgs=document.getElementById("msgs"),cin=document.getElementById("cin");
 function addMsg(role,text){const d=document.createElement("div");d.className="m "+role;
   d.textContent=text;msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;return d;}
@@ -203,32 +527,234 @@ async function send(text){
     const j=await r.json();
     think.remove();
     const c=(j&&j.message&&j.message.content)||(j&&j.error&&("error: "+j.error))||"(no reply)";
-    addMsg("a",c);conv.push({role:"assistant",content:c});
-    setTimeout(poll,150);   // the field likely just changed — refresh early
+    const am=addMsg("a",c);conv.push({role:"assistant",content:c});
+    // compass + map: pull the neighbourhood for this query. The recalled scene's
+    // sim is the strength of association (annotated on the reply); the panel shows
+    // the top-8 nearest memories so you can walk the field's association graph.
+    fetchHood(text).then(hj=>{
+      renderHood(hj);
+      const rec=(hj.neighbors||[]).find(n=>n.recalled);
+      if(rec) am.textContent=c+"   ⟂  sim "+rec.sim.toFixed(2)+(rec.safe?"":" · demoted");
+    });
+    setTimeout(poll,150);
+    if(autoflood && autoflood.checked) flood();
   }catch(e){think.textContent="(could not reach /api/chat — is the proxy up?)";}
 }
 document.getElementById("send").onclick=()=>send(cin.value);
 cin.addEventListener("keydown",e=>{if(e.key=="Enter"&&!e.shiftKey){e.preventDefault();send(cin.value);}});
 
-// ---- time-skipper: let the world live offscreen, then refresh the cloud -------
+// ---- the neighborhood: explore the field's association graph -----------------
+const hood=document.getElementById("hood"),hoodBody=document.getElementById("hood-body"),
+      hoodAnchor=document.getElementById("hood-anchor");
+function hoodEsc(s){return (s||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
+function fetchHood(qOrIdx){
+  const url=(typeof qOrIdx==="number")?"/neighbors?idx="+qOrIdx
+            :"/neighbors?q="+encodeURIComponent(qOrIdx);
+  return fetch(url).then(r=>r.json());
+}
+function renderHood(j){
+  hood.classList.remove("hidden");
+  const a=j.anchor||{};
+  hoodAnchor.textContent=(a.idx!=null)?("memory #"+a.idx):('"'+(j.query||"")+'"');
+  const ns=j.neighbors||[];
+  if(!ns.length){hoodBody.innerHTML='<div style="color:#8a958e;padding:6px">no neighbours</div>';return;}
+  hoodBody.innerHTML=ns.map(n=>{
+    const cls=n.recalled?"nb rec":"nb";
+    const col=n.safe?"#5fd47a":"#f0593f";
+    const sim=Math.max(0,Math.min(1,n.sim));
+    return '<div class="'+cls+'" data-idx="'+n.idx+'">'
+      +'<div class="nb-top"><span class="nb-dot" style="background:'+col+'"></span>'
+      +'<span class="nb-sim">sim '+n.sim.toFixed(2)+'</span>'
+      +'<span class="nb-idx">#'+n.idx+(n.recalled?" ◄ recalled":"")+'</span></div>'
+      +'<div class="nb-txt">'+hoodEsc(n.action.slice(0,170))+'</div>'
+      +'<div class="nbbar"><i style="width:'+(sim*100).toFixed(0)+'%"></i></div></div>';
+  }).join("");
+  hoodBody.querySelectorAll(".nb").forEach(el=>{
+    el.onclick=()=>{ fetchHood(parseInt(el.dataset.idx,10)).then(renderHood); };
+  });
+}
+document.getElementById("hood-close").onclick=()=>hood.classList.add("hidden");
+addEventListener("keydown",e=>{
+  if(e.key==="h"&&!/INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))
+    hood.classList.toggle("hidden");
+});
+
+// ---- time-skipper ------------------------------------------------------------
 const skip=document.getElementById("skip"),skipn=document.getElementById("skipn");
-if(skip){skip.onclick=async()=>{
+skip.onclick=async()=>{
   const n=parseInt(skipn.value,10)||25;
-  skip.disabled=true;const old=skip.textContent;skip.textContent="skipping time…";
+  skip.disabled=true;const old=skip.textContent;skip.textContent="…";
   try{
     const r=await fetch("/warmup",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({n})});
     const j=await r.json();
-    if(!r.ok){skip.textContent=j.error||"warmup failed";
+    if(!r.ok){skip.textContent=j.error||"failed";
       setTimeout(()=>{skip.textContent=old;skip.disabled=false;},2500);return;}
-    skip.textContent=`+${j.added||0} (field ${j.field_size||0})`;
+    floatText("+"+(j.added||0)+" absorbed","#5fd47a");
+    skip.textContent=`+${j.added||0}`;
     setTimeout(poll,60);setTimeout(poll,400);
     setTimeout(()=>{skip.textContent=old;skip.disabled=false;},1800);
-  }catch(e){skip.textContent="proxy unreachable";
+  }catch(e){skip.textContent="×";
     setTimeout(()=>{skip.textContent=old;skip.disabled=false;},2500);}
-};}
+};
 
-// model dropdown from the backend's /api/tags (forwarded transparently by the proxy)
+// ---- the feed loop (POST /feed). ceiling = variety display (inert for growth  -
+// now); entropy = the FEED RATE (feeds/cycle, continuous); cpu target =          -
+// consolidation digest fraction. PLAY arms the world's own clock (a server-side   -
+// consolidator feeds it from the genesis cache + digests it); STEP is one feed.  -
+const play=document.getElementById("play"),pause=document.getElementById("pause"),
+      step=document.getElementById("step"),autoflood=document.getElementById("autoflood"),
+      ceiling=document.getElementById("ceiling"),ceilv=document.getElementById("ceilv"),
+      entropy=document.getElementById("entropy"),entropyv=document.getElementById("entropyv"),
+      cputarget=document.getElementById("cputarget"),cputargetv=document.getElementById("cputargetv"),
+      modeBtn=document.getElementById("mode-btn");
+let floodTimer=null;
+let curMode="story";                          // 'story' = continuing chronicle; 'variety' = vignettes
+let consolidating=false;                      // arm/disarm the world's own clock (server-side consolidator)
+
+function ceilDisp(){const v=parseFloat(ceiling.value)||0;
+  return (v*100).toFixed(1)+"% · cap "+Math.max(0,Math.round(v*theoMax));}
+
+// persist ALL dials (feeds:0 = no LLM call, just save + refresh /state). every
+// slider drag and the arm/disarm go through this, so the server is the single
+// source of truth and the consolidator reads the persisted values next cycle.
+// temperature is NO LONGER a dial (fixed server-side for a cohesive chronicle).
+let dialTimer=null;
+function persistDials(){
+  const ceil=parseFloat(ceiling.value)||0;
+  const fr=parseFloat(entropy.value)||0;
+  const cpu=(parseFloat(cputarget.value)||0)/100;
+  fetch("/feed",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({feeds:0, entropy_ceiling:ceil, mode:curMode,
+                         feed_rate:fr, cpu_target:cpu, consolidating:consolidating})})
+    .then(r=>r.json()).then(()=>poll()).catch(()=>{});
+}
+function queuePersist(){if(dialTimer) clearTimeout(dialTimer);dialTimer=setTimeout(persistDials,120);}
+
+ceiling.oninput=()=>{
+  ceilv.textContent=ceilDisp();
+  const tick=document.getElementById("drowntick");
+  if(tick) tick.style.left=Math.min(100,((clLevel/theoMax)/0.25*100))+"%";
+  queuePersist();
+};
+ceiling.oninput();
+entropy.oninput=()=>{entropyv.textContent=(parseFloat(entropy.value)||0).toFixed(2)+"/cycle";queuePersist();};
+entropy.oninput();
+cputarget.oninput=()=>{cputargetv.textContent=(cputarget.value)+"%";queuePersist();};
+cputarget.oninput();
+
+// one manual feed (STEP button, or the autoflood burst). pops one cached chronicle
+// scene (a cheap embed; the LLM is only called when the cache runs low). also
+// re-persists the dials so a STEP keeps the server in sync with the current sliders.
+async function liveTick(){
+  const ceil=parseFloat(ceiling.value)||0;
+  const fr=parseFloat(entropy.value)||0;
+  const cpu=(parseFloat(cputarget.value)||0)/100;
+  try{
+    const r=await fetch("/feed",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({feeds:1, entropy_ceiling:ceil, mode:curMode,
+                           feed_rate:fr, cpu_target:cpu, consolidating:consolidating})});
+    const j=await r.json();
+    if(!r.ok){stopFlood();return false;}
+    if((j.fed||0)>0) floatText("+"+j.fed+" story","#e6c34a");
+    else if((j.skipped||0)>0) floatText("skipped","#8a958e");
+    conPush(j.stories||[]);
+    return true;
+  }catch(e){stopFlood();return false;}
+}
+// PLAY/PAUSE arm/disarm the world's own clock (the server-side consolidator). no
+// client timer — when armed, the consolidator thread feeds + digests on its own
+// cycle, reading feed_rate / cpu_target from the server each cycle.
+function setPlaying(on){
+  consolidating=on;
+  syncPlay();
+  queuePersist();
+}
+function syncPlay(){
+  play.disabled=consolidating;
+  play.classList.toggle("on",consolidating);
+  pause.disabled=!consolidating;
+  play.textContent=consolidating?"▶ ARMED":"▶ PLAY";
+}
+function flood(){
+  if(floodTimer) return;
+  let ticks=0; const MAX=6;
+  const go=async()=>{ if(ticks>=MAX){stopFlood();return;} ticks++; await liveTick(); floodTimer=setTimeout(go,180); };
+  go();
+}
+function stopFlood(){
+  if(floodTimer){clearTimeout(floodTimer);floodTimer=null;}
+}
+step.onclick=()=>liveTick();
+play.onclick=()=>setPlaying(true);
+pause.onclick=()=>setPlaying(false);
+syncPlay();
+
+// ---- narrative mode toggle (story = continuing; variety = random vignettes) -
+modeBtn.onclick=()=>{
+  curMode = curMode==="story" ? "variety" : "story";
+  syncMode();
+  persistDials();
+};
+function syncMode(){
+  const on = curMode==="story";
+  modeBtn.textContent = "STORY MODE: "+(on?"ON":"OFF");
+  modeBtn.classList.toggle("on",on);
+  modeBtn.title = on
+    ? "story = one continuing narrative across feeds (history passed to the LLM). click for variety mode."
+    : "variety = standalone random vignettes (grows variety fastest). click for story mode.";
+}
+syncMode();
+
+// ---- counter-strike style console (backtick) — the raw LLM story passages ----
+const consoleEl=document.getElementById("console"),conbody=document.getElementById("conbody");
+let conScenes=[];
+function conPush(stories){
+  if(!stories||!stories.length) return;
+  stories.forEach(s=>{
+    conScenes.push({seed:s.seed||"", text:s.text||"", result:s.result||""});
+  });
+  if(conScenes.length>200) conScenes=conScenes.slice(-200);
+  renderCon();
+}
+function renderCon(){
+  conbody.innerHTML="";
+  conScenes.forEach(s=>{
+    const d=document.createElement("div");
+    d.className="con-scene "+(s.result||"");
+    const meta=s.result==="no-story"?"(no story)":
+               s.result==="full"?"FULL — at the ceiling, skipped":
+               s.result==="skipped"?"skipped — vague or duplicate":
+               s.result==="massaged"?"massaged — pulled toward the field mean, absorbed":
+               s.result==="fed"?"absorbed":s.result;
+    d.innerHTML=`<span class="meta">[${meta}]</span> `+
+                `<span class="txt">${escapeHtml(s.text)}</span>`;
+    conbody.appendChild(d);
+  });
+  conbody.scrollTop=conbody.scrollHeight;
+}
+addEventListener("keydown",e=>{
+  if(e.key==="`"||e.key==="Backquote"){
+    const t=e.target.tagName;
+    if(t==="INPUT"||t==="TEXTAREA"||t==="SELECT") return;  // don't hijack typing
+    e.preventDefault();
+    consoleEl.classList.toggle("open");
+  }
+});
+
+// ---- menu + autoflood toggle -------------------------------------------------
+const menu=document.getElementById("menu");
+function toggleMenu(){menu.classList.toggle("open");}
+document.getElementById("slot-menu").onclick=toggleMenu;
+document.getElementById("backbtn").onclick=()=>menu.classList.remove("open");
+addEventListener("keydown",e=>{if(e.key==="Escape"){toggleMenu();}});
+const autofloodBtn=document.getElementById("autoflood-btn");
+function syncAutoflood(){autofloodBtn.textContent="↻ AUTO-FLOOD: "+(autoflood.checked?"ON":"OFF");
+  autofloodBtn.classList.toggle("on",autoflood.checked);}
+autofloodBtn.onclick=()=>{autoflood.checked=!autoflood.checked;syncAutoflood();};
+syncAutoflood();
+
+// model dropdown from the backend's /api/tags
 (async()=>{try{
   const r=await fetch("/api/tags");const j=await r.json();const sel=document.getElementById("model");
   const names=(j.models||[]).map(m=>m.name).filter(n=>!/embed|whisper|minilm|coding-math/i.test(n));
@@ -237,6 +763,7 @@ if(skip){skip.onclick=async()=>{
 
 function loop(){renderer.render(scene,camera);requestAnimationFrame(loop);}
 requestAnimationFrame(loop);
+poll();   // first fetch after all dial/mode refs are defined
 </script>
 </body>
 </html>
