@@ -1,6 +1,6 @@
 # membrane
 
-![Membrane](./black_white_hole.gif)
+![Membrane](./ceentered_uroboros.gif)
 
 A **local-first, self-authoring world you enter as a character.** It grows a
 world on its own clock from a memory of scenes; you inhabit that world as a
