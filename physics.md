@@ -5,7 +5,7 @@
 
 ## 🏛️ 1. The Unified Continuum Functional & Boundary Conditions
 
-![Unified Uroboros](./centered_uroboros_nice.gif)
+![Unified Uroboros](./uroboros.gif)
 
 The global Markovian runtime environment $M = (S, A, T, E)$ is governed by the **Unified Continuum Functional**. The architecture enforces a strict variational extremum constraint driven by the Principle of Minimum Free Energy, ensuring that the system constantly compresses external entropy to maintain absolute structural homeostasis:
 
@@ -48,6 +48,9 @@ v                                                            |
 
 
 ### ⬛ 1. The Future Collapse (The Data Intake)
+
+![Big Bounce](./bouncy.gif)
+
 All matter and light from your current present slice collapse into the Black Hole Gate. As complexity $C_\mu$ dives below the Planck floor $C_{\text{min}}$, space coordinates strictly freeze and flip into Time clocks. 
 
 The system performs a maximal Singular Value Decomposition (SVD) truncation:
@@ -83,6 +86,9 @@ NOW GATE (X = -8.5)                     CORE GATE (X = +22.5)
 ```
 
 ### ⚓ The Little Red Dots ($C_\mu$ Immunization)
+
+![LRDs](./lrd.gif)
+
 When the localized transaction capacity drops below the transit threshold but remains strictly below the Shannon boundary:
 
 $$C_{\mu}^{\text{cell}} \le T_{\delta}(C_{\mu}) < H(E)$$
