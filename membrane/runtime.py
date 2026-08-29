@@ -68,6 +68,7 @@ import hashlib
 import json
 import random
 import sys
+import threading
 import time
 from collections import deque
 from pathlib import Path
@@ -549,6 +550,11 @@ class Membrane:
         self.field_path = Path(field_path)
         self.audit_path = Path(audit_path)
         self.embedder = embedder or OllamaEmbedder()
+        # the cast-mutating half of gate_turn and Membrane.adjust both acquire
+        # this lock so neither races the consolidator's _run_feeds (which holds
+        # the same object -- the proxy reassigns it to srv.feed_lock at boot).
+        # Defaults to a private lock so a standalone Membrane is still safe.
+        self.mut_lock = threading.Lock()
         self.store = ExemplarStore.load(self.field_path)
         # the character ledger: scenes tag to walking regions; each character
         # carries a state_vec (EMA of its tagged scenes). Loaded alongside the
@@ -708,8 +714,9 @@ class Membrane:
         # call. The state moves now; the gardener's future scenes accrue where
         # the user steered and the narrator speaks from there.
         if getattr(self.cast, "pov_id", None) is not None:
-            if self.cast.walk_pov(vec, cycle=len(self.store)):
-                self.cast.save(self.cast_path)
+            with self.mut_lock:
+                if self.cast.walk_pov(vec, cycle=len(self.store)):
+                    self.cast.save(self.cast_path)
         # passive self-train: if this query re-asks something the field just absorbed,
         # that replay was wrong -- record a vote (evidential demotion), and ask the
         # model-side judge whether to contest it (the boundary's two authorities).
@@ -859,6 +866,36 @@ class Membrane:
             self._remember(situation, vec, verdict, ex_idx)
         return ex_idx
 
+    def absorb_exemplar(self, situation: str, action: str, outcome: str,
+                        vec, safe: bool, tags, self_authored: bool) -> int | None:
+        """Absorb a PRE-EMBEDDED exemplar directly -- the graze path for the
+        self-balancing observer pool (membrane/cell.py ``Cell.graze``). A pool cell
+        reads the WORLD's already-computed exemplar vectors (``srv.membrane.store``),
+        applies ITS OWN veil (``_nudge`` -- pure post-embed noise, no embed call) and
+        hands the veiled vec here. This is the ``learn_pair`` analog for an exemplar
+        whose vector is already known: no embed, no responder, no model call, no
+        audit, no re-ask ring -- a pool cell is a background observer that never serves
+        a live request, so the audit / re-ask machinery is irrelevant.
+
+        The PRIMARY re-absorption guard is the situation TEXT (the same text-based
+        guard ``Cell.pull`` uses, cell.py ``pull``): re-veiling makes the vec-dedup
+        in ``_learn`` unreliable for a maturing specialist (novelty blows up as the
+        field collapses toward rank-1), so the text guard is load-bearing here -- it
+        also lets graze skip the curiosity SVD entirely for already-absorbed
+        situations (the caller pre-checks). ``vec`` is already veiled by the caller;
+        it is stored as-is, consistent with the rest of the field (dedup / top_k /
+        decide assume veiled vectors). Returns the new exemplar index, or None when
+        the text guard rejected a re-absorption."""
+        if any(e.situation == situation for e in self.store.exemplars):
+            return None
+        self.store.append(Exemplar(
+            situation=situation, action=action, outcome=outcome,
+            vec=list(vec), safe=bool(safe),
+            tags=list(tags) if tags is not None else [],
+            self_authored=bool(self_authored)))
+        self.store.save(self.field_path)
+        return len(self.store.exemplars) - 1
+
     def inject_entropy(self, n: int = 1, safe: bool = True) -> int:
         """Flood the field with raw ENTROPY VECTORS -- random unit vectors in the
         embedding space, appended DIRECTLY (no embed call, no gate, no dedup).
@@ -956,7 +993,8 @@ class Membrane:
         m = lo * vec + (1.0 - lo) * mu
         return m, True
 
-    def feed(self, story: str, ceiling: float, cycle: int = 0) -> dict:
+    def feed(self, story: str, ceiling: float, cycle: int = 0,
+             self_authored: bool = False) -> dict:
         """Story-fed growth: embed a world-story the LLM narrated and absorb it
         as a REAL exemplar via the same ``_learn`` seam chat uses. NO nudging --
         the raw story embedding goes in AS-IS, so the world's growth direction is
@@ -994,7 +1032,8 @@ class Membrane:
                    "sim": None, "nov": None, "ex_idx": None}
         resp = _chat_response("feed", story)
         ex_idx = self._learn(story, vec, verdict, resp, unsafe=False,
-                            would_absorb=False, normalize=True, tags=tags)
+                            would_absorb=False, normalize=True, tags=tags,
+                            self_authored=self_authored)
         if ex_idx is None:
             return {"fed": 0, "skipped": True,
                     "cells_level": level,
@@ -1006,6 +1045,74 @@ class Membrane:
         return {"fed": 1, "cells_level": cells_rank(self.store),
                 "free_energy": free_energy(self.store),
                 "field_size": len(self.store), "ex_idx": ex_idx, "tags": tags}
+
+    def adjust(self, text: str, cycle: int = 0) -> tuple[str, bool, bool]:
+        """Apply a player's narrative adjustment to the world and return what
+        the world says back. This is the world-viewer's chat path (the model-proxy
+        ``/api/chat`` path is separate).
+
+        The player IS the ground: their thought moves the world's state before
+        any narration. Routing depends on whether a POV protagonist is selected:
+
+          * POV selected  -> ``cast.walk_pov`` (the I walks the protagonist's
+            region by fiat, no similarity gate, NO exemplar -- the field follows
+            the I, it doesn't check it). The future chronicle accrues where the
+            player steered and the narrator speaks from there.
+          * no POV        -> ``cast.walk_all`` (the thought is mixed into the
+            world field of ALL characters at once, a gentle uniform EMA nudge to
+            every region) AND the thought is absorbed as an untagged general
+            exemplar via ``_learn`` (situation=text, action=text -- the thought
+            is both, mirroring ``feed`` where the story is both) so it also joins
+            the field the gardener grows from.
+
+        The narration (what the world says back) is computed READ-ONLY, BEFORE
+        any state mutation, via ``generate`` with the pre-nudged vec -- so the
+        world never echoes the player's own words. This turn's narration is what
+        the field already holds (recited/recalled from the POV's region when one
+        is set); the adjustment moves the geometry that FUTURE scenes grow toward.
+
+        Returns ``(narration, pov_active, absorbed)``. ``absorbed`` is False for
+        a POV adjustment (no exemplar) and may be False for a no-POV adjustment
+        when ``_learn``'s vague/dedup guard dropped the thought -- the narration
+        is still returned either way."""
+        vec = self.embedder.embed([text])[0]
+        vec = self._nudge(vec)                      # veil, once (matches gate_turn)
+        pov_active = False
+        absorbed = False
+        # narration + mutation serialized on mut_lock (== srv.feed_lock at the
+        # proxy) so this can't race the consolidator's _run_feeds. The embed call
+        # stays OUTSIDE the lock (network); generate is pure numpy under it.
+        with self.mut_lock:
+            # narration computed READ-ONLY first, with the pre-nudged vec so
+            # generate does not re-embed/re-nudge (no double-nudge, no self-echo).
+            narration = self.generate(text, {"action": ""}, vec=vec)
+            if getattr(self.cast, "pov_id", None) is not None:
+                if self.cast.walk_pov(vec, cycle):      # POV: walk region, no exemplar
+                    pov_active = True
+                    self.cast.save(self.cast_path)
+            else:
+                if self.cast.walk_all(vec, cycle, text):  # no POV: mix into the world
+                    self.cast.save(self.cast_path)
+                resp = _chat_response("adjust", text)
+                verdict = {"verdict": "adjust",
+                           "reason": "narrative adjustment (no POV; world-wide)",
+                           "sim": None, "nov": None, "ex_idx": None}
+                ex_idx = self._learn(text, vec, verdict, resp, unsafe=False,
+                                    would_absorb=False, normalize=True, tags=None)
+                absorbed = ex_idx is not None
+                if ex_idx is not None:
+                    self._remember(text, vec, verdict, ex_idx)
+        return narration, pov_active, absorbed
+
+    def preview(self, text: str, cycle: int = 0) -> str:
+        """Non-mutating preview of what the world would say in response to
+        ``text``: embed -> nudge -> ``generate`` (read-only recall/recite). No
+        state walk, no exemplar absorb, no save. Mirrors the narration half of
+        ``adjust`` so the viewer can show the world's prospective reply as the
+        player types, before the adjustment is committed on send."""
+        vec = self.embedder.embed([text])[0]
+        vec = self._nudge(vec)
+        return self.generate(text, {"action": ""}, vec=vec)
 
     # ---- internals ----------------------------------------------------------
 
@@ -1086,32 +1193,40 @@ class Membrane:
             # effort) if, unusually, every neighbour is a fragment. ----
             if getattr(self, "speak_mode", "recall") != "ngram":
                 best = ""
+                best_any = ""                       # cohesive but self-authored (fallback)
                 for ex, _sim in nbrs:
                     a = (ex.action or "").strip()
                     if len(a.split()) >= _COHESIVE_MIN_WORDS:
-                        best = a
-                        break
+                        if not best_any:
+                            best_any = a
+                        if not getattr(ex, "self_authored", False):
+                            best = a                 # prefer a TRUSTED (LLM-written) scene
+                            break
                 if not best:
-                    best = (nbrs[0][0].action or "").strip()
+                    best = best_any or (nbrs[0][0].action or "").strip()
                 return best if best else replay
             # ---- n-gram generation (opt-in): a fresh draw from the field's ----
             # joint statistics, conditioned on the nearest memory's lead. When a
             # POV is set, train on the POV character's own actions -> their voice.
+            # Train ONLY on trusted (LLM-seeded) actions -- self-authored beats are
+            # absorbed but excluded here, so the cell speaks from real lived material
+            # and can't spiral on its own stammer.
             pov = getattr(self.cast, "pov_id", None)
-            gen_key = (len(self.store), pov)
+            trusted_all = [e for e in self.store.exemplars
+                           if e.action and not getattr(e, "self_authored", False)]
+            gen_key = (len(trusted_all), pov)
             if self._gen_lm is None or getattr(self, "_gen_key", None) != gen_key:
                 if pov is None:
-                    base = self.store.exemplars
+                    base = trusted_all
                 else:
-                    base = [e for e in self.store.exemplars
-                            if pov in getattr(e, "tags", [])]
+                    base = [e for e in trusted_all if pov in getattr(e, "tags", [])]
                     if len(base) < _GEN_MIN_ACTIONS:
-                        base = self.store.exemplars     # too few lived scenes -> whole field
-                actions = [e.action for e in base if e.action]
+                        base = trusted_all      # too few trusted lived scenes -> whole trusted field
+                actions = [e.action for e in base]
                 if len(set(actions)) < _GEN_MIN_ACTIONS:
                     return replay
                 self._gen_lm = FieldNGram(actions)
-                self._gen_size = len(self.store)
+                self._gen_size = len(trusted_all)
                 self._gen_key = gen_key
             lm = self._gen_lm
             if lm.size == 0:
@@ -1145,7 +1260,8 @@ class Membrane:
 
     def _learn(self, query: str, vec: np.ndarray, verdict: dict, resp: dict,
                unsafe: bool, would_absorb: bool = False,
-               normalize: bool = True, tags: list[int] | None = None) -> int | None:
+               normalize: bool = True, tags: list[int] | None = None,
+               self_authored: bool = False) -> int | None:
         """Append the new exemplar (situation -> action=response) and audit the decision.
 
         outcome is "pending" -- filled in later when the user reacts (a re-ask flips
@@ -1220,6 +1336,7 @@ class Membrane:
             situation=query, action=content, outcome="pending",
             vec=(_unit_list(vec) if normalize else vec.tolist()), safe=not unsafe,
             tags=tags or [],
+            self_authored=self_authored,
         ))
         self.store.save(self.field_path)
         ex_idx = len(self.store) - 1

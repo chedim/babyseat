@@ -41,6 +41,7 @@ buffer and runs a cell pool) is stage 1.5/2, gated on the layer-1 hatchery test.
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -48,6 +49,10 @@ import numpy as np
 from .buffer import BufferView
 from .curiosity import assess, CURIOSITY_MIN
 from .runtime import Membrane
+
+# a cell is "mature enough to color" once its field has grown this many exemplars
+# (a 1-exemplar field has a trivial dominant direction -- not a cone yet).
+_MATURE_MIN_EXEMPLARS = 4
 
 
 class Cell:
@@ -289,6 +294,119 @@ class Cell:
             fresh=child_fresh,              # False -> load the seed; True (default) -> blank
         )
 
+    # ---- differentiation (stage 6): the REVERSE of budding -------------------
+    def differentiate(self, direction_index: int = 0, cos_sep: float = 0.5,
+                      align_min: float = 0.5, gate_strength: float = 4.0
+                      ) -> "np.ndarray | None":
+        """DIFFERENTIATE -- the reverse of budding (the anti-bud): a cell cuts ITS
+        OWN field down to one experienced direction and LOCKS that direction as a
+        hard gate, committing to the specialist/death move that ``bud`` avoids.
+
+        Where ``bud`` (the forward operation) keeps the PARENT whole and buds a
+        specialist CHILD (oriented, seeded, a soft/default-off curiosity bias),
+        ``differentiate`` makes the cell ITSELF the specialist. It selects the
+        exemplars aligned with one of its own ``orient_dirs`` -- the SAME selector
+        ``bud`` uses to seed a child (``variety.aligned_safe_slice``) -- but keeps
+        ONLY the aligned slice and DROPS the rest, then raises
+        ``orientation_strength`` so the hard alignment gate
+        (``curiosity._aligned``) refuses off-subspace situations. The symmetry with
+        ``bud`` IS the "reverse of budding": same selector, opposite retention.
+
+        The orthogonal exemplars are paved -- the null space collapses, the field's
+        ``effective_rank`` falls toward 1 (toward crystal death), and the hard gate
+        stops the lost directions re-growing via curiosity. A standalone
+        differentiated cell is then DEAD on its orthogonal complement: it escalates
+        on the bases it used to cover (the §4 "specialist alone is dead" prediction,
+        tested in ``experiments/multi_differentiate.py``). The organism (Phase 2)
+        resurrects it by ROUTING those situations to a sibling that owns them.
+
+        DECENTRALIZED BY CONSTRUCTION (held, as in ``bud``): the specialization
+        axis comes from the cell's OWN field geometry (``orient_dirs`` -- its
+        distinct experienced directions), not a central router. No external input
+        picks the skill; ``direction_index`` only selects which of the cell's own
+        directions to commit to.
+
+        IRREVOCABLE ON THE FIELD (the difference from ``bud``): the dropped
+        exemplars are gone (the ``trim_entropy`` reassign-then-save pattern,
+        runtime.py:917) and the orientation is set STRONG, so the hard alignment
+        gate blocks off-subspace situations from re-entering through curiosity.
+        ``bud`` orients a blank child; ``differentiate`` cuts a grown cell.
+
+        NOT READY -> None: if the cell has fewer than ``direction_index + 1``
+        separable directions (``orient_dirs``), or nothing aligned with the chosen
+        direction is safe, the cell has not grown enough to differentiate in that
+        direction -- the honest no-op, mirroring ``bud``'s "not ready to bud"
+        (line ~245). The field and orientation are left untouched.
+
+        SELECTION, NOT PROJECTION (the open §4.7 question): the cut keeps the
+        aligned exemplars and drops the rest -- unit-vec invariant preserved, no
+        memory distortion, reuses ``aligned_safe_slice`` exactly. ``align_min`` is
+        the calibration knob (how tight the cone = how far toward death: the kept
+        field's effective rank falls toward 1 as the cone tightens). The safe
+        filter is inherited from ``aligned_safe_slice`` (the specialist crystallizes
+        around its PROVEN-SAFE aligned knowledge, shedding both the orthogonal AND
+        the disproven). A low-rank PROJECTION variant -- the literal SVD
+        coarse-graining of §4.7 -- is deferred: it tests that specific unvetted
+        claim directly but distorts memory and breaks the unit-vec invariant; it is
+        added later as a ``mode=`` parameter to compare death signatures.
+
+        GUARDRAILS UNTOUCHED (held): observer mode (never authors), the
+        ``BufferView`` boundary (cannot feed itself), and the gate are unchanged.
+        ``differentiate`` mutates the cell's OWN field and orientation only -- the
+        same surface ``bud`` touches. It adds no deposit path, no self-author, no
+        safe-mutator. The reverse of budding opens no farm move."""
+        from .variety import aligned_safe_slice, orient_dirs
+        dirs = orient_dirs(self.membrane.store, direction_index + 1, cos_sep)
+        if len(dirs) <= direction_index:
+            return None                  # not ready: hasn't grown in this direction
+        orientation = np.asarray(dirs[direction_index], dtype=float)
+        # the SAME selector `bud` uses to seed a child -- but keep ALL aligned (a
+        # commit, not a capped seed of max_n=8) and drop the rest (the cut).
+        kept = aligned_safe_slice(self.membrane.store, orientation, align_min,
+                                 max_n=len(self.membrane.store))
+        if not kept:
+            return None                  # nothing aligned+safe to keep (degenerate)
+        self.membrane.store.exemplars = list(kept)     # the trim_entropy reassign pattern
+        self.membrane.store.save(self.membrane.field_path)   # the cut is persisted
+        # ---- keep the cast honest to the cut field (the stage-6 fix) ---------
+        # Unlike ``trim_entropy`` (which only sheds UNTAGGED entropy ballast),
+        # ``differentiate`` drops real character-TAGGED lived scenes. Each
+        # Character's ``scene_count`` / ``last_scene`` / ``state_vec`` would
+        # otherwise still describe the PRE-cut field -- and ``voice_for``'s
+        # per-character n-gram cache is keyed on ``scene_count``, which the cut
+        # does NOT change, so a cached voice would keep speaking from now-dropped
+        # scenes while ``last_scene`` phantom-grounds the next genesis /
+        # progression seed ("continue from this point" at a scene the field no
+        # longer holds). Re-derive each character from the SURVIVING tagged
+        # exemplars and POISON the voice cache so the next ``voice_for`` rebuilds
+        # from the cut field. Defensive: the multi-differentiate experiment builds
+        # cells with NO cast, so this block is a no-op there; it only matters
+        # against the cast-bearing live world.
+        cast = getattr(self.membrane, "cast", None)
+        if cast is not None and getattr(cast, "chars", None):
+            for c in cast.chars:
+                lived = [e for e in kept if c.id in getattr(e, "tags", [])]
+                c.scene_count = len(lived)
+                if lived:
+                    c.last_scene = lived[-1].action or c.last_scene
+                    V = np.stack([np.asarray(e.vec, dtype=float) for e in lived])
+                    m = V.mean(axis=0)
+                    nrm = np.linalg.norm(m)
+                    if nrm > 1e-12:            # the _unit(_mean) centroid pattern
+                        c.state_vec = (m / nrm).tolist()
+                # no surviving scenes -> leave state_vec/last_scene as last known
+                # (the char is dead in this cell's field; on_stage freshness +
+                # the voice_for distinct-actions gate handle the rest)
+                cast._voices.pop(c.id, None)        # poison the stale n-gram cache
+                cast._voice_size.pop(c.id, None)
+            try:
+                cast.save(self.membrane.cast_path)
+            except (AttributeError, OSError) as e:
+                print(f"[differentiate] cast re-save failed ({e})", file=sys.stderr)
+        self.orientation = orientation
+        self.orientation_strength = gate_strength      # the lock: hard gate refuses off-subspace
+        return orientation
+
     # ---- the pull decision --------------------------------------------------
 
     def _situation_vec(self, text: str) -> np.ndarray:
@@ -432,6 +550,76 @@ class Cell:
             taken_idx.add(best_i)
             count += 1
         return count
+
+    # ---- grazing the world field (the self-balancing observer organism) ----
+    # The live pool does NOT graze the user-turn buffer (which re-embeds the whole
+    # unbounded log every pull). It grazes the WORLD's field -- ``srv.membrane.store``
+    # -- whose exemplar vectors are already computed. The cell applies ITS OWN veil
+    # (``_nudge``, pure post-embed noise) to each pre-computed vec and lets curiosity
+    # decide, so specialization is emergent (veil-driven) and the cost is numpy-only
+    # (no embed call). Absorption goes through ``Membrane.absorb_exemplar`` (the
+    # text-dedup guard that ``pull``'s ``absorbed`` set provides, but for an
+    # ExemplarStore source instead of a BufferView).
+
+    def graze(self, store) -> int:
+        """Pull the WORLD's exemplars into this cell's field, curiosity-gated, with no
+        embed call. ``store`` is an ``ExemplarStore`` (the world's, ``srv.membrane.store``)
+        read as a snapshot (GIL-safe: one atomic read of ``store.exemplars`` then
+        ``list()``). For each world exemplar: skip if its situation text is already in
+        this cell's field (the text guard -- primary re-absorption defense, and it skips
+        the curiosity SVD for the already-absorbed majority); otherwise veil the
+        pre-computed vec via ``_nudge`` and let ``_assess`` decide. Curious exemplars are
+        absorbed via ``Membrane.absorb_exemplar`` (which re-checks the text guard, appends
+        the veiled vec, and saves). Self-extinguishing: as a cell's cone fills, fewer
+        world exemplars are curious -> the cell's field self-bounds. Returns the count
+        absorbed this graze."""
+        world = list(store.exemplars)
+        if not world:
+            return 0
+        already = {ex.situation for ex in self.membrane.store.exemplars}
+        count = 0
+        for ex in world:
+            if ex.situation in already:
+                continue
+            veiled = self.membrane._nudge(np.asarray(ex.vec, dtype=float))
+            curious, _ = self._assess(veiled)
+            if not curious:
+                continue
+            idx = self.membrane.absorb_exemplar(
+                ex.situation, ex.action, ex.outcome, veiled,
+                ex.safe, getattr(ex, "tags", []), getattr(ex, "self_authored", False))
+            if idx is not None:
+                already.add(ex.situation)
+                count += 1
+        return count
+
+    def dominant_dir(self, cos_sep: float = 0.5) -> np.ndarray | None:
+        """This cell's dominant grown direction -- the first of its distinct
+        ``orient_dirs`` -- or None when it is too immature to color (fewer than
+        ``_MATURE_MIN_EXEMPLARS`` exemplars, or no separable direction). The
+        differentiation signal the viewer colors by."""
+        if len(self.membrane.store) < _MATURE_MIN_EXEMPLARS:
+            return None
+        from .variety import orient_dirs
+        dirs = orient_dirs(self.membrane.store, 1, cos_sep)
+        return dirs[0] if dirs else None
+
+    def covered_dir(self, world_dirs, cos_sep: float = 0.5) -> int | None:
+        """Which world direction this cell covers -- argmax cosine of its committed
+        direction to ``world_dirs`` (the world's ``orient_dirs``). Uses the cell's
+        ASSIGNED ``orientation`` (set at bud -- the gate that makes it a specialist)
+        when present, else its emergent ``dominant_dir`` (an undifferentiated
+        generalist). None when the world has no directions or the cell has no
+        direction at all. The palette index for the viewer."""
+        if not world_dirs:
+            return None
+        o = self.orientation
+        if o is None:
+            o = self.dominant_dir(cos_sep)
+        if o is None:
+            return None
+        return int(max(range(len(world_dirs)),
+                       key=lambda i: float(o @ world_dirs[i])))
 
     # ---- the hatchery-signature accessors (the test reads these) ------------
 

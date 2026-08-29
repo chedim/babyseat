@@ -16,6 +16,15 @@ It is a **Python lab** (sibling of `rosetta-check`, the Java linter, and
 technically a proxy, but that is the mechanism, not the point. The point is the
 world.
 
+> **Why that name?** The project began as one question — *how do you measure
+> "variety" for a memory that decides absorb-a-cached-answer vs
+> escalate-to-the-model?* — and the answer is what makes the world above
+> possible and is why it is called **membrane**: a selective, *active* boundary
+> between lived memory (the inside) and the incoming world (the outside) that
+> absorbs what it has the variety for and escalates the rest — a regulator whose
+> telos was flipped from *control the output* to *absorb the world*. The full
+> findings, implication, and name are in **[Why "membrane"](#why-membrane)**.
+
 ---
 
 ## Executive summary

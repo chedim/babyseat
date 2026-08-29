@@ -103,6 +103,13 @@ class Cast:
         self.cap = cap
         self.embedder = embedder      # set by the Membrane after construction
         self.pov_id: int | None = None   # the protagonist (who the reader IS)
+        # the world's own clock (the consolidation cycle). In-memory on the proxy
+        # (``srv.consolidation_stats["cycles"]``) but mirrored here so it persists
+        # across restarts in the cast wrapper -- otherwise every restart drops the
+        # in-world date back to "cycle 0" while the field still holds 100+ scenes.
+        # Kept in sync by the proxy at every cycle increment; persisted whenever the
+        # cast is saved (every tag/walk/adjust/cast action), so the lag is tiny.
+        self.cycles: int = 0
         # ---- emergence (in-memory, never serialized) ----
         # untagged beats accumulate here; a recurring region is auto-admitted.
         self._strangers: list[dict] = []
@@ -206,6 +213,28 @@ class Cast:
         c.scene_count += 1
         c.last_cycle = cycle
         return True
+
+    def walk_all(self, vec, cycle: int, text: str = "") -> int:
+        """The I speaks to the whole world: unconditionally EMA-walk EVERY
+        character's ``state_vec`` toward ``vec`` -- bypassing the cosine
+        ``admit_threshold`` that gates ``tag``. Used when no POV is selected, so
+        the player's thought is mixed into the world field of ALL characters at
+        once (a gentle, uniform nudge to every region), not targeted at one
+        protagonist. Like ``walk_pov`` this appends NO exemplar (no recall loop,
+        no echo of the user's words); it only moves each region -- the future
+        chronicle accrues where the player steered. Returns the number of
+        characters walked (0 for an empty cast)."""
+        if not self.chars:
+            return 0
+        sv = _unit(np.asarray(vec, dtype=float))
+        for c in self.chars:
+            old = np.asarray(c.state_vec, dtype=float)
+            c.state_vec = _unit(self.decay * old + (1.0 - self.decay) * sv).tolist()
+            c.scene_count += 1
+            c.last_cycle = cycle
+            if text:
+                c.last_scene = text
+        return len(self.chars)
 
     def retro_tag(self, store) -> int:
         """One-time, after the genesis seed: tag every existing exemplar to the
@@ -314,7 +343,12 @@ class Cast:
         Trained on the character's own tagged ``Exemplar.action``s (the chronicle
         scenes they lived), cached and rebuilt when they live more. Reuses
         ``FieldNGram`` unchanged. Returns None too when the lived scenes are too
-        few distinct actions to speak from."""
+        few distinct actions to speak from.
+
+        Only TRUSTED (LLM-seeded) scenes train the voice -- self-authored beats
+        (the cell's own n-gram stammer, flagged ``self_authored``) are absorbed
+        into the field but excluded here, so the voice speaks from real lived
+        material and can't spiral on its own output."""
         from .generator import FieldNGram, MIN_ACTIONS
         c = self.by_id(cid)
         if c is None or c.scene_count < _VOICE_MIN:
@@ -323,7 +357,8 @@ class Cast:
         if self._voice_size.get(cid, -1) == size and cid in self._voices:
             return self._voices[cid]
         actions = [e.action for e in store.exemplars
-                   if cid in getattr(e, "tags", []) and e.action]
+                   if cid in getattr(e, "tags", []) and e.action
+                   and not getattr(e, "self_authored", False)]
         if len(set(actions)) < MIN_ACTIONS:
             return None
         lm = FieldNGram(actions)
@@ -359,11 +394,13 @@ class Cast:
         return [asdict(c) for c in self.chars]
 
     def save(self, path: str | Path) -> None:
-        # wrapper shape so the protagonist pointer (pov_id) persists alongside
-        # the cast. ``to_json`` (the /state + /cast response) stays the bare list
-        # the viewer already reads; only the on-disk file gains the wrapper.
+        # wrapper shape so the protagonist pointer (pov_id) + the world clock
+        # (cycles) persist alongside the cast. ``to_json`` (the /state + /cast
+        # response) stays the bare list the viewer already reads; only the on-disk
+        # file gains the wrapper.
         Path(path).write_text(json.dumps(
-            {"pov_id": self.pov_id, "chars": self.to_json()}, indent=2))
+            {"pov_id": self.pov_id, "cycles": self.cycles,
+             "chars": self.to_json()}, indent=2))
 
     @classmethod
     def load(cls, path: str | Path, decay: float = 0.6,
@@ -381,6 +418,7 @@ class Cast:
             # bare list (old ad521bb cast files) -> no migration needed.
             recs = data["chars"] if isinstance(data, dict) else data
             pov_id = data.get("pov_id") if isinstance(data, dict) else None
+            cycles = data.get("cycles", 0) if isinstance(data, dict) else 0
             for rec in recs:
                 try:
                     cast.chars.append(Character(**rec))
@@ -390,4 +428,9 @@ class Cast:
             # validate the protagonist pointer AFTER the cast is loaded (a retired
             # char's stale pointer -> drop it, so the narrator falls back to global)
             cast.pov_id = pov_id if (pov_id is not None and cast.by_id(pov_id)) else None
+            # restore the world clock (0 for old bare-list files -> starts at 0)
+            try:
+                cast.cycles = int(cycles)
+            except (TypeError, ValueError):
+                cast.cycles = 0
         return cast

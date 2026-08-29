@@ -50,6 +50,14 @@ class Exemplar:
     # chronicle scenes). Backward-compatible: old field records lack the key ->
     # Exemplar(**rec) falls back to this default.
     tags: list[int] = field(default_factory=list)
+    # True when this scene was authored by the cell's OWN n-gram voice (the
+    # cells-act chronicle / --speak ngram path), NOT by the LLM. Such beats are
+    # absorbed into the field (so the world still grows + recall stays rich) but
+    # EXCLUDED from the n-gram's training corpus + the cells-act seed -- otherwise
+    # the n-gram trains on its own stammer and spirals to gibberish. The LLM is
+    # the teacher at seed time; the n-gram speaks only from trusted (LLM-seeded)
+    # material. Backward-compatible: old records lack the key -> trusted by default.
+    self_authored: bool = False
 
     def recompute_safe(self, demote_threshold: int) -> None:
         """Re-derive `safe` from the evidence: net votes against must reach the threshold.

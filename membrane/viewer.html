@@ -114,6 +114,31 @@
   .m.a.narr{color:#f4ecd8;border-left:2px solid rgba(255,255,255,.22);
     padding:2px 4px 2px 8px;margin:2px 0}
   .m.a.narr .gl{opacity:.45;margin-right:4px}
+  .m.a.narr.chronicle{border-left-color:rgba(124,255,90,.35);color:#e7f4dc}
+  .m.a.narr.chronicle::before{content:"❧ ";opacity:.5}
+  /* the LIVE CHRONICLE: a single rolling message that, while the world runs,
+     compresses the autonomous story into flowing paragraphs and updates in
+     place. Same green chronicle rail + ❧ marker, but `.live` adds a soft pulse
+     so it reads as "updating" (the pulse stops when the world is paused and the
+     node freezes into a static snapshot). Carries the 3-rep stash: the rep
+     toggle switches the compressed narration <-> its raw source beats. */
+  .m.a.narr.chronicle.live{border-left-color:rgba(124,255,90,.6);
+    animation:chronPulse 2.6s ease-in-out infinite}
+  @keyframes chronPulse{0%,100%{box-shadow:inset 3px 0 0 rgba(124,255,90,0)}
+    50%{box-shadow:inset 3px 0 0 rgba(124,255,90,.18)}}
+  /* a POV situation report (the chat's situation channel). Warm parchment,
+     a § marker. Carries the same 3-rep stash as a narr beat so the rep toggle
+     switches between the rendered report and its raw source scenes. */
+  .m.a.narr.situation{border-left-color:rgba(233,216,166,.55);color:#f4ecd8}
+  .m.a.narr.situation::before{content:"§ ";opacity:.5}
+  .m.a.narr.preview{border-left:2px dashed rgba(255,255,255,.28);color:#b9c2bb;
+    font-style:italic;opacity:.82}
+  .m.a.narr.preview .gl{opacity:.5}
+  /* LLM'd gloss in flight: the just-arrived text shows grayer than the landed
+     gloss and pulses (brightness back-and-forth) until /render returns. Removed
+     when the gloss lands (or the render gives up -> stays on corrected, bright). */
+  .m.a.narr.rendering{color:#8a958e;animation:renderPulse 1.3s ease-in-out infinite}
+  @keyframes renderPulse{0%,100%{opacity:.4}50%{opacity:.72}}
   #chat .irow{display:flex;gap:4px}
   #chat select,#chat input,#chat button{font-family:var(--vt);font-size:18px;
     background:rgba(0,0,0,.6);color:#fff;border:2px solid var(--ink);
@@ -285,7 +310,8 @@
   </div>
   <div id="ctrl">
     <div class="ctrl-row">
-      <button id="pp" class="mc-btn sm" title="pause / resume the world's own clock">&#x23F8;</button>
+      <button id="pp" class="mc-btn sm" title="run / stop the world's own clock">&#x25B6;</button>
+      <button id="pp-step" class="mc-btn sm" title="advance the world by one step (only while stopped)">&#x23ED; STEP</button>
       <button class="mc-btn sm spd on" data-spd="1" title="world clock: normal speed">1×</button>
       <button class="mc-btn sm spd" data-spd="2" title="world clock: double speed">2×</button>
       <button class="mc-btn sm spd" data-spd="4" title="world clock: quadruple speed">4×</button>
@@ -294,6 +320,11 @@
       <button class="mc-btn sm diet" data-fr="0" title="digest only — no new scenes absorb">STARVE</button>
       <button class="mc-btn sm diet" data-fr="2" title="a measured feed rate">BALANCE</button>
       <button class="mc-btn sm diet" data-fr="8" title="feed the world fast">FEED</button>
+    </div>
+    <div class="ctrl-row">
+      <button class="mc-btn sm rep on" data-rep="llm" title="render each beat into readable prose via the LLM (raw shows first, gloss swaps in)">LLM'd</button>
+      <button class="mc-btn sm rep" data-rep="corrected" title="client-side typographic repair of the raw n-gram (no model)">Corrected</button>
+      <button class="mc-btn sm rep" data-rep="raw" title="the literal n-gram output, exactly as the cell emitted it">Raw</button>
     </div>
   </div>
 </div>
@@ -307,6 +338,7 @@
 <div id="chat">
   <div class="mc-info">
     <span class="info-name">THE WORLD</span>
+    <select id="pov-pick" title="who you are in this world — the protagonist the chronicle follows (the world = no POV)"></select>
     <span class="info-date" id="wdate"><span class="ph">&#x1F311;</span>Day 1 · 00:00 · cycle 0</span>
     <span class="info-lvl">Lv <b id="cl">0</b></span>
     <span class="info-status" id="wait">waiting for the proxy…</span>
@@ -371,23 +403,14 @@
               title="the local Ollama model that writes the world's chronicle (the gardener). Persists across restarts."></select>
     </div>
     <div class="set-row">
-      <span class="set-lbl">WORLD DRIVE — how the world writes itself</span>
-      <select id="set-drive" class="set-select"
-              title="reactive (default): after each move you make, the world writes ONE scene that follows from it. pov-follow: the world writes its own chronicle, but it follows the protagonist (press PLAY). explore: the world does not write itself -- it only grows from your chat.">
-        <option value="reactive">reactive — world writes a beat after each move</option>
-        <option value="pov-follow">pov-follow — autonomous chronicle follows the protagonist</option>
-        <option value="explore">explore — no self-writing; world grows from your chat</option>
-      </select>
-    </div>
-    <div class="set-row">
       <span class="set-lbl">BEAT AUTHOR — who writes the autonomous chronicle</span>
       <select id="set-beat-author" class="set-select"
-              title="llm (default): the story model writes each pov-follow beat. cells: the on-stage character's own n-gram voice authors the beat (no model) -- the autonomous chronicle after training. Reactive beats are always LLM regardless.">
+              title="llm: the story model writes each autonomous beat. cells: the on-stage character's own n-gram voice authors the beat (no model) -- the autonomous chronicle after training.">
         <option value="llm">llm — the story model writes each beat</option>
         <option value="cells">cells — the on-stage character's n-gram authors</option>
       </select>
     </div>
-    <div class="btn-row"><button id="set-save" class="mc-btn" title="apply the server, token, story model, and world drive to the world">&#x2713; SAVE SETTINGS</button></div>
+    <div class="btn-row"><button id="set-save" class="mc-btn" title="apply the server, token, and story model to the world">&#x2713; SAVE SETTINGS</button></div>
 
     <div class="menu-section">STATS</div>
     <div class="stats">
@@ -429,19 +452,15 @@
     </div>
     <div class="slide-val" id="cputargetv">20%</div>
 
-    <div class="menu-section">FEED THE WORLD</div>
+    <div class="menu-section">THE WORLD CLOCK</div>
     <div class="btn-row">
-      <button id="step" class="mc-btn" title="one story from the LLM — absorbed if it fits, massaged in or skipped if not">&#x23ED; STEP</button>
-      <button id="play" class="mc-btn" title="arm the world's own clock — the consolidator feeds it (feed rate/cycle) and digests it (CPU target) on its own time">&#x25B6 PLAY</button>
-      <button id="pause" class="mc-btn" disabled title="disarm the world's own clock (pause consolidation)">&#x23F8; PAUSE</button>
+      <button id="step" class="mc-btn" title="advance the world by one step (one feed + one digest) — only while stopped">&#x23ED; STEP</button>
+      <button id="play" class="mc-btn" title="run the world's own clock — it feeds itself (feed rate/cycle) and digests (CPU target) on its own time">&#x25B6 RUN</button>
+      <button id="pause" class="mc-btn" disabled title="stop the world's own clock (the world waits for STEP or your chat)">&#x23F8; STOP</button>
     </div>
 
     <div class="menu-section">NARRATIVE MODE</div>
     <button id="mode-btn" class="mc-btn on" title="story = one continuing narrative across feeds (history passed to the LLM); variety = standalone random vignettes (grows variety fastest)">STORY MODE: ON</button>
-
-    <div class="menu-section">AUTO-FLOOD (grow between your messages)</div>
-    <button id="autoflood-btn" class="mc-btn" title="grow the world between your messages">&#x21BB; AUTO-FLOOD: ON</button>
-    <input id="autoflood" type="checkbox" checked style="display:none">
 
     <div class="menu-section">TIME SKIP (live offscreen, no model)</div>
     <div class="skip-row">
@@ -465,6 +484,13 @@
       <div class="d"><span class="dot dr"></span> demoted (unsafe)</div>
       <div class="d"><span class="dot db"></span> absorb · escalate</div>
       <div class="d"><span class="dot do"></span> contest / rescue</div>
+    </div>
+
+    <div class="menu-section">CELLS — the self-balancing organism</div>
+    <div class="bestiary">
+      <div class="d"><span class="dot" style="background:#c9cdd4"></span> growing (undifferentiated)</div>
+      <div class="d"><span class="dot" style="background:#33d98c"></span> differentiated — color = covered direction</div>
+      <div class="d" style="opacity:.7;font-size:11px">buds with the world's variety, capped by CPU %</div>
     </div>
 
     <div class="menu-section">ACTIVITY LOG</div>
@@ -538,6 +564,39 @@ function renderCloud(exs){
     transparent:true,depthWrite:false,blending:THREE.AdditiveBlending});
   cloud=new THREE.Points(g,m);scene.add(cloud);
 }
+// ---- the self-balancing organism: pool cells as individual sprites ----------
+// Cells bud/retire between polls, so unlike the exemplar cloud (rebuilt every
+// poll as one batched Points) they need IDENTITY: a diff-in-place Map<id,Sprite>
+// (add new ids, update existing, remove retired). Color = the cell's covered
+// world-direction (palette index); immature (undifferentiated) cells are neutral
+// grey. Size = maturity (differentiated cells are larger). Reuses the radial sprite
+// `tex` so cells read as bright cores among the star field.
+const CELL_COLORS=[[0.20,0.85,0.55],[0.95,0.40,0.35],[0.35,0.66,0.95],[0.95,0.80,0.30],
+ [0.75,0.40,0.90],[0.30,0.90,0.85],[1.0,0.60,0.30],[0.55,0.95,0.45],
+ [0.90,0.50,0.75],[0.80,0.80,0.85],[0.45,0.85,1.0],[1.0,0.70,0.40]];
+function cellColor(d){return CELL_COLORS[(d|0)%CELL_COLORS.length];}
+const cellObjects=new Map();   // id -> THREE.Sprite
+function renderCells(cells){
+  const seen=new Set();
+  for(const c of cells){
+    seen.add(c.id);
+    const col=(c.dir==null)?[0.78,0.80,0.85]:cellColor(c.dir);
+    const sz=c.mature?2.6:1.5;
+    let obj=cellObjects.get(c.id);
+    if(!obj){
+      obj=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,
+        color:new THREE.Color(col[0],col[1],col[2]),transparent:true,depthWrite:false,
+        blending:THREE.AdditiveBlending}));
+      obj.scale.set(sz,sz,sz);scene.add(obj);cellObjects.set(c.id,obj);
+    }
+    obj.position.set(c.p[0]||0,c.p[1]||0,c.p[2]||0);
+    obj.material.color.setRGB(col[0],col[1],col[2]);
+    obj.scale.set(sz,sz,sz);
+  }
+  for(const [id,obj] of cellObjects){
+    if(!seen.has(id)){scene.remove(obj);obj.material.dispose();cellObjects.delete(id);}
+  }
+}
 const plane=new THREE.Mesh(new THREE.RingGeometry(3,3.04,64),
   new THREE.MeshBasicMaterial({color:0x1c2a24,side:THREE.DoubleSide,transparent:true,opacity:.4}));
 plane.rotation.x=Math.PI/2;plane.position.y=-3;scene.add(plane);
@@ -552,6 +611,30 @@ renderer.domElement.addEventListener("wheel",e=>{rad=Math.max(6,Math.min(36,rad+
 
 // ---- state polling -----------------------------------------------------------
 let seenVerdicts=0, feMax=1, lastFe=NaN, theoMax=1024, clLevel=0, lastConCycle=0;
+// ---- the situation channel: the chat renders POV SITUATION REPORTS, not chronicle
+// snapshots. lastSituationKey is the watermark {id,scene_count} of the last rendered
+// situation; poll appends a new one only when the subject's scene_count rises past it
+// (a scene tagged them) -- other chars' beats stay quiet. lastUserSituationTs is the
+// grace window after a user send / POV switch so the next poll can't double it.
+// previewSeq stale-drops out-of-order /situation preview replies on fast typing.
+// sitSeq stale-drops SITUATION renders: only the LATEST dispatched /situation (or
+// the latest append) may write to the chat -- any older in-flight render (e.g. a
+// loadSituation still resolving when the user steps) is dropped, so two concurrent
+// renders can't both append ("5 responses" -> "2" -> 1).
+let lastUserSituationTs=0, lastSituationKey=null, previewSeq=0, sitSeq=0;
+// LIVE CHRONICLE: while the world runs autonomously, the chat shows ONE rolling,
+// auto-updated message that compresses the ongoing story into a paragraph or two
+// (POST /chronicle). It updates IN PLACE (not appended) as the world advances --
+// POV set -> that character's thread; no POV -> the whole world. The render is a
+// slow LLM call (~10-15s), so the concurrency model is "ONE in flight, never
+// stack": liveBusy gates dispatch -- while a /chronicle is in flight, no new one
+// is sent (a stale-drop that fired a new request every 4s stacked ~8 on Ollama's
+// serialized queue before the first 31s render resolved, so the node never
+// updated). liveTs (5s) paces the first dispatch after a completed render;
+// lastChronCycle gates it so we only re-render when the world actually moved. On
+// STOP the node freezes as a static snapshot (liveNode=null) and a new one
+// starts on the next RUN. Turn-based situation reports still happen on send.
+let liveNode=null, liveBusy=false, liveTs=0, lastChronCycle=-1;
 const heartsEl=document.getElementById("hearts");
 async function poll(){
   try{
@@ -559,6 +642,7 @@ async function poll(){
     const waitEl=document.getElementById("wait");
     waitEl.textContent="live · polling the field";waitEl.style.color="var(--green-hi)";
     renderCloud(j.exemplars||[]);
+    renderCells(j.pool_cells||[]);
     const fe=j.free_energy||0; feMax=Math.max(feMax,Math.abs(fe),1);
     if(!isNaN(lastFe)&&Math.abs(fe-lastFe)>0.01)
       floatText((fe>lastFe?"+":"")+(fe-lastFe).toFixed(2)+" FE", fe>lastFe?"#e6c34a":"#e05a4a");
@@ -604,12 +688,6 @@ async function poll(){
     if(j.story_mode && j.story_mode!==curMode){
       curMode=j.story_mode; syncMode();
     }
-    // world-drive (reactive | pov-follow | explore) — sync from the server truth.
-    // In reactive/explore the autonomous chronicle is off, so AUTO-FLOOD is forced
-    // off + disabled (it only makes sense when the world writes on its own clock).
-    if(j.world_drive!=null && j.world_drive!==worldDrive){
-      worldDrive=j.world_drive; syncDriveUI(); applyAutofloodGate();
-    }
     // beat_author (llm | cells) — who writes the autonomous chronicle. Mirror the
     // server truth into the SETTINGS select (unless the user is mid-edit there).
     if(j.beat_author!=null && j.beat_author!==beatAuthor){
@@ -617,17 +695,28 @@ async function poll(){
       const ba=document.getElementById("set-beat-author");
       if(ba && document.activeElement!==ba) ba.value=beatAuthor;
     }
-    // ---- consolidation: sync dials + arm state, surface stats + autonomous stories
+    // ---- consolidation: sync dials + run state, surface stats + autonomous stories
     if(j.cpu_target!=null && cputarget && document.activeElement!==cputarget){
       cputarget.value=Math.max(0,Math.min(100,Math.round(j.cpu_target*100)));
       if(cputargetv) cputargetv.textContent=cputarget.value+"%";
     }
-    if(j.consolidating!=null && j.consolidating!==consolidating && Date.now()-userDialTs>700){
-      consolidating=j.consolidating; syncPlay(); syncPp(); syncSpeed();
+    // the world clock: RUNNING/STOPPED. The server is the source of truth; we mirror
+    // it locally (within a grace window so a manual RUN/STOP isn't reverted by a
+    // stale poll) and badge #wait. syncPp/syncPlay/syncSpeed all read `running`.
+    if(j.running!=null){
+      if(j.running!==running && Date.now()-userDialTs>700){
+        running=j.running; syncPlay(); syncPp(); syncSpeed();
+      }
+      waitEl.textContent = running ? "RUNNING" : "STOPPED";
+      waitEl.style.color = running ? "var(--green-hi)" : "#8a958e";
     }
     // world-clock speed (1x/2x/4x) — sync the main-UI buttons to the server truth
     if(j.cycle_speed!=null && Math.abs(j.cycle_speed-cycleSpeed)>1e-6 && Date.now()-userDialTs>700){
       cycleSpeed=j.cycle_speed; syncSpeed();
+    }
+    // representation (llm | corrected | raw) — sync the main-UI buttons to the server truth
+    if(j.representation && j.representation!==curRep && Date.now()-userDialTs>700){
+      curRep=j.representation; syncRep(); rerenderAll();
     }
     const con=j.consolidation||{};
     set("ccpu",Math.round((con.cpu_actual||0)*100)+"%");
@@ -640,7 +729,9 @@ async function poll(){
     // DAY + time-of-day + phase, so a paused world freezes and PLAY moves the
     // clock. 2 hours per cycle, 12 cycles per day. The night market's lamps burn
     // coldest at midnight, so the phase icon marks where in the diurnal arc the
-    // world sits. (Cycle resets on proxy restart; the field/cells persist.)
+    // world sits. (The cycle persists across proxy restarts in the cast wrapper --
+    // cast.cycles is mirrored at every tick + restored on startup -- so the
+    // in-world date continues; the field/casts persist too.)
     {
       const cyc=con.cycles||0, HPC=2, CPD=12;
       const day=Math.floor(cyc/CPD)+1, h=(cyc*HPC)%24, hh=String(h).padStart(2,'0');
@@ -649,13 +740,11 @@ async function poll(){
       const wd=document.getElementById('wdate');
       if(wd) wd.innerHTML='<span class="ph">'+ph+'</span>Day '+day+' · '+hh+':00 · '+pl+' · cycle '+cyc;
     }
-    // the consolidator feeds the world on its own clock — pipe those stories into
-    // the MAIN CHAT as narrator prose, so the world's chronicle reads where the
-    // reader lives (no separate console panel).
-    if((con.cycles||0)>lastConCycle){
-      lastConCycle=con.cycles||0;
-      storyPush(con.stories||[]);
-    }
+    // the consolidator feeds the world on its own clock. The chat no longer
+    // streams the raw chronicle (storyPush removed) -- it is a SITUATION channel
+    // now: situations append only when the subject is touched (see the auto-refresh
+    // block after the cast). Keep lastConCycle current so STEP's dedup still holds.
+    if((con.cycles||0)>lastConCycle) lastConCycle=con.cycles||0;
     const tickEl=document.getElementById("drowntick");
     if(tickEl) tickEl.style.left=Math.min(100,((cl/theo)/0.25*100))+"%";
     const vs=j.verdicts||[], nv=j.n_verdicts||vs.length;
@@ -672,7 +761,86 @@ async function poll(){
       });
     }
     // ---- the cast: named walking-regions of the field ------------------------
-    castList=j.cast||[]; renderRoster(); syncPov(); renderSituation(con);
+    castList=j.cast||[]; renderRoster(); syncPov(); syncPovPicker(); renderSituation(con);
+    // ---- chat while the world runs: a LIVE CHRONICLE (one rolling, auto-updated
+    // message compressing the autonomous story) takes over from the situation
+    // channel. STOPPED, the chronicle freezes as a static snapshot and we fall
+    // through to the situation channel (turn-based: discrete reports on send /
+    // POV-touch / STEP). The two never run at once -- `running` is the switch.
+    if(running){
+      // ---- LIVE CHRONICLE: one rolling node, updated in place as the world
+      // advances. POV set -> that char's thread; no POV -> the whole world. The
+      // render is a slow LLM call, so liveBusy keeps ONE in flight at a time --
+      // never stack (a stale-drop that fired a new request every 4s flooded
+      // Ollama's queue and the node never updated). The cycle gate + 5s throttle
+      // mean we only re-render when the world actually moved + not faster than
+      // the shared Ollama instance can keep up.
+      if(!liveNode){
+        liveNode=addChronicleLive("…", [], povChar?povChar.name:"THE WORLD");
+        lastChronCycle=-1; liveTs=0;
+      }
+      const cyc=(con&&con.cycles)||0;
+      if(!liveBusy && cyc!==lastChronCycle && Date.now()-liveTs>5000){
+        lastChronCycle=cyc; liveTs=Date.now(); liveBusy=true;
+        const sid=povChar?povChar.id:null;
+        fetch("/chronicle",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({pov_id:sid})})
+          .then(r=>r.json()).then(cj=>{
+            liveBusy=false;
+            if(!liveNode) return;                   // frozen (STOP) while in flight -> drop
+            setChronicleLive(liveNode, (cj&&cj.chronicle)||"(the world is quiet…)",
+                             (cj&&cj.raw_beats)||[], povChar?povChar.name:"THE WORLD");
+            msgs.appendChild(liveNode);             // keep the rolling node last in the chat
+            msgs.scrollTop=msgs.scrollHeight;
+          }).catch(()=>{liveBusy=false;});
+      }
+    } else {
+      // ---- STOPPED: freeze the live chronicle as a static snapshot (one per RUN
+      // session) and reset so the next RUN starts a fresh rolling node.
+      if(liveNode){ liveNode.classList.remove("live"); liveNode=null; }
+      // ---- situation channel: auto-append a situation when the SUBJECT is touched
+      // The subject is the POV, or (no POV) whoever is on stage (max last_cycle, the
+      // same resolution the server uses). A new situation appends ONLY when the
+      // subject's scene_count rises past the watermark (a scene just tagged them) --
+      // other chars' beats stay quiet. The watermark + the 1500ms post-send grace
+      // together stop a double-render after a send (walk_pov bumps scene_count).
+      // On the very first poll we just baseline the watermark (no render).
+      const subj = povChar || (castList||[]).slice().sort((a,b)=>(b.last_cycle||0)-(a.last_cycle||0))[0];
+      if(subj){
+        if(lastSituationKey===null){
+          // first poll: baseline the watermark. If a POV is already set (persisted)
+          // and the chat is empty, open on that POV's situation now -- otherwise the
+          // chat would stay blank until the user acts.
+          lastSituationKey={id:subj.id, scene_count:subj.scene_count||0};
+          if(povChar && !msgs.children.length) loadSituation(povChar.id);
+        }else if((subj.id!==lastSituationKey.id ||
+                  (subj.scene_count||0)>lastSituationKey.scene_count) &&
+                 Date.now()-lastUserSituationTs>1500){
+          // Set the watermark + grace SYNCHRONOUSLY, before the fetch. Without this
+          // every poll during the ~10s /situation render sees scene_count still
+          // above the STALE watermark and fires another -- a string of different
+          // "interpretations" of the same state (5+ duplicates on one step). With
+          // the watermark set now, subsequent polls see scene_count == watermark and
+          // stay quiet until the subject is touched AGAIN. The .then refines with
+          // the server's exact pov_id/scene_count.
+          lastSituationKey={id:subj.id, scene_count:subj.scene_count||0};
+          lastUserSituationTs=Date.now();
+          const my=++sitSeq;                  // stale-drop: supersede any in-flight render
+          const sid=povChar?povChar.id:null;
+          fetch("/situation",{method:"POST",headers:{"Content-Type":"application/json"},
+            body:JSON.stringify({pov_id:sid})})
+            .then(r=>r.json()).then(sj=>{
+              if(my!==sitSeq) return;          // a send/step/loadSituation won while in flight -> drop
+              addSituation((sj&&sj.situation)||"(the world is quiet…)",
+                           (sj&&sj.raw_scenes)||[],
+                           povChar?povChar.name:"THE WORLD");   // APPEND (the chat is a log)
+              lastSituationKey={id:(sj&&sj.pov_id!=null)?sj.pov_id:subj.id,
+                                scene_count:(sj&&sj.scene_count)||subj.scene_count||0};
+              lastUserSituationTs=Date.now();
+            }).catch(()=>{});
+        }
+      }
+    }
     // ---- settings: keep the SETTINGS panel + storyModel in sync with the server
     // truth, without clobbering fields the user is actively editing ----------------
     if(j.backend!=null) curBackend=j.backend;
@@ -685,6 +853,7 @@ function escapeHtml(s){return s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;","
 
 // ---- the cast: named pins on the world map + the roster in the menu ----------
 let castList=[];
+let castNames=new Set();          // for correctedText capitalization, refreshed in renderRoster
 const castMarksEl=document.getElementById("cast-marks");
 function renderCastMarks(){
   if(!castList.length){if(castMarksEl.childElementCount)castMarksEl.innerHTML="";return;}
@@ -708,6 +877,7 @@ function renderCastMarks(){
   }
 }
 function renderRoster(){
+  castNames=new Set(castList.map(c=>c.name).filter(Boolean));   // source of names for correctedText
   const el=document.getElementById("cast-roster");if(!el)return;
   if(!castList.length){el.innerHTML='<div class="roster-empty">no cast yet — the world seeds one on its first chapter</div>';return;}
   el.innerHTML=castList.map(ch=>'<div class="roster-row'+(ch.pov?' pov':'')+'" data-id="'+ch.id+'">'
@@ -731,9 +901,26 @@ function zoomToChar(id){
   tgt=new THREE.Vector3(ch.p[0],ch.p[1],ch.p[2]);rad=Math.max(6,rad*0.6);cam();
 }
 function castAction(act,id){
+  const prevPovId=povChar?povChar.id:null;
   fetch("/cast",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({action:act,id:id})})
-    .then(r=>r.json()).then(j=>{castList=j.cast||[];renderRoster();syncPov();poll();}).catch(()=>{});
+    .then(r=>r.json()).then(j=>{
+      castList=j.cast||[];renderRoster();syncPov();
+      const curPovId=povChar?povChar.id:null;
+      if(curPovId!==prevPovId) onPovChanged(curPovId);   // POV changed -> re-open the chat
+      poll();
+    }).catch(()=>{});
+}
+// POV changed: how the chat responds depends on whether the world is running.
+// RUNNING -> the live chronicle just switches to the new POV's thread (reset so
+// the next poll fetches /chronicle with the new pov_id; no chat clear). STOPPED
+// -> re-open on a discrete situation report (loadSituation clears + opens).
+function onPovChanged(newPovId){
+  if(running){
+    lastChronCycle=-1; liveTs=0;          // force a fresh /chronicle for the new thread
+  } else {
+    loadSituation(newPovId);
+  }
 }
 // ---- the POV protagonist: who the reader IS --------------------------------
 let povChar=null;          // the castList entry with pov:true (or null -> no POV)
@@ -743,6 +930,40 @@ function syncPov(){
   if(povChar){nm.textContent=povChar.name;cin.placeholder="what does "+povChar.name+" think?";}
   else{nm.textContent="THE WORLD";cin.placeholder="speak to the cell…";}
 }
+// the POV picker in the chat header: a compact way to choose who you are (or
+// "THE WORLD" = no POV). Reuses the /cast {action:"pov"} path (id -1 unsets).
+// Rebuilt each poll from castList, but never clobbers a selection the user is
+// mid-interaction with (we track the live option separately).
+function syncPovPicker(){
+  const sel=document.getElementById("pov-pick"); if(!sel) return;
+  const curId = povChar ? povChar.id : -1;
+  // rebuild only when the cast roster actually changed (ids differ), to avoid
+  // blowing away the open dropdown while the user is choosing
+  const ids = (castList||[]).map(c=>c.id).join(",");
+  if(sel.dataset.ids!==ids){
+    sel.dataset.ids=ids;
+    sel.innerHTML='<option value="-1">THE WORLD</option>'+
+      (castList||[]).map(c=>'<option value="'+c.id+'">'+escapeHtml(c.name)+'</option>').join("");
+  }
+  if(sel.dataset.userPicking!=="1") sel.value=String(curId);
+}
+function povPickSet(id){
+  const prevPovId=povChar?povChar.id:null;
+  fetch("/cast",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({action:"pov",id:parseInt(id,10)})})
+    .then(r=>r.json()).then(j=>{
+      castList=j.cast||[];renderRoster();syncPov();syncPovPicker();
+      const curPovId=povChar?povChar.id:null;
+      if(curPovId!==prevPovId) onPovChanged(curPovId);   // POV changed -> re-open the chat
+      poll();
+    }).catch(()=>{});
+}
+(function wirePovPick(){
+  const sel=document.getElementById("pov-pick"); if(!sel) return;
+  sel.addEventListener("mousedown",()=>{sel.dataset.userPicking="1";});   // hold the selection while open
+  sel.addEventListener("change",()=>{sel.dataset.userPicking="";povPickSet(sel.value);});
+  sel.addEventListener("blur",()=>{sel.dataset.userPicking="";});
+})();
 // the SITUATION snapshot: the POV character's current scene (their last_scene),
 // refreshed every poll. Falls back to the latest chronicle scene if the POV has
 // no tagged scene yet, so the panel is never blank while the world is narrating.
@@ -774,7 +995,14 @@ function renderSituation(con){
 setInterval(poll,1000);
 
 // ---- chat --------------------------------------------------------------------
-const conv=[],msgs=document.getElementById("msgs"),cin=document.getElementById("cin");
+// The world-viewer's chat path is /adjust_narrative: the player's words ADJUST the
+// world (walk the POV's region, or mix into the whole world) and the server returns
+// the world's narration. /api/chat stays for the model-proxy (observer/Claude Code)
+// but the viewer no longer drives it. Three narration channels share the chat:
+//   .narr          — the world's reply to an adjustment (send)
+//   .narr.chronicle— the autonomous chronicle the consolidator writes (storyPush)
+//   .narr.preview  — a transient read-only preview shown as the player types
+const msgs=document.getElementById("msgs"),cin=document.getElementById("cin");
 function addMsg(role,text){
   const d=document.createElement("div");d.className="m "+role;
   if(povChar&&role==="u"){                       // your words -> the protagonist's thoughts
@@ -788,51 +1016,240 @@ function addMsg(role,text){
   }
   msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;return d;
 }
+function addNarration(text){              // the world's reply to an adjustment
+  return makeNarrNode(text,"narr","");
+}
+function addChronicle(text,result){       // the autonomous chronicle (consolidator)
+  const suffix=(result && result!=="fed")?("   ⟂ "+result):"";
+  return makeNarrNode(text,"chronicle",suffix);
+}
+// ---- the situation channel --------------------------------------------------
+// A SITUATION REPORT: a rendered summary of where the POV is + what's been
+// happening, grounded in their recent lived scenes. Reuses the 3-rep stash so
+// the [LLM'd][Corrected][Raw] toggle switches between the rendered report and
+// its raw source scenes. The report is ALREADY rendered (server-side) -> we
+// pre-fill dataset.llm and fire NO /render (renderBeatLlm's guard skips a node
+// whose dataset.llm is set). suffix carries the "— who" attribution; send()
+// folds the compass ⟂ sim into it.
+function addSituation(situationText,rawScenes,who){
+  const raw=(rawScenes||[]).join("  ·  ");
+  const d=document.createElement("div");
+  d.className="m a narr situation";
+  d.dataset.raw=raw;
+  d.dataset.corrected=correctedText(raw);
+  d.dataset.llm=situationText||"";               // already rendered -> no /render fetch
+  d.dataset.suffix=who?("  — "+who):"";
+  setRepText(d);
+  msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;
+  return d;
+}
+// The LIVE CHRONICLE node: a single rolling message that, while the world runs,
+// compresses the autonomous story into a few flowing paragraphs and updates IN
+// PLACE. Reuses the 3-rep stash: dataset.raw = the source beats joined (the Raw
+// view shows what the cells actually authored), dataset.llm = the compressed
+// narration (pre-filled -> no /render fetch). `.live` marks it as the rolling
+// node (its own CSS + it's the target of setChronicleLive updates).
+function addChronicleLive(text,beats,who){
+  const raw=(beats||[]).join("  ·  ");
+  const d=document.createElement("div");
+  d.className="m a narr chronicle live";
+  d.dataset.raw=raw;
+  d.dataset.corrected=correctedText(raw);
+  d.dataset.llm=text||"";
+  d.dataset.suffix=who?("  — "+who+" · LIVE"):"  — LIVE";
+  setRepText(d);
+  msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;
+  return d;
+}
+// update an existing live-chronicle node's compressed narration + source beats
+// in place (the node stays where it is; the caller may re-append to keep it last).
+function setChronicleLive(node,text,beats,who){
+  if(!node) return;
+  const raw=(beats||[]).join("  ·  ");
+  node.dataset.raw=raw;
+  node.dataset.corrected=correctedText(raw);
+  node.dataset.llm=text||"";
+  node.dataset.suffix=who?("  — "+who+" · LIVE"):"  — LIVE";
+  setRepText(node);
+}
+// Load the POV's situation into the chat (clear + open). Used on POV switch +
+// world LOAD so the chat opens on a situation, not a stale chronicle. Shows a
+// transient placeholder, fetches /situation, then clears #msgs and drops the
+// report; sets the watermark so the next poll won't immediately re-render.
+function loadSituation(povId){
+  const name=povChar?povChar.name:"THE WORLD";
+  // Set the watermark + grace SYNCHRONOUSLY, before the fetch. Otherwise poll's
+  // auto-refresh sees the STALE watermark from the previous POV (different id) and
+  // fires a /situation every second while this fetch is in flight -- appending a
+  // string of duplicate situations that read as the world "stepping" on a mere
+  // change of perspective. With the watermark set now, the immediate poll() (and
+  // every poll until the fetch resolves) sees the right subject + scene_count and
+  // stays quiet. The .then refines it with the server's exact values.
+  const subj0 = povChar || (castList||[]).slice().sort((a,b)=>(b.last_cycle||0)-(a.last_cycle||0))[0];
+  if(subj0) lastSituationKey={id:subj0.id, scene_count:subj0.scene_count||0};
+  lastUserSituationTs=Date.now();
+  const my=++sitSeq;                  // stale-drop: only the LATEST render clears + writes
+  const ph=addMsg("sys","(reading "+name+"'s situation…)");
+  fetch("/situation",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({pov_id:(povId!=null?povId:null)})})
+    .then(r=>r.json()).then(j=>{
+      ph.remove();
+      if(my!==sitSeq) return;          // superseded (e.g. a send/step while in flight) -> drop
+      msgs.innerHTML="";
+      addSituation((j&&j.situation)||"(the world is quiet…)",
+                   (j&&j.raw_scenes)||[], name);
+      lastSituationKey={id:(j&&j.pov_id!=null)?j.pov_id:(povChar?povChar.id:null),
+                        scene_count:(j&&j.scene_count)||0};
+      lastUserSituationTs=Date.now();
+    }).catch(()=>{ph.textContent="(could not reach /situation — is the proxy up?)";});
+}
+// ---- three representations of one beat --------------------------------------
+// The cell authors a RAW n-gram beat (lowercase, mid-thought, cut-off). We keep
+// three displays of the SAME words on each .narr node and switch between them:
+//   dataset.raw        — exactly what the cell emitted (the canon, what the field absorbs)
+//   dataset.corrected  — client-side typographic repair only (no model)
+//   dataset.llm        — an on-demand /render gloss (filled lazily; "" until it lands)
+// `curRep` selects which shows; dataset.suffix holds the ⟂ annotation, re-appended
+// after every swap (it's baked into textContent, so a swap would drop it otherwise).
+// The LLM is a RENDERER only — raw is what the field absorbs; this never changes canon.
+function setRepText(d){                            // render the active rep + suffix onto a node
+  if(d.dataset.raw===undefined) return;           // preview / non-beat nodes: leave untouched
+  let t=d.dataset[curRep];
+  if((!t)&&curRep==="llm") t=d.dataset.corrected;  // LLM'd not landed yet -> corrected placeholder
+  if(!t) t=d.dataset.raw||"";
+  d.textContent=t+(d.dataset.suffix||"");
+}
+function makeNarrNode(raw,extraClass,suffix){
+  const d=document.createElement("div");
+  d.className="m a narr"+(extraClass?(" "+extraClass):"");
+  d.dataset.raw=raw;
+  d.dataset.corrected=correctedText(raw);
+  d.dataset.llm="";                                // filled on demand by renderBeatLlm
+  d.dataset.suffix=suffix||"";
+  setRepText(d);
+  msgs.appendChild(d);msgs.scrollTop=msgs.scrollHeight;
+  // default view: raw shows first, the LLM'd gloss swaps in when it lands. Skip
+  // the model for fallback messages (parenthetical / "error:"), which aren't beats.
+  if(curRep==="llm" && raw && raw.charAt(0)!=="(" && raw.slice(0,6)!=="error:")
+    renderBeatLlm(d);
+  return d;
+}
+// pure typographic repair, no model: straighten quotes, capitalize cast names +
+// sentence starts, trim a trailing cut-off token the trigram often leaves. Same
+// words, just typeset — the raw is still recoverable (dataset.raw).
+function correctedText(raw){
+  let s=String(raw||"");
+  if(!s.trim()) return s;
+  s=s.replace(/[\u201c\u201d]/g,'"').replace(/[\u2018\u2019]/g,"'");
+  if(s.charAt(0)==='"'||s.charAt(0)==="'") s=s.slice(1);
+  castNames.forEach(nm=>{
+    if(!nm) return;
+    const re=new RegExp("\\b"+nm.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\b","ig");
+    s=s.replace(re,nm);
+  });
+  s=s.replace(/(^|[.!?]\s+)([a-z])/g,(m,p,c)=>p+c.toUpperCase());
+  for(let i=0;i<2;i++){                              // trim up to two trailing cut-off tokens
+    const t=s.replace(/\s*\b(the|a|an|to|and|of|in|on|by|his|her|their|its|that|this|with|from|as|at|for|but|or|so|if)\b[^\w]*$/i,"");
+    if(t===s) break; s=t;
+  }
+  return s.replace(/[\s,]+$/,"").trim();
+}
+// on-demand LLM gloss for a single node, fetched at most once. Fire the fetch
+// right away — the browser already caps concurrent fetches per origin, and Ollama
+// serializes its own request queue, so no manual cap is needed. (An earlier
+// hand-rolled cap of 3 stalled queued beats: their fetch never sent, so the gloss
+// never swapped in without a toggle.) On any failure the node stays on
+// corrected/raw (graceful) and is retried on the next toggle.
+function renderBeatLlm(d){
+  if(!d||d.dataset._rendering||d.dataset.llm||!d.dataset.raw) return;
+  d.dataset._rendering="1";
+  if(curRep==="llm") d.classList.add("rendering");   // dim + pulse: gloss in flight
+  fetch("/render",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({text:d.dataset.raw, pov_id:(povChar?povChar.id:null)})})
+    .then(r=>r.json()).then(j=>{ if(j&&j.rendered) d.dataset.llm=j.rendered; })
+    .catch(()=>{})
+    .then(()=>{
+      d.dataset._rendering="";
+      d.classList.remove("rendering");               // gloss landed (or gave up -> corrected)
+      if(d.dataset.llm && curRep==="llm") setRepText(d);
+    });
+}
+// a single transient preview line; replaced each keystroke, cleared on send/blur
+let previewNode=null;
+function addPreview(text){
+  if(previewNode){previewNode.textContent=text;return previewNode;}
+  previewNode=document.createElement("div");previewNode.className="m a narr preview";
+  previewNode.textContent=text;
+  msgs.appendChild(previewNode);msgs.scrollTop=msgs.scrollHeight;return previewNode;
+}
+function clearPreview(){if(previewNode){previewNode.remove();previewNode=null;}}
 async function send(text){
   if(!text.trim())return;
-  conv.push({role:"user",content:text});addMsg("u",text);cin.value="";
-  const think=addMsg("sys","the cell is deciding…");
+  addMsg("u",text);clearPreview();cin.value="";
+  const think=addMsg("sys","the world is listening…");
   try{
-    const model=storyModel||"llama3.1:8b";
-    const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({model,messages:conv,stream:false})});
+    const r=await fetch("/adjust_narrative",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({text})});
     const j=await r.json();
     think.remove();
-    const c=(j&&j.message&&j.message.content)||(j&&j.error&&("error: "+j.error))||"(no reply)";
-    const am=addMsg("a",c);conv.push({role:"assistant",content:c});
+    // the chat reply is now a SITUATION REPORT (rendered server-side), not the
+    // raw n-gram narration. The report is grounded in the POV's recent scenes +
+    // this adjustment folded in as the latest beat. raw_scenes feeds the Raw rep.
+    const who=povChar?povChar.name:"THE WORLD";
+    ++sitSeq;            // a send supersedes any in-flight /situation render: its .then
+                       // now sees my!==sitSeq and drops, so the send reply is the only
+                       // thing that appends (no "2 responses" on send).
+    const am=addSituation(
+      (j&&j.situation)||((j&&j.error)&&("error: "+j.error))||"(the world is silent)",
+      (j&&j.raw_scenes)||[], who);
+    // watermark: the subject this situation was rendered for + its scene_count, so
+    // the next poll won't immediately append a duplicate (send's walk_pov may bump
+    // scene_count). The grace window + watermark together stop the double-render.
+    lastSituationKey={id:(j&&j.pov_id!=null)?j.pov_id:(povChar?povChar.id:null),
+                      scene_count:(j&&j.scene_count)||0};
+    lastUserSituationTs=Date.now();
     // compass + map: pull the neighbourhood for this query. The recalled scene's
     // sim is the strength of association (annotated on the reply); the panel shows
     // the top-8 nearest memories so you can walk the field's association graph.
+    // Fold the ⟂ sim AFTER the "— who" label already on the suffix (append, don't
+    // overwrite, or the attribution would drop).
     fetchHood(text).then(hj=>{
       renderHood(hj);
       const rec=(hj.neighbors||[]).find(n=>n.recalled);
-      if(rec) am.textContent=c+"   ⟂  sim "+rec.sim.toFixed(2)+(rec.safe?"":" · demoted");
+      if(rec){ am.dataset.suffix=(am.dataset.suffix||"")+"   ⟂  sim "+rec.sim.toFixed(2)+(rec.safe?"":" · demoted"); setRepText(am); }
     });
     setTimeout(poll,150);
-    // REACTIVE world-drive: after the protagonist's move, the world writes ONE
-    // scene that follows from it -- the self-writing follows the explorer. The
-    // beat is narrated into the chat as the world's response to the move.
-    if(worldDrive==="reactive") reactiveBeat(text);
-    else if(worldDrive==="pov-follow" && autoflood && autoflood.checked) flood();
-  }catch(e){think.textContent="(could not reach /api/chat — is the proxy up?)";}
+  }catch(e){think.textContent="(could not reach /adjust_narrative — is the proxy up?)";}
 }
 document.getElementById("send").onclick=()=>send(cin.value);
-cin.addEventListener("keydown",e=>{if(e.key=="Enter"&&!e.shiftKey){e.preventDefault();send(cin.value);}});
-// REACTIVE world-drive beat: the world writes ONE scene that follows the
-// protagonist's move (feeds:0 + reactive:true -> proxy._reactive_beat). The beat
-// is narrated into the chat as the world's response, the same channel autonomous
-// chronicle scenes use. No-op in pov-follow (the consolidator writes) / explore.
-function reactiveBeat(text){
-  const ceil=parseFloat(ceiling.value)||0;
-  const fr=parseFloat(entropy.value)||0;
-  const cpu=(parseFloat(cputarget.value)||0)/100;
-  fetch("/feed",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({feeds:0, reactive:true, prompt:String(text||""),
-      entropy_ceiling:ceil, mode:curMode, feed_rate:fr, cpu_target:cpu,
-      consolidating:consolidating, cycle_speed:cycleSpeed})})
-    .then(r=>r.json()).then(j=>{ storyPush(j.stories||[]); poll(); })
-    .catch(()=>{});
-}
+cin.addEventListener("keydown",e=>{if(e.key=="Enter"&&!e.shiftKey){e.preventDefault(); cin.value.trim()?send(cin.value):stepWorld();}});
+// ---- live preview: as the player types, ask the world for a read-only SITUATION
+// (no mutation) with the typed text folded in as a "new development". Debounced
+// 600ms (situation renders are heavier than a one-beat /render, and they share the
+// one Ollama instance with /render + the consolidator, so we don't flood the
+// queue); a previewSeq stale-drop discards out-of-order replies on fast typing.
+// A transient .narr.preview line shows it, cleared on send / blur / empty input.
+// Setting cin.value programmatically does NOT fire "input", so send()'s clear is clean.
+let previewTimer=null;
+cin.addEventListener("input",()=>{
+  if(previewTimer){clearTimeout(previewTimer);previewTimer=null;}
+  clearPreview();
+  if(!cin.value.trim())return;
+  previewTimer=setTimeout(()=>{
+    const text=cin.value.trim();
+    previewSeq++; const my=previewSeq;
+    addPreview("…");
+    fetch("/situation",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({pov_id:(povChar?povChar.id:null), text})})
+      .then(r=>r.json()).then(j=>{
+        if(my!==previewSeq) return;                 // a newer keystroke won -> drop this stale reply
+        const s=(j&&j.situation)||"";
+        if(!s){clearPreview();return;}
+        addPreview(s);
+      }).catch(()=>{});
+  },600);
+});
+cin.addEventListener("blur",clearPreview);
 
 // ---- the neighborhood: explore the field's association graph -----------------
 const hood=document.getElementById("hood"),hoodBody=document.getElementById("hood-body"),
@@ -889,40 +1306,40 @@ skip.onclick=async()=>{
     setTimeout(()=>{skip.textContent=old;skip.disabled=false;},2500);}
 };
 
-// ---- the feed loop (POST /feed). ceiling = variety display (inert for growth  -
-// now); entropy = the FEED RATE (feeds/cycle, continuous); cpu target =          -
-// consolidation digest fraction. PLAY arms the world's own clock (a server-side   -
-// consolidator feeds it from the genesis cache + digests it); STEP is one feed.  -
+// ---- the world clock (server-owned). ceiling = variety display (inert for
+// growth now); entropy = the FEED RATE (feeds/cycle, continuous); cpu target =
+// consolidation digest fraction. RUN arms the world's own clock (a server-side
+// consolidator feeds + digests it on its own time); STEP is one feed+digest
+// (STOPPED only). No client growth timer — the server is the clock. --
 const play=document.getElementById("play"),pause=document.getElementById("pause"),
-      step=document.getElementById("step"),autoflood=document.getElementById("autoflood"),
+      step=document.getElementById("step"),
       ceiling=document.getElementById("ceiling"),ceilv=document.getElementById("ceilv"),
       entropy=document.getElementById("entropy"),entropyv=document.getElementById("entropyv"),
       cputarget=document.getElementById("cputarget"),cputargetv=document.getElementById("cputargetv"),
       modeBtn=document.getElementById("mode-btn");
-let floodTimer=null;
-let curMode="story";                          // 'story' = continuing chronicle; 'variety' = vignettes
-let consolidating=false;                      // arm/disarm the world's own clock (server-side consolidator)
-let cycleSpeed=1.0;                           // world-clock multiplier (1x/2x/4x from the main-UI buttons)
-let worldDrive="reactive";                    // reactive | pov-follow | explore (server is source of truth)
-let beatAuthor="llm";                         // llm | cells — who writes the autonomous (pov-follow) chronicle (server truth)
-let userDialTs=0;                             // last manual dial click; poll ignores stale server dials within a grace window
+let curMode="variety";                          // 'story' = continuing chronicle; 'variety' = vignettes
+let running=false;                              // the world's own clock: RUNNING/STOPPED (server is source of truth)
+let cycleSpeed=1.0;                             // world-clock multiplier (1x/2x/4x from the main-UI buttons)
+let beatAuthor="cells";                         // llm | cells — who writes the autonomous chronicle (server truth)
+let userDialTs=0;                               // last manual dial click; poll ignores stale server dials within a grace window
+let curRep="llm";                              // llm | corrected | raw — how a beat is DISPLAYED (canon stays raw)
 
 function ceilDisp(){const v=parseFloat(ceiling.value)||0;
   return (v*100).toFixed(1)+"% · cap "+Math.max(0,Math.round(v*theoMax));}
 
-// persist ALL dials (feeds:0 = no LLM call, just save + refresh /state). every
-// slider drag and the arm/disarm go through this, so the server is the single
-// source of truth and the consolidator reads the persisted values next cycle.
-// temperature is NO LONGER a dial (fixed server-side for a cohesive chronicle).
+// persist ALL growth dials to the server (single source of truth; persisted to
+// disk by /world/controls). every slider drag + the narrative-mode toggle go
+// through this. The world-loop state (RUNNING/STOPPED) is NOT a dial — it goes
+// through /world/run + /world/stop. temperature is fixed server-side.
 let dialTimer=null;
 function persistDials(){
   const ceil=parseFloat(ceiling.value)||0;
   const fr=parseFloat(entropy.value)||0;
   const cpu=(parseFloat(cputarget.value)||0)/100;
-  fetch("/feed",{method:"POST",headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({feeds:0, entropy_ceiling:ceil, mode:curMode,
-                         feed_rate:fr, cpu_target:cpu, consolidating:consolidating,
-                         cycle_speed:cycleSpeed})})
+  fetch("/world/controls",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({entropy_ceiling:ceil, story_mode:curMode,
+                         feed_rate:fr, cpu_target:cpu, cycle_speed:cycleSpeed,
+                         representation:curRep})})
     .then(r=>r.json()).then(()=>poll()).catch(()=>{});
 }
 function queuePersist(){if(dialTimer) clearTimeout(dialTimer);dialTimer=setTimeout(persistDials,120);}
@@ -939,77 +1356,75 @@ entropy.oninput();
 cputarget.oninput=()=>{cputargetv.textContent=(cputarget.value)+"%";queuePersist();};
 cputarget.oninput();
 
-// one manual feed (STEP button, or the autoflood burst). pops one cached chronicle
-// scene (a cheap embed; the LLM is only called when the cache runs low). also
-// re-persists the dials so a STEP keeps the server in sync with the current sliders.
-async function liveTick(){
-  const ceil=parseFloat(ceiling.value)||0;
-  const fr=parseFloat(entropy.value)||0;
-  const cpu=(parseFloat(cputarget.value)||0)/100;
+// STEP: one server-side feed+digest (STOPPED only). POST /world/step returns the
+// scene -> narrate it via the chronicle channel. Refused while RUNNING (stop
+// first) or with no --system premise; the server's error message surfaces briefly.
+async function stepWorld(){
+  const btns=[step,document.getElementById("pp-step")].filter(Boolean);
+  btns.forEach(b=>{b.disabled=true;});
+  const old=step.textContent;step.textContent="…";
   try{
-    const r=await fetch("/feed",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({feeds:1, entropy_ceiling:ceil, mode:curMode,
-                           feed_rate:fr, cpu_target:cpu, consolidating:consolidating,
-                           cycle_speed:cycleSpeed})});
+    const r=await fetch("/world/step",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({})});
     const j=await r.json();
-    if(!r.ok){stopFlood();return false;}
+    if(!r.ok){step.textContent=j.error||"failed";
+      setTimeout(()=>{step.textContent=old;btns.forEach(b=>b.disabled=false);},2500);return;}
     if((j.fed||0)>0) floatText("+"+j.fed+" story","#e6c34a");
     else if((j.skipped||0)>0) floatText("skipped","#8a958e");
-    storyPush(j.stories||[]);
-    return true;
-  }catch(e){stopFlood();return false;}
+    // STEP produces no chat line directly: the chat is a SITUATION channel now.
+    // Mark this cycle seen (keep the cycle dedup current), then poll -- if the
+    // stepped scene tags the subject, the poll's auto-refresh renders a situation
+    // (~1 cycle later); if not, the chat stays quiet.
+    lastConCycle = Math.max(lastConCycle, j.cycles||0);
+    poll();
+    setTimeout(()=>{step.textContent=old;btns.forEach(b=>b.disabled=false);},500);
+  }catch(e){step.textContent="×";
+    setTimeout(()=>{step.textContent=old;btns.forEach(b=>b.disabled=false);},2500);}
 }
-// PLAY/PAUSE arm/disarm the world's own clock (the server-side consolidator). no
-// client timer — when armed, the consolidator thread feeds + digests on its own
-// cycle, reading feed_rate / cpu_target from the server each cycle.
-function setPlaying(on){
-  consolidating=on;
+// RUN/STOP: arm/disarm the world's own clock (server-side consolidator). The
+// server is the source of truth; we POST then mirror locally + grace the poll
+// so it won't revert us within ~700ms. No client timer — when RUNNING the
+// consolidator thread feeds + digests on its own cycle.
+function setRunning(on){
+  running=on;
   syncPlay(); syncPp(); syncSpeed();   // mirror into ALL three control groups: menu + #pp + speeds
-  userDialTs=Date.now();        // grace: poll won't revert the play/pause within ~700ms
-  queuePersist();
+  userDialTs=Date.now();              // grace: poll won't revert the RUN/STOP within ~700ms
+  fetch(on?"/world/run":"/world/stop",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:"{}"}).then(()=>poll()).catch(()=>{});
 }
 function syncPlay(){
-  play.disabled=consolidating;
-  play.classList.toggle("on",consolidating);
-  pause.disabled=!consolidating;
-  play.textContent=consolidating?"▶ ARMED":"▶ PLAY";
+  play.disabled=running;
+  play.classList.toggle("on",running);
+  pause.disabled=!running;
+  play.textContent=running?"▶ RUNNING":"▶ RUN";
 }
-function flood(){
-  if(floodTimer) return;
-  let ticks=0; const MAX=6;
-  const go=async()=>{ if(ticks>=MAX){stopFlood();return;} ticks++; await liveTick(); floodTimer=setTimeout(go,180); };
-  go();
-}
-function stopFlood(){
-  if(floodTimer){clearTimeout(floodTimer);floodTimer=null;}
-}
-step.onclick=()=>liveTick();
-play.onclick=()=>setPlaying(true);
-pause.onclick=()=>setPlaying(false);
+step.onclick=stepWorld;
+play.onclick=()=>setRunning(true);
+pause.onclick=()=>setRunning(false);
 syncPlay();
 
-// ---- main-UI playback controls (mirror the menu's PLAY/PAUSE + add 1x/2x/4x) -
+// ---- main-UI playback controls (RUN/STOP toggle + STEP + 1x/2x/4x speed) ----
 const pp=document.getElementById("pp");
 function syncPp(){
   if(!pp) return;
-  // #pp is a PAUSE button: it highlights (on) when the world is PAUSED — the
-  // affordance is "press to resume" while paused, "press to pause" while live.
-  pp.textContent="⏸";
-  pp.classList.toggle("on",!consolidating);
-  pp.title=consolidating?"pause the world's own clock":"resume the world's own clock";
+  // #pp is the RUN/STOP toggle: ▶ while stopped (lit = on when RUNNING), ⏸ while running.
+  pp.textContent = running ? "⏸" : "▶";
+  pp.classList.toggle("on",running);
+  pp.title = running ? "stop the world's own clock" : "run the world's own clock";
 }
-pp.onclick=()=>setPlaying(!consolidating);
+pp.onclick=()=>setRunning(!running);
+const ppStep=document.getElementById("pp-step");
+if(ppStep) ppStep.onclick=stepWorld;
 // world-clock speed: 1x/2x/4x scales the consolidation cycle rate (the whole
 // world — feeding + digestion + the day/night clock — moves faster together).
 function syncSpeed(){
-  // a speed only highlights while the world is RUNNING; paused -> none highlight
-  // (pausing deselects the speeds). When resumed, the matching speed re-lights.
+  // a speed only highlights while the world is RUNNING; stopped -> none highlight.
   document.querySelectorAll(".spd").forEach(b=>{
-    b.classList.toggle("on",consolidating && Math.abs((+b.dataset.spd)-cycleSpeed)<1e-6);
+    b.classList.toggle("on",running && Math.abs((+b.dataset.spd)-cycleSpeed)<1e-6);
   });
 }
 document.querySelectorAll(".spd").forEach(b=>{
-  b.onclick=()=>{cycleSpeed=+b.dataset.spd;setPlaying(true);syncSpeed();userDialTs=Date.now();queuePersist();};
+  b.onclick=()=>{cycleSpeed=+b.dataset.spd;syncSpeed();userDialTs=Date.now();queuePersist();};
 });
 syncPp();syncSpeed();
 // ---- starve / balance / feed: three inter-connected feed-rate presets -------
@@ -1049,57 +1464,62 @@ function syncMode(){
 }
 syncMode();
 
+// ---- representation: LLM'd / Corrected / Raw (how a beat is DISPLAYED) ------
+// The canon stays raw (absorbed as-is); these only change the VIEW. LLM'd fetches
+// a /render gloss per beat (concurrency-bounded, on demand); Corrected is pure
+// client-side repair; Raw is the literal n-gram. Choice persists via the dials.
+function syncRep(){
+  document.querySelectorAll(".rep").forEach(b=>{
+    b.classList.toggle("on",b.dataset.rep===curRep);
+  });
+}
+function rerenderAll(){                          // re-render every existing beat in the active rep
+  document.querySelectorAll("#msgs .narr").forEach(d=>{
+    if(d.dataset.raw===undefined) return;        // preview / non-beat nodes
+    if(curRep==="llm"){
+      if(!d.dataset.llm && d.dataset.raw) renderBeatLlm(d);   // pulses while pending
+      else d.classList.remove("rendering");                    // already glossed -> bright
+    } else {
+      d.classList.remove("rendering");           // not LLM'd mode -> no pulse
+    }
+    setRepText(d);
+  });
+}
+document.querySelectorAll(".rep").forEach(b=>{
+  b.onclick=()=>{
+    curRep=b.dataset.rep; syncRep();
+    userDialTs=Date.now(); queuePersist(); rerenderAll();
+  };
+});
+syncRep();
+
 // ---- the world's chronicle, narrated into the MAIN CHAT ---------------------
-// The consolidator feeds the world on its own clock (POV-FOLLOW mode) and a
-// reactive beat follows each move (REACTIVE mode); STEP feeds on demand. Each
-// scene is dropped into the main chat (#msgs) as narrator prose -- the same
-// place replies land -- so the world's story reads where the reader lives. No
-// separate console panel. A scene that was absorbed cleanly is plain prose; one
-// that was skipped gets a dim "⟂ <status>" suffix. Empty / no-story entries are
-// silent. When a POV protagonist is set, only scenes that TAGGED the POV are
-// narrated -- the chat reads as the protagonist's thread, not an omniscient
-// chronicle (so it stays coherent with the SITUATION panel). No POV -> all.
+// The consolidator feeds the world on its own clock when RUNNING; STEP feeds one
+// scene on demand. Each scene is dropped into the main chat (#msgs) as chronicle
+// prose (.narr.chronicle) -- distinct from an adjustment's reply (.narr) so the
+// reader can tell the world's own voice from its answer. A scene that was
+// absorbed cleanly is plain prose; one that was skipped gets a "⟂ <status>"
+// suffix. Empty / no-story entries are silent. When a POV protagonist is set,
+// only scenes that TAGGED the POV are narrated -- the chat reads as the
+// protagonist's thread, not an omniscient chronicle (so it stays coherent with
+// the SITUATION panel). No POV -> all.
 function storyPush(stories){
   if(!stories||!stories.length) return;
+  clearPreview();
   stories.forEach(s=>{
     const text=(s&&s.text)||"", result=(s&&s.result)||"";
     if(!text) return;                          // no text -> nothing to narrate
     if(povChar && s.pov===false) return;       // a POV is set + this scene isn't theirs -> skip
-    const d=addMsg("a", text);                 // the chronicle scene -> narrator prose
-    if(result && result!=="fed") d.textContent+="   ⟂ "+result;
+    addChronicle(text, result);
   });
 }
 
-// ---- menu + autoflood toggle -------------------------------------------------
+// ---- menu open / close -------------------------------------------------------
 const menu=document.getElementById("menu");
 function toggleMenu(){const open=menu.classList.toggle("open"); if(open) loadWorlds();}
 document.getElementById("slot-menu").onclick=toggleMenu;
 document.getElementById("backbtn").onclick=()=>menu.classList.remove("open");
 addEventListener("keydown",e=>{if(e.key==="Escape"){toggleMenu();}});
-const autofloodBtn=document.getElementById("autoflood-btn");
-function syncAutoflood(){autofloodBtn.textContent="↻ AUTO-FLOOD: "+(autoflood.checked?"ON":"OFF");
-  autofloodBtn.classList.toggle("on",autoflood.checked);}
-autofloodBtn.onclick=()=>{autoflood.checked=!autoflood.checked;syncAutoflood();};
-syncAutoflood();
-// ---- world-drive: mirror the SETTINGS selector + gate AUTO-FLOOD ----------------
-// AUTO-FLOOD (the autonomous chronicle burst) only makes sense when the world
-// writes on its own clock (pov-follow). In reactive the world writes one beat per
-// player move; in explore it never writes. So in those modes the toggle is forced
-// off + greyed so it can't be arm-restled into flooding.
-function syncDriveUI(){
-  const dr=document.getElementById("set-drive"); if(!dr) return;
-  if(document.activeElement!==dr) dr.value=worldDrive;
-}
-function applyAutofloodGate(){
-  const allow = worldDrive==="pov-follow";
-  if(!allow){ autoflood.checked=false; syncAutoflood(); }
-  autofloodBtn.disabled=!allow;
-  autofloodBtn.classList.toggle("dim",!allow);
-  autofloodBtn.title = allow ? "grow the world between your messages"
-    : (worldDrive==="reactive" ? "reactive: the world writes one beat per move"
-       : "explore: the world grows only from chat");
-}
-applyAutofloodGate();
 
 // ---- save / load / new world (the whole field + cast + audit) ----------------
 const worldSave=document.getElementById("world-save"),
@@ -1120,7 +1540,13 @@ async function loadWorlds(){
           if(!r.ok||!j.ok){b.textContent=j.error||"failed";setTimeout(()=>{b.textContent=old;b.disabled=false;},2500);return;}
           castList=j.cast||[];renderRoster();syncPov();renderCastMarks();
           floatText("loaded: "+b.dataset.load,"#5fd47a");
+          // a freshly loaded world is STOPPED + the chat starts clean: drop any
+          // stale live-chronicle node + baselines so the situation channel opens.
+          if(liveNode){liveNode.classList.remove("live");liveNode=null;}
+          liveBusy=false; liveTs=0; lastChronCycle=-1;
+          lastSituationKey=null; lastUserSituationTs=0;
           loadWorlds();poll();menu.classList.remove("open");
+          loadSituation(povChar?povChar.id:null);   // open the loaded world on a situation
         }catch(e){b.textContent="×";setTimeout(()=>{b.textContent=old;b.disabled=false;},2500);}
       };
     });
@@ -1196,8 +1622,6 @@ function syncSettingsUI(){
   if(tf) tf.textContent=curHasToken?"· set":"";
   const tk=document.getElementById("set-token");
   if(tk && document.activeElement!==tk && !tk.dataset.dirty) tk.value="";
-  const dr=document.getElementById("set-drive");
-  if(dr && document.activeElement!==dr) dr.value=worldDrive;
   const ba=document.getElementById("set-beat-author");
   if(ba && document.activeElement!==ba) ba.value=beatAuthor;
 }
@@ -1205,9 +1629,8 @@ async function saveSettings(clearToken){
   const be=document.getElementById("set-backend");
   const tk=document.getElementById("set-token");
   const sm=document.getElementById("set-model");
-  const dr=document.getElementById("set-drive");
   const ba=document.getElementById("set-beat-author");
-  const body={backend:be.value.trim(), story_model:sm.value||"", world_drive:dr?dr.value:worldDrive, beat_author:ba?ba.value:beatAuthor};
+  const body={backend:be.value.trim(), story_model:sm.value||"", beat_author:ba?ba.value:beatAuthor};
   if(clearToken) body.clear_token=true;
   else if(tk.value) body.token=tk.value;
   try{
@@ -1215,7 +1638,6 @@ async function saveSettings(clearToken){
     const j=await r.json();
     if(j && j.ok){
       curBackend=j.backend; storyModel=j.story_model; curHasToken=j.has_token;
-      if(j.world_drive){ worldDrive=j.world_drive; applyAutofloodGate(); }
       if(j.beat_author){ beatAuthor=j.beat_author; }
       tk.value=""; delete tk.dataset.dirty; delete be.dataset.dirty; delete sm.dataset.dirty;
       floatText("settings saved","#5fd47a");

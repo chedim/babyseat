@@ -4,7 +4,7 @@ A background daemon thread (mirroring ``pool.CellPool``'s stop/join pattern) tha
 runs the world on its OWN clock, independent of the viewer's feed-tick. Each cycle:
 
   FEED phase  -- feeds the world ``feed_rate`` times via the SAME story-gen path
-                 the ``/feed`` endpoint uses (LLM ``/api/chat`` + embedder
+                 ``/world/step`` uses (LLM ``/api/chat`` + embedder
                  ``/api/embed`` + absorb). This is the dial that "controls the
                  models": feed_rate > 0 makes real LLM + embed calls every cycle.
 
@@ -19,24 +19,26 @@ runs the world on its OWN clock, independent of the viewer's feed-tick. Each cyc
                  budget up if under target, down if over. So the CPU slider truly
                  "ramps the consolidation speed up based on target CPU usage."
 
-Armed/disarmed by ``srv.consolidating`` (the viewer's PLAY/PAUSE). Disarmed, the
+Armed/disarmed by ``srv.world_running`` (the viewer's RUN/STOP). STOPPED, the
 thread idles on a cheap ``Event.wait`` (the world is paused). Stopped in
 ``main()``'s ``finally`` like the cell pool, so a mid-cycle digest cannot hang the
 proxy exit (the thread is a daemon; ``stop`` joins with a bounded timeout).
 
 THREAD-SAFETY: the FEED phase goes through ``proxy._run_feeds`` which holds
-``srv.feed_lock``, so the background feeder and a live HTTP ``/feed`` never race
-the rolling narrative (``srv.story_history``) or double-feed. The DIGEST phase is
-read-only on the store (``thermo_state`` / ``novelty`` rebuild arrays; numpy
-releases the GIL during the SVD, so a digest does not block request threads) and
-atomically swaps the rebuilt ``FieldNGram`` reference -- worst case a live
-``generate`` turn uses a one-cycle-stale n-gram, never a torn one.
+``srv.feed_lock``, so the background feeder, a live HTTP ``/world/step``, and a
+``/adjust_narrative`` (which holds the same lock) never race the rolling
+narrative (``srv.story_history``) or double-feed. The DIGEST phase is read-only
+on the store (``thermo_state`` / ``novelty`` rebuild arrays; numpy releases the
+GIL during the SVD, so a digest does not block request threads) and atomically
+swaps the rebuilt ``FieldNGram`` reference -- worst case a live ``generate`` turn
+uses a one-cycle-stale n-gram, never a torn one.
 """
 from __future__ import annotations
 
 import threading
 import time
 import traceback
+import sys
 
 import numpy as np
 
@@ -76,14 +78,20 @@ def _digest(srv, mem, budget: float) -> dict:
     srv._digest_cursor = (cursor + budget) % n
     # rebuild the n-gram if the field grew since the last build -- a real
     # consolidation side-effect: the next self-author act comes from refreshed memory.
+    # Train ONLY on trusted (LLM-seeded) actions -- self-authored beats (the cell's
+    # own n-gram stammer) are absorbed into the field but excluded here, else the
+    # n-gram trains on its own output and spirals to gibberish.
     try:
+        trusted = [e for e in store.exemplars
+                   if e.action and not getattr(e, "self_authored", False)]
+        n_trusted = len(trusted)
         if (getattr(mem, "_gen_lm", None) is None
-                or len(store) != getattr(mem, "_gen_size", 0)):
-            actions = [e.action for e in store.exemplars if e.action]
+                or n_trusted != getattr(mem, "_gen_size", 0)):
+            actions = [e.action for e in trusted]
             if len(set(actions)) >= 8:
                 from .generator import FieldNGram
                 mem._gen_lm = FieldNGram(actions)
-                mem._gen_size = len(store)
+                mem._gen_size = n_trusted
     except Exception:
         pass
     return {"swept": budget,
@@ -129,29 +137,24 @@ class Consolidator:
 
     def _cycle(self) -> float:
         srv = self.srv
-        if not getattr(srv, "consolidating", False):
-            return self._idle                       # disarmed -- the world is paused
+        if not getattr(srv, "world_running", False):
+            return self._idle                       # STOPPED -- the world is paused
         mem = srv.membrane
         from .proxy import _run_feeds, _feed_count  # lazy: avoid a circular import
         t0 = time.time()
-        # ---- FEED phase: only in POV-FOLLOW world-drive does the world feed itself
-        # autonomously (the chronicle that follows the protagonist). In REACTIVE the
-        # world writes a beat after each player move (not here); in EXPLORE it grows
-        # only from chat. Both still DIGEST below. abort_if_disarmed so a PAUSE takes
-        # effect within a feed or two, not after a whole genesis chapter. --
-        wd = str(getattr(srv, "world_drive", "reactive"))
-        # the initial training burst feeds LLM chapters REGARDLESS of world_drive
-        # (it is the seeding phase, not subject to the drive gating), so a world
-        # that boots reactive can still train via --consolidate --initial-burst.
-        training = getattr(srv, "initial_burst", 0) > 0
+        # ---- FEED phase: when the world is RUNNING it feeds itself autonomously
+        # (the chronicle that follows the on-stage character). pov-follow is just
+        # the natural behaviour of cells-act (beat_author == "cells").
+        # abort_if_disarmed so a STOP takes effect within a feed or two, not
+        # after a whole genesis chapter. The initial training burst feeds LLM
+        # chapters too (the seeding phase). --
         stories: list = []
         fed = 0
-        if wd == "pov-follow" or training:
-            fr = _feed_count(float(getattr(srv, "feed_rate", 0.0)))
-            if fr > 0:
-                st = _run_feeds(srv, mem, fr, abort_if_disarmed=True)
-                stories = st.get("stories", [])
-                fed = int(st.get("fed", 0))
+        fr = _feed_count(float(getattr(srv, "feed_rate", 0.0)))
+        if fr > 0:
+            st = _run_feeds(srv, mem, fr, abort_if_disarmed=True, progression=True)
+            stories = st.get("stories", [])
+            fed = int(st.get("fed", 0))
         # ---- DIGEST phase: CPU consolidation (no model, no field mutation) -----
         t_d0 = time.time()
         digest = _digest(srv, mem, self._budget)
@@ -166,6 +169,7 @@ class Consolidator:
         self._budget += (target - duty) * n * 0.5
         self._budget = max(0.0, min(self._budget, float(n)))
         cycles = int(getattr(srv, "consolidation_stats", {}).get("cycles", 0)) + 1
+        mem.cast.cycles = cycles            # mirror so the next cast.save persists the clock
         srv.consolidation_stats = {
             "cycles": cycles,
             "cpu_actual": round(duty, 3),
@@ -180,21 +184,41 @@ class Consolidator:
             "cache": len(getattr(srv, "story_cache", [])),
             "stories": stories,
         }
+        # ---- self-balancing observer organism (the cell pool) ----------------
+        # When --cells is on, a pool parallels this Membrane: its cells graze
+        # ``mem.store`` (the world's field) and self-balance to the world's variety,
+        # capped by ``cpu_target``. Bud when variety (``orient_dirs``) exceeds the
+        # cell count; retire the stalest/collapsed when over the cap. The population
+        # caps at ``round(cpu_target * 30)`` -- the "bound by the CPU %" ceiling.
+        # Maturation is NON-DESTRUCTIVE: ``balance`` commits each new bud to a distinct
+        # world direction (sets ``orientation`` -> the curiosity gate) so it grazes
+        # only that cone -- specialization WITHOUT the ``Cell.differentiate`` field
+        # cut (the experiment's death move, which trims a grown generalist to a
+        # near-empty cone and leaves it directionless). No field mutation here.
+        pool = getattr(srv, "cell_pool", None)
+        if pool is not None:
+            from .variety import orient_dirs
+            cpu_cap = max(1, round(target * 30))            # K=30: 0.2->6, 1.0->30
+            world_dirs = orient_dirs(mem.store, cpu_cap + 1, 0.5)
+            pool_target = min(len(world_dirs), cpu_cap)
+            try:
+                pool.balance(pool_target, world_dirs)
+            except Exception:
+                traceback.print_exc()
         # ---- initial training burst: run a few cycles after the first chapter
         # lands, then auto-pause so the world is "trained" and waits for PLAY.
         # Gated on story_history so a model-down boot keeps retrying until a scene
         # actually feeds before the countdown starts. --initial-burst 0 disables.
+        # Suppressed when the user has already started the world themselves
+        # (``_user_run``): once the user drives it, training does not yank it back
+        # to stopped.
         if getattr(srv, "initial_burst", 0) > 0 and getattr(srv, "story_history", None):
             srv.initial_burst -= 1
             if srv.initial_burst <= 0:
-                srv.consolidating = False          # training burst done -> auto-pause
                 # the default lifecycle after training: the autonomous chronicle
-                # follows the protagonist (pov-follow) and is authored by the
-                # on-stage characters' own n-gram voices (cells) -- no LLM. The
-                # user can override either via SETTINGS anytime (persisted, takes
-                # effect immediately). This realizes "pov-follow as default mode
-                # after training" + cells-act auto-engaged.
-                srv.world_drive = "pov-follow"
+                # is authored by the on-stage characters' own n-gram voices
+                # (cells) -- no LLM. The user can override via /world/controls
+                # anytime (persisted, takes effect immediately).
                 srv.beat_author = "cells"
                 try:
                     from .proxy import _save_settings
@@ -203,8 +227,13 @@ class Consolidator:
                 except Exception as e:
                     print(f"[consolidate] post-training settings persist failed "
                           f"({e})", file=sys.stderr)
-                print("[consolidate] training complete -> pov-follow + cells "
-                      "(auto-paused; press PLAY)", file=sys.stderr)
+                if not getattr(srv, "_user_run", False):
+                    srv.world_running = False        # training done -> auto-pause
+                    print("[consolidate] training complete -> cells authored "
+                          "(auto-paused; press RUN)", file=sys.stderr)
+                else:
+                    print("[consolidate] training complete -> cells authored "
+                          "(user-started; staying RUNNING)", file=sys.stderr)
         # cap spin: never cycle faster than ~5/s when both phases are tiny.
         # cycle_speed (set from the viewer's 1x/2x/4x playback controls) scales
         # the target cycle period -- 2x -> 0.1s, 4x -> 0.05s (the floor). 1x is
