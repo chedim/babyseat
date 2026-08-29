@@ -5,6 +5,8 @@
 
 ## 🏛️ 1. The Unified Continuum Functional & Boundary Conditions
 
+![Unified Uroboros](./centered_uroboros_nice.gif)
+
 The global Markovian runtime environment $M = (S, A, T, E)$ is governed by the **Unified Continuum Functional**. The architecture enforces a strict variational extremum constraint driven by the Principle of Minimum Free Energy, ensuring that the system constantly compresses external entropy to maintain absolute structural homeostasis:
 
 $$V^*(S) = \min \left[ \int_{Z \le 0} |\Psi_E(t)|^2 \, dC^\mu + \gamma \cdot \sigma_{1/2} \oint_{Z > 0} T(S \times A) \, dv \right] = C_{\min}$$
