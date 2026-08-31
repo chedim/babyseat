@@ -131,6 +131,135 @@ class CodeGraphTest(unittest.TestCase):
         self.assertIn("no symbol", CG.query(self.g, "impact nope_xyz"))
 
 
+class CodegraphBridgeTest(unittest.TestCase):
+    """The incremental refresh: rebuild_paths re-parses only changed files,
+    stale_paths finds external edits by mtime, deletes/renames drop out."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        (self.root / "pkg").mkdir()
+        (self.root / "pkg" / "a.py").write_text(
+            "def helper():\n    return 1\n\n\n"
+            "def caller():\n    return helper()\n")
+        (self.root / "pkg" / "b.py").write_text(
+            "from pkg.a import helper\n\n\ndef other():\n    return helper()\n")
+        self.g = CG.build_graph(self.root)
+
+    def _write_a(self, text):
+        (self.root / "pkg" / "a.py").write_text(text)
+        # guarantee a different stored mtime even on coarse filesystems
+        import os
+        st = (self.root / "pkg" / "a.py").stat()
+        os.utime((self.root / "pkg" / "a.py"), (st.st_atime, st.st_mtime + 2))
+
+    def test_rebuild_renames_symbol(self):
+        self._write_a("def helper_v2():\n    return 2\n\n\n"
+                      "def caller():\n    return helper_v2()\n")
+        r = CG.rebuild_paths(self.g, ["pkg/a.py"])
+        self.assertEqual(r["touched"], ["pkg/a.py"])
+        self.assertNotIn("helper", self.g["symbols"])
+        self.assertIn("helper_v2", self.g["symbols"])
+        self.assertIn("caller", self.g["symbols"])
+        # b.py's symbol set is untouched
+        self.assertIn("other", self.g["symbols"])
+
+    def test_rebuild_picks_up_new_callers(self):
+        self._write_a("def helper():\n    return 1\n\n\n"
+                      "def caller():\n    return helper()\n\n\n"
+                      "def extra():\n    return caller()\n")
+        CG.rebuild_paths(self.g, ["pkg/a.py"])
+        r = CG.callers_of(self.g, "helper", depth=2)
+        all_callers = {e["caller"] for lvl in r["levels"] for e in lvl}
+        self.assertIn("extra", all_callers)
+
+    def test_rebuild_drops_deleted_file(self):
+        (self.root / "pkg" / "b.py").unlink()
+        r = CG.rebuild_paths(self.g, ["pkg/b.py"])
+        self.assertEqual(r["dropped"], ["pkg/b.py"])
+        self.assertNotIn("other", self.g["symbols"])
+        # the callers index rebuilt without b.py's edges
+        r2 = CG.callers_of(self.g, "helper", depth=1)
+        self.assertNotIn("other", [e["caller"] for e in r2["levels"][0]])
+
+    def test_rebuild_keeps_shared_symbol_from_other_owner(self):
+        # helper exists in both files; rebuilding a.py must not drop b.py's
+        # claim on it
+        self._write_a("def helper():\n    return 2\n")
+        CG.rebuild_paths(self.g, ["pkg/a.py"])
+        self.assertIn("helper", self.g["symbols"])
+        self.assertEqual(self.g["symbols"]["helper"]["file"], "pkg/a.py")
+
+    def test_stale_paths_finds_external_edit(self):
+        self.assertEqual(CG.stale_paths(self.g), [])
+        self._write_a("def helper():\n    return 9\n")
+        self.assertEqual(CG.stale_paths(self.g), ["pkg/a.py"])
+
+    def test_stale_paths_finds_added_and_deleted(self):
+        (self.root / "pkg" / "c.py").write_text("def fresh():\n    pass\n")
+        (self.root / "pkg" / "b.py").unlink()
+        stale = CG.stale_paths(self.g)
+        self.assertIn("pkg/c.py", stale)
+        self.assertIn("pkg/b.py", stale)
+
+
+class CodegraphDirtyMarkTest(unittest.TestCase):
+    """_tool_arg_path parses edit/write args; _codegraph_note_dirty maps them
+    to repo-relative dirty entries that _codegraph_refresh consumes."""
+
+    def setUp(self):
+        self.root = Path(tempfile.mkdtemp())
+        (self.root / "pkg").mkdir()
+        (self.root / "pkg" / "a.py").write_text("def helper():\n    return 1\n")
+        self.g = CG.build_graph(self.root)
+
+    def test_tool_arg_path(self):
+        self.assertEqual(OC._tool_arg_path(
+            {"arguments": '{"filePath": "/x/y.py"}'}), "/x/y.py")
+        self.assertEqual(OC._tool_arg_path(
+            {"arguments": '{"file_path": "/x/z.py"}'}), "/x/z.py")
+        self.assertEqual(OC._tool_arg_path({"arguments": "not json"}), "")
+        self.assertEqual(OC._tool_arg_path({}), "")
+
+    def test_note_dirty_and_refresh(self):
+        class Srv:
+            _codegraph = self.g
+            _cg_dirty = []
+            _cg_swept = 0.0
+
+        srv = Srv()
+        OC._codegraph_note_dirty(srv, [str(self.root / "pkg" / "a.py"),
+                                       str(self.root / "notes.txt")])
+        self.assertEqual(srv._cg_dirty, ["pkg/a.py"])
+        # refresh via the real path: sweep interval already elapsed (0.0)
+        self._w_a()
+        OC._codegraph_refresh(srv, self.g)
+        self.assertIn("helper_v2", self.g["symbols"])
+        self.assertEqual(srv._cg_dirty, [])
+
+    def _w_a(self):
+        (self.root / "pkg" / "a.py").write_text("def helper_v2():\n    return 1\n")
+
+    def test_capture_lane_marks_dirty(self):
+        class Mem:
+            _pending_tools = {}
+            store = _Store()
+
+        orig_capture = OC._capture
+        OC._capture = lambda *a, **k: None  # silence learning for this test
+        try:
+            mem = Mem()
+            mem.server_ref = type("S", (), {})()
+            mem.server_ref._codegraph = self.g
+            mem.server_ref._cg_dirty = []
+            calls = {0: {"id": "t1", "function": {
+                "name": "edit",
+                "arguments": '{"filePath": "%s"}' % (self.root / "pkg" / "a.py")}}}
+            OC._capture_plan_and_calls(mem, "fix helper", "editing", calls)
+            self.assertEqual(mem.server_ref._cg_dirty, ["pkg/a.py"])
+        finally:
+            OC._capture = orig_capture
+
+
 class CodegraphMatcherTest(unittest.TestCase):
     def test_canon_and_intent(self):
         self.assertTrue(OC._is_codegraph_query("membrane: codegraph stats"))

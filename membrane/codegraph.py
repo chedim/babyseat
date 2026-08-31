@@ -223,6 +223,76 @@ def impact_of_file(graph: dict, rel: str) -> dict:
     return {"symbols": info["symbols"], "levels": levels, "file": rel}
 
 
+def rebuild_paths(graph: dict, rels) -> dict:
+    """Incremental update: re-scan ONLY the named repo-relative files (the
+    incremental bridge). Edits re-parse and swap that file's symbols; missing
+    files drop out (deletes/renames). Then the callers index is rebuilt.
+    Symbol-owner semantics match build_graph (a duplicated qualname: last
+    file scanned wins) -- a symbol another file also claims is never
+    dropped. Half-written files (parse error mid-save) keep their old
+    symbols; the next mtime sweep re-picks them."""
+    rootp = Path(graph["root"])
+    symbols = graph["symbols"]
+    files = graph["files"]
+    owner: dict = {}
+    for rel2, meta2 in files.items():
+        for s in meta2["symbols"]:
+            owner[s] = rel2
+    touched: list[str] = []
+    dropped: list[str] = []
+    for rel in rels:
+        rel = Path(rel).as_posix()
+        p = rootp / rel
+        if not p.is_file():
+            for s in files.get(rel, {}).get("symbols", ()):
+                if owner.get(s) == rel:
+                    symbols.pop(s, None)
+            files.pop(rel, None)
+            dropped.append(rel)
+            touched.append(rel)
+            continue
+        try:
+            src = p.read_text(encoding="utf-8", errors="replace")
+            if "\x00" in src[:1024]:
+                continue
+            tree = ast.parse(src)
+            mt = p.stat().st_mtime
+        except (OSError, SyntaxError):
+            continue
+        for s in files.get(rel, {}).get("symbols", ()):
+            if owner.get(s) == rel:
+                symbols.pop(s, None)
+        syms = _scan_tree(tree, rel)
+        files[rel] = {"mtime": mt, "symbols": sorted(syms)}
+        symbols.update(syms)
+        touched.append(rel)
+    graph["callers_index"] = _callers_index(symbols)
+    return {"touched": touched, "dropped": dropped}
+
+
+def stale_paths(graph: dict) -> list[str]:
+    """Repo-relative files whose stored mtime no longer matches disk (edited
+    outside the tool lane -- bash, git, an external editor) plus deleted
+    files and files added since the last scan. A full walk, so callers must
+    throttle it (the opencode bridge sweeps at most once per interval)."""
+    rootp = Path(graph["root"])
+    files = graph["files"]
+    stale: list[str] = []
+    seen: set[str] = set()
+    for p in _py_files(rootp):
+        rel = p.relative_to(rootp).as_posix()
+        seen.add(rel)
+        try:
+            mt = p.stat().st_mtime
+        except OSError:
+            continue
+        info = files.get(rel)
+        if info is None or info.get("mtime") != mt:
+            stale.append(rel)
+    stale.extend(rel for rel in files if rel not in seen)
+    return stale
+
+
 def stats(graph: dict) -> dict:
     files = graph["files"]
     symbols = graph["symbols"]

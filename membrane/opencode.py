@@ -930,11 +930,55 @@ _CODEGRAPH_MARKER = ("[membrane-intercept] codegraph read; handled internally, "
                      "NOT learned. To force the model path, repeat prefixed "
                      "with 'model:'")
 
+# min seconds between whole-tree mtime sweeps of the codegraph (edits through
+# the tool lane refresh instantly; this only bounds the everything-else sweep)
+_CG_SWEEP_INTERVAL = 30.0
+
+
+def _tool_arg_path(fn: dict) -> str:
+    """Pull a file path out of one tool call's arguments (edit/write):
+    filePath for opencode's tools, file_path as the defensive alias. The
+    JSON args may be malformed -- an unparseable call dirties nothing (the
+    mtime sweep still catches the edit within its interval)."""
+    try:
+        a = json.loads(fn.get("arguments") or "{}")
+        if isinstance(a, dict):
+            return a.get("filePath") or a.get("file_path") or ""
+    except Exception:
+        pass
+    return ""
+
+
+def _codegraph_note_dirty(srv, paths) -> None:
+    """Mark repo-relative .py paths dirty for the next codegraph query."""
+    g = getattr(srv, "_codegraph", None)
+    if g is None:
+        return
+    try:
+        root = Path(g["root"])
+        for p in paths:
+            rp = Path(p)
+            if not rp.is_absolute():
+                rp = root / rp
+            rp = rp.resolve()
+            if rp.suffix != ".py":
+                continue
+            rel = rp.relative_to(root).as_posix()
+            d = getattr(srv, "_cg_dirty", None)
+            if d is None:
+                d = srv._cg_dirty = []
+            if rel not in d:
+                d.append(rel)
+    except (ValueError, OSError):
+        pass
+
 
 def _codegraph_graph(srv):
     """The lazily-built AST graph for the project root (the field's parent
-    dir). Cached on the server; one build per process (a stale graph after a
-    refactor is a restart away -- stated in the answer)."""
+    dir). Cached on the server and kept fresh INCREMENTALLY: edit/write tool
+    calls mark paths dirty on the spot (see _capture_plan_and_calls), a
+    throttled mtime sweep catches edits that bypassed the tool lane, and
+    codegraph.rebuild_paths re-parses only what changed. Zero model calls."""
     g = getattr(srv, "_codegraph", None)
     if g is None:
         try:
@@ -945,7 +989,37 @@ def _codegraph_graph(srv):
             print(f"[opencode] codegraph build failed: {_one_line(e)}",
                   file=sys.stderr)
             return None
+    _codegraph_refresh(srv, g)
     return g
+
+
+def _codegraph_refresh(srv, g) -> None:
+    """The incremental bridge: re-parse dirty paths (tool-lane edits) plus a
+    throttled whole-tree mtime sweep (everything else). Never fatal."""
+    now = time.time()
+    rels = list(getattr(srv, "_cg_dirty", ()))
+    if now - getattr(srv, "_cg_swept", 0.0) >= _CG_SWEEP_INTERVAL:
+        try:
+            from .codegraph import stale_paths
+            rels += stale_paths(g)
+        except Exception:
+            pass
+        srv._cg_swept = now
+    rels = list(dict.fromkeys(rels))
+    if not rels:
+        return
+    try:
+        from .codegraph import rebuild_paths
+        r = rebuild_paths(g, rels)
+    except Exception as e:
+        print(f"[opencode] codegraph rebuild failed: {_one_line(e)}",
+              file=sys.stderr)
+        return
+    srv._cg_dirty = []
+    if r["touched"] or r["dropped"]:
+        print(f"[opencode] codegraph refreshed "
+              f"({len(r['touched'])} re-scanned, {len(r['dropped'])} "
+              f"dropped)", file=sys.stderr)
 
 
 def _is_codegraph_query(q: str) -> bool:
@@ -989,8 +1063,8 @@ def _codegraph_answer(srv, q: str) -> str:
                 break
         else:
             spec = "stats"
-    return ("[membrane-intercept] codegraph (built at server start; a "
-            "refactor needs a proxy restart to re-scan):\n"
+    return ("[membrane-intercept] codegraph (auto-refreshes: tool edits "
+            "re-scan instantly, other changes within a 30s sweep):\n"
             + cg_query(g, spec) + "\n\n" + _CODEGRAPH_MARKER)
 
 
@@ -2137,10 +2211,16 @@ def _capture(mem, label: str, situation: str, action: str, min_len: int = 1) -> 
         print(f"[capture] {label} error: {_one_line(e)}", file=sys.stderr)
 
 
+def srv_ref(mem):
+    """The proxy server backref off a membrane (None outside the proxy)."""
+    return getattr(mem, "server_ref", None)
+
+
 def _capture_plan_and_calls(mem, query: str, content: str, calls: dict) -> None:
     """One response turn: learn the visible plan text and each tool call. Each
     call registers in mem._pending_tools so its RESULT (next request) captures
-    the full situational loop: 'tool bash for: <query> / args' -> result."""
+    the full situational loop: 'tool bash for: <query> / args' -> result.
+    File-touching calls (edit/write) also mark the codegraph dirty."""
     if calls:
         for idx, c in sorted(calls.items()):
             fn = c.get("function") or {}
@@ -2152,6 +2232,9 @@ def _capture_plan_and_calls(mem, query: str, content: str, calls: dict) -> None:
             cid = c.get("id")
             if cid:
                 mem._pending_tools[cid] = {"query": query, "name": name, "args": args}
+        _codegraph_note_dirty(srv_ref(mem), [
+            _tool_arg_path(c.get("function") or {})
+            for c in calls.values()])
         if content.strip():
             _capture(mem, "plan",
                      f"plan: {_clip(query, _CAP_QUERY)}",
@@ -3729,6 +3812,12 @@ def main() -> None:
                          "stdio MCP server exposing membrane_query/learn/"
                          "forget/state as structured tools; the frames keep "
                          "working either way)")
+    ap.add_argument("--no-lsp", dest="lsp", action="store_false",
+                    help="do not enable LSP servers in the generated opencode "
+                         "config (default ON: built-in servers like pyright/"
+                         "gopls/typescript auto-start for matching files and "
+                         "feed diagnostics to the agent; requires the server "
+                         "binaries to be installed or auto-installable)")
     ap.add_argument("--global-field", default=None, metavar="PATH",
                     help="enable the global-field layer (docs/global-field.md):"
                          " a shared commons of operator-promoted memories "
@@ -4147,6 +4236,13 @@ def main() -> None:
             "timeout": 60_000,
         }}
         mcp_state = "on (membrane_query/learn/forget/state)"
+    # ---- LSP servers (built-ins) ----------------------------------------------
+    # Diagnostics lane for the agent: pyright/gopls/typescript etc. start
+    # automatically when matching files open. --no-lsp reverts to off.
+    lsp_state = "off (--no-lsp)"
+    if getattr(args, "lsp", True):
+        cfg["lsp"] = True
+        lsp_state = "on (built-in servers)"
     fd, cfg_path = tempfile.mkstemp(prefix="membrane-opencode-", suffix=".json")
     with os.fdopen(fd, "w") as f:
         json.dump(cfg, f, indent=2)
@@ -4175,6 +4271,7 @@ def main() -> None:
           f"  router: {'on (' + str(len(srv.router.records)) + ' candidates' + (', prefer-local' if getattr(srv.router, 'prefer_local', False) else ', cloud-floor') + ')' if getattr(srv, 'router', None) else 'off (--disable-llm-router to keep it off)'}\n"
           f"  judge: {judge_s}\n"
           f"  mcp tools: {mcp_state}\n"
+          f"  lsp: {lsp_state}\n"
           f"  opencode config: {cfg_path}",
           file=sys.stderr)
 
