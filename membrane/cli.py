@@ -10,6 +10,9 @@
     membrane demo         in-process end-to-end loop (no chat model needed)
     membrane install      drop the agent skills into ./.opencode/skills/ of
                           the CURRENT directory and print the AGENTS.md blurb
+    membrane connect      offer to connect a shared Couchbase field for THIS
+                          project (creds go to ~/.membrane/projects/, never
+                          into the repo)
     membrane doctor       show what's installed/running (CLI, skills, Ollama)
 
 Per-project DATA lives in ./.membrane/ (field, audit, review queue, logs) --
@@ -29,6 +32,8 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+from .project_env import couchbase_onboarding, load_project_env
 
 SKILLS_DIR = Path(__file__).parent / "skills"
 
@@ -60,10 +65,13 @@ as clearly-marked `[membrane-intercept]` blocks; writes/forgets from model
 prose are report-only (the field is only written by operator turns).
 
 Data lives in .membrane/ (field.json, audit.jsonl, logs) -- never commit it.
-Persistence backend: JSON file by default; MEMBRANE_STORE=couchbase moves the
-exemplar field to a Couchbase cluster (CouchbaseCollection `membrane.exemplars`
-in COUCHBASE_BUCKET, cortex-experiment's env convention:
-COUCHBASE_CONN_STRING / COUCHBASE_USER / COUCHBASE_PASSWORD / COUCHBASE_BUCKET).
+Persistence backend: JSON file by default; `membrane connect` (or the
+launch-time prompt) points THIS project at a shared Couchbase cluster
+(CouchbaseCollection `membrane.exemplars` in COUCHBASE_BUCKET, cortex
+env convention: COUCHBASE_CONN_STRING / COUCHBASE_USER / COUCHBASE_PASSWORD
+/ COUCHBASE_BUCKET). Credentials are stored per-project under
+~/.membrane/projects/<slug>.env (mode 600) -- never in the repo; a `.env`
+here would leak on the first `git add .`.
 Couchbase unreachable -> transparent fallback to the JSON field.
 Skills are project-scoped: .opencode/skills/ in THIS repo only (an opencode
 launched outside never sees them). Read those skills (membrane-query-field,
@@ -279,6 +287,23 @@ def _install(args: argparse.Namespace) -> int:
     return 0
 
 
+def _connect() -> int:
+    """`membrane connect`: (re)run the shared-field onboarding interactively.
+
+    Unlike the passive launch-time offer, this respects a MEMBRANE_NO_ASK=1
+    ONLY for the passive path -- an explicit `connect` is the operator
+    asking, so it always prompts (force=True) unless the env already
+    configures the store, in which case it just points at where."""
+    from .project_env import project_env_path, parse_env_file, store_configured
+    if store_configured():
+        print(f"[membrane] couchbase already configured via environment "
+              f"(MEMBRANE_STORE/COUCHBASE_*); env wins over the project "
+              f"file.", file=sys.stderr)
+        return 0
+    wrote = couchbase_onboarding(force=True)
+    return 0 if (wrote or parse_env_file(project_env_path())) else 1
+
+
 def _doctor() -> int:
     """What's installed / running / reachable."""
     print("membrane doctor")
@@ -339,6 +364,8 @@ def main() -> None:
         "  demo       in-process end-to-end loop (no chat model needed)\n"
         "  reset      kill the proxy on the port, then TUI+proxy fresh\n"
         "  install    install .opencode/skills/* into the CURRENT directory\n"
+        "  connect    offer to connect a shared Couchbase field for THIS\n"
+        "             project (creds go to ~/.membrane/projects/, not the repo)\n"
         "  doctor     what's installed/running (CLI, skills, Ollama)\n"
         "\n"
         "Everything after the subcommand is forwarded verbatim to the\n"
@@ -349,7 +376,7 @@ def main() -> None:
         return
     cmd = argv[0] if argv and not argv[0].startswith("-") else None
     if cmd not in ("tui", "proxy", "opencode", "anthropic", "review",
-                   "demo", "reset", "install", "doctor"):
+                   "demo", "reset", "install", "doctor", "connect"):
         if cmd is None and not argv:
             print(__doc__)
             return
@@ -367,6 +394,15 @@ def main() -> None:
     # opencode surfaces: bind per-project data + auto-install skills first
     if cmd in ("opencode", "tui", "anthropic", "reset"):
         _autoinstall_skills()
+    # shared-field onboarding: hydrate the per-project env (secrets live in
+    # ~/.membrane/projects/, never in the repo), and -- when nothing
+    # configures the store and we are interactive -- offer to connect a
+    # Couchbase cluster once (a decline is remembered, not re-asked).
+    load_project_env()
+    if cmd == "connect":
+        raise SystemExit(_connect())
+    if cmd in ("opencode", "tui", "anthropic", "reset", "proxy"):
+        couchbase_onboarding()
     if cmd == "reset":
         raise SystemExit(_reset(args.forwarded))
     if cmd == "tui":
