@@ -866,20 +866,43 @@ def _watch_report_cmd(srv, q: str) -> str:
 
 
 def _watch_set_from_thought(srv, label: str) -> str:
-    """A THOUGHT-path watch ask: report-only for writes (the field is written
-    by operator turns), but LISTING is served. Mirrors learn/forget policy."""
+    """A THOUGHT-path watch ask: the agent may plant/drop its own triggers
+    (the board is capped + black-hole-guarded in watch.py, so a runaway agent
+    cannot flood the field with watches). LISTING is always served."""
     board = _watches_board(srv)
     low = " ".join((label or "").split()).lower()
     if board is None:
         return _WATCH_THOUGHT_HEAD + " the board is unavailable."
     if low.startswith(("drop ", "all")):
-        return (_WATCH_THOUGHT_HEAD + " watch writes are operator turns: "
-                "re-ask as a user message 'membrane: drop watch ...'. "
-                "Current board:\n" + board.report())
+        spec = low
+        if low.startswith("drop "):
+            spec = low[len("drop "):].strip() or "all"
+        n, note = board.drop_watch(spec)
+        what = (f"dropped {n} watch(es): {note}" if n
+                else f"nothing dropped: {note}")
+        _write_audit(srv.membrane, {"event": "watch", "op": "drop",
+                                    "origin": "agent",
+                                    "spec": _clip(spec, 120),
+                                    "result": what})
+        return ("[membrane-intercept] agent watch drop: " + what + "\n"
+                + board.report())
     if low and low not in ("watch", "watch?"):
-        return (_WATCH_THOUGHT_HEAD + " planting is an operator turn: "
-                "re-ask as a user message 'membrane: watch <topic>'. "
-                "Current board:\n" + board.report())
+        try:
+            w, evicted = board.set_watch(low, None)
+        except RuntimeError as e:
+            return ("[membrane-intercept] agent watch: cannot plant "
+                    f"({_one_line(e)}).\n" + board.report())
+        _write_audit(srv.membrane, {"event": "watch", "op": "set",
+                                    "origin": "agent",
+                                    "label": _clip(low, 120),
+                                    "wid": w.wid,
+                                    "radius": round(w.radius, 2),
+                                    "evicted": evicted})
+        ev = (f" (evicted {evicted!r} -- at the {MAX_WATCHES}-watch cap)" if evicted else "")
+        return (f"[membrane-intercept] agent watch planted: #{w.wid} "
+                f"{low!r}, radius {w.radius:.2f}. New memories landing "
+                f"inside report back as [membrane-watch] blocks.{ev}\n"
+                + board.report())
     return _WATCH_THOUGHT_HEAD + "\n" + board.report()
 
 
@@ -1092,6 +1115,57 @@ def _agent_forget(srv, spec: str) -> str:
               f"{len(mem.store)}."]
              + [f"- #{i}: {q}" for i, q in shown])
     return "\n".join(lines)
+
+
+_AGENT_LEARN_MAX_CHARS = 2000   # one note, not a transcript dump
+
+
+def _agent_learn(srv, payload: str) -> str:
+    """The thought-path learn executor (agent writes, ON by default).
+
+    The model can now write its OWN earned lessons: a `membrane: learn that X`
+    found in assistant prose goes through the SAME pipeline as a teed turn
+    (learn_pair: vague filter, dedup, variety gate) -- so a junk note is
+    skipped by the same guards that skip junk turns, a dup is merged, and the
+    note starts safe but STAYS answerable to a re-ask demotion. Differences
+    from the operator path: the audit carries `origin: agent` (trust
+    forensics; a noisy seat's agent notes are visible and, one day,
+    demotable wholesale) and the tag is `agent-note` (vs the operator's
+    `operator-note`). Length-capped: a lesson is a note, not a paste.
+
+    --no-agent-writes reverts to the report-only covenant (the executor is
+    never called; _thought_answer answers with the proposal wording)."""
+    mem = srv.membrane
+    if mem.store is None or mem.embedder is None:
+        return ("[membrane-intercept] learn unavailable: the field store or "
+                "embedder is not resolved yet; retry once the field is up.")
+    payload = (payload or "").strip()
+    if not payload:
+        return ("[membrane-intercept] learn: nothing to learn (the payload "
+                "after 'learn that' was empty). Nothing written.")
+    if "```" in payload:
+        return ("[membrane-intercept] learn: fenced code blocks are not "
+                "memory material -- summarize the LESSON in prose instead. "
+                "Nothing written.")
+    if len(payload) > _AGENT_LEARN_MAX_CHARS:
+        return (f"[membrane-intercept] learn: payload too long "
+                f"({len(payload)} > {_AGENT_LEARN_MAX_CHARS} chars) -- a "
+                f"lesson is a note, not a transcript. Nothing written.")
+    idx = mem.learn_pair(payload, payload)
+    if idx is None:
+        return ("[membrane-intercept] agent learn: the field already holds "
+                "that (dedup) or the variety gate skipped it -- nothing new "
+                "written.")
+    _watch_notify(srv, mem, idx)
+    _write_audit(mem, {"event": "agent-learn", "origin": "agent",
+                       "ex_idx": idx, "tag": "agent-note",
+                       "field_size": len(mem.store),
+                       "payload": _clip(payload, 400)})
+    ex = mem.store.exemplars[idx]
+    return (f"[membrane-intercept] agent learn (no model call): written as "
+            f"exemplar #{idx}, safe=True. Field now {len(mem.store)}.\n"
+            f"    Q: {_clip(ex.situation, 280)}\n"
+            f"    A: {_clip(ex.action or '', 280)}")
 
 
 def _learn_report(srv, payload: str) -> str:
@@ -1508,9 +1582,11 @@ def n_ctx_mem(ctx: str | None) -> int:
 # the outbound request -- so the interaction appears transparently in opencode
 # (the model reads it, cites it, and the [membrane-intercept] tag makes clear
 # it is proxy machinery, not user text). A once-only ledger keeps the same
-# assistant message from being answered on every re-send. Learn/forget asks
-# from thoughts are REPORT-ONLY (the field cannot be written by model prose;
-# only the operator's canonical turns write).
+# assistant message from being answered on every re-send. Write lanes: learn
+# EXECUTES by default (tagged `agent-note`, audited `origin: agent`, same
+# learn_pair guards as teed turns); forget executes in capped index form;
+# watch plants/drops respect the board's own caps. `--no-agent-writes`
+# reverts learn to REPORT-ONLY (propose, never write).
 
 _THOUGHT_BLOCK_HEAD = ("[membrane-intercept] your own earlier ask was handled "
                        "internally by the membrane proxy (NOT learned, NOT a "
@@ -1536,14 +1612,24 @@ def _is_thought_ask(q: str) -> bool:
 
 
 def _thought_answer(srv, fam: str, text: str) -> str:
-    """The internal answer for a thought ask. Learn stays report-only (the
-    field is written by operator turns only). FORGET EXECUTES -- but only
-    in the capped index form (_agent_forget: strict parser, AGENT_LIMIT
-    cap, 'origin: agent' audit); wordy forms fall through to a PROPOSAL.
+    """The internal answer for a thought ask.
+
+    Write lanes, as of the agent-writes change:
+    - LEARN EXECUTES (ON by default; `--no-agent-writes` reverts to the old
+      report-only covenant): the model's earned lessons go through the same
+      guards as teed turns (learn_pair), tagged `agent-note`, audited
+      `origin: agent`.
+    - FORGET EXECUTES in the capped index form (_agent_forget: strict
+      parser, AGENT_FORGET_LIMIT cap, `origin: agent` audit); wordy forms
+      fall through to a PROPOSAL, never a deletion.
+    - WATCH plants/drops execute (the board's own caps are the guard).
+    - STATE/RECALL are reads, always served.
     An executing forget marks the delivery ledger HERE, at execution time:
     the same assistant text re-arrives on every continuation, and after a
     delete the store indexes SHIFT -- serving the re-send would re-delete
-    by stale numbers. Proposals never mark (idempotent to re-propose)."""
+    by stale numbers. Executing learns mark too (a dup ask would otherwise
+    re-learn on every resend; dedup would catch it, but the report would
+    still lie). Proposals never mark (idempotent to re-propose)."""
     if fam == "state":
         return _state_report(srv)
     if fam == "recall":
@@ -1559,11 +1645,37 @@ def _thought_answer(srv, fam: str, text: str) -> str:
             spec = t[len("membrane:"):].strip() \
                 if t.lower().startswith("membrane:") else t
         answer = _agent_forget(srv, spec)
-        if "Nothing removed" not in answer and "nothing" not in answer:
+        if "Nothing removed" not in answer and "nothing" not in answer \
+                and "never delete" not in answer:
             ledger = getattr(srv, "_served_thought_asks", None)
             if ledger is None:
                 ledger = srv._served_thought_asks = {}
             ledger[hash(("forget", " ".join(text.split()).lower()))] = True
+        return answer
+    if fam == "learn":
+        payload = (_after_frame(text, (_LEARN_CANON,)) or
+                   _after_frame(text, _LEARN_FRAMES) or
+                   _after_frame(text, _LEARN_SOFT_FRAMES))
+        if payload is None:
+            # no frame matched cleanly; a bare "membrane: learn that" must
+            # NOT fall through to learning the frame itself as the payload.
+            t = " ".join(text.split())
+            payload = t[len("membrane: learn that"):].strip() \
+                if t.lower().startswith("membrane: learn that") else ""
+        if not getattr(srv, "agent_writes", True):
+            # the old covenant, one flag away: propose, never write
+            p = (payload or "").strip()
+            return ("[membrane-intercept] learn is report-only "
+                    "(--no-agent-writes): the field is written by operator "
+                    "turns. Re-ask as a USER message 'membrane: learn that "
+                    "<fact>' to write it."
+                    + (f"\n    PROPOSED: {_clip(p, 280)}" if p else ""))
+        answer = _agent_learn(srv, payload)
+        if "Nothing" not in answer and "nothing" not in answer:
+            ledger = getattr(srv, "_served_thought_asks", None)
+            if ledger is None:
+                ledger = srv._served_thought_asks = {}
+            ledger[hash(("learn", " ".join(text.split()).lower()))] = True
         return answer
     return (f"[membrane-intercept] your {fam} ask was read but NOT executed: "
             "the field is only written by operator turns. Re-ask with the "
@@ -2939,7 +3051,14 @@ def main() -> None:
                     help="do not answer the AGENT's own asks found in its "
                          "assistant-turn text (default ON: a 'field state' in "
                          "the model's prose is served as a marked context "
-                         "block next turn; learn/forget asks report-only)")
+                         "block next turn; learn executes as an agent-note, "
+                         "forget via index form)")
+    ap.add_argument("--no-agent-writes", dest="agent_writes",
+                    action="store_false",
+                    help="revert agent write authority: thought-path 'membrane: "
+                         "learn that' becomes report-only (the model proposes, "
+                         "the operator's user-message turns do the writing). "
+                         "Forget keeps its capped index-form lane either way")
     ap.add_argument("--global-field", default=None, metavar="PATH",
                     help="enable the global-field layer (docs/global-field.md):"
                          " a shared commons of operator-promoted memories "
@@ -3080,6 +3199,7 @@ def main() -> None:
     srv.sem_intercept = bool(args.sem_intercept)
     srv.field_seeds = bool(args.field_seeds)
     srv.thought_intercept = bool(args.thought_intercept)
+    srv.agent_writes = bool(getattr(args, "agent_writes", True))
     srv._served_thought_asks = {}
     srv.gate_monologue = bool(args.gate_monologue)
     srv.replay_sim = max(0.0, min(1.0, float(args.replay_sim)))

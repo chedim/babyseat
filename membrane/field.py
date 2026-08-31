@@ -140,11 +140,34 @@ def _origin_tag(field_path: str | Path) -> str:
     regardless of symlinks/relative paths). This is the wire identity every
     write stamps and every read filters by. The START FOLDER is the project
     directory, not the data dir: for the per-project layout (<proj>/.membrane/
-    field.json) that is the PARENT of the field's directory."""
+    field.json) that is the PARENT of the field's directory.
+
+    PERSISTED IDENTITY: the derived tag is only a DEFAULT. On first boot the
+    tag is written to <data-dir>/origin (mode 600, gitignored like the rest of
+    .membrane/) and every later boot reuses it -- so renaming the repo (or
+    moving it) keeps the same origin: your couchbase patch stays YOURS, your
+    memories keep their provenance, forgets keep matching them. Rename-
+    migration is zero-step for the common case; delete <data-dir>/origin to
+    deliberately fork a new identity. Hand-edit it to ADOPT an old identity
+    (e.g. after restoring a clone from a backup path)."""
     import socket
     p = Path(field_path).resolve()
-    folder = p.parent.name if p.parent.name != DATA_DIRNAME else p.parent.parent.name
-    return f"{folder}@{socket.gethostname()}"
+    data_dir = (p.parent if p.parent.name == DATA_DIRNAME
+                else p.parent / DATA_DIRNAME)
+    tag_file = data_dir / "origin"
+    if tag_file.is_file():
+        stored = tag_file.read_text().strip()
+        if stored:
+            return stored
+    tag = (f"{p.parent.name if p.parent.name != DATA_DIRNAME
+            else p.parent.parent.name}@{socket.gethostname()}")
+    try:
+        data_dir.mkdir(parents=True, exist_ok=True)
+        tag_file.write_text(tag + "\n")
+        tag_file.chmod(0o600)
+    except OSError:
+        pass                    # read-only cwd: fall back to the derived tag
+    return tag
 
 
 def _ex_key(ex: "Exemplar") -> str:

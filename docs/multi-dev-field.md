@@ -17,7 +17,11 @@ Set the same env on every dev machine (cortex-experiment convention):
 Mechanics that make sharing collision-free (all in membrane/field.py):
 
 - **Origin axis** (`_origin_tag`, field.py:137): every write stamps
-  `<start-folder>@<hostname>`. Same project + two machines = two origins;
+  `<start-folder>@<hostname>`, GENERATED ONCE per project and persisted in
+  `.membrane/origin` (gitignored, mode 600) -- later boots reuse it, so
+  renaming or moving the repo keeps the same origin (your couchbase patch
+  stays yours; delete the file to fork a new identity deliberately). Same
+  project + two machines = two origins;
   `_ex_key` (field.py:150) namespaces doc keys by origin, so identical Q/A
   pairs stay separate documents -- each dev's evidence stays its own.
 - **Veil poke-through** (VEIL_POKE_SIM, field.py:133): teammates' exemplars

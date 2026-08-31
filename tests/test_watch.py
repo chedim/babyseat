@@ -210,6 +210,20 @@ class TestPersistence(unittest.TestCase):
 
 
 class TestOpencodeGlue(unittest.TestCase):
+    def setUp(self):
+        # the watch board persists beside the field: isolate from the repo's
+        # own watches.json so tests never see (or clobber) live state.
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.field_path = str(Path(self._tmp.name) / "field.json")
+
+    def _srv(self):
+        store = _Store()
+        return type("S", (), {"membrane": type("M", (), {
+            "store": store, "embedder": _Emb(),
+            "field_path": self.field_path,
+            "audit_path": ""})()})()
+
     def test_watch_query_matcher(self):
         for q in ("membrane: watch flaky tests", "membrane: watches",
                   "membrane: drop watch #2", "Membrane: watch pytest?"):
@@ -220,25 +234,28 @@ class TestOpencodeGlue(unittest.TestCase):
             self.assertEqual(OC._is_watch_query(q), q.startswith("membrane: w"))
 
     def test_dispatch_plants(self):
-        store = _Store()
-        srv = type("S", (), {"membrane": type("M", (), {
-            "store": store, "embedder": _Emb(), "field_path": "x.json",
-            "audit_path": ""})()})()
+        srv = self._srv()
         with patch.object(OC, "_write_audit"):
             out = OC._watch_report_cmd(srv, "membrane: watch flaky tests")
         self.assertIn("planted", out)
         board = srv._watch_board
         self.assertEqual(len(board.watches), 1)
 
-    def test_thought_watch_is_report_only(self):
-        store = _Store()
-        srv = type("S", (), {"membrane": type("M", (), {
-            "store": store, "embedder": _Emb(), "field_path": "x.json",
-            "audit_path": ""})()})()
-        OC._watch_report_cmd(srv, "membrane: watch flaky tests")
-        out = OC._watch_set_from_thought(srv, "new topic here")
-        self.assertIn("NOT executed", out)
-        self.assertEqual(len(srv._watch_board.watches), 1)
+    def test_thought_watch_plants(self):
+        srv = self._srv()
+        with patch.object(OC, "_write_audit"):
+            OC._watch_report_cmd(srv, "membrane: watch flaky tests")
+            out = OC._watch_set_from_thought(srv, "new topic here")
+        self.assertIn("agent watch planted", out)
+        self.assertEqual(len(srv._watch_board.watches), 2)
+
+    def test_thought_watch_drop_executes(self):
+        srv = self._srv()
+        with patch.object(OC, "_write_audit"):
+            OC._watch_report_cmd(srv, "membrane: watch flaky tests")
+            out = OC._watch_set_from_thought(srv, "drop all")
+        self.assertIn("dropped 1", out)
+        self.assertEqual(len(srv._watch_board.watches), 0)
 
 
 if __name__ == "__main__":

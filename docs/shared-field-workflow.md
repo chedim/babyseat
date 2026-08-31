@@ -78,10 +78,20 @@ digest of what the overnight seats taught the field.
 
 ## Operator rules, team edition
 
-- **Write authority stays human at every seat.** Model prose never writes
-  the field (report-only intercepts); the `membrane: learn that` /
-  `membrane: promote` turns are the operator's hand. A rogue subagent on
-  one seat cannot poison eleven.
+- **Write authority is shared, with provenance.** A `membrane: learn that X`
+  in the AGENT's prose writes the field (tagged `agent-note`, audited
+  `origin: agent`, same dedup/variety guards as any turn; the operator path
+  stays distinguished as `operator-note`). `--no-agent-writes` reverts the
+  seat to propose-only for seats that want the strict human-hand covenant.
+  Whatever the lane, model prose never writes a TEAMMATE's cells, and the
+  operator audit trail still separates who wrote what (a rogue subagent on
+  one seat cannot poison eleven silently -- its notes are forensically
+  visible, and demotable per-origin once trust weights land).
+- **Agent learn hygiene:** the agent learns only EARNED lessons of its own
+  work (the fixed quirk, the command that worked). No secrets, no user
+  personal data, no transcript dumps -- the length cap and the guards filter
+  the bulk, and the operator's `membrane: forget`/review paths remain the
+  sanitation layer.
 - **Forget sovereignty:** you can only delete YOUR origin's cells. A
   teammate's junk is handled by (a) asking them, (b) demoting their
   origin's trust (see below), or (c) out-earning it in arbitration.

@@ -61,8 +61,13 @@ canonical frames itself (intercepts -- no model call, never learned):
                                               cross-project commons
 
 The agent may also emit these frames in its own prose: reads arrive next turn
-as clearly-marked `[membrane-intercept]` blocks; writes/forgets from model
-prose are report-only (the field is only written by operator turns).
+as clearly-marked `[membrane-intercept]` blocks. WRITES: a `membrane: learn
+that <lesson>` in the agent's prose EXECUTES by default (same guards as any
+turn, tagged `agent-note`, audited `origin: agent`; --no-agent-writes reverts
+to propose-only), index-form `membrane: forget #N` deletes (wordy forms
+propose only), and `membrane: watch <topic>` plants a trigger. The agent must
+learn only EARNED lessons of its own work -- never secrets, user personal
+data, or transcript dumps.
 
 Data lives in .membrane/ (field.json, audit.jsonl, logs) -- never commit it.
 Persistence backend: JSON file by default; `membrane connect` (or the
