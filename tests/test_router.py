@@ -59,13 +59,19 @@ class _Reg(R.Registry):
 TAGS = {
     "models": [
         {"name": "qwen2.5-coder:32b", "size": 18 * 2**30,
-         "capabilities": ["tools"]},
+         "capabilities": ["completion", "tools"]},
         {"name": "deepseek-r1:8b", "size": 4 * 2**30,
-         "capabilities": ["tools"]},
+         "capabilities": ["completion", "tools"]},
+        {"name": "bakllava:latest", "size": 4 * 2**30,
+         "capabilities": ["completion", "vision"]},          # no tools
+        {"name": "karanchopda333/whisper:latest", "size": 2**30,
+         "capabilities": ["completion", "tools"]},           # whisper marker
         {"name": "glm-5.3-flash:cloud", "size": 0,
-         "remote_host": "https://api.z.ai", "capabilities": ["tools"]},
+         "remote_host": "https://api.z.ai", "capabilities": ["tools",
+                                                             "completion",
+                                                             "thinking"]},
         {"name": "claude-opus:cloud", "size": 0,
-         "remote_host": "https://api.anthropic.com"},
+         "remote_host": "https://api.anthropic.com"},        # no caps served
     ],
     "_ps": {"models": [{"name": "qwen2.5-coder:32b"}]},   # resident
 }
@@ -115,31 +121,115 @@ class TestImprintPrior(unittest.TestCase):
         self.assertLess(share, 0.10)
 
 
-class TestCostFloor(unittest.TestCase):
-    def test_cloud_never_wins_idle_box(self):
+class TestCompatibilityScreen(unittest.TestCase):
+    """The DECLARED filter: opencode-eligibility before any scoring."""
+    def test_bakllava_never_routes(self):
         reg = _Reg("http://x", tags=TAGS)
-        # local candidate has a GREAT imprint for this situation
-        lp = reg.records["qwen2.5-coder:32b"]
+        lv = reg.records["bakllava:latest"]
+        self.assertFalse(R.local_is_eligible(lv))   # completion but no tools
+
+    def test_whisper_never_routes(self):
+        reg = _Reg("http://x", tags=TAGS)
+        self.assertFalse(R.local_is_eligible(
+            reg.records["karanchopda333/whisper:latest"]))
+
+    def test_tools_coder_and_unknown_caps_cloud_pass(self):
+        reg = _Reg("http://x", tags=TAGS)
+        self.assertTrue(R.local_is_eligible(
+            reg.records["deepseek-r1:8b"]))
+        # caps unknown -> conservative keep (name screen passed)
+        self.assertTrue(R.local_is_eligible(
+            reg.records["claude-opus:cloud"]))
+
+    def test_oversized_local_is_never_a_candidate(self):
+        # 18.5GB > max_local_gib 12: filtered OUT of locals entirely
+        reg = _Reg("http://x", tags=TAGS, max_local_gib=12.0)
+        best, info = reg.route(_vec(1.0), urgency=1.0)
+        self.assertNotEqual(best and best.name, "qwen2.5-coder:32b")
+
+    def test_needs_tools_never_picks_toolsless_cloud(self):
+        reg = _Reg("http://x", tags=TAGS, explore=0.0)
+        # claude serves no caps -> cap_ok keeps it (declared-unknown covenant);
+        # bakllava is screened out; glm declares tools. So with needs_tools
+        # the route may be glm (tools-declared) or claude (caps unknown) --
+        # but never bakllava or whisper.
+        for _ in range(10):
+            best, _ = reg.route(_vec(0.1), needs_tools=True)
+            self.assertIsNotNone(best)
+            self.assertNotIn(best.name, ("bakllava:latest",
+                                         "karanchopda333/whisper:latest"))
+
+
+class TestReversedLadder(unittest.TestCase):
+    """The OPERATOR default: the cheapest eligible cloud holds the floor."""
+    def test_cloud_floor_on_idle_box(self):
+        reg = _Reg("http://x", tags=TAGS, explore=0.0)
+        lp = reg.records["deepseek-r1:8b"]
+        lp.imprint = [list(_vec(1.0))]          # local claims a great fit
+        lp.trials = 0                            # ...but has EARNED nothing
+        best, info = reg.route(_vec(1.0), urgency=1.0)
+        self.assertEqual(best.kind, "cloud")
+        self.assertEqual(info["route"], "glm-5.3-flash:cloud")  # cheapest cloud
+        self.assertIn("floor", info["reason"])
+
+    def test_no_cloud_falls_back_to_best_local(self):
+        reg = _Reg("http://x", tags=TAGS, explore=0.0, cloud_budget=0.0)
+        lp = reg.records["deepseek-r1:8b"]
         lp.imprint = [list(_vec(1.0))]
-        cp = reg.records["claude-opus:cloud"]
-        cp.imprint = [list(_vec(1.1))]     # marginally better fit
         best, info = reg.route(_vec(1.0), urgency=1.0)
         self.assertEqual(best.kind, "local")
-        self.assertEqual(info["route"], "qwen2.5-coder:32b")
+        self.assertIn("no cloud", info["reason"])
 
-    def test_pressure_valve_lets_cloud_win(self):
-        reg = _Reg("http://x", tags=TAGS, explore=0.0)   # no eps-assert noise
-        lp = reg.records["qwen2.5-coder:32b"]
-        lp.imprint = [list(_vec(1.0))]
-        lp.latency_ewma = 45.0             # >> default threshold 10s: stuck
-        cp = reg.records["claude-opus:cloud"]
-        # cloud is tangibly better for THIS situation: with the local stuck
-        # (45s EWMA under load) the valve justifies the money.
-        cp.imprint = [list(_vec(1.0)), list(_vec(0.2))]
-        reg.pressure = lambda: 2.0         # monkeypatched: box is pegged
-        best, info = reg.route(_vec(1.0) * 0.3 + _vec(0.2) * 0.7, urgency=2.0)
-        self.assertEqual(info["route"], "claude-opus:cloud")
-        self.assertIn("valve", info["reason"])
+    def test_earned_local_takes_the_rank(self):
+        reg = _Reg("http://x", tags=TAGS, explore=0.0)
+        v = _vec(1.0)
+        lp = reg.records["deepseek-r1:8b"]       # 4GB, tools, holds in RAM
+        for _ in range(6):
+            reg.note_outcome("deepseek-r1:8b", v, survived=True)
+        cp = reg.records["glm-5.3-flash:cloud"]
+        cp.imprint = [list(_vec(2.5))]            # floor claims a DIFFERENT topic
+        lp.imprint = [list(v)]
+        best, info = reg.route(v, urgency=1.0)
+        self.assertEqual(best.kind, "local")
+        self.assertIn("earned-local", info["reason"])
+
+    def test_tie_keeps_the_floor(self):
+        # equal fits -> the incumbent cloud keeps the rank (conservative)
+        reg = _Reg("http://x", tags=TAGS, explore=0.0)
+        v = _vec(1.0)
+        lp = reg.records["deepseek-r1:8b"]
+        for _ in range(6):
+            reg.note_outcome("deepseek-r1:8b", v, survived=True)
+        cp = reg.records["glm-5.3-flash:cloud"]
+        cp.imprint = [list(v)]
+        lp.imprint = [list(v)]
+        best, info = reg.route(v, urgency=1.0)
+        self.assertEqual(best.kind, "cloud")
+
+    def test_prefer_local_flips_the_floor_back(self):
+        reg = _Reg("http://x", tags=TAGS, explore=0.0, prefer_local=True)
+        best, info = reg.route(_vec(1.0), urgency=1.0)
+        self.assertEqual(best.kind, "local")
+        self.assertIn("prefer-local", info["reason"])
+
+    def test_explore_never_cold_loads_or_picks_toys(self):
+        reg = _Reg("http://x", tags=TAGS, explore=1.0)
+        # the unsampleable/filtered set: oversize qwen2.5-coder:32b (too big
+        # to hold), bakllava (incompatible), whisper (non-chat marker),
+        # claude-opus:cloud (never explored: cloud). deepseek-r1:8b (4GB,
+        # eligible) is the only sampleable local -> a local route from
+        # exploration must be IT, and cloud routes must be glm (the floor).
+        for _ in range(30):
+            best, info = reg.route(_vec(0.3), urgency=1.0)
+            if best is not None and best.kind == "local":
+                self.assertEqual(best.name, "deepseek-r1:8b")
+            self.assertTrue(info["reason"])
+
+    def test_pressure_valve_record_still_accrues_on_cloud_routes(self):
+        reg = _Reg("http://x", tags=TAGS)
+        reg.note_outcome("glm-5.3-flash:cloud", _vec(0.7), survived=True,
+                         pressure=2.0)
+        self.assertEqual(len(reg.calibration), 1)
 
     def test_budget_exhausted_drops_cloud(self):
         reg = _Reg("http://x", tags=TAGS, cloud_budget=5.0)

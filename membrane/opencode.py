@@ -59,12 +59,17 @@ CLOUD_DEFAULT_PRICE = 3.0   # an unknown cloud model's relative money/turn
 
 def _PRICE_TABLE_BY_NAME():
     """(name, usd) pairs for the judge ladder: the router's discovered
-    candidates priced via the table (unknown -> default), locals priced 0."""
+    candidates priced via the table (unknown -> default), locals priced 0.
+    Only OPencode-ELIGIBLE candidates are proposed: a whisper or a
+    vision-only model never adjudicates an answer."""
+    from .router import local_is_eligible
     router = globals().get("_BOOT_ROUTER")
     out = []
     if router is not None:
         from .router import PRICE_TABLE
         for rec in router.records.values():
+            if rec.kind == "local" and not local_is_eligible(rec):
+                continue
             low = rec.name.lower()
             usd = CLOUD_DEFAULT_PRICE if rec.kind == "cloud" else 0.0
             for frag, p in PRICE_TABLE:
@@ -82,6 +87,10 @@ from .variety import thermo_state
 _NON_CHAT_MARKERS = ("embed", "minilm", "bge", "whisper", "nomic-embed")
 # tag markers meaning "an embedding model" (the embed-role candidates)
 _EMBED_MARKERS = ("embed", "minilm", "bge", "arctic", "gte")
+# the opencode-compatibility screen for the PICKER (same covenant as the
+# router's screen in router.py; both sides filter on Ollama's declared caps)
+_OC_MIN_CAPS = ("completion", "tools")
+_OC_MAX_LOCAL_GIB = 12.0
 
 
 def _is_non_chat(name: str) -> bool:
@@ -1627,13 +1636,36 @@ def _capture_reasoning(mem, query: str, reasoning: str) -> None:
 
 
 def _chat_capable_models(backend: str) -> list:
+    """Models opencode may SEE and select: the opencode-compatibility screen
+    (completion + tools caps, non-chat name markers) — the same covenant the
+    router routes under, applied to the picker, /v1/models and the default
+    model choice. Cloud entries (size 0 / remote_host) always pass."""
     try:
         with urllib.request.urlopen(backend + "/api/tags", timeout=30) as r:
             tags = json.loads(r.read())
     except Exception:
         return []
-    return [m.get("name", "") for m in tags.get("models", [])
-            if m.get("name") and not _is_non_chat(m.get("name"))]
+    out = []
+    for m in tags.get("models", []) or []:
+        name = m.get("name") or ""
+        if not name:
+            continue
+        is_cloud = bool(m.get("remote_host")) or not m.get("size")
+        if is_cloud:
+            out.append(name)
+            continue
+        if _is_non_chat(name):       # unconditional: the name screen is a
+            continue                 # floor; caps only ADD restrictions
+        caps = list(m.get("capabilities") or [])
+        if caps and not all(c in caps for c in _OC_MIN_CAPS):
+            continue
+        elif _is_non_chat(name):
+            continue
+        sz = int(m.get("size") or 0)
+        if sz and sz / 2**30 > _OC_MAX_LOCAL_GIB:
+            continue
+        out.append(name)
+    return out
 
 
 def _pick_default_model(models: list, preferred: str | None) -> str | None:
@@ -2017,9 +2049,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 print(f"[opencode] peer-ask error (ignored): {e}",
                       file=sys.stderr)
         # ---- the orchestration router: model-vs-model on escalations ----
-        # Score proposes (fit_hat - delay - price); cost-floor disposes
-        # (local first, cheap cloud next, expensive cloud when really stuck).
-        # Failure degrades to the plain backend path (the safe direction).
+        # Score proposes (fit_hat - delay - price); the REVERSED cost-floor
+        # disposes (cheapest eligible cloud holds the floor; locals must
+        # earn the rank). THE OPERATOR'S CEILING: the model the user picked
+        # in opencode caps the ladder (never pricier cloud; a local pick
+        # forbids cloud). Failure degrades to the plain backend path (the
+        # safe direction).
         router = getattr(srv, "router", None)
         if router is not None and str(verdict.get("verdict", "")) \
                 .startswith("escalate"):
@@ -2028,16 +2063,20 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                     isinstance(m, dict) and m.get("tool_calls")
                     for m in (body.get("messages") or [])
                     if isinstance(m, dict))
+                ceiling = (str(body.get("model") or "").split("/", 1)[-1]
+                           or None)          # membrane/<model> -> <model>
                 rec, route_info = router.route(
                     vec if vec is not None else None,
-                    urgency=1.0, needs_tools=needs_tools)
+                    urgency=1.0, needs_tools=needs_tools, ceiling=ceiling)
                 if rec is not None:
                     route_info["fallback"] = str(up.get("model") or "membrane")
                     route_info["price"] = rec.price()
                     verdict["route"] = route_info
-                    up["model"] = rec.name
-                    print(f"[opencode] router -> {rec.name} "
-                          f"({route_info.get('reason')})", file=sys.stderr)
+                    if rec.name != str(up.get("model")):
+                        up["model"] = rec.name
+                        print(f"[opencode] router -> {rec.name} "
+                              f"({route_info.get('reason')})",
+                              file=sys.stderr)
             except Exception as e:
                 print(f"[opencode] router error (plain path): {e}",
                       file=sys.stderr)
@@ -2061,9 +2100,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         t0 = time.monotonic() if routed_model else None
 
         def _open_backend(model_name: str):
-            """POST the turn to Ollama; ONE failover retry on the pre-router
-            model when the routed candidate cannot serve at all (connect
-            error / 5xx -- degrade toward the safe direction)."""
+            """POST the turn to Ollama. On a rung DOWN (out of tokens /
+            auth / rate limit / dead backend) fall DOWN THE LADDER: next
+            cloud rung, then eligible locals, each failed rung cooling down
+            so later turns skip it. When nothing answers the request fails
+            and opencode surfaces the field-only state honestly."""
             u2 = dict(up)
             u2["model"] = model_name
             rq = urllib.request.Request(
@@ -2073,27 +2114,64 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             try:
                 return urllib.request.urlopen(rq, timeout=300)
             except urllib.error.HTTPError as he:
-                # 404/400 (model absent, bad request) = the routed candidate
-                # cannot serve THIS turn -> failover once. 5xx too. 4xx auth
-                # on a cloud relay is also "this rung is down", but a 4xx on
-                # the fallback itself must surface (client-side error).
-                if (model_name == orig_model or not routed_model
-                        or route.get("failover")):
+                # rung-down codes: bad/absent model (400/404), auth or
+                # payment (401/402/403), rate limit / quota (429), 5xx.
+                # 400 on the FINAL rung surfaces (client-side error).
+                down = he.code in (400, 401, 402, 403, 404, 408, 429,
+                                   500, 502, 503, 504)
+                nxt = _next_rung(model_name)
+                if not down or nxt is None:
                     raise
-                if he.code in (400, 404, 500, 502, 503, 504):
-                    print(f"[opencode] router failover {model_name} -> "
-                          f"{orig_model} (HTTP {he.code})", file=sys.stderr)
-                    route["failover"] = orig_model
-                    return _open_backend(orig_model)
-                raise
+                why = f"HTTP {he.code}"
+                if he.code in (401, 402, 403, 429):
+                    why += (" (out of tokens/limit)" if he.code in (402, 429)
+                            else " (auth)")
+                print(f"[opencode] ladder failover {model_name} -> {nxt} "
+                      f"({why})", file=sys.stderr)
+                router.note_outage(model_name, why)
+                route["failover"] = nxt
+                return _open_backend(nxt)
             except Exception as first_err:
-                if (model_name == orig_model or not routed_model
-                        or route.get("failover")):
+                nxt = _next_rung(model_name)
+                if nxt is None:
                     raise
-                print(f"[opencode] router failover {model_name} -> "
-                      f"{orig_model} ({first_err})", file=sys.stderr)
-                route["failover"] = orig_model
-                return _open_backend(orig_model)
+                print(f"[opencode] ladder failover {model_name} -> {nxt} "
+                      f"({first_err})", file=sys.stderr)
+                router = getattr(srv, "router", None)
+                if router is not None:
+                    router.note_outage(model_name, str(first_err)[:120])
+                route["failover"] = nxt
+                return _open_backend(nxt)
+
+        def _next_rung(model_name: str):
+            """The next rung down the ladder after model_name, or None when
+            the stack is exhausted (nothing alive) — the field-only edge."""
+            router = getattr(srv, "router", None)
+            if router is None or not routed_model:
+                return None
+            try:
+                stack = router.ladder(
+                    needs_tools=any(isinstance(m, dict) and m.get("tool_calls")
+                                    for m in (up.get("messages") or [])
+                                    if isinstance(m, dict)),
+                    ceiling=ceiling if (ceiling := str(
+                        up.get("model") or "").split("/", 1)[-1]) else None)
+            except Exception:
+                return None
+            seen = False
+            for r in stack:
+                if r.name == model_name:
+                    seen = True
+                    continue
+                if seen and r.name != orig_model:
+                    return r.name
+                if seen and r.name == orig_model:
+                    return r.name          # the pre-router rung is fair game
+            # every listed rung failed or was above model_name: if the
+            # requested rung was never on the stack (pre-router fallback),
+            # offer nothing more — the stack walk ends.
+            return None
+
         streaming = bool(up.get("stream", False))
         parts: list[str] = []
         think: list[str] = []
@@ -2420,16 +2498,30 @@ def main() -> None:
                          "live working context (--no-momentum for exact recall).")
     ap.add_argument("--no-momentum", dest="momentum", action="store_false")
     ap.set_defaults(archive=True, momentum=True)
-    ap.add_argument("--no-router", dest="router", action="store_false",
+    ap.add_argument("--no-router", "--disable-llm-router", dest="router",
+                    action="store_false",
                     help="disable the LLM orchestration router and always "
-                         "escalate to the single --backend model")
+                         "escalate to the single --backend model (the kill "
+                         "switch if routing goes crazy)")
     ap.add_argument("--cloud-budget", type=float, default=None, metavar="USD",
                     help="max relative-money spend per day on cloud-routed "
                          "escalations (the cost ladder's hard cap; unset = "
                          "uncapped). Score proposes; budget disposes.")
     ap.add_argument("--explore", type=float, default=0.05, metavar="EPS",
                     help="fraction of escalations that try the least-tried "
-                         "LOCAL model so fresh candidates can build a record")
+                         "OPencode-ELIGIBLE local model that holds in memory "
+                         "(0 disables; fresh candidates can otherwise never "
+                         "build a record)")
+    ap.add_argument("--prefer-local", dest="prefer_local",
+                    action="store_true",
+                    help="restore the classic LOCAL-FIRST cost floor (the "
+                         "router's default is cloud-first: the cheapest "
+                         "eligible cloud holds the floor and locals must "
+                         "earn the rank with a win-rate record). Use for "
+                         "offline / privacy / zero-cloud operations.")
+    ap.add_argument("--max-local-gib", type=float, default=12.0, metavar="GIB",
+                    help="never cold-load a local model bigger than this "
+                         "(protected RAM budget; 32GB boxes: 8-14 is sane)")
     ap.add_argument("--price", action="append", default=[], metavar="M=USD",
                     help="override the relative money per turn for a cloud "
                          "model (substring match, repeatable), e.g. "
@@ -2684,7 +2776,9 @@ def main() -> None:
             srv.router = Registry(
                 backend=backend, embedder=mem.embedder,
                 state_path=rstate, explore=float(args.explore),
-                cloud_budget=args.cloud_budget)
+                cloud_budget=args.cloud_budget,
+                prefer_local=bool(args.prefer_local),
+                max_local_gib=float(args.max_local_gib))
             if mem.embedder is not None:
                 srv.router.seed_imprints_async()
             n_local = sum(1 for r in srv.router.records.values()
@@ -2782,7 +2876,7 @@ def main() -> None:
           f"  replay: {'sim>=' + format(srv.replay_sim, '.2f') + ' -> stored answer, no model call' if srv.replay_sim > 0 else 'off (pure observer)'}\n"
           f"  archive: {'on (cold tier after each compaction)' if getattr(srv, 'archive', False) else 'off (--archive)'}\n"
           f"  momentum: {'on (recall skewed toward working context)' if getattr(srv, 'momentum', False) else 'off (--momentum)'}\n"
-          f"  router: {'on (' + str(len(srv.router.records)) + ' candidates)' if getattr(srv, 'router', None) else 'off (--no-router to disable; would be on by default)'}\n"
+          f"  router: {'on (' + str(len(srv.router.records)) + ' candidates' + (', prefer-local' if getattr(srv.router, 'prefer_local', False) else ', cloud-floor') + ')' if getattr(srv, 'router', None) else 'off (--disable-llm-router to keep it off)'}\n"
           f"  judge: {judge_s}\n"
           f"  opencode config: {cfg_path}",
           file=sys.stderr)

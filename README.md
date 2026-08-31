@@ -212,8 +212,16 @@ field then *answers without asking a model again*:
    field small so kNN stays fast *and* the retrieval surface stays small.
 
 Where the money actually goes after all of that: **escalations** — genuinely
-new situations. That is the router's job: route them local first, cheap cloud
-next, expensive cloud when really stuck, and replay the ones that settle.
+new situations. That is the router's job: the cheapest eligible cloud model
+holds the floor (fast, cool, always "resident") and a LOCAL takes the rank
+only on earned evidence — a real win-rate over lived turns plus a fit margin,
+and only if it holds without a cold load. The user's opencode model pick is
+the **ceiling**: the router never routes pricier cloud than the selected
+model, and a local selection forbids cloud entirely. A rung that fails
+(out of tokens, auth, rate limit, dead backend) **cools down** and the turn
+falls down the ladder to the next rung; when everything is down, the field
+itself is the last resort — reliance on learned memory grows automatically
+as ladder rungs drop out.
 
 ---
 
@@ -229,15 +237,21 @@ LLM keeps two jobs, both rare:
 2. **The judge** (on by default; `--no-judge` opt-out) — adjudicate demotions
    via the **judge ladder** (start one rung up the cost stack from the model
    that answered and propagate upward until a rung rules; the human is the
-   top rung, asked with question + options + consequences per case).
+   top rung, asked with question + options + consequences per case; only
+   opencode-eligible candidates adjudicate).
 
 Recall is **momentum-skewed kNN** (toward the live working context), the
 context block is MMR-deduped, and replay returns the stored answer verbatim
-above `--replay-sim`. On escalations, the **router** picks the model:
-`score = fit_hat − λ_time·urgency·delay − λ_cost·price` — the cost ladder
-(local 0 → cheap cloud → expensive cloud) with a measured pressure valve
-(cloud only when the machine is genuinely slow or no local fits), a daily
-budget cap, eps-exploration of unsampled locals, and per-turn audit lines
+above `--replay-sim`. On escalations, the **router** picks the model under
+an **opencode-compatibility screen** (a local candidate must declare
+`completion` + `tools` capability flags, clear the non-chat name screen, and
+fit the `--max-local-gib` budget — never a cold load of an outlier; the same
+screen filters `/v1/models`, the picker and the judge ladder):
+`score = fit_hat − λ_time·urgency·delay − λ_cost·price`. Knobs:
+`--prefer-local` (classic local-first floor for offline/privacy),
+`--cloud-budget` (daily cap), `--explore` (eps-sampling of eligible,
+in-memory locals only), `--disable-llm-router` (the kill switch — plain
+single-model escalation), and per-turn audit lines
 (`route: model=… reason=… pressure=…`) that `field state` tabulates as
 claimed-vs-measured win rates.
 
