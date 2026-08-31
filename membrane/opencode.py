@@ -144,8 +144,9 @@ def _state_report(srv) -> str:
 # Turns that ASK what the field remembers are served straight from the store:
 # the topic is embedded, top-k SAFE exemplars come back formatted. The turn is
 # intercepted BEFORE the gate -> it never learns, never demotes, never nudges:
-# the field cannot eat its own readback (the collapse route). The two skills
-# in .opencode/skills/ teach the agent the canonical phrasings; to the agent
+# the field cannot eat its own readback (the collapse route). The skills
+# shipped in membrane/skills/ (installed into .opencode/skills/) teach the
+# agent the canonical phrasings; to the agent
 # they look like ordinary skills, but the SKILL.md bodies say they are served
 # by membrane itself.
 _RECALL_CANON = ("membrane: query the field for ",

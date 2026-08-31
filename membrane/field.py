@@ -97,7 +97,8 @@ class ExemplarStore:
         nothing in the learning loop may remove a cell. The OPERATOR stands
         outside that promise: the same authority that injects entropy may withdraw
         what it gave, and an explicitly commanded forget (``membrane: forget ...``,
-        the skills in .opencode/skills/) removes cells outright. Nothing else may
+        the skills in .opencode/skills/, shipped as membrane/skills/) removes cells
+        outright. Nothing else may
         call this. Persists nothing here -- the caller saves.
 
         Returns the number removed (out-of-range indexes are ignored -- the

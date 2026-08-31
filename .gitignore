@@ -19,3 +19,10 @@ cortex-audit.jsonl
 
 # personal worlds — embedded private conversations, never commit
 worlds/
+
+# membrane runtime state (per-project memory field)
+rag-field.json
+rag-audit.jsonl
+rag-field.json.review.jsonl
+membrane-opencode.log
+membrane-proxy.log

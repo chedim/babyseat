@@ -111,6 +111,35 @@ Rick's lived scenes, Morty is the co-lead, and the world is *about them*.
 
 ---
 
+## Use in another project (portable membrane)
+
+membrane is pip-installable straight from this repo, so any project can get a
+field-backed coding agent — its own memory field, its own skills, zero copies
+of this repo needed:
+
+```bash
+# in the OTHER project's root:
+uvx --from "membrane @ git+ssh://git@github.com/chedim/membrane" membrane install
+uvx --from "membrane @ git+ssh://git@github.com/chedim/membrane" membrane opencode
+```
+
+- `membrane install` drops the four agent skills (query/learn/forget/state)
+  into `.opencode/skills/` of the current directory, appends the membrane
+  runtime files to `.gitignore` (create if missing), and prints a short
+  AGENTS.md blurb to paste. Re-run with `--force` to refresh the skills.
+- `membrane opencode` starts the OpenAI-compatible proxy on `:11500`
+  (backend Ollama at `http://localhost:11434`, override `--backend`/`--model`)
+  and opens opencode pointed at it. Every turn is grounded by the field's
+  recall and learned back — that project accumulates its own long-term memory
+  in `rag-field.json` (+ `rag-audit.jsonl`, `.review.jsonl`, logs) in its root.
+- Other surfaces: `membrane tui` (world + proxy), `membrane proxy`,
+  `membrane review`, `membrane demo`, `membrane reset` (kill the port, start
+  fresh). `./run.sh` still works in-repo and delegates to the same CLI.
+- Requires only Python ≥ 3.10 + numpy; embeddings/chat come from a running
+  Ollama.
+
+---
+
 ## How it works
 
 ### The field acts; the LLM gardens
