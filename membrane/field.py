@@ -29,6 +29,8 @@ at runtime the agent queries it by cosine to the current task's embedding.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import dataclass, asdict, field
 from pathlib import Path
 from typing import Optional
@@ -80,9 +82,32 @@ class ExemplarStore:
 
     def __init__(self) -> None:
         self.exemplars: list[Exemplar] = []
+        # set by load() when a corrupt field could NOT be quarantined: save()
+        # then refuses to write, so it never clobbers the unrecovered file.
+        self._quarantine_failed = False
 
     def append(self, ex: Exemplar) -> None:
         self.exemplars.append(ex)
+
+    def forget(self, indexes) -> int:
+        """Operator-given deletion: drop the exemplars at ``indexes``.
+
+        The store is append-only for EARNED history -- the gate, the compactor and
+        the boundary paths only ever add cells or mutate the evidence counts;
+        nothing in the learning loop may remove a cell. The OPERATOR stands
+        outside that promise: the same authority that injects entropy may withdraw
+        what it gave, and an explicitly commanded forget (``membrane: forget ...``,
+        the skills in .opencode/skills/) removes cells outright. Nothing else may
+        call this. Persists nothing here -- the caller saves.
+
+        Returns the number removed (out-of-range indexes are ignored -- the
+        compactor may have renumbered between listing and dropping)."""
+        idx_set = {int(i) for i in indexes if 0 <= int(i) < len(self.exemplars)}
+        if not idx_set:
+            return 0
+        self.exemplars = [e for i, e in enumerate(self.exemplars)
+                          if i not in idx_set]
+        return len(idx_set)
 
     def set_safe(self, index: int, value: bool) -> None:
         """Manually override an exemplar's `safe` (the review surface / a supervisor).
@@ -178,9 +203,28 @@ class ExemplarStore:
         return [(self.exemplars[i], float(sims[i])) for i in idx]
 
     def save(self, path: str | Path) -> None:
-        Path(path).write_text(
-            json.dumps([asdict(e) for e in self.exemplars], indent=2)
-        )
+        """Atomic save: write to a temp file in the same directory, then
+        ``os.replace`` it over the target. A crash mid-write leaves the old
+        field intact (the rename is the atomic publish step) instead of a
+        truncated JSON no future load can read."""
+        p = Path(path)
+        if self._quarantine_failed:
+            raise RuntimeError(
+                f"refusing to save over unreadable field {p} "
+                f"(quarantine failed at load); move the file aside first")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=p.name + ".", suffix=".tmp",
+                                   dir=str(p.parent))
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump([asdict(e) for e in self.exemplars], f, indent=2)
+            os.replace(tmp, p)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
 
     @classmethod
     def load(cls, path: str | Path) -> "ExemplarStore":
@@ -191,12 +235,24 @@ class ExemplarStore:
             try:
                 recs = json.loads(text) if text.strip() else []
             except json.JSONDecodeError as e:
-                # empty / truncated / corrupt field -- degrade to an empty store
-                # rather than killing the proxy on startup. Nothing is lost: the
-                # raw file is untouched, and the next save() overwrites cleanly.
+                # corrupt field -- QUARANTINE, don't discard. The file is moved
+                # aside with the exact bytes preserved so nothing is destroyed;
+                # the proxy starts empty and the next save() writes cleanly.
+                # (Before: a warning + an empty start, which silently orphaned
+                # every memory in the file against the append-only promise.)
                 import sys
-                print(f"[membrane] warning: field {p} unreadable ({e}); "
-                      f"starting empty", file=sys.stderr)
+                import time
+                quar = p.with_name(p.name + f".corrupt-{time.strftime('%Y%m%d-%H%M%S')}")
+                try:
+                    os.replace(p, quar)
+                    print(f"[membrane] warning: field {p} unreadable ({e}); "
+                          f"quarantined to {quar}; starting empty", file=sys.stderr)
+                except OSError as e2:
+                    print(f"[membrane] warning: field {p} unreadable ({e}); "
+                          f"quarantine failed ({e2}); proceeding WITHOUT saving "
+                          f"over it", file=sys.stderr)
+                    # mark the store read-only-ish: save() refuses to clobber
+                    store._quarantine_failed = True
                 recs = []
             for rec in recs:
                 store.append(Exemplar(**rec))

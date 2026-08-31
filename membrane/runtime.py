@@ -402,6 +402,9 @@ class OllamaJudge:
             "Reply on the FIRST line exactly one word:\n"
             "  CONTEST  -- the answer was correct/complete; the re-ask was likely a misunderstanding.\n"
             "  ACCEPT   -- the answer was wrong/incomplete; the demotion should stand.\n"
+            "  ESCALATE -- genuinely undecidable (needs information you do not have: it is\n"
+            "             about user intent, private context, or too ambiguous to rule on).\n"
+            "             Reserve this for real deadlocks; do not use it to hedge.\n"
             "Then on the SECOND line, one sentence justifying it. Nothing else."
         )
         user_msg = (f"Question:\n\"\"\"\n{situation}\n\"\"\"\n\n"
@@ -427,6 +430,12 @@ class OllamaJudge:
         if first.startswith("CONTEST"):
             reason = lines[1].strip() if len(lines) > 1 else "answer was correct"
             return f"judge: {reason}"
+        if first.startswith("ESCALATE"):
+            reason = lines[1].strip() if len(lines) > 1 else "too ambiguous to rule on"
+            # ESCALATE: the special 'give it to the human' verdict. Returned as a
+            # distinct marker; Membrane._demote parks the case for the human and
+            # the demotion stands meanwhile (never replay: the safe side).
+            return f"ESCALATE: {reason}"
         return None  # ACCEPT or unparseable -> accept the demotion
 
 
@@ -550,11 +559,15 @@ class Membrane:
         self.field_path = Path(field_path)
         self.audit_path = Path(audit_path)
         self.embedder = embedder or OllamaEmbedder()
-        # the cast-mutating half of gate_turn and Membrane.adjust both acquire
-        # this lock so neither races the consolidator's _run_feeds (which holds
-        # the same object -- the proxy reassigns it to srv.feed_lock at boot).
+        # Serializes every field/cast mutation (gate_turn's POV walk, adjust's
+        # narration, _learn's read-dedup-append, contest/_demote votes, the
+        # compactor) so concurrent HTTP turns + background threads can't lose
+        # exemplars or interleave save()s. An RLock because the call graph is
+        # NESTED on one thread: adjust holds it and calls _learn, which
+        # re-acquires; the proxy reassigns it to srv.feed_lock at boot (an
+        # RLock there too). The judge/model calls stay OUTSIDE the lock.
         # Defaults to a private lock so a standalone Membrane is still safe.
-        self.mut_lock = threading.Lock()
+        self.mut_lock = threading.RLock()
         self.store = ExemplarStore.load(self.field_path)
         # the character ledger: scenes tag to walking regions; each character
         # carries a state_vec (EMA of its tagged scenes). Loaded alongside the
@@ -589,6 +602,16 @@ class Membrane:
         # re-ask across turns. Lost on restart; fine, the durable change (the safe flip)
         # is written to the field file, and the re-ask window is short.
         self._recent: deque = deque(maxlen=16)
+        # total-capture ledger: tool_call_id -> {query, name, args} for calls
+        # seen in-flight (opencode proxy). The RESULT arrives on the next
+        # request as a role:"tool" message; pairing + learning happens there.
+        # Unmatched ids are dropped on pop (pre-boot results); bounded by the
+        # number of calls actually in flight.
+        self._pending_tools: dict = {}
+        # per-turn gate notes (re-ask votes, demotions, judge rulings) for the
+        # opencode thinking-channel monologue. Reset by each gate_turn; appended
+        # by _demote. Other entrypoints simply never read it.
+        self.gate_notes: list[str] = []
         # Fork C: the boundary's generative organ, lazily grown from the field.
         # ``_gen_lm`` caches the n-gram built from the field's actions; ``_gen_size``
         # is the field length it was built at (rebuild when the field grows). None
@@ -684,6 +707,7 @@ class Membrane:
         per-veil variety record, from ONE SVD (reused as ``eff_rank`` into decide).
         """
         query = _last_user(request_body) or ""
+        self.gate_notes = []
         # OBSERVER ambient signal: a tool_result is_error in the latest user message
         # means a tool the model just invoked failed in the world -- the environment
         # pushed back through what happened, no dislike button. Demote the most-recent
@@ -1295,54 +1319,59 @@ class Membrane:
             self._audit(query, verdict, resp, ex_idx=None, learned=False,
                         would_absorb=would_absorb, vague=True)
             return None
-        dup_idx = self._find_dup(vec)
-        if dup_idx is not None:
-            # repair, not abandon: a demoted (unsafe) dup is a slot the environment
-            # already voted against. The dedup guard blocks appending the corrected
-            # answer the model just returned -- without intervention the slot would
-            # escalate-with-hint on the WRONG action forever. Two halves of the fix:
-            #   REPAIR  -- the model's new action DIFFERS from the demoted one: overwrite
-            #     the stored action (so the hint becomes correct), keep the demotion as
-            #     PROBATION (reask stays, safe stays False). The slot does not replay yet
-            #     (not the harsh immediate-trust of a cosine cache).
-            #   CONFIRM -- the model's new action EQUALS the stored (corrected) one: the
-            #     model stands by its fix -> a contest (the model's first-veto authority)
-            #     cancels the probation re-ask -> safe re-promotes. The environment keeps
-            #     the final say: if it re-asked again (reask=2), the first contest does
-            #     NOT restore (net 1 >= threshold) -> the demotion stands (boundary rule).
-            dup = self.store.exemplars[dup_idx]
-            if not dup.safe:
-                if content != dup.action:
-                    self.store.repair_action(dup_idx, content)
-                    self.store.save(self.field_path)
-                    self._audit(query, verdict, resp, ex_idx=dup_idx, learned=False,
-                                dup=True, repaired=True, would_absorb=would_absorb)
-                    return dup_idx
-                self.contest(dup_idx,
-                             reason="repair-confirm: model stood by corrected action",
-                             source="judge")
-            self._audit(query, verdict, resp, ex_idx=dup_idx, learned=False,
-                        dup=True, would_absorb=would_absorb)
-            return dup_idx
-        if self.variety_gate and len(self.store) >= 2:
-            from .variety import effective_rank, effective_rank_with
-            before = effective_rank(self.store)
-            after = effective_rank_with(self.store, vec)
-            if after - before <= 1e-6:            # adds no directional variety
-                self._audit(query, verdict, resp, ex_idx=None, learned=False,
-                            would_absorb=would_absorb, variety_skip=True)
-                return None
-        self.store.append(Exemplar(
-            situation=query, action=content, outcome="pending",
-            vec=(_unit_list(vec) if normalize else vec.tolist()), safe=not unsafe,
-            tags=tags or [],
-            self_authored=self_authored,
-        ))
-        self.store.save(self.field_path)
-        ex_idx = len(self.store) - 1
-        self._audit(query, verdict, resp, ex_idx=ex_idx, learned=True,
-                    would_absorb=would_absorb)
-        return ex_idx
+        # the read-dedup-repair-append-save sequence is one critical section:
+        # concurrent HTTP turns each run this path, and an unlocked check-then-
+        # append loses one of the learns (or repairs two dups simultaneously).
+        # RLock: adjust already holds it when it calls _learn.
+        with self.mut_lock:
+            dup_idx = self._find_dup(vec)
+            if dup_idx is not None:
+                # repair, not abandon: a demoted (unsafe) dup is a slot the environment
+                # already voted against. The dedup guard blocks appending the corrected
+                # answer the model just returned -- without intervention the slot would
+                # escalate-with-hint on the WRONG action forever. Two halves of the fix:
+                #   REPAIR  -- the model's new action DIFFERS from the demoted one: overwrite
+                #     the stored action (so the hint becomes correct), keep the demotion as
+                #     PROBATION (reask stays, safe stays False). The slot does not replay yet
+                #     (not the harsh immediate-trust of a cosine cache).
+                #   CONFIRM -- the model's new action EQUALS the stored (corrected) one: the
+                #     model stands by its fix -> a contest (the model's first-veto authority)
+                #     cancels the probation re-ask -> safe re-promotes. The environment keeps
+                #     the final say: if it re-asked again (reask=2), the first contest does
+                #     NOT restore (net 1 >= threshold) -> the demotion stands (boundary rule).
+                dup = self.store.exemplars[dup_idx]
+                if not dup.safe:
+                    if content != dup.action:
+                        self.store.repair_action(dup_idx, content)
+                        self.store.save(self.field_path)
+                        self._audit(query, verdict, resp, ex_idx=dup_idx, learned=False,
+                                    dup=True, repaired=True, would_absorb=would_absorb)
+                        return dup_idx
+                    self.contest(dup_idx,
+                                 reason="repair-confirm: model stood by corrected action",
+                                 source="judge")
+                self._audit(query, verdict, resp, ex_idx=dup_idx, learned=False,
+                            dup=True, would_absorb=would_absorb)
+                return dup_idx
+            if self.variety_gate and len(self.store) >= 2:
+                from .variety import effective_rank, effective_rank_with
+                before = effective_rank(self.store)
+                after = effective_rank_with(self.store, vec)
+                if after - before <= 1e-6:            # adds no directional variety
+                    self._audit(query, verdict, resp, ex_idx=None, learned=False,
+                                would_absorb=would_absorb, variety_skip=True)
+                    return None
+            self.store.append(Exemplar(
+                situation=query, action=content, outcome="pending",
+                vec=(_unit_list(vec) if normalize else vec.tolist()), safe=not unsafe,
+                tags=tags or [],
+                self_authored=self_authored,
+            ))
+            self.store.save(self.field_path)
+            ex_idx = len(self.store) - 1
+            self._audit(query, verdict, resp, ex_idx=ex_idx, learned=True,
+                        would_absorb=would_absorb)
+            return ex_idx
 
     def _find_dup(self, vec: np.ndarray) -> int | None:
         """Return the index of an existing exemplar whose situation is near-identical
@@ -1428,24 +1457,28 @@ class Membrane:
         """
         if not (0 <= ex_idx < len(self.store)):
             return
-        ex = self.store.exemplars[ex_idx]
-        first = ex.contest_count == 0
-        was_safe = ex.safe
-        self.store.add_contest(ex_idx)
-        restore = force_restore or first
-        if restore:
-            ex.recompute_safe(self.demote_threshold)
-        self.store.save(self.field_path)
-        self._audit_contest(ex_idx, reason, source, restore, first,
-                           ex.reask_count, ex.contest_count, ex.safe)
+        # RLock: callable while _learn already holds it on the same thread; the
+        # read-mutate-save stays one critical section.
+        with self.mut_lock:
+            ex = self.store.exemplars[ex_idx]
+            first = ex.contest_count == 0
+            was_safe = ex.safe
+            self.store.add_contest(ex_idx)
+            restore = force_restore or first
+            if restore:
+                ex.recompute_safe(self.demote_threshold)
+            self.store.save(self.field_path)
+            snap = (ex.reask_count, ex.contest_count, ex.safe)
+        r_k, c_k, safe_k = snap
+        self._audit_contest(ex_idx, reason, source, restore, first, r_k, c_k, safe_k)
         kind = "first-veto" if first else ("supervisor" if source == "supervisor" else "record-only")
-        if ex.safe != was_safe:
+        if safe_k != was_safe:
             print(f"[membrane] CONTEST ({source}, {kind}) restored exemplar #{ex_idx} "
-                  f"(reask={ex.reask_count} contest={ex.contest_count} safe={ex.safe}); "
+                  f"(reask={r_k} contest={c_k} safe={safe_k}); "
                   f"replayable again", file=sys.stderr)
         else:
             print(f"[membrane] CONTEST ({source}, {kind}) filed on exemplar #{ex_idx} "
-                  f"(reask={ex.reask_count} contest={ex.contest_count} safe={ex.safe}); "
+                  f"(reask={r_k} contest={c_k} safe={safe_k}); "
                   f"demotion stands", file=sys.stderr)
 
     def _remember(self, query: str, vec: np.ndarray, verdict: dict,
@@ -1494,9 +1527,10 @@ class Membrane:
         # wrong" signal as an act: demote the cell that spoke. The field is coupled
         # to the user, not the model.
         if self.observer or self.self_author:
-            match_verdicts = {"act", "escalate", "escalate-with-hint"}
+            match_verdicts = {"act", "act-replayed", "escalate",
+                              "escalate-with-hint"}
         else:
-            match_verdicts = {"act"}
+            match_verdicts = {"act", "act-replayed"}
         for r in self._recent:
             if r["verdict"] not in match_verdicts:
                 continue
@@ -1509,7 +1543,10 @@ class Membrane:
             ex_idx = r["ex_idx"]
             if ex_idx is None or not (0 <= ex_idx < len(self.store)):
                 return None
-            signal = "cosine" if r["verdict"] == "act" else "reask-after-escalate"
+            signal = ("cosine" if r["verdict"] in ("act", "act-replayed")
+                      else "reask-after-escalate")
+            self.gate_notes.append(
+                f"re-ask vote ({signal}, sim {sim:.2f}) on #{ex_idx}")
             return self._demote(ex_idx, query, sim, signal)
         # 2) negative follow-up (opt-in) -- only if no cosine re-ask matched
         if self.neg_followup:
@@ -1520,6 +1557,7 @@ class Membrane:
                 rv = np.asarray(r["vec"], dtype=float)
                 sim = float(qn @ (rv / (np.linalg.norm(rv) + 1e-12)))
                 if self._is_negative_followup(query, ex.action):
+                    self.gate_notes.append("negative follow-up vote")
                     return self._demote(r["ex_idx"], query, sim, "neg-followup")
         return None
 
@@ -1560,29 +1598,163 @@ class Membrane:
     def _demote(self, ex_idx: int, query: str, sim: float, signal: str) -> int:
         """Record a re-ask vote on exemplar ``ex_idx`` and ask the judge whether to contest.
         Shared by the cosine and negative-follow-up paths. Returns ``ex_idx``."""
-        ex = self.store.exemplars[ex_idx]
-        was_safe = ex.safe
-        self.store.add_reask(ex_idx)
-        ex.recompute_safe(self.demote_threshold)
-        self.store.save(self.field_path)
-        self._audit_outcome(ex_idx, "reask", query, sim,
-                            ex.reask_count, ex.contest_count, ex.safe, signal)
-        if ex.safe != was_safe:
+        # the mutation itself is the critical section; the judge call (a live
+        # Ollama model) must stay OUTSIDE the lock so it never blocks the live
+        # chat path -- same split the compactor uses.
+        with self.mut_lock:
+            ex = self.store.exemplars[ex_idx]
+            was_safe = ex.safe
+            self.store.add_reask(ex_idx)
+            ex.recompute_safe(self.demote_threshold)
+            self.store.save(self.field_path)
+            self._audit_outcome(ex_idx, "reask", query, sim,
+                                ex.reask_count, ex.contest_count, ex.safe, signal)
+            jr = (ex.reask_count, ex.contest_count, ex.safe, was_safe,
+                  ex.situation, ex.action)
+        reask_n, contest_n, safe_now, was_safe, ex_sit, ex_act = jr
+        if safe_now != was_safe:
+            self.gate_notes.append(
+                f"DEMOTED #{ex_idx} (reask={reask_n} contest={contest_n})")
             print(f"[membrane] RE-ASK ({signal}) demoted exemplar #{ex_idx} "
-                  f"(reask={ex.reask_count} contest={ex.contest_count} sim={sim:.3f}); "
+                  f"(reask={reask_n} contest={contest_n} sim={sim:.3f}); "
                   f"next time it escalates-with-hint", file=sys.stderr)
             # the model-side authority: ask the judge whether to contest this demotion.
             # Fires ONLY on an actual demotion (a safe flip) -- the rare, high-value
             # moment where adjudication matters, never every turn. StubJudge no-ops;
             # a live OllamaJudge calls a fresh model; a ScriptedJudge stands in for the demo.
-            reason = self.judge.contest(ex.situation, ex.action, query, ex.reask_count)
-            if reason:
+            reason = self.judge.contest(ex_sit, ex_act, query, reask_n)
+            if reason and reason.startswith("ESCALATE:"):
+                self.gate_notes.append("judge deferred -> human review")
+                # the judge declined to rule -> the human is the final authority.
+                # Park the case (a .review.jsonl queue beside the field); the
+                # demotion STANDS meanwhile (never replay = the safe side), and
+                # the human's verdict is final: keep -> a contest that restores,
+                # drop -> the demotion is confirmed permanently.
+                self._escalate_to_human(ex_idx, query, sim, reason, signal,
+                                        reask_n, contest_n)
+            elif reason:
+                self.gate_notes.append("judge contested -> restored")
                 self.contest(ex_idx, reason, source="judge")
         else:
             print(f"[membrane] re-ask vote ({signal}) on exemplar #{ex_idx} "
-                  f"(reask={ex.reask_count}, not yet demoted at threshold={self.demote_threshold})",
+                  f"(reask={reask_n}, not yet demoted at threshold={self.demote_threshold})",
                   file=sys.stderr)
         return ex_idx
+
+    def _escalate_to_human(self, ex_idx: int, query: str, sim: float,
+                           reason: str, signal: str, reask_n: int,
+                           contest_n: int) -> int:
+        """Park a judge ESCALATE for the human: append one case to the review
+        queue (``<field>.review.jsonl``) and audit it. The demotion stands
+        meanwhile; the human's verdict (keep/drop) is FINAL. Idempotent per
+        (demotion cycle, exemplar): an already-open case for the same index is
+        not duplicated. Returns the queue slot."""
+        case = {
+            "slot": int(time.time()),          # queue id (monotone enough locally)
+            "ex_idx": ex_idx,
+            "situation": "",
+            "action": "",
+        }
+        with self.mut_lock:
+            ex = (self.store.exemplars[ex_idx]
+                  if 0 <= ex_idx < len(self.store) else None)
+            case["situation"] = (ex.situation if ex else "")[:400]
+            case["action"] = (ex.action if ex else "")[:400]
+            case.update({
+                "reask_query": (query or "")[:400],
+                "judge_reason": reason.split(":", 1)[-1].strip(),
+                "signal": signal, "sim": sim,
+                "reask_count": reask_n, "contest_count": contest_n,
+                "field_size": len(self.store),
+                "status": "pending",
+            })
+            qpath = self.review_queue_path()
+            try:
+                with qpath.open("a") as f:
+                    f.write(json.dumps(case) + "\n")
+            except OSError as e:
+                print(f"[membrane] review queue write failed ({e}); case only "
+                      f"audited", file=sys.stderr)
+            verdict = {"verdict": "escalate-human",
+                       "reason": reason, "sim": sim, "nov": None,
+                       "ex_idx": ex_idx}
+            self._audit(f"[escalated to human] {case['situation'][:120]}",
+                        verdict, {"message": {"content": reason}}, ex_idx=None,
+                        learned=False)
+        print(f"[membrane] judge ESCALATED exemplar #{ex_idx} -> queued for the "
+              f"human ({qpath})", file=sys.stderr)
+        return case["slot"]
+
+    def review_queue_path(self) -> Path:
+        """The human-review queue: ``<field>.review.jsonl`` beside the field."""
+        return self.field_path.with_name(self.field_path.name + ".review.jsonl")
+
+    def review_pending(self) -> list[dict]:
+        """Open (pending) cases from the review queue, queue order."""
+        out = []
+        try:
+            with self.review_queue_path().open("r") as f:
+                for ln in f:
+                    try:
+                        rec = json.loads(ln)
+                    except json.JSONDecodeError:
+                        continue
+                    if rec.get("status") == "pending":
+                        out.append(rec)
+        except OSError:
+            pass
+        return out
+
+    def resolve_review(self, slot: int, keep: bool, note: str = "") -> dict | None:
+        """The HUMAN's final verdict on a parked case (via the opencode
+        question window). keep=True: the answer was right after all -> file a
+        judge contest (the same restore path the model veto uses; the memory
+        re-promotes). keep=False: the demotion is CONFIRMED (outcome
+        'human-dropped', so the compactor/retrieval treat it as settled).
+        Either way the case closes. Returns the resolved case (for the chat
+        answer), or None when the slot is unknown/already resolved."""
+        rec = None
+        rest: list[str] = []
+        qpath = self.review_queue_path()
+        try:
+            with qpath.open("r") as f:
+                for ln in f:
+                    try:
+                        r = json.loads(ln)
+                    except json.JSONDecodeError:
+                        rest.append(ln)
+                        continue
+                    if r.get("slot") == slot and r.get("status") == "pending":
+                        rec = r          # matched: DROP the stale line from rest
+                        continue
+                    rest.append(ln)
+        except OSError:
+            return None
+        if rec is None:
+            return None
+        rec["status"] = "resolved"
+        rec["resolution"] = "keep" if keep else "drop"
+        rec["note"] = note[:400]
+        try:
+            with qpath.open("w") as f:
+                f.writelines(rest)
+                f.write(json.dumps(rec) + "\n")
+        except OSError as e:
+            print(f"[membrane] review queue update failed ({e})", file=sys.stderr)
+            return None
+        if keep and 0 <= rec["ex_idx"] < len(self.store):
+            self.contest(rec["ex_idx"],
+                         reason=f"human keep: {note or 'operator ruled the answer correct'}",
+                         source="human")
+        elif 0 <= rec["ex_idx"] < len(self.store):
+            ex = self.store.exemplars[rec["ex_idx"]]
+            ex.outcome = "human-dropped"
+            self.store.save(self.field_path)
+            self._audit_outcome(rec["ex_idx"], "human-dropped",
+                                rec.get("reask_query", ""), rec.get("sim") or 0.0,
+                                ex.reask_count, ex.contest_count, ex.safe,
+                                signal="human-verdict")
+        return rec
 
     def _is_negative_followup(self, query: str, absorbed_action: str) -> bool:
         """High-precision check that ``query`` is a complaint about a just-replayed answer,

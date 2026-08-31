@@ -3432,8 +3432,9 @@ def main() -> None:
     srv.membrane = membrane
     # the cast-mutating half of gate_turn (/api/chat) and Membrane.adjust both
     # acquire this lock so neither races the consolidator's _run_feeds (which
-    # holds it too). Same object as srv.feed_lock, set below.
-    membrane.mut_lock = threading.Lock()           # reassigned to srv.feed_lock below
+    # holds it too). Same object as srv.feed_lock, set below. RLock: the call
+    # graph re-acquires it on one thread (adjust -> _learn -> contest).
+    membrane.mut_lock = threading.RLock()          # reassigned to srv.feed_lock below
     srv.backend = backend.rstrip("/")
     srv.buffer = None         # the user-turn buffer is unused by the graze pool; None keeps the deposit guards short-circuited
     srv.cell_pool = pool      # None when OFF (nothing for the shutdown finally to stop)
@@ -3468,7 +3469,7 @@ def main() -> None:
     srv.story_history = []                                            # the rolling chronicle (last 8 scenes fed; seeds the next chapter)
     srv.story_cache = []                                             # the genesis cache: pending chronicle scenes (one LLM chapter -> ~8 feeds)
     srv.cache_depth = 0
-    srv.feed_lock = threading.Lock()                                   # serializes feeders (/world/step + the consolidator + /adjust_narrative)
+    srv.feed_lock = threading.RLock()                                  # serializes feeders (/world/step + the consolidator + /adjust_narrative); RLock: runtime's mutation paths nest (adjust -> _learn -> contest)
     srv._events = []                                                   # opt-in client action recorder buffer (?rec=1 viewer)
     srv._events_lock = threading.Lock()                                # guards _events (POST/GET/DELETE from the page)
     srv.feed_rate = max(0.0, min(32.0, float(getattr(args, "feed_rate", 1.0))))  # feeds/cycle (continuous; the ENTROPY dial)

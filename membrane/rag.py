@@ -402,15 +402,22 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
 
     # ---- the RAG context: top-k safe memories -----------------------------
     def _memory_block(self, vec) -> str | None:
-        """The nearest past exchanges as one system block. Only SAFE exemplars
+        """The nearest past exchanges as one system block, MMR-diversified.
+
+        Plain top-k has a failure mode: near-duplicate memories of the same
+        stale fact (all below the 0.95 dedup-sim) fill every k slot and the
+        turn sees one opinion four times. Selection is MMR-style: over-fetch
+        the nearest candidates, then skip any too similar to what is ALREADY
+        PICKED (recall-redundancy, not learn-time dedup). Only SAFE exemplars
         (a re-ask-demoted memory stops being retrieved) with non-empty Q+A; a
-        per-excerpt and a total character budget. The top-1 similarity also has
-        to clear --rag-sim-min; below it the field stays out of the turn."""
+        per-excerpt and a total character budget; the top-1 similarity still
+        has to clear --rag-sim-min."""
         srv = self.server
         mem = srv.membrane
-        picked = []
+        picked = []                    # (entry_text, unit_vec) chosen so far
         budget = int(srv.rag_ctx_chars)
-        for ex, sim in mem.store.top_k(vec, k=int(srv.rag_k)):
+        mmr_sim = float(getattr(srv, "rag_mmr_sim", 0.90))
+        for ex, sim in mem.store.top_k(vec, k=int(srv.rag_k) * 4):
             if sim < srv.rag_sim_min:
                 break                       # sorted desc; nothing closer remains
             if not ex.safe:
@@ -419,23 +426,30 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
             a = _clip(ex.action or "", srv.rag_mem_chars)
             if not q or not a:
                 continue
+            v = np.asarray(ex.vec, dtype=float)
+            v = v / (np.linalg.norm(v) + 1e-12)
+            if any(float(v @ pv) >= mmr_sim for _, pv in picked):
+                continue                    # redundant with a memory already picked
             entry = f"Q: {q}\nA: {a}"
             if len(entry) > budget:
                 break
             budget -= len(entry)
-            picked.append(entry)
+            picked.append((entry, v))
+            if len(picked) >= srv.rag_k:
+                break
         if not picked:
             return None
-        return "Recalled exchanges:\n\n" + "\n----\n".join(picked)
+        return "Recalled exchanges:\n\n" + "\n----\n".join(e for e, _ in picked)
 
     def _log_turn(self, verdict: dict, ctx: str | None, ex_idx,
-                  field_size: int) -> None:
+                  field_size: int, replayed: int | None = None) -> None:
         sim = verdict.get("sim")
         sim_s = f"{sim:.2f}" if isinstance(sim, (int, float)) else "  -  "
         n_ctx = 0 if not ctx else ctx.count("Q: ")
         tag = f"{verdict['verdict']:14s}"
+        rp = f" replayed=#{replayed}" if replayed is not None else ""
         print(f"[rag] {tag} sim={sim_s} ctx={n_ctx} "
-              f"learned={ex_idx} field={field_size}", file=sys.stderr)
+              f"learned={ex_idx} field={field_size}{rp}", file=sys.stderr)
 
     # ---- transparent forward (everything else + error fallback) --------
     def _forward(self):
@@ -502,6 +516,10 @@ def main() -> None:
                     help="per-memory truncation (characters)")
     ap.add_argument("--ctx-chars", type=int, default=2400,
                     help="total character budget for the injected context block")
+    ap.add_argument("--rag-mmr-sim", type=float, default=0.90,
+                    help="cosine above which a candidate memory is considered "
+                         "redundant with one already in the context block "
+                         "(recall-time MMR dedup)")
     ap.add_argument("--sim-min", type=float, default=0.85,
                     help="gate absorb threshold (audit-only in RAG mode; "
                          "re-asks still demote)")
@@ -560,6 +578,7 @@ def main() -> None:
     srv.rag_sim_min = max(0.0, min(1.0, float(args.rag_sim_min)))
     srv.rag_ctx_chars = max(200, int(args.ctx_chars))
     srv.rag_mem_chars = max(64, int(args.mem_chars))
+    srv.rag_mmr_sim = max(0.0, min(1.0, float(args.rag_mmr_sim)))
     srv.compact_min_field = max(6, int(args.compact_min_field))
     srv.compact_min_cluster = max(2, int(args.compact_cluster_min))
     srv.compact_max_cluster = max(srv.compact_min_cluster,
