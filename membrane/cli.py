@@ -8,15 +8,21 @@
     membrane anthropic    TUI+proxy in --anthropic mode (Claude Code front door)
     membrane review       print what the field learned
     membrane demo         in-process end-to-end loop (no chat model needed)
-    membrane install      drop .opencode/skills/* + print an AGENTS.md blurb
-                          into the CURRENT directory
+    membrane install      drop the agent skills into ./.opencode/skills/ of
+                          the CURRENT directory and print the AGENTS.md blurb
+    membrane doctor       show what's installed/running (CLI, skills, Ollama)
 
-Extra args are forwarded verbatim to the underlying module (proxy flags to the
-proxy, etc.). In tui mode flags are routed by name exactly like ./run.sh did.
+Per-project DATA lives in ./.membrane/ (field, audit, review queue, logs) --
+auto-created on first run per directory. Skills are PROJECT-SCOPED on purpose
+(~/.config/opencode/skills/ would leak them into unrelated opencode
+sessions); `membrane opencode` auto-installs them into ./.opencode/skills/
+on first run unless MEMBRANE_NO_AUTOINSTALL=1. Extra args are forwarded
+verbatim to the underlying module.
 """
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import socket
 import subprocess
@@ -25,6 +31,12 @@ import time
 from pathlib import Path
 
 SKILLS_DIR = Path(__file__).parent / "skills"
+
+DATA_DIR = Path(".membrane")           # per-project, auto-created
+FIELD = DATA_DIR / "field.json"
+AUDIT = DATA_DIR / "audit.jsonl"
+PROXY_LOG = DATA_DIR / "proxy.log"
+OPENCODE_LOG = DATA_DIR / "opencode.log"
 
 AGENTS_BLURB = """\
 # membrane (field memory)
@@ -45,7 +57,9 @@ The agent may also emit these frames in its own prose: reads arrive next turn
 as clearly-marked `[membrane-intercept]` blocks; writes/forgets from model
 prose are report-only (the field is only written by operator turns).
 
-Read the skills in .opencode/skills/ (membrane-query-field,
+Data lives in .membrane/ (field.json, audit.jsonl, logs) -- never commit it.
+Skills are project-scoped: .opencode/skills/ in THIS repo only (an opencode
+launched outside never sees them). Read those skills (membrane-query-field,
 membrane-write-memory, membrane-forget-memory, membrane-state) for the full
 contract, guards, and model-collapse hazards. Do not curl membrane's
 endpoints and paste field content into chat -- raw-pasted field content is
@@ -54,16 +68,44 @@ learnable and feeds the field back into itself.
 
 GITIGNORE_SNIPPET = """
 # membrane runtime state (per-project memory field)
-rag-field.json
-rag-audit.jsonl
-rag-field.json.review.jsonl
-membrane-opencode.log
-membrane-proxy.log
+.membrane/
 """
 
 
 def _module_args(args: argparse.Namespace) -> list[str]:
     return list(args.forwarded)
+
+
+def _autoinstall_skills(quiet: bool = False) -> bool:
+    """Install the packaged skills into ./.opencode/skills/ if missing.
+
+    Returns True if anything was installed. Respects MEMBRANE_NO_AUTOINSTALL.
+    """
+    if os.environ.get("MEMBRANE_NO_AUTOINSTALL"):
+        return False
+    dest_root = Path.cwd() / ".opencode" / "skills"
+    missing = [s.name for s in sorted(SKILLS_DIR.iterdir())
+               if (s / "SKILL.md").is_file() and not (dest_root / s.name).exists()]
+    if not missing:
+        return False
+    for name in missing:
+        src = SKILLS_DIR / name
+        shutil.copytree(src, dest_root / name)
+        if not quiet:
+            print(f"[cli] installed .opencode/skills/{name}/SKILL.md "
+                  f"(project-scoped; MEMBRANE_NO_AUTOINSTALL=1 to skip)")
+    return bool(missing)
+
+
+def _ensure_data_dir(argv: list[str]) -> list[str]:
+    """Create ./.membrane/ and bind --field/--audit to it unless the caller
+    passed their own. Pass-through flags win; defaults live here."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    if "--field" not in argv:
+        argv = ["--field", str(FIELD)] + argv
+    if "--audit" not in argv:
+        argv = ["--audit", str(AUDIT)] + argv
+    return argv
 
 
 def _run_module(module: str, argv: list[str]) -> int:
@@ -83,7 +125,10 @@ def _port_open(port: int) -> bool:
     return True
 
 
-def _tui(argv: list[str]) -> int:
+def _tui(argv: list[str], data_dir: bool = False) -> int:
+    if data_dir:
+        argv = _ensure_data_dir(argv)
+        PROXY_LOG.parent.mkdir(parents=True, exist_ok=True)
     # Route flags between proxy and TUI exactly like ./run.sh did.
     proxy_flags = ("--judge", "--no-judge", "--no-neg-followup", "--anthropic",
                    "--observer", "--absorb", "--no-vague-filter",
@@ -125,7 +170,7 @@ def _tui(argv: list[str]) -> int:
             port = int(proxy_args[i + 1]); break
 
     started: subprocess.Popen | None = None
-    log = open("membrane-proxy.log", "a")
+    log = open(PROXY_LOG if data_dir else "membrane-proxy.log", "a")
     if not _port_open(port):
         started = subprocess.Popen(
             [sys.executable, "-m", "membrane.proxy"] + proxy_args,
@@ -160,7 +205,7 @@ def _anthropic(argv: list[str]) -> int:
     # TUI+proxy in --anthropic mode: prepend --anthropic if absent.
     if "--anthropic" not in argv:
         argv = ["--anthropic"] + argv
-    return _tui(argv)
+    return _tui(argv, data_dir=True)
 
 
 def _reset(argv: list[str]) -> int:
@@ -209,7 +254,6 @@ def _install(args: argparse.Namespace) -> int:
     for name in refreshed:
         print(f"kept existing .opencode/skills/{name}/ (--force to refresh)")
     if not args.force:
-        # Always print the blurb; also append the gitignore snippet once.
         gi = cwd / ".gitignore"
         marker = "# membrane runtime state"
         if gi.is_file() and marker in gi.read_text():
@@ -222,6 +266,48 @@ def _install(args: argparse.Namespace) -> int:
             print("created .gitignore with membrane entries")
     print()
     print(AGENTS_BLURB)
+    return 0
+
+
+def _doctor() -> int:
+    """What's installed / running / reachable."""
+    print("membrane doctor")
+    cli = Path(sys.argv[0]).resolve()
+    print(f"  cli:      {cli}")
+    print(f"  python:   {sys.version.split()[0]}  ({sys.executable})")
+
+    pkg = SKILLS_DIR.parent
+    print(f"  package:  {pkg}")
+    shipped = sorted(s.name for s in SKILLS_DIR.iterdir()
+                     if (s / "SKILL.md").is_file())
+    print(f"  skills shipped: {', '.join(shipped) or 'NONE (broken install)'}")
+
+    proj = Path.cwd() / ".opencode" / "skills"
+    here = sorted(s.name for s in SKILLS_DIR.iterdir()
+                  if (s / "SKILL.md").is_file() and (proj / s.name).exists())
+    here = [n for n in shipped if (proj / n / "SKILL.md").is_file()]
+    print(f"  skills in this project: {', '.join(here) or 'none'}"
+          f"  ({proj})")
+
+    print(f"  project data: {DATA_DIR}/ "
+          f"({'exists' if DATA_DIR.is_dir() else 'not created yet'})")
+    if "--verbose" in sys.argv and DATA_DIR.is_dir():
+        for p in sorted(DATA_DIR.iterdir()):
+            print(f"    {p.name}  {p.stat().st_size}B")
+
+    for name, port, up in (("TUI proxy", 11435, None),
+                           ("opencode proxy", 11500, None)):
+        print(f"  {name} port {port}: {'LISTENING' if _port_open(port) else 'free'}")
+
+    backend = "http://localhost:11434"
+    try:
+        import urllib.request
+        with urllib.request.urlopen(backend + "/api/tags", timeout=2) as r:
+            models = [m["name"] for m in __import__("json").load(r)["models"]]
+        print(f"  ollama {backend}: up, {len(models)} models "
+              f"(embed-capable present: {any('embed' in m or 'minilm' in m or 'bxbai' in m or 'mxbai' in m for m in models)})")
+    except Exception:
+        print(f"  ollama {backend}: DOWN (chat/learning will not work)")
     return 0
 
 
@@ -243,13 +329,17 @@ def main() -> None:
         "  demo       in-process end-to-end loop (no chat model needed)\n"
         "  reset      kill the proxy on the port, then TUI+proxy fresh\n"
         "  install    install .opencode/skills/* into the CURRENT directory\n"
+        "  doctor     what's installed/running (CLI, skills, Ollama)\n"
         "\n"
         "Everything after the subcommand is forwarded verbatim to the\n"
         "underlying module (proxy/TUI flags by name).\n")
     argv = sys.argv[1:]
+    if argv and argv[0] in ("-h", "--help", "help"):
+        print(__doc__)
+        return
     cmd = argv[0] if argv and not argv[0].startswith("-") else None
     if cmd not in ("tui", "proxy", "opencode", "anthropic", "review",
-                   "demo", "reset", "install"):
+                   "demo", "reset", "install", "doctor"):
         if cmd is None and not argv:
             print(__doc__)
             return
@@ -258,19 +348,30 @@ def main() -> None:
     forwarded = argv[1:]
     args = argparse.Namespace(cmd=cmd, forwarded=forwarded,
                               force="--force" in forwarded)
+    if cmd == "doctor":
+        raise SystemExit(_doctor())
     if cmd == "install":
         if args.force:
             forwarded = [a for a in forwarded if a != "--force"]
         raise SystemExit(_install(args))
-    if args.cmd == "reset":
+    # opencode surfaces: bind per-project data + auto-install skills first
+    if cmd in ("opencode", "tui", "anthropic", "reset"):
+        _autoinstall_skills()
+    if cmd == "reset":
         raise SystemExit(_reset(args.forwarded))
-    if args.cmd == "tui":
-        raise SystemExit(_tui(args.forwarded))
-    if args.cmd == "anthropic":
+    if cmd == "tui":
+        raise SystemExit(_tui(args.forwarded, data_dir=True))
+    if cmd == "anthropic":
         raise SystemExit(_anthropic(args.forwarded))
-    if args.cmd == "demo":
+    if cmd == "demo":
         raise SystemExit(_run_module("membrane.demo", args.forwarded))
-    raise SystemExit(_run_module("membrane." + args.cmd, args.forwarded))
+    if cmd == "opencode":
+        argv2 = _ensure_data_dir(args.forwarded)
+        raise SystemExit(_run_module("membrane.opencode", argv2))
+    if cmd == "review":
+        argv2 = _ensure_data_dir(args.forwarded)
+        raise SystemExit(_run_module("membrane.review", argv2))
+    raise SystemExit(_run_module("membrane." + cmd, args.forwarded))
 
 
 if __name__ == "__main__":

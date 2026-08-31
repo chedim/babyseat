@@ -115,26 +115,55 @@ Rick's lived scenes, Morty is the co-lead, and the world is *about them*.
 
 membrane is pip-installable straight from this repo, so any project can get a
 field-backed coding agent — its own memory field, its own skills, zero copies
-of this repo needed:
+of this repo needed.
+
+### Install the CLI (one line, no sudo)
 
 ```bash
-# in the OTHER project's root:
-uvx --from "membrane @ git+ssh://git@github.com/chedim/membrane" membrane install
-uvx --from "membrane @ git+ssh://git@github.com/chedim/membrane" membrane opencode
+curl -fsSL https://raw.githubusercontent.com/chedim/membrane/main/install.sh | bash
 ```
 
-- `membrane install` drops the four agent skills (query/learn/forget/state)
-  into `.opencode/skills/` of the current directory, appends the membrane
-  runtime files to `.gitignore` (create if missing), and prints a short
-  AGENTS.md blurb to paste. Re-run with `--force` to refresh the skills.
-- `membrane opencode` starts the OpenAI-compatible proxy on `:11500`
-  (backend Ollama at `http://localhost:11434`, override `--backend`/`--model`)
-  and opens opencode pointed at it. Every turn is grounded by the field's
-  recall and learned back — that project accumulates its own long-term memory
-  in `rag-field.json` (+ `rag-audit.jsonl`, `.review.jsonl`, logs) in its root.
+Installs the `membrane` CLI globally, user-local (`~/.local/bin`):
+`uv tool install` if you have [uv](https://docs.astral.sh/uv/), otherwise a
+managed venv at `~/.membrane/venv` + a symlink on your PATH. Re-running it is
+safe (upgrade in place). To install from a local checkout instead (e.g. while
+hacking on membrane):
+
+```bash
+MEMBRANE_REPO=/path/to/membrane bash install.sh
+```
+
+### Use it — in any project directory
+
+```bash
+membrane opencode
+```
+
+That's the whole workflow. On first run in a directory it bootstraps that
+project:
+
+- auto-installs the four agent skills (query/learn/forget/state) into
+  `.opencode/skills/` there (project-scoped on purpose — an opencode launched
+  elsewhere never sees them; skip with `MEMBRANE_NO_AUTOINSTALL=1`),
+- creates the per-project memory data in `.membrane/` there (`field.json`,
+  `audit.jsonl`, logs; add `.membrane/` to `.gitignore`).
+
+It then starts the OpenAI-compatible proxy on `:11500` (backend Ollama at
+`http://localhost:11434`, override `--backend`/`--model`) and opens opencode
+pointed at it. Every turn is grounded by the field's recall and learned back —
+that project accumulates its own long-term memory in `.membrane/`.
+
+- Only explicit install (no autoinstall) or a refresh of existing skills:
+  `membrane install` (add `--force` to overwrite). It also appends the
+  `.membrane/` runtime files to `.gitignore` (create if missing) and prints a
+  short AGENTS.md blurb to paste.
+- Check what's installed/running: `membrane doctor`.
 - Other surfaces: `membrane tui` (world + proxy), `membrane proxy`,
-  `membrane review`, `membrane demo`, `membrane reset` (kill the port, start
-  fresh). `./run.sh` still works in-repo and delegates to the same CLI.
+  `membrane anthropic` (Claude Code front door), `membrane review`,
+  `membrane demo`, `membrane reset` (kill the port, start fresh). `./run.sh`
+  still works in-repo and delegates to the same CLI.
+- Without installing anything, one-off via uvx:
+  `uvx --from "membrane @ git+ssh://git@github.com/chedim/membrane" membrane install`.
 - Requires only Python ≥ 3.10 + numpy; embeddings/chat come from a running
   Ollama.
 

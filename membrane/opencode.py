@@ -1811,9 +1811,16 @@ def main() -> None:
     # In launch mode opencode owns the terminal, so membrane's own stderr
     # (the [opencode]/[rag]/[compact] debug lines) would corrupt the TUI.
     # Redirect it to a log file; the terminal stays clean for opencode.
+    # The CLI passes a field under .membrane/ per project: keep the log
+    # beside it so a project's runtime state stays in one directory.
     _log_fh = None
     if args.launch:
-        _log_fh = open("membrane-opencode.log", "a", buffering=1)
+        log_path = "membrane-opencode.log"
+        if args.field != "rag-field.json":
+            fdir = os.path.dirname(os.path.abspath(args.field))
+            if os.path.basename(fdir) == ".membrane":
+                log_path = os.path.join(fdir, "opencode.log")
+        _log_fh = open(log_path, "a", buffering=1)
         sys.stderr = _log_fh
 
     backend = args.backend.rstrip("/")
