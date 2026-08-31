@@ -4,7 +4,8 @@ Status: **slices 1–4 built** (operator promote + recall top-up; ledger shards
 + consensus promotion; scope axis + residency drift + suggestions; peers +
 live ask). Flag: `--global-field [PATH]` (default
 `~/.membrane/global-field.json`), kill switch `--no-global`.
-Tests: `python -m tests.test_global_field` (11 checks, no pytest needed).
+Tests: `python3 -m unittest tests.test_global_field` (11 checks; or
+`.venv/bin/python -m pytest tests/test_global_field.py -q`).
 
 ## The principle
 
