@@ -9,6 +9,12 @@
 #                           Use this to pick up code changes -- ./run.sh alone only
 #                           attaches if a proxy is already up.
 #   ./run.sh proxy          just the proxy, foreground (no TUI)
+#   ./run.sh opencode       field-backed opencode: starts the OpenAI-compatible
+#                           RAG proxy on :11500 and opens opencode pointed at it
+#                           (math/state answered internally; model work proxied
+#                           to Ollama; the selected model is the cortex's too).
+#                           Flags forward verbatim; opencode's own args go after
+#                           `--`: ./run.sh opencode --model qwen3:14b -- --prompt x
 #   ./run.sh anthropic      TUI+proxy in --anthropic mode (Claude Code front door,
 #                           observer-only by default; set ANTHROPIC_API_KEY and
 #                           point Claude Code at http://127.0.0.1:11435). Extra
@@ -33,6 +39,7 @@ export PYTHONPATH="$ROOT${PYTHONPATH:+:$PYTHONPATH}"
 # ---- single-process subcommands: forward raw args ---------------------------
 case "${1:-}" in
   proxy)  shift; exec "$PY" -m membrane.proxy "$@" ;;
+  opencode) shift; exec "$PY" -m membrane.opencode "$@" ;;
   anthropic) shift; set -- --anthropic "$@" ;;   # fall through with --anthropic prepended
   review) shift; exec "$PY" -m membrane.review "$@" ;;
   demo)   shift; exec "$PY" experiments/proxy_demo.py "$@" ;;
@@ -53,7 +60,7 @@ case "${1:-}" in
              echo "[run.sh] restart: nothing on :$rport, starting fresh" >&2
            fi
            ;;                # fall through to the TUI+proxy path
-  -h|--help|help) sed -n '3,17p' "$0"; exit 0 ;;
+  -h|--help|help) sed -n '4,22p' "$0"; exit 0 ;;
 esac
 
 # ---- default / `tui`: route args by flag, then proxy+tui --------------------
