@@ -13,6 +13,10 @@
     membrane connect      offer to connect a shared Couchbase field for THIS
                           project (creds go to ~/.membrane/projects/, never
                           into the repo)
+    membrane ingest       cold-start: absorb docs/README into the field
+                          (no model call; same learn guards as any turn)
+    membrane codegraph    stdlib-AST call graph of this repo (stats / impact /
+                          callers / callees; no model call)
     membrane doctor       show what's installed/running (CLI, skills, Ollama)
 
 Per-project DATA lives in ./.membrane/ (field, audit, review queue, logs) --
@@ -57,6 +61,8 @@ canonical frames itself (intercepts -- no model call, never learned):
                                               topics, "the last hour",
                                               "this session", "everything")
     field state                               memory health/stats
+    membrane: codegraph <spec>                call graph reads (stats | impact
+                                              <sym|file.py> | callers | callees)
     membrane: suggest                         review scope suggestions for the
                                               cross-project commons
 
@@ -81,12 +87,16 @@ Couchbase unreachable -> transparent fallback to the JSON field.
 Skills are project-scoped: .opencode/skills/ in THIS repo only (an opencode
 launched outside never sees them). Read those skills (membrane-query-field,
 membrane-write-memory, membrane-forget-memory, membrane-state,
-membrane-global-field) for the full contract, guards, and model-collapse
-hazards. Facts true BEYOND this repo (user/machine/team preferences) belong
-in the global commons: `membrane: remember globally: <fact>` (see
-membrane-global-field). Do not curl membrane's endpoints and paste field
-content into chat -- raw-pasted field content is learnable and feeds the
-field back into itself.
+membrane-global-field, membrane-codegraph, membrane-ingest) for the full
+contract, guards, and model-collapse hazards. Facts true BEYOND this repo
+(user/machine/team preferences) belong in the global commons:
+`membrane: remember globally: <fact>` (see membrane-global-field). Do not
+curl membrane's endpoints and paste field content into chat -- raw-pasted
+field content is learnable and feeds the field back into itself.
+Cold start: a fresh field is thin; if docs/README already hold the knowledge,
+run `membrane ingest` (no model call, same guards as any learn) -- see
+membrane-ingest. Before editing a function or file, `membrane: codegraph
+impact <sym|file.py>` reads the call graph (no model call).
 """
 
 GITIGNORE_SNIPPET = """
@@ -371,6 +381,8 @@ def main() -> None:
         "  install    install .opencode/skills/* into the CURRENT directory\n"
         "  connect    offer to connect a shared Couchbase field for THIS\n"
         "             project (creds go to ~/.membrane/projects/, not the repo)\n"
+        "  ingest     cold-start: absorb docs/README into the field (no model call)\n"
+        "  codegraph  stdlib-AST call graph (stats | impact | callers | callees)\n"
         "  doctor     what's installed/running (CLI, skills, Ollama)\n"
         "\n"
         "Everything after the subcommand is forwarded verbatim to the\n"
@@ -381,7 +393,8 @@ def main() -> None:
         return
     cmd = argv[0] if argv and not argv[0].startswith("-") else None
     if cmd not in ("tui", "proxy", "opencode", "anthropic", "review",
-                   "demo", "reset", "install", "doctor", "connect"):
+                   "demo", "reset", "install", "doctor", "connect",
+                   "ingest", "codegraph"):
         if cmd is None and not argv:
             print(__doc__)
             return
@@ -406,6 +419,11 @@ def main() -> None:
     load_project_env()
     if cmd == "connect":
         raise SystemExit(_connect())
+    if cmd == "ingest":
+        argv2 = _ensure_data_dir(args.forwarded)
+        raise SystemExit(_run_module("membrane.ingest", argv2))
+    if cmd == "codegraph":
+        raise SystemExit(_run_module("membrane.codegraph", args.forwarded))
     if cmd in ("opencode", "tui", "anthropic", "reset", "proxy"):
         couchbase_onboarding()
     if cmd == "reset":

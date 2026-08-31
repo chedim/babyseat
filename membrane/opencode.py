@@ -194,6 +194,10 @@ def _state_report(srv) -> str:
         undel = sum(1 for e in wb.events if not e.get("delivered"))
         lines.append(f"- watches: {live} live (cap {MAX_WATCHES}), "
                      f"{undel} undelivered reports")
+    cg = getattr(srv, "_codegraph", None)
+    if cg is not None:
+        from .codegraph import summary as cg_summary
+        lines.append(f"- " + cg_summary(cg))
     if getattr(mem.store, "_cb", None) is not None:
         own = sum(1 for e in mem.store.exemplars
                   if (getattr(e, "origin", "") or mem.store.origin)
@@ -821,6 +825,84 @@ def _is_watch_query(q: str) -> bool:
     return (low.startswith(_WATCH_CANON) or low.startswith(_WATCHES_CANON)
             or low.startswith(_WATCH_DROP)
             or low.rstrip("?!").strip() == "membrane: watch")
+
+
+# ---- the codegraph lane (docs close-the-gap: Tencent's CodeGraph asset, ----
+# retold): `membrane: codegraph <spec>` answers WHO CALLS X / WHAT DOES X
+# CALL / blast radius of a file, from a stdlib-AST graph built lazily once per
+# server (zero model calls). Read-only by construction -- nothing here writes
+# the field -- so it is served pre-gate like recall/state.
+
+_CODEGRAPH_CANON = "membrane: codegraph"
+
+# read-lane marker (codegraph answers nothing was written -- the write marker
+# would be a lie)
+_CODEGRAPH_MARKER = ("[membrane-intercept] codegraph read; handled internally, "
+                     "NOT learned. To force the model path, repeat prefixed "
+                     "with 'model:'")
+
+
+def _codegraph_graph(srv):
+    """The lazily-built AST graph for the project root (the field's parent
+    dir). Cached on the server; one build per process (a stale graph after a
+    refactor is a restart away -- stated in the answer)."""
+    g = getattr(srv, "_codegraph", None)
+    if g is None:
+        try:
+            from .codegraph import build_graph
+            root = Path(srv.membrane.field_path).parent.parent or Path(".")
+            g = srv._codegraph = build_graph(root)
+        except Exception as e:
+            print(f"[opencode] codegraph build failed: {_one_line(e)}",
+                  file=sys.stderr)
+            return None
+    return g
+
+
+def _is_codegraph_query(q: str) -> bool:
+    low = " ".join((q or "").split()).lower()
+    if not low or "```" in low or len(low) > 400:
+        return False
+    if low.startswith(_CODEGRAPH_CANON):
+        return True
+    # intent phrasing without the canon frame: the TARGET must look
+    # symbol-like (snake_case, dotted, or a .py path) -- "who calls the api"
+    # is a coding turn, "who calls learn_pair?" is a graph read (a stolen
+    # turn is worse than a missed shortcut).
+    for opener in ("what calls ", "who calls ", "impact of touching ",
+                   "blast radius of "):
+        if low.startswith(opener):
+            target = low[len(opener):].strip().rstrip("?.!").strip()
+            symlike = ("_" in target or "." in target
+                       or target.endswith(".py"))
+            return symlike and len(low.split()) <= 12
+    return False
+
+
+def _codegraph_answer(srv, q: str) -> str:
+    from .codegraph import query as cg_query
+    g = _codegraph_graph(srv)
+    if g is None:
+        return ("[membrane-intercept] codegraph unavailable (graph failed "
+                "to build).")
+    low = " ".join(q.split()).lower()
+    if low.startswith(_CODEGRAPH_CANON):
+        spec = low[len(_CODEGRAPH_CANON):].strip().rstrip("?.!") or "stats"
+    else:
+        # intent phrasing: strip the question opener, keep the target;
+        # trailing punctuation rides the question mark in ("who calls
+        # helper?" must not resolve to the literal symbol "helper?")
+        for opener in ("what calls ", "who calls ", "impact of touching ",
+                       "blast radius of "):
+            if low.startswith(opener):
+                target = low[len(opener):].strip().rstrip("?.!").strip()
+                spec = ("callers " + target).strip()
+                break
+        else:
+            spec = "stats"
+    return ("[membrane-intercept] codegraph (built at server start; a "
+            "refactor needs a proxy restart to re-scan):\n"
+            + cg_query(g, spec) + "\n\n" + _CODEGRAPH_MARKER)
 
 
 def _watch_report_cmd(srv, q: str) -> str:
@@ -1607,6 +1689,8 @@ def _is_thought_ask(q: str) -> bool:
         return False
     if low.startswith(_WATCH_CANON) or low.startswith(_WATCHES_CANON):
         return True                # watch asks: report-only via the watch path
+    if _is_codegraph_query(low):
+        return True                # codegraph reads: answered from the AST
     return (_is_state_query(low) or _is_recall_query(low)
             or _is_learn_query(low) or _is_forget_query(low))
 
@@ -1634,6 +1718,8 @@ def _thought_answer(srv, fam: str, text: str) -> str:
         return _state_report(srv)
     if fam == "recall":
         return _recall_report(srv, _recall_topic(text))
+    if fam == "codegraph":
+        return _codegraph_answer(srv, text)
     if " ".join(text.split()).lower().startswith((_WATCH_CANON, _WATCHES_CANON)):
         return _watch_set_from_thought(srv,
                                        " ".join(text.split()).lower()
@@ -1703,6 +1789,8 @@ def _assistant_thought_asks(srv, body: dict) -> list:
         t_low = t.lower()
         if t_low.startswith((_WATCH_CANON, _WATCHES_CANON)):
             fam = "watch"
+        elif _is_codegraph_query(t_low):
+            fam = "codegraph"
         else:
             fam = ("state" if _is_state_query(c) else
                    "recall" if _is_recall_query(c) else
@@ -2257,6 +2345,14 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if not model_escaped and _is_watch_query(q_early):
             text = _watch_report_cmd(srv, q_early)
             _print_intercept("watch", q_early)
+            self._serve_intercept_answer(model, text,
+                                         bool(body.get("stream", False)))
+            return
+        # ---- the codegraph lane: call-graph/impact reads, pre-gate like
+        # recall/state (read-only by construction, zero model calls).
+        if not model_escaped and _is_codegraph_query(q_early):
+            text = _codegraph_answer(srv, q_early)
+            _print_intercept("codegraph", q_early)
             self._serve_intercept_answer(model, text,
                                          bool(body.get("stream", False)))
             return
