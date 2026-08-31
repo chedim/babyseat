@@ -83,6 +83,7 @@ PRIOR_MASS_K = 3.0         # phantom trials standing behind the imprint claim
 DEFAULT_PRESSURE_THRESHOLD = 10.0   # local p95 (s) where cloud may win, pre-evidence
 LATENCY_ALPHA = 0.25       # EWMA friction for measured latencies
 COMPETENCE_ALPHA = 0.6     # EMA friction for the earned direction
+LOSS_FIT_W = 0.35          # fit removed per unit of earned loss-topic alignment
 CALIBRATION_MIN = 8        # calibration records before the measured line wins
 
 # ---- opencode compatibility (the DECLARED filter) --------------------------
@@ -95,7 +96,7 @@ NON_CHAT_NAME_MARKERS = ("embed", "minilm", "bge", "whisper", "nomic-embed",
 MAX_LOCAL_GIB_DEFAULT = 12.0   # 32GB unified memory: leave room for the OS +
                                # embedder + an 8-16GB neighbor; never cold-load
                                # an outlier like an 18.5GB coder on a laptop.
-# the earned LOCAL record that may take the rank from the cloud floor
+    # the earned LOCAL record that may take the rank from the cloud floor
 MIN_LOCAL_TRIALS = 6
 MIN_LOCAL_WINRATE = 0.7
 LOCAL_FIT_MARGIN = 0.05        # local fit must beat the floor by this much
@@ -144,6 +145,7 @@ class ModelRecord:
     self_desc: str = ""
     # the earned record
     competence: list | None = None      # unit EMA of WON situation vectors
+    loss_ema: list | None = None        # unit EMA of LOST situation vectors
     wins: int = 0
     trials: int = 0
     # measured cost
@@ -170,16 +172,29 @@ class ModelRecord:
             return 0.0
         return max(0.0, float(np.asarray(self.competence) @ v))
 
-    def fit_hat(self, situ) -> float:
-        """Laplace-blended expected fit: the claim seeds, the record votes.
+    def outcome_fit(self, situ) -> float:
+        """The EARNED, outcome-conditioned fit for THIS situation (the
+        smartness metric, post-restart plan #1): the win EMA votes FOR the
+        topic, the loss EMA votes AGAINST it weighted by the earned loss
+        share. A high scalar win-rate earned on OTHER topics stops riding
+        into a topic the model chronically fails."""
+        base = max(0.0, self.competence_fit(situ))
+        v = _unit(situ)
+        if self.loss_ema and v is not None and self.trials > self.wins:
+            lf = max(0.0, float(np.asarray(self.loss_ema) @ v))
+            base -= LOSS_FIT_W * (1.0 - self.wins / max(self.trials, 1)) * lf
+        return max(0.0, base)
 
-        With no trials routing is 100% by claim; as trials accrue the
+    def fit_hat(self, situ) -> float:
+        """Laplace-blended expected fit: the claim seeds, the OUTCOME record
+        votes (outcome-conditioned: the win direction up, the loss direction
+        down). With no trials routing is 100% by claim; as trials accrue the
         phantom mass dilutes (30 trials -> the claim is ~10% of the vote).
         """
         claim = self.imprint_fit(situ)
         if self.trials <= 0:
             return claim
-        earned = max(self.competence_fit(situ), claim)
+        earned = max(self.outcome_fit(situ), claim)
         return (self.wins * earned + PRIOR_MASS_K * claim) \
             / (self.trials + PRIOR_MASS_K)
 
@@ -219,6 +234,7 @@ class ModelRecord:
     def to_doc(self) -> dict:
         return {"name": self.name, "kind": self.kind, "wins": self.wins,
                 "trials": self.trials, "competence": self.competence,
+                "loss_ema": self.loss_ema,
                 "latency_ewma": self.latency_ewma, "self_desc": self.self_desc,
                 "imprint": self.imprint, "last_used": self.last_used,
                 "size_bytes": self.size_bytes, "caps": self.caps}
@@ -252,6 +268,10 @@ class Registry:
         # the measured pressure valve: (pressure_at_route, cloud_survived)
         self.calibration: list[list] = []
         self._last_pressure: float = 0.0
+        # lazy imprint seeding (plan #6): the interview thread starts on the
+        # first route()/ladder() that could actually use a claim -- a model
+        # that never becomes routable never costs a boot chat call.
+        self._seed_started = False
         # rung outages: name -> (until_ts, why); route() and ladder() skip
         self._outages: dict[str, tuple] = {}
         self._load_state()
@@ -291,7 +311,16 @@ class Registry:
             rec.caps = caps + [f for f in fams if f not in caps]
 
     def seed_imprints_async(self) -> None:
+        self._seed_started = True
         threading.Thread(target=self.seed_imprints, daemon=True).start()
+
+    def ensure_seeded(self) -> None:
+        """Lazy imprint seeding (plan #6): start the background interview
+        only when a route()/ladder() could actually USE a claim. Eager boot
+        seeding paid chat calls for models the screen would never route."""
+        if self._seed_started or self.embedder is None:
+            return
+        self.seed_imprints_async()
 
     def seed_imprints(self) -> None:
         """Ask each model (once, cached) what it is good for; embed the claim.
@@ -463,6 +492,7 @@ class Registry:
         The OPERATOR'S CEILING: the model the user SELECTED in opencode
         caps the candidate set (cloud never above it; a local selection
         forbids cloud entirely; the @explore sentinel farms evidence)."""
+        self.ensure_seeded()
 
         def cap_ok(r: ModelRecord) -> bool:
             # structure filters only when the capability set is KNOWN: a turn
@@ -596,6 +626,8 @@ class Registry:
         selected model's price; a local selection drops cloud entirely.
         The @explore lane drops cloud too, and puts the least-tried
         eligible local first: it exists to farm evidence."""
+        self.ensure_seeded()
+
         def cap_ok(r):
             return not needs_tools or not r.caps or "tools" in r.caps
         max_price, allow_cloud = self.ceiling_cap(ceiling)
@@ -663,6 +695,20 @@ class Registry:
                         n = float(np.linalg.norm(c))
                         if n > 1e-12:
                             rec.competence = [float(x) / n for x in c]
+            else:
+                # the loss direction (the smartness metric's negative half):
+                # a loss on THIS topic walks the loss EMA, so the model stops
+                # riding its global win-rate into topics it chronically fails.
+                v = _unit(situ_vec)
+                if v is not None:
+                    if rec.loss_ema is None:
+                        rec.loss_ema = [float(x) for x in v]
+                    else:
+                        c = COMPETENCE_ALPHA * np.asarray(rec.loss_ema) \
+                            + (1 - COMPETENCE_ALPHA) * v
+                        n = float(np.linalg.norm(c))
+                        if n > 1e-12:
+                            rec.loss_ema = [float(x) / n for x in c]
             if rec.kind == "cloud":
                 p = float(pressure) if pressure is not None \
                     else self._last_pressure
@@ -719,6 +765,7 @@ class Registry:
             rec.self_desc = rd.get("self_desc", "")
             rec.imprint = list(rd.get("imprint") or [])
             rec.competence = rd.get("competence")
+            rec.loss_ema = rd.get("loss_ema")
             rec.wins = int(rd.get("wins") or 0)
             rec.trials = int(rd.get("trials") or 0)
             rec.latency_ewma = rd.get("latency_ewma")

@@ -46,6 +46,28 @@ dumbest models": rolled the router back, then rebuilt it forward.
    qwen-coder hijack junk exemplars (obj['response'] + system-prompt-leak),
    verify boot line, and confirm chat routes never show
    `exploring unsampled local` while glm holds the floor.
+0b. **Landed 2026-08-31 (postponed batch, needs proxy restart)**:
+   1. *Smartness metric* — losses walk a per-model loss EMA (router.py);
+      `fit_hat` is outcome-conditioned (`outcome_fit`: wins up on their
+      topic, chronic-loss topics down by LOSS_FIT_W). 0 trials -> claim only.
+   2. *Capture-machinery quota* — `_CAP_ARGS` 2400->900, `_CAP_BODY`
+      8192->2400; compactor seeds clusters with a capture before prose
+      (`_pick_cluster`).
+   3. *Auto-settle loop* — repeat-k rule in `gate_turn` (`settle_k=3`,
+      `settle_sim=0.92`): an escalating near-dup that kept failing to learn
+      replays the safe near match (`settle-replay`) or escalates with the
+      demoted one as hint; ring wiped per settle. Tests:
+      tests/test_postponed_batch.py.
+   4. *Recall hygiene* — `Exemplar.model` stamp (the answering model,
+      learned from the route verdict), `[via <model>]` in recall surfaces,
+      `_hygiene_demote_screened_models(srv)` at boot mass-demotes exemplars
+      answered by screen-rejected models (evidence-path; contest restores).
+   5. *Field-only banner* — when the ladder is exhausted (route() found
+      nothing alive or every rung failed at delivery), the proxy serves
+      "membrane: FIELD-ONLY" + safe recall instead of a bare 500/502; never
+      learned (no self-feeding).
+   6. *Boot imprints* — lazy: `ensure_seeded()` arms the interview thread on
+      the first route()/ladder(), not at boot.
 1. **Smartness metric**: outcome-conditioned per-situation fit — rank models
    by earned competence direction on the query topic, not scalar win-rate.
 2. **Capture-machinery quota**: tool/result captures are ~95% of the store;

@@ -78,10 +78,8 @@ _RAG_SYSTEM = (
     "WHAT MEMBRANE GIVES YOU, and how to use it:\n"
     "- 'Recalled exchanges:' Q/A memories from this same project. Ground your "
     "answer in them when relevant; ignore stale ones; never mention them as "
-    "if the user said them.\n"
-    "- 'Recalled exchanges:' Q/A memories from this same project. Ground your "
-    "answer in them when relevant; ignore stale ones; never mention them as "
-    "if the user said them.\n"
+    "if the user said them."
+    "\n"
     "- '[membrane-intercept]' blocks hold answers membrane already computed "
     "(field stats, recalled facts, watch reports). Trusted context: use "
     "directly, do not recompute, do not restate as your own discovery.\n"
@@ -289,7 +287,15 @@ class Compactor:
                 and not (e.outcome or "").startswith("compacted@")]
         if len(pool) < self.srv.compact_min_cluster:
             return None
-        seed = pool[0]                       # oldest qualifying memory (append-only store)
+        # capture-machinery first (plan #2): among the qualifying pool, a
+        # tool/result/reasoning capture seeds the cluster before prose --
+        # machinery echoes compact away eagerly so the hot field stays
+        # retrieval-shaped; prose waits its turn.
+        _CAPS = ("reasoning:", "plan:", "call ", "result ", "tool ")
+        pool.sort(key=lambda e: (
+            not " ".join(e.situation.split()).lower().startswith(_CAPS),
+        ))
+        seed = pool[0]                       # oldest capture, else oldest prose
         sn = np.asarray(seed.vec, dtype=float)
         sn = sn / (np.linalg.norm(sn) + 1e-12)
         scored = []
@@ -635,7 +641,8 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
             v = v / (np.linalg.norm(v) + 1e-12)
             if any(float(v @ pv) >= mmr_sim for _, pv in picked):
                 continue                    # redundant with a memory already picked
-            entry = f"Q: {q}\nA: {a}"
+            via = f" [via {ex.model}]" if getattr(ex, "model", "") else ""
+            entry = f"Q: {q}\nA: {a}{via}"
             if len(entry) > budget:
                 break
             budget -= len(entry)

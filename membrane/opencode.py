@@ -184,6 +184,46 @@ def _is_state_query(q: str) -> bool:
     return any(m in low for m in _STATE_STRONG)
 
 
+# ---- the boot hygiene sweep (recall hygiene, plan #4) -----------------------
+def _hygiene_demote_screened_models(srv) -> int:
+    """Dumb-model-era cleanup: mass-demote exemplars whose ANSWERING model
+    the opencode-compatibility screen now rejects (bakllava / whisper / toy
+    routers that took chat turns before the screen existed -- plan #4).
+    Non-destructive: the ordinary two-authority boundary applies, so the
+    model's first contest restores any that were actually fine. Runs once at
+    boot, silently no-ops without a router. Returns the count demoted."""
+    from .router import local_is_eligible
+    mem = srv.membrane
+    rtr = getattr(srv, "router", None)
+    if rtr is None or len(mem.store) == 0:
+        return 0
+    bad = set()
+    for rec in rtr.records.values():
+        if rec.kind == "local" and not local_is_eligible(rec):
+            bad.add(rec.name.split(":")[0])
+    if not bad:
+        return 0
+    demoted = 0
+    with mem.mut_lock:
+        for i, ex in enumerate(mem.store.exemplars):
+            m = (getattr(ex, "model", "") or "").lower()
+            if not m:
+                continue                       # pre-provenance row: leave it
+            if any(m == b or m.startswith(b + ":") or b in m
+                   for b in bad):
+                if ex.safe:
+                    mem.store.add_reask(i)
+                    ex.recompute_safe(mem.demote_threshold)
+                    demoted += 1
+        if demoted:
+            mem.store.save(mem.field_path)
+    if demoted:
+        print(f"[opencode] hygiene: demoted {demoted} exemplar(s) answered "
+              f"by screened-out models ({', '.join(sorted(bad))})",
+              file=sys.stderr)
+    return demoted
+
+
 def _state_report(srv) -> str:
     """The internal answer for a state/math query: live numbers straight off
     the field, the compactor, and the audit. No model call."""
@@ -1649,7 +1689,8 @@ def _recall_report(srv, topic: str) -> str:
             if not q or not a:
                 continue
             tag = getattr(ex, "outcome", "") or "pending"
-            lines.append(f"({sim:.2f} [{tag}]) Q: {q}\n    A: {a}")
+            via = f" [via {ex.model}]" if getattr(ex, "model", "") else ""
+            lines.append(f"({sim:.2f} [{tag}]{via}) Q: {q}\n    A: {a}")
             hits += 1
             if hits >= 8:
                 break
@@ -2024,12 +2065,15 @@ _THINK_KEYS = ("reasoning", "reasoning_content", "thinking")
 
 # capture clips. The situation side is embedded at learn time (the default
 # mxbai-embed-large has a 512-token window), so what rides inside it stays
-# modest; the action side is stored near-verbatim -- recall re-clips to
-# --mem-chars anyway, so long stored actions cost storage, not context.
+# modest; the action side is stored clipped. CAPTURE-MACHINERY QUOTA (plan
+# #2): tool/result/reasoning captures were ~95% of the store, so machinery
+# clips MUCH harder than prose (prose turns learned via the main path don't
+# use these caps at all) -- recall re-clips to --mem-chars anyway, so long
+# stored actions cost storage, not context.
 _CAP_QUERY = 400      # query head inside a captured situation (embedded)
 _CAP_SIT_ARGS = 600   # args head inside a captured situation (embed budget)
-_CAP_ARGS = 2400      # args head kept in the stored action
-_CAP_BODY = 8192      # body cap for long stored actions (results, thoughts)
+_CAP_ARGS = 900       # args head kept in the stored action (machinery: hard)
+_CAP_BODY = 2400      # body cap for captured results/thoughts (machinery)
 _CAP_THOUGHT = 24     # min chars for a reasoning capture (noise floor)
 
 
@@ -2678,6 +2722,20 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             replay_blocked = sit_l.startswith(_THOUGHT_CAPTURE_PREFIXES)
         else:
             replay_blocked = False
+        # ---- auto-settle delivery (the repeat-k rule, plan #3): the gate
+        # settled a stuck unlearned-repeat loop; serve the stored answer with
+        # no model call. Verdict mapped to act-replayed so the existing re-ask
+        # demotion loop stays armed (a bad settle replay is still demotable).
+        if verdict["verdict"] == "settle-replay":
+            answer = verdict.get("action", "")
+            v = {**verdict, "verdict": "act-replayed"}
+            self._serve_intercept_answer(model, answer,
+                                         bool(body.get("stream", False)),
+                                         thinking=mono)
+            mem.record_act(query, vec, v, model, answer)
+            self._log_turn(v, ctx, None, len(mem.store),
+                           replayed=v.get("ex_idx"))
+            return
         if (replay_sim > 0 and not reasked_idx and not replay_blocked
                 and (verdict["verdict"] == "act"
                      or (verdict["verdict"] == "escalate"
@@ -2829,6 +2887,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                                    500, 502, 503, 504)
                 nxt = _next_rung(model_name)
                 if not down or nxt is None:
+                    if down:
+                        route["ladder_exhausted"] = True
                     raise
                 why = f"HTTP {he.code}"
                 if he.code in (401, 402, 403, 429):
@@ -2842,6 +2902,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             except Exception as first_err:
                 nxt = _next_rung(model_name)
                 if nxt is None:
+                    route["ladder_exhausted"] = True
                     raise
                 print(f"[opencode] ladder failover {model_name} -> {nxt} "
                       f"({first_err})", file=sys.stderr)
@@ -2903,7 +2964,15 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                             reasoning=True):
                         self.wfile.write(chunk)
                     self.wfile.flush()
-            with _open_backend(up.get("model", "membrane")) as r:
+            try:
+                backend_r = _open_backend(up.get("model", "membrane"))
+            except Exception as e:
+                if route.get("ladder_exhausted"):
+                    self._serve_field_only(up.get("model", "membrane"), vec,
+                                           route, mid_stream=True, err=e)
+                    return
+                raise
+            with backend_r as r:
                 for line in r:                      # SSE, tee verbatim
                     if not line:
                         continue
@@ -2940,7 +3009,14 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self.wfile.flush()
             resp_obj = None
         else:
-            resp_bytes = _open_backend(up.get("model", "membrane")).read()
+            try:
+                resp_bytes = _open_backend(up.get("model", "membrane")).read()
+            except Exception as e:
+                if route.get("ladder_exhausted"):
+                    self._serve_field_only(up.get("model", "membrane"), vec,
+                                           route, mid_stream=False, err=e)
+                    return
+                raise
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(resp_bytes)))
@@ -3074,6 +3150,72 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self.wfile.flush()
         except Exception as e:
             print(f"[opencode] intercept stream error: {e}", file=sys.stderr)
+
+    # ---- the field-only banner (plan #5) ------------------------------------
+    # When the whole ladder is down (route() returned nothing, or every rung
+    # failed at delivery) the field itself is the last resort -- but a bare
+    # 502 teaches opencode nothing. Serve an honest banner instead: the turn
+    # is answered from lived memory (or honestly says nothing matches), NO
+    # model call, NO learn (re-serving recall as a learned answer would be
+    # the field feeding on itself -- the collapse doctrine).
+    def _serve_field_only(self, model: str, vec, route: dict,
+                          mid_stream: bool, err=None) -> None:
+        srv = self.server
+        mem = srv.membrane
+        rtr = getattr(srv, "router", None)
+        cooling = (sum(1 for o in (getattr(rtr, "_outages", None) or {}).values()
+                       if isinstance(o, (tuple, list)) and o and o[0] > time.time())
+                   if rtr is not None else 0)
+        why = (route.get("reason") or
+               ("all rungs cooling down" if cooling else
+                "model ladder exhausted"))
+        lines = [f"[membrane] FIELD-ONLY: no model rung answered this turn "
+                 f"({why}).",
+                 "[membrane] The answer below comes from lived memory alone "
+                 "-- it may be stale; verify before acting on it.", ""]
+        hits = 0
+        try:
+            if vec is not None and mem.embedder is not None:
+                for ex, sim in mem.store.top_k(vec, k=3):
+                    if sim < float(getattr(srv, "rag_sim_min", 0.5)) \
+                            or not ex.safe:
+                        break
+                    q = _clip(ex.situation, 280)
+                    a = _clip(ex.action or "", 600)
+                    if not q or not a:
+                        continue
+                    lines.append(f"({sim:.2f}) Q: {q}\n    A: {a}")
+                    hits += 1
+        except Exception:
+            pass
+        if not hits:
+            lines.append("- nothing trusted in the field matched this "
+                         "question; retry when the model ladder recovers.")
+        text = "\n".join(lines)
+        if err:
+            print(f"[opencode] field-only ({err})",
+                  file=sys.stderr)
+        else:
+            print(f"[opencode] field-only ({why})", file=sys.stderr)
+        verdict = {"verdict": "field-only", "reason": why, "sim": None,
+                   "nov": None, "ex_idx": None, "route": route}
+        if mid_stream:
+            # headers + (maybe) the gate monologue already went out: the only
+            # honest move is an assistant delta carrying the banner.
+            try:
+                for chunk in _openai_sse_chunks(model, text):
+                    self.wfile.write(chunk)
+                self.wfile.flush()
+            except Exception as e:
+                print(f"[opencode] field-only stream error: {e}",
+                      file=sys.stderr)
+        else:
+            self._serve_intercept_answer(model, text, False)
+        # captured for the audit trail only -- never learned into the field.
+        try:
+            self._log_turn(verdict, None, None, len(mem.store))
+        except Exception:
+            pass
 
     # ---- /membrane/ask: the slice-4 peer endpoint (read-only kNN over the ----
     # LOCAL field). A sibling membrane asks on behalf of its own turn; we answer
@@ -3690,8 +3832,9 @@ def main() -> None:
                 cloud_budget=args.cloud_budget,
                 prefer_local=bool(args.prefer_local),
                 max_local_gib=float(args.max_local_gib))
-            if mem.embedder is not None:
-                srv.router.seed_imprints_async()
+            # imprints now seed LAZILY (plan #6): the interview thread starts
+            # on the first route()/ladder() that could use a claim -- models
+            # that never become routable never cost a boot chat call.
             n_local = sum(1 for r in srv.router.records.values()
                           if r.kind == "local")
             globals()["_BOOT_ROUTER"] = srv.router   # the judge ladder reads it
@@ -3745,7 +3888,15 @@ def main() -> None:
     if srv.router is not None and mem.embedder is not None \
             and srv.router.embedder is None:
         srv.router.embedder = mem.embedder
-        srv.router.seed_imprints_async()
+
+    # recall hygiene (plan #4): mass-demote the dumb-model-era exemplars
+    # (answered by bakllava/whisper/toys the compat screen now rejects).
+    # Evidence-path demotion: the model's first contest still restores.
+    try:
+        _hygiene_demote_screened_models(srv)
+    except Exception as e:
+        print(f"[opencode] hygiene sweep skipped (non-fatal): {e}",
+              file=sys.stderr)
 
     # ---- the dev organism (the cell pool, --cells) --------------------------
     # The world pool's graze/balance machinery on the dev surface: an observer

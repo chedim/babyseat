@@ -54,6 +54,14 @@ class Exemplar:
     # chronicle scenes). Backward-compatible: old field records lack the key ->
     # Exemplar(**rec) falls back to this default.
     tags: list[int] = field(default_factory=list)
+    # ---- recall hygiene (model provenance) ----
+    # WHICH answering model produced this action (the routing verdict's pick,
+    # stamped at learn time). Empty for legacy rows / interceptor notes. The
+    # recall surfaces show it ("[via <model>]") and the boot hygiene sweep
+    # mass-demotes exemplars whose model the compat screen now rejects
+    # (bakllava/whisper/toys from the dumb-model era) -- the ordinary
+    # two-authority boundary applies: the model's first contest restores.
+    model: str = ""
     # True when this scene was authored by the cell's OWN n-gram voice (the
     # cells-act chronicle / --speak ngram path), NOT by the LLM. Such beats are
     # absorbed into the field (so the world still grows + recall stays rich) but

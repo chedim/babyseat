@@ -562,6 +562,16 @@ class Membrane:
         # real prompt; only the field sees the veiled situation.
         nudge_sigma: float = 0.0,
         nudge_seed: int = 0,
+        # ---- the auto-settle loop (repeat-k, post-restart plan #3) ----
+        # A near-identical query that keeps ESCALATING and keeps failing to
+        # learn (ring entries with learned=None: a guard skipped the append)
+        # burns a model call every turn for something the field already
+        # holds. After settle_k such repeats at cosine >= settle_sim the gate
+        # settles the turn: replay the nearest SAFE exemplar (zero model
+        # calls), or -- when the near match is unsafe/demoted -- escalate
+        # WITH its hint so the repair path can converge. 0 disables.
+        settle_k: int = 3,
+        settle_sim: float = 0.92,
     ) -> None:
         self.responder = responder
         self.field_path = Path(field_path)
@@ -607,6 +617,9 @@ class Membrane:
         # per-veil RNG: each veil seeds its own so independent instances realize
         # different nudges from the same traffic. Unused when nudge_sigma == 0.
         self._rng = np.random.default_rng(nudge_seed)
+        # the auto-settle loop knobs (repeat-k): see the __init__ doc above.
+        self.settle_k = int(settle_k)
+        self.settle_sim = float(settle_sim)
         # in-memory ring of recent decisions -- the state that lets the proxy detect a
         # re-ask across turns. Lost on restart; fine, the durable change (the safe flip)
         # is written to the field file, and the re-ask window is short.
@@ -774,6 +787,55 @@ class Membrane:
         verdict["safe_frac"] = thermo["safe_frac"]
         verdict["sim_min_eff"] = sim_min_eff
         v = verdict["verdict"]
+        # ---- the auto-settle loop (repeat-k) ----
+        # A near-identical query (cosine >= settle_sim, no re-ask in flight)
+        # that has ESCALATED settle_k times in a row while learning NOTHING
+        # (ring ex_idx None: a guard skipped the append) is a stuck loop: the
+        # same question keeps buying model calls the field cannot bank.
+        # Settle it before burning another call:
+        #   - near match SAFE  -> "settle-replay": the caller replays ex.action
+        #     (the exact-dup covenant: sim >= settle_sim on a SAFE exemplar, no
+        #     consensus needed because repeat-k itself is the consensus).
+        #   - near match UNSAFE -> plain escalate-with-hint (the repair path
+        #     keeps its chance; never replay a demoted answer).
+        # The ring is wiped for this turn either way, so one settle buys one
+        # honest retry -- a still-bad answer re-asks (demote) and the loop
+        # restarts from fresh evidence, never from a stale count.
+        if (v in ("escalate", "escalate-with-hint") and self.settle_k > 0 \
+                and self._recent
+                and (verdict.get("sim") or 0.0) >= self.settle_sim
+                and all(r["verdict"].startswith("escalate")
+                        and r.get("ex_idx") is None for r in self._recent)
+                and len(self._recent) >= self.settle_k
+                and not reasked_idx
+                and verdict.get("near_idx") is not None
+                and 0 <= verdict["near_idx"] < len(self.store)):
+            near_ex = self.store.exemplars[verdict["near_idx"]]
+            verdict["settle"] = True
+            if v == "escalate" and near_ex.safe:
+                verdict["verdict"] = v = "settle-replay"
+                verdict["action"] = near_ex.action
+                verdict["ex_idx"] = verdict["near_idx"]
+                verdict["near_safe"] = True
+                verdict["reason"] = (f"auto-settle: {len(self._recent)}x "
+                                     f"unlearned repeat; replaying safe "
+                                     f"#{verdict['near_idx']}")
+            else:
+                verdict = {"verdict": "escalate-with-hint", "hint": near_ex.action,
+                           "action": near_ex.action, "sim": verdict.get("sim"),
+                           "nov": verdict.get("nov"),
+                           "reason": (f"auto-settle: repeated unlearned "
+                                      f"escalate; demoted near match as hint"),
+                           "ex_idx": verdict["near_idx"],
+                           "near_idx": verdict["near_idx"],
+                           "near_safe": False, "eff_rank": thermo["eff_rank"],
+                           "rank_ratio": thermo["rank_ratio"],
+                           "spectrum_entropy": thermo["spectrum_entropy"],
+                           "free_energy": thermo["free_energy"],
+                           "safe_frac": thermo["safe_frac"],
+                           "sim_min_eff": sim_min_eff,
+                           "settle": True}
+            self._recent.clear()
         # a re-ask means "do not replay THIS turn" even if the lasting demotion hasn't
         # crossed the threshold yet (e.g. demote_threshold > 1): the user just told us
         # the replay was wrong, so give them a fresh model answer with the bad replay as a hint.
@@ -1374,6 +1436,7 @@ class Membrane:
             self.store.append(Exemplar(
                 situation=query, action=content, outcome="pending",
                 vec=(_unit_list(vec) if normalize else vec.tolist()), safe=not unsafe,
+                model=str(((verdict.get("route") or {}).get("route")) or ""),
                 tags=tags or [],
                 self_authored=self_authored,
             ))
