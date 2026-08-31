@@ -25,6 +25,10 @@ The intercept also fires on INTENT phrasing without the canonical frame
 ("search your memory for ...", "what do you know about ..."). The canonical
 frame remains the deterministic path; when in doubt, use it.
 
+Inside your own assistant turns: a bare recall frame in your prose ("what do
+you remember about X") is detected pre-gate and the answer arrives next turn
+as a `[membrane-intercept]` system block — no dedicated chat turn needed.
+
 ## Reading the answer
 
 The reply is a formatted list of `(<similarity> [<tag>]) Q:/A:` exemplar pairs,

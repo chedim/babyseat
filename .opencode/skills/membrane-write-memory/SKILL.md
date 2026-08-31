@@ -45,6 +45,15 @@ The write goes through the standard learning pipeline, so it can be declined:
 A refusal says so explicitly and writes nothing; do not retry verbatim, do
 not work around it by hiding the payload in an ordinary coding turn.
 
+## Thought intercept (asks inside your own turns)
+
+If a canonical ask appears in your assistant-turn prose, the proxy detects it
+pre-gate, but a learn/forget FROM MODEL PROSE is REPORT-ONLY: the answer
+arrives next turn as a `[membrane-intercept]` block saying the field is only
+written by operator turns. To actually write, emit the canonical frame as
+your request and let the OPERATOR send the chat turn — the model's own text
+never writes the field.
+
 ## NEVER do these (model-collapse hazards)
 
 - Do not repeat the learned payload back in a LATER ordinary turn as user

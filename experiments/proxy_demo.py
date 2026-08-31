@@ -49,9 +49,9 @@ class CountingResponder:
         self.inner = inner
         self.calls = 0
 
-    def respond(self, request_body: dict, hint):
+    def respond(self, request_body: dict, hint, auth=None):
         self.calls += 1
-        return self.inner.respond(request_body, hint)
+        return self.inner.respond(request_body, hint=hint, auth=auth)
 
 
 def chat(user: str, model: str = "demo") -> dict:

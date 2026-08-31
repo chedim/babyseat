@@ -24,6 +24,14 @@ Membrane answers internally with: backend + embed model, field composition
 free_energy, safe_frac, spectrum_entropy), gate knobs, retrieval settings,
 and compactor counters.
 
+## Asking inside your own turns (thought intercept)
+
+You do NOT need a dedicated chat turn: if your assistant-turn text contains
+a canonical ask ("field state"), the proxy detects it pre-gate and injects
+the answer into your NEXT turn as a clearly-marked
+`[membrane-intercept]` system block. Do not answer state questions by
+curl/tool-then-paste — the proxy handles canonical asks in your own prose.
+
 ## Reading the numbers
 
 - `free_energy` rising slowly with real traffic = the field is growing useful

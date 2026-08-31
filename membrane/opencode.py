@@ -712,15 +712,26 @@ def _field_seed_topics(srv) -> list:
         return c["topics"]
     topics: list = []
     for ex in mem.store.exemplars:
+        # total-capture kinds (reasoning:/plan:/call/result) are model traffic
+        # -- the exact junk the field layer must never learn from: a captured
+        # thought merely QUOTING "remember that ..." must not become a learn
+        # seed (misroute seen live: plan-mode reasoning hijacked the learn
+        # family and ate an operator ask).
+        sit = " ".join(ex.situation.split()).lower()
+        if (sit.startswith("reasoning:") or sit.startswith("plan:")
+                or sit.startswith("call ") or sit.startswith("result ")):
+            continue
         text = " ".join((ex.situation + " " + (ex.action or "")).split())
         low = text.lower()
-        if low.startswith("model:"):
+        # frames only at the START of the text: prose that merely MENTIONS
+        # "note that" mid-sentence is not a memory command (prefix-only).
+        if low.startswith("model:"):            # escaped asks stay recall seeds
             fam = "recall"
-        elif any(f in low for f in _FORGET_FRAMES):
+        elif low.startswith(_FORGET_CANON) or any(low.startswith(f) for f in _FORGET_FRAMES):
             fam = "forget"
-        elif any(f in low for f in _LEARN_FRAMES):
+        elif low.startswith("membrane: learn that") or any(low.startswith(f) for f in _LEARN_FRAMES):
             fam = "learn"
-        elif any(f in low for f in _RECALL_FRAMES):
+        elif any(low.startswith(f) for f in _RECALL_FRAMES):
             fam = "recall"
         elif low.startswith("membrane:"):
             body = low[len("membrane:"):].strip()
@@ -885,6 +896,104 @@ def n_ctx_mem(ctx: str | None) -> int:
     return 0 if not ctx else ctx.count("Q: ")
 
 
+# ---- the thought intercept (the agent's own asks, answered as context) ------
+# The agent's own text can ADDRESS the membrane ("field state", "membrane:
+# learn that X"). Detection runs on assistant-role messages of INCOMING
+# requests (my thoughts ride there on the next continuation turn), the answer
+# is computed internally, and DELIVERED as a clearly-marked system block on
+# the outbound request -- so the interaction appears transparently in opencode
+# (the model reads it, cites it, and the [membrane-intercept] tag makes clear
+# it is proxy machinery, not user text). A once-only ledger keeps the same
+# assistant message from being answered on every re-send. Learn/forget asks
+# from thoughts are REPORT-ONLY (the field cannot be written by model prose;
+# only the operator's canonical turns write).
+
+_THOUGHT_BLOCK_HEAD = ("[membrane-intercept] your own earlier ask was handled "
+                       "internally by the membrane proxy (NOT learned, NOT a "
+                       "model answer):")
+
+_THOUGHT_CAPTURE_PREFIXES = ("reasoning:", "plan:", "call ", "result ",
+                             "tool ")
+
+
+def _is_thought_ask(q: str) -> bool:
+    """Conservative lexical match of the assistant text as an intercept ASK.
+    Same frames as the operator matchers; plus the guard that a captured
+    reasoning/plan echo is never itself an ask."""
+    low = " ".join((q or "").split()).lower()
+    if not low or "```" in low or len(low) > 400:
+        return False
+    if low.startswith(_THOUGHT_CAPTURE_PREFIXES):
+        return False
+    return (_is_state_query(low) or _is_recall_query(low)
+            or _is_learn_query(low) or _is_forget_query(low))
+
+
+def _thought_answer(srv, fam: str, text: str) -> str:
+    """The internal answer for a thought ask. Learn/forget from model prose
+    are REPORT-ONLY descriptions -- they never write, only tell the agent to
+    re-ask as the operator."""
+    if fam == "state":
+        return _state_report(srv)
+    if fam == "recall":
+        return _recall_report(srv, _recall_topic(text))
+    return (f"[membrane-intercept] your {fam} ask was read but NOT executed: "
+            "the field is only written by operator turns. Re-ask with the "
+            "canonical form or prefixed with 'model:' to force the model "
+            "path.")
+
+
+def _assistant_thought_asks(srv, body: dict) -> list:
+    """(fam, normalized_text) for every PENDING intercept ask in
+    assistant-role messages of the incoming request. Already-served asks
+    (the delivery ledger) are skipped; the same assistant message re-arrives
+    on every continuation, so marking happens ONLY at delivery -- an
+    undelivered ask stays pending."""
+    ledger = getattr(srv, "_served_thought_asks", None) or {}
+    out: list = []
+    for m in reversed(body.get("messages") or []):
+        if not isinstance(m, dict) or m.get("role") != "assistant":
+            continue
+        c = m.get("content")
+        if not isinstance(c, str) or not c.strip():
+            continue
+        t = " ".join(c.split())
+        if not _is_thought_ask(t):
+            continue
+        fam = ("state" if _is_state_query(c) else
+               "recall" if _is_recall_query(c) else
+               "learn" if _is_learn_query(c) else "forget")
+        if ledger.get(hash((fam, t.lower()))):
+            continue
+        out.append((fam, t))
+    return out
+
+
+def _serve_thoughts_served(srv, asks: list) -> None:
+    """Mark asks as answered in the once-only ledger (in-memory; a proxy
+    reboot forgets it -- the worst case is one repeated answer)."""
+    ledger = getattr(srv, "_served_thought_asks", None)
+    if ledger is None:
+        ledger = srv._served_thought_asks = {}
+    for fam, t in asks:
+        ledger[hash((fam, t.lower()))] = True
+
+
+def _thought_block(asks: list) -> str | None:
+    """The marked context block for the outbound request (injected next to
+    the RAG memories; clearly tagged so opencode shows it as machinery)."""
+    if not asks:
+        return None
+    parts = [_THOUGHT_BLOCK_HEAD]
+    for fam, ans in asks:
+        parts.append(f"\n[{fam}] {ans.strip()}")
+    parts.append("\n[membrane-intercept] end of internal answer. Reference "
+                 "this when relevant; do not repeat it verbatim to the user. "
+                 "If you already answered the user using a fact this corrects, "
+                 "fix it on your next turn")
+    return "\n".join(parts)
+
+
 def _sse_line(obj) -> bytes:
     return ("data: " + json.dumps(obj) + "\n\n").encode()
 
@@ -955,6 +1064,16 @@ def _audit_count(path: str) -> int:
 
 _THINK_KEYS = ("reasoning", "reasoning_content", "thinking")
 
+# capture clips. The situation side is embedded at learn time (the default
+# mxbai-embed-large has a 512-token window), so what rides inside it stays
+# modest; the action side is stored near-verbatim -- recall re-clips to
+# --mem-chars anyway, so long stored actions cost storage, not context.
+_CAP_QUERY = 400      # query head inside a captured situation (embedded)
+_CAP_SIT_ARGS = 600   # args head inside a captured situation (embed budget)
+_CAP_ARGS = 2400      # args head kept in the stored action
+_CAP_BODY = 8192      # body cap for long stored actions (results, thoughts)
+_CAP_THOUGHT = 24     # min chars for a reasoning capture (noise floor)
+
 
 def _msg_reasoning(msg: dict) -> str:
     for kk in _THINK_KEYS:
@@ -1024,15 +1143,15 @@ def _capture_plan_and_calls(mem, query: str, content: str, calls: dict) -> None:
             name = fn.get("name") or "?"
             args = (fn.get("arguments") or "").strip()
             _capture(mem, f"call {name}",
-                     f"tool call for: {_clip(query, 200)} -> {name}(args)",
-                     f"{name}({_clip(args, 600)})")
+                     f"tool call for: {_clip(query, _CAP_QUERY)} -> {name}(args)",
+                     f"{name}({_clip(args, _CAP_ARGS)})")
             cid = c.get("id")
             if cid:
                 mem._pending_tools[cid] = {"query": query, "name": name, "args": args}
         if content.strip():
             _capture(mem, "plan",
-                     f"plan: {_clip(query, 200)}",
-                     content)
+                     f"plan: {_clip(query, _CAP_QUERY)}",
+                     _clip(content, _CAP_BODY))
     elif content.strip():
         # (text-only turns are learned by the main path; nothing extra here)
         pass
@@ -1054,14 +1173,14 @@ def _capture_tool_results(srv, body: dict) -> None:
             continue                      # pre-boot result or unknown id
         result = _tool_result_text(m)
         _capture(mem, f"result {rec['name']}",
-                 f"tool {rec['name']} for: {_clip(rec['query'], 200)}\n"
-                 f"args: {_clip(rec['args'], 300)}",
-                 _clip(result, 2400))
+                 f"tool {rec['name']} for: {_clip(rec['query'], _CAP_QUERY)}\n"
+                 f"args: {_clip(rec['args'], _CAP_SIT_ARGS)}",
+                 _clip(result, _CAP_BODY))
 
 
 def _capture_reasoning(mem, query: str, reasoning: str) -> None:
-    _capture(mem, "reasoning", f"reasoning: {_clip(query, 200)}",
-             reasoning, min_len=80)
+    _capture(mem, "reasoning", f"reasoning: {_clip(query, _CAP_QUERY)}",
+             _clip(reasoning, _CAP_BODY), min_len=_CAP_THOUGHT)
 
 
 def _chat_capable_models(backend: str) -> list:
@@ -1220,6 +1339,18 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             _capture_tool_results(srv, body)
         except Exception as cap_e:
             print(f"[opencode] result-capture error: {cap_e}", file=sys.stderr)
+        # ---- THOUGHT intercept (detect): the agent's own asks in
+        # assistant-role text ("field state", "membrane: learn that ...").
+        # Detection only -- the marked answer block is injected POST-GATE (into
+        # `up`, next to the RAG memories) so the gate math never sees field
+        # readback. Learn/forget asks are report-only, never written. Once-only
+        # via the ledger marked at real delivery.
+        thought_asks: list = []
+        if getattr(srv, "thought_intercept", True):
+            try:
+                thought_asks = _assistant_thought_asks(srv, body)
+            except Exception as t_e:
+                print(f"[opencode] thought-detect error: {t_e}", file=sys.stderr)
         # ---- INTERNAL interception (before the gate: these turns never touch
         # the field -- no learn, no demote, no nudge -- so introspection can't
         # feed the field back into itself). Served straight from the live store.
@@ -1242,7 +1373,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         forget_hit = (not model_escaped) and _is_forget_query(q_early)
         rec_hit = (not model_escaped) and _is_recall_query(q_early)
         state_hit = (not model_escaped) and _is_state_query(q_early)
-        if not any((learn_hit, forget_hit, rec_hit, state_hit)) and srv.sem_intercept:
+        if (not any((learn_hit, forget_hit, rec_hit, state_hit))
+                and srv.sem_intercept and not model_escaped):
             # the semantic fallback embeds the query itself (an outbound read,
             # never learned). 4-family: recall/state answer from the field;
             # learn/forget are operator writes routed without the incantation.
@@ -1354,8 +1486,19 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         up = dict(body)
         if ctx:
             up["messages"] = _inject(body.get("messages") or [], ctx)
+        # thought-intercept delivery: the marked internal answers ride next to
+        # the RAG context; marked served only AFTER _v1_deliver succeeds (a
+        # backend error forwards the original raw -- undelivered asks must
+        # stay pending for the next continuation turn).
+        if thought_asks:
+            t_block = _thought_block([
+                (fam, _thought_answer(srv, fam, t)) for fam, t in thought_asks])
+            if t_block:
+                up["messages"] = _inject(up["messages"], t_block)
         try:
             self._v1_deliver(up, raw, query, vec, verdict, ctx)
+            if thought_asks:
+                _serve_thoughts_served(srv, thought_asks)
         except Exception as e:
             print(f"[opencode] backend error, no field write: {e}", file=sys.stderr)
             self._forward_raw(raw)
@@ -1642,6 +1785,12 @@ def main() -> None:
                     action="store_false",
                     help="do not stream the [membrane] gate monologue into "
                          "opencode's thinking channel")
+    ap.add_argument("--no-thought-intercept", dest="thought_intercept",
+                    action="store_false",
+                    help="do not answer the AGENT's own asks found in its "
+                         "assistant-turn text (default ON: a 'field state' in "
+                         "the model's prose is served as a marked context "
+                         "block next turn; learn/forget asks report-only)")
     ap.add_argument("--no-launch", dest="launch", action="store_false",
                     help="run only the proxy (don't start opencode)")
     ap.add_argument("passthrough", nargs="*",
@@ -1728,6 +1877,8 @@ def main() -> None:
     srv.state_intercept = bool(args.state_intercept)
     srv.sem_intercept = bool(args.sem_intercept)
     srv.field_seeds = bool(args.field_seeds)
+    srv.thought_intercept = bool(args.thought_intercept)
+    srv._served_thought_asks = {}
     srv.gate_monologue = bool(args.gate_monologue)
     srv.replay_sim = max(0.0, min(1.0, float(args.replay_sim)))
     srv.embed_model_arg = args.embed_model
@@ -1795,6 +1946,7 @@ def main() -> None:
           f"{' (follows opencode selection)' if srv.compact_follows_chat else ' (pinned)'}\n"
           f"  embedder: {getattr(mem.embedder, 'model', None) or 'UNRESOLVED -- chat blocked until an embed model is available'}\n"
           f"  state/math: {'answered internally from the live field' if srv.state_intercept else 'off'}\n"
+          f"  thoughts: {'agent asks answered as marked context' if srv.thought_intercept else 'off'}\n"
           f"  replay: {'sim>=' + format(srv.replay_sim, '.2f') + ' -> stored answer, no model call' if srv.replay_sim > 0 else 'off (pure observer)'}\n"
           f"  judge: {judge_s}\n"
           f"  opencode config: {cfg_path}",

@@ -151,5 +151,77 @@ srvff = FakeSrv(FakeMembrane(exemplars=[_note("membrane: learn that x")],
 check("degenerate geometry disables field layer",
       oc._embed_field_seed_matrix(srvff) is False)
 
+# ---- 7: capture-kind echoes are NOT harvested as field seeds -----------------
+reset()
+srv4 = FakeSrv(FakeMembrane(exemplars=[
+    # the live misroute: captured plan-mode reasoning quoting a learn frame
+    _note("reasoning: hello? <system-reminder> note that we should remember "
+          "that the deploy needs staging"),
+    _note("plan: remember that tests must stay green"),
+    _note("call read -> exemplar #1"),
+    _note("result read -> 200 OK, ok note that"),
+], embedder=FakeEmbedder()))
+check("capture-kind echoes never harvested",
+      oc._field_seed_topics(srv4) == [])
+
+# ---- 8: frames mid-text no longer become seeds (prefix-only rule) ------------
+reset()
+srv5 = FakeSrv(FakeMembrane(exemplars=[
+    _note("let me note that the config lives in app.yaml"),
+    _note("I must remember that the old key was deprecated"),
+    _note("first, what do you remember about the schema; then edit it"),
+], embedder=FakeEmbedder()))
+check("mid-text frame mentions not harvested",
+      oc._field_seed_topics(srv5) == [])
+
+# ---- 9: legit canon seeds still harvested ------------------------------------
+reset()
+srv6 = FakeSrv(FakeMembrane(exemplars=[
+    _note("membrane: learn that the deploy script needs RUN_ENV=staging"),
+    _note("membrane: query the field for rate limiting"),
+    _note("model: field state"),
+], embedder=FakeEmbedder()))
+fams = sorted(f for _, f, _ in oc._field_seed_topics(srv6))
+check("canon seeds still harvested",
+      fams == ["learn", "recall", "recall"])
+
+# ---- 10: thought intercept -- detection + once-only ledger -------------------
+class NoSrv:
+    thought_intercept = True
+
+srv7 = NoSrv()
+srv7._served_thought_asks = {}
+body1 = {"messages": [
+    {"role": "user", "content": "fix the flaky test"},
+    {"role": "assistant", "content": "Reading the file, then field state to check the field size before running the suite."},
+    {"role": "user", "content": "ok"},
+    {"role": "assistant", "content": "running tests"},
+]}
+asks = oc._assistant_thought_asks(srv7, body1)
+check("thought ask not detected (not a canonical ask)",
+      asks == [])
+body2 = {"messages": [
+    {"role": "user", "content": "fix the flaky test"},
+    {"role": "assistant", "content": "field state"},
+]}
+asks = oc._assistant_thought_asks(srv7, body2)
+check("state ask detected in assistant text",
+      len(asks) == 1 and asks[0][0] == "state")
+oc._serve_thoughts_served(srv7, asks)
+check("ledger fires once",
+      oc._assistant_thought_asks(srv7, body2) == [])
+body3 = {"messages": [
+    {"role": "assistant", "content": "membrane: learn that the api key rotates monthly"},
+]}
+asks = oc._assistant_thought_asks(srv7, body3)
+check("learn ask detected", len(asks) == 1 and asks[0][0] == "learn")
+block = oc._thought_block([(f, oc._thought_answer(srv7, f, t))
+                           for f, t in asks])
+check("block marked for opencode",
+      block is not None and "[membrane-intercept]" in block
+      and "NOT executed" in block)
+check("reasoning captures never asks",
+      oc._is_thought_ask("reasoning: the user asked, field state next") is False)
+
 print(f"\n{passed} passed, {failed} failed")
 sys.exit(1 if failed else 0)
