@@ -26,6 +26,10 @@ rag-audit.jsonl
 rag-field.json.review.jsonl
 membrane-opencode.log
 membrane-proxy.log
+# the dev organism's persistent cell fields + audits (graze state, not source)
+cell-field-*
+cell-audit-*
+router.json
 
 # local runtime state + scratch (never source)
 build/

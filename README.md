@@ -269,6 +269,7 @@ shows the launch command.
 |---|---|
 | [docs/shared-field-workflow.md](docs/shared-field-workflow.md) | **Team field: the process.** Day-one setup, the async loop, watches, operator rules, go-live checklist |
 | [docs/multi-dev-field.md](docs/multi-dev-field.md) | **Team field: the substrate.** Origin axis, veil, arbitration — what makes multi-seat sharing collision-free |
+| [docs/dev-organism.md](docs/dev-organism.md) | The dev organism: cells that graze the field — curiosity veils, the bud/death economy, cells visible in the viewer |
 | [docs/global-field.md](docs/global-field.md) | The global commons: facts true beyond one repo; operator promotion, consensus, residency drift |
 | [docs/token-economics.md](docs/token-economics.md) | Where the savings come from (intercepts, replay, compaction) + the router: the ladder, the ceiling, the outage fallback |
 | [docs/principle.md](docs/principle.md) | "Only variety absorbs variety" — Ashby's law with the telos flipped; free_energy, effective_rank, the veil, multi-membrane |

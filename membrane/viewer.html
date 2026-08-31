@@ -380,6 +380,7 @@
       <div class="slot stat"><span class="ico" id="hb-fe">0</span><span class="sl">fe</span></div>
       <div class="slot stat"><span class="ico" id="hb-var">0/0</span><span class="sl">var</span></div>
       <div class="slot stat"><span class="ico" id="hb-safe">0</span><span class="sl">safe</span></div>
+      <div class="slot stat"><span class="ico" id="hbc">0/0</span><span class="sl">cells</span></div>
       <div class="slot stat"><span class="ico" id="hb-entropy">1.0</span><span class="sl">rate</span></div>
     </div>
   </div>
@@ -1029,6 +1030,7 @@ setInterval(poll,1000);
 // the real /api/chat gate (which also learns the exchange — visible as new dots).
 function pollDev(j){
   const exs=j.exemplars||[]; renderCloud(exs);
+  renderCells(j.pool_cells||[]);       // the dev organism: bud/graze sprites among the stars
   const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
   const th=j.thermo||{};
   const fe=th.free_energy||0;
@@ -1038,6 +1040,7 @@ function pollDev(j){
   set("ec",th.eff_rank!=null?th.eff_rank.toFixed(1):"0");
   set("ecap",th.eff_rank!=null?"/"+j.field_size:"—");
   set("n",j.field_size);set("ns",j.safe);set("nu",j.field_size-j.safe);
+  const pcs=j.pool_cells||[];set("hbc",pcs.length+"/"+pcs.filter(c=>c.mature).length);
   const vs=j.verdicts||[], nv=j.n_verdicts||vs.length;
   if(nv>seenVerdicts){
     seenVerdicts=nv;

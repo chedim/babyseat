@@ -80,8 +80,52 @@ def _PRICE_TABLE_BY_NAME():
                     break
             out.append((rec.name, usd))
     return out
-from .runtime import Membrane, OllamaChatResponder, OllamaJudge, StubJudge
-from .variety import thermo_state
+from .cell import Cell
+from .curiosity import CURIOSITY_MIN
+from .pool import CellPool
+from .runtime import (Membrane, OllamaChatResponder, OllamaJudge, StubJudge,
+                      StubResponder)
+from .variety import free_energy, orient_dirs, thermo_state
+
+
+def _bud_cost(free_e: float) -> float:
+    """The adaptive budding cost from the energy-economy experiments
+    (multi_telemetry._bud_cost): 0.4 * the tighter of (current energy,
+    headroom to the ceiling), with a floor so near-saturation still costs
+    something. At the live 1024-dim embed space the headroom term is
+    effectively unbounded, so this is 0.4 * energy (floor 0.25) -- the
+    GROWTH requirement is what holds the bound either way: a cell must grow
+    this much MORE safe variety since its last bud before it may bud again,
+    so a static field never re-crosses the threshold (no runaway)."""
+    return 0.4 * max(free_e, 0.625)
+
+
+def _bud_thread(srv):
+    """The budger: the dev organism's reproduction clock (the pool-balance
+    half of the world's consolidator, consolidate.py:198-207, made its own
+    daemon because the dev surface has no world Consolidator). Each cycle:
+
+      - reads the FIELD's distinct experienced directions (``orient_dirs`` --
+        the interests the field actually grew), capped by the CPU ceiling
+        (round(cpu_target * 30), the same K=30 mapping the world pool uses);
+      - balance()s the pool toward that: bud a new cell committed to a
+        world direction not yet covered (a cone = an interest, non-destructive
+        -- pool.py's living-specialist gate, NOT the differentiate death move),
+        retire the collapsed/lowest-free-energy cell when over.
+
+    Static field -> no new directions -> no buds; variety growth -> the next
+    free direction gets a cell. Self-limiting by construction."""
+    pool = srv.cell_pool
+    mem = srv.membrane
+    while not srv._bstop.wait(srv.cells_interval):
+        try:
+            if len(mem.store) < 2:
+                continue
+            cpu_cap = max(1, round(float(getattr(srv, "cpu_target", 0.2)) * 30))
+            dirs = orient_dirs(mem.store, cpu_cap + 1, 0.5)
+            pool.balance(min(len(dirs), cpu_cap), dirs)
+        except Exception as e:
+            print(f"[cells] balance error: {_one_line(e)}", file=sys.stderr)
 
 # tag markers meaning "not a chat model" (kept out of /v1/models). Cloud models
 # (e.g. glm-4.7:cloud, deepseek-v4-pro:cloud, gpt-oss:20b-cloud) never match these
@@ -3188,6 +3232,53 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 "peers_live": (len(srv.peers.livelist())
                                if getattr(srv, "peers", None) else 0),
             }
+        # ---- the dev organism: the live pool cells (the viewer renders them
+        # colored by their covered field-direction, sized by maturity). Each
+        # cell's 3D position is its vec-centroid through the SAME stable PCA
+        # basis (_cloud_points' srv._v_basis) the exemplar cloud uses, so
+        # cells sit among the memories they observe. Reads of each cell's
+        # store are GIL snapshots (one-cycle-stale at worst), like the rest.
+        # Wrapped: /state is the read-only instrument -- a cell dying mid-
+        # graze must degrade the pool panel, never the whole state.
+        pool_cells = []
+        try:
+            _pool = getattr(srv, "cell_pool", None)
+            if _pool is not None:
+                _dirs = (orient_dirs(mem.store, max(1, round(float(
+                    getattr(srv, "cpu_target", 0.2)) * 30)) + 1, 0.5)
+                    if len(exs) >= 2 else [])
+                _basis = getattr(srv, "_v_basis", None)
+                _mu = (np.mean([np.asarray(e.vec, dtype=float) for e in exs],
+                               axis=0) if exs else None)
+                for c in _pool.cells:
+                    cexs = c.membrane.store.exemplars
+                    cn = len(cexs)
+                    cp = [0.0, 0.0, 0.0]
+                    if cn and _basis is not None and _mu is not None:
+                        try:
+                            CV = np.array([np.asarray(e.vec, dtype=float)
+                                           for e in cexs])
+                            cc = (CV.mean(0) - _mu) @ _basis.T
+                            cp = [round(float(cc[0]), 4), round(float(cc[1]), 4),
+                                  round(float(cc[2]), 4)]
+                        except Exception:
+                            pass
+                    try:
+                        cfe = float(free_energy(c.membrane.store)) if cn >= 2 else 0.0
+                    except Exception:
+                        cfe = 0.0
+                    cmature = c.dominant_dir() is not None
+                    cdir = c.covered_dir(_dirs) if (_dirs and cmature) else None
+                    pool_cells.append({
+                        "id": c.tag, "tag": c.tag, "p": cp, "dir": cdir,
+                        "mature": cmature, "n": cn,
+                        "free_energy": round(cfe, 3),
+                        "ready": bool(c.ready_to_bud(_bud_cost(cfe))),
+                    })
+        except Exception as e:
+            print(f"[opencode] state: pool_cells degraded ({_one_line(e)})",
+                  file=sys.stderr)
+        out["pool_cells"] = pool_cells
         self._json_out(out)
 
 
@@ -3259,6 +3350,19 @@ def main() -> None:
                          "live working context (--no-momentum for exact recall).")
     ap.add_argument("--no-momentum", dest="momentum", action="store_false")
     ap.set_defaults(archive=True, momentum=True)
+    ap.add_argument("--cells", type=int, default=4, metavar="N",
+                    help="seed N curiosity-driven cells of a SELF-BALANCING observer "
+                         "organism that parallels the dev field (the world pool's "
+                         "graze/balance machinery, pool.py, on the dev surface). The "
+                         "cells GRAZE the field's exemplars through their own veils and "
+                         "_bud_thread buds them to the FIELD's variety (each cell "
+                         "committed to a distinct experienced direction -- an interest "
+                         "the field grew), capped by --cpu-target (~cpu*30). Fields "
+                         "persist as cell-field-*.json beside the field and grow across "
+                         "boots. 0 = off.")
+    ap.add_argument("--cells-interval", type=float, default=30.0, metavar="S",
+                    help="seconds between cell graze/balance cycles (also the "
+                         "budger's cadence; 5-60 sane)")
     ap.add_argument("--no-router", "--disable-llm-router", dest="router",
                     action="store_false",
                     help="disable the LLM orchestration router and always "
@@ -3620,6 +3724,68 @@ def main() -> None:
         srv.router.embedder = mem.embedder
         srv.router.seed_imprints_async()
 
+    # ---- the dev organism (the cell pool, --cells) --------------------------
+    # The world pool's graze/balance machinery on the dev surface: an observer
+    # organism parallel to the single Membrane. Cells GRAZE the dev field's
+    # exemplars (pre-computed vectors, per-cell veil, curiosity-gated -- no
+    # embed call, numpy-only), each committed to a DISTINCT experienced
+    # direction of the field (an interest the field grew -- non-destructive
+    # orientation, not the differentiate death move). _bud_thread buds cells
+    # as the field's variety (orient_dirs) grows past the population, retires
+    # collapsed/stale ones. Observer mode holds (never authors, never serves,
+    # never touches the live gate); a cell's field is its own persistent
+    # perspective that grows across boots. None when --cells 0 (the
+    # single-Membrane path pays one `is None` check per cycle).
+    srv.cell_pool = None
+    if args.cells > 0 and mem.embedder is not None:
+        import math as _math
+        _fdir = Path(args.field).parent
+        _dim = len(mem.store.exemplars[0].vec) if len(mem.store) else 1024
+        _veil_sigma = 0.5 / _math.sqrt(_dim)   # dim-scaled veil (see proxy.py's pool)
+        _fdir.mkdir(parents=True, exist_ok=True)
+
+        def _dev_cell(tag, field_path, audit_path, nudge_seed):
+            return Cell(
+                tag=tag,
+                responder=StubResponder(tag=tag),
+                field_path=str(field_path),
+                audit_path=str(audit_path),
+                sim_min=args.sim_min,
+                dedup_sim=args.dedup_sim,
+                observer=True,             # the never-authors guardrail -- do NOT flip
+                vague_filter=False,        # isolate curiosity+veil (the pool config)
+                variety_gate=False,
+                variety_temp=False,
+                nudge_sigma=_veil_sigma,
+                nudge_seed=nudge_seed,
+                curiosity_on=True,
+                curiosity_min=CURIOSITY_MIN,
+                fresh=False,               # persistent: load cell-field-*.json if present
+            )
+
+        srv.cell_pool = CellPool(mem, _dev_cell,
+                                 interval=max(1.0, float(args.cells_interval)),
+                                 field_prefix=str(_fdir / "cell-field-"),
+                                 audit_prefix=str(_fdir / "cell-audit-"))
+        _seed_dirs = orient_dirs(mem.store, args.cells + 1, 0.5) \
+            if len(mem.store) >= 2 else []
+        for _i in range(max(0, args.cells)):
+            srv.cell_pool.bud_cell(
+                orientation=_seed_dirs[_i] if _i < len(_seed_dirs) else None)
+        srv.cell_pool.start()
+        srv.cells_interval = max(5.0, float(args.cells_interval))
+        srv._bstop = threading.Event()
+        srv._budger = threading.Thread(target=_bud_thread, args=(srv,),
+                                       name="dev-budger", daemon=True)
+        srv._budger.start()
+        print(f"[opencode] cells: {args.cells} seeded, grazing the field "
+              f"(interval {srv.cells_interval:.0f}s, veil_sigma={_veil_sigma:.4f}, "
+              f"pop cap ~{max(1, round(float(getattr(srv, 'cpu_target', 0.2)) * 30))})",
+              file=sys.stderr)
+    elif args.cells > 0:
+        print("[opencode] cells: skipped -- no embedder resolved yet "
+              "(the gate itself cannot run)", file=sys.stderr)
+
     # ---- the opencode config + launch ----
     cfg = {
         "$schema": "https://opencode.ai/config.json",
@@ -3657,6 +3823,7 @@ def main() -> None:
           f"  thoughts: {'agent asks answered as marked context' if srv.thought_intercept else 'off'}\n"
           f"  global field: {'on (' + str(len(srv.global_field.store)) + ' notes)' if srv.global_field else 'off'}\n"
           f"  watches: {'on (' + str(len(srv._watch_board.watches)) + ' planted, cap ' + str(MAX_WATCHES) + ')' if getattr(srv, '_watch_board', None) is not None else 'off'}\n"
+          f"  cells: {('on (' + str(len(srv.cell_pool.cells)) + ' grazing, cap ~' + str(max(1, round(float(getattr(srv, 'cpu_target', 0.2)) * 30))) + ')') if getattr(srv, 'cell_pool', None) is not None else 'off (--cells N)'}\n"
           f"  peers: {len(srv.peers.livelist()) if getattr(srv, 'peers', None) else 0} live\n"
           f"  replay: {'sim>=' + format(srv.replay_sim, '.2f') + ' -> stored answer, no model call' if srv.replay_sim > 0 else 'off (pure observer)'}\n"
           f"  archive: {'on (cold tier after each compaction)' if getattr(srv, 'archive', False) else 'off (--archive)'}\n"
@@ -3728,6 +3895,12 @@ def main() -> None:
                 pass
         if srv.compactor is not None:
             srv.compactor.stop()
+        if getattr(srv, "cell_pool", None) is not None:
+            try:
+                srv._bstop.set()
+                srv.cell_pool.stop()
+            except Exception:
+                pass
         for p in (cfg_path,):
             try:
                 os.unlink(p)
