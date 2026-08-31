@@ -11,9 +11,18 @@ its live field — no model call, and the turn is NOT learned into the field.
 
 ## How to query
 
-Send a chat turn (no tools) phrased with the canonical frame:
+Use the `membrane_query` MCP tool (registered by default):
 
-    membrane: query the field for <topic>
+    membrane_query {"topic": "<what to recall>"}
+
+Structured arguments, answer in the same turn, same guarantees as the
+frame: read-only, no model call, never learned.
+
+Tool not registered (`--no-mcp`, or the MCP server failed to start)? Do NOT
+ask the user to relay it — use your own prose lane instead: a bare recall
+frame in your assistant-turn text ("what do you remember about X") is
+detected pre-gate and the answer arrives NEXT turn as a
+`[membrane-intercept]` system block. Same endpoint, same guards.
 
 Examples:
 

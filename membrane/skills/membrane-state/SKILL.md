@@ -11,7 +11,15 @@ model call, and the turn is NOT learned into the field.
 
 ## How to ask
 
-Send a chat turn (no tools) phrased as a direct state ask:
+Use the `membrane_state` MCP tool (registered by default) — answer in the
+same turn, straight from the live field.
+
+Tool not registered (`--no-mcp`, or the MCP server failed to start)? Do NOT
+ask the user to relay it — use your own prose lane instead: a canonical state
+ask in your assistant-turn text ("field state") is detected pre-gate and the
+answer arrives NEXT turn as a `[membrane-intercept]` system block. Same live
+field, same guarantees. Do not answer state questions by curl/tool-then-paste
+— the proxy handles canonical asks in your own prose.
 
     field state
     membrane state

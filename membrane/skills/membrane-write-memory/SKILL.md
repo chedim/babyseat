@@ -30,9 +30,21 @@ remains the deterministic path; when in doubt, use it.
 
 ## How to write (from YOUR OWN work -- the agent lane, ON by default)
 
-When a working/planning cycle teaches you something durable, end the reply
-you were already writing with ONE canonical line (no tool call, no break in
-the cycle -- the frame rides your normal prose and is executed post-hoc):
+Use the `membrane_learn` MCP tool (registered by default):
+
+    membrane_learn {"lesson": "<the lesson you just earned>"}
+
+Guards run proxy-side, confirmation in the same tool result. Same rules as
+the prose lane: earned lessons only, no secrets, no user personal data, no
+code blocks, no transcript dumps. A "skipped" result is the dedup/variety
+gate declining -- that is normal, do not rephrase-spam to force it through.
+
+Tool not registered (`--no-mcp`, or the MCP server failed to start)? Do NOT
+ask the user to relay it — use your own prose lane instead: end the assistant
+turn you were already writing with ONE canonical frame, on its own line, at
+the END (a `membrane: learn that <lesson>` in your normal prose is detected
+and executed post-hoc; the confirmation arrives NEXT turn as a
+`[membrane-intercept]` block).
 
     membrane: learn that <the lesson you just earned>
 

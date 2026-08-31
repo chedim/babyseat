@@ -260,6 +260,10 @@ def _ex_to_wire(ex: "Exemplar", stamp: bool = True) -> dict:
     shared-bucket window). JSON files stay unstamped: byte-identical to the
     v1 raw-list shape every released version already reads."""
     rec = {k: v for k, v in asdict(ex).items() if k != "extra"}
+    # empty provenance is the legacy shape: only rows WITH a model carry the
+    # key, so pre-provenance JSON stays byte-identical to v1
+    if not rec.get("model"):
+        rec.pop("model", None)
     extra = getattr(ex, "extra", None) or {}
     for k, v in extra.items():
         if not k.startswith("_"):

@@ -52,7 +52,8 @@ import numpy as np
 
 from .embed import OllamaEmbedder
 from .global_field import PEER_ASK_SIM_MIN
-from .rag import Compactor, RAGProxyHandler, _clip, _inject
+from .rag import (Compactor, RAGProxyHandler, _clip, _inject,
+                  doctrine_instructions_text)
 from .router import EXPLORE_LANE
 from .watch import MAX_WATCHES, WatchBoard
 
@@ -2336,6 +2337,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._v1_embeddings(); return
         if path == "/membrane/delegate":
             self._membrane_delegate(); return
+        if path == "/membrane/learn":
+            self._membrane_learn(); return
+        if path == "/membrane/forget":
+            self._membrane_forget(); return
         if path.startswith("/membrane/"):
             self._json_out({"error": "read-only; GET /membrane/state"}); return
         super().do_POST()
@@ -2683,7 +2688,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # ---- INTERNAL: the 'model:' escape hatch only (recall/state were both
         # fully handled above, pre-gate) ----
         q = _last_user_text(body)
-        ctx = self._memory_block(vec)
+        ctx = self._memory_block(vec, body.get("messages"))
         self.momentum_update(vec, query)
         # pending human reviews ride along as a system-level notice: the model
         # is told to ASK the user via its native question tool. The user's
@@ -3222,6 +3227,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
     # from our lived knowledge (never the commons -- they have that file too).
     # All failures degrade to a JSON {"hit": false}; the asker falls through
     # to its model (the safe direction).
+    # k>1 selects the MCP tool shape: up to k pairs (same hygiene screen:
+    # safe, non-capture-lane, above the bar) + field_size. The k=1 shape is
+    # byte-compatible with the peer contract (hit/sim/situation/action/ts).
     def _membrane_ask(self) -> None:
         import urllib.parse
         srv = self.server
@@ -3232,24 +3240,137 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             sim_min = float((qs.get("sim_min") or [PEER_ASK_SIM_MIN])[0])
         except ValueError:
             sim_min = PEER_ASK_SIM_MIN
+        try:
+            k = max(1, min(8, int((qs.get("k") or ["1"])[0])))
+        except ValueError:
+            k = 1
         out = {"fid": srv.global_field.fid if getattr(srv, "global_field", None)
                else "?", "hit": False}
         if q and mem.embedder is not None:
             try:
                 vec = mem.embedder.embed([q])[0]
-                for ex, sim in mem.store.top_k(vec, k=1):
-                    sit_l = " ".join(ex.situation.split()).lower()
-                    cap_junk = sit_l.startswith(_THOUGHT_CAPTURE_PREFIXES)
-                    if sim >= sim_min and ex.safe and not cap_junk \
-                            and ex.situation and ex.action:
-                        out.update({"hit": True, "sim": round(float(sim), 4),
-                                    "situation": ex.situation[:400],
-                                    "action": ex.action[:1200],
-                                    "ts": _now_iso()})
-                    break
+                if k == 1:
+                    for ex, sim in mem.store.top_k(vec, k=1):
+                        sit_l = " ".join(ex.situation.split()).lower()
+                        cap_junk = sit_l.startswith(_THOUGHT_CAPTURE_PREFIXES)
+                        if sim >= sim_min and ex.safe and not cap_junk \
+                                and ex.situation and ex.action:
+                            out.update({"hit": True, "sim": round(float(sim), 4),
+                                        "situation": ex.situation[:400],
+                                        "action": ex.action[:1200],
+                                        "ts": _now_iso()})
+                        break
+                else:
+                    hits = []
+                    for ex, sim in mem.store.top_k(vec, k=k * 4):
+                        if sim < 0.25:
+                            break               # sorted desc; nothing closer remains
+                        sit_l = " ".join(ex.situation.split()).lower()
+                        if sim >= sim_min and ex.safe \
+                                and not sit_l.startswith(_THOUGHT_CAPTURE_PREFIXES) \
+                                and ex.situation and ex.action:
+                            hits.append({"sim": round(float(sim), 4),
+                                         "situation": ex.situation[:400],
+                                         "action": ex.action[:1200],
+                                         "outcome": getattr(ex, "outcome", "") or "pending",
+                                         "model": getattr(ex, "model", "") or ""})
+                        if len(hits) >= k:
+                            break
+                    out["field_size"] = len(mem.store)
+                    out["hits"] = hits
             except Exception:
                 pass
         self._json_out(out)
+
+    # ---- /membrane/learn + /membrane/forget: the MCP write lanes -----------
+    # The MCP tool surface (membrane/mcp_server.py) relays structured writes
+    # here. They run the EXACT executors the thought-intercept uses
+    # (_agent_learn / _agent_forget): same dedup/variety/length guards, same
+    # audit trail (origin: mcp), same agent_writes kill switch. Returns are
+    # JSON mirrors of the executors' text (the MCP layer formats for the
+    # model); failures degrade to {"written": false} / {"removed": null}.
+    def _membrane_learn(self) -> None:
+        srv = self.server
+        body = self._json_body()
+        payload = str(body.get("lesson") or "").strip()
+        if not payload:
+            self._json_err_raw(400, "lesson required"); return
+        if not getattr(srv, "agent_writes", True):
+            self._json_out({"written": False,
+                            "reason": "agent writes are off "
+                                      "(--no-agent-writes)"}); return
+        mem = srv.membrane
+        if mem.store is None or mem.embedder is None:
+            self._json_out({"written": False,
+                            "reason": "field store or embedder unresolved"}); return
+        if len(payload) > _AGENT_LEARN_MAX_CHARS:
+            self._json_out({"written": False,
+                            "reason": f"payload too long ({len(payload)} > "
+                                      f"{_AGENT_LEARN_MAX_CHARS} chars)"}); return
+        idx = mem.learn_pair(payload, payload)
+        if idx is None:
+            self._json_out({"written": False,
+                            "reason": "dedup or variety gate: nothing new"}); return
+        _watch_notify(srv, mem, idx)
+        _write_audit(mem, {"event": "agent-learn", "origin": "mcp",
+                           "ex_idx": idx, "tag": "agent-note",
+                           "field_size": len(mem.store),
+                           "payload": _clip(payload, 400)})
+        ex = mem.store.exemplars[idx]
+        self._json_out({"written": True, "ex_idx": idx,
+                        "field_size": len(mem.store),
+                        "exemplar": {"situation": ex.situation,
+                                     "action": ex.action or ""}})
+
+    def _membrane_forget(self) -> None:
+        srv = self.server
+        body = self._json_body()
+        spec = str(body.get("spec") or "").strip()
+        if not spec:
+            self._json_err_raw(400, "spec required"); return
+        mem = srv.membrane
+        if mem.store is None or mem.embedder is None:
+            self._json_out({"removed": None, "candidates": [],
+                            "reason": "field store or embedder unresolved"}); return
+        idxs = _parse_agent_forget(spec)
+        if idxs is None:
+            # wordy -> PROPOSAL ONLY (never delete from a wordy spec)
+            try:
+                vec = mem.embedder.embed([spec])[0]
+            except Exception:
+                vec = None
+            cands = []
+            if vec is not None:
+                qn = np.asarray(vec, dtype=float)
+                n = float(np.linalg.norm(qn))
+                if n > 1e-12:
+                    for ex, sim in mem.store.top_k(qn / n, k=_FORGET_LIMIT):
+                        if sim >= 0.55 and ex.safe:
+                            i = mem.store.index_of(ex)
+                            if i is not None:
+                                cands.append({"idx": i, "sim": round(float(sim), 4)})
+            self._json_out({"removed": None, "candidates": cands}); return
+        n0 = len(mem.store)
+        in_range = [i for i in idxs if 0 <= i < n0]
+        if not in_range:
+            self._json_out({"removed": 0, "field_size_before": n0,
+                            "field_size": n0, "removed_cells": [],
+                            "reason": "none of those indexes exist"}); return
+        if len(in_range) > _AGENT_FORGET_LIMIT:
+            self._json_out({"removed": None, "candidates": [],
+                            "reason": f"{len(in_range)} indexes exceed the "
+                                      f"agent cap ({_AGENT_FORGET_LIMIT})"}); return
+        shown = [{"idx": i, "situation": _clip(mem.store.exemplars[i].situation, 120)}
+                 for i in in_range]
+        removed = mem.store.forget(in_range)
+        mem.store.save(mem.field_path)
+        _write_audit(mem, {"event": "forget", "origin": "mcp",
+                           "removed": removed,
+                           "field_size_before": n0,
+                           "field_size_after": len(mem.store),
+                           "spec": _clip(spec, 200)})
+        self._json_out({"removed": removed, "field_size_before": n0,
+                        "field_size": len(mem.store), "removed_cells": shown})
 
     # ---- /membrane/delegate: model-pointed work, router-disposed ------------
     def _membrane_delegate(self) -> None:
@@ -3581,6 +3702,14 @@ def main() -> None:
                     action="store_false",
                     help="do not stream the [membrane] gate monologue into "
                          "opencode's thinking channel")
+    ap.add_argument("--no-doctrine-move", dest="doctrine_move",
+                    action="store_false",
+                    help="keep injecting the membrane doctrine into every "
+                         "request (the default ships it ONCE via the generated "
+                         "opencode config's instructions file -- a byte-stable "
+                         "system prefix every provider can cache -- and the "
+                         "proxy skips its per-turn copy when the stamp line "
+                         "is present)")
     ap.add_argument("--no-thought-intercept", dest="thought_intercept",
                     action="store_false",
                     help="do not answer the AGENT's own asks found in its "
@@ -3594,6 +3723,12 @@ def main() -> None:
                          "learn that' becomes report-only (the model proposes, "
                          "the operator's user-message turns do the writing). "
                          "Forget keeps its capped index-form lane either way")
+    ap.add_argument("--no-mcp", dest="mcp", action="store_false",
+                    help="do not wire the MCP tool surface into the generated "
+                         "opencode config (default ON: opencode gets a local "
+                         "stdio MCP server exposing membrane_query/learn/"
+                         "forget/state as structured tools; the frames keep "
+                         "working either way)")
     ap.add_argument("--global-field", default=None, metavar="PATH",
                     help="enable the global-field layer (docs/global-field.md):"
                          " a shared commons of operator-promoted memories "
@@ -3974,9 +4109,44 @@ def main() -> None:
             },
         },
     }
+    # ---- doctrine split (P0b) -------------------------------------------------
+    # The STATIC membrane doctrine ships ONCE as an instructions file (a
+    # byte-stable member of the system prefix -- every provider's prompt cache
+    # holds it for the whole session) instead of riding the per-turn RAG tail.
+    # The proxy recognizes the stamp line and skips its own per-turn copy
+    # (rag._DOCTRINE_STAMP). --no-doctrine-move reverts to per-turn injection.
+    instr_path = None
+    if getattr(args, "doctrine_move", True):
+        try:
+            ifd, instr_path = tempfile.mkstemp(prefix="membrane-doctrine-",
+                                               suffix=".md")
+            with os.fdopen(ifd, "w") as f:
+                f.write(doctrine_instructions_text())
+            cfg["instructions"] = [instr_path]
+        except Exception as e:
+            instr_path = None
+            print(f"[opencode] doctrine-move skipped ({e}); per-turn "
+                  "injection stays", file=sys.stderr)
     if model:
         cfg["model"] = f"membrane/{model}"
         cfg["small_model"] = f"membrane/{model}"
+    # ---- MCP tool surface (P1) ---------------------------------------------------
+    # The structured lane for the canonical frames: a local stdio MCP server
+    # (membrane/mcp_server.py) relays typed tool calls to THIS proxy's
+    # /membrane/* endpoints -- no prose-frame parsing, no one-turn wait, and
+    # the same proxy-side guards. --no-mcp reverts to frames-only.
+    mcp_state = "off (--no-mcp)"
+    if getattr(args, "mcp", True):
+        # prefer the venv python RUNNING this process over the ambient PATH
+        # python (an opencode child must be able to re-import membrane)
+        py = sys.executable or "python3"
+        cfg["mcp"] = {"membrane": {
+            "type": "local",
+            "command": [py, "-m", "membrane.mcp_server", "--port", str(listen)],
+            "enabled": True,
+            "timeout": 60_000,
+        }}
+        mcp_state = "on (membrane_query/learn/forget/state)"
     fd, cfg_path = tempfile.mkstemp(prefix="membrane-opencode-", suffix=".json")
     with os.fdopen(fd, "w") as f:
         json.dump(cfg, f, indent=2)
@@ -4004,6 +4174,7 @@ def main() -> None:
           f"  momentum: {'on (recall skewed toward working context)' if getattr(srv, 'momentum', False) else 'off (--momentum)'}\n"
           f"  router: {'on (' + str(len(srv.router.records)) + ' candidates' + (', prefer-local' if getattr(srv.router, 'prefer_local', False) else ', cloud-floor') + ')' if getattr(srv, 'router', None) else 'off (--disable-llm-router to keep it off)'}\n"
           f"  judge: {judge_s}\n"
+          f"  mcp tools: {mcp_state}\n"
           f"  opencode config: {cfg_path}",
           file=sys.stderr)
 
@@ -4075,7 +4246,7 @@ def main() -> None:
                 srv.cell_pool.stop()
             except Exception:
                 pass
-        for p in (cfg_path,):
+        for p in (cfg_path, instr_path):
             try:
                 os.unlink(p)
             except OSError:

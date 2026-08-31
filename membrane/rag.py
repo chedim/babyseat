@@ -50,6 +50,7 @@ Run:
 from __future__ import annotations
 
 import json
+import re
 import signal
 import sys
 import threading
@@ -137,6 +138,111 @@ def _clip(s: str, cap: int) -> str:
     return s if len(s) <= cap else s[: max(1, cap - 1)] + "..."
 
 
+# ---- recall hygiene (P0c) --------------------------------------------------
+# What the field MAY learn is broader than what recall should SURFACE. This is
+# the surfaced-side screen, applied at _memory_block time:
+#   1. MACHINERY SPANS: <system-reminder>...</system-reminder> (and friends)
+#      ride inside chat turns (opencode's mode banners) but are noise as
+#      grounding material -- stripped from the SURFACED text (the stored cell
+#      keeps its bytes; provenance lives in the audit).
+#   2. CAPTURE LANES: total-capture cells (reasoning:/plan:/call/result/tool
+#      echoes) are machinery by construction; `delegated:`/`system-reminder`
+#      led cells joined them (observed leaking into recall verbatim).
+#      `compact note:` cells are the compactor's DISTILLATE -- they surface.
+#   3. TRANSCRIPT ECHOES: a memory whose Q/A already appears in THIS request's
+#      transcript is a restated conversation, not a memory -- skipped (pure
+#      token waste, and the self-feed loop the doctrine warns about).
+
+_SYSTEM_TAG_SPAN = re.compile(
+    r"<system-reminder>.*?</system-reminder>|<system-warning>.*?</system-warning>",
+    re.DOTALL | re.IGNORECASE)
+
+# capture-lane cells never surface; compact notes always do (kept explicit:
+# _COMPACTOR_NOTE is NOT in this tuple and must stay out of it).
+_RECALL_JUNK_PREFIXES = (
+    "reasoning:", "plan:", "call ", "result ", "tool ",
+    "delegated:", "system-reminder",
+)
+
+
+def strip_machinery_text(text: str) -> str:
+    """Surface form of a stored cell: machinery spans dropped, whitespace
+    collapsed. Returns "" when nothing but machinery remained."""
+    if not text:
+        return ""
+    t = _SYSTEM_TAG_SPAN.sub(" ", text)
+    return " ".join(t.split())
+
+
+def is_capture_junk(situation: str) -> bool:
+    """True when a cell's situation is a total-capture artifact (never
+    grounding material -- learned and audited, yes; recalled, no)."""
+    q_l = " ".join((situation or "").split()).lower()
+    return q_l.startswith(_RECALL_JUNK_PREFIXES)
+
+
+_ECHO_TRANSCRIPT_MSGS = 40     # recent tail of the transcript is enough
+_ECHO_JACCARD = 0.90           # Q restates a user turn ~= echo
+
+# ---- doctrine split (P0b) --------------------------------------------------
+# The static doctrine ships ONCE via the generated opencode config's
+# `instructions` file (a byte-stable member of the system prefix -- cacheable
+# by every provider). The proxy stops injecting it per-turn when the request
+# already carries the stamp line below in a system message. Bare clients
+# (no stamp) keep the old behavior: both parts injected, nothing changes.
+_DOCTRINE_STAMP = "membrane-doctrine: v1"
+
+
+def _has_doctrine_stamp(messages) -> bool:
+    """True when a system message already carries the doctrine stamp (i.e.
+    the doctrine was delivered via the config's instructions file)."""
+    for m in messages or []:
+        if (isinstance(m, dict) and m.get("role") == "system"
+                and _DOCTRINE_STAMP in (m.get("content") or "")):
+            return True
+    return False
+
+
+def doctrine_instructions_text() -> str:
+    """The instructions-file form of the doctrine: same text plus the stamp
+    line, so _inject can recognize delivered doctrine and skip re-stamping."""
+    return _DOCTRINE_STAMP + "\n" + _RAG_SYSTEM
+
+def _transcript_index(messages) -> tuple[frozenset, set]:
+    """(user-token set, exact Q/A pairkeys) for the recent transcript tail."""
+    msgs = [m for m in (messages or []) if isinstance(m, dict)][-_ECHO_TRANSCRIPT_MSGS:]
+    tokens: set[str] = set()
+    pairs: set[tuple[str, str]] = set()
+    prev_user = ""
+    for m in msgs:
+        role = m.get("role")
+        c = m.get("content")
+        text = c if isinstance(c, str) else ""
+        if isinstance(c, list):
+            text = " ".join(b.get("text", "") for b in c
+                            if isinstance(b, dict) and b.get("type") == "text")
+        if role == "user":
+            prev_user = strip_machinery_text(text).lower()
+            tokens.update(prev_user.split())
+        elif role == "assistant" and prev_user:
+            a_norm = strip_machinery_text(text).lower()[:200]
+            pairs.add((prev_user[:200], a_norm))
+            prev_user = ""
+    return frozenset(tokens), pairs
+
+
+def echoes_transcript(q_norm: str, a_norm: str,
+                      t_tokens: frozenset, t_pairs: set) -> bool:
+    """True when this Q/A is the conversation talking about itself: the exact
+    exchange is in the transcript, or the Q token-overlaps a user turn."""
+    if t_pairs and (q_norm[:200], a_norm[:200]) in t_pairs:
+        return True
+    qt = frozenset(q_norm.split())
+    if not qt or not t_tokens:
+        return False
+    return len(qt & t_tokens) / len(qt) >= _ECHO_JACCARD
+
+
 def _inject(messages, block: str) -> list:
     """Insert the RAG system message near the END of the conversation -- just
     before the last user turn -- instead of after the leading system messages.
@@ -146,12 +252,24 @@ def _inject(messages, block: str) -> list:
     for the whole transcript. Near the end, the system + full history prefix
     stays byte-stable across turns and only the tail re-rolls (the injected
     block itself is still per-turn-variable, but it now costs only its own
-    bytes, not the transcript's)."""
+    bytes, not the transcript's).
+
+    Doctrine split (P0b): the STATIC doctrine ships once, via the generated
+    opencode config's `instructions` file (a byte-stable system prefix every
+    provider can cache), so the per-turn tail carries ONLY the variable
+    block. Clients that already carry the doctrine stamp -- the marker line
+    `_DOCTRINE_STAMP` in an existing system message -- are not re-stamped;
+    everyone else (bare clients, anthropic mode) gets both parts as before.
+    """
     msgs = list(messages) if isinstance(messages, list) else []
+    if _has_doctrine_stamp(msgs):
+        content = block
+    else:
+        content = _RAG_SYSTEM + "\n\n" + block
     i = len(msgs)
     while i > 0 and msgs[i - 1].get("role") == "user":
         i -= 1
-    msgs.insert(i, {"role": "system", "content": _RAG_SYSTEM + "\n\n" + block})
+    msgs.insert(i, {"role": "system", "content": content})
     return msgs
 
 
@@ -469,7 +587,7 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
             print(f"[rag] gate error, forwarding raw: {e}", file=sys.stderr)
             self._forward_raw(raw)
             return
-        ctx = self._memory_block(vec)
+        ctx = self._memory_block(vec, body.get("messages"))
         self.momentum_update(vec, query)
         up = dict(body)
         up["stream"] = False
@@ -516,7 +634,7 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
             up["stream"] = True
             ctx = None
             if vec is not None:
-                ctx = self._memory_block(vec)
+                ctx = self._memory_block(vec, body.get("messages"))
                 self.momentum_update(vec, query)
                 if ctx:
                     up["messages"] = _inject(body.get("messages") or [], ctx)
@@ -602,7 +720,7 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
         except Exception as e:
             print(f"[rag] momentum update skipped: {e}", file=sys.stderr)
 
-    def _memory_block(self, vec) -> str | None:
+    def _memory_block(self, vec, messages=None) -> str | None:
         """The nearest past exchanges as one system block, MMR-diversified.
 
         Plain top-k has a failure mode: near-duplicate memories of the same
@@ -614,29 +732,40 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
         per-excerpt and a total character budget; the top-1 similarity still
         has to clear --rag-sim-min.
 
-        Total-capture artifacts (reasoning:/plan:/call/result/tool echoed
-        machinery) stay OUT of the retrieval surface: they can still be
-        learned and audited, but they are not grounding material for a reply
-        -- injecting them was paying transcript tokens for noise."""
+        Recall hygiene (P0c), applied at surface time:
+        - capture-lane cells (reasoning:/plan:/call/result/tool/delegated:/
+          system-reminder artifacts) are learned and audited but never
+          grounding material -- is_capture_junk screens them;
+        - machinery spans (<system-reminder>...) are stripped from the
+          SURFACED text (the stored cell keeps its bytes);
+        - a memory whose exchange already appears in THIS request's transcript
+          is the conversation restating itself (token waste + the self-feed
+          loop) -- echoes_transcript skips it.
+        """
         srv = self.server
         mem = srv.membrane
         picked = []                    # (entry_text, unit_vec) chosen so far
         budget = int(srv.rag_ctx_chars)
         mmr_sim = float(getattr(srv, "rag_mmr_sim", 0.90))
+        t_tokens, t_pairs = _transcript_index(messages)
         search_vec, skewed = self._momentum_skew(vec)
         for ex, sim in mem.store.top_k(search_vec, k=int(srv.rag_k) * 4):
             if sim < srv.rag_sim_min:
                 break                       # sorted desc; nothing closer remains
             if not ex.safe:
                 continue
-            q_l = " ".join(ex.situation.split()).lower()
-            if q_l.startswith(("reasoning:", "plan:", "call ", "result ",
-                               "tool ")):
+            if is_capture_junk(ex.situation):
                 continue                    # capture-junk: never grounding
-            q = _clip(ex.situation, srv.rag_mem_chars)
-            a = _clip(ex.action or "", srv.rag_mem_chars)
-            if not q or not a:
-                continue
+            q_raw = strip_machinery_text(ex.situation)
+            a_raw = strip_machinery_text(ex.action or "")
+            if not q_raw or not a_raw:
+                continue                    # nothing but machinery remained
+            q_norm = q_raw.lower()
+            a_norm = a_raw.lower()
+            if echoes_transcript(q_norm, a_norm, t_tokens, t_pairs):
+                continue                    # the transcript restating itself
+            q = _clip(q_raw, srv.rag_mem_chars)
+            a = _clip(a_raw, srv.rag_mem_chars)
             v = np.asarray(ex.vec, dtype=float)
             v = v / (np.linalg.norm(v) + 1e-12)
             if any(float(v @ pv) >= mmr_sim for _, pv in picked):
@@ -689,8 +818,14 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
             if any(float(v @ lv) >= mmr_sim for lv in local_vecs + glob_vecs):
                 continue
             glob_vecs.append(v)
-            q = _clip(ex.situation, self.server.rag_mem_chars)
-            a = _clip(ex.action or "", self.server.rag_mem_chars)
+            if is_capture_junk(ex.situation):
+                continue                # commons hygiene: same screen, same rule
+            q_raw = strip_machinery_text(ex.situation)
+            a_raw = strip_machinery_text(ex.action or "")
+            if not q_raw or not a_raw:
+                continue
+            q = _clip(q_raw, self.server.rag_mem_chars)
+            a = _clip(a_raw, self.server.rag_mem_chars)
             if not q or not a:
                 continue
             entries.append(

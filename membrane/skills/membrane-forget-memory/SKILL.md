@@ -34,24 +34,25 @@ so windows can only under-remove, never over-remove anything older).
 
 ## How to forget (from YOUR OWN work -- the agent lane, index-form ONLY)
 
-From assistant prose, forgets execute ONLY in explicit index form -- end a
-reply with one canonical line (no tool call, the frame rides your normal
-prose and is executed post-hoc):
+Use the `membrane_forget` MCP tool (registered by default):
 
-    membrane: forget #12              (or #3-7, #2,9 — indexes you can SEE)
+    membrane_forget {"spec": "#12"}          (also: "#3-7", "3-7, 9")
 
 Rules of the lane:
 
 - INDEX FORM ONLY: `#12`, `12`, `3-7`, `3-7, 9` -- parsed by a strict token
   grammar, hard-capped at 12 cells per ask (the remainder is named so you
-  can re-ask in batches).
-- WORdy asks never delete from agent prose: "forget everything about X",
-  time windows, and "everything" are the operator's forms. From your side
-  they only PROPOSE -- the reply lists nearest safe cells (sim >= 0.55) and
-  you re-ask in index form.
+  can re-ask in batches). Wordy specs PROPOSE, never delete: the result
+  lists nearest safe cells (sim >= 0.55) and you re-ask in index form.
 - Why so blunt: free-text deletion from model prose wiped a hot field once
   (the 2026-08-31 overshoot); indexes you can SEE are the guard.
-- Deletes are audited `origin: agent` -- visible and demotable wholesale.
+- Deletes are audited `origin: mcp` -- visible and demotable wholesale.
+
+Tool not registered (`--no-mcp`, or the MCP server failed to start)? Do NOT
+ask the user to relay it -- use your own prose lane instead: end a reply
+with one canonical line, INDEX FORM ONLY (`membrane: forget #12` in your
+normal prose is detected and executed post-hoc; wordy forms from prose
+propose, never delete).
 
 ## Reading the answer
 
