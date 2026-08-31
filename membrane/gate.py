@@ -33,6 +33,21 @@ from .field import ExemplarStore
 from .variety import novelty, effective_rank
 
 
+def _action_overlap(a: str, b: str) -> float:
+    """Token-overlap (Jaccard) between two stored answers -- the consensus
+    signal. String equality was too brittle: two phrasings of the SAME answer
+    ("4" vs "The answer is 4.") counted as disagreement and pinned consensus
+    at/near zero on text fields, making the act/replay zone unreachable.
+    Jaccard >= ~0.7 on the token set means the same content, just re-worded."""
+    ta = {w.lower() for w in (a or "").split()}
+    tb = {w.lower() for w in (b or "").split()}
+    if not ta and not tb:
+        return 1.0
+    if not ta or not tb:
+        return 0.0
+    return len(ta & tb) / len(ta | tb)
+
+
 def decide(
     query: np.ndarray,
     store: ExemplarStore,
@@ -70,8 +85,11 @@ def decide(
     nbrs = store.top_k(qn, k=k)
     near, sim = nbrs[0]
     near_idx = store.index_of(near)              # identity lookup; the training loop uses this
+    near_safe = bool(near.safe)
     actions = [a.action for a, _ in nbrs]
-    consensus = sum(1 for a in actions if a == near.action) / len(actions)
+    consensus = (sum(1 for a in actions
+                     if _action_overlap(a, near.action) >= 0.7)
+                 / len(actions))
 
     # novelty is conditional: only trustworthy when the field is low-rank (a real
     # null space exists). On a high-rank dense field the residual is near-constant
@@ -103,8 +121,16 @@ def decide(
     common = {"sim": sim, "nov": nov, "eff_rank": er, "rank_ratio": rank_ratio,
               "sim_min": sim_min}
     if not sure:
+        # the near-match identity rides along even on escalate: the replay
+        # layer (opencode) uses it for the EXACT-DUP replay (sim >= replay_sim
+        # on a SAFE exemplar needs no consensus -- a near-identical repeat of a
+        # trusted memory is servable without the model). Tool-call-heavy turns
+        # and unsafe/demoted memories are excluded there.
         return {"verdict": "escalate", "reason": f"not sure ({signals})",
-                "ex_idx": None, **common}
+                "ex_idx": None, "near_idx": near_idx, "near_safe": near_safe,
+                **common}
     if near.safe:
-        return {"verdict": "act", "action": near.action, "ex_idx": near_idx, **common}
-    return {"verdict": "escalate-with-hint", "hint": near.action, "ex_idx": near_idx, **common}
+        return {"verdict": "act", "action": near.action, "ex_idx": near_idx,
+                "near_idx": near_idx, "near_safe": near_safe, **common}
+    return {"verdict": "escalate-with-hint", "hint": near.action, "ex_idx": near_idx,
+            "near_idx": near_idx, "near_safe": near_safe, **common}

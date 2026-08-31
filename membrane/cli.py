@@ -43,7 +43,7 @@ AGENTS_BLURB = """\
 
 This project is membrane-backed: a long-term memory field sits between the
 agent and the model. It recalls past situations per turn (RAG), learns every
-turn (Q/A exemplars with a judge/demotion pipeline), and answers four
+turn (Q/A exemplars with a judge/demotion pipeline), and answers five
 canonical frames itself (intercepts -- no model call, never learned):
 
     membrane: query the field for <topic>     read recall
@@ -52,6 +52,8 @@ canonical frames itself (intercepts -- no model call, never learned):
                                               topics, "the last hour",
                                               "this session", "everything")
     field state                               memory health/stats
+    membrane: suggest                         review scope suggestions for the
+                                              cross-project commons
 
 The agent may also emit these frames in its own prose: reads arrive next turn
 as clearly-marked `[membrane-intercept]` blocks; writes/forgets from model
@@ -60,10 +62,13 @@ prose are report-only (the field is only written by operator turns).
 Data lives in .membrane/ (field.json, audit.jsonl, logs) -- never commit it.
 Skills are project-scoped: .opencode/skills/ in THIS repo only (an opencode
 launched outside never sees them). Read those skills (membrane-query-field,
-membrane-write-memory, membrane-forget-memory, membrane-state) for the full
-contract, guards, and model-collapse hazards. Do not curl membrane's
-endpoints and paste field content into chat -- raw-pasted field content is
-learnable and feeds the field back into itself.
+membrane-write-memory, membrane-forget-memory, membrane-state,
+membrane-global-field) for the full contract, guards, and model-collapse
+hazards. Facts true BEYOND this repo (user/machine/team preferences) belong
+in the global commons: `membrane: remember globally: <fact>` (see
+membrane-global-field). Do not curl membrane's endpoints and paste field
+content into chat -- raw-pasted field content is learnable and feeds the
+field back into itself.
 """
 
 GITIGNORE_SNIPPET = """

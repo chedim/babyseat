@@ -67,3 +67,5 @@ never writes the field.
 
 - membrane-query-field: read what the field holds about a topic
 - membrane-forget-memory: delete memories from the field
+- membrane-global-field: promote a memory to the CROSS-PROJECT commons
+  ("remember globally") -- use that when the fact is true beyond this repo

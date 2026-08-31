@@ -60,6 +60,23 @@ class Exemplar:
     # the teacher at seed time; the n-gram speaks only from trusted (LLM-seeded)
     # material. Backward-compatible: old records lack the key -> trusted by default.
     self_authored: bool = False
+    # ---- the global-field layer (docs/global-field.md) ----
+    # scope: is this memory local knowledge or commons? "global" exemplars live
+    # in a curated cross-project field, operator-promoted only (slice 1).
+    scope: str = "project"
+    # owner: the field-id where this memory was BORN (provenance -- who vouches
+    # for the text); home: the field that currently MASTERs it (who to ask).
+    # Both default empty = born here, mastered here (single-field normal form).
+    owner: str = ""
+    home: str = ""
+    # consensus evidence: [(field-id, iso-ts), ...] -- the distinct fields that
+    # independently produced this note (the slice-2 promotion path).
+    votes: list = field(default_factory=list)
+    # residency evidence (slice 3): [(field-id, iso-ts), ...] -- the fields that
+    # actually USED this note (it grounded a reply / surfaced in a top-up).
+    # Capped by the writer; home drifts toward the heaviest user ("homes follow
+    # use, not birth"). Unused locally (a local field never sets it).
+    uses: list = field(default_factory=list)
 
     def recompute_safe(self, demote_threshold: int) -> None:
         """Re-derive `safe` from the evidence: net votes against must reach the threshold.

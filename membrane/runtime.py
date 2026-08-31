@@ -540,6 +540,14 @@ class Membrane:
         temp_driver: str = "free_energy",
         temp_tau: float = 1.0,
         sim_min_floor: float = 0.70,
+        # the gate's novelty veto rank cutoff. Default 0.0 = novelty permanently
+        # OFF: on real dense embeddings (mxbai) the field is high-rank, so the
+        # veto never fired validly -- but a near-dup-heavy capture field DOES dip
+        # below any positive cutoff, and there the near-constant residual
+        # (nov~30+ against novelty_max=2) vetoes the whole near-band. The null
+        # space is only an asset on genuinely low-rank fields; opt back in
+        # explicitly (e.g. --novelty-rank-ratio 0.5) when running one.
+        novelty_rank_ratio_max: float = 0.0,
         # ---- the veil: nudge everything that transits this instance ----
         # A per-veil perturbation of the incoming situation embedding: add Gaussian
         # noise of strength nudge_sigma, renormalize. Applied to EVERY message
@@ -577,6 +585,7 @@ class Membrane:
         self.sim_min = sim_min
         self.consensus_min = consensus_min
         self.k = k
+        self.novelty_rank_ratio_max = novelty_rank_ratio_max
         self.reask_sim = reask_sim
         self.reask_window_s = reask_window_s
         self.dedup_sim = dedup_sim
@@ -756,7 +765,8 @@ class Membrane:
         sim_min_eff = self._adaptive_sim_min(thermo) if self.variety_temp else self.sim_min
         verdict = decide(vec, self.store, k=self.k, sim_min=sim_min_eff,
                          consensus_min=self.consensus_min, eff_rank=thermo["eff_rank"],
-                         novelty_sim_max=self.dedup_sim)
+                         novelty_sim_max=self.dedup_sim,
+                         novelty_rank_ratio_max=self.novelty_rank_ratio_max)
         # stamp the thermodynamic state this decision was made under (for audit/TUI).
         verdict["spectrum_entropy"] = thermo["spectrum_entropy"]
         verdict["free_energy"] = thermo["free_energy"]
