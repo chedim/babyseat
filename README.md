@@ -71,6 +71,22 @@ Requires only Python ≥ 3.10 + numpy; embeddings/chat come from a running
 [Ollama](https://ollama.com). Without installing anything, one-off via uvx:
 `uvx --from "membrane @ git+ssh://git@github.com/chedim/membrane" membrane install`.
 
+**Dependencies, honestly:**
+
+- **Python ≥ 3.10** + **numpy** — the only hard pip deps (`pip install -r requirements.txt`).
+- **Ollama** (`brew install ollama` / <https://ollama.com>) — NOT auto-installed; embeddings
+  and local chat need it running on `:11434`. Optional: a **Couchbase** cluster for shared
+  team fields (the `couchbase` pip package is imported only when you actually connect,
+  and its absence falls back to the local JSON field).
+- **[opencode](https://opencode.ai)** — NOT auto-installed either; `membrane opencode`
+  launches it if found on PATH (`sh <(curl ... opencode.ai/install.sh)`), otherwise the
+  proxy runs bare and you point any OpenAI-compatible client at `http://127.0.0.1:11500/v1`
+  (`--no-launch` skips the spawn entirely). The other surfaces (TUI, viewer, review,
+  ingest, codegraph) need nothing beyond Python.
+- The **viewer** ships inside the package (three.js + both pixel fonts are vendored,
+  served same-origin at `/viewer`, opened in your browser on start; `--no-viewer --no-open`
+  to disable) — no CDN, no node, no browser install.
+
 ### First run in a project
 
 ```bash
@@ -81,7 +97,8 @@ membrane opencode
 That's the whole workflow. On first run in a directory it bootstraps that
 project:
 
-- auto-installs the five agent skills (query/learn/forget/state/global-field)
+- auto-installs the seven agent skills (query / learn / forget / state /
+  global-field / codegraph / ingest)
   into `.opencode/skills/` there (project-scoped on purpose — an opencode
   launched elsewhere never sees them; skip with `MEMBRANE_NO_AUTOINSTALL=1`),
 - creates the per-project memory data in `.membrane/` there (`field.json`,

@@ -2139,6 +2139,79 @@ def _pick_default_model(models: list, preferred: str | None) -> str | None:
     return models[0] if models else None
 
 
+def _audit_tail(path, k: int = 24):
+    """Last k ticker-worthy audit records ({verdict,sim,q}) + the MONOTONIC
+    total (the page compares totals to detect new verdicts, not list lengths).
+    Maps the three record shapes (decision / outcome / contest), same as the
+    world proxy's _audit_tail."""
+    out: list = []
+    try:
+        with open(path, "rb") as f:
+            lines = f.readlines()
+    except OSError:
+        return [], 0
+    for ln in lines:
+        ln = ln.strip()
+        if not ln:
+            continue
+        try:
+            rec = json.loads(ln)
+        except json.JSONDecodeError:
+            continue
+        ev = rec.get("event")
+        if ev == "decision":
+            tag, sim, q = rec.get("verdict"), rec.get("sim"), rec.get("query", "")
+        elif ev == "outcome":
+            oc = rec.get("outcome", "outcome")
+            tag = {"demote": "demote", "re-ask": "re-ask"}.get(oc, oc)
+            sim, q = rec.get("sim"), rec.get("query", "")
+        elif ev == "contest":
+            tag = "contest-restore" if rec.get("restore") else "contest"
+            sim, q = None, rec.get("reason") or ""
+        else:
+            continue
+        if not tag:
+            continue
+        out.append({"verdict": str(tag),
+                    "sim": (round(float(sim), 2) if isinstance(sim, (int, float)) else None),
+                    "q": str(q)[:48]})
+    return out[-k:], len(out)
+
+
+def _cloud_points(srv, exs):
+    """PCA 3D projection of the field for the dev viewer's renderCloud — the
+    same math as the world proxy's /state (one stable basis, fit once per
+    process, so the cloud grows instead of spinning)."""
+    n = len(exs)
+    if not n:
+        return []
+    V = np.array([np.asarray(e.vec, dtype=float) for e in exs])
+    mu = V.mean(0)
+    basis = getattr(srv, "_v_basis", None)
+    if basis is None and n >= 4:
+        try:
+            _, _, Vt = np.linalg.svd(V - mu, full_matrices=False)
+            basis = Vt[:3]; srv._v_basis = basis
+        except Exception:
+            basis = None
+    if basis is not None:
+        coords = (V - mu) @ basis.T
+    else:                                   # too few for PCA: first raw dims
+        k = min(3, V.shape[1]); coords = np.zeros((n, 3))
+        if k:
+            coords[:, :k] = (V - mu)[:, :k] * 3.0
+    pts = []
+    for i, e in enumerate(exs):
+        pts.append({"p": [round(float(coords[i, 0]), 4),
+                          round(float(coords[i, 1]), 4),
+                          round(float(coords[i, 2]), 4)],
+                    "safe": bool(e.safe),
+                    "reask": int(getattr(e, "reask_count", 0)),
+                    "contest": int(getattr(e, "contest_count", 0)),
+                    "tags": list(getattr(e, "tags", []))})
+    return pts
+
+
 class MembraneOpenAIHandler(RAGProxyHandler):
     """The RAG handler + the OpenAI-compatible surface: /v1/models,
     /v1/chat/completions (the RAG gate + the internal state/math intercept),
@@ -2154,6 +2227,13 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._membrane_state(); return
         if path == "/membrane/ask":
             self._membrane_ask(); return
+        if getattr(self.server, "viewer", False):
+            if path in ("/viewer", "/viewer/"):
+                self._serve_viewer(); return
+            if path in ("/three.min.js", "/PressStart2P.woff2", "/VT323.woff2"):
+                self._serve_asset(path.lstrip("/")); return
+            if path in ("/neighbors", "/neighbors/"):
+                self._neighbors(); return
         super().do_GET()
 
     def do_POST(self):
@@ -2184,6 +2264,88 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         self.send_header("Content-Length", str(len(out)))
         self.end_headers()
         self.wfile.write(out)
+
+    # ---- the dev viewer (field view; world controls hidden by body.dev) -----
+    def _serve_viewer(self):
+        import os, time
+        p = os.path.join(os.path.dirname(__file__), "viewer.html")
+        try:
+            mtime = os.path.getmtime(p)
+        except OSError:
+            self._json_err_raw(404, "viewer.html not found"); return
+        cached = getattr(self.server, "_viewer_cache", None)
+        if cached is None or cached[0] != mtime:
+            with open(p, "rb") as f:
+                html = f.read()
+            self.server._viewer_cache = (mtime, html)
+        else:
+            html = cached[1]
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store, max-age=0")
+        self.send_header("Content-Length", str(len(html)))
+        self.end_headers()
+        self.wfile.write(html)
+
+    def _serve_asset(self, name: str):
+        import os
+        p = os.path.join(os.path.dirname(__file__), name)
+        try:
+            with open(p, "rb") as f:
+                data = f.read()
+        except OSError:
+            self._json_err_raw(404, name + " not found"); return
+        ctype = ("application/javascript" if name.endswith(".js")
+                 else "font/woff2" if name.endswith(".woff2")
+                 else "application/octet-stream")
+        self.send_response(200)
+        self.send_header("Content-Type", ctype + "; charset=utf-8")
+        self.send_header("Cache-Control", "no-store, max-age=0")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    # ---- /neighbors: the field's association graph (read-only) --------------
+    def _neighbors(self):
+        from urllib.parse import urlparse, parse_qs
+        import numpy as np
+        mem = self.server.membrane
+        store = mem.store
+        qs = parse_qs(urlparse(self.path).query)
+        K, COH = 8, 15
+        query = qs.get("q", [""])[0]
+        rows: list = []
+        try:
+            if "idx" in qs:
+                i = int(qs["idx"][0])
+                if i < 0 or i >= len(store):
+                    raise ValueError("idx out of range")
+                qn = np.asarray(store.exemplars[i].vec, dtype=float)
+            else:
+                if not query.strip():
+                    self._json_out({"query": "", "anchor": None,
+                                    "neighbors": []}); return
+                vec = mem._nudge(mem.embedder.embed([query])[0])
+                qn = np.asarray(vec, dtype=float)
+            qn = qn / (np.linalg.norm(qn) + 1e-12)
+            recalled = False
+            for ex, sim in store.top_k(qn, k=K):
+                a = ex.action or ""
+                words = len(a.split())
+                is_rec = (not recalled) and words >= COH
+                if is_rec:
+                    recalled = True
+                rows.append({"idx": store.index_of(ex),
+                             "sim": round(float(sim), 3),
+                             "safe": bool(ex.safe), "words": words,
+                             "recalled": is_rec, "action": a})
+            anchor = ({"idx": int(qs["idx"][0])} if "idx" in qs
+                      else {"query": query})
+            self._json_out({"query": query, "anchor": anchor,
+                            "neighbors": rows})
+        except Exception as e:
+            self._json_out({"query": query, "anchor": None,
+                            "neighbors": [], "error": str(e)})
 
     def _json_body(self) -> dict:
         length = int(self.headers.get("Content-Length", 0) or 0)
@@ -2988,7 +3150,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         srv = self.server
         mem = srv.membrane
         exs = mem.store.exemplars
+        tail, n_verd = _audit_tail(mem.audit_path)
         out = {
+            "mode": "DEV",
             "backend": srv.backend,
             "embed_model": getattr(mem.embedder, "model", None),
             "field_size": len(exs),
@@ -3003,6 +3167,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                      "vague_filter": mem.vague_filter},
             "retrieval": {"k": srv.rag_k, "rag_sim_min": srv.rag_sim_min,
                           "ctx_chars": srv.rag_ctx_chars},
+            # dev-viewer surface: the 3D field cloud + the verdict ticker
+            "exemplars": _cloud_points(srv, exs),
+            "verdicts": tail,
+            "n_verdicts": n_verd,
             "compact": dict(srv.compactor.stats) if srv.compactor else None,
             "compact_model": srv.compact_model,
             "compact_follows_chat": srv.compact_follows_chat,
@@ -3031,6 +3199,10 @@ def main() -> None:
                     "to Ollama).")
     ap.add_argument("--listen", type=int, default=11500,
                     help="port for the membrane OpenAI-compatible proxy")
+    ap.add_argument("--no-viewer", dest="viewer", action="store_false", default=True,
+                    help="don't serve the dev field viewer at /viewer (ON by default)")
+    ap.add_argument("--no-open", dest="open_browser", action="store_false", default=True,
+                    help="don't open the dev viewer in the browser on start")
     ap.add_argument("--backend", default="http://localhost:11434",
                     help="upstream Ollama URL")
     ap.add_argument("--model", default=None, metavar="MODEL",
@@ -3274,6 +3446,7 @@ def main() -> None:
               f"(pass --listen to pin)", file=sys.stderr)
     srv = ThreadingHTTPServer(("127.0.0.1", listen), MembraneOpenAIHandler)
     srv.membrane = mem
+    srv.viewer = bool(args.viewer)   # dev field viewer at /viewer (ON default)
     mem.server_ref = srv          # the router-outcome loop reads srv.router
     srv.backend = backend
     srv.rag_k = args.k
@@ -3507,6 +3680,22 @@ def main() -> None:
 
     child = None
     try:
+        # dev viewer: served at /viewer (world controls hidden) + auto-open once
+        # the server is bound. Daemon thread; never fatal on browser failure.
+        # --no-open or MEMBRANE_NO_OPEN=1 silences the tab for headless runs.
+        if args.viewer and args.open_browser:
+            def _open_dev_viewer():
+                time.sleep(1.0)
+                if os.environ.get("MEMBRANE_NO_OPEN"):
+                    return
+                try:
+                    import webbrowser
+                    webbrowser.open(f"http://127.0.0.1:{listen}/viewer")
+                except Exception as e:
+                    print(f"[opencode] viewer: browser open skipped ({e})",
+                          file=sys.stderr)
+            threading.Thread(target=_open_dev_viewer, name="dev-viewer-open",
+                             daemon=True).start()
         if args.launch:
             opencode = shutil.which("opencode")
             if opencode is None:

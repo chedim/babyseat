@@ -30,6 +30,8 @@ membrane-proxy.log
 # local runtime state + scratch (never source)
 build/
 .membrane/
+# generated on launch from membrane/skills/ (source of truth lives in the package)
+.opencode/skills/
 .claude/
 watches.json
 itll-pave-us.html

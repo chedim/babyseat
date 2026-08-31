@@ -4,10 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>THE WORLD — a membrane</title>
-<script src="/three.min.js"></script><!-- vendored: the viewer is self-contained, never depends on a CDN (a CDN load failure left THREE undefined and halted the script before the chat wiring) -->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+<!-- vendored: the viewer is self-contained, never depends on a CDN (a CDN load failure left THREE undefined and halted the script before the chat wiring) -->
+<script src="/three.min.js"></script>
+<!-- the two pixel fonts are vendored too (SIL OFL): a fonts.googleapis.com outage used to
+     degrade the whole UI; @font-face below serves them from the same origin as three.min.js -->
+<style>
+  @font-face{font-family:"Press Start 2P";font-style:normal;font-weight:400;font-display:swap;
+    src:url("/PressStart2P.woff2") format("woff2")}
+  @font-face{font-family:"VT323";font-style:normal;font-weight:400;font-display:swap;
+    src:url("/VT323.woff2") format("woff2")}
+</style>
 <style>
   :root{
     --px:"Press Start 2P",monospace;
@@ -294,13 +300,25 @@
 
   .hint{position:fixed;top:8px;left:50%;transform:translateX(-50%);
     font-family:var(--vt);font-size:16px;color:#c6c6c6;text-shadow:1px 1px #000;z-index:20}
+
+  /* ---- DEV MODE (field viewer for the coding agent) ------------------------
+     body.dev is set once /state reports mode:"DEV" (membrane opencode). World
+     features (world clock, cast, narrative, chronicle, settings, save/load)
+     make no sense without a cast/world, so they are hidden; what remains is
+     the field: the 3D memory cloud + stats + verdict ticker + H-neighbourhood
+     + a plain chat that talks to the real /api/chat gate. */
+  body.dev .world-only{display:none !important}
+  body:not(.dev) .dev-only{display:none !important}
+  body.dev #right{flex-direction:column}
+  body.dev #c{flex:1 1 auto}
+  body.dev .hint::after{content:" · DEV FIELD VIEW";color:#6cb0e0}
 </style>
 </head>
 <body>
 <!-- the right column: the (shrunk) world map, the POV's situation, and controls -->
 <div id="right">
   <canvas id="c"></canvas>
-  <div id="situation">
+  <div id="situation" class="world-only">
     <div class="sit-head">SITUATION</div>
     <div class="sit-empty" id="sit-empty">no one is in focus yet — the world seeds a cast on its first chapter.</div>
     <div id="sit-body" style="display:none">
@@ -308,7 +326,7 @@
       <div class="sit-body" id="sit-text"></div>
     </div>
   </div>
-  <div id="ctrl">
+  <div id="ctrl" class="world-only">
     <div class="ctrl-row">
       <button id="pp" class="mc-btn sm" title="run / stop the world's own clock">&#x25B6;</button>
       <button id="pp-step" class="mc-btn sm" title="advance the world by one step (only while stopped)">&#x23ED; STEP</button>
@@ -330,7 +348,7 @@
 </div>
 
 <!-- the world map is the cosmos (right); the cast's named pins overlay it -->
-<div id="cast-marks"></div>
+<div id="cast-marks" class="world-only"></div>
 
 <div class="hint">drag the map to orbit · scroll to zoom · esc menu · H neighbours</div>
 
@@ -338,13 +356,13 @@
 <div id="chat">
   <div class="mc-info">
     <span class="info-name">THE WORLD</span>
-    <select id="pov-pick" title="who you are in this world — the protagonist the chronicle follows (the world = no POV)"></select>
-    <span class="info-date" id="wdate"><span class="ph">&#x1F311;</span>Day 1 · 00:00 · cycle 0</span>
+    <select id="pov-pick" class="world-only" title="who you are in this world — the protagonist the chronicle follows (the world = no POV)"></select>
+    <span class="info-date world-only" id="wdate"><span class="ph">&#x1F311;</span>Day 1 · 00:00 · cycle 0</span>
     <span class="info-lvl">Lv <b id="cl">0</b></span>
     <span class="info-status" id="wait">waiting for the proxy…</span>
   </div>
   <div class="msgs" id="msgs"></div>
-  <div class="hud-bottom">
+  <div class="hud-bottom world-only">
     <div class="xplvl" id="xplvl">0</div>
     <div class="hearts" id="hearts">
       <span class="heart">&#x2665;</span><span class="heart">&#x2665;</span><span class="heart">&#x2665;</span>
@@ -380,10 +398,10 @@
 <!-- THE MENU — all world controls -->
 <div id="menu">
   <div class="menu-panel">
-    <div class="menu-title">WORLD OPTIONS</div>
+    <div class="menu-title">WORLD OPTIONS <span id="menu-mode"></span></div>
 
-    <div class="menu-section">SETTINGS — ollama server · token · story model</div>
-    <div class="set-row">
+    <div class="menu-section world-only">SETTINGS — ollama server · token · story model</div>
+    <div class="set-row world-only">
       <span class="set-lbl">OLLAMA SERVER</span>
       <input id="set-backend" class="set-input" type="text" placeholder="http://localhost:11434"
              autocomplete="off" spellcheck="false"
@@ -417,66 +435,66 @@
       <div class="stat">free_energy<b id="fe">0.00</b></div>
       <div class="stat">ceiling<b id="ce">5.0%</b></div>
       <div class="stat">entropy<b id="tmp">0.70</b></div>
-      <div class="stat">world level<b id="drown">0%</b></div>
-      <div class="stat">horizon<b id="theo">1024</b></div>
+      <div class="stat world-only">world level<b id="drown">0%</b></div>
+      <div class="stat world-only">horizon<b id="theo">1024</b></div>
       <div class="stat">variety<b id="ec">0</b>/<b id="ecap">51</b></div>
       <div class="stat">exemplars<b id="n">0</b></div>
       <div class="stat">safe<b id="ns">0</b></div>
       <div class="stat">demoted<b id="nu">0</b></div>
-      <div class="stat">cpu (digest)<b id="ccpu">0%</b></div>
-      <div class="stat">swept/cycle<b id="cswept">0</b></div>
-      <div class="stat">cycles<b id="ccycles">0</b></div>
-      <div class="stat">cache<b id="ccache">0</b></div>
-      <div class="stat">mean novelty<b id="cnov">0.0</b></div>
+      <div class="stat world-only">cpu (digest)<b id="ccpu">0%</b></div>
+      <div class="stat world-only">swept/cycle<b id="cswept">0</b></div>
+      <div class="stat world-only">cycles<b id="ccycles">0</b></div>
+      <div class="stat world-only">cache<b id="ccache">0</b></div>
+      <div class="stat world-only">mean novelty<b id="cnov">0.0</b></div>
     </div>
 
-    <div class="menu-section">CEILING — never-cross line on variety</div>
-    <div class="mc-slide-wrap">
+    <div class="menu-section world-only">CEILING — never-cross line on variety</div>
+    <div class="mc-slide-wrap world-only">
       <input id="ceiling" type="range" min="0" max="0.25" step="0.001" value="0.05" class="mc-slider"
              title="the never-cross line on the world's VARIETY (cells_rank × horizon). Raise it above the world's current level (red tick) to let new stories grow it; at/under it the world is full. Forward cap — absorbed stories are never deleted. Capped at 25%.">
       <span id="drowntick" class="drowntick" title="the world's current level — raise the ceiling above this to grow"></span>
     </div>
     <div class="slide-val" id="ceilv">5.0% · cap 51</div>
 
-    <div class="menu-section">FEED RATE — feeds per cycle (their time) · the entropy dial</div>
-    <div class="mc-slide-wrap">
+    <div class="menu-section world-only">FEED RATE — feeds per cycle (their time) · the entropy dial</div>
+    <div class="mc-slide-wrap world-only">
       <input id="entropy" type="range" min="0" max="32" step="0.25" value="1" class="mc-slider"
              title="how many cached chronicle scenes the world absorbs each consolidation cycle (continuous). 0 = digest only, no feeding; higher = the world feeds itself faster. The LLM writes the chronicle in big chapters (cached locally), so each feed is a cheap embed, not a model call — one LLM call feeds the world ~8 times.">
     </div>
     <div class="slide-val" id="entropyv">1.0/cycle</div>
 
-    <div class="menu-section">CPU TARGET — consolidation speed (digestion)</div>
-    <div class="mc-slide-wrap">
+    <div class="menu-section world-only">CPU TARGET — consolidation speed (digestion)</div>
+    <div class="mc-slide-wrap world-only">
       <input id="cputarget" type="range" min="0" max="100" step="5" value="20" class="mc-slider"
              title="target CPU fraction for the digest phase. The closed loop ramps the cell-sweep budget up/down so the world spends this fraction of each cycle re-examining its memories (real SVD work). 0 = no digestion; 100 = one core fully digesting.">
     </div>
     <div class="slide-val" id="cputargetv">20%</div>
 
-    <div class="menu-section">THE WORLD CLOCK</div>
-    <div class="btn-row">
+    <div class="menu-section world-only">THE WORLD CLOCK</div>
+    <div class="btn-row world-only">
       <button id="step" class="mc-btn" title="advance the world by one step (one feed + one digest) — only while stopped">&#x23ED; STEP</button>
       <button id="play" class="mc-btn" title="run the world's own clock — it feeds itself (feed rate/cycle) and digests (CPU target) on its own time">&#x25B6 RUN</button>
       <button id="pause" class="mc-btn" disabled title="stop the world's own clock (the world waits for STEP or your chat)">&#x23F8; STOP</button>
     </div>
 
-    <div class="menu-section">NARRATIVE MODE</div>
-    <button id="mode-btn" class="mc-btn on" title="story = one continuing narrative across feeds (history passed to the LLM); variety = standalone random vignettes (grows variety fastest)">STORY MODE: ON</button>
+    <div class="menu-section world-only">NARRATIVE MODE</div>
+    <button id="mode-btn" class="mc-btn on world-only" title="story = one continuing narrative across feeds (history passed to the LLM); variety = standalone random vignettes (grows variety fastest)">STORY MODE: ON</button>
 
-    <div class="menu-section">TIME SKIP (live offscreen, no model)</div>
-    <div class="skip-row">
+    <div class="menu-section world-only">TIME SKIP (live offscreen, no model)</div>
+    <div class="skip-row world-only">
       <input id="skipn" type="number" value="25" min="1" max="500" class="mc-num" title="how many offscreen events">
       <button id="skip" class="mc-btn" title="let the world live offscreen (one palette call, then no-model absorptions)">&#x23ED; SKIP</button>
     </div>
 
-    <div class="menu-section">WORLD — save · load · new (the whole field + cast + audit)</div>
-    <div class="world-row">
+    <div class="menu-section world-only">WORLD — save · load · new (the whole field + cast + audit)</div>
+    <div class="world-row world-only">
       <button id="world-save" class="mc-btn" title="save the current world (field + cast + audit) to a named slot under worlds/">&#x1F4BE; SAVE WORLD</button>
       <button id="world-new" class="mc-btn" title="empty the field + cast + audit — a blank slate (the protagonist is gone; re-seed on next launch)">&#x2795; NEW WORLD</button>
     </div>
-    <div id="world-list" class="world-list"></div>
+    <div id="world-list" class="world-list world-only"></div>
 
-    <div class="menu-section">CAST — who is in the world (click a name to find them on the map)</div>
-    <div id="cast-roster" class="roster"><div class="roster-empty">no cast yet — the world seeds one on its first chapter</div></div>
+    <div class="menu-section world-only">CAST — who is in the world (click a name to find them on the map)</div>
+    <div id="cast-roster" class="roster world-only"><div class="roster-empty">no cast yet — the world seeds one on its first chapter</div></div>
 
     <div class="menu-section">BESTIARY</div>
     <div class="bestiary">
@@ -503,6 +521,10 @@
 <div id="floats"></div>
 
 <script>
+// DEV MODE: /state reports mode:"DEV" when the proxy is membrane opencode (the
+// coding-agent surface). body.dev hides world-only UI (CSS); the JS guards below
+// skip cast/chronicle/world-clock logic and send() talks to the real /api/chat.
+let devMode=false;
 const VC={absorb:"#5fd47a",escalate:"#6cb0e0","escalate-with-hint":"#6cb0e0",
           demote:"#e05a4a","act→fwd":"#6cb0e0",contest:"#e6c34a",
           "contest-restore":"#e6c34a","re-ask":"#e05a4a","teed-pair":"#e6c34a",
@@ -639,6 +661,13 @@ const heartsEl=document.getElementById("hearts");
 async function poll(){
   try{
     const r=await fetch("/state");const j=await r.json();
+    // ---- DEV MODE latching: the coding-agent surface (membrane opencode) ----
+    if(j.mode==="DEV"&&!devMode){
+      devMode=true;document.body.classList.add("dev");
+      const mm=document.getElementById("menu-mode");if(mm)mm.textContent="· DEV FIELD VIEW";
+      document.getElementById("wait").textContent="DEV field view · polling /membrane/state";
+    }
+    if(devMode){pollDev(j);return;}
     const waitEl=document.getElementById("wait");
     waitEl.textContent="live · polling the field";waitEl.style.color="var(--green-hi)";
     renderCloud(j.exemplars||[]);
@@ -994,6 +1023,54 @@ function renderSituation(con){
 }
 setInterval(poll,1000);
 
+// ---- DEV MODE render/chat (the coding-agent field view) ----------------------
+// No cast, no world clock, no chronicle: the field IS the world here. Reuses
+// the 3D cloud + verdict ticker + H-neighbourhood; the chat is plain Q/A through
+// the real /api/chat gate (which also learns the exchange — visible as new dots).
+function pollDev(j){
+  const exs=j.exemplars||[]; renderCloud(exs);
+  const set=(id,v)=>{const e=document.getElementById(id);if(e)e.textContent=v;};
+  const th=j.thermo||{};
+  const fe=th.free_energy||0;
+  set("fe",Number(fe).toFixed(2));
+  set("ce","—");                      // no variety ceiling on the dev surface
+  set("tmp",(th.spectrum_entropy!=null?th.spectrum_entropy:0).toFixed(2)+" nats");
+  set("ec",th.eff_rank!=null?th.eff_rank.toFixed(1):"0");
+  set("ecap",th.eff_rank!=null?"/"+j.field_size:"—");
+  set("n",j.field_size);set("ns",j.safe);set("nu",j.field_size-j.safe);
+  const vs=j.verdicts||[], nv=j.n_verdicts||vs.length;
+  if(nv>seenVerdicts){
+    seenVerdicts=nv;
+    const list=document.getElementById("ticklist");list.innerHTML="";
+    vs.slice().reverse().forEach(v=>{
+      const d=document.createElement("div");d.className="vrow";
+      const tag=v.verdict, col=VC[tag]||"#8a958e";
+      d.innerHTML=`<span class="tag" style="color:${col}">${tag}</span>`+
+        `<span class="sim">${v.sim==null?"":v.sim.toFixed(2)}</span>`+
+        `<span class="q">${escapeHtml(v.q||"")}</span>`;
+      list.appendChild(d);
+    });
+  }
+  const waitEl=document.getElementById("wait");
+  if(waitEl){
+    waitEl.textContent="DEV field view · "+j.field_size+" exemplars · "+
+      (j.review_pending?(""+j.review_pending+" pending review"):"gate live");
+  }
+}
+async function sendDev(text){
+  if(!text.trim())return;
+  addMsg("u",text);
+  const think=addMsg("sys","thinking…");
+  try{
+    const r=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({stream:false,messages:[{role:"user",content:text}]})});
+    const j=await r.json();
+    think.remove();
+    addMsg("a",(j&&j.message&&j.message.content)||j&&j.error||"(the model is silent)");
+    setTimeout(poll,150);
+  }catch(e){think.textContent="(could not reach /api/chat — is the backend up?)";}
+}
+
 // ---- chat --------------------------------------------------------------------
 // The world-viewer's chat path is /adjust_narrative: the player's words ADJUST the
 // world (walk the POV's region, or mix into the whole world) and the server returns
@@ -1184,6 +1261,7 @@ function addPreview(text){
 }
 function clearPreview(){if(previewNode){previewNode.remove();previewNode=null;}}
 async function send(text){
+  if(devMode){return sendDev(text);}
   if(!text.trim())return;
   addMsg("u",text);clearPreview();cin.value="";
   const think=addMsg("sys","the world is listening…");
@@ -1222,7 +1300,8 @@ async function send(text){
   }catch(e){think.textContent="(could not reach /adjust_narrative — is the proxy up?)";}
 }
 document.getElementById("send").onclick=()=>send(cin.value);
-cin.addEventListener("keydown",e=>{if(e.key=="Enter"&&!e.shiftKey){e.preventDefault(); cin.value.trim()?send(cin.value):stepWorld();}});
+cin.addEventListener("keydown",e=>{if(e.key=="Enter"&&!e.shiftKey){e.preventDefault();
+  if(cin.value.trim())send(cin.value); else if(!devMode)stepWorld();}});
 // ---- live preview: as the player types, ask the world for a read-only SITUATION
 // (no mutation) with the typed text folded in as a "new development". Debounced
 // 600ms (situation renders are heavier than a one-beat /render, and they share the

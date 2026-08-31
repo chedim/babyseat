@@ -37,6 +37,7 @@ import re
 import signal
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -1316,8 +1317,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if getattr(self.server, "viewer", False):
             if self.path in ("/viewer", "/viewer/"):
                 self._serve_viewer(); return
-            if self.path.split("?")[0] in ("/three.min.js",):
-                self._serve_asset("three.min.js", "application/javascript"); return
+            if self.path.split("?")[0] in ("/three.min.js", "/PressStart2P.woff2", "/VT323.woff2"):
+                self._serve_asset(self.path.split("?")[0].lstrip("/"), "application/octet-stream"); return
             if self.path in ("/state", "/state/"):
                 self._state(); return
             if self.path in ("/settings", "/settings/"):
@@ -3216,10 +3217,15 @@ def main() -> None:
     # chats through the real /api/chat, so you talk to the live cell and watch its
     # field respond in 3D. Local-first (the proxy is 127.0.0.1 only); no key, no
     # new remote calls from the proxy (the browser loads Three.js from a CDN).
-    ap.add_argument("--viewer", action="store_true",
+    ap.add_argument("--viewer", dest="viewer", action="store_true", default=True,
                     help="serve the 3D live viewer at /viewer and a field snapshot at /state "
-                         "(off by default). Open http://127.0.0.1:<port>/viewer; the page polls "
-                         "/state and chats through the real /api/chat gate.")
+                         "(ON by default; the page opens in your browser on start). "
+                         "http://127.0.0.1:<port>/viewer; the page polls /state and chats "
+                         "through the real /api/chat gate.")
+    ap.add_argument("--no-viewer", dest="viewer", action="store_false",
+                    help="don't serve the viewer (headless / scripted runs)")
+    ap.add_argument("--no-open", dest="open_browser", action="store_false", default=True,
+                    help="don't open the viewer in the browser on start")
     ap.add_argument("--no-viewer-log", dest="viewer_log", action="store_false", default=True,
                     help="opt-OUT of the [viewer] action log: by default every viewer-driven "
                          "action (RUN/STOP/STEP/chat/POV/dials/settings/world save-load) is logged "
@@ -3430,6 +3436,20 @@ def main() -> None:
 
     srv = ThreadingHTTPServer(("127.0.0.1", args.listen), ProxyHandler)
     srv.membrane = membrane
+    # open the viewer in the browser shortly after bind (default ON; --no-open).
+    # Deferred + daemon: bind is confirmed before we fork the tab, and a browser
+    # failure can never take the proxy down.
+    if args.viewer and args.open_browser:
+        def _open_when_bound():
+            time.sleep(1.0)
+            try:
+                import webbrowser
+                webbrowser.open(f"http://127.0.0.1:{args.listen}/viewer")
+            except Exception as e:
+                print(f"[membrane] viewer: browser open skipped ({e})",
+                      file=sys.stderr)
+        threading.Thread(target=_open_when_bound, name="browser-open",
+                         daemon=True).start()
     # the cast-mutating half of gate_turn (/api/chat) and Membrane.adjust both
     # acquire this lock so neither races the consolidator's _run_feeds (which
     # holds it too). Same object as srv.feed_lock, set below. RLock: the call
