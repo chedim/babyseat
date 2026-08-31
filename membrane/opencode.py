@@ -2740,7 +2740,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 and str(verdict.get("verdict", "")).startswith("escalate")):
             try:
                 for peer in srv.peers.livelist()[:4]:
-                    phit = Peers.ask(peer, query, timeout=5.0)
+                    phit = srv.peers.ask(peer, query, timeout=5.0)
                     if phit:
                         verdict["peer_hit"] = phit
                         pblock = (f"[membrane-intercept] a sibling membrane's "
