@@ -483,7 +483,12 @@ class ExemplarStore:
             PasswordAuthenticator(user, pw)))
         self._cb_cluster.wait_until_ready(timedelta(seconds=10))
         # the bucket must exist; the SDK can't create buckets -> management
-        # REST API on :8091 with the same credentials
+        # REST API on :8091 with the same credentials. When creation is
+        # refused (cluster RAM quota fully allocated by other buckets, e.g.
+        # cortex-core/cortex-ephemeral), REUSE an existing bucket: the
+        # membrane scope + exemplars collection namespace everything, so
+        # sharing a bucket is collision-free by design. Preference order:
+        # an existing cortex bucket (cortex-core first), else the first.
         mgr = self._cb_cluster.buckets()
         try:
             mgr.get_bucket(bucket)
@@ -495,10 +500,37 @@ class ExemplarStore:
                 f"http://{host}:8091/pools/default/buckets", method="POST")
             req.add_header("Authorization", "Basic " + base64.b64encode(
                 f"{user}:{pw}".encode()).decode())
-            urllib.request.urlopen(req, data=json.dumps({
-                "name": bucket, "ramQuotaMB": 256,
-                "bucketType": "couchbase"}).encode(), timeout=10)
-            mgr.get_bucket(bucket)  # raises if we truly could not create it
+            req.add_header("Content-Type",
+                           "application/x-www-form-urlencoded")
+            from urllib.parse import urlencode
+            # try a sane quota, then the minimum: a cluster whose RAM quota
+            # is already fully allocated (other buckets) rejects big asks.
+            created = False
+            last_err: Exception | None = None
+            for mb in (256, 128, 100):
+                try:
+                    urllib.request.urlopen(req, data=urlencode({
+                        "name": bucket, "ramQuotaMB": mb,
+                        "bucketType": "couchbase"}).encode(), timeout=10)
+                    created = True
+                    break
+                except Exception as e:
+                    last_err = e
+            if not created:
+                reuse = self._existing_bucket(host, user, pw)
+                if not reuse:
+                    raise RuntimeError(
+                        f"bucket '{bucket}' missing and cannot be created "
+                        f"({last_err}); no existing bucket to reuse either. "
+                        f"Free cluster RAM quota in the Couchbase UI, or set "
+                        f"COUCHBASE_BUCKET to an existing bucket.") from last_err
+                print(f"[membrane] bucket '{bucket}' not creatable "
+                      f"({last_err}); sharing existing bucket '{reuse}' "
+                      f"(the membrane scope/collection namespaces it "
+                      f"-- collision-free)", file=__import__("sys").stderr)
+                bucket = reuse
+            self._cb_bucket = bucket
+            mgr.get_bucket(bucket)  # proves the bucket we will use exists
         colls = self._cb_cluster.bucket(bucket).collections()
         try:
             colls.create_scope(_CB_SCOPE)
@@ -543,8 +575,13 @@ class ExemplarStore:
         qr = st._cb_cluster.query(
             "SELECT meta().id AS id, t.* "
             f"FROM `{st._cb_bucket}`.`{_CB_SCOPE}`.`{_CB_COLL}` t "
-            "WHERE t.origin = $my OR t.scope = 'global'",
-            QueryOptions(timeout=timedelta(seconds=30), named_params={"my": my}))
+            "WHERE (t.`origin` = $my OR t.`scope` = 'global') "
+            "AND meta().id NOT LIKE 'sit:%'",
+            # the arbitration index docs (sit:<hash> -> {origin, ex_key})
+            # carry an origin but no exemplar fields -- bookkeeping, not
+            # memories; the key-prefix filter excludes them.
+            QueryOptions(timeout=timedelta(seconds=30),
+                         named_parameters={"my": my}))
         keys = []
         for row in qr:
             rec = {k: v for k, v in row.items() if k != "id"
@@ -576,12 +613,12 @@ class ExemplarStore:
             qr = self._cb_cluster.query(
                 "SELECT t.* "
                 f"FROM `{self._cb_bucket}`.`{_CB_SCOPE}`.`{_CB_COLL}` t "
-                "WHERE t.origin IS NOT MISSING AND t.origin != '' "
-                "AND t.origin != $my "
-                "AND (t.scope IS MISSING OR t.scope != 'global') "
+                "WHERE t.`origin` IS NOT MISSING AND t.`origin` != '' "
+                "AND t.`origin` != $my "
+                "AND (t.`scope` IS MISSING OR t.`scope` != 'global') "
                 "LIMIT $lim",
                 QueryOptions(timeout=timedelta(seconds=30),
-                             named_params={"my": my, "lim": limit}))
+                             named_parameters={"my": my, "lim": limit}))
             docs = list(qr)
         except Exception as e:
             print(f"[membrane] veil poke skipped ({e})",
@@ -658,6 +695,29 @@ class ExemplarStore:
         """The tie-break mass: votes + uses + re-ask/contest traffic."""
         return (len(ex.votes or []) + len(ex.uses or [])
                 + (ex.reask_count or 0) + (ex.contest_count or 0))
+
+    @staticmethod
+    def _existing_bucket(host: str, user: str, pw: str) -> str | None:
+        """An existing bucket to share when 'membrane' can't be created:
+        an existing cortex bucket first (cortex-core -- the sibling project's
+        home), else alphabetical-first. None when the cluster has none."""
+        import base64
+        import urllib.request
+        try:
+            req = urllib.request.Request(
+                f"http://{host}:8091/pools/default/buckets")
+            req.add_header("Authorization", "Basic " + base64.b64encode(
+                f"{user}:{pw}".encode()).decode())
+            with urllib.request.urlopen(req, timeout=5) as r:
+                names = [b.get("name", "") for b in json.loads(r.read())]
+        except Exception:
+            return None
+        names = [n for n in names if n]
+        for pref in ("cortex-core", "cortex"):
+            for n in names:
+                if pref in n.lower():
+                    return n
+        return names[0] if names else None
 
     def _cb_doc(self, ex: Exemplar) -> dict:
         """The wire record for an exemplar (asdict + provenance bookkeeping)."""
@@ -830,14 +890,49 @@ class ExemplarStore:
         self.append(ex)
         return True
 
+    @staticmethod
+    def _probe_local_couchbase() -> bool:
+        """Cheap one-shot probe: does a local Couchbase answer at the default
+        (or env-provided) endpoint with default (or env-provided) creds?
+
+        Plain HTTP GET /pools with Basic auth -- no SDK import, ~1s cap.
+        True only when the server responds 200; auth failures, DNS failures,
+        timeouts, and every other refusal are all 'no' (the JSON field, as
+        always, the safe fallback). Env vars override defaults, matching
+        load_couchbase's convention."""
+        import base64
+        import urllib.request
+        conn = os.environ.get("COUCHBASE_CONN_STRING", "couchbase://localhost")
+        user = os.environ.get("COUCHBASE_USER", "Administrator")
+        pw = os.environ.get("COUCHBASE_PASSWORD", "password")
+        host = conn.replace("couchbase://", "").replace("http://", "") \
+                   .split("/")[0].split(":")[0]
+        try:
+            req = urllib.request.Request(f"http://{host}:8091/pools")
+            req.add_header("Authorization", "Basic " + base64.b64encode(
+                f"{user}:{pw}".encode()).decode())
+            with urllib.request.urlopen(req, timeout=2.0) as r:
+                return r.status == 200
+        except Exception:
+            return False
+
     @classmethod
     def load(cls, path: str | Path) -> "ExemplarStore":
-        """Load the field; honors MEMBRANE_STORE=couchbase to hydrate from
-        Couchbase instead of the JSON file. Couchbase is OPTIONAL by design:
-        missing SDK or unreachable server -> a how-to-fix notice, then a
-        transparent fallback to the JSON field -- degradation, not failure
-        (membrane keeps running autonomously either way)."""
-        if os.environ.get("MEMBRANE_STORE", "").lower() in ("couchbase", "cb"):
+        """Load the field; hydrates from Couchbase when either:
+
+        1. MEMBRANE_STORE=couchbase is set (explicit opt-in, as before), or
+        2. a LOCAL Couchbase answers at the default conn string with the
+           default (or env-provided) credentials -- auto-detection, so a
+           machine with a running cluster shares by default and a plain
+           laptop falls back to the JSON file silently.
+
+        Couchbase is OPTIONAL by design: missing SDK or unreachable server
+        -> a how-to-fix notice, then a transparent fallback to the JSON
+        field -- degradation, not failure (membrane keeps running
+        autonomously either way). Set MEMBRANE_STORE=json to disable
+        detection and force the file."""
+        want_cb = os.environ.get("MEMBRANE_STORE", "").strip().lower()
+        if want_cb in ("couchbase", "cb"):
             try:
                 return cls.load_couchbase(path)
             except ImportError as e:
@@ -856,6 +951,19 @@ class ExemplarStore:
                       f"{path} -- membrane keeps running autonomously and will "
                       f"retry Couchbase at next boot.",
                       file=__import__("sys").stderr)
+        elif want_cb not in ("json", "file", "none", "0", "false"):
+            # AUTO-DETECT: probe the default local cluster once, cheaply
+            # (plain HTTP /pools, no SDK import on the hot path). Responds
+            # with default/admin credentials or env-provided ones -> the
+            # shared substrate is ON by default; silent/refused/unreachable
+            # -> the JSON field as before.
+            if cls._probe_local_couchbase():
+                try:
+                    return cls.load_couchbase(path)
+                except Exception as e:
+                    print(f"[membrane] local Couchbase detected but "
+                        f"unusable ({e}); JSON field {path} it is.",
+                        file=__import__("sys").stderr)
         store = cls()
         store.origin = _origin_tag(path)
         p = Path(path)

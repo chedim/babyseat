@@ -46,12 +46,33 @@ import threading
 import time
 import urllib.request
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 
 import numpy as np
 
 from .embed import OllamaEmbedder
 from .global_field import PEER_ASK_SIM_MIN
 from .rag import Compactor, RAGProxyHandler, _clip, _inject
+
+CLOUD_DEFAULT_PRICE = 3.0   # an unknown cloud model's relative money/turn
+
+
+def _PRICE_TABLE_BY_NAME():
+    """(name, usd) pairs for the judge ladder: the router's discovered
+    candidates priced via the table (unknown -> default), locals priced 0."""
+    router = globals().get("_BOOT_ROUTER")
+    out = []
+    if router is not None:
+        from .router import PRICE_TABLE
+        for rec in router.records.values():
+            low = rec.name.lower()
+            usd = CLOUD_DEFAULT_PRICE if rec.kind == "cloud" else 0.0
+            for frag, p in PRICE_TABLE:
+                if frag in low:
+                    usd = p
+                    break
+            out.append((rec.name, usd))
+    return out
 from .runtime import Membrane, OllamaChatResponder, OllamaJudge, StubJudge
 from .variety import thermo_state
 
@@ -146,6 +167,9 @@ def _state_report(srv) -> str:
                      f"hot field stays small, raw turns stay queryable")
     else:
         lines.append("- cold tier: off (--archive)")
+    router = getattr(srv, "router", None)
+    if router is not None:
+        lines.append(router.summary())
     if getattr(srv, "momentum", False):
         lines.append(f"- momentum: on (alpha={srv.momentum_alpha}, "
                      f"decay={srv.momentum_decay})")
@@ -612,8 +636,9 @@ _REVIEW_MATCHERS = (
 def _review_request_block(srv) -> str | None:
     """The pending-review notice for the chat context, or None when the queue
     is empty. Capped: at most 3 cases so the notice never crowds out real
-    memories; each case gets enough detail to actually rule on (Q, A, the
-    re-ask that triggered it, why the judge declined, and the signal stats)."""
+    memories. Each case is presented as a COMPLETE ruling package: what the
+    question actually is, the options, and what each option CONSEQUES -- so
+    the user can rule from the question window alone, without follow-ups."""
     try:
         pending = srv.membrane.review_pending()
     except Exception:
@@ -621,26 +646,43 @@ def _review_request_block(srv) -> str | None:
     if not pending:
         return None
     lines = ["PENDING HUMAN REVIEWS (membrane's judge declined to rule; the "
-             "human is the final authority). Full context, so the user can "
-             "rule without asking for more:"]
+             "human is the final authority). Each case: the question, the "
+             "options, and the consequences of each option -- relay ALL "
+             "three when you ask."]
     for rec in pending[:3]:
+        slot = rec["slot"]
         lines.append(
-            f"- review slot {rec['slot']} (exemplar #{rec.get('ex_idx')}):\n"
-            f"    Q: {_clip(rec.get('situation', ''), 200)}\n"
-            f"    A: {_clip(rec.get('action', ''), 200)}\n"
-            f"    user re-asked: {_clip(rec.get('reask_query', ''), 120)}\n"
-            f"    judge declined because: {_clip(rec.get('judge_reason', ''), 160)}\n"
-            f"    signal: {rec.get('signal')} (sim {rec.get('sim')}, "
+            f"- review slot {slot} (exemplar #{rec.get('ex_idx')}):\n"
+            f"    THE QUESTION: a memory was demoted because the user "
+            f"re-asked right after it was used (signal: "
+            f"{rec.get('signal')}, sim {rec.get('sim')}, "
             f"reasks {rec.get('reask_count', 0)}, "
-            f"contests {rec.get('contest_count', 0)})")
+            f"contests {rec.get('contest_count', 0)}); the judge declined "
+            f"to rule because: {_clip(rec.get('judge_reason', ''), 160)}. "
+            f"Is this memory worth keeping?\n"
+            f"    the demoted memory:\n"
+            f"      Q: {_clip(rec.get('situation', ''), 200)}\n"
+            f"      A: {_clip(rec.get('action', ''), 200)}\n"
+            f"      user re-asked: {_clip(rec.get('reask_query', ''), 120)}\n"
+            f"    THE OPTIONS and CONSEQUENCES:\n"
+            f"      Keep this memory -- restores it to safe; the field "
+            f"recalls it again, the re-ask is treated as a misunderstanding "
+            f"(wrong: a bad memory stays servable).\n"
+            f"      Drop this memory -- the demotion stands permanently; "
+            f"similar asks escalate to the model fresh instead (wrong: a "
+            f"good memory is lost and its question re-paid each time).\n"
+            f"      Let's discuss -- case stays open; you explain the "
+            f"trade-off and the user decides later.")
     lines.append(
         "Ask the user to rule on these NOW via your question tool (one "
-        "question per pending case; use its slot number verbatim). Exact "
-        "choices: `Keep this memory` / `Drop this memory` / `Let's discuss`. "
-        "When the user answers, send the ruling as your NEXT chat turn "
-        "(no tools) phrased exactly `membrane: keep #<slot>`, "
-        "`membrane: drop #<slot>`, or `membrane: discuss review #<slot>`. "
-        "Do not restate the case text back into chat; just relay the ruling.")
+        "question per pending case; use its slot number verbatim). The "
+        "question must state WHAT is being judged, and each option's "
+        "description must state its consequence. Exact choices: `Keep this "
+        "memory` / `Drop this memory` / `Let's discuss`. When the user "
+        "answers, send the ruling as your NEXT chat turn (no tools) phrased "
+        "exactly `membrane: keep #<slot>`, `membrane: drop #<slot>`, or "
+        "`membrane: discuss review #<slot>`. Do not restate the case text "
+        "back into chat; just relay the ruling.")
     return "\n".join(lines)
 
 
@@ -1974,6 +2016,31 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             except Exception as e:
                 print(f"[opencode] peer-ask error (ignored): {e}",
                       file=sys.stderr)
+        # ---- the orchestration router: model-vs-model on escalations ----
+        # Score proposes (fit_hat - delay - price); cost-floor disposes
+        # (local first, cheap cloud next, expensive cloud when really stuck).
+        # Failure degrades to the plain backend path (the safe direction).
+        router = getattr(srv, "router", None)
+        if router is not None and str(verdict.get("verdict", "")) \
+                .startswith("escalate"):
+            try:
+                needs_tools = any(
+                    isinstance(m, dict) and m.get("tool_calls")
+                    for m in (body.get("messages") or [])
+                    if isinstance(m, dict))
+                rec, route_info = router.route(
+                    vec if vec is not None else None,
+                    urgency=1.0, needs_tools=needs_tools)
+                if rec is not None:
+                    route_info["fallback"] = str(up.get("model") or "membrane")
+                    route_info["price"] = rec.price()
+                    verdict["route"] = route_info
+                    up["model"] = rec.name
+                    print(f"[opencode] router -> {rec.name} "
+                          f"({route_info.get('reason')})", file=sys.stderr)
+            except Exception as e:
+                print(f"[opencode] router error (plain path): {e}",
+                      file=sys.stderr)
         try:
             self._v1_deliver(up, raw, query, vec, verdict, ctx)
             if thought_asks:
@@ -1988,10 +2055,45 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         to the client, then learn the exchange into the field."""
         srv = self.server
         mem = srv.membrane
-        data = json.dumps(up).encode()
-        req = urllib.request.Request(srv.backend + "/v1/chat/completions",
-                                     data=data, method="POST",
-                                     headers={"Content-Type": "application/json"})
+        route = verdict.get("route") or {}
+        routed_model = route.get("route")
+        orig_model = str(up.get("model") or "membrane")
+        t0 = time.monotonic() if routed_model else None
+
+        def _open_backend(model_name: str):
+            """POST the turn to Ollama; ONE failover retry on the pre-router
+            model when the routed candidate cannot serve at all (connect
+            error / 5xx -- degrade toward the safe direction)."""
+            u2 = dict(up)
+            u2["model"] = model_name
+            rq = urllib.request.Request(
+                srv.backend + "/v1/chat/completions",
+                data=json.dumps(u2).encode(), method="POST",
+                headers={"Content-Type": "application/json"})
+            try:
+                return urllib.request.urlopen(rq, timeout=300)
+            except urllib.error.HTTPError as he:
+                # 404/400 (model absent, bad request) = the routed candidate
+                # cannot serve THIS turn -> failover once. 5xx too. 4xx auth
+                # on a cloud relay is also "this rung is down", but a 4xx on
+                # the fallback itself must surface (client-side error).
+                if (model_name == orig_model or not routed_model
+                        or route.get("failover")):
+                    raise
+                if he.code in (400, 404, 500, 502, 503, 504):
+                    print(f"[opencode] router failover {model_name} -> "
+                          f"{orig_model} (HTTP {he.code})", file=sys.stderr)
+                    route["failover"] = orig_model
+                    return _open_backend(orig_model)
+                raise
+            except Exception as first_err:
+                if (model_name == orig_model or not routed_model
+                        or route.get("failover")):
+                    raise
+                print(f"[opencode] router failover {model_name} -> "
+                      f"{orig_model} ({first_err})", file=sys.stderr)
+                route["failover"] = orig_model
+                return _open_backend(orig_model)
         streaming = bool(up.get("stream", False))
         parts: list[str] = []
         think: list[str] = []
@@ -2015,7 +2117,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                             reasoning=True):
                         self.wfile.write(chunk)
                     self.wfile.flush()
-            with urllib.request.urlopen(req, timeout=300) as r:
+            with _open_backend(up.get("model", "membrane")) as r:
                 for line in r:                      # SSE, tee verbatim
                     if not line:
                         continue
@@ -2052,7 +2154,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self.wfile.flush()
             resp_obj = None
         else:
-            resp_bytes = urllib.request.urlopen(req, timeout=300).read()
+            resp_bytes = _open_backend(up.get("model", "membrane")).read()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(resp_bytes)))
@@ -2077,6 +2179,19 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 think.append(_msg_reasoning(msg))
         content = "".join(parts)
         thought = "".join(think).strip()
+        # the router's measured record: latency of the routed turn, and (for
+        # cloud) the spend + the calibration record -- (pressure, survived)
+        # lands after the re-ask window resolves the outcome (see below).
+        router = getattr(srv, "router", None)
+        if router is not None and routed_model:
+            try:
+                router.note_latency(routed_model, time.monotonic() - t0)
+                if route.get("kind") == "cloud":
+                    router.record_spend(float(route.get("price")
+                                              or CLOUD_DEFAULT_PRICE))
+            except Exception as e:
+                print(f"[opencode] router bookkeeping error: {e}",
+                      file=sys.stderr)
         ex_idx = None
         # learn text turns; a pure tool-call turn has no human prose to ground
         # future turns on and the gate may have already learned from its user
@@ -2114,6 +2229,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         n = len(mem.store)
         notes = getattr(mem, "gate_notes", None) or []
         lines = [f"[membrane] route={v} sim={sim_s} field={n}"]
+        rt = verdict.get("route")
+        if rt and rt.get("route"):
+            lines.append(f"[membrane] router: {rt['route']} ({rt.get('kind')}) "
+                         f"— {rt.get('reason')}"
+                         + (", explored" if rt.get("explored") else ""))
         v_verb = {"act": "would-absorb", "act-replayed": "REPLAYED (no model call)",
                   "escalate": "forwarding to model"}.get(v)
         if v == "escalate-with-hint":
@@ -2300,6 +2420,24 @@ def main() -> None:
                          "live working context (--no-momentum for exact recall).")
     ap.add_argument("--no-momentum", dest="momentum", action="store_false")
     ap.set_defaults(archive=True, momentum=True)
+    ap.add_argument("--no-router", dest="router", action="store_false",
+                    help="disable the LLM orchestration router and always "
+                         "escalate to the single --backend model")
+    ap.add_argument("--cloud-budget", type=float, default=None, metavar="USD",
+                    help="max relative-money spend per day on cloud-routed "
+                         "escalations (the cost ladder's hard cap; unset = "
+                         "uncapped). Score proposes; budget disposes.")
+    ap.add_argument("--explore", type=float, default=0.05, metavar="EPS",
+                    help="fraction of escalations that try the least-tried "
+                         "LOCAL model so fresh candidates can build a record")
+    ap.add_argument("--price", action="append", default=[], metavar="M=USD",
+                    help="override the relative money per turn for a cloud "
+                         "model (substring match, repeatable), e.g. "
+                         "--price glm-5.3-flash=1.0 --price claude=6.0")
+    ap.add_argument("--router-state", default=None, metavar="PATH",
+                    help="where the router persists model records (wins, "
+                         "imprints, latency EWMAs, calibration, spend); "
+                         "default <field-dir>/router.json")
     ap.add_argument("--replay-sim", type=float, default=0.97, metavar="SIM",
                     help="cosine above which an ACT verdict replays the stored "
                          "answer with NO model call (the token saver). "
@@ -2378,26 +2516,54 @@ def main() -> None:
     if args.no_judge:
         judge = StubJudge()          # demotions always stand
     else:
-        # "you = the selected model" for the judge too: the demotion judge is
-        # an OllamaJudge whose .model is read LIVE at each call -- it follows
-        # srv.compact_model (which follows the opencode selection) unless
-        # --judge-model pins it. Errors degrade to ACCEPT, so a broken judge
-        # never silences the environment's vote.
+        # The JUDGE LADDER: adjudication starts one rung up the COST STACK
+        # from the model that answered (the responder is the least qualified
+        # to check itself) and propagates upward through the price table
+        # until a rung rules CONTEST/ACCEPT; ESCALATE -- or every rung
+        # failing -- parks the case for the human (the top rung, asked with
+        # question + options + consequences). The ladder itself is computed
+        # AFTER the router boots (srv.judge_ladder, priced candidates,
+        # cheapest first); until then contest() falls back to the selected
+        # chat model.
         _judge_impl = OllamaJudge(backend=backend,
                                   model=args.judge_model or model or "granite3.3:8b",
                                   timeout=120)
 
-        class _FollowChatJudge:
-            """OllamaJudge whose model tracks the live selected model (read
-            from the server at call time -- the handler stamps
-            srv.compact_model on every chat turn)."""
+        class _LadderJudge:
+            """Walks the cost stack: for each rung (cheapest capable first)
+            ask CONTEST/ACCEPT/ESCALATE; ESCALATE or error -> next rung;
+            stack exhausted -> None (ACCEPT: degrade toward the environment,
+            the safe direction) and the human-escalation path in _demote
+            takes over. No ladder (router off / single model) -> the selected
+            chat model judges, the old behavior."""
 
             def contest(self, situation, action, query, reask_count):
-                _judge_impl.model = srv.compact_model
-                return _judge_impl.contest(situation, action, query,
-                                           reask_count)
+                ladder = getattr(srv, "judge_ladder", None)
+                if not ladder:
+                    _judge_impl.model = (getattr(srv, "compact_model", None)
+                                         or _judge_impl.model)
+                    return _judge_impl.contest(situation, action, query,
+                                               reask_count)
+                last_exc = None
+                for name, _usd in ladder:
+                    try:
+                        _judge_impl.model = name
+                        r = _judge_impl.contest(situation, action, query,
+                                                reask_count)
+                    except Exception as e:
+                        last_exc = e
+                        continue
+                    if r is None:
+                        continue          # this rung erred -> try above
+                    if str(r).upper().startswith("ESCALATE"):
+                        continue          # genuinely undecidable -> rung up
+                    return r              # CONTEST/ACCEPT: a rung ruled
+                if last_exc:
+                    print(f"[judge-ladder] all rungs failed ({last_exc}) "
+                          f"-> ACCEPT (human may be asked)", file=sys.stderr)
+                return None
 
-        judge = _FollowChatJudge() if not args.judge_model else _judge_impl
+        judge = _LadderJudge()
     mem = Membrane(
         responder=OllamaChatResponder(backend),
         field_path=args.field,
@@ -2420,6 +2586,7 @@ def main() -> None:
               f"(pass --listen to pin)", file=sys.stderr)
     srv = ThreadingHTTPServer(("127.0.0.1", listen), MembraneOpenAIHandler)
     srv.membrane = mem
+    mem.server_ref = srv          # the router-outcome loop reads srv.router
     srv.backend = backend
     srv.rag_k = args.k
     srv.rag_sim_min = max(0.0, min(1.0, float(args.rag_sim_min)))
@@ -2498,6 +2665,46 @@ def main() -> None:
     srv.momentum_alpha = 1.2         # skew weight (geometry.py's alpha_weight)
     srv.momentum_decay = 0.95        # friction (geometry.py's decay_factor)
 
+    # the orchestration router (model-vs-model): discovered from the live
+    # Ollama (locals AND remote-backed cloud entries), imprints seeded in the
+    # background, records persisted beside the field. OFF with --no-router.
+    srv.router = None
+    if args.router:
+        try:
+            from .router import Registry, PRICE_TABLE
+            table = list(PRICE_TABLE)
+            for spec in (args.price or []):
+                name, _, usd = spec.rpartition("=")
+                if name and usd:
+                    table.insert(0, (name.lower(), float(usd)))
+            import membrane.router as _rt
+            _rt.PRICE_TABLE = table
+            rstate = (args.router_state
+                      or str(Path(args.field).parent / "router.json"))
+            srv.router = Registry(
+                backend=backend, embedder=mem.embedder,
+                state_path=rstate, explore=float(args.explore),
+                cloud_budget=args.cloud_budget)
+            if mem.embedder is not None:
+                srv.router.seed_imprints_async()
+            n_local = sum(1 for r in srv.router.records.values()
+                          if r.kind == "local")
+            globals()["_BOOT_ROUTER"] = srv.router   # the judge ladder reads it
+            # the judge ladder: priced candidates, cheapest first, minus the
+            # default chat model (the one that ANSWERS judges worst). The
+            # human is the implicit top rung via the review queue.
+            srv.judge_ladder = [(name, usd) for name, usd in
+                                sorted(_PRICE_TABLE_BY_NAME(),
+                                       key=lambda kv: kv[1])
+                                if name != (model or "")]
+            print(f"[opencode] router: {len(srv.router.records)} candidates "
+                  f"({n_local} local, {len(srv.router.records) - n_local} "
+                  f"cloud), imprints seeding in background", file=sys.stderr)
+        except Exception as e:
+            print(f"[opencode] router disabled ({e}); escalating directly "
+                  f"to {backend}", file=sys.stderr)
+            srv.router = None
+
     # resolve the embedder AT BOOT: the field must be able to embed before a
     # single turn (a fresh field also needs nothing, but the resolver proves
     # the embed role early rather than on the first chat).
@@ -2526,6 +2733,14 @@ def main() -> None:
         except Exception as e:
             print(f"[opencode] veil poke failed (non-fatal): {e}",
                   file=sys.stderr)
+
+    # now that the embedder is proven, the router's imprint seeding can run
+    # (it embeds the models' self-descriptions); a router built before this
+    # point holds embedder=None and would never seed.
+    if srv.router is not None and mem.embedder is not None \
+            and srv.router.embedder is None:
+        srv.router.embedder = mem.embedder
+        srv.router.seed_imprints_async()
 
     # ---- the opencode config + launch ----
     cfg = {
@@ -2567,6 +2782,7 @@ def main() -> None:
           f"  replay: {'sim>=' + format(srv.replay_sim, '.2f') + ' -> stored answer, no model call' if srv.replay_sim > 0 else 'off (pure observer)'}\n"
           f"  archive: {'on (cold tier after each compaction)' if getattr(srv, 'archive', False) else 'off (--archive)'}\n"
           f"  momentum: {'on (recall skewed toward working context)' if getattr(srv, 'momentum', False) else 'off (--momentum)'}\n"
+          f"  router: {'on (' + str(len(srv.router.records)) + ' candidates)' if getattr(srv, 'router', None) else 'off (--no-router to disable; would be on by default)'}\n"
           f"  judge: {judge_s}\n"
           f"  opencode config: {cfg_path}",
           file=sys.stderr)

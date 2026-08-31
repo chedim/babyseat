@@ -1413,6 +1413,9 @@ class Membrane:
                "would_absorb": would_absorb, "vague": vague, "variety_skip": variety_skip,
                "repaired": repaired,
                "query": query, "response": content, "field_size": len(self.store),
+               # the router's decision (model-vs-model): which model, why, what
+               # the machine pressure was. Absent on non-escalated turns.
+               "route": verdict.get("route"),
                # the per-veil thermodynamic state at decision time (the variety
                # record). None on the empty-query / pre-gate paths.
                "eff_rank": verdict.get("eff_rank"),
@@ -1493,11 +1496,18 @@ class Membrane:
 
     def _remember(self, query: str, vec: np.ndarray, verdict: dict,
                   ex_idx: int | None) -> None:
-        """Push this decision to the in-memory ring (for re-ask detection)."""
+        """Push this decision to the in-memory ring (for re-ask detection).
+
+        The entry also carries the ROUTED model (the orchestrator's choice)
+        so an outcome can vote against the ANSWERING model, not just the
+        exemplar -- the record that feeds the router's win/loss counts."""
         self._recent.append({
             "query": query, "vec": _unit_list(vec),
             "verdict": verdict["verdict"], "ex_idx": ex_idx,
+            "model": (verdict.get("route") or {}).get("route"),
+            "pressure": (verdict.get("route") or {}).get("pressure"),
             "ts": time.monotonic(),
+            "ts_wall": time.time(),
         })
 
     def _detect_reask(self, vec: np.ndarray, query: str) -> int | None:
@@ -1528,6 +1538,25 @@ class Membrane:
             return None
         qn = vec / (np.linalg.norm(vec) + 1e-12)
         now = time.monotonic()
+        # the router's WIN half: a ROUTED turn that outlives its re-ask
+        # window with no demote is a win for the answering model (a loss is
+        # noted in _demote). Wins feed the competence EMA and -- for cloud
+        # -- the calibration record the pressure threshold learns from.
+        # Non-fatal if the router is absent (router off / tests).
+        router = getattr(self, "router", None) or getattr(
+            getattr(self, "server_ref", None), "router", None)
+        if router is not None:
+            for r in self._recent:
+                if (r.get("model") and not r.get("resolved")
+                        and now - r["ts"] > self.reask_window_s):
+                    r["resolved"] = True
+                    try:
+                        router.note_outcome(
+                            r["model"],
+                            np.asarray(r.get("vec", []), dtype=float),
+                            survived=True, pressure=r.get("pressure"))
+                    except Exception:
+                        pass
         # 1) cosine re-ask. In OBSERVER mode there are no absorbs, so a near-dup
         # repeat after an ESCALATE is also a re-ask signal (the forwarded answer
         # didn't satisfy -- the user is asking again). In normal mode only an ``act``
@@ -1611,6 +1640,23 @@ class Membrane:
         # the mutation itself is the critical section; the judge call (a live
         # Ollama model) must stay OUTSIDE the lock so it never blocks the live
         # chat path -- same split the compactor uses.
+        # The ROUTER also hears the loss (the ring entry carries the answering
+        # model): a re-ask is a loss against it, feeding the win/loss record
+        # and (for cloud routes) the calibration record. Non-fatal if absent.
+        router = getattr(self, "router", None) or getattr(
+            getattr(self, "server_ref", None), "router", None)
+        ring_hit = next((r for r in reversed(self._recent)
+                         if r.get("ex_idx") == ex_idx), None)
+        if router is not None and ring_hit is not None:
+            try:
+                if ring_hit.get("model"):
+                    router.note_outcome(ring_hit["model"],
+                                        np.asarray(ring_hit.get("vec", []),
+                                                   dtype=float),
+                                        survived=False,
+                                        pressure=ring_hit.get("pressure"))
+            except Exception:
+                pass
         with self.mut_lock:
             ex = self.store.exemplars[ex_idx]
             was_safe = ex.safe

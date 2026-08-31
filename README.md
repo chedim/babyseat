@@ -175,6 +175,48 @@ inference**.
 
 ---
 
+## How it saves tokens
+
+Two honest facts up front. First: **in this architecture, learning is free** —
+every turn is absorbed as a local embedding (~\$0), so the training data
+accumulates without model spend. In a measured real working session on this
+repo, **4,219 turn exchanges (~1.17M chars ≈ 290k tokens of traffic) were
+learned as `teed-pair` exemplars at zero marginal model cost** — the capture
+rides the turns that were happening anyway. The savings come from what the
+field then *answers without asking a model again*:
+
+1. **Intercepts (0 tokens).** Five canonical frames —
+   `membrane: query the field…`, `field state`, `membrane: learn that…`,
+   `membrane: forget…`, `membrane: suggest` — are computed from the live
+   field and never see a model; the agent's own prose-embedded asks (thought
+   intercepts) are answered the same way. Every such turn is a full LLM-turn
+   avoided.
+2. **Replay (0 tokens).** A settled repeat of a safe memory returns the
+   stored answer verbatim above `--replay-sim` (0.97): verbatim-similarity,
+   demotion-guarded, tool-call-excluded. Rare early, compounding as the
+   field earns trust — in the measured session 1 of ~180 chat-escalations
+   replayed (~180 tokens); the design intent is that a month-old field
+   replays the boilerplate (the tenth "run the tests the same way" costs
+   nothing).
+3. **Compaction (fewer tokens per turn).** The idle-time Compactor distills
+   clusters of retired raw turns into one note; later turns inject the small
+   note instead of the raw exchanges on every single request. Measured: two
+   compaction cycles on this repo distilled 8 exchanges into 2 notes — a
+   per-turn context saving paid every call, forever after.
+4. **Self-author mode (0 tokens per turn).** The extreme dial: the cell
+   *recites* its nearest lived scene instead of calling the model, and the
+   genesis cache amortizes one LLM call over ~8 world scenes (the virtual
+   world runs this way end-to-end).
+5. **Momentum + cold tier (indirect).** Momentum-skew raises first-shot
+   recall precision (fewer clarifying re-asks); the cold tier keeps the hot
+   field small so kNN stays fast *and* the retrieval surface stays small.
+
+Where the money actually goes after all of that: **escalations** — genuinely
+new situations. That is the router's job: route them local first, cheap cloud
+next, expensive cloud when really stuck, and replay the ones that settle.
+
+---
+
 ## How it works
 
 ### The field acts; the LLM escalates
@@ -184,12 +226,20 @@ The world is a **field**: an append-only store of exemplars, each a situation
 LLM keeps two jobs, both rare:
 
 1. **Answering escalations** — turns the field cannot absorb confidently.
-2. **The judge** (opt-in) — adjudicate demotions (default off via
-   `--no-judge`) and the one-time seed.
+2. **The judge** (on by default; `--no-judge` opt-out) — adjudicate demotions
+   via the **judge ladder** (start one rung up the cost stack from the model
+   that answered and propagate upward until a rung rules; the human is the
+   top rung, asked with question + options + consequences per case).
 
 Recall is **momentum-skewed kNN** (toward the live working context), the
 context block is MMR-deduped, and replay returns the stored answer verbatim
-above `--replay-sim`.
+above `--replay-sim`. On escalations, the **router** picks the model:
+`score = fit_hat − λ_time·urgency·delay − λ_cost·price` — the cost ladder
+(local 0 → cheap cloud → expensive cloud) with a measured pressure valve
+(cloud only when the machine is genuinely slow or no local fits), a daily
+budget cap, eps-exploration of unsampled locals, and per-turn audit lines
+(`route: model=… reason=… pressure=…`) that `field state` tabulates as
+claimed-vs-measured win rates.
 
 ### The compactor and the cold tier
 
