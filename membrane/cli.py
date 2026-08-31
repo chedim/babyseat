@@ -8,7 +8,11 @@
     membrane anthropic    TUI+proxy in --anthropic mode (Claude Code front door)
     membrane review       print what the field learned
     membrane demo         in-process end-to-end loop (no chat model needed)
-    membrane install      drop the agent skills into ./.opencode/skills/ of
+    membrane reset         kill the port's proxy, then start fresh
+    membrane update        check the install source, show what changed,
+                           update + re-exec (MEMBRANE_NO_UPDATE_CHECK=1
+                           disables the automatic startup check)
+    membrane install       drop the agent skills into ./.opencode/skills/ of
                           the CURRENT directory and print the AGENTS.md blurb
     membrane connect      offer to connect a shared Couchbase field for THIS
                           project (creds go to ~/.membrane/projects/, never
@@ -38,6 +42,7 @@ import time
 from pathlib import Path
 
 from .project_env import couchbase_onboarding, load_project_env
+from .update import main as update_main, maybe_check_on_boot
 
 SKILLS_DIR = Path(__file__).parent / "skills"
 
@@ -378,6 +383,8 @@ def main() -> None:
         "  review     print what the field learned\n"
         "  demo       in-process end-to-end loop (no chat model needed)\n"
         "  reset      kill the proxy on the port, then TUI+proxy fresh\n"
+        "  update     check the install source for updates, show what\n"
+        "             changed, apply (git pull --ff-only) and re-exec\n"
         "  install    install .opencode/skills/* into the CURRENT directory\n"
         "  connect    offer to connect a shared Couchbase field for THIS\n"
         "             project (creds go to ~/.membrane/projects/, not the repo)\n"
@@ -394,7 +401,7 @@ def main() -> None:
     cmd = argv[0] if argv and not argv[0].startswith("-") else None
     if cmd not in ("tui", "proxy", "opencode", "anthropic", "review",
                    "demo", "reset", "install", "doctor", "connect",
-                   "ingest", "codegraph"):
+                   "ingest", "codegraph", "update"):
         if cmd is None and not argv:
             print(__doc__)
             return
@@ -405,6 +412,8 @@ def main() -> None:
                               force="--force" in forwarded)
     if cmd == "doctor":
         raise SystemExit(_doctor())
+    if cmd == "update":
+        raise SystemExit(update_main())
     if cmd == "install":
         if args.force:
             forwarded = [a for a in forwarded if a != "--force"]
@@ -426,6 +435,7 @@ def main() -> None:
         raise SystemExit(_run_module("membrane.codegraph", args.forwarded))
     if cmd in ("opencode", "tui", "anthropic", "reset", "proxy"):
         couchbase_onboarding()
+        maybe_check_on_boot(args.forwarded)
     if cmd == "reset":
         raise SystemExit(_reset(args.forwarded))
     if cmd == "tui":

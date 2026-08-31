@@ -92,6 +92,13 @@ class Exemplar:
     # current master later degrades (demoted/forgotten) and the alternate is
     # more salient to a future query. Losers wait; nothing is lost.
     alternates: list = field(default_factory=list)
+    # ---- the schema sliding window (docs: SCHEMA_VERSION below) ----
+    # Keys a LOAD encountered that THIS version's Exemplar does not know land
+    # here, and the save paths spread them back as TOP-LEVEL record keys (the
+    # wire never contains the literal "extra" key). A newer field loaded by
+    # this version round-trips losslessly; to an older reader those keys are
+    # simply invisible (this load path is the one that IGNORES unknowns).
+    extra: dict = field(default_factory=dict)
 
     def recompute_safe(self, demote_threshold: int) -> None:
         """Re-derive `safe` from the evidence: net votes against must reach the threshold.
@@ -124,6 +131,47 @@ def _unit(v: np.ndarray) -> np.ndarray:
 
 _CB_SCOPE = "membrane"
 _CB_COLL = "exemplars"
+
+# ---- the schema sliding window ----------------------------------------------
+# SCHEMA_VERSION is bumped ONLY by a registered migration (below). The window
+# rule: this version READS records of version v in [V-1, V] (older writers:
+# migrated up on load) and WRITES its own version V, PRESERVING unknown keys
+# (Exemplar.extra -> top-level wire keys) so a record written by V+1 survives
+# a round-trip through V untouched -- invisible to this reader, intact for the
+# newer reader. Two-window safety: never skip a version (V-2 records must be
+# migrated by V-1 first; the registry chains them).
+#
+# COUCHBASE DOCS: each exemplar doc carries `_scm` = the writer's version; a
+# reader inside its window decodes normally and PRESERVES unknown keys; a doc
+# stamped OLDER than its window (an ancient shared bucket, pre-stamp docs
+# count as v1) is migrated by the same registry. This is what lets membranes
+# of different versions share one bucket without erasing each other's fields.
+#
+# JSON field files: raw exemplar LISTS (v1 format). A future envelope version
+# bumps WIRE_VERSION to {"version": N, "exemplars": [...]} -- load accepts both
+# shapes forever, so one version can always read its predecessor's file.
+SCHEMA_VERSION = 1
+WIRE_VERSION = 1          # the JSON file envelope version (raw list == 1)
+SCHEMA_STAMP = f"s{SCHEMA_VERSION}"
+
+# Registry key: (from_version,). Value: a function record-dict -> record-dict
+# applied IN ORDER (1 -> 2 -> ... -> V). Add exactly one entry per version
+# bump; older entries stay forever (the sliding window's spine).
+MIGRATIONS: dict[int, Any] = {}
+
+
+def migrate_record(rec: dict, from_version: int,
+                   to_version: int = SCHEMA_VERSION) -> dict:
+    """Lift a raw record dict from ``from_version`` to ``to_version`` by
+    applying the registry's migrations in order. Unknown target versions and
+    gaps simply leave the record as-is except the version key -- decode never
+    destroys data (an out-of-window record keeps its unknown keys in ``extra``)."""
+    rec = dict(rec)
+    for v in range(from_version, to_version):
+        step = MIGRATIONS.get(v)
+        if step is not None:
+            rec = step(rec)
+    return rec
 
 DATA_DIRNAME = ".membrane"   # the per-project data dir (cli.DATA_DIR)
 
@@ -168,6 +216,51 @@ def _origin_tag(field_path: str | Path) -> str:
     except OSError:
         pass                    # read-only cwd: fall back to the derived tag
     return tag
+
+
+# ---- wire decode/encode (the schema window's moving parts) ------------------
+_EX_KNOWN = frozenset(Exemplar.__dataclass_fields__) - {"extra"}
+
+
+def _rec_from_wire(rec: dict) -> "Exemplar":
+    """Decode one wire record -> Exemplar, schema-window aware.
+
+    v1 wire shape: flat exemplar keys. Later versions may add top-level keys
+    or an envelope; this function is the ONE place that decides. Unknown keys
+    are preserved in ``extra`` (lossless round-trip through an older reader);
+    unknown VERSIONS are tolerated the same way -- decode never destroys."""
+    rec = dict(rec or {})
+    v = int(rec.get("_scm") or rec.get("_schema") or 1)
+    if v < SCHEMA_VERSION:
+        rec = migrate_record(rec, v)
+    known = {k: rec[k] for k in _EX_KNOWN if k in rec}
+    extra = {k: rec[k] for k in rec
+             if k not in _EX_KNOWN and not k.startswith("_")
+             and k != "extra"}
+    ex = Exemplar(**known, extra=extra)
+    stamp = rec.get("_scm", rec.get("_schema"))
+    if isinstance(stamp, int):
+        # same-or-newer stamp rides along; save paths re-spread it
+        ex.extra["_scm"] = stamp
+    return ex
+
+
+def _ex_to_wire(ex: "Exemplar", stamp: bool = True) -> dict:
+    """Exemplar -> wire record: dataclass fields as top-level keys, ``extra``
+    spread back into top level. ``stamp`` adds the ``_scm`` version stamp --
+    for COUCHBASE docs (underscore keys are invisible to older readers, the
+    shared-bucket window). JSON files stay unstamped: byte-identical to the
+    v1 raw-list shape every released version already reads."""
+    rec = {k: v for k, v in asdict(ex).items() if k != "extra"}
+    extra = getattr(ex, "extra", None) or {}
+    for k, v in extra.items():
+        if not k.startswith("_"):
+            rec[k] = v
+    if stamp:
+        scm = extra.get("_scm")
+        rec["_scm"] = scm if isinstance(scm, int) and scm > SCHEMA_VERSION \
+            else SCHEMA_VERSION
+    return rec
 
 
 def _ex_key(ex: "Exemplar") -> str:
@@ -359,7 +452,8 @@ class ExemplarStore:
                                    dir=str(p.parent))
         try:
             with os.fdopen(fd, "w") as f:
-                json.dump([asdict(e) for e in self.exemplars], f, indent=2)
+                json.dump([_ex_to_wire(e, stamp=False) for e in self.exemplars],
+                          f, indent=2)
             os.replace(tmp, p)
         except BaseException:
             try:
@@ -404,7 +498,7 @@ class ExemplarStore:
                 k = _ex_key(ex)
                 if k in seen:
                     continue
-                rec = asdict(ex)
+                rec = _ex_to_wire(ex, stamp=False)
                 rec["_archived_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
                 rec["_key"] = k
                 f.write(json.dumps(rec) + "\n")
@@ -439,7 +533,7 @@ class ExemplarStore:
                     continue  # idempotent: already in the cold tier
             except Exception:
                 pass
-            rec = asdict(ex)
+            rec = _ex_to_wire(ex, stamp=False)
             rec["_archived_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
             coll.upsert(k, rec)
             n += 1
@@ -555,22 +649,61 @@ class ExemplarStore:
             self._cb_bucket = bucket
             mgr.get_bucket(bucket)  # proves the bucket we will use exists
         colls = self._cb_cluster.bucket(bucket).collections()
-        try:
-            colls.create_scope(_CB_SCOPE)
-        except Exception:
-            pass
+        created = self._cb_ensure_infra(bucket, colls)
         coll_name = _CB_COLL if mode == "live" else _CB_COLL + "_archive"
-        try:
-            colls.create_collection(_CB_SCOPE, coll_name)
-        except Exception:
-            pass
         handle = (self._cb_cluster.bucket(bucket)
                   .scope(_CB_SCOPE).collection(coll_name))
+        if created:
+            print(f"[membrane] bootstrapped couchbase infra in bucket "
+                  f"'{bucket}': {created}", file=__import__("sys").stderr)
         if mode == "live":
             self._cb = handle
         else:
             self._cb_archive = handle
         return handle
+
+    def _cb_ensure_infra(self, bucket: str, colls: Any) -> list[str]:
+        """THE FRESH-BUCKET CONTRACT: installing onto an EMPTY Couchbase
+        bucket creates everything membrane needs, idempotently -- the
+        `membrane` scope, the `exemplars` (hot) and `exemplars_archive`
+        (cold-tier) collections, and a PRIMARY INDEX on each (SQL++ needs
+        one: without it the veil queries fail with 'No index available' on
+        a bucket that has never had an index). Nothing is deferred/built
+        async -- fields here are tiny at boot, and a synchronous CREATE
+        keeps first-write safe. Already-existing objects are a no-op.
+        Returns a human list of what was actually created (for the boot
+        notice), so a warm bucket stays silent."""
+        created: list[str] = []
+        try:
+            colls.create_scope(_CB_SCOPE)
+            created.append(f"scope {_CB_SCOPE}")
+        except Exception:
+            pass                        # scope exists (or refused): use it
+        for coll_name in (_CB_COLL, _CB_COLL + "_archive"):
+            try:
+                colls.create_collection(_CB_SCOPE, coll_name)
+                created.append(f"collection {coll_name}")
+            except Exception:
+                pass
+        try:
+            mgr = self._cb_cluster.query_indexes()
+            for coll_name in (_CB_COLL, _CB_COLL + "_archive"):
+                try:
+                    existing = {i.name for i in mgr.get_all_indexes(
+                        bucket, scope_name=_CB_SCOPE,
+                        collection_name=coll_name)}
+                    if "def_primary" not in existing \
+                            and "#primary" not in existing:
+                        mgr.create_primary_index(
+                            bucket, scope_name=_CB_SCOPE,
+                            collection_name=coll_name,
+                            ignore_if_exists=True)
+                        created.append(f"primary index {coll_name}")
+                except Exception:
+                    pass                # exists / verifier lag: not fatal
+        except Exception:
+            pass                        # no index manager (old SDK): kv paths still work
+        return created
 
     @classmethod
     def load_couchbase(cls, field_path: str | Path = "") -> "ExemplarStore":
@@ -607,9 +740,8 @@ class ExemplarStore:
                          named_parameters={"my": my}))
         keys = []
         for row in qr:
-            rec = {k: v for k, v in row.items() if k != "id"
-                   and k in Exemplar.__dataclass_fields__}
-            st.append(Exemplar(**rec))
+            ex = _rec_from_wire({k: v for k, v in row.items() if k != "id"})
+            st.append(ex)
             keys.append(row["id"])
         st._cb_keys = set(keys)
         # own patch situations are already arbitrated: don't replay the CAS
@@ -744,7 +876,7 @@ class ExemplarStore:
 
     def _cb_doc(self, ex: Exemplar) -> dict:
         """The wire record for an exemplar (asdict + provenance bookkeeping)."""
-        rec = asdict(ex)
+        rec = _ex_to_wire(ex, stamp=True)
         rec["_origin"] = ex.origin or self.origin
         rec["_situ"] = _situ_key(ex.situation)
         return rec
@@ -875,15 +1007,13 @@ class ExemplarStore:
 
     @staticmethod
     def _rec_from_doc(doc: dict) -> "Exemplar | None":
-        """An Exemplar from a raw couchbase doc (None when it isn't one)."""
+        """An Exemplar from a raw couchbase doc (None when it isn't one).
+        Schema-window aware: unknown keys survive in ``extra`` (a newer
+        writer's fields are invisible here but never erased)."""
         if not doc:
             return None
-        rec = {k: v for k, v in doc.items()
-               if k in Exemplar.__dataclass_fields__ and not k.startswith("_")}
-        try:
-            return Exemplar(**rec)
-        except Exception:
-            return None
+        ex = _rec_from_wire(doc)
+        return ex if ex.situation or ex.action else None
 
     def _merge_alternates(self, mine: Exemplar, alts: list) -> None:
         """Fold the channel's deferred contenders into MY local exemplar's
@@ -993,7 +1123,7 @@ class ExemplarStore:
         if p.exists():
             text = p.read_text()
             try:
-                recs = json.loads(text) if text.strip() else []
+                parsed = json.loads(text) if text.strip() else []
             except json.JSONDecodeError as e:
                 # corrupt field -- QUARANTINE, don't discard. The file is moved
                 # aside with the exact bytes preserved so nothing is destroyed;
@@ -1014,6 +1144,19 @@ class ExemplarStore:
                     # mark the store read-only-ish: save() refuses to clobber
                     store._quarantine_failed = True
                 recs = []
+            else:
+                # envelope-aware: a raw list is v1; a dict envelope carries
+                # its own WIRE_VERSION + records list (future-proof: one
+                # version reads its predecessor's file).
+                if isinstance(parsed, dict):
+                    env_v = int(parsed.get("version") or 1)
+                    recs = parsed.get("exemplars") or []
+                    if env_v < WIRE_VERSION:
+                        print(f"[membrane] field file v{env_v} envelope -> "
+                              f"migrating to v{WIRE_VERSION} on next save",
+                              file=__import__("sys").stderr)
+                else:
+                    recs = parsed
             for rec in recs:
-                store.append(Exemplar(**rec))
+                store.append(_rec_from_wire(rec))
         return store

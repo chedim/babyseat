@@ -253,6 +253,28 @@ What the numbers mean and how the field's "thermodynamics" work:
 [docs/principle.md](docs/principle.md) (plain words) and
 [docs/math-findings.md](docs/math-findings.md) (the measured math).
 
+## Lifecycle: updates, restarts, schema compatibility
+
+- **Update check at boot.** On `membrane tui/opencode/proxy`, membrane
+  checks its install source (the git checkout it runs from, or the pip/uv
+  direct URL it was installed from). If an update exists it prints the
+  CHANGELOG (the commits between you and the remote tip) and asks
+  `Update membrane now? [y/N]` in the terminal — answering yes pulls
+  (`--ff-only`, a dirty tree is refused) and re-execs with the same argv.
+  Non-interactive sessions are never interrupted; `membrane update` runs
+  the same path manually. Opt out with `MEMBRANE_NO_UPDATE_CHECK=1`.
+- **Restart only from the shell.** `./run.sh restart` (or `membrane
+  reset`) is the safe procedure — see the membrane-restart skill. Membrane
+  never restarts itself while running (no file watcher, no self-re-exec);
+  a restart loses nothing: the field re-hydrates from its backend.
+- **The schema sliding window.** The field's record schema carries a
+  version (`SCHEMA_VERSION`; Couchbase docs are stamped `_scm`). One
+  version reads one older (migrations chain in a registry) and PRESERVES
+  unknown keys from newer writers — so membranes of adjacent versions
+  share a bucket (or swap a JSON field) without erasing each other's
+  fields, and upgrades never require a flag day. Bump `SCHEMA_VERSION`
+  only together with a registered migration in `membrane/field.py`.
+
 ## Easter egg: a self-authoring virtual world
 
 The same field, worn as a world: point the proxy at a fictional premise and

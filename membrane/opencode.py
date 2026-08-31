@@ -85,7 +85,8 @@ from .curiosity import CURIOSITY_MIN
 from .pool import CellPool
 from .runtime import (Membrane, OllamaChatResponder, OllamaJudge, StubJudge,
                       StubResponder)
-from .variety import free_energy, orient_dirs, thermo_state
+from .variety import (cells_rank, entropy_count, free_energy, orient_dirs,
+                      thermo_state)
 
 
 def _bud_cost(free_e: float) -> float:
@@ -204,6 +205,9 @@ def _state_report(srv) -> str:
         f"- effective rank {th['eff_rank']:.2f} (rank ratio {th['rank_ratio']:.2f}); "
         f"free energy {th['free_energy']:.2f} (safe_frac {th['safe_frac']:.2f}, "
         f"spectrum entropy {th['spectrum_entropy']:.2f})",
+        f"- cells level {cells_rank(mem.store):.2f} "
+        f"(entropy flood {entropy_count(mem.store)}/{max(0, round(cells_rank(mem.store)))} "
+        f"of cap; earned variety, injected entropy excluded)",
         f"- gate: sim_min={mem.sim_min} dedup={mem.dedup_sim} "
         f"reask_window={mem.reask_window_s:.0f}s demote_threshold={mem.demote_threshold}",
         f"- retrieval: k={srv.rag_k}, sim>={srv.rag_sim_min}, "
