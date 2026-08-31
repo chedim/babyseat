@@ -314,8 +314,9 @@ _REVIEW_MATCHERS = (
 
 def _review_request_block(srv) -> str | None:
     """The pending-review notice for the chat context, or None when the queue
-    is empty. Capped: at most 3 cases and ~700 chars so the notice never
-    crowds out real memories."""
+    is empty. Capped: at most 3 cases so the notice never crowds out real
+    memories; each case gets enough detail to actually rule on (Q, A, the
+    re-ask that triggered it, why the judge declined, and the signal stats)."""
     try:
         pending = srv.membrane.review_pending()
     except Exception:
@@ -323,12 +324,18 @@ def _review_request_block(srv) -> str | None:
     if not pending:
         return None
     lines = ["PENDING HUMAN REVIEWS (membrane's judge declined to rule; the "
-             "human is the final authority):"]
+             "human is the final authority). Full context, so the user can "
+             "rule without asking for more:"]
     for rec in pending[:3]:
         lines.append(
-            f"- review slot {rec['slot']} (exemplar #{rec.get('ex_idx')}): "
-            f"Q: {_clip(rec.get('situation', ''), 110)} | judge: "
-            f"{_clip(rec.get('judge_reason', ''), 90)}")
+            f"- review slot {rec['slot']} (exemplar #{rec.get('ex_idx')}):\n"
+            f"    Q: {_clip(rec.get('situation', ''), 200)}\n"
+            f"    A: {_clip(rec.get('action', ''), 200)}\n"
+            f"    user re-asked: {_clip(rec.get('reask_query', ''), 120)}\n"
+            f"    judge declined because: {_clip(rec.get('judge_reason', ''), 160)}\n"
+            f"    signal: {rec.get('signal')} (sim {rec.get('sim')}, "
+            f"reasks {rec.get('reask_count', 0)}, "
+            f"contests {rec.get('contest_count', 0)})")
     lines.append(
         "Ask the user to rule on these NOW via your question tool (one "
         "question per pending case; use its slot number verbatim). Exact "
