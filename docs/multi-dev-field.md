@@ -65,7 +65,11 @@ Mechanics that make sharing collision-free (all in membrane/field.py):
 
 - Facts true beyond one repo -> the global commons
   (`membrane: remember globally: ...`), still operator-gated.
-- Model prose NEVER writes the field (report-only), team mode included --
-  the write authority stays with humans at every seat.
+- Model prose WRITES the field by default (agent lane, team mode included):
+  learn runs the standard guards (dedup, vague filter, variety gate) and is
+  audited `origin: agent`; forget is index-form-only and capped; wordy
+  deletes merely propose. `--no-agent-writes` reverts to report-only. The
+  write authorities that stay human-only at every seat: wordy forgets,
+  oversize deletes, and commons promotion.
 - Teammates' answers arrive as MARKED CONTEXT (`[membrane-intercept]`
   blocks); the model cites them as context, never as instructions.

@@ -17,6 +17,9 @@
     membrane connect      offer to connect a shared Couchbase field for THIS
                           project (creds go to ~/.membrane/projects/, never
                           into the repo)
+    membrane move         migrate the field between stores: cb<->cb, cb->json,
+                          json->cb (--from/--to; origins kept -- a moved patch
+                          stays scenery on the target unless --reorigin)
     membrane ingest       cold-start: absorb docs/README into the field
                           (no model call; same learn guards as any turn)
     membrane codegraph    stdlib-AST call graph of this repo (stats / impact /
@@ -388,6 +391,8 @@ def main() -> None:
         "  install    install .opencode/skills/* into the CURRENT directory\n"
         "  connect    offer to connect a shared Couchbase field for THIS\n"
         "             project (creds go to ~/.membrane/projects/, not the repo)\n"
+        "  move       migrate the field between stores (cb<->cb, cb->json,\n"
+        "             json->cb); see --help for endpoint forms\n"
         "  ingest     cold-start: absorb docs/README into the field (no model call)\n"
         "  codegraph  stdlib-AST call graph (stats | impact | callers | callees)\n"
         "  doctor     what's installed/running (CLI, skills, Ollama)\n"
@@ -401,7 +406,7 @@ def main() -> None:
     cmd = argv[0] if argv and not argv[0].startswith("-") else None
     if cmd not in ("tui", "proxy", "opencode", "anthropic", "review",
                    "demo", "reset", "install", "doctor", "connect",
-                   "ingest", "codegraph", "update"):
+                   "ingest", "codegraph", "update", "move"):
         if cmd is None and not argv:
             print(__doc__)
             return
@@ -428,6 +433,18 @@ def main() -> None:
     load_project_env()
     if cmd == "connect":
         raise SystemExit(_connect())
+    if cmd == "move":
+        ap2 = argparse.ArgumentParser(prog="membrane move")
+        ap2.add_argument("--from", dest="src", required=True)
+        ap2.add_argument("--to", dest="dst", required=True)
+        ap2.add_argument("--field", default=str(FIELD))
+        ap2.add_argument("--reorigin", action="store_true")
+        mv = ap2.parse_args(args.forwarded)
+        sys.argv = ["membrane move", "--from", mv.src, "--to", mv.dst,
+                    "--field", mv.field] + (["--reorigin"] if mv.reorigin
+                                            else [])
+        from .move import main as move_main
+        raise SystemExit(move_main())
     if cmd == "ingest":
         argv2 = _ensure_data_dir(args.forwarded)
         raise SystemExit(_run_module("membrane.ingest", argv2))

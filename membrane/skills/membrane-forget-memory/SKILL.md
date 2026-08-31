@@ -1,6 +1,6 @@
 ---
 name: membrane-forget-memory
-description: Delete memories from membrane's long-term field on explicit request. Use when the user says "forget X", "wipe your memory", "delete the memory of X", or asks to remove a stored fact/memory by index (e.g. "membrane: forget...", "forget everything about...", "delete that memory").
+description: Delete memories from membrane's long-term field. Use when the user says "forget X", "wipe your memory", "delete the memory of X", or asks to remove a stored fact/memory by index -- AND when YOU spot junk cells in recall/state output during work (index form only from your prose: "membrane: forget #12" / "#3-7, 9", max 12 per ask; wordy asks only propose candidates).
 ---
 
 # Forget memories in the field
@@ -8,17 +8,17 @@ description: Delete memories from membrane's long-term field on explicit request
 This skill is served BY MEMBRANE, not by opencode and not by the model. When
 you follow it, membrane's proxy intercepts the turn itself and removes cells
 from its live store -- no model call, and the command itself is NOT learned.
-Deletion is the operator's hand: it is recorded on the audit log as a
-`forget` event, but the learning loop itself never deletes (this is the only
+Each delete is recorded on the audit log as a `forget` event (with its
+`origin`), but the learning loop itself never deletes (this is the only
 removal path).
 
-## How to forget
+## How to forget (operator turns)
 
 Send a chat turn (no tools) phrased with the canonical frame:
 
     membrane: forget <what or which>
 
-Three forms:
+Three forms (OPERATOR ONLY -- see the agent lane below):
 
     membrane: forget #12              (by index; ranges/lists work: 3-7, 2,9)
     membrane: forget everything about the deployment pipeline
@@ -31,6 +31,27 @@ similarity 0.55 are removed (up to 40 per command). Unsafe/retired cells need
 the index form. Time windows resolve by boot time: 'this session' removes
 every exemplar appended since the proxy started (the store is append-ordered,
 so windows can only under-remove, never over-remove anything older).
+
+## How to forget (from YOUR OWN work -- the agent lane, index-form ONLY)
+
+From assistant prose, forgets execute ONLY in explicit index form -- end a
+reply with one canonical line (no tool call, the frame rides your normal
+prose and is executed post-hoc):
+
+    membrane: forget #12              (or #3-7, #2,9 — indexes you can SEE)
+
+Rules of the lane:
+
+- INDEX FORM ONLY: `#12`, `12`, `3-7`, `3-7, 9` -- parsed by a strict token
+  grammar, hard-capped at 12 cells per ask (the remainder is named so you
+  can re-ask in batches).
+- WORdy asks never delete from agent prose: "forget everything about X",
+  time windows, and "everything" are the operator's forms. From your side
+  they only PROPOSE -- the reply lists nearest safe cells (sim >= 0.55) and
+  you re-ask in index form.
+- Why so blunt: free-text deletion from model prose wiped a hot field once
+  (the 2026-08-31 overshoot); indexes you can SEE are the guard.
+- Deletes are audited `origin: agent` -- visible and demotable wholesale.
 
 ## Reading the answer
 

@@ -128,9 +128,13 @@ Inside opencode, the field answers five canonical frames itself —
     membrane: suggest                         review scope suggestions for
                                               the cross-project commons
 
-The agent may also emit these frames in its own prose; reads arrive next turn
-as clearly-marked `[membrane-intercept]` blocks. Write authority stays human:
-model prose never writes the field.
+The agent may also emit these frames in its own prose; answers arrive next
+turn as clearly-marked `[membrane-intercept]` blocks. Writes from model prose
+execute by default (`--no-agent-writes` reverts to report-only): a learn runs
+the same guards as any turn and is audited `origin: agent` (tagged
+`agent-note`); forgets only in explicit index form (capped, wordy asks merely
+propose). The thermodynamics is the collapse guard — the model cannot skip
+dedup, the vague filter, or the variety gate.
 
 Everything else is ambient: recall grounds each turn, replay answers settled
 repeats from memory (zero model calls), and the router picks the cheapest
