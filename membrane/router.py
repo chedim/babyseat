@@ -99,6 +99,10 @@ MAX_LOCAL_GIB_DEFAULT = 12.0   # 32GB unified memory: leave room for the OS +
 MIN_LOCAL_TRIALS = 6
 MIN_LOCAL_WINRATE = 0.7
 LOCAL_FIT_MARGIN = 0.05        # local fit must beat the floor by this much
+EXPLORE_FIT_MARGIN = 0.15      # eps-explore samples only locals this NEAR the
+                               # floor's fit -- never a 0.4-fit toy on a chat turn
+EXPLORE_LANE = "@explore"      # sentinel ceiling: the deliberate evidence-farm
+                               # lane (subagents), least-tried eligible local
 
 
 def local_is_eligible(rec) -> bool:
@@ -370,6 +374,8 @@ class Registry:
         Unknown model -> no cap (we cannot price what we do not know)."""
         if not ceiling:
             return None, True
+        if ceiling.strip().lower() == EXPLORE_LANE:
+            return None, False       # the lane forbids cloud BY DESIGN
         rec = self.records.get(ceiling)
         if rec is not None:
             if rec.kind == "local":
@@ -454,10 +460,40 @@ class Registry:
         fit margin) AND holding without a cold load. eps-explore samples
         only eligible, holding locals (never a whisper, never an outlier
         cold load). --prefer-local flips the floor back to locals.
-        THE OPERATOR'S CEILING: `ceiling` is the model the user SELECTED in
-        opencode -- its price caps the candidate set (cloud never above it;
-        a local selection forbids cloud entirely). The router never spends
-        past the user's hand."""
+        The OPERATOR'S CEILING: the model the user SELECTED in opencode
+        caps the candidate set (cloud never above it; a local selection
+        forbids cloud entirely; the @explore sentinel farms evidence)."""
+
+        def cap_ok(r: ModelRecord) -> bool:
+            # structure filters only when the capability set is KNOWN: a turn
+            # that carries tools never routes to a model declared tools-less.
+            if not needs_tools or not r.caps:
+                return True
+            return "tools" in r.caps
+
+        if ceiling and ceiling.strip().lower() == EXPLORE_LANE:
+            day = time.strftime("%Y-%m-%d")
+            if self.spend_day != day:
+                self.spend_day, self.spend_today = day, 0.0
+            thr = self.calibrated_threshold()
+            pres = self.pressure()
+            self._last_pressure = pres
+            locals_ = sorted(
+                [r for r in self.records.values()
+                 if r.kind == "local" and cap_ok(r)
+                 and local_is_eligible(r) and self.local_holds(r)],
+                key=lambda r: (r.trials, r.name))
+            if not locals_:
+                return None, {"route": None, "kind": None,
+                              "reason": "explore-lane: no eligible local",
+                              "pressure": round(pres, 2)}
+            least = locals_[0]
+            return least, {"route": least.name, "kind": least.kind,
+                           "reason": (f"explore-lane: sampling {least.name} "
+                                      f"(trials={least.trials})"),
+                           "explored": True, "pressure": round(pres, 2),
+                           "imprint": bool(least.imprint),
+                           "threshold": round(thr, 1), "ts": time.time()}
         situ = np.asarray(situ_vec, dtype=float) if situ_vec is not None else None
         day = time.strftime("%Y-%m-%d")
         if self.spend_day != day:
@@ -466,13 +502,6 @@ class Registry:
         pres = self.pressure()
         self._last_pressure = pres
         max_price, allow_cloud = self.ceiling_cap(ceiling)
-
-        def cap_ok(r: ModelRecord) -> bool:
-            # structure filters only when the capability set is KNOWN: a turn
-            # that carries tools never routes to a model declared tools-less.
-            if not needs_tools or not r.caps:
-                return True
-            return "tools" in r.caps
 
         locals_ = [r for r in self.records.values()
                    if r.kind == "local" and cap_ok(r)
@@ -498,13 +527,15 @@ class Registry:
             return None, {"route": None, "kind": None,
                           "reason": why, "pressure": round(pres, 2)}
 
-        # eps-explore: try the least-tried ELIGIBLE LOCAL that holds without
-        # a cold load, so a new model can ever build a record (chicken-and-
-        # egg killer) -- never a whisper, never an 18.5GB outlier cold load.
+        # eps-explore on a CHAT turn: only when NO cloud floor exists (the
+        # offline covenant). Clouds are fast and cool: while one holds the
+        # floor, chat traffic NEVER gambles on an unsampled local -- the
+        # @explore lane does the evidence farming instead (deliberate,
+        # operator-pointed, never user-visible).
         explored = False
         explore_pool = [r for r in locals_ if r.trials == 0
                         and self.local_holds(r)]
-        if explore_pool and self.explore > 0 \
+        if explore_pool and not clouds and self.explore > 0 \
                 and self._rng.random() < self.explore:
             least = min(explore_pool, key=lambda r: r.trials)
             explored = True
@@ -562,10 +593,22 @@ class Registry:
         remaining clouds cheapest-first, then eligible holding locals, all
         outage-filtered. The caller walks it top-down until one answers.
         The OPERATOR'S CEILING applies here too: cloud never above the
-        selected model's price; a local selection drops cloud entirely."""
+        selected model's price; a local selection drops cloud entirely.
+        The @explore lane drops cloud too, and puts the least-tried
+        eligible local first: it exists to farm evidence."""
         def cap_ok(r):
             return not needs_tools or not r.caps or "tools" in r.caps
         max_price, allow_cloud = self.ceiling_cap(ceiling)
+        if ceiling and ceiling.strip().lower() == EXPLORE_LANE:
+            # the lane's stack: least-tried eligible locals first
+            locals_ = sorted(
+                [r for r in self.records.values() if r.kind == "local"
+                 and cap_ok(r) and local_is_eligible(r)
+                 and self.local_holds(r)],
+                key=lambda r: (r.trials, r.name))
+            return self._alive(locals_ or [min(
+                (r for r in self.records.values() if r.kind == "cloud"),
+                key=lambda r: r.price(), default=None)] if locals_ else [])
         clouds = [r for r in self.records.values() if r.kind == "cloud"
                   and cap_ok(r)]
         if not allow_cloud:

@@ -53,6 +53,8 @@ import numpy as np
 from .embed import OllamaEmbedder
 from .global_field import PEER_ASK_SIM_MIN
 from .rag import Compactor, RAGProxyHandler, _clip, _inject
+from .router import EXPLORE_LANE
+from .watch import MAX_WATCHES, WatchBoard
 
 CLOUD_DEFAULT_PRICE = 3.0   # an unknown cloud model's relative money/turn
 
@@ -185,6 +187,13 @@ def _state_report(srv) -> str:
     else:
         lines.append("- momentum: off (--momentum)")
     lines.append(f"- audit: {_audit_count(mem.audit_path)} records")
+    wb = getattr(srv, "_watch_board", None)
+    if wb is not None:
+        now = time.time()
+        live = sum(1 for w in wb.watches.values() if now >= w.dormant_until)
+        undel = sum(1 for e in wb.events if not e.get("delivered"))
+        lines.append(f"- watches: {live} live (cap {MAX_WATCHES}), "
+                     f"{undel} undelivered reports")
     if getattr(mem.store, "_cb", None) is not None:
         own = sum(1 for e in mem.store.exemplars
                   if (getattr(e, "origin", "") or mem.store.origin)
@@ -309,6 +318,7 @@ _FORGET_SOFT_FRAMES = ("forget everything about ", "wipe that from your memory: 
                        "wipe from your memory ", "erase what you learned about ",
                        "delete the memory of ")
 _FORGET_LIMIT = 40          # max candidates a single forget may drop
+_AGENT_FORGET_LIMIT = 12    # max cells an INDEX-FORM agent forget may drop
 
 # ---- the global-field layer (slice 1): operator promote/forget of the ------
 # commons (docs/global-field.md). Same covenant as learn/forget: the operator's
@@ -583,6 +593,25 @@ def _write_audit(mem, rec: dict) -> None:
               file=sys.stderr)
 
 
+def _watch_notify(srv, mem, ex_idx: int | None) -> None:
+    """Feed one learned/merged exemplar to the watch board (the spatial
+    triggers' gravity check). Never raises into the learning path."""
+    if ex_idx is None:
+        return
+    board = getattr(srv, "_watch_board", None)
+    if board is None:
+        return
+    try:
+        ex = mem.store.exemplars[ex_idx]
+        ev = board.on_learn(ex, ex_idx)
+        if ev is not None:
+            print(f"[watch] #{ex_idx} inside watch {ev['label']!r} "
+                  f"(sim {ev['sim']})", file=sys.stderr)
+    except Exception as e:
+        print(f"[opencode] watch-notify error: {_one_line(e)}",
+              file=sys.stderr)
+
+
 def _after_frame(q: str, frames: tuple[str, ...]) -> str:
     t = " ".join(q.split()).lower()
     for f in sorted(frames, key=len, reverse=True):
@@ -754,6 +783,106 @@ def _review_report(srv, verdict: str, slot: int) -> str:
             f"\n\n{_INTERCEPT_MARKER}")
 
 
+# ---- the watch layer (spatial triggers, docs: membrane/watch.py) -----------
+# The agent plants WATCHES -- (probe, radius) over the field's embedding space;
+# every NEW memory landing inside one is reported to the agent as a marked
+# [membrane-watch] block on its next model turn. Operator-given like every
+# other write: the canonical turns are handled pre-gate; a thought-echo of
+# these frames is report-only. Black-hole caps live in watch.py (count cap,
+# gravity collapse, dormancy); the board persists beside the field.
+
+_WATCH_CANON = "membrane: watch "
+_WATCHES_CANON = "membrane: watches"
+_WATCH_DROP = "membrane: drop watch "
+_WATCH_THOUGHT_HEAD = "[membrane-watch] your ask was read but NOT executed"
+
+
+def _watches_board(srv) -> WatchBoard | None:
+    b = getattr(srv, "_watch_board", None)
+    if b is None:
+        try:
+            fdir = Path(srv.membrane.field_path).parent
+            b = srv._watch_board = WatchBoard.load(
+                fdir / "watches.json", embedder=srv.membrane.embedder)
+        except Exception as e:
+            print(f"[opencode] watch board unavailable: {_one_line(e)}",
+                  file=sys.stderr)
+            b = srv._watch_board = None
+    if b is not None and b.embedder is None and srv.membrane.embedder is not None:
+        b.embedder = srv.membrane.embedder
+    return b
+
+
+def _is_watch_query(q: str) -> bool:
+    """Operator watch commands (set/list/drop), pre-gate like every write."""
+    low = " ".join((q or "").split()).lower()
+    if not low or "```" in low or len(low) > 400:
+        return False
+    return (low.startswith(_WATCH_CANON) or low.startswith(_WATCHES_CANON)
+            or low.startswith(_WATCH_DROP)
+            or low.rstrip("?!").strip() == "membrane: watch")
+
+
+def _watch_report_cmd(srv, q: str) -> str:
+    """Dispatch 'membrane: watch X' / 'membrane: watches' / 'membrane: drop watch ...'."""
+    board = _watches_board(srv)
+    if board is None:
+        return "[membrane-intercept] watch layer unavailable (no board)."
+    low = " ".join(q.split()).lower()
+    if low.startswith(_WATCH_DROP):
+        spec = low[len(_WATCH_DROP):].strip().rstrip("?.!")
+        n, note = board.drop_watch(spec)
+        what = f"dropped {n} watch(es): {note}" if n else f"nothing dropped: {note}"
+        _write_audit(srv.membrane, {"event": "watch", "op": "drop",
+                                    "spec": _clip(spec, 120), "result": what})
+        return (f"Membrane watches: {what}.\n\n" + _INTERCEPT_MARKER)
+    if low.startswith(_WATCHES_CANON):
+        return board.report() + "\n\n" + _INTERCEPT_MARKER
+    if low.rstrip("?!").strip() == "membrane: watch":
+        return (board.report() + "\n\nPlant with `membrane: watch <topic>`; "
+                "drop with `membrane: drop watch #N|all|<fragment>`.\n\n"
+                + _INTERCEPT_MARKER)
+    label = low[len(_WATCH_CANON):].strip().rstrip("?.!")
+    if not label:
+        return (board.report() + "\n\n" + _INTERCEPT_MARKER)
+    try:
+        w, evicted = board.set_watch(label, None)
+    except RuntimeError as e:
+        return (f"Membrane watch: cannot plant ({_one_line(e)}).\n\n"
+                + _INTERCEPT_MARKER)
+    _write_audit(srv.membrane, {"event": "watch", "op": "set",
+                                "label": _clip(label, 120), "wid": w.wid,
+                                "radius": round(w.radius, 2),
+                                "evicted": evicted})
+    ev = (f" (evicted {evicted!r} -- at the {MAX_WATCHES}-watch cap)"
+          if evicted else "")
+    return (f"Membrane watch #{w.wid} planted: {label!r}, radius "
+            f"{w.radius:.2f}. Every new memory landing inside reports to you "
+            f"as a [membrane-watch] block on your next model turn. "
+            f"Black-hole guard: at {MAX_WATCHES} watches max, and a watch "
+            f"that swallows too many arrivals collapses (radius shrink) or "
+            f"goes dormant. Board: `membrane: watches`.{ev}\n\n"
+            + _INTERCEPT_MARKER)
+
+
+def _watch_set_from_thought(srv, label: str) -> str:
+    """A THOUGHT-path watch ask: report-only for writes (the field is written
+    by operator turns), but LISTING is served. Mirrors learn/forget policy."""
+    board = _watches_board(srv)
+    low = " ".join((label or "").split()).lower()
+    if board is None:
+        return _WATCH_THOUGHT_HEAD + " the board is unavailable."
+    if low.startswith(("drop ", "all")):
+        return (_WATCH_THOUGHT_HEAD + " watch writes are operator turns: "
+                "re-ask as a user message 'membrane: drop watch ...'. "
+                "Current board:\n" + board.report())
+    if low and low not in ("watch", "watch?"):
+        return (_WATCH_THOUGHT_HEAD + " planting is an operator turn: "
+                "re-ask as a user message 'membrane: watch <topic>'. "
+                "Current board:\n" + board.report())
+    return _WATCH_THOUGHT_HEAD + "\n" + board.report()
+
+
 def _window_seconds(spec: str) -> float | None:
     """Parse a time-window forget spec -> seconds, or None when the spec is not
     a window. Forms: 'the last N minutes/hours/days', 'last 30m', 'this
@@ -865,6 +994,106 @@ def _forget_report(srv, spec: str) -> str:
     return "\n".join(lines) + _INTERCEPT_MARKER
 
 
+# ---- the agent's self-serve forget (index-form ONLY, executes) --------------
+# The thought intercept detects `membrane: forget ...` in my own prose. The
+# operator path (semantic forms, windows, "everything") stays human-only --
+# the 2026-08-31 overshoot (a semantic forget that wiped the hot field)
+# is the proof that free-text deletion from model prose is too blunt. What
+# the AGENT may do is drop cells it can SEE: explicit indexes parsed by a
+# strict token grammar, capped hard (AGENT_FORGET_LIMIT), audited with
+# origin 'agent'. Wordy asks never delete -- they PROPOSE: the reply lists
+# candidate indexes (top-K sim) and the agent re-asks in index form.
+
+def _parse_agent_forget(spec: str) -> list[int] | None:
+    """Strict index-form parser. Returns a deduped bounded index list, or
+    None when the spec is NOT pure index form (wordy -> the proposal path).
+    Accepts '#12', '12', '3-7', '3-7, 9' -- nothing else (no words, no
+    windows, no 'everything': those are the operator's forms for a reason)."""
+    toks = [t.strip().lstrip("#") for t in spec.replace(",", " ").split()]
+    if not toks:
+        return None
+    for t in toks:
+        if t.isdigit():
+            continue
+        if "-" in t:
+            parts = t.split("-", 1)
+            if not (len(parts) == 2 and parts[0].isdigit()
+                    and parts[1].isdigit()):
+                return None
+            continue
+        return None
+    idx: set[int] = set()
+    for t in toks:
+        if "-" in t:
+            a, b = (int(p) for p in t.split("-", 1))
+            idx.update(range(min(a, b), max(a, b) + 1))
+        else:
+            idx.add(int(t))
+    return sorted(idx)
+
+
+def _agent_forget(srv, spec: str) -> str:
+    """The thought-path forget executor. Index form -> DELETE (capped at
+    AGENT_FORGET_LIMIT; the remainder is named so the agent can re-ask in
+    batches). Anything wordier -> a PROPOSAL of candidate indexes (top-K
+    safe sim hits), never a deletion. Both replies carry the intercept
+    marker (the ask itself is never learned)."""
+    mem = srv.membrane
+    if mem.store is None or mem.embedder is None:
+        return ("[membrane-intercept] forget unavailable: the field store or "
+                "embedder is not resolved yet; retry once the field is up.")
+    idxs = _parse_agent_forget(spec)
+    if idxs is None:
+        # PROPOSAL ONLY: embed the spec, list sim>=0.55 SAFE candidates.
+        try:
+            vec = mem.embedder.embed([spec])[0]
+        except Exception:
+            vec = None
+        cands: list[tuple[int, float]] = []
+        if vec is not None:
+            qn = np.asarray(vec, dtype=float)
+            n = float(np.linalg.norm(qn))
+            if n > 1e-12:
+                for ex, sim in mem.store.top_k(qn / n, k=_FORGET_LIMIT):
+                    if sim >= 0.55 and ex.safe:
+                        i = mem.store.index_of(ex)
+                        if i is not None:
+                            cands.append((i, float(sim)))
+        if not cands:
+            return ("[membrane-intercept] forget proposal: nothing near that "
+                    "(sim >= 0.55, safe cells only). Nothing removed. Point "
+                    "at explicit indexes instead.")
+        lst = ", ".join(f"#{i} (sim {s:.2f})"
+                        for i, s in cands[:8])
+        return ("[membrane-intercept] wordy asks never delete from agent "
+                "prose. Nearest safe cells: " + lst +
+                ". To remove, re-ask in index form "
+                "(e.g. 'membrane: forget #3-7, 9'). Nothing removed.")
+    n0 = len(mem.store)
+    in_range = [i for i in idxs if 0 <= i < n0]
+    if not in_range:
+        return (f"[membrane-intercept] forget: none of those indexes exist "
+                f"(field has {n0} cells). Nothing removed.")
+    if len(in_range) > _AGENT_FORGET_LIMIT:
+        return (f"[membrane-intercept] forget: {len(in_range)} indexes exceed "
+                f"the agent cap ({_AGENT_FORGET_LIMIT}). Ask the operator for "
+                f"a larger delete. Nothing removed.")
+    shown = [(i, _clip(mem.store.exemplars[i].situation, 120))
+             for i in in_range]
+    removed = mem.store.forget(in_range)
+    mem.store.save(mem.field_path)
+    _write_audit(mem, {"event": "forget", "origin": "agent",
+                       "removed": removed,
+                       "field_size_before": n0,
+                       "field_size_after": len(mem.store),
+                       "spec": _clip(spec, 200)})
+    lines = ([f"[membrane-intercept] agent forget (index-form, no model "
+              f"call): removed {removed} of {n0}; field now "
+              f"{len(mem.store)}."]
+             + [f"- #{i}: {q}" for i, q in shown])
+    return "\n".join(lines)
+
+
 def _learn_report(srv, payload: str) -> str:
     mem = srv.membrane
     if not payload.strip() or not mem.embedder:
@@ -875,6 +1104,7 @@ def _learn_report(srv, payload: str) -> str:
         return ("Membrane learn (operator path): the field already holds that "
                 "(dedup) or the variety gate skipped it -- nothing new written."
                 "\n\n" + _INTERCEPT_MARKER)
+    _watch_notify(srv, mem, idx)
     _write_audit(mem, {"event": "operator-learn", "ex_idx": idx,
                        "tag": _LEARN_TAG, "field_size": len(mem.store),
                        "payload": _clip(payload, 400)})
@@ -1299,22 +1529,46 @@ def _is_thought_ask(q: str) -> bool:
         return False
     if low.startswith(_THOUGHT_CAPTURE_PREFIXES):
         return False
+    if low.startswith(_WATCH_CANON) or low.startswith(_WATCHES_CANON):
+        return True                # watch asks: report-only via the watch path
     return (_is_state_query(low) or _is_recall_query(low)
             or _is_learn_query(low) or _is_forget_query(low))
 
 
 def _thought_answer(srv, fam: str, text: str) -> str:
-    """The internal answer for a thought ask. Learn/forget from model prose
-    are REPORT-ONLY descriptions -- they never write, only tell the agent to
-    re-ask as the operator."""
+    """The internal answer for a thought ask. Learn stays report-only (the
+    field is written by operator turns only). FORGET EXECUTES -- but only
+    in the capped index form (_agent_forget: strict parser, AGENT_LIMIT
+    cap, 'origin: agent' audit); wordy forms fall through to a PROPOSAL.
+    An executing forget marks the delivery ledger HERE, at execution time:
+    the same assistant text re-arrives on every continuation, and after a
+    delete the store indexes SHIFT -- serving the re-send would re-delete
+    by stale numbers. Proposals never mark (idempotent to re-propose)."""
     if fam == "state":
         return _state_report(srv)
     if fam == "recall":
         return _recall_report(srv, _recall_topic(text))
+    if " ".join(text.split()).lower().startswith((_WATCH_CANON, _WATCHES_CANON)):
+        return _watch_set_from_thought(srv,
+                                       " ".join(text.split()).lower()
+                                       [len(_WATCH_CANON):].strip())
+    if fam == "forget":
+        spec = _after_frame(text, (_FORGET_CANON,))
+        if not spec:
+            t = text.strip()
+            spec = t[len("membrane:"):].strip() \
+                if t.lower().startswith("membrane:") else t
+        answer = _agent_forget(srv, spec)
+        if "Nothing removed" not in answer and "nothing" not in answer:
+            ledger = getattr(srv, "_served_thought_asks", None)
+            if ledger is None:
+                ledger = srv._served_thought_asks = {}
+            ledger[hash(("forget", " ".join(text.split()).lower()))] = True
+        return answer
     return (f"[membrane-intercept] your {fam} ask was read but NOT executed: "
             "the field is only written by operator turns. Re-ask with the "
-            "canonical form or prefixed with 'model:' to force the model "
-            "path.")
+            "canonical form, or use index form ('membrane: forget #3-7') "
+            "to delete cells yourself.")
 
 
 def _assistant_thought_asks(srv, body: dict) -> list:
@@ -1334,9 +1588,13 @@ def _assistant_thought_asks(srv, body: dict) -> list:
         t = " ".join(c.split())
         if not _is_thought_ask(t):
             continue
-        fam = ("state" if _is_state_query(c) else
-               "recall" if _is_recall_query(c) else
-               "learn" if _is_learn_query(c) else "forget")
+        t_low = t.lower()
+        if t_low.startswith((_WATCH_CANON, _WATCHES_CANON)):
+            fam = "watch"
+        else:
+            fam = ("state" if _is_state_query(c) else
+                   "recall" if _is_recall_query(c) else
+                   "learn" if _is_learn_query(c) else "forget")
         if ledger.get(hash((fam, t.lower()))):
             continue
         out.append((fam, t))
@@ -1579,6 +1837,7 @@ def _capture(mem, label: str, situation: str, action: str, min_len: int = 1) -> 
         idx = mem.learn_pair(situation, action)
         if idx is not None:
             print(f"[capture] {label} -> exemplar #{idx}", file=sys.stderr)
+            _watch_notify(getattr(mem, "server_ref", None), mem, idx)
         else:
             print(f"[capture] {label} skipped (guard)", file=sys.stderr)
     except Exception as e:
@@ -1703,6 +1962,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._v1_chat(); return
         if path == "/v1/embeddings":
             self._v1_embeddings(); return
+        if path == "/membrane/delegate":
+            self._membrane_delegate(); return
         if path.startswith("/membrane/"):
             self._json_out({"error": "read-only; GET /membrane/state"}); return
         super().do_POST()
@@ -1735,6 +1996,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
     # ---- /v1/models: internal (Ollama's list, embed models filtered out) ----
     def _v1_models(self) -> None:
         ids = _chat_capable_models(self.server.backend)
+        ids = ids + [EXPLORE_LANE]          # the sentinel evidence-farm lane
         self._json_out({"object": "list",
                         "data": [{"id": m, "object": "model",
                                   "owned_by": "membrane->ollama"} for m in ids]})
@@ -1804,6 +2066,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # (unless pinned): the follow-chat judge reads srv.compact_model live
         if srv.compact_follows_chat:
             srv.compact_model = model
+        # the operator's ceiling for delegated work: whatever model opencode
+        # selected is the SESSION's law -- delegate requests may not raise it
+        srv.op_ceiling = model
         # ---- the embed role: resolve lazily (maybe ollama gained a model);
         # block the chat with a clear 503 when nothing can embed.
         if mem.embedder is None and self._resolve_embedder(model) is None:
@@ -1872,6 +2137,14 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             text = _review_report(srv, v, slot)
             print(f"[opencode] intercept (review-{v} {slot}): "
                   f"{q_early[:60]!r}", file=sys.stderr)
+            self._serve_intercept_answer(model, text,
+                                         bool(body.get("stream", False)))
+            return
+        # ---- the watch layer (spatial triggers): operator set/list/drop,
+        # handled pre-gate like every other operator write.
+        if not model_escaped and _is_watch_query(q_early):
+            text = _watch_report_cmd(srv, q_early)
+            _print_intercept("watch", q_early)
             self._serve_intercept_answer(model, text,
                                          bool(body.get("stream", False)))
             return
@@ -2025,6 +2298,21 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 (fam, _thought_answer(srv, fam, t)) for fam, t in thought_asks])
             if t_block:
                 up["messages"] = _inject(up["messages"], t_block)
+        # watch delivery: undelivered [membrane-watch] reports ride on model
+        # turns (marked served only after _v1_deliver succeeds, same covenant
+        # as thought asks). Intercepted turns skip this -- their answer IS the
+        # delivery; the report rides again on the next real model turn.
+        wboard = getattr(srv, "_watch_board", None)
+        w_events = None
+        if wboard is not None:
+            try:
+                wr = wboard.take_report()
+            except Exception as w_e:
+                print(f"[opencode] watch-report error: {w_e}", file=sys.stderr)
+                wr = None
+            if wr is not None:
+                w_events, w_block = wr
+                up["messages"] = _inject(up["messages"], w_block)
         # slice 4: the live peer ask. On an escalation (the local field has
         # nothing certain), ask live siblings' local fields -- bounded
         # fan-out, tight timeout (a hung peer must not stall a turn). A hit
@@ -2084,6 +2372,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._v1_deliver(up, raw, query, vec, verdict, ctx)
             if thought_asks:
                 _serve_thoughts_served(srv, thought_asks)
+            if w_events is not None:
+                wboard.mark_served(w_events)
         except Exception as e:
             print(f"[opencode] backend error, no field write: {e}", file=sys.stderr)
             self._forward_raw(raw)
@@ -2282,6 +2572,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             except Exception as e:
                 print(f"[opencode] learn error (response already served): {e}",
                       file=sys.stderr)
+        # the watch layer: report new memories landing inside planted watches
+        _watch_notify(srv, mem, ex_idx)
         # total capture: the model's intent + machinery + thought, as plain Q/A.
         try:
             if calls:
@@ -2393,6 +2685,95 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             except Exception:
                 pass
         self._json_out(out)
+
+    # ---- /membrane/delegate: model-pointed work, router-disposed ------------
+    def _membrane_delegate(self) -> None:
+        """A model (or subagent) hands a subtask to membrane; the ROUTER
+        disposes. The caller never names the target: the task routes under
+        the operator's ceiling like any turn, on the shared ladder. A
+        caller may ASK for the exploration lane (@explore) -- evidence
+        farming is a first-class lane, not a chat hijack. Depth 1: a
+        delegated turn is a leaf (no nested delegation). Capture: the
+        exchange lands as a 'delegate' exemplar, tagged, so model-to-model
+        chatter stays separable from human chat."""
+        srv = self.server
+        mem = srv.membrane
+        body = self._json_body()
+        task = str(body.get("task") or "").strip()
+        if not task:
+            self._json_err_raw(400, "task required"); return
+        if getattr(srv, "_delegate_busy", False):
+            self._json_err_raw(429, "delegate busy (depth guard)"); return
+        router = getattr(srv, "router", None)
+        if router is None:
+            self._json_err_raw(503, "router off; no delegation"); return
+        lane = str(body.get("lane") or "").strip().lower()
+        # THE OPERATOR'S CEILING IS NOT NEGOTIABLE: the caller may request
+        # the explore lane (deliberate farming) but never raise the ceiling
+        # above the operator's opencode pick. The request's own "ceiling"
+        # field is ignored -- a model cannot mint authority.
+        ceiling = str(getattr(srv, "op_ceiling", "") or "").strip() or None
+        if lane == "explore":
+            ceiling = EXPLORE_LANE
+        situ = None
+        if mem.embedder is not None:
+            try:
+                situ = mem.embedder.embed([task[:512]])[0]
+            except Exception:
+                situ = None
+        srv._delegate_busy = True
+        try:
+            rec, info = router.route(situ, urgency=float(body.get("urgency")
+                                                        or 1.0),
+                                     needs_tools=False, ceiling=ceiling)
+        except Exception as e:
+            srv._delegate_busy = False
+            self._json_err_raw(500, f"router error: {e}"); return
+        if rec is None:
+            srv._delegate_busy = False
+            self._json_out({"ok": False, "reason": info.get("reason"),
+                            "field_only": True}); return
+        model = rec.name
+        messages = [{"role": "system",
+                     "content": "You are a delegated subtask worker. "
+                                "Answer the task directly, tersely."},
+                    {"role": "user", "content": task[:8000]}]
+        rq = urllib.request.Request(
+            srv.backend + "/v1/chat/completions",
+            data=json.dumps({"model": model, "messages": messages,
+                             "stream": False}).encode(),
+            method="POST", headers={"Content-Type": "application/json"})
+        t0 = time.monotonic()
+        try:
+            with urllib.request.urlopen(rq, timeout=300) as resp:
+                ans = json.loads(resp.read())
+        except Exception as e:
+            router.note_outage(model, f"delegate: {str(e)[:120]}")
+            srv._delegate_busy = False
+            self._json_err_raw(502, f"delegated rung down: {e}"); return
+        dt = time.monotonic() - t0
+        srv._delegate_busy = False
+        content = str(((ans.get("choices") or [{}])[0].get("message") or {})
+                      .get("content") or "").strip()
+        survived = bool(content)
+        try:
+            router.note_latency(model, dt)
+            if info.get("kind") == "cloud":
+                router.record_spend(float(info.get("price")
+                                          or CLOUD_DEFAULT_PRICE))
+            router.note_outcome(model, situ, survived=survived)
+        except Exception:
+            pass
+        if survived and mem.embedder is not None:
+            try:
+                _capture(mem, "delegate", f"delegated: {_clip(task, 200)}",
+                         _clip(content, 1024), min_len=0)
+            except Exception:
+                pass
+        self._json_out({"ok": survived, "model": model,
+                        "reason": info.get("reason"), "explored":
+                        bool(info.get("explored")), "latency_s": round(dt, 3),
+                        "answer": content[:4000]})
 
     # ---- /membrane/state: the JSON instrument ----
     def _membrane_state(self) -> None:
@@ -2743,6 +3124,20 @@ def main() -> None:
     # the append-ordered store means 'this session' / 'the last hour' (the
     # time-window forget) resolves to everything appended after boot
     srv._boot_field_size = len(mem.store)
+
+    # ---- the watch layer (spatial triggers, membrane/watch.py) ----
+    # Probes live beside the field (<field-dir>/watches.json); events are
+    # RAM-only (a restart loses undelivered reports -- same as thought asks).
+    srv._watch_board = None
+    try:
+        _wdir = Path(args.field).parent
+        srv._watch_board = WatchBoard(_wdir / "watches.json")
+        _n_w = len(srv._watch_board.watches)
+        print(f"[opencode] watches: {_n_w} planted "
+              f"(cap {MAX_WATCHES})", file=sys.stderr)
+    except Exception as e:
+        print(f"[opencode] watch layer disabled ({_one_line(e)})",
+              file=sys.stderr)
     if args.compact_every > 0:
         srv.compactor = Compactor(srv, idle=args.compact_every)
         srv.compactor.start()
@@ -2872,6 +3267,7 @@ def main() -> None:
           f"  state/math: {'answered internally from the live field' if srv.state_intercept else 'off'}\n"
           f"  thoughts: {'agent asks answered as marked context' if srv.thought_intercept else 'off'}\n"
           f"  global field: {'on (' + str(len(srv.global_field.store)) + ' notes)' if srv.global_field else 'off'}\n"
+          f"  watches: {'on (' + str(len(srv._watch_board.watches)) + ' planted, cap ' + str(MAX_WATCHES) + ')' if getattr(srv, '_watch_board', None) is not None else 'off'}\n"
           f"  peers: {len(srv.peers.livelist()) if getattr(srv, 'peers', None) else 0} live\n"
           f"  replay: {'sim>=' + format(srv.replay_sim, '.2f') + ' -> stored answer, no model call' if srv.replay_sim > 0 else 'off (pure observer)'}\n"
           f"  archive: {'on (cold tier after each compaction)' if getattr(srv, 'archive', False) else 'off (--archive)'}\n"

@@ -24,15 +24,28 @@ dumbest models": rolled the router back, then rebuilt it forward.
 6. Flags: `--disable-llm-router` (kill switch), `--prefer-local`,
    `--max-local-gib`. 22/22 router tests pass.
 
-## Verify after restart
+## Verify after restart — DONE 2026-08-31
 
-- boot line shows `router: ... candidates, cloud-floor`
-- escalation log shows `cloud-floor` reasons, never `cost-floor: local first`
-- `field state` shows the compat screen counts
-- pick a local model in opencode -> confirm zero cloud routes
+- boot line shows `router: on (36 candidates, cloud-floor)` (opencode.log:5002)
+- all `cost-floor: local first` lines are pre-restart; post-restart log shows
+  only `cloud-floor` + one legit `exploring unsampled local` (eps-explore,
+  trials=0 eligible coder model)
+- operator ceiling exercised live: cloud pick -> cloud-floor; local pick ->
+  "no cloud available: best eligible local", zero cloud routes
+- 22/22 router tests pass (run with ~/.membrane/venv python, unittest)
 
 ## Next steps (in order)
 
+0. **Landed 2026-08-31 (needs restart)**: explore hijack closed — chat turns
+   never eps-explore while a cloud floor holds (test_offline_box_still_explores
+   keeps the offline covenant); new `@explore` sentinel lane (subagents point
+   at it, least-tried eligible local, never cloud); `/membrane/delegate`
+   endpoint (model-pointed work, router-disposed: caller's ceiling ignored,
+   operator's opencode pick is law, depth-1 guard, outcomes + latency + spend
+   recorded, capture tagged `delegation`). 34/34 tests pass. THEN: forget the
+   qwen-coder hijack junk exemplars (obj['response'] + system-prompt-leak),
+   verify boot line, and confirm chat routes never show
+   `exploring unsampled local` while glm holds the floor.
 1. **Smartness metric**: outcome-conditioned per-situation fit — rank models
    by earned competence direction on the query topic, not scalar win-rate.
 2. **Capture-machinery quota**: tool/result captures are ~95% of the store;

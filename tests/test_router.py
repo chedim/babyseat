@@ -239,6 +239,68 @@ class TestReversedLadder(unittest.TestCase):
         self.assertNotEqual(best and best.kind, "cloud")
 
 
+class TestExploreLane(unittest.TestCase):
+    """The @explore sentinel: deliberate evidence farming, never a hijack."""
+
+    def test_lane_routes_least_tried_eligible_local(self):
+        reg = _Reg("http://x", tags=TAGS, explore=0.0)
+        reg.records["deepseek-r1:8b"].trials = 3
+        reg.records["bakllava:latest"].trials = 0   # ineligible: screened out
+        best, info = reg.route(_vec(1.0), ceiling="@explore")
+        self.assertEqual(best.name, "deepseek-r1:8b")
+        self.assertTrue(info["explored"])
+        self.assertIn("explore-lane", info["reason"])
+
+    def test_lane_never_routes_cloud(self):
+        for _ in range(10):
+            best, info = reg = _Reg("http://x", tags=TAGS) \
+                .route(_vec(0.2), ceiling="@explore")
+            self.assertIsNotNone(best)
+            self.assertEqual(best.kind, "local")
+
+    def test_lane_never_cold_loads_oversize(self):
+        reg = _Reg("http://x", tags=TAGS, max_local_gib=12.0)
+        best, _ = reg.route(_vec(1.0), ceiling="@explore")
+        # qwen2.5-coder:32b (18.5GB) may NEVER be the lane's pick here:
+        # the only holding local is deepseek-r1:8b
+        self.assertEqual(best.name, "deepseek-r1:8b")
+
+    def test_lane_no_eligible_local_reports_honestly(self):
+        reg = _Reg("http://x", tags={"models": [
+            {"name": "karanchopda333/whisper:latest", "size": 2**30,
+             "capabilities": ["completion", "tools"]}]})
+        best, info = reg.route(_vec(1.0), ceiling="@explore")
+        self.assertIsNone(best)
+        self.assertIn("explore-lane", info["reason"])
+
+
+class TestChatExploreGuard(unittest.TestCase):
+    """A chat turn NEVER gambles while a cloud floor exists."""
+
+    def test_no_explore_while_cloud_floor_holds(self):
+        reg = _Reg("http://x", tags=TAGS, explore=1.0)   # dice ALWAYS in
+        for _ in range(40):
+            best, info = reg.route(_vec(0.3), ceiling="glm-5.3-flash:cloud")
+            self.assertEqual(best.name, "glm-5.3-flash:cloud")
+            self.assertFalse(info.get("explored"))
+
+    def test_offline_box_still_explores(self):
+        reg = _Reg("http://x", tags=TAGS, explore=1.0, cloud_budget=0.0)
+        best, info = reg.route(_vec(0.3))
+        self.assertEqual(best.kind, "local")
+        self.assertTrue(info.get("explored"))
+
+    def test_lane_ignores_operator_cloud_ceiling(self):
+        # the lane is the operator's deliberate farm: even a cloud pick in
+        # opencode does not stop a subagent pointed at @explore (but the
+        # ladder still caps CHAT routes under the same pick).
+        reg = _Reg("http://x", tags=TAGS, explore=0.0)
+        best, _ = reg.route(_vec(1.0), ceiling="claude-opus:cloud")
+        self.assertEqual(best.name, "glm-5.3-flash:cloud")  # capped at price
+        best, _ = reg.route(_vec(1.0), ceiling="@explore")
+        self.assertEqual(best.kind, "local")
+
+
 class TestOutcomeRecord(unittest.TestCase):
     def test_win_walks_competence_and_counts(self):
         reg = _Reg("http://x", tags=TAGS)
