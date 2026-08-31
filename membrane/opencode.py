@@ -2805,7 +2805,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         route = verdict.get("route") or {}
         routed_model = route.get("route")
         orig_model = str(up.get("model") or "membrane")
-        t0 = time.monotonic() if routed_model else None
+        t0 = time.monotonic()
 
         def _open_backend(model_name: str):
             """POST the turn to Ollama. On a rung DOWN (out of tokens /
@@ -2979,6 +2979,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 print(f"[opencode] router bookkeeping error: {e}",
                       file=sys.stderr)
         ex_idx = None
+        # the compactor's traffic signal: when the last real model forward
+        # landed and how long it took (the duty loop reads both as "busy
+        # now"; consolidate.py's controller analogue for the chat lane).
+        srv._last_fwd_dt = time.time()
+        srv._last_fwd_dur = time.monotonic() - t0
         # learn text turns; a pure tool-call turn has no human prose to ground
         # future turns on and the gate may have already learned from its user
         # text -- so only text-bearing answers are learned here.
@@ -3330,7 +3335,19 @@ def main() -> None:
                     help="pin the demotion judge model (default: follows the "
                          "model selected in opencode)")
     ap.add_argument("--compact-every", type=float, default=90.0, metavar="S",
-                    help="seconds between cortex compaction cycles (0 disables)")
+                    help="base seconds between cortex compaction cycles "
+                         "(0 disables); the duty loop stretches this under "
+                         "load and the growth trigger skips quiet periods")
+    ap.add_argument("--compact-cpu-target", type=float, default=0.10,
+                    dest="compact_cpu_target", metavar="FRAC",
+                    help="target fraction of wall time the compactor may "
+                         "spend while traffic is live (the consolidate.py "
+                         "closed loop; 0 = fixed-interval mode)")
+    ap.add_argument("--compact-growth-frac", type=float, default=0.25,
+                    dest="compact_growth_frac", metavar="FRAC",
+                    help="compact only after the field grew this fraction "
+                         "of its size since the last note (min "
+                         "compact-min-field raw turns; 0 = every interval)")
     ap.add_argument("--compact-min-field", type=int, default=12)
     ap.add_argument("--compact-cluster-min", type=int, default=4)
     ap.add_argument("--compact-cluster-max", type=int, default=8)
@@ -3568,6 +3585,8 @@ def main() -> None:
                                   int(args.compact_cluster_max))
     srv.compact_cluster_sim = max(0.0, min(1.0, float(args.compact_cluster_sim)))
     srv.compact_mem_chars = max(64, int(args.compact_mem_chars))
+    srv.compact_cpu_target = max(0.0, min(1.0, float(args.compact_cpu_target)))
+    srv.compact_growth_frac = max(0.0, float(args.compact_growth_frac))
     srv.compact_follows_chat = args.compact_model is None
     srv.compact_model = args.compact_model or model or "granite3.3:8b"
     srv.judge_follows_chat = (not args.no_judge) and args.judge_model is None

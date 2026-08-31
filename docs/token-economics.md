@@ -26,11 +26,18 @@ field then *answers without asking a model again*:
    chat-escalations replayed (~180 tokens); the design intent is that a
    month-old field replays the boilerplate (the tenth "run the tests the same
    way" costs nothing).
-3. **Compaction (fewer tokens per turn).** The idle-time Compactor distills
-   clusters of retired raw turns into one note; later turns inject the small
-   note instead of the raw exchanges on every single request. Measured: two
-   compaction cycles on this repo distilled 8 exchanges into 2 notes — a
-   per-turn context saving paid every call, forever after.
+3. **Compaction (fewer tokens per turn).** The Compactor distills clusters of
+   retired raw turns into one note; later turns inject the small note instead
+   of the raw exchanges on every single request. Measured: two compaction
+   cycles on this repo distilled 8 exchanges into 2 notes — a per-turn
+   context saving paid every call, forever after. Governed by two default-on
+   dials (the consolidate.py closed loop, chat-lane edition):
+   `--compact-growth-frac` 0.25 runs a cycle only after the field grew ~25%
+   since the last note (a quiet field sleeps); `--compact-cpu-target` 0.10
+   stretches the interval up to 8x when live traffic is streaming, so
+   compaction work backs off mid-task and digs in while idle
+   (`--compact-every` 90s stays the base cadence; `--compact-cpu-target 0`
+   or `--compact-growth-frac 0` reverts each dial).
 4. **Self-author mode (0 tokens per turn).** The extreme dial: the cell
    *recites* its nearest lived scene instead of calling the model, and the
    genesis cache amortizes one LLM call over ~8 world scenes (the virtual

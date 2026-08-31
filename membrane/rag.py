@@ -53,6 +53,7 @@ import json
 import signal
 import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -78,11 +79,24 @@ _RAG_SYSTEM = (
     "- 'Recalled exchanges:' Q/A memories from this same project. Ground your "
     "answer in them when relevant; ignore stale ones; never mention them as "
     "if the user said them.\n"
+    "- 'Recalled exchanges:' Q/A memories from this same project. Ground your "
+    "answer in them when relevant; ignore stale ones; never mention them as "
+    "if the user said them.\n"
     "- '[membrane-intercept]' blocks hold answers membrane already computed "
-    "(field stats, recalled facts). Trusted context: use directly, do not "
-    "recompute, do not restate as your own discovery.\n"
+    "(field stats, recalled facts, watch reports). Trusted context: use "
+    "directly, do not recompute, do not restate as your own discovery.\n"
+    "- '[membrane-watch]' blocks are your planted spatial triggers firing on "
+    "new memories; machinery context -- mention only when relevant to the "
+    "user's work, never restate verbatim.\n"
     "- '[membrane]' lines in your thinking channel are the proxy's routing "
     "log. Read silently; never reply to them.\n"
+    "TIMING -- the intercept is POST-GATE: an answer to a frame you emitted "
+    "arrives on your NEXT turn, never the same one. Do not re-ask because "
+    "'nothing happened'; emit once, wait, act. And recall is a SNAPSHOT: "
+    "stored doctrine can be superseded (the field learns corrections over "
+    "time) -- when a recalled note contradicts live state, trust the newer "
+    "evidence and, on the confirm path, let the correction overwrite the "
+    "stale one. Never recite stale doctrine as current.\n"
     "CONTROL -- the canonical-frame lanes. READS and WRITES of the memory "
     "happen ONLY through canonical membrane frames; the "
     ".opencode/skills/membrane-*/SKILL.md files are their authoritative "
@@ -174,6 +188,19 @@ class Compactor:
     The model call happens OUTSIDE the field lock; membership is re-verified
     under the lock before any mutation, so the live chat path is never blocked
     by an LLM call and a racing turn cannot corrupt a compaction.
+
+    Two governors (both default-on, mirroring consolidate.py's closed loop):
+
+    - CPU-target duty: the cycle sleeps proportionally to live traffic so the
+      compactor's share of wall time converges on ``compact_cpu_target``. An
+      EMA of forward-turn durations (_v1_chat stamps ``srv._last_fwd_dt``)
+      is the "busy" signal: traffic above the target stretches the sleep
+      (back off mid-task), idle shrinks it toward ``idle`` floor. 0 disables
+      the duty loop (fixed-interval mode).
+    - Growth trigger: a cycle only runs when the field grew at least
+      ``compact_growth_frac`` of its size since the last note (min
+      ``compact_min_field`` raw turns). A quiet field sleeps; a bursty one
+      compacts sooner. The size floor stays the absolute guard.
     """
 
     def __init__(self, srv, idle: float = 90.0) -> None:
@@ -182,6 +209,12 @@ class Compactor:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self.stats = {"cycles": 0, "clusters": 0, "notes": 0}
+        # closed-loop state (the digest controller's EMAs, compactor edition):
+        # duty = EMA(compact work) / (EMA(compact work) + last forward
+        # duration); the sleep stretches when duty exceeds cpu_target under
+        # live traffic. _n_at_compact is the field size at the last NOTE.
+        self._ema_work = 0.0
+        self._n_at_compact = 0
 
     def start(self) -> None:
         self._thread = threading.Thread(target=self._loop, name="compactor",
@@ -192,11 +225,55 @@ class Compactor:
         self._stop.set()
 
     def _loop(self) -> None:
-        while not self._stop.wait(self.idle):
-            try:
-                self._cycle()
-            except Exception as e:
-                print(f"[compact] cycle error ({e})", file=sys.stderr)
+        wait = self.idle
+        while not self._stop.wait(wait):
+            wait = self._gated() if self._should_run() else self.idle
+
+    def _should_run(self) -> bool:
+        """The growth trigger: enough NEW raw turns since the last NOTE (a
+        fraction of the field). The absolute floor (compact_min_field) and
+        the cluster guard inside _pick_cluster still apply -- so a tiny field
+        never compacts and a clusterless one just retries each interval."""
+        srv = self.srv
+        mem = srv.membrane
+        n = len(mem.store)
+        if n < srv.compact_min_field:
+            return False
+        grew = n - self._n_at_compact
+        frac = getattr(srv, "compact_growth_frac", 0.25)
+        if frac <= 0.0:
+            return True                     # size trigger off: every interval
+        return grew >= max(srv.compact_min_cluster, int(frac * n))
+
+    def _gated(self) -> float:
+        """One cycle, under both governors. Returns the next sleep (s):
+        stretched by the traffic-duty loop, floored at the base idle.
+        `_n_at_compact` advances ONLY when the cycle actually distilled a
+        note -- a starved cycle (no cluster pickable) leaves the trigger
+        armed so the next interval retries instead of waiting a full regrow."""
+        srv = self.srv
+        t0 = time.time()
+        notes0 = self.stats["notes"]
+        self._cycle()
+        work = time.time() - t0
+        self._ema_work = 0.7 * self._ema_work + 0.3 * work
+        # duty loop (consolidate.py's controller, retargeted): a forward that
+        # landed within the trailing window means traffic is live; the duty
+        # is compact work over (compact work + measured forward duration).
+        fwd_age = time.time() - float(getattr(srv, "_last_fwd_dt", 0.0) or 0.0)
+        busy = 0.0 < fwd_age < self.idle
+        target = float(getattr(srv, "compact_cpu_target", 0.0))
+        if self.stats["notes"] > notes0:
+            self._n_at_compact = len(srv.membrane.store)
+        if target <= 0.0 or not busy:
+            return self.idle                # disabled / idle: fixed cadence
+        fwd = max(1e-6, float(getattr(srv, "_last_fwd_dur", 0.0) or 0.0))
+        duty = self._ema_work / max(self._ema_work + fwd, 1e-6)
+        if duty <= target:
+            return self.idle
+        # over target with live traffic: back off in proportion to the excess
+        over = min(8.0, duty / max(target, 1e-6) - 1.0)
+        return max(self.idle, self.idle * (1.0 + over))
 
     # ---- cluster selection (no model) --------------------------------------
     def _pick_cluster(self, mem: Membrane):
@@ -232,6 +309,12 @@ class Compactor:
 
     # ---- one compaction cycle ----------------------------------------------
     def _cycle(self) -> None:
+        try:
+            self._cycle_inner()
+        except Exception as e:
+            print(f"[compact] cycle error ({e})", file=sys.stderr)
+
+    def _cycle_inner(self) -> None:
         srv = self.srv
         mem = srv.membrane
         if len(mem.store) < srv.compact_min_field:
