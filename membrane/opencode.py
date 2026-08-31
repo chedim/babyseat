@@ -77,23 +77,31 @@ _STATE_STRONG = ("field state", "field stats", "system state",
 _STATE_QSTARTS = ("what", "how", "show", "tell", "give", "print", "report",
                   "dump", "status")
 _STATE_EXACT = ("status", "state", "field state", "field stats", "stats",
-                "memory", "membrane state")
+                "memory", "membrane state", "membrane")
+# whole-turn asks that are exactly about the membrane itself. "membrane" merely
+# MENTIONED in a longer sentence is never enough -- in this repo nearly every
+# turn says "membrane", so a substring rule would hijack normal questions.
+_MEMBRANE_DIRECT = ("the membrane", "what is the membrane",
+                    "what's the membrane", "whats the membrane",
+                    "how is your memory", "how's your memory",
+                    "hows your memory")
 
 
 def _is_state_query(q: str) -> bool:
     """Conservative: the turn asks ABOUT the membrane itself (its math/state,
     not the codebase) -> answered internally from the live field. Guards:
-    question-shaped (a '?' or a question/imperative opener), no code fence,
-    short (a state ask is short) -- so ordinary coding prose never trips it."""
+    question-shaped (a '?' or a question/imperative opener) except for bare
+    exact asks ("status", "field state"), no code fence, short (a state ask is
+    short) -- so ordinary coding prose never trips it."""
     low = " ".join((q or "").split()).lower()
     if not low or "```" in low or len(low) > 400:
         return False
+    bare = low.rstrip("?!").strip()
+    if bare in _STATE_EXACT or bare in _MEMBRANE_DIRECT:
+        return True
     if not ("?" in low or low.startswith(_STATE_QSTARTS)):
         return False
-    if any(m in low for m in _STATE_STRONG):
-        return True
-    # bare "membrane" only as a short direct question ("what's the membrane?")
-    return ("membrane" in low and len(low) <= 120) or low in _STATE_EXACT
+    return any(m in low for m in _STATE_STRONG)
 
 
 def _state_report(srv) -> str:
