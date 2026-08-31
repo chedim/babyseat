@@ -139,7 +139,32 @@ def _state_report(srv) -> str:
                      f"model={srv.compact_model}  every={srv.compactor.idle:.0f}s")
     else:
         lines.append("- cortex/compactor: disabled")
+    if getattr(srv, "archive", False):
+        n_arch = len(mem.store.archived(mem.field_path))
+        lines.append(f"- cold tier: {n_arch} archived turns "
+                     f"(session archived {getattr(srv, 'archived_total', 0)}); "
+                     f"hot field stays small, raw turns stay queryable")
+    else:
+        lines.append("- cold tier: off (--archive)")
+    if getattr(srv, "momentum", False):
+        lines.append(f"- momentum: on (alpha={srv.momentum_alpha}, "
+                     f"decay={srv.momentum_decay})")
+    else:
+        lines.append("- momentum: off (--momentum)")
     lines.append(f"- audit: {_audit_count(mem.audit_path)} records")
+    if getattr(mem.store, "_cb", None) is not None:
+        own = sum(1 for e in mem.store.exemplars
+                  if (getattr(e, "origin", "") or mem.store.origin)
+                  == mem.store.origin)
+        glo = sum(1 for e in mem.store.exemplars
+                  if getattr(e, "scope", "") == "global")
+        forn = len(mem.store.exemplars) - own - glo
+        lines.append(f"- shared store: couchbase ({mem.store._cb_bucket}) | "
+                     f"origin {mem.store.origin} | own {own} + commons {glo}"
+                     + (f" + foreign {forn} (poked through)" if forn else ""))
+    else:
+        lines.append(f"- shared store: off (JSON field; "
+                     f"MEMBRANE_STORE=couchbase to share across membranes)")
     gf = getattr(srv, "global_field", None)
     if gf is not None:
         st = gf.merge_ledgers()
@@ -1850,6 +1875,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # fully handled above, pre-gate) ----
         q = _last_user_text(body)
         ctx = self._memory_block(vec)
+        self.momentum_update(vec, query)
         # pending human reviews ride along as a system-level notice: the model
         # is told to ASK the user via its native question tool. The user's
         # answer arrives as the next turn and is matched by the pre-gate
@@ -2259,6 +2285,21 @@ def main() -> None:
     ap.add_argument("--compact-model", default=None, metavar="MODEL",
                     help="pin the cortex/distillation model (default: follows "
                          "the model selected in opencode)")
+    ap.add_argument("--archive", dest="archive", action="store_true",
+                    help="after each compaction, move the retired raw turns "
+                         "OUT of the hot field into the cold tier "
+                         "(<field>.archive.jsonl, or couchbase collection "
+                         "exemplars_archive when MEMBRANE_STORE=couchbase). "
+                         "The note stays in the field; the raw turns stay "
+                         "queryable via 'membrane: query the field'.")
+    ap.add_argument("--no-archive", dest="archive", action="store_false")
+    ap.add_argument("--momentum", dest="momentum", action="store_true",
+                    help="momentum-skewed retrieval (cortex's laser projector): "
+                         "a frictional EMA of recent turn embeddings shifts the "
+                         "query vector before top_k, biasing recall toward the "
+                         "live working context (--no-momentum for exact recall).")
+    ap.add_argument("--no-momentum", dest="momentum", action="store_false")
+    ap.set_defaults(archive=True, momentum=True)
     ap.add_argument("--replay-sim", type=float, default=0.97, metavar="SIM",
                     help="cosine above which an ACT verdict replays the stored "
                          "answer with NO model call (the token saver). "
@@ -2448,6 +2489,14 @@ def main() -> None:
         srv.compactor.start()
     else:
         srv.compactor = None
+    srv.archive = bool(args.archive)
+    srv.archived_total = 0
+    # the momentum EMA (feature 2): updated on every gated turn in _v1_chat,
+    # consumed by _memory_block; alpha/friction follow cortex's geometry.py.
+    srv.momentum = bool(args.momentum)
+    srv.momentum_vec = None          # unit EMA of recent query embeddings
+    srv.momentum_alpha = 1.2         # skew weight (geometry.py's alpha_weight)
+    srv.momentum_decay = 0.95        # friction (geometry.py's decay_factor)
 
     # resolve the embedder AT BOOT: the field must be able to embed before a
     # single turn (a fresh field also needs nothing, but the resolver proves
@@ -2468,6 +2517,15 @@ def main() -> None:
                 srv.resolved_embed_name = cand
                 print(f"[opencode] embedder resolved: {cand}", file=sys.stderr)
                 break
+
+    # the veil's poke-through, now that the embedder is proven: adopt foreign
+    # memories whose situation is near-identical to one I hold (bounded pass).
+    if mem.embedder is not None and getattr(mem.store, "_cb", None) is not None:
+        try:
+            mem.store.veil_poke(mem.embedder)
+        except Exception as e:
+            print(f"[opencode] veil poke failed (non-fatal): {e}",
+                  file=sys.stderr)
 
     # ---- the opencode config + launch ----
     cfg = {
@@ -2507,6 +2565,8 @@ def main() -> None:
           f"  global field: {'on (' + str(len(srv.global_field.store)) + ' notes)' if srv.global_field else 'off'}\n"
           f"  peers: {len(srv.peers.livelist()) if getattr(srv, 'peers', None) else 0} live\n"
           f"  replay: {'sim>=' + format(srv.replay_sim, '.2f') + ' -> stored answer, no model call' if srv.replay_sim > 0 else 'off (pure observer)'}\n"
+          f"  archive: {'on (cold tier after each compaction)' if getattr(srv, 'archive', False) else 'off (--archive)'}\n"
+          f"  momentum: {'on (recall skewed toward working context)' if getattr(srv, 'momentum', False) else 'off (--momentum)'}\n"
           f"  judge: {judge_s}\n"
           f"  opencode config: {cfg_path}",
           file=sys.stderr)

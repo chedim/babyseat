@@ -31,9 +31,11 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from dataclasses import dataclass, asdict, field
+from datetime import timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -77,6 +79,19 @@ class Exemplar:
     # Capped by the writer; home drifts toward the heaviest user ("homes follow
     # use, not birth"). Unused locally (a local field never sets it).
     uses: list = field(default_factory=list)
+    # ---- the shared-substrate layer (origin axis + CAN arbitration) ----
+    # origin: WHICH membrane wrote this, as "start-folder@hostname" -- the axis
+    # that keeps two membranes' writes from colliding and lets the reader
+    # filter to its own patch + the commons. Empty = born here (legacy rows).
+    origin: str = ""
+    # alternates: NON-DESTRUCTIVE CONTENTION (cortex's CAN bus, retold) -- when
+    # two membranes earned DIFFERENT actions for the same situation, the less
+    # salient version defers here instead of being erased:
+    #   [{"action": str, "origin": str, "salience": float, "ts": iso}, ...]
+    # capped (ALTERNATES_MAX); a deferred action is re-promotable if the
+    # current master later degrades (demoted/forgotten) and the alternate is
+    # more salient to a future query. Losers wait; nothing is lost.
+    alternates: list = field(default_factory=list)
 
     def recompute_safe(self, demote_threshold: int) -> None:
         """Re-derive `safe` from the evidence: net votes against must reach the threshold.
@@ -94,6 +109,65 @@ def _unit(v: np.ndarray) -> np.ndarray:
     return v / n if n > 1e-12 else v
 
 
+# ---- persistence backends --------------------------------------------------
+# JSON file (default, zero-setup) or Couchbase (durable incremental writes,
+# shared across processes). The store object stays the SAME: exemplars live in
+# RAM for the gate/kNN; the backend only decides how mutations reach disk.
+# Couchbase keys are `membrane:ex:<n>` -- but indexes are volatile (the
+# compactor forgets/renumbers), so each document carries the full record and
+# mutations are expressed against CONTENT, not position: upsert a deterministic
+# content key (sha1 of situation+action) under scope `membrane`, and deletions
+# are a query-and-remove sweep. The in-RAM list remains positional; save() is
+# a full reconcile (upsert every current exemplar, remove stale keys), which
+# turns the 30MB full-JSON rewrite into per-doc upserts (unchanged docs are
+# cheap idempotent writes) plus one lookup sweep.
+
+_CB_SCOPE = "membrane"
+_CB_COLL = "exemplars"
+
+DATA_DIRNAME = ".membrane"   # the per-project data dir (cli.DATA_DIR)
+
+# ---- the origin axis + CAN arbitration constants ----------------------------
+ALTERNATES_MAX = 4          # deferred contenders kept per exemplar
+ARBITRATION_ROUNDS = 3      # CAS mismatch -> re-read, re-arbitrate, retry
+VEIL_POKE_SIM = 0.90        # foreign-scope exemplars poke through the veil at
+                            # this cosine (they shadow, they never master)
+
+
+def _origin_tag(field_path: str | Path) -> str:
+    """The origin axis: "<start-folder>@<hostname>", computed from the RESOLVED
+    field path (so two membranes started from the same folder agree on the tag
+    regardless of symlinks/relative paths). This is the wire identity every
+    write stamps and every read filters by. The START FOLDER is the project
+    directory, not the data dir: for the per-project layout (<proj>/.membrane/
+    field.json) that is the PARENT of the field's directory."""
+    import socket
+    p = Path(field_path).resolve()
+    folder = p.parent.name if p.parent.name != DATA_DIRNAME else p.parent.parent.name
+    return f"{folder}@{socket.gethostname()}"
+
+
+def _ex_key(ex: "Exemplar") -> str:
+    """Deterministic content key: same situation+action+origin -> same doc.
+
+    Keys are NAMESPACED by origin: two membranes that earned the same Q/A
+    keep separate documents (each patch's evidence stays its own); they merge
+    only through arbitration. Blank origin (legacy rows) hashes exactly as
+    the pre-shared-substrate scheme did, so old keys stay deterministic."""
+    import hashlib
+    prefix = f"{ex.origin}\x00" if ex.origin else ""
+    h = hashlib.sha1(f"{prefix}{ex.situation}\x00{ex.action}".encode("utf-8"))
+    return h.hexdigest()[:20]
+
+
+def _situ_key(situation: str) -> str:
+    """The CONTEST key: hash of the situation text alone. Two origins earning
+    answers for the same situation contend for one master slot; this is how
+    arbitration finds them."""
+    import hashlib
+    return hashlib.sha1(" ".join(situation.split()).encode("utf-8")).hexdigest()[:20]
+
+
 class ExemplarStore:
     """Append-only store of exemplars; queryable by cosine to a query vector."""
 
@@ -102,6 +176,27 @@ class ExemplarStore:
         # set by load() when a corrupt field could NOT be quarantined: save()
         # then refuses to write, so it never clobbers the unrecovered file.
         self._quarantine_failed = False
+        # couchbase backend state: _cb is the collection handle once connected
+        # (None -> JSON-file backend); _cb_keys tracks live doc ids so save()
+        # can reconcile deletions (forget/compactor removals). _cb_archive is
+        # the cold-tier handle (exemplars_archive) -- a separate collection,
+        # NOT the live one (the early-return cache is mode-aware for this).
+        self._cb = None
+        self._cb_archive = None
+        self._cb_bucket: str = ""
+        self._cb_keys: set[str] | None = None
+        # the origin axis: "<start-folder>@<hostname>", set at load/boot (empty
+        # = a store constructed bare, e.g. tests). Stamped onto every write by
+        # the save path; the reader-side veil filter keys off it.
+        self.origin: str = ""
+        # indexes of FOREIGN-patch exemplars hydrated as poke-through
+        # candidates (see load_couchbase / veil_poke).
+        self.veil_foreign: set[int] = set()
+        # situ keys already arbitrated (this session): every save re-writes
+        # ALL own exemplars; without this, boot + every learn would replay
+        # get/CAS on every situation's channel doc. Seeded at hydrate with
+        # the own patch's situ keys; each save only arbitrates NEW situations.
+        self._cb_situ: set[str] = set()
 
     def append(self, ex: Exemplar) -> None:
         self.exemplars.append(ex)
@@ -220,7 +315,13 @@ class ExemplarStore:
         idx = np.argsort(-sims)[:k]
         return [(self.exemplars[i], float(sims[i])) for i in idx]
 
-    def save(self, path: str | Path) -> None:
+    def save(self, path: str | Path) -> None:  # noqa: F811
+        if self._cb is not None:
+            self._save_couchbase()
+            return
+        self._save_json(path)
+
+    def _save_json(self, path: str | Path) -> None:
         """Atomic save: write to a temp file in the same directory, then
         ``os.replace`` it over the target. A crash mid-write leaves the old
         field intact (the rename is the atomic publish step) instead of a
@@ -244,9 +345,519 @@ class ExemplarStore:
                 pass
             raise
 
+    # ---- the cold tier (archive) -------------------------------------------
+    # Cortex's episodic-buffer idea: raw turns that have been distilled into a
+    # compact note leave the HOT retrieval surface but are never destroyed --
+    # they move to a cold archive. JSON backend: an append-only JSONL next to
+    # the field (<field>.archive.jsonl). Couchbase backend: the sibling
+    # collection `membrane.archive` (same bucket/scope). The hot field stays
+    # small (kNN latency, save() cost, context noise all scale with it); the
+    # archive stays queryable (membrane: query the field can search it) and is
+    # the source of truth for anything the compactor retired.
+
+    def archive_exemplars(self, exs: list["Exemplar"], field_path: str | Path) -> int:
+        """Move exemplars to the cold tier. Idempotent per content key: a
+        repeated archive of the same situation+action is a no-op write.
+
+        Returns the number newly written. Never raises into the chat path? It
+        CAN -- callers hold mut_lock and treat archive failure like save()
+        failure (the exemplars are still in RAM; nothing is lost)."""
+        if not exs:
+            return 0
+        if self._cb is not None:
+            return self._archive_couchbase(exs)
+        return self._archive_jsonl(exs, field_path)
+
+    def _archive_jsonl(self, exs: list["Exemplar"], field_path: str | Path) -> int:
+        p = Path(str(field_path) + ".archive.jsonl")
+        if self._quarantine_failed:
+            raise RuntimeError(
+                f"refusing to archive next to unreadable field {p}")
+        p.parent.mkdir(parents=True, exist_ok=True)
+        seen = self._archive_seen_jsonl(p)
+        n = 0
+        with open(p, "a") as f:
+            for ex in exs:
+                k = _ex_key(ex)
+                if k in seen:
+                    continue
+                rec = asdict(ex)
+                rec["_archived_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+                rec["_key"] = k
+                f.write(json.dumps(rec) + "\n")
+                seen.add(k)
+                n += 1
+        return n
+
+    @staticmethod
+    def _archive_seen_jsonl(p: Path) -> set[str]:
+        """Content keys already in the archive (file missing -> empty set)."""
+        if not p.exists():
+            return set()
+        keys = set()
+        with open(p) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    keys.add(json.loads(line).get("_key", ""))
+                except json.JSONDecodeError:
+                    continue  # a torn tail line from a crash is not fatal
+        return keys
+
+    def _archive_couchbase(self, exs: list["Exemplar"]) -> int:
+        coll = self._cb_collection(mode="archive")
+        n = 0
+        for ex in exs:
+            k = _ex_key(ex)
+            try:
+                if coll.get(k):
+                    continue  # idempotent: already in the cold tier
+            except Exception:
+                pass
+            rec = asdict(ex)
+            rec["_archived_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+            coll.upsert(k, rec)
+            n += 1
+        return n
+
+    def archived(self, field_path: str | Path) -> list[dict]:
+        """The cold tier, newest last. JSON backend reads the JSONL; couchbase
+        backend runs a SQL++ scan. Empty list when nothing was ever archived.
+        Degrades to [] on any read failure (the archive is an affordance, not
+        a dependency of the hot path)."""
+        try:
+            if self._cb is not None:
+                from couchbase.options import QueryOptions
+                qr = self._cb_cluster.query(
+                    "SELECT t.* "
+                    f"FROM `{self._cb_bucket}`.`{_CB_SCOPE}`.`{_CB_COLL}_archive` t",
+                    QueryOptions(timeout=timedelta(seconds=30)))
+                return [dict(r) for r in qr]
+            p = Path(str(field_path) + ".archive.jsonl")
+            if not p.exists():
+                return []
+            out = []
+            with open(p) as f:
+                for line in f:
+                    line = line.strip()
+                    if line:
+                        try:
+                            out.append(json.loads(line))
+                        except json.JSONDecodeError:
+                            continue
+            return out
+        except Exception:
+            return []
+
+    # ---- Couchbase backend -------------------------------------------------
+    # Same call sites (mem.store.save(path)) -- when the store was hydrated
+    # from Couchbase, `path` is ignored and mutations are per-doc upserts.
+
+    def _cb_collection(self, mode: str = "live") -> Any:
+        """The `membrane.exemplars` (mode="live") or `membrane.exemplars_archive`
+        (mode="archive") collection, created on first touch.
+
+        Bucket may or may not exist; the couchbase SDK cannot create buckets,
+        so a missing bucket falls back to the management REST API (same
+        credentials). Connection settings come from the env:
+        COUCHBASE_CONN_STRING / COUCHBASE_USER / COUCHBASE_PASSWORD /
+        COUCHBASE_BUCKET (cortex-experiment's convention).
+        """
+        if mode == "live" and self._cb is not None:
+            return self._cb
+        if mode == "archive" and self._cb_archive is not None:
+            return self._cb_archive
+        import urllib.request
+        import base64
+        from couchbase.cluster import Cluster
+        from couchbase.auth import PasswordAuthenticator
+        from couchbase.options import ClusterOptions
+        conn = os.environ.get("COUCHBASE_CONN_STRING", "couchbase://localhost")
+        user = os.environ.get("COUCHBASE_USER", "Administrator")
+        pw = os.environ.get("COUCHBASE_PASSWORD", "password")
+        bucket = os.environ.get("COUCHBASE_BUCKET", "membrane")
+        self._cb_bucket = bucket
+        self._cb_cluster = Cluster(conn, ClusterOptions(
+            PasswordAuthenticator(user, pw)))
+        self._cb_cluster.wait_until_ready(timedelta(seconds=10))
+        # the bucket must exist; the SDK can't create buckets -> management
+        # REST API on :8091 with the same credentials
+        mgr = self._cb_cluster.buckets()
+        try:
+            mgr.get_bucket(bucket)
+        except Exception:
+            import urllib.request
+            import base64
+            host = conn.replace("couchbase://", "").split("/")[0].split(":")[0]
+            req = urllib.request.Request(
+                f"http://{host}:8091/pools/default/buckets", method="POST")
+            req.add_header("Authorization", "Basic " + base64.b64encode(
+                f"{user}:{pw}".encode()).decode())
+            urllib.request.urlopen(req, data=json.dumps({
+                "name": bucket, "ramQuotaMB": 256,
+                "bucketType": "couchbase"}).encode(), timeout=10)
+            mgr.get_bucket(bucket)  # raises if we truly could not create it
+        colls = self._cb_cluster.bucket(bucket).collections()
+        try:
+            colls.create_scope(_CB_SCOPE)
+        except Exception:
+            pass
+        coll_name = _CB_COLL if mode == "live" else _CB_COLL + "_archive"
+        try:
+            colls.create_collection(_CB_SCOPE, coll_name)
+        except Exception:
+            pass
+        handle = (self._cb_cluster.bucket(bucket)
+                  .scope(_CB_SCOPE).collection(coll_name))
+        if mode == "live":
+            self._cb = handle
+        else:
+            self._cb_archive = handle
+        return handle
+
+    @classmethod
+    def load_couchbase(cls, field_path: str | Path = "") -> "ExemplarStore":
+        """Hydrate from Couchbase; on any failure the caller falls back to JSON.
+
+        THE VEIL (scope split): a shared bucket holds every membrane's patch.
+        This membrane hydrates --
+          1. its OWN patch   (origin == my origin tag)
+          2. the COMMONS     (scope == "global", any origin)
+          3. ...and, poking through the veil: foreign PROJECT exemplars whose
+             situation is near-identical to one I already hold (cosine >=
+             VEIL_POKE_SIM on the situation TEXT-hash is too weak, so the poke
+             is done AFTER hydration, in `veil_poke` -- Couchbase has no
+             vectors to cosine here). Foreign memories are scenery: loaded so
+             recall/gate can SEE them, but writes never mutate or delete them,
+             and arbitration never makes a foreign exemplar master of mine.
+        On this pass the raw foreign set is loaded (cheap: no model call); a
+        caller with an embedder narrows it via `prune_veil`.
+        """
+        st = cls()
+        st.origin = _origin_tag(field_path) if field_path else st.origin
+        coll = st._cb_collection()
+        from couchbase.options import QueryOptions
+        my = st.origin
+        qr = st._cb_cluster.query(
+            "SELECT meta().id AS id, t.* "
+            f"FROM `{st._cb_bucket}`.`{_CB_SCOPE}`.`{_CB_COLL}` t "
+            "WHERE t.origin = $my OR t.scope = 'global'",
+            QueryOptions(timeout=timedelta(seconds=30), named_params={"my": my}))
+        keys = []
+        for row in qr:
+            rec = {k: v for k, v in row.items() if k != "id"
+                   and k in Exemplar.__dataclass_fields__}
+            st.append(Exemplar(**rec))
+            keys.append(row["id"])
+        st._cb_keys = set(keys)
+        # own patch situations are already arbitrated: don't replay the CAS
+        # pass for them on the first save after boot
+        st._cb_situ = {_situ_key(e.situation) for e in st.exemplars
+                       if (e.origin or my) == my}
+        # foreign project exemplars ride along ONLY through the boot poke
+        # (`veil_poke`, bounded) and arbitration adoption -- never wholesale.
+        return st
+
+    def veil_poke(self, embedder, limit: int = 256) -> int:
+        """The veil's poke-through, run once at boot (embedder is proven by
+        then). A BOUNDED sample of foreign PROJECT exemplars is fetched; a
+        foreign memory is adopted into RAM only when its situation is
+        near-identical to one I already hold (cosine >= VEIL_POKE_SIM): the
+        same question, possibly a different earned answer. Adopted rows keep
+        their foreign origin (read-only scenery; my save never touches them).
+        Returns the number adopted."""
+        if self._cb is None or embedder is None or not self.exemplars:
+            return 0
+        from couchbase.options import QueryOptions
+        my = self.origin
+        try:
+            qr = self._cb_cluster.query(
+                "SELECT t.* "
+                f"FROM `{self._cb_bucket}`.`{_CB_SCOPE}`.`{_CB_COLL}` t "
+                "WHERE t.origin IS NOT MISSING AND t.origin != '' "
+                "AND t.origin != $my "
+                "AND (t.scope IS MISSING OR t.scope != 'global') "
+                "LIMIT $lim",
+                QueryOptions(timeout=timedelta(seconds=30),
+                             named_params={"my": my, "lim": limit}))
+            docs = list(qr)
+        except Exception as e:
+            print(f"[membrane] veil poke skipped ({e})",
+                  file=__import__("sys").stderr)
+            return 0
+        if not docs:
+            return 0
+        V = self.vectors()
+        Vn = V / (np.linalg.norm(V, axis=1, keepdims=True) + 1e-12) \
+            if len(self.exemplars) else None
+        texts = [d.get("situation", "") for d in docs]
+        try:
+            E = np.asarray(embedder.embed(texts), dtype=float)
+        except Exception as e:
+            print(f"[membrane] veil poke embed failed ({e})",
+                  file=__import__("sys").stderr)
+            return 0
+        En = E / (np.linalg.norm(E, axis=1, keepdims=True) + 1e-12)
+        n = 0
+        for doc, ev in zip(docs, En):
+            if not doc.get("situation"):
+                continue
+            best = float((Vn @ ev).max()) if len(Vn) else 0.0
+            if best >= VEIL_POKE_SIM:
+                if self._adopt_foreign_doc(doc):
+                    n += 1
+        if n:
+            print(f"[membrane] veil: {n} foreign memories poked through "
+                  f"(cosine >= {VEIL_POKE_SIM})", file=__import__("sys").stderr)
+        return n
+
+    # ---- the shared substrate: CAS save with CAN-style arbitration ----------
+    # Two membranes sharing a bucket used to erase each other (full reconcile
+    # deleted every key not in the local list). Now:
+    #   - every content key is NAMESPACED by origin (_ex_key hashes origin too)
+    #   - deletes only ever touch OWN keys (foreign patches are read-only)
+    #   - when two origins earned DIFFERENT actions for the SAME situation,
+    #     arbitration runs: the version more salient to THIS membrane (cosine
+    #     to its own live field, tie-break evidence then recency) masters the
+    #     shared situation; the loser DEFERS into `alternates` on the winner's
+    #     doc (CAN non-destructive queuing: losers wait, nothing is destroyed).
+    # Contention is detected via Couchbase CAS on the situation-index doc
+    # (`sit:<situ_key>` -> {origin, ex_key}); a CasMismatchError means another
+    # membrane grabbed the channel -> re-read, re-arbitrate, retry.
+
+    def _salience(self, ex: "Exemplar") -> float:
+        """How well an exemplar's situation resonates with THIS membrane's
+        lived field (its best cosine against my OTHER exemplars -- the
+        contender never scores against itself, or a lone cell would claim
+        salience 1.0 and win every arbitration). Salience is the CAN priority
+        axis: semantic and LOCAL -- each membrane arbitrates by its own focus,
+        so no global arbiter exists."""
+        import numpy as _np
+        v = _np.asarray(ex.vec, dtype=float)
+        n = float(_np.linalg.norm(v))
+        if n < 1e-12 or len(self.exemplars) < 2:
+            return 0.0
+        v = v / n
+        best = 0.0
+        for mine in self.exemplars:
+            if mine is ex:
+                continue           # never self-resonance
+            mv = _np.asarray(mine.vec, dtype=float)
+            mn = float(_np.linalg.norm(mv))
+            if mn < 1e-12:
+                continue
+            s = float(v @ (mv / mn))
+            if s > best:
+                best = s
+        return best
+
+    @staticmethod
+    def _evidence(ex: "Exemplar") -> int:
+        """The tie-break mass: votes + uses + re-ask/contest traffic."""
+        return (len(ex.votes or []) + len(ex.uses or [])
+                + (ex.reask_count or 0) + (ex.contest_count or 0))
+
+    def _cb_doc(self, ex: Exemplar) -> dict:
+        """The wire record for an exemplar (asdict + provenance bookkeeping)."""
+        rec = asdict(ex)
+        rec["_origin"] = ex.origin or self.origin
+        rec["_situ"] = _situ_key(ex.situation)
+        return rec
+
+    def _save_couchbase(self) -> None:
+        """Reconcile: upsert own exemplars (origin-namespaced keys), arbitrate
+        contested situations via CAS, remove only OWN vanished keys.
+
+        Origin stamping happens HERE, at the wire: in-RAM exemplars written
+        by this membrane carry origin="" (born here); the first save pins
+        that blank to the store's origin tag, so keys and records are stable
+        from then on (an exemplar that gained origin would change key and
+        duplicate its doc). Foreign rows (origin set) are never written."""
+        coll = self._cb
+        live: set[str] = set()
+        pending: dict[str, Exemplar] = {}   # situ_key -> my contender
+        for ex in self.exemplars:
+            if not ex.origin:
+                if self.origin:
+                    ex.origin = self.origin        # pin at first touch
+                else:
+                    continue    # origin-less store: JSON-only semantics
+            k = _ex_key(ex)
+            live.add(k)
+            if ex.origin != self.origin:
+                continue                    # foreign patch: never written by us
+            coll.upsert(k, self._cb_doc(ex))
+            situ = _situ_key(ex.situation)
+            if situ not in self._cb_situ:   # new situation: contend once
+                self._cb_situ.add(situ)
+                pending.setdefault(situ, ex)
+        if pending:
+            self._arbitrate(pending)
+        if getattr(self, "_cb_keys", None):
+            stale = self._cb_keys - live
+            for k in stale:
+                try:
+                    coll.remove(k)
+                except Exception:
+                    pass
+        self._cb_keys = live
+
+    def _arbitrate(self, pending: dict[str, Exemplar]) -> None:
+        """One arbitration pass over my newly-written docs.
+
+        Each contested situation has a channel doc `sit:<situ_key>` =
+        {ex_key, origin, salience, alternates}. Challenger protocol (CAN,
+        retold): read the channel with CAS -> compare salience (mine vs. the
+        incumbent's own claim) -> winner masters the channel, loser's action
+        is APPENDED to the channel's alternates (non-destructive queuing).
+        A CAS mismatch -> re-read, re-arbitrate, retry; the loser is never
+        deleted, only deferred."""
+        coll = self._cb
+        import couchbase.exceptions as _cbe
+        CasMismatch = getattr(_cbe, "CasMismatchError", None) \
+            or _cbe.CASMismatchException
+        DocExists = _cbe.DocumentExistsException
+        for situ, mine in pending.items():
+            k = f"sit:{situ}"
+            sal_m = self._salience(mine)
+            for _ in range(ARBITRATION_ROUNDS):
+                try:
+                    got = coll.get(k)
+                    doc, cas = got.content_as[dict], got.cas
+                except Exception:
+                    # no incumbent: claim the channel with MY salience claim
+                    try:
+                        coll.insert(k, {"ex_key": _ex_key(mine),
+                                        "origin": self.origin,
+                                        "salience": sal_m,
+                                        "alternates": []})
+                        break
+                    except DocExists:
+                        continue       # someone claimed first -> retry loop
+                other = str(doc.get("origin") or "")
+                if other == self.origin:
+                    doc["salience"] = max(float(doc.get("salience") or 0.0),
+                                          sal_m)   # keep our best claim fresh
+                    try:
+                        coll.upsert(k, doc, cas=cas)
+                    except CasMismatch:
+                        continue
+                    break
+                sal_t = float(doc.get("salience") or 0.0)
+                # the master's action text: needed to store as my alternate
+                try:
+                    mdoc = coll.get(doc["ex_key"]).content_as[dict]
+                except Exception:
+                    mdoc = {}
+                mine_wins = (sal_m > sal_t or
+                             (sal_m == sal_t and
+                              self._evidence(mine) >
+                              self._evidence(self._rec_from_doc(mdoc))))
+                alt_theirs = {"action": (mdoc.get("action")
+                                         or doc.get("action") or ""),
+                              "origin": other, "salience": sal_t,
+                              "ts": time.strftime("%Y-%m-%dT%H:%M:%S")}
+                alt_mine = {"action": mine.action, "origin": self.origin,
+                            "salience": sal_m,
+                            "ts": time.strftime("%Y-%m-%dT%H:%M:%S")}
+                # merge BOTH sides' alternates on the channel (the shared
+                # contention record): mine if I lost, theirs if I won --
+                # either way every contender survives on the channel doc.
+                channel = dict(doc)
+                alts = [a for a in (channel.get("alternates") or [])
+                        if a.get("action")]
+                if mine_wins:
+                    if alt_theirs["action"] and alt_theirs["action"] not in \
+                            [a["action"] for a in alts]:
+                        alts.append(alt_theirs)
+                    channel = {"ex_key": _ex_key(mine),
+                               "origin": self.origin, "salience": sal_m,
+                               "alternates": alts[-ALTERNATES_MAX:]}
+                    self._merge_alternates(mine, alts)
+                    method = coll.upsert
+                else:
+                    if alt_mine["action"] and alt_mine["action"] not in \
+                            [a["action"] for a in alts]:
+                        alts.append(alt_mine)
+                    channel["alternates"] = alts[-ALTERNATES_MAX:]
+                    self._adopt_foreign_doc(mdoc)
+                    method = coll.upsert
+                try:
+                    method(k, channel, cas=cas)
+                except CasMismatch:
+                    continue       # lost the channel -> re-read, re-arbitrate
+                break
+
+    @staticmethod
+    def _rec_from_doc(doc: dict) -> "Exemplar | None":
+        """An Exemplar from a raw couchbase doc (None when it isn't one)."""
+        if not doc:
+            return None
+        rec = {k: v for k, v in doc.items()
+               if k in Exemplar.__dataclass_fields__ and not k.startswith("_")}
+        try:
+            return Exemplar(**rec)
+        except Exception:
+            return None
+
+    def _merge_alternates(self, mine: Exemplar, alts: list) -> None:
+        """Fold the channel's deferred contenders into MY local exemplar's
+        alternates (recall can see them; nothing here writes the remote doc)."""
+        try:
+            seen = {a.get("action") for a in (mine.alternates or [])}
+            for a in alts:
+                if a.get("action") and a["action"] not in seen:
+                    mine.alternates.append(a)
+                    seen.add(a["action"])
+            mine.alternates = mine.alternates[-ALTERNATES_MAX:]
+        except Exception:
+            pass
+
+    def _adopt_foreign_doc(self, doc: dict) -> bool:
+        """Pull a foreign master doc into my RAM field as read-only scenery
+        (they keep ownership; my save never re-serves their key). True when
+        adopted, False when it was already known or unusable."""
+        ex = self._rec_from_doc(doc)
+        if ex is None or not (ex.situation or "").strip() or not ex.vec:
+            return False
+        ex.origin = doc.get("_origin") or doc.get("origin") or "foreign"
+        ex.scope = "project"
+        if any(e.situation == ex.situation and e.origin == ex.origin
+               for e in self.exemplars):
+            return False          # the poke-through already carries it
+        self.append(ex)
+        return True
+
     @classmethod
     def load(cls, path: str | Path) -> "ExemplarStore":
+        """Load the field; honors MEMBRANE_STORE=couchbase to hydrate from
+        Couchbase instead of the JSON file. Couchbase is OPTIONAL by design:
+        missing SDK or unreachable server -> a how-to-fix notice, then a
+        transparent fallback to the JSON field -- degradation, not failure
+        (membrane keeps running autonomously either way)."""
+        if os.environ.get("MEMBRANE_STORE", "").lower() in ("couchbase", "cb"):
+            try:
+                return cls.load_couchbase(path)
+            except ImportError as e:
+                print(f"[membrane] MEMBRANE_STORE=couchbase but the SDK is "
+                      f"missing ({e}). Fix: pip install couchbase. Falling "
+                      f"back to the JSON field {path} -- everything works, "
+                      f"nothing is shared until the SDK is installed.",
+                      file=__import__("sys").stderr)
+            except Exception as e:
+                conn = os.environ.get("COUCHBASE_CONN_STRING",
+                                      "couchbase://localhost")
+                print(f"[membrane] Couchbase unreachable ({e}). Fix: check the "
+                      f"server is up and COUCHBASE_CONN_STRING / COUCHBASE_USER "
+                      f"/ COUCHBASE_PASSWORD / COUCHBASE_BUCKET are set "
+                      f"(current conn: {conn}). Falling back to the JSON field "
+                      f"{path} -- membrane keeps running autonomously and will "
+                      f"retry Couchbase at next boot.",
+                      file=__import__("sys").stderr)
         store = cls()
+        store.origin = _origin_tag(path)
         p = Path(path)
         if p.exists():
             text = p.read_text()

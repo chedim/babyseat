@@ -60,6 +60,11 @@ as clearly-marked `[membrane-intercept]` blocks; writes/forgets from model
 prose are report-only (the field is only written by operator turns).
 
 Data lives in .membrane/ (field.json, audit.jsonl, logs) -- never commit it.
+Persistence backend: JSON file by default; MEMBRANE_STORE=couchbase moves the
+exemplar field to a Couchbase cluster (CouchbaseCollection `membrane.exemplars`
+in COUCHBASE_BUCKET, cortex-experiment's env convention:
+COUCHBASE_CONN_STRING / COUCHBASE_USER / COUCHBASE_PASSWORD / COUCHBASE_BUCKET).
+Couchbase unreachable -> transparent fallback to the JSON field.
 Skills are project-scoped: .opencode/skills/ in THIS repo only (an opencode
 launched outside never sees them). Read those skills (membrane-query-field,
 membrane-write-memory, membrane-forget-memory, membrane-state,

@@ -236,6 +236,25 @@ class Compactor:
                                   outcome="compact-note",
                                   vec=[float(x) for x in centroid], safe=True))
             store.save(mem.field_path)
+            # the cold tier (cortex's episodic-purge, retold): the distilled
+            # raw turns MOVE OUT of the hot field. They are archived first
+            # (JSONL or couchbase -- the store decides), then dropped from
+            # RAM; the note is the field's living knowledge, the archive is
+            # the provenance. Failure never aborts the compaction -- the
+            # raw turns just stay retired-but-unarchived (they were already
+            # marked compacted@, so the data survives in the field file).
+            if getattr(srv, "archive", False):
+                try:
+                    n_arch = store.archive_exemplars(kept, mem.field_path)
+                    store.forget([store.index_of(e) for e in kept])
+                    store.save(mem.field_path)
+                    srv.archived_total += n_arch
+                    print(f"[compact] archived {n_arch}/{len(kept)} raw "
+                          f"turns (cold tier total {srv.archived_total})",
+                          file=sys.stderr)
+                except Exception as arch_e:
+                    print(f"[compact] archive failed, hot field keeps the "
+                          f"raw turns: {arch_e}", file=sys.stderr)
             verdict = {"verdict": "compact",
                        "reason": f"distilled {len(kept)} exchanges into one note",
                        "sim": None, "nov": None, "ex_idx": None}
@@ -325,6 +344,7 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
             self._forward_raw(raw)
             return
         ctx = self._memory_block(vec)
+        self.momentum_update(vec, query)
         up = dict(body)
         up["stream"] = False
         if ctx:
@@ -371,6 +391,7 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
             ctx = None
             if vec is not None:
                 ctx = self._memory_block(vec)
+                self.momentum_update(vec, query)
                 if ctx:
                     up["messages"] = _inject(body.get("messages") or [], ctx)
             req = urllib.request.Request(srv.backend + "/api/chat",
@@ -405,6 +426,56 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
             print(f"[rag] stream delivery error: {e}", file=sys.stderr)
 
     # ---- the RAG context: top-k safe memories -----------------------------
+    def _momentum_skew(self, vec):
+        """Cortex's 'laser projector' (geometry.py shift_query_vector), opt-in.
+
+        The server keeps a frictional EMA of recent turn embeddings
+        (momentum); the query is shifted toward it before top_k, so recall is
+        biased toward the live working context (recent turns matter more).
+        OFF by default (--momentum): exact recall is the safer default, and a
+        stale momentum after an idle gap can mislead. Returns (search_vec,
+        skew_applied)."""
+        srv = self.server
+        if not getattr(srv, "momentum", False) or srv.momentum_vec is None:
+            return vec, False
+        mv = np.asarray(srv.momentum_vec, dtype=float)
+        if mv.shape != np.asarray(vec, dtype=float).shape:
+            return vec, False
+        q = np.asarray(vec, dtype=float) + float(srv.momentum_alpha) * mv
+        n = float(np.linalg.norm(q))
+        return (q / n if n > 1e-12 else q), True
+
+    def momentum_update(self, vec, query_text: str) -> None:
+        """Fold this turn into the EMA: momentum = 0.95*momentum + P_delta.
+
+        cortex's update_momentum, retold: friction decays the accumulated
+        momentum, then the current force (the unit turn embedding) is added.
+        Guarded so a broken turn never breaks the chat. Called AFTER the
+        recall skew so the current turn biases the NEXT one, not itself."""
+        srv = self.server
+        if not getattr(srv, "momentum", False):
+            return
+        try:
+            import time as _t
+            import numpy as _np
+            v = _np.asarray(vec, dtype=float)
+            v = v / (_np.linalg.norm(v) + 1e-12)
+            old = (srv.momentum_vec if srv.momentum_vec is not None
+                   else _np.zeros_like(v))
+            # per-turn friction (0.95: geometry.py parity) scaled down further
+            # by idle time (~5% per minute): yesterday's momentum must not
+            # bleed into today's recall after a long gap.
+            last = float(getattr(srv, "momentum_ts", 0.0) or 0.0)
+            idle = max(0.0, _t.time() - last) / 60.0 if last else 0.0
+            frac = 0.95 ** (1.0 + idle)
+            srv.momentum_vec = frac * old + v
+            n = float(_np.linalg.norm(srv.momentum_vec))
+            if n > 1e-12:
+                srv.momentum_vec = srv.momentum_vec / n
+            srv.momentum_ts = _t.time()
+        except Exception as e:
+            print(f"[rag] momentum update skipped: {e}", file=sys.stderr)
+
     def _memory_block(self, vec) -> str | None:
         """The nearest past exchanges as one system block, MMR-diversified.
 
@@ -426,7 +497,8 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
         picked = []                    # (entry_text, unit_vec) chosen so far
         budget = int(srv.rag_ctx_chars)
         mmr_sim = float(getattr(srv, "rag_mmr_sim", 0.90))
-        for ex, sim in mem.store.top_k(vec, k=int(srv.rag_k) * 4):
+        search_vec, skewed = self._momentum_skew(vec)
+        for ex, sim in mem.store.top_k(search_vec, k=int(srv.rag_k) * 4):
             if sim < srv.rag_sim_min:
                 break                       # sorted desc; nothing closer remains
             if not ex.safe:
