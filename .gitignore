@@ -26,3 +26,11 @@ rag-audit.jsonl
 rag-field.json.review.jsonl
 membrane-opencode.log
 membrane-proxy.log
+
+# local runtime state + scratch (never source)
+build/
+.membrane/
+.claude/
+watches.json
+itll-pave-us.html
+.launcher.py
