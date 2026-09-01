@@ -573,19 +573,20 @@ class Membrane:
         # WITH its hint so the repair path can converge. 0 disables.
         settle_k: int = 3,
         settle_sim: float = 0.92,
-        # ---- the ephemeral tier (flag-gated; experiments/ephemeral_tier.py) --
-        # WHEN ON (opt-in via MEMBRANE_EPHEMERAL=1): every fresh capture enters
-        # the store's ephemeral tier instead of canon; the evidence paths
-        # PROMOTE across tiers (a re-ask refute -> durable-unsafe; a contest
-        # confirm -> durable-safe). Silence expires by TTL. DEFAULT OFF:
-        # until the merged-recall surface (recall_merged) is wired into the
-        # gate and promote-on-use lands, tier-ON would retire the whole live
-        # field at TTL (candidates nobody can confirm). --no-ephemeral /
-        # MEMBRANE_EPHEMERAL=0 keep today's exact semantics either way.
-        ephemeral: bool = False,
+        # ---- the ephemeral tier (DEFAULT ON; experiments/ephemeral_tier.py) --
+        # WHEN ON (the default): every fresh capture enters the store's
+        # ephemeral tier instead of canon; the evidence paths PROMOTE across
+        # tiers (a re-ask refute -> durable-unsafe; a contest confirm ->
+        # durable-safe). Silence expires by TTL (the clock's GC server-side).
+        # Opt out with --no-ephemeral or MEMBRANE_EPHEMERAL=0 (pre-tier
+        # semantics); force on past a 0-env with --ephemeral. Lab evidence
+        # (experiments/ephemeral_tier.py, OVERALL GREEN) + the couchbase
+        # two-tier port (dedicated ephemeral bucket, delta-seeded hydration)
+        # are what retired the old opt-in caution.
+        ephemeral: bool = True,
     ) -> None:
         if ephemeral is None:
-            ephemeral = os.environ.get("MEMBRANE_EPHEMERAL", "0") \
+            ephemeral = os.environ.get("MEMBRANE_EPHEMERAL", "1") \
                 .strip().lower() in ("1", "true", "yes", "on")
         self.ephemeral_tier = bool(ephemeral)
         self.responder = responder

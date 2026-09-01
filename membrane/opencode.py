@@ -3800,9 +3800,13 @@ def main() -> None:
         description="Membrane field + opencode: a local field-backed coding "
                     "agent (math/state answered internally; model work proxied "
                     "to Ollama).")
+    ap.add_argument("--ephemeral", dest="ephemeral", action="store_true",
+                    default=None,
+                    help="force the ephemeral candidate tier ON (captures "
+                         "enter as TTL candidates; evidence promotes)")
     ap.add_argument("--no-ephemeral", dest="ephemeral", action="store_false",
-                    default=True,
-                    help="route fresh captures straight to CANON (today's "
+                    default=None,
+                    help="route fresh captures straight to CANON (pre-tier "
                          "semantics) instead of the ephemeral candidate tier")
     ap.add_argument("--listen", type=int, default=11500,
                     help="port for the membrane OpenAI-compatible proxy")
@@ -4087,9 +4091,10 @@ def main() -> None:
         judge=judge,
         observer=True,          # never replay: always forward, always learn
         vague_filter=bool(args.vague_filter),
-        ephemeral=bool(getattr(args, "ephemeral", False))
-                  and os.environ.get("MEMBRANE_EPHEMERAL", "0")
-                      .strip().lower() in ("1", "true", "yes", "on"),
+        ephemeral=(bool(getattr(args, "ephemeral", False))
+                   if getattr(args, "ephemeral", None) is not None
+                   else os.environ.get("MEMBRANE_EPHEMERAL", "1")
+                       .strip().lower() in ("1", "true", "yes", "on")),
     )
     # Membrane defaults embedder to OllamaEmbedder() when None; we want the
     # lazy resolution ladder instead, so clear it after construction.
