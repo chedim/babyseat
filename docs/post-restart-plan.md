@@ -232,12 +232,22 @@ is the conversation -- and the conversation is shared."
   (intents, working lessons) to a model-side field, invalidation lane
   designed day one.
 
-## E1 (parked, evidence-first): embeddings leverage
+## E1 (parked, evidence-first): embeddings leverage -- DONE 2026-09-01
 
-- Experiment script first (no production change): replay the 86 near-miss
-  queries (audit sim 0.70-0.85) with (a) context-prepended text, (b) lower
-  sim_min; measure crossings over 0.85 against the live field. Then decide
-  query contextualization vs threshold calibration vs embedder swap.
+- DONE (experiments/e1_nearmiss.py, commit b888e7a). Script-first replay of
+  the 92 near-miss escalations (86 distinct queries, 22% of escalations)
+  graded against the ground truth we hold -- the model's eventual answer.
+  (a) lower sim_min (0.80/0.84): flips are 86-95% WRONG -- the retrieved
+  servable row is a different conversation beat (greetings are mutually
+  similar; continuations are context-bound). (b) context-prepended text:
+  WORSE (0% precision) -- prepending the prior turn drags the match onto
+  the prior beat. Complaints land on only 14/92 near-miss queries:
+  escalate was the right call; the band is honest uncertainty, not lost
+  replays. The near-miss matches are dominated by machinery captures
+  flooding the field (3319 tool + 232 reasoning vs 243 servable rows) --
+  the capture-machinery quota (postponed batch) is the lever, already
+  shipped. No threshold change, no embedder swap; W4c stays parked
+  (no self-feed collapse observed).
 
 ## Order of attack after reboot
 
