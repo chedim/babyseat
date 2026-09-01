@@ -66,6 +66,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import random
 import sys
 import threading
@@ -572,7 +573,21 @@ class Membrane:
         # WITH its hint so the repair path can converge. 0 disables.
         settle_k: int = 3,
         settle_sim: float = 0.92,
+        # ---- the ephemeral tier (flag-gated; experiments/ephemeral_tier.py) --
+        # WHEN ON (opt-in via MEMBRANE_EPHEMERAL=1): every fresh capture enters
+        # the store's ephemeral tier instead of canon; the evidence paths
+        # PROMOTE across tiers (a re-ask refute -> durable-unsafe; a contest
+        # confirm -> durable-safe). Silence expires by TTL. DEFAULT OFF:
+        # until the merged-recall surface (recall_merged) is wired into the
+        # gate and promote-on-use lands, tier-ON would retire the whole live
+        # field at TTL (candidates nobody can confirm). --no-ephemeral /
+        # MEMBRANE_EPHEMERAL=0 keep today's exact semantics either way.
+        ephemeral: bool = False,
     ) -> None:
+        if ephemeral is None:
+            ephemeral = os.environ.get("MEMBRANE_EPHEMERAL", "0") \
+                .strip().lower() in ("1", "true", "yes", "on")
+        self.ephemeral_tier = bool(ephemeral)
         self.responder = responder
         self.field_path = Path(field_path)
         self.audit_path = Path(audit_path)
@@ -595,6 +610,7 @@ class Membrane:
         self.sim_min = sim_min
         self.consensus_min = consensus_min
         self.k = k
+        self._last_vec: "np.ndarray | None" = None   # drift telemetry
         self.novelty_rank_ratio_max = novelty_rank_ratio_max
         self.reask_sim = reask_sim
         self.reask_window_s = reask_window_s
@@ -696,6 +712,7 @@ class Membrane:
         resp = self.responder.respond(request_body, hint=hint, auth=auth)
         ex_idx = self._learn(query, vec, verdict, resp, unsafe)
         self._remember(query, vec, verdict, ex_idx)
+        self._confirm_on_use(vec, query, exclude={ex_idx} if ex_idx is not None else None)
         return resp, verdict
 
     def _observe_forward(self, verdict: dict, request_body: dict, query: str,
@@ -707,6 +724,7 @@ class Membrane:
         resp = self.responder.respond(request_body, hint=None, auth=auth)
         ex_idx = self._learn(query, vec, verdict, resp, unsafe, would_absorb=True)
         self._remember(query, vec, verdict, ex_idx)
+        self._confirm_on_use(vec, query, exclude={ex_idx} if ex_idx is not None else None)
         return resp, verdict
 
     def gate_turn(self, request_body: dict, unsafe: bool = False
@@ -751,6 +769,26 @@ class Membrane:
         # prompt text is never garbled (only the field's representation is veiled).
         # Default sigma=0 is the identity veil -- zero behaviour change.
         vec = self._nudge(vec)
+        # drift velocity (telemetry, audit-first): cosine between this turn's
+        # situation vector and the PREVIOUS turn's -- the temporal axis the
+        # spatial stats (sim/nov/rank) don't see. High drift = context switch
+        # or a trajectory the field hasn't seen; near-zero = hovering in a
+        # region (possible loop -- the PC trajectory view's trigger). Read by
+        # the audit trail/TUI first; a gate input ONLY if the logs earn it.
+        try:
+            prev = self._last_vec
+            v1 = np.asarray(vec, dtype=float)
+            drift = None
+            if prev is not None and len(prev) == len(v1) \
+                    and float(np.linalg.norm(v1)) > 1e-12:
+                p1 = np.asarray(prev, dtype=float)
+                np1 = float(np.linalg.norm(p1))
+                drift = float(v1 @ p1 / (np1 * np.linalg.norm(v1))) \
+                    if np1 > 1e-12 else None
+            self._last_vec = v1
+            verdict_drift = drift
+        except Exception:
+            verdict_drift = None
         # the I is the ground: when a POV protagonist is set the user IS that
         # character, so their thought walks the POV's state_vec toward it
         # unconditionally (bypassing the cosine admit_threshold that gates every
@@ -779,13 +817,15 @@ class Membrane:
         verdict = decide(vec, self.store, k=self.k, sim_min=sim_min_eff,
                          consensus_min=self.consensus_min, eff_rank=thermo["eff_rank"],
                          novelty_sim_max=self.dedup_sim,
-                         novelty_rank_ratio_max=self.novelty_rank_ratio_max)
+                         novelty_rank_ratio_max=self.novelty_rank_ratio_max,
+                         canon_only=getattr(self, "ephemeral_tier", False))
         # stamp the thermodynamic state this decision was made under (for audit/TUI).
         verdict["spectrum_entropy"] = thermo["spectrum_entropy"]
         verdict["free_energy"] = thermo["free_energy"]
         verdict["rank_ratio"] = thermo["rank_ratio"]
         verdict["safe_frac"] = thermo["safe_frac"]
         verdict["sim_min_eff"] = sim_min_eff
+        verdict["drift"] = verdict_drift
         v = verdict["verdict"]
         # ---- the auto-settle loop (repeat-k) ----
         # A near-identical query (cosine >= settle_sim, no re-ask in flight)
@@ -849,6 +889,30 @@ class Membrane:
                        "free_energy": thermo["free_energy"], "safe_frac": thermo["safe_frac"],
                        "sim_min_eff": sim_min_eff}
         return verdict, vec, query, reasked_idx
+
+    def _confirm_on_use(self, vec: np.ndarray, query: str,
+                        exclude: set | None = None) -> None:
+        """The tier's confirm path: a served turn (the model answered, the
+        user's need was real) is USE. Candidates near the turn's vector are
+        the evidence that their content matched a real need -- promote them
+        durable-safe (use is the promotion, never self-declaration). The
+        indexes captured by THIS turn are excluded (a candidate never
+        confirms itself). No-op when the tier is off; failures never reach
+        the chat path."""
+        if not getattr(self, "ephemeral_tier", False) or vec is None:
+            return
+        try:
+            promoted = self.store.promote_on_use(vec, sim_min=0.85,
+                                                 exclude=exclude)
+        except Exception:
+            return
+        if promoted:
+            try:
+                self.store.save(self.field_path)
+            except Exception:
+                pass
+            self.gate_notes.append(
+                f"use-promoted candidates {promoted} (confirmed by a real turn)")
 
     def _nudge(self, vec: np.ndarray) -> np.ndarray:
         """The veil's perturbation of an incoming situation embedding.
@@ -1412,6 +1476,24 @@ class Membrane:
                 #     the final say: if it re-asked again (reask=2), the first contest does
                 #     NOT restore (net 1 >= threshold) -> the demotion stands (boundary rule).
                 dup = self.store.exemplars[dup_idx]
+                if getattr(self, "ephemeral_tier", False) and dup.ephemeral:
+                    # THE TIER RULE, dedup edition: the model has now SERVED
+                    # this need twice (the candidate + this turn's real
+                    # answer) -- use-evidence at learn time. The first dup
+                    # into a candidate is its USE: promote durable-safe with
+                    # the model's newest action (the candidate's own action
+                    # was never served; the live answer supersedes it).
+                    self.store.promote_ephemeral(dup_idx, safe=True,
+                                                  how="dedup-use")
+                    dup = self.store.exemplars[dup_idx]
+                    repaired = content != dup.action
+                    if repaired:
+                        self.store.repair_action(dup_idx, content)
+                    self.store.save(self.field_path)
+                    self._audit(query, verdict, resp, ex_idx=dup_idx, learned=False,
+                                dup=True, repaired=repaired,
+                                would_absorb=would_absorb)
+                    return dup_idx
                 if not dup.safe:
                     if content != dup.action:
                         self.store.repair_action(dup_idx, content)
@@ -1433,14 +1515,22 @@ class Membrane:
                     self._audit(query, verdict, resp, ex_idx=None, learned=False,
                                 would_absorb=would_absorb, variety_skip=True)
                     return None
-            self.store.append(Exemplar(
+            fresh = Exemplar(
                 situation=query, action=content, outcome="pending",
                 vec=(_unit_list(vec) if normalize else vec.tolist()), safe=not unsafe,
                 model=str(((verdict.get("route") or {}).get("route")) or ""),
                 tags=tags or [],
                 self_authored=self_authored,
-            ))
-            self.store.save(self.field_path)
+            )
+            if getattr(self, "ephemeral_tier", False):
+                # THE TIER RULE: a fresh capture is a CANDIDATE (lab E1 --
+                # capture leaks nothing into canon). Silence expires by TTL;
+                # promotion happens only on the evidence paths below.
+                self.store.capture_ephemeral(fresh)
+                self.store.save(self.field_path)
+            else:
+                self.store.append(fresh)
+                self.store.save(self.field_path)
             ex_idx = len(self.store) - 1
             self._audit(query, verdict, resp, ex_idx=ex_idx, learned=True,
                         would_absorb=would_absorb)
@@ -1487,7 +1577,8 @@ class Membrane:
                "spectrum_entropy": verdict.get("spectrum_entropy"),
                "free_energy": verdict.get("free_energy"),
                "safe_frac": verdict.get("safe_frac"),
-               "sim_min_eff": verdict.get("sim_min_eff")}
+               "sim_min_eff": verdict.get("sim_min_eff"),
+               "drift": verdict.get("drift")}
         with self.audit_path.open("a") as f:
             f.write(json.dumps(rec) + "\n")
 
@@ -1542,6 +1633,13 @@ class Membrane:
             ex = self.store.exemplars[ex_idx]
             first = ex.contest_count == 0
             was_safe = ex.safe
+            if getattr(self, "ephemeral_tier", False) and ex.ephemeral \
+                    and (force_restore or first):
+                # THE TIER RULE: a contest is the model's vote FOR (a
+                # confirm) -- evidence of reality. Promote durable-SAFE;
+                # the ordinary contest bookkeeping continues on canon.
+                self.store.promote_ephemeral(
+                    ex_idx, safe=True, outcome="confirmed", how="confirm")
             self.store.add_contest(ex_idx)
             restore = force_restore or first
             if restore:
@@ -1648,6 +1746,13 @@ class Membrane:
             ex_idx = r["ex_idx"]
             if ex_idx is None or not (0 <= ex_idx < len(self.store)):
                 return None
+            # THE TIER RULE: a CANDIDATE was never served (the gate reads
+            # canon-only; the model's stream carried the answer instead).
+            # A re-ask votes against the MODEL's answer, not the candidate's
+            # content -- a candidate is judged by USE (promote) or the
+            # horizon (expire), never by a replay it could not have made.
+            if getattr(self.store.exemplars[ex_idx], "ephemeral", False):
+                continue
             signal = ("cosine" if r["verdict"] in ("act", "act-replayed")
                       else "reask-after-escalate")
             self.gate_notes.append(
@@ -1726,6 +1831,12 @@ class Membrane:
         with self.mut_lock:
             ex = self.store.exemplars[ex_idx]
             was_safe = ex.safe
+            if getattr(self, "ephemeral_tier", False) and ex.ephemeral:
+                # THE TIER RULE: a re-ask is the environment's vote AGAINST --
+                # evidence of reality. Promote durable-UNSAFE (the confirmed
+                # negative: exactly what must never be re-earned), then the
+                # ordinary re-ask bookkeeping continues on the canon row.
+                self.store.promote_ephemeral(ex_idx, safe=False, how="refute")
             self.store.add_reask(ex_idx)
             ex.recompute_safe(self.demote_threshold)
             self.store.save(self.field_path)

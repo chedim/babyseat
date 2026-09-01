@@ -94,7 +94,7 @@ class TestOnboarding(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             home = Path(td) / "home"
             ft = _FakeTTY(["y", "couchbase://team", "alice", "s3cret",
-                           "membrane-team"])
+                           "membrane-team", ""])
             env: dict = {}
             wrote = PE.couchbase_onboarding("/tmp/w/proj", home, env,
                                             input_fn=ft.input,

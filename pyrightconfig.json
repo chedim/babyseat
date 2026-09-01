@@ -1,0 +1,8 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "include": ["membrane", "tests", "experiments"],
+  "reportMissingImports": true,
+  "reportAttributeAccessIssue": false,
+  "typeCheckingMode": "basic"
+}

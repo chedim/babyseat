@@ -32,12 +32,15 @@ class _Mem:
 
 
 class _Emb:
-    """Deterministic embedder: text -> a 3-dim unit vector from its hash."""
+    """Deterministic embedder: text -> a 3-dim unit vector from its sha256
+    (NOT hash(): that is per-process randomized, so an unlucky PYTHONHASHSEED
+    could drop every sim under the 0.55 proposal floor -> flaky)."""
 
     def embed(self, texts):
+        import hashlib
         out = []
         for t in texts:
-            h = hash(t) & 0xFFFFFFFF
+            h = int.from_bytes(hashlib.sha256(t.encode()).digest()[:4], "big")
             v = np.asarray([(h >> 8) & 0xFF, (h >> 16) & 0xFF, h & 0xFF],
                            dtype=float)
             n = np.linalg.norm(v)

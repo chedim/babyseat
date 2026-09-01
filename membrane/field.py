@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import tempfile
 import time
 from dataclasses import dataclass, asdict, field
@@ -107,6 +108,14 @@ class Exemplar:
     # this version round-trips losslessly; to an older reader those keys are
     # simply invisible (this load path is the one that IGNORES unknowns).
     extra: dict = field(default_factory=dict)
+    # ---- the ephemeral tier (experiments/ephemeral_tier.py, OVERALL GREEN) --
+    # True = a CANDIDATE (fresh capture nobody has stood by): recalled only
+    # through the merged surface (recency-weighted), never replayed by the
+    # gate, retired by the CLOCK at TTL unless evidence promotes it. False =
+    # canon (evidence of reality lived here). Kept OUT of the v1 wire shape
+    # when False (legacy rows stay byte-identical); the birth timestamp rides
+    # extra["eph_born"].
+    ephemeral: bool = False
 
     def recompute_safe(self, demote_threshold: int) -> None:
         """Re-derive `safe` from the evidence: net votes against must reach the threshold.
@@ -188,6 +197,26 @@ ALTERNATES_MAX = 4          # deferred contenders kept per exemplar
 ARBITRATION_ROUNDS = 3      # CAS mismatch -> re-read, re-arbitrate, retry
 VEIL_POKE_SIM = 0.90        # foreign-scope exemplars poke through the veil at
                             # this cosine (they shadow, they never master)
+
+# ---- the ephemeral tier (experiments/ephemeral_tier.py, OVERALL GREEN) ------
+# The invariant: EVIDENCE OF REALITY -> DURABLE; SILENCE -> EPHEMERAL;
+# CONFIRMATION IS THE PROMOTION. Candidates (fresh turns nobody has stood by,
+# quarantined dreams, watch pendings) live in the ephemeral tier with a TTL;
+# the CLOCK does the GC (Couchbase doc TTL in production, eph_born compare in
+# the JSON mirror) -- no janitor sweep, ONE horizon shared with the dreamer.
+EPH_TTL_S = float(os.environ.get("MEMBRANE_EPHEMERAL_TTL_S", 3 * 86400))
+EPH_COLL = "exemplars_ephemeral"   # sibling collection, same scope
+# The ephemeral BUCKET: candidates live in a dedicated ephemeral-type bucket
+# (server-side TTL, the clock's GC) alongside the canon bucket -- the
+# cortex-core / cortex-ephemeral convention. Resolution order in
+# `_resolve_eph_bucket`: explicit COUCHBASE_EPHEMERAL_BUCKET, then
+# "<canon>-ephemeral" if it exists, then any existing *ephemeral* bucket,
+# then CREATE an ephemeral-type bucket (SDK can't: management REST), else
+# None -> the sibling-collection fallback (ephemeral tier rides the canon
+# bucket's exemplars_ephemeral collection).
+EPH_BUCKET_SUFFIX = "-ephemeral"
+_JL_SEED = 5                # picked for low basis crosstalk at toy scale (lab E4)
+_SKETCH_D = 96              # production sketch dim (D=1024 -> d=96)
 
 
 def _is_lab_field_path(field_path: str | Path) -> bool:
@@ -290,6 +319,9 @@ def _ex_to_wire(ex: "Exemplar", stamp: bool = True) -> dict:
     # key, so pre-provenance JSON stays byte-identical to v1
     if not rec.get("model"):
         rec.pop("model", None)
+    # the ephemeral flag: legacy shape too -- only CANDIDATES carry it
+    if not rec.get("ephemeral"):
+        rec.pop("ephemeral", None)
     extra = getattr(ex, "extra", None) or {}
     for k, v in extra.items():
         if not k.startswith("_"):
@@ -322,6 +354,17 @@ def _situ_key(situation: str) -> str:
     return hashlib.sha1(" ".join(situation.split()).encode("utf-8")).hexdigest()[:20]
 
 
+def _eph_key(ex: "Exemplar") -> str:
+    """Content key for an EPHEMERAL row: separate namespace from the canon
+    keys (a candidate and its later promoted self are different docs in
+    different collections; sharing the hash would make promotion invisible
+    to the delta sets)."""
+    import hashlib
+    prefix = f"{ex.origin}\x00" if ex.origin else ""
+    h = hashlib.sha1(f"eph\x00{prefix}{ex.situation}\x00{ex.action}".encode("utf-8"))
+    return h.hexdigest()[:20]
+
+
 class ExemplarStore:
     """Append-only store of exemplars; queryable by cosine to a query vector."""
 
@@ -351,6 +394,137 @@ class ExemplarStore:
         # get/CAS on every situation's channel doc. Seeded at hydrate with
         # the own patch's situ keys; each save only arbitrates NEW situations.
         self._cb_situ: set[str] = set()
+        # ---- the ephemeral tier (candidates; evidence -> durable) ----
+        # ONE list: exemplars carry ex.ephemeral. The tier never splits the
+        # index spaces (re-ask votes, index_of, compactor, veil_foreign all
+        # index store.exemplars). Promotion flips the flag; the couchbase
+        # doc moves buckets/collections at the next save (delta sets
+        # invalidate). _cb_eph_bucket: the DEDICATED ephemeral bucket when
+        # one was resolved ("" -> sibling collection in the canon bucket).
+        self._cb_eph = None
+        self._cb_eph_bucket: str = ""
+        self._cb_keys_eph: set[str] = None  # type: ignore[assignment]
+        # delta-save bookkeeping: content keys already known current on the
+        # backend (written by us, unmutated since). save() upserts only
+        # exemplars NOT in this set and removes only vanished keys -- the
+        # full-reconcile cost (per-save re-upsert of the whole patch) dies.
+        self._written: set[str] = set()
+        self._written_eph: set[str] = set()
+
+    # ---- the ephemeral tier (capture / promote / expire / merged recall) ----
+    @staticmethod
+    def _eph_born(ex: Exemplar) -> float:
+        try:
+            return float((ex.extra or {}).get("eph_born", 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
+    def capture_ephemeral(self, ex: Exemplar, now: float | None = None) -> int:
+        """A CANDIDATE enters the field: appended to the ONE list flagged
+        ``ephemeral`` (all indexes stay coherent; the replayable set is
+        canon-only by definition). Callers must NOT hand a confirmed/refuted
+        row here -- that is evidence, promote it."""
+        ex.ephemeral = True
+        ex.extra = dict(ex.extra or {})
+        ex.extra["eph_born"] = float(now if now is not None else time.time())
+        ex.extra.setdefault("eph_ttl", EPH_TTL_S)
+        self.append(ex)
+        return len(self.exemplars) - 1
+
+    def promote_ephemeral(self, index: int, *, safe: bool,
+                          outcome: str | None = None,
+                          how: str = "") -> int:
+        """The ONLY cross-tier move: reality signed (confirm-contest, re-ask
+        refute, dream vote, compactor distill). The flag drops; the row
+        becomes canon (safe carries the vote's sign: a refute is a durable
+        UNSAFE row -- the confirmed negative). ``outcome`` is left untouched
+        by default: the tier flips, the existing verdict vocabulary
+        (pending/teed/escalate/confirmed) stays the caller's business. The
+        couchbase doc moves from the ephemeral collection to canon at the
+        next save (both delta keys invalidate). Returns its (unchanged)
+        index. Raises when the row is not an ephemeral candidate (the
+        evidence paths may then run their normal in-canon route)."""
+        ex = self.exemplars[index]
+        if not ex.ephemeral:
+            raise ValueError(f"promote_ephemeral: #{index} is already canon")
+        ex.ephemeral = False
+        ex.safe = bool(safe)
+        if outcome is not None:
+            ex.outcome = outcome
+        ex.extra = {k: v for k, v in (ex.extra or {}).items()
+                    if k not in ("eph_born", "eph_ttl")}
+        # a promotion is a WRITE in both collections' books: the canon key
+        # must upsert (new content there) and the ephemeral key must delete
+        self._written.discard(_ex_key(ex))
+        self._written_eph.discard(_eph_key(ex))
+        return index
+
+    def expire_ephemeral(self, now: float | None = None) -> list[int]:
+        """The clock's GC: candidates past the horizon (TTL == the dreamer's
+        GC horizon). Returns their INDEXES; the caller forget()s + saves
+        (expiry is an operator-shaped deletion of CANDIDATES only -- never
+        canon, so the append-only promise for earned history holds). On the
+        couchbase backend the docs are already TTL-expired server-side;
+        this trims the RAM mirror to match."""
+        now = float(now if now is not None else time.time())
+        return [i for i, e in enumerate(self.exemplars)
+                if e.ephemeral and now - self._eph_born(e) >= EPH_TTL_S]
+
+    def promote_on_use(self, q: np.ndarray, *, sim_min: float = 0.85,
+                       now: float | None = None, max_promote: int = 2,
+                       exclude: set[int] | None = None
+                       ) -> list[int]:
+        """USE IS THE PROMOTION (lab E1's confirm, generalized): candidates
+        near a REAL turn's query vector are the evidence that the turn's
+        need matched the candidate's content -- promote them durable-safe.
+        ``exclude`` skips indexes captured by THIS turn (a candidate must
+        never confirm itself: use is a LATER turn's evidence). Called from
+        the confirm path (a gate turn that went to the model and came back
+        served). Never touches canon; raises nothing."""
+        now = float(now if now is not None else time.time())
+        qn = _unit(q)
+        out: list[int] = []
+        excl = exclude or set()
+        for i, e in enumerate(self.exemplars):
+            if not e.ephemeral or len(out) >= max_promote or i in excl:
+                continue
+            ev = np.asarray(e.vec, dtype=float)
+            n = float(np.linalg.norm(ev))
+            if n < 1e-12:
+                continue
+            if float(qn @ (ev / n)) >= sim_min:
+                self.promote_ephemeral(i, safe=True, how="use")
+                out.append(i)
+        return out
+
+    def recall_merged(self, q: np.ndarray, k: int = 5, *,
+                      now: float | None = None,
+                      w_rec: float = 0.15, tau: float = 6 * 3600.0
+                      ) -> list[tuple[Exemplar, float]]:
+        """DURABLE + EPHEMERAL, recency-weighted (lab E3): a fresh candidate
+        outranks stale canon for the same need; canon recall is untaxed when
+        nothing is fresh. The returned sim is the EFFECTIVE score (cosine +
+        the ephemeral recency bonus); callers treating it as plain cosine
+        still work -- the bonus only matters near ties, exactly where the
+        fresh answer should win."""
+        if not self.exemplars:
+            return []
+        now = float(now if now is not None else time.time())
+        qn = _unit(q)
+        V = self.vectors()
+        Vn = V / (np.linalg.norm(V, axis=1, keepdims=True) + 1e-12)
+        sims_all = Vn @ qn
+        order = np.argsort(-sims_all)[:min(len(self.exemplars), k + 16)]
+        rows: list[tuple[Exemplar, float]] = []
+        for i in order:
+            ex = self.exemplars[i]
+            sim = float(sims_all[i])
+            if ex.ephemeral and w_rec > 0:
+                age = max(now - self._eph_born(ex), 0.0)
+                sim += w_rec * float(np.exp(-age / tau))
+            rows.append((ex, sim))
+        rows.sort(key=lambda t: -t[1])
+        return rows[:k]
 
     def append(self, ex: Exemplar) -> None:
         self.exemplars.append(ex)
@@ -457,17 +631,25 @@ class ExemplarStore:
             return np.zeros((0, 0), dtype=float)
         return np.array([e.vec for e in self.exemplars], dtype=float)
 
-    def top_k(self, q: np.ndarray, k: int = 5) -> list[tuple[Exemplar, float]]:
-        """The k nearest exemplars to unit query q, by cosine similarity."""
-        if len(self.exemplars) == 0:
+    def top_k(self, q: np.ndarray, k: int = 5,
+              canon_only: bool = False) -> list[tuple[Exemplar, float]]:
+        """The k nearest exemplars to unit query q, by cosine similarity.
+
+        ``canon_only`` excludes ephemeral CANDIDATES: the gate's replay
+        decision reads canon alone (a candidate is an unconfirmed claim --
+        replaying it would be acting on silence). Recall that should SEE
+        candidates uses ``recall_merged`` instead."""
+        pool = ([e for e in self.exemplars if not e.ephemeral]
+                if canon_only else self.exemplars)
+        if not pool:
             return []
-        V = self.vectors()
+        V = np.array([e.vec for e in pool], dtype=float)
         qn = _unit(q)
         Vn = V / (np.linalg.norm(V, axis=1, keepdims=True) + 1e-12)
         sims = Vn @ qn
-        k = min(k, len(self.exemplars))
+        k = min(k, len(pool))
         idx = np.argsort(-sims)[:k]
-        return [(self.exemplars[i], float(sims[i])) for i in idx]
+        return [(pool[i], float(sims[i])) for i in idx]
 
     def save(self, path: str | Path) -> None:  # noqa: F811
         if self._cb is not None:
@@ -479,7 +661,13 @@ class ExemplarStore:
         """Atomic save: write to a temp file in the same directory, then
         ``os.replace`` it over the target. A crash mid-write leaves the old
         field intact (the rename is the atomic publish step) instead of a
-        truncated JSON no future load can read."""
+        truncated JSON no future load can read.
+
+        Ephemeral rows ride the same file as plain exemplars carrying their
+        ``eph_born`` in extra -- load() routes them back into the ephemeral
+        tier, so the JSON mirror has the SAME semantics as the couchbase
+        tier split. (The fallback must be a faithful tier mirror, or a
+        cluster-loss flip would promote silence by forgetting candidates.)"""
         p = Path(path)
         if self._quarantine_failed:
             raise RuntimeError(
@@ -490,8 +678,17 @@ class ExemplarStore:
                                    dir=str(p.parent))
         try:
             with os.fdopen(fd, "w") as f:
-                json.dump([_ex_to_wire(e, stamp=False) for e in self.exemplars],
-                          f, indent=2)
+                # ONE list, two tiers by flag: ephemeral rows carry their
+                # eph_born in extra (the load path routes them back); the
+                # flag itself rides the record only when True (legacy rows
+                # stay byte-identical)
+                recs = []
+                for e in self.exemplars:
+                    rec = _ex_to_wire(e, stamp=False)
+                    if e.ephemeral:
+                        rec["ephemeral"] = True
+                    recs.append(rec)
+                json.dump(recs, f, indent=2)
             os.replace(tmp, p)
         except BaseException:
             try:
@@ -700,6 +897,125 @@ class ExemplarStore:
             self._cb_archive = handle
         return handle
 
+    def _list_buckets(self, host: str, user: str, pw: str) -> list[dict]:
+        """The cluster's buckets (name + bucketType) via the management REST
+        API -- the SDK cannot create buckets, and existence checks need the
+        type too (an ephemeral tier wants an EPHEMERAL-type bucket). Empty
+        list when the API is unreachable (offline cluster, bad creds)."""
+        import base64
+        import urllib.request
+        try:
+            req = urllib.request.Request(
+                f"http://{host}:8091/pools/default/buckets")
+            req.add_header("Authorization", "Basic " + base64.b64encode(
+                f"{user}:{pw}".encode()).decode())
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return json.loads(r.read())
+        except Exception:
+            return []
+
+    def _resolve_eph_bucket(self) -> str:
+        """Which bucket holds the ephemeral tier. Resolution order:
+        1. explicit COUCHBASE_EPHEMERAL_BUCKET (must exist on the cluster)
+        2. "<canon>-ephemeral" (the cortex-core/cortex-ephemeral convention)
+        3. any existing bucket of type 'ephemeral'
+        4. CREATE "<canon>-ephemeral" (management REST; the SDK cannot) --
+           ephemeral bucketType: the server TTLs docs, nothing persists.
+        "" when nothing works -> callers fall back to the sibling collection
+        inside the canon bucket (today's semantics, still correct)."""
+        conn = os.environ.get("COUCHBASE_CONN_STRING", "couchbase://localhost")
+        user = os.environ.get("COUCHBASE_USER", "Administrator")
+        pw = os.environ.get("COUCHBASE_PASSWORD", "password")
+        host = conn.replace("couchbase://", "").split("/")[0].split(":")[0]
+        canon = self._cb_bucket or os.environ.get("COUCHBASE_BUCKET", "membrane")
+        buckets = {b.get("name", ""): b.get("bucketType", "membase")
+                   for b in self._list_buckets(host, user, pw)}
+        explicit = os.environ.get("COUCHBASE_EPHEMERAL_BUCKET", "").strip()
+        if explicit:
+            if explicit in buckets:
+                return explicit
+            print(f"[membrane] COUCHBASE_EPHEMERAL_BUCKET={explicit!r} not on "
+                  f"the cluster; falling back to discovery", file=sys.stderr)
+        want = canon + EPH_BUCKET_SUFFIX
+        if buckets.get(want) == "ephemeral":
+            return want
+        for n, btype in buckets.items():
+            if btype == "ephemeral" and n:
+                return n
+        # create it: same ladder as the canon bucket (quota may be tight);
+        # no replicas -- candidates are disposable by design
+        import base64
+        import urllib.request
+        from urllib.parse import urlencode
+        last_err: Exception | None = None
+        for mb in (256, 128, 100):
+            try:
+                req = urllib.request.Request(
+                    f"http://{host}:8091/pools/default/buckets", method="POST")
+                req.add_header("Authorization", "Basic " + base64.b64encode(
+                    f"{user}:{pw}".encode()).decode())
+                req.add_header("Content-Type",
+                               "application/x-www-form-urlencoded")
+                urllib.request.urlopen(req, data=urlencode({
+                    "name": want, "ramQuotaMB": mb,
+                    "bucketType": "ephemeral", "replicaNumber": 0,
+                }).encode(), timeout=10)
+                print(f"[membrane] created ephemeral bucket '{want}' "
+                      f"({mb} MB, bucketType=ephemeral)", file=sys.stderr)
+                return want
+            except Exception as e:
+                last_err = e
+        print(f"[membrane] no ephemeral bucket available ({last_err}); "
+              f"the ephemeral tier rides the canon bucket's {EPH_COLL} "
+              f"collection", file=sys.stderr)
+        return ""
+
+    def _ensure_eph_collection(self) -> Any:
+        """The ephemeral tier's home: the `membrane.exemplars_ephemeral`
+        collection in the DEDICATED ephemeral bucket when one resolves
+        (`_resolve_eph_bucket`), else the sibling collection in the canon
+        bucket (same fresh-bucket contract: scope + collection + PRIMARY
+        INDEX, idempotent). Doc TTL does the GC server-side either way."""
+        if self._cb_eph is not None:
+            return self._cb_eph
+        bucket = self._resolve_eph_bucket()
+        if bucket:
+            self._cb_eph_bucket = bucket
+        else:
+            bucket = self._cb_bucket or os.environ.get(
+                "COUCHBASE_BUCKET", "membrane")
+        colls = self._cb_cluster.bucket(bucket).collections()
+        created: list[str] = []
+        try:
+            colls.create_scope(_CB_SCOPE)
+            created.append(f"scope {_CB_SCOPE}")
+        except Exception:
+            pass                    # scope exists (or refused): use it
+        try:
+            colls.create_collection(_CB_SCOPE, EPH_COLL)
+            created.append(f"collection {EPH_COLL}")
+        except Exception:
+            pass
+        try:
+            mgr = self._cb_cluster.query_indexes()
+            existing = {i.name for i in mgr.get_all_indexes(
+                bucket, scope_name=_CB_SCOPE, collection_name=EPH_COLL)}
+            if "def_primary" not in existing and "#primary" not in existing:
+                mgr.create_primary_index(
+                    bucket, scope_name=_CB_SCOPE, collection_name=EPH_COLL)
+                created.append(f"primary index {EPH_COLL}")
+        except Exception:
+            pass                    # old SDK: KV paths still work
+        handle = (self._cb_cluster.bucket(bucket)
+                  .scope(_CB_SCOPE).collection(EPH_COLL))
+        if created:
+            where = (f"bucket '{bucket}' (dedicated ephemeral)"
+                     if self._cb_eph_bucket else f"bucket '{bucket}'")
+            print(f"[membrane] bootstrapped ephemeral tier in {where}: "
+                  f"{created}", file=__import__("sys").stderr)
+        self._cb_eph = handle
+        return handle
+
     def _cb_ensure_infra(self, bucket: str, colls: Any) -> list[str]:
         """THE FRESH-BUCKET CONTRACT: installing onto an EMPTY Couchbase
         bucket creates everything membrane needs, idempotently -- the
@@ -782,10 +1098,59 @@ class ExemplarStore:
             st.append(ex)
             keys.append(row["id"])
         st._cb_keys = set(keys)
+        # delta-save bookkeeping: everything hydrated IS current on the
+        # backend -- the first save touches only rows born/mutated since.
+        st._written = set(keys)
         # own patch situations are already arbitrated: don't replay the CAS
         # pass for them on the first save after boot
         st._cb_situ = {_situ_key(e.situation) for e in st.exemplars
                        if (e.origin or my) == my}
+        # the ephemeral tier: candidates survive across boots server-side
+        # (TTL does the GC); hydrate them back flagged into the ONE list.
+        try:
+            eph_coll = st._ensure_eph_collection()
+            eph_bucket = st._cb_eph_bucket or st._cb_bucket
+            now = time.time()
+            eph_q = st._cb_cluster.query(
+                "SELECT meta().id AS id, t.* "
+                f"FROM `{eph_bucket}`.`{_CB_SCOPE}`.`{EPH_COLL}` t",
+                QueryOptions(timeout=timedelta(seconds=30)))
+            n_eph = 0
+            eph_keys: list[str] = []
+            for row in eph_q:
+                # the id is bookkeeping (delta sets + retire-on-sight), not
+                # exemplar data: strip it before decode (canon loop's shape)
+                eph_id = row.get("id") or ""
+                ex = _rec_from_wire(
+                    {k: v for k, v in row.items() if k != "id"})
+                if not (ex.situation or ex.action):
+                    continue
+                if "eph_born" not in (ex.extra or {}):
+                    ex.extra["eph_born"] = float(now)
+                if now - st._eph_born(ex) >= EPH_TTL_S:
+                    # server TTL lag: retire on sight (not loaded at all)
+                    try:
+                        eph_coll.remove(eph_id)
+                    except Exception:
+                        pass
+                    continue
+                ex.ephemeral = True
+                st.append(ex)
+                eph_keys.append(eph_id)
+                n_eph += 1
+            # delta-save seeding (canon's `_cb_keys`/`_written` contract):
+            # everything hydrated IS current on the backend -- without this,
+            # a candidate forgotten/expired BEFORE the first save is invisible
+            # to the stale reconcile and its doc lingers server-side.
+            st._cb_keys_eph = set(eph_keys)
+            st._written_eph = set(eph_keys)
+            if n_eph:
+                print(f"[membrane] ephemeral tier: {n_eph} candidate(s) "
+                      f"hydrated (TTL {EPH_TTL_S:.0f}s)",
+                      file=__import__("sys").stderr)
+        except Exception as e:
+            print(f"[membrane] ephemeral tier hydrate skipped ({e})",
+                  file=__import__("sys").stderr)
         # foreign project exemplars ride along ONLY through the boot poke
         # (`veil_poke`, bounded) and arbitration adoption -- never wholesale.
         return st
@@ -919,18 +1284,64 @@ class ExemplarStore:
         rec["_situ"] = _situ_key(ex.situation)
         return rec
 
-    def _save_couchbase(self) -> None:
-        """Reconcile: upsert own exemplars (origin-namespaced keys), arbitrate
-        contested situations via CAS, remove only OWN vanished keys.
+    # ---- the mem:stats doc (the sketch that replaces boot hydration) --------
+    # Lab E4's finding, carried honestly: a JL projection FLOORS the
+    # observable eff_rank near the sketch dim, so the spectrum here is a
+    # TREND estimator (does the field get richer or just bigger between
+    # saves), not an exact meter. safe_frac / counts are EXACT O(1) tallies
+    # -- the part every --status render reads per write.
 
-        Origin stamping happens HERE, at the wire: in-RAM exemplars written
-        by this membrane carry origin="" (born here); the first save pins
-        that blank to the store's origin tag, so keys and records are stable
-        from then on (an exemplar that gained origin would change key and
-        duplicate its doc). Foreign rows (origin set) are never written."""
+    def stats_sketch(self) -> dict:
+        """The mem:stats payload: exact counts + the sketched spectrum."""
+        n = len(self.exemplars)
+        n_eph = sum(1 for e in self.exemplars if e.ephemeral)
+        safe = sum(1 for e in self.exemplars if e.safe)
+        safe_frac = (safe / n) if n else 0.0
+        out = {"n": n, "n_durable": n - n_eph, "n_ephemeral": n_eph,
+               "safe": safe, "safe_frac": safe_frac}
+        # trend: JL-project then SVD (one fixed matrix per dim -- stable
+        # across saves so the trend is comparable over time)
+        st = self.exemplars
+        D = len(st[0].vec) if st else 0
+        if n >= 2 and D:
+            d = min(_SKETCH_D, D)
+            rng = np.random.default_rng(_JL_SEED)
+            R = rng.standard_normal((d, D)) / np.sqrt(d)
+            V = np.array([e.vec for e in st], dtype=float)
+            Y = (V - V.mean(axis=0)) @ R.T
+            _, S, _ = np.linalg.svd(Y, full_matrices=False)
+            var = (S ** 2) / n
+            p = var / (var.sum() + 1e-12)
+            er = float(np.exp(-(p * np.log(p + 1e-12)).sum()))
+            fe = safe_frac * er - 0.25 * (1.0 - safe_frac) * er
+            out.update({"eff_rank_sketch": er, "free_energy_sketch": float(fe),
+                        "sketch_d": d, "dim": D})
+        return out
+
+    def _save_stats_doc(self) -> None:
+        """Persist the sketch as `mem:stats` in the live collection (a KV
+        upsert with the delta saves -- cheaper than any recompute-on-boot)."""
+        try:
+            self._cb.upsert("mem:stats", self.stats_sketch())
+        except Exception:
+            pass                    # stats are an affordance, never a dependency
+
+    def _save_couchbase(self) -> None:
+        """DELTA save (was: full reconcile). Only rows NOT already confirmed
+        current on the backend get upserted; only OWN vanished keys get
+        removed. Arbitration still runs for NEW situations only (the
+        _cb_situ set keeps that bookkeeping). A full reconcile is pay-per-
+        exemplar on every learn; with the delta set the steady-state save is
+        O(changed), which is what makes the ephemeral write path affordable
+        (every capture is a save).
+
+        Origin stamping happens HERE, at the wire (unchanged): in-RAM
+        exemplars written by this membrane carry origin="" (born here); the
+        first save pins that blank to the store's origin tag."""
         coll = self._cb
         live: set[str] = set()
         pending: dict[str, Exemplar] = {}   # situ_key -> my contender
+        dirty: list[tuple[str, Exemplar]] = []
         for ex in self.exemplars:
             if not ex.origin:
                 if self.origin:
@@ -941,21 +1352,80 @@ class ExemplarStore:
             live.add(k)
             if ex.origin != self.origin:
                 continue                    # foreign patch: never written by us
-            coll.upsert(k, self._cb_doc(ex))
+            if ex.ephemeral:
+                continue                    # candidates: the ephemeral pass
+                # owns them (their key namespace differs from canon's)
+            if k not in self._written:
+                dirty.append((k, ex))
             situ = _situ_key(ex.situation)
             if situ not in self._cb_situ:   # new situation: contend once
                 self._cb_situ.add(situ)
                 pending.setdefault(situ, ex)
+        for k, ex in dirty:
+            coll.upsert(k, self._cb_doc(ex))
+        self._written |= {k for k, _ in dirty}
         if pending:
             self._arbitrate(pending)
+        ephemeral_keys = {_eph_key(ex) for ex in self.exemplars if ex.ephemeral}
         if getattr(self, "_cb_keys", None):
-            stale = self._cb_keys - live
+            stale = (self._cb_keys - live) | ephemeral_keys
+            # a promoted candidate's ephemeral doc must GO; canon's stale
+            # keys go with it (the forget/compactor paths)
             for k in stale:
                 try:
                     coll.remove(k)
                 except Exception:
                     pass
         self._cb_keys = live
+        # the ephemeral pass + stats doc need the cluster handle (fakes and
+        # bare KV stubs in tests set only _cb): skip on anything less
+        if getattr(self, "_cb_cluster", None) is not None:
+            self._save_couchbase_ephemeral()
+            self._save_stats_doc()
+
+    def _save_couchbase_ephemeral(self) -> None:
+        """The ephemeral tier on couchbase: same origin namespace, the
+        SIBLING `exemplars_ephemeral` collection, server-side doc TTL (the
+        clock's GC -- no janitor sweep to run). A PROMOTED candidate's
+        ephemeral doc is removed here (its content moved to canon); TTL
+        handles the silent rest."""
+        coll = self._ensure_eph_collection()
+        upsert = getattr(coll, "upsert_with_expiry", None)
+        live: set[str] = set()
+        for ex in self.exemplars:
+            if not ex.ephemeral:
+                continue
+            if not ex.origin:
+                if self.origin:
+                    ex.origin = self.origin
+                else:
+                    continue
+            k = _eph_key(ex)
+            live.add(k)
+            if k not in self._written_eph:
+                rec = self._cb_doc(ex)
+                rec["eph_born"] = self._eph_born(ex)
+                rec["eph_ttl"] = EPH_TTL_S
+                try:
+                    if upsert is not None:
+                        from datetime import timedelta as _td
+                        upsert(k, rec, expiry=_td(seconds=int(EPH_TTL_S)))
+                    else:  # old SDK: no expiry API -- plain upsert; the JSON
+                           # mirror's eph_born still retires it at load
+                        coll.upsert(k, rec)
+                except Exception:
+                    continue
+                self._written_eph.add(k)
+        stale = getattr(self, "_cb_keys_eph", None) or set()
+        stale -= live
+        # a promoted row's ephemeral key vanished from `live` because the
+        # flag flipped -- its doc is garbage now; remove it
+        for k in stale:
+            try:
+                coll.remove(k)
+            except Exception:
+                pass
+        self._cb_keys_eph = live
 
     def _arbitrate(self, pending: dict[str, Exemplar]) -> None:
         """One arbitration pass over my newly-written docs.
@@ -1205,5 +1675,12 @@ class ExemplarStore:
                 else:
                     recs = parsed
             for rec in recs:
-                store.append(_rec_from_wire(rec))
+                ex = _rec_from_wire(rec)
+                if (ex.extra or {}).get("eph_born") is not None \
+                        or rec.get("ephemeral"):
+                    # the ephemeral tier rides the JSON mirror (same file):
+                    # restore the candidate flag -- the fallback must be a
+                    # faithful tier mirror
+                    ex.ephemeral = True
+                store.append(ex)
         return store

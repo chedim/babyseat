@@ -33,7 +33,7 @@ from typing import Callable
 
 COUCHBASE_ENV_KEYS = ("MEMBRANE_STORE", "COUCHBASE_CONN_STRING",
                       "COUCHBASE_USER", "COUCHBASE_PASSWORD",
-                      "COUCHBASE_BUCKET")
+                      "COUCHBASE_BUCKET", "COUCHBASE_EPHEMERAL_BUCKET")
 DECLINE_KEY = "MEMBRANE_ASKED_COUCHBASE"
 # only keys under these namespaces may be exported from a project env file
 _EXPORT_PREFIXES = ("MEMBRANE_", "COUCHBASE_")
@@ -187,14 +187,20 @@ def couchbase_onboarding(cwd: Path | str | None = None,
     user = input_fn("  user [Administrator]: ").strip()
     pw = getpass_fn("  password: ").strip()
     bucket = input_fn("  bucket [membrane]: ").strip()
+    eph = input_fn("  ephemeral bucket [<bucket>-ephemeral, empty=auto]: ").strip()
+    canon = bucket or "membrane"
     vals = dict(have)
     vals.update({
         "MEMBRANE_STORE": "couchbase",
         "COUCHBASE_CONN_STRING": conn or "couchbase://localhost",
         "COUCHBASE_USER": user or "Administrator",
         "COUCHBASE_PASSWORD": pw or "password",
-        "COUCHBASE_BUCKET": bucket or "membrane",
+        "COUCHBASE_BUCKET": canon,
     })
+    if eph:
+        vals["COUCHBASE_EPHEMERAL_BUCKET"] = eph
+    else:
+        vals.pop("COUCHBASE_EPHEMERAL_BUCKET", None)  # auto-resolve at boot
     vals[DECLINE_KEY] = "0"     # an explicit connect overrides a past decline
     _write_env_file(path, vals)
     for k, v in vals.items():   # this launch shares immediately
@@ -202,7 +208,7 @@ def couchbase_onboarding(cwd: Path | str | None = None,
             env.setdefault(k, v)
     if not quiet:
         print(f"[membrane] shared store on: couchbase "
-              f"({vals['COUCHBASE_CONN_STRING']}, bucket "
-              f"{vals['COUCHBASE_BUCKET']}); creds at {path} (never commit "
-              f"them there).", file=sys.stderr)
+              f"({vals['COUCHBASE_CONN_STRING']}, canon bucket {canon}, "
+              f"ephemeral tier {eph or canon + '-ephemeral (auto)'}); creds "
+              f"at {path} (never commit them there).", file=sys.stderr)
     return True

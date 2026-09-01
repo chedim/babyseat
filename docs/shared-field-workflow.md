@@ -28,6 +28,18 @@ the stack wise.
    distinguish themselves by the origin axis -- do NOT add per-project
    buckets (that defeats independent-agreement promotion).
 
+   TWO TIERS, two buckets: stable field data lives in the canon bucket
+   (membase type, persists); unconfirmed candidates (fresh captures, the
+   ephemeral tier) live in a dedicated EPHEMERAL-type bucket -- the
+   `cortex-core` / `cortex-ephemeral` convention. Point at it explicitly
+   with `COUCHBASE_EPHEMERAL_BUCKET`, or let boot resolve it:
+   `<canon>-ephemeral` if it exists, else any `ephemeral`-type bucket, else
+   one is created (256 MB, no replicas). No ephemeral bucket available?
+   The tier falls back to a sibling `exemplars_ephemeral` collection in the
+   canon bucket -- semantics identical, GC by doc TTL either way. The
+   migration script (`scripts/cb_migrate_field.py`) routes flagged rows to
+   the ephemeral bucket and canon rows to the canon bucket in one pass.
+
 2. Run `python -m membrane.opencode` in the repo. Boot line should say
    `shared store: couchbase (...)` and `peers: N other membrane(s) live`.
    If peers: 0 while a teammate is online, their proxy is down or behind a

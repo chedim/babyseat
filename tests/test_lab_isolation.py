@@ -40,6 +40,9 @@ def test_experiments_field_tag_pattern_is_lab():
 def test_load_prefers_json_for_lab_paths(monkeypatch):
     """Even with a Couchbase cluster up and no MEMBRANE_STORE pin, a lab path
     must come back as a JSON-backed store (no _cb handle)."""
+    # hermetic: an exported MEMBRANE_STORE=couchbase (port-work shells) is
+    # the EXPLICIT opt-in branch and would bypass the guard under test
+    monkeypatch.delenv("MEMBRANE_STORE", raising=False)
     with tempfile.TemporaryDirectory(prefix="dream-loop-") as d:
         fp = os.path.join(d, "field-lab.json")
         # pretend the probe would succeed: auto-detect must still refuse

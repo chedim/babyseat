@@ -58,6 +58,7 @@ def decide(
     novelty_rank_ratio_max: float = 0.5,
     novelty_sim_max: float = 0.95,
     eff_rank: float | None = None,
+    canon_only: bool = False,
 ) -> dict:
     """Route `query` against `store` to one of: act / escalate-with-hint / escalate.
 
@@ -73,6 +74,12 @@ def decide(
     a second SVD per turn. When None, the rank is computed internally (existing
     behaviour for direct callers / tests).
 
+    ``canon_only`` (the ephemeral tier): CANDIDATES are invisible to the
+    replay decision -- an unconfirmed claim is never acted on. The gate
+    escalates to the model; the model's served answer is what CONFIRMS the
+    nearby candidates (promote-on-use). Set by ``gate_turn`` when the tier
+    is on.
+
     Returns (each carries the variety the decision was made under):
       {"verdict": ..., "sim": ..., "nov": ...|None, "ex_idx": int|None,
        "eff_rank": float, "rank_ratio": float, "sim_min": float}
@@ -82,7 +89,12 @@ def decide(
                 "ex_idx": None, "eff_rank": 0.0, "rank_ratio": 0.0, "sim_min": sim_min}
 
     qn = query / (np.linalg.norm(query) + 1e-12)
-    nbrs = store.top_k(qn, k=k)
+    nbrs = store.top_k(qn, k=k, canon_only=canon_only)
+    if not nbrs:
+        # canon-only recall with a candidates-only field: nothing to act on
+        return {"verdict": "escalate", "reason": "no canon matches", "sim": 0.0,
+                "nov": None, "ex_idx": None, "eff_rank": (eff_rank or 0.0),
+                "rank_ratio": 0.0, "sim_min": sim_min}
     near, sim = nbrs[0]
     near_idx = store.index_of(near)              # identity lookup; the training loop uses this
     near_safe = bool(near.safe)
