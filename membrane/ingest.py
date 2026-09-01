@@ -183,7 +183,7 @@ def ingest(mem, paths: list[str] | None = None, root: str | Path = ".",
         if dry_run:
             absorbed += 1
             continue
-        idx = mem.learn_pair(sit, act)
+        idx = mem.learn_pair(sit, act, src="ingest")
         if idx is None:
             dups += 1
         else:

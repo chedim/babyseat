@@ -157,7 +157,9 @@ def tool_query(args: dict, port: int) -> str:
     for h in out["hits"]:
         via = f" [via {h['model']}]" if h.get("model") else ""
         tag = h.get("outcome") or "pending"
-        lines.append(f"({h['sim']:.2f} [{tag}]{via}) Q: {h['situation']}\n"
+        src = h.get("src") or "user"
+        lines.append(f"({h['sim']:.2f} [{tag}]{via} [src: {src}]) "
+                     f"Q: {h['situation']}\n"
                      f"    A: {h['action']}")
     return "\n".join(lines)
 

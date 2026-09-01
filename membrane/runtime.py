@@ -447,6 +447,52 @@ def _chat_response(model: str, content: str) -> dict:
     }
 
 
+# ---- W4a: the per-cell provenance axis --------------------------------------
+# `src` rides extra["src"] (earned at learn time, surfaced at recall):
+#   ground  -- learned on a turn carrying paired tool results (the
+#              _pending_tools call->result hook); environment-verified.
+#   user    -- operator turns and teed Q/A (the default).
+#   model   -- agent-learned notes (own prior guesses; verify against ground).
+#   ingest  -- docs/README cold-start (prior conclusions, same caution).
+# Trust order ground > user > model powers supersede-on-confirm: a lower-
+# trust correction may supersede a higher-trust cell, never the reverse
+# at equal lane (ground beats model; model cannot beat ground).
+SRC_TRUST = {"ground": 3, "user": 2, "model": 1, "ingest": 1}
+_SRC_VALID = frozenset(SRC_TRUST)
+
+
+def _src_of(src: str | None, fallback=None) -> str:
+    """Normalize a src tag; `fallback` (an Exemplar or None) supplies the dup's
+    existing tag when the caller passes something unknown (never invent trust)."""
+    s = (src or "").strip().lower()
+    if s in _SRC_VALID:
+        return s
+    if fallback is not None:
+        f = (getattr(fallback, "extra", None) or {}).get("src")
+        if f in _SRC_VALID:
+            return f
+    return "user"
+
+
+def _src_get(ex) -> str:
+    """The stored provenance tag of an exemplar ("" = legacy/unknown)."""
+    try:
+        return str((getattr(ex, "extra", None) or {}).get("src") or "")
+    except Exception:
+        return ""
+
+
+def _src_label(ex) -> str:
+    """The recall-time provenance stamp: `[src: ground -- environment-verified]`
+    style; legacy rows (no tag) surface as `[src: user -- operator turn]`."""
+    s = _src_get(ex) or "user"
+    why = {"ground": "environment-verified",
+           "user": "operator turn",
+           "model": "own prior guess -- verify against ground",
+           "ingest": "from docs -- prior conclusion, verify"}.get(s, s)
+    return f"[src: {s} -- {why}]"
+
+
 class Membrane:
     """The absorb/escalate runtime over a local exemplar field, with passive self-training.
 
@@ -993,7 +1039,8 @@ class Membrane:
         self._remember(query, vec, verdict, ex_idx)
         return ex_idx
 
-    def learn_pair(self, situation: str, action: str, unsafe: bool = False) -> int | None:
+    def learn_pair(self, situation: str, action: str, unsafe: bool = False,
+                   src: str = "user") -> int | None:
         """Absorb a PRE-COMPLETED ``(situation, action)`` pair -- the action is the REAL
         response teed from the live proxy (membrane/buffer.py ``attach_response``), not a
         responder/model call. This is the cell's teed-intake path: it learns the exemplar
@@ -1023,7 +1070,8 @@ class Membrane:
         verdict = {"verdict": "teed-pair", "reason": "pre-completed pair",
                    "sim": None, "nov": None, "ex_idx": None}
         resp = _chat_response("teed", action)
-        ex_idx = self._learn(situation, vec, verdict, resp, unsafe, would_absorb=False)
+        ex_idx = self._learn(situation, vec, verdict, resp, unsafe,
+                             would_absorb=False, src=src)
         if ex_idx is not None:
             self._remember(situation, vec, verdict, ex_idx)
         return ex_idx
@@ -1423,7 +1471,7 @@ class Membrane:
     def _learn(self, query: str, vec: np.ndarray, verdict: dict, resp: dict,
                unsafe: bool, would_absorb: bool = False,
                normalize: bool = True, tags: list[int] | None = None,
-               self_authored: bool = False) -> int | None:
+               self_authored: bool = False, src: str = "user") -> int | None:
         """Append the new exemplar (situation -> action=response) and audit the decision.
 
         outcome is "pending" -- filled in later when the user reacts (a re-ask flips
@@ -1494,6 +1542,14 @@ class Membrane:
                 if (getattr(self, "ephemeral_tier", False) and dup.safe
                         and not dup.ephemeral
                         and _action_overlap(dup.action, content) < 0.7):
+                    # W4a trust order: a ground cell is environment-verified;
+                    # only a ground-signaled correction supersedes it. A
+                    # lower-trust answer (model claim) may not.
+                    if (_src_get(dup) == "ground" and src != "ground"):
+                        self._audit(query, verdict, resp, ex_idx=dup_idx,
+                                    learned=False, dup=True,
+                                    would_absorb=would_absorb)
+                        return dup_idx
                     fresh = Exemplar(
                         situation=query, action=content, outcome="pending",
                         vec=(_unit_list(vec) if normalize else vec.tolist()),
@@ -1501,6 +1557,7 @@ class Membrane:
                         model=str(((verdict.get("route") or {}).get("route")) or ""),
                         tags=tags or [],
                         self_authored=self_authored,
+                        extra={"src": _src_of(src, fallback=dup)},
                     )
                     self.store.capture_ephemeral(fresh)
                     new_idx = len(self.store) - 1
@@ -1558,6 +1615,7 @@ class Membrane:
                 model=str(((verdict.get("route") or {}).get("route")) or ""),
                 tags=tags or [],
                 self_authored=self_authored,
+                extra={"src": _src_of(src)},
             )
             if getattr(self, "ephemeral_tier", False):
                 # THE TIER RULE: a fresh capture is a CANDIDATE (lab E1 --

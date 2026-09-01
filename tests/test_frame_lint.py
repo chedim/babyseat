@@ -116,5 +116,35 @@ class TestFrameLint(unittest.TestCase):
         self.assertIn("frame discipline: 2 violation(s)", report)
 
 
+class TestDevWarn(unittest.TestCase):
+    """W3b: --dev plants a ONE-SHOT warning consumed on the next request."""
+
+    def test_no_warn_without_dev_flag(self):
+        srv = _srv()
+        OC._frame_lint(srv, "prose\nmembrane: learn that a\nmembrane: "
+                            "learn that b")
+        self.assertIsNone(OC._dev_warn_take(srv))
+
+    def test_dev_plants_one_shot_warning(self):
+        srv = _srv()
+        srv.dev = True
+        OC._frame_lint(srv, "prose\nmembrane: learn that a\nfield state")
+        w = OC._dev_warn_take(srv)
+        self.assertIn("frame discipline", w)
+        self.assertIn("stacked", w)
+        # consumed exactly once
+        self.assertIsNone(OC._dev_warn_take(srv))
+
+    def test_buried_kind_named_in_warning(self):
+        srv = _srv()
+        srv.dev = True
+        OC._frame_lint(srv, "we discussed it\n"
+                            "membrane: learn that x\n"
+                            "then moved on to other checks entirely")
+        w = OC._dev_warn_take(srv)
+        self.assertIn("buried", w)
+        self.assertIn("ONE canonical frame", w)
+
+
 if __name__ == "__main__":
     unittest.main()

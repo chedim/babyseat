@@ -47,7 +47,7 @@ class IngestTest(unittest.TestCase):
             store = _Store()
             embedder = FakeEmb()
 
-            def learn_pair(self, s, a, unsafe=False):
+            def learn_pair(self, s, a, unsafe=False, src="user"):
                 for e in self.store.exemplars:
                     if e.situation == s:
                         return None

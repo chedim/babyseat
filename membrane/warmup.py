@@ -388,7 +388,7 @@ def run_warmup(membrane, backend: str, model: str | None, premise: str, n: int,
 
     def _absorb(sit, act):
         if sit and act:
-            membrane.learn_pair(sit, act)
+            membrane.learn_pair(sit, act, src="ingest")
 
     if not curriculum:
         for i in range(n):

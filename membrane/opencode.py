@@ -86,7 +86,7 @@ from .cell import Cell
 from .curiosity import CURIOSITY_MIN
 from .pool import CellPool
 from .runtime import (Membrane, OllamaChatResponder, OllamaJudge, StubJudge,
-                      StubResponder)
+                      StubResponder, _src_label, _src_get)
 from .variety import (cells_rank, entropy_count, free_energy, orient_dirs,
                       thermo_state)
 
@@ -334,6 +334,9 @@ def _state_report(srv) -> str:
                      f"(`membrane: suggest` to review)")
     else:
         lines.append("- global field: off")
+    ledger = getattr(srv, "user_ledger", None)
+    lines.append(f"- user ledger: {ledger.count() if ledger else 0} verbatim "
+                 f"decision(s){' (' + ledger.path + ')' if ledger else ' (unavailable)'}")
     return "\n".join(lines)
 
 
@@ -1558,7 +1561,7 @@ def _agent_learn(srv, payload: str) -> str:
         return (f"[membrane-intercept] learn: payload too long "
                 f"({len(payload)} > {_AGENT_LEARN_MAX_CHARS} chars) -- a "
                 f"lesson is a note, not a transcript. Nothing written.")
-    idx = mem.learn_pair(payload, payload)
+    idx = mem.learn_pair(payload, payload, src="model")
     if idx is None:
         return ("[membrane-intercept] agent learn: the field already holds "
                 "that (dedup) or the variety gate skipped it -- nothing new "
@@ -1585,6 +1588,14 @@ def _learn_report(srv, payload: str) -> str:
         return ("Membrane learn (operator path): the field already holds that "
                 "(dedup) or the variety gate skipped it -- nothing new written."
                 "\n\n" + _INTERCEPT_MARKER)
+    # W4b: the operator's verbatim words also land in the user ledger
+    # (model-unwritable; this executor is reached only from USER turns).
+    ledger = getattr(srv, "user_ledger", None)
+    if ledger is not None:
+        try:
+            ledger.append(payload)
+        except Exception:
+            pass
     _watch_notify(srv, mem, idx)
     _write_audit(mem, {"event": "operator-learn", "ex_idx": idx,
                        "tag": _LEARN_TAG, "field_size": len(mem.store),
@@ -1927,7 +1938,8 @@ def _recall_report(srv, topic: str) -> str:
                 continue
             tag = getattr(ex, "outcome", "") or "pending"
             via = f" [via {ex.model}]" if getattr(ex, "model", "") else ""
-            lines.append(f"({sim:.2f} [{tag}]{via}) Q: {q}\n    A: {a}")
+            lines.append(f"({sim:.2f} [{tag}]{via} {_src_label(ex)}) "
+                         f"Q: {q}\n    A: {a}")
             hits += 1
             if hits >= 8:
                 break
@@ -1957,8 +1969,11 @@ def _recall_report(srv, topic: str) -> str:
             tag = getattr(ex, "outcome", "") or "pending"
             mark = "" if ex.safe else " [UNSAFE]"
             lines.append(f"#{len(exs) - len(exs[-12:]) + i} [{tag}]{mark} "
+                         f"{_src_label(ex)} "
                          f"Q: {_clip(ex.situation, 200)}\n"
                          f"    A: {_clip(ex.action or '', 200)}")
+    lines.append("- trust: ground (environment-verified) > user (operator) "
+                 "> model (own prior guess -- verify against ground)")
     return "\n".join(lines)
 
 
@@ -2073,6 +2088,25 @@ def _thought_family(t: str, c: str) -> str:
 _CANON_FRAME_PREFIXES = ("membrane:", "field state", "field stats",
                          "membrane query", "membrane learn", "membrane forget")
 
+_DEV_FRAME_WARN = ("[membrane-intercept] frame discipline: {kinds}. At most "
+                   "ONE canonical frame per reply, on its own line, LAST. "
+                   "Stacked or buried frames miss the pre-gate intercept and "
+                   "the whole turn absorbs as junk memory. Re-emit the frame "
+                   "alone on your next turn.")
+
+
+def _dev_frame_warning(kinds: list[str]) -> str:
+    """W3b: the one-shot --dev warning text for the violation kinds."""
+    return _DEV_FRAME_WARN.format(kinds=" and ".join(kinds))
+
+
+def _dev_warn_take(srv) -> str | None:
+    """Consume the pending one-shot --dev warning (exactly once)."""
+    w = getattr(srv, "_dev_warn", None)
+    if w:
+        srv._dev_warn = None
+    return w
+
 
 def _frame_lint(srv, text: str, source: str = "assistant") -> int:
     """Count discipline violations in one assistant text; audit each.
@@ -2110,6 +2144,11 @@ def _frame_lint(srv, text: str, source: str = "assistant") -> int:
     for k in kinds:
         fw[f"viol_{k}"] = fw.get(f"viol_{k}", 0) + 1
     fw["violations"] = fw.get("violations", 0) + 1
+    # W3b: in --dev mode the violation also plants a ONE-SHOT warning that
+    # rides the next model-bound request (trains the habit at the source;
+    # never blocks -- live traffic is already served by the time we lint).
+    if getattr(srv, "dev", False):
+        srv._dev_warn = _dev_frame_warning(kinds)
     try:
         if mem is not None and getattr(mem, "audit_path", ""):
             with open(mem.audit_path, "a") as f:
@@ -2526,15 +2565,18 @@ def _tool_result_text(msg: dict) -> str:
     return ""
 
 
-def _capture(mem, label: str, situation: str, action: str, min_len: int = 1) -> None:
+def _capture(mem, label: str, situation: str, action: str, min_len: int = 1,
+             src: str = "model") -> None:
     """Learn one observed artifact (plan / call / result / reasoning) as a plain
     Q/A exemplar. NEVER breaks the chat path: a capture error is logged and
     dropped. The standard pipeline (vague + dedup guards, repair path) applies,
-    so a retry of the same tool call merges instead of piling up."""
+    so a retry of the same tool call merges instead of piling up.
+    W4a provenance: a RESULT capture is `ground` (the environment signed it --
+    a tool actually returned this); plans/calls/reasoning are `model` claims."""
     try:
         if not (situation.strip() and action.strip()) or len(action) < min_len:
             return
-        idx = mem.learn_pair(situation, action)
+        idx = mem.learn_pair(situation, action, src=src)
         if idx is not None:
             print(f"[capture] {label} -> exemplar #{idx}", file=sys.stderr)
             _watch_notify(getattr(mem, "server_ref", None), mem, idx)
@@ -2595,7 +2637,7 @@ def _capture_tool_results(srv, body: dict) -> None:
         _capture(mem, f"result {rec['name']}",
                  f"tool {rec['name']} for: {_clip(rec['query'], _CAP_QUERY)}\n"
                  f"args: {_clip(rec['args'], _CAP_SIT_ARGS)}",
-                 _clip(result, _CAP_BODY))
+                 _clip(result, _CAP_BODY), src="ground")
 
 
 def _capture_reasoning(mem, query: str, reasoning: str) -> None:
@@ -3121,8 +3163,18 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # 'membrane: keep/drop' resolver below.
         review_block = _review_request_block(srv)
         intent_block = _intents_context_block(srv)
+        # W4b: the operator's verbatim decisions near this turn ride along
+        # (read-only; every failure degrades to no help).
+        ledger_block = None
+        ledger = getattr(srv, "user_ledger", None)
+        if ledger is not None:
+            try:
+                ledger_block = ledger.block(vec, mem.embedder)
+            except Exception:
+                ledger_block = None
         mono_review = review_block or ""
-        extra_blocks = [b for b in (review_block, intent_block) if b]
+        extra_blocks = [b for b in (review_block, intent_block, ledger_block)
+                        if b]
         for block in extra_blocks:
             ctx = (ctx + "\n\n" + block) if ctx else block
         replay_sim = float(getattr(srv, "replay_sim", 0.0) or 0.0)
@@ -3204,6 +3256,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 for fam, t, _ in thought_asks])
             if t_block:
                 up["messages"] = _inject(up["messages"], t_block)
+        # W3b: the one-shot --dev frame-discipline warning rides the next
+        # model-bound request (never blocks; consumed exactly once).
+        dev_warn = _dev_warn_take(srv)
+        if dev_warn:
+            up["messages"] = _inject(up["messages"], dev_warn)
         # watch delivery: undelivered [membrane-watch] reports ride on model
         # turns (marked served only after _v1_deliver succeeds, same covenant
         # as thought asks). Intercepted turns skip this -- their answer IS the
@@ -3703,7 +3760,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                                          "situation": ex.situation[:400],
                                          "action": ex.action[:1200],
                                          "outcome": getattr(ex, "outcome", "") or "pending",
-                                         "model": getattr(ex, "model", "") or ""})
+                                         "model": getattr(ex, "model", "") or "",
+                                         "src": _src_get(ex) or "user"})
                         if len(hits) >= k:
                             break
                     out["field_size"] = len(mem.store)
@@ -3737,7 +3795,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._json_out({"written": False,
                             "reason": f"payload too long ({len(payload)} > "
                                       f"{_AGENT_LEARN_MAX_CHARS} chars)"}); return
-        idx = mem.learn_pair(payload, payload)
+        idx = mem.learn_pair(payload, payload, src="model")
         if idx is None:
             self._json_out({"written": False,
                             "reason": "dedup or variety gate: nothing new"}); return
@@ -3883,7 +3941,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if survived and mem.embedder is not None:
             try:
                 _capture(mem, "delegate", f"delegated: {_clip(task, 200)}",
-                         _clip(content, 1024), min_len=0)
+                         _clip(content, 1024), min_len=0, src="model")
             except Exception:
                 pass
         self._json_out({"ok": survived, "model": model,
@@ -4092,6 +4150,12 @@ def main() -> None:
                     help="disable the LLM orchestration router and always "
                          "escalate to the single --backend model (the kill "
                          "switch if routing goes crazy)")
+    ap.add_argument("--dev", dest="dev", action="store_true",
+                    help="developer mode: a canonical-frame discipline "
+                         "violation in an assistant reply (stacked or buried "
+                         "frames, W3a's lint) plants a ONE-SHOT marked "
+                         "warning that rides the next model-bound request. "
+                         "Never blocks live traffic")
     ap.add_argument("--cloud-budget", type=float, default=None, metavar="USD",
                     help="max relative-money spend per day on cloud-routed "
                          "escalations (the cost ladder's hard cap; unset = "
@@ -4322,6 +4386,18 @@ def main() -> None:
     srv.sem_intercept = bool(args.sem_intercept)
     srv.field_seeds = bool(args.field_seeds)
     srv.thought_intercept = bool(args.thought_intercept)
+    srv.dev = bool(getattr(args, "dev", False))
+    srv._dev_warn = None
+
+    # ---- W4b: the user ledger (the operator's verbatim decision log) ----
+    # A plain JSONL next to the field; only USER turns write it (the
+    # operator learn executor above); the model reads, never writes.
+    srv.user_ledger = None
+    try:
+        from .ledger import UserLedger
+        srv.user_ledger = UserLedger(str(args.field) + ".ledger.jsonl")
+    except Exception:
+        srv.user_ledger = None
     srv.agent_writes = bool(getattr(args, "agent_writes", True))
     srv._served_thought_asks = {}
     srv.gate_monologue = bool(args.gate_monologue)
@@ -4662,7 +4738,9 @@ def main() -> None:
           f"  embedder: {getattr(mem.embedder, 'model', None) or 'UNRESOLVED -- chat blocked until an embed model is available'}\n"
           f"  state/math: {'answered internally from the live field' if srv.state_intercept else 'off'}\n"
           f"  thoughts: {'agent asks answered as marked context' if srv.thought_intercept else 'off'}\n"
+          f"  dev: {'on (one-shot frame-discipline warnings)' if srv.dev else 'off (--dev)'}\n"
           f"  global field: {'on (' + str(len(srv.global_field.store)) + ' notes)' if srv.global_field else 'off'}\n"
+          f"  user ledger: {srv.user_ledger.count() if srv.user_ledger else 0} verbatim decisions\n"
           f"  watches: {'on (' + str(len(srv._watch_board.watches)) + ' planted, cap ' + str(MAX_WATCHES) + ')' if getattr(srv, '_watch_board', None) is not None else 'off'}\n"
           f"  cells: {('on (' + str(len(srv.cell_pool.cells)) + ' grazing, cap ~' + str(max(1, round(float(getattr(srv, 'cpu_target', 0.2)) * 30))) + ')') if getattr(srv, 'cell_pool', None) is not None else 'off (--cells N)'}\n"
           f"  peers: {len(srv.peers.livelist()) if getattr(srv, 'peers', None) else 0} live\n"

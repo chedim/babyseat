@@ -466,7 +466,7 @@ class Cell:
         the user actually received, not a stub. The feeding boundary stays one-way -- the
         response entered through the boundary (attached by the live path), never generated
         by the cell."""
-        return self.membrane.learn_pair(text, response)
+        return self.membrane.learn_pair(text, response, src="user")
 
     def pull(self, view: BufferView, greedy: bool = True) -> int:
         """Pull situations from a read-only buffer view into this cell's field.

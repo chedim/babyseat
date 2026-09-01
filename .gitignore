@@ -40,3 +40,6 @@ build/
 watches.json
 itll-pave-us.html
 .launcher.py
+
+# a smoke test that passed --audit :memory: from the repo root materializes a literal file
+:memory:

@@ -31,7 +31,7 @@ class _Mem:
         self.field_path = ""
         self.reask_ring: list = []
 
-    def learn_pair(self, situation, action, unsafe=False):
+    def learn_pair(self, situation, action, unsafe=False, src="user"):
         """Mirror runtime.learn_pair's observable contract: append (the fake
         store has no variety gate -- dedup by exact situation here), return
         the new index (or None when the caller guards reject first)."""

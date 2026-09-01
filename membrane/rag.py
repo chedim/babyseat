@@ -63,7 +63,8 @@ import numpy as np
 
 from .embed import OllamaEmbedder
 from .field import Exemplar
-from .runtime import Membrane, OllamaChatResponder, OllamaJudge, StubJudge, _response_text
+from .runtime import (Membrane, OllamaChatResponder, OllamaJudge, StubJudge, _response_text,
+                      _src_label)
 from .variety import thermo_state
 
 HOP_BY_HOP = {"host", "content-length", "connection", "transfer-encoding",
@@ -776,7 +777,8 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
             if any(float(v @ pv) >= mmr_sim for _, pv in picked):
                 continue                    # redundant with a memory already picked
             via = f" [via {ex.model}]" if getattr(ex, "model", "") else ""
-            entry = f"Q: {q}\nA: {a}{via}"
+            src = _src_label(ex)
+            entry = f"Q: {q}\nA: {a}{via}{src}"
             if len(entry) > budget:
                 break
             budget -= len(entry)

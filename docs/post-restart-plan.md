@@ -187,9 +187,14 @@ The instinct to re-ask is human; the system can carry more of it.
   (code legitimately contains frame-like lines); a single trailing frame is
   the disciplined form, never flagged. Violations are now visible and
   countable instead of only poisoning silently.
-- **W3b — one-frame assert in dev**: a --dev flag that warns (never
-  blocks) when a reply contains two canonical frames, to train the habit
-  without breaking live traffic.
+- **W3b — one-frame assert in dev**: DONE 2026-09-01
+  (`tests/test_frame_lint.py` TestDevWarn, 3 tests; full suite 233 OK). A
+  `--dev` flag: when the W3a lint flags a violation (stacked/buried canon
+  frames), a ONE-SHOT marked warning (`[membrane-intercept] frame
+  discipline: ...`) is planted on the server and rides the NEXT model-bound
+  request (`_dev_warn_take`, consumed exactly once, never blocks — the
+  reply is already served by lint time). Trains the habit at the source;
+  boot line shows `dev: on (one-shot frame-discipline warnings)`.
 
 ## W4: provenance axis (split the trust, not the membrane)
 
@@ -198,24 +203,30 @@ internal/external split is rejected (fragments the one-geometry math, and
 a split without an invalidation lane is worse than no split): "the field
 is the conversation -- and the conversation is shared."
 
-- **W4a -- per-cell `src` tag** (the trust split, not the field split):
-  rides the existing `extra` dict, earned at learn time. Values:
-  `ground` (learned on a turn carrying paired tool results -- the
-  `_pending_tools` call->result hook already exists), `user` (operator
-  turns and teed Q/A, the default), `model` (agent-learned notes),
-  `ingest` (docs/README cold-start). Surfaced at RECALL time on every hit
-  (`[src: model -- own prior guess]`) with a doctrine line: model/ingest
-  cells are prior conclusions, verify against ground; ground cells are
-  environment-verified. Trust order `ground > user > model` powers W2a
-  (supersede-on-confirm: ground supersedes model at equal sim, never the
-  reverse) and gives model-only claims a policy: corroboration or expiry.
-- **W4b -- the user ledger** (highest-value memories first): append-only,
-  verbatim user-stated decisions and corrections; model-readable,
-  MODEL-UNWRITABLE (only operator turns and the learn intercept write
-  it), user-editable on disk. Small file next to the field
-  (`<field>.ledger.jsonl`), recalled verbatim when near the current turn
-  -- provenance certainty for the 10% of memories that carry 90% of the
-  trust weight.
+- **W4a -- per-cell `src` tag**: DONE 2026-09-01
+  (`tests/test_provenance.py`, 12 tests; full suite 233 OK). Every learned
+  cell now carries `extra["src"]` (wire: top-level `src`, only when set --
+  legacy rows stay byte-identical). Earned at learn time via
+  `learn_pair(src=...)`: `ground` for tool RESULT captures (the
+  call->result hook signs the environment saw it), `model` for agent
+  notes/MCP writes/delegate captures, `ingest` for docs/warmup cold-start,
+  `user` the default (operator turns, teed Q/A, cell pulls). Surfaced on
+  every recall hit (`[src: ground -- environment-verified]` in the chat
+  grounding block, `[src: ...]` in `_recall_report` + the MCP query tool
+  + peer-ask JSON) with the trust doctrine line (ground > user > model).
+  Trust order lives in supersede-on-confirm: a ground dup is only
+  corrected by a ground-signaled answer; model claims never supersede
+  ground (`_src_get`/`_src_of` in runtime.py).
+- **W4b -- the user ledger**: DONE 2026-09-01 (`membrane/ledger.py`,
+  `tests/test_ledger.py`, 8 tests; full suite 233 OK). Append-only
+  verbatim JSONL at `<field>.ledger.jsonl` (`{"ts","text"}`), written ONLY
+  by the operator learn executor (`_learn_report` -- reached from USER
+  turns; agent notes/MCP/captures never touch it), model-readable,
+  user-editable on disk (mtime-keyed cache re-reads a hand-pruned file;
+  corrupt lines skipped, never fatal). Recalled VERBATIM when near the
+  current turn: a `[membrane-ledger]` marked block rides the model-bound
+  request next to the RAG context, labeled "law, not recall". State
+  report + boot line show the count.
 - **W4c (parked, evidence-conditional) -- model-side scratch field**:
   ONLY if self-feed collapse is OBSERVED (not feared): move model scratch
   (intents, working lessons) to a model-side field, invalidation lane
