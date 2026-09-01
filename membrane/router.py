@@ -138,6 +138,14 @@ class ModelRecord:
     """One discovered model: what it claims, what it has earned, what it costs."""
     name: str
     kind: str = "local"                 # "local" | "cloud" (remote-backed)
+    # WHERE this rung answers: "" = the proxy's own Ollama backend (the
+    # default /v1/chat/completions path); a provider name ("anthropic",
+    # "openrouter", "groq", ...) = that provider's OpenAI-compatible endpoint
+    # (the proxy picks URL + auth per rung via auth.PROVIDERS).
+    backend: str = ""
+    # optional price pin (USD-ish relative/turn) set at registration from the
+    # provider's default_price; --price overrides still win (checked first).
+    price_override: float | None = None
     size_bytes: int = 0
     caps: list = dfield(default_factory=list)   # ollama capability flags
     # the claimed region (self-description embeds) + its verbatim claim
@@ -199,12 +207,15 @@ class ModelRecord:
             / (self.trials + PRIOR_MASS_K)
 
     def price(self) -> float:
-        """Relative money per turn. local -> 0; cloud -> the cheapest table
-        hit, else CLOUD_PRICE. The ladder IS the preference: prefer LOWER
-        token-cost models unless really stuck (the pressure valve + fit
-        margin are the "really stuck" conditions)."""
+        """Relative money per turn. local -> 0; cloud -> the registration
+        pin (provider default), else the cheapest table hit, else CLOUD_PRICE.
+        The ladder IS the preference: prefer LOWER token-cost models unless
+        really stuck (the pressure valve + fit margin are the "really stuck"
+        conditions)."""
         if self.kind == "local":
             return 0.0
+        if self.price_override is not None:
+            return self.price_override
         low = self.name.lower()
         for frag, usd in PRICE_TABLE:
             if frag in low:
@@ -237,7 +248,9 @@ class ModelRecord:
                 "loss_ema": self.loss_ema,
                 "latency_ewma": self.latency_ewma, "self_desc": self.self_desc,
                 "imprint": self.imprint, "last_used": self.last_used,
-                "size_bytes": self.size_bytes, "caps": self.caps}
+                "size_bytes": self.size_bytes, "caps": self.caps,
+                "backend": self.backend,
+                "price_override": self.price_override}
 
 
 class Registry:
@@ -309,6 +322,36 @@ class Registry:
             caps = list(m.get("capabilities") or [])
             fams = list((m.get("details") or {}).get("families") or [])
             rec.caps = caps + [f for f in fams if f not in caps]
+
+    def add_cloud_models(self, ids: list[str], provider: str,
+                         price: float | None = None) -> int:
+        """Register a provider's models as cloud rungs (first-class citizens).
+
+        Each answers the OpenAI-compatible chat path on that provider's
+        endpoint (auth.PROVIDERS carries base/auth style) -- the proxy routes
+        the URL + key per rung's backend tag; the ladder/streaming/learn
+        machinery is shared. `price` pins the rung's relative cost at
+        registration (the provider's default_price, typically near-floor for
+        free tiers) so the ladder can rank it before PRICE_TABLE falls
+        through; --price overrides still win (checked first in price()).
+        Caps are DECLARED (chat providers take tools + completion). Never
+        touches existing records: a name collision with an Ollama model keeps
+        the Ollama rung (the local backend is the default for a reason)."""
+        n = 0
+        for mid in ids or []:
+            if not mid or mid in self.records:
+                continue
+            rec = ModelRecord(name=mid, kind="cloud", backend=provider,
+                              caps=["completion", "tools"])
+            if price is not None:
+                rec.price_override = float(price)
+            self.records[mid] = rec
+            n += 1
+        return n
+
+    def add_anthropic_models(self, ids: list[str]) -> int:
+        """Back-compat shim: the anthropic flavor of add_cloud_models."""
+        return self.add_cloud_models(ids, provider="anthropic")
 
     def seed_imprints_async(self) -> None:
         self._seed_started = True
@@ -772,6 +815,9 @@ class Registry:
             rec.last_used = float(rd.get("last_used") or 0.0)
             rec.size_bytes = int(rd.get("size_bytes") or 0)
             rec.caps = list(rd.get("caps") or [])
+            rec.backend = str(rd.get("backend") or "")
+            po = rd.get("price_override")
+            rec.price_override = None if po is None else float(po)
             self.records[name] = rec
 
     # ---- reporting -----------------------------------------------------------

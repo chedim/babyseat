@@ -445,6 +445,60 @@ def _connect() -> int:
     return 0 if (wrote or parse_env_file(project_env_path())) else 1
 
 
+def _auth(argv: list[str]) -> int:
+    """`membrane auth <provider>`: store a cloud API key outside the repo.
+
+    Providers come from auth.PROVIDERS (anthropic, openrouter, gemini, groq,
+    github, mistral). The key goes to ~/.membrane/auth.json (600); the
+    provider's env var always wins over the stored value (the shell is the
+    louder authority). Probes the provider's model listing on success so a
+    typo fails HERE, not on the first routed turn."""
+    from .auth import (save_api_key, mask, fetch_models, PROVIDERS,
+                       load_api_key, _env_names)
+    import getpass as _getpass
+    provider = argv[0] if argv and not argv[0].startswith("-") else None
+    if not provider or provider not in PROVIDERS:
+        provs = ", ".join(sorted(PROVIDERS))
+        print(f"usage: membrane auth <{provs}>   "
+              f"(or: membrane auth <provider> --key <KEY>)", file=sys.stderr)
+        return 2
+    prov = PROVIDERS[provider]
+    # --key flag (non-interactive); otherwise prompt (hidden)
+    key = ""
+    prev = ""
+    for a in argv[1:]:
+        if prev == "--key":
+            key = a
+            break
+        prev = a
+    if not key and not sys.stdin.isatty():
+        print("[membrane] auth: no TTY and no --key; pass "
+              "`--key <API key>` or run interactively", file=sys.stderr)
+        return 2
+    if not key:
+        key = _getpass.getpass(
+            f"{provider} API key (input hidden, {prov['key_hint']}): ").strip()
+    if not key:
+        print("[membrane] auth: empty key, nothing stored", file=sys.stderr)
+        return 2
+    p = save_api_key(provider, key)
+    ids = fetch_models(provider, key)
+    print(f"[membrane] {provider} key stored: {p}")
+    if ids:
+        print(f"[membrane] verified: {len(ids)} model(s) visible, "
+              f"first: {', '.join(ids[:3])}")
+        print("[membrane] they will appear in opencode's model picker at "
+              "the next `membrane opencode` boot")
+    else:
+        print("[membrane] WARNING: stored, but the model listing probe "
+              "failed -- check the key/network; rung registration will "
+              "retry at next boot")
+    env_names = _env_names(provider)
+    print(f"[membrane] active key: {mask(key)} "
+          f"(env {env_names[0]} overrides the store)")
+    return 0
+
+
 def _doctor() -> int:
     """What's installed / running / reachable."""
     print("membrane doctor")
@@ -509,6 +563,9 @@ def main() -> None:
         "  install    install .opencode/skills/* into the CURRENT directory\n"
         "  connect    offer to connect a shared Couchbase field for THIS\n"
         "             project (creds go to ~/.membrane/projects/, not the repo)\n"
+        "  auth       store a cloud API key (anthropic, openrouter, gemini,\n"
+        "             groq, github, mistral): ~/.membrane/auth.json (600);\n"
+        "             its models become routable rungs + picker entries\n"
         "  move       migrate the field between stores (cb<->cb, cb->json,\n"
         "             json->cb); see --help for endpoint forms\n"
         "  migrate    interactive migration front door: detects where this\n"
@@ -527,7 +584,8 @@ def main() -> None:
     cmd = argv[0] if argv and not argv[0].startswith("-") else None
     if cmd not in ("tui", "proxy", "opencode", "anthropic", "review",
                    "demo", "reset", "install", "doctor", "connect",
-                   "ingest", "codegraph", "update", "move", "migrate"):
+                   "ingest", "codegraph", "update", "move", "migrate",
+                   "auth"):
         if cmd is None and not argv:
             print(__doc__)
             return
@@ -554,6 +612,8 @@ def main() -> None:
     load_project_env()
     if cmd == "connect":
         raise SystemExit(_connect())
+    if cmd == "auth":
+        raise SystemExit(_auth(args.forwarded))
     if cmd == "move":
         ap2 = argparse.ArgumentParser(prog="membrane move")
         ap2.add_argument("--from", dest="src", required=True)

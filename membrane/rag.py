@@ -592,7 +592,10 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
             print(f"[rag] gate error, forwarding raw: {e}", file=sys.stderr)
             self._forward_raw(raw)
             return
-        ctx = self._memory_block(vec, body.get("messages"))
+        # fork stand-down: no recall injection -- the fork's /api/chat does
+        # its own membraneRecallInject.
+        ctx = (None if getattr(mem, "fork_owns_field", False)
+               else self._memory_block(vec, body.get("messages")))
         self.momentum_update(vec, query)
         up = dict(body)
         up["stream"] = False
@@ -605,9 +608,12 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
             self._forward_raw(raw)
             return
         content = _response_text(resp)
-        ex_idx = mem.record_escalation(query, vec, verdict, content,
-                                       resp.get("model") or body.get("model", "membrane"),
-                                       False)
+        if not getattr(mem, "fork_owns_field", False):
+            ex_idx = mem.record_escalation(query, vec, verdict, content,
+                                           resp.get("model") or body.get("model", "membrane"),
+                                           False)
+        else:
+            ex_idx = None
         out = json.dumps(resp).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -639,7 +645,10 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
             up["stream"] = True
             ctx = None
             if vec is not None:
-                ctx = self._memory_block(vec, body.get("messages"))
+                # fork stand-down: no recall injection -- the fork's /api/chat
+                # does its own membraneRecallInject.
+                ctx = (None if getattr(mem, "fork_owns_field", False)
+                       else self._memory_block(vec, body.get("messages")))
                 self.momentum_update(vec, query)
                 if ctx:
                     up["messages"] = _inject(body.get("messages") or [], ctx)
@@ -666,7 +675,8 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
                     if c:
                         parts.append(c)
             self.wfile.flush()
-            if vec is not None:
+            if vec is not None \
+                    and not getattr(mem, "fork_owns_field", False):
                 ex_idx = mem.record_escalation(query, vec, verdict,
                                                "".join(parts),
                                                body.get("model", "membrane"), False)

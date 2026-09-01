@@ -1,0 +1,220 @@
+"""Multi-provider cloud auth + rungs: the provider seam end to end.
+
+Pure-data tests (no network): the auth store round-trip + env precedence per
+provider, the registry's provider-tagged cloud rungs (price pins, collision
+safety, persistence), and the ladder mixing rungs from DIFFERENT providers
+(cheapest-first floor, outage failover across providers).
+"""
+
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from membrane import auth as A
+from membrane import router as R
+
+
+class _Reg(R.Registry):
+    """Registry with the live HTTP walk stubbed out: no Ollama, no accidental
+    loading of a real router.json from the working directory."""
+
+    def refresh(self):     # noqa: D102 - no discovery in these tests
+        return
+
+
+class TestAuthStore(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name)
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_store_roundtrip_and_600(self):
+        p = A.save_api_key("openrouter", "sk-or-test-123", home=self.home)
+        self.assertEqual(json.loads(p.read_text())["openrouter"],
+                         "sk-or-test-123")
+        self.assertEqual(p.stat().st_mode & 0o777, 0o600)
+
+    def test_store_merges_never_removes(self):
+        A.save_api_key("anthropic", "sk-ant-aaa", home=self.home)
+        A.save_api_key("groq", "gsk_bbb", home=self.home)
+        d = json.loads(A.auth_path(self.home).read_text())
+        self.assertEqual(d["anthropic"], "sk-ant-aaa")
+        self.assertEqual(d["groq"], "gsk_bbb")
+
+    def test_env_wins_over_store(self):
+        A.save_api_key("groq", "stored-key", home=self.home)
+        got = A.load_api_key("groq", home=self.home,
+                             environ={"GROQ_API_KEY": "env-key"})
+        self.assertEqual(got, "env-key")
+        # a DIFFERENT provider's env var does not leak into this lookup
+        got2 = A.load_api_key("groq", home=self.home,
+                              environ={"ANTHROPIC_API_KEY": "other"})
+        self.assertEqual(got2, "stored-key")
+
+    def test_every_registry_provider_has_shape(self):
+        for name, prov in A.PROVIDERS.items():
+            self.assertTrue(prov["base"].startswith("https://"), name)
+            self.assertTrue(prov["chat_path"].startswith("/"), name)
+            self.assertTrue(prov["models_path"].startswith("/"), name)
+            self.assertTrue(prov.get("env"), name)
+            self.assertIn(prov.get("auth_style"), ("bearer", "anthropic"),
+                          name)
+
+    def test_header_styles(self):
+        h = A._headers("anthropic", "K")
+        self.assertEqual(h["x-api-key"], "K")
+        self.assertIn("anthropic-version", h)
+        h2 = A._headers("groq", "K")
+        self.assertEqual(h2["Authorization"], "Bearer K")
+        self.assertNotIn("x-api-key", h2)
+        # openrouter carries the app-attribution header
+        self.assertEqual(A._headers("openrouter", "K").get("X-Title"),
+                         "membrane")
+
+    def test_mask(self):
+        self.assertEqual(A.mask(""), "(none)")
+        m = A.mask("sk-ant-api03-0123456789abcdef")
+        self.assertTrue(m.startswith("sk-ant-"))
+        self.assertTrue(m.endswith("cdef"))
+        self.assertNotIn("0123456789", m)
+
+
+class TestCloudRungs(unittest.TestCase):
+    def _reg(self, tmp: str) -> R.Registry:
+        return _Reg(backend="http://127.0.0.1:11434", embedder=None,
+                    state_path=str(Path(tmp) / "router.json"))
+
+    def test_add_cloud_models_registers_provider_rungs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reg = self._reg(tmp)
+            n = reg.add_cloud_models(["m-a", "m-b"], provider="groq",
+                                     price=0.75)
+            self.assertEqual(n, 2)
+            for mid in ("m-a", "m-b"):
+                rec = reg.records[mid]
+                self.assertEqual(rec.kind, "cloud")
+                self.assertEqual(rec.backend, "groq")
+                self.assertEqual(rec.price(), 0.75)
+                self.assertIn("tools", rec.caps)
+
+    def test_price_table_beats_nothing_but_pin_wins_first(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reg = self._reg(tmp)
+            # a pinned rung: the pin wins even when the name would table-hit
+            reg.add_cloud_models(["claude-sonnet-9"], provider="openrouter",
+                                 price=1.0)
+            self.assertEqual(reg.records["claude-sonnet-9"].price(), 1.0)
+            # an unpinned rung falls through to the table (claude -> 6.0)
+            reg.add_cloud_models(["claude-opus-9"], provider="anthropic")
+            self.assertEqual(reg.records["claude-opus-9"].price(), 6.0)
+
+    def test_name_collision_keeps_local(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reg = self._reg(tmp)
+            local = R.ModelRecord(name="shared-name", kind="local",
+                                  size_bytes=2**30)
+            reg.records["shared-name"] = local
+            n = reg.add_cloud_models(["shared-name", "cloud-only"],
+                                     provider="mistral")
+            self.assertEqual(n, 1)               # only cloud-only landed
+            self.assertEqual(reg.records["shared-name"].kind, "local")
+            self.assertEqual(reg.records["shared-name"].backend, "")
+
+    def test_persistence_roundtrip_keeps_backend_and_pin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            sp = str(Path(tmp) / "router.json")
+            reg = _Reg(backend="http://127.0.0.1:11434", embedder=None,
+                       state_path=sp)
+            reg.add_cloud_models(["free-model"], provider="openrouter",
+                                 price=1.0)
+            reg.save()
+            reg2 = _Reg(backend="http://127.0.0.1:11434", embedder=None,
+                        state_path=sp)
+            rec = reg2.records["free-model"]
+            self.assertEqual(rec.backend, "openrouter")
+            self.assertEqual(rec.price_override, 1.0)
+            self.assertEqual(rec.price(), 1.0)
+
+    def test_ladder_mixes_providers_cheapest_first(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reg = self._reg(tmp)
+            reg.add_cloud_models(["groq-fast"], provider="groq", price=0.75)
+            reg.add_cloud_models(["or-free"], provider="openrouter",
+                                 price=1.0)
+            reg.add_cloud_models(["big-expensive"], provider="anthropic",
+                                 price=9.0)
+            stack = reg.ladder(needs_tools=True)
+            names = [r.name for r in stack if r.kind == "cloud"]
+            self.assertEqual(names[0], "groq-fast")
+            self.assertEqual(names[1], "or-free")
+            # ceiling at the middle price drops the expensive rung
+            stack2 = reg.ladder(needs_tools=True, ceiling="or-free")
+            names2 = [r.name for r in stack2 if r.kind == "cloud"]
+            self.assertNotIn("big-expensive", names2)
+            self.assertIn("or-free", names2)
+
+    def test_outage_failover_to_other_provider(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reg = self._reg(tmp)
+            reg.add_cloud_models(["groq-fast"], provider="groq", price=0.75)
+            reg.add_cloud_models(["or-free"], provider="openrouter",
+                                 price=1.0)
+            reg.note_outage("groq-fast", "HTTP 429")
+            stack = [r.name for r in reg.ladder(needs_tools=True)]
+            self.assertEqual(stack[0], "or-free")   # crossed the provider seam
+
+
+class TestFetchModelsParsing(unittest.TestCase):
+    def test_openai_shape_and_bare_list(self):
+        calls = []
+
+        class FakeResp:
+            def __init__(self, payload):
+                self._p = json.dumps(payload).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return self._p
+
+        payloads = {
+            A.PROVIDERS["openrouter"]["base"] + "/v1/models":
+                {"data": [{"id": "deepseek/free-x"}, {"id": "qwen/y"}]},
+            A.PROVIDERS["github"]["base"] + "/catalog/models":
+                [{"id": "openai/gpt-5"}, {"name": "meta/llama"},
+                 {"id": ""}, "junk"],
+        }
+        import urllib.request as _u
+
+        def fake_urlopen(req, timeout=None):
+            calls.append(req.get_full_url())
+            return FakeResp(payloads[req.get_full_url()])
+
+        orig = _u.urlopen
+        _u.urlopen = fake_urlopen
+        try:
+            ids1 = A.fetch_models("openrouter", "k")
+            ids2 = A.fetch_models("github", "k")
+        finally:
+            _u.urlopen = orig
+        self.assertEqual(ids1, ["deepseek/free-x", "qwen/y"])
+        self.assertEqual(ids2, ["openai/gpt-5", "meta/llama"])
+
+    def test_failure_degrades_to_empty(self):
+        ids = A.fetch_models("groq", "k", timeout=0.01)
+        self.assertEqual(ids, [])
+        self.assertEqual(A.fetch_models("nope", "k"), [])
+
+
+if __name__ == "__main__":
+    unittest.main()

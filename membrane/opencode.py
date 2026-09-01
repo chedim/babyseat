@@ -257,6 +257,10 @@ def _state_report(srv) -> str:
         f"- retrieval: k={srv.rag_k}, sim>={srv.rag_sim_min}, "
         f"budget {srv.rag_ctx_chars} chars",
     ]
+    if getattr(mem, "fork_owns_field", False):
+        lines.append("- FORK STAND-DOWN: ollama-membrane fork owns the field "
+                     "-- no capture, no recall injection, no doctrine from "
+                     "this seat; operator lanes stay read-only")
     if srv.compactor is not None:
         lines.append(f"- cortex/compactor: cycles={comp['cycles']} "
                      f"clusters={comp['clusters']} notes={comp['notes']}  "
@@ -2095,6 +2099,44 @@ _DEV_FRAME_WARN = ("[membrane-intercept] frame discipline: {kinds}. At most "
                    "alone on your next turn.")
 
 
+def _auth_headers(provider: str, keys: dict) -> dict:
+    """Outgoing auth headers for one provider's API call, from the
+    memory-only key map (srv.cloud_keys). Unknown provider / no key -> {} (a
+    rung without a key can't answer; the ladder treats it as DOWN)."""
+    from .auth import _headers
+    key = str(keys.get(provider) or "")
+    return _headers(provider, key) if key else {}
+
+
+# ---- the ollama-membrane fork: detect-and-stand-down -------------------------
+# The Go fork (ollama-membrane) embeds its own capture/recall stack. When it is
+# live, THIS seat must not write a second stream of memories for the same
+# project: no capture, no recall injection, no doctrine. The operator's launch
+# choice decides which seat runs; a probe failure = normal operation again
+# (re-checked every boot, never cached across restarts).
+
+_FORK_PROBE_TIMEOUT = 2      # seconds; a fork probe must never delay boot
+
+
+def _ollama_membrane_present(host: str | None = None) -> dict | None:
+    """The fork advertises itself at GET /api/membrane with an X-Membrane
+    header + an `impl: ollama-membrane` body. Returns the JSON info dict when
+    the fork owns the field, else None (probe failure or foreign server)."""
+    import urllib.request
+    host = host or os.environ.get("MEMBRANE_UPSTREAM",
+                                  "http://127.0.0.1:11435")
+    try:
+        with urllib.request.urlopen(host + "/api/membrane",
+                                    timeout=_FORK_PROBE_TIMEOUT) as r:
+            if r.headers.get("X-Membrane") == "ollama-membrane":
+                info = json.loads(r.read())
+                if info.get("impl") == "ollama-membrane":
+                    return info
+    except Exception:
+        return None
+    return None
+
+
 def _dev_frame_warning(kinds: list[str]) -> str:
     """W3b: the one-shot --dev warning text for the violation kinds."""
     return _DEV_FRAME_WARN.format(kinds=" and ".join(kinds))
@@ -2573,6 +2615,10 @@ def _capture(mem, label: str, situation: str, action: str, min_len: int = 1,
     so a retry of the same tool call merges instead of piling up.
     W4a provenance: a RESULT capture is `ground` (the environment signed it --
     a tool actually returned this); plans/calls/reasoning are `model` claims."""
+    # fork stand-down: the ollama-membrane fork owns capture for this project;
+    # a second writer would fork the field's evidence.
+    if getattr(mem, "fork_owns_field", False):
+        return
     try:
         if not (situation.strip() and action.strip()) or len(action) < min_len:
             return
@@ -2914,9 +2960,21 @@ class MembraneOpenAIHandler(RAGProxyHandler):
     def _v1_models(self) -> None:
         ids = _chat_capable_models(self.server.backend)
         ids = ids + [EXPLORE_LANE]          # the sentinel evidence-farm lane
+        # first-class cloud backends: registered providers' models ride this
+        # surface too (the picker selects them like any model; the operator's
+        # ceiling then applies). Router absent -> no rungs, the local-only view.
+        router = getattr(self.server, "router", None)
+        if router is not None:
+            ids += [r.name for r in router.records.values() if r.backend]
         self._json_out({"object": "list",
                         "data": [{"id": m, "object": "model",
-                                  "owned_by": "membrane->ollama"} for m in ids]})
+                                  "owned_by": ("membrane->"
+                                               + (router.records[m].backend
+                                                  if router and m in
+                                                  router.records and
+                                                  router.records[m].backend
+                                                  else "ollama"))}
+                                 for m in ids]})
 
     # ---- /v1/embeddings: the field's own embedder ----
     def _v1_embeddings(self) -> None:
@@ -3155,7 +3213,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # ---- INTERNAL: the 'model:' escape hatch only (recall/state were both
         # fully handled above, pre-gate) ----
         q = _last_user_text(body)
-        ctx = self._memory_block(vec, body.get("messages"))
+        # fork stand-down: no recall injection -- the fork's /api/chat does its
+        # own membraneRecallInject; a second block would double-inject.
+        ctx = (None if getattr(mem, "fork_owns_field", False)
+               else self._memory_block(vec, body.get("messages")))
         self.momentum_update(vec, query)
         # pending human reviews ride along as a system-level notice: the model
         # is told to ASK the user via its native question tool. The user's
@@ -3213,7 +3274,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._serve_intercept_answer(model, answer,
                                          bool(body.get("stream", False)),
                                          thinking=mono)
-            mem.record_act(query, vec, v, model, answer)
+            if not getattr(mem, "fork_owns_field", False):
+                mem.record_act(query, vec, v, model, answer)
             self._log_turn(v, ctx, None, len(mem.store),
                            replayed=v.get("ex_idx"))
             return
@@ -3239,7 +3301,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._serve_intercept_answer(model, answer,
                                          bool(body.get("stream", False)),
                                          thinking=mono)
-            mem.record_act(query, vec, v, model, answer)
+            if not getattr(mem, "fork_owns_field", False):
+                mem.record_act(query, vec, v, model, answer)
             self._log_turn(v, ctx, None, len(mem.store),
                            replayed=v["ex_idx"])
             return
@@ -3353,17 +3416,33 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         t0 = time.monotonic()
 
         def _open_backend(model_name: str):
-            """POST the turn to Ollama. On a rung DOWN (out of tokens /
-            auth / rate limit / dead backend) fall DOWN THE LADDER: next
-            cloud rung, then eligible locals, each failed rung cooling down
-            so later turns skip it. When nothing answers the request fails
-            and opencode surfaces the field-only state honestly."""
+            """POST the turn to the routed model's backend. On a rung DOWN
+            (out of tokens / auth / rate limit / dead backend) fall DOWN THE
+            LADDER: next cloud rung, then eligible locals, each failed rung
+            cooling down so later turns skip it. When nothing answers the
+            request fails and opencode surfaces the field-only state
+            honestly."""
             u2 = dict(up)
             u2["model"] = model_name
+            # per-rung backend: registered providers answer their
+            # OpenAI-compatible chat path with their own key + header style
+            # (auth.PROVIDERS carries the shapes, memory-only keys);
+            # everything else goes to the Ollama /v1 surface as before.
+            rec = (getattr(srv, "router", None).records.get(model_name)
+                   if getattr(srv, "router", None) else None)
+            if rec is not None and rec.backend:
+                from .auth import PROVIDERS as _PROV
+                prov = _PROV.get(rec.backend) or {}
+                url = (prov.get("base", "") + prov.get("chat_path",
+                       "/v1/chat/completions"))
+                headers = {"Content-Type": "application/json",
+                           **_auth_headers(rec.backend, srv.cloud_keys)}
+            else:
+                url = srv.backend + "/v1/chat/completions"
+                headers = {"Content-Type": "application/json"}
             rq = urllib.request.Request(
-                srv.backend + "/v1/chat/completions",
-                data=json.dumps(u2).encode(), method="POST",
-                headers={"Content-Type": "application/json"})
+                url, data=json.dumps(u2).encode(), method="POST",
+                headers=headers)
             try:
                 return urllib.request.urlopen(rq, timeout=300)
             except urllib.error.HTTPError as he:
@@ -3550,7 +3629,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # learn text turns; a pure tool-call turn has no human prose to ground
         # future turns on and the gate may have already learned from its user
         # text -- so only text-bearing answers are learned here.
-        if content.strip() and not tool_calls:
+        # Fork stand-down: no field writes -- the fork captures its own turns.
+        if content.strip() and not tool_calls \
+                and not getattr(mem, "fork_owns_field", False):
             try:
                 ex_idx = mem.record_escalation(query, vec, verdict, content,
                                                up.get("model", "membrane"),
@@ -4356,6 +4437,22 @@ def main() -> None:
     # lazy resolution ladder instead, so clear it after construction.
     mem.embedder = None
 
+    # ---- the ollama-membrane fork stand-down (re-probed every boot) ----
+    # When the Go fork advertises /api/membrane with its own origin, it owns
+    # capture/recall for this project: this seat writes NOTHING to the field
+    # (capture off) and injects NOTHING into turns (recall + doctrine off).
+    # The operator's lanes (state/learn/forget queries, ledger, MCP) stay up --
+    # this is a write stand-down, not a handoff: the fork keeps its own origin.
+    mem.fork_owns_field = False
+    fork_info = _ollama_membrane_present()
+    if fork_info:
+        mem.fork_owns_field = True
+        print(f"membrane: ollama-membrane fork detected at "
+              f"{os.environ.get('MEMBRANE_UPSTREAM', 'http://127.0.0.1:11435')} "
+              f"(origin={fork_info.get('origin')}, "
+              f"bucket={fork_info.get('bucket')}) -- proxy standing down",
+              file=sys.stderr)
+
     listen = _pick_listen_port(args.listen)
     if listen != args.listen:
         print(f"[opencode] port {args.listen} busy -> using {listen} "
@@ -4467,9 +4564,13 @@ def main() -> None:
     except Exception as e:
         print(f"[opencode] intent layer disabled ({_one_line(e)})",
               file=sys.stderr)
-    if args.compact_every > 0:
+    if args.compact_every > 0 and not getattr(mem, "fork_owns_field", False):
         srv.compactor = Compactor(srv, idle=args.compact_every)
         srv.compactor.start()
+    elif args.compact_every > 0:
+        srv.compactor = None
+        print("[opencode] compactor: skipped -- fork owns the field "
+              "(no second writer)", file=sys.stderr)
     else:
         srv.compactor = None
     srv.archive = bool(args.archive)
@@ -4503,6 +4604,34 @@ def main() -> None:
                 cloud_budget=args.cloud_budget,
                 prefer_local=bool(args.prefer_local),
                 max_local_gib=float(args.max_local_gib))
+            # Cloud providers as first-class backends: for every provider in
+            # auth.PROVIDERS with a key configured (`membrane auth <p>` or
+            # its env var), the provider's models register as cloud rungs
+            # (backend=<provider>) and ride the same ladder -- cheapest-
+            # eligible floor, operator ceiling, outages, spend. Free-tier
+            # providers pin near-floor prices so a healthy local still wins.
+            # No keys -> no rungs (silent, local).
+            from . import auth as _auth
+            srv.cloud_keys = {}
+            srv.cloud_models = []
+            for pname, prov in _auth.PROVIDERS.items():
+                key = _auth.load_api_key(pname)
+                if not key:
+                    continue
+                srv.cloud_keys[pname] = key      # memory only
+                try:
+                    ids = _auth.fetch_models(pname, key)
+                    price = prov.get("default_price")
+                    n_p = srv.router.add_cloud_models(
+                        ids, provider=pname, price=price)
+                    if n_p:
+                        srv.cloud_models.append(pname)
+                        print(f"[opencode] {pname}: {n_p} model(s) registered "
+                              f"as cloud rungs (key {_auth.mask(key)})",
+                              file=sys.stderr)
+                except Exception as p_e:
+                    print(f"[opencode] {pname} rungs skipped ({p_e})",
+                          file=sys.stderr)
             # imprints now seed LAZILY (plan #6): the interview thread starts
             # on the first route()/ladder() that could use a claim -- models
             # that never become routable never cost a boot chat call.
@@ -4563,11 +4692,13 @@ def main() -> None:
     # recall hygiene (plan #4): mass-demote the dumb-model-era exemplars
     # (answered by bakllava/whisper/toys the compat screen now rejects).
     # Evidence-path demotion: the model's first contest still restores.
-    try:
-        _hygiene_demote_screened_models(srv)
-    except Exception as e:
-        print(f"[opencode] hygiene sweep skipped (non-fatal): {e}",
-              file=sys.stderr)
+    # Fork stand-down: the fork owns demotion policy for its turns too.
+    if not getattr(mem, "fork_owns_field", False):
+        try:
+            _hygiene_demote_screened_models(srv)
+        except Exception as e:
+            print(f"[opencode] hygiene sweep skipped (non-fatal): {e}",
+                  file=sys.stderr)
 
     # ---- the dev organism (the cell pool, --cells) --------------------------
     # The world pool's graze/balance machinery on the dev surface: an observer
@@ -4582,7 +4713,8 @@ def main() -> None:
     # perspective that grows across boots. None when --cells 0 (the
     # single-Membrane path pays one `is None` check per cycle).
     srv.cell_pool = None
-    if args.cells > 0 and mem.embedder is not None:
+    if args.cells > 0 and mem.embedder is not None \
+            and not getattr(mem, "fork_owns_field", False):
         import math as _math
         _fdir = Path(args.field).parent
         _dim = len(mem.store.exemplars[0].vec) if len(mem.store) else 1024
@@ -4632,6 +4764,13 @@ def main() -> None:
               "(the gate itself cannot run)", file=sys.stderr)
 
     # ---- the opencode config + launch ----
+    # first-class cloud backends join the picker: any router record with an
+    # explicit backend tag (provider name) is a selectable model -- selecting
+    # one sets the operator's ceiling (cloud-capped-at-its-price) like any pick.
+    cloud_models = [r.name for r in
+                    (getattr(srv.router, "records", {}).values()
+                     if getattr(srv, "router", None) else [])
+                    if getattr(r, "backend", "") and r.kind == "cloud"]
     cfg = {
         "$schema": "https://opencode.ai/config.json",
         "autoupdate": False,
@@ -4641,7 +4780,7 @@ def main() -> None:
                 "npm": "@ai-sdk/openai-compatible",
                 "name": "Membrane (field)",
                 "options": {"baseURL": f"http://127.0.0.1:{listen}/v1"},
-                "models": {m: {"name": m} for m in chat_models},
+                "models": {m: {"name": m} for m in chat_models + cloud_models},
             },
         },
     }
@@ -4651,8 +4790,11 @@ def main() -> None:
     # holds it for the whole session) instead of riding the per-turn RAG tail.
     # The proxy recognizes the stamp line and skips its own per-turn copy
     # (rag._DOCTRINE_STAMP). --no-doctrine-move reverts to per-turn injection.
+    # Fork stand-down: the fork's /api/chat stamps its own doctrine; this seat
+    # ships NO instructions file when the fork owns the field.
     instr_path = None
-    if getattr(args, "doctrine_move", True):
+    if getattr(args, "doctrine_move", True) \
+            and not getattr(mem, "fork_owns_field", False):
         try:
             ifd, instr_path = tempfile.mkstemp(prefix="membrane-doctrine-",
                                                suffix=".md")
@@ -4736,6 +4878,7 @@ def main() -> None:
           f"  default model: {model or '?'}  |  cortex model: {srv.compact_model}"
           f"{' (follows opencode selection)' if srv.compact_follows_chat else ' (pinned)'}\n"
           f"  embedder: {getattr(mem.embedder, 'model', None) or 'UNRESOLVED -- chat blocked until an embed model is available'}\n"
+          f"  field writes: {'STOOD DOWN (ollama-membrane fork owns capture/recall; operator lanes read-only)' if getattr(mem, 'fork_owns_field', False) else 'on (this proxy captures + injects)'}\n"
           f"  state/math: {'answered internally from the live field' if srv.state_intercept else 'off'}\n"
           f"  thoughts: {'agent asks answered as marked context' if srv.thought_intercept else 'off'}\n"
           f"  dev: {'on (one-shot frame-discipline warnings)' if srv.dev else 'off (--dev)'}\n"
@@ -4823,6 +4966,8 @@ def main() -> None:
             except Exception:
                 pass
         for p in (cfg_path, instr_path):
+            if not p:
+                continue
             try:
                 os.unlink(p)
             except OSError:
