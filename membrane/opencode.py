@@ -277,6 +277,12 @@ def _state_report(srv) -> str:
     else:
         lines.append("- momentum: off (--momentum)")
     lines.append(f"- audit: {_audit_count(mem.audit_path)} records")
+    fw = _frame_wait_summary(srv)
+    if fw:
+        lines.append(f"- frame waits: {fw['unique_asks']} unique asks, "
+                     f"{fw['served']} served, {fw['re_asks']} re-asks"
+                     + (f", {fw['buried']} buried (last-line)"
+                        if fw.get("buried") else ""))
     wb = getattr(srv, "_watch_board", None)
     if wb is not None:
         now = time.time()
@@ -2008,6 +2014,70 @@ def _is_thought_ask(q: str) -> bool:
             or _is_learn_query(low) or _is_forget_query(low))
 
 
+def _last_line_ask(c: str) -> str | None:
+    """The discipline-compliant trailing frame of a LONG or fenced reply.
+
+    Whole-message matching (the guards in _is_thought_ask) misses the
+    canonical use: a long reply whose LAST line is the frame. W1a: scan the
+    last non-empty line only, and only trust the canonical 'membrane: ...'
+    form (or a short bare ask) -- a frame merely MENTIONED mid-prose is
+    W3a's business, never a detection here."""
+    lines = [ln.strip() for ln in (c or "").splitlines() if ln.strip()]
+    if not lines:
+        return None
+    # a line inside an open code fence is code, never an ask
+    if sum(ln.count("```") for ln in lines[:-1]) % 2 == 1:
+        return None
+    last = " ".join(lines[-1].split())
+    low = last.lower()
+    if not low or len(low) > 300:
+        return None
+    if low.startswith(_THOUGHT_CAPTURE_PREFIXES):
+        return None
+    if not (low.startswith("membrane:") or len(low) <= 60):
+        return None
+    if not _is_thought_ask(last):
+        return None
+    return last
+
+
+def _thought_family(t: str, c: str) -> str:
+    """Family of a thought ask; `c` is the raw message (state/recall matchers
+    apply their own normalization), `t` the normalized ask text."""
+    t_low = t.lower()
+    if t_low.startswith((_WATCH_CANON, _WATCHES_CANON)):
+        return "watch"
+    if _is_codegraph_query(t_low):
+        return "codegraph"
+    return ("state" if _is_state_query(c) else
+            "recall" if _is_recall_query(c) else
+            "learn" if _is_learn_query(c) else "forget")
+
+
+def _frame_wait_bump(srv, key: int, buried: bool) -> None:
+    """W1b counters: unique asks seen (a resend of an UNDELIVERED ask re-adds
+    the same key -- sets keep it honest), buried = found via the last-line
+    scan. In-memory; the re-ask event also writes the audit trail."""
+    fw = getattr(srv, "_frame_wait", None)
+    if fw is None:
+        fw = srv._frame_wait = {}
+    fw.setdefault("asks", set()).add(key)
+    if buried:
+        fw.setdefault("buried", set()).add(key)
+
+
+def _frame_wait_summary(srv) -> dict:
+    """The W1b numbers for the state surfaces (sets -> counts)."""
+    fw = getattr(srv, "_frame_wait", None)
+    if not fw:
+        return {}
+    return {"unique_asks": len(fw.get("asks", ())),
+            "served": int(fw.get("served", 0)),
+            "re_asks": int(fw.get("re_asks", 0)),
+            "buried": len(fw.get("buried", ())),
+            "hot": bool(fw.get("hot"))}
+
+
 def _thought_answer(srv, fam: str, text: str) -> str:
     """The internal answer for a thought ask.
 
@@ -2083,13 +2153,17 @@ def _thought_answer(srv, fam: str, text: str) -> str:
 
 
 def _assistant_thought_asks(srv, body: dict) -> list:
-    """(fam, normalized_text) for every PENDING intercept ask in
+    """(fam, normalized_text, buried) for every PENDING intercept ask in
     assistant-role messages of the incoming request. Already-served asks
-    (the delivery ledger) are skipped; the same assistant message re-arrives
-    on every continuation, so marking happens ONLY at delivery -- an
-    undelivered ask stays pending."""
+    (the delivery ledger) are skipped -- but NOT silently: a repeat of an
+    undelivered ask bumps the W1b re-ask counter (the system carrying the
+    timing friction instead of just teaching it). The same assistant message
+    re-arrives on every continuation, so marking happens ONLY at delivery --
+    an undelivered ask stays pending. `buried` marks a discipline-compliant
+    trailing frame found by the last-line scan (W3a's telemetry input)."""
     ledger = getattr(srv, "_served_thought_asks", None) or {}
     out: list = []
+    seen: set = set()
     for m in reversed(body.get("messages") or []):
         if not isinstance(m, dict) or m.get("role") != "assistant":
             continue
@@ -2097,31 +2171,64 @@ def _assistant_thought_asks(srv, body: dict) -> list:
         if not isinstance(c, str) or not c.strip():
             continue
         t = " ".join(c.split())
-        if not _is_thought_ask(t):
-            continue
         t_low = t.lower()
-        if t_low.startswith((_WATCH_CANON, _WATCHES_CANON)):
-            fam = "watch"
-        elif _is_codegraph_query(t_low):
-            fam = "codegraph"
+        buried = False
+        if not _is_thought_ask(t):
+            buried = True
+            t2 = _last_line_ask(c)
+            if t2 is None:
+                continue
+            t = t2
+            t_low = t.lower()
+            fam = _thought_family(t, t2)
         else:
-            fam = ("state" if _is_state_query(c) else
-                   "recall" if _is_recall_query(c) else
-                   "learn" if _is_learn_query(c) else "forget")
-        if ledger.get(hash((fam, t.lower()))):
+            fam = _thought_family(t, c)
+        key = hash((fam, t_low))
+        if key in seen:
             continue
-        out.append((fam, t))
+        seen.add(key)
+        if ledger.get(key):
+            # the undelivered ask re-arriving: count it (W1b), stay silent --
+            # the marker in the recall block is what the model sees (W1a)
+            try:
+                _frame_wait_bump(srv, key, buried)
+                fw = getattr(srv, "_frame_wait", None)
+                if fw is not None:
+                    fw["re_asks"] = fw.get("re_asks", 0) + 1
+                    if fw.get("re_asks", 0) >= 2:
+                        fw["hot"] = True
+                mem = getattr(srv, "membrane", None)
+                if mem is not None and getattr(mem, "audit_path", ""):
+                    with open(mem.audit_path, "a") as f:
+                        f.write(json.dumps({
+                            "event": "frame-wait", "fam": fam,
+                            "buried": buried, "ask": t[:120]}) + "\n")
+            except Exception:
+                pass
+            continue
+        _frame_wait_bump(srv, key, buried)
+        out.append((fam, t, buried))
     return out
 
 
 def _serve_thoughts_served(srv, asks: list) -> None:
     """Mark asks as answered in the once-only ledger (in-memory; a proxy
-    reboot forgets it -- the worst case is one repeated answer)."""
+    reboot forgets it -- the worst case is one repeated answer). Accepts
+    (fam, text) or (fam, text, buried) triples; a delivered ask also counts
+    in the W1b 'served' total."""
     ledger = getattr(srv, "_served_thought_asks", None)
     if ledger is None:
         ledger = srv._served_thought_asks = {}
-    for fam, t in asks:
+    for a in asks:
+        fam, t = a[0], a[1]
         ledger[hash((fam, t.lower()))] = True
+    try:
+        fw = getattr(srv, "_frame_wait", None)
+        if fw is None:
+            fw = srv._frame_wait = {}
+        fw["served"] = fw.get("served", 0) + len(asks)
+    except Exception:
+        pass
 
 
 def _thought_block(asks: list) -> str | None:
@@ -2136,6 +2243,9 @@ def _thought_block(asks: list) -> str | None:
                  "this when relevant; do not repeat it verbatim to the user. "
                  "If you already answered the user using a fact this corrects, "
                  "fix it on your next turn")
+    parts.append("\nTIMING: if you emitted a canonical frame whose answer is "
+                 "NOT in this block, the answer lands on your NEXT turn "
+                 "-- emit once, wait, act; do not re-ask")
     return "\n".join(parts)
 
 
@@ -3016,7 +3126,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # stay pending for the next continuation turn).
         if thought_asks:
             t_block = _thought_block([
-                (fam, _thought_answer(srv, fam, t)) for fam, t in thought_asks])
+                (fam, _thought_answer(srv, fam, t))
+                for fam, t, _ in thought_asks])
             if t_block:
                 up["messages"] = _inject(up["messages"], t_block)
         # watch delivery: undelivered [membrane-watch] reports ride on model
@@ -3732,6 +3843,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             "compact_follows_chat": srv.compact_follows_chat,
             "state_intercept": srv.state_intercept,
             "audit_records": _audit_count(mem.audit_path),
+            "frame_wait": _frame_wait_summary(srv) or None,
             "review_pending": len(mem.review_pending()),
         }
         gf = getattr(srv, "global_field", None)
@@ -3810,8 +3922,9 @@ def main() -> None:
                          "semantics) instead of the ephemeral candidate tier")
     ap.add_argument("--listen", type=int, default=11500,
                     help="port for the membrane OpenAI-compatible proxy")
-    ap.add_argument("--no-viewer", dest="viewer", action="store_false", default=True,
-                    help="don't serve the dev field viewer at /viewer (ON by default)")
+    ap.add_argument("--viewer", action="store_true",
+                    help="serve the dev field viewer at /viewer (OFF by "
+                         "default; the TUI/world proxies keep theirs)")
     ap.add_argument("--no-open", dest="open_browser", action="store_false", default=True,
                     help="don't open the dev viewer in the browser on start")
     ap.add_argument("--backend", default="http://localhost:11434",
@@ -4106,7 +4219,7 @@ def main() -> None:
               f"(pass --listen to pin)", file=sys.stderr)
     srv = ThreadingHTTPServer(("127.0.0.1", listen), MembraneOpenAIHandler)
     srv.membrane = mem
-    srv.viewer = bool(args.viewer)   # dev field viewer at /viewer (ON default)
+    srv.viewer = bool(args.viewer)   # dev field viewer at /viewer (OFF default)
     mem.server_ref = srv          # the router-outcome loop reads srv.router
     srv.backend = backend
     srv.rag_k = args.k

@@ -41,13 +41,30 @@ _TIMEOUT = timedelta(seconds=60)
 # ---- source readers ---------------------------------------------------------
 
 def _connect(conn: str, user: str, pw: str):
-    """A ready cluster handle (the field.py cred convention)."""
+    """A ready cluster handle (the field.py cred convention).
+
+    TLS connstrings (couchbases:// -- Capella and secured clusters) are
+    passed through; the SDK needs a root CA for Capella's public cert,
+    provided via COUCHBASE_CERT_PATH (or the well-known homebrew curl
+    bundle on macOS)."""
     from couchbase.auth import PasswordAuthenticator
     from couchbase.cluster import Cluster
     from couchbase.options import ClusterOptions
 
-    cluster = Cluster(conn, ClusterOptions(PasswordAuthenticator(user, pw)))
-    cluster.wait_until_ready(timedelta(seconds=10))
+    opts = {}
+    cert = os.environ.get("COUCHBASE_CERT_PATH", "").strip()
+    if not cert and conn.startswith("couchbases"):
+        for cand in ("/etc/ssl/cert.pem",
+                     "/opt/homebrew/etc/ca-certificates/cert.pem",
+                     "/usr/local/etc/openssl@3/cert.pem"):
+            if os.path.isfile(cand):
+                cert = cand
+                break
+    if cert:
+        opts["cert_path"] = cert
+    cluster = Cluster(conn, ClusterOptions(PasswordAuthenticator(user, pw,
+                                                                 **opts)))
+    cluster.wait_until_ready(timedelta(seconds=30))
     return cluster
 
 
@@ -63,7 +80,8 @@ def read_cb_all(conn: str, user: str, pw: str, bucket: str,
     qr = cluster.query(
         "SELECT meta().id AS id, t.* "
         f"FROM `{bucket}`.{_CB_SCOPE}.`{coll}` t "
-        "WHERE meta().id NOT LIKE 'sit:%'",
+        "WHERE meta().id NOT LIKE 'sit:%' "
+        "AND meta().id NOT LIKE 'mem:%'",
         QueryOptions(timeout=_TIMEOUT))
     rows = []
     for r in qr:
@@ -98,14 +116,26 @@ def read_json_all(path: Path) -> tuple[list[dict], list[dict]]:
 
 def _decode(rows: list[dict]) -> list:
     """Wire rows -> Exemplars (schema-window aware; blank origins stay blank
-    until a writer stamps them)."""
+    until a writer stamps them). A row that fails to decode or carries no
+    situation AND no action is bookkeeping, not a memory -- skipped with a
+    count, never fatal (a migration must survive one weird doc)."""
     out = []
+    skipped = 0
     for rec in rows:
-        ex = _rec_from_wire(rec)
+        try:
+            ex = _rec_from_wire(rec)
+        except Exception:
+            skipped += 1
+            continue
         if not ex.origin and rec.get("_origin"):
             ex.origin = rec["_origin"]
         if ex.situation or ex.action:
             out.append(ex)
+        else:
+            skipped += 1
+    if skipped:
+        print(f"[membrane move] skipped {skipped} non-exemplar/malformed "
+              f"doc(s)", file=sys.stderr)
     return out
 
 
@@ -214,16 +244,22 @@ def _parse_endpoint(spec: str) -> dict:
                 "user": os.environ.get("COUCHBASE_USER", "Administrator"),
                 "pw": os.environ.get("COUCHBASE_PASSWORD", "password"),
                 "bucket": spec[3:] or "membrane"}
-    if spec.startswith("cb://"):
-        m = re.match(r"cb://([^:@/]+)(?::([^@/]*))?@([^/:]+)(?::(\d+))?/(.+)",
+    if spec.startswith(("cb://", "cbs://")):
+        # cb://  -> plaintext (KV 11210); cbs:// -> TLS (Capella's
+        # couchbases:// scheme, KV 11207). Port may carry the scheme.
+        m = re.match(r"(cb|cbs)://([^:@/]+)(?::([^@/]*))?@([^/:]+)(?::(\d+))?/(.+)",
                      spec)
         if not m:
-            raise SystemExit(f"[membrane move] unparseable cb:// spec: {spec}")
-        user, pw, host, port, bucket = m.groups()
-        return {"kind": "cb", "conn": f"couchbase://{host}:{port or 11210}",
+            raise SystemExit(f"[membrane move] unparseable cb(s):// spec: "
+                             f"{spec}")
+        scheme, user, pw, host, port, bucket = m.groups()
+        default_port = "11207" if scheme == "cbs" else "11210"
+        scheme_full = "couchbases" if scheme == "cbs" else "couchbase"
+        return {"kind": "cb",
+                "conn": f"{scheme_full}://{host}:{port or default_port}",
                 "user": user, "pw": pw or "", "bucket": bucket}
     raise SystemExit(f"[membrane move] endpoint must start with json:, cb:, "
-                     f"or cb:// -- got {spec!r}")
+                     f"cbs://, or cb:// -- got {spec!r}")
 
 
 def main() -> int:

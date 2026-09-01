@@ -115,13 +115,18 @@ critique; this plan converts each into work, most-earn-first.
 
 The instinct to re-ask is human; the system can carry more of it.
 
-- **W1a — pending-frame markers**: when a turn emits a canonical frame and
-  the intercept hasn't answered yet, the recall block should say so
-  explicitly ("frame pending, answer lands next turn"). Cheap: a flag on
-  the frame-detection path surfaced in the recall block.
-- **W1b — audit the wait**: count frames whose answer never arrived (the
-  re-ask-because-nothing-happened signature) in audit analysis; if real,
-  the pre-gate timing needs a look, not just the doctrine wording.
+- **W1a — pending-frame markers**: DONE 2026-09-01. The thought block
+  carries a TIMING tail ("emit once, wait, act; do not re-ask"); a
+  discipline-compliant TRAILING frame (last line of a long/fenced reply,
+  fence-guarded, canon-or-short-bare only) is now detected where
+  whole-message matching missed it (`_last_line_ask`).
+- **W1b — audit the wait**: DONE 2026-09-01. A repeat of an UNDELIVERED
+  ask is no longer silently skipped: it bumps a `frame-wait` counter
+  (unique asks / served / re-asks / buried), writes a `frame-wait` audit
+  record, and surfaces in `/membrane/state` + the state report. Verified
+  live on a spare-port smoke: delivered ask -> `served: 1`; resend ->
+  `re_asks: 1`; buried trailing frame -> `buried: 1`.
+  (`tests/test_frame_wait.py`, 9 tests.)
 
 ## W2: stale-cell defense (friction #2) -- the tier was step one
 
@@ -149,6 +154,36 @@ The instinct to re-ask is human; the system can carry more of it.
   blocks) when a reply contains two canonical frames, to train the habit
   without breaking live traffic.
 
+## W4: provenance axis (split the trust, not the membrane)
+
+The operator's follow-up plus the second seat's concurrence. A literal
+internal/external split is rejected (fragments the one-geometry math, and
+a split without an invalidation lane is worse than no split): "the field
+is the conversation -- and the conversation is shared."
+
+- **W4a -- per-cell `src` tag** (the trust split, not the field split):
+  rides the existing `extra` dict, earned at learn time. Values:
+  `ground` (learned on a turn carrying paired tool results -- the
+  `_pending_tools` call->result hook already exists), `user` (operator
+  turns and teed Q/A, the default), `model` (agent-learned notes),
+  `ingest` (docs/README cold-start). Surfaced at RECALL time on every hit
+  (`[src: model -- own prior guess]`) with a doctrine line: model/ingest
+  cells are prior conclusions, verify against ground; ground cells are
+  environment-verified. Trust order `ground > user > model` powers W2a
+  (supersede-on-confirm: ground supersedes model at equal sim, never the
+  reverse) and gives model-only claims a policy: corroboration or expiry.
+- **W4b -- the user ledger** (highest-value memories first): append-only,
+  verbatim user-stated decisions and corrections; model-readable,
+  MODEL-UNWRITABLE (only operator turns and the learn intercept write
+  it), user-editable on disk. Small file next to the field
+  (`<field>.ledger.jsonl`), recalled verbatim when near the current turn
+  -- provenance certainty for the 10% of memories that carry 90% of the
+  trust weight.
+- **W4c (parked, evidence-conditional) -- model-side scratch field**:
+  ONLY if self-feed collapse is OBSERVED (not feared): move model scratch
+  (intents, working lessons) to a model-side field, invalidation lane
+  designed day one.
+
 ## E1 (parked, evidence-first): embeddings leverage
 
 - Experiment script first (no production change): replay the 86 near-miss
@@ -162,4 +197,6 @@ The instinct to re-ask is human; the system can carry more of it.
 2. W1a + W1b (smallest UX win, unblocks trust in the wait).
 3. W2a + W2b (stale-cell defense completes what the tier started).
 4. W3a (make discipline violations visible).
-5. E1 experiment (near-miss replay) -- before any embedder talk.
+5. W4a + W4b provenance axis (after the current plan items land; W4a
+   pairs with W2a, W4b is standalone).
+6. E1 experiment (near-miss replay) -- before any embedder talk.

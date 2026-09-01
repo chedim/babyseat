@@ -310,6 +310,124 @@ def _install(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cb_ask(input_fn, getpass_fn, title: str) -> dict:
+    """Interactive Couchbase endpoint (creds typed, never echoed)."""
+    print(f"  {title}")
+    conn = input_fn("  conn string [couchbase://localhost]: ").strip()
+    user = input_fn("  user [Administrator]: ").strip()
+    pw = getpass_fn("  password: ").strip()
+    bucket = input_fn("  bucket [membrane]: ").strip()
+    return {"conn": conn or "couchbase://localhost",
+            "user": user or "Administrator",
+            "pw": pw or "password",
+            "bucket": bucket or "membrane"}
+
+
+def _migrate(argv: list[str]) -> int:
+    """`membrane migrate`: the interactive front door to `membrane move`.
+
+    Detects where THIS project's field lives (MEMBRANE_STORE env / project
+    env file -> couchbase; anything else -> memory), asks what to migrate
+    TO (offering the sane default), asks creds when the target is Couchbase,
+    then runs the production `move` path (same endpoint grammar, idempotent,
+    content-keyed). Passthrough flags (--reorigin, --field) ride along."""
+    import getpass as _getpass
+    from .project_env import project_env_path, parse_env_file
+
+    def _ask(prompt: str, default: str) -> str:
+        ans = input(prompt).strip()
+        return ans or default
+
+    have = parse_env_file(project_env_path())
+    on_cb = (os.environ.get("MEMBRANE_STORE", "").strip().lower() == "couchbase"
+             or have.get("MEMBRANE_STORE", "").strip().lower() == "couchbase")
+    src_desc = "couchbase" if on_cb else "memory (local json field)"
+    print(f"[membrane migrate] this project's field lives on: {src_desc}")
+    print("  migrate to: [1] couchbase  [2] memory")
+    to = _ask("  target [{}]: ".format(
+        "1 (couchbase)" if not on_cb else "2 (memory)"),
+        "1" if not on_cb else "2")
+    to_cb = to.strip() in ("1", "couchbase", "cb")
+
+    field = str(FIELD)
+    extra: list[str] = []
+    if "--field" in argv:
+        i = argv.index("--field")
+        if i + 1 < len(argv):
+            field = argv[i + 1]
+    extra = [a for a in argv if a in ("--reorigin",)]
+
+    if on_cb and not to_cb:
+        # cb -> json: the target is this project's private field file; the
+        # source endpoint is cb:BUCKET with the CURRENT env/project creds
+        bucket = (os.environ.get("COUCHBASE_BUCKET", "").strip()
+                  or have.get("COUCHBASE_BUCKET", "").strip() or "membrane")
+        src = "cb:" + bucket
+        dst = "json:" + field
+        print(f"[membrane migrate] couchbase ({bucket}) -> {field}")
+    elif on_cb and to_cb:
+        # cb -> cb: source = current cluster (env creds), target = NEW creds
+        cur_bucket = (os.environ.get("COUCHBASE_BUCKET", "").strip()
+                      or have.get("COUCHBASE_BUCKET", "").strip() or "membrane")
+        print("  (source cluster is the currently configured one; "
+              f"bucket {cur_bucket})")
+        print("  target cluster:")
+        tgt = _cb_ask(input, _getpass.getpass,
+                      "target cluster (creds for the NEW cluster):")
+        scheme = "cbs" if tgt["conn"].startswith("couchbases") else "cb"
+        src = "cb:" + cur_bucket
+        dst = (f"{scheme}://{tgt['user']}:{tgt['pw']}@"
+               + tgt["conn"].replace("couchbase://", "")
+               .replace("couchbases://", "").rstrip("/")
+               + f"/{tgt['bucket']}")
+    elif (not on_cb) and to_cb:
+        # json -> cb: source is the local json field; ask target creds
+        tgt = _cb_ask(input, _getpass.getpass,
+                      "target cluster (creds are stored in "
+                      "~/.membrane/projects/, never the repo):")
+        scheme = "cbs" if tgt["conn"].startswith("couchbases") else "cb"
+        src = "json:" + field
+        dst = (f"{scheme}://{tgt['user']}:{tgt['pw']}@"
+               + tgt["conn"].replace("couchbase://", "")
+               .replace("couchbases://", "").rstrip("/")
+               + f"/{tgt['bucket']}")
+        # persist the target as this project's store (the migration's point:
+        # the project now LIVES on the new cluster)
+        try:
+            from .project_env import _write_env_file, DECLINE_KEY
+            path = project_env_path()
+            vals = dict(have)
+            vals.update({
+                "MEMBRANE_STORE": "couchbase",
+                "COUCHBASE_CONN_STRING": tgt["conn"],
+                "COUCHBASE_USER": tgt["user"],
+                "COUCHBASE_PASSWORD": tgt["pw"],
+                "COUCHBASE_BUCKET": tgt["bucket"],
+                DECLINE_KEY: "0",
+            })
+            _write_env_file(path, vals)
+            print(f"[membrane migrate] store config saved to {path} "
+                  f"(this project now lives on couchbase)", file=sys.stderr)
+        except Exception as e:
+            print(f"[membrane migrate] warning: could not save store config "
+                  f"({e}); the move itself still runs.", file=sys.stderr)
+    else:
+        print("[membrane migrate] already on memory and memory was chosen "
+              "-- nothing to do.", file=sys.stderr)
+        return 0
+
+    dst_show = dst
+    if to_cb:
+        import re as _re
+        dst_show = _re.sub(r"(cb://[^:@/]+):[^@/]*@", r"\1:***@", dst)
+    print(f"[membrane migrate] running: membrane move --from {src} "
+          f"--to {dst_show}")
+    sys.argv = ["membrane move", "--from", src, "--to", dst, "--field", field] \
+        + extra
+    from .move import main as move_main
+    return move_main()
+
+
 def _connect() -> int:
     """`membrane connect`: (re)run the shared-field onboarding interactively.
 
@@ -393,6 +511,9 @@ def main() -> None:
         "             project (creds go to ~/.membrane/projects/, not the repo)\n"
         "  move       migrate the field between stores (cb<->cb, cb->json,\n"
         "             json->cb); see --help for endpoint forms\n"
+        "  migrate    interactive migration front door: detects where this\n"
+        "             project's field lives, asks for the target mechanism\n"
+        "             (and creds when Couchbase is involved), then runs move\n"
         "  ingest     cold-start: absorb docs/README into the field (no model call)\n"
         "  codegraph  stdlib-AST call graph (stats | impact | callers | callees)\n"
         "  doctor     what's installed/running (CLI, skills, Ollama)\n"
@@ -406,7 +527,7 @@ def main() -> None:
     cmd = argv[0] if argv and not argv[0].startswith("-") else None
     if cmd not in ("tui", "proxy", "opencode", "anthropic", "review",
                    "demo", "reset", "install", "doctor", "connect",
-                   "ingest", "codegraph", "update", "move"):
+                   "ingest", "codegraph", "update", "move", "migrate"):
         if cmd is None and not argv:
             print(__doc__)
             return
@@ -445,6 +566,8 @@ def main() -> None:
                                             else [])
         from .move import main as move_main
         raise SystemExit(move_main())
+    if cmd == "migrate":
+        raise SystemExit(_migrate(args.forwarded))
     if cmd == "ingest":
         argv2 = _ensure_data_dir(args.forwarded)
         raise SystemExit(_run_module("membrane.ingest", argv2))
