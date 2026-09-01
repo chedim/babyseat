@@ -130,26 +130,63 @@ The instinct to re-ask is human; the system can carry more of it.
 
 ## W2: stale-cell defense (friction #2) -- the tier was step one
 
-- **W2a — supersede-on-confirm**: when a correction is learned and an old
-  canon cell contradicts it (high sim, conflicting action), mark the old
-  cell `superseded_by` instead of leaving both live in recall. Promotion
-  machinery exists (promote_ephemeral/demote paths); add the supersede
-  link at learn-dedup time.
-- **W2b — recall freshness weighting**: recall_merged already has an
-  ephemeral recency bonus; extend weighting so stale canon (old eph_born,
-  low evidence, low use count) ranks below recently confirmed cells --
+- **W2a — supersede-on-confirm**: DONE 2026-09-01 (`tests/test_supersede.py`,
+  11 tests; full suite 197 OK). A fresh answer that CONFLICTS with a live
+  SAFE canon dup (token overlap < 0.7) is a correction, not a re-statement:
+  the correction is learned as a fresh CANDIDATE and the old cell is linked
+  out of live recall (`extra["superseded_by"]` -> the successor's CONTENT
+  key, stable across compactor renumbering; `superseded_ts`/`supersede_how`
+  /`superseded_by_text` ride along). The link is SELF-HEALING at read time:
+  it holds while the successor is alive and un-refuted (canon-safe or a live
+  candidate); a refuted correction (durable-unsafe), a demoted one, a
+  forgotten or TTL-expired one dangles the link and the predecessor returns
+  to live recall (the alternates rule, retold). Chains unwind level by
+  level (A->B->C hides A and B while C lives). Read-side resolution is
+  one-pass (`_superseded_set`, zero cost when no links exist). Live-recall
+  surfaces opt in: the gate (`decide(live_only=True)`), chat grounding
+  (rag `top_k(live_only=True)`), and `_find_dup` (a third opinion echoes the
+  correction and promotes IT, never resurrects the stale cell); archaeology
+  lanes (forget search, compactor, query surface) keep the default so
+  superseded rows stay findable and the links resolvable. Tier-off keeps
+  the conservative keep-first-seen covenant (no candidate machinery to
+  police the successor). Audit carries `superseded: <idx>`; state report
+  shows the superseded count.
+- **W2b — recall freshness weighting**: DONE 2026-09-01
+  (`tests/test_recall_freshness.py`, 5 tests; full suite 202 OK). Canon
+  rows now carry `confirmed_ts`, stamped at `promote_ephemeral` (safe
+  promotions only -- a refute invents no freshness); legacy rows are
+  ageless (no stamp, no invented bonus). `recall_merged` adds a SMALL
+  confirmation-freshness bonus (w_conf=0.05, tau=7d -- deliberately
+  gentler than the candidate bonus w_rec=0.15: evidence beats recency) so
+  at a near-tie the just-confirmed answer outranks ageless stale canon;
   snapshot recall self-corrects instead of relying on the reader's
-  vigilance.
-- **W2c — mass-demote sweep** (carried from the previous plan, item 4):
-  audit-sourced demotion of exemplars answered by models the compat screen
-  rejects; the dumb-model-era junk is still surfacing.
+  vigilance. Chat grounding (`_memory_block`) now reads the MERGED
+  surface (supersede-hidden + freshness-weighted + candidate-aware);
+  verified band coexistence: minutes-old candidate > just-confirmed canon
+  > 12h-old candidate at a tie.
+- **W2c — mass-demote sweep**: RESOLVED 2026-09-01 (verified, no code
+  needed). `_hygiene_demote_screened_models` (opencode.py:190, runs at
+  boot) was already in place from the postponed batch; the audit trace
+  shows ZERO learned exemplars from screened-out models and the live field
+  carries 29 stamped rows, all glm-5.3-flash:cloud -- the dumb-model-era
+  junk (qwen-coder hijack era) is already gone from the field (compactor
+  + refute paths ate it). The sweep stays as a boot guard against future
+  screen regressions; nothing to sweep today.
 
 ## W3: lane-discipline guardrails (friction #3: strictness earns its keep)
 
-- **W3a — frame-lint at ingest**: when a stacked/buried frame is absorbed
-  as junk memory, the boot/audit layer should FLAG it in the audit (event:
-  "frame_discipline_violation") so violations are visible and countable
-  instead of only poisoning silently.
+- **W3a — frame-lint at ingest**: DONE 2026-09-01 (`tests/test_frame_lint.py`,
+  8 tests; full suite 210 OK). `_frame_lint` (opencode.py) scans every
+  delivered assistant TEXT reply: stacked (2+ canon frames in one reply --
+  only the first is servable, the rest poison learn) and buried (a canon-
+  frame-looking line mid-prose that neither whole-message nor last-line
+  scans can serve) both fire a `frame_discipline_violation` audit event
+  (kinds + a short preview) and in-memory counters that ride
+  `_frame_wait_summary` into the state report (`- frame discipline: N
+  violation(s) (x stacked, y buried mid-prose)`). Fenced code is exempt
+  (code legitimately contains frame-like lines); a single trailing frame is
+  the disciplined form, never flagged. Violations are now visible and
+  countable instead of only poisoning silently.
 - **W3b — one-frame assert in dev**: a --dev flag that warns (never
   blocks) when a reply contains two canonical frames, to train the habit
   without breaking live traffic.

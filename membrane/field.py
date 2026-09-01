@@ -453,6 +453,13 @@ class ExemplarStore:
             ex.outcome = outcome
         ex.extra = {k: v for k, v in (ex.extra or {}).items()
                     if k not in ("eph_born", "eph_ttl")}
+        if safe:
+            # W2b freshness anchor: WHEN this row earned its canon seat
+            # (dedup-use / confirm / dream vote). Recall weights it so a
+            # recently-confirmed cell outranks ageless stale canon at
+            # near-ties. Legacy rows without the stamp are ageless (no
+            # bonus, no penalty) -- honest about what we cannot know.
+            ex.extra["confirmed_ts"] = float(time.time())
         # a promotion is a WRITE in both collections' books: the canon key
         # must upsert (new content there) and the ephemeral key must delete
         self._written.discard(_ex_key(ex))
@@ -469,6 +476,92 @@ class ExemplarStore:
         now = float(now if now is not None else time.time())
         return [i for i, e in enumerate(self.exemplars)
                 if e.ephemeral and now - self._eph_born(e) >= EPH_TTL_S]
+
+    # ---- supersede-on-confirm (W2a: stale-cell defense) --------------------
+    # When a CORRECTION is learned and an old canon cell contradicts it (high
+    # sim, conflicting action), the old cell is marked ``superseded_by`` --
+    # the successor's CONTENT key (stable across compactor renumbering) -- and
+    # drops out of LIVE recall while staying in the store (append-only for
+    # earned history; nothing is deleted). The link is one-directional
+    # (old -> newer, written only at learn time, so no cycles) and
+    # SELF-HEALING at read time: the link holds only while the successor is
+    # alive and un-refuted (canon-safe, or a live candidate under the tier).
+    # A refuted correction (durable-unsafe), a demoted one, or a forgotten /
+    # TTL-expired one dangles the link and the predecessor returns to live
+    # recall -- a deferred answer is re-promotable when its master degrades
+    # (the alternates rule, retold). Chains: A->B->C hides A and B while C
+    # lives; death or demotion unwinds the chain level by level.
+    @staticmethod
+    def _supersede_link(ex: "Exemplar") -> str:
+        try:
+            return str((ex.extra or {}).get("superseded_by") or "")
+        except (TypeError, ValueError):
+            return ""
+
+    def mark_superseded(self, index: int, *, by_key: str,
+                        by_text: str = "", how: str = "") -> None:
+        """Link ``exemplars[index]`` out of live recall: its content was
+        contradicted by a newer answer. ``by_key`` is the SUCCESSOR's content
+        key (``content_key``) -- not an index -- so compactor renumbering
+        cannot break the link; the read side resolves keys against the live
+        list. ``by_text`` rides along (a short preview for audit surfaces).
+        Persists nothing here (the caller saves); the delta-save bookkeeping
+        is invalidated so the old cell's doc re-upserts with the link."""
+        old = self.exemplars[index]
+        old.extra = dict(old.extra or {})
+        old.extra["superseded_by"] = by_key
+        old.extra["superseded_ts"] = float(time.time())
+        old.extra["supersede_how"] = how
+        if by_text:
+            old.extra["superseded_by_text"] = by_text[:120]
+        # a linked cell's content changed -> its couchbase doc must re-upsert
+        self._written.discard(_ex_key(old))
+
+    def content_key(self, situation: str, action: str) -> str:
+        """The deterministic canon key an exemplar with this content WILL
+        have once saved (same formula as ``_ex_key``, with this store's
+        origin). Lets a caller link to a successor that does not exist yet
+        (the fresh answer being learned)."""
+        import hashlib
+        prefix = f"{self.origin}\x00" if self.origin else ""
+        h = hashlib.sha1(f"{prefix}{situation}\x00{action}".encode("utf-8"))
+        return h.hexdigest()[:20]
+
+    def index_of_key(self, key: str) -> int | None:
+        """First index whose canon content key equals ``key`` (any tier --
+        a candidate successor shares the situation+action hash space)."""
+        for i, e in enumerate(self.exemplars):
+            if _ex_key(e) == key:
+                return i
+        return None
+
+    def is_superseded(self, ex: "Exemplar") -> bool:
+        """True when ``ex`` is linked to an ALIVE successor: one whose
+        content key exists in this store and is not canon-UNSAFE. A live
+        candidate counts (the correction exists, it just awaits evidence);
+        a refuted correction (durable-unsafe), a demoted answer, or a
+        forgotten / expired one leaves the link dangling -> the predecessor
+        serves again."""
+        key = self._supersede_link(ex)
+        if not key:
+            return False
+        return any((o.ephemeral or o.safe) and _ex_key(o) == key
+                   for o in self.exemplars)
+
+    def _superseded_set(self) -> frozenset:
+        """One-pass resolution for the hot recall paths: the indexes of all
+        cells whose supersede link points at an alive (canon-safe or
+        un-refuted candidate) cell. Zero cost when the field holds no links
+        (the common case: one cheap O(N) pre-scan, no hashing)."""
+        links: list[tuple[int, str]] = []
+        for i, e in enumerate(self.exemplars):
+            k = self._supersede_link(e)
+            if k:
+                links.append((i, k))
+        if not links:
+            return frozenset()
+        alive = {_ex_key(e) for e in self.exemplars if e.ephemeral or e.safe}
+        return frozenset(i for i, k in links if k in alive)
 
     def promote_on_use(self, q: np.ndarray, *, sim_min: float = 0.85,
                        now: float | None = None, max_promote: int = 2,
@@ -497,31 +590,60 @@ class ExemplarStore:
                 out.append(i)
         return out
 
+    @staticmethod
+    def _confirmed_ts(ex: "Exemplar") -> float:
+        try:
+            return float((ex.extra or {}).get("confirmed_ts", 0.0))
+        except (TypeError, ValueError):
+            return 0.0
+
     def recall_merged(self, q: np.ndarray, k: int = 5, *,
                       now: float | None = None,
-                      w_rec: float = 0.15, tau: float = 6 * 3600.0
+                      w_rec: float = 0.15, tau: float = 6 * 3600.0,
+                      w_conf: float = 0.05, tau_conf: float = 7 * 86400.0
                       ) -> list[tuple[Exemplar, float]]:
         """DURABLE + EPHEMERAL, recency-weighted (lab E3): a fresh candidate
         outranks stale canon for the same need; canon recall is untaxed when
         nothing is fresh. The returned sim is the EFFECTIVE score (cosine +
         the ephemeral recency bonus); callers treating it as plain cosine
         still work -- the bonus only matters near ties, exactly where the
-        fresh answer should win."""
+        fresh answer should win.
+
+        W2b confirmation freshness: canon rows carry ``confirmed_ts`` (set at
+        promotion -- the moment evidence made them durable). A recently
+        confirmed cell takes a SMALL bonus (w_conf over tau_conf = a week
+        scale), so at a near-tie the just-confirmed answer outranks ageless
+        stale canon. Deliberately gentler than the candidate bonus (w_conf
+        < w_rec): evidence beats recency; a stale confirmed cell must NOT
+        lose to a mere claim. Legacy rows without the stamp get nothing --
+        no invented freshness for the ageless."""
         if not self.exemplars:
             return []
         now = float(now if now is not None else time.time())
         qn = _unit(q)
-        V = self.vectors()
+        # live recall first: a superseded row (its content contradicted by a
+        # learned correction with a live successor) must not out-rank the
+        # correction that replaced it
+        dead = self._superseded_set()
+        pool = [e for i, e in enumerate(self.exemplars) if i not in dead]
+        if not pool:
+            return []
+        V = np.array([e.vec for e in pool], dtype=float)
         Vn = V / (np.linalg.norm(V, axis=1, keepdims=True) + 1e-12)
         sims_all = Vn @ qn
-        order = np.argsort(-sims_all)[:min(len(self.exemplars), k + 16)]
+        order = np.argsort(-sims_all)[:min(len(pool), k + 16)]
         rows: list[tuple[Exemplar, float]] = []
         for i in order:
-            ex = self.exemplars[i]
+            ex = pool[i]
             sim = float(sims_all[i])
             if ex.ephemeral and w_rec > 0:
                 age = max(now - self._eph_born(ex), 0.0)
                 sim += w_rec * float(np.exp(-age / tau))
+            elif not ex.ephemeral and w_conf > 0:
+                born = self._confirmed_ts(ex)
+                if born > 0.0:
+                    age = max(now - born, 0.0)
+                    sim += w_conf * float(np.exp(-age / tau_conf))
             rows.append((ex, sim))
         rows.sort(key=lambda t: -t[1])
         return rows[:k]
@@ -632,18 +754,34 @@ class ExemplarStore:
         return np.array([e.vec for e in self.exemplars], dtype=float)
 
     def top_k(self, q: np.ndarray, k: int = 5,
-              canon_only: bool = False) -> list[tuple[Exemplar, float]]:
+              canon_only: bool = False,
+              live_only: bool = False) -> list[tuple[Exemplar, float]]:
         """The k nearest exemplars to unit query q, by cosine similarity.
 
         ``canon_only`` excludes ephemeral CANDIDATES: the gate's replay
         decision reads canon alone (a candidate is an unconfirmed claim --
         replaying it would be acting on silence). Recall that should SEE
-        candidates uses ``recall_merged`` instead."""
+        candidates uses ``recall_merged`` instead.
+
+        ``live_only`` additionally excludes superseded canon: cells whose
+        content a learned correction contradicted (``mark_superseded`` with a
+        live successor). LIVE-recall surfaces (chat grounding) opt in;
+        archaeology lanes (forget search, compactor, codegraph, the query
+        surface) keep the default -- a superseded row must stay findable so
+        the links stay resolvable and the dreamer's GC can distill it."""
         pool = ([e for e in self.exemplars if not e.ephemeral]
                 if canon_only else self.exemplars)
+        if live_only:
+            dead = self._superseded_set()
+            pool = [e for i, e in enumerate(self.exemplars)
+                    if i not in dead and (not canon_only or not e.ephemeral)]
         if not pool:
             return []
         V = np.array([e.vec for e in pool], dtype=float)
+        if V.shape[1] != len(q):
+            # shape guard (legacy/stub rows of a different dim): nothing is
+            # comparable -- not a match, not a crash
+            return []
         qn = _unit(q)
         Vn = V / (np.linalg.norm(V, axis=1, keepdims=True) + 1e-12)
         sims = Vn @ qn
@@ -1297,8 +1435,9 @@ class ExemplarStore:
         n_eph = sum(1 for e in self.exemplars if e.ephemeral)
         safe = sum(1 for e in self.exemplars if e.safe)
         safe_frac = (safe / n) if n else 0.0
+        n_sup = len(self._superseded_set())
         out = {"n": n, "n_durable": n - n_eph, "n_ephemeral": n_eph,
-               "safe": safe, "safe_frac": safe_frac}
+               "safe": safe, "safe_frac": safe_frac, "n_superseded": n_sup}
         # trend: JL-project then SVD (one fixed matrix per dim -- stable
         # across saves so the trend is comparable over time)
         st = self.exemplars

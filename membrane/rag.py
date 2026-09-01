@@ -753,7 +753,8 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
         mmr_sim = float(getattr(srv, "rag_mmr_sim", 0.90))
         t_tokens, t_pairs = _transcript_index(messages)
         search_vec, skewed = self._momentum_skew(vec)
-        for ex, sim in mem.store.top_k(search_vec, k=int(srv.rag_k) * 4):
+        for ex, sim in mem.store.recall_merged(search_vec,
+                                               k=int(srv.rag_k) * 4):
             if sim < srv.rag_sim_min:
                 break                       # sorted desc; nothing closer remains
             if not ex.safe:

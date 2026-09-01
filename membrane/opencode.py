@@ -243,7 +243,9 @@ def _state_report(srv) -> str:
         "Membrane state (computed live on this server, no model call):",
         f"- backend {srv.backend} | embed model {getattr(mem.embedder, 'model', None) or 'unresolved'}",
         f"- field: {n} exemplars ({safe} safe / {n - safe} unsafe; "
-        f"{retired} compacted, {notes} compact notes)",
+        f"{retired} compacted, {notes} compact notes"
+        + (f"; {len(mem.store._superseded_set())} superseded" 
+           if mem.store._superseded_set() else "") + ")",
         f"- effective rank {th['eff_rank']:.2f} (rank ratio {th['rank_ratio']:.2f}); "
         f"free energy {th['free_energy']:.2f} (safe_frac {th['safe_frac']:.2f}, "
         f"spectrum entropy {th['spectrum_entropy']:.2f})",
@@ -283,6 +285,11 @@ def _state_report(srv) -> str:
                      f"{fw['served']} served, {fw['re_asks']} re-asks"
                      + (f", {fw['buried']} buried (last-line)"
                         if fw.get("buried") else ""))
+        viol = fw.get("violations", 0)
+        if viol:
+            lines.append(f"- frame discipline: {viol} violation(s) "
+                         f"({fw.get('viol_stacked', 0)} stacked, "
+                         f"{fw.get('viol_buried', 0)} buried mid-prose)")
     wb = getattr(srv, "_watch_board", None)
     if wb is not None:
         now = time.time()
@@ -2054,6 +2061,67 @@ def _thought_family(t: str, c: str) -> str:
             "learn" if _is_learn_query(c) else "forget")
 
 
+# ---- W3a: frame-lint (discipline violations made visible) -------------------
+# The lane discipline says at most ONE canonical frame per reply, on its own
+# line, last. Violations self-poison the field (stacked or buried frames miss
+# the pre-gate intercept and the whole turn is absorbed as junk memory) -- but
+# until now they were INVISIBLE: the machinery just silently missed them.
+# The lint makes them countable: a `frame_discipline_violation` audit event
+# per offending reply, with the kind ("stacked" = two+ canon frames in one
+# reply; "buried" = a canon frame mid-prose that is neither the whole message
+# nor the trailing line) and a short preview. Never blocks live traffic.
+_CANON_FRAME_PREFIXES = ("membrane:", "field state", "field stats",
+                         "membrane query", "membrane learn", "membrane forget")
+
+
+def _frame_lint(srv, text: str, source: str = "assistant") -> int:
+    """Count discipline violations in one assistant text; audit each.
+
+    - stacked: two+ canonical frames anywhere in the reply (only the first
+      is servable; the rest miss the pre-gate intercept and poison learn).
+    - buried: a line that lexically LOOKS like a canon frame sits mid-prose
+      (not first, not last) in a multi-line reply -- whole-message matching
+      will miss it and the frame never gets served.
+    Never raises; returns the violation count (0 = clean)."""
+    if not text or "```" in text:
+        # fenced code legitimately contains frame-like lines; not prose
+        return 0
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return 0
+    canon = [ln for ln in lines
+             if " ".join(ln.split()).lower().startswith(_CANON_FRAME_PREFIXES)]
+    violations = 0
+    kinds: list[str] = []
+    if len(canon) >= 2:
+        kinds.append("stacked")
+        violations += 1
+    if len(lines) > 2 and len(canon) == 1:
+        idx = lines.index(canon[0])
+        if 0 < idx < len(lines) - 1:
+            kinds.append("buried")
+            violations += 1
+    if not violations:
+        return 0
+    mem = getattr(srv, "membrane", None)
+    fw = getattr(srv, "_frame_wait", None)
+    if fw is None:
+        fw = srv._frame_wait = {}
+    for k in kinds:
+        fw[f"viol_{k}"] = fw.get(f"viol_{k}", 0) + 1
+    fw["violations"] = fw.get("violations", 0) + 1
+    try:
+        if mem is not None and getattr(mem, "audit_path", ""):
+            with open(mem.audit_path, "a") as f:
+                f.write(json.dumps({
+                    "event": "frame_discipline_violation",
+                    "kinds": kinds, "origin": source,
+                    "preview": " | ".join(canon)[:200]}) + "\n")
+    except Exception:
+        pass
+    return violations
+
+
 def _frame_wait_bump(srv, key: int, buried: bool) -> None:
     """W1b counters: unique asks seen (a resend of an UNDELIVERED ask re-adds
     the same key -- sets keep it honest), buried = found via the last-line
@@ -2067,15 +2135,21 @@ def _frame_wait_bump(srv, key: int, buried: bool) -> None:
 
 
 def _frame_wait_summary(srv) -> dict:
-    """The W1b numbers for the state surfaces (sets -> counts)."""
+    """The W1b/W3a numbers for the state surfaces (sets -> counts)."""
     fw = getattr(srv, "_frame_wait", None)
     if not fw:
         return {}
-    return {"unique_asks": len(fw.get("asks", ())),
-            "served": int(fw.get("served", 0)),
-            "re_asks": int(fw.get("re_asks", 0)),
-            "buried": len(fw.get("buried", ())),
-            "hot": bool(fw.get("hot"))}
+    out = {"unique_asks": len(fw.get("asks", ())),
+           "served": int(fw.get("served", 0)),
+           "re_asks": int(fw.get("re_asks", 0)),
+           "buried": len(fw.get("buried", ())),
+           "hot": bool(fw.get("hot"))}
+    # W3a: the discipline counters ride the same summary
+    if fw.get("violations"):
+        out["violations"] = int(fw["violations"])
+        out["viol_stacked"] = int(fw.get("viol_stacked", 0))
+        out["viol_buried"] = int(fw.get("viol_buried", 0))
+    return out
 
 
 def _thought_answer(srv, fam: str, text: str) -> str:
@@ -3430,7 +3504,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # the watch layer: report new memories landing inside planted watches
         _watch_notify(srv, mem, ex_idx)
         # total capture: the model's intent + machinery + thought, as plain Q/A.
+        # W3a rides the same lane: the delivered text is linted for frame-
+        # discipline violations (stacked/buried canon frames) so the poison
+        # that self-learns as junk memory is also VISIBLE and countable.
         try:
+            if content.strip() and not tool_calls:
+                _frame_lint(srv, content, source="assistant-text")
             if calls:
                 _capture_plan_and_calls(mem, query, content, calls)
             if thought:

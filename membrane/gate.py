@@ -59,6 +59,7 @@ def decide(
     novelty_sim_max: float = 0.95,
     eff_rank: float | None = None,
     canon_only: bool = False,
+    live_only: bool = False,
 ) -> dict:
     """Route `query` against `store` to one of: act / escalate-with-hint / escalate.
 
@@ -89,7 +90,7 @@ def decide(
                 "ex_idx": None, "eff_rank": 0.0, "rank_ratio": 0.0, "sim_min": sim_min}
 
     qn = query / (np.linalg.norm(query) + 1e-12)
-    nbrs = store.top_k(qn, k=k, canon_only=canon_only)
+    nbrs = store.top_k(qn, k=k, canon_only=canon_only, live_only=live_only)
     if not nbrs:
         # canon-only recall with a candidates-only field: nothing to act on
         return {"verdict": "escalate", "reason": "no canon matches", "sim": 0.0,

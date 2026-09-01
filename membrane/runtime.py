@@ -79,7 +79,7 @@ import numpy as np
 
 from .embed import OllamaEmbedder
 from .field import Exemplar, ExemplarStore
-from .gate import decide
+from .gate import decide, _action_overlap
 from .generator import FieldNGram, MIN_ACTIONS as _GEN_MIN_ACTIONS, _tok as _gen_tokens
 from .variety import thermo_state
 from .cast import Cast
@@ -819,7 +819,8 @@ class Membrane:
                          consensus_min=self.consensus_min, eff_rank=thermo["eff_rank"],
                          novelty_sim_max=self.dedup_sim,
                          novelty_rank_ratio_max=self.novelty_rank_ratio_max,
-                         canon_only=getattr(self, "ephemeral_tier", False))
+                         canon_only=getattr(self, "ephemeral_tier", False),
+                         live_only=True)
         # stamp the thermodynamic state this decision was made under (for audit/TUI).
         verdict["spectrum_entropy"] = thermo["spectrum_entropy"]
         verdict["free_energy"] = thermo["free_energy"]
@@ -1477,6 +1478,41 @@ class Membrane:
                 #     the final say: if it re-asked again (reask=2), the first contest does
                 #     NOT restore (net 1 >= threshold) -> the demotion stands (boundary rule).
                 dup = self.store.exemplars[dup_idx]
+                # ---- supersede-on-confirm (W2a) ----
+                # A fresh answer that CONFLICTS with a live SAFE canon dup is
+                # a correction, not a re-statement. The old dedup covenant
+                # ("keep first-seen") loses the correction AND leaves the stale
+                # cell live in recall. Instead: the correction is learned as a
+                # fresh CANDIDATE (the tier's evidence machinery polices it --
+                # use confirms, refute/expire dangles the link) and the old
+                # cell is linked out of live recall (superseded_by -> the
+                # successor's content key). Genuinely-different means token
+                # overlap < 0.7 (rewordings are the same content). Only when
+                # the tier is on: without the candidate tier there is no
+                # evidence path to revive or police the successor, so the
+                # conservative keep-first-seen stays.
+                if (getattr(self, "ephemeral_tier", False) and dup.safe
+                        and not dup.ephemeral
+                        and _action_overlap(dup.action, content) < 0.7):
+                    fresh = Exemplar(
+                        situation=query, action=content, outcome="pending",
+                        vec=(_unit_list(vec) if normalize else vec.tolist()),
+                        safe=not unsafe,
+                        model=str(((verdict.get("route") or {}).get("route")) or ""),
+                        tags=tags or [],
+                        self_authored=self_authored,
+                    )
+                    self.store.capture_ephemeral(fresh)
+                    new_idx = len(self.store) - 1
+                    self.store.mark_superseded(
+                        dup_idx,
+                        by_key=self.store.content_key(query, content),
+                        by_text=content, how="learn-dedup")
+                    self.store.save(self.field_path)
+                    self._audit(query, verdict, resp, ex_idx=new_idx,
+                                learned=True, would_absorb=would_absorb,
+                                superseded=dup_idx)
+                    return new_idx
                 if getattr(self, "ephemeral_tier", False) and dup.ephemeral:
                     # THE TIER RULE, dedup edition: the model has now SERVED
                     # this need twice (the candidate + this turn's real
@@ -1539,11 +1575,17 @@ class Membrane:
 
     def _find_dup(self, vec: np.ndarray) -> int | None:
         """Return the index of an existing exemplar whose situation is near-identical
-        to ``vec`` (cosine >= ``dedup_sim``), else None -- the learn-time duplicate guard."""
+        to ``vec`` (cosine >= ``dedup_sim``), else None -- the learn-time duplicate guard.
+
+        LIVE cells only: a superseded row is history (its content was
+        contradicted by a learned correction that is still alive); the dedup
+        guard must match the correction, not the contradicted answer -- a
+        third opinion that echoes the correction promotes IT (dedup-use),
+        it does not resurrect the stale cell."""
         if len(self.store) == 0 or self.dedup_sim > 1.0:
             return None
         qn = vec / (np.linalg.norm(vec) + 1e-12)
-        near, sim = self.store.top_k(qn, k=1)[0]
+        near, sim = self.store.top_k(qn, k=1, live_only=True)[0]
         if sim >= self.dedup_sim:
             return self.store.index_of(near)
         return None
@@ -1551,7 +1593,8 @@ class Membrane:
     def _audit(self, query: str, verdict: dict, resp: dict,
                ex_idx: int | None, learned: bool, dup: bool = False,
                would_absorb: bool = False, vague: bool = False,
-               variety_skip: bool = False, repaired: bool = False) -> None:
+               variety_skip: bool = False, repaired: bool = False,
+               superseded: int | None = None) -> None:
         """Append a decision record to the audit log (the training data).
 
         Observer-only flags: ``would_absorb`` (the gate said ``act`` but we
@@ -1559,14 +1602,16 @@ class Membrane:
         situation was too low-information to learn), ``variety_skip`` (the
         exemplar added no effective-rank variety, dropped by the variety gate),
         ``repaired`` (a demoted dup's action was overwritten with the corrected
-        answer -- repair, not abandon)."""
+        answer -- repair, not abandon), ``superseded`` (W2a: this learn linked
+        an old canon cell out of live recall -- the index of the superseded
+        cell; the correction was learned as a candidate)."""
         content = _response_text(resp)
         rec = {"event": "decision", "ts": time.time(),
                "verdict": verdict["verdict"], "sim": verdict.get("sim"),
                "nov": verdict.get("nov"), "reason": verdict.get("reason"),
                "ex_idx": ex_idx, "learned": learned, "dup": dup,
                "would_absorb": would_absorb, "vague": vague, "variety_skip": variety_skip,
-               "repaired": repaired,
+               "repaired": repaired, "superseded": superseded,
                "query": query, "response": content, "field_size": len(self.store),
                # the router's decision (model-vs-model): which model, why, what
                # the machine pressure was. Absent on non-escalated turns.
