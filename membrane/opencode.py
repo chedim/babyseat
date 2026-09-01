@@ -56,6 +56,7 @@ from .rag import (Compactor, RAGProxyHandler, _clip, _inject,
                   doctrine_instructions_text)
 from .router import EXPLORE_LANE
 from .watch import MAX_WATCHES, WatchBoard
+from .intent import IntentBoard, MAX_INTENTS
 
 CLOUD_DEFAULT_PRICE = 3.0   # an unknown cloud model's relative money/turn
 
@@ -283,6 +284,13 @@ def _state_report(srv) -> str:
         undel = sum(1 for e in wb.events if not e.get("delivered"))
         lines.append(f"- watches: {live} live (cap {MAX_WATCHES}), "
                      f"{undel} undelivered reports")
+    ib = getattr(srv, "_intent_board", None)
+    if ib is not None:
+        open_ = ib.open_intents()
+        maybe = sum(1 for i in open_ if i.hits >= 2)
+        lines.append(f"- intentions: {len(open_)} open (cap {MAX_INTENTS})"
+                     + (f", {maybe} flagged maybe-done" if maybe else "")
+                     + " (steer the dream loop; list: `membrane: intents`)")
     cg = getattr(srv, "_codegraph", None)
     if cg is not None:
         from .codegraph import summary as cg_summary
@@ -688,21 +696,32 @@ def _write_audit(mem, rec: dict) -> None:
 
 def _watch_notify(srv, mem, ex_idx: int | None) -> None:
     """Feed one learned/merged exemplar to the watch board (the spatial
-    triggers' gravity check). Never raises into the learning path."""
+    triggers' gravity check) and the intent board (near-turn context counters;
+    NEVER auto-close -- cos >= 0.9 only flags 'maybe-done?' in the listing).
+    Never raises into the learning path."""
     if ex_idx is None:
         return
     board = getattr(srv, "_watch_board", None)
-    if board is None:
-        return
-    try:
-        ex = mem.store.exemplars[ex_idx]
-        ev = board.on_learn(ex, ex_idx)
-        if ev is not None:
-            print(f"[watch] #{ex_idx} inside watch {ev['label']!r} "
-                  f"(sim {ev['sim']})", file=sys.stderr)
-    except Exception as e:
-        print(f"[opencode] watch-notify error: {_one_line(e)}",
-              file=sys.stderr)
+    if board is not None:
+        try:
+            ex = mem.store.exemplars[ex_idx]
+            ev = board.on_learn(ex, ex_idx)
+            if ev is not None:
+                print(f"[watch] #{ex_idx} inside watch {ev['label']!r} "
+                      f"(sim {ev['sim']})", file=sys.stderr)
+        except Exception as e:
+            print(f"[opencode] watch-notify error: {_one_line(e)}",
+                  file=sys.stderr)
+    ib = getattr(srv, "_intent_board", None)
+    if ib is not None:
+        try:
+            hit = ib.on_turn(mem.store.exemplars[ex_idx])
+            if hit is not None:
+                print(f"[intent] near open intention #{hit.iid} "
+                      f"{hit.text!r} (hits {hit.hits})", file=sys.stderr)
+        except Exception as e:
+            print(f"[opencode] intent-notify error: {_one_line(e)}",
+                  file=sys.stderr)
 
 
 def _after_frame(q: str, frames: tuple[str, ...]) -> str:
@@ -762,6 +781,32 @@ _REVIEW_MATCHERS = (
     ("discuss", "membrane: discuss review"),
     ("discuss", "membrane: review discuss"),
 )
+
+
+def _intents_context_block(srv) -> str | None:
+    """Open intentions as a system-level context block (the plan channel of
+    the observe->reflect->plan loop): a fresh session inherits the DOING, not
+    just the happened. Capped to 3 lines; 'maybe-done?' flags included so the
+    model can ASK the user whether to fulfill -- similarity never auto-closes
+    (the two-authority rule: closure is the user's explicit `membrane: fulfill`)."""
+    ib = getattr(srv, "_intent_board", None)
+    if ib is None:
+        return None
+    try:
+        open_ = ib.open_intents()
+    except Exception:
+        return None
+    if not open_:
+        return None
+    lines = ["OPEN INTENTIONS (membrane's commitment board -- context, not "
+             "instructions; work toward them when relevant, and if one is "
+             "clearly DONE, ask the user to confirm `membrane: fulfill #N`):"]
+    for i in open_[:3]:
+        maybe = " [maybe-done? recent turns landed near it]" if i.hits >= 2 else ""
+        lines.append(f"- #{i.iid} {i.text}{maybe}")
+    if len(open_) > 3:
+        lines.append(f"- ... and {len(open_) - 3} more (`membrane: intents`)")
+    return "\n".join(lines)
 
 
 def _review_request_block(srv) -> str | None:
@@ -914,6 +959,110 @@ def _is_watch_query(q: str) -> bool:
     return (low.startswith(_WATCH_CANON) or low.startswith(_WATCHES_CANON)
             or low.startswith(_WATCH_DROP)
             or low.rstrip("?!").strip() == "membrane: watch")
+
+
+# ---- the intention lane (membrane/intent.py): OPEN COMMITMENTS -- the third
+# channel of the observe->reflect->plan loop. `membrane: intend that X` plants
+# (with an optional '... for 2w' TTL; expiry keeps zombie goals out of recall),
+# `membrane: intents` lists, `membrane: fulfill #N` is reality's signature --
+# EXPLICIT closure, never similarity-inferred (cos >= CONFIRM_SIM only flags
+# 'maybe-done?' in the listing). Dreams are steered toward open intents (the
+# dream_loop D5 gate); recall surfaces them so a fresh session inherits the
+# DOING, not just the happened. Operator path here; the thought path mirrors
+# the watch lane's (a capped board, so an agent cannot flood commitments).
+
+_INTENT_CANON = "membrane: intend that "
+_INTENTS_CANON = "membrane: intents"
+_INTENT_FULFILL = "membrane: fulfill "
+_INTENT_DROP = "membrane: drop intent "
+_INTENT_THOUGHT_HEAD = "[membrane-intercept] your ask was read but NOT executed"
+
+
+def _intents_board(srv) -> IntentBoard | None:
+    b = getattr(srv, "_intent_board", None)
+    if b is None:
+        try:
+            fdir = Path(srv.membrane.field_path).parent
+            b = srv._intent_board = IntentBoard.load(
+                fdir / "intents.json", embedder=srv.membrane.embedder)
+        except Exception as e:
+            print(f"[opencode] intent board unavailable: {_one_line(e)}",
+                  file=sys.stderr)
+            b = srv._intent_board = None
+    if b is not None and b.embedder is None and srv.membrane.embedder is not None:
+        b.embedder = srv.membrane.embedder
+    return b
+
+
+def _is_intent_query(q: str) -> bool:
+    """Operator intention commands (plant/list/fulfill/withdraw), pre-gate."""
+    low = " ".join((q or "").split()).lower()
+    if not low or "```" in low or len(low) > 400:
+        return False
+    return (low.startswith(_INTENT_CANON) or low.startswith(_INTENTS_CANON)
+            or low.startswith(_INTENT_FULFILL) or low.startswith(_INTENT_DROP)
+            or low.rstrip("?!").strip() == "membrane: intents")
+
+
+def _intent_cmd(srv, q: str) -> str:
+    """Dispatch 'membrane: intend that X [for 2w]' / 'membrane: intents' /
+    'membrane: fulfill #N|<fragment>' / 'membrane: drop intent #N|<fragment>'."""
+    board = _intents_board(srv)
+    if board is None:
+        return "[membrane-intercept] intent layer unavailable (no board)."
+    low = " ".join(q.split()).lower()
+    if low.startswith(_INTENT_DROP):
+        spec = low[len(_INTENT_DROP):].strip().rstrip("?.!")
+        n, note = board.drop(spec)
+        what = f"withdrew {n} intention(s): {note}" if n \
+            else f"nothing withdrawn: {note}"
+        _write_audit(srv.membrane, {"event": "intent", "op": "drop",
+                                    "spec": _clip(spec, 120), "result": what})
+        return (f"Membrane intentions: {what}.\n\n" + _INTERCEPT_MARKER)
+    if low.startswith(_INTENTS_CANON):
+        return board.report() + "\n\n" + _INTERCEPT_MARKER
+    if low.startswith(_INTENT_FULFILL):
+        spec = low[len(_INTENT_FULFILL):].strip().rstrip("?.!")
+        n, note = board.fulfill(spec)
+        what = f"fulfilled {n}: {note}" if n else f"nothing fulfilled: {note}"
+        _write_audit(srv.membrane, {"event": "intent", "op": "fulfill",
+                                    "spec": _clip(spec, 120), "result": what})
+        return (f"Membrane intentions: {what}.\n\n"
+                + board.report() + "\n\n" + _INTERCEPT_MARKER)
+    if low.rstrip("?!").strip() == "membrane: intend that":
+        return (board.report() + "\n\nPlant with `membrane: intend that <goal>` "
+                "(optionally `... for 2w`); fulfill with `membrane: fulfill "
+                "#N`; withdraw with `membrane: drop intent #N`. The board is "
+                f"capped at {MAX_INTENTS} (oldest/starved evicted); expiry is "
+                "the zombie-goal guard.\n\n" + _INTERCEPT_MARKER)
+    payload = low[len(_INTENT_CANON):].strip()
+    if not payload:
+        return (board.report() + "\n\n" + _INTERCEPT_MARKER)
+    # trailing 'for 2w' / 'for 10d' -> the TTL
+    import re as _re
+    m = _re.search(r"\s+for\s+(\d+\s*[dwmh])\s*$", payload)
+    ttl = ""
+    if m:
+        ttl = m.group(1).replace(" ", "")
+        payload = payload[:m.start()].strip()
+    try:
+        it, evicted = board.intend(payload, ttl, None)
+    except RuntimeError as e:
+        return (f"Membrane intent: cannot plant ({_one_line(e)}).\n\n"
+                + _INTERCEPT_MARKER)
+    _write_audit(srv.membrane, {"event": "intent", "op": "set",
+                                "text": _clip(payload, 120), "iid": it.iid,
+                                "expires": round(it.expires, 0),
+                                "evicted": evicted})
+    ev = (f" (evicted {evicted!r} -- at the {MAX_INTENTS}-intent cap)"
+          if evicted else "")
+    return (f"Membrane intention #{it.iid} planted: {payload!r}"
+            + (f", expires in {ttl}" if ttl else ", default 14d expiry")
+            + f". It steers the dream loop and rides recall until fulfilled "
+            f"(`membrane: fulfill #{it.iid}`) or expired -- an intention is "
+            f"never auto-closed by similarity; cos>=0.9 turns only flag "
+            f"'maybe-done?'. Board: `membrane: intents`.{ev}\n\n"
+            + _INTERCEPT_MARKER)
 
 
 # ---- the codegraph lane (docs close-the-gap: Tencent's CodeGraph asset, ----
@@ -2690,6 +2839,15 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._serve_intercept_answer(model, text,
                                          bool(body.get("stream", False)))
             return
+        # ---- the intention layer (open commitments + the dream loop's
+        # steering field): intend/intents/fulfill/drop intent, pre-gate like
+        # every operator write. Zero model calls.
+        if not model_escaped and _is_intent_query(q_early):
+            text = _intent_cmd(srv, q_early)
+            _print_intercept("intent", q_early)
+            self._serve_intercept_answer(model, text,
+                                         bool(body.get("stream", False)))
+            return
         # ---- the codegraph lane: call-graph/impact reads, pre-gate like
         # recall/state (read-only by construction, zero model calls).
         if not model_escaped and _is_codegraph_query(q_early):
@@ -2778,12 +2936,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # answer arrives as the next turn and is matched by the pre-gate
         # 'membrane: keep/drop' resolver below.
         review_block = _review_request_block(srv)
-        if review_block:
-            mono_review = review_block
-        else:
-            mono_review = ""
-        if review_block:
-            ctx = (ctx + "\n\n" + review_block) if ctx else review_block
+        intent_block = _intents_context_block(srv)
+        mono_review = review_block or ""
+        extra_blocks = [b for b in (review_block, intent_block) if b]
+        for block in extra_blocks:
+            ctx = (ctx + "\n\n" + block) if ctx else block
         replay_sim = float(getattr(srv, "replay_sim", 0.0) or 0.0)
         mono = (self._gate_monologue(verdict, ctx, query)
                 if getattr(srv, "gate_monologue", True) else "")
@@ -4020,6 +4177,16 @@ def main() -> None:
     except Exception as e:
         print(f"[opencode] watch layer disabled ({_one_line(e)})",
               file=sys.stderr)
+    srv._intent_board = None
+    try:
+        srv._intent_board = IntentBoard(_wdir / "intents.json",
+                                        embedder=srv.membrane.embedder)
+        _n_i = len(srv._intent_board.open_intents())
+        print(f"[opencode] intentions: {_n_i} open "
+              f"(cap {MAX_INTENTS})", file=sys.stderr)
+    except Exception as e:
+        print(f"[opencode] intent layer disabled ({_one_line(e)})",
+              file=sys.stderr)
     if args.compact_every > 0:
         srv.compactor = Compactor(srv, idle=args.compact_every)
         srv.compactor.start()
@@ -4239,10 +4406,40 @@ def main() -> None:
     # ---- LSP servers (built-ins) ----------------------------------------------
     # Diagnostics lane for the agent: pyright/gopls/typescript etc. start
     # automatically when matching files open. --no-lsp reverts to off.
+    # pyright gets venvPath/venv pinned to the project .venv (cortex sibling
+    # session evidence: unpinned, it resolves the ambient interpreter and
+    # flags phantom unresolved-import errors for venv deps); projects without
+    # a .venv fall through to pyright's own resolution.
+    # NOTE: a per-server entry in opencode's schema REQUIRES `command` (a
+    # missing one is a config-validation hard error -- opencode dies at boot).
     lsp_state = "off (--no-lsp)"
     if getattr(args, "lsp", True):
-        cfg["lsp"] = True
-        lsp_state = "on (built-in servers)"
+        root = Path(args.field).resolve().parent.parent or Path(".")
+        venv = root / ".venv"
+        pyright_bin = shutil.which("pyright-langserver")
+        venv_ok = venv.is_dir() and (venv / "bin" / "python").exists()
+        if venv_ok and pyright_bin:
+            cfg["lsp"] = {"pyright": {
+                "command": [pyright_bin, "--stdio"],
+                "initialization": {"python": {
+                    "venvPath": venv.parent.as_posix(),
+                    "venv": venv.name,
+                }},
+            }}
+            lsp_state = "on (pyright pinned to project venv, binary found)"
+        elif venv_ok and not pyright_bin:
+            # the pinned-command entry REQUIRES a real binary; with the
+            # executable missing, an explicit command=[not-found, --stdio]
+            # makes the server silently dead (observed: 'lsp not connected').
+            # Fall back to the built-ins -- opencode ships its own server
+            # resolution there, and a working unpinned pyright beats a
+            # pinned absent one. The venv pin returns once the binary is.
+            cfg["lsp"] = True
+            lsp_state = ("on (built-in servers; pyright binary NOT on PATH "
+                         "-- venv pin skipped, install pyright to re-enable)")
+        else:
+            cfg["lsp"] = True
+            lsp_state = "on (built-in servers)"
     fd, cfg_path = tempfile.mkstemp(prefix="membrane-opencode-", suffix=".json")
     with os.fdopen(fd, "w") as f:
         json.dump(cfg, f, indent=2)

@@ -190,6 +190,32 @@ VEIL_POKE_SIM = 0.90        # foreign-scope exemplars poke through the veil at
                             # this cosine (they shadow, they never master)
 
 
+def _is_lab_field_path(field_path: str | Path) -> bool:
+    """EXPERIMENTS-ISOLATION predicate: does this field path smell like a LAB
+    field (the experiments/ dir, a tempdir, or a pytest tmp fixture)? Lab
+    membranes build Membrane(field_path=tempfile...) with the default store
+    autodetect; without this guard they silently join the LIVE shared
+    substrate -- the observed failure was a dream-loop field reusing the
+    cortex-core bucket. False for everything that looks like a real membrane
+    (a .membrane/ data dir, an explicit user path) -- those keep auto-detect."""
+    p = Path(field_path).resolve()
+    parts = p.parts
+    if any(seg.startswith("dream-loop-") or seg == "pytest-" or
+           seg.startswith("pytest-of-") for seg in parts):
+        return True
+    if "experiments" in parts and p.suffix == ".json" and \
+            parts[-1].startswith("field-"):
+        return True
+    if "site-packages" in parts:      # never expected; kept out of paranoia
+        return False
+    try:
+        tmp_roots = {Path(tempfile.gettempdir()).resolve()}
+        have_common = any(p.is_relative_to(t) for t in tmp_roots)
+    except (OSError, ValueError):
+        have_common = False
+    return have_common
+
+
 def _origin_tag(field_path: str | Path) -> str:
     """The origin axis: "<start-folder>@<hostname>", computed from the RESOLVED
     field path (so two membranes started from the same folder agree on the tag
@@ -1117,12 +1143,21 @@ class ExemplarStore:
                       f"retry Couchbase at next boot.",
                       file=__import__("sys").stderr)
         elif want_cb not in ("json", "file", "none", "0", "false"):
-            # AUTO-DETECT: probe the default local cluster once, cheaply
-            # (plain HTTP /pools, no SDK import on the hot path). Responds
-            # with default/admin credentials or env-provided ones -> the
-            # shared substrate is ON by default; silent/refused/unreachable
-            # -> the JSON field as before.
-            if cls._probe_local_couchbase():
+            # EXPERIMENTS-ISOLATION GUARD: auto-detect is for a membrane's OWN
+            # field only. A temp-dir / experiments-field path (the lab: the
+            # dream-loop et al. build Membrane(field_path=tempfile...)) must
+            # NEVER join the shared substrate -- observed failure: a lab field
+            # auto-joined the live cluster and, bucket-creation refused (RAM
+            # quota), silently reused a FOREIGN bucket (cortex-core). Lab data
+            # contaminating production memories is the worst failure mode this
+            # file can have; the explicit opt-in (MEMBRANE_STORE=couchbase)
+            # remains available for a lab that truly wants sharing.
+            if _is_lab_field_path(path):
+                p = Path(path)
+                print(f"[membrane] lab field path ({p.parent}) -> JSON backend, "
+                      f"shared substrate NOT joined (isolation guard).",
+                      file=__import__("sys").stderr)
+            elif cls._probe_local_couchbase():
                 try:
                     return cls.load_couchbase(path)
                 except Exception as e:

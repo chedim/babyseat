@@ -1470,7 +1470,8 @@ class Membrane:
         ``repaired`` (a demoted dup's action was overwritten with the corrected
         answer -- repair, not abandon)."""
         content = _response_text(resp)
-        rec = {"event": "decision", "verdict": verdict["verdict"], "sim": verdict.get("sim"),
+        rec = {"event": "decision", "ts": time.time(),
+               "verdict": verdict["verdict"], "sim": verdict.get("sim"),
                "nov": verdict.get("nov"), "reason": verdict.get("reason"),
                "ex_idx": ex_idx, "learned": learned, "dup": dup,
                "would_absorb": would_absorb, "vague": vague, "variety_skip": variety_skip,
@@ -1494,7 +1495,8 @@ class Membrane:
                        reask: int, contest: int, safe: bool, signal: str = "cosine") -> None:
         """Append an outcome record -- a self-correction, joinable to a decision by ex_idx.
         ``signal`` is "cosine" (a verbatim re-ask) or "neg-followup" (a complaint follow-up)."""
-        rec = {"event": "outcome", "ex_idx": ex_idx, "outcome": outcome,
+        rec = {"event": "outcome", "ts": time.time(),
+               "ex_idx": ex_idx, "outcome": outcome,
                "query": query, "sim": sim, "signal": signal,
                "reask_count": reask, "contest_count": contest, "safe": safe}
         with self.audit_path.open("a") as f:
@@ -1503,7 +1505,8 @@ class Membrane:
     def _audit_contest(self, ex_idx: int, reason: str, source: str, restore: bool,
                        first: bool, reask: int, contest: int, safe: bool) -> None:
         """Append a contest record -- the model-side veto, the other half of the boundary."""
-        rec = {"event": "contest", "ex_idx": ex_idx, "reason": reason, "source": source,
+        rec = {"event": "contest", "ts": time.time(),
+               "ex_idx": ex_idx, "reason": reason, "source": source,
                "restore": restore, "first": first,
                "reask_count": reask, "contest_count": contest, "safe": safe}
         with self.audit_path.open("a") as f:
