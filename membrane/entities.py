@@ -335,9 +335,11 @@ _MACHINERY_RES = (
     re.compile(r"<system-reminder>|</system-reminder>", re.I),  # harness noise
     re.compile(r'"(?:\$schema|autoupdate|npm|model|provider)"\s*:'),  # config JSON
     re.compile(r"COMMAND\s+PID\s+USER\s+FD\s+TYPE"),   # lsof tables
-    # ps lines, 12h and 24h forms: PID TIME PATH (the path is the give --
-    # "at 5:30 we met" prose has no path after the time)
-    re.compile(r"\b\d{2,6}\s+\d{1,2}:\d{2}\s+[\w./\\-]*[\w-]+/[\w./-]+"),
+    re.compile(r"PID\s+STARTED\s+COMMAND"),            # ps lstart header
+    # ps lines: time followed by a path -- 12h glued (1:38PM), 24h (08:52),
+    # or lstart ("Mon Aug 31 02:24:06 2026"); prose "at 5:30 we met" has no path
+    re.compile(r"\b\d{1,2}:\d{2}(?:[AP]M)?\s+[\w./\\-]*[\w-]+/[\w./-]+"),
+    re.compile(r"\b\w{3}\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4}\s+[\w./-]*/"),
 )
 
 
@@ -564,9 +566,70 @@ class EntityStore:
         # entity TRACKS: key -> {key, label, op, n, alerted}. The banner
         # lane: live cell counts in WHERE WE ARE, optional boundary alerts.
         self.tracks: dict[str, dict] = {}
+        self.junk_screen = JunkScreen(self)
         self._cb_warned = False
         self._load()
         self._load_tracks()
+        self._seed_junk_anchors()
+
+    def _seed_junk_anchors(self) -> None:
+        """Write the seed anchors once (merge-on-collision; existing docs
+        never duplicated). Silent on failure -- the regex screens carry."""
+        try:
+            added = False
+            for ent in junk_anchor_docs():
+                if ent.eid not in self.docs:
+                    self.docs[ent.eid] = ent
+                    added = True
+            if added:
+                self.save()
+        except Exception:
+            pass                   # the regex screens carry
+
+    def set_junk_cut(self, spec: str, cut) -> dict:
+        """Set a track's junk cut (the per-track anchor-screen floor).
+        spec: track key, 'all' (every track), or 'default' (the global
+        default for NEW tracks). None clears back to the default."""
+        if spec == "default":
+            try:
+                val = None if cut in (None, "") \
+                    else max(0.0, min(1.0, float(cut)))
+            except (TypeError, ValueError):
+                return {"ok": False,
+                        "error": "cut must be a number 0..1 (or null)"}
+            if val is None:
+                return {"ok": False, "error": "clearing the default makes "
+                        "no sense; give a number"}
+            globals()["JUNK_CUT_DEFAULT"] = round(val, 3)
+            return {"ok": True, "default": JUNK_CUT_DEFAULT}
+        targets = (list(self.tracks.values()) if spec == "all"
+                   else [self.tracks[spec]] if spec in self.tracks else [])
+        if not targets:
+            return {"ok": False, "error": f"no track {spec!r} "
+                    "(list via membrane_list_tracks)"}
+        try:
+            val = None if cut in (None, "") else max(0.0, min(1.0, float(cut)))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "cut must be a number 0..1 "
+                    "(or null to clear)"}
+        for t in targets:
+            if val is None:
+                t.pop("junk_sim", None)
+            else:
+                t["junk_sim"] = round(val, 3)
+        self._save_tracks()
+        return {"ok": True, "spec": spec, "junk_sim": val,
+                "tracks": len(targets)}
+
+    def junk_beat_ok(self, key: str, vec, embedder=None) -> bool:
+        """The per-track junk gate for one beat: the track's own cut (or
+        the default) against the anchor screen. Tracks with no cut and no
+        anchors degrade to always-True (the regexes still run)."""
+        cut = (self.tracks.get(key) or {}).get("junk_sim")
+        cut = JUNK_CUT_DEFAULT if cut is None else cut
+        if not self.junk_screen._vecs and embedder is None:
+            return True
+        return self.junk_screen.sim_of(vec, embedder) < cut
 
     # ---- persistence --------------------------------------------------------
     def _load(self) -> None:
@@ -995,7 +1058,7 @@ class EntityStore:
 
     def track_report(self, exemplars, query_vec=None,
                      session_since: float | None = None,
-                     goal: str = "") -> list[str] | None:
+                     goal: str = "", embedder=None) -> list[str] | None:
         """Tracked entities, ONE MIXED line each:
         HISTORY half = the story ARC (now -> how it got there ->
         originated -> aiming), rendered through the zoom ladder (the
@@ -1041,6 +1104,11 @@ class EntityStore:
                     v = getattr(exemplars[i], "vec", None)
                     if not v:
                         continue
+                    # the per-track junk cut: the beat's own vector vs the
+                    # anchor entities (unknown junk forms die here; known
+                    # forms died in the regex above)
+                    if not self.junk_beat_ok(key, v, embedder):
+                        continue
                     vv = _np.asarray(v, dtype=float)
                     vn = _np.linalg.norm(vv)
                     if vn < 1e-12:
@@ -1054,7 +1122,7 @@ class EntityStore:
                     # an old beat must ALIGN HARDER to win the slot
                     fresh = FRESH_WEIGHT * (0.5 ** (max(now - born, 0.0)
                                                     / FRESH_HALF_LIFE))
-                    scored.append((i, sim + fresh))
+                    scored.append((i, sim + fresh, born))
                 if scored and (not newest_born
                                or (now - newest_born) <= STALE_STORY_S):
                     # the zoom ladder needs the WHOLE timeline, not just
@@ -1063,14 +1131,17 @@ class EntityStore:
                                        for i in idxs)
                     all_borns = [b for b in all_borns if b > 0]
                     # the fine-grain beats: fresh-aligned, junk-screened,
-                    # deduped, chronological (the ladder's prose slots)
+                    # deduped, chronological (the ladder's prose slots).
+                    # A beat without a birth stamp carries no temporal
+                    # truth -- it cannot anchor a story, so it dies here
+                    # (the 'last active recently:' stutter fix).
                     scored.sort(key=lambda x: -x[1])
-                    picked = scored[:6]
-                    picked.sort(key=lambda x: _eph_born_of(exemplars, x[0]))
+                    picked = [s for s in scored if s[2] > 0][:6]
+                    picked.sort(key=lambda x: x[2])
                     beats: list[tuple[float, str]] = []
                     seen: set[int] = set()
                     seen_actions: list[str] = []
-                    for i, _sim in picked:
+                    for i, _sim, born in picked:
                         if i in seen:
                             continue
                         seen.add(i)
@@ -1089,7 +1160,7 @@ class EntityStore:
                         frag = sit
                         if act and _action_overlap(act, sit) < 0.6:
                             frag += f" — {act}"
-                        beats.append((_eph_born_of(exemplars, i), frag))
+                        beats.append((born, frag))
                     story = _arc(beats, all_borns, now, goal=goal)
                     if story:
                         story = f"{label}: {story}"
@@ -1139,6 +1210,96 @@ def _clip_entity(s: str, cap: int = 60) -> str:
 SURR_MAX = 5               # neighbors per track, most-linked first
 SURR_DRIFT = 0.25          # weight change fraction that re-renders
 SURR_MIN_LINKS = 2         # a co-occurrence edge needs >= this many cells
+
+
+# ---- the junk-cut knob (per-track, live, anchor-vector screen) -------------
+# The regex screens (_machinery_junk et al) catch KNOWN junk forms; the
+# anchor screen catches UNKNOWN forms of the same SEMANTICS: raw tool
+# output embeds near junk-anchor texts ("a process listing table with PID
+# USER COMMAND columns"), prose stays far. Anchors live IN the store as
+# entities (eid prefix membrane::junk-anchor:) -- the shared couchbase
+# substrate ships them to the fork, the model can add more via
+# membrane_entity_add, and every track carries its own cut (junk_sim):
+# raise it for a paranoid trace, lower it for a permissive one. Beats are
+# screened with the cell's EXISTING vector -- zero new embed calls.
+JUNK_CUT_DEFAULT = 0.62    # calibrated: ps/lsof 0.62-0.66, prose ~0.37
+JUNK_EID_PREFIX = MEMBRANE_NS + "junk-anchor:"
+
+JUNK_ANCHOR_SEEDS = (
+    "raw process listing table: PID USER COMMAND ELAPSED columns, ps lsof output",
+    "raw pytest output: progress dots, percent bars, 'passed in' summary lines",
+    "raw JSON config dump with quoted keys and schema urls",
+    "proxy log line with route verdict sim field_size metrics",
+    "raw tool result dump: stack trace, LSP diagnostics wall, error codes",
+    "http access log line: status code, bytes, user agent",
+    "base64 blob, hex dump, minified javascript one-liner",
+)
+
+
+def junk_anchor_docs() -> list[QuantumEntity]:
+    """The seed anchors as entities (written once; merge-on-collision)."""
+    out = []
+    for i, s in enumerate(JUNK_ANCHOR_SEEDS):
+        out.append(QuantumEntity(
+            eid=f"{JUNK_EID_PREFIX}seed-{i}", cls=CLASS_COMPONENT,
+            properties={"name": f"junk-anchor-seed-{i}", "summary": s,
+                        "junk_anchor": True},
+            derived_by=["membrane-junk"]))
+    return out
+
+
+class JunkScreen:
+    """Max cosine of a text's vector against the junk-anchor set. Anchors
+    embed lazily (one batch, cached in RAM); the anchor SET re-reads from
+    the store when it grows (the model added one). Zero per-beat cost:
+    beats arrive pre-embedded (ex.vec)."""
+
+    def __init__(self, store: "EntityStore") -> None:
+        self.store = store
+        self._vecs: list = []
+        self._n_docs = -1
+
+    def _refresh(self, embedder) -> None:
+        n = len(self.store.docs)
+        if n == self._n_docs and self._vecs:
+            return
+        self._n_docs = n
+        self._vecs = []
+        if embedder is None:
+            return
+        texts = []
+        for q in self.store.docs.values():
+            s = str((q.properties or {}).get("summary") or "")
+            if (q.eid.startswith(JUNK_EID_PREFIX)
+                    or (q.properties or {}).get("junk_anchor")) and s:
+                texts.append(s)
+        if not texts:
+            return
+        try:
+            vs = embedder.embed(texts)
+            import numpy as _np
+            for v in vs:
+                a = _np.asarray(v, dtype=float)
+                an = _np.linalg.norm(a)
+                if an > 1e-12:
+                    self._vecs.append(a / an)
+        except Exception:
+            self._vecs = []
+
+    def sim_of(self, vec, embedder=None) -> float:
+        """Max cosine of an ALREADY-EMBEDDED vector vs the anchors."""
+        if vec is None:
+            return 0.0
+        self._refresh(embedder)
+        if not self._vecs:
+            return 0.0
+        import numpy as _np
+        v = _np.asarray(vec, dtype=float)
+        vn = _np.linalg.norm(v)
+        if vn < 1e-12:
+            return 0.0
+        v = v / vn
+        return max(float(v @ a) for a in self._vecs)
 
 
 def cooccurrence_neighbors(exemplars, key: str, inv=None,

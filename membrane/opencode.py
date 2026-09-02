@@ -3125,6 +3125,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._entity_track_list(); return
         if path == "/membrane/entity/add":
             self._entity_add(); return
+        if path == "/membrane/junk-cut":
+            self._junk_cut_set(); return
         if path == "/membrane/entity/edit":
             self._entity_edit(); return
         if path == "/membrane/entity/remove":
@@ -4172,7 +4174,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                                  f"boundary ({a['boundary']}; {a['detail']})")
                 story = est.track_report(
                     mem.store.exemplars, query_vec=query_vec,
-                    session_since=getattr(srv, "_boot_ts", None))
+                    session_since=getattr(srv, "_boot_ts", None),
+                    embedder=mem.embedder)
                 if story:
                     lines.extend(story)
             except Exception as e:
@@ -4636,6 +4639,52 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                                "field_size": len(mem.store)})
         except Exception:
             pass
+
+    def _junk_cut_set(self) -> None:
+        """POST /membrane/junk-cut: the live junk-cut knob. spec '#N'
+        targets a spatial watch, 'all'/'default'/track-key hit the entity
+        store; every change audited."""
+        srv = self.server
+        body = self._json_body()
+        spec = str(body.get("spec") or "").strip()
+        cut = body.get("cut")
+        if not spec:
+            self._json_err_raw(400, "spec required ('#N', track key, "
+                                    "'all', or 'default')"); return
+        # watch spec?
+        if spec.startswith("#") and spec[1:].isdigit():
+            board = getattr(srv, "_watch_board", None)
+            w = board.watches.get(int(spec[1:])) if board else None
+            if w is None:
+                self._json_err_raw(400, f"no watch {spec}"); return
+            try:
+                w.junk_sim = (None if cut in (None, "")
+                              else max(0.0, min(1.0, float(cut))))
+            except (TypeError, ValueError):
+                self._json_err_raw(400, "cut must be a number 0..1"); return
+            board.save()
+            try:
+                _write_audit(srv.membrane,
+                             {"event": "agent-junk-cut", "origin": "mcp",
+                              "spec": spec, "cut": w.junk_sim,
+                              "field_size": len(srv.membrane.store)})
+            except Exception:
+                pass
+            self._json_out({"ok": True, "spec": spec, "junk_sim": w.junk_sim,
+                            "tracks": 1}); return
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
+        res = est.set_junk_cut(spec, cut)
+        if res.get("ok"):
+            try:
+                _write_audit(srv.membrane,
+                             {"event": "agent-junk-cut", "origin": "mcp",
+                              "spec": spec, "cut": res.get("junk_sim"),
+                              "field_size": len(srv.membrane.store)})
+            except Exception:
+                pass
+        self._json_out(res)
 
     def _entity_track_list(self) -> None:
         srv = self.server
@@ -5199,7 +5248,23 @@ def main() -> None:
     srv._watch_board = None
     try:
         _wdir = Path(args.field).parent
-        srv._watch_board = WatchBoard(_wdir / "watches.json")
+        _est = srv.entity_store
+
+        def _watch_junk_gate(vec, w) -> bool:
+            """Per-watch junk cut: machinery never trips a spatial watch.
+            The watch's own junk_sim, else the entity-track default; the
+            anchor screen comes from the entity store (lazily embedded)."""
+            est = getattr(srv, "entity_store", None)
+            if est is None:
+                return True
+            cut = getattr(w, "junk_sim", None)
+            cut = JUNK_CUT_DEFAULT if cut is None else cut
+            if not est.junk_screen._vecs and mem.embedder is None:
+                return True
+            return est.junk_screen.sim_of(vec, mem.embedder) < cut
+
+        srv._watch_board = WatchBoard(_wdir / "watches.json",
+                                      junk_gate=_watch_junk_gate)
         _n_w = len(srv._watch_board.watches)
         print(f"[opencode] watches: {_n_w} planted "
               f"(cap {MAX_WATCHES})", file=sys.stderr)
@@ -5225,7 +5290,8 @@ def main() -> None:
     srv._boot_ts = time.time()
     srv.entity_store = None
     try:
-        from .entities import EntityStore
+        from .entities import (EntityStore, JUNK_CUT_DEFAULT,
+                               related_entities)
         srv.entity_store = EntityStore(path=str(_wdir / "entities.json"))
         _n_e = len(srv.entity_store.docs)
         print(f"[opencode] entities: {_n_e} known "

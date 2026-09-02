@@ -227,6 +227,30 @@ TOOLS: list[dict] = [
             "required": ["spec"],
         },
     },
+    {
+        "name": "membrane_set_junk_cut",
+        "description": (
+            "Tune the junk cut: how aggressively machinery (raw tool "
+            "output -- ps/lsof tables, test bars, log lines, config "
+            "dumps) is kept out of YOUR banner stories and watch "
+            "triggers. Per-track (raise for a paranoid trace, lower for "
+            "a permissive one), 'all' tracks at once, or the global "
+            "default. The screen is anchor-vector based: junk embeds "
+            "near anchor entities stored IN the field; prose stays far. "
+            "CUT 0..1 -- higher = stricter. Audited to the operator."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "spec": {"type": "string",
+                         "description": "Track key (entity-track key or "
+                                        "watch #N), 'all', or 'default'."},
+                "cut": {"type": "number",
+                        "description": "0..1 (higher = stricter); null "
+                                       "clears back to the default."},
+            },
+            "required": ["spec", "cut"],
+        },
+    },
 ]
 
 
@@ -487,6 +511,25 @@ def tool_entity_remove(args: dict, port: int) -> str:
               f"(ambiguous fragments are refused).")
 
 
+def tool_set_junk_cut(args: dict, port: int) -> str:
+    spec = str(args.get("spec") or "").strip()
+    if not spec:
+        raise ProxyError(400, "spec required (track key, watch #N, "
+                              "'all', or 'default')")
+    cut = args.get("cut")
+    out = _http(port, "POST", "/membrane/junk-cut", {"spec": spec,
+                                                     "cut": cut})
+    if not out.get("ok"):
+        return f"Junk cut not set: {out.get('error', 'unknown error')}"
+    if out.get("default") is not None:
+        return (f"Global junk-cut default now {out['default']} (new "
+                f"tracks inherit it; existing tracks keep their own).")
+    val = out.get("junk_sim")
+    return (f"Junk cut {'cleared to the default' if val is None else val} "
+            f"for {out['tracks']} track(s) matching {spec!r}. The screen "
+            f"applies on the next banner render / watch arrival.")
+
+
 TOOL_IMPLS = {
     "membrane_query": tool_query,
     "membrane_state": tool_state,
@@ -499,6 +542,7 @@ TOOL_IMPLS = {
     "membrane_entity_add": tool_entity_add,
     "membrane_entity_edit": tool_entity_edit,
     "membrane_entity_remove": tool_entity_remove,
+    "membrane_set_junk_cut": tool_set_junk_cut,
 }
 
 

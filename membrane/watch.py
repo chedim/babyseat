@@ -64,6 +64,7 @@ class Watch:
     probe: list              # unit vector
     radius: float = RADIUS_DEFAULT
     filter_key: str = ""     # entity key or kind prefix ('' = all memories)
+    junk_sim: float | None = None   # per-watch junk cut (None = default)
     charge: float = CHARGE_START
     hits: int = 0
     seen: int = 0            # arrivals since last dormancy/reset
@@ -73,20 +74,26 @@ class Watch:
     collapse_note: str = ""
 
     def to_json(self) -> dict:
-        return {"wid": self.wid, "label": self.label, "probe": self.probe,
-                "radius": round(self.radius, 4),
-                "filter_key": self.filter_key,
-                "charge": round(self.charge, 3),
-                "hits": self.hits, "seen": self.seen,
-                "dormant_until": self.dormant_until,
-                "last_hit": self.last_hit, "collapse_note": self.collapse_note}
+        d = {"wid": self.wid, "label": self.label, "probe": self.probe,
+             "radius": round(self.radius, 4),
+             "filter_key": self.filter_key,
+             "charge": round(self.charge, 3),
+             "hits": self.hits, "seen": self.seen,
+             "dormant_until": self.dormant_until,
+             "last_hit": self.last_hit, "collapse_note": self.collapse_note}
+        if self.junk_sim is not None:
+            d["junk_sim"] = round(self.junk_sim, 3)
+        return d
 
     @classmethod
     def from_json(cls, r: dict) -> "Watch":
+        js = r.get("junk_sim")
         return cls(wid=int(r["wid"]), label=str(r.get("label", "")),
                    probe=[float(x) for x in r.get("probe", [])],
                    radius=float(r.get("radius", RADIUS_DEFAULT)),
                    filter_key=str(r.get("filter_key", "")),
+                   junk_sim=(None if js is None
+                             else max(0.0, min(1.0, float(js)))),
                    charge=float(r.get("charge", CHARGE_START)),
                    hits=int(r.get("hits", 0)), seen=int(r.get("seen", 0)),
                    dormant_until=float(r.get("dormant_until", 0.0)),
@@ -96,11 +103,14 @@ class Watch:
 
 class WatchBoard:
     """All watches for one field: set/drop, the per-append gravity check,
-    and the pending-report queue the chat path drains."""
+    and the pending-report queue the chat path drains. An optional
+    junk_gate callable (vec -> bool, wired by the proxy to the entity
+    store's anchor screen) keeps machinery from tripping the probes."""
 
-    def __init__(self, path, embedder=None) -> None:
+    def __init__(self, path, embedder=None, junk_gate=None) -> None:
         self.path = path
         self.embedder = embedder
+        self.junk_gate = junk_gate     # vec -> bool (True = clean)
         self.watches: dict[int, Watch] = {}
         self._next_wid = 1
         self.events: list[dict] = []          # newest last, capped EVENT_MAX
@@ -217,6 +227,16 @@ class WatchBoard:
         sims = pv @ v
         ex_key = _entity_key_of(ex)
         for w, sim in zip(list(self.watches.values()), sims):
+            # the junk gate: machinery (raw tool output) never trips a
+            # watch -- the vec-vs-anchor screen, per-watch cut or default.
+            # A gated arrival counts as a miss (it WAS seen, just refused)
+            if self.junk_gate is not None and not self.junk_gate(vec, w):
+                w.seen += 1
+                w.window.append(0)
+                if len(w.window) > WINDOW:
+                    w.window = w.window[-WINDOW:]
+                w.charge = max(0.0, w.charge - CHARGE_MISS)
+                continue
             # the filter: a filtered watch fires only on matching arrivals
             # (entity key exact or kind prefix; '' = all memories)
             if w.filter_key:

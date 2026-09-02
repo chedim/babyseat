@@ -146,9 +146,13 @@ class TestEntityStore(unittest.TestCase):
                                     properties={"summary": "s"},
                                     links=[1, 2], derived_by=["operator"]))
             self.assertEqual(st.docs["membrane::synth:a"].links, [1, 2])
-            self.assertEqual(len(st.docs), 1)       # never a second doc
+            # never a second doc OF THE SYNTH ENTITY (the store also
+            # carries the 7 junk-anchor seeds)
+            self.assertEqual(len([k for k in st.docs
+                                  if "junk-anchor" not in k]), 1)
             st2 = EntityStore(path=p)               # reload from JSON
-            self.assertEqual(len(st2.docs), 1)
+            self.assertEqual(len([k for k in st2.docs
+                                  if "junk-anchor" not in k]), 1)
             self.assertEqual(st2.find("a").eid, "membrane::synth:a")
 
 

@@ -139,7 +139,8 @@ class TestMcpProtocol(unittest.TestCase):
                                  "membrane_related_entities",
                                  "membrane_entity_add",
                                  "membrane_entity_edit",
-                                 "membrane_entity_remove"])
+                                 "membrane_entity_remove",
+                                 "membrane_set_junk_cut"])
         for t in resp["result"]["tools"]:
             self.assertIn("inputSchema", t)
             self.assertTrue(t["description"].strip())
