@@ -3084,6 +3084,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._membrane_state(); return
         if path == "/membrane/entity-track":
             self._entity_track_list(); return
+        if path == "/membrane/entity-related":
+            self._entity_related(); return
         if path == "/membrane/ask":
             self._membrane_ask(); return
         if getattr(self.server, "viewer", False):
@@ -3113,6 +3115,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._entity_track_remove(); return
         if path == "/membrane/entity-track/list":
             self._entity_track_list(); return
+        if path == "/membrane/entity/add":
+            self._entity_add(); return
+        if path == "/membrane/entity/edit":
+            self._entity_edit(); return
+        if path == "/membrane/entity/remove":
+            self._entity_remove(); return
         if path.startswith("/membrane/"):
             self._json_out({"error": "read-only; GET /membrane/state"}); return
         super().do_POST()
@@ -4531,6 +4539,95 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if not key:
             self._json_err_raw(400, "key required"); return
         self._json_out({"removed": est.unwatch_track(key)})
+
+    def _entity_related(self) -> None:
+        """GET /membrane/entity-related?q=<text>[&k=8]: the entity-graph
+        reader -- entities related to the query (named hits first, then
+        centroid-nearest), each with its co-occurrence neighbors."""
+        srv = self.server
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
+        from urllib.parse import parse_qs
+        qs = parse_qs(self.path.split("?", 1)[-1])
+        q = (qs.get("q") or [""])[0].strip()
+        if not q:
+            self._json_err_raw(400, "query param ?q= required"); return
+        try:
+            k = min(max(int(qs.get("k", ["8"])[0]), 1), 20)
+        except ValueError:
+            k = 8
+        mem = srv.membrane
+        qvec = None
+        if mem.embedder is not None:
+            try:
+                qvec = mem.embedder.embed([q])[0]
+            except Exception:
+                qvec = None
+        try:
+            from .entities import related_entities
+            res = related_entities(mem.store.exemplars, q, qvec=qvec, k=k)
+        except Exception as e:
+            self._json_err_raw(500, f"related lookup failed: {e}"); return
+        self._json_out({"query": q, "related": res})
+
+    def _entity_add(self) -> None:
+        srv = self.server
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
+        body = self._json_body()
+        res = est.add(cls=str(body.get("class") or ""),
+                      name=str(body.get("name") or ""),
+                      summary=str(body.get("summary") or ""),
+                      links=body.get("links") or [])
+        self._entity_audit("add", res)
+        if not res.get("ok"):
+            self._json_err_raw(400, str(res.get("error"))); return
+        self._json_out(res)
+
+    def _entity_edit(self) -> None:
+        srv = self.server
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
+        body = self._json_body()
+        spec = str(body.get("spec") or "").strip()
+        if not spec:
+            self._json_err_raw(400, "spec required (eid or name fragment)")
+            return
+        res = est.edit(spec, summary=body.get("summary"),
+                       links=body.get("links"), cls=body.get("class"))
+        self._entity_audit("edit", res)
+        if not res.get("ok"):
+            self._json_err_raw(400, str(res.get("error"))); return
+        self._json_out(res)
+
+    def _entity_remove(self) -> None:
+        srv = self.server
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
+        body = self._json_body()
+        spec = str(body.get("spec") or "").strip()
+        if not spec:
+            self._json_err_raw(400, "spec required (eid or name fragment)")
+            return
+        n = est.remove(spec)
+        self._entity_audit("remove", {"ok": n > 0, "eid": spec, "count": n})
+        self._json_out({"removed": n})
+
+    def _entity_audit(self, op: str, res: dict) -> None:
+        """Every model-side entity mutation hits the operator's ledger."""
+        try:
+            mem = self.server.membrane
+            _write_audit(mem, {"event": f"agent-entity-{op}",
+                               "origin": "mcp",
+                               "eid": str(res.get("eid") or ""),
+                               "ok": bool(res.get("ok")),
+                               "field_size": len(mem.store)})
+        except Exception:
+            pass
 
     def _entity_track_list(self) -> None:
         srv = self.server

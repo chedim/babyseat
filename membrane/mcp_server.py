@@ -155,6 +155,78 @@ TOOLS: list[dict] = [
             "planting a duplicate track or to review your banner."),
         "inputSchema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "membrane_related_entities",
+        "description": (
+            "Read the entity graph: entities related to a free-text query "
+            "(named hits first, then semantic nearness), each with cell "
+            "count and co-occurrence neighbors. Use to explore what the "
+            "field knows about a component before acting on it."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string",
+                          "description": "Free text: names, paths, symbols."},
+                "k": {"type": "integer",
+                      "description": "Max entities (1-20, default 8)."},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "membrane_entity_add",
+        "description": (
+            "Add an abstract entity to the symbolic layer: a decision, "
+            "failure mode, component, or goal with a one-line summary. "
+            "Merge-on-collision: the same name updates the existing "
+            "entity instead of duplicating. Audited to the operator."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "class": {"type": "string",
+                          "description": "Decision | FailureMode | "
+                                         "Component | Goal | Model | Other "
+                                         "(default Component)."},
+                "name": {"type": "string"},
+                "summary": {"type": "string",
+                            "description": "One line: what it is / what "
+                                           "was decided / what fails."},
+                "links": {"type": "array",
+                          "description": "Field cell indexes to link."},
+            },
+            "required": ["name"],
+        },
+    },
+    {
+        "name": "membrane_entity_edit",
+        "description": (
+            "Edit an entity: resolve by eid or exact name, patch summary/"
+            "links/class (only provided fields change)."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "spec": {"type": "string",
+                         "description": "eid or exact name."},
+                "summary": {"type": "string"},
+                "links": {"type": "array"},
+                "class": {"type": "string"},
+            },
+            "required": ["spec"],
+        },
+    },
+    {
+        "name": "membrane_entity_remove",
+        "description": (
+            "Remove an entity (noise cleanup): resolve by eid or exact "
+            "name. Ambiguous fragments remove nothing."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "spec": {"type": "string"},
+            },
+            "required": ["spec"],
+        },
+    },
 ]
 
 
@@ -353,6 +425,68 @@ def tool_list_tracks(args: dict, port: int) -> str:
     return "\n".join(lines)
 
 
+def tool_related_entities(args: dict, port: int) -> str:
+    q = str(args.get("query") or "").strip()
+    if not q:
+        raise ProxyError(400, "query required")
+    k = int(args.get("k") or 8)
+    out = _http(port, "GET",
+                f"/membrane/entity-related?q={urllib.parse.quote(q)}&k={k}")
+    rel = out.get("related") or []
+    if not rel:
+        return (f"No entities related to {q!r} yet. The index grows as "
+                f"cells are learned (deterministic harvest) and as you "
+                f"add abstract entities via membrane_entity_add.")
+    lines = [f"Entities related to {q!r}:"]
+    for r in rel:
+        nb = ""
+        if r.get("neighbors"):
+            nb = " -- " + ", ".join(f"{n['key']} ({n['shared']} shared)"
+                                    for n in r["neighbors"][:3])
+        lines.append(f"- {r['key']} ({r['cells']} cells, {r.get('how', '')})"
+                     f"{nb}")
+    return "\n".join(lines)
+
+
+def tool_entity_add(args: dict, port: int) -> str:
+    out = _http(port, "POST", "/membrane/entity/add", {
+        "class": str(args.get("class") or ""),
+        "name": str(args.get("name") or ""),
+        "summary": str(args.get("summary") or ""),
+        "links": args.get("links") or [],
+    })
+    if not out.get("ok"):
+        return f"Entity not written: {out.get('error', 'unknown error')}"
+    how = "merged into the existing entity" if out.get("merged") \
+        else "created"
+    return (f"Entity {out['name']!r} [{out['class']}] {how}: {out['eid']} "
+            f"(visible to membrane_related_entities; audited to the "
+            f"operator).")
+
+
+def tool_entity_edit(args: dict, port: int) -> str:
+    body = {"spec": str(args.get("spec") or "").strip()}
+    for f in ("summary", "links", "class"):
+        if args.get(f) is not None:
+            body[f] = args[f]
+    out = _http(port, "POST", "/membrane/entity/edit", body)
+    if not out.get("ok"):
+        return f"Edit failed: {out.get('error', 'unknown error')}"
+    return (f"Entity {out['eid']} updated: class {out.get('class')}, "
+            f"summary {out.get('summary')!r}, links {out.get('links')}.")
+
+
+def tool_entity_remove(args: dict, port: int) -> str:
+    spec = str(args.get("spec") or "").strip()
+    if not spec:
+        raise ProxyError(400, "spec required (eid or exact name)")
+    out = _http(port, "POST", "/membrane/entity/remove", {"spec": spec})
+    n = int(out.get("removed") or 0)
+    return f"Removed {spec!r}." if n \
+        else (f"Nothing removed: no single entity matches {spec!r} "
+              f"(ambiguous fragments are refused).")
+
+
 TOOL_IMPLS = {
     "membrane_query": tool_query,
     "membrane_state": tool_state,
@@ -361,6 +495,10 @@ TOOL_IMPLS = {
     "membrane_watch_entity": tool_watch_entity,
     "membrane_unwatch_entity": tool_unwatch_entity,
     "membrane_list_tracks": tool_list_tracks,
+    "membrane_related_entities": tool_related_entities,
+    "membrane_entity_add": tool_entity_add,
+    "membrane_entity_edit": tool_entity_edit,
+    "membrane_entity_remove": tool_entity_remove,
 }
 
 

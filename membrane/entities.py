@@ -186,6 +186,65 @@ STALE_STORY_S = 24 * 3600.0   # a story whose newest beat is older -> silence
 FRESH_HALF_LIFE = 6 * 3600.0  # a beat's freshness credit halves every 6h
 FRESH_WEIGHT = 0.25           # freshness weight vs alignment (sim 0..1)
 
+# ---- the zoom ladder (black-hole geometry for story beats) -----------------
+# ONE rule, scaled at every grain: windows are GEOMETRIC (each ZOOM_STEP x
+# wider than the last) with HALVING beat budgets (2, 1, 0, 0...) -- so the
+# beat DENSITY vanishes into the past (~1/h now, ~1/8h, then bare counts).
+# A window whose cell mass exceeds its budget COLLAPSES to an era count
+# (the black-hole guard: precision x span stays bounded -- you cannot have
+# a too-precise view of a too-large slice); a window with nothing starves
+# silently. The ladder iterates until it covers the entity's whole age.
+ZOOM_NOW_S = 2 * 3600.0       # the first (finest) window's span
+ZOOM_STEP = 4.0               # each next window is 4x wider
+ZOOM_BUDGETS = (2, 1)         # beat budgets per window (then 0: era counts)
+ZOOM_ERA_MIN = 3              # cells in a window below this render prose
+
+
+def _era(n: int, span_s: float) -> str:
+    """A collapsed window: the mass without the detail."""
+    h = max(1, round(span_s / 3600))
+    return f"{n} changes over ~{h}h"
+
+
+def _zoom_windows(oldest_born: float, now: float):
+    """Yield (win_start_age, win_end_age, budget) youngest-first, geometric
+    until the entity's origin is covered. Budgets: ZOOM_BUDGETS then 0."""
+    lo, wi = 0.0, 0
+    while lo < max(now - oldest_born, ZOOM_NOW_S):
+        span = ZOOM_NOW_S * (ZOOM_STEP ** wi)
+        budget = ZOOM_BUDGETS[wi] if wi < len(ZOOM_BUDGETS) else 0
+        yield lo, lo + span, budget
+        lo += span
+        wi += 1
+
+
+def _arc(beats: list, borns: list, now: float, goal: str = "") -> str:
+    """The story ARC through the zoom ladder: now -> how it got there ->
+    originated -> aiming. ``beats``: (born, frag), junk-screened, deduped,
+    chronological. ``borns``: every junk-free cell birth (the window
+    masses). Each geometric window renders at most its budget of beats;
+    mass beyond the budget collapses to an era count -- the vanishing-
+    density rule at every grain."""
+    age_of = sorted(now - b for b in borns if b > 0)
+    if not age_of:
+        return ""
+    parts: list[str] = []
+    for lo, hi, budget in _zoom_windows(age_of[-1], now):
+        in_win = [a for a in age_of if lo <= a < hi]
+        if not in_win:
+            continue                       # starved: silence, next window
+        win_beats = [b for b in beats if lo <= now - b[0] < hi]
+        n = len(in_win)
+        if n <= ZOOM_ERA_MIN and budget > 0 and win_beats:
+            tag = "now" if lo == 0 else "before that"
+            for _, frag in win_beats[-budget:]:
+                parts.append(f"{tag}: {frag[0].lower() + frag[1:]}")
+        else:
+            parts.append(_era(n, hi - lo))
+    if goal:
+        parts.append(f"aiming for: {goal}")
+    return "; ".join(parts)
+
 
 def _sit_text_of(exemplars, i):
     s = " ".join(str(exemplars[i].situation).split())
@@ -230,6 +289,10 @@ _MACHINERY_RES = (
     re.compile(r"\[opencode\] |\[membrane\] |\[rag\] "), # proxy log lines
     re.compile(r"<system-reminder>|</system-reminder>", re.I),  # harness noise
     re.compile(r'"(?:\$schema|autoupdate|npm|model|provider)"\s*:'),  # config JSON
+    re.compile(r"COMMAND\s+PID\s+USER\s+FD\s+TYPE"),   # lsof tables
+    # ps lines, 12h and 24h forms: PID TIME PATH (the path is the give --
+    # "at 5:30 we met" prose has no path after the time)
+    re.compile(r"\b\d{2,6}\s+\d{1,2}:\d{2}\s+[\w./\\-]*[\w-]+/[\w./-]+"),
 )
 
 
@@ -608,6 +671,95 @@ class EntityStore:
                 return q
         return None
 
+    # ---- model-side CRUD (the MCP write surface) -----------------------------
+    # The model is a first-class citizen of the symbolic layer: it can ADD
+    # abstract entities (decisions, failure modes, junk-anchor vectors),
+    # EDIT summaries/links, and REMOVE noise -- every mutation audited to
+    # the operator's ledger (agent-entity-* events) and merged under the
+    # same upsert covenant as the synthesizer (union, never a second doc).
+
+    def _resolve_spec(self, spec: str) -> QuantumEntity | None:
+        """An eid, an exact eid-suffix, or a name fragment -> the entity."""
+        spec = (spec or "").strip()
+        if not spec:
+            return None
+        if spec in self.docs:
+            return self.docs[spec]
+        low = spec.lower()
+        if not low.startswith(MEMBRANE_NS):
+            low = MEMBRANE_NS + low
+        if low in self.docs:
+            return self.docs[low]
+        hits = [q for q in self.docs.values()
+                if q.eid.endswith(":" + spec.lower())
+                or str((q.properties or {}).get("name", "")).lower()
+                == spec.lower()]
+        return hits[0] if len(hits) == 1 else (hits[0] if hits else None)
+
+    def add(self, cls: str, name: str, summary: str = "",
+            links=None) -> dict:
+        """Model-side entity ADD: merge-on-collision with any existing doc
+        (same name = same thing), write-through both homes."""
+        name = (name or "").strip()
+        if not name:
+            return {"ok": False, "error": "name required"}
+        c = cls if cls in CLASSES else CLASS_COMPONENT   # safest default
+        eid = entity_id(c, name)
+        ent = QuantumEntity(eid=eid, cls=c,
+                            properties={"name": name,
+                                        **({"summary": summary}
+                                           if summary else {})},
+                            links=[int(i) for i in (links or [])
+                                   if str(i).lstrip("-").isdigit()],
+                            derived_by=["model"])
+        existing = self.docs.get(eid)
+        merged = existing is not None
+        if merged:
+            existing.merge(ent)
+            ent = existing
+        self.upsert(ent)
+        return {"ok": True, "eid": eid, "merged": merged,
+                "class": c, "name": name}
+
+    def edit(self, spec: str, summary=None, links=None, cls=None) -> dict:
+        """Model-side entity EDIT: patch summary/links/class on the
+        resolved entity. Only provided fields change."""
+        ent = self._resolve_spec(spec)
+        if ent is None:
+            return {"ok": False,
+                    "error": f"no entity matches {spec!r} "
+                             f"(list via membrane_related_entities)"}
+        if summary is not None:
+            ent.properties["summary"] = str(summary).strip()
+        if links is not None:
+            clean = [int(i) for i in links
+                     if str(i).lstrip("-").isdigit()]
+            merged = set(ent.links or []) | set(clean)
+            ent.links = sorted(merged)
+        if cls and cls in CLASSES:
+            ent.cls = cls
+        ent.derived_by = sorted(set(ent.derived_by or []) | {"model-edit"})
+        self.upsert(ent)
+        return {"ok": True, "eid": ent.eid, "class": ent.cls,
+                "summary": ent.properties.get("summary", ""),
+                "links": ent.links}
+
+    def remove(self, spec: str) -> int:
+        """Model-side entity REMOVE by eid/name fragment (exact single
+        match only -- an ambiguous fragment removes nothing)."""
+        ent = self._resolve_spec(spec)
+        if ent is None:
+            return 0
+        self.docs.pop(ent.eid, None)
+        self.save()
+        coll = self._entities_collection()
+        if coll is not None:
+            try:
+                coll.remove(ent.eid)
+            except Exception:
+                pass                    # JSON/RAM already carried
+        return 1
+
     # ---- entity TRACKS v2 (the model's banner lane, EVENT-based) ------------
     # A track = {key, enter, exit, filter} over an entity's SAFE-cell count:
     #   enter: 'N'      -- alert when the count rises INTO/ABOVE N
@@ -797,16 +949,20 @@ class EntityStore:
             pass
 
     def track_report(self, exemplars, query_vec=None,
-                     session_since: float | None = None) -> list[str] | None:
-        """Tracked entities, ONE MIXED line each: the HISTORY half (fresh-
-        aligned beats: cosine to the current turn PLUS a freshness credit
-        halving every FRESH_HALF_LIFE hours; the whole story silenced when
-        its newest beat is older than STALE_STORY_S) + the STRUCTURE half
-        (co-occurrence surroundings, rendered only when the neighborhood
-        CHANGED since the last render). Both halves event-conditional:
-        stale -> silence, unchanged -> silence. Deterministic, $0. The
-        teed meta-voice and raw machinery dumps (pytest bars, ps listings,
-        route tables) are junk, never beats."""
+                     session_since: float | None = None,
+                     goal: str = "") -> list[str] | None:
+        """Tracked entities, ONE MIXED line each:
+        HISTORY half = the story ARC (now -> how it got there ->
+        originated -> aiming), rendered through the zoom ladder (the
+        black-hole invariant applied to time): the NOW window
+        (<= ZOOM_NOW_S) renders fine grain (<= ZOOM_NOW_MAX beats), the
+        RECENT window mid grain, the ORIGIN era always coarse. A window
+        with more cells than its beat budget COLLAPSES into an era count
+        ("now: active — 5 changes just before"); precision x span stays
+        bounded. Stale story (newest beat > STALE_STORY_S) -> silence.
+        STRUCTURE half = co-occurrence surroundings, change-gated.
+        Both halves event-conditional; deterministic, $0; the teed
+        meta-voice and raw machinery dumps are junk, never beats."""
         if not self.tracks:
             return None
         try:
@@ -828,7 +984,7 @@ class EntityStore:
             if not idxs:
                 continue          # quiet: nothing until the entity appears
             label = t.get("label") or self.default_label(key)
-            # ---- the HISTORY half (per-turn, alignment + freshness) ----
+            # ---- the HISTORY half (the arc through the zoom ladder) ----
             story = ""
             if qv is not None:
                 scored = []
@@ -856,15 +1012,20 @@ class EntityStore:
                     scored.append((i, sim + fresh))
                 if scored and (not newest_born
                                or (now - newest_born) <= STALE_STORY_S):
+                    # the zoom ladder needs the WHOLE timeline, not just
+                    # aligned winners: every junk-free born cell, sorted
+                    all_borns = sorted(_eph_born_of(exemplars, i)
+                                       for i in idxs)
+                    all_borns = [b for b in all_borns if b > 0]
+                    # the fine-grain beats: fresh-aligned, junk-screened,
+                    # deduped, chronological (the ladder's prose slots)
                     scored.sort(key=lambda x: -x[1])
-                    picked = scored[:4]
+                    picked = scored[:6]
                     picked.sort(key=lambda x: _eph_born_of(exemplars, x[0]))
-                                                  # chronological among picked
-                    # -- the beats --
-                    frags: list[str] = []
+                    beats: list[tuple[float, str]] = []
                     seen: set[int] = set()
                     seen_actions: list[str] = []
-                    for i, sim in picked:
+                    for i, _sim in picked:
                         if i in seen:
                             continue
                         seen.add(i)
@@ -880,24 +1041,13 @@ class EntityStore:
                                for p in seen_actions):
                             continue
                         seen_actions.append(a_low)
-                        born = _eph_born_of(exemplars, i)
-                        when = _ago(born, now)
-                        frag = f"{when}: {sit}" if when else sit
+                        frag = sit
                         if act and _action_overlap(act, sit) < 0.6:
                             frag += f" — {act}"
-                        frags.append(frag)
-                    if frags:
-                        # chronologically, newest anchored last; NO
-                        # horoscope suffixes -- the beats speak, the
-                        # story ends
-                        story = (f"{label}: began with "
-                                 f"{frags[0][0].lower() + frags[0][1:]}")
-                        for f in frags[1:-1]:
-                            story += f", then {f[0].lower() + f[1:]}"
-                        if len(frags) > 1:
-                            story += (f", and most recently: "
-                                      f"{frags[-1][0].lower() + frags[-1][1:]}")
-                        story += "."
+                        beats.append((_eph_born_of(exemplars, i), frag))
+                    story = _arc(beats, all_borns, now, goal=goal)
+                    if story:
+                        story = f"{label}: {story}"
             # ---- the STRUCTURE half (change-gated surroundings) ----
             surr = ""
             links = cooccurrence_neighbors(exemplars, key, inv=inv)
@@ -999,3 +1149,60 @@ def centroid_neighbors(exemplars, key: str, inv=None,
         scored[other_key] = float(center @ (o / on))
     out = sorted(scored.items(), key=lambda x: -x[1])[:top]
     return out
+
+
+def related_entities(exemplars, q: str, qvec=None,
+                     k: int = 8) -> list[dict]:
+    """The entity-graph READER: entities related to a free-text query.
+    Named hits (the query's harvested entities present in the index) come
+    first with their co-occurrence neighbors; the centroid-shadow
+    (cosine between qvec and each entity's cell centroid) fills the rest.
+    Deterministic, $0 beyond one query embed (done by the caller)."""
+    inv = entity_index(exemplars)
+    if not inv:
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+
+    def _rec(key: str) -> dict:
+        idxs = inv.get(key) or []
+        links = cooccurrence_neighbors(exemplars, key, inv=inv,
+                                       min_links=1)
+        return {"key": key, "cells": len(idxs),
+                "neighbors": [{"key": nk, "shared": c}
+                              for nk, c in links[:5]]}
+
+    # 1. named hits: entities the query text itself mentions
+    for key in query_entities(q):
+        if key in inv and key not in seen:
+            out.append({**_rec(key), "how": "named"})
+            seen.add(key)
+    # 2. centroid fill: nearest entity centroids to the query vector
+    if qvec is not None and len(out) < k:
+        import numpy as _np
+        qv = _np.asarray(qvec, dtype=float)
+        qn = _np.linalg.norm(qv)
+        if qn > 1e-12:
+            qv = qv / qn
+            scored: list[tuple[float, str]] = []
+            for other_key, idxs in inv.items():
+                if other_key in seen:
+                    continue
+                ovecs = [exemplars[i].vec for i in idxs
+                         if getattr(exemplars[i], "vec", None)]
+                if not ovecs:
+                    continue
+                o = _np.asarray(ovecs, dtype=float).mean(axis=0)
+                on = _np.linalg.norm(o)
+                if on < 1e-12:
+                    continue
+                scored.append((float(qv @ (o / on)), other_key))
+            scored.sort(reverse=True)
+            for sim, other_key in scored:
+                if len(out) >= k:
+                    break
+                if sim < 0.35:
+                    break           # below the floor: silence, not noise
+                out.append({**_rec(other_key), "how": f"near ({sim:.2f})"})
+                seen.add(other_key)
+    return out[:k]

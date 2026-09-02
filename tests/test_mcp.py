@@ -135,7 +135,11 @@ class TestMcpProtocol(unittest.TestCase):
                                  "membrane_learn", "membrane_forget",
                                  "membrane_watch_entity",
                                  "membrane_unwatch_entity",
-                                 "membrane_list_tracks"])
+                                 "membrane_list_tracks",
+                                 "membrane_related_entities",
+                                 "membrane_entity_add",
+                                 "membrane_entity_edit",
+                                 "membrane_entity_remove"])
         for t in resp["result"]["tools"]:
             self.assertIn("inputSchema", t)
             self.assertTrue(t["description"].strip())
