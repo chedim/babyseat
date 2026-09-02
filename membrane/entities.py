@@ -340,6 +340,8 @@ _MACHINERY_RES = (
     # or lstart ("Mon Aug 31 02:24:06 2026"); prose "at 5:30 we met" has no path
     re.compile(r"\b\d{1,2}:\d{2}(?:[AP]M)?\s+[\w./\\-]*[\w-]+/[\w./-]+"),
     re.compile(r"\b\w{3}\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4}\s+[\w./-]*/"),
+    re.compile(r"^#!/(usr/)?bin/(env )?\w+", re.M),   # shell script source
+    re.compile(r"[\w-]+-[\w-]+-[\w-]+-[\w-]+-[0-9a-f]{8}\.env\b"),  # tmp env files
 )
 
 
@@ -1233,6 +1235,8 @@ JUNK_ANCHOR_SEEDS = (
     "raw tool result dump: stack trace, LSP diagnostics wall, error codes",
     "http access log line: status code, bytes, user agent",
     "base64 blob, hex dump, minified javascript one-liner",
+    "shell script source code: shebang line, exported variables, command flags",
+    "file path listing: multiple .env or .json file names in a row with sizes",
 )
 
 
