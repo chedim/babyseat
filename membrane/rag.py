@@ -997,10 +997,11 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
         if not picked:
             local = None
         else:
-            local = ("Recalled exchanges (past Q/A from this project's "
-                     "memory field; the sim is cosine to the CURRENT "
-                     "question -- high sim = likely directly relevant, "
-                     "low sim = background only):\n\n"
+            # THE MINIMAL RECALL HEADER (the operator's call): the
+            # sim-calibration sentence lives in the doctrine (stated
+            # once, cached) -- the block header is just a marker. The
+            # per-entry (sim NN) stamps carry the calibration per entry.
+            local = ("Recalled exchanges:\n\n"
                      + "\n----\n".join(e for e, _ in picked))
         return self._global_top_up(vec, local,
                                    [pv for _, pv in picked])

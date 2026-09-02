@@ -4889,7 +4889,10 @@ def main() -> None:
                          "injected (0.72: the 0.65-0.72 band measured as "
                          "mostly stale background -- it rode every turn "
                          "and taught the model to echo context)")
-    ap.add_argument("--mem-chars", type=int, default=400)
+    ap.add_argument("--mem-chars", type=int, default=220,
+                    help="max chars per recalled Q and per A (the "
+                         "operator's unbounded-essay fix: a memory is a "
+                         "pointer to a narrative, not the narrative)")
     ap.add_argument("--ctx-chars", type=int, default=2400)
     ap.add_argument("--rag-mmr-sim", type=float, default=0.90,
                     help="recall-time dedup: a memory this similar to one "
