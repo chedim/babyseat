@@ -3594,7 +3594,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # field is the operator's rich one, and a read-only injection is not
         # a second writer. (The old full stand-down left BOTH seats silent
         # when the fork's own recall was thin -- the hollow-world bug.)
-        ctx = self._memory_block(vec, body.get("messages"))
+        # THE OPERATOR'S RULE (final): the recall block is REMOVED from
+        # this seat's injection -- 'remove the recall block and it looks
+        # nice'. The fork's membraneRecallInject owns recall; the banner
+        # (tracks + alerts) is this seat's whole injection.
+        ctx = None
         # NO provenance narration (the operator's 'useless' call): the
         # fork-standdown header repeated every turn -- the per-entry
         # provenance stamps ([src: ...]) already carry origin; the
@@ -3604,20 +3608,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # is told to ASK the user via its native question tool. The user's
         # answer arrives as the next turn and is matched by the pre-gate
         # 'membrane: keep/drop' resolver below.
-        review_block = _review_request_block(srv)
-        intent_block = _intents_context_block(srv)
-        # W4b: the operator's verbatim decisions near this turn ride along
-        # (read-only; every failure degrades to no help).
-        ledger_block = None
-        ledger = getattr(srv, "user_ledger", None)
-        if ledger is not None:
-            try:
-                ledger_block = ledger.block(vec, mem.embedder)
-            except Exception:
-                ledger_block = None
-        # THE 'I' TRACK: the where-we-are header (focus + commitments +
-        # field position) -- computed live each turn, zero model calls.
-        # Momentum updates first so the header reflects THIS turn.
+        # THE UNIFIED BANNER's neighborhood: review/intent/ledger blocks
+        # are RETIRED from the injection (the operator's rule -- tracks +
+        # alerts only; they live in /membrane/state and the doctrine).
+        # THE 'I' TRACK: the where-we-are header -- computed live each
+        # turn, zero model calls.
         # THE TOOL-ROUND GUARD (the operator's flicker catch): a tool
         # round's last 'user' message is the TOOL RESULT (role=user in
         # the tool protocol) -- nudging momentum with it wobbles the
@@ -3632,19 +3627,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                       else []))
         if not _is_tool_round:
             self.momentum_update(vec, query)
-        where_block = _where_delta(srv, _where_we_are(srv, vec))
-        # ASSEMBLY ORDER MATTERS: the extra blocks (where-we-are, review,
-        # intents, ledger) must be in ctx BEFORE the banner is computed --
-        # the banner reports what was sent, so it sees the final context.
-        # (The old order computed the banner first: it always reported the
-        # pre-assembly ctx -- "injected 0" while slices rode right above it.)
-        # THE UNIFIED BANNER (the operator's rule, final form): ONE header,
-        # injected EVERY turn, containing ONLY tracks + alerts (changed
-        # tracks via the delta gate). No recall preambles, no vitals, no
-        # 'your state this turn' section, no review/intents/ledger blocks
-        # (those live in /membrane/state and the doctrine). The recall Q/A
-        # block rides separately (it is content, not banner).
-        mono_review = review_block or ""
+        # THE UNIFIED BANNER: ONE _where_we_are call, ONE delta-gate
+        # evaluation (the double-call bug: the first call consumed the
+        # delta gate, the second saw 'unchanged' and returned None -- the
+        # banner vanished while the removed recall block stayed).
         banner_block = _where_delta(srv, _where_we_are(srv, vec))
         if banner_block:
             ctx = (ctx + "\n\n" + banner_block) if ctx else banner_block
