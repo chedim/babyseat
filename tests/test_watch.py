@@ -82,17 +82,18 @@ class TestSetDrop(unittest.TestCase):
     def test_cap_evicts_lowest_charge(self):
         b = _board()
         first, _ = b.set_watch("deploy", None)
-        for topic in ("testing", "database", "other one a", "other one b"):
+        for topic in ("testing", "database", "other one a", "other one b",
+                      "other one c", "other one d", "other one e"):
             b.set_watch(topic, None)
-        # drain the first watch's charge via misses on its direction
+        # now at the cap (7); drain the first watch's charge via misses
         for _ in range(30):
             b.on_learn(_ex(5), 0)
         _, evicted = b.set_watch("fresh topic", None)
+        self.assertEqual(len(b.watches), MAX_WATCHES)
         self.assertEqual(evicted, min(b.watches.values(),
                                       key=lambda w: w.charge).label
                          if False else evicted)
         self.assertNotIn("fresh topic", evicted or "")
-        self.assertEqual(len(b.watches), MAX_WATCHES)
 
     def test_drop_forms(self):
         b = _board()

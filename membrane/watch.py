@@ -29,7 +29,9 @@ from dataclasses import dataclass, field as dc_field
 
 import numpy as np
 
-MAX_WATCHES = 5          # live spatial triggers at once (new evicts weakest)
+MAX_WATCHES = 7          # live spatial triggers at once (new evicts weakest)
+                         # -- the operator's ratio: 3 tracks / 7 watches
+                         # (tracks are the expensive lane, watches cheap)
 RADIUS_DEFAULT = 0.70    # cosine radius of a new watch
 RADIUS_MIN = 0.35        # collapse.floor: below this the watch removes itself
 COLLAPSE_RATE = 0.15     # hit rate above which the radius shrinks
@@ -134,6 +136,15 @@ class WatchBoard:
                 rec = Watch.from_json(w)
                 b.watches[rec.wid] = rec
             b._next_wid = int(r.get("next_wid", len(b.watches) + 1))
+            # THE CAP ENFORCES ON LOAD: a pre-covenant board may hold more
+            # than MAX_WATCHES -- boot trims, lowest-charge (tie: oldest
+            # hit) first. Same covenant as the tracks' load trim.
+            over = len(b.watches) - MAX_WATCHES
+            if over > 0:
+                victims = sorted(b.watches.values(),
+                                 key=lambda w: (w.charge, w.last_hit))[:over]
+                for v in victims:
+                    b.watches.pop(v.wid, None)
         except Exception:
             pass
         return b

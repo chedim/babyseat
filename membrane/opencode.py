@@ -906,38 +906,43 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
             # THE STORIES, not just names: each track renders its arc
             # essence inline (the operator's call -- a bare entity name
             # traces nothing). track_report is the story renderer; a
-            # silent story (change-gated) falls back to the name+state.
+            # silent story (change-gated) falls back to name+state.
+            # Stories lead with the ENTITY ID (the operator's call: the id
+            # is the actionable handle -- paste into
+            # membrane_related_entities / membrane_query for the field
+            # slice) -- the lookup indexes by id.
             stories: dict[str, str] = {}
             try:
                 for s in (est.track_report(
                         mem.store.exemplars, query_vec=vec,
                         session_since=getattr(srv, "_boot_ts", None),
                         embedder=mem.embedder) or []):
-                    # stories are prefixed 'Label: ...' -- index by label
-                    lbl = s.split(":", 1)[0].strip().lower()
-                    stories[lbl] = s
+                    # stories are prefixed '<entity id>: ...' -- index by id
+                    sid = s.split(":", 1)[0].strip().lower()
+                    stories[sid] = s
             except Exception:
                 stories = {}
             for t in est.list_tracks():
-                label = t.get("label") or t["key"]
-                story = stories.get(label.lower())
+                key = t["key"]
+                label = t.get("label") or key
+                story = stories.get(key.lower())
                 if story:
                     lines.append("track: " + story)
                     continue
                 # the story was silent: the fallback must still TRACE --
                 # a compact temporal line (the honest minimum), never a
-                # bare name (the operator's 'I want stories' call)
-                key = t["key"]
+                # bare name (the operator's 'I want stories' call). The
+                # ID leads (actionable), the label glosses.
                 idxs2 = entity_index(mem.store.exemplars).get(key) or []
                 if idxs2:
                     newest = max((_eph_born_of(mem.store.exemplars, i)
                                   for i in idxs2), default=0.0)
                     import time as _tmod
                     ago = _ago(newest, _tmod.time()) or "unknown age"
-                    lines.append(f"track: {label} — {len(idxs2)} cells, "
-                                 f"last active {ago}")
+                    lines.append(f"track: {key} ({label}) — {len(idxs2)} "
+                                 f"cells, last active {ago}")
                 else:
-                    lines.append(f"track: {label} — no cells yet")
+                    lines.append(f"track: {key} ({label}) — no cells yet")
         except Exception:
             pass
     # (entity track stories live in the banner -- _gate_monologue -- not

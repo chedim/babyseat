@@ -81,8 +81,9 @@ class TestTransparency(unittest.TestCase):
             h = _handler(tracks_store=est)
             h.server.membrane.store.exemplars = cells
             out = h._gate_monologue(VERDICT, CTX, "test", query_vec=qv)
-            # the prose story rides: label + temporal arc + the action
-            self.assertIn("router:", out)
+            # the prose story rides: ENTITY ID prefix (the operator's call:
+            # the id is the actionable handle) + temporal arc + the action
+            self.assertIn("files:router.py:", out)
             self.assertIn("Applied the failover patch", out)
             # the story ends at the beats: no horoscope suffixes
             self.assertNotIn("Moving fast", out)

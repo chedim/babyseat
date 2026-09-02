@@ -219,8 +219,17 @@ FRESH_WEIGHT = 0.25           # freshness weight vs alignment (sim 0..1)
 # silently. The ladder iterates until it covers the entity's whole age.
 ZOOM_NOW_S = 2 * 3600.0       # the first (finest) window's span
 ZOOM_STEP = 4.0               # each next window is 4x wider
-ZOOM_BUDGETS = (2, 2)         # beat budgets per window (then 0: era counts)
+ZOOM_BUDGETS = (3, 2)         # beat budgets per window (then 0: era counts)
 ZOOM_ERA_MIN = 3              # cells in a window below this render prose
+
+# ---- the scarcity covenant (the operator's ratio) --------------------------
+# TRACKS are the EXPENSIVE lane (every one renders a paragraph in WHERE WE
+# ARE, every turn) -> few: MAX_TRACKS=3 (the default now-track counts).
+# WATCHES are the CHEAP lane (event-driven, silent until fired) -> more:
+# watch.py's MAX_WATCHES=7. Attention is scarce by construction; overflow
+# evicts the OLDEST planted track (never the default now-track).
+MAX_TRACKS = 3
+DEFAULT_TRACK_KEY = "session:now"
 
 
 def _era(n: int, span_s: float) -> str:
@@ -273,22 +282,24 @@ def _arc(beats: list, borns: list, now: float, goal: str = "",
         win_beats = [b for b in beats if lo <= now - b[0] < hi]
         is_origin = (wi == len(wins) - 1)
         if is_origin:
-            # the bookend earns its ONE coarse beat unconditionally --
-            # 'began N ago with X' (a bare count tells the reader nothing)
-            piece = f"began {_ago(now - oldest_age, now) or 'long ago'}"
-            if win_beats:
-                _, frag = win_beats[0]        # the oldest clean beat
-                piece += f" with {frag[0].lower() + frag[1:]}"
-                rendered.add(win_beats[0][0])
+            # the bookend earns its coarse beats -- the origin era may
+            # render up to 2 of its oldest clean fragments (a paragraph
+            # deserves a real opening, not a single clause)
+            piece = f"It began {_ago(now - oldest_age, now) or 'long ago'}"
+            openers = win_beats[:2] if win_beats else []
+            if openers:
+                frags = [f[0].lower() + f[1:] for _, f in openers]
+                piece += " with " + "; ".join(frags)
+                rendered.update(b[0] for b in openers)
             if n > 2:
                 piece += f" ({n} cells since)"
-            chron.append(piece)
+            chron.append(piece + ".")
         elif n <= ZOOM_ERA_MIN and budget > 0 and win_beats:
-            for _, frag in win_beats[-budget:]:
-                chron.append(f"then {frag[0].lower() + frag[1:]}")
-                rendered.add(win_beats[-1][0])
+            frags = [f[0].lower() + f[1:] for _, f in win_beats[-budget:]]
+            chron.append("Then " + "; ".join(frags) + ".")
+            rendered.update(b[0] for b in win_beats[-budget:])
         else:
-            chron.append(_era(n, hi - lo))
+            chron.append(f"Then {_era(n, hi - lo)}.")
     # the NOW anchor last: the point the whole story lands on (and for a
     # young entity — one window total — it is the WHOLE story; the early
     # bail below must not fire before this block runs)
@@ -297,9 +308,9 @@ def _arc(beats: list, borns: list, now: float, goal: str = "",
     now_beats = [b for b in beats if now - b[0] < hi]
     if in_now and len(in_now) <= era_min and now_beats:
         frags = [f[0].lower() + f[1:] for _, f in now_beats[-budget:]]
-        chron.append("and right now: " + "; ".join(frags))
+        chron.append("Right now: " + "; ".join(frags) + ".")
     elif in_now:
-        chron.append(f"now active — {_era(len(in_now), hi)}")
+        chron.append(f"Right now it is active — {_era(len(in_now), hi)}.")
     elif [b for b in beats if b[0] not in rendered]:
         # the now-window starved but the entity LIVES (newest beat within
         # the stale gate): anchor on the last known state NOT already in
@@ -308,13 +319,13 @@ def _arc(beats: list, borns: list, now: float, goal: str = "",
         nb_born, nb_frag = max((b for b in beats if b[0] not in rendered),
                                key=lambda b: b[0], default=(0, ""))
         if nb_frag:
-            chron.append(f"last active {_ago(nb_born, now) or 'recently'}: "
-                         f"{nb_frag[0].lower() + nb_frag[1:]}")
+            chron.append(f"Last active {_ago(nb_born, now) or 'recently'}: "
+                         f"{nb_frag[0].lower() + nb_frag[1:]}.")
     if not chron:
         return ""
     if goal:
-        chron.append(f"aiming for: {goal}")
-    return ", ".join(chron)
+        chron.append(f"Aiming for: {goal}.")
+    return " ".join(chron)
 
 
 _ENTITY_MGMT_PREFIXES = (
@@ -1215,7 +1226,27 @@ class EntityStore:
             b = self.parse_boundary(boundary)
         except ValueError as e:
             return {"ok": False, "error": str(e)}
+        # THE SCARCITY COVENANT (the operator's ratio: 3 tracks / 7
+        # watches): tracks are the expensive lane -- every one renders a
+        # paragraph every turn. Overflow evicts the OLDEST planted
+        # track (never the default now-track); the eviction is reported
+        # so the planter knows what attention was traded.
+        evicted = None
+        if (key not in self.tracks and key != DEFAULT_TRACK_KEY
+                and len(self.tracks) >= MAX_TRACKS):
+            oldest_key, oldest = min(
+                ((k, t) for k, t in self.tracks.items()
+                 if k != DEFAULT_TRACK_KEY),
+                key=lambda kv: kv[1].get("planted_ts", 0.0),
+                default=(None, None))
+            if oldest_key is not None:
+                evicted = {"key": oldest_key,
+                           "label": oldest.get("label") or oldest_key}
+                del self.tracks[oldest_key]
         rec = dict(self.tracks.get(key) or {})
+        if not rec:
+            import time as _t
+            rec["planted_ts"] = _t.time()
         rec["key"] = key
         rec["label"] = label or self.default_label(key)
         old = (rec.get("enter"), rec.get("exit"))
@@ -1234,6 +1265,8 @@ class EntityStore:
         for k in ("enter", "exit", "inside"):
             if rec.get(k) is not None:
                 out[k] = rec[k]
+        if evicted:
+            out["evicted"] = evicted
         return out
 
     @staticmethod
@@ -1355,6 +1388,19 @@ class EntityStore:
             d = json.loads(self.path.read_text())
             for k, t in (d.get("tracks") or {}).items():
                 self.tracks[k] = t
+            # THE CAP ENFORCES ON LOAD TOO: a pre-covenant field may hold
+            # more tracks than MAX_TRACKS (the operator's 3/7 ratio) --
+            # boot trims, oldest-planted first, the default now-track
+            # never evicted. The trim is silent (the covenant IS the
+            # rule; the operator sees the roster in the banner).
+            over = len(self.tracks) - MAX_TRACKS
+            if over > 0:
+                by_old = sorted(((k, t) for k, t in self.tracks.items()
+                                 if k != DEFAULT_TRACK_KEY),
+                                key=lambda kv: kv[1].get("planted_ts", 0.0))
+                for k, _ in by_old[:over]:
+                    del self.tracks[k]
+                self._save_tracks()
         except Exception:
             pass
 
@@ -1553,8 +1599,14 @@ class EntityStore:
                     story = _arc(beats, all_borns, now, goal=goal,
                                  era_min=(ZOOM_ERA_MIN + 3) if is_now
                                  else ZOOM_ERA_MIN)
+                    # THE ID PREFIX (the operator's call): stories lead with
+                    # the ENTITY ID (files:router.py), not the friendly
+                    # label -- the id is the actionable handle (paste it
+                    # into membrane_related_entities / membrane_query and
+                    # the named-hit path finds the field slice). One name
+                    # space across banner, reader, and field.
                     if story:
-                        story = f"{label}: {story}"
+                        story = f"{key}: {story}"
             # ---- the STRUCTURE half (change-gated surroundings) ----
             surr = ""
             links = cooccurrence_neighbors(exemplars, key, inv=inv)
