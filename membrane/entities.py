@@ -1397,6 +1397,79 @@ class EntityStore:
         except Exception:
             pass
 
+    def _now_report(self, exemplars, now: float) -> tuple[str, str] | None:
+        """THE NOW-TRACK'S OWN RENDERER (the operator's 'why is it so
+        problematic' call answered: the tag-track pipeline never fit a
+        tagless, cell-pool-less, momentum-driven tracker -- four gate
+        patches deep, each revealing the next). The now-story is its
+        GEOMETRY, directly:
+          subject  -- position -> nearest entity centroids (what the
+                      session is about RIGHT NOW)
+          motion   -- ring velocity (drifting fast / holding steady)
+        One paragraph, change-gated on the subject+pace signature, no
+        cell pool, no arc, no fallback ladder."""
+        ent = self.docs.get(f"{MEMBRANE_NS}session:now")
+        if ent is None or not getattr(ent, "position", None):
+            return None
+        subj = self._nearest_entities(ent.position, exemplars)
+        vel = ent.ring_velocity(now)
+        direction = ent.ring_direction()
+        parts: list[str] = []
+        if subj:
+            names = ", ".join(f"{self.default_label(k)} ({c:.2f})"
+                              for k, c in subj)
+            parts.append(f"The session's present is around: {names}")
+        if direction == "drifting":
+            pace = ("fast" if vel >= 0.15
+                    else "slowly" if vel < 0.05 else "steadily")
+            parts.append(f"moving {pace} ({vel:.2f}/h)")
+        elif vel > 0.005:
+            parts.append("holding steady")
+        if not parts:
+            return None
+        sig = "|".join(parts)[:80]
+        t = self.tracks.get(DEFAULT_TRACK_KEY) or {}
+        if (t.get("drift") or {}).get("sig") == sig:
+            return None               # unchanged -> silence (covenant)
+        t["drift"] = {"sig": sig, "ts": now}
+        self._save_tracks()
+        return (DEFAULT_TRACK_KEY,
+                f"{DEFAULT_TRACK_KEY}: {parts[0]}"
+                + (f", {parts[1]}." if len(parts) > 1 else ".")
+                + (" Right now the work is moving between these."
+                   if direction == "drifting" else ""))
+
+    def _nearest_entities(self, position, exemplars,
+                          top: int = 3) -> list[tuple[str, float]]:
+        """The entities whose cell-centroids sit nearest a position
+        vector -- 'what is this session about right now' from the
+        now-tracker's own geometry. $0: one pass over the inverted
+        index's centroids."""
+        import numpy as _np
+        if not position:
+            return []
+        inv = entity_index(exemplars)
+        p = _np.asarray(position, dtype=float)
+        pn = _np.linalg.norm(p)
+        if pn < 1e-12:
+            return []
+        p = p / pn
+        scored: list[tuple[float, str]] = []
+        for other_key, idxs in inv.items():
+            if other_key == DEFAULT_TRACK_KEY:
+                continue
+            ovecs = [exemplars[i].vec for i in idxs
+                     if getattr(exemplars[i], "vec", None)]
+            if not ovecs:
+                continue
+            o = _np.asarray(ovecs, dtype=float).mean(axis=0)
+            on = _np.linalg.norm(o)
+            if on < 1e-12:
+                continue
+            scored.append((float(p @ (o / on)), other_key))
+        scored.sort(reverse=True)
+        return [(k, round(s, 2)) for s, k in scored[:top] if s >= 0.4]
+
     def _enforce_cap(self) -> list[str]:
         """THE CAP, enforced wherever the roster stands: story-poorest
         (fewest tagged cells via _exemplars_hint, tie: oldest planted)
@@ -1496,6 +1569,17 @@ class EntityStore:
         # falls back to its own distinct cells or the compact line.
         claimed_cells: set[int] = set()
         for key, t in self.tracks.items():
+            # THE NOW-TRACK'S OWN PATH: it has no tags and no real cell
+            # pool (boot-scoped; fork owns capture) -- the tag-track
+            # pipeline (arc through zoom windows, junk screens, alignment)
+            # never fit it. Its story is its GEOMETRY: position -> nearest
+            # entities (the subject) + ring velocity (the motion). One
+            # dedicated tiny renderer instead of a fourth gate patch.
+            if key == DEFAULT_TRACK_KEY:
+                now_line = self._now_report(exemplars, now)
+                if now_line:
+                    out.append(now_line)
+                continue
             idxs = inv.get(key) or []
             is_now = (key == "session:now")
             # the NOW TRACK: nothing tags 'session:now' -- its cell pool IS
@@ -1726,6 +1810,25 @@ class EntityStore:
                                      f"({vel_sig:.2f}/h, measured).")
                         elif band > 0:
                             drift = " Holding steady (measured)."
+                        # THE SUBJECT (the operator's 'it's not a story'
+                        # call): a pace stat alone names no subject. The
+                        # now-tracker's POSITION matches the entity
+                        # centroids -- the nearest keys ARE what the
+                        # session is about right now. Rendered as the
+                        # story's subject: 'The session's present is
+                        # around: X, Y'
+                        if is_now and getattr(ent, "position", None):
+                            subj = self._nearest_entities(ent.position,
+                                                          inv, exemplars)
+                            if subj:
+                                names = ", ".join(
+                                    f"{self.default_label(k)} ({c:.2f})"
+                                    for k, c in subj)
+                                drift = (f" The session's present is "
+                                         f"around: {names}."
+                                         + (f" Moving {pace}."
+                                            if direction == "drifting"
+                                            else ""))
                 except Exception:
                     drift = ""
             if story or surr or drift:
