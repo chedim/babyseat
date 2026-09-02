@@ -196,7 +196,7 @@ FRESH_WEIGHT = 0.25           # freshness weight vs alignment (sim 0..1)
 # silently. The ladder iterates until it covers the entity's whole age.
 ZOOM_NOW_S = 2 * 3600.0       # the first (finest) window's span
 ZOOM_STEP = 4.0               # each next window is 4x wider
-ZOOM_BUDGETS = (2, 1)         # beat budgets per window (then 0: era counts)
+ZOOM_BUDGETS = (2, 2)         # beat budgets per window (then 0: era counts)
 ZOOM_ERA_MIN = 3              # cells in a window below this render prose
 
 
@@ -206,11 +206,11 @@ def _era(n: int, span_s: float) -> str:
     return f"{n} changes over ~{h}h"
 
 
-def _zoom_windows(oldest_born: float, now: float):
-    """Yield (win_start_age, win_end_age, budget) youngest-first, geometric
-    until the entity's origin is covered. Budgets: ZOOM_BUDGETS then 0."""
+def _zoom_windows(oldest_age: float):
+    """(start_age, end_age, budget) youngest-first, geometric until the
+    entity's origin is covered. Budgets: ZOOM_BUDGETS then 0."""
     lo, wi = 0.0, 0
-    while lo < max(now - oldest_born, ZOOM_NOW_S):
+    while lo < max(oldest_age, ZOOM_NOW_S):
         span = ZOOM_NOW_S * (ZOOM_STEP ** wi)
         budget = ZOOM_BUDGETS[wi] if wi < len(ZOOM_BUDGETS) else 0
         yield lo, lo + span, budget
@@ -219,31 +219,58 @@ def _zoom_windows(oldest_born: float, now: float):
 
 
 def _arc(beats: list, borns: list, now: float, goal: str = "") -> str:
-    """The story ARC through the zoom ladder: now -> how it got there ->
-    originated -> aiming. ``beats``: (born, frag), junk-screened, deduped,
+    """The story ARC, told the way stories are told: ORIGIN -> development
+    -> NOW -> aiming. ``beats``: (born, frag), junk-screened, deduped,
     chronological. ``borns``: every junk-free cell birth (the window
-    masses). Each geometric window renders at most its budget of beats;
-    mass beyond the budget collapses to an era count -- the vanishing-
-    density rule at every grain."""
+    masses). The zoom ladder's vanishing-density rule holds at every
+    grain -- NOW renders up to its beat budget, each older geometric
+    window renders less per hour, and mass beyond a window's budget
+    collapses to an era count (the black-hole guard: precision x span
+    stays bounded). The origin era earns ONE coarse beat (the classic
+    'began with' bookend); the arc always ENDS at the now."""
     age_of = sorted(now - b for b in borns if b > 0)
     if not age_of:
         return ""
-    parts: list[str] = []
-    for lo, hi, budget in _zoom_windows(age_of[-1], now):
+    oldest_age = age_of[-1]
+    wins = list(_zoom_windows(oldest_age))
+    chron: list[str] = []            # rendered oldest -> newest
+    for wi in range(len(wins) - 1, -1, -1):
+        lo, hi, budget = wins[wi]
         in_win = [a for a in age_of if lo <= a < hi]
         if not in_win:
-            continue                       # starved: silence, next window
-        win_beats = [b for b in beats if lo <= now - b[0] < hi]
+            continue                 # starved: silence, next window
         n = len(in_win)
-        if n <= ZOOM_ERA_MIN and budget > 0 and win_beats:
-            tag = "now" if lo == 0 else "before that"
+        win_beats = [b for b in beats if lo <= now - b[0] < hi]
+        is_origin = (wi == len(wins) - 1)
+        if is_origin:
+            age = _ago(now - oldest_age, now) or "long ago"
+            piece = f"began {age} ago"
+            if win_beats and budget > 0:
+                _, frag = win_beats[0]        # the oldest clean beat
+                piece += f" with {frag[0].lower() + frag[1:]}"
+            if n > 2:
+                piece += f" ({n} cells since)"
+            chron.append(piece)
+        elif n <= ZOOM_ERA_MIN and budget > 0 and win_beats:
             for _, frag in win_beats[-budget:]:
-                parts.append(f"{tag}: {frag[0].lower() + frag[1:]}")
+                chron.append(f"then {frag[0].lower() + frag[1:]}")
         else:
-            parts.append(_era(n, hi - lo))
+            chron.append(_era(n, hi - lo))
+    if not chron:
+        return ""
+    # the NOW anchor last: the point the whole story lands on
+    now_win = wins[0]
+    lo, hi, budget = now_win
+    in_now = [a for a in age_of if a < hi]
+    now_beats = [b for b in beats if now - b[0] < hi]
+    if in_now and len(in_now) <= ZOOM_ERA_MIN and now_beats:
+        frags = [f[0].lower() + f[1:] for _, f in now_beats[-budget:]]
+        chron.append("and right now: " + "; ".join(frags))
+    elif in_now:
+        chron.append(f"now active — {_era(len(in_now), hi)}")
     if goal:
-        parts.append(f"aiming for: {goal}")
-    return "; ".join(parts)
+        chron.append(f"aiming for: {goal}")
+    return ", ".join(chron)
 
 
 def _sit_text_of(exemplars, i):

@@ -831,7 +831,7 @@ def _intents_context_block(srv) -> str | None:
     return "\n".join(lines)
 
 
-def _where_we_are(srv, vec) -> str | None:
+def _where_we_are(srv, vec, drain: bool = True) -> str | None:
     """THE 'I' TRACK -- the model's position, not its persona.
 
     One compact header computed per turn (zero model calls): what we're
@@ -839,7 +839,13 @@ def _where_we_are(srv, vec) -> str | None:
     field stands, and what's pending review. The point: memories answer
     'what do I know', this header answers 'where am I' -- the track a fresh
     session has no other way to see. Deliberately NOT a self-model: no
-    feelings, no persona text -- commitments, focus, and state only."""
+    feelings, no persona text -- commitments, focus, and state only.
+
+    ``drain``: only the CHAT path drains the entity-track ALERT queue
+    (exactly-once delivery to a real model turn). The /membrane/state
+    reader passes drain=False -- a PEEK: it shows pending counts without
+    consuming them (the state-instrument read must never eat the model's
+    alerts -- the curl-drained-the-ALERT bug)."""
     mem = srv.membrane
     lines: list[str] = []
     # 1. FOCUS: the momentum EMA's top directions = what the conversation has
@@ -885,13 +891,15 @@ def _where_we_are(srv, vec) -> str | None:
     # 4. TRACKS: the model's own planted entity tracks -- the live count +
     #    inside/outside state every turn; ALERT lines for boundary events.
     #    evaluate_tracks() transitions the state machine; ALERTS render from
-    #    take_alerts() ONLY (the exactly-once ledger -- rendering the eval
-    #    return too duplicates every line).
+    #    take_alerts() ONLY when draining (the chat path); a peek shows the
+    #    pending count without consuming (the exactly-once ledger stays
+    #    intact for the next real model turn).
     est = getattr(srv, "entity_store", None)
     if est is not None and getattr(est, "tracks", None):
         try:
             est.evaluate_tracks(mem.store.exemplars)
-            for a in est.take_alerts():
+            alerts = est.take_alerts() if drain else []
+            for a in alerts:
                 lines.append(f"ALERT: {a['label']} {a['kind']} its "
                              f"boundary ({a['boundary']}; {a['detail']})")
             for t in est.list_tracks():
@@ -4677,7 +4685,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             "surface": _surface_tail(srv),
             # THE 'I' TRACK over MCP: the same WHERE WE ARE the opencode
             # seat's model gets -- so the tool lane sees position + tracks.
-            "where_we_are": _where_we_are(srv, None),
+            "where_we_are": _where_we_are(srv, None, drain=False),
             # entity tracks raw (the JSON form of the banner section)
             "entity_tracks": (getattr(srv, "entity_store", None).list_tracks()
                               if getattr(srv, "entity_store", None) else []),
