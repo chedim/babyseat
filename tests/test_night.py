@@ -75,7 +75,9 @@ class FakeSrv:
 
 
 def fake_chat(reply: str):
-    return lambda backend, model, msgs: reply
+    def _chat(backend, model, msgs, timeout=None):
+        return reply
+    return _chat
 
 
 ANCHOR_REPLY = ('{"anchor": "raw command-line process dumps with pid and '

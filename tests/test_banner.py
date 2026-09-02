@@ -53,7 +53,11 @@ class TestTransparency(unittest.TestCase):
         self.assertIn("a memory about the tool skills", CTX)
 
     def test_track_stories_ride(self):
-        import tempfile, os, time as _t
+        """THE UNIFIED RENDER (the operator's call): stories ride WHERE WE
+        ARE -- one home, one renderer; the banner keeps vitals+alerts
+        only (the old split-brain: stories in the banner, fallbacks in
+        WHERE WE ARE, same tracks)."""
+        import tempfile, time as _t
         from membrane.entities import EntityStore, extract_entities
 
         class E:
@@ -69,8 +73,6 @@ class TestTransparency(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             est = EntityStore(path=str(Path(tmp) / "entities.json"))
             est.watch_track("files:router.py", label="router")
-            # the cell must embed near the query for the alignment floor:
-            # embed its situation THROUGH the same prefix geometry
             cells = [E("tool edit for: fix x1 in router.py",
                        "Applied the failover patch; the ladder walks on",
                        born=_t.time())]
@@ -80,21 +82,19 @@ class TestTransparency(unittest.TestCase):
             cells[0].vec = list(qv)
             h = _handler(tracks_store=est)
             h.server.membrane.store.exemplars = cells
-            out = h._gate_monologue(VERDICT, CTX, "test", query_vec=qv)
-            # the prose story rides: ENTITY ID prefix (the operator's call:
-            # the id is the actionable handle) + temporal arc + the action
+            out = oc._where_we_are(h.server, qv)
+            # the prose story rides WHERE WE ARE: ENTITY ID prefix + arc
             self.assertIn("files:router.py:", out)
             self.assertIn("Applied the failover patch", out)
-            # the story ends at the beats: no horoscope suffixes
-            self.assertNotIn("Moving fast", out)
-            self.assertNotIn("focus moved", out)
+            # the banner (monologue) carries NO stories -- vitals+alerts only
+            mono = h._gate_monologue(VERDICT, CTX, "test", query_vec=qv)
+            self.assertNotIn("files:router.py", mono)
 
     def test_stale_story_told_with_age(self):
         """THE STALE COVENANT (revised, the operator's 'I want stories'
         call): an old story is told WITH ITS AGE ATTACHED ('last active
-        25h ago: ...') -- silence was the lie of omission. The gate's
-        real function (blocking recitation that PRETENDS recency) is
-        served by the arc's honest age stamps."""
+        25h ago: ...') -- silence was the lie of omission. Rendered in
+        WHERE WE ARE (the unified home)."""
         import tempfile, time as _t
         from membrane.entities import EntityStore, extract_entities
 
@@ -119,10 +119,50 @@ class TestTransparency(unittest.TestCase):
             cells[0].vec = list(qv)
             h = _handler(tracks_store=est)
             h.server.membrane.store.exemplars = cells
-            out = h._gate_monologue(VERDICT, CTX, "test", query_vec=qv)
+            out = oc._where_we_are(h.server, qv)
             # the story IS told -- with the honest age stamp
             self.assertIn("router", out)
             self.assertIn("25h ago", out)
+
+    def test_what_model_sees_is_what_operator_sees(self):
+        """THE TRANSPARENCY CONTRACT AS A TEST (the operator's call):
+        render BOTH lanes in the same turn and assert they never
+        contradict -- a track's story appears in WHERE WE ARE; the banner
+        never re-renders stories (split-brain is the failure mode:
+        stories in one lane, fallbacks in the other, same tracks)."""
+        import tempfile, time as _t
+        from membrane.entities import EntityStore, extract_entities
+
+        class E:
+            def __init__(self, situation, action, born):
+                self.situation, self.action, self.safe = situation, action, True
+                self.extra, self.model = {}, {}
+                self.extra["eph_born"] = born
+                t = extract_entities(situation, " " + action)
+                if t:
+                    self.extra["entities"] = t
+
+        with tempfile.TemporaryDirectory() as tmp:
+            est = EntityStore(path=str(Path(tmp) / "entities.json"))
+            est.watch_track("files:router.py", label="router")
+            cells = [E("tool edit for: fix x1 in router.py",
+                       "Applied the failover patch",
+                       born=_t.time() - 25 * 3600)]
+            from membrane.embed import OllamaEmbedder
+            emb = OllamaEmbedder(model="mxbai-embed-large")
+            qv = emb.embed(["what changed in router.py?"])[0]
+            cells[0].vec = list(qv)
+            h = _handler(tracks_store=est)
+            h.server.membrane.store.exemplars = cells
+            wwa = oc._where_we_are(h.server, qv) or ""
+            mono = h._gate_monologue(VERDICT, CTX, "test", query_vec=qv)
+            # WHERE WE ARE: the story (id-prefixed)
+            self.assertIn("files:router.py:", wwa)
+            # the banner: NO story bytes (one home, one renderer)
+            self.assertNotIn("files:router.py:", mono)
+            # no fallback/story CONTRADICTION: a track that renders a
+            # story in WHERE WE ARE must never render its fallback there
+            self.assertNotIn("files:router.py (router)", wwa)
 
     def test_meta_voice_stripped(self):
         """The teed meta-voice ('The user is laughing about ...') is

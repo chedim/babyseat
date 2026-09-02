@@ -917,10 +917,25 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
                         mem.store.exemplars, query_vec=vec,
                         session_since=getattr(srv, "_boot_ts", None),
                         embedder=mem.embedder) or []):
-                    # stories are prefixed '<entity id>: ...' -- index by id
+                    # stories are prefixed '<entity id>: ...' -- the ID
+                    # itself contains colons (files:router.py), so the
+                    # split must anchor on 'id: ' + a KNOWN key, not the
+                    # first colon (the files-only-key bug: the dict keyed
+                    # on 'files' and the lookup missed -- the split-brain
+                    # fallback exhibit)
                     sid = s.split(":", 1)[0].strip().lower()
-                    stories[sid] = s
-            except Exception:
+                    matched = next((t["key"].lower()
+                                    for t in est.list_tracks()
+                                    if sid == t["key"].lower()
+                                    or t["key"].lower().startswith(sid)),
+                                   None)
+                    if matched:
+                        stories[matched] = s
+                    else:
+                        stories[sid] = s
+            except Exception as e:
+                print(f"[opencode] story render skipped ({e})",
+                      file=sys.stderr)
                 stories = {}
             for t in est.list_tracks():
                 key = t["key"]
@@ -4188,29 +4203,22 @@ class MembraneOpenAIHandler(RAGProxyHandler):
     # ---- the [membrane] monologue (thinking channel) ----------------------
     def _gate_monologue(self, verdict: dict, ctx: str | None, query: str,
                         query_vec=None) -> str:
-        """THE BANNER: entity stories only, deterministic, token-cheap.
-        The recall and WHERE WE ARE ride the ctx (opencode renders them);
-        reciting them here duplicates bytes. The banner's unique job: the
-        tracked entities' histories and dynamics."""
+        """THE BANNER: vitals + alerts only. The track STORIES ride WHERE
+        WE ARE (the operator's one place to read them -- the old
+        double-render showed stories in the banner while WHERE WE ARE
+        showed fallback lines for the same tracks: two event-conditional
+        renderers, one got the story, one didn't -- split-brain). The
+        state-machine step runs here (alerts drained exactly-once)."""
         lines: list[str] = []
         mem = self.server.membrane
         srv = self.server
         est = getattr(srv, "entity_store", None)
         if est is not None and getattr(est, "tracks", None):
             try:
-                # the state-machine step; ALERTS render from take_alerts()
-                # ONLY (the exactly-once ledger -- the eval return would
-                # duplicate every line)
                 est.evaluate_tracks(mem.store.exemplars)
                 for a in est.take_alerts():
                     lines.append(f"ALERT: {a['label']} {a['kind']} its "
                                  f"boundary ({a['boundary']}; {a['detail']})")
-                story = est.track_report(
-                    mem.store.exemplars, query_vec=query_vec,
-                    session_since=getattr(srv, "_boot_ts", None),
-                    embedder=mem.embedder)
-                if story:
-                    lines.extend(story)
             except Exception as e:
                 print(f"[opencode] banner render error: {e}",
                       file=sys.stderr)
