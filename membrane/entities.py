@@ -1458,7 +1458,17 @@ class EntityStore:
                            else 0.0)
                     born = _eph_born_of(exemplars, i)
                     newest_born = max(newest_born, born)
+                    # THE POOL GUARANTEE (stronger than the now-guarantee):
+                    # alignment never KILLS a beat candidate -- an
+                    # unaligned cell drops to sim 0 and competes on
+                    # freshness alone. A 3-cell track where the current
+                    # query aligns with none must still tell its story
+                    # (the live test: cosines 0.45-0.51 straddling the
+                    # floor silently emptied the pool -> bare fallback).
+                    # The ALIGN_FLOOR filter applies only to RANKING when
+                    # the pool is rich (>= 3 aligned candidates).
                     if qv is not None and sim < ALIGN_FLOOR:
+                        scored.append((i, 0.0 + 0.0, born))   # unaligned: rank-last, not dead
                         continue
                     # freshness credit: halves every FRESH_HALF_LIFE --
                     # an old beat must ALIGN HARDER to win the slot
