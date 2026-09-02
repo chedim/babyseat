@@ -34,8 +34,9 @@ import json
 import sys
 import time
 
-from .entities import (MEMBRANE_NS, CLASS_COMPONENT, entity_index,
-                       _eph_born_of, QuantumEntity, _KIND_CLASS)
+from .entities import (MEMBRANE_NS, CLASS_COMPONENT, CLASS_SESSION,
+                       entity_index, _eph_born_of, QuantumEntity,
+                       _KIND_CLASS)
 
 # ---- knobs (the audited defaults; all overridable per call) ---------------
 NIGHT_SWEEP_CUT = 0.70     # demote threshold (stricter than display 0.62)
@@ -233,6 +234,68 @@ def register_gray_forms(srv, mem, est, gray_idx_sims: list,
     return out
 
 
+def consolidate_now(mem, est, momentum_vec=None) -> dict:
+    """The 'now' trackers (the operator's design: the default entity is the
+    session's living present, not the model):
+
+    - session:now -- EPHEMERAL (RAM-only, never persisted, never shared):
+      a session's present is nobody else's business; it dies with the
+      process. Nudged EVERY TURN (the momentum fold) + the night tick.
+    - global:now -- SHARED (the couchbase write-through): the collective
+      drift, heavy half-life (7d), nudged only by the night's slow clock
+      from the newest cells. Parallel seats merge through the doc
+      merge-on-collision; the fresher trajectory wins (last-writer-wins
+      for derived state).
+
+    Its cells are the fresh tail -- not tag-matched (nothing tags 'now';
+    everything is now). Time rides INSIDE the nudge: the drift weights
+    decay by each cell's eph_born, so no separate timestamp push exists."""
+    import numpy as _np
+    now = time.time()
+    res = {"moved": 0.0, "velocity": 0.0, "direction": ""}
+    exs = mem.store.exemplars
+    safe_idx = [i for i, e in enumerate(exs) if getattr(e, "safe", False)]
+    # ---- session:now (ephemeral) ----
+    eid = f"{MEMBRANE_NS}session:now"
+    ent = est.docs.get(eid)
+    if ent is None:
+        ent = QuantumEntity(
+            eid=eid, cls=CLASS_SESSION,
+            properties={"name": "now", "grain": 0.03, "ephemeral": True},
+            derived_by=["membrane-night"])
+        est.docs[eid] = ent            # RAM-only: upsert would persist
+    pts = []
+    if momentum_vec is not None:
+        pts.append((list(momentum_vec), now))     # the strongest force
+    for i in safe_idx[-16:]:                       # the newest safe cells
+        e = exs[i]
+        v = getattr(e, "vec", None)
+        born = _eph_born_of(exs, i)
+        if v and born:
+            pts.append((v, born))
+    res = ent.consolidate_position(pts, now)
+    # ---- global:now (shared, heavy) ----
+    geid = f"{MEMBRANE_NS}global:now"
+    gent = est.docs.get(geid)
+    if gent is None:
+        gent = QuantumEntity(
+            eid=geid, cls=CLASS_SESSION,
+            properties={"name": "the global now",
+                        "grain": 0.05, "half_life_h": 168.0},
+            derived_by=["membrane-night"])
+        est.upsert(gent, embedder=mem.embedder)
+    gpts = [(exs[i].vec, _eph_born_of(exs, i)) for i in safe_idx[-64:]
+            if getattr(exs[i], "vec", None)]
+    if gpts:
+        gres = gent.consolidate_position(gpts, now)
+        if gres["moved"] > gent.grain():
+            est.upsert(gent, embedder=mem.embedder)   # shared: drift syncs
+    return {"moved": round(res["moved"], 4),
+            "velocity": round(res["velocity"], 4),
+            "direction": res["direction"],
+            "global_moved": round(gres["moved"], 4) if gpts else 0.0}
+
+
 def consolidate_entities(mem, est, materialize: int = 8) -> dict:
     """Phase 3 (every cycle, ~ms): drift every linked entity's position
     toward its recent cells and record the motion. Cells are immutable;
@@ -301,6 +364,10 @@ def run_night(srv, mem, est, chat, sweep: bool = False) -> dict:
     out: dict = {}
     try:
         out["consolidation"] = consolidate_entities(mem, est)
+        out["now"] = consolidate_now(mem, est,
+                                     momentum_vec=getattr(srv,
+                                                          "momentum_vec",
+                                                          None))
     except Exception as e:
         print(f"[night] consolidation skipped ({e})", file=sys.stderr)
     if sweep:

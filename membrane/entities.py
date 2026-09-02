@@ -218,7 +218,8 @@ def _zoom_windows(oldest_age: float):
         wi += 1
 
 
-def _arc(beats: list, borns: list, now: float, goal: str = "") -> str:
+def _arc(beats: list, borns: list, now: float, goal: str = "",
+         era_min: int = ZOOM_ERA_MIN) -> str:
     """The story ARC, told the way stories are told: ORIGIN -> development
     -> NOW -> aiming. ``beats``: (born, frag), junk-screened, deduped,
     chronological. ``borns``: every junk-free cell birth (the window
@@ -227,7 +228,9 @@ def _arc(beats: list, borns: list, now: float, goal: str = "") -> str:
     window renders less per hour, and mass beyond a window's budget
     collapses to an era count (the black-hole guard: precision x span
     stays bounded). The origin era earns ONE coarse beat (the classic
-    'began with' bookend); the arc always ENDS at the now."""
+    'began with' bookend); the arc always ENDS at the now.
+    ``era_min``: the collapse threshold (the now-track earns a higher
+    one -- its pool is pre-curated, so the detail lives at 'now')."""
     age_of = sorted(now - b for b in borns if b > 0)
     if not age_of:
         return ""
@@ -269,7 +272,7 @@ def _arc(beats: list, borns: list, now: float, goal: str = "") -> str:
     lo, hi, budget = wins[0]
     in_now = [a for a in age_of if a < hi]
     now_beats = [b for b in beats if now - b[0] < hi]
-    if in_now and len(in_now) <= ZOOM_ERA_MIN and now_beats:
+    if in_now and len(in_now) <= era_min and now_beats:
         frags = [f[0].lower() + f[1:] for _, f in now_beats[-budget:]]
         chron.append("and right now: " + "; ".join(frags))
     elif in_now:
@@ -905,7 +908,10 @@ class EntityStore:
             # the planted tracks; the silent tracking-death bug)
             d = json.loads(self.path.read_text()) if self.path.exists() \
                 else {}
-            d["docs"] = {k: q.to_doc() for k, q in self.docs.items()}
+            # EPHEMERAL docs (a session's living present) stay RAM-only:
+            # a dead session's 'now' must not pollute the next boot
+            d["docs"] = {k: q.to_doc() for k, q in self.docs.items()
+                         if not (q.properties or {}).get("ephemeral")}
             if self.tracks:
                 d["tracks"] = self.tracks
             tmp.write_text(json.dumps(d))
@@ -953,7 +959,11 @@ class EntityStore:
     # ---- the merge contract --------------------------------------------------
     def upsert(self, ent: QuantumEntity, embedder=None) -> bool:
         """Merge one entity (union on collision), persist both homes.
-        Returns True when written (new or merged)."""
+        Returns True when written (new or merged).
+        EPHEMERAL entities (properties['ephemeral']) stay LOCAL: a
+        session's living present is nobody else's business -- it never
+        rides the couchbase write-through (two parallel seats would
+        otherwise fight over one 'now' doc)."""
         if not ent.eid:
             return False
         existing = self.docs.get(ent.eid)
@@ -963,6 +973,8 @@ class EntityStore:
         else:
             self.docs[ent.eid] = ent
         self.save()
+        if (ent.properties or {}).get("ephemeral"):
+            return True
         coll = self._entities_collection()
         if coll is not None:
             try:
@@ -1338,12 +1350,27 @@ class EntityStore:
         dirty = False
         for key, t in self.tracks.items():
             idxs = inv.get(key) or []
+            is_now = (key == "session:now")
+            # the NOW TRACK: nothing tags 'session:now' -- its cell pool IS
+            # the fresh tail SINCE THIS SESSION'S BOOT (session_since --
+            # the seam finally consumed): each restart starts a new 'now'
+            # story; the previous session's cells are history, not present.
+            if is_now:
+                since = session_since or 0.0
+                fresh = sorted(((i, b) for i in range(len(exemplars))
+                                for b in (_eph_born_of(exemplars, i),)
+                                if b >= max(since, now - 24 * 3600.0)
+                                and getattr(exemplars[i], "safe", False)),
+                               key=lambda x: -x[1])
+                idxs = [i for i, _ in fresh[:24]]
             if not idxs:
                 continue          # quiet: nothing until the entity appears
             label = t.get("label") or self.default_label(key)
             # ---- the HISTORY half (the arc through the zoom ladder) ----
+            # the now-track renders TEMPORALLY (the fresh tail IS the
+            # story; alignment would filter out exactly what 'now' means)
             story = ""
-            if qv is not None:
+            if qv is not None or is_now:
                 scored = []
                 newest_born = 0.0
                 for i in idxs:
@@ -1351,21 +1378,21 @@ class EntityStore:
                     if is_capture_junk(sit_text) or _machinery_junk(sit_text):
                         continue
                     v = getattr(exemplars[i], "vec", None)
-                    if not v:
-                        continue
-                    # the per-track junk cut: the beat's own vector vs the
-                    # anchor entities (unknown junk forms die here; known
-                    # forms died in the regex above)
-                    if not self.junk_beat_ok(key, v, embedder):
-                        continue
-                    vv = _np.asarray(v, dtype=float)
-                    vn = _np.linalg.norm(vv)
-                    if vn < 1e-12:
-                        continue
-                    sim = float(qv @ (vv / vn))
+                    if v is not None:
+                        # the per-track junk cut: the beat's own vector vs
+                        # the anchor entities (unknown junk forms die here;
+                        # known forms died in the regex above)
+                        if not self.junk_beat_ok(key, v, embedder):
+                            continue
+                        vv = _np.asarray(v, dtype=float)
+                        vn = _np.linalg.norm(vv)
+                        if vn < 1e-12:
+                            continue
+                    sim = (float(qv @ (vv / vn)) if (qv is not None and v)
+                           else 0.0)
                     born = _eph_born_of(exemplars, i)
                     newest_born = max(newest_born, born)
-                    if sim < ALIGN_FLOOR:
+                    if qv is not None and sim < ALIGN_FLOOR:
                         continue
                     # freshness credit: halves every FRESH_HALF_LIFE --
                     # an old beat must ALIGN HARDER to win the slot
@@ -1410,9 +1437,13 @@ class EntityStore:
                         sit, act = _frag_of(exemplars, i)
                         sit = _narrative(sit, 110)
                         act = _narrative(act, 140)
-                        if (not sit or _tool_artifact(act)
-                                or _machinery_junk(sit)
-                                or _machinery_junk(act)):
+                        # an EMPTY action is silence, not junk (learn-pair
+                        # cells carry their text in the situation) -- only
+                        # a PRESENT action gets the artifact screen
+                        if not sit or (act and (_tool_artifact(act)
+                                                or _machinery_junk(act))):
+                            continue
+                        if _machinery_junk(sit):
                             continue
                         a_low = act.lower()[:80]
                         if any(_action_overlap(a_low, p) > 0.6
@@ -1423,7 +1454,13 @@ class EntityStore:
                         if act and _action_overlap(act, sit) < 0.6:
                             frag += f" — {act}"
                         beats.append((born, frag))
-                    story = _arc(beats, all_borns, now, goal=goal)
+                    # the now-track earns a higher prose budget: its pool is
+                    # the pre-curated fresh tail (not a raw tag-index), so
+                    # the era-collapse guard relaxes -- "now" is WHERE the
+                    # detail lives by definition
+                    story = _arc(beats, all_borns, now, goal=goal,
+                                 era_min=(ZOOM_ERA_MIN + 3) if is_now
+                                 else ZOOM_ERA_MIN)
                     if story:
                         story = f"{label}: {story}"
             # ---- the STRUCTURE half (change-gated surroundings) ----

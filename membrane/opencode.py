@@ -5297,6 +5297,14 @@ def main() -> None:
         from .entities import (EntityStore, JUNK_CUT_DEFAULT,
                                related_entities)
         srv.entity_store = EntityStore(path=str(_wdir / "entities.json"))
+        # the DEFAULT track (the operator's design): 'now' -- the session's
+        # living present. The model is a vessel (constant, uninformative);
+        # the conversation's direction is the thing worth watching. The
+        # story renders from the fresh tail (nothing tags 'now'; everything
+        # is now); the position drifts with the momentum EMA + fresh cells.
+        if "session:now" not in srv.entity_store.tracks:
+            srv.entity_store.watch_track(
+                "session:now", label="now (the session's living present)")
         _n_e = len(srv.entity_store.docs)
         print(f"[opencode] entities: {_n_e} known "
               f"(cortex-core write-through: {'on' if srv.entity_store._entities_collection() else 'json-only'})",

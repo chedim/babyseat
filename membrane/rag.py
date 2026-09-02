@@ -820,6 +820,19 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
         Guarded so a broken turn never breaks the chat. Called AFTER the
         recall skew so the current turn biases the NEXT one, not itself."""
         srv = self.server
+        # THE NOW NUDGE (the operator's design: 'now' is the default
+        # entity): every turn's direction is the strongest force on the
+        # session tracker -- live, not on the night's 15-min tick. The
+        # current turn's vector IS now (this is not recall; no
+        # self-bias concern). Independent of --momentum: the fresh-cell
+        # pull alone still tracks the present.
+        est = getattr(srv, "entity_store", None)
+        if est is not None:
+            try:
+                from .night import consolidate_now
+                consolidate_now(srv.membrane, est, momentum_vec=vec)
+            except Exception:
+                pass
         if not getattr(srv, "momentum", False):
             return
         try:
