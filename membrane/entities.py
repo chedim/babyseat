@@ -1227,37 +1227,14 @@ class EntityStore:
         except ValueError as e:
             return {"ok": False, "error": str(e)}
         # THE SCARCITY COVENANT (the operator's ratio: 3 tracks / 7
-        # watches): tracks are the expensive lane -- every one renders a
-        # paragraph every turn. Overflow evicts the STORY-POOREST track
-        # (fewest tagged cells, tie: oldest planted) -- a track with a
-        # rich history earns its bytes; a never-active track is a bare
-        # name wasting the lane (the operator's catch: planting-age
-        # eviction kept empty tracks and killed the rich one). The
-        # default now-track is never evicted.
-        evicted = None
+        # watches): overflow evicts via _enforce_cap -- STORY-POOREST
+        # (fewest tagged cells, tie: oldest planted), never a rich track,
+        # never the default now-track.
+        evicted_key = None
         if (key not in self.tracks and key != DEFAULT_TRACK_KEY
                 and len(self.tracks) >= MAX_TRACKS):
-            # STORY-POOREST eviction: the track with the fewest tagged
-            # cells (tie: oldest planted) loses the lane -- a rich history
-            # earns its bytes; a never-active track is a bare name wasting
-            # the lane. Needs the field's entity index: the caller sets
-            # _exemplars_hint when it can (the proxy does); without it the
-            # fallback is planted age.
-            est_idx = entity_index(getattr(self, "_exemplars_hint", []) or [])
-
-            def _pool(k):
-                return (len(est_idx.get(k) or []),
-                        -self.tracks[k].get("planted_ts", 0.0))
-
-            poorest_key = min((k for k in self.tracks
-                               if k != DEFAULT_TRACK_KEY),
-                              key=lambda k: _pool(k),
-                              default=None)
-            if poorest_key is not None:
-                t = self.tracks[poorest_key]
-                evicted = {"key": poorest_key,
-                           "label": t.get("label") or poorest_key}
-                del self.tracks[poorest_key]
+            evicted_list = self._enforce_cap_for_plant(key)
+            evicted_key = evicted_list[0] if evicted_list else None
         rec = dict(self.tracks.get(key) or {})
         if not rec:
             import time as _t
@@ -1280,8 +1257,8 @@ class EntityStore:
         for k in ("enter", "exit", "inside"):
             if rec.get(k) is not None:
                 out[k] = rec[k]
-        if evicted:
-            out["evicted"] = evicted
+        if evicted_key:
+            out["evicted"] = {"key": evicted_key}
         return out
 
     @staticmethod
@@ -1403,21 +1380,65 @@ class EntityStore:
             d = json.loads(self.path.read_text())
             for k, t in (d.get("tracks") or {}).items():
                 self.tracks[k] = t
-            # THE CAP ENFORCES ON LOAD TOO: a pre-covenant field may hold
-            # more tracks than MAX_TRACKS (the operator's 3/7 ratio) --
-            # boot trims, oldest-planted first, the default now-track
-            # never evicted. The trim is silent (the covenant IS the
-            # rule; the operator sees the roster in the banner).
-            over = len(self.tracks) - MAX_TRACKS
-            if over > 0:
-                by_old = sorted(((k, t) for k, t in self.tracks.items()
-                                 if k != DEFAULT_TRACK_KEY),
-                                key=lambda kv: kv[1].get("planted_ts", 0.0))
-                for k, _ in by_old[:over]:
-                    del self.tracks[k]
-                self._save_tracks()
         except Exception:
             pass
+
+    def _enforce_cap(self) -> list[str]:
+        """THE CAP, enforced wherever the roster stands: story-poorest
+        (fewest tagged cells via _exemplars_hint, tie: oldest planted)
+        evicted down to MAX_TRACKS; the default now-track immune. Called
+        at boot (after the hint wires) and at plant time. Returns the
+        evicted keys."""
+        evicted: list[str] = []
+        over = len(self.tracks) - MAX_TRACKS
+        if over <= 0:
+            return evicted
+        est_idx = entity_index(getattr(self, "_exemplars_hint", []) or [])
+
+        def _pool(k):
+            return (len(est_idx.get(k) or []),
+                    -self.tracks[k].get("planted_ts", 0.0))
+
+        for _ in range(over):
+            poorest = min((k for k in self.tracks
+                           if k != DEFAULT_TRACK_KEY),
+                          key=lambda k: _pool(k),
+                          default=None)
+            if poorest is None:
+                break
+            del self.tracks[poorest]
+            evicted.append(poorest)
+        if evicted:
+            self._save_tracks()
+        return evicted
+
+    def _enforce_cap_for_plant(self, incoming_key: str) -> list[str]:
+        """Plant-time variant: make room for `incoming_key` BEFORE it
+        lands (the incoming track must not be an eviction candidate --
+        it arrives with zero cells and would always be the poorest)."""
+        over = len(self.tracks) - MAX_TRACKS + 1
+        evicted: list[str] = []
+        if over <= 0:
+            return evicted
+        est_idx = entity_index(getattr(self, "_exemplars_hint", []) or [])
+
+        def _pool(k):
+            return (len(est_idx.get(k) or []),
+                    -self.tracks[k].get("planted_ts", 0.0))
+
+        for _ in range(over):
+            poorest = min((k for k in self.tracks
+                           if k != DEFAULT_TRACK_KEY
+                           and k != incoming_key),
+                          key=lambda k: _pool(k),
+                          default=None)
+            if poorest is None:
+                break
+            del self.tracks[poorest]
+            evicted.append(poorest)
+        if evicted:
+            self._save_tracks()
+        return evicted
 
     def track_report(self, exemplars, query_vec=None,
                      session_since: float | None = None,

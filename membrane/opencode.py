@@ -5340,8 +5340,15 @@ def main() -> None:
         # is now); the position drifts with the momentum EMA + fresh cells.
         # THE SCARCITY COVENANT WIRE: the store gets the field so
         # story-poorest eviction counts cells (never evicts a rich track
-        # for a fresh plant).
+        # for a fresh plant); the cap then ENFORCES at boot -- a
+        # pre-covenant roster (or a previous boot's oldest-trimmed
+        # mistake) trims by story-poverty here, recovering a rich track
+        # if a stub can be evicted instead.
         srv.entity_store._exemplars_hint = mem.store.exemplars
+        evicted_boot = srv.entity_store._enforce_cap()
+        if evicted_boot:
+            print(f"[opencode] track cap: evicted {evicted_boot} "
+                  f"(story-poorest)", file=sys.stderr)
         if "session:now" not in srv.entity_store.tracks:
             srv.entity_store.watch_track(
                 "session:now", label="now (the session's living present)")
