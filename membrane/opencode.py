@@ -872,47 +872,14 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
     mem = srv.membrane
     from .entities import entity_index, _eph_born_of, _ago
     lines: list[str] = []
-    # 1. FOCUS: the momentum EMA's top directions = what the conversation has
-    #    been about lately (computed, not remembered).
-    mv = getattr(srv, "momentum_vec", None)
-    if mv is not None and mem.embedder is not None:
-        try:
-            ib = getattr(srv, "_intent_board", None)
-            i, c = (ib.nearest(mv) if ib else (None, 0.0))
-            if i is not None and c >= 0.45:
-                lines.append(f"focus: {i.text[:90]} (near an open "
-                             f"commitment, cos {c:.2f})")
-            else:
-                lines.append("focus: mid-conversation (recent turns share a "
-                             "direction; no open commitment near it)")
-        except Exception:
-            pass
-    # 2. COMMITMENTS: open intentions (the 'I said I would' track).
-    ib = getattr(srv, "_intent_board", None)
-    if ib is not None:
-        try:
-            open_ = [i for i in ib.open_intents() if (i.text or "").strip()]
-            if open_:
-                lines.append(f"open commitments: "
-                             + "; ".join(f"#{i.iid} {i.text[:60]}"
-                                         for i in open_[:2])
-                             + (f" (+{len(open_) - 2} more)" if len(open_) > 2
-                                else ""))
-        except Exception:
-            pass
-    # 3. POSITION: the field's size + trust + pending human reviews -- the
-    #    substrate the model stands on.
-    try:
-        n = len(mem.store)
-        safe = sum(1 for e in mem.store.exemplars if e.safe)
-        rp = len(mem.review_pending()) if hasattr(mem, "review_pending") else 0
-        pos = f"field: {n} memories ({100 * safe / max(n, 1):.0f}% trusted)"
-        if rp:
-            pos += f"; {rp} pending human review(s)"
-        lines.append(pos)
-    except Exception:
-        pass
-    # 4. TRACKS: the model's own planted entity tracks -- the live count +
+    # THE MINIMAL HEADER (the operator's call: 'only tracks and
+    # notifications'): the focus/commitments/field-stats lines moved to
+    # /membrane/state (the operator's instrument) -- the MODEL's header
+    # carries only what steers the work: the track stories + the event
+    # lines (ALERTs). Identical bytes were re-sent every turn and the
+    # field-stats line leaked the stale-shard count; tracks carry their
+    # own subjects now (the now-report names the subject).
+    # 1. TRACKS: the model's own planted entity tracks -- the live count +
     #    inside/outside state every turn; ALERT lines for boundary events.
     #    evaluate_tracks() transitions the state machine; ALERTS render from
     #    take_alerts() ONLY when draining (the chat path); a peek shows the
@@ -3632,10 +3599,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # a second writer. (The old full stand-down left BOTH seats silent
         # when the fork's own recall was thin -- the hollow-world bug.)
         ctx = self._memory_block(vec, body.get("messages"))
-        if getattr(mem, "fork_owns_field", False) and ctx:
-            ctx = ("[membrane] recall from the operator's field (the "
-                   "ollama-membrane fork owns capture; this seat is "
-                   "read-only):\n\n" + ctx)
+        # NO provenance narration (the operator's 'useless' call): the
+        # fork-standdown header repeated every turn -- the per-entry
+        # provenance stamps ([src: ...]) already carry origin; the
+        # narration was bytes without information.
         self.momentum_update(vec, query)
         # pending human reviews ride along as a system-level notice: the model
         # is told to ASK the user via its native question tool. The user's
