@@ -988,6 +988,12 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
                          f" [situation: {q}]{via}")
             else:
                 entry = f"Q: {q}\nA: {a}{via} (sim {sim:.2f}){src}"
+            # THE COMPOSED CAP (the operator's 'why does it sometimes send
+            # larger header' catch): the per-side caps COMPOSE -- an
+            # action-first entry carries 220 (A) + 220 (Q as note) + the
+            # stamp ~ 470 chars. The cap that matters is the ENTRY's.
+            if len(entry) > srv.rag_mem_chars * 2:
+                entry = entry[:srv.rag_mem_chars * 2 - 1].rstrip() + "…"
             if len(entry) > budget:
                 break
             budget -= len(entry)
