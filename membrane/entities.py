@@ -234,7 +234,11 @@ def _arc(beats: list, borns: list, now: float, goal: str = "") -> str:
     oldest_age = age_of[-1]
     wins = list(_zoom_windows(oldest_age))
     chron: list[str] = []            # rendered oldest -> newest
-    for wi in range(len(wins) - 1, -1, -1):
+    rendered: set[float] = set()     # beat birth stamps already in the arc
+    # the window loop covers wi >= 1 only: the NOW window (wi == 0) is the
+    # story's ANCHOR, rendered last by the block below (rendering it in the
+    # loop too duplicated every fresh beat)
+    for wi in range(len(wins) - 1, 0, -1):
         lo, hi, budget = wins[wi]
         in_win = [a for a in age_of if lo <= a < hi]
         if not in_win:
@@ -243,23 +247,26 @@ def _arc(beats: list, borns: list, now: float, goal: str = "") -> str:
         win_beats = [b for b in beats if lo <= now - b[0] < hi]
         is_origin = (wi == len(wins) - 1)
         if is_origin:
+            # the bookend earns its ONE coarse beat unconditionally --
+            # 'began N ago with X' (a bare count tells the reader nothing)
             piece = f"began {_ago(now - oldest_age, now) or 'long ago'}"
-            if win_beats and budget > 0:
+            if win_beats:
                 _, frag = win_beats[0]        # the oldest clean beat
                 piece += f" with {frag[0].lower() + frag[1:]}"
+                rendered.add(win_beats[0][0])
             if n > 2:
                 piece += f" ({n} cells since)"
             chron.append(piece)
         elif n <= ZOOM_ERA_MIN and budget > 0 and win_beats:
             for _, frag in win_beats[-budget:]:
                 chron.append(f"then {frag[0].lower() + frag[1:]}")
+                rendered.add(win_beats[-1][0])
         else:
             chron.append(_era(n, hi - lo))
-    if not chron:
-        return ""
-    # the NOW anchor last: the point the whole story lands on
-    now_win = wins[0]
-    lo, hi, budget = now_win
+    # the NOW anchor last: the point the whole story lands on (and for a
+    # young entity — one window total — it is the WHOLE story; the early
+    # bail below must not fire before this block runs)
+    lo, hi, budget = wins[0]
     in_now = [a for a in age_of if a < hi]
     now_beats = [b for b in beats if now - b[0] < hi]
     if in_now and len(in_now) <= ZOOM_ERA_MIN and now_beats:
@@ -267,6 +274,18 @@ def _arc(beats: list, borns: list, now: float, goal: str = "") -> str:
         chron.append("and right now: " + "; ".join(frags))
     elif in_now:
         chron.append(f"now active — {_era(len(in_now), hi)}")
+    elif [b for b in beats if b[0] not in rendered]:
+        # the now-window starved but the entity LIVES (newest beat within
+        # the stale gate): anchor on the last known state NOT already in
+        # the arc (a duplicate anchor reads as stutter). NOTE: beats carry
+        # ABSOLUTE birth stamps; _ago wants the timestamp, not the age.
+        nb_born, nb_frag = max((b for b in beats if b[0] not in rendered),
+                               key=lambda b: b[0], default=(0, ""))
+        if nb_frag:
+            chron.append(f"last active {_ago(nb_born, now) or 'recently'}: "
+                         f"{nb_frag[0].lower() + nb_frag[1:]}")
+    if not chron:
+        return ""
     if goal:
         chron.append(f"aiming for: {goal}")
     return ", ".join(chron)
