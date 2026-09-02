@@ -243,8 +243,7 @@ def _arc(beats: list, borns: list, now: float, goal: str = "") -> str:
         win_beats = [b for b in beats if lo <= now - b[0] < hi]
         is_origin = (wi == len(wins) - 1)
         if is_origin:
-            age = _ago(now - oldest_age, now) or "long ago"
-            piece = f"began {age} ago"
+            piece = f"began {_ago(now - oldest_age, now) or 'long ago'}"
             if win_beats and budget > 0:
                 _, frag = win_beats[0]        # the oldest clean beat
                 piece += f" with {frag[0].lower() + frag[1:]}"
