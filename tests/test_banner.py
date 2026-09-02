@@ -88,9 +88,12 @@ class TestTransparency(unittest.TestCase):
             self.assertNotIn("Moving fast", out)
             self.assertNotIn("focus moved", out)
 
-    def test_stale_story_silent(self):
-        """THE STALE GATE: a story whose newest beat is >24h old renders
-        NOTHING (silence beats a stale story recited back)."""
+    def test_stale_story_told_with_age(self):
+        """THE STALE COVENANT (revised, the operator's 'I want stories'
+        call): an old story is told WITH ITS AGE ATTACHED ('last active
+        25h ago: ...') -- silence was the lie of omission. The gate's
+        real function (blocking recitation that PRETENDS recency) is
+        served by the arc's honest age stamps."""
         import tempfile, time as _t
         from membrane.entities import EntityStore, extract_entities
 
@@ -116,7 +119,9 @@ class TestTransparency(unittest.TestCase):
             h = _handler(tracks_store=est)
             h.server.membrane.store.exemplars = cells
             out = h._gate_monologue(VERDICT, CTX, "test", query_vec=qv)
-            self.assertEqual(out, "")   # silence, not a stale story
+            # the story IS told -- with the honest age stamp
+            self.assertIn("router", out)
+            self.assertIn("25h ago", out)
 
     def test_meta_voice_stripped(self):
         """The teed meta-voice ('The user is laughing about ...') is

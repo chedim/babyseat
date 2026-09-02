@@ -1365,12 +1365,23 @@ class EntityStore:
                 idxs = [i for i, _ in fresh[:24]]
             if not idxs:
                 continue          # quiet: nothing until the entity appears
+            # ---- the now-scope for the track's OWN compact line ----
+            # (used when the story is stale-silent: the fallback must
+            # still TRACE -- a bare name says nothing about the entity's
+            # temporal position; 'last active' is the honest minimum)
+            newest_cell = max((_eph_born_of(exemplars, i) for i in idxs),
+                              default=0.0)
             label = t.get("label") or self.default_label(key)
             # ---- the HISTORY half (the arc through the zoom ladder) ----
             # the now-track renders TEMPORALLY (the fresh tail IS the
-            # story; alignment would filter out exactly what 'now' means)
+            # story; alignment would filter out exactly what 'now' means).
+            # A tag-track with no query vector ALSO tells its story --
+            # alignment SELECTS which beats win the fine slots; it is not
+            # the gate on WHETHER a story exists (a 74-cell history
+            # rendered as a bare name is a lie of omission -- the
+            # operator's 'I want stories' call).
             story = ""
-            if qv is not None or is_now:
+            if qv is not None or is_now or newest_cell > 0:
                 scored = []
                 newest_born = 0.0
                 for i in idxs:
@@ -1399,10 +1410,15 @@ class EntityStore:
                     fresh = FRESH_WEIGHT * (0.5 ** (max(now - born, 0.0)
                                                     / FRESH_HALF_LIFE))
                     scored.append((i, sim + fresh, born))
-                if scored and (not newest_born
-                               or (now - newest_born) <= STALE_STORY_S):
+                if scored:
+                    # NO inner stale gate: _arc already marks recency
+                    # honestly ('last active 28h ago: ...') -- a rich
+                    # history told with an honest age stamp beats a bare
+                    # name (the operator's 'I want stories' call; the
+                    # stale-recitation risk lives in pretending recency,
+                    # not in telling an old story with its age attached).
                     # the zoom ladder needs the WHOLE timeline, not just
-                    # aligned winners: every junk-free born cell, sorted
+                    # aligned winners: every junk-free born cell, sorted.
                     all_borns = sorted(_eph_born_of(exemplars, i)
                                        for i in idxs)
                     all_borns = [b for b in all_borns if b > 0]

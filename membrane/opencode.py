@@ -847,6 +847,7 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
     consuming them (the state-instrument read must never eat the model's
     alerts -- the curl-drained-the-ALERT bug)."""
     mem = srv.membrane
+    from .entities import entity_index, _eph_born_of, _ago
     lines: list[str] = []
     # 1. FOCUS: the momentum EMA's top directions = what the conversation has
     #    been about lately (computed, not remembered).
@@ -923,16 +924,20 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
                 if story:
                     lines.append("track: " + story)
                     continue
-                bits = [t["key"]]
-                if t.get("enter") is not None:
-                    bits.append(f"boundary enter {t['enter']}, "
-                                f"currently {'inside' if t.get('inside') else 'outside'}")
-                elif t.get("exit") is not None:
-                    bits.append(f"boundary exit {t['exit']}, "
-                                f"currently {'inside' if t.get('inside') else 'outside'}")
-                if t.get("pending_alerts"):
-                    bits.append(f"{t['pending_alerts']} alert(s) pending")
-                lines.append("track: " + ", ".join(bits))
+                # the story was silent: the fallback must still TRACE --
+                # a compact temporal line (the honest minimum), never a
+                # bare name (the operator's 'I want stories' call)
+                key = t["key"]
+                idxs2 = entity_index(mem.store.exemplars).get(key) or []
+                if idxs2:
+                    newest = max((_eph_born_of(mem.store.exemplars, i)
+                                  for i in idxs2), default=0.0)
+                    import time as _tmod
+                    ago = _ago(newest, _tmod.time()) or "unknown age"
+                    lines.append(f"track: {label} — {len(idxs2)} cells, "
+                                 f"last active {ago}")
+                else:
+                    lines.append(f"track: {label} — no cells yet")
         except Exception:
             pass
     # (entity track stories live in the banner -- _gate_monologue -- not
