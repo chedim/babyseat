@@ -62,7 +62,8 @@ MEMBRANE_NS = "membrane::"
 # ---- deterministic extraction (capture time, $0) -----------------------------
 _FILE_RE = re.compile(
     r"(?:[\w.-]+/)*[\w.-]+\.(?:py|md|json|jsonc|ts|js|jsonl|toml|yaml|yml|sh|html|css|txt)\b")
-_SYMBOL_RE = re.compile(r"\b[a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*){1,3}\b")
+_SYMBOL_RE = re.compile(r"\b[a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*){1,3}\b"
+                        r"|\b[a-zA-Z][a-z0-9]*(?:_[a-z0-9]+)+\b")
 _MODEL_RE = re.compile(r"\b[a-zA-Z][\w.-]*(?::[\w.-]+){1,3}\b")
 _URL_RE = re.compile(r"https?://[^\s\"'`)\]}]+")
 _HA_RE = re.compile(r"\b(?:sensor|binary_sensor|light|switch|cover|fan|pump|battery)\.[\w]+")
