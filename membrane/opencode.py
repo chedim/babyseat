@@ -3940,17 +3940,20 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self.send_header("Connection", "close")
             self.close_connection = True
             self.end_headers()
-            # the [membrane] gate monologue: streamed as reasoning deltas so
-            # opencode shows the proxy's routing/recall/judge machinery in the
-            # thinking channel, separated from the model's own reasoning.
-            if getattr(srv, "gate_monologue", True):
-                mono = self._gate_monologue(verdict, ctx, query, query_vec=vec)
-                if mono:
-                    for chunk in _openai_sse_chunks(
-                            up.get("model", "membrane"), mono + "\n\n",
-                            reasoning=True):
-                        self.wfile.write(chunk)
-                    self.wfile.flush()
+            # THE TRANSPARENCY CONTRACT, restored: stream the FULL composed
+            # injection (recall + where-we-are + the banner -- everything
+            # membrane appended to ctx) as reasoning deltas, so the operator
+            # sees EXACTLY what the model sees. The old path streamed only
+            # the gate monologue; recall and where-we-are rode silently --
+            # the dark-banner bug (the surface log proved the bytes were
+            # sent while the thinking channel showed nothing).
+            if getattr(srv, "gate_monologue", True) and ctx:
+                for chunk in _openai_sse_chunks(
+                        up.get("model", "membrane"),
+                        "[membrane] injecting this turn:\n\n" + ctx + "\n\n",
+                        reasoning=True):
+                    self.wfile.write(chunk)
+                self.wfile.flush()
             try:
                 backend_r = _open_backend(up.get("model", "membrane"))
             except Exception as e:
