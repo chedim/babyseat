@@ -1507,7 +1507,13 @@ class EntityStore:
         """The entities whose cell-centroids sit nearest a position
         vector -- 'what is this session about right now' from the
         now-tracker's own geometry. $0: one pass over the inverted
-        index's centroids."""
+        index's centroids.
+        THE TOPIC RANKING (the 'subject reads tools, not topics' fix):
+        shell verbs and model names tag aggressively and dominate recent
+        mass, but the session's SUBJECT lives in files/symbols/topics.
+        Kind-weighted ranking: files/symbols 1.0, everything else 0.75
+        of its cosine -- a shell verb must beat a file by 25% cosine to
+        lead the subject line."""
         import numpy as _np
         if not position:
             return []
@@ -1529,7 +1535,10 @@ class EntityStore:
             on = _np.linalg.norm(o)
             if on < 1e-12:
                 continue
-            scored.append((float(p @ (o / on)), other_key))
+            sim = float(p @ (o / on))
+            kind = other_key.split(":", 1)[0]
+            sim *= _SUBJECT_KIND_WEIGHT.get(kind, 0.75)
+            scored.append((sim, other_key))
         scored.sort(reverse=True)
         return [(k, round(s, 2)) for s, k in scored[:top] if s >= 0.4]
 
@@ -1615,21 +1624,19 @@ class EntityStore:
     def track_report(self, exemplars, query_vec=None,
                      session_since: float | None = None,
                      goal: str = "", embedder=None) -> list[tuple[str, str]] | None:
-        """Tracked entities as STRUCTURED stories: (track_key, text) —
-        the consumer indexes by the key itself (never string-splitting a
-        colon-rich ID out of prose). ONE MIXED paragraph per track:"""
-        """Tracked entities, ONE MIXED line each:
-        HISTORY half = the story ARC (now -> how it got there ->
-        originated -> aiming), rendered through the zoom ladder (the
-        black-hole invariant applied to time): the NOW window
-        (<= ZOOM_NOW_S) renders fine grain (<= ZOOM_NOW_MAX beats), the
-        RECENT window mid grain, the ORIGIN era always coarse. A window
-        with more cells than its beat budget COLLAPSES into an era count
-        ("now: active — 5 changes just before"); precision x span stays
-        bounded. Stale story (newest beat > STALE_STORY_S) -> silence.
-        STRUCTURE half = co-occurrence surroundings, change-gated.
-        Both halves event-conditional; deterministic, $0; the teed
-        meta-voice and raw machinery dumps are junk, never beats."""
+        """THE PRINTF (the operator's verdict on the spaghetti: 'just
+        render three fucking tracks and whatever alerts are there').
+
+        Per track, the honest minimum -- no zoom ladder, no era collapse,
+        no alignment scoring, no freshness credits, no stale gates, no
+        fallback ladders. Just:
+          - the newest junk-free fragment(s), newest first, with ages
+          - the cell count + last-active age
+        Kept from the old maze (each earned independently): the junk
+        screens (capture form judged after prefix-strip), the tool-stamp
+        trim, the echo guard (one cell anchors one story), the
+        structured (key, text) return. session:now keeps _now_report
+        (its own geometry renderer -- position + ring, no cells)."""
         if not self.tracks:
             return None
         try:
@@ -1637,304 +1644,63 @@ class EntityStore:
         except Exception:
             is_capture_junk = lambda s: False
         import time as _t
-        import numpy as _np
         now = _t.time()
         inv = entity_index(exemplars)
-        qv = None
-        if query_vec is not None:
-            qv = _np.asarray(query_vec, dtype=float)
-            qv = qv / (_np.linalg.norm(qv) + 1e-12)
         out: list[tuple[str, str]] = []
-        dirty = False
-        # THE CROSS-TRACK ECHO GUARD: one cell may anchor at most ONE
-        # story per render pass -- the now-track and a young entity-track
-        # would otherwise recite the same fresh cell twice (the live
-        # exhibit: both tracks rendered the same probe cell verbatim).
-        # Priority = track order (planted first wins); the later track
-        # falls back to its own distinct cells or the compact line.
+        # THE ECHO GUARD: one cell anchors at most ONE story per pass.
         claimed_cells: set[int] = set()
         for key, t in self.tracks.items():
-            # THE NOW-TRACK'S OWN PATH: it has no tags and no real cell
-            # pool (boot-scoped; fork owns capture) -- the tag-track
-            # pipeline (arc through zoom windows, junk screens, alignment)
-            # never fit it. Its story is its GEOMETRY: position -> nearest
-            # entities (the subject) + ring velocity (the motion). One
-            # dedicated tiny renderer instead of a fourth gate patch.
             if key == DEFAULT_TRACK_KEY:
                 now_line = self._now_report(exemplars, now)
                 if now_line:
                     out.append(now_line)
                 continue
             idxs = inv.get(key) or []
-            is_now = (key == "session:now")
-            # the NOW TRACK: nothing tags 'session:now' -- its cell pool IS
-            # the fresh tail SINCE THIS SESSION'S BOOT (session_since --
-            # the seam finally consumed): each restart starts a new 'now'
-            # story; the previous session's cells are history, not present.
-            if is_now:
-                since = session_since or 0.0
-                fresh = sorted(((i, b) for i in range(len(exemplars))
-                                for b in (_eph_born_of(exemplars, i),)
-                                if b >= max(since, now - 24 * 3600.0)
-                                and getattr(exemplars[i], "safe", False)),
-                               key=lambda x: -x[1])
-                idxs = [i for i, _ in fresh[:24]]
-            # THE MOTION STORY NEEDS NO CELLS (the session:now fix): the
-            # now-tracker's ring carries the momentum story even when the
-            # cell pool is empty (fork owns capture; boot-scoped pool) --
-            # an empty pool skips the HISTORY half but must not skip the
-            # tracker's own recorded motion.
-            if not idxs and not is_now:
-                continue          # quiet: nothing until the entity appears
-            # ---- the now-scope for the track's OWN compact line ----
-            # (used when the story is stale-silent: the fallback must
-            # still TRACE -- a bare name says nothing about the entity's
-            # temporal position; 'last active' is the honest minimum)
-            newest_cell = max((_eph_born_of(exemplars, i) for i in idxs),
-                              default=0.0)
+            if not idxs:
+                out.append((key, f"{key}: no cells yet"))
+                continue
             label = t.get("label") or self.default_label(key)
-            # ---- the HISTORY half (the arc through the zoom ladder) ----
-            # the now-track renders TEMPORALLY (the fresh tail IS the
-            # story; alignment would filter out exactly what 'now' means).
-            # A tag-track with no query vector ALSO tells its story --
-            # alignment SELECTS which beats win the fine slots; it is not
-            # the gate on WHETHER a story exists (a 74-cell history
-            # rendered as a bare name is a lie of omission -- the
-            # operator's 'I want stories' call).
-            story = ""
-            if qv is not None or is_now or newest_cell > 0:
-                scored = []
-                newest_born = 0.0
-                for i in idxs:
-                    # THE STORY-ELIGIBILITY SCREEN: judge the STRIPPED
-                    # narrative, not the raw capture form. A tool-capture
-                    # cell IS recall-junk (never grounding material) but
-                    # its fragment after prefix-strip is the operator's
-                    # own words -- story-eligible (the entity-management
-                    # captures are structurally ABOUT this entity; killing
-                    # them here is why tracks had no stories). The raw
-                    # MACHINERY forms (ps tables, config JSON) still die:
-                    # they stay junk after any strip.
-                    sit_text = _sit_text_of(exemplars, i)
-                    stripped = _strip_tool_prefix(sit_text)
-                    if stripped == sit_text:
-                        # no tool prefix: the raw form IS the narrative
-                        if is_capture_junk(sit_text) or _machinery_junk(sit_text):
-                            continue
-                    elif _machinery_junk(stripped):
-                        continue
-                    v = getattr(exemplars[i], "vec", None)
-                    if v is not None:
-                        # the per-track junk cut: the beat's own vector vs
-                        # the anchor entities (unknown junk forms die here;
-                        # known forms died in the regex above)
-                        if not self.junk_beat_ok(key, v, embedder):
-                            continue
-                        vv = _np.asarray(v, dtype=float)
-                        vn = _np.linalg.norm(vv)
-                        if vn < 1e-12:
-                            continue
-                    sim = (float(qv @ (vv / vn)) if (qv is not None and v)
-                           else 0.0)
-                    born = _eph_born_of(exemplars, i)
-                    newest_born = max(newest_born, born)
-                    # THE POOL GUARANTEE (stronger than the now-guarantee):
-                    # alignment never KILLS a beat candidate -- an
-                    # unaligned cell drops to sim 0 and competes on
-                    # freshness alone. A 3-cell track where the current
-                    # query aligns with none must still tell its story
-                    # (the live test: cosines 0.45-0.51 straddling the
-                    # floor silently emptied the pool -> bare fallback).
-                    # The ALIGN_FLOOR filter applies only to RANKING when
-                    # the pool is rich (>= 3 aligned candidates).
-                    if qv is not None and sim < ALIGN_FLOOR:
-                        scored.append((i, 0.0 + 0.0, born))   # unaligned: rank-last, not dead
-                        continue
-                    # freshness credit: halves every FRESH_HALF_LIFE --
-                    # an old beat must ALIGN HARDER to win the slot
-                    fresh = FRESH_WEIGHT * (0.5 ** (max(now - born, 0.0)
-                                                    / FRESH_HALF_LIFE))
-                    scored.append((i, sim + fresh, born))
-                if scored:
-                    # NO inner stale gate: _arc already marks recency
-                    # honestly ('last active 28h ago: ...') -- a rich
-                    # history told with an honest age stamp beats a bare
-                    # name (the operator's 'I want stories' call; the
-                    # stale-recitation risk lives in pretending recency,
-                    # not in telling an old story with its age attached).
-                    # the zoom ladder needs the WHOLE timeline, not just
-                    # aligned winners: every junk-free born cell, sorted.
-                    all_borns = sorted(_eph_born_of(exemplars, i)
-                                       for i in idxs)
-                    all_borns = [b for b in all_borns if b > 0]
-                    # the fine-grain beats: fresh-aligned, junk-screened,
-                    # deduped, chronological (the ladder's prose slots).
-                    # A beat without a birth stamp carries no temporal
-                    # truth -- it cannot anchor a story, so it dies here
-                    # (the 'last active recently:' stutter fix).
-                    scored.sort(key=lambda x: -x[1])
-                    picked = [s for s in scored if s[2] > 0][:6]
-                    # THE NOW GUARANTEE: the arc must END at the now --
-                    # the 2 newest junk-free cells join the beat pool
-                    # regardless of alignment (a story that ends 29h deep
-                    # while fresh work exists is a lie about the present).
-                    # The junk screens below still apply to them.
-                    by_born = sorted(((i, b) for i in idxs
-                                      for b in (_eph_born_of(exemplars, i),)
-                                      if b > 0),
-                                     key=lambda x: -x[1])
-                    have = {p[0] for p in picked}
-                    for i, b in by_born[:2]:
-                        if i not in have:
-                            picked.append((i, 0.0, b))
-                    picked.sort(key=lambda x: x[2])
-                    beats: list[tuple[float, str]] = []
-                    seen: set[int] = set()
-                    seen_actions: list[str] = []
-                    for i, _sim, born in picked:
-                        if i in seen:
-                            continue
-                        seen.add(i)
-                        sit, act = _frag_of(exemplars, i)
-                        sit = _narrative(sit, 200)
-                        act = _narrative(act, 240)
-                        # an EMPTY action is silence, not junk (learn-pair
-                        # cells carry their text in the situation) -- only
-                        # a PRESENT action gets the artifact screen
-                        if not sit or (act and (_tool_artifact(act)
-                                                or _machinery_junk(act))):
-                            continue
-                        if _machinery_junk(sit):
-                            continue
-                        a_low = act.lower()[:80]
-                        if any(_action_overlap(a_low, p) > 0.6
-                               for p in seen_actions):
-                            continue
-                        seen_actions.append(a_low)
-                        # the act half of an entity-management capture is a
-                        # tool RESULT stamp ('Entity track planted: ...') —
-                        # the situation fragment already carries the
-                        # operator's words; the stamp adds nothing (the
-                        # _tool_artifact trim ran, but the remainder is
-                        # still tool-voice: drop the act entirely here)
-                        if act and act.startswith(("Entity track planted",
-                                                   "Entity ",
-                                                   "Removed ",
-                                                   "Track not planted")):
-                            act = ""
-                        # the echo guard: a cell already anchoring another
-                        # track's story this pass dies here (the FIRST
-                        # claim wins -- track order = priority)
-                        if i in claimed_cells:
-                            continue
-                        frag = sit
-                        if act and _action_overlap(act, sit) < 0.6:
-                            frag += f" — {act}"
-                        beats.append((born, frag))
-                        claimed_cells.add(i)
-                    # the now-track earns a higher prose budget: its pool is
-                    # the pre-curated fresh tail (not a raw tag-index), so
-                    # the era-collapse guard relaxes -- "now" is WHERE the
-                    # detail lives by definition
-                    story = _arc(beats, all_borns, now, goal=goal,
-                                 era_min=(ZOOM_ERA_MIN + 3) if is_now
-                                 else ZOOM_ERA_MIN)
-                    # THE ID PREFIX (the operator's call): stories lead with
-                    # the ENTITY ID (files:router.py), not the friendly
-                    # label -- the id is the actionable handle (paste it
-                    # into membrane_related_entities / membrane_query and
-                    # the named-hit path finds the field slice). One name
-                    # space across banner, reader, and field.
-                    if story:
-                        story = f"{key}: {story}"
-            # ---- the STRUCTURE half (change-gated surroundings) ----
-            surr = ""
-            links = cooccurrence_neighbors(exemplars, key, inv=inv)
-            mode = "shared cells"
-            if not links:
-                cent = centroid_neighbors(exemplars, key, inv=inv)
-                links = [(k, round(float(c), 2)) for k, c in cent]
-                mode = "near"
-            if links:
-                sig = [f"{k}:{c}" for k, c in links]
-                if (t.get("surr") or {}).get("sig") != sig:
-                    t["surr"] = {"sig": sig, "mode": mode, "ts": now}
-                    dirty = True
-                    if mode == "shared cells":
-                        nb = ", ".join(f"{self.default_label(k)} ({c} shared)"
-                                       for k, c in links[:SURR_MAX])
-                    else:
-                        nb = ", ".join(f"{self.default_label(k)} (cos {c:.2f})"
-                                       for k, c in links[:SURR_MAX])
-                    surr = f" Around it: {nb} [{mode}]."
-            # ---- the MOTION half (measured drift from the living geometry) ----
-            # the tracker's OWN recorded trajectory (night consolidation):
-            # velocity from the fine end of the ring, change-gated like the
-            # surroundings -- silence unless the motion is new information
-            drift = ""
-            ent = self.docs.get(f"{MEMBRANE_NS}{key}")
-            if ent is not None and getattr(ent, "position_history", None):
-                try:
-                    vel = ent.ring_velocity(now)          # cos-distance/h
-                    direction = ent.ring_direction()
-                    # quantized for the change-gate: the story re-renders
-                    # only when the PACE BAND changes (quiet/creeping/active/
-                    # fast), not on every micro-jitter
-                    vel_sig = round(vel, 2)
-                    band = (0 if vel_sig < 0.005 else
-                            1 if vel_sig < 0.05 else
-                            2 if vel_sig < 0.15 else 3)
-                    sig2 = f"{band}|{direction}"
-                    if (t.get("drift") or {}).get("sig") != sig2:
-                        t["drift"] = {"sig": sig2, "ts": now}
-                        dirty = True
-                        if direction == "drifting":
-                            pace = ("fast" if band >= 3
-                                    else "slowly" if band <= 1 else "steadily")
-                            drift = (f" Moving {pace} "
-                                     f"({vel_sig:.2f}/h, measured).")
-                        elif band > 0:
-                            drift = " Holding steady (measured)."
-                        # THE SUBJECT (the operator's 'it's not a story'
-                        # call): a pace stat alone names no subject. The
-                        # now-tracker's POSITION matches the entity
-                        # centroids -- the nearest keys ARE what the
-                        # session is about right now. Rendered as the
-                        # story's subject: 'The session's present is
-                        # around: X, Y'
-                        if is_now and getattr(ent, "position", None):
-                            subj = self._nearest_entities(ent.position,
-                                                          inv, exemplars)
-                            if subj:
-                                names = ", ".join(
-                                    f"{self.default_label(k)} ({c:.2f})"
-                                    for k, c in subj)
-                                drift = (f" The session's present is "
-                                         f"around: {names}."
-                                         + (f" Moving {pace}."
-                                            if direction == "drifting"
-                                            else ""))
-                except Exception:
-                    drift = ""
-            if story or surr or drift:
-                # a bare drift line needs its anchor: '<key>: Moving ...'
-                # (a floating 'Moving fast' names nothing -- the reader
-                # cannot tell WHO moves). Structured return: (key, text)
-                # -- the consumer indexes by the TRACK KEY itself, never
-                # by string-splitting a colon-rich ID out of the prose
-                # (the 'files'-prefix mis-key bug).
-                if not story:
-                    story = f"{key}:"
-                    # the drift is the WHOLE story here -- it must not
-                    # ALSO ride the tail (the bare-drift fallback + the
-                    # tail drift rendered the same sentence twice: the
-                    # 'Moving fast. Moving fast.' stutter)
-                    body = surr.strip()
-                    out.append((key, (story + " " + body + " " + drift.strip()).strip()
-                                if (body or drift) else story.rstrip()))
-                else:
-                    out.append((key, (story + surr + drift).strip()))
-        if dirty:
+            # ---- the beats: newest junk-free fragments, newest first ----
+            beats: list[tuple[float, str]] = []
+            for i in sorted(idxs, key=lambda i: -_eph_born_of(exemplars, i)):
+                if i in claimed_cells:
+                    continue
+                sit, act = _frag_of(exemplars, i)
+                sit = _narrative(sit, 200)
+                act = _narrative(act, 240)
+                if not sit:
+                    continue
+                if _machinery_junk(sit):
+                    continue
+                if act and (_tool_artifact(act) or _machinery_junk(act)):
+                    act = ""
+                if act and act.startswith(("Entity track planted", "Entity ",
+                                           "Removed ", "Track not planted")):
+                    act = ""
+                born = _eph_born_of(exemplars, i)
+                frag = f"{_ago(born, now) or 'recently'}: {sit[0].lower() + sit[1:]}"
+                if act and _action_overlap(act, sit) < 0.6:
+                    frag += f" — {act[0].lower() + act[1:]}"
+                beats.append((born, frag))
+                claimed_cells.add(i)
+                if len(beats) >= 3:
+                    break
+            if not beats:
+                out.append((key, f"{key} ({label}): no clean beats yet"))
+                continue
+            # ---- the printf: '<id>: <newest>. Then <older>. (<n> cells,
+            #      last active <ago>.) ----
+            body = beats[0][1]
+            if len(beats) > 1:
+                body += " Then " + "; ".join(f[0].lower() + f[1:]
+                                             for _, f in beats[1:])
+            n = len(idxs)
+            last = max((_eph_born_of(exemplars, i) for i in idxs),
+                       default=0.0)
+            body += (f" ({n} cells, last active "
+                     f"{_ago(last, now) or 'unknown'}).")
+            out.append((key, f"{key}: {body}"))
+        if False:
             self._save_tracks()
         return out or None
 
@@ -1969,6 +1735,13 @@ SURR_MIN_LINKS = 2         # a co-occurrence edge needs >= this many cells
 POSITION_HALF_LIFE_S = 24 * 3600.0   # default drift half-life (24h)
 RING_MAX = 16                        # history ring cap (entries)
 GRAIN_DEFAULT = 0.05                 # delta-perception threshold (cosine)
+# the now-subject's kind weights (the 'subject reads tools, not topics'
+# fix): the session's subject lives in files/symbols; shell verbs and
+# model names tag aggressively and dominate recent mass
+_SUBJECT_KIND_WEIGHT = {
+    "files": 1.0, "symbols": 1.0,
+    "shell": 0.75, "models": 0.75, "urls": 0.5,
+}
 # class-tuned defaults: hot things resolve fine, slow things coarsen
 _GRAIN_DEFAULTS = {
     CLASS_SESSION: 0.03,             # a session's dynamics move fast

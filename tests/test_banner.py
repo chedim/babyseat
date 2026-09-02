@@ -85,7 +85,7 @@ class TestTransparency(unittest.TestCase):
             out = oc._where_we_are(h.server, qv)
             # the prose story rides WHERE WE ARE: ENTITY ID prefix + arc
             self.assertIn("files:router.py:", out)
-            self.assertIn("Applied the failover patch", out)
+            self.assertIn("applied the failover patch", out.lower())
             # the banner (monologue) carries NO stories -- vitals+alerts only
             mono = h._gate_monologue(VERDICT, CTX, "test", query_vec=qv)
             self.assertNotIn("files:router.py", mono)
