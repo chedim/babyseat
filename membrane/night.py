@@ -176,11 +176,15 @@ def register_gray_forms(srv, mem, est, gray_idx_sims: list,
             "existing entity array shape>]}\n\nSamples:\n\n"
             + "\n----\n".join(samples))
     try:
+        # THE NIGHT'S OWN TIMEOUT (20s): the tick runs on a daemon thread
+        # -- a slow/stuck local model must not pin the loop for the
+        # blanket 120s (the gray-band pass repeats hourly; a missed
+        # registration is cheap, a wedged night thread is not)
         reply = chat(srv.backend, srv.idle_cortex_model, [
             {"role": "system", "content":
                 "You classify memory fragments. Output only the JSON "
                 "object."},
-            {"role": "user", "content": user}])
+            {"role": "user", "content": user}], timeout=20)
     except Exception:
         return {"anchors": 0, "entities": 0}
     out = {"anchors": 0, "entities": 0}
