@@ -902,7 +902,27 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
             for a in alerts:
                 lines.append(f"ALERT: {a['label']} {a['kind']} its "
                              f"boundary ({a['boundary']}; {a['detail']})")
+            # THE STORIES, not just names: each track renders its arc
+            # essence inline (the operator's call -- a bare entity name
+            # traces nothing). track_report is the story renderer; a
+            # silent story (change-gated) falls back to the name+state.
+            stories: dict[str, str] = {}
+            try:
+                for s in (est.track_report(
+                        mem.store.exemplars, query_vec=vec,
+                        session_since=getattr(srv, "_boot_ts", None),
+                        embedder=mem.embedder) or []):
+                    # stories are prefixed 'Label: ...' -- index by label
+                    lbl = s.split(":", 1)[0].strip().lower()
+                    stories[lbl] = s
+            except Exception:
+                stories = {}
             for t in est.list_tracks():
+                label = t.get("label") or t["key"]
+                story = stories.get(label.lower())
+                if story:
+                    lines.append("track: " + story)
+                    continue
                 bits = [t["key"]]
                 if t.get("enter") is not None:
                     bits.append(f"boundary enter {t['enter']}, "
