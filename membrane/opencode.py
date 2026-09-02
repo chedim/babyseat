@@ -54,7 +54,9 @@ from .embed import OllamaEmbedder
 from .global_field import PEER_ASK_SIM_MIN
 from .rag import (Compactor, RAGProxyHandler, _clip, _inject,
                   doctrine_instructions_text)
-from .router import EXPLORE_LANE
+from .router import (EXPLORE_LANE, AUTO_CLOUD, AUTO_LOCAL, AUTO_LANES,
+                     AUTO_ALIASES, LANE_TOKENS, normalize_lane,
+                     Registry)
 from .watch import MAX_WATCHES, WatchBoard
 from .intent import IntentBoard, MAX_INTENTS
 
@@ -829,6 +831,89 @@ def _intents_context_block(srv) -> str | None:
     return "\n".join(lines)
 
 
+def _where_we_are(srv, vec) -> str | None:
+    """THE 'I' TRACK -- the model's position, not its persona.
+
+    One compact header computed per turn (zero model calls): what we're
+    working on (the momentum focus + the nearest open commitment), where the
+    field stands, and what's pending review. The point: memories answer
+    'what do I know', this header answers 'where am I' -- the track a fresh
+    session has no other way to see. Deliberately NOT a self-model: no
+    feelings, no persona text -- commitments, focus, and state only."""
+    mem = srv.membrane
+    lines: list[str] = []
+    # 1. FOCUS: the momentum EMA's top directions = what the conversation has
+    #    been about lately (computed, not remembered).
+    mv = getattr(srv, "momentum_vec", None)
+    if mv is not None and mem.embedder is not None:
+        try:
+            ib = getattr(srv, "_intent_board", None)
+            i, c = (ib.nearest(mv) if ib else (None, 0.0))
+            if i is not None and c >= 0.45:
+                lines.append(f"focus: {i.text[:90]} (near an open "
+                             f"commitment, cos {c:.2f})")
+            else:
+                lines.append("focus: mid-conversation (recent turns share a "
+                             "direction; no open commitment near it)")
+        except Exception:
+            pass
+    # 2. COMMITMENTS: open intentions (the 'I said I would' track).
+    ib = getattr(srv, "_intent_board", None)
+    if ib is not None:
+        try:
+            open_ = [i for i in ib.open_intents() if (i.text or "").strip()]
+            if open_:
+                lines.append(f"open commitments: "
+                             + "; ".join(f"#{i.iid} {i.text[:60]}"
+                                         for i in open_[:2])
+                             + (f" (+{len(open_) - 2} more)" if len(open_) > 2
+                                else ""))
+        except Exception:
+            pass
+    # 3. POSITION: the field's size + trust + pending human reviews -- the
+    #    substrate the model stands on.
+    try:
+        n = len(mem.store)
+        safe = sum(1 for e in mem.store.exemplars if e.safe)
+        rp = len(mem.review_pending()) if hasattr(mem, "review_pending") else 0
+        pos = f"field: {n} memories ({100 * safe / max(n, 1):.0f}% trusted)"
+        if rp:
+            pos += f"; {rp} pending human review(s)"
+        lines.append(pos)
+    except Exception:
+        pass
+    # 4. TRACKS: the model's own planted entity tracks -- the live count +
+    #    inside/outside state every turn; ALERT lines for boundary events.
+    #    evaluate_tracks() transitions the state machine; ALERTS render from
+    #    take_alerts() ONLY (the exactly-once ledger -- rendering the eval
+    #    return too duplicates every line).
+    est = getattr(srv, "entity_store", None)
+    if est is not None and getattr(est, "tracks", None):
+        try:
+            est.evaluate_tracks(mem.store.exemplars)
+            for a in est.take_alerts():
+                lines.append(f"ALERT: {a['label']} {a['kind']} its "
+                             f"boundary ({a['boundary']}; {a['detail']})")
+            for t in est.list_tracks():
+                bits = [t["key"]]
+                if t.get("enter") is not None:
+                    bits.append(f"boundary enter {t['enter']}, "
+                                f"currently {'inside' if t.get('inside') else 'outside'}")
+                elif t.get("exit") is not None:
+                    bits.append(f"boundary exit {t['exit']}, "
+                                f"currently {'inside' if t.get('inside') else 'outside'}")
+                if t.get("pending_alerts"):
+                    bits.append(f"{t['pending_alerts']} alert(s) pending")
+                lines.append("track: " + ", ".join(bits))
+        except Exception:
+            pass
+    # (entity track stories live in the banner -- _gate_monologue -- not
+    # here: one render, not two.)
+    if not lines:
+        return None
+    return ("WHERE WE ARE:\n- " + "\n- ".join(lines))
+
+
 def _review_request_block(srv) -> str | None:
     """The pending-review notice for the chat context, or None when the queue
     is empty. Capped: at most 3 cases so the notice never crowds out real
@@ -1092,6 +1177,10 @@ def _intent_cmd(srv, q: str) -> str:
 # the field -- so it is served pre-gate like recall/state.
 
 _CODEGRAPH_CANON = "membrane: codegraph"
+
+# the [membrane] monologue toggle (the thinking-channel banner): a canonical
+# operator frame, pre-gate like every read/write -- zero model calls.
+_MONOLOGUE_CANON = "membrane: monologue"
 
 # read-lane marker (codegraph answers nothing was written -- the write marker
 # would be a lie)
@@ -1998,7 +2087,149 @@ def _last_user_text(body: dict) -> str:
 
 
 def n_ctx_mem(ctx: str | None) -> int:
-    return 0 if not ctx else ctx.count("Q: ")
+    """Count injected memory entries: BOTH formats -- the classic 'Q: ...'
+    lines and the action-first 'Memory (sim ...):' entries. The \\n anchor
+    keeps any prose mention of the Memory format from counting."""
+    if not ctx:
+        return 0
+    return ctx.count("Q: ") + ctx.count("\nMemory (sim ")
+
+
+# ---- the surface log (the totality view) ------------------------------------
+# Everything membrane exchanges with the model, per turn, as ONE inspectable
+# ring: the injected blocks (recall / where-we-are / peer / watch / thought
+# asks), the routing decision, and what came back. The operator's window
+# onto the API surface between membrane and the model -- the answer to "I
+# want to see everything membrane sends/receives". Backed by /membrane/state
+# ('surface' key) and 'membrane: surface' in the chat lane.
+
+_SURFACE_CAP = 12          # turns kept (the ring)
+
+
+def _surface_report(srv) -> str:
+    """The totality view as text: the last turns' full API surface -- what
+    membrane injected (per channel), the routing, and what the model
+    returned. The operator's answer to 'what does membrane send/receive?'"""
+    ring = list(getattr(srv, "_surface_ring", None) or [])
+    if not ring:
+        return ("Membrane surface: no turns recorded yet this session "
+                "(the ring fills as chat turns flow).\n\n" + _INTERCEPT_MARKER)
+    out = [f"Membrane surface -- the last {len(ring)} turn(s) of the "
+           f"membrane<->model API surface (newest last):"]
+    for rec in ring[-6:]:
+        when = time.strftime("%H:%M:%S", time.localtime(rec.get("ts", 0)))
+        head = [f"[{when}] {rec.get('verdict')} sim={rec.get('sim')} "
+                f"model={rec.get('model')} route={rec.get('route')} "
+                f"({rec.get('route_reason')})"]
+        head.append(f"  Q: {rec.get('query', '')}")
+        blocks = rec.get("sent_blocks") or []
+        if blocks:
+            head.append("  SENT:")
+            for b in blocks:
+                head.append(f"    - {b['block']} ({b['chars']}ch): "
+                            f"{b['preview'][:110]}")
+        else:
+            head.append("  SENT: (nothing injected)")
+        rh = rec.get("reply_head") or ""
+        tc = " [tool-calls]" if rec.get("tool_calls") else ""
+        ln = rec.get("learned")
+        head.append(f"  GOT: {_clip(rh, 140) or '(empty)'}{tc}"
+                    + (f" [learned #{ln}]" if ln is not None else ""))
+        out.append("\n".join(head))
+    return "\n----\n".join(out) + "\n\n" + _INTERCEPT_MARKER
+
+
+def _surface_push(srv, rec: dict) -> None:
+    ring = getattr(srv, "_surface_ring", None)
+    if ring is None:
+        srv._surface_ring = ring = []
+    ring.append(rec)
+    if len(ring) > _SURFACE_CAP:
+        del ring[:len(ring) - _SURFACE_CAP]
+
+
+def _surface_tail(srv) -> list:
+    return list(getattr(srv, "_surface_ring", None) or [])
+
+
+def _surface_block_summary(ctx: str | None) -> list[dict]:
+    """An injected context block -> per-section summaries (the totality view's
+    'what we sent' side). Splits on the known block headers so each channel
+    (recall / where-we-are / peer / watch / intent / review / ledger) is
+    visible separately, with sizes."""
+    if not ctx:
+        return []
+    markers = [
+        ("recall", "Recalled exchanges"),
+        ("global", "Global memories"),
+        ("where-we-are", "WHERE WE ARE"),
+        ("intentions", "OPEN INTENTIONS"),
+        ("review", "PENDING HUMAN REVIEWS"),
+        ("watch", "[membrane-watch]"),
+        ("peer", "[membrane-intercept] a sibling"),
+        ("thought", "[membrane-intercept] your own earlier ask"),
+        ("ledger", "OPERATOR DECISIONS"),
+    ]
+    found: list[dict] = []
+    low = ctx
+    for name, marker in markers:
+        i = low.find(marker)
+        if i >= 0:
+            # block ends at the next known marker (or end)
+            ends = [low.find(m, i + 1) for _, m in markers]
+            ends = [e for e in ends if e > i]
+            end = min(ends) if ends else len(ctx)
+            block = ctx[i:end]
+            found.append({"block": name,
+                          "chars": len(block),
+                          "preview": _clip(block, 160)})
+    if not found and ctx.strip():
+        found.append({"block": "other", "chars": len(ctx),
+                      "preview": _clip(ctx, 160)})
+    return found
+
+
+def _surface_block_text(ctx: str, sec: dict) -> str:
+    """The FULL text of one sent block (the totality view's payload side --
+    the operator reads what the memories SAY, not the header clip)."""
+    markers = ["Recalled exchanges", "Global memories", "WHERE WE ARE",
+               "OPEN INTENTIONS", "PENDING HUMAN REVIEWS",
+               "[membrane-watch]", "[membrane-intercept] a sibling",
+               "[membrane-intercept] your own earlier ask",
+               "OPERATOR DECISIONS"]
+    i = ctx.find(sec["preview"][:40]) if sec.get("preview") else -1
+    if i < 0:
+        return sec.get("preview", "")
+    ends = [ctx.find(m, i + 1) for m in markers]
+    ends = [e for e in ends if e > i]
+    end = min(ends) if ends else len(ctx)
+    return ctx[i:end]
+
+
+def _ctx_gave_summary(ctx: str | None, cap: int = 3) -> list[str]:
+    """What the field GAVE this turn: the topic/fact line per injected
+    memory, in injection order. Recognizes BOTH entry formats:
+
+    - classic: 'Q: <situation>'
+    - action-first: 'Memory (sim 0.80, [src ...]): <fact> [situation: ...]'
+      -> the fact is the payload; the trailing [situation: ...] tag drops.
+    """
+    if not ctx:
+        return []
+    out: list[str] = []
+    for line in ctx.splitlines():
+        s = line.strip()
+        if s.startswith("Q: "):
+            q = s[3:].strip()
+        elif s.startswith("Memory (sim ") and "): " in s:
+            q = s.split("): ", 1)[1].strip()
+            if "[situation:" in q:
+                q = q.split("[situation:", 1)[0].strip()
+        else:
+            continue
+        if q:
+            out.append(q)
+    return out[:cap]
 
 
 # ---- the thought intercept (the agent's own asks, answered as context) ------
@@ -2587,6 +2818,35 @@ def _delta_reasoning(d: dict) -> str:
     return ""
 
 
+def _resp_has_content(resp_bytes: bytes | None) -> bool:
+    """Does an OpenAI-shaped chat completion carry an ANSWER (content or
+    tool calls)? A 200 with neither is a rung down in disguise (observed:
+    openrouter free tiers answer 200-with-empty-body) -- the caller fails
+    the rung over and walks the ladder. Unparseable bodies count as EMPTY."""
+    if not resp_bytes:
+        return False
+    try:
+        obj = json.loads(resp_bytes)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return False
+    ch = (obj.get("choices") or [{}])[0]
+    msg = ch.get("message") or {}
+    c = msg.get("content")
+    if isinstance(c, str) and c.strip():
+        return True
+    if isinstance(c, list) and any(
+            (isinstance(b, dict) and str(b.get("text") or "").strip())
+            for b in c):
+        return True
+    if msg.get("tool_calls") or ch.get("finish_reason") == "tool_calls":
+        return True
+    for kk in _THINK_KEYS:                    # reasoning-only answer: content
+        v = msg.get(kk)                       # is empty but the turn spoke
+        if isinstance(v, str) and v.strip():
+            return True
+    return False
+
+
 def _render_calls(calls: dict) -> str:
     """Accumulated tool-call deltas -> one compact line per call."""
     lines = []
@@ -2822,6 +3082,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._v1_models(); return
         if path in ("/membrane/state", "/state"):
             self._membrane_state(); return
+        if path == "/membrane/entity-track":
+            self._entity_track_list(); return
         if path == "/membrane/ask":
             self._membrane_ask(); return
         if getattr(self.server, "viewer", False):
@@ -2845,6 +3107,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._membrane_learn(); return
         if path == "/membrane/forget":
             self._membrane_forget(); return
+        if path == "/membrane/entity-track":
+            self._entity_track_set(); return
+        if path == "/membrane/entity-track/remove":
+            self._entity_track_remove(); return
+        if path == "/membrane/entity-track/list":
+            self._entity_track_list(); return
         if path.startswith("/membrane/"):
             self._json_out({"error": "read-only; GET /membrane/state"}); return
         super().do_POST()
@@ -2960,6 +3228,14 @@ class MembraneOpenAIHandler(RAGProxyHandler):
     def _v1_models(self) -> None:
         ids = _chat_capable_models(self.server.backend)
         ids = ids + [EXPLORE_LANE]          # the sentinel evidence-farm lane
+        # the AUTOSELECT sentinels: the router itself as a selectable "model".
+        # autoselect scores all candidates per turn (cloud-floor);
+        # autoselect-local forces the local floor (offline covenant).
+        # @-free names (some pickers mangle or hide odd characters; the
+        # @-spelled forms stay accepted aliases). Advertised only when the
+        # router exists (without it there is nothing to route between).
+        if getattr(self.server, "router", None) is not None:
+            ids = ids + list(AUTO_LANES)
         # first-class cloud backends: registered providers' models ride this
         # surface too (the picker selects them like any model; the operator's
         # ceiling then applies). Router absent -> no rungs, the local-only view.
@@ -2968,12 +3244,14 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             ids += [r.name for r in router.records.values() if r.backend]
         self._json_out({"object": "list",
                         "data": [{"id": m, "object": "model",
-                                  "owned_by": ("membrane->"
-                                               + (router.records[m].backend
-                                                  if router and m in
-                                                  router.records and
-                                                  router.records[m].backend
-                                                  else "ollama"))}
+                                  "owned_by": ("membrane-router"
+                                               if m in AUTO_LANES else
+                                               ("membrane->"
+                                                + (router.records[m].backend
+                                                   if router and m in
+                                                   router.records and
+                                                   router.records[m].backend
+                                                   else "ollama")))}
                                  for m in ids]})
 
     # ---- /v1/embeddings: the field's own embedder ----
@@ -3041,13 +3319,37 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # (unless pinned): the follow-chat judge reads srv.compact_model live
         if srv.compact_follows_chat:
             srv.compact_model = model
+        # the AUTOSELECT sentinels: the operator picked the ROUTER as the
+        # model. The judge/cortex keep the lane name; the compact model
+        # resolves to nothing real, so pin it back to the boot default.
+        if normalize_lane(model) in AUTO_LANES:
+            srv.compact_model = srv.default_compact_model
         # the operator's ceiling for delegated work: whatever model opencode
         # selected is the SESSION's law -- delegate requests may not raise it
-        srv.op_ceiling = model
+        # (an autoselect selection delegates the CHOOSING to the lane, so the
+        # ceiling is the lane sentinel itself, not a fake model name).
+        srv.op_ceiling = (normalize_lane(model)
+                          if normalize_lane(model) in AUTO_LANES else model)
         # ---- the embed role: resolve lazily (maybe ollama gained a model);
         # block the chat with a clear 503 when nothing can embed.
         if mem.embedder is None and self._resolve_embedder(model) is None:
             self._json_err_raw(503, srv.pending_embed_error); return
+        # ---- entity read-through (once, at first embedder resolution): the
+        # cortex commons' entities join the local side-index -- one symbolic
+        # layer across both systems. Best-effort; a failure degrades to the
+        # JSON mirror's contents.
+        est = getattr(srv, "entity_store", None)
+        if est is not None and mem.embedder is not None \
+                and not getattr(srv, "_entities_read_through", False):
+            srv._entities_read_through = True
+            try:
+                _n_read = est.hydrate_from_couchbase()
+                if _n_read:
+                    print(f"[opencode] entities: read-through +{_n_read} "
+                          f"from the couchbase commons", file=sys.stderr)
+            except Exception as e:
+                print(f"[opencode] entity read-through skipped ({e})",
+                      file=sys.stderr)
         # ---- total capture: results from the PREVIOUS turn's tool calls ----
         # before the intercepts: even a recall/state turn may carry the previous
         # turn's tool results; pairing must not be skipped. A capture error
@@ -3140,6 +3442,44 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._serve_intercept_answer(model, text,
                                          bool(body.get("stream", False)))
             return
+        # ---- the monologue toggle (the [membrane] thinking-channel banner):
+        # 'membrane: monologue [on|off]' -- pre-gate, zero model calls. The
+        # /monologue opencode command emits this frame via passthrough.
+        if not model_escaped and q_early.strip().lower().startswith(
+                _MONOLOGUE_CANON):
+            spec = q_early.strip().lower()[len(_MONOLOGUE_CANON):].strip()
+            cur = bool(getattr(srv, "gate_monologue", True))
+            if spec in ("on", "enable"):
+                srv.gate_monologue = True
+            elif spec in ("off", "disable"):
+                srv.gate_monologue = False
+            elif spec in ("", "toggle"):
+                srv.gate_monologue = not cur
+            else:
+                self._serve_intercept_answer(
+                    model, f"[membrane-intercept] monologue: unknown mode "
+                    f"{spec!r} (on/off/toggle). Currently "
+                    f"{'ON' if cur else 'OFF'}.", bool(body.get("stream")))
+                return
+            state = "ON" if srv.gate_monologue else "OFF"
+            _write_audit(srv.membrane, {"event": "monologue-toggle",
+                                        "state": state})
+            self._serve_intercept_answer(
+                model, f"[membrane-intercept] [membrane] banner now {state}. "
+                f"It shows the gate verdict, field vitals, what memory was "
+                f"gave to the LLM, and what was learned — streamed in the "
+                f"thinking channel like /thinking."
+                .replace("was gave", "was given"),
+                bool(body.get("stream", False)))
+            return
+        # ---- the surface frame (the totality view): 'membrane: surface'
+        # shows the last turns' full API surface -- everything membrane
+        # sent to / received from the model. Pre-gate, zero model calls.
+        if not model_escaped and q_early.strip().lower().startswith(
+                "membrane: surface"):
+            self._serve_intercept_answer(model, _surface_report(srv),
+                                         bool(body.get("stream", False)))
+            return
         # ---- the global-field layer (docs/global-field.md): the operator's
         # promote / forget-commons / suggest-review turns, handled pre-gate
         # like every other operator write. Disabled with --no-global.
@@ -3213,10 +3553,16 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # ---- INTERNAL: the 'model:' escape hatch only (recall/state were both
         # fully handled above, pre-gate) ----
         q = _last_user_text(body)
-        # fork stand-down: no recall injection -- the fork's /api/chat does its
-        # own membraneRecallInject; a second block would double-inject.
-        ctx = (None if getattr(mem, "fork_owns_field", False)
-               else self._memory_block(vec, body.get("messages")))
+        # fork stand-down, SPLIT AUTHORITY: the fork owns CAPTURE (no second
+        # writer -- our learn/capture stays off) but NOT recall: this seat's
+        # field is the operator's rich one, and a read-only injection is not
+        # a second writer. (The old full stand-down left BOTH seats silent
+        # when the fork's own recall was thin -- the hollow-world bug.)
+        ctx = self._memory_block(vec, body.get("messages"))
+        if getattr(mem, "fork_owns_field", False) and ctx:
+            ctx = ("[membrane] recall from the operator's field (the "
+                   "ollama-membrane fork owns capture; this seat is "
+                   "read-only):\n\n" + ctx)
         self.momentum_update(vec, query)
         # pending human reviews ride along as a system-level notice: the model
         # is told to ASK the user via its native question tool. The user's
@@ -3233,16 +3579,36 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 ledger_block = ledger.block(vec, mem.embedder)
             except Exception:
                 ledger_block = None
+        # THE 'I' TRACK: the where-we-are header (focus + commitments +
+        # field position) -- computed live each turn, zero model calls.
+        # Momentum updates first so the header reflects THIS turn.
+        self.momentum_update(vec, query)
+        where_block = _where_we_are(srv, vec)
+        # ASSEMBLY ORDER MATTERS: the extra blocks (where-we-are, review,
+        # intents, ledger) must be in ctx BEFORE the banner is computed --
+        # the banner reports what was sent, so it sees the final context.
+        # (The old order computed the banner first: it always reported the
+        # pre-assembly ctx -- "injected 0" while slices rode right above it.)
         mono_review = review_block or ""
-        extra_blocks = [b for b in (review_block, intent_block, ledger_block)
+        extra_blocks = [b for b in (where_block, review_block, intent_block,
+                                    ledger_block)
                         if b]
         for block in extra_blocks:
             ctx = (ctx + "\n\n" + block) if ctx else block
-        replay_sim = float(getattr(srv, "replay_sim", 0.0) or 0.0)
-        mono = (self._gate_monologue(verdict, ctx, query)
+        # THE BANNER: computed LAST, over the FINAL ctx, and it RIDES the
+        # context (the operator's contract: the banner is properly generated,
+        # useful to the model, and operator-visible -- ONE surface, both read
+        # the same bytes). The banner describes the ctx assembled above it;
+        # it is appended after them so it never describes itself.
+        mono = (self._gate_monologue(verdict, ctx, query, query_vec=vec)
                 if getattr(srv, "gate_monologue", True) else "")
         if mono_review:
             mono = (mono + "\n[membrane] " + _one_line(mono_review)[:220]) if mono else "[membrane] " + _one_line(mono_review)[:220]
+        banner_block = (f"[membrane] your state this turn:\n{mono}"
+                        if mono else None)
+        if banner_block:
+            ctx = (ctx + "\n\n" + banner_block) if ctx else banner_block
+        replay_sim = float(getattr(srv, "replay_sim", 0.0) or 0.0)
         # ---- token savers, in cost order ----
         # 1. FULL REPLAY (gate act + consensus): the gate is sure the near match
         #    answers the query; replay when it also clears the strict line.
@@ -3268,6 +3634,21 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # settled a stuck unlearned-repeat loop; serve the stored answer with
         # no model call. Verdict mapped to act-replayed so the existing re-ask
         # demotion loop stays armed (a bad settle replay is still demotable).
+        # OBSERVER GUARD: pure-observer mode (replay_sim == 0) never answers
+        # the user from memory -- settle degrades to escalate-with-hint (the
+        # gate already mapped an UNSAFE near match there).
+        if verdict["verdict"] == "settle-replay" and replay_sim <= 0:
+            verdict = {"verdict": "escalate-with-hint",
+                       "hint": verdict.get("action", ""),
+                       "action": verdict.get("action", ""),
+                       "sim": verdict.get("sim"), "nov": verdict.get("nov"),
+                       "ex_idx": verdict.get("ex_idx"),
+                       "reason": "auto-settle (observer: hint, not replay)",
+                       "spectrum_entropy": verdict.get("spectrum_entropy"),
+                       "free_energy": verdict.get("free_energy"),
+                       "rank_ratio": verdict.get("rank_ratio"),
+                       "safe_frac": verdict.get("safe_frac"),
+                       "sim_min_eff": verdict.get("sim_min_eff")}
         if verdict["verdict"] == "settle-replay":
             answer = verdict.get("action", "")
             v = {**verdict, "verdict": "act-replayed"}
@@ -3365,23 +3746,35 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # ---- the orchestration router: model-vs-model on escalations ----
         # Score proposes (fit_hat - delay - price); the REVERSED cost-floor
         # disposes (cheapest eligible cloud holds the floor; locals must
-        # earn the rank). THE OPERATOR'S CEILING: the model the user picked
-        # in opencode caps the ladder (never pricier cloud; a local pick
-        # forbids cloud). Failure degrades to the plain backend path (the
-        # safe direction).
+        # earn the rank). THE OPERATOR'S HAND: a lane sentinel (autoselect /
+        # autoselect-local, @-aliases accepted) delegates the CHOOSING to the
+        # router; a SPECIFIC model selection is a HARD pick -- the router
+        # must never override it (that pick was the operator's decision; the
+        # sentinel name itself never reaches a backend -- a router-less or
+        # failed autoselect falls back to the boot model, the safe
+        # direction).
         router = getattr(srv, "router", None)
-        if router is not None and str(verdict.get("verdict", "")) \
+        lane = normalize_lane(str(body.get("model") or "").split("/", 1)[-1])
+        autoselect = router is not None and lane in AUTO_LANES
+        if autoselect:
+            up["model"] = (srv.default_compact_model
+                           or _pick_default_model(_chat_capable_models(
+                               srv.backend), None) or "membrane")
+        if autoselect and str(verdict.get("verdict", "")) \
                 .startswith("escalate"):
+            assert router is not None     # autoselect implies router exists
             try:
                 needs_tools = any(
                     isinstance(m, dict) and m.get("tool_calls")
                     for m in (body.get("messages") or [])
                     if isinstance(m, dict))
-                ceiling = (str(body.get("model") or "").split("/", 1)[-1]
-                           or None)          # membrane/<model> -> <model>
+                # the lane sentinel IS the routing instruction: route()
+                # consumes it (route -> the scored pick; the lane rides the
+                # audit as route_info['lane']).
                 rec, route_info = router.route(
                     vec if vec is not None else None,
-                    urgency=1.0, needs_tools=needs_tools, ceiling=ceiling)
+                    urgency=1.0, needs_tools=needs_tools, ceiling=lane,
+                    ctx_tokens=Registry.estimate_tokens(up.get("messages")))
                 if rec is not None:
                     route_info["fallback"] = str(up.get("model") or "membrane")
                     route_info["price"] = rec.price()
@@ -3480,17 +3873,27 @@ class MembraneOpenAIHandler(RAGProxyHandler):
 
         def _next_rung(model_name: str):
             """The next rung down the ladder after model_name, or None when
-            the stack is exhausted (nothing alive) — the field-only edge."""
+            the stack is exhausted (nothing alive) — the field-only edge.
+            An autoselect turn keeps the LANE as the ladder's ceiling (the
+            sentinel chose 'route it all', not the fallback model's price).
+            A specific pick keeps ITS ceiling (never escalates past what the
+            operator selected). The context-window filter applies here too:
+            a failover rung that cannot hold the request is skipped."""
             router = getattr(srv, "router", None)
             if router is None or not routed_model:
                 return None
+            lane_ceiling = (str(verdict.get("route", {}).get("lane") or "")
+                            or None)
+            ceiling = (normalize_lane(lane_ceiling)
+                       if lane_ceiling else
+                       (str(up.get("model") or "").split("/", 1)[-1] or None))
             try:
                 stack = router.ladder(
                     needs_tools=any(isinstance(m, dict) and m.get("tool_calls")
                                     for m in (up.get("messages") or [])
                                     if isinstance(m, dict)),
-                    ceiling=ceiling if (ceiling := str(
-                        up.get("model") or "").split("/", 1)[-1]) else None)
+                    ceiling=ceiling,
+                    ctx_tokens=Registry.estimate_tokens(up.get("messages")))
             except Exception:
                 return None
             seen = False
@@ -3523,7 +3926,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             # opencode shows the proxy's routing/recall/judge machinery in the
             # thinking channel, separated from the model's own reasoning.
             if getattr(srv, "gate_monologue", True):
-                mono = self._gate_monologue(verdict, ctx, query)
+                mono = self._gate_monologue(verdict, ctx, query, query_vec=vec)
                 if mono:
                     for chunk in _openai_sse_chunks(
                             up.get("model", "membrane"), mono + "\n\n",
@@ -3575,22 +3978,61 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self.wfile.flush()
             resp_obj = None
         else:
-            try:
-                resp_bytes = _open_backend(up.get("model", "membrane")).read()
-            except Exception as e:
-                if route.get("ladder_exhausted"):
-                    self._serve_field_only(up.get("model", "membrane"), vec,
-                                           route, mid_stream=False, err=e)
-                    return
-                raise
+            # BUFFERED delivery. The empty-answer guard: a rung that answers
+            # HTTP 200 with NO content and NO tool calls is DOWN in disguise
+            # (observed: openrouter free tiers 200-with-empty-body). Treat it
+            # like any rung-down: outage-note it and walk the ladder; when
+            # nothing is left, the honest field-only banner serves instead of
+            # silence. Non-routed turns keep the verbatim passthrough.
+            resp_bytes: bytes | None = None
+            model_name = up.get("model", "membrane")
+            if routed_model:
+                for _attempt in range(6):        # bounded: ladder + retries
+                    try:
+                        resp_bytes = _open_backend(model_name).read()
+                    except Exception as e:
+                        if route.get("ladder_exhausted"):
+                            self._serve_field_only(
+                                up.get("model", "membrane"), vec,
+                                route, mid_stream=False, err=e)
+                            return
+                        raise
+                    if _resp_has_content(resp_bytes):
+                        break
+                    nxt = _next_rung(model_name)
+                    if nxt is None:
+                        route["ladder_exhausted"] = True
+                        self._serve_field_only(
+                            up.get("model", "membrane"), vec, route,
+                            mid_stream=False,
+                            err=RuntimeError(f"{model_name}: empty answer"))
+                        return
+                    print(f"[opencode] EMPTY answer from {model_name}; "
+                          f"failover -> {nxt}", file=sys.stderr)
+                    router = getattr(srv, "router", None)
+                    if router is not None:
+                        router.note_outage(model_name,
+                                           "empty answer (200, no content)")
+                    route["failover"] = nxt
+                    model_name = nxt
+            else:
+                try:
+                    resp_bytes = _open_backend(model_name).read()
+                except Exception as e:
+                    if route.get("ladder_exhausted"):
+                        self._serve_field_only(
+                            up.get("model", "membrane"), vec,
+                            route, mid_stream=False, err=e)
+                        return
+                    raise
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(resp_bytes)))
+            self.send_header("Content-Length", str(len(resp_bytes or b"")))
             self.end_headers()
-            self.wfile.write(resp_bytes)
+            self.wfile.write(resp_bytes or b"")
             self.wfile.flush()
             try:
-                resp_obj = json.loads(resp_bytes)
+                resp_obj = json.loads(resp_bytes or b"{}")
             except json.JSONDecodeError:
                 resp_obj = None
             if resp_obj:
@@ -3607,6 +4049,18 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 think.append(_msg_reasoning(msg))
         content = "".join(parts)
         thought = "".join(think).strip()
+        # the STREAMING empty-answer guard: bytes were already tee'd, so no
+        # failover is possible this turn -- but the silent rung must not look
+        # healthy: outage-note it (later turns skip it) and let the
+        # re-ask window learn it as a loss (see the calibration pass).
+        if streaming and routed_model and not content.strip() and not tool_calls \
+                and not thought:
+            router = getattr(srv, "router", None)
+            if router is not None:
+                router.note_outage(routed_model,
+                                   "empty answer (200, no content)")
+                print(f"[opencode] EMPTY answer from {routed_model} "
+                      f"(streamed; rung cooled down)", file=sys.stderr)
         # the router's measured record: latency of the routed turn, and (for
         # cloud) the spend + the calibration record -- (pressure, survived)
         # lands after the re-ask window resolves the outcome (see below).
@@ -3655,43 +4109,60 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         except Exception as e:
             print(f"[opencode] capture error (response already served): {e}",
                   file=sys.stderr)
+        # THE TOTALITY VIEW: record this turn's full API surface -- what we
+        # sent (per-block summaries + routing + model) and what came back
+        # (reply head + tool calls). The operator reads it via
+        # /membrane/state 'surface' or 'membrane: surface'.
+        try:
+            _surface_push(srv, {
+                "ts": time.time(),
+                "query": _clip(query, 120),
+                "verdict": verdict.get("verdict"),
+                "sim": verdict.get("sim"),
+                "route": (verdict.get("route") or {}).get("route"),
+                "route_reason": (verdict.get("route") or {}).get("reason"),
+                "model": up.get("model"),
+                "sent_blocks": _surface_block_summary(ctx),
+                "ctx_chars": len(ctx or ""),
+                "n_injected": n_ctx_mem(ctx),
+                "reply_head": _clip(content, 200),
+                "tool_calls": bool(tool_calls),
+                "learned": ex_idx,
+                "thought_head": _clip(thought, 120) if thought else None,
+            })
+        except Exception as s_e:
+            print(f"[opencode] surface-log error: {s_e}", file=sys.stderr)
         self._log_turn(verdict, ctx, ex_idx, len(mem.store))
 
     # ---- the [membrane] monologue (thinking channel) ----------------------
-    def _gate_monologue(self, verdict: dict, ctx: str | None, query: str) -> str:
-        """One [membrane] block: routing decision, what was recalled, and the
-        gate notes (re-ask votes, demotions, judge rulings). Streamed into
-        opencode's thinking channel BEFORE the model's own reasoning so the
-        wall of text is visibly separated: [membrane] lines are the proxy's
-        machinery, everything after is the model."""
+    def _gate_monologue(self, verdict: dict, ctx: str | None, query: str,
+                        query_vec=None) -> str:
+        """THE BANNER: entity stories only, deterministic, token-cheap.
+        The recall and WHERE WE ARE ride the ctx (opencode renders them);
+        reciting them here duplicates bytes. The banner's unique job: the
+        tracked entities' histories and dynamics."""
+        lines: list[str] = []
         mem = self.server.membrane
-        v = verdict.get("verdict", "?")
-        sim = verdict.get("sim")
-        sim_s = f"{sim:.2f}" if isinstance(sim, (int, float)) else "-"
-        n = len(mem.store)
-        notes = getattr(mem, "gate_notes", None) or []
-        lines = [f"[membrane] route={v} sim={sim_s} field={n}"]
-        rt = verdict.get("route")
-        if rt and rt.get("route"):
-            lines.append(f"[membrane] router: {rt['route']} ({rt.get('kind')}) "
-                         f"— {rt.get('reason')}"
-                         + (", explored" if rt.get("explored") else ""))
-        v_verb = {"act": "would-absorb", "act-replayed": "REPLAYED (no model call)",
-                  "escalate": "forwarding to model"}.get(v)
-        if v == "escalate-with-hint":
-            v_verb = "forwarding with demoted memory as hint"
-        if v_verb:
-            lines.append(f"[membrane] {v_verb}")
-        if notes:
-            lines.append(f"[membrane] gate: " + "; ".join(notes))
-        th_fe = verdict.get("free_energy")
-        if isinstance(th_fe, (int, float)):
-            lines.append(f"[membrane] field free_energy={th_fe:.1f}")
-        if ctx:
-            lines.append(f"[membrane] injected {n_ctx_mem(ctx)} memory slice(s)")
-        else:
-            lines.append("[membrane] no memory injected (nothing close enough)")
-        return "\n".join(lines)
+        srv = self.server
+        est = getattr(srv, "entity_store", None)
+        if est is not None and getattr(est, "tracks", None):
+            try:
+                # the state-machine step; ALERTS render from take_alerts()
+                # ONLY (the exactly-once ledger -- the eval return would
+                # duplicate every line)
+                est.evaluate_tracks(mem.store.exemplars)
+                for a in est.take_alerts():
+                    lines.append(f"ALERT: {a['label']} {a['kind']} its "
+                                 f"boundary ({a['boundary']}; {a['detail']})")
+                story = est.track_report(
+                    mem.store.exemplars, query_vec=query_vec,
+                    session_since=getattr(srv, "_boot_ts", None))
+                if story:
+                    lines.extend(story)
+            except Exception as e:
+                print(f"[opencode] banner render error: {e}",
+                      file=sys.stderr)
+        return "\n".join(lines) if lines else ""
 
     # ---- the internal intercept answer (no model call, never learned) ----
     # One unified server for both families: a fully-buffered recall/state
@@ -3970,6 +4441,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         ceiling = str(getattr(srv, "op_ceiling", "") or "").strip() or None
         if lane == "explore":
             ceiling = EXPLORE_LANE
+        else:
+            ceiling = normalize_lane(ceiling)
         situ = None
         if mem.embedder is not None:
             try:
@@ -3980,7 +4453,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         try:
             rec, info = router.route(situ, urgency=float(body.get("urgency")
                                                         or 1.0),
-                                     needs_tools=False, ceiling=ceiling)
+                                     needs_tools=False, ceiling=ceiling,
+                                     ctx_tokens=Registry.estimate_tokens(
+                                         [{"content": task[:8000]}]))
         except Exception as e:
             srv._delegate_busy = False
             self._json_err_raw(500, f"router error: {e}"); return
@@ -4030,6 +4505,40 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                         bool(info.get("explored")), "latency_s": round(dt, 3),
                         "answer": content[:4000]})
 
+    # ---- /membrane/entity-track: the model's banner lane (MCP relay) ----
+    def _entity_track_set(self) -> None:
+        srv = self.server
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
+        body = self._json_body()
+        key = str(body.get("key") or "").strip()
+        if not key:
+            self._json_err_raw(400, "key required"); return
+        res = est.watch_track(key, boundary=str(body.get("boundary") or ""),
+                              label=str(body.get("label") or ""))
+        if not res.get("ok"):
+            self._json_err_raw(400, str(res.get("error"))); return
+        self._json_out(res)
+
+    def _entity_track_remove(self) -> None:
+        srv = self.server
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
+        body = self._json_body()
+        key = str(body.get("key") or "").strip()
+        if not key:
+            self._json_err_raw(400, "key required"); return
+        self._json_out({"removed": est.unwatch_track(key)})
+
+    def _entity_track_list(self) -> None:
+        srv = self.server
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
+        self._json_out({"tracks": est.list_tracks()})
+
     # ---- /membrane/state: the JSON instrument ----
     def _membrane_state(self) -> None:
         srv = self.server
@@ -4063,6 +4572,18 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             "audit_records": _audit_count(mem.audit_path),
             "frame_wait": _frame_wait_summary(srv) or None,
             "review_pending": len(mem.review_pending()),
+            # THE TOTALITY VIEW: everything membrane sent to / received from
+            # the model on the last turns (the full API surface per turn --
+            # doctrine, recall, where-we-are, peer blocks, watch reports,
+            # thought asks -- and what came back). The surface log the
+            # operator reads; capped ring, newest last.
+            "surface": _surface_tail(srv),
+            # THE 'I' TRACK over MCP: the same WHERE WE ARE the opencode
+            # seat's model gets -- so the tool lane sees position + tracks.
+            "where_we_are": _where_we_are(srv, None),
+            # entity tracks raw (the JSON form of the banner section)
+            "entity_tracks": (getattr(srv, "entity_store", None).list_tracks()
+                              if getattr(srv, "entity_store", None) else []),
         }
         gf = getattr(srv, "global_field", None)
         if gf is not None:
@@ -4158,7 +4679,11 @@ def main() -> None:
                          "BLOCKS when nothing can embed)")
     ap.add_argument("-k", dest="k", type=int, default=3,
                     help="memories retrieved per turn")
-    ap.add_argument("--rag-sim-min", type=float, default=0.65)
+    ap.add_argument("--rag-sim-min", type=float, default=0.72,
+                    help="cosine floor below which a memory is not "
+                         "injected (0.72: the 0.65-0.72 band measured as "
+                         "mostly stale background -- it rode every turn "
+                         "and taught the model to echo context)")
     ap.add_argument("--mem-chars", type=int, default=400)
     ap.add_argument("--ctx-chars", type=int, default=2400)
     ap.add_argument("--rag-mmr-sim", type=float, default=0.90,
@@ -4198,6 +4723,12 @@ def main() -> None:
     ap.add_argument("--compact-model", default=None, metavar="MODEL",
                     help="pin the cortex/distillation model (default: follows "
                          "the model selected in opencode)")
+    ap.add_argument("--idle-cortex-model", default=None, metavar="MODEL",
+                    help="model for BACKGROUND loops only (compactor "
+                         "distillation, entity synthesis); default "
+                         "granite3.3:8b (local-first: a stray background "
+                         "seat never burns cloud tokens). --compact-model "
+                         "overrides for both lanes.")
     ap.add_argument("--archive", dest="archive", action="store_true",
                     help="after each compaction, move the retired raw turns "
                          "OUT of the hot field into the cold tier "
@@ -4237,10 +4768,13 @@ def main() -> None:
                          "frames, W3a's lint) plants a ONE-SHOT marked "
                          "warning that rides the next model-bound request. "
                          "Never blocks live traffic")
-    ap.add_argument("--cloud-budget", type=float, default=None, metavar="USD",
+    ap.add_argument("--cloud-budget", type=float, default=0.0, metavar="USD",
                     help="max relative-money spend per day on cloud-routed "
-                         "escalations (the cost ladder's hard cap; unset = "
-                         "uncapped). Score proposes; budget disposes.")
+                         "escalations (the cost ladder's hard cap; default 0 "
+                         "= FREE-TIER rungs only -- free pins cost ~0.1 and "
+                         "a $0 budget keeps the free pool reachable while "
+                         "paid rungs need an explicit budget). Score "
+                         "proposes; budget disposes.")
     ap.add_argument("--explore", type=float, default=0.05, metavar="EPS",
                     help="fraction of escalations that try the least-tried "
                          "OPencode-ELIGIBLE local model that holds in memory "
@@ -4264,12 +4798,13 @@ def main() -> None:
                     help="where the router persists model records (wins, "
                          "imprints, latency EWMAs, calibration, spend); "
                          "default <field-dir>/router.json")
-    ap.add_argument("--replay-sim", type=float, default=0.97, metavar="SIM",
+    ap.add_argument("--replay-sim", type=float, default=0.0, metavar="SIM",
                     help="cosine above which an ACT verdict replays the stored "
                          "answer with NO model call (the token saver). "
-                         "An instant repeat still takes the re-ask demotion "
-                         "path; a settled later repeat gets the free replay. "
-                         "0 disables replay (pure observer).")
+                         "DEFAULT 0 = pure observer: membrane NEVER answers "
+                         "the user from memory -- every turn reaches the "
+                         "model, memories ride along as context. Set >0 "
+                         "(e.g. 0.97) to re-enable the replay token saver.")
     ap.add_argument("--no-state-intercept", dest="state_intercept",
                     action="store_false",
                     help="proxy every turn to the model, even membrane math/"
@@ -4335,6 +4870,9 @@ def main() -> None:
                     help="cosine floor for commons top-up in recall")
     ap.add_argument("--no-launch", dest="launch", action="store_false",
                     help="run only the proxy (don't start opencode)")
+    ap.add_argument("--no-continue", dest="cont", action="store_false",
+                    help="don't resume opencode's last session (default: "
+                         "resume; -c/-s in passthrough still win)")
     ap.add_argument("passthrough", nargs="*",
                     help="extra args passed to opencode (use -- to separate)")
     args = ap.parse_args()
@@ -4477,6 +5015,15 @@ def main() -> None:
     srv.compact_growth_frac = max(0.0, float(args.compact_growth_frac))
     srv.compact_follows_chat = args.compact_model is None
     srv.compact_model = args.compact_model or model or "granite3.3:8b"
+    # THE IDLE-CORTEX SPLIT: background loops (compactor distillation, the
+    # entity synthesizer) run on a LOCAL model by default -- a stray stuck
+    # background seat can never burn cloud tokens again. An explicit
+    # --compact-model pins BOTH lanes (chat-stamped + idle); --idle-cortex-
+    # model overrides just the idle lane. The judge/cortex continue to follow
+    # the operator's chat selection (1-per-turn, bounded by the turn itself).
+    srv.idle_cortex_model = (args.idle_cortex_model or args.compact_model
+                             or "granite3.3:8b")
+    srv.default_compact_model = srv.compact_model   # the autoselect-lane pin-back
     srv.judge_follows_chat = (not args.no_judge) and args.judge_model is None
     srv.pending_embed_error = None
     srv.state_intercept = bool(args.state_intercept)
@@ -4564,6 +5111,41 @@ def main() -> None:
     except Exception as e:
         print(f"[opencode] intent layer disabled ({_one_line(e)})",
               file=sys.stderr)
+    # ---- the entity store (the shared symbolic layer) ----
+    # Derived entities (deterministic + idle-cortex synthesis) live in three
+    # homes: RAM, <field>.entities.json, and cortex-core._default.entities
+    # (the QuantumEntity collection -- one symbolic layer shared with the
+    # cortex-experiment brain). Boot reads the JSON; read-through from the
+    # couchbase commons is best-effort after the embedder resolves.
+    srv._boot_ts = time.time()
+    srv.entity_store = None
+    try:
+        from .entities import EntityStore
+        srv.entity_store = EntityStore(path=str(_wdir / "entities.json"))
+        _n_e = len(srv.entity_store.docs)
+        print(f"[opencode] entities: {_n_e} known "
+              f"(cortex-core write-through: {'on' if srv.entity_store._entities_collection() else 'json-only'})",
+              file=sys.stderr)
+    except Exception as e:
+        print(f"[opencode] entity layer disabled ({_one_line(e)})",
+              file=sys.stderr)
+
+    def _entity_sink(ents, links):
+        """The compactor synthesizer's commit path: merge + write-through,
+        back-linked to the cluster's cell indexes (where they still exist --
+        the compactor may have retired them into the note)."""
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            return
+        for ent in ents:
+            for i in (links or []):
+                if i not in ent.links:
+                    ent.links.append(i)
+            try:
+                est.upsert(ent, embedder=srv.membrane.embedder)
+            except Exception:
+                pass
+    srv.entity_sink = _entity_sink
     if args.compact_every > 0 and not getattr(mem, "fork_owns_field", False):
         srv.compactor = Compactor(srv, idle=args.compact_every)
         srv.compactor.start()
@@ -4620,15 +5202,22 @@ def main() -> None:
                     continue
                 srv.cloud_keys[pname] = key      # memory only
                 try:
-                    ids = _auth.fetch_models(pname, key)
+                    pairs = _auth.fetch_models_info(pname, key)
                     price = prov.get("default_price")
                     n_p = srv.router.add_cloud_models(
-                        ids, provider=pname, price=price)
+                        [mid for mid, _f, _ctx in pairs], provider=pname,
+                        price=price,
+                        free_ids={mid for mid, f, _ctx in pairs if f})
                     if n_p:
+                        n_free = sum(
+                            1 for mid, _f, _ctx in pairs
+                            if (rec := srv.router.records.get(mid)) is not None
+                            and rec.price() <= 0.1)
                         srv.cloud_models.append(pname)
                         print(f"[opencode] {pname}: {n_p} model(s) registered "
-                              f"as cloud rungs (key {_auth.mask(key)})",
-                              file=sys.stderr)
+                              f"as cloud rungs (key {_auth.mask(key)})"
+                              + (f", {n_free} free-tier expert(s) at near-floor"
+                                 if n_free else ""), file=sys.stderr)
                 except Exception as p_e:
                     print(f"[opencode] {pname} rungs skipped ({p_e})",
                           file=sys.stderr)
@@ -4771,6 +5360,13 @@ def main() -> None:
                     (getattr(srv.router, "records", {}).values()
                      if getattr(srv, "router", None) else [])
                     if getattr(r, "backend", "") and r.kind == "cloud"]
+    # the AUTOSELECT sentinels ride the picker too (the router itself as a
+    # selectable "model"): @-free names (some pickers mangle odd characters;
+    # @-spelled forms stay accepted aliases). Only with a router present.
+    if getattr(srv, "router", None) is not None:
+        auto_models = list(AUTO_LANES)
+    else:
+        auto_models = []
     cfg = {
         "$schema": "https://opencode.ai/config.json",
         "autoupdate": False,
@@ -4780,7 +5376,8 @@ def main() -> None:
                 "npm": "@ai-sdk/openai-compatible",
                 "name": "Membrane (field)",
                 "options": {"baseURL": f"http://127.0.0.1:{listen}/v1"},
-                "models": {m: {"name": m} for m in chat_models + cloud_models},
+                "models": {m: {"name": m}
+                           for m in chat_models + cloud_models + auto_models},
             },
         },
     }
@@ -4793,18 +5390,25 @@ def main() -> None:
     # Fork stand-down: the fork's /api/chat stamps its own doctrine; this seat
     # ships NO instructions file when the fork owns the field.
     instr_path = None
-    if getattr(args, "doctrine_move", True) \
-            and not getattr(mem, "fork_owns_field", False):
-        try:
-            ifd, instr_path = tempfile.mkstemp(prefix="membrane-doctrine-",
-                                               suffix=".md")
-            with os.fdopen(ifd, "w") as f:
-                f.write(doctrine_instructions_text())
-            cfg["instructions"] = [instr_path]
-        except Exception as e:
-            instr_path = None
-            print(f"[opencode] doctrine-move skipped ({e}); per-turn "
-                  "injection stays", file=sys.stderr)
+    # TRUST-THE-DELIVERY: the doctrine ships once (the generated instructions
+    # file when this seat generates it; the transcript's first injection when
+    # the fork owns the field) — _inject never re-stamps the ~2k preamble
+    # per turn. Set BEFORE the fork branch so it holds in both worlds.
+    import membrane.rag as _rag
+    if getattr(args, "doctrine_move", True):
+        _rag._inject.doctrine_delivered = True
+    if not getattr(mem, "fork_owns_field", False):
+        if getattr(args, "doctrine_move", True):
+            try:
+                ifd, instr_path = tempfile.mkstemp(prefix="membrane-doctrine-",
+                                                   suffix=".md")
+                with os.fdopen(ifd, "w") as f:
+                    f.write(doctrine_instructions_text())
+                cfg["instructions"] = [instr_path]
+            except Exception as e:
+                instr_path = None
+                print(f"[opencode] doctrine-move skipped ({e}); per-turn "
+                      "injection stays", file=sys.stderr)
     if model:
         cfg["model"] = f"membrane/{model}"
         cfg["small_model"] = f"membrane/{model}"
@@ -4937,6 +5541,13 @@ def main() -> None:
                 if model and not any(a.startswith("--model") or a.startswith("-m")
                                      for a in passthrough):
                     extra = ["--model", f"membrane/{model}"]
+                # resume by default: opencode -c continues the last session.
+                # An explicit -c/-s/--session in passthrough wins; --no-continue
+                # opts out (fresh session).
+                if args.cont and not any(
+                        a in ("-c", "--continue") or a in ("-s", "--session")
+                        or a.startswith("--session=") for a in passthrough):
+                    extra += ["-c"]
                 cmd = [opencode] + extra + list(passthrough)
                 print(f"[opencode] launching: {' '.join(cmd)}", file=sys.stderr)
                 child = subprocess.Popen(cmd, env=env)

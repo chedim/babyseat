@@ -77,6 +77,8 @@ PRICE_TABLE: list[tuple[str, float]] = [
 ]
 LAMBDA_TIME = 0.05         # score units per pressure-inflated second
 LAMBDA_COST = 1.0          # score units per money unit
+FREE_TIER_PRICE = 0.1      # the near-floor pin for zero-token-cost rungs
+                           # (below every paid cloud price, above local 0)
 COLD_LOAD_S_PER_GIB = 1.2  # cold-loading a local model costs ~1.2s/GiB
 CLOUD_LATENCY = 4.0        # network + big-model baseline, seconds
 PRIOR_MASS_K = 3.0         # phantom trials standing behind the imprint claim
@@ -104,6 +106,33 @@ EXPLORE_FIT_MARGIN = 0.15      # eps-explore samples only locals this NEAR the
                                # floor's fit -- never a 0.4-fit toy on a chat turn
 EXPLORE_LANE = "@explore"      # sentinel ceiling: the deliberate evidence-farm
                                # lane (subagents), least-tried eligible local
+# the AUTOSELECT sentinels (operator-facing picker entries, backed by the
+# router itself): "autoselect" scores every candidate per turn (fit_hat -
+# delay - price, cheapest eligible cloud floor, locals earning the rank);
+# "autoselect-local" is the same logic with --prefer-local forced (the
+# offline covenant: a local holds the floor, cloud is the escalation).
+# Names are deliberately @-free (some pickers mangle or hide odd characters);
+# the @-spelled forms are kept as accepted aliases for older sessions.
+AUTO_CLOUD = "autoselect"
+AUTO_LOCAL = "autoselect-local"
+AUTO_LANES = (AUTO_CLOUD, AUTO_LOCAL)
+AUTO_ALIASES = ("@autoselect", "@autoselect-local")
+LANE_TOKENS = frozenset(AUTO_LANES + AUTO_ALIASES + (EXPLORE_LANE,))
+
+
+def normalize_lane(ceiling: str | None) -> str | None:
+    """A selected model name -> the canonical lane sentinel, or the name as-is.
+
+    Matches the @-free canonical sentinels and their @-spelled aliases
+    (case/space-insensitive, provider prefix stripped by the caller)."""
+    if not ceiling:
+        return None
+    low = str(ceiling).strip().lower()
+    if low == EXPLORE_LANE:
+        return EXPLORE_LANE
+    if low in LANE_TOKENS:
+        return AUTO_LOCAL if "local" in low else AUTO_CLOUD
+    return str(ceiling).strip()
 
 
 def local_is_eligible(rec) -> bool:
@@ -147,6 +176,11 @@ class ModelRecord:
     # provider's default_price; --price overrides still win (checked first).
     price_override: float | None = None
     size_bytes: int = 0
+    # context window reported by the provider (tokens). HARD FILTER when
+    # the caller reports the request's own token estimate: a rung whose
+    # window cannot hold the turn is skipped (never an oversized-context
+    # 400 from the backend). 0 = unknown -> conservatively routable.
+    context_length: int = 0
     caps: list = dfield(default_factory=list)   # ollama capability flags
     # the claimed region (self-description embeds) + its verbatim claim
     imprint: list = dfield(default_factory=list)  # unit vectors
@@ -250,7 +284,8 @@ class ModelRecord:
                 "imprint": self.imprint, "last_used": self.last_used,
                 "size_bytes": self.size_bytes, "caps": self.caps,
                 "backend": self.backend,
-                "price_override": self.price_override}
+                "price_override": self.price_override,
+                "context_length": self.context_length}
 
 
 class Registry:
@@ -324,7 +359,8 @@ class Registry:
             rec.caps = caps + [f for f in fams if f not in caps]
 
     def add_cloud_models(self, ids: list[str], provider: str,
-                         price: float | None = None) -> int:
+                         price: float | None = None,
+                         free_ids: set[str] | None = None) -> int:
         """Register a provider's models as cloud rungs (first-class citizens).
 
         Each answers the OpenAI-compatible chat path on that provider's
@@ -334,19 +370,38 @@ class Registry:
         registration (the provider's default_price, typically near-floor for
         free tiers) so the ladder can rank it before PRICE_TABLE falls
         through; --price overrides still win (checked first in price()).
-        Caps are DECLARED (chat providers take tools + completion). Never
-        touches existing records: a name collision with an Ollama model keeps
-        the Ollama rung (the local backend is the default for a reason)."""
+        `free_ids` marks the provider's ZERO-TOKEN-COST rungs (openrouter's
+        `:free` / pricing==0 rows): they pin near-floor so the ladder ranks
+        them as the first escalation above locals -- free experts, the
+        cheapest possible cloud step. A free id listed in --price still
+        takes the operator's pin. Caps are DECLARED (chat providers take
+        tools + completion). Never touches existing records: a name collision
+        with an Ollama model keeps the Ollama rung (the local backend is the
+        default for a reason)."""
         n = 0
         for mid in ids or []:
             if not mid or mid in self.records:
                 continue
             rec = ModelRecord(name=mid, kind="cloud", backend=provider,
                               caps=["completion", "tools"])
-            if price is not None:
+            if free_ids and mid in free_ids and price is not None:
+                rec.price_override = min(float(price), FREE_TIER_PRICE)
+            elif price is not None:
                 rec.price_override = float(price)
             self.records[mid] = rec
             n += 1
+        # persisted-rung reconciliation: rungs registered by an OLDER boot
+        # (before a pin policy existed) carry stale price pins -- refresh the
+        # provider's own rungs only (never another provider's, never locals;
+        # an operator --price pin for a name that is no longer free stays
+        # untouched because it lists the id in free_ids by name and the
+        # listing is the authority per boot).
+        if free_ids and price is not None:
+            for mid in free_ids:
+                rec = self.records.get(mid)
+                if rec is not None and rec.kind == "cloud" \
+                        and rec.backend == provider:
+                    rec.price_override = min(float(price), FREE_TIER_PRICE)
         return n
 
     def add_anthropic_models(self, ids: list[str]) -> int:
@@ -446,8 +501,11 @@ class Registry:
         Unknown model -> no cap (we cannot price what we do not know)."""
         if not ceiling:
             return None, True
-        if ceiling.strip().lower() == EXPLORE_LANE:
+        low_c = str(ceiling).strip().lower()
+        if low_c == EXPLORE_LANE:
             return None, False       # the lane forbids cloud BY DESIGN
+        if low_c in LANE_TOKENS:
+            return None, True        # autoselect: the router IS the chooser
         rec = self.records.get(ceiling)
         if rec is not None:
             if rec.kind == "local":
@@ -471,6 +529,32 @@ class Registry:
         size (0) stays conservatively routable."""
         return r.size_bytes == 0 or r.size_bytes / 2**30 <= self.max_local_gib
 
+    def context_holds(self, r: ModelRecord, ctx_tokens: int = 0) -> bool:
+        """Can this rung hold the request under its DECLARED context window?
+
+        ctx_tokens is the caller's estimate of THIS request (prompt + history
+        + margin). 0 on either side (unknown window or unknown request size)
+        stays conservatively routable -- the filter only fires on real data."""
+        if ctx_tokens <= 0 or r.context_length <= 0:
+            return True
+        return ctx_tokens <= r.context_length
+
+    @staticmethod
+    def estimate_tokens(messages: list | None, reserve: int = 2048) -> int:
+        """Rough token estimate of a chat request: ~4 chars/token over the
+        message bodies (content + tool calls), plus a completion reserve so
+        a rung whose window barely fits the prompt is not picked for a long
+        answer."""
+        if not messages:
+            return reserve
+        try:
+            chars = sum(len(str(m.get("content") or ""))
+                        + len(json.dumps(m.get("tool_calls") or []))
+                        for m in messages if isinstance(m, dict))
+        except Exception:
+            return 0
+        return int(chars / 4) + reserve
+
     def local_earned(self, r: ModelRecord, situ) -> bool:
         """Has this local EARNED taking the rank from the cloud floor?"""
         if r.trials < MIN_LOCAL_TRIALS:
@@ -489,7 +573,8 @@ class Registry:
             - LAMBDA_COST * r.price()
 
     def _floor(self, clouds: list[ModelRecord], locals_: list[ModelRecord],
-               situ, urgency: float, pres: float, thr: float
+               situ, urgency: float, pres: float, thr: float,
+               force_local: bool | None = None
                ) -> tuple[ModelRecord | None, str]:
         """The floor holder under the REVERSED ladder.
 
@@ -498,11 +583,13 @@ class Registry:
         EARNED it (win-rate over MIN_LOCAL_TRIALS + a real fit margin) AND
         holds without a cold load. --prefer-local restores the classic
         local-first floor; if no cloud exists, the best eligible local is
-        the floor (the offline covenant)."""
+        the floor (the offline covenant). force_local (the autoselect-local
+        lane's policy, passed as a parameter -- never a registry mutation)
+        forces that local-first floor for one route."""
         def score(r):
             return self._score(r, situ, urgency, pres, thr)
 
-        if locals_ and self.prefer_local:
+        if locals_ and (force_local or self.prefer_local):
             return max(locals_, key=score), "prefer-local: local first"
         cheap = min(clouds, key=lambda r: r.price()) if clouds else None
         if cheap is None:
@@ -523,7 +610,8 @@ class Registry:
 
     def route(self, situ_vec, urgency: float = 1.0,
               needs_tools: bool = False,
-              ceiling: str | None = None) -> tuple[ModelRecord | None, dict]:
+              ceiling: str | None = None,
+              ctx_tokens: int = 0) -> tuple[ModelRecord | None, dict]:
         """Pick the escalation target; return (record, audit_route dict).
 
         score(m) = fit_hat - LAMBDA_TIME*urgency*delay - LAMBDA_COST*price.
@@ -532,9 +620,17 @@ class Registry:
         fit margin) AND holding without a cold load. eps-explore samples
         only eligible, holding locals (never a whisper, never an outlier
         cold load). --prefer-local flips the floor back to locals.
-        The OPERATOR'S CEILING: the model the user SELECTED in opencode
-        caps the candidate set (cloud never above it; a local selection
-        forbids cloud entirely; the @explore sentinel farms evidence)."""
+        THE OPERATOR'S HAND:
+        - a lane sentinel (autoselect / autoselect-local, @-spelled aliases
+          accepted) delegates the CHOOSING to the router: every candidate is
+          scored per turn, with the lane's floor policy forced. The router
+          never mutates its own policy: the lane rides as a parameter.
+        - a SPECIFIC model selection is a HARD pick: the router must not
+          override it (that selection IS the rung; routing only re-picks
+          when the operator chose a lane sentinel).
+        - @explore farms evidence on least-tried eligible locals.
+        ctx_tokens (the request's estimated size) is a HARD filter: a rung
+        whose declared context window cannot hold the turn is skipped."""
         self.ensure_seeded()
 
         def cap_ok(r: ModelRecord) -> bool:
@@ -544,7 +640,11 @@ class Registry:
                 return True
             return "tools" in r.caps
 
-        if ceiling and ceiling.strip().lower() == EXPLORE_LANE:
+        def fits(r: ModelRecord) -> bool:
+            return cap_ok(r) and self.context_holds(r, ctx_tokens)
+
+        lane = normalize_lane(ceiling)
+        if lane == EXPLORE_LANE:
             day = time.strftime("%Y-%m-%d")
             if self.spend_day != day:
                 self.spend_day, self.spend_today = day, 0.0
@@ -553,7 +653,7 @@ class Registry:
             self._last_pressure = pres
             locals_ = sorted(
                 [r for r in self.records.values()
-                 if r.kind == "local" and cap_ok(r)
+                 if r.kind == "local" and fits(r)
                  and local_is_eligible(r) and self.local_holds(r)],
                 key=lambda r: (r.trials, r.name))
             if not locals_:
@@ -567,6 +667,14 @@ class Registry:
                            "explored": True, "pressure": round(pres, 2),
                            "imprint": bool(least.imprint),
                            "threshold": round(thr, 1), "ts": time.time()}
+        # the AUTOSELECT lanes: the router IS the model. The pick routes by
+        # this method's own scoring with the lane's floor policy passed as a
+        # PARAMETER (never mutating the registry's own prefer_local -- a
+        # failed/raised route must not leave the registry flipped); the
+        # ceiling is NO ceiling -- the operator chose "route it all".
+        lane_floor_local = None
+        if lane in AUTO_LANES:
+            lane_floor_local = (lane == AUTO_LOCAL)
         situ = np.asarray(situ_vec, dtype=float) if situ_vec is not None else None
         day = time.strftime("%Y-%m-%d")
         if self.spend_day != day:
@@ -574,19 +682,43 @@ class Registry:
         thr = self.calibrated_threshold()
         pres = self.pressure()
         self._last_pressure = pres
-        max_price, allow_cloud = self.ceiling_cap(ceiling)
+        if lane in AUTO_LANES:
+            max_price, allow_cloud = None, True
+        elif lane is not None and lane in self.records:
+            # a SPECIFIC model selection is a HARD pick, not a price hint:
+            # the operator named a rung -- that rung answers (if alive and
+            # eligible), the ladder never re-picks beneath it. Degrade to the
+            # old price-ceiling semantics only for UNKNOWN names (there we
+            # cannot route to what we do not know).
+            rec = self.records[lane]
+            if self.outage(rec.name) is None and fits(rec):
+                return rec, {"route": rec.name, "kind": rec.kind,
+                             "reason": f"operator pick: {rec.name}",
+                             "explored": False, "lane": None,
+                             "pressure": round(pres, 2),
+                             "imprint": bool(rec.imprint),
+                             "threshold": round(thr, 1), "ts": time.time()}
+            max_price, allow_cloud = self.ceiling_cap(lane)
+        else:
+            max_price, allow_cloud = self.ceiling_cap(lane)
 
         locals_ = [r for r in self.records.values()
-                   if r.kind == "local" and cap_ok(r)
+                   if r.kind == "local" and fits(r)
                    and local_is_eligible(r)]
         clouds = [r for r in self.records.values()
-                  if r.kind == "cloud" and cap_ok(r)]
+                  if r.kind == "cloud" and fits(r)]
         if not allow_cloud:
             clouds = []
         elif max_price is not None:
             clouds = [r for r in clouds if r.price() <= max_price]
         if self.cloud_budget is not None and self.spend_today >= self.cloud_budget:
-            clouds = []
+            # budget exhausted -- but a ZERO budget is the free-tier covenant,
+            # not a blackout: near-floor (free) rungs stay reachable, paid
+            # ones drop out (a free pin costs ~0.1, paid >= 1).
+            if self.cloud_budget <= 0:
+                clouds = [r for r in clouds if r.price() <= 0.1]
+            else:
+                clouds = []
         locals_ = self._alive(locals_)
         clouds = self._alive(clouds)
         if not locals_ and not clouds:
@@ -597,6 +729,9 @@ class Registry:
                 why = f"no candidates under the selected model ({ceiling}: local-only)"
             elif ceiling:
                 why = f"no candidates under the selected model's price ({ceiling})"
+            elif ctx_tokens > 0:
+                why = (f"no candidate holds the request "
+                       f"(~{ctx_tokens} tokens vs declared context windows)")
             return None, {"route": None, "kind": None,
                           "reason": why, "pressure": round(pres, 2)}
 
@@ -620,13 +755,15 @@ class Registry:
                     "imprint": bool(best.imprint),
                     "threshold": round(thr, 1), "ts": time.time()}
             return best, info
-        best, reason = self._floor(clouds, locals_, situ, urgency, pres, thr)
+        best, reason = self._floor(clouds, locals_, situ, urgency, pres, thr,
+                                   force_local=lane_floor_local)
         if best is None:
             return None, {"route": None, "kind": None,
                           "reason": reason, "pressure": round(pres, 2)}
         info = {"route": best.name,
                 "kind": best.kind,
                 "reason": reason, "explored": explored,
+                "lane": lane if lane in AUTO_LANES else None,
                 "pressure": round(pres, 2),
                 "imprint": bool(best.imprint) if best else False,
                 "threshold": round(thr, 1), "ts": time.time()}
@@ -661,37 +798,73 @@ class Registry:
         return [r for r in rs if self.outage(r.name) is None]
 
     def ladder(self, needs_tools: bool = False,
-               ceiling: str | None = None) -> list:
+               ceiling: str | None = None,
+               ctx_tokens: int = 0) -> list:
         """ALL candidates as an ordered failover stack: floor first, then the
         remaining clouds cheapest-first, then eligible holding locals, all
         outage-filtered. The caller walks it top-down until one answers.
-        The OPERATOR'S CEILING applies here too: cloud never above the
-        selected model's price; a local selection drops cloud entirely.
-        The @explore lane drops cloud too, and puts the least-tried
-        eligible local first: it exists to farm evidence."""
+        The OPERATOR'S HAND applies here too: a lane sentinel (autoselect /
+        autoselect-local, @-aliases accepted) drops the price cap (the
+        sentinel IS the chooser) and orders by the lane's floor policy
+        (passed as a parameter, never a registry mutation); a specific
+        model selection caps the stack (cloud never above its price; a
+        local selection drops cloud). ctx_tokens is the request's estimated
+        size -- a rung whose declared context window cannot hold it is
+        skipped."""
         self.ensure_seeded()
 
         def cap_ok(r):
             return not needs_tools or not r.caps or "tools" in r.caps
-        max_price, allow_cloud = self.ceiling_cap(ceiling)
-        if ceiling and ceiling.strip().lower() == EXPLORE_LANE:
+        lane = normalize_lane(ceiling)
+        if lane in AUTO_LANES:
+            # no price cap: the sentinel chose "all"; the lane's floor
+            # policy rides as a parameter
+            return self._ladder_under(needs_tools, None,
+                                      allow_cloud=True,
+                                      ctx_tokens=ctx_tokens,
+                                      force_local=(lane == AUTO_LOCAL))
+        if lane == EXPLORE_LANE:
             # the lane's stack: least-tried eligible locals first
             locals_ = sorted(
                 [r for r in self.records.values() if r.kind == "local"
                  and cap_ok(r) and local_is_eligible(r)
-                 and self.local_holds(r)],
+                 and self.local_holds(r)
+                 and self.context_holds(r, ctx_tokens)],
                 key=lambda r: (r.trials, r.name))
             return self._alive(locals_ or [min(
                 (r for r in self.records.values() if r.kind == "cloud"),
                 key=lambda r: r.price(), default=None)] if locals_ else [])
+        max_price, allow_cloud = self.ceiling_cap(lane)
+        return self._ladder_under(needs_tools, max_price,
+                                  allow_cloud=allow_cloud,
+                                  ctx_tokens=ctx_tokens)
+
+    def _ladder_under(self, needs_tools: bool, max_price: float | None,
+                      allow_cloud: bool = True, ctx_tokens: int = 0,
+                      force_local: bool | None = None) -> list:
+        """The failover stack for an already-parsed ceiling: cheapest cloud
+        first (when allowed), the rest cheapest-first, then eligible holding
+        locals most-tried-first. force_local (the autoselect-local lane)
+        puts holding eligible locals before the clouds."""
+        def cap_ok(r):
+            return not needs_tools or not r.caps or "tools" in r.caps
+
+        def fits(r):
+            return cap_ok(r) and self.context_holds(r, ctx_tokens)
         clouds = [r for r in self.records.values() if r.kind == "cloud"
-                  and cap_ok(r)]
+                  and fits(r)]
         if not allow_cloud:
             clouds = []
         elif max_price is not None:
             clouds = [r for r in clouds if r.price() <= max_price]
+        if self.cloud_budget is not None and self.spend_today >= self.cloud_budget:
+            # zero budget = free-tier covenant (see route()); paid rungs out
+            if self.cloud_budget <= 0:
+                clouds = [r for r in clouds if r.price() <= 0.1]
+            else:
+                clouds = []
         locals_ = [r for r in self.records.values() if r.kind == "local"
-                   and cap_ok(r) and local_is_eligible(r)
+                   and fits(r) and local_is_eligible(r)
                    and self.local_holds(r)]
         stack = []
         if clouds:
@@ -699,6 +872,11 @@ class Registry:
             stack += sorted([c for c in clouds if c not in stack],
                             key=lambda r: r.price())
         stack += sorted(locals_, key=lambda r: -r.trials)
+        if force_local or self.prefer_local:
+            # the local floor (offline covenant): holding eligible locals
+            # lead the stack; the clouds follow as the escalation
+            stack = (sorted(locals_, key=lambda r: -r.trials)
+                     + [r for r in stack if r.kind == "cloud"])
         return self._alive(stack)
 
     # ---- outcome feedback (the measured record) ---------------------------------
@@ -818,6 +996,7 @@ class Registry:
             rec.backend = str(rd.get("backend") or "")
             po = rd.get("price_override")
             rec.price_override = None if po is None else float(po)
+            rec.context_length = int(rd.get("context_length") or 0)
             self.records[name] = rec
 
     # ---- reporting -----------------------------------------------------------

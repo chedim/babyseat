@@ -159,6 +159,36 @@ def fetch_models(provider: str, key: str, timeout: float = 8.0) -> list[str]:
     degrades to no models (the seat just doesn't offer the rung) -- never
     raises. Parses both OpenAI shapes ({data: [...]}) and bare lists
     (github's /catalog/models)."""
+    return [mid for mid, _free, _ctx in fetch_models_info(provider, key,
+                                                          timeout)]
+
+
+def is_free_model(row: dict, mid: str) -> bool:
+    """Zero-token-cost detection for a listing row: OpenRouter carries
+    per-token `pricing` (prompt/completion "0" == free tier) and marks free
+    ids with a `:free` suffix; other providers just don't charge for their
+    listing shape (no pricing data -> not free by declaration)."""
+    if str(mid).lower().endswith(":free"):
+        return True
+    p = row.get("pricing")
+    if isinstance(p, dict):
+        try:
+            if float(p.get("prompt") or 1) == 0.0 \
+                    and float(p.get("completion") or 1) == 0.0:
+                return True
+        except (TypeError, ValueError):
+            pass
+    return False
+
+
+def fetch_models_info(provider: str, key: str,
+                       timeout: float = 8.0) -> list[tuple[str, bool, int]]:
+    """fetch_models with the free-tier flag and context_length per id:
+    [(id, is_free, ctx_len), ...].  Same degrade-to-empty covenant; the
+    flag feeds the router's near-floor pin (free models become zero-cost
+    expert rungs on the ladder) and the context_length lets the router
+    prefer rungs with more room when prices tie.
+    """
     prov = PROVIDERS.get(provider)
     if not prov or not key:
         return []
@@ -170,13 +200,14 @@ def fetch_models(provider: str, key: str, timeout: float = 8.0) -> list[str]:
             data = json.loads(r.read())
         rows = data if isinstance(data, list) \
             else (data.get("data") or data.get("models") or [])
-        ids = []
+        out = []
         for m in rows:
             if isinstance(m, dict):
                 mid = str(m.get("id") or m.get("name") or "").strip()
                 if mid:
-                    ids.append(mid)
-        return ids
+                    out.append((mid, is_free_model(m, mid),
+                                int(m.get("context_length") or 0)))
+        return out
     except Exception as e:
         print(f"[membrane] {provider} model listing failed ({e}); "
               f"no {provider} rungs this boot", file=sys.stderr)

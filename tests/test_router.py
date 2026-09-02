@@ -292,13 +292,110 @@ class TestChatExploreGuard(unittest.TestCase):
 
     def test_lane_ignores_operator_cloud_ceiling(self):
         # the lane is the operator's deliberate farm: even a cloud pick in
-        # opencode does not stop a subagent pointed at @explore (but the
-        # ladder still caps CHAT routes under the same pick).
+        # opencode does not stop a subagent pointed at @explore. A specific
+        # pick is a HARD pick (the router never overrides it); the lane
+        # ignores it by design.
         reg = _Reg("http://x", tags=TAGS, explore=0.0)
         best, _ = reg.route(_vec(1.0), ceiling="claude-opus:cloud")
-        self.assertEqual(best.name, "glm-5.3-flash:cloud")  # capped at price
+        self.assertEqual(best.name, "claude-opus:cloud")  # the pick IS the rung
         best, _ = reg.route(_vec(1.0), ceiling="@explore")
         self.assertEqual(best.kind, "local")
+
+
+class TestAutoselectLanes(unittest.TestCase):
+    """The autoselect sentinels: the router itself as a selectable model."""
+
+    def test_autoselect_routes_with_no_ceiling(self):
+        reg = _Reg("http://x", tags=TAGS, explore=0.0)
+        best, info = reg.route(_vec(0.3), ceiling=R.AUTO_CLOUD)
+        # the sentinel chose "route it all": the expensive rung is reachable
+        self.assertIsNotNone(best)
+        self.assertEqual(info.get("lane"), R.AUTO_CLOUD)
+        # default lane picks the cheapest cloud floor, not claude
+        self.assertEqual(best.name, "glm-5.3-flash:cloud")
+
+    def test_autoselect_prefers_local(self):
+        reg = _Reg("http://x", tags=TAGS, explore=0.0)
+        best, info = reg.route(_vec(0.3), ceiling=R.AUTO_LOCAL)
+        self.assertEqual(best.kind, "local")
+        self.assertEqual(info.get("lane"), R.AUTO_LOCAL)
+        self.assertIn("prefer-local", info["reason"])
+        # default lane picks the cheapest cloud; the local lane does not
+        reg2 = _Reg("http://x", tags=TAGS, explore=0.0)
+        best2, _ = reg2.route(_vec(0.3), ceiling=R.AUTO_CLOUD)
+        self.assertEqual(best2.kind, "cloud")
+        # the registry's own policy is untouched after either route (the
+        # lane rides as a parameter, never a registry mutation)
+        self.assertFalse(reg.prefer_local)
+        self.assertFalse(reg2.prefer_local)
+
+    def test_at_aliases_normalize(self):
+        reg = _Reg("http://x", tags=TAGS, explore=0.0)
+        best, info = reg.route(_vec(0.3), ceiling="@autoselect-local")
+        self.assertEqual(best.kind, "local")
+        self.assertEqual(info.get("lane"), R.AUTO_LOCAL)
+        best2, info2 = reg.route(_vec(0.3), ceiling="@Autoselect")
+        self.assertEqual(info2.get("lane"), R.AUTO_CLOUD)
+        self.assertEqual(reg.ladder(ceiling="@autoselect"),
+                         reg.ladder(ceiling=R.AUTO_CLOUD))
+
+    def test_specific_selection_is_not_rerouted(self):
+        """A SPECIFIC model pick is the operator's rung, not a price hint:
+        the router only routes when a lane sentinel was selected."""
+        reg = _Reg("http://x", tags=TAGS, explore=0.0)
+        best, info = reg.route(_vec(0.3), ceiling="claude-opus:cloud")
+        # the pick itself wins (no demotion to the cheapest cloud under it)
+        self.assertEqual(best.name, "claude-opus:cloud")
+        self.assertIsNone(info.get("lane"))
+        # the registry's own policy survives a specific pick
+        self.assertFalse(reg.prefer_local)
+
+    def test_context_window_filters_oversize_requests(self):
+        """A rung whose DECLARED context window cannot hold the request is
+        skipped (never an oversized-context 400 from the backend)."""
+        reg = _Reg("http://x", tags=TAGS, explore=0.0)
+        reg.records["glm-5.3-flash:cloud"].context_length = 100
+        # a big request: the small-window rung is out, claude holds the floor
+        best, _ = reg.route(_vec(0.3), ceiling=R.AUTO_CLOUD,
+                            ctx_tokens=5000)
+        self.assertEqual(best.name, "claude-opus:cloud")
+        # unknown window (claude) or unknown request -> no filtering
+        best2, _ = reg.route(_vec(0.3), ceiling=R.AUTO_CLOUD)
+        self.assertEqual(best2.name, "glm-5.3-flash:cloud")
+        # the ladder skips the filtered rung too
+        stack = [r.name for r in reg.ladder(ceiling=R.AUTO_CLOUD,
+                                            ctx_tokens=5000)]
+        self.assertNotIn("glm-5.3-flash:cloud", stack)
+        self.assertIn("claude-opus:cloud", stack)
+
+    def test_estimate_tokens_rough(self):
+        msgs = [{"content": "x" * 400}, {"content": "y" * 400}]
+        est = R.Registry.estimate_tokens(msgs, reserve=100)
+        # 800 content chars + 2x "[]" tool-call stubs = 804; /4 + reserve
+        self.assertEqual(est, int(804 / 4) + 100)
+        self.assertEqual(R.Registry.estimate_tokens(None, reserve=100), 100)
+
+    def test_autoselect_ladder_full_stack(self):
+        reg = _Reg("http://x", tags=TAGS, explore=0.0)
+        stack = [r.name for r in reg.ladder(ceiling=R.AUTO_CLOUD)]
+        self.assertIn("claude-opus:cloud", stack)   # no ceiling: everything
+        self.assertIn("deepseek-r1:8b", stack)
+        self.assertEqual(stack[0], "glm-5.3-flash:cloud")  # cheapest floor
+
+    def test_autoselect_local_ladder_prefers_local_floor(self):
+        reg = _Reg("http://x", tags=TAGS, explore=0.0)
+        stack = [r.name for r in reg.ladder(ceiling=R.AUTO_LOCAL)]
+        # prefer-local: holding eligible locals lead the failover stack
+        # (qwen 18GB is over the hold cap; deepseek 4GB leads; clouds follow
+        # as the escalation, never before the local floor)
+        self.assertEqual(stack[0], "deepseek-r1:8b")
+        self.assertEqual(stack[-2:], ["glm-5.3-flash:cloud",
+                                      "claude-opus:cloud"])
+
+    def test_autoselect_sentinels_are_not_rungs(self):
+        reg = _Reg("http://x", tags=TAGS, explore=0.0)
+        self.assertNotIn(R.AUTO_CLOUD, reg.records)
+        self.assertNotIn(R.AUTO_LOCAL, reg.records)
 
 
 class TestOutcomeRecord(unittest.TestCase):

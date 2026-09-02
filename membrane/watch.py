@@ -45,12 +45,25 @@ MIN_WINDOW = 10          # rates only judged after this many arrivals
 EVENT_MAX = 32           # report ring capacity
 
 
+def _entity_key_of(ex) -> str:
+    """An exemplar's entity keys -> the strongest single key for watch
+    matching (first of its harvested tags; '' when untagged)."""
+    tags = getattr(ex, "extra", None) or {}
+    ents = tags.get("entities") if isinstance(tags, dict) else None
+    if isinstance(ents, dict):
+        for kind, values in ents.items():
+            for v in values or []:
+                return f"{kind}:{str(v).lower()}"
+    return ""
+
+
 @dataclass
 class Watch:
     wid: int
     label: str               # the planted topic text
     probe: list              # unit vector
     radius: float = RADIUS_DEFAULT
+    filter_key: str = ""     # entity key or kind prefix ('' = all memories)
     charge: float = CHARGE_START
     hits: int = 0
     seen: int = 0            # arrivals since last dormancy/reset
@@ -62,6 +75,7 @@ class Watch:
     def to_json(self) -> dict:
         return {"wid": self.wid, "label": self.label, "probe": self.probe,
                 "radius": round(self.radius, 4),
+                "filter_key": self.filter_key,
                 "charge": round(self.charge, 3),
                 "hits": self.hits, "seen": self.seen,
                 "dormant_until": self.dormant_until,
@@ -72,6 +86,7 @@ class Watch:
         return cls(wid=int(r["wid"]), label=str(r.get("label", "")),
                    probe=[float(x) for x in r.get("probe", [])],
                    radius=float(r.get("radius", RADIUS_DEFAULT)),
+                   filter_key=str(r.get("filter_key", "")),
                    charge=float(r.get("charge", CHARGE_START)),
                    hits=int(r.get("hits", 0)), seen=int(r.get("seen", 0)),
                    dormant_until=float(r.get("dormant_until", 0.0)),
@@ -200,7 +215,20 @@ class WatchBoard:
         if pv is None or not len(pv):
             return None
         sims = pv @ v
+        ex_key = _entity_key_of(ex)
         for w, sim in zip(list(self.watches.values()), sims):
+            # the filter: a filtered watch fires only on matching arrivals
+            # (entity key exact or kind prefix; '' = all memories)
+            if w.filter_key:
+                fk = w.filter_key.lower()
+                if not (ex_key == fk or ex_key.startswith(fk)
+                        or ex_key.split(":", 1)[0] + ":" == fk):
+                    w.seen += 1
+                    w.window.append(0)
+                    if len(w.window) > WINDOW:
+                        w.window = w.window[-WINDOW:]
+                    w.charge = max(0.0, w.charge - CHARGE_MISS)
+                    continue
             hit = float(sim) >= w.radius
             w.seen += 1
             if hit:

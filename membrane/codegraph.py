@@ -372,6 +372,66 @@ def summary(graph: dict) -> str:
             f"({s['n_edges']} call edges)")
 
 
+def refine_entities(tags: dict, graph: dict) -> dict:
+    """Validate/refine entity tags against the AST graph (the entities.py
+    capture-time harvest, grounded in the real symbol table):
+
+    - ``symbols``: drop anything the graph cannot resolve (regex harvests
+      prose noise like ``http.server`` in a URL string); promote resolvable
+      bare names to their full qualname (``route`` -> ``router.Registry.route``)
+      -- the qualname is the precise retrieval key.
+    - ``files``: keep only files the graph knows (a mentioned path that is
+      not in the repo is a fiction, e.g. a path in a copied log line).
+    Everything else passes through untouched; any error degrades to the
+    unrefined tags (a capture must never fail because refinement did)."""
+    try:
+        symbols: dict = graph.get("symbols") or {}
+        files: dict = graph.get("files") or {}
+        out: dict = {}
+        for kind, values in (tags or {}).items():
+            if kind == "symbols":
+                good = []
+                for s in values or []:
+                    if s in symbols:
+                        good.append(s)
+                        continue
+                    hits = [q for q in symbols if _short(q) == s]
+                    if not hits:
+                        hits = [q for q in symbols
+                                if q.endswith("." + s)]
+                    if len(hits) == 1:
+                        good.append(hits[0])   # promote to the qualname
+                    elif hits:
+                        good.append(s)         # ambiguous: keep the mention
+                    # no hits at all -> drop (prose noise)
+                if good:
+                    out[kind] = good[:8]
+            elif kind == "files":
+                repo_tails: dict = {}
+                for k in files:
+                    repo_tails.setdefault(k.rsplit("/", 1)[-1], k)
+                good = []
+                for f in values or []:
+                    if f in files:
+                        good.append(f)                       # exact repo path
+                    elif f in repo_tails:
+                        good.append(repo_tails[f])           # tail match
+                    # else: not a repo file -> drop (foreign log-line path)
+                if good:
+                    out[kind] = sorted(set(good))[:8]
+            else:
+                out[kind] = values
+        return out
+    except Exception:
+        return tags or {}
+
+
+def repo_tails(files: dict, name: str) -> dict:
+    """files whose tail == name -> {name: repo_rel_path}."""
+    return {k.rsplit("/", 1)[-1]: k for k in files
+            if k.rsplit("/", 1)[-1] == name}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         prog="membrane codegraph",

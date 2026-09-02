@@ -19,13 +19,16 @@ field then *answers without asking a model again*:
    field and never see a model; the agent's own prose-embedded asks (thought
    intercepts) are answered the same way. Every such turn is a full LLM-turn
    avoided.
-2. **Replay (0 tokens).** A settled repeat of a safe memory returns the
-   stored answer verbatim above `--replay-sim` (default 0.97):
-   verbatim-similarity, demotion-guarded, tool-call-excluded. Rare early,
-   compounding as the field earns trust — in the measured session 1 of ~180
-   chat-escalations replayed (~180 tokens); the design intent is that a
-   month-old field replays the boilerplate (the tenth "run the tests the same
-   way" costs nothing).
+2. **Replay (0 tokens, OFF by default).** A settled repeat of a safe memory
+   can return the stored answer verbatim above `--replay-sim` — but the
+   default is now `0` (pure observer): membrane NEVER answers the user from
+   memory; every turn reaches the model with memories as context. Set
+   `--replay-sim 0.97` to re-enable the saver (verbatim-similarity,
+   demotion-guarded, tool-call-excluded). The reason: replayed answers go
+   stale silently, and a stuck settle-replay loop answers the user from a
+   month-old cell. In the measured session 1 of ~180 chat-escalations
+   replayed — the saver's upside is real but small; the honesty cost is not
+   worth it by default.
 3. **Compaction (fewer tokens per turn).** The Compactor distills clusters of
    retired raw turns into one note; later turns inject the small note instead
    of the raw exchanges on every single request. Measured: two compaction
@@ -82,12 +85,20 @@ rates in `field state`. Tests: `tests/test_router.py`.
 
 Per turn the gate picks one of:
 
-- **REPLAY** — cosine ≥ `--replay-sim` (0.97) to a safe past turn → the
-  stored answer, **zero model calls**. The LLM is replaced completely for
-  the mundane.
-- **ESCALATE** — forward to the routed backend (local Ollama by default; the
-  Anthropic adapter fronts the cloud for Claude Code).
-- **OBSERVE** — forward + learn, never replay a coding answer.
+- **REPLAY** — cosine ≥ `--replay-sim` (default 0 = DISABLED; the pure-
+  observer covenant) to a safe past turn → the stored answer, zero model
+  calls. Opt in with `--replay-sim 0.97`.
+- **ESCALATE** — forward to the routed backend (free-tier cloud rungs by
+  default under the $0 budget; `--budget` opens paid rungs; local Ollama for
+  the `autoselect-local` lane).
+- **OBSERVE** — forward + learn. The default path for everything: the model
+  always answers; the field banks the exchange.
+
+Idle background loops (compaction distillation, entity synthesis) run on a
+LOCAL cortex by default (`--idle-cortex-model`, default `granite3.3:8b`) —
+a stuck background seat burns zero cloud tokens. The router's free-tier
+covenant: `--cloud-budget` defaults to $0, which keeps free-tier rungs
+(price ≤ 0.1) reachable and paid rungs unreachable until an explicit budget.
 
 Replay, intercepts, and the compactor's distilled notes mean a well-worn
 project runs long stretches with **zero** model calls.

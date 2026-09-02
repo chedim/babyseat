@@ -169,6 +169,40 @@ class TestCloudRungs(unittest.TestCase):
             stack = [r.name for r in reg.ladder(needs_tools=True)]
             self.assertEqual(stack[0], "or-free")   # crossed the provider seam
 
+    def test_free_rungs_pin_near_floor(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reg = self._reg(tmp)
+            # a mixed listing: one :free id, one paid
+            reg.add_cloud_models(["z-ai/glm-5.2:free", "z-ai/paid"],
+                                 provider="openrouter", price=1.0,
+                                 free_ids={"z-ai/glm-5.2:free"})
+            self.assertEqual(reg.records["z-ai/glm-5.2:free"].price(),
+                             R.FREE_TIER_PRICE)
+            self.assertEqual(reg.records["z-ai/paid"].price(), 1.0)
+            # free wins the floor: cheapest-first
+            stack = [r.name for r in reg.ladder(needs_tools=True)]
+            self.assertEqual(stack[0], "z-ai/glm-5.2:free")
+
+    def test_free_rung_below_paid_respects_ceiling(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reg = self._reg(tmp)
+            reg.add_cloud_models(["free-m"], provider="openrouter",
+                                 price=1.0, free_ids={"free-m"})
+            reg.add_cloud_models(["paid-m"], provider="groq", price=0.75)
+            # a ceiling at the paid rung keeps the free rung in (cheaper)
+            stack = [r.name for r in reg.ladder(needs_tools=True,
+                                                ceiling="paid-m")]
+            self.assertIn("free-m", stack)
+            self.assertIn("paid-m", stack)
+
+    def test_free_pin_never_raises_price(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            reg = self._reg(tmp)
+            # a low provider default stays as-is; the pin only lowers
+            reg.add_cloud_models(["free-m"], provider="groq", price=0.05,
+                                 free_ids={"free-m"})
+            self.assertEqual(reg.records["free-m"].price(), 0.05)
+
 
 class TestFetchModelsParsing(unittest.TestCase):
     def test_openai_shape_and_bare_list(self):
@@ -214,6 +248,60 @@ class TestFetchModelsParsing(unittest.TestCase):
         ids = A.fetch_models("groq", "k", timeout=0.01)
         self.assertEqual(ids, [])
         self.assertEqual(A.fetch_models("nope", "k"), [])
+
+
+class TestFreeDetection(unittest.TestCase):
+    def test_is_free_model_shapes(self):
+        # openrouter's two free markers: pricing==0 and the :free suffix
+        self.assertTrue(A.is_free_model(
+            {"pricing": {"prompt": "0", "completion": "0"}}, "any/id"))
+        self.assertTrue(A.is_free_model({}, "vendor/model:free"))
+        # priced rows are NOT free
+        self.assertFalse(A.is_free_model(
+            {"pricing": {"prompt": "0.0000015", "completion": "0.000002"}},
+            "vendor/paid"))
+        # missing/unparseable pricing -> not free by declaration
+        self.assertFalse(A.is_free_model({}, "vendor/mystery"))
+        self.assertFalse(A.is_free_model(
+            {"pricing": {"prompt": "free?"}}, "vendor/mystery"))
+
+    def test_fetch_models_info_parses_flag(self):
+        class FakeResp:
+            def __init__(self, payload):
+                self._p = json.dumps(payload).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return self._p
+
+        payloads = {
+            A.PROVIDERS["openrouter"]["base"] + "/v1/models":
+                {"data": [
+                    {"id": "a/free", "pricing": {"prompt": "0",
+                                                 "completion": "0"}},
+                    {"id": "a/paid:free"},
+                    {"id": "a/paid", "pricing": {"prompt": "0.001",
+                                                 "completion": "0.002"}},
+                ]},
+        }
+        import urllib.request as _u
+
+        def fake_urlopen(req, timeout=None):
+            return FakeResp(payloads[req.get_full_url()])
+
+        orig = _u.urlopen
+        _u.urlopen = fake_urlopen
+        try:
+            pairs = A.fetch_models_info("openrouter", "k")
+        finally:
+            _u.urlopen = orig
+        self.assertEqual(pairs, [("a/free", True, 0), ("a/paid:free", True, 0),
+                                 ("a/paid", False, 0)])
 
 
 if __name__ == "__main__":

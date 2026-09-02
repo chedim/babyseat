@@ -105,6 +105,56 @@ TOOLS: list[dict] = [
             "required": ["spec"],
         },
     },
+    {
+        "name": "membrane_watch_entity",
+        "description": (
+            "Manage your banner ENTITY TRACKS. A track shows the entity's "
+            "live safe-cell count in the WHERE WE ARE header every turn "
+            "(constant tracking), and an optional boundary turns it into an "
+            "EVENT trigger: 'enter N' alerts when the count rises to N+, "
+            "'exit N' alerts when it falls below N. Alerts fire ONCE per "
+            "transition (re-entry re-arms) and ride the banner as ALERT "
+            "lines. Key forms: 'files:router.py', "
+            "'models:glm-5.3-flash:cloud', 'symbols:<qualname>', "
+            "'shell:git', 'ha:sensor.x'. No boundary = count-only track. "
+            "Use to notice field drift around a component you are working "
+            "on (e.g. 'enter 5' on a module you are refactoring, 'exit 2' "
+            "on a model rung you depend on)."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string",
+                        "description": "Entity key, 'kind:value'."},
+                "boundary": {"type": "string",
+                             "description": "Optional: 'enter N' / 'exit N' "
+                                            "(bare N = enter N)."},
+                "label": {"type": "string",
+                          "description": "Optional display label."},
+            },
+            "required": ["key"],
+        },
+    },
+    {
+        "name": "membrane_unwatch_entity",
+        "description": (
+            "Remove entity tracks: exact key ('files:router.py') or a kind "
+            "prefix ('files:' removes all file tracks)."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "key": {"type": "string"},
+            },
+            "required": ["key"],
+        },
+    },
+    {
+        "name": "membrane_list_tracks",
+        "description": (
+            "List your planted entity tracks: key, label, boundary, current "
+            "inside/outside state, and pending alert count. Use before "
+            "planting a duplicate track or to review your banner."),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
 ]
 
 
@@ -187,6 +237,30 @@ def tool_state(args: dict, port: int) -> str:
                      f"model={out.get('compact_model') or '?'}")
     if out.get("review_pending"):
         lines.append(f"- review pending: {out['review_pending']}")
+    # THE 'I' TRACK over MCP: the same WHERE WE ARE the chat seat's model
+    # gets -- position, commitments, entity tracks.
+    wwa = out.get("where_we_are")
+    if wwa:
+        lines.append("")
+        lines.append(wwa)
+    elif out.get("entity_tracks"):
+        lines.append("- entity tracks: "
+                     + "; ".join(t["key"] for t in out["entity_tracks"]))
+    # the SURFACE BANNER over MCP: the last turn's [membrane] monologue lines
+    # (route/vitals/gave/learned) -- the same stream the TUI thinking channel
+    # gets, delivered in the tool lane so the MCP seat sees the banner too.
+    surf = (out.get("surface") or [])
+    if surf:
+        r = surf[-1]
+        b = [f"[membrane] surface (last turn): verdict={r.get('verdict')} "
+             f"sim={r.get('sim')} route={r.get('route')} "
+             f"model={r.get('model')}"]
+        for blk in (r.get("sent_blocks") or []):
+            b.append(f"  sent: {blk['block']} ({blk['chars']}ch)")
+        if r.get("learned") is not None:
+            b.append(f"  learned: #{r['learned']}")
+        lines.append("")
+        lines.append("\n".join(b))
     return "\n".join(lines)
 
 
@@ -229,11 +303,64 @@ def tool_forget(args: dict, port: int) -> str:
     return "\n".join(lines)
 
 
+def tool_watch_entity(args: dict, port: int) -> str:
+    """Plant an entity track via the proxy's /membrane/entity-track
+    endpoint (the proxy holds the EntityStore; guards live there)."""
+    key = str(args.get("key") or "").strip()
+    if not key:
+        raise ProxyError(400, "key required (e.g. 'files:router.py')")
+    out = _http(port, "POST", "/membrane/entity-track", {
+        "key": key,
+        "boundary": str(args.get("boundary") or ""),
+        "label": str(args.get("label") or ""),
+    })
+    if not out.get("ok"):
+        return f"Track not planted: {out.get('error', 'unknown error')}"
+    e, x = out.get("enter"), out.get("exit")
+    bs = (f" with boundary: enter {e}" if e is not None
+          else f" with boundary: exit {x}" if x is not None else "")
+    return (f"Entity track planted: {out['key']}{bs}. Its live cell count "
+            f"rides the WHERE WE ARE header each turn; a boundary "
+            f"transition (enter/exit) alerts once via the banner.")
+
+
+def tool_unwatch_entity(args: dict, port: int) -> str:
+    key = str(args.get("key") or "").strip()
+    if not key:
+        raise ProxyError(400, "key required (exact key or kind prefix)")
+    out = _http(port, "POST", "/membrane/entity-track/remove", {"key": key})
+    n = int(out.get("removed") or 0)
+    return f"Removed {n} entity track(s)." if n \
+        else "No matching tracks (list them via membrane_list_tracks)."
+
+
+def tool_list_tracks(args: dict, port: int) -> str:
+    out = _http(port, "GET", "/membrane/entity-track")
+    tracks = out.get("tracks") or []
+    if not tracks:
+        return ("No entity tracks planted. Plant one with "
+                "membrane_watch_entity (key + optional boundary).")
+    lines = ["Your entity tracks (live in the WHERE WE ARE banner):"]
+    for t in tracks:
+        b = (f", boundary enter {t['enter']}" if t.get("enter") is not None
+             else f", boundary exit {t['exit']}" if t.get("exit") is not None
+             else "")
+        inside = (f", currently {t['inside']}" if t.get("inside") is not None
+                  else "")
+        pa = f", {t['pending_alerts']} pending alert(s)" \
+            if t.get("pending_alerts") else ""
+        lines.append(f"- {t['key']}{b}{inside}{pa}")
+    return "\n".join(lines)
+
+
 TOOL_IMPLS = {
     "membrane_query": tool_query,
     "membrane_state": tool_state,
     "membrane_learn": tool_learn,
     "membrane_forget": tool_forget,
+    "membrane_watch_entity": tool_watch_entity,
+    "membrane_unwatch_entity": tool_unwatch_entity,
+    "membrane_list_tracks": tool_list_tracks,
 }
 
 

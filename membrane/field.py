@@ -1217,24 +1217,79 @@ class ExemplarStore:
         """
         st = cls()
         st.origin = _origin_tag(field_path) if field_path else st.origin
+        st._field_path_hint = str(field_path) if field_path else None
         coll = st._cb_collection()
         from couchbase.options import QueryOptions
         my = st.origin
-        qr = st._cb_cluster.query(
-            "SELECT meta().id AS id, t.* "
-            f"FROM `{st._cb_bucket}`.`{_CB_SCOPE}`.`{_CB_COLL}` t "
-            "WHERE (t.`origin` = $my OR t.`scope` = 'global') "
-            "AND meta().id NOT LIKE 'sit:%'",
-            # the arbitration index docs (sit:<hash> -> {origin, ex_key})
-            # carry an origin but no exemplar fields -- bookkeeping, not
-            # memories; the key-prefix filter excludes them.
-            QueryOptions(timeout=timedelta(seconds=30),
-                         named_parameters={"my": my}))
-        keys = []
-        for row in qr:
+        # BOOT-SPEED: the id-only N1QL scan + batched KV get_multi beats the
+        # full-payload N1QL stream ~5x (the streaming query-service JSON
+        # parser eats ~0.4ms/row; KV is the bulk path). The id-scan itself is
+        # still ~2s at 4.6k docs, so the KEYS SNAPSHOT (below) skips it too.
+        # Same WHERE filter, same decode -- only the transport changed.
+        keys_path = Path(str(field_path) + ".cb-keys.json") if field_path \
+            else None
+        keys: list[str] = []
+        keys_fresh = False
+        if keys_path and keys_path.exists():
+            try:
+                loaded = json.loads(keys_path.read_text())
+                if isinstance(loaded, list) and loaded:
+                    keys = [str(k) for k in loaded]
+            except Exception:
+                keys = []
+        if not keys:
+            qr = st._cb_cluster.query(
+                "SELECT meta().id AS id "
+                f"FROM `{st._cb_bucket}`.`{_CB_SCOPE}`.`{_CB_COLL}` t "
+                "WHERE (t.`origin` = $my OR t.`scope` = 'global') "
+                "AND meta().id NOT LIKE 'sit:%'",
+                # the arbitration index docs (sit:<hash> -> {origin, ex_key})
+                # carry an origin but no exemplar fields -- bookkeeping, not
+                # memories; the key-prefix filter excludes them.
+                QueryOptions(timeout=timedelta(seconds=30),
+                             named_parameters={"my": my}))
+            keys = [r["id"] for r in qr]
+        else:
+            st._keys_from_snapshot = True   # save() refreshes the snapshot
+        rows: list[dict] = []
+        # batched KV fetch. MultiGetResult exposes .results (Dict[str,
+        # GetResult]) and .all_ok; iterate THAT, not the wrapper. One batch
+        # when possible (a single get_multi of 4.6k keys runs in ~1s; the
+        # chunk loop only guards absurd key counts).
+        if keys:
+            try:
+                got = coll.get_multi(keys)
+                for k, res in (getattr(got, "results", None) or {}).items():
+                    try:
+                        # .value is ALREADY decoded (dict) -- content_as[dict]
+                        # would re-run the serializer on every row (measured:
+                        # the boot's 7.7k json.loads for 6.4k docs)
+                        v = res.value
+                        if isinstance(v, dict):
+                            rows.append(dict(v, id=k))
+                    except Exception:
+                        continue
+            except Exception as e:
+                # a too-big multi or a reaped doc: degrade to chunked fetch
+                print(f"[membrane] hydrate single-batch skipped "
+                      f"({str(e)[:80]}); chunking", file=__import__("sys").stderr)
+                for lo in range(0, len(keys), 500):
+                    batch = keys[lo:lo + 500]
+                    try:
+                        got = coll.get_multi(batch)
+                    except Exception:
+                        continue
+                    results = getattr(got, "results", None) or {}
+                    for k, res in results.items():
+                        try:
+                            v = res.value
+                            if isinstance(v, dict):
+                                rows.append(dict(v, id=k))
+                        except Exception:
+                            continue
+        for row in rows:
             ex = _rec_from_wire({k: v for k, v in row.items() if k != "id"})
             st.append(ex)
-            keys.append(row["id"])
         st._cb_keys = set(keys)
         # delta-save bookkeeping: everything hydrated IS current on the
         # backend -- the first save touches only rows born/mutated since.
@@ -1249,14 +1304,31 @@ class ExemplarStore:
             eph_coll = st._ensure_eph_collection()
             eph_bucket = st._cb_eph_bucket or st._cb_bucket
             now = time.time()
+            # BOOT-SPEED (same KV trick as canon): id-scan + get_multi beats
+            # the full-payload N1QL stream
             eph_q = st._cb_cluster.query(
-                "SELECT meta().id AS id, t.* "
-                f"FROM `{eph_bucket}`.`{_CB_SCOPE}`.`{EPH_COLL}` t",
+                f"SELECT meta().id AS id "
+                f"FROM `{eph_bucket}`.`{_CB_SCOPE}`.{EPH_COLL} t",
                 QueryOptions(timeout=timedelta(seconds=30)))
+            eph_ids = [r["id"] for r in eph_q]
             n_eph = 0
             eph_keys: list[str] = []
-            for row in eph_q:
-                # the id is bookkeeping (delta sets + retire-on-sight), not
+            # .value is already decoded (dict); content_as re-parses
+            eph_rows: list[dict] = []
+            for lo in range(0, len(eph_ids), 1000):
+                batch = eph_ids[lo:lo + 1000]
+                try:
+                    got = eph_coll.get_multi(batch)
+                except Exception:
+                    continue
+                for k, res in (getattr(got, "results", None) or {}).items():
+                    try:
+                        v = res.value
+                        if isinstance(v, dict):
+                            eph_rows.append(dict(v, id=k))
+                    except Exception:
+                        continue
+            for row in eph_rows:
                 # exemplar data: strip it before decode (canon loop's shape)
                 eph_id = row.get("id") or ""
                 ex = _rec_from_wire(
@@ -1516,11 +1588,33 @@ class ExemplarStore:
                 except Exception:
                     pass
         self._cb_keys = live
+        # the keys snapshot (boot-speed): save() refreshes <field>.cb-keys.json
+        # so the next boot KV-fetches straight from the snapshot instead of
+        # paying the ~2s N1QL id-scan. Written only when the key set CHANGED
+        # (or on the first save after a snapshot boot, to keep it fresh).
+        try:
+            kp = self._keys_snapshot_path()
+            if kp is not None and (live != getattr(self, "_snapshot_keys", None)
+                                   or getattr(self, "_keys_from_snapshot",
+                                              False)):
+                tmp = kp.with_suffix(".tmp")
+                tmp.write_text(json.dumps(sorted(live)))
+                os.replace(tmp, kp)
+                self._snapshot_keys = set(live)
+                self._keys_from_snapshot = False
+        except Exception:
+            pass
         # the ephemeral pass + stats doc need the cluster handle (fakes and
         # bare KV stubs in tests set only _cb): skip on anything less
         if getattr(self, "_cb_cluster", None) is not None:
             self._save_couchbase_ephemeral()
             self._save_stats_doc()
+
+    def _keys_snapshot_path(self):
+        """<field>.cb-keys.json next to the JSON field file, or None when the
+        store has no field path (tests)."""
+        fp = getattr(self, "_field_path_hint", None)
+        return Path(fp + ".cb-keys.json") if fp else None
 
     def _save_couchbase_ephemeral(self) -> None:
         """The ephemeral tier on couchbase: same origin namespace, the

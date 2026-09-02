@@ -80,7 +80,11 @@ _RAG_SYSTEM = (
     "WHAT MEMBRANE GIVES YOU, and how to use it:\n"
     "- 'Recalled exchanges:' Q/A memories from this same project. Ground your "
     "answer in them when relevant; ignore stale ones; never mention them as "
-    "if the user said them."
+    "if the user said them. Each entry carries (sim NN) -- its cosine to the "
+    "CURRENT question: high sim (0.8+) = likely directly relevant, low sim "
+    "(0.6-0.7) = background only. Some entries lead with the answer instead "
+    "of a question ('Memory (sim..): <fact> [situation: ...]') -- the fact is "
+    "the payload; the situation is just where it was learned."
     "\n"
     "- '[membrane-intercept]' blocks hold answers membrane already computed "
     "(field stats, recalled facts, watch reports). Trusted context: use "
@@ -88,8 +92,14 @@ _RAG_SYSTEM = (
     "- '[membrane-watch]' blocks are your planted spatial triggers firing on "
     "new memories; machinery context -- mention only when relevant to the "
     "user's work, never restate verbatim.\n"
-    "- '[membrane]' lines in your thinking channel are the proxy's routing "
-    "log. Read silently; never reply to them.\n"
+    "- '[membrane]' lines are YOUR state: the turn's verdict, which memories "
+    "you are grounding on (named, so you know what to trust), what was just "
+    "learned, and your entity tracks. Use them to orient; they are machinery "
+    "context, never the user's words.\n"
+    "CONTEXT ECHOING IS A BUG: never recite injected blocks (this doctrine, "
+    "recalled exchanges, WHERE WE ARE) back into your reply or reasoning. "
+    "The user SEES your thinking channel; echoing machinery there is noise. "
+    "Read context silently; answer with substance only.\n"
     "TIMING -- the intercept is POST-GATE: an answer to a frame you emitted "
     "arrives on your NEXT turn, never the same one. Do not re-ask because "
     "'nothing happened'; emit once, wait, act. And recall is a SNAPSHOT: "
@@ -168,6 +178,23 @@ _RECALL_JUNK_PREFIXES = (
     "reasoning:", "plan:", "call ", "result ", "tool ",
     "delegated:", "system-reminder",
 )
+# compact-note situations that carry MACHINERY inside the topic line
+# (distillation preserved the capture prefix) — these ground as junk
+# ("compact note: plan: 48.4% used...") because the situation is
+# machinery text, not a human question.
+_COMPACT_MACHINERY_PREFIXES = (
+    "compact note: plan:", "compact note: reasoning:",
+    "compact note: tool ", "compact note: call ",
+    "compact note: result ",
+)
+
+
+def is_machinery_compact_note(situation: str) -> bool:
+    """A compact note whose topic line is capture machinery (the distiller
+    kept the 'plan:'/'tool ' prefix) — its situation is machinery, its
+    ACTION is the distilled knowledge."""
+    s = " ".join((situation or "").split()).lower()
+    return any(s.startswith(p) for p in _COMPACT_MACHINERY_PREFIXES)
 
 
 def strip_machinery_text(text: str) -> str:
@@ -184,6 +211,27 @@ def is_capture_junk(situation: str) -> bool:
     grounding material -- learned and audited, yes; recalled, no)."""
     q_l = " ".join((situation or "").split()).lower()
     return q_l.startswith(_RECALL_JUNK_PREFIXES)
+
+
+_ACTION_JUNK_MARKERS = (
+    "resuming work after restart",
+    "welcome back to me",
+    "misread that as a request",
+    "i can't do it from in here",
+)
+
+
+def is_action_junk(action: str) -> bool:
+    """True when a cell's ACTION is conversational filler (greeting/ack/
+    restart-confirmation) -- zero durable knowledge. Situation-side screens
+    can't catch these (their situations are content-ful: 'ok, restarted');
+    the ACTION is where the junk lives. These cells resurrect via the shared
+    couchbase store (the fork's capture lane has no vague filter), so the
+    recall surface is the durable gate."""
+    a_l = " ".join((action or "").split()).lower()
+    if not a_l or len(a_l.split()) > 6:      # filler is short
+        return False
+    return any(m in a_l for m in _ACTION_JUNK_MARKERS)
 
 
 _ECHO_TRANSCRIPT_MSGS = 40     # recent tail of the transcript is enough
@@ -267,7 +315,11 @@ def _inject(messages, block: str) -> list:
     everyone else (bare clients, anthropic mode) gets both parts as before.
     """
     msgs = list(messages) if isinstance(messages, list) else []
-    if _has_doctrine_stamp(msgs):
+    # doctrine-move ON = this process shipped the doctrine as the generated
+    # config's instructions file (a byte-stable system prefix). Trust the
+    # delivery: never re-stamp the preamble per turn, even when the stamp
+    # check misses opencode's merged system shape (the every-turn ~2k waste).
+    if getattr(_inject, "doctrine_delivered", False) or _has_doctrine_stamp(msgs):
         content = block
     else:
         content = _RAG_SYSTEM + "\n\n" + block
@@ -462,7 +514,7 @@ class Compactor:
         user = ("Topic seed: " + _clip(topic, 120) + "\n\nPast exchanges "
                 "(oldest first):\n\n" + "\n----\n".join(parts) +
                 "\n\nDistill these into one compact memory note.")
-        note = _ollama_chat(srv.backend, srv.compact_model, [
+        note = _ollama_chat(srv.backend, srv.idle_cortex_model, [
             {"role": "system", "content": _COMPACT_SYSTEM},
             {"role": "user", "content": user}])
         if not note:
@@ -515,6 +567,26 @@ class Compactor:
               f" <- {len(kept)} turns (topic: {_clip(topic, 60)!r})  "
               f"field={len(mem.store)} eff_rank={th['eff_rank']:.1f} "
               f"free_energy={th['free_energy']:.1f}", file=sys.stderr)
+        # 4. the entity synthesizer (the idle cortex's second pass): the SAME
+        # cluster derives abstract entities (decisions/failure-modes/...) --
+        # cortex's cron-job pattern at compactor cadence, zero chat cost.
+        # Any failure degrades to no entities; the compaction already landed.
+        try:
+            from . import entity_synthesis as ES
+            ents = ES.synthesize_from_cluster(
+                srv.backend, srv.idle_cortex_model,
+                [m.situation for m in kept], note, topic,
+                chat=_ollama_chat)
+            if ents:
+                sink = getattr(srv, "entity_sink", None)
+                if sink is not None:
+                    sink(ents, [store.index_of(e) for e in kept
+                                if store.index_of(e) is not None]
+                     if store is not None else [])
+                print(f"[entities] synthesized {len(ents)} from "
+                      f"{_clip(topic, 48)!r}", file=sys.stderr)
+        except Exception as ent_e:
+            print(f"[entities] synthesis skipped ({ent_e})", file=sys.stderr)
 
 
 class RAGProxyHandler(BaseHTTPRequestHandler):
@@ -764,16 +836,65 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
         mmr_sim = float(getattr(srv, "rag_mmr_sim", 0.90))
         t_tokens, t_pairs = _transcript_index(messages)
         search_vec, skewed = self._momentum_skew(vec)
-        for ex, sim in mem.store.recall_merged(search_vec,
-                                               k=int(srv.rag_k) * 4):
-            if sim < srv.rag_sim_min:
-                break                       # sorted desc; nothing closer remains
+        # ---- the ENTITY axis (precise hits, union-recalled) --------------
+        # Vector recall is fuzzy; a query naming "router.py" or
+        # "ling-3.0-flash-fin:free" sits at sim 0.7 mush against cells that
+        # literally carry that term. The entity index inverts SAFE cells'
+        # capture-time tags ('kind:value' -> [idx]); a query mentioning an
+        # entity pulls those cells in as EXTRA candidates (tagged "entity
+        # match", sim-stamped with a trustable pseudo-sim = 0.9 fixed -- term
+        # evidence, not vector evidence). Both streams merge through the
+        # same MMR + transcript-echo screens below.
+        entity_pool: list[tuple[object, float]] = []
+        try:
+            from .entities import query_entities, entity_index
+            # the query text: the last user turn (messages may carry the
+            # full transcript; the extractor only needs the current ask)
+            q_text = ""
+            for m in reversed(messages or []):
+                if isinstance(m, dict) and m.get("role") == "user":
+                    c = m.get("content")
+                    q_text = c if isinstance(c, str) else ""
+                    break
+            q_keys = query_entities(q_text) if q_text else []
+            if q_keys:
+                inv = entity_index(mem.store.exemplars)
+                seen_hits: set[int] = set()
+                for k in q_keys:
+                    for i in reversed(inv.get(k) or []):
+                        if i in seen_hits:
+                            continue
+                        seen_hits.add(i)
+                        entity_pool.append((mem.store.exemplars[i], 0.99))
+                entity_pool = entity_pool[-24:]   # one hot term can't flood
+        except Exception:
+            entity_pool = []
+        candidates = list(entity_pool) + list(
+            mem.store.recall_merged(search_vec, k=int(srv.rag_k) * 4))
+        entity_sim_floor = min(0.65, srv.rag_sim_min)   # term evidence clears
+        for ex, sim in candidates:
+            is_entity_hit = sim >= 0.99
+            if sim < (entity_sim_floor if is_entity_hit else srv.rag_sim_min):
+                if not is_entity_hit:
+                    break                   # sorted desc; nothing closer remains
+                continue
             if not ex.safe:
                 continue
             if is_capture_junk(ex.situation):
                 continue                    # capture-junk: never grounding
-            q_raw = strip_machinery_text(ex.situation)
-            a_raw = strip_machinery_text(ex.action or "")
+            if is_action_junk(ex.action):
+                continue                    # conversational filler: no story
+            # a compact note whose topic line is machinery: the ACTION is
+            # the distilled knowledge -- render it action-first
+            if is_machinery_compact_note(ex.situation):
+                q_raw = "compact note: " + _clip(strip_machinery_text(
+                    ex.action or ""), 160)
+                a_raw = strip_machinery_text(ex.action or "")
+                if not a_raw:
+                    continue
+            else:
+                q_raw = strip_machinery_text(ex.situation)
+                a_raw = strip_machinery_text(ex.action or "")
             if not q_raw or not a_raw:
                 continue                    # nothing but machinery remained
             q_norm = q_raw.lower()
@@ -788,7 +909,16 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
                 continue                    # redundant with a memory already picked
             via = f" [via {ex.model}]" if getattr(ex, "model", "") else ""
             src = _src_label(ex)
-            entry = f"Q: {q}\nA: {a}{via}{src}"
+            # Format: situation-first, but a contentless situation ("would
+            # that make sense?") tells the reader nothing -- when the
+            # situation is short/fragmentary, the ACTION leads and the
+            # situation becomes the context note. Sim is stamped so the
+            # reader can calibrate how hard to trust each entry.
+            if len(q_raw) < 40 and len(a_raw) > len(q_raw) * 2:
+                entry = (f"Memory (sim {sim:.2f}, {src}): {a}"
+                         f" [situation: {q}]{via}")
+            else:
+                entry = f"Q: {q}\nA: {a}{via} (sim {sim:.2f}){src}"
             if len(entry) > budget:
                 break
             budget -= len(entry)
@@ -798,7 +928,11 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
         if not picked:
             local = None
         else:
-            local = "Recalled exchanges:\n\n" + "\n----\n".join(e for e, _ in picked)
+            local = ("Recalled exchanges (past Q/A from this project's "
+                     "memory field; the sim is cosine to the CURRENT "
+                     "question -- high sim = likely directly relevant, "
+                     "low sim = background only):\n\n"
+                     + "\n----\n".join(e for e, _ in picked))
         return self._global_top_up(vec, local,
                                    [pv for _, pv in picked])
 
@@ -966,6 +1100,12 @@ def main() -> None:
     ap.add_argument("--compact-model", default=None, metavar="MODEL",
                     help="Ollama model that distills clusters (default: any "
                          "chat-capable model, e.g. gemma3:12b)")
+    ap.add_argument("--idle-cortex-model", default=None, metavar="MODEL",
+                    help="model for BACKGROUND loops only (compactor "
+                         "distillation, entity synthesis); default "
+                         "granite3.3:8b (local-first: a stray background "
+                         "seat never burns cloud tokens). --compact-model "
+                         "overrides for both lanes.")
     args = ap.parse_args()
 
     backend = args.backend.rstrip("/")
@@ -1000,6 +1140,14 @@ def main() -> None:
     srv.compact_mem_chars = max(64, int(args.mem_chars))
     srv.compact_model = (args.compact_model
                          or getattr(args, "judge_model", "granite3.3:8b"))
+    # THE IDLE-CORTEX SPLIT: background loops (compactor, entity synthesis)
+    # distill on a LOCAL model by default -- a stray background seat must not
+    # burn cloud tokens (the multi-seat leak). --compact-model pins BOTH
+    # lanes explicitly; otherwise idle work uses --idle-cortex (a local
+    # default) while the judge/cortex keep following the operator's chat
+    # selection (1-per-turn, bounded).
+    srv.idle_cortex_model = (args.idle_cortex_model or args.compact_model
+                             or "granite3.3:8b")
     if args.compact_every > 0:
         srv.compactor = Compactor(srv, idle=args.compact_every)
         srv.compactor.start()

@@ -551,13 +551,12 @@ def main() -> None:
     # and those are exactly what we must pass through untouched.
     sub_help = (
         "\n"
-        "  tui        TUI + proxy (default surface)\n"
         "  proxy      proxy only, foreground\n"
         "  opencode   field-backed opencode (OpenAI-compatible proxy on :11500)\n"
-        "  anthropic  TUI+proxy --anthropic mode (Claude Code front door)\n"
+        "  anthropic  --anthropic mode (Claude Code front door)\n"
         "  review     print what the field learned\n"
         "  demo       in-process end-to-end loop (no chat model needed)\n"
-        "  reset      kill the proxy on the port, then TUI+proxy fresh\n"
+        "  reset      kill the proxy on the port, then opencode fresh\n"
         "  update     check the install source for updates, show what\n"
         "             changed, apply (git pull --ff-only) and re-exec\n"
         "  install    install .opencode/skills/* into the CURRENT directory\n"
@@ -582,7 +581,7 @@ def main() -> None:
         print(__doc__)
         return
     cmd = argv[0] if argv and not argv[0].startswith("-") else None
-    if cmd not in ("tui", "proxy", "opencode", "anthropic", "review",
+    if cmd not in ("proxy", "opencode", "anthropic", "review",
                    "demo", "reset", "install", "doctor", "connect",
                    "ingest", "codegraph", "update", "move", "migrate",
                    "auth"):
@@ -603,7 +602,7 @@ def main() -> None:
             forwarded = [a for a in forwarded if a != "--force"]
         raise SystemExit(_install(args))
     # opencode surfaces: bind per-project data + auto-install skills first
-    if cmd in ("opencode", "tui", "anthropic", "reset"):
+    if cmd in ("opencode", "anthropic", "reset"):
         _autoinstall_skills()
     # shared-field onboarding: hydrate the per-project env (secrets live in
     # ~/.membrane/projects/, never in the repo), and -- when nothing

@@ -774,6 +774,16 @@ class Membrane:
         self._confirm_on_use(vec, query, exclude={ex_idx} if ex_idx is not None else None)
         return resp, verdict
 
+    def _time_prefix(self) -> str:
+        """The universal full timestamp for embeddings: '[2026-09-01T21:34Z]'
+        (UTC). Prepend to the text before embedding so the vector encodes
+        content + era -- two identical texts from different eras embed
+        differently, giving the field temporal geometry. The STORED text
+        stays clean; the prefix rides only the embed input."""
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        return f"[{now.strftime('%Y-%m-%dT%H:%M')}Z] "
+
     def gate_turn(self, request_body: dict, unsafe: bool = False
                   ) -> tuple[dict, "np.ndarray | None", str, "int | None"]:
         """The query-side decision, shared by stream + non-stream delivery.
@@ -808,7 +818,12 @@ class Membrane:
         if not query.strip():
             return ({"verdict": "escalate", "reason": "empty query", "sim": 0.0,
                      "nov": None, "ex_idx": None}, None, query, None)
-        vec = self.embedder.embed([query])[0]
+        # TIME-AWARE EMBEDDINGS (the operator's call): the embed input carries
+        # the universal full timestamp so the vector encodes content + era.
+        # The stored query stays clean; the geometry carries the timeline.
+        # NOTE: existing cells were embedded bare -- a re-embed migration is
+        # the clean path; until then old cells just sit at a slight offset.
+        vec = self.embedder.embed([self._time_prefix() + query])[0]
         # the veil: nudge EVERYTHING that transits this instance. The incoming
         # situation embedding is perturbed (per-veil Gaussian noise, own seed) before
         # it touches the gate or the field. The stored exemplar vec IS this nudged
@@ -1502,6 +1517,7 @@ class Membrane:
         """
         content = _response_text(resp)
         if self.vague_filter and self._is_vague(query):
+            self.gate_notes.append("learn: skipped (vague)")
             self._audit(query, verdict, resp, ex_idx=None, learned=False,
                         would_absorb=would_absorb, vague=True)
             return None
@@ -1546,6 +1562,8 @@ class Membrane:
                     # only a ground-signaled correction supersedes it. A
                     # lower-trust answer (model claim) may not.
                     if (_src_get(dup) == "ground" and src != "ground"):
+                        self.gate_notes.append(
+                            f"learn: kept ground cell #{dup_idx} (model claim loses)")
                         self._audit(query, verdict, resp, ex_idx=dup_idx,
                                     learned=False, dup=True,
                                     would_absorb=would_absorb)
@@ -1583,6 +1601,8 @@ class Membrane:
                     repaired = content != dup.action
                     if repaired:
                         self.store.repair_action(dup_idx, content)
+                    self.gate_notes.append(
+                        f"learn: candidate #{dup_idx} dedup-promoted (served twice)")
                     self.store.save(self.field_path)
                     self._audit(query, verdict, resp, ex_idx=dup_idx, learned=False,
                                 dup=True, repaired=repaired,
@@ -1592,12 +1612,15 @@ class Membrane:
                     if content != dup.action:
                         self.store.repair_action(dup_idx, content)
                         self.store.save(self.field_path)
+                        self.gate_notes.append(
+                            f"learn: repaired demoted #{dup_idx} (action overwritten)")
                         self._audit(query, verdict, resp, ex_idx=dup_idx, learned=False,
                                     dup=True, repaired=True, would_absorb=would_absorb)
                         return dup_idx
                     self.contest(dup_idx,
                                  reason="repair-confirm: model stood by corrected action",
                                  source="judge")
+                self.gate_notes.append(f"learn: dedup'd into #{dup_idx} (no new cell)")
                 self._audit(query, verdict, resp, ex_idx=dup_idx, learned=False,
                             dup=True, would_absorb=would_absorb)
                 return dup_idx
@@ -1606,16 +1629,35 @@ class Membrane:
                 before = effective_rank(self.store)
                 after = effective_rank_with(self.store, vec)
                 if after - before <= 1e-6:            # adds no directional variety
+                    self.gate_notes.append("learn: variety-gate skip (no new rank)")
                     self._audit(query, verdict, resp, ex_idx=None, learned=False,
                                 would_absorb=would_absorb, variety_skip=True)
                     return None
+            extra = {"src": _src_of(src)}
+            # capture-time entity harvest (deterministic, $0): the precise
+            # retrieval axis -- extra["entities"] rides the field row itself,
+            # so every store (JSON + couchbase) carries its own tags. The
+            # codegraph lane (AST) grounds symbol/file tags when the server
+            # has a graph: noise dropped, bare names promoted to qualnames.
+            try:
+                from .entities import extract_entities
+                tags_found = extract_entities(query, content)
+                cg = getattr(getattr(self, "server_ref", None),
+                             "_codegraph", None)
+                if tags_found and cg is not None:
+                    from .codegraph import refine_entities
+                    tags_found = refine_entities(tags_found, cg)
+                if tags_found:
+                    extra["entities"] = tags_found
+            except Exception:
+                pass
             fresh = Exemplar(
                 situation=query, action=content, outcome="pending",
                 vec=(_unit_list(vec) if normalize else vec.tolist()), safe=not unsafe,
                 model=str(((verdict.get("route") or {}).get("route")) or ""),
                 tags=tags or [],
                 self_authored=self_authored,
-                extra={"src": _src_of(src)},
+                extra=extra,
             )
             if getattr(self, "ephemeral_tier", False):
                 # THE TIER RULE: a fresh capture is a CANDIDATE (lab E1 --
@@ -1627,6 +1669,8 @@ class Membrane:
                 self.store.append(fresh)
                 self.store.save(self.field_path)
             ex_idx = len(self.store) - 1
+            self.gate_notes.append(
+                f"learned #{ex_idx}: {(query or '').strip()[:60]}")
             self._audit(query, verdict, resp, ex_idx=ex_idx, learned=True,
                         would_absorb=would_absorb)
             return ex_idx
@@ -2124,23 +2168,26 @@ class Membrane:
         """Low-information situation -- skip learning it (the cheap entropy-value
         guard). Conservative on purpose: a false negative just learns the exemplar
         (the safe side); a false positive drops a real turn. Catches the
-        "yes"/"ok"/"beep"/"sigh"/"nice"-class one-word acknowledgements that filled
-        the test field with junk.
+        "yes"/"ok"/"beep"/"sigh"/"nice"-class one-word acknowledgements AND the
+        greeting/ack composite class ("ok, restarted, welcome back!") -- turns
+        with zero durable content that still pass the token-count check.
 
         NOT vague (i.e. real content, learn it) if ANY of:
           - it carries a question mark (an ask, however short);
-          - it meets ``vague_min_tokens`` words (long enough to be substantive);
           - it has a digit, a path separator, or a Capitalized identifier (a
             name/file/symbol -- real referent);
+          - the entity extractor finds a referent (a file, model, url, symbol
+            -- the same test recall uses; no second word list to maintain);
           - it starts with an information stem (how/what/why/.../fix/deploy/...),
             a short request that's still substantive.
+        Long-but-empty turns pass only if EVERY word is a stopword or an
+        acknowledgment ("all right, we are back!") -- a content word (>3
+        chars, not stop/ack) makes it learnable.
         """
         text = query.strip()
         if not text:
             return False                     # empty is handled elsewhere (escalate, no learn)
         if "?" in text:
-            return False
-        if len(text.split()) >= self.vague_min_tokens:
             return False
         if any(ch.isdigit() for ch in text):
             return False
@@ -2149,15 +2196,37 @@ class Membrane:
         if any(w[:1].isupper() for w in text.split() if w):
             return False
         low = text.lower()
+        # the entity harvest IS the content test (entities.py, the precise
+        # retrieval axis): a named referent makes the turn substantive
+        try:
+            from .entities import extract_entities
+            if extract_entities(text):
+                return False
+        except Exception:
+            pass
         info_stems = ("how", "what", "why", "when", "where", "who", "which", "can",
                       "could", "should", "would", "is", "are", "do", "does", "did",
                       "show", "list", "find", "run", "make", "add", "fix", "get",
                       "set", "use", "test", "build", "read", "write", "open", "edit",
                       "help", "explain", "refactor", "deploy", "start", "stop", "go",
-                      "continue", "try", "check", "update", "remove", "delete", "move")
+                      "continue", "try", "check", "update", "remove", "delete",
+                      "move", "lets", "let")
         if any(low == s or low.startswith(s + " ") for s in info_stems):
             return False
-        return True
+        # the long-but-empty screen: every word stop/ack -> vague
+        stop = set("ok okay the a an and or of to in on it its is are was be "
+                   "we i you they so then than that this those these for "
+                   "with back out up down more some all just also into "
+                   "right there here now when what".split())
+        ack = set("ok okay alright allright cool nice great awesome perfect "
+                  "welcome thanks thank hey hello hi lol haha yes yeah yep "
+                  "nope sure good neat done restarted continue cont engaged "
+                  "beep boop voice please".split())
+        words = [w.strip(".,!?;:'\"()—-") for w in low.split()]
+        content_words = [w for w in words
+                         if w and w not in stop and w not in ack
+                         and len(w) > 3]
+        return not content_words
 
 
 def _unit_list(v: np.ndarray) -> list[float]:

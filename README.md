@@ -136,10 +136,19 @@ the same guards as any turn and is audited `origin: agent` (tagged
 propose). The thermodynamics is the collapse guard — the model cannot skip
 dedup, the vague filter, or the variety gate.
 
-Everything else is ambient: recall grounds each turn, replay answers settled
-repeats from memory (zero model calls), and the router picks the cheapest
-eligible model under the ceiling you picked in opencode. How the token
-economics and routing work: [docs/token-economics.md](docs/token-economics.md).
+Everything else is ambient: recall grounds each turn (now entity-boosted:
+cells are tagged with files/symbols/models/tool names at capture time, and a
+query naming one pulls its cells in even when cosine alone would miss),
+membrane never answers the user from memory by default (`--replay-sim 0` =
+pure observer; set >0 to re-enable the replay saver), and the router picks
+the cheapest eligible model — free-tier-only by default (`--cloud-budget 0`;
+paid rungs need an explicit budget). Idle background loops (compaction,
+entity synthesis) distill on a LOCAL cortex by default (`--idle-cortex-model`,
+default `granite3.3:8b`) so a stuck background seat can never burn cloud
+tokens. The `[membrane]` monologue in your thinking channel shows the gate
+verdict, field vitals, and the per-turn memory flow (gave/learned); toggle it
+with `/monologue`. How the token economics and routing work:
+[docs/token-economics.md](docs/token-economics.md).
 
 ### Other surfaces
 
@@ -297,7 +306,9 @@ shows the launch command.
 | [docs/multi-dev-field.md](docs/multi-dev-field.md) | **Team field: the substrate.** Origin axis, veil, arbitration — what makes multi-seat sharing collision-free |
 | [docs/dev-organism.md](docs/dev-organism.md) | The dev organism: cells that graze the field — curiosity veils, the bud/death economy, cells visible in the viewer |
 | [docs/global-field.md](docs/global-field.md) | The global commons: facts true beyond one repo; operator promotion, consensus, residency drift |
-| [docs/token-economics.md](docs/token-economics.md) | Where the savings come from (intercepts, replay, compaction) + the router: the ladder, the ceiling, the outage fallback |
+| [docs/token-economics.md](docs/token-economics.md) | Where the savings come from (intercepts, replay, compaction) + the router: the ladder, the ceiling, the outage fallback, the free-tier default budget |
+| [docs/monologue.md](docs/monologue.md) | The `[membrane]` thinking-channel banner: every line explained, the memory flow (gave/learned), `/monologue` toggle |
+| [docs/fork-port-notes.md](docs/fork-port-notes.md) | Porting checklist for the ollama-membrane fork: observer default, free-tier budget, entity layer + tracks, WHERE WE ARE, boot-speed KV hydrate |
 | [docs/principle.md](docs/principle.md) | "Only variety absorbs variety" — Ashby's law with the telos flipped; free_energy, effective_rank, the veil, multi-membrane |
 | [docs/math-findings.md](docs/math-findings.md) | The substrate-phase math: three experiments, one self-correcting conclusion (cosine primary, novelty specialist) |
 | [docs/ab-critic-scorecard.md](docs/ab-critic-scorecard.md) | The A/B scorecard vs a plain cosine cache — six criticisms faced honestly |

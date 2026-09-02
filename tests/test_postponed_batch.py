@@ -78,7 +78,7 @@ class TestAutoSettle(unittest.TestCase):
     def test_unlearned_repeats_settle_to_replay(self):
         mem = self._mem(settle_k=3)
         q = "how do I rebase onto main"
-        e = _Emb().embed([q])[0]
+        e = _Emb().embed([mem._time_prefix() + q])[0]
         mem.store.append(Exemplar(situation=q, action="rebase onto origin/main",
                                   outcome="pending", vec=list(e), safe=True))
         drift = list((e + 0.05) / np.linalg.norm(e + 0.05))
@@ -96,7 +96,7 @@ class TestAutoSettle(unittest.TestCase):
         mem = self._mem(settle_k=2)
         q = "how do I reset a lost commit"
         bad = "rm -rf .git"
-        e = _Emb().embed([q])[0]
+        e = _Emb().embed([mem._time_prefix() + q])[0]
         mem.store.append(Exemplar(situation=q, action=bad,
                                   outcome="pending", vec=list(e), safe=False))
         drift = list((e + 0.05) / np.linalg.norm(e + 0.05))

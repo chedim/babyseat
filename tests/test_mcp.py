@@ -132,7 +132,10 @@ class TestMcpProtocol(unittest.TestCase):
         (resp,) = _rpc([{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}])
         names = [t["name"] for t in resp["result"]["tools"]]
         self.assertEqual(names, ["membrane_query", "membrane_state",
-                                 "membrane_learn", "membrane_forget"])
+                                 "membrane_learn", "membrane_forget",
+                                 "membrane_watch_entity",
+                                 "membrane_unwatch_entity",
+                                 "membrane_list_tracks"])
         for t in resp["result"]["tools"]:
             self.assertIn("inputSchema", t)
             self.assertTrue(t["description"].strip())
