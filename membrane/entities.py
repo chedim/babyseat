@@ -413,7 +413,9 @@ def _tool_artifact(act: str) -> bool:
     a = " ".join(act.split())
     if not a:
         return True
-    if a.startswith(("write(", "bash(", "grep(", "read(", "{'", '{"',
+    if a.startswith(("write(", "bash(", "grep(", "read(", "edit(",
+                     "glob(", "task(", "todowrite(", "question(",
+                     "membrane_", "{'", '{"',
                      "Field recall (membrane", "[membrane] route=",
                      "[membrane] turn:")):
         return True
