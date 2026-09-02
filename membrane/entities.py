@@ -181,6 +181,9 @@ def _action_overlap(a: str, b: str) -> float:
 
 
 ALIGN_FLOOR = 0.5
+STALE_STORY_S = 24 * 3600.0   # a story whose newest beat is older -> silence
+FRESH_HALF_LIFE = 6 * 3600.0  # a beat's freshness credit halves every 6h
+FRESH_WEIGHT = 0.25           # freshness weight vs alignment (sim 0..1)
 
 
 def _sit_text_of(exemplars, i):
@@ -218,6 +221,24 @@ def _eph_born_of(exemplars, i):
         return 0.0
 
 
+_MACHINERY_RES = (
+    re.compile(r"\[\s*\d{1,3}%\]"),                # pytest progress bars
+    re.compile(r"\d+ passed in [\d.]+s"),          # raw pytest summaries
+    re.compile(r"\d+\.\d\s+\d+\.\d\s+\d{6,}"),     # ps CPU% MEM% VSZ columns
+    re.compile(r'"(?:route|verdict|sim|field_size)":'),  # proxy JSON tables
+    re.compile(r"\[opencode\] |\[membrane\] |\[rag\] "), # proxy log lines
+    re.compile(r"<system-reminder>|</system-reminder>", re.I),  # harness noise
+    re.compile(r'"(?:\$schema|autoupdate|npm|model|provider)"\s*:'),  # config JSON
+)
+
+
+def _machinery_junk(s: str) -> bool:
+    """Raw tool/proxy output (pytest bars, ps listings, route tables, log
+    lines) -- never a story beat. The narrative form ('all 326 tests pass'
+    inside a prose sentence) survives; the raw dump dies."""
+    return any(rx.search(s) for rx in _MACHINERY_RES)
+
+
 def _narrative(s: str, cap: int) -> str:
     """A cell's text -> clean story fragment: tool machinery stripped,
     teed-reasoning narration stripped, clipped at a SENTENCE boundary
@@ -239,12 +260,16 @@ def _narrative(s: str, cap: int) -> str:
                      "--- [", "- field:")):
         return ""
     # strip the teed-reasoning narration ANYWHERE in the text (the model's
-    # meta-voice quoting its own analysis): drop from "The user is saying"
-    # through the "it seems like" bridge, keep the substance after it.
+    # meta-voice quoting its own analysis): drop from "The user is <verb>ing
+    # about" through the bridge, keep the substance after it.
     import re as _re
     m = _re.search(r'The user is saying [\'"](.+?)[\'"]\s*[-—]\s*it seems like\s+', s)
     if m:
         s = s[:m.start()] + m.group(1).strip() + ". " + s[m.end():].strip()
+    else:
+        m = _re.search(r'The user is \w+ing about [\'"]?(.+?)[\'"]?\s*[-—,\.]', s)
+        if m:
+            s = s[:m.start()] + m.group(1).strip() + ". " + s[m.end():].strip()
     for pre in ("Let me analyze the situation carefully.",
                 "Let me look at what happened:",
                 "Let me be precise about"):
@@ -772,14 +797,15 @@ class EntityStore:
 
     def track_report(self, exemplars, query_vec=None,
                      session_since: float | None = None) -> list[str] | None:
-        """Tracked entities rendered as ALIGNMENT-SELECTED prose stories:
-        cells scored by cosine to the current situation (query_vec), the
-        unaligned dropped (floor 0.5), top-4 selected, rendered
-        chronologically as one cohesive paragraph per track. Velocity from
-        the beat spacing (how fast the entity changes); direction from the
-        topic migration (oldest subject vs newest) and the nearest open
-        commitment (the goal). No birth-time fallback: no query_vec -> no
-        story. Pure tracing: no boundaries, no alerts."""
+        """Tracked entities, ONE MIXED line each: the HISTORY half (fresh-
+        aligned beats: cosine to the current turn PLUS a freshness credit
+        halving every FRESH_HALF_LIFE hours; the whole story silenced when
+        its newest beat is older than STALE_STORY_S) + the STRUCTURE half
+        (co-occurrence surroundings, rendered only when the neighborhood
+        CHANGED since the last render). Both halves event-conditional:
+        stale -> silence, unchanged -> silence. Deterministic, $0. The
+        teed meta-voice and raw machinery dumps (pytest bars, ps listings,
+        route tables) are junk, never beats."""
         if not self.tracks:
             return None
         try:
@@ -790,97 +816,185 @@ class EntityStore:
         import numpy as _np
         now = _t.time()
         inv = entity_index(exemplars)
-        dirty = False
-        out: list[str] = []
-        for key, t in self.tracks.items():
-            idxs = inv.get(key) or []
-            n = len(idxs)
-            label = t.get("label") or self.default_label(key)
-            if n == 0:
-                continue          # quiet: no story until the entity appears
-            # -- ALIGNMENT SELECTION: score by cosine to the current
-            #    situation; drop unaligned (floor); no query_vec -> no story
-            if query_vec is None:
-                continue
-            import numpy as _np
+        qv = None
+        if query_vec is not None:
             qv = _np.asarray(query_vec, dtype=float)
             qv = qv / (_np.linalg.norm(qv) + 1e-12)
-            scored = []
-            for i in idxs:
-                sit_text = _sit_text_of(exemplars, i)
-                if is_capture_junk(sit_text):
-                    continue
-                v = _np.asarray(exemplars[i].vec, dtype=float)
-                vn = _np.linalg.norm(v)
-                if vn < 1e-12:
-                    continue
-                sim = float(vn and qv @ (v / vn))
-                if sim >= ALIGN_FLOOR:
-                    scored.append((i, sim))
-            if not scored:
-                continue          # nothing aligned: silence, not noise
-            scored.sort(key=lambda x: -x[1])
-            picked = scored[:4]
-            picked.sort(key=lambda x: _eph_born_of(exemplars, x[0]))
+        out: list[str] = []
+        dirty = False
+        for key, t in self.tracks.items():
+            idxs = inv.get(key) or []
+            if not idxs:
+                continue          # quiet: nothing until the entity appears
+            label = t.get("label") or self.default_label(key)
+            # ---- the HISTORY half (per-turn, alignment + freshness) ----
+            story = ""
+            if qv is not None:
+                scored = []
+                newest_born = 0.0
+                for i in idxs:
+                    sit_text = _sit_text_of(exemplars, i)
+                    if is_capture_junk(sit_text) or _machinery_junk(sit_text):
+                        continue
+                    v = getattr(exemplars[i], "vec", None)
+                    if not v:
+                        continue
+                    vv = _np.asarray(v, dtype=float)
+                    vn = _np.linalg.norm(vv)
+                    if vn < 1e-12:
+                        continue
+                    sim = float(qv @ (vv / vn))
+                    if sim < ALIGN_FLOOR:
+                        continue
+                    born = _eph_born_of(exemplars, i)
+                    newest_born = max(newest_born, born)
+                    # freshness credit: halves every FRESH_HALF_LIFE --
+                    # an old beat must ALIGN HARDER to win the slot
+                    fresh = FRESH_WEIGHT * (0.5 ** (max(now - born, 0.0)
+                                                    / FRESH_HALF_LIFE))
+                    scored.append((i, sim + fresh))
+                if scored and (not newest_born
+                               or (now - newest_born) <= STALE_STORY_S):
+                    scored.sort(key=lambda x: -x[1])
+                    picked = scored[:4]
+                    picked.sort(key=lambda x: _eph_born_of(exemplars, x[0]))
                                                   # chronological among picked
-            # -- the beats --
-            frags: list[str] = []
-            seen: set[int] = set()
-            seen_actions: list[str] = []
-            issues = 0
-            birth_of = {}
-            for i, sim in picked:
-                if i in seen:
-                    continue
-                seen.add(i)
-                sit, act = _frag_of(exemplars, i)
-                sit = _narrative(sit, 110)
-                act = _narrative(act, 140)
-                if not sit or _tool_artifact(act):
-                    continue
-                a_low = act.lower()[:80]
-                if any(_action_overlap(a_low, p) > 0.6 for p in seen_actions):
-                    continue
-                seen_actions.append(a_low)
-                born = _eph_born_of(exemplars, i)
-                when = _ago(born, now)
-                frag = f"{when}: {sit}" if when else sit
-                if act and _action_overlap(act, sit) < 0.6:
-                    frag += f" — {act}"
-                frags.append(frag)
-                low = act.lower()
-                if any(w in low for w in ("failed", "fixed", "bug", "crash",
-                                          "wrong", "issue", "broken")):
-                    issues += 1
-            if not frags:
-                continue
-            # -- the prose story: chronologically, newest anchored last --
-            story = f"{label}: began with {frags[0][0].lower() + frags[0][1:]}"
-            for f in frags[1:-1]:
-                story += f", then {f[0].lower() + f[1:]}"
-            if len(frags) > 1:
-                story += f", and most recently: {frags[-1][0].lower() + frags[-1][1:]}"
-            # -- VELOCITY: the dynamics from beat spacing --
-            borns = sorted(b for b in (_eph_born_of(exemplars, i) for i, _ in picked) if b > 0)
-            if len(borns) >= 2:
-                span_h = (borns[-1] - borns[0]) / 3600.0
-                if span_h > 0.01:
-                    story += (f". Moving fast — {len(borns)} changes in "
-                              f"{span_h:.0f}h")
-                else:
-                    story += ". Changing rapidly right now"
-            last_b = borns[-1] if borns else 0
-            if last_b:
-                story += f"; last substantive change {_ago(last_b, now)}"
-            # -- DIRECTION: topic migration + the goal --
-            if len(frags) >= 2:
-                story += (f"; the focus moved from the early work to the "
-                          f"latest development")
-            out.append(story + ".")
-        return out
+                    # -- the beats --
+                    frags: list[str] = []
+                    seen: set[int] = set()
+                    seen_actions: list[str] = []
+                    for i, sim in picked:
+                        if i in seen:
+                            continue
+                        seen.add(i)
+                        sit, act = _frag_of(exemplars, i)
+                        sit = _narrative(sit, 110)
+                        act = _narrative(act, 140)
+                        if (not sit or _tool_artifact(act)
+                                or _machinery_junk(sit)
+                                or _machinery_junk(act)):
+                            continue
+                        a_low = act.lower()[:80]
+                        if any(_action_overlap(a_low, p) > 0.6
+                               for p in seen_actions):
+                            continue
+                        seen_actions.append(a_low)
+                        born = _eph_born_of(exemplars, i)
+                        when = _ago(born, now)
+                        frag = f"{when}: {sit}" if when else sit
+                        if act and _action_overlap(act, sit) < 0.6:
+                            frag += f" — {act}"
+                        frags.append(frag)
+                    if frags:
+                        # chronologically, newest anchored last; NO
+                        # horoscope suffixes -- the beats speak, the
+                        # story ends
+                        story = (f"{label}: began with "
+                                 f"{frags[0][0].lower() + frags[0][1:]}")
+                        for f in frags[1:-1]:
+                            story += f", then {f[0].lower() + f[1:]}"
+                        if len(frags) > 1:
+                            story += (f", and most recently: "
+                                      f"{frags[-1][0].lower() + frags[-1][1:]}")
+                        story += "."
+            # ---- the STRUCTURE half (change-gated surroundings) ----
+            surr = ""
+            links = cooccurrence_neighbors(exemplars, key, inv=inv)
+            mode = "shared cells"
+            if not links:
+                cent = centroid_neighbors(exemplars, key, inv=inv)
+                links = [(k, round(float(c), 2)) for k, c in cent]
+                mode = "near"
+            if links:
+                sig = [f"{k}:{c}" for k, c in links]
+                if (t.get("surr") or {}).get("sig") != sig:
+                    t["surr"] = {"sig": sig, "mode": mode, "ts": now}
+                    dirty = True
+                    if mode == "shared cells":
+                        nb = ", ".join(f"{self.default_label(k)} ({c} shared)"
+                                       for k, c in links[:SURR_MAX])
+                    else:
+                        nb = ", ".join(f"{self.default_label(k)} (cos {c:.2f})"
+                                       for k, c in links[:SURR_MAX])
+                    surr = f" Around it: {nb} [{mode}]."
+            if story or surr:
+                out.append((story + surr).strip())
+        if dirty:
+            self._save_tracks()
+        return out or None
 
 def _clip_entity(s: str, cap: int = 60) -> str:
     """A situation line -> the entity story's 'new' fragment."""
     line = " ".join((s or "").split())
     line = line.replace("tool edit for: ", "").replace("tool bash for: ", "")
     return (line[:cap] + "…") if len(line) > cap else line
+
+
+# ---- the SURROUNDINGS block (per-track semantic neighborhood) --------------
+# The banner's STRUCTURE lane: for every tracked entity, WHAT LIVES AROUND
+# IT in the field -- co-occurring entities (cells that mention both; a real
+# graph edge) with an embedding-centroid fallback when the entity has no
+# co-occurrences yet. History (the story lane) answers "what happened";
+# surroundings answers "what is this connected to" -- the thing a fresh
+# session cannot reconstruct from working context. Rendered EVENT-
+# CONDITIONALLY: only when the neighborhood CHANGES (a new neighbor or a
+# weight drift), never per-turn recitation.
+
+SURR_MAX = 5               # neighbors per track, most-linked first
+SURR_DRIFT = 0.25          # weight change fraction that re-renders
+SURR_MIN_LINKS = 2         # a co-occurrence edge needs >= this many cells
+
+
+def cooccurrence_neighbors(exemplars, key: str, inv=None,
+                           min_links: int = SURR_MIN_LINKS) -> list[tuple[str, int]]:
+    """Entity keys that share CELLS with `key`, strongest first. Pure tag
+    arithmetic, $0: each of the entity's cells contributes 1 to every other
+    entity tagged in it (<= 8 tags/cell, bounded). Pass `inv` to reuse a
+    prebuilt index."""
+    inv = inv if inv is not None else entity_index(exemplars)
+    mine = inv.get(key) or []
+    counts: dict[str, int] = {}
+    for i in mine:
+        for other in iter_entities(exemplars[i]):
+            if other != key:
+                counts[other] = counts.get(other, 0) + 1
+    out = [(k, c) for k, c in counts.items() if c >= min_links]
+    out.sort(key=lambda x: (-x[1], x[0]))
+    return out[:SURR_MAX]
+
+
+def centroid_neighbors(exemplars, key: str, inv=None,
+                       top: int = SURR_MAX) -> list[tuple[str, float]]:
+    """The fallback neighborhood: cosine between the tracked entity's cell
+    centroid and every OTHER entity's cell centroid. Co-occurrence is the
+    honest edge; this is the geometric shadow (used only when the entity
+    has no co-occurrences yet)."""
+    inv = inv if inv is not None else entity_index(exemplars)
+    mine = inv.get(key) or []
+    if not mine:
+        return []
+    vecs = [exemplars[i].vec for i in mine
+            if getattr(exemplars[i], "vec", None)]
+    if not vecs:
+        return []
+    import numpy as _np
+    center = _np.asarray(vecs, dtype=float).mean(axis=0)
+    cn = _np.linalg.norm(center)
+    if cn < 1e-12:
+        return []
+    center = center / cn
+    scored: dict[str, float] = {}
+    for other_key, idxs in inv.items():
+        if other_key == key or other_key.startswith(key + "/"):
+            continue
+        ovecs = [exemplars[i].vec for i in idxs
+                 if getattr(exemplars[i], "vec", None)]
+        if not ovecs:
+            continue
+        o = _np.asarray(ovecs, dtype=float).mean(axis=0)
+        on = _np.linalg.norm(o)
+        if on < 1e-12:
+            continue
+        scored[other_key] = float(center @ (o / on))
+    out = sorted(scored.items(), key=lambda x: -x[1])[:top]
+    return out

@@ -308,7 +308,7 @@ shows the launch command.
 | [docs/global-field.md](docs/global-field.md) | The global commons: facts true beyond one repo; operator promotion, consensus, residency drift |
 | [docs/token-economics.md](docs/token-economics.md) | Where the savings come from (intercepts, replay, compaction) + the router: the ladder, the ceiling, the outage fallback, the free-tier default budget |
 | [docs/monologue.md](docs/monologue.md) | The `[membrane]` thinking-channel banner: every line explained, the memory flow (gave/learned), `/monologue` toggle |
-| [docs/fork-port-notes.md](docs/fork-port-notes.md) | Porting checklist for the ollama-membrane fork: observer default, free-tier budget, entity layer + tracks, WHERE WE ARE, boot-speed KV hydrate |
+| [docs/fork-port-notes.md](docs/fork-port-notes.md) | Porting checklist for the ollama-membrane fork: observer default, free-tier budget, entity tracks v2 (boundary state machine + the mixed banner) + the enrichment ladder, WHERE WE ARE, boot-speed KV hydrate |
 | [docs/principle.md](docs/principle.md) | "Only variety absorbs variety" — Ashby's law with the telos flipped; free_energy, effective_rank, the veil, multi-membrane |
 | [docs/math-findings.md](docs/math-findings.md) | The substrate-phase math: three experiments, one self-correcting conclusion (cosine primary, novelty specialist) |
 | [docs/ab-critic-scorecard.md](docs/ab-critic-scorecard.md) | The A/B scorecard vs a plain cosine cache — six criticisms faced honestly |

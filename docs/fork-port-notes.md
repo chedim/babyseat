@@ -334,6 +334,94 @@ free_ids=...)` pins free rungs to `min(price, FREE_TIER_PRICE=0.1)` — they
 become the first escalation above locals under the $0 budget. Persisted-rung
 reconciliation refreshes stale price pins for the provider's own rungs.
 
+## 16. Entity tracks v2: the boundary state machine + the mixed banner
+
+The tracks graduated from passive traces to EVENT triggers with a strict
+rendering covenant. Fork mapping: the fork's `membraneRecallInject` carries
+the WHERE WE ARE header; the banner rides the fork's reasoning-stream lane.
+
+**The state machine (entities.py `watch_track`/`evaluate_tracks`/
+`take_alerts`).** A track = {key, label, enter?, exit?, inside, pending[]}
+over the entity's live SAFE-cell count. Boundary syntax: `enter N` /
+`exit N` / bare `N` (= enter). Semantics:
+- The alert fires ON THE TRANSITION, once per transition; re-entry
+  re-arms by construction (a state machine, NOT a level check -- the v1
+  "op N" design re-fired every turn and was replaced).
+- The seed evaluation (first eval after plant) is SILENT: it establishes
+  inside/outside without alerting.
+- A changed boundary restarts the machine (`inside` -> None, re-seeds).
+- Alerts queue in a bounded `pending` list (cap 8) per track;
+  `take_alerts()` drains it exactly-once (the delivery ledger) -- the
+  eval-return AND the drain must never both render (the duplicate-ALERT
+  bug; render from the drain only).
+- Proxy: GET/POST `/membrane/entity-track` (list/set), POST
+  `/membrane/entity-track/remove`. MCP: membrane_watch_entity /
+  membrane_unwatch_entity / membrane_list_tracks.
+
+**The rendering covenant (every lane, every turn):**
+1. EVENT-CONDITIONAL or SILENT: stale (newest beat > STALE_STORY_S=24h)
+   -> silence; unchanged neighborhood -> silence; no query_vec -> silence.
+   Silence beats recitation.
+2. FRESHNESS-WEIGHTED selection: beat score = cosine-to-current-turn +
+   freshness credit (halves every FRESH_HALF_LIFE=6h, weight 0.25). An old
+   beat must align HARDER to win a slot.
+3. MIXED lines, one per track: history ("began with X, then Y, and most
+   recently Z") + structure ("Around it: N1 (3 shared), N2 (2 shared)
+   [shared cells]") in ONE sentence. Structure = co-occurrence neighbors
+   (entities sharing >= SURR_MIN_LINKS=2 cells -- a real graph edge),
+   centroid-cosine fallback for young entities, change-gated via a
+   persisted `surr.sig` fingerprint.
+4. JUNK SCREENS (the hard-won list -- every one of these leaked into the
+   banner live before its screen existed):
+   - `is_capture_junk` (recall-side, rag.py) + `_machinery_junk` (NEW,
+     entities.py): pytest progress bars / raw summaries, ps CPU/MEM
+     columns, proxy JSON route tables, `[opencode]`/`[membrane]` log
+     lines -- raw tool output is never a story beat. Prose MENTIONING
+     results ("all 326 tests pass") survives; the dump dies.
+   - `_tool_artifact`: args/diagnostics walls, banner echoes.
+   - `_narrative` strips the teed meta-voice: both "The user is saying
+     '...' -- it seems like" AND "The user is <laughing/saying>ing about
+     ..." forms.
+   - Horoscope suffixes removed ("Moving fast -- 2 changes in 7h", "the
+     focus moved from the early work to the latest development"): filler
+     the reader cannot act on; the beats speak, the story ends.
+5. NO track cap yet (watches cap at 5) -- the ling track surviving
+   forever in the fork is the mild version of the drowning risk. Port
+   WITH a cap (same scarcity covenant: evict lowest-charge/oldest).
+
+## 17. The enrichment plan (this seat, symbol-only; fork = the real seat)
+
+Direction named by the operator: membrane as context ENRICHMENT over
+opencode, never transcript REPLACEMENT. The division of labor is
+architectural: opencode owns the live transcript (ground truth), tool
+execution, and the provider prefix cache; membrane owns the earned field
+and appends projections. The fork (ollama-membrane) is the endgame seat:
+it owns the context window itself and can one day inject GEOMETRY
+(centroid vectors as KV state / attention bias) instead of lossy prose --
+everything symbolic built now is the rehearsal that teaches which bytes
+deserve that power.
+
+Planned (in order):
+1. **Déjà-vu tool-result annotation.** The proxy sees tool results arrive
+   in the request messages. Screen (machinery junk), embed locally ($0),
+   cosine vs the field; a known SAFE failure-mode cell at sim >= floor
+   appends ONE line: `[membrane] seen before: <cell> (sim 0.8)`.
+   Event-conditional: silent unless a match. Prototype HERE (proxy-side,
+   one-turn delay is acceptable), port to the fork's tool boundary
+   (inline, zero delay) once the signal is proven.
+2. **Entity-inline for thin entities.** query_entities already runs per
+   turn; an entity mapping to <= 2 cells gets its top cell inlined in the
+   recall header (no second cosine reach).
+3. **Lane-level byte accounting** in the surface log (per-lane chars per
+   turn) -- the auditability ruler for "every byte earns its place", and
+   the instrument for the banner-on/off ablation (measure absorb rate +
+   escalation length, not vibes).
+
+NOT doing (the covenant): transcript compaction or tail-truncation
+(breaks transparency + invalidates the provider prefix cache -- often a
+token LOSS, not saving), any LLM summarization in lanes (deterministic
+or nothing), hiding old lanes (fewer bytes by EARNING, not by hiding).
+
 ## Port checklist
 
 1. `--replay-sim` default 0.0 + settle-replay observer guard.
@@ -347,3 +435,10 @@ reconciliation refreshes stale price pins for the provider's own rungs.
 6. Monologue: vitals line + gave/learned + `membrane: monologue` toggle.
 7. Inject format: sim stamps + action-first for fragmentary situations +
    sim-calibration doctrine sentence.
+8. Entity tracks v2 (section 16): boundary state machine (enter/exit,
+   once-per-transition, silent seed, bounded pending, drain-only
+   rendering), mixed story+surroundings lines, the full junk-screen list,
+   a track CAP (the Python seat still owes this -- do not port the omission).
+9. Enrichment ladder (section 17): déjà-vu tool annotation first (proxy-
+   side prototype, tool-boundary port), entity-inline, lane byte
+   accounting. Never transcript compaction, never LLM-summarized lanes.

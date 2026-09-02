@@ -53,7 +53,7 @@ class TestTransparency(unittest.TestCase):
         self.assertIn("a memory about the tool skills", CTX)
 
     def test_track_stories_ride(self):
-        import tempfile, os
+        import tempfile, os, time as _t
         from membrane.entities import EntityStore, extract_entities
 
         class E:
@@ -73,7 +73,7 @@ class TestTransparency(unittest.TestCase):
             # embed its situation THROUGH the same prefix geometry
             cells = [E("tool edit for: fix x1 in router.py",
                        "Applied the failover patch; the ladder walks on",
-                       born=1000.0)]
+                       born=_t.time())]
             from membrane.embed import OllamaEmbedder
             emb = OllamaEmbedder(model="mxbai-embed-large")
             qv = emb.embed(["what changed in router.py?"])[0]
@@ -84,6 +84,49 @@ class TestTransparency(unittest.TestCase):
             # the prose story rides: label + temporal arc + the action
             self.assertIn("router:", out)
             self.assertIn("Applied the failover patch", out)
+            # the story ends at the beats: no horoscope suffixes
+            self.assertNotIn("Moving fast", out)
+            self.assertNotIn("focus moved", out)
+
+    def test_stale_story_silent(self):
+        """THE STALE GATE: a story whose newest beat is >24h old renders
+        NOTHING (silence beats a stale story recited back)."""
+        import tempfile, time as _t
+        from membrane.entities import EntityStore, extract_entities
+
+        class E:
+            def __init__(self, situation, action, born):
+                self.situation, self.action, self.safe = situation, action, True
+                self.extra, self.model = {}, {}
+                self.extra["eph_born"] = born
+                t = extract_entities(situation, " " + action)
+                if t:
+                    self.extra["entities"] = t
+
+        with tempfile.TemporaryDirectory() as tmp:
+            est = EntityStore(path=str(Path(tmp) / "entities.json"))
+            est.watch_track("files:router.py", label="router")
+            cells = [E("tool edit for: fix x1 in router.py",
+                       "Applied the failover patch",
+                       born=_t.time() - 25 * 3600)]   # 25h old
+            from membrane.embed import OllamaEmbedder
+            emb = OllamaEmbedder(model="mxbai-embed-large")
+            qv = emb.embed(["what changed in router.py?"])[0]
+            cells[0].vec = list(qv)
+            h = _handler(tracks_store=est)
+            h.server.membrane.store.exemplars = cells
+            out = h._gate_monologue(VERDICT, CTX, "test", query_vec=qv)
+            self.assertEqual(out, "")   # silence, not a stale story
+
+    def test_meta_voice_stripped(self):
+        """The teed meta-voice ('The user is laughing about ...') is
+        narration junk: the story keeps the substance, drops the echo."""
+        from membrane.entities import _narrative
+        s = ("cont: oof that is scary — The user is laughing about "
+             "\"a token leak\" — Honest take: yes, it helps.")
+        out = _narrative(s, 300)
+        self.assertNotIn("The user is laughing", out)
+        self.assertIn("token leak", out)
 
     def test_no_llm_summarization(self):
         """Token saving: the stories are DETERMINISTIC (no LLM call)."""

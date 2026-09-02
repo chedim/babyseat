@@ -47,6 +47,32 @@ a repair of a demoted cell, a candidate promotion, or a guard skip
 ```
 Quality machinery: re-ask votes, demotions, judge contests.
 
+## The track lines (banner lane)
+
+```
+me (glm-5.3-flash:cloud): began with <beat>, then <beat>, and most
+recently: <beat>. Around it: <neighbor> (3 shared), <neighbor> (2 shared)
+[shared cells].
+```
+One MIXED line per planted entity track:
+- **History half** — fresh-aligned beats (cells scored by cosine to the
+  current turn + a freshness credit that halves every 6h), chronological,
+  newest anchored last. If the newest beat is >24h old the history is
+  SILENT (silence beats a stale story).
+- **Structure half** ("Around it: ...") — the entity's neighborhood:
+  co-occurring entities (cells mentioning both — a real graph edge) or,
+  for young entities, embedding-centroid nearness. Rendered only when the
+  neighborhood CHANGED since the last render; unchanged -> silence.
+- **ALERT lines** — boundary transitions (`enter N`/`exit N` on the live
+  safe-cell count), one alert per transition, re-entry re-arms, rendered
+  from the exactly-once drain.
+
+The rendering covenant: every lane is event-conditional or silent. Raw
+tool output (pytest bars, ps listings, proxy JSON tables, log lines),
+teed meta-voice ("The user is laughing about ..."), config dumps, and
+horoscope suffixes ("Moving fast — 2 changes in 7h") are junk — never
+rendered. Fewer bytes by EARNING, not by hiding.
+
 ## Toggle
 
 `/monologue` in the TUI (or send `membrane: monologue on|off|toggle` as a
