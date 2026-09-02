@@ -342,6 +342,11 @@ _MACHINERY_RES = (
     re.compile(r"\b\w{3}\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4}\s+[\w./-]*/"),
     re.compile(r"^#!/(usr/)?bin/(env )?\w+", re.M),   # shell script source
     re.compile(r"[\w-]+-[\w-]+-[\w-]+-[\w-]+-[0-9a-f]{8}\.env\b"),  # tmp env files
+    # a model CATALOG (3+ 'name:tag' rungs in one line) is an inventory dump,
+    # not a story: prose mentions one or two models, never eight
+    re.compile(r"(?:[\w.-]+:[\w.-]+\s+){3,}"),
+    # a tool-call args dump embedded mid-fragment: '-> edit({' / '— write({'
+    re.compile(r"[-—>]+\s*\w+\(\s*[\{\"']"),
 )
 
 
