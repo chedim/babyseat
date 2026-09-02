@@ -648,13 +648,22 @@ class QuantumEntity:
         return POSITION_HALF_LIFE_S
 
     def consolidate_position(self, cell_vecs_with_ts: list,
-                             now: float) -> dict:
+                             now: float, drift_gain: float = 0.5,
+                             record_always: bool = False) -> dict:
         """ONE consolidation step (pure numpy, ~ms): drift the position
         toward the recent cells' centroid (time-weighted by the half-life)
         and record the motion in the coarsening history ring.
 
         ``cell_vecs_with_ts``: [(vec, born), ...] for this entity's linked
         SAFE cells (the caller harvests them; already unit-normalizable).
+        ``drift_gain``: the blend step toward the weighted target
+        (0.5 = the balanced default; the momentum pulse uses 0.9 -- the
+        EMA already smooths across turns, the tracker must not re-smooth:
+        a near-identical target at gain 0.5 moves the position ~1e-5,
+        forever below grain, and the ring never grows).
+        ``record_always``: the PULSE mode -- every step lands in the ring
+        regardless of grain (the session:now momentum fold: a turn
+        HAPPENED is itself the event; velocity needs its two points).
 
         Storage: a new ring entry lands ONLY when the position moved >=
         the entity's grain (delta-perceptual); era anchors at half-life
@@ -692,10 +701,12 @@ class QuantumEntity:
                         cn = _np.linalg.norm(cur)
                         if cn > 1e-12:
                             cur = cur / cn
-                            lam = 0.5 ** (1.0)   # one step; the weights
-                            # above already encode time -- a fixed step
-                            # keeps the drift bounded per cycle
-                            blended = cur * 0.5 + target * 0.5
+                            lam = drift_gain    # one step; the time weights
+                            # above already encode recency -- the gain is
+                            # just how decisively one step moves (0.5 the
+                            # balanced default; 0.9 the momentum pulse)
+                            blended = cur * (1.0 - drift_gain) \
+                                + target * drift_gain
                             bn = _np.linalg.norm(blended)
                             if bn > 1e-12:
                                 new_pos = blended / bn
@@ -708,14 +719,16 @@ class QuantumEntity:
         if not self.position:
             return {"moved": 0.0, "velocity": 0.0, "direction": ""}
         # ---- the coarsening ring ----
-        self._ring_store(now)
+        self._ring_store(now, record_always=record_always)
         return {"moved": moved,
                 "velocity": self.ring_velocity(now),
                 "direction": self.ring_direction()}
 
-    def _ring_store(self, ts: float) -> None:
+    def _ring_store(self, ts: float, record_always: bool = False) -> None:
         """Insert (ts, position) into the history ring under the delta
-        rule + era anchors, then collapse to the cap (oldest era first)."""
+        rule + era anchors, then collapse to the cap (oldest era first).
+        ``record_always``: the PULSE mode -- skip the delta check (every
+        step lands; the session:now momentum fold needs its two points)."""
         import numpy as _np
         hist = list(getattr(self, "position_history", []) or [])
         pos = _np.asarray(self.position, dtype=float)
@@ -724,7 +737,8 @@ class QuantumEntity:
             return
         pos = pos / pn
         # delta-perceptual insertion: only meaningful motion lands
-        if hist:
+        # (UNLESS pulse mode: every step records)
+        if hist and not record_always:
             _, last_pos = hist[-1]
             lp = _np.asarray(last_pos, dtype=float)
             ln = _np.linalg.norm(lp)

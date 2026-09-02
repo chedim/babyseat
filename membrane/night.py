@@ -253,7 +253,16 @@ def consolidate_now(mem, est, momentum_vec=None) -> dict:
 
     Its cells are the fresh tail -- not tag-matched (nothing tags 'now';
     everything is now). Time rides INSIDE the nudge: the drift weights
-    decay by each cell's eph_born, so no separate timestamp push exists."""
+    decay by each cell's eph_born, so no separate timestamp push exists.
+
+    THE PULSE RULE (the session:now empty-story fix): the now-tracker's
+    ring needs 2+ points for velocity, but a steady conversation moves
+    the position BELOW the entity grain (identical-direction turns are
+    imperceptible) -- the ring would sit at 1 entry forever and the
+    story would never render. The momentum nudge is the PULSE, not the
+    evidence: for session:now the grain check relaxes to a tenth (a
+    sub-grain per-turn drift still records), so the ring grows every
+    turn and the motion story always has its two points."""
     import numpy as _np
     now = time.time()
     res = {"moved": 0.0, "velocity": 0.0, "direction": ""}
@@ -265,7 +274,7 @@ def consolidate_now(mem, est, momentum_vec=None) -> dict:
     if ent is None:
         ent = QuantumEntity(
             eid=eid, cls=CLASS_SESSION,
-            properties={"name": "now", "grain": 0.03, "ephemeral": True},
+            properties={"name": "now", "grain": 0.003, "ephemeral": True},
             derived_by=["membrane-night"])
         est.docs[eid] = ent            # RAM-only: upsert would persist
     pts = []
@@ -277,8 +286,8 @@ def consolidate_now(mem, est, momentum_vec=None) -> dict:
         born = _eph_born_of(exs, i)
         if v and born:
             pts.append((v, born))
-    res = ent.consolidate_position(pts, now)
-    # ---- global:now (shared, heavy) ----
+    res = ent.consolidate_position(pts, now, drift_gain=0.9,
+                                   record_always=True)
     geid = f"{MEMBRANE_NS}global:now"
     gent = est.docs.get(geid)
     if gent is None:
