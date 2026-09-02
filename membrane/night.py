@@ -338,6 +338,18 @@ def consolidate_entities(mem, est, materialize: int = 8) -> dict:
                 derived_by=["membrane-night"])
             if est.upsert(ent, embedder=mem.embedder):
                 mat += 1
+                # THE AUDIT COMPLETION: materialization births hit the
+                # ledger (the durable event record; the announcement
+                # queue already fired inside upsert)
+                try:
+                    from .opencode import _write_audit
+                    _write_audit(mem, {"event": "night-entity-birth",
+                                       "origin": "night-materialize",
+                                       "eid": ent.eid, "cls": ent.cls,
+                                       "cells": n,
+                                       "field_size": len(mem.store)})
+                except Exception:
+                    pass
     # -- the drift pass --
     drifted = 0
     total_moved = 0.0

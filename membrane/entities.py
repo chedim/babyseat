@@ -884,6 +884,15 @@ class EntityStore:
         # entity TRACKS: key -> {key, label, op, n, alerted}. The banner
         # lane: live cell counts in WHERE WE ARE, optional boundary alerts.
         self.tracks: dict[str, dict] = {}
+        # THE ANNOUNCEMENT QUEUE (in-memory, exactly-once): entity BIRTHS
+        # and MERGES announce once to the model (banner ALERT-style
+        # lines); the queue is the delivery ledger (a restart losing
+        # undelivered ones is the same covenant as the ALERT queue --
+        # notifications, not state). Only GRADUATIONS announce: a new
+        # STORE DOC (night synthesis, model add, gray-band growth,
+        # materialization). Nursery activity (side-index tags, first-
+        # sightings, read-through, reharvest) stays silent.
+        self.announcements: list[dict] = []
         self.junk_screen = JunkScreen(self)
         self._cb_warned = False
         self._load()
@@ -1029,16 +1038,23 @@ class EntityStore:
         EPHEMERAL entities (properties['ephemeral']) stay LOCAL: a
         session's living present is nobody else's business -- it never
         rides the couchbase write-through (two parallel seats would
-        otherwise fight over one 'now' doc)."""
+        otherwise fight over one 'now' doc).
+        BIRTHS announce: a NEW store doc (any creation path -- night
+        synthesis, model add, materialization, gray-band growth) queues
+        an announcement; merges-into-existing stay silent here (the
+        merge itself announces via entity_edit's merged_into)."""
         if not ent.eid:
             return False
         existing = self.docs.get(ent.eid)
+        is_new = existing is None
         if existing is not None:
             existing.merge(ent)
             ent = existing
         else:
             self.docs[ent.eid] = ent
         self.save()
+        if is_new and not (ent.properties or {}).get("ephemeral"):
+            self._announce("new", ent)
         if (ent.properties or {}).get("ephemeral"):
             return True
         coll = self._entities_collection()
@@ -1114,7 +1130,22 @@ class EntityStore:
     # same upsert covenant as the synthesizer (union, never a second doc).
 
     def _resolve_spec(self, spec: str) -> QuantumEntity | None:
-        """An eid, an exact eid-suffix, or a name fragment -> the entity."""
+        """An eid, an exact eid-suffix, or a name fragment -> the entity.
+        MERGE POINTER-FOLLOWING: a merged id resolves to its survivor
+        (the mark-don't-delete covenant -- the merged doc stays, the
+        graph stays connected)."""
+        ent = self._resolve_spec_raw(spec)
+        seen: set[str] = set()
+        while ent is not None and (ent.properties or {}).get("merged_into"):
+            dst = str(ent.properties["merged_into"])
+            if dst in seen:
+                break                  # merge cycle: stop pointing
+            seen.add(dst)
+            ent = self.docs.get(dst)
+        return ent
+
+    def _resolve_spec_raw(self, spec: str) -> QuantumEntity | None:
+        """The direct resolution (no merge-pointer following)."""
         spec = (spec or "").strip()
         if not spec:
             return None
@@ -1156,9 +1187,16 @@ class EntityStore:
         return {"ok": True, "eid": eid, "merged": merged,
                 "class": c, "name": name}
 
-    def edit(self, spec: str, summary=None, links=None, cls=None) -> dict:
+    def edit(self, spec: str, summary=None, links=None, cls=None,
+             merged_into=None) -> dict:
         """Model-side entity EDIT: patch summary/links/class on the
-        resolved entity. Only provided fields change."""
+        resolved entity. Only provided fields change.
+        ``merged_into``: MARK-don't-delete subsumption (the operator's
+        covenant) -- the source doc STAYS, marked
+        properties['merged_into'] = <dst eid>, its links union into the
+        destination, and the merge ANNOUNCES (an event the model should
+        see, same as a birth). The graph reader follows the pointer:
+        a merged id transparently resolves to its survivor."""
         ent = self._resolve_spec(spec)
         if ent is None:
             return {"ok": False,
@@ -1173,6 +1211,27 @@ class EntityStore:
             ent.links = sorted(merged)
         if cls and cls in CLASSES:
             ent.cls = cls
+        if merged_into:
+            dst = self._resolve_spec(str(merged_into))
+            if dst is None or dst.eid == ent.eid:
+                return {"ok": False,
+                        "error": f"merge target {merged_into!r} not found "
+                                 f"(or same entity)"}
+            # the mark: the source STAYS, pointing at its survivor
+            ent.properties["merged_into"] = dst.eid
+            # the union: the destination inherits the source's links
+            for l in (ent.links or []):
+                if l not in (dst.links or []):
+                    dst.links.append(l)
+            dst.derived_by = sorted(set(dst.derived_by or [])
+                                    | {"model-merge"})
+            ent.derived_by = sorted(set(ent.derived_by or [])
+                                    | {"model-merge"})
+            self.upsert(dst)
+            self.upsert(ent)
+            self._announce("merged", ent, extra=f"into {dst.eid}")
+            return {"ok": True, "eid": ent.eid,
+                    "merged_into": dst.eid}
         ent.derived_by = sorted(set(ent.derived_by or []) | {"model-edit"})
         self.upsert(ent)
         return {"ok": True, "eid": ent.eid, "class": ent.cls,
@@ -1427,10 +1486,14 @@ class EntityStore:
             parts.append("holding steady")
         if not parts:
             return None
+        # NO silence-on-unchanged here: WHERE WE ARE is rebuilt fresh
+        # every turn -- the model's context NEEDS the subject each turn
+        # (constant tracking is the now-track's whole job). The old sig
+        # gate made the story render once and then fall back to 'no
+        # cells yet' on every later turn -- the rendered-once bug. The
+        # sig stays only as observability.
         sig = "|".join(parts)[:80]
         t = self.tracks.get(DEFAULT_TRACK_KEY) or {}
-        if (t.get("drift") or {}).get("sig") == sig:
-            return None               # unchanged -> silence (covenant)
         t["drift"] = {"sig": sig, "ts": now}
         self._save_tracks()
         return (DEFAULT_TRACK_KEY,
@@ -1469,6 +1532,28 @@ class EntityStore:
             scored.append((float(p @ (o / on)), other_key))
         scored.sort(reverse=True)
         return [(k, round(s, 2)) for s, k in scored[:top] if s >= 0.4]
+
+    def _announce(self, kind: str, ent: QuantumEntity,
+                  extra: str = "") -> None:
+        """Queue one entity event for the banner (bounded, in-memory).
+        Only GRADUATIONS announce: new store docs and merges."""
+        a = {"kind": kind, "eid": ent.eid,
+             "cls": ent.cls,
+             "name": str((ent.properties or {}).get("name")
+                         or ent.eid.rsplit(":", 1)[-1]),
+             "summary": str((ent.properties or {}).get("summary")
+                            or "")[:140]}
+        if extra:
+            a["extra"] = extra
+        self.announcements.append(a)
+        del self.announcements[:-8]           # bounded
+
+    def take_announcements(self) -> list[dict]:
+        """Drain every pending entity announcement, exactly-once (the
+        queue is the delivery ledger)."""
+        out = self.announcements
+        self.announcements = []
+        return out
 
     def _enforce_cap(self) -> list[str]:
         """THE CAP, enforced wherever the roster stands: story-poorest

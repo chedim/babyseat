@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from membrane.entities import (extract_entities, entity_index, iter_entities,
                                query_entities, QuantumEntity, EntityStore,
                                CLASS_DECISION, CLASS_MODEL, CLASSES,
+                               CLASS_COMPONENT, CLASS_SESSION,
                                MEMBRANE_NS, entity_id)
 from membrane.entity_synthesis import parse_entity_reply, synthesize_from_cluster
 
@@ -293,6 +294,69 @@ class TestBoundaryStateMachine(unittest.TestCase):
             self.assertEqual(t["label"], "router watch")
             self.assertEqual(t["enter"], 3)
             self.assertEqual(t["inside"], True)
+
+
+class TestAnnouncements(unittest.TestCase):
+    """The announcement queue: entity births and merges announce once to
+    the model (ALERT-style banner lines); nursery activity (side-index
+    tags, read-through, reharvest) stays silent. Exactly-once: the queue
+    is the delivery ledger."""
+
+    def _store(self):
+        return EntityStore(path=None)      # RAM-only
+
+    def test_birth_announces_exactly_once(self):
+        st = self._store()
+        st.add(cls=CLASS_DECISION, name="the-big-refactor",
+               summary="settled: extract entities.py")
+        self.assertEqual(len(st.announcements), 1)
+        a = st.announcements[0]
+        self.assertEqual(a["kind"], "new")
+        self.assertIn("the-big-refactor", a["eid"])
+        # the edit (update, not birth) stays silent
+        st.edit("the-big-refactor", summary="settled v2")
+        self.assertEqual(len(st.announcements), 1)
+        # drained exactly-once: second drain empty
+        out = st.take_announcements()
+        self.assertEqual(len(out), 1)
+        self.assertEqual(st.take_announcements(), [])
+
+    def test_merge_announces_and_marks(self):
+        st = self._store()
+        st.add(cls=CLASS_COMPONENT, name="dup-a", summary="first shape")
+        st.add(cls=CLASS_COMPONENT, name="dup-b", summary="second shape")
+        self.assertEqual(len(st.announcements), 2)     # two births
+        st.announcements = []                          # clear births
+        r = st.edit("dup-a", merged_into="dup-b")
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["merged_into"], st.docs[
+            "membrane::Component:dup-b"].eid)
+        # the source STAYS, marked
+        src = st.docs["membrane::Component:dup-a"]
+        self.assertEqual(src.properties.get("merged_into"),
+                         "membrane::Component:dup-b")
+        # the survivor inherited the source's links
+        # (none here, but the union ran) -- and the merge announced
+        out = st.take_announcements()
+        self.assertEqual([a["kind"] for a in out], ["merged"])
+        # POINTER-FOLLOWING: the merged id resolves to its survivor
+        self.assertIs(st._resolve_spec("dup-a"),
+                      st.docs["membrane::Component:dup-b"])
+
+    def test_ephemeral_never_announces(self):
+        st = self._store()
+        ent = QuantumEntity(eid="membrane::session:now", cls=CLASS_SESSION,
+                            properties={"name": "now", "ephemeral": True},
+                            derived_by=["x"])
+        st.docs[ent.eid] = ent
+        self.assertEqual(st.announcements, [])
+
+    def test_queue_bounded(self):
+        st = self._store()
+        for i in range(20):
+            st.add(cls=CLASS_COMPONENT, name=f"ent-{i}",
+                   summary=f"entity {i}")
+        self.assertLessEqual(len(st.announcements), 8)
 
 
 if __name__ == "__main__":

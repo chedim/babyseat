@@ -831,6 +831,29 @@ def _intents_context_block(srv) -> str | None:
     return "\n".join(lines)
 
 
+def _where_delta(srv, text: str | None) -> str | None:
+    """THE DELTA HEADER (the operator's call: 'it sends same tracks and
+    same text blocks' -- identical bytes re-sent every turn bloat the
+    context; the transcript already carries last turn's header). WHERE
+    WE ARE is constant-tracking STATE: send only on CHANGE, force a
+    refresh every WHERE_REFRESH_TURNS turns (a long conversation may
+    truncate old headers -- the model must never lose its position
+    entirely). Returns the block to append, or None (skip this turn).
+    The state-peek path (drain=False) never touches the sig."""
+    if not text:
+        return None
+    if text != getattr(srv, "_last_where_text", None) or \
+            getattr(srv, "_where_skip_count", 0) >= WHERE_REFRESH_TURNS:
+        srv._last_where_text = text
+        srv._where_skip_count = 0
+        return text
+    srv._where_skip_count = getattr(srv, "_where_skip_count", 0) + 1
+    return None
+
+
+WHERE_REFRESH_TURNS = 8      # the forced re-send (position never lost)
+
+
 def _where_we_are(srv, vec, drain: bool = True) -> str | None:
     """THE 'I' TRACK -- the model's position, not its persona.
 
@@ -3632,8 +3655,21 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # THE 'I' TRACK: the where-we-are header (focus + commitments +
         # field position) -- computed live each turn, zero model calls.
         # Momentum updates first so the header reflects THIS turn.
-        self.momentum_update(vec, query)
-        where_block = _where_we_are(srv, vec)
+        # THE TOOL-ROUND GUARD (the operator's flicker catch): a tool
+        # round's last 'user' message is the TOOL RESULT (role=user in
+        # the tool protocol) -- nudging momentum with it wobbles the
+        # session:now subject mid-turn (make -> opencode.py -> model name)
+        # and re-streams a different header per round. A REAL operator
+        # turn's last message is the original text, not a tool payload;
+        # tool results carry tool_use_id blocks. Only real turns nudge.
+        _is_tool_round = any(
+            isinstance(b, dict) and b.get("type") == "tool_result"
+            for m in reversed(body.get("messages") or [])
+            for b in (m.get("content") if isinstance(m.get("content"), list)
+                      else []))
+        if not _is_tool_round:
+            self.momentum_update(vec, query)
+        where_block = _where_delta(srv, _where_we_are(srv, vec))
         # ASSEMBLY ORDER MATTERS: the extra blocks (where-we-are, review,
         # intents, ledger) must be in ctx BEFORE the banner is computed --
         # the banner reports what was sent, so it sees the final context.
@@ -4206,6 +4242,18 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 for a in est.take_alerts():
                     lines.append(f"ALERT: {a['label']} {a['kind']} its "
                                  f"boundary ({a['boundary']}; {a['detail']})")
+                # THE ENTITY ANNOUNCEMENTS (ALERT-style, exactly-once):
+                # births and merges drain here -- the model SEES what the
+                # night grew and what it registered itself (the loop that
+                # makes the registration habit stick)
+                for a in est.take_announcements():
+                    if a["kind"] == "merged":
+                        lines.append(f"new entity: {a['eid']} — merged "
+                                     f"{a.get('extra', '')}")
+                    else:
+                        clip = a.get("summary") or a["name"]
+                        lines.append(f"new entity: {a['eid']} [{a['cls']}]"
+                                     f" {clip}")
             except Exception as e:
                 print(f"[opencode] banner render error: {e}",
                       file=sys.stderr)
@@ -4639,7 +4687,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._json_err_raw(400, "spec required (eid or name fragment)")
             return
         res = est.edit(spec, summary=body.get("summary"),
-                       links=body.get("links"), cls=body.get("class"))
+                       links=body.get("links"), cls=body.get("class"),
+                       merged_into=body.get("merged_into"))
         self._entity_audit("edit", res)
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return

@@ -119,7 +119,14 @@ _RAG_SYSTEM = (
     "<topic>', 'membrane: intend that <goal> [for 2w]' (plant an OPEN "
     "COMMITMENT: it steers the dream loop and rides recall until 'membrane: "
     "fulfill #N' explicitly closes it or it expires -- an intention is never "
-    "auto-closed by similarity), 'membrane: intents' (the board). THE LANE "
+    "auto-closed by similarity), 'membrane: intents' (the board). "
+    "ENTITY REGISTRATION -- the MCP entity surface (membrane_entity_add / "
+    "_edit / _remove / _related_entities) is YOURS: when you SETTLE a "
+    "decision, discover a RECURRING failure, FORM a commitment, or coin a "
+    "reusable concept, register it via membrane_entity_add (one call, "
+    "audited, merge-on-collision). New entities announce in your banner "
+    "(births from the night pass, your own registrations echoed) -- use "
+    "membrane_related_entities with an id to pull a field slice. THE LANE "
     "DISCIPLINE (earned the hard way -- violations "
     "self-poison the field):\n"
     "- At most ONE canonical frame per reply, on its own line, as the LAST "
@@ -583,6 +590,19 @@ class Compactor:
                     sink(ents, [store.index_of(e) for e in kept
                                 if store.index_of(e) is not None]
                      if store is not None else [])
+                # THE AUDIT COMPLETION: entity births from the night
+                # synthesis hit the operator's ledger (the durable event
+                # record -- births were previously stderr-only)
+                try:
+                    from .opencode import _write_audit
+                    for ent in ents:
+                        _write_audit(mem, {
+                            "event": "night-entity-birth", "origin": "night",
+                            "eid": ent.eid, "cls": ent.cls,
+                            "topic": _clip(topic, 60),
+                            "field_size": len(mem.store)})
+                except Exception:
+                    pass
                 print(f"[entities] synthesized {len(ents)} from "
                       f"{_clip(topic, 48)!r}", file=sys.stderr)
         except Exception as ent_e:

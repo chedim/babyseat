@@ -201,7 +201,9 @@ TOOLS: list[dict] = [
         "name": "membrane_entity_edit",
         "description": (
             "Edit an entity: resolve by eid or exact name, patch summary/"
-            "links/class (only provided fields change)."),
+            "links/class (only provided fields change). merged_into marks "
+            "a subsumption: the source doc stays, pointing at its "
+            "survivor (links unioned; the merge announces)."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -210,6 +212,9 @@ TOOLS: list[dict] = [
                 "summary": {"type": "string"},
                 "links": {"type": "array"},
                 "class": {"type": "string"},
+                "merged_into": {"type": "string",
+                                "description": "eid or name of the "
+                                               "survivor entity."},
             },
             "required": ["spec"],
         },
@@ -490,12 +495,16 @@ def tool_entity_add(args: dict, port: int) -> str:
 
 def tool_entity_edit(args: dict, port: int) -> str:
     body = {"spec": str(args.get("spec") or "").strip()}
-    for f in ("summary", "links", "class"):
+    for f in ("summary", "links", "class", "merged_into"):
         if args.get(f) is not None:
             body[f] = args[f]
     out = _http(port, "POST", "/membrane/entity/edit", body)
     if not out.get("ok"):
         return f"Edit failed: {out.get('error', 'unknown error')}"
+    if out.get("merged_into"):
+        return (f"Entity {out['eid']} MARKED merged into "
+                f"{out['merged_into']} (the source doc stays, pointing "
+                f"at its survivor; links unioned; announced).")
     return (f"Entity {out['eid']} updated: class {out.get('class')}, "
             f"summary {out.get('summary')!r}, links {out.get('links')}.")
 
