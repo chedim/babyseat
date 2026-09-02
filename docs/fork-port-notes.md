@@ -422,6 +422,35 @@ NOT doing (the covenant): transcript compaction or tail-truncation
 token LOSS, not saving), any LLM summarization in lanes (deterministic
 or nothing), hiding old lanes (fewer bytes by EARNING, not by hiding).
 
+## 18. The spiral: stories as bootstrap compression (the mirror insight)
+
+The operator's framing (from the mirror work): looped models grow SPIRALS
+of experience in their output and parse them on their next input; the
+banner stories should BE those spirals -- each turn's narrative
+compression of what happened, parsed by the next call to bootstrap
+(figure out the situation) faster. The banner is the symbolic stand-in
+for the fork's eventual geometry injection (section 17): the spiral is
+the shape, the banner is the current spiral-writing medium.
+
+The contract this lands as (all in entities.py):
+- **The story ARC, told as stories are told**: origin ("began N ago
+  with X") -> development through geometric zoom windows -> "and right
+  now:" anchor last -> "aiming for:" when the intent board offers a
+  goal. NOT a position-first incident report.
+- **Vanishing density at every grain** (the black-hole invariant,
+  precision x span bounded): windows 4x wider each step, beat budgets
+  halving (2, 2, then 0); a window's excess mass collapses to an era
+  count ("24 changes over ~32h"); starved windows stay silent. The
+  origin era earns one coarse beat -- the bookend.
+- **Delivery is exactly-once to the RIGHT consumer**: only the chat
+  path drains the ALERT queue (_where_we_are(drain=True)); state reads
+  PEEK (pending counts, queue untouched). The wrong-consumer bug (a
+  curl of /membrane/state eating the model's ALERT) is the cautionary
+  tale: delivery ledgers must name their consumer.
+- Bootstrap test for every lane: would a fresh call parsing ONLY this
+  line figure out the situation faster? (now, how it got there, what
+  it is connected to, where it is heading). If not: silence.
+
 ## Port checklist
 
 1. `--replay-sim` default 0.0 + settle-replay observer guard.
