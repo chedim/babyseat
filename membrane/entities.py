@@ -364,6 +364,7 @@ def _narrative(s: str, cap: int) -> str:
     s = " ".join(s.split())
     for pre in ("tool edit for: ", "tool bash for: ", "reasoning: ",
                 "plan: ", "tool call for: ", "compact note: ",
+                "cont: ",                              # teed continuation
                 "tool membrane_membrane_state for: ",
                 "tool membrane_membrane_query for: ",
                 "tool membrane_membrane_learn for: "):
@@ -1244,6 +1245,9 @@ JUNK_ANCHOR_SEEDS = (
     "base64 blob, hex dump, minified javascript one-liner",
     "shell script source code: shebang line, exported variables, command flags",
     "file path listing: multiple .env or .json file names in a row with sizes",
+    "teed conversation chatter: reactive commentary, laughter, deflation, "
+    "banter about the process itself instead of the work",
+    "model inventory listing: LLM names with tags and sizes in a row",
 )
 
 
