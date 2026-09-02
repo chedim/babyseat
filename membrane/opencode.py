@@ -879,41 +879,39 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
     # lines (ALERTs). Identical bytes were re-sent every turn and the
     # field-stats line leaked the stale-shard count; tracks carry their
     # own subjects now (the now-report names the subject).
-    # 1. TRACKS: the model's own planted entity tracks -- the live count +
-    #    inside/outside state every turn; ALERT lines for boundary events.
-    #    evaluate_tracks() transitions the state machine; ALERTS render from
-    #    take_alerts() ONLY when draining (the chat path); a peek shows the
-    #    pending count without consuming (the exactly-once ledger stays
-    #    intact for the next real model turn).
+    # 1. EVENTS FIRST: boundary ALERTS + entity ANNOUNCEMENTS (exactly-once
+    #    drains -- the chat path is the only consumer; a state peek passes
+    #    drain=False and shows nothing, consuming nothing). The unified
+    #    banner's event lane.
     est = getattr(srv, "entity_store", None)
     if est is not None and getattr(est, "tracks", None):
         try:
+            # 1. EVENTS: boundary ALERTS + entity ANNOUNCEMENTS (exactly-
+            #    once drains -- the chat path is the only consumer; a
+            #    state peek passes drain=False and consumes nothing)
+            # 2. TRACKS: the printf stories, ID-prefixed; the fallback
+            #    carries the ID + the honest empty state.
             est.evaluate_tracks(mem.store.exemplars)
-            alerts = est.take_alerts() if drain else []
-            for a in alerts:
-                lines.append(f"ALERT: {a['label']} {a['kind']} its "
-                             f"boundary ({a['boundary']}; {a['detail']})")
-            # THE STORIES, not just names: each track renders its arc
-            # essence inline (the operator's call -- a bare entity name
-            # traces nothing). track_report is the story renderer; a
-            # silent story (change-gated) falls back to name+state.
-            # Stories lead with the ENTITY ID (the operator's call: the id
-            # is the actionable handle -- paste into
-            # membrane_related_entities / membrane_query for the field
-            # slice) -- the lookup indexes by id.
+            if drain:
+                for a in est.take_alerts():
+                    lines.append(f"ALERT: {a['label']} {a['kind']} its "
+                                 f"boundary ({a['boundary']}; {a['detail']})")
+                for a in est.take_announcements():
+                    if a["kind"] == "merged":
+                        lines.append(f"new entity: {a['eid']} — merged "
+                                     f"{a.get('extra', '')}")
+                    else:
+                        clip = a.get("summary") or a["name"]
+                        lines.append(f"new entity: {a['eid']} [{a['cls']}]"
+                                     f" {clip}")
             stories: dict[str, str] = {}
-            try:
-                for k, s in (est.track_report(
-                        mem.store.exemplars, query_vec=vec,
-                        session_since=getattr(srv, "_boot_ts", None),
-                        embedder=mem.embedder) or []):
-                    # STRUCTURED: (track_key, text) -- no string-splitting
-                    # a colon-rich ID out of prose (the 'files' mis-key)
-                    stories[k.lower()] = s
-            except Exception as e:
-                print(f"[opencode] story render skipped ({e})",
-                      file=sys.stderr)
-                stories = {}
+            for k, s in (est.track_report(
+                    mem.store.exemplars, query_vec=vec,
+                    session_since=getattr(srv, "_boot_ts", None),
+                    embedder=mem.embedder) or []):
+                # STRUCTURED: (track_key, text) -- no string-splitting a
+                # colon-rich ID out of prose (the 'files' mis-key)
+                stories[k.lower()] = s
             for t in est.list_tracks():
                 key = t["key"]
                 label = t.get("label") or key
@@ -935,10 +933,8 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
                                  f"cells, last active {ago}")
                 else:
                     lines.append(f"track: {key} ({label}) — no cells yet")
-        except Exception:
-            pass
-    # (entity track stories live in the banner -- _gate_monologue -- not
-    # here: one render, not two.)
+        except Exception as e:
+            print(f"[opencode] banner render error: {e}", file=sys.stderr)
     if not lines:
         return None
     return ("WHERE WE ARE:\n- " + "\n- ".join(lines))
@@ -3642,23 +3638,14 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # the banner reports what was sent, so it sees the final context.
         # (The old order computed the banner first: it always reported the
         # pre-assembly ctx -- "injected 0" while slices rode right above it.)
+        # THE UNIFIED BANNER (the operator's rule, final form): ONE header,
+        # injected EVERY turn, containing ONLY tracks + alerts (changed
+        # tracks via the delta gate). No recall preambles, no vitals, no
+        # 'your state this turn' section, no review/intents/ledger blocks
+        # (those live in /membrane/state and the doctrine). The recall Q/A
+        # block rides separately (it is content, not banner).
         mono_review = review_block or ""
-        extra_blocks = [b for b in (where_block, review_block, intent_block,
-                                    ledger_block)
-                        if b]
-        for block in extra_blocks:
-            ctx = (ctx + "\n\n" + block) if ctx else block
-        # THE BANNER: computed LAST, over the FINAL ctx, and it RIDES the
-        # context (the operator's contract: the banner is properly generated,
-        # useful to the model, and operator-visible -- ONE surface, both read
-        # the same bytes). The banner describes the ctx assembled above it;
-        # it is appended after them so it never describes itself.
-        mono = (self._gate_monologue(verdict, ctx, query, query_vec=vec)
-                if getattr(srv, "gate_monologue", True) else "")
-        if mono_review:
-            mono = (mono + "\n[membrane] " + _one_line(mono_review)[:220]) if mono else "[membrane] " + _one_line(mono_review)[:220]
-        banner_block = (f"[membrane] your state this turn:\n{mono}"
-                        if mono else None)
+        banner_block = _where_delta(srv, _where_we_are(srv, vec))
         if banner_block:
             ctx = (ctx + "\n\n" + banner_block) if ctx else banner_block
         replay_sim = float(getattr(srv, "replay_sim", 0.0) or 0.0)
@@ -3707,7 +3694,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             v = {**verdict, "verdict": "act-replayed"}
             self._serve_intercept_answer(model, answer,
                                          bool(body.get("stream", False)),
-                                         thinking=mono)
+                                         thinking=None)
             if not getattr(mem, "fork_owns_field", False):
                 mem.record_act(query, vec, v, model, answer)
             self._log_turn(v, ctx, None, len(mem.store),
@@ -3734,7 +3721,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             answer = ex.action
             self._serve_intercept_answer(model, answer,
                                          bool(body.get("stream", False)),
-                                         thinking=mono)
+                                         thinking=None)
             if not getattr(mem, "fork_owns_field", False):
                 mem.record_act(query, vec, v, model, answer)
             self._log_turn(v, ctx, None, len(mem.store),
