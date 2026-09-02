@@ -630,6 +630,9 @@ def main() -> None:
     if cmd == "ingest":
         argv2 = _ensure_data_dir(args.forwarded)
         raise SystemExit(_run_module("membrane.ingest", argv2))
+    if cmd == "reharvest":
+        argv2 = _ensure_data_dir(args.forwarded)
+        raise SystemExit(_run_module("membrane.reharvest", argv2))
     if cmd == "codegraph":
         raise SystemExit(_run_module("membrane.codegraph", args.forwarded))
     if cmd in ("opencode", "tui", "anthropic", "reset", "proxy"):
