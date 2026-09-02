@@ -1363,10 +1363,10 @@ class EntityStore:
                     if vn < 1e-12:
                         continue
                     sim = float(qv @ (vv / vn))
-                    if sim < ALIGN_FLOOR:
-                        continue
                     born = _eph_born_of(exemplars, i)
                     newest_born = max(newest_born, born)
+                    if sim < ALIGN_FLOOR:
+                        continue
                     # freshness credit: halves every FRESH_HALF_LIFE --
                     # an old beat must ALIGN HARDER to win the slot
                     fresh = FRESH_WEIGHT * (0.5 ** (max(now - born, 0.0)
@@ -1386,6 +1386,19 @@ class EntityStore:
                     # (the 'last active recently:' stutter fix).
                     scored.sort(key=lambda x: -x[1])
                     picked = [s for s in scored if s[2] > 0][:6]
+                    # THE NOW GUARANTEE: the arc must END at the now --
+                    # the 2 newest junk-free cells join the beat pool
+                    # regardless of alignment (a story that ends 29h deep
+                    # while fresh work exists is a lie about the present).
+                    # The junk screens below still apply to them.
+                    by_born = sorted(((i, b) for i in idxs
+                                      for b in (_eph_born_of(exemplars, i),)
+                                      if b > 0),
+                                     key=lambda x: -x[1])
+                    have = {p[0] for p in picked}
+                    for i, b in by_born[:2]:
+                        if i not in have:
+                            picked.append((i, 0.0, b))
                     picked.sort(key=lambda x: x[2])
                     beats: list[tuple[float, str]] = []
                     seen: set[int] = set()

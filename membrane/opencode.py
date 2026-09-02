@@ -53,7 +53,7 @@ import numpy as np
 from .embed import OllamaEmbedder
 from .global_field import PEER_ASK_SIM_MIN
 from .rag import (Compactor, RAGProxyHandler, _clip, _inject,
-                  doctrine_instructions_text)
+                  _ollama_chat, doctrine_instructions_text)
 from .router import (EXPLORE_LANE, AUTO_CLOUD, AUTO_LOCAL, AUTO_LANES,
                      AUTO_ALIASES, LANE_TOKENS, normalize_lane,
                      Registry)
@@ -5328,6 +5328,50 @@ def main() -> None:
         srv.compactor = None
         print("[opencode] compactor: skipped -- fork owns the field "
               "(no second writer)", file=sys.stderr)
+    # THE STANDALONE NIGHT: when the Compactor is stood down (fork owns
+    # capture) the night still runs on its own slow timer -- quality
+    # control is not capture (the operator's shared-field call). The
+    # sweep self-rate-limits to 1/hour; consolidation is pure numpy.
+    # When the Compactor IS running, the night rides its cycle instead
+    # (rag.py step 5) and this loop is not started.
+    if srv.compactor is None and getattr(mem, "store", None) is not None:
+        import threading as _th
+
+        def _night_loop():
+            from .night import run_night, NIGHT_SWEEP_MIN_INTERVAL_S
+            while True:
+                time.sleep(900)          # a 15-minute tick
+                try:
+                    est = getattr(srv, "entity_store", None)
+                    if est is None:
+                        continue
+                    now = time.time()
+                    do_sweep = (now - getattr(srv, "_night_sweep_ts", 0.0)
+                                ) >= NIGHT_SWEEP_MIN_INTERVAL_S
+                    night = run_night(srv, mem, est, chat=_ollama_chat,
+                                      sweep=do_sweep)
+                    if do_sweep:
+                        srv._night_sweep_ts = now
+                        sw = night.get("sweep") or {}
+                        if sw.get("checked"):
+                            print(f"[night] demoted {sw.get('demoted', 0)} "
+                                  f"(gray {sw.get('gray', 0)}) of "
+                                  f"{sw.get('checked', 0)}", file=sys.stderr)
+                    if night.get("consolidation", {}).get("drifted") or \
+                            night.get("consolidation", {}).get("materialized"):
+                        d = night["consolidation"]
+                        print(f"[night] drifted {d['drifted']} entities "
+                              f"(avg {d['avg_moved']:.3f}), materialized "
+                              f"{d.get('materialized', 0)}", file=sys.stderr)
+                    srv.night_stats = {**night, "ts": now,
+                                       "swept": bool(do_sweep)}
+                except Exception as e:
+                    print(f"[night] loop error ({e})", file=sys.stderr)
+
+        _th.Thread(target=_night_loop, daemon=True,
+                   name="membrane-night").start()
+        print("[opencode] night: standalone timer on (15-min tick; the "
+              "compactor is stood down)", file=sys.stderr)
     else:
         srv.compactor = None
     srv.archive = bool(args.archive)
