@@ -1228,21 +1228,36 @@ class EntityStore:
             return {"ok": False, "error": str(e)}
         # THE SCARCITY COVENANT (the operator's ratio: 3 tracks / 7
         # watches): tracks are the expensive lane -- every one renders a
-        # paragraph every turn. Overflow evicts the OLDEST planted
-        # track (never the default now-track); the eviction is reported
-        # so the planter knows what attention was traded.
+        # paragraph every turn. Overflow evicts the STORY-POOREST track
+        # (fewest tagged cells, tie: oldest planted) -- a track with a
+        # rich history earns its bytes; a never-active track is a bare
+        # name wasting the lane (the operator's catch: planting-age
+        # eviction kept empty tracks and killed the rich one). The
+        # default now-track is never evicted.
         evicted = None
         if (key not in self.tracks and key != DEFAULT_TRACK_KEY
                 and len(self.tracks) >= MAX_TRACKS):
-            oldest_key, oldest = min(
-                ((k, t) for k, t in self.tracks.items()
-                 if k != DEFAULT_TRACK_KEY),
-                key=lambda kv: kv[1].get("planted_ts", 0.0),
-                default=(None, None))
-            if oldest_key is not None:
-                evicted = {"key": oldest_key,
-                           "label": oldest.get("label") or oldest_key}
-                del self.tracks[oldest_key]
+            # STORY-POOREST eviction: the track with the fewest tagged
+            # cells (tie: oldest planted) loses the lane -- a rich history
+            # earns its bytes; a never-active track is a bare name wasting
+            # the lane. Needs the field's entity index: the caller sets
+            # _exemplars_hint when it can (the proxy does); without it the
+            # fallback is planted age.
+            est_idx = entity_index(getattr(self, "_exemplars_hint", []) or [])
+
+            def _pool(k):
+                return (len(est_idx.get(k) or []),
+                        -self.tracks[k].get("planted_ts", 0.0))
+
+            poorest_key = min((k for k in self.tracks
+                               if k != DEFAULT_TRACK_KEY),
+                              key=lambda k: _pool(k),
+                              default=None)
+            if poorest_key is not None:
+                t = self.tracks[poorest_key]
+                evicted = {"key": poorest_key,
+                           "label": t.get("label") or poorest_key}
+                del self.tracks[poorest_key]
         rec = dict(self.tracks.get(key) or {})
         if not rec:
             import time as _t
@@ -1435,6 +1450,13 @@ class EntityStore:
             qv = qv / (_np.linalg.norm(qv) + 1e-12)
         out: list[str] = []
         dirty = False
+        # THE CROSS-TRACK ECHO GUARD: one cell may anchor at most ONE
+        # story per render pass -- the now-track and a young entity-track
+        # would otherwise recite the same fresh cell twice (the live
+        # exhibit: both tracks rendered the same probe cell verbatim).
+        # Priority = track order (planted first wins); the later track
+        # falls back to its own distinct cells or the compact line.
+        claimed_cells: set[int] = set()
         for key, t in self.tracks.items():
             idxs = inv.get(key) or []
             is_now = (key == "session:now")
@@ -1588,10 +1610,16 @@ class EntityStore:
                                                    "Removed ",
                                                    "Track not planted")):
                             act = ""
+                        # the echo guard: a cell already anchoring another
+                        # track's story this pass dies here (the FIRST
+                        # claim wins -- track order = priority)
+                        if i in claimed_cells:
+                            continue
                         frag = sit
                         if act and _action_overlap(act, sit) < 0.6:
                             frag += f" — {act}"
                         beats.append((born, frag))
+                        claimed_cells.add(i)
                     # the now-track earns a higher prose budget: its pool is
                     # the pre-curated fresh tail (not a raw tag-index), so
                     # the era-collapse guard relaxes -- "now" is WHERE the

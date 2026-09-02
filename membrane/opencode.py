@@ -4563,6 +4563,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         est = getattr(srv, "entity_store", None)
         if est is None:
             self._json_err_raw(503, "entity layer unavailable"); return
+        # the eviction covenant counts cells: refresh the hint so the
+        # story-poorest eviction sees the live field
+        est._exemplars_hint = srv.membrane.store.exemplars
         body = self._json_body()
         key = str(body.get("key") or "").strip()
         if not key:
@@ -5335,6 +5338,10 @@ def main() -> None:
         # the conversation's direction is the thing worth watching. The
         # story renders from the fresh tail (nothing tags 'now'; everything
         # is now); the position drifts with the momentum EMA + fresh cells.
+        # THE SCARCITY COVENANT WIRE: the store gets the field so
+        # story-poorest eviction counts cells (never evicts a rich track
+        # for a fresh plant).
+        srv.entity_store._exemplars_hint = mem.store.exemplars
         if "session:now" not in srv.entity_store.tracks:
             srv.entity_store.watch_track(
                 "session:now", label="now (the session's living present)")
