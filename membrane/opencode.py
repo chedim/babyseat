@@ -913,26 +913,13 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
             # slice) -- the lookup indexes by id.
             stories: dict[str, str] = {}
             try:
-                for s in (est.track_report(
+                for k, s in (est.track_report(
                         mem.store.exemplars, query_vec=vec,
                         session_since=getattr(srv, "_boot_ts", None),
                         embedder=mem.embedder) or []):
-                    # stories are prefixed '<entity id>: ...' -- the ID
-                    # itself contains colons (files:router.py), so the
-                    # split must anchor on 'id: ' + a KNOWN key, not the
-                    # first colon (the files-only-key bug: the dict keyed
-                    # on 'files' and the lookup missed -- the split-brain
-                    # fallback exhibit)
-                    sid = s.split(":", 1)[0].strip().lower()
-                    matched = next((t["key"].lower()
-                                    for t in est.list_tracks()
-                                    if sid == t["key"].lower()
-                                    or t["key"].lower().startswith(sid)),
-                                   None)
-                    if matched:
-                        stories[matched] = s
-                    else:
-                        stories[sid] = s
+                    # STRUCTURED: (track_key, text) -- no string-splitting
+                    # a colon-rich ID out of prose (the 'files' mis-key)
+                    stories[k.lower()] = s
             except Exception as e:
                 print(f"[opencode] story render skipped ({e})",
                       file=sys.stderr)

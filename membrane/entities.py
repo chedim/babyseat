@@ -1442,7 +1442,10 @@ class EntityStore:
 
     def track_report(self, exemplars, query_vec=None,
                      session_since: float | None = None,
-                     goal: str = "", embedder=None) -> list[str] | None:
+                     goal: str = "", embedder=None) -> list[tuple[str, str]] | None:
+        """Tracked entities as STRUCTURED stories: (track_key, text) —
+        the consumer indexes by the key itself (never string-splitting a
+        colon-rich ID out of prose). ONE MIXED paragraph per track:"""
         """Tracked entities, ONE MIXED line each:
         HISTORY half = the story ARC (now -> how it got there ->
         originated -> aiming), rendered through the zoom ladder (the
@@ -1469,7 +1472,7 @@ class EntityStore:
         if query_vec is not None:
             qv = _np.asarray(query_vec, dtype=float)
             qv = qv / (_np.linalg.norm(qv) + 1e-12)
-        out: list[str] = []
+        out: list[tuple[str, str]] = []
         dirty = False
         # THE CROSS-TRACK ECHO GUARD: one cell may anchor at most ONE
         # story per render pass -- the now-track and a young entity-track
@@ -1605,8 +1608,8 @@ class EntityStore:
                             continue
                         seen.add(i)
                         sit, act = _frag_of(exemplars, i)
-                        sit = _narrative(sit, 110)
-                        act = _narrative(act, 140)
+                        sit = _narrative(sit, 200)
+                        act = _narrative(act, 240)
                         # an EMPTY action is silence, not junk (learn-pair
                         # cells carry their text in the situation) -- only
                         # a PRESENT action gets the artifact screen
@@ -1707,12 +1710,16 @@ class EntityStore:
                 except Exception:
                     drift = ""
             if story or surr or drift:
-                # a bare drift line needs its anchor: 'label: Moving ...'
+                # a bare drift line needs its anchor: '<key>: Moving ...'
                 # (a floating 'Moving fast' names nothing -- the reader
-                # cannot tell WHO moves)
-                if drift and not (story or surr):
-                    drift = f"{label}: {drift.strip()}"
-                out.append((story + surr + drift).strip())
+                # cannot tell WHO moves). Structured return: (key, text)
+                # -- the consumer indexes by the TRACK KEY itself, never
+                # by string-splitting a colon-rich ID out of the prose
+                # (the 'files'-prefix mis-key bug).
+                if not story:
+                    story = (f"{key}: {drift.strip()}" if drift
+                             else f"{key}:")
+                out.append((key, (story + surr + drift).strip()))
         if dirty:
             self._save_tracks()
         return out or None
