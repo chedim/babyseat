@@ -83,7 +83,27 @@ def extract_entities(situation: str, action: str = "") -> dict:
     every answer that mentions a model name tags the cell with it, and the
     tracks fill with cells that merely reference the entity in passing.
     A tag is a HINT (false positives acceptable); a miss just means vector
-    recall stays the only path for that cell."""
+    recall stays the only path for that cell.
+
+    THE ENTITY-MANAGEMENT EXCEPTION: a capture cell whose situation is an
+    entity-management tool call (watch/entity add/edit/remove) has the
+    entity as the OPERATION'S TARGET -- its mention in the action is not
+    a passing reference. Those cells harvest situation + action, so a
+    planted track's own cells tag the planted entity (the story lane's
+    cell pool would otherwise be empty for exactly the cells that are
+    structurally ABOUT an entity)."""
+    sit_l = " ".join((situation or "").split()).lower()
+    for pre in ("tool membrane_membrane_watch_entity for:",
+                "tool membrane_membrane_unwatch_entity for:",
+                "tool membrane_membrane_entity_add for:",
+                "tool membrane_membrane_entity_edit for:",
+                "tool membrane_membrane_entity_remove for:",
+                "tool membrane_entity_add for:",
+                "tool membrane_entity_edit for:",
+                "tool membrane_entity_remove for:"):
+        if sit_l.startswith(pre):
+            merged = f"{situation}\n{action or ''}"
+            return _harvest(merged)
     return _harvest(situation)   # SITUATION ONLY: what the cell is ABOUT
 
 
@@ -108,9 +128,12 @@ def _harvest(text: str) -> dict:
     add("urls", _URL_RE.findall(text))
     add("ha", _HA_RE.findall(text))
     # model tags before the symbol pass (glm-5.3-flash:cloud is a model, not
-    # a symbol); urls excluded (their dots are not symbols)
-    add("models", [m for m in _MODEL_RE.findall(text)
-                   if not m.startswith("http")])
+    # a symbol); urls excluded (their dots are not symbols). A match whose
+    # NEXT char in the source is '/' is a path PREFIX ('files:membrane' in
+    # the entity key 'files:membrane/entities.py'), not a model.
+    add("models", [m.group(0) for m in _MODEL_RE.finditer(text)
+                   if not m.group(0).startswith("http")
+                   and (m.end() >= len(text) or text[m.end()] != "/")])
     # dotted code symbols: keep Class.attr / module.fn / snake_case chains,
     # drop pronoun-sentences and everything already claimed above
     claimed = ({f.lower() for f in out.get("files", [])}
@@ -294,6 +317,30 @@ def _arc(beats: list, borns: list, now: float, goal: str = "",
     return ", ".join(chron)
 
 
+_ENTITY_MGMT_PREFIXES = (
+    "tool membrane_membrane_watch_entity for: ",
+    "tool membrane_membrane_unwatch_entity for: ",
+    "tool membrane_membrane_entity_add for: ",
+    "tool membrane_membrane_entity_edit for: ",
+    "tool membrane_membrane_entity_remove for: ",
+    "tool membrane_entity_add for: ",
+    "tool membrane_entity_edit for: ",
+    "tool membrane_entity_remove for: ",
+)
+
+
+def _strip_tool_prefix(s: str) -> str:
+    """Tool-capture prefixes off: the REST is the operator's words (the
+    narrative fragment). Includes the entity-management captures -- their
+    remainder is the planting request, a real story fragment."""
+    for pre in ("tool edit for: ", "tool bash for: ", "tool call for: ",
+                "reasoning: ", "plan: ", "compact note: ",
+                *_ENTITY_MGMT_PREFIXES):
+        if s.startswith(pre):
+            return s[len(pre):].strip()
+    return s
+
+
 def _sit_text_of(exemplars, i):
     s = " ".join(str(exemplars[i].situation).split())
     for pre in ("tool edit for: ", "tool bash for: ", "tool call for: ",
@@ -306,15 +353,7 @@ def _sit_text_of(exemplars, i):
 
 def _frag_of(exemplars, i):
     e = exemplars[i]
-    sit = " ".join(str(e.situation).split())
-    for pre in ("tool edit for: ", "tool bash for: ", "reasoning: ",
-                "plan: ", "tool call for: ", "compact note: ",
-                "tool membrane_membrane_state for: ",
-                "tool membrane_membrane_query for: ",
-                "tool membrane_membrane_learn for: "):
-        if sit.startswith(pre):
-            sit = sit[len(pre):]
-            break
+    sit = _strip_tool_prefix(" ".join(str(e.situation).split()))
     if " args: {" in sit:
         sit = sit.split(" args:", 1)[0]
     act = " ".join(str(e.action or "").split())
@@ -426,7 +465,9 @@ def _tool_artifact(act: str) -> bool:
     # trim a leading Edit-applied stamp: the REST decides
     core = a
     for lead in ("Edit applied successfully.", "Edit applied successfully",
-                 "Edit applied"):
+                 "Edit applied",
+                 "Entity track planted:",          # tool RESULT stamps
+                 "Entity track planted"):
         if a.startswith(lead):
             a = a[len(lead):].strip()
             break
@@ -1385,8 +1426,22 @@ class EntityStore:
                 scored = []
                 newest_born = 0.0
                 for i in idxs:
+                    # THE STORY-ELIGIBILITY SCREEN: judge the STRIPPED
+                    # narrative, not the raw capture form. A tool-capture
+                    # cell IS recall-junk (never grounding material) but
+                    # its fragment after prefix-strip is the operator's
+                    # own words -- story-eligible (the entity-management
+                    # captures are structurally ABOUT this entity; killing
+                    # them here is why tracks had no stories). The raw
+                    # MACHINERY forms (ps tables, config JSON) still die:
+                    # they stay junk after any strip.
                     sit_text = _sit_text_of(exemplars, i)
-                    if is_capture_junk(sit_text) or _machinery_junk(sit_text):
+                    stripped = _strip_tool_prefix(sit_text)
+                    if stripped == sit_text:
+                        # no tool prefix: the raw form IS the narrative
+                        if is_capture_junk(sit_text) or _machinery_junk(sit_text):
+                            continue
+                    elif _machinery_junk(stripped):
                         continue
                     v = getattr(exemplars[i], "vec", None)
                     if v is not None:
@@ -1466,6 +1521,17 @@ class EntityStore:
                                for p in seen_actions):
                             continue
                         seen_actions.append(a_low)
+                        # the act half of an entity-management capture is a
+                        # tool RESULT stamp ('Entity track planted: ...') —
+                        # the situation fragment already carries the
+                        # operator's words; the stamp adds nothing (the
+                        # _tool_artifact trim ran, but the remainder is
+                        # still tool-voice: drop the act entirely here)
+                        if act and act.startswith(("Entity track planted",
+                                                   "Entity ",
+                                                   "Removed ",
+                                                   "Track not planted")):
+                            act = ""
                         frag = sit
                         if act and _action_overlap(act, sit) < 0.6:
                             frag += f" — {act}"
