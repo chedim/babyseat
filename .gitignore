@@ -43,3 +43,4 @@ itll-pave-us.html
 
 # a smoke test that passed --audit :memory: from the repo root materializes a literal file
 :memory:
+:memory:.corrupt-*
