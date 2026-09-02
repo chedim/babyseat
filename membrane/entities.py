@@ -466,6 +466,8 @@ class QuantumEntity:
     links: list[int] = dfield(default_factory=list)   # field cell back-refs
     derived_by: list[str] = dfield(default_factory=list)
     embedding: list | None = None               # 1024-d, the shared space
+    position: list | None = None                # the LIVING summary vector
+    position_history: list = dfield(default_factory=list)   # [[ts, pos]...]
 
     def describe(self) -> str:
         props = self.properties or {}
@@ -485,7 +487,7 @@ class QuantumEntity:
             props["links"] = list(self.links)
         if self.derived_by:
             props["derived_by"] = list(self.derived_by)
-        return {
+        doc = {
             "meta": {"type": "QuantumEntity"},
             "type": "entities",
             "vector_data": list(vec or []),
@@ -493,6 +495,16 @@ class QuantumEntity:
             "state_space": {"position": {"semantic_embeddings":
                                          list(vec or [])}},
         }
+        # the LIVING geometry rides its own state_space lane (cortex-compat:
+        # position.semantic_embeddings stays the STATIC embedding; the
+        # tracker's drift lives in position.tracked + trajectory)
+        if self.position:
+            doc["state_space"]["position"]["tracked"] = list(self.position)
+        if self.position_history:
+            doc["state_space"]["trajectory"] = [
+                [float(t), [float(x) for x in p]]
+                for t, p in self.position_history]
+        return doc
 
     @staticmethod
     def from_doc(doc_id: str, doc: dict) -> "QuantumEntity | None":
@@ -510,14 +522,24 @@ class QuantumEntity:
             derived = props.get("derived_by") or ["cortex"]
             vec = (((doc.get("state_space") or {})
                     .get("position") or {}).get("semantic_embeddings"))
-            return QuantumEntity(
+            tracked = (((doc.get("state_space") or {})
+                        .get("position") or {}).get("tracked"))
+            trajectory = (doc.get("state_space") or {}).get("trajectory")
+            q = QuantumEntity(
                 eid=str(doc_id),
                 cls=str(data.get("class") or CLASS_COMPONENT),
                 properties=props,
                 links=[int(x) for x in links if str(x).isdigit()],
                 derived_by=[str(x) for x in derived],
                 embedding=list(vec or []),
+                position=([float(x) for x in tracked]
+                          if isinstance(tracked, (list, tuple)) and tracked
+                          else None),
+                position_history=([[float(t), [float(x) for x in p]]
+                                   for t, p in trajectory]
+                                  if isinstance(trajectory, list) else []),
             )
+            return q
         except Exception:
             return None
 
@@ -533,6 +555,223 @@ class QuantumEntity:
         for d in other.derived_by:
             if d not in self.derived_by:
                 self.derived_by.append(d)
+
+    # ---- the living geometry (consolidation) --------------------------------
+    # CELLS are evidence: immutable, full-precision, forever. ENTITIES are
+    # trackers: their position is a derived, decaying summary that is
+    # SUPPOSED to move (their meaning moves). The position drifts toward
+    # the centroid of recent linked cells (lambda from the half-life, time-
+    # based), and the position HISTORY ring coarsens with age: a delta-
+    # perceptual store (only perceptible motion lands) + era anchors on
+    # the half-life's own timescale -- important past stays, in ever less
+    # space. Cells never rewrite; the tracker's autobiography compresses.
+
+    def grain(self) -> float:
+        """This entity's delta-perception threshold (the coarsening knob).
+        Class default, overridable via properties['grain']; lives in the
+        SHARED doc so both seats see the same knob."""
+        g = (self.properties or {}).get("grain")
+        try:
+            g = float(g)
+            if 0.001 <= g <= 0.5:
+                return g
+        except (TypeError, ValueError):
+            pass
+        return _GRAIN_DEFAULTS.get(self.cls, GRAIN_DEFAULT)
+
+    def half_life_s(self) -> float:
+        """The drift half-life: how long ago cells must be to pull the
+        position with HALF the force of now-cells. Class-tuned via
+        properties['half_life_h'] when present."""
+        h = (self.properties or {}).get("half_life_h")
+        try:
+            h = float(h)
+            if 0.25 <= h <= 24 * 30:
+                return h * 3600.0
+        except (TypeError, ValueError):
+            pass
+        return POSITION_HALF_LIFE_S
+
+    def consolidate_position(self, cell_vecs_with_ts: list,
+                             now: float) -> dict:
+        """ONE consolidation step (pure numpy, ~ms): drift the position
+        toward the recent cells' centroid (time-weighted by the half-life)
+        and record the motion in the coarsening history ring.
+
+        ``cell_vecs_with_ts``: [(vec, born), ...] for this entity's linked
+        SAFE cells (the caller harvests them; already unit-normalizable).
+
+        Storage: a new ring entry lands ONLY when the position moved >=
+        the entity's grain (delta-perceptual); era anchors at half-life
+        fractions (T/8, T/4, T/2, T) guarantee the past stays represented;
+        overflow collapses the OLDEST era first (velocity lives at the
+        fine end -- it must stay trustworthy). Returns the derived
+        dynamics: {moved, velocity, direction}."""
+        import numpy as _np
+        import time as _t
+        moved = 0.0
+        # ---- the drift step: lambda-weighted pull toward recent cells ----
+        pts = [(v, t) for v, t in (cell_vecs_with_ts or [])
+               if v is not None and t]
+        if pts:
+            vs, ws = [], []
+            for v, born in pts:
+                a = _np.asarray(v, dtype=float)
+                an = _np.linalg.norm(a)
+                if an < 1e-12:
+                    continue
+                vs.append(a / an)
+                # time-decay weight: recent cells pull harder (the
+                # relativistic horizon: dt=half_life -> half force)
+                dt = max(now - born, 0.0)
+                ws.append(0.5 ** (dt / max(self.half_life_s(), 1.0)))
+            if vs:
+                W = _np.asarray(ws)
+                W = W / (W.sum() + 1e-12)
+                target = _np.average(_np.asarray(vs), axis=0, weights=W)
+                tn = _np.linalg.norm(target)
+                if tn > 1e-12:
+                    target = target / tn
+                    if self.position:
+                        cur = _np.asarray(self.position, dtype=float)
+                        cn = _np.linalg.norm(cur)
+                        if cn > 1e-12:
+                            cur = cur / cn
+                            lam = 0.5 ** (1.0)   # one step; the weights
+                            # above already encode time -- a fixed step
+                            # keeps the drift bounded per cycle
+                            blended = cur * 0.5 + target * 0.5
+                            bn = _np.linalg.norm(blended)
+                            if bn > 1e-12:
+                                new_pos = blended / bn
+                                moved = float(1.0 - float(cur @ new_pos))
+                                self.position = [float(x) for x in new_pos]
+                        else:
+                            self.position = [float(x) for x in target]
+                    else:
+                        self.position = [float(x) for x in target]
+        if not self.position:
+            return {"moved": 0.0, "velocity": 0.0, "direction": ""}
+        # ---- the coarsening ring ----
+        self._ring_store(now)
+        return {"moved": moved,
+                "velocity": self.ring_velocity(now),
+                "direction": self.ring_direction()}
+
+    def _ring_store(self, ts: float) -> None:
+        """Insert (ts, position) into the history ring under the delta
+        rule + era anchors, then collapse to the cap (oldest era first)."""
+        import numpy as _np
+        hist = list(getattr(self, "position_history", []) or [])
+        pos = _np.asarray(self.position, dtype=float)
+        pn = _np.linalg.norm(pos)
+        if pn < 1e-12:
+            return
+        pos = pos / pn
+        # delta-perceptual insertion: only meaningful motion lands
+        if hist:
+            _, last_pos = hist[-1]
+            lp = _np.asarray(last_pos, dtype=float)
+            ln = _np.linalg.norm(lp)
+            if ln > 1e-12:
+                if 1.0 - float(lp / ln @ pos) < self.grain():
+                    # imperceptible: skip UNLESS an era anchor is due
+                    if not self._era_anchor_due(hist, ts):
+                        self.position_history = hist[-RING_MAX:]
+                        return
+        hist.append([ts, [float(x) for x in pos]])
+        self.position_history = self._ring_collapse(hist, ts)[-RING_MAX:]
+
+    def _era_span(self) -> float:
+        """The era-anchor schedule derives from the entity's OWN timescale
+        (the half-life): anchors at T/8, T/4, T/2, T."""
+        t = self.half_life_s()
+        return t / 8.0
+
+    def _era_anchor_due(self, hist: list, now: float) -> bool:
+        """True when an era anchor is missing/stale: an era the entity has
+        LIVED through (its recorded birth predates the era's start) with
+        no stored point -- the 'important past stays' guarantee."""
+        span = self._era_span()
+        now_ts = now
+        birth = hist[0][0] if hist else now_ts
+        for i in range(4):
+            hi_age = span * (2 ** (i + 1))
+            lo_age = span * (2 ** i)
+            lo_ts, hi_ts = now_ts - hi_age, now_ts - lo_age
+            in_era = [e for e in hist if lo_ts <= e[0] < hi_ts]
+            if not in_era and birth < lo_ts:
+                return True
+        return False
+
+    def _ring_collapse(self, hist: list, now: float) -> list:
+        """Vanishing-precision compression: when a window holds more than
+        its budget, its two closest-in-time entries merge (position mean,
+        newer stamp). The OLDEST era merges first; the recent end (the
+        velocity source) is touched last."""
+        import numpy as _np
+        span = self._era_span()
+        budgets = (6, 4, 2, 1)          # per geometric era window
+        def window_of(ts: float) -> int:
+            age = max(now - ts, 0.0)
+            for i in range(4):
+                if age < span * (2 ** (i + 1)):
+                    return i
+            return 3                     # oldest era: everything elder
+        for _ in range(64):              # bounded converge
+            counts = {0: [], 1: [], 2: [], 3: []}
+            for e in hist:
+                counts[window_of(e[0])].append(e)
+            over = next((w for w in range(3, -1, -1)
+                         if len(counts[w]) > budgets[w]), None)
+            if over is None:
+                return hist
+            win = counts[over]
+            win.sort(key=lambda e: e[0])
+            a, b = win[0], win[1]        # the two oldest in that window
+            pa = _np.asarray(a[1], dtype=float)
+            pb = _np.asarray(b[1], dtype=float)
+            m = pa + pb
+            mn = _np.linalg.norm(m)
+            merged = [b[0], ([float(x) for x in m / mn] if mn > 1e-12
+                             else b[1])]
+            hist = [e for e in hist if e is not a and e is not b]
+            hist.append(merged)
+            hist.sort(key=lambda e: e[0])
+        return hist
+
+    def ring_velocity(self, now: float) -> float:
+        """Cosine-distance per hour across the FINE end of the ring (the
+        two most recent points) -- the trustworthy motion signal."""
+        import numpy as _np
+        h = getattr(self, "position_history", []) or []
+        if len(h) < 2:
+            return 0.0
+        (t0, p0), (t1, p1) = h[-2], h[-1]
+        dt_h = (t1 - t0) / 3600.0
+        if dt_h <= 1e-6:
+            return 0.0
+        a = _np.asarray(p0, dtype=float)
+        b = _np.asarray(p1, dtype=float)
+        an, bn = _np.linalg.norm(a), _np.linalg.norm(b)
+        if an < 1e-12 or bn < 1e-12:
+            return 0.0
+        return (1.0 - float(a / an @ (b / bn))) / dt_h
+
+    def ring_direction(self) -> str:
+        """The coarse-end story: which linked entity-key the OLDEST->NEWEST
+        position migration points at, by name (renderable, not a vector)."""
+        import numpy as _np
+        h = getattr(self, "position_history", []) or []
+        if len(h) < 2:
+            return ""
+        old = _np.asarray(h[0][1], dtype=float)
+        new = _np.asarray(h[-1][1], dtype=float)
+        on, nn = _np.linalg.norm(old), _np.linalg.norm(new)
+        if on < 1e-12 or nn < 1e-12:
+            return ""
+        return "drifting" if 1.0 - float(old / on @ (new / nn)) > 0.05 \
+            else "holding"
 
 
 def entity_id(kind: str, value: str) -> str:
@@ -1194,8 +1433,43 @@ class EntityStore:
                         nb = ", ".join(f"{self.default_label(k)} (cos {c:.2f})"
                                        for k, c in links[:SURR_MAX])
                     surr = f" Around it: {nb} [{mode}]."
-            if story or surr:
-                out.append((story + surr).strip())
+            # ---- the MOTION half (measured drift from the living geometry) ----
+            # the tracker's OWN recorded trajectory (night consolidation):
+            # velocity from the fine end of the ring, change-gated like the
+            # surroundings -- silence unless the motion is new information
+            drift = ""
+            ent = self.docs.get(f"{MEMBRANE_NS}{key}")
+            if ent is not None and getattr(ent, "position_history", None):
+                try:
+                    vel = ent.ring_velocity(now)          # cos-distance/h
+                    direction = ent.ring_direction()
+                    # quantized for the change-gate: the story re-renders
+                    # only when the PACE BAND changes (quiet/creeping/active/
+                    # fast), not on every micro-jitter
+                    vel_sig = round(vel, 2)
+                    band = (0 if vel_sig < 0.005 else
+                            1 if vel_sig < 0.05 else
+                            2 if vel_sig < 0.15 else 3)
+                    sig2 = f"{band}|{direction}"
+                    if (t.get("drift") or {}).get("sig") != sig2:
+                        t["drift"] = {"sig": sig2, "ts": now}
+                        dirty = True
+                        if direction == "drifting":
+                            pace = ("fast" if band >= 3
+                                    else "slowly" if band <= 1 else "steadily")
+                            drift = (f" Moving {pace} "
+                                     f"({vel_sig:.2f}/h, measured).")
+                        elif band > 0:
+                            drift = " Holding steady (measured)."
+                except Exception:
+                    drift = ""
+            if story or surr or drift:
+                # a bare drift line needs its anchor: 'label: Moving ...'
+                # (a floating 'Moving fast' names nothing -- the reader
+                # cannot tell WHO moves)
+                if drift and not (story or surr):
+                    drift = f"{label}: {drift.strip()}"
+                out.append((story + surr + drift).strip())
         if dirty:
             self._save_tracks()
         return out or None
@@ -1220,6 +1494,25 @@ def _clip_entity(s: str, cap: int = 60) -> str:
 SURR_MAX = 5               # neighbors per track, most-linked first
 SURR_DRIFT = 0.25          # weight change fraction that re-renders
 SURR_MIN_LINKS = 2         # a co-occurrence edge needs >= this many cells
+
+
+# ---- the living geometry (entity consolidation) ----------------------------
+# CELLS are evidence (immutable, full-precision). ENTITIES are trackers:
+# position drifts toward recent linked cells (half-life time-decay), and
+# the position HISTORY coarsens with age -- delta-perceptual storage plus
+# era anchors on the half-life's own timescale. The knob (per-entity
+# 'grain') lives in the SHARED doc so both seats see the same control.
+POSITION_HALF_LIFE_S = 24 * 3600.0   # default drift half-life (24h)
+RING_MAX = 16                        # history ring cap (entries)
+GRAIN_DEFAULT = 0.05                 # delta-perception threshold (cosine)
+# class-tuned defaults: hot things resolve fine, slow things coarsen
+_GRAIN_DEFAULTS = {
+    CLASS_SESSION: 0.03,             # a session's dynamics move fast
+    CLASS_FAILURE: 0.03,             # failure modes need fine tracking
+    CLASS_GOAL: 0.08,                # goals drift slowly by nature
+    CLASS_COMPONENT: 0.05,
+    CLASS_MODEL: 0.08,
+}
 
 
 # ---- the junk-cut knob (per-track, live, anchor-vector screen) -------------

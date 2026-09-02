@@ -42,6 +42,16 @@ a repair of a demoted cell, a candidate promotion, or a guard skip
 (vague/variety). The field's write-side ledger, per turn.
 
 ```
+[night] demoted 12 (gray 3) of 200
+[night] drifted 5 entities (avg 0.031), materialized 2
+```
+The compactor night's gate note (rides the banner's memory-flow): the
+maintenance clock's last pass — the junk sweep's demotions (consensus
+screened, blast-radius capped, origin-tagged, overturnable), the
+gray-band registration's grown anchors, and the entity trackers'
+measured drift. The field cleaning itself, visible.
+
+```
 [membrane] gate: re-ask vote (cosine, sim 0.91) on #88
 [membrane] gate: DEMOTED #88 (reask=2 contest=0)
 ```

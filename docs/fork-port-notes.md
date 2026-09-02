@@ -451,6 +451,66 @@ The contract this lands as (all in entities.py):
   line figure out the situation faster? (now, how it got there, what
   it is connected to, where it is heading). If not: silence.
 
+## 19. The compactor night: four maintenance phases on the existing slow clock
+
+Cortex's nightly reflection (cron_job.py), retold at compactor cadence --
+NO separate cron: the Compactor's duty-cycle governor already decides
+when cycles make sense. Lives in membrane/night.py, called from
+Compactor._cycle_inner step 5.
+
+1. **Junk sweep** (cortex's purge_episodic_buffer, retold): sample SAFE
+   cells (oldest-first + jitter, cap 200), score against the junk-anchor
+   entities with their OWN vectors ($0). sim >= 0.70 (the night cut --
+   stricter than the 0.62 display cut) + **CONSENSUS** (near >= 2
+   distinct anchors -- one hot anchor cannot kill a cell) -> DEMOTE
+   (safe=False, extra["night_junk"] provenance, never delete). Blast
+   radius: an absolute cap (50/sweep; the field can be genuinely
+   mostly-junk -- that is a slow cleanup across sweeps, not an abort).
+   Audit event night-junk-demote; the operator's ledger can overturn.
+2. **Gray-band registration** (cortex's process_unregistered_logs,
+   retold): cells near NO anchor but not clean prose (sim 0.40-0.70,
+   no entity tags) are the UNREGISTERED forms. ONE idle-cortex call:
+   junk-form -> a new anchor sentence (grown as DATA, shared via the
+   couchbase write-through); durable -> entities via the existing
+   parser. Rate-limited <= 1 anchor + <= 5 entities per pass.
+3. **Entity consolidation** (cortex's consolidate_long_term_vectors,
+   RESHAPED): the operator's call -- entities MUST move (their meaning
+   moves); cells stay immutable. QuantumEntity gains position +
+   position_history (state_space.position.tracked + trajectory in the
+   doc; the static semantic_embeddings lane is untouched). Drift:
+   position <- normalize(0.5*position + 0.5*centroid(recent linked
+   cells)) with half-life time-decay weights (default 24h = STALE_STORY_S;
+   per-entity via properties["half_life_h"]).
+4. **Materialization**: tag-derived keys (files:router.py etc.) live in
+   the exemplar side-index, not the store; when a key accumulates >= 3
+   cells it EARNS a store doc (top-8 per pass). The tracker then drifts.
+
+**The coarsening ring** (vanishing-precision compression of the
+tracker's own biography): delta-perceptual storage -- a new ring entry
+lands only when the position moved >= the entity's grain (cosine;
+per-entity knob in the SHARED doc, class defaults 0.03-0.08, tunable
+via membrane_entity_edit); era anchors at half-life fractions (T/8..
+T) guarantee the important past stays; overflow merges the OLDEST
+era's closest pair (velocity reads the fine end -- it stays
+trustworthy); cap 16.
+
+**The banner's MOTION half**: track_report renders measured drift from
+the ring ("Moving fast (0.15/h, measured).") -- velocity quantized into
+pace bands for the change-gate (quiet/creeping/active/fast), re-render
+only on band change; a bare drift line takes the label anchor
+("label: Moving ..."). The /membrane/state "night" key exposes the last
+pass (demotions, gray size, anchors grown, drift stats).
+
+**Shared-field boundary**: demotions are SHARED-FIELD writes (origin-
+tagged through the provenance substrate -- the field is shared;
+capture is the fork's, quality control is everyone's). Consolidation
+runs regardless (the entity store is the shared symbolic layer).
+
+Fork mapping: the night is Python-side; the fork inherits the GROWN
+anchors and DRIFTED entity positions through the couchbase write-
+through -- when the fork gets its own consolidation (Go), the grain
+knob and the ring shape travel in the shared docs.
+
 ## Port checklist
 
 1. `--replay-sim` default 0.0 + settle-replay observer guard.

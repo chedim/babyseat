@@ -587,6 +587,42 @@ class Compactor:
                       f"{_clip(topic, 48)!r}", file=sys.stderr)
         except Exception as ent_e:
             print(f"[entities] synthesis skipped ({ent_e})", file=sys.stderr)
+        # 5. THE COMPACTOR NIGHT (cortex's nightly reflection, retold at
+        # compactor cadence): consolidation every cycle (pure numpy);
+        # the junk sweep + gray-band registration at most hourly. The
+        # demotions are SHARED-FIELD writes (origin-tagged through the
+        # provenance substrate -- the field is shared; capture is the
+        # fork's, quality control is everyone's). Every phase degrades
+        # silently -- the compaction already landed.
+        try:
+            from .night import run_night, NIGHT_SWEEP_MIN_INTERVAL_S
+            est = getattr(srv, "entity_store", None)
+            if est is not None:
+                now = time.time()
+                last = getattr(srv, "_night_sweep_ts", 0.0)
+                do_sweep = (now - last) >= NIGHT_SWEEP_MIN_INTERVAL_S
+                night = run_night(srv, mem, est, chat=_ollama_chat,
+                                  sweep=do_sweep)
+                if do_sweep and night.get("sweep"):
+                    srv._night_sweep_ts = now
+                    sw = night["sweep"]
+                    mem.gate_notes.append(
+                        f"night sweep: demoted {sw.get('demoted', 0)} "
+                        f"junk (worst sim {sw.get('worst', 0)}) of "
+                        f"{sw.get('checked', 0)} checked")
+                    print(f"[night] demoted {sw.get('demoted', 0)} "
+                          f"(gray {sw.get('gray', 0)}) of "
+                          f"{sw.get('checked', 0)}", file=sys.stderr)
+                if night.get("consolidation", {}).get("drifted") or \
+                        night.get("consolidation", {}).get("materialized"):
+                    d = night["consolidation"]
+                    print(f"[night] drifted {d['drifted']} entities "
+                          f"(avg {d['avg_moved']:.3f}), materialized "
+                          f"{d.get('materialized', 0)}", file=sys.stderr)
+                srv.night_stats = {**night, "ts": now,
+                                   "swept": bool(do_sweep)}
+        except Exception as night_e:
+            print(f"[night] skipped ({night_e})", file=sys.stderr)
 
 
 class RAGProxyHandler(BaseHTTPRequestHandler):

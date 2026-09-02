@@ -4722,6 +4722,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             "compact": dict(srv.compactor.stats) if srv.compactor else None,
             "compact_model": srv.compact_model,
             "compact_follows_chat": srv.compact_follows_chat,
+            # THE COMPACTOR NIGHT: the maintenance clock's last pass (the
+            # sweep's demotions, the gray-band size, anchors grown, the
+            # consolidation's drift stats). None until the first cycle.
+            "night": (getattr(srv, "night_stats", None) or None),
             "state_intercept": srv.state_intercept,
             "audit_records": _audit_count(mem.audit_path),
             "frame_wait": _frame_wait_summary(srv) or None,
