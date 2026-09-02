@@ -1896,12 +1896,14 @@ _SUBJECT_KIND_WEIGHT = {
     "shell": 0.75, "models": 0.75, "urls": 0.5,
 }
 # junk symbols that must never lead the subject (the ex_idx/tslog.info/
-# nv_glvys... exhibit): log-path fragments, temp-dir slugs, pure hashes
+# nv_glvys... exhibit): log-path fragments, temp-dir slugs, pure hashes.
+# NOTE: the subject keys are 'kind:value' form -- the screen searches the
+# WHOLE key (a '^[\\w-]*tempdir' anchor can never match past the colon)
 _SUBJECT_JUNK_RES = (
-    re.compile(r"\.(info|log|json|tmp|pid)$", re.I),
-    re.compile(r"^[0-9a-f]{16,}$"),                # hex slugs
-    re.compile(r"(ex_idx|field_size|sent_blocks|ctx_chars)\b"),
-    re.compile(r"^[\w-]*glvys3kgcw706nvfkvgf40000gr", re.I),  # temp dirs
+    re.compile(r"\.(info|log|json|tmp|pid)\b", re.I),
+    re.compile(r"\b[0-9a-f]{16,}\b"),              # hex slugs
+    re.compile(r"\b(ex_idx|field_size|sent_blocks|ctx_chars)\b"),
+    re.compile(r"glvys3kgcw706nvfkvgf40000gr", re.I),  # temp dirs
 )
 # class-tuned defaults: hot things resolve fine, slow things coarsen
 _GRAIN_DEFAULTS = {
