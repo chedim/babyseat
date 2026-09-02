@@ -1496,7 +1496,12 @@ class EntityStore:
                                 and getattr(exemplars[i], "safe", False)),
                                key=lambda x: -x[1])
                 idxs = [i for i, _ in fresh[:24]]
-            if not idxs:
+            # THE MOTION STORY NEEDS NO CELLS (the session:now fix): the
+            # now-tracker's ring carries the momentum story even when the
+            # cell pool is empty (fork owns capture; boot-scoped pool) --
+            # an empty pool skips the HISTORY half but must not skip the
+            # tracker's own recorded motion.
+            if not idxs and not is_now:
                 continue          # quiet: nothing until the entity appears
             # ---- the now-scope for the track's OWN compact line ----
             # (used when the story is stale-silent: the fallback must
@@ -1717,9 +1722,16 @@ class EntityStore:
                 # by string-splitting a colon-rich ID out of the prose
                 # (the 'files'-prefix mis-key bug).
                 if not story:
-                    story = (f"{key}: {drift.strip()}" if drift
-                             else f"{key}:")
-                out.append((key, (story + surr + drift).strip()))
+                    story = f"{key}:"
+                    # the drift is the WHOLE story here -- it must not
+                    # ALSO ride the tail (the bare-drift fallback + the
+                    # tail drift rendered the same sentence twice: the
+                    # 'Moving fast. Moving fast.' stutter)
+                    body = surr.strip()
+                    out.append((key, (story + " " + body + " " + drift.strip()).strip()
+                                if (body or drift) else story.rstrip()))
+                else:
+                    out.append((key, (story + surr + drift).strip()))
         if dirty:
             self._save_tracks()
         return out or None
