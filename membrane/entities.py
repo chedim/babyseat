@@ -1456,6 +1456,62 @@ class EntityStore:
         except Exception:
             pass
 
+    def _axis_of_motion(self, ent, exclude_key: str = DEFAULT_TRACK_KEY,
+                        min_cos: float = 0.15) -> dict:
+        """The movement vector decoded through the tracked frame (the
+        operator's approaching/receding design): ring newest − oldest,
+        normalized, projected onto the directions toward each OTHER
+        positioned track. Returns {'toward': [(key, cos)...],
+        'away': [(key, cos)...]} — strongest first, below-threshold
+        pairs dropped. The session:now pulse and every entity's drift
+        decode through the same lens; the tracked set is the frame,
+        the loose centroid set is the fallback, nothing pinned."""
+        import numpy as _np
+        hist = getattr(ent, "position_history", []) or []
+        if len(hist) < 2 or not getattr(ent, "position", None):
+            return {"toward": [], "away": []}
+        newest = _np.asarray(hist[-1][1], dtype=float)
+        oldest = _np.asarray(hist[0][1], dtype=float)
+        nn, on = _np.linalg.norm(newest), _np.linalg.norm(oldest)
+        if nn < 1e-12 or on < 1e-12:
+            return {"toward": [], "away": []}
+        move = newest - oldest
+        mn = _np.linalg.norm(move)
+        if mn < 1e-12:
+            return {"toward": [], "away": []}
+        mv = move / mn
+        toward, away = [], []
+        now_pos = _np.asarray(ent.position, dtype=float)
+        npn = _np.linalg.norm(now_pos)
+        if npn < 1e-12:
+            return {"toward": [], "away": []}
+        now_pos = now_pos / npn
+        for key, t in self.tracks.items():
+            if key == exclude_key:
+                continue
+            o_ent = self.docs.get(f"{MEMBRANE_NS}{key}")
+            if o_ent is None or not getattr(o_ent, "position", None):
+                continue
+            op = _np.asarray(o_ent.position, dtype=float)
+            opn = _np.linalg.norm(op)
+            if opn < 1e-12:
+                continue
+            op = op / opn
+            # the direction from the tracker toward the landmark
+            d_land = op - now_pos
+            dn = _np.linalg.norm(d_land)
+            if dn < 1e-12:
+                continue
+            cos = float(mv @ (d_land / dn))
+            if cos >= min_cos:
+                toward.append((cos, key))
+            elif cos <= -min_cos:
+                away.append((-cos, key))
+        toward.sort(reverse=True)
+        away.sort(reverse=True)
+        return {"toward": [(k, round(c, 2)) for c, k in toward[:2]],
+                "away": [(k, round(c, 2)) for c, k in away[:2]]}
+
     def _now_report(self, exemplars, now: float) -> tuple[str, str] | None:
         """THE NOW-TRACK'S OWN RENDERER (the operator's 'why is it so
         problematic' call answered: the tag-track pipeline never fit a
@@ -1478,10 +1534,23 @@ class EntityStore:
             names = ", ".join(f"{self.default_label(k)} ({c:.2f})"
                               for k, c in subj)
             parts.append(f"The session's present is around: {names}")
+        # THE AXIS (the operator's approaching/receding design): the
+        # momentum pulse decoded through the tracked frame -- the
+        # session's movement vector projected onto the other tracked
+        # entities. 'A turn happened' becomes a DIRECTION OF TRAVEL.
+        ax = self._axis_of_motion(ent, exclude_key=DEFAULT_TRACK_KEY)
+        if ax["toward"]:
+            t_names = ", ".join(f"{self.default_label(k)} ({c:.2f})"
+                                for k, c in ax["toward"])
+            parts.append(f"moving toward {t_names}")
+        elif ax["away"]:
+            a_names = ", ".join(f"{self.default_label(k)} ({c:.2f})"
+                                for k, c in ax["away"])
+            parts.append(f"receding from {a_names}")
         if direction == "drifting":
             pace = ("fast" if vel >= 0.15
                     else "slowly" if vel < 0.05 else "steadily")
-            parts.append(f"moving {pace} ({vel:.2f}/h)")
+            parts.append(f"{pace} ({vel:.2f}/h)")
         elif vel > 0.005:
             parts.append("holding steady")
         if not parts:
@@ -1545,7 +1614,19 @@ class EntityStore:
             sim *= _SUBJECT_KIND_WEIGHT.get(kind, 0.75)
             scored.append((sim, other_key))
         scored.sort(reverse=True)
-        return [(k, round(s, 2)) for s, k in scored[:top] if s >= 0.4]
+        # THE KEY DEDUP (the 'opencode.py (0.95), opencode.py (0.95)'
+        # exhibit): multiple entity docs can decode to the same label --
+        # one rendering per distinct key
+        out: list[tuple[str, float]] = []
+        seen_keys: set[str] = set()
+        for s, k in scored:
+            if k in seen_keys:
+                continue
+            seen_keys.add(k)
+            out.append((k, round(s, 2)))
+            if len(out) >= top:
+                break
+        return [x for x in out if x[1] >= 0.4]
 
     def _announce(self, kind: str, ent: QuantumEntity,
                   extra: str = "") -> None:
@@ -1562,11 +1643,14 @@ class EntityStore:
         self.announcements.append(a)
         del self.announcements[:-8]           # bounded
 
-    def take_announcements(self) -> list[dict]:
-        """Drain every pending entity announcement, exactly-once (the
-        queue is the delivery ledger)."""
-        out = self.announcements
-        self.announcements = []
+    def take_announcements(self, max_per_pass: int = 3) -> list[dict]:
+        """Drain up to `max_per_pass` pending entity announcements,
+        exactly-once (the queue is the delivery ledger). The per-pass
+        cap smooths a night-synthesis flood into a trickle across turns
+        (the 8-at-once exhibit: 8 lines drowned the tracks in one
+        header)."""
+        out = self.announcements[:max_per_pass]
+        del self.announcements[:max_per_pass]
         return out
 
     def _enforce_cap(self) -> list[str]:
@@ -1671,6 +1755,17 @@ class EntityStore:
                     names = ", ".join(f"{self.default_label(k)} ({c:.2f})"
                                       for k, c in subj_now[:2])
                     parts.append(f"sits near {names}")
+                # THE AXIS: the entity's own drift decoded through the
+                # tracked frame (same lens as the session pulse)
+                ax = self._axis_of_motion(ent, exclude_key=key)
+                if ax["toward"]:
+                    t_names = ", ".join(f"{self.default_label(k)} ({c:.2f})"
+                                        for k, c in ax["toward"])
+                    parts.append(f"approaching {t_names}")
+                elif ax["away"]:
+                    a_names = ", ".join(f"{self.default_label(k)} ({c:.2f})"
+                                        for k, c in ax["away"])
+                    parts.append(f"receding from {a_names}")
                 if subj_then and subj_now:
                     k_now = subj_now[0][0]
                     k_then = subj_then[0][0]
