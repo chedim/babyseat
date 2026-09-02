@@ -1527,6 +1527,11 @@ class EntityStore:
         for other_key, idxs in inv.items():
             if other_key == DEFAULT_TRACK_KEY:
                 continue
+            # THE JUNK-SYMBOL SCREEN (the ex_idx/tslog.info/nv_glvys
+            # exhibit): log-path fragments, temp-dir slugs, pure hashes
+            # and field-dump keys never lead the subject
+            if any(rx.search(other_key) for rx in _SUBJECT_JUNK_RES):
+                continue
             ovecs = [exemplars[i].vec for i in idxs
                      if getattr(exemplars[i], "vec", None)]
             if not ovecs:
@@ -1624,30 +1629,23 @@ class EntityStore:
     def track_report(self, exemplars, query_vec=None,
                      session_since: float | None = None,
                      goal: str = "", embedder=None) -> list[tuple[str, str]] | None:
-        """THE PRINTF (the operator's verdict on the spaghetti: 'just
-        render three fucking tracks and whatever alerts are there').
-
-        Per track, the honest minimum -- no zoom ladder, no era collapse,
-        no alignment scoring, no freshness credits, no stale gates, no
-        fallback ladders. Just:
-          - the newest junk-free fragment(s), newest first, with ages
-          - the cell count + last-active age
-        Kept from the old maze (each earned independently): the junk
-        screens (capture form judged after prefix-strip), the tool-stamp
-        trim, the echo guard (one cell anchors one story), the
-        structured (key, text) return. session:now keeps _now_report
-        (its own geometry renderer -- position + ring, no cells)."""
+        """THE GEOMETRY-FIRST RENDER (the operator's side question -- 'why
+        render cells, not entities/entity vectors or deltas?' -- was the
+        design flaw): the ENTITY already IS the aggregation. Its position
+        holds the meaning, its ring holds the deltas. Per track:
+          - SUBJECT: position -> nearest entity centroids (what this
+            entity is about / sits near NOW)
+          - MOTION: ring velocity (drifting/holding) + the DELTA (oldest
+            ring point vs now: 'moved from near A to near B')
+          - CELLS only backfill for young entities (no ring or ring too
+            short to decode): the newest junk-free fragment + count/age.
+        Kept: the junk screens, the echo guard, the structured return."""
         if not self.tracks:
             return None
-        try:
-            from .rag import is_capture_junk
-        except Exception:
-            is_capture_junk = lambda s: False
         import time as _t
         now = _t.time()
         inv = entity_index(exemplars)
         out: list[tuple[str, str]] = []
-        # THE ECHO GUARD: one cell anchors at most ONE story per pass.
         claimed_cells: set[int] = set()
         for key, t in self.tracks.items():
             if key == DEFAULT_TRACK_KEY:
@@ -1655,22 +1653,74 @@ class EntityStore:
                 if now_line:
                     out.append(now_line)
                 continue
+            ent = self.docs.get(f"{MEMBRANE_NS}{key}")
+            has_ring = (ent is not None
+                        and len(getattr(ent, "position_history", []) or []) >= 2
+                        and getattr(ent, "position", None))
+            # ---- GEOMETRY-FIRST: subject + motion + delta from the ring,
+            #      PLUS the freshest fragment as the WHY (the operator's
+            #      'curious but aint no story' call: geometry alone names
+            #      the state, the freshest beat explains it) ----
+            if has_ring:
+                parts: list[str] = []
+                subj_now = self._nearest_entities(ent.position, exemplars)
+                hist = ent.position_history
+                subj_then = (self._nearest_entities(hist[0][1], exemplars)
+                             if len(hist) >= 2 else None)
+                if subj_now:
+                    names = ", ".join(f"{self.default_label(k)} ({c:.2f})"
+                                      for k, c in subj_now[:2])
+                    parts.append(f"sits near {names}")
+                if subj_then and subj_now:
+                    k_now = subj_now[0][0]
+                    k_then = subj_then[0][0]
+                    if k_now != k_then:
+                        parts.append(f"moving from near "
+                                     f"{self.default_label(k_then)} toward "
+                                     f"{self.default_label(k_now)}")
+                vel = ent.ring_velocity(now)
+                if direction_drifting(ent, now):
+                    pace = ("fast" if vel >= 0.15
+                            else "slowly" if vel < 0.05 else "steadily")
+                    parts.append(f"moving {pace} ({vel:.2f}/h)")
+                # THE WHY: the freshest junk-free fragment -- geometry
+                # says WHERE, the beat says WHY (the 'aint no story' fix)
+                idxs = inv.get(key) or []
+                for i in sorted(idxs, key=lambda i: -_eph_born_of(exemplars, i)):
+                    if i in claimed_cells:
+                        continue
+                    sit, act = _frag_of(exemplars, i)
+                    sit = _narrative(sit, 200)
+                    if not sit or _machinery_junk(sit):
+                        continue
+                    if act and (_tool_artifact(act) or _machinery_junk(act)):
+                        act = ""
+                    born = _eph_born_of(exemplars, i)
+                    why = f"{_ago(born, now) or 'recently'}: {sit[0].lower() + sit[1:]}"
+                    parts.append(why)
+                    claimed_cells.add(i)
+                    break                     # one beat explains the now
+                if not parts:
+                    continue
+                n = len(inv.get(key) or [])
+                parts.append(f"{n} cells")
+                out.append((key, f"{key}: " + ", ".join(parts) + "."))
+                continue
+            # ---- the cell backfill (young entities: no geometry yet) ----
             idxs = inv.get(key) or []
             if not idxs:
                 out.append((key, f"{key}: no cells yet"))
                 continue
             label = t.get("label") or self.default_label(key)
-            # ---- the beats: newest junk-free fragments, newest first ----
             beats: list[tuple[float, str]] = []
+            seen_frags: set[str] = set()
             for i in sorted(idxs, key=lambda i: -_eph_born_of(exemplars, i)):
                 if i in claimed_cells:
                     continue
                 sit, act = _frag_of(exemplars, i)
                 sit = _narrative(sit, 200)
                 act = _narrative(act, 240)
-                if not sit:
-                    continue
-                if _machinery_junk(sit):
+                if not sit or _machinery_junk(sit):
                     continue
                 if act and (_tool_artifact(act) or _machinery_junk(act)):
                     act = ""
@@ -1681,6 +1731,9 @@ class EntityStore:
                 frag = f"{_ago(born, now) or 'recently'}: {sit[0].lower() + sit[1:]}"
                 if act and _action_overlap(act, sit) < 0.6:
                     frag += f" — {act[0].lower() + act[1:]}"
+                if frag.rsplit(": ", 1)[-1] in seen_frags:
+                    continue
+                seen_frags.add(frag.rsplit(": ", 1)[-1])
                 beats.append((born, frag))
                 claimed_cells.add(i)
                 if len(beats) >= 3:
@@ -1688,8 +1741,6 @@ class EntityStore:
             if not beats:
                 out.append((key, f"{key} ({label}): no clean beats yet"))
                 continue
-            # ---- the printf: '<id>: <newest>. Then <older>. (<n> cells,
-            #      last active <ago>.) ----
             body = beats[0][1]
             if len(beats) > 1:
                 body += " Then " + "; ".join(f[0].lower() + f[1:]
@@ -1700,9 +1751,16 @@ class EntityStore:
             body += (f" ({n} cells, last active "
                      f"{_ago(last, now) or 'unknown'}).")
             out.append((key, f"{key}: {body}"))
-        if False:
-            self._save_tracks()
         return out or None
+
+def direction_drifting(ent, now: float) -> bool:
+    """True when the entity's ring shows real motion (the fine-end delta
+    crosses the drift floor). The geometry renderer's motion test."""
+    try:
+        return ent.ring_direction() == "drifting"
+    except Exception:
+        return False
+
 
 def _clip_entity(s: str, cap: int = 60) -> str:
     """A situation line -> the entity story's 'new' fragment."""
@@ -1742,6 +1800,14 @@ _SUBJECT_KIND_WEIGHT = {
     "files": 1.0, "symbols": 1.0,
     "shell": 0.75, "models": 0.75, "urls": 0.5,
 }
+# junk symbols that must never lead the subject (the ex_idx/tslog.info/
+# nv_glvys... exhibit): log-path fragments, temp-dir slugs, pure hashes
+_SUBJECT_JUNK_RES = (
+    re.compile(r"\.(info|log|json|tmp|pid)$", re.I),
+    re.compile(r"^[0-9a-f]{16,}$"),                # hex slugs
+    re.compile(r"(ex_idx|field_size|sent_blocks|ctx_chars)\b"),
+    re.compile(r"^[\w-]*glvys3kgcw706nvfkvgf40000gr", re.I),  # temp dirs
+)
 # class-tuned defaults: hot things resolve fine, slow things coarsen
 _GRAIN_DEFAULTS = {
     CLASS_SESSION: 0.03,             # a session's dynamics move fast
