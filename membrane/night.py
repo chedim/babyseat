@@ -290,7 +290,23 @@ def consolidate_now(mem, est, momentum_vec=None) -> dict:
     pts = []
     if momentum_vec is not None:
         pts.append((list(momentum_vec), now))     # the strongest force
+    # the now-tracker's fresh-cell pull: entity-management captures are
+    # machinery about the ACT of editing (the 'nudge_script (0.96)'
+    # subject exhibit -- my own edit-tool calls got learned and the
+    # tracker ate them); they are story-eligible for ENTITY tracks but
+    # never for the session's SUBJECT
+    _MGMT_PREFIXES = ("tool membrane_membrane_entity_add for:",
+                      "tool membrane_membrane_entity_edit for:",
+                      "tool membrane_membrane_entity_remove for:",
+                      "tool membrane_entity_add for:",
+                      "tool membrane_entity_edit for:",
+                      "tool membrane_entity_remove for:",
+                      "tool membrane_membrane_watch_entity for:",
+                      "tool membrane_membrane_unwatch_entity for:")
     for i in safe_idx[-16:]:                       # the newest safe cells
+        sit_l = str(exs[i].situation or "").lower()
+        if any(sit_l.startswith(p) for p in _MGMT_PREFIXES):
+            continue
         e = exs[i]
         v = getattr(e, "vec", None)
         born = _eph_born_of(exs, i)
@@ -512,7 +528,8 @@ def run_entity_script(code: str, state: dict) -> dict:
         return {"error": f"{type(e).__name__}: {e}"[:200]}
 
 
-def run_scripted_entities(mem, est, now: float | None = None) -> dict:
+def run_scripted_entities(mem, est, now: float | None = None,
+                          force: bool = False) -> dict:
     """Consolidation-time script pass: for every entity carrying scripts,
     run delete_script FIRST (retire wins over nudge), then nudge_script
     (its output {render?, data?} patches the entity's banner fragment
@@ -524,7 +541,11 @@ def run_scripted_entities(mem, est, now: float | None = None) -> dict:
     every ``script_every_n`` passes (default 4: once/hour at the 15-min
     tick; hot entities set 1), the whole pass caps at
     SCRIPT_MAX_PER_PASS executions (oldest-run first), so worst case is
-    bounded regardless of how many scripted entities pile up."""
+    bounded regardless of how many scripted entities pile up.
+    ``force``: the BOOT pass bypasses the duty cycle -- the one pass
+    where every script echoes (the operator's 'a script edit between
+    boots must echo immediately' rule; a deferred boot pass left the
+    stale fixture riding the banner)."""
     import time as _time
     import json as _json
     now = now or time.time()
@@ -549,10 +570,11 @@ def run_scripted_entities(mem, est, now: float | None = None) -> dict:
             every = max(1, int(every))
         except (TypeError, ValueError):
             every = SCRIPT_DEFAULT_EVERY_N
-        slot = (hash(eid) % max(every, 1))
-        if pass_no % max(every, 1) != slot % max(every, 1):
-            stats["deferred"] = stats.get("deferred", 0) + 1
-            continue
+        if not force:
+            slot = (hash(eid) % max(every, 1))
+            if pass_no % max(every, 1) != slot % max(every, 1):
+                stats["deferred"] = stats.get("deferred", 0) + 1
+                continue
         budget -= 1
         props = ent.properties or {}
         state = _script_state(ent, mem, now)

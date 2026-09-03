@@ -5385,7 +5385,8 @@ def main() -> None:
             # THE SCRIPT PASS AT BOOT: a script edit between boots must
             # echo immediately (the stale script_render otherwise rides
             # the banner until the next 15-min night tick)
-            out = run_scripted_entities(srv.membrane, srv.entity_store)
+            out = run_scripted_entities(srv.membrane, srv.entity_store,
+                                        force=True)
             if out.get("errors"):
                 print(f"[opencode] script pass: {out['errors']} error(s)",
                       file=sys.stderr)
