@@ -5367,10 +5367,18 @@ def main() -> None:
         # the reharvest/eid-dual fix orphaned) get their geometry now,
         # so the render is geometry-first instead of cell recitation.
         try:
+            # THE TRACK-ENTITY GUARANTEE first: doc-less tracks (planted
+            # before the seeding code, or model-added via entity_add)
+            # get their docs NOW -- then consolidate to seed the rings
+            for k in list(srv.entity_store.tracks.keys()):
+                if k == "session:now":
+                    continue
+                srv.entity_store.ensure_track_entity(k)
             from .night import consolidate_entities
             consolidate_entities(srv.membrane, srv.entity_store,
                                  materialize=0,
-                                 only_keys=list(srv.entity_store.tracks.keys()))
+                                 only_keys=[k for k in srv.entity_store.tracks.keys()
+                                            if k != "session:now"])
         except Exception as e:
             print(f"[opencode] track geometry bootstrap skipped ({e})",
                   file=sys.stderr)

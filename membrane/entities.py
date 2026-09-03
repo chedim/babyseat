@@ -1850,6 +1850,29 @@ class EntityStore:
             self._save_tracks()
         return evicted
 
+    def ensure_track_entity(self, key: str) -> QuantumEntity:
+        """THE TRACK-ENTITY GUARANTEE (the 'entities.py has no doc' fix):
+        every planted track gets a store doc immediately -- created on
+        demand if neither materialization nor entity_add made one (the
+        bootstrap passes materialize=0, so doc-less tracks were skipped
+        forever). Idempotent: an existing doc (either eid form) is
+        returned untouched. The bootstrap then consolidates the key to
+        seed the ring (this method does NOT consolidate -- it has no
+        field access; the caller does). The birth is SILENT: the model
+        planted the track; the doc is a mechanical consequence."""
+        ent = self._entity_for_track(key)
+        if ent is not None:
+            return ent
+        kind, _, val = key.partition(":")
+        ent = QuantumEntity(
+            eid=f"{MEMBRANE_NS}{key}",
+            cls=_KIND_CLASS.get(kind, CLASS_COMPONENT),
+            properties={"name": val, "tracked_by": "track-plant",
+                        "silent_birth": True},
+            derived_by=["track-bootstrap"])
+        self.upsert(ent)
+        return self.docs.get(ent.eid) or ent
+
     def _entity_for_track(self, key: str) -> QuantumEntity | None:
         """THE TRACK-KEY LOOKUP (the dual-eid fix): entity docs exist in
         TWO eid forms -- materialization gives 'membrane::files:x.py'
