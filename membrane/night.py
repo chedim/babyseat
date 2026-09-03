@@ -421,8 +421,23 @@ def consolidate_entities(mem, est, materialize: int = 8,
             ekey = ent.eid[len(MEMBRANE_NS):] \
                 if ent.eid.startswith(MEMBRANE_NS) else ""
         # THE CELL LOOKUP uses the stripped key (the index is keyed
-        # 'files:x', not 'Component:files:x') with the links fallback
-        idxs = list(inv.get(ekey) or [])
+        # 'files:x', not 'Component:files:x') with the links fallback.
+        # THE MGMT-CAPTURE EXCLUSION (the 'nudge_script (0.97)' subject
+        # pollution): entity-management captures are machinery about the
+        # ACT of editing -- excluded from consolidation pulls too (they
+        # stay learned+audited; they never steer geometry)
+        _MGMT_PREFIXES = ("tool membrane_membrane_entity_add for:",
+                          "tool membrane_membrane_entity_edit for:",
+                          "tool membrane_membrane_entity_remove for:",
+                          "tool membrane_entity_add for:",
+                          "tool membrane_entity_edit for:",
+                          "tool membrane_entity_remove for:",
+                          "tool membrane_membrane_watch_entity for:",
+                          "tool membrane_membrane_unwatch_entity for:")
+        idxs = [i for i in (list(inv.get(ekey) or []))
+                if not any(str(mem.store.exemplars[i].situation or "")
+                           .lower().startswith(p)
+                           for p in _MGMT_PREFIXES)]
         if not idxs and ent.links:
             idxs = [i for i in ent.links
                     if 0 <= i < len(mem.store.exemplars)
