@@ -385,14 +385,28 @@ def consolidate_entities(mem, est, materialize: int = 8,
     total_moved = 0.0
     for ent in est.docs.values():
         # only_keys: the plant-time seeding path consolidates JUST this
-        # entity (a fresh track's ring, immediately)
+        # entity (a fresh track's ring, immediately). THE DUAL-EID FIX:
+        # entity_add gives 'membrane::Component:files:x' (class-embedded)
+        # while materialization gives 'membrane::files:x' -- the key
+        # match must accept BOTH (strip a leading <Class>: segment when
+        # the direct form misses).
         if only_keys:
             ekey = ent.eid[len(MEMBRANE_NS):] \
                 if ent.eid.startswith(MEMBRANE_NS) else ""
-            if ekey not in only_keys:
+            matched = ekey in only_keys
+            if not matched and ":" in ekey:
+                stripped = ekey.split(":", 1)[1]
+                if stripped in only_keys:
+                    matched = True
+                    ekey = stripped          # the index key for cell lookup
+            if not matched:
                 continue
-        idxs = list(inv.get(ent.eid[len(MEMBRANE_NS):]) or []) \
-            if ent.eid.startswith(MEMBRANE_NS) else []
+        else:
+            ekey = ent.eid[len(MEMBRANE_NS):] \
+                if ent.eid.startswith(MEMBRANE_NS) else ""
+        # THE CELL LOOKUP uses the stripped key (the index is keyed
+        # 'files:x', not 'Component:files:x') with the links fallback
+        idxs = list(inv.get(ekey) or [])
         if not idxs and ent.links:
             idxs = [i for i in ent.links
                     if 0 <= i < len(mem.store.exemplars)
