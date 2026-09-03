@@ -641,7 +641,16 @@ def main() -> None:
     if cmd == "reset":
         raise SystemExit(_reset(args.forwarded))
     if cmd == "tui":
-        raise SystemExit(_tui(args.forwarded, data_dir=True))
+        # THE TUI IS DEPRECATED (the operator's call): opencode is the
+        # only real seat. The command remains as a pointer, not a
+        # launcher -- a silent fall-back to a dead surface teaches the
+        # wrong habit.
+        print("membrane tui is deprecated -- the opencode seat is the "
+              "real surface now:\n"
+              "  membrane opencode     (field-backed opencode on :11500)\n"
+              "  membrane proxy        (just the proxy, foreground)",
+              file=sys.stderr)
+        raise SystemExit(2)
     if cmd == "anthropic":
         raise SystemExit(_anthropic(args.forwarded))
     if cmd == "demo":

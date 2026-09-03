@@ -531,3 +531,61 @@ knob and the ring shape travel in the shared docs.
 9. Enrichment ladder (section 17): déjà-vu tool annotation first (proxy-
    side prototype, tool-boundary port), entity-inline, lane byte
    accounting. Never transcript compaction, never LLM-summarized lanes.
+10. THE DAY-2 ARC (sections 19-23, the Sep 2 session -- port in this
+    order, each builds on the last):
+    a. The compactor night (section 19): four phases on the slow clock
+       (junk sweep cut 0.70 + consensus + demote-cap, gray-band
+       registration, consolidation, materialization).
+    b. The two nows (session:now ephemeral/RAM-only + global:now
+       shared/7d) + the pulse mode (the momentum fold records every
+       turn; a turn happened is itself the event).
+    c. The GEOMETRY-FIRST track render: subject (nearest centroids) +
+       motion (ring velocity) + approaching/receding axis (the
+       movement vector projected onto the tracked frame) + relations
+       line (distances + speeds AS CHANGES, event-conditional). Cells
+       only backfill for young entities -- entities with geometry
+       never recite raw cells.
+    d. THE UNIFIED BANNER (the operator's final rule): ONE block,
+       injected EVERY turn, tracks + alerts only -- no recall
+       preamble (the fork's membraneRecallInject owns recall), no
+       vitals, no review/intent/ledger blocks. Delta-gated: changed
+       tracks only, 8-turn forced refresh.
+    e. PROGRAMMABLE ENTITIES (section 19's completion): nudge/
+       delete scripts via membrane_entity_edit, run at consolidation
+       (delete first), the duty cycle (script_every_n, max 20/pass),
+       the import policy (pure-compute stdlib allowed, process-level
+       banned), 3-strike auto-disable, errors as banner events, the
+       script_render hook owning the track's line.
+    f. THE ENTITY CARD (the LLM representation): id + summary +
+       decoded relations (toward/away) + state (cells, age) +
+       provenance. membrane_related_entities should return cards.
+    g. The 6/7 covenant (user tracks / watches) + story-poorest
+       eviction at BOTH enforcement sites + announcement drain cap
+       (3/pass -- the flood-smoothing).
+    h. mem_reharvest: the entity-axis upgrade instrument (re-run the
+       extractor over all cells; idempotent _reharvest stamp).
+11. THE SANDBOX HONESTY NOTE: exec() sandboxing is SOFT (CPython
+    escapes exist via __builtins__ introspection) -- the real
+    containment is trust + audit + the 2KB size caps + the 3-strike
+    disable + the operator's ledger. Document as such in the fork.
+## 24. The ablation ruler (built, not yet run)
+
+The open question this session never answered with data: does the
+banner actually help? Every claim is informed vibes. The harness:
+
+- **Metrics** (all already logged): absorb rate (the gate's replay
+  fraction), escalation length (model-call chars), wrong-absorb rate
+  (safety), per-lane byte counts (the surface log).
+- **Arms**: banner-on (full), banner-minimal (tracks + alerts only --
+  the current default), banner-off (no WHERE WE ARE, no
+  announcements; recall stays -- it is content, not banner).
+- **Run**: N>=10 sessions per arm on the SAME task suite (fresh
+  fields, seeded identically); compare absorb rate and escalation
+  length; the banner earns its bytes if banner-minimal >= banner-on
+  on task quality AND either cuts escalation length or raises absorb
+  rate.
+- **The honest risk**: the model KNOWS when the banner is off (no
+  self-report possible) -- contamination is structural; treat
+  results as directional, not causal.
+- **Where it plugs in**: a `--no-banner` flag + the delta gate's
+  counter; the surface log's per-lane chars are the byte ruler.
