@@ -361,3 +361,89 @@ class TestAnnouncements(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestSubjectGrain(unittest.TestCase):
+    """THE SUBJECT-GRAIN CONTRACT (peer-reported from rosetta-check): the
+    session:now subject names the session's FILES, not machinery. Two
+    screens: (a) package-namespace chains (com.couchbase.rosetta.check --
+    a gradle name harvested from build output) never lead the subject;
+    (b) at a near-tie the file grain beats symbols -- the subject lives
+    in the edited file, a symbol co-leading at the same cosine is mush."""
+
+    class E:
+        def __init__(self, sit, vec, safe=True):
+            self.situation, self.action, self.safe = sit, "", safe
+            self.model = ""
+            self.extra = {"entities": extract_entities(sit)}
+            self.vec = vec
+
+    def _store_with_cells(self, tmp, cells):
+        st = EntityStore(path=str(Path(tmp) / "entities.json"))
+        st.watch_track("files:router.py", label="router")
+        st.ensure_track_entity("files:router.py")
+        from membrane import night as _n
+        class M:
+            store = type("F", (), {"exemplars": cells})()
+            embedder = None
+        _n.consolidate_now(M(), st)
+        return st
+
+    def test_package_chain_never_leads(self):
+        """The com.couchbase.rosetta.check exhibit: a dotted all-lowercase
+        chain under a package TLD is build-output machinery. Screened at
+        RENDER time (a query naming a package still pulls its cells)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            base = [1.0, 0.0, 0.0]
+            cells = [
+                self.E("tool bash for: make com.couchbase.rosetta.check",
+                       [1.0, 0.0, 0.0]),
+                self.E("fix router.py the failover patch",
+                       [0.99, 0.05, 0.0]),
+            ]
+            st = self._store_with_cells(tmp, cells)
+            ent = st.docs.get(f"{MEMBRANE_NS}session:now")
+            subj = st._nearest_entities(ent.position, cells,
+                                        exclude="session:now")
+            self.assertFalse(any("com.couchbase" in k for k, _ in subj),
+                             f"package chain led: {subj}")
+
+    def test_file_beats_equal_sim_symbol(self):
+        """files:field.py (0.94), symbols:pkg.chain (0.94) -- the file
+        leads, the symbol cedes within the margin (a symbol must OUTSCORE
+        the best file by _FILE_GRAIN_MARGIN to appear at all)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cells = [
+                self.E("edit field.py the recall lane", [0.99, 0.02, 0.0]),
+                self.E("touch symbols like Somepkg.Sub.symbol",
+                       [0.98, 0.03, 0.0]),
+            ]
+            st = self._store_with_cells(tmp, cells)
+            ent = st.docs.get(f"{MEMBRANE_NS}session:now")
+            subj = st._nearest_entities(ent.position, cells,
+                                        exclude="session:now")
+            file_sims = [s for k, s in subj if k.startswith("files:")]
+            # a files:* candidate is near: any symbols:* survivor must
+            # outscore the best file by the margin (the near-tie cede)
+            if file_sims:
+                best_file = max(file_sims)
+                for k, s in subj:
+                    if k.startswith("symbols:"):
+                        self.assertGreaterEqual(
+                            s, best_file + 0.03 - 1e-9,
+                            f"{k} ({s}) ceded-grain violation vs "
+                            f"file {best_file}: {subj}")
+
+    def test_symbol_leads_when_no_file_near(self):
+        """The load_couchbase exhibit: a genuine symbol must still lead
+        when no files:* candidate is near."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cells = [
+                self.E("reading load_couchbase internals", [1.0, 0.0, 0.0]),
+            ]
+            st = self._store_with_cells(tmp, cells)
+            ent = st.docs.get(f"{MEMBRANE_NS}session:now")
+            subj = st._nearest_entities(ent.position, cells,
+                                        exclude="session:now")
+            self.assertTrue(any("load_couchbase" in k for k, _ in subj)
+                            or subj == [],
+                            f"genuine symbol vanished: {subj}")

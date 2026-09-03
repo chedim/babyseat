@@ -1889,6 +1889,22 @@ class EntityStore:
             sim *= _SUBJECT_KIND_WEIGHT.get(kind, 0.75)
             scored.append((sim, other_key))
         scored.sort(reverse=True)
+        # THE FILE GRAIN PREFERENCE (peer-reported from rosetta-check: the
+        # subject grain drifted to symbols after an edit -- the package
+        # exhibit AND the 'symbols:com.couchbase.rosetta.check (0.94),
+        # files:field.py (0.94)' co-lead): when a files:* candidate sits
+        # within _FILE_GRAIN_MARGIN of the top sim, the symbol-grain
+        # candidates cede the lead -- the session's subject lives in the
+        # EDITED FILE, a symbol co-leading at the same cosine is grain
+        # mush. Genuine symbols still lead when no file is near (the
+        # 'symbols:load_couchbase' exhibit stays).
+        top_sim = scored[0][0] if scored else 0.0
+        best_file = next((s for s, k in scored
+                          if k.startswith("files:")), 0.0)
+        if best_file >= top_sim - _FILE_GRAIN_MARGIN:
+            scored = [(s, k) for s, k in scored
+                      if not k.startswith("symbols:")
+                      or s >= best_file + _FILE_GRAIN_MARGIN]
         # THE KEY DEDUP (the 'opencode.py (0.95), opencode.py (0.95)'
         # exhibit): multiple entity docs can decode to the same label --
         # one rendering per distinct key. THE SELF-EXCLUSION: a track's
@@ -2267,6 +2283,16 @@ _SUBJECT_JUNK_RES = (
     re.compile(r"\bsrv\.\w+"),
     re.compile(r"\b(?:nudge_script|delete_script|script_render|"
                r"script_every_n|script_failures|script_disabled)\b"),
+    # THE PACKAGE-NAMESPACE SCREEN (the com.couchbase.rosetta.check
+    # exhibit, peer-reported from rosetta-check): dotted chains of
+    # all-lowercase parts under the package TLDs are Java/gradle
+    # BUILD-OUTPUT names, harvested from tool captures, never the
+    # session's subject. The chain qualifies in _harvest only on the
+    # len>=3 rule (no capitals, no underscores -- the two real symbol
+    # signals); a real code symbol looks like load_couchbase or
+    # ExemplarStore.load. Screened at RENDER time, not harvest: a query
+    # legitimately naming a package must still pull its cells.
+    re.compile(r"symbols:(?:com|org|net|io|edu|gov)\.[a-z0-9.]+$"),
 )
 # class-tuned defaults: hot things resolve fine, slow things coarsen
 _GRAIN_DEFAULTS = {
@@ -2276,6 +2302,11 @@ _GRAIN_DEFAULTS = {
     CLASS_COMPONENT: 0.05,
     CLASS_MODEL: 0.08,
 }
+
+# THE FILE GRAIN MARGIN: a symbol must OUTSCORE the best file by this
+# much to lead the subject at all when a file is near (the near-tie
+# cede). 0.03 = one grain step: inside it, same-grain mush.
+_FILE_GRAIN_MARGIN = 0.03
 
 # ---- programmable entities (the script constants live HERE -- entities.py
 # owns the entity contract; night.py imports them, no circular import) ----
