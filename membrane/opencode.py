@@ -296,6 +296,17 @@ def _state_report(srv) -> str:
             lines.append(f"- frame discipline: {viol} violation(s) "
                          f"({fw.get('viol_stacked', 0)} stacked, "
                          f"{fw.get('viol_buried', 0)} buried mid-prose)")
+    # THE NULL-RECALL COUNTER (the honest metric, same spirit as frame
+    # waits): the session's all-orthogonal asks -- where the field had
+    # nothing and the banner said so. The last miss (query + sim) rides
+    # along while it is still the live edge.
+    rn = getattr(srv, "_recall_null", None)
+    if rn and rn.get("count"):
+        tail = ""
+        if rn.get("query"):
+            tail = (f" (last: {rn['query']!r} @ "
+                    f"{rn.get('sim')})")
+        lines.append(f"- recall nulls: {rn['count']} this session{tail}")
     wb = getattr(srv, "_watch_board", None)
     if wb is not None:
         now = time.time()
@@ -853,6 +864,15 @@ def _where_delta(srv, text: str | None) -> str | None:
 
 WHERE_REFRESH_TURNS = 8      # the forced re-send (position never lost)
 
+# THE NULL-RECALL FLOOR (peer-reported from rosetta-check: 3 of 5 field
+# queries returned empty and nothing said so): below this sim the field
+# genuinely holds nothing shaped like the ask. The 0.5-0.7 band is honest
+# uncertainty (the E1 near-miss replay proved lowering the bar there
+# serves the WRONG beat); below 0.5 is ABSENCE, and absence is
+# information -- the banner says it so the model doesn't re-derive.
+RECALL_NULL_SIM_FLOOR = 0.50
+RECALL_NULL_FRESH_S = 10 * 60.0   # the miss rides the banner this long
+
 
 def _where_we_are(srv, vec, drain: bool = True) -> str | None:
     """THE 'I' TRACK -- the model's position, not its persona.
@@ -935,6 +955,20 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
                     lines.append(f"track: {key} ({label}) — no cells yet")
         except Exception as e:
             print(f"[opencode] banner render error: {e}", file=sys.stderr)
+    # 4. THE NULL-RECALL NOTICE (absence is information): a fresh all-
+    #    orthogonal ask rides the header so the model knows the field has
+    #    nothing on this direction -- proceed on your own, don't re-derive
+    #    from git archaeology. Fresh-only (the miss retires after the window
+    #    or when a real hit lands); scoped wording because the fork's
+    #    shared-bucket recall may still find what this local field lacks.
+    rn = getattr(srv, "_recall_null", None) or {}
+    if rn.get("query") and (time.time() - float(rn.get("ts", 0.0))
+                            ) < RECALL_NULL_FRESH_S:
+        lines.append(
+            f"field: no SAFE memory near {rn['query']!r} "
+            f"(top sim {rn.get('sim')}) — this field holds nothing on "
+            f"that; absence is information ({rn.get('count', 1)} null "
+            f"recall(s) this session)")
     # 5. THE PEER SUBSTRATES (the operator's multi-seat design): the
     #    REGISTRY heartbeat + the seats line (who else is connected) +
     #    unread PEER-CHANNEL messages (cross-seat chatter, read-once per
@@ -3658,6 +3692,35 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                       else []))
         if not _is_tool_round:
             self.momentum_update(vec, query)
+        # THE NULL-RECALL LANE (peer-reported from rosetta-check: 3 of 5
+        # field queries returned empty and nothing said so -- absence is
+        # information; saying it prevents re-deriving from git):
+        # when the GATE's own top sim is far below sim_min (all-orthogonal:
+        # the field holds nothing shaped like this ask), record the miss.
+        # The banner renders it next turn; /membrane/state counts the
+        # session. Reuses the gate's sim -- zero new embeds. The 0.5 floor:
+        # the 0.5-0.7 band is honest uncertainty (the E1 near-miss replay:
+        # lowering the bar there serves the WRONG beat); below 0.5 the field
+        # is genuinely empty on this direction. Cleared by any hit -- a real
+        # near match makes the last null stale.
+        v_sim = verdict.get("sim")
+        if (not _is_tool_round
+                and isinstance(v_sim, (int, float))
+                and float(v_sim) < RECALL_NULL_SIM_FLOOR):
+            prev = getattr(srv, "_recall_null", None)
+            n = int((prev or {}).get("count", 0) or 0) + 1
+            srv._recall_null = {"query": _clip(query, 90), "sim": round(
+                float(v_sim), 2), "ts": time.time(), "count": n}
+        elif not _is_tool_round and isinstance(v_sim, (int, float)) \
+                and float(v_sim) >= float(getattr(
+                    mem, "sim_min", 0.7)):
+            # a real hit: the counter STAYS (the session's honest metric)
+            # but the 'current miss' retires -- the banner line is about
+            # the live edge, not history
+            cur = getattr(srv, "_recall_null", None)
+            if cur is not None:
+                cur.pop("query", None)
+                cur.pop("sim", None)
         # THE UNIFIED BANNER: ONE _where_we_are call, ONE delta-gate
         # evaluation (the double-call bug: the first call consumed the
         # delta gate, the second saw 'unchanged' and returned None -- the
@@ -4820,6 +4883,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             "state_intercept": srv.state_intercept,
             "audit_records": _audit_count(mem.audit_path),
             "frame_wait": _frame_wait_summary(srv) or None,
+            # the null-recall lane (peer suggestion #3): the session's
+            # all-orthogonal asks -- the honest absence metric
+            "recall_null": (getattr(srv, "_recall_null", None) or None),
             "review_pending": len(mem.review_pending()),
             # THE TOTALITY VIEW: everything membrane sent to / received from
             # the model on the last turns (the full API surface per turn --

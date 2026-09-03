@@ -262,5 +262,91 @@ class TestTransparency(unittest.TestCase):
         self.assertNotIn("eff_rank", out)
 
 
+class TestNullRecall(unittest.TestCase):
+    """THE NULL-RECALL LANE (peer-reported from rosetta-check): when the
+    field holds nothing shaped like the ask, the header SAYS so -- absence
+    is information; it prevents re-deriving from git."""
+
+    def _state_handler(self, null):
+        """A handler whose store passes _state_report's thermo SVD: a
+        REAL ExemplarStore with two orthogonal exemplars (a MagicMock
+        store mocks vectors() into a non-array -- the SVD dies)."""
+        from membrane.field import Exemplar, ExemplarStore
+        h = _handler()
+        st = ExemplarStore()
+        st.exemplars = [Exemplar("situation about the router", "an action",
+                                 "pending", vec=[1.0, 0.0]),
+                        Exemplar("another situation about the gate",
+                                 "another action", "pending",
+                                 vec=[0.0, 1.0])]
+        for e in st.exemplars:
+            e.safe = True
+        h.server.membrane.store = st
+        h.server.membrane.embedder = None
+        h.server.membrane.sim_min = 0.7
+        h.server.membrane.dedup_sim = 0.95
+        h.server.membrane.reask_window_s = 120.0
+        h.server.membrane.demote_threshold = 2
+        h.server.membrane.store_origin_json = True   # not a MagicMock path
+        h.server.membrane.store._cb = None           # the JSON-field branch
+        h.server.membrane.audit_path = "/tmp/audit.jsonl"
+        h.server.user_ledger = None
+        h.server.global_field = None                 # off: the gf block skips
+        h.server.compactor = None
+        h.server._watch_board = None                 # no board: the lines skip
+        h.server._intent_board = None
+        h.server._codegraph = None
+        h.server.router = None
+        h.server.peers = None
+        h.server.rag_k, h.server.rag_sim_min = 4, 0.5
+        h.server.rag_ctx_chars = 1200
+        if null is not None:
+            h.server._recall_null = null
+        return h
+
+    def test_null_rides_banner_when_fresh(self):
+        h = _handler()
+        import time as _t
+        h.server._recall_null = {"query": "why does exit-code=count",
+                                 "sim": 0.31, "ts": _t.time(), "count": 2}
+        out = oc._where_we_are(h.server, None)
+        self.assertIsNotNone(out)
+        self.assertIn("no SAFE memory near", out)
+        self.assertIn("exit-code=count", out)
+        self.assertIn("0.31", out)
+        self.assertIn("2 null recall(s)", out)
+
+    def test_null_retires_when_stale(self):
+        h = _handler()
+        import time as _t
+        h.server._recall_null = {"query": "old miss", "sim": 0.2,
+                                 "ts": _t.time() - (oc.RECALL_NULL_FRESH_S
+                                                    + 60),
+                                 "count": 1}
+        out = oc._where_we_are(h.server, None)
+        if out is not None:
+            self.assertNotIn("no SAFE memory near", out)
+
+    def test_null_absent_by_default(self):
+        h = _handler()
+        out = oc._where_we_are(h.server, None)
+        if out is not None:
+            self.assertNotIn("no SAFE memory near", out)
+
+    def test_state_report_carries_counter(self):
+        import time as _t
+        h = self._state_handler({"query": "q", "sim": 0.4,
+                                 "ts": _t.time(), "count": 3})
+        out = oc._state_report(h.server)
+        self.assertIn("recall nulls: 3 this session", out)
+        self.assertIn("(last: 'q' @ 0.4)", out)
+
+    def test_state_report_clean_when_no_null(self):
+        h = self._state_handler(None)
+        h.server._recall_null = None       # MagicMock auto-attrs are truthy
+        out = oc._state_report(h.server)
+        self.assertNotIn("recall nulls", out)
+
+
 if __name__ == "__main__":
     unittest.main()
