@@ -3103,6 +3103,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
 
     # ---- routing ----
     def do_GET(self):
+        # THE IDLE CLOCK (the orphaned-proxy fix): every request resets
+        # the idle-exit timer -- an active seat never trips it
+        self.server._last_request_ts = time.time()
         path = self.path.split("?")[0]
         if path in ("/v1/models", "/v1/models/"):
             self._v1_models(); return
@@ -3124,6 +3127,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         super().do_GET()
 
     def do_POST(self):
+        self.server._last_request_ts = time.time()
         path = self.path.split("?")[0]
         if path == "/v1/chat/completions":
             self._v1_chat(); return
@@ -4841,6 +4845,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         self._json_out(out)
 
 
+PROXY_IDLE_EXIT_S = 30 * 60.0   # proxy-only mode: exit after 30 idle minutes
+
+
 def main() -> None:
     import argparse
     ap = argparse.ArgumentParser(
@@ -5865,8 +5872,25 @@ def main() -> None:
                 print(f"[opencode] launching: {' '.join(cmd)}", file=sys.stderr)
                 child = subprocess.Popen(cmd, env=env)
         if child is None:
-            # proxy-only: block forever, SIGINT/SIGTERM raise KeyboardInterrupt
-            srv.serve_forever()
+            # proxy-only mode: serve until IDLE (the operator's call: an
+            # orphaned proxy serving a stale banner is worse than no
+            # proxy). The idle clock resets on ANY request (chat turns,
+            # MCP tool calls, state reads) -- a seat actively using
+            # membrane never trips it; an abandoned one exits cleanly
+            # after PROXY_IDLE_EXIT_S.
+            srv.timeout = 1.0
+            last_seen = time.time()
+            while True:
+                srv.handle_request()
+                now = time.time()
+                lr = getattr(srv, "_last_request_ts", 0.0)
+                if lr > last_seen:
+                    last_seen = lr
+                if now - last_seen > PROXY_IDLE_EXIT_S:
+                    print(f"\n[membrane-opencode] idle {int(PROXY_IDLE_EXIT_S/60)}m "
+                          "-- proxy exiting (orphaned; relaunch with "
+                          "'membrane opencode')", file=sys.stderr)
+                    break
         else:
             # launch mode: serve until the opencode child exits (or a signal).
             # serve_forever() blocks, so poll the child on a short timeout loop.
