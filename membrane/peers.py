@@ -19,6 +19,7 @@ connected seat; the model reads/posts via MCP.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import time
@@ -69,7 +70,7 @@ class PeerSubstrate:
             self._cluster = Cluster(conn, ClusterOptions(
                 PasswordAuthenticator(user, pw)))
             self._bucket = self._cluster.bucket(bucket_name)
-            self._reg = self._ensure_eph_registry()
+            self._reg, self._reg_bucket = self._ensure_eph_registry()
             self._ensure_collection(self._bucket, "peer_chat")
             self._chan = self._bucket.scope("_default").collection(
                 "peer_chat")
@@ -100,6 +101,7 @@ class PeerSubstrate:
             try:
                 b = self._cluster.bucket(cand)
                 self._ensure_collection(b, "proxies")
+                self._ensure_registry_index(b)
                 return b.scope("_default").collection("proxies"), b
             except Exception:
                 continue
@@ -111,15 +113,41 @@ class PeerSubstrate:
                 name=eph, bucket_type="ephemeral", ttl=int(HEARTBEAT_S * 10))
             b = self._cluster.bucket(eph)
             self._ensure_collection(b, "proxies")
+            self._ensure_registry_index(b)
             return b.scope("_default").collection("proxies"), b
         except Exception:
             return None, None
 
+    def _ensure_registry_index(self, bucket) -> None:
+        """A PRIMARY index on the proxies collection: registration is a KV
+        upsert (index-free), but the READS are N1QL scans (list_seats /
+        fetch_unread) -- without #primary they raise
+        QueryIndexNotFoundException and the degrade covenant silently
+        serves an empty registry (the 'seats: [] with my own seat up'
+        exhibit). Best-effort: an index build failure only degrades reads."""
+        try:
+            from couchbase.management.queries import (
+                CreatePrimaryQueryIndexOptions)
+            self._cluster.query_indexes().create_primary_index(
+                bucket.name,
+                CreatePrimaryQueryIndexOptions(scope_name="_default",
+                                               collection_name="proxies",
+                                               ignore_if_exists=True))
+        except Exception:
+            pass
+
     # ---- the registry ----
-    def register(self, extra: dict | None = None) -> bool:
+    def register(self, port: int | None = None, field: str | None = None
+                 ) -> bool:
         """Proxy boot registration: proxy::<port> {pid, cwd, port, model,
         ts, chan_cursor} with a TTL. Returns False on couchbase failure
-        (silent)."""
+        (silent). The positional (port, field) form is the slice-4
+        Peers.register signature; accepted here so call sites written
+        against either substrate work, but the doc already carries the
+        authoritative port."""
+        if port is not None and int(port) != self.port:
+            self.port = int(port)
+            self.seat_id = f"proxy-{self.port}"
         if self._reg is None:
             self._reg, self._reg_bucket = self._ensure_eph_registry()
         if self._reg is None:
@@ -128,8 +156,8 @@ class PeerSubstrate:
                "model": self.model, "ts": time.time(),
                "heartbeat_s": self.heartbeat_s,
                "chan_cursor": self._cursor_ts}
-        if extra:
-            doc.update(extra)
+        if field:
+            doc["field"] = str(field)
         try:
             from couchbase.options import UpsertOptions
             from datetime import timedelta
@@ -185,6 +213,55 @@ class PeerSubstrate:
         except Exception:
             return []
         return out
+
+    # ---- the slice-4 Peers compat surface (opencode call sites written
+    # against the JSONL substrate: livelist/ask/register(port, field)) ----
+    def livelist(self, exclude_self: bool = True) -> list[dict]:
+        """The slice-4 name for the live registry: every seat doc except
+        (optionally) this one. Empty on any failure (the covenant)."""
+        seats = self.list_seats()
+        if exclude_self:
+            seats = [s for s in seats
+                     if str(s.get("port") or "") != str(self.port)]
+        return seats
+
+    @staticmethod
+    def ask(peer: dict, situation: str, sim_min: float = 0.60,
+            timeout: float = 20.0) -> dict | None:
+        """One live ask: GET http://127.0.0.1:<port>/membrane/ask?q=...
+        The slice-4 Peers.ask contract, verbatim (peer dicts from
+        livelist() carry 'port'; all failures degrade to None)."""
+        import urllib.parse
+        import urllib.request
+        q = urllib.parse.quote(situation[:400])
+        url = f"http://127.0.0.1:{int(peer.get('port', 0))}/membrane/ask?q={q}"
+        try:
+            with urllib.request.urlopen(url, timeout=timeout) as r:
+                data = json.loads(r.read())
+        except Exception:
+            return None
+        try:
+            if float(data.get("sim", 0.0)) < sim_min:
+                return None
+        except (TypeError, ValueError):
+            return None
+        if not (data.get("situation") and data.get("action")):
+            return None
+        return data
+
+    def close(self) -> None:
+        """Shutdown: close the couchbase cluster so its IO threads stop
+        BEFORE interpreter finalization (a live asio thread touching
+        CPython during Py_Finalize is a SIGSEGV, seen in the wild)."""
+        cluster = getattr(self, "_cluster", None)
+        if cluster is None:
+            return
+        self._cluster = self._bucket = self._reg = self._reg_bucket = None
+        self._chan = None
+        try:
+            cluster.close()
+        except Exception:
+            pass
 
     # ---- the chat channel ----
     def post(self, text: str, reply_to: str = "") -> bool:

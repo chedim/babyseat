@@ -3140,6 +3140,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._entity_related(); return
         if path == "/membrane/ask":
             self._membrane_ask(); return
+        if path == "/membrane/peer/seats":
+            self._peer_seats(); return
         if getattr(self.server, "viewer", False):
             if path in ("/viewer", "/viewer/"):
                 self._serve_viewer(); return
@@ -4589,6 +4591,14 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         ok = peers.post(text, reply_to=str(body.get("reply_to") or ""))
         self._json_out({"ok": ok})
 
+    def _peer_seats(self) -> None:
+        """GET /membrane/peer/seats: the registry read (who else is
+        connected; dead proxies expire by TTL)."""
+        peers = getattr(self.server, "peers", None)
+        if peers is None:
+            self._json_err_raw(503, "peer substrate unavailable"); return
+        self._json_out({"seats": peers.list_seats()})
+
     def _entity_track_set(self) -> None:
         srv = self.server
         est = getattr(srv, "entity_store", None)
@@ -5638,12 +5648,24 @@ def main() -> None:
 
     # the veil's poke-through, now that the embedder is proven: adopt foreign
     # memories whose situation is near-identical to one I hold (bounded pass).
+    # OFF the boot-critical path (the same lazy treatment imprints got): the
+    # poke embeds up to 256 foreign situations in ONE /api/embed batch — under
+    # a loaded Ollama (busy peers, big fields) that is minutes of synchronous
+    # stall BEFORE the server binds, which reads as "membrane fails to start".
+    # A daemon thread keeps the boot snappy; poke failures were always
+    # non-fatal, so losing the try/except into the thread is safe.
     if mem.embedder is not None and getattr(mem.store, "_cb", None) is not None:
-        try:
-            mem.store.veil_poke(mem.embedder)
-        except Exception as e:
-            print(f"[opencode] veil poke failed (non-fatal): {e}",
-                  file=sys.stderr)
+        def _veil_poke_bg():
+            try:
+                adopted = mem.store.veil_poke(mem.embedder)
+                if adopted:
+                    print(f"[opencode] veil poke adopted {adopted} foreign "
+                          f"memor(ies) (background)", file=sys.stderr)
+            except Exception as e:
+                print(f"[opencode] veil poke failed (non-fatal): {e}",
+                      file=sys.stderr)
+        threading.Thread(target=_veil_poke_bg, name="veil-poke",
+                         daemon=True).start()
 
     # now that the embedder is proven, the router's imprint seeding can run
     # (it embeds the models' self-descriptions); a router built before this
@@ -5983,6 +6005,21 @@ def main() -> None:
             try:
                 srv._bstop.set()
                 srv.cell_pool.stop()
+            except Exception:
+                pass
+        # the couchbase clusters FIRST (peers substrate, the field's store,
+        # the entity layer): each close() joins the SDK's asio IO threads so
+        # no C-extension thread touches the interpreter during Py_Finalize
+        # (a live _core.so thread at finalize is a SIGSEGV).
+        for closer in (
+                getattr(getattr(srv, "peers", None), "close", None),
+                getattr(getattr(srv.membrane, "store", None), "close", None),
+                getattr(getattr(srv, "entity_store", None), "close", None),
+                getattr(getattr(srv, "global_field", None), "close", None)):
+            if closer is None:
+                continue
+            try:
+                closer()
             except Exception:
                 pass
         for p in (cfg_path, instr_path):

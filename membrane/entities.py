@@ -1028,6 +1028,19 @@ class EntityStore:
                   file=sys.stderr)
 
     # ---- couchbase (the shared collection) ----------------------------------
+    def close(self) -> None:
+        """Shutdown: close the couchbase cluster so its IO threads stop
+        BEFORE interpreter finalization (a live asio thread touching
+        CPython during Py_Finalize is a SIGSEGV, seen in the wild)."""
+        cluster = getattr(self, "_cluster_ref", None)
+        if cluster is None:
+            return
+        self._cluster_ref = None
+        try:
+            cluster.close()
+        except Exception:
+            pass
+
     def _entities_collection(self):
         """cortex-core._default.entities (the QuantumEntity home). None when
         couchbase is unreachable (JSON/RAM still carry) OR when the store

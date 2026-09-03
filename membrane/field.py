@@ -945,6 +945,20 @@ class ExemplarStore:
     # Same call sites (mem.store.save(path)) -- when the store was hydrated
     # from Couchbase, `path` is ignored and mutations are per-doc upserts.
 
+    def close(self) -> None:
+        """Shutdown: close the couchbase cluster so its IO threads stop
+        BEFORE interpreter finalization (a live asio thread touching
+        CPython during Py_Finalize is a SIGSEGV, seen in the wild)."""
+        cluster = getattr(self, "_cb_cluster", None)
+        if cluster is None:
+            return
+        self._cb_cluster = None
+        self._cb = self._cb_archive = self._cb_eph = None
+        try:
+            cluster.close()
+        except Exception:
+            pass
+
     def _cb_collection(self, mode: str = "live") -> Any:
         """The `membrane.exemplars` (mode="live") or `membrane.exemplars_archive`
         (mode="archive") collection, created on first touch.
