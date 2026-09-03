@@ -3631,7 +3631,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # evaluation (the double-call bug: the first call consumed the
         # delta gate, the second saw 'unchanged' and returned None -- the
         # banner vanished while the removed recall block stayed).
-        banner_block = _where_delta(srv, _where_we_are(srv, vec))
+        # THE ABLATION ARM (documented in port-notes 24): --no-banner
+        # removes the banner from the injection entirely (recall stays --
+        # it is content). The ruler's third arm; the flag exists so the
+        # measurement can actually run.
+        banner_block = (None if getattr(srv, "no_banner", False)
+                        else _where_delta(srv, _where_we_are(srv, vec)))
         if banner_block:
             ctx = (ctx + "\n\n" + banner_block) if ctx else banner_block
         replay_sim = float(getattr(srv, "replay_sim", 0.0) or 0.0)
@@ -4937,6 +4942,10 @@ def main() -> None:
                          "query vector before top_k, biasing recall toward the "
                          "live working context (--no-momentum for exact recall).")
     ap.add_argument("--no-momentum", dest="momentum", action="store_false")
+    ap.add_argument("--no-banner", dest="no_banner", action="store_true",
+                    help="the ablation arm: inject NO banner (tracks/"
+                         "alerts/announcements off; recall stays) -- "
+                         "port-notes 24's measurement flag")
     ap.set_defaults(archive=True, momentum=True)
     ap.add_argument("--cells", type=int, default=4, metavar="N",
                     help="seed N curiosity-driven cells of a SELF-BALANCING observer "
@@ -5196,6 +5205,9 @@ def main() -> None:
     srv.backend = backend
     srv.rag_k = args.k
     srv.rag_sim_min = max(0.0, min(1.0, float(args.rag_sim_min)))
+    # THE ABLATION FLAG (port-notes 24): --no-banner arms the
+    # banner-off measurement
+    srv.no_banner = bool(getattr(args, "no_banner", False))
     srv.rag_ctx_chars = max(200, int(args.ctx_chars))
     srv.rag_mem_chars = max(64, int(args.mem_chars))
     srv.rag_mmr_sim = max(0.0, min(1.0, float(args.rag_mmr_sim)))

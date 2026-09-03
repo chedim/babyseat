@@ -331,6 +331,12 @@ def consolidate_entities(mem, est, materialize: int = 8,
     # -- materialize: hot tag keys earn store docs (SKIPPED on only_keys:
     #    the plant-time seeding path materializes nothing) --
     mat = 0
+    # THE ANNOUNCEMENT QUALITY BAR (the os.environ.get exhibit): generic
+    # symbols announce by cell-count alone -- only kinds that make good
+    # subjects (files/models, the operator's real objects) announce
+    # their birth; symbols/configs graduate silently (the doc still
+    # exists for the graph reader and scripts)
+    _ANNOUNCE_KINDS = ("files", "models")
     if materialize > 0 and not only_keys:
         hot = sorted(((k, len(v)) for k, v in inv.items()
                       if len(v) >= 3 and f"{MEMBRANE_NS}{k}" not in est.docs
@@ -341,7 +347,9 @@ def consolidate_entities(mem, est, materialize: int = 8,
             ent = QuantumEntity(
                 eid=f"{MEMBRANE_NS}{key}",
                 cls=_KIND_CLASS.get(kind, CLASS_COMPONENT),
-                properties={"name": val, "materialized_by": "night"},
+                properties={"name": val, "materialized_by": "night",
+                            **({} if kind in _ANNOUNCE_KINDS
+                               else {"silent_birth": True})},
                 derived_by=["membrane-night"])
             if est.upsert(ent, embedder=mem.embedder):
                 mat += 1

@@ -1743,7 +1743,12 @@ class EntityStore:
     def _announce(self, kind: str, ent: QuantumEntity,
                   extra: str = "") -> None:
         """Queue one entity event for the banner (bounded, in-memory).
-        Only GRADUATIONS announce: new store docs and merges."""
+        Only GRADUATIONS announce: new store docs and merges.
+        properties['silent_birth'] suppresses the birth announcement
+        (the materialization quality bar: generic symbols graduate
+        silently -- the doc exists, the banner isn't told)."""
+        if kind == "new" and (ent.properties or {}).get("silent_birth"):
+            return
         a = {"kind": kind, "eid": ent.eid,
              "cls": ent.cls,
              "name": str((ent.properties or {}).get("name")
