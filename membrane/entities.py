@@ -1758,10 +1758,18 @@ class EntityStore:
         # cos ~0.95) is tautology, not information.
         out: list[tuple[str, float]] = []
         seen_keys: set[str] = set()
+        seen_labels: set[str] = set()
         for s, k in scored:
-            if k in seen_keys or (exclude and k == exclude):
+            # THE KEY + LABEL DEDUP (the 'run.sh twice' exhibit): the key
+            # dedup catches one eid twice; the LABEL dedup catches
+            # different keys decoding to the same label ('files:run.sh'
+            # vs 'shell:run.sh' both render 'run.sh')
+            label = self.default_label(k).lower()
+            if k in seen_keys or label in seen_labels \
+                    or (exclude and k == exclude):
                 continue
             seen_keys.add(k)
+            seen_labels.add(label)
             out.append((k, round(s, 2)))
             if len(out) >= top:
                 break
