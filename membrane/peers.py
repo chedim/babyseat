@@ -1,0 +1,238 @@
+"""The multi-seat substrates: proxy REGISTRY (ephemeral bucket, TTL docs,
+heartbeats -- a dead proxy's doc expires itself) + the PEER CHANNEL
+(permanent collection, a chat lane between the LLMs, visible on every
+connected seat's banner).
+
+THE REGISTRY (cortex's episodic_memory pattern): each proxy registers on
+boot -- {pid, cwd, port, model, ts} under 'proxy::<port>' with a TTL of
+3 heartbeats. Every HEARTBEAT (default 60s) re-upserts the doc,
+refreshing the TTL; a proxy that dies stops heartbeating and its doc
+expires -- the registry self-cleans. Consumers: the banner's 'seats:'
+line (who else is connected), membrane_doctor, the fork.
+
+THE PEER CHANNEL (cortex-core._default.peer_chat, permanent): messages
+are {from, ts, text, reply_to?} -- any seat can post, every seat's
+banner shows the latest unread line(s) (bounded, cursor-tracked per
+seat). The operator sees cross-seat chatter in opencode on EVERY
+connected seat; the model reads/posts via MCP.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+import time
+
+HEARTBEAT_S = 60.0             # registration refresh cadence
+REGISTRY_TTL_S = 3 * 180       # doc TTL: 3 missed heartbeats -> expired
+CHANNEL_MAX_FETCH = 5          # unread lines fetched per render
+CHANNEL_TEXT_CAP = 240         # per-message text cap
+CHANNEL_TAIL = 8               # the cursor memory (last seen ts rides the
+                               # registry doc; a seat's cursor survives its
+                               # own restarts via the doc's residual TTL)
+
+
+class PeerSubstrate:
+    """The registry + the chat channel, over couchbase's ephemeral and
+    permanent collections. Degradation covenant: couchbase down -> both
+    lanes go silent (register/heartbeat/post degrade to no-ops; reads
+    return empty). One class, one connection attempt, no leaks."""
+
+    def __init__(self, field_path: str, port: int, model: str = "",
+                 heartbeat_s: float = HEARTBEAT_S) -> None:
+        self.field_path = field_path
+        self.port = port
+        self.model = model
+        self.heartbeat_s = heartbeat_s
+        self.cwd = os.getcwd()
+        self.seat_id = f"proxy-{self.port}"
+        self._cluster = None
+        self._bucket = None
+        self._reg = None           # proxies collection (ephemeral bucket)
+        self._reg_bucket = None
+        self._chan = None          # peer_chat collection (permanent)
+        self._cursor_ts = 0.0
+        self._last_beat = 0.0
+        self._connect()
+
+    # ---- the connection (degrade covenant) ----
+    def _connect(self) -> None:
+        try:
+            from couchbase.cluster import Cluster
+            from couchbase.auth import PasswordAuthenticator
+            from couchbase.options import ClusterOptions
+            conn = os.environ.get("COUCHBASE_CONN_STRING",
+                                  "couchbase://localhost")
+            user = os.environ.get("COUCHBASE_USER", "Administrator")
+            pw = os.environ.get("COUCHBASE_PASSWORD", "password")
+            bucket_name = os.environ.get("COUCHBASE_BUCKET", "cortex-core")
+            self._cluster = Cluster(conn, ClusterOptions(
+                PasswordAuthenticator(user, pw)))
+            self._bucket = self._cluster.bucket(bucket_name)
+            self._reg = self._ensure_eph_registry()
+            self._ensure_collection(self._bucket, "peer_chat")
+            self._chan = self._bucket.scope("_default").collection(
+                "peer_chat")
+        except Exception as e:
+            print(f"[peers] substrate unavailable ({str(e)[:80]}) -- "
+                  f"registry + chat degrade to silent", file=sys.stderr)
+            self._reg = self._chan = self._cluster = None
+
+    def _ensure_collection(self, bucket, name: str) -> None:
+        try:
+            try:
+                bucket.collections().create_collection("_default", name)
+            except Exception:
+                pass                    # exists
+        except Exception:
+            pass
+
+    def _ensure_eph_registry(self):
+        """The ephemeral bucket + proxies collection: explicit env, then
+        the canon-ephemeral convention, then create (ephemeral TTL does
+        the GC -- expired proxy docs vanish without a janitor)."""
+        name = os.environ.get("COUCHBASE_EPHEMERAL_BUCKET")
+        candidates = [name] if name else [
+            f"{self._bucket.name}-ephemeral", "cortex-ephemeral"]
+        for cand in candidates:
+            if not cand:
+                continue
+            try:
+                b = self._cluster.bucket(cand)
+                self._ensure_collection(b, "proxies")
+                return b.scope("_default").collection("proxies"), b
+            except Exception:
+                continue
+        try:
+            eph = f"{self._bucket.name}-ephemeral"
+            # creation via the management REST surface (the SDK can't
+            # create ephemeral buckets directly); failure degrades
+            self._cluster.buckets().create_bucket(
+                name=eph, bucket_type="ephemeral", ttl=int(HEARTBEAT_S * 10))
+            b = self._cluster.bucket(eph)
+            self._ensure_collection(b, "proxies")
+            return b.scope("_default").collection("proxies"), b
+        except Exception:
+            return None, None
+
+    # ---- the registry ----
+    def register(self, extra: dict | None = None) -> bool:
+        """Proxy boot registration: proxy::<port> {pid, cwd, port, model,
+        ts, chan_cursor} with a TTL. Returns False on couchbase failure
+        (silent)."""
+        if self._reg is None:
+            self._reg, self._reg_bucket = self._ensure_eph_registry()
+        if self._reg is None:
+            return False
+        doc = {"pid": os.getpid(), "cwd": self.cwd, "port": self.port,
+               "model": self.model, "ts": time.time(),
+               "heartbeat_s": self.heartbeat_s,
+               "chan_cursor": self._cursor_ts}
+        if extra:
+            doc.update(extra)
+        try:
+            from couchbase.options import UpsertOptions
+            from datetime import timedelta
+            self._reg.upsert(
+                self.seat_id, doc,
+                UpsertOptions(expiry=timedelta(seconds=REGISTRY_TTL_S)))
+            return True
+        except Exception:
+            return False
+
+    def heartbeat(self) -> bool:
+        """The periodic refresh (re-register, refreshing the TTL). Called
+        from the server tick; a dead proxy's doc simply expires."""
+        if time.time() - self._last_beat < self.heartbeat_s:
+            return True
+        ok = self.register()
+        if ok:
+            self._last_beat = time.time()
+        return ok
+
+    def _query(self, statement: str, **params) -> list[dict]:
+        """One N1QL query via the cluster handle (Collections have no
+        .query). Empty on any failure (the degrade covenant)."""
+        try:
+            from couchbase.options import QueryOptions
+            import datetime as _dt
+            q = self._cluster.query(
+                "SELECT meta().id AS id, t.* FROM `{b}`.`_default`.`{c}` t"
+                .format(b=self._bucket.name),
+                QueryOptions(timeout=_dt.timedelta(seconds=10),
+                             named_parameters={} if False else None))
+            return [dict(r) for r in q]
+        except Exception:
+            return []
+
+    def list_seats(self) -> list[dict]:
+        """The live seats: every registry doc (expired ones are gone by
+        TTL -- the GC is the clock)."""
+        if self._reg is None:
+            self._reg, self._reg_bucket = self._ensure_eph_registry()
+        if self._reg is None:
+            return []
+        out = []
+        try:
+            from couchbase.options import QueryOptions
+            import datetime as _dt
+            b = self._reg_bucket
+            q = self._cluster.query(
+                f"SELECT t.* FROM `{b.name}`.`_default`.`proxies` t",
+                QueryOptions(timeout=_dt.timedelta(seconds=10)))
+            for row in q:
+                out.append(dict(row))
+        except Exception:
+            return []
+        return out
+
+    # ---- the chat channel ----
+    def post(self, text: str, reply_to: str = "") -> bool:
+        """One channel message: {from, ts, text, reply_to?}. Permanent
+        (no TTL) -- the chat is the commons' memory of its own talk."""
+        if self._chan is None:
+            return False
+        msg = {"from": self.seat_id, "ts": time.time(),
+               "text": str(text)[:2000]}
+        if reply_to:
+            msg["reply_to"] = reply_to
+        try:
+            key = f"msg::{int(time.time() * 1000)}::{self.seat_id}"
+            self._chan.upsert(key, msg)
+            return True
+        except Exception:
+            return False
+
+    def fetch_unread(self) -> list[dict]:
+        """Every channel message past this seat's cursor (stored in the
+        registry doc, rides the heartbeat), oldest first, capped. Marks
+        the cursor. Read-once per seat: the operator sees each line on
+        their seat until read."""
+        if self._chan is None or self._reg is None:
+            return []
+        try:
+            from couchbase.options import QueryOptions
+            import datetime as _dt
+            q = self._cluster.query(
+                f"SELECT t.* FROM `{self._bucket.name}`.`_default`."
+                f"peer_chat t WHERE t.ts > $since "
+                "AND t.`from` != $me ORDER BY t.ts ASC LIMIT $lim",
+                QueryOptions(timeout=_dt.timedelta(seconds=10),
+                             named_parameters={
+                                 "since": self._cursor_ts,
+                                 "me": self.seat_id,
+                                 "lim": CHANNEL_MAX_FETCH}))
+            rows = [dict(r) for r in q]
+            if rows:
+                last = rows[-1].get("ts")
+                if last:
+                    self._cursor_ts = float(last)
+                    self.register()   # the cursor rides the heartbeat doc
+            return rows
+        except Exception:
+            return []
+
+
+def _timedelta(s: float):
+    from datetime import timedelta
+    return timedelta(seconds=s)

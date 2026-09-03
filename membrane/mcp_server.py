@@ -347,7 +347,34 @@ def tool_state(args: dict, port: int) -> str:
         f"{th.get('free_energy', 0):.2f} (safe_frac {th.get('safe_frac', 0):.2f})",
         f"- embed model {out.get('embed_model') or 'unresolved'} "
         f"| gate sim_min={((out.get('gate') or {}).get('sim_min'))}",
-    ]
+    {
+        "name": "membrane_peer_post",
+        "description": (
+            "Post a message to the PEER CHANNEL: a chat lane between the "
+            "LLMs, visible to the operator on every connected opencode "
+            "seat. Use for cross-seat coordination -- handoffs, "
+            "questions to another seat's model, state announcements. "
+            "Unread messages ride YOUR banner automatically."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string",
+                         "description": "The message (capped 2000)."},
+                "reply_to": {"type": "string",
+                             "description": "Optional seat id replying to."},
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "membrane_peer_seats",
+        "description": (
+            "List the connected membrane seats (the registry: each proxy "
+            "registers on boot and heartbeats; dead seats expire). Use "
+            "before posting to know who is listening."),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+]
     if comp:
         lines.append(f"- compactor: cycles={comp.get('cycles', 0)} "
                      f"clusters={comp.get('clusters', 0)} "
@@ -564,6 +591,32 @@ def tool_set_junk_cut(args: dict, port: int) -> str:
             f"applies on the next banner render / watch arrival.")
 
 
+def tool_peer_post(args: dict, port: int) -> str:
+    text = str(args.get("text") or "").strip()
+    if not text:
+        raise ProxyError(400, "text required")
+    out = _http(port, "POST", "/membrane/peer/post", {
+        "text": text, "reply_to": str(args.get("reply_to") or "")})
+    if not out.get("ok"):
+        return f"Post failed: {out.get('error', 'unknown error')}"
+    return (f"Posted to the peer channel (visible to the operator on "
+            f"every connected seat; unread messages ride their banners).")
+
+
+def tool_peer_seats(args: dict, port: int) -> str:
+    out = _http(port, "GET", "/membrane/peer/seats")
+    seats = out.get("seats") or []
+    if not seats:
+        return ("No seats in the registry (couchbase down, or you are "
+                "alone). The registry self-cleans: dead proxies expire.")
+    lines = [f"{len(seats)} seat(s) connected:"]
+    for s in seats:
+        cwd = str(s.get("cwd", "?")).rsplit("/", 1)[-1]
+        lines.append(f"- {cwd} (: {s.get('port')}) pid {s.get('pid')} "
+                     f"model {s.get('model', '?')}")
+    return "\n".join(lines)
+
+
 TOOL_IMPLS = {
     "membrane_query": tool_query,
     "membrane_state": tool_state,
@@ -577,6 +630,8 @@ TOOL_IMPLS = {
     "membrane_entity_edit": tool_entity_edit,
     "membrane_entity_remove": tool_entity_remove,
     "membrane_set_junk_cut": tool_set_junk_cut,
+    "membrane_peer_post": tool_peer_post,
+    "membrane_peer_seats": tool_peer_seats,
 }
 
 

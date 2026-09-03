@@ -935,6 +935,29 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
                     lines.append(f"track: {key} ({label}) — no cells yet")
         except Exception as e:
             print(f"[opencode] banner render error: {e}", file=sys.stderr)
+    # 5. THE PEER SUBSTRATES (the operator's multi-seat design): the
+    #    REGISTRY heartbeat + the seats line (who else is connected) +
+    #    unread PEER-CHANNEL messages (cross-seat chatter, read-once per
+    #    seat, visible to the operator on every connected opencode).
+    peers = getattr(srv, "peers", None)
+    if peers is not None:
+        try:
+            from .peers import CHANNEL_TEXT_CAP
+            peers.heartbeat()
+            seats = peers.list_seats()
+            others = [s for s in seats
+                      if str(s.get("port") or "") != str(peers.port)]
+            if others:
+                who = ", ".join(
+                    f"{str(s.get('cwd', '?')).rsplit('/', 1)[-1]}"
+                    f"(:{s.get('port')})" for s in others[:3])
+                lines.append(f"seats: {who} also connected")
+            for m in peers.fetch_unread():
+                frm = str(m.get("from", "?")).replace("proxy-", "")
+                text = str(m.get("text", ""))[:CHANNEL_TEXT_CAP]
+                lines.append(f"peer[{frm}]: {text}")
+        except Exception:
+            pass
     if not lines:
         return None
     return ("WHERE WE ARE:\n- " + "\n- ".join(lines))
@@ -3147,6 +3170,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._entity_track_list(); return
         if path == "/membrane/entity/add":
             self._entity_add(); return
+        if path == "/membrane/peer/post":
+            self._peer_post(); return
         if path == "/membrane/junk-cut":
             self._junk_cut_set(); return
         if path == "/membrane/entity/edit":
@@ -4550,6 +4575,20 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                         "answer": content[:4000]})
 
     # ---- /membrane/entity-track: the model's banner lane (MCP relay) ----
+    def _peer_post(self) -> None:
+        """POST /membrane/peer/post: the cross-seat chat lane (the
+        operator's multi-seat design)."""
+        srv = self.server
+        peers = getattr(srv, "peers", None)
+        if peers is None:
+            self._json_err_raw(503, "peer substrate unavailable"); return
+        body = self._json_body()
+        text = str(body.get("text") or "").strip()
+        if not text:
+            self._json_err_raw(400, "text required"); return
+        ok = peers.post(text, reply_to=str(body.get("reply_to") or ""))
+        self._json_out({"ok": ok})
+
     def _entity_track_set(self) -> None:
         srv = self.server
         est = getattr(srv, "entity_store", None)
@@ -5349,6 +5388,23 @@ def main() -> None:
         from .entities import (EntityStore, JUNK_CUT_DEFAULT,
                                related_entities)
         srv.entity_store = EntityStore(path=str(_wdir / "entities.json"))
+        # THE PEER SUBSTRATES (the operator's design): the proxy REGISTRY
+        # (ephemeral bucket, TTL docs, heartbeats -- who else is connected)
+        # + the PEER CHANNEL (permanent, a chat lane between the LLMs,
+        # visible on every seat's banner). Degraded silently when
+        # couchbase is down (the same covenant as the entity layer).
+        try:
+            from .peers import PeerSubstrate
+            srv.peers = PeerSubstrate(
+                field_path=str(_wdir / "field.json"),
+                port=listen, model=str(srv.compact_model))
+            srv.peers.register()
+            print(f"[opencode] peers: registered as {srv.peers.seat_id} "
+                  f"(heartbeat {int(srv.peers.heartbeat_s)}s)",
+                  file=sys.stderr)
+        except Exception as e:
+            srv.peers = None
+            print(f"[opencode] peers unavailable ({e})", file=sys.stderr)
         # the DEFAULT track (the operator's design): 'now' -- the session's
         # living present. The model is a vessel (constant, uninformative);
         # the conversation's direction is the thing worth watching. The

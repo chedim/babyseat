@@ -901,9 +901,17 @@ class EntityStore:
     Degrade covenant: any couchbase failure is logged once and the JSON/RAM
     copies carry on."""
 
-    def __init__(self, path: str | None = None, bucket: str = "cortex-core") -> None:
+    def __init__(self, path: str | None = None, bucket: str = "cortex-core",
+                 shared: bool = True) -> None:
         self.path = Path(path) if path else None
         self.bucket = bucket
+        # THE TEST-ISOLATION GUARD (the 'doomed.py in the fork's banner'
+        # bug): test stores were created with shared=True default, so
+        # when couchbase was UP the test fixtures WROTE THROUGH to the
+        # shared collection -- my test entities materialized in the
+        # fork's banner via its read-through. Tests pass shared=False:
+        # RAM/JSON only, the shared substrate never touched.
+        self.shared = shared
         self.docs: dict[str, QuantumEntity] = {}
         # entity TRACKS: key -> {key, label, op, n, alerted}. The banner
         # lane: live cell counts in WHERE WE ARE, optional boundary alerts.
@@ -1022,8 +1030,12 @@ class EntityStore:
     # ---- couchbase (the shared collection) ----------------------------------
     def _entities_collection(self):
         """cortex-core._default.entities (the QuantumEntity home). None when
-        couchbase is unreachable (JSON/RAM still carry). Stashes the cluster
+        couchbase is unreachable (JSON/RAM still carry) OR when the store
+        is unshared (the test-isolation guard: tests never touch the
+        shared substrate). Stashes the cluster
         handle (self._cluster_ref) for N1QL (Collections have no .query)."""
+        if not self.shared:
+            return None
         try:
             from couchbase.cluster import Cluster
             from couchbase.auth import PasswordAuthenticator
@@ -1081,7 +1093,9 @@ class EntityStore:
             self._announce("new", ent)
         if (ent.properties or {}).get("ephemeral"):
             return True
-        coll = self._entities_collection()
+        coll = (self._entities_collection()
+                if (ent.properties or {}).get("ephemeral") is None or True
+                else None)
         if coll is not None:
             try:
                 coll.upsert(ent.eid, ent.to_doc(embedder))
@@ -1091,7 +1105,10 @@ class EntityStore:
                     print(f"[entities] write-through failed ({str(e)[:80]})",
                           file=sys.stderr)
                     self._cb_warned = True
-        return False
+        # THE RETURN SEMANTICS fix (the shared=False test failures): the
+        # RAM/JSON write IS the success -- the couchbase write-through is
+        # best-effort (a fork read-through bonus, not the contract)
+        return True
 
     def hydrate_from_couchbase(self, limit: int = 2000) -> int:
         """READ-THROUGH: pull cortex's entities into RAM (both systems see
@@ -2127,6 +2144,13 @@ _SUBJECT_JUNK_RES = (
     re.compile(r"\b[0-9a-f]{16,}\b"),              # hex slugs
     re.compile(r"\b(ex_idx|field_size|sent_blocks|ctx_chars)\b"),
     re.compile(r"glvys3kgcw706nvfkvgf40000gr", re.I),  # temp dirs
+    # THE INTERNALS SCREEN (the srv.entity_store / self._cb_warned
+    # exhibit): membrane's own implementation symbols are machinery
+    # about the build session, never the session's subject
+    re.compile(r"\b(?:self|srv|cls)\._\w+"),
+    re.compile(r"\bsrv\.\w+"),
+    re.compile(r"\b(?:nudge_script|delete_script|script_render|"
+               r"script_every_n|script_failures|script_disabled)\b"),
 )
 # class-tuned defaults: hot things resolve fine, slow things coarsen
 _GRAIN_DEFAULTS = {
