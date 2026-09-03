@@ -5371,14 +5371,20 @@ def main() -> None:
             # before the seeding code, or model-added via entity_add)
             # get their docs NOW -- then consolidate to seed the rings
             for k in list(srv.entity_store.tracks.keys()):
-                if k == "session:now":
-                    continue
-                srv.entity_store.ensure_track_entity(k)
-            from .night import consolidate_entities
+                if k != "session:now":
+                    srv.entity_store.ensure_track_entity(k)
+            from .night import consolidate_entities, run_scripted_entities
             consolidate_entities(srv.membrane, srv.entity_store,
                                  materialize=0,
                                  only_keys=[k for k in srv.entity_store.tracks.keys()
                                             if k != "session:now"])
+            # THE SCRIPT PASS AT BOOT: a script edit between boots must
+            # echo immediately (the stale script_render otherwise rides
+            # the banner until the next 15-min night tick)
+            out = run_scripted_entities(srv.membrane, srv.entity_store)
+            if out.get("errors"):
+                print(f"[opencode] script pass: {out['errors']} error(s)",
+                      file=sys.stderr)
         except Exception as e:
             print(f"[opencode] track geometry bootstrap skipped ({e})",
                   file=sys.stderr)
