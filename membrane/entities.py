@@ -61,7 +61,8 @@ MEMBRANE_NS = "membrane::"
 
 # ---- deterministic extraction (capture time, $0) -----------------------------
 _FILE_RE = re.compile(
-    r"(?:[\w.-]+/)*[\w.-]+\.(?:py|md|json|jsonc|ts|js|jsonl|toml|yaml|yml|sh|html|css|txt)\b")
+    r"(?:[\w.-]+/)*[\w.-]+\.(?:py|md|json|jsonc|ts|js|jsx|tsx|mjs|cjs|go|rs|"
+    r"toml|yaml|yml|sh|bash|html|css|txt|d\.ts)\b")
 _SYMBOL_RE = re.compile(r"\b[a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*){1,3}\b"
                         r"|\b[a-zA-Z][a-z0-9]*(?:_[a-z0-9]+)+\b")
 _MODEL_RE = re.compile(r"\b[a-zA-Z][\w.-]*(?::[\w.-]+){1,3}\b")
@@ -73,6 +74,10 @@ _SHELL_VERBS = ("git", "docker", "kubectl", "brew", "pip", "npm", "pnpm",
 # prose dots that LOOK like symbols but are sentences ("we.think", "it.does")
 _PRONOUN_HEADS = ("it", "we", "i", "they", "he", "she", "you", "this",
                   "that", "there", "here", "one", "something", "anything")
+# URL-encoded harness artifacts that LOOK like symbols but are chat-template
+# tokens or escaped markup leaking through capture ("u003cstart_of_turn" =
+# URL-encoded "<start_of_turn"; "u003c" prefix = the encoded "<")
+_CAPTURE_TOKEN_JUNK = re.compile(r"u003[cde][\w]*", re.I)
 
 
 def extract_entities(situation: str, action: str = "") -> dict:
@@ -143,6 +148,10 @@ def _harvest(text: str) -> dict:
     for c in _SYMBOL_RE.findall(text):
         low = c.lower()
         if low in claimed or c.endswith((".py", ".md", ".json", ".js", ".ts")):
+            continue
+        # THE CAPTURE-TOKEN SCREEN (the u003cstart_of_turn exhibit):
+        # URL-encoded harness artifacts die before the symbol signal check
+        if _CAPTURE_TOKEN_JUNK.match(c):
             continue
         head = c.split(".")[0].lower()
         if head in _PRONOUN_HEADS:

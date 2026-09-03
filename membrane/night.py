@@ -228,12 +228,20 @@ def register_gray_forms(srv, mem, est, gray_idx_sims: list,
         if validated:
             from .entities import entity_id, QuantumEntity as _QE
             for it in validated:
+                # THE SAME QUALITY BAR as materialization: only files/
+                # models births announce; symbol/config abstractions
+                # graduate silently (the doc exists; the banner isn't
+                # told -- the tslog.debug/t.logf flood exhibit)
+                kind_hint = str(it["name"]).split(":", 1)[0]
+                silent = kind_hint not in ("files", "models")
                 e = _QE(
                     eid=f"membrane::synth:{str(it['name']).strip().lower().replace(' ', '-')[:80]}",
                     cls=it["class"],
                     properties={"name": it["name"],
                                 "summary": it["summary"],
-                                "topic": "night-registration"},
+                                "topic": "night-registration",
+                                **({} if not silent
+                                   else {"silent_birth": True})},
                     derived_by=["membrane-night"])
                 if est.upsert(e):
                     out["entities"] += 1
