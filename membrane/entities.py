@@ -1661,7 +1661,8 @@ class EntityStore:
         ent = self.docs.get(f"{MEMBRANE_NS}session:now")
         if ent is None or not getattr(ent, "position", None):
             return None
-        subj = self._nearest_entities(ent.position, exemplars)
+        subj = self._nearest_entities(ent.position, exemplars,
+                                     exclude=DEFAULT_TRACK_KEY)
         vel = ent.ring_velocity(now)
         direction = ent.ring_direction()
         parts: list[str] = []
@@ -1707,11 +1708,12 @@ class EntityStore:
                    if direction == "drifting" else ""))
 
     def _nearest_entities(self, position, exemplars,
-                          top: int = 3) -> list[tuple[str, float]]:
+                          top: int = 3, exclude: str = "") -> list[tuple[str, float]]:
         """The entities whose cell-centroids sit nearest a position
         vector -- 'what is this session about right now' from the
         now-tracker's own geometry. $0: one pass over the inverted
-        index's centroids.
+        index's centroids. ``exclude``: a track key never rendered as
+        its own subject (the self-match is tautology).
         THE TOPIC RANKING (the 'subject reads tools, not topics' fix):
         shell verbs and model names tag aggressively and dominate recent
         mass, but the session's SUBJECT lives in files/symbols/topics.
@@ -1751,11 +1753,13 @@ class EntityStore:
         scored.sort(reverse=True)
         # THE KEY DEDUP (the 'opencode.py (0.95), opencode.py (0.95)'
         # exhibit): multiple entity docs can decode to the same label --
-        # one rendering per distinct key
+        # one rendering per distinct key. THE SELF-EXCLUSION: a track's
+        # own subject match (its position vs its own cells' centroid,
+        # cos ~0.95) is tautology, not information.
         out: list[tuple[str, float]] = []
         seen_keys: set[str] = set()
         for s, k in scored:
-            if k in seen_keys:
+            if k in seen_keys or (exclude and k == exclude):
                 continue
             seen_keys.add(k)
             out.append((k, round(s, 2)))
@@ -1934,14 +1938,19 @@ class EntityStore:
                 if script_render:
                     out.append((key, f"{key}: {script_render}"))
                     continue
-            has_ring = (ent is not None
-                        and len(getattr(ent, "position_history", []) or []) >= 2
-                        and getattr(ent, "position", None))
+            # THE GEOMETRY GATE, corrected (the 'still recites cells'
+            # proof-failure): ONE point is geometry -- the subject
+            # renders from the position alone; motion needs two points
+            # and simply doesn't render for a 1-point entity. The cell
+            # backfill is only for entities with NO position at all.
+            has_geometry = (ent is not None
+                            and getattr(ent, "position", None))
             # ---- GEOMETRY-FIRST: subject + motion + delta from the ring
             #      (the script hook above already claimed scripted lines)
-            if has_ring:
+            if has_geometry:
                 parts: list[str] = []
-                subj_now = self._nearest_entities(ent.position, exemplars)
+                subj_now = self._nearest_entities(ent.position, exemplars,
+                                                  exclude=key)
                 hist = ent.position_history
                 subj_then = (self._nearest_entities(hist[0][1], exemplars)
                              if len(hist) >= 2 else None)

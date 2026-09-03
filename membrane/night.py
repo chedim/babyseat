@@ -428,6 +428,14 @@ def consolidate_entities(mem, est, materialize: int = 8,
             total_moved += res["moved"]
         if res["moved"] > ent.grain():
             est.upsert(ent, embedder=mem.embedder)   # persist the motion
+        elif len(ent.position_history) == 1 and not getattr(
+                ent.properties or {}, "_ring_persisted", False):
+            # THE SEED PERSISTENCE (the re-seed-every-boot fix): a fresh
+            # ring's seed moves 0.0 (below grain) -- without persisting,
+            # every boot re-seeds into RAM and the geometry never
+            # accumulates across boots. The stamp makes it once-only.
+            ent.properties["_ring_persisted"] = True
+            est.upsert(ent, embedder=mem.embedder)
     return {"drifted": drifted, "materialized": mat,
             "avg_moved": round(total_moved / drifted, 4) if drifted else 0.0}
 

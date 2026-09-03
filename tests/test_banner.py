@@ -90,6 +90,73 @@ class TestTransparency(unittest.TestCase):
             mono = h._gate_monologue(VERDICT, CTX, "test", query_vec=qv)
             self.assertNotIn("files:router.py", mono)
 
+    def test_geometry_first_after_bootstrap(self):
+        """THE GEOMETRY PROOF (the operator's demand: 'prove that its
+        fixed and will appear as unified single banner after restart'):
+        the exact boot path in-process -- ensure_track_entity for every
+        track, consolidate to seed rings, then the unified render.
+        Asserts: a positioned entity renders GEOMETRY ('sits near ...')
+        never cell recitation as the lead; the self-match is excluded;
+        the ring persists across boots (the seed-persistence stamp)."""
+        import tempfile, time as _t
+        from membrane.entities import EntityStore, extract_entities
+
+        class E:
+            def __init__(self, situation, action, born, vec):
+                self.situation, self.action, self.safe = situation, action, True
+                self.extra, self.model = {}, {}
+                self.extra["eph_born"] = born
+                self.extra["entities"] = extract_entities(situation, action)
+                self.vec = vec
+
+        with tempfile.TemporaryDirectory() as tmp:
+            est = EntityStore(path=str(Path(tmp) / "entities.json"))
+            est.watch_track("files:router.py", label="router")
+            # the bootstrap: guarantee the doc, consolidate to seed the ring
+            est.ensure_track_entity("files:router.py")
+            cells = [E("tool edit for: fix x1 in router.py",
+                       "Applied the failover patch",
+                       _t.time(), None) for _ in range(3)]
+            from membrane.embed import OllamaEmbedder
+            emb = OllamaEmbedder(model="mxbai-embed-large")
+            qv = emb.embed(["what changed in router.py?"])[0]
+            for c in cells:
+                c.vec = list(qv)
+            from membrane.night import consolidate_entities
+            # a SECOND entity in the world: the subject needs something
+            # to point at (the self-exclusion removes the track's own key)
+            qv2 = emb.embed(["the watch.py collapse guards"])[0]
+            watch_cells = [type("C", (), {
+                "situation": "the watch.py collapse guards fire",
+                "action": "", "safe": True,
+                "extra": {"eph_born": _t.time(),
+                          "entities": extract_entities("watch.py collapse guards", "")},
+                "model": "", "vec": list(emb.embed(["watch.py collapse guards"])[0])})()
+                for _ in range(3)]
+            cells = cells + watch_cells
+            store = type("S", (), {"exemplars": cells,
+                                   "mut_lock": type("L", (), {
+                                       "__enter__": lambda s: None,
+                                       "__exit__": lambda s, *a: None})(),
+                                   "field_path": "/tmp/x",
+                                   "__len__": lambda s: len(cells)})()
+            class Mem: pass
+            mem = Mem(); mem.store, mem.embedder = store, emb
+            mem.mut_lock = store.mut_lock
+            mem.field_path = "/tmp/x"
+            consolidate_entities(mem, est, materialize=0,
+                                 only_keys=["files:router.py"])
+            ent = est._entity_for_track("files:router.py")
+            self.assertTrue(ent.position, "ring/position must seed")
+            # the render: GEOMETRY, not cell recitation
+            h = _handler(tracks_store=est)
+            h.server.membrane.store.exemplars = cells
+            out = oc._where_we_are(h.server, qv) or ""
+            self.assertIn("sits near", out)          # the geometry lead
+            self.assertIn("files:router.py:", out)   # the id prefix
+            # THE SELF-EXCLUSION: the track never sits near itself
+            self.assertNotIn("sits near router.py", out)
+
     def test_stale_story_told_with_age(self):
         """THE STALE COVENANT (revised, the operator's 'I want stories'
         call): an old story is told WITH ITS AGE ATTACHED ('last active
