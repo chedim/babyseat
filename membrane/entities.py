@@ -1671,17 +1671,117 @@ class EntityStore:
         return (DEFAULT_TRACK_KEY,
                 "relations: " + "; ".join(parts) + ".")
 
+    def _motion_target(self, ent, exemplars, exclude_key: str,
+                       floor: float = 0.3) -> tuple[str, float] | None:
+        """THE DRIFT DECODE (the sensor panel's target reading): the
+        movement vector (ring newest - oldest, unit-normalized) decoded
+        through the field -- the entities whose centroids sit nearest
+        the direction of travel. The max-cos decode below the floor is
+        the per-track null signal, informative by design: 'drifting
+        into unclaimed space'. Returns (key, cos) or None."""
+        import numpy as _np
+        hist = getattr(ent, "position_history", []) or []
+        if len(hist) < 2:
+            return None
+        newest = _np.asarray(hist[-1][1], dtype=float)
+        oldest = _np.asarray(hist[0][1], dtype=float)
+        nn, on = _np.linalg.norm(newest), _np.linalg.norm(oldest)
+        if nn < 1e-12 or on < 1e-12:
+            return None
+        move = (newest / nn) - (oldest / on)
+        mn = _np.linalg.norm(move)
+        if mn < 1e-12:
+            return None
+        move = move / mn
+        return self._decode_direction(move, exemplars, exclude_key, floor)
+
+    def _null_direction(self, ent, exemplars, exclude_key: str,
+                        floor: float = 0.25) -> tuple[str, float] | None:
+        """THE VOID DECODE (the operator's 'what do the null-fields point
+        toward'): the complement of the local mass -- the direction away
+        from every positioned neighbor's centroid -- decoded at a LOW
+        floor (0.25: the frontier is by definition weakly related; the
+        standard 0.4 floor would erase it). Requires >= 3 positioned
+        neighbors (a void is defined AGAINST structure; 1-2 neighbors is
+        just the receding clause). Returns (key, cos) or None (the
+        'void points nowhere known' signal is the caller's)."""
+        import numpy as _np
+        positioned = []
+        for k in self.tracks:
+            if k == exclude_key or k == DEFAULT_TRACK_KEY:
+                continue
+            o = self._entity_for_track(k)
+            if o is not None and getattr(o, "position", None):
+                positioned.append((k, o))
+        # non-tracked positioned entities count too (the index's keys
+        # with cells): the neighborhood is the field, not just the frame
+        if len(positioned) < 3:
+            return None
+        center = _np.asarray(ent.position, dtype=float)
+        cn = _np.linalg.norm(center)
+        if cn < 1e-12:
+            return None
+        center = center / cn
+        mass = _np.zeros_like(center)
+        used = 0
+        for k, o in positioned:
+            op = _np.asarray(o.position, dtype=float)
+            opn = _np.linalg.norm(op)
+            if opn < 1e-12:
+                continue
+            mass += op / opn
+            used += 1
+        if used < 3:
+            return None
+        mn = _np.linalg.norm(mass)
+        if mn < 1e-12:
+            return None
+        void_vec = center - (mass / mn) * 0.8   # mostly-away, some keep
+        vn = _np.linalg.norm(void_vec)
+        if vn < 1e-12:
+            return None
+        void_vec = void_vec / vn
+        return self._decode_direction(void_vec, exemplars, exclude_key,
+                                      floor)
+
+    def _decode_direction(self, vec, exemplars, exclude_key: str,
+                          floor: float) -> tuple[str, float] | None:
+        """The shared decode: a unit direction vector -> the nearest
+        entity centroid (reuses _nearest_entities' junk screens, label
+        dedup, self-exclusion). None below the floor."""
+        import numpy as _np
+        v = _np.asarray(vec, dtype=float)
+        vn = _np.linalg.norm(v)
+        if vn < 1e-12:
+            return None
+        v = v / vn
+        inv = entity_index(exemplars)
+        best: tuple[float, str] | None = None
+        for other_key, idxs in inv.items():
+            if other_key == exclude_key:
+                continue
+            ovecs = [exemplars[i].vec for i in idxs
+                     if getattr(exemplars[i], "vec", None)]
+            if not ovecs:
+                continue
+            o = _np.asarray(ovecs, dtype=float).mean(axis=0)
+            on = _np.linalg.norm(o)
+            if on < 1e-12:
+                continue
+            cos = float(v @ (o / on))
+            if best is None or cos > best[0]:
+                best = (cos, other_key)
+        if best is None or best[0] < floor:
+            return None
+        return (best[1], round(best[0], 2))
+
     def _now_report(self, exemplars, now: float) -> tuple[str, str] | None:
-        """THE NOW-TRACK'S OWN RENDERER (the operator's 'why is it so
-        problematic' call answered: the tag-track pipeline never fit a
-        tagless, cell-pool-less, momentum-driven tracker -- four gate
-        patches deep, each revealing the next). The now-story is its
-        GEOMETRY, directly:
-          subject  -- position -> nearest entity centroids (what the
-                      session is about RIGHT NOW)
-          motion   -- ring velocity (drifting fast / holding steady)
-        One paragraph, change-gated on the subject+pace signature, no
-        cell pool, no arc, no fallback ladder."""
+        """THE NOW-TRACK'S SENSOR PANEL (the same readings as the entity
+        panel, for the session's momentum): subject (the position
+        decode), the TARGET (what the momentum drift points toward),
+        the FRAME (approaching/receding the tracked set), pace. The
+        session's momentum made legible -- the highest-value reads in
+        the panel."""
         ent = self.docs.get(f"{MEMBRANE_NS}session:now")
         if ent is None or not getattr(ent, "position", None):
             return None
@@ -1691,20 +1791,21 @@ class EntityStore:
         direction = ent.ring_direction()
         parts: list[str] = []
         if subj:
-            names = ", ".join(f"{k} ({c:.2f})"
-                              for k, c in subj)
+            names = ", ".join(f"{k} ({c:.2f})" for k, c in subj)
             parts.append(f"The session's present is around: {names}")
-        # THE AXIS (the operator's approaching/receding design): the
-        # momentum pulse decoded through the tracked frame -- the
-        # session's movement vector projected onto the other tracked
-        # entities. 'A turn happened' becomes a DIRECTION OF TRAVEL.
+        # THE TARGET: the momentum drift decoded through the field
+        target = self._motion_target(ent, exemplars,
+                                     exclude_key=DEFAULT_TRACK_KEY)
+        if target:
+            parts.append(f"moving toward {target[0]} ({target[1]:.2f})")
+        # THE AXIS: the momentum pulse decoded through the tracked frame
         ax = self._axis_of_motion(ent, exclude_key=DEFAULT_TRACK_KEY)
         if ax["toward"]:
-            t_names = ", ".join(f"{self.default_label(k)} ({c:.2f})"
+            t_names = ", ".join(f"{k} ({c:.2f})"
                                 for k, c in ax["toward"])
             parts.append(f"moving toward {t_names}")
         elif ax["away"]:
-            a_names = ", ".join(f"{self.default_label(k)} ({c:.2f})"
+            a_names = ", ".join(f"{k} ({c:.2f})"
                                 for k, c in ax["away"])
             parts.append(f"receding from {a_names}")
         if direction == "drifting":
@@ -1977,64 +2078,66 @@ class EntityStore:
             # backfill is only for entities with NO position at all.
             has_geometry = (ent is not None
                             and getattr(ent, "position", None))
-            # ---- GEOMETRY-FIRST: subject + motion + delta from the ring
-            #      (the script hook above already claimed scripted lines)
+            # ---- GEOMETRY-FIRST: THE SENSOR PANEL (the operator's
+            #      reframe: each track is a FIELD SENSOR, not a story --
+            #      the banner is an instrument panel). Fixed reading
+            #      order: near, pace, toward, frame, void, why-tail
+            #      (capped 80ch -- the receipt for the readings), state.
             if has_geometry:
                 parts: list[str] = []
                 subj_now = self._nearest_entities(ent.position, exemplars,
                                                   exclude=key)
                 hist = ent.position_history
-                subj_then = (self._nearest_entities(hist[0][1], exemplars)
-                             if len(hist) >= 2 else None)
                 if subj_now:
                     names = ", ".join(
-                        f"{self.default_label(k)} ({c:.2f})"
-                        for k, c in subj_now[:2])
-                    parts.append(f"sits near {names}")
-                # THE AXIS: the entity's own drift decoded through the
-                # tracked frame (same lens as the session pulse)
+                        f"{k} ({c:.2f})" for k, c in subj_now[:2])
+                    parts.append(f"near {names}")
+                vel = ent.ring_velocity(now)
+                pace_band = (0 if vel < 0.005 else
+                             1 if vel < 0.05 else
+                             2 if vel < 0.15 else 3)
+                pace_word = ("fast" if pace_band >= 3 else
+                             "slowly" if pace_band == 1 else "steadily")
+                # THE TARGET: the drift vector decoded through the field
+                # (the panel's pointer reading -- what the drift heads at)
+                target = self._motion_target(ent, exemplars, key)
+                if target:
+                    parts.append(f"{pace_word} ({vel:.2f}/h) toward "
+                                 f"{target[0]} ({target[1]:.2f})")
+                elif vel >= 0.005:
+                    parts.append(f"drifting into unclaimed space "
+                                 f"({vel:.2f}/h)")
+                # THE FRAME: approaching/receding the tracked set
                 ax = self._axis_of_motion(ent, exclude_key=key)
                 if ax["toward"]:
-                    t_names = ", ".join(
-                        f"{self.default_label(k)} ({c:.2f})"
-                        for k, c in ax["toward"])
+                    t_names = ", ".join(f"{k} ({c:.2f})"
+                                        for k, c in ax["toward"])
                     parts.append(f"approaching {t_names}")
                 elif ax["away"]:
-                    a_names = ", ".join(
-                        f"{self.default_label(k)} ({c:.2f})"
-                        for k, c in ax["away"])
+                    a_names = ", ".join(f"{k} ({c:.2f})"
+                                        for k, c in ax["away"])
                     parts.append(f"receding from {a_names}")
-                if subj_then and subj_now:
-                    k_now = subj_now[0][0]
-                    k_then = subj_then[0][0]
-                    if k_now != k_then:
-                        parts.append(f"moving from near "
-                                     f"{self.default_label(k_then)} "
-                                     f"toward "
-                                     f"{self.default_label(k_now)}")
-                vel = ent.ring_velocity(now)
-                if direction_drifting(ent, now):
-                    pace = ("fast" if vel >= 0.15
-                            else "slowly" if vel < 0.05
-                            else "steadily")
-                    parts.append(f"moving {pace} ({vel:.2f}/h)")
-                # THE WHY: the freshest junk-free fragment -- geometry
-                # says WHERE, the beat says WHY (the 'aint no story' fix)
+                # THE VOID: the null direction decoded at the low floor
+                # (the frontier reading -- what the local null-field
+                # points toward)
+                nd = self._null_direction(ent, exemplars, key)
+                if nd:
+                    parts.append(f"void→{nd[0]} ({nd[1]:.2f})")
+                # THE WHY-TAIL (the receipt, capped): the freshest beat
+                # follows the readings -- evidence for them, demoted
                 idxs = inv.get(key) or []
                 for i in sorted(idxs, key=lambda i: -_eph_born_of(exemplars, i)):
                     if i in claimed_cells:
                         continue
                     sit, act = _frag_of(exemplars, i)
-                    sit = _narrative(sit, 200)
+                    sit = _narrative(sit, 80)
                     if not sit or _machinery_junk(sit):
                         continue
-                    if act and (_tool_artifact(act) or _machinery_junk(act)):
-                        act = ""
                     born = _eph_born_of(exemplars, i)
-                    why = f"{_ago(born, now) or 'recently'}: {sit[0].lower() + sit[1:]}"
-                    parts.append(why)
+                    parts.append(f"why: {_ago(born, now) or 'recently'}"
+                                 f" -- {sit[0].lower() + sit[1:]}")
                     claimed_cells.add(i)
-                    break                     # one beat explains the now
+                    break                     # one beat is the receipt
                 if not parts:
                     continue
                 n = len(inv.get(key) or [])

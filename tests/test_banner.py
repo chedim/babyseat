@@ -148,14 +148,15 @@ class TestTransparency(unittest.TestCase):
                                  only_keys=["files:router.py"])
             ent = est._entity_for_track("files:router.py")
             self.assertTrue(ent.position, "ring/position must seed")
-            # the render: GEOMETRY, not cell recitation
+            # the render: GEOMETRY, not cell recitation -- the panel's
+            # 'near' lead (the sensor framing renamed 'sits near')
             h = _handler(tracks_store=est)
             h.server.membrane.store.exemplars = cells
             out = oc._where_we_are(h.server, qv) or ""
-            self.assertIn("sits near", out)          # the geometry lead
+            self.assertIn("near ", out)              # the geometry lead
             self.assertIn("files:router.py:", out)   # the id prefix
             # THE SELF-EXCLUSION: the track never sits near itself
-            self.assertNotIn("sits near router.py", out)
+            self.assertNotIn("near files:router.py", out)
 
     def test_stale_story_told_with_age(self):
         """THE STALE COVENANT (revised, the operator's 'I want stories'
