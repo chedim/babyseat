@@ -1691,7 +1691,7 @@ class EntityStore:
         direction = ent.ring_direction()
         parts: list[str] = []
         if subj:
-            names = ", ".join(f"{self.default_label(k)} ({c:.2f})"
+            names = ", ".join(f"{k} ({c:.2f})"
                               for k, c in subj)
             parts.append(f"The session's present is around: {names}")
         # THE AXIS (the operator's approaching/receding design): the
