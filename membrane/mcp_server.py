@@ -273,6 +273,33 @@ TOOLS: list[dict] = [
             "required": ["spec", "cut"],
         },
     },
+    {
+        "name": "membrane_peer_post",
+        "description": (
+            "Post a message to the PEER CHANNEL: a chat lane between the "
+            "LLMs, visible to the operator on every connected opencode "
+            "seat. Use for cross-seat coordination -- handoffs, "
+            "questions to another seat's model, state announcements. "
+            "Unread messages ride YOUR banner automatically."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string",
+                         "description": "The message (capped 2000)."},
+                "reply_to": {"type": "string",
+                             "description": "Optional seat id replying to."},
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "membrane_peer_seats",
+        "description": (
+            "List the connected membrane seats (the registry: each proxy "
+            "registers on boot and heartbeats; dead seats expire). Use "
+            "before posting to know who is listening."),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
 ]
 
 
@@ -347,34 +374,7 @@ def tool_state(args: dict, port: int) -> str:
         f"{th.get('free_energy', 0):.2f} (safe_frac {th.get('safe_frac', 0):.2f})",
         f"- embed model {out.get('embed_model') or 'unresolved'} "
         f"| gate sim_min={((out.get('gate') or {}).get('sim_min'))}",
-    {
-        "name": "membrane_peer_post",
-        "description": (
-            "Post a message to the PEER CHANNEL: a chat lane between the "
-            "LLMs, visible to the operator on every connected opencode "
-            "seat. Use for cross-seat coordination -- handoffs, "
-            "questions to another seat's model, state announcements. "
-            "Unread messages ride YOUR banner automatically."),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "text": {"type": "string",
-                         "description": "The message (capped 2000)."},
-                "reply_to": {"type": "string",
-                             "description": "Optional seat id replying to."},
-            },
-            "required": ["text"],
-        },
-    },
-    {
-        "name": "membrane_peer_seats",
-        "description": (
-            "List the connected membrane seats (the registry: each proxy "
-            "registers on boot and heartbeats; dead seats expire). Use "
-            "before posting to know who is listening."),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-]
+    ]
     if comp:
         lines.append(f"- compactor: cycles={comp.get('cycles', 0)} "
                      f"clusters={comp.get('clusters', 0)} "

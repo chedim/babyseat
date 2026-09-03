@@ -303,7 +303,7 @@ class TestAnnouncements(unittest.TestCase):
     is the delivery ledger."""
 
     def _store(self):
-        return EntityStore(path=None)      # RAM-only
+        return EntityStore(path=None, shared=False)   # RAM-only, isolated
 
     def test_birth_announces_exactly_once(self):
         st = self._store()

@@ -13,6 +13,15 @@ from membrane.entities import EntityStore, QuantumEntity, CLASS_COMPONENT
 from membrane.night import (sweep_junk, register_gray_forms,
                             consolidate_entities, run_scripted_entities)
 
+
+def _isolated_store(tmp=None):
+    """A TEST-ISOLATED store: shared=False (never touches the couchbase
+    commons -- the 'doomed.py in the fork's banner' bug: test fixtures
+    wrote through to the shared collection when couchbase was up)."""
+    if tmp:
+        return EntityStore(path=tmp, shared=False)
+    return EntityStore(path=None, shared=False)
+
 JUNK_WORDS = ("pid ", "command ", "traceback", "lsof", "dump", "raw",
               "listing", "log line", "blob", "hex", "minified",
               "shebang", "columns")
@@ -89,7 +98,7 @@ ANCHOR_REPLY = ('{"anchor": "raw command-line process dumps with pid and '
 class TestSweep(unittest.TestCase):
     def _world(self, n_junk=20, n_work=5):
         emb = FakeEmb()
-        est = EntityStore(path=None)          # RAM-only
+        est = _isolated_store()          # RAM-only
         junk = [Ex(f"PID {i} COMMAND /usr/bin/thing {i}",
                    vec=emb.embed([f"PID {i} COMMAND x"])[0])
                 for i in range(n_junk)]
@@ -137,7 +146,7 @@ class TestSweep(unittest.TestCase):
 class TestRegistration(unittest.TestCase):
     def test_anchor_and_entity_growth_rate_limited(self):
         emb = FakeEmb()
-        est = EntityStore(path=None)
+        est = _isolated_store()
         junk = [Ex(f"PID {i} COMMAND thing", vec=emb.embed([f"PID {i} COMMAND x"])[0])
                 for i in range(4)]
         work = [Ex(f"we fixed the screen {i}", vec=emb.embed([f"clean {i}"])[0])
@@ -157,7 +166,7 @@ class TestRegistration(unittest.TestCase):
 
     def test_no_gray_no_call(self):
         emb = FakeEmb()
-        est = EntityStore(path=None)
+        est = _isolated_store()
         cells = [Ex("clean prose", vec=emb.embed(["clean prose"])[0])]
         store = Store(cells)
         mem = Mem(store, emb)
@@ -176,7 +185,7 @@ class TestRegistration(unittest.TestCase):
 class TestConsolidation(unittest.TestCase):
     def _world(self):
         emb = FakeEmb()
-        est = EntityStore(path=None)
+        est = _isolated_store()
         now = time.time()
         cells = []
         for i in range(6):
@@ -214,7 +223,7 @@ class TestScriptedEntities(unittest.TestCase):
 
     def _world(self):
         emb = FakeEmb()
-        est = EntityStore(path=None)
+        est = _isolated_store()
         store = Store([])
         mem = Mem(store, emb)
         return emb, est, store, mem
