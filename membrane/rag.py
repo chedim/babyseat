@@ -945,8 +945,20 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
                 entity_pool = entity_pool[-24:]   # one hot term can't flood
         except Exception:
             entity_pool = []
+        # THE WHY-QUERY CHECK (peer suggestion #2): is this ask why-shaped?
+        # The anchor classifier on the ALREADY-EMBEDDED query vec (zero
+        # model calls); a hit arms the why-boost on the recall below.
+        why_boost = 0.0
+        try:
+            from .runtime import _why_anchor_sims, _WHY_QUERY_BAR, _WHY_BOOST
+            _sit, ask_sim = _why_anchor_sims(mem.embedder, search_vec)
+            if ask_sim >= _WHY_QUERY_BAR:
+                why_boost = _WHY_BOOST
+        except Exception:
+            why_boost = 0.0
         candidates = list(entity_pool) + list(
-            mem.store.recall_merged(search_vec, k=int(srv.rag_k) * 4))
+            mem.store.recall_merged(search_vec, k=int(srv.rag_k) * 4,
+                                    why_boost=why_boost))
         entity_sim_floor = min(0.65, srv.rag_sim_min)   # term evidence clears
         for ex, sim in candidates:
             is_entity_hit = sim >= 0.99

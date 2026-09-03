@@ -600,7 +600,8 @@ class ExemplarStore:
     def recall_merged(self, q: np.ndarray, k: int = 5, *,
                       now: float | None = None,
                       w_rec: float = 0.15, tau: float = 6 * 3600.0,
-                      w_conf: float = 0.05, tau_conf: float = 7 * 86400.0
+                      w_conf: float = 0.05, tau_conf: float = 7 * 86400.0,
+                      why_boost: float = 0.0
                       ) -> list[tuple[Exemplar, float]]:
         """DURABLE + EPHEMERAL, recency-weighted (lab E3): a fresh candidate
         outranks stale canon for the same need; canon recall is untaxed when
@@ -616,7 +617,14 @@ class ExemplarStore:
         stale canon. Deliberately gentler than the candidate bonus (w_conf
         < w_rec): evidence beats recency; a stale confirmed cell must NOT
         lose to a mere claim. Legacy rows without the stamp get nothing --
-        no invented freshness for the ageless."""
+        no invented freshness for the ageless.
+
+        THE WHY BOOST (peer suggestion #2): ``why_boost`` > 0 when the
+        caller classified the query as why-shaped (the anchor classifier,
+        runtime.py) -- cells stamped extra["why"] (learn-time reason cells)
+        take the bonus, so the distilled reason outranks its what-
+        neighbors at a near-tie. Deliberately w_conf-scale: a strong
+        what-match still beats a weak why-match."""
         if not self.exemplars:
             return []
         now = float(now if now is not None else time.time())
@@ -644,6 +652,8 @@ class ExemplarStore:
                 if born > 0.0:
                     age = max(now - born, 0.0)
                     sim += w_conf * float(np.exp(-age / tau_conf))
+            if why_boost > 0.0 and (getattr(ex, "extra", None) or {}).get("why"):
+                sim += why_boost
             rows.append((ex, sim))
         rows.sort(key=lambda t: -t[1])
         return rows[:k]

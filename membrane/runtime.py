@@ -68,6 +68,7 @@ import hashlib
 import json
 import os
 import random
+import re
 import sys
 import threading
 import time
@@ -472,6 +473,78 @@ def _src_of(src: str | None, fallback=None) -> str:
         if f in _SRC_VALID:
             return f
     return "user"
+
+
+# ---- the WHY lane (peer-reported from rosetta-check: 5/5 why-queries
+#      missed -- the field holds WHAT but not WHY) -----------------------------
+# Two ends, both anchor-classified (the JunkScreen pattern: embed the
+# anchors once, classify forever by cosine -- zero model calls):
+#   STAMP (learn time): the situation anchors near "operator explains
+#     design intent" -> extra["why"]=true. A why-cell is the distilled
+#     reason, the thing future why-asks need FIRST.
+#   BOOST (recall time): the query anchors near "a why/how-comes ask"
+#     -> why-cells get a small cosine bonus in recall_merged, so the
+#     reason cell outranks its what-neighbors at a tie. Deliberately
+#     SMALL (w_rec-class): a strong what-match must still beat a weak
+#     why-match -- the boost only breaks ties.
+WHY_ANCHORS = (
+    "the operator explains why a design is the way it is: because the "
+    "original constraint was X, so that Y would hold",
+    "the reason this exists by design: it was chosen so that the other "
+    "path would not break; the rationale behind the decision",
+    "why do we do it this way? because of a hard requirement; that is "
+    "the intent behind the behavior",
+    "the design rationale: by design, this exists to prevent the earlier "
+    "failure mode, at the cost of simplicity",
+    "the explanation of the root cause: this happens because the module "
+    "assumes X; the cause of the behavior",
+)
+_WHY_SITUATION_BAR = 0.72     # situation sim to the intent anchors -> a why-cell
+_WHY_QUERY_BAR = 0.80         # query sim to the ask anchors -> a why-shaped query
+_WHY_BOOST = 0.05             # recall bonus (w_conf-scale: evidence beats recency)
+_FIX_QUERY_RE = re.compile(
+    r"\b(?:fixed|shipped|landed|released)\b[^\n]{0,80}?"
+    r"(?:v?\d+\.\d+|commit\s+[0-9a-f]{7,40}|tag\s+[\w.-]+)", re.I)
+_COMMIT_RE = re.compile(r"\b(?:commit\s+)?([0-9a-f]{7,40})\b", re.I)
+_TAG_RE = re.compile(r"\b(?:tag\s+|v)([\w][\w.-]+)\b", re.I)
+# the ASK anchors (query side): a why/how-comes/how-come question
+WHY_QUERY_ANCHORS = (
+    "why does this work the way it does? what is the reason behind it?",
+    "how come this is here; what was the rationale for this design?",
+    "explain the cause: what makes this happen, what is it for?",
+)
+
+
+_WHY_ANCHOR_VECS: list | None = None   # lazily embedded (one batch, RAM-cached)
+
+
+def _why_anchor_sims(embedder, vec) -> tuple[float, float]:
+    """(situation-side intent sim, query-side ask sim) for one ALREADY-
+    EMBEDDED vector. Anchors embed lazily on first call, cached in RAM
+    (one batch, zero per-learn cost after). Embedder-less: (0, 0)."""
+    global _WHY_ANCHOR_VECS
+    if vec is None:
+        return (0.0, 0.0)
+    import numpy as _np
+    if _WHY_ANCHOR_VECS is None:
+        if embedder is None:
+            return (0.0, 0.0)
+        try:
+            vs = embedder.embed(list(WHY_ANCHORS) + list(WHY_QUERY_ANCHORS))
+            _WHY_ANCHOR_VECS = [v for v in vs if v is not None]
+        except Exception:
+            _WHY_ANCHOR_VECS = []
+    if not _WHY_ANCHOR_VECS:
+        return (0.0, 0.0)
+    v = _np.asarray(vec, dtype=float)
+    vn = _np.linalg.norm(v)
+    if vn < 1e-12:
+        return (0.0, 0.0)
+    v = v / vn
+    sit_sims = [float(v @ a) for a in _WHY_ANCHOR_VECS[:len(WHY_ANCHORS)]]
+    qry_sims = [float(v @ a) for a in _WHY_ANCHOR_VECS[len(WHY_ANCHORS):]]
+    return (max(sit_sims) if sit_sims else 0.0,
+            max(qry_sims) if qry_sims else 0.0)
 
 
 def _src_get(ex) -> str:
@@ -1633,7 +1706,7 @@ class Membrane:
                     self._audit(query, verdict, resp, ex_idx=None, learned=False,
                                 would_absorb=would_absorb, variety_skip=True)
                     return None
-            extra = {"src": _src_of(src)}
+            extra: dict = {"src": _src_of(src)}
             # capture-time entity harvest (deterministic, $0): the precise
             # retrieval axis -- extra["entities"] rides the field row itself,
             # so every store (JSON + couchbase) carries its own tags. The
@@ -1649,6 +1722,28 @@ class Membrane:
                     tags_found = refine_entities(tags_found, cg)
                 if tags_found:
                     extra["entities"] = tags_found
+            except Exception:
+                pass
+            # THE WHY STAMP (peer suggestion #2): the situation anchors near
+            # "operator explains design intent" -> the cell is a REASON cell
+            # (the thing a future why-ask needs first). Zero model calls: the
+            # vec is already embedded; anchors embed once, cached.
+            try:
+                sit_sim, _q_unused = _why_anchor_sims(self.embedder, vec)
+                if sit_sim >= _WHY_SITUATION_BAR:
+                    extra["why"] = sit_sim
+                # THE FIX STAMP (peer suggestion #4): the situation mentions
+                # a shipped/fixed version or commit -> the provenance pointer
+                # rides extra["fix"] so archaeology can trace cell -> commit.
+                fm = _FIX_QUERY_RE.search(query or "")
+                if fm:
+                    cm = _COMMIT_RE.search(fm.group(0))
+                    tg = _TAG_RE.search(fm.group(0))
+                    extra["fix"] = {
+                        "commit": (cm.group(1) if cm and not cm.group(
+                            1).startswith("v") else None) or None,
+                        "tag": tg.group(1) if tg else None,
+                    }
             except Exception:
                 pass
             fresh = Exemplar(
