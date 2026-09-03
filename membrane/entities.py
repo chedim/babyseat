@@ -135,10 +135,24 @@ def _harvest(text: str) -> dict:
     # model tags before the symbol pass (glm-5.3-flash:cloud is a model, not
     # a symbol); urls excluded (their dots are not symbols). A match whose
     # NEXT char in the source is '/' is a path PREFIX ('files:membrane' in
-    # the entity key 'files:membrane/entities.py'), not a model.
-    add("models", [m.group(0) for m in _MODEL_RE.finditer(text)
-                   if not m.group(0).startswith("http")
-                   and (m.end() >= len(text) or text[m.end()] != "/")])
+    # the entity key 'files:membrane/entities.py'), not a model. A match
+    # whose tag part contains '.py'/'\.js' etc. is a file:line ERROR
+    # FRAGMENT ('gate.py:handle', 'file:line'), not a model.
+    _CODE_EXTS = ("py", "js", "ts", "go", "rs", "rb", "java", "sh")
+    models = []
+    for m in _MODEL_RE.finditer(text):
+        mv = m.group(0)
+        if mv.startswith("http"):
+            continue
+        if m.end() < len(text) and text[m.end()] == "/":
+            continue
+        # a file:line ERROR FRAGMENT anywhere in the match ('gate.py:handle',
+        # 'file:line') is not a model -- the code-extension check runs on
+        # the WHOLE match
+        if re.search(r"\.(?:%s)\b" % "|".join(_CODE_EXTS), mv):
+            continue
+        models.append(mv)
+    add("models", models)
     # dotted code symbols: keep Class.attr / module.fn / snake_case chains,
     # drop pronoun-sentences and everything already claimed above
     claimed = ({f.lower() for f in out.get("files", [])}
