@@ -294,7 +294,9 @@ def consolidate_now(mem, est, momentum_vec=None) -> dict:
     # machinery about the ACT of editing (the 'nudge_script (0.96)'
     # subject exhibit -- my own edit-tool calls got learned and the
     # tracker ate them); they are story-eligible for ENTITY tracks but
-    # never for the session's SUBJECT
+    # never for the session's SUBJECT. The SELF-SYMBOL screen: cells
+    # about membrane's own internals (self._cb_warned etc.) are
+    # implementation noise, never the session's subject.
     _MGMT_PREFIXES = ("tool membrane_membrane_entity_add for:",
                       "tool membrane_membrane_entity_edit for:",
                       "tool membrane_membrane_entity_remove for:",
@@ -302,10 +304,27 @@ def consolidate_now(mem, est, momentum_vec=None) -> dict:
                       "tool membrane_entity_edit for:",
                       "tool membrane_entity_remove for:",
                       "tool membrane_membrane_watch_entity for:",
-                      "tool membrane_membrane_unwatch_entity for:")
+                      "tool membrane_membrane_unwatch_entity for:",
+                      "tool membrane_membrane_learn for:",
+                      "tool membrane_membrane_query for:",
+                      "tool membrane_membrane_state for:")
+    _SUBJECT_JUNK_SYMBOLS = ("self._entities_collection",
+                             "self._cb_warned", "self._announce",
+                             "self._cb_eph", "self._reg",
+                             "script_render", "script_every_n",
+                             "nudge_script", "delete_script",
+                             "script_failures", "script_disabled",
+                             "default_label", "_nearest_entities",
+                             "entity_index", "_eph_born_of",
+                             "track_report", "ensure_track_entity",
+                             "_entity_for_track", "ring_velocity",
+                             "cooccurrence_neighbors",
+                             "membrane_hook")
     for i in safe_idx[-16:]:                       # the newest safe cells
         sit_l = str(exs[i].situation or "").lower()
         if any(sit_l.startswith(p) for p in _MGMT_PREFIXES):
+            continue
+        if any(j in sit_l for j in _SUBJECT_JUNK_SYMBOLS):
             continue
         e = exs[i]
         v = getattr(e, "vec", None)
