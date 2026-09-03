@@ -351,6 +351,13 @@ def consolidate_entities(mem, est, materialize: int = 8,
                       and est.find(k.split(":", 1)[1]) is None),
                      key=lambda x: -x[1])[:materialize]
         for key, n in hot:
+            # THE PATH-FRAGMENT SCREEN (the s/peers.jsonl and
+            # projects/membrane/membrane/field.py exhibits): a path with
+            # a 1-char directory segment is a truncated/doubled capture
+            # fragment, not a real file
+            segs = key.split("/", 1)[1].split("/") if "/" in key else []
+            if any(len(s) <= 2 for s in segs[:-1]):
+                continue
             kind, _, val = key.partition(":")
             ent = QuantumEntity(
                 eid=f"{MEMBRANE_NS}{key}",

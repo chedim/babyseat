@@ -5361,6 +5361,19 @@ def main() -> None:
         if evicted_boot:
             print(f"[opencode] track cap: evicted {evicted_boot} "
                   f"(story-poorest)", file=sys.stderr)
+        # THE GEOMETRY BOOTSTRAP (the cell-story fix): every planted
+        # track consolidates AT BOOT (not only at plant time) -- tracks
+        # planted before the seeding code existed (or whose entity doc
+        # the reharvest/eid-dual fix orphaned) get their geometry now,
+        # so the render is geometry-first instead of cell recitation.
+        try:
+            from .night import consolidate_entities
+            consolidate_entities(srv.membrane, srv.entity_store,
+                                 materialize=0,
+                                 only_keys=list(srv.entity_store.tracks.keys()))
+        except Exception as e:
+            print(f"[opencode] track geometry bootstrap skipped ({e})",
+                  file=sys.stderr)
         if "session:now" not in srv.entity_store.tracks:
             srv.entity_store.watch_track(
                 "session:now", label="now (the session's living present)")
