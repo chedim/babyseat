@@ -1822,6 +1822,23 @@ class EntityStore:
             self._save_tracks()
         return evicted
 
+    def _entity_for_track(self, key: str) -> QuantumEntity | None:
+        """THE TRACK-KEY LOOKUP (the dual-eid fix): entity docs exist in
+        TWO eid forms -- materialization gives 'membrane::files:x.py'
+        (kind:key) while model-side entity_add gives
+        'membrane::Component:files:x.py' (class-embedded). The track's
+        geometry lookup must find BOTH, or scripted/geometry tracks
+        silently fall back to cell recitation. Exact first, then
+        suffix match (the class-prefixed form ends with ':<key>')."""
+        direct = self.docs.get(f"{MEMBRANE_NS}{key}")
+        if direct is not None:
+            return direct
+        suffix = ":" + key.lower()
+        for q in self.docs.values():
+            if q.eid.lower().endswith(suffix):
+                return q
+        return None
+
     def track_report(self, exemplars, query_vec=None,
                      session_since: float | None = None,
                      goal: str = "", embedder=None) -> list[tuple[str, str]] | None:
@@ -1854,7 +1871,7 @@ class EntityStore:
                 if rel:
                     out.append(rel)
                 continue
-            ent = self.docs.get(f"{MEMBRANE_NS}{key}")
+            ent = self._entity_for_track(key)
             has_ring = (ent is not None
                         and len(getattr(ent, "position_history", []) or []) >= 2
                         and getattr(ent, "position", None))
