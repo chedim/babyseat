@@ -1243,7 +1243,11 @@ class EntityStore:
         if cls and cls in CLASSES:
             ent.cls = cls
         # THE SCRIPT FIELDS (programmable entities, size-capped; ''
-        # clears the script and its failure state):
+        # clears the script and its failure state). Setting a NEW
+        # nudge script also clears the stale `script_render` (the
+        # operator's catch: the old fixture line rode the banner
+        # until the next consolidation pass otherwise) -- the new
+        # script's render lands at the next pass.
         for field, val, cap in (("nudge_script", nudge_script,
                                  SCRIPT_MAX_NUDGE),
                                 ("delete_script", delete_script,
@@ -1260,9 +1264,12 @@ class EntityStore:
                 ent.properties.pop("script_failures", None)
             else:
                 ent.properties[field] = sval
-                # a rewrite is a fresh start (clear the disable state)
+                # a rewrite is a fresh start (clear the disable state
+                # AND the stale render from the previous script)
                 ent.properties.pop("script_disabled", None)
                 ent.properties.pop("script_failures", None)
+                if field == "nudge_script":
+                    ent.properties.pop("script_render", None)
         if merged_into:
             dst = self._resolve_spec(str(merged_into))
             if dst is None or dst.eid == ent.eid:
