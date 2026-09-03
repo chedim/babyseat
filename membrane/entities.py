@@ -222,13 +222,14 @@ ZOOM_STEP = 4.0               # each next window is 4x wider
 ZOOM_BUDGETS = (3, 2)         # beat budgets per window (then 0: era counts)
 ZOOM_ERA_MIN = 3              # cells in a window below this render prose
 
-# ---- the scarcity covenant (the operator's ratio) --------------------------
+# ---- the scarcity covenant (the operator's ratio, revised: 6 tracks) ------
 # TRACKS are the EXPENSIVE lane (every one renders a paragraph in WHERE WE
-# ARE, every turn) -> few: MAX_TRACKS=3 (the default now-track counts).
-# WATCHES are the CHEAP lane (event-driven, silent until fired) -> more:
-# watch.py's MAX_WATCHES=7. Attention is scarce by construction; overflow
-# evicts the OLDEST planted track (never the default now-track).
-MAX_TRACKS = 3
+# ARE, every turn) -> MAX_TRACKS=6 user tracks + the default now-track
+# (the clock, permanent, never counted). WATCHES are the CHEAP lane
+# (event-driven, silent until fired) -> watch.py's MAX_WATCHES=7.
+# Attention is scarce by construction; overflow evicts the STORY-POOREST
+# track (never the default now-track).
+MAX_TRACKS = 6
 DEFAULT_TRACK_KEY = "session:now"
 
 
