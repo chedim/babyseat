@@ -34,9 +34,11 @@ import json
 import sys
 import time
 
+# ---- programmable entities (the script constants live in entities.py --
+# entities.py owns the entity contract; this module imports them) ----
 from .entities import (MEMBRANE_NS, CLASS_COMPONENT, CLASS_SESSION,
                        entity_index, _eph_born_of, QuantumEntity,
-                       _KIND_CLASS)
+                       _KIND_CLASS, SCRIPT_MAX_NUDGE, SCRIPT_MAX_DELETE)
 
 # ---- knobs (the audited defaults; all overridable per call) ---------------
 NIGHT_SWEEP_CUT = 0.70     # demote threshold (stricter than display 0.62)
@@ -309,7 +311,8 @@ def consolidate_now(mem, est, momentum_vec=None) -> dict:
             "global_moved": round(gres["moved"], 4) if gpts else 0.0}
 
 
-def consolidate_entities(mem, est, materialize: int = 8) -> dict:
+def consolidate_entities(mem, est, materialize: int = 8,
+                         only_keys=None) -> dict:
     """Phase 3 (every cycle, ~ms): drift every linked entity's position
     toward its recent cells and record the motion. Cells are immutable;
     the tracker moves. Returns the drift stats for the gate note.
@@ -318,13 +321,17 @@ def consolidate_entities(mem, est, materialize: int = 8) -> dict:
     the exemplar side-index, not the store -- when a key accumulates
     enough cells (>= 3) it EARNS a store doc (the tracker that drifts).
     Bounded per pass (top-k by cell count) so a big field does not spawn
-    hundreds of trackers in one cycle."""
+    hundreds of trackers in one cycle.
+    ``only_keys``: consolidate ONLY these entity keys (skips
+    materialization) -- the plant-time seeding path (a fresh track needs
+    its ring immediately, the night pass may be 15 minutes away)."""
     import numpy as _np
     now = time.time()
     inv = entity_index(mem.store.exemplars)
-    # -- materialize: hot tag keys earn store docs --
+    # -- materialize: hot tag keys earn store docs (SKIPPED on only_keys:
+    #    the plant-time seeding path materializes nothing) --
     mat = 0
-    if materialize > 0:
+    if materialize > 0 and not only_keys:
         hot = sorted(((k, len(v)) for k, v in inv.items()
                       if len(v) >= 3 and f"{MEMBRANE_NS}{k}" not in est.docs
                       and est.find(k.split(":", 1)[1]) is None),
@@ -354,6 +361,13 @@ def consolidate_entities(mem, est, materialize: int = 8) -> dict:
     drifted = 0
     total_moved = 0.0
     for ent in est.docs.values():
+        # only_keys: the plant-time seeding path consolidates JUST this
+        # entity (a fresh track's ring, immediately)
+        if only_keys:
+            ekey = ent.eid[len(MEMBRANE_NS):] \
+                if ent.eid.startswith(MEMBRANE_NS) else ""
+            if ekey not in only_keys:
+                continue
         idxs = list(inv.get(ent.eid[len(MEMBRANE_NS):]) or []) \
             if ent.eid.startswith(MEMBRANE_NS) else []
         if not idxs and ent.links:
@@ -381,13 +395,222 @@ def consolidate_entities(mem, est, materialize: int = 8) -> dict:
             "avg_moved": round(total_moved / drifted, 4) if drifted else 0.0}
 
 
+# ---- programmable entities (the operator's design: the model writes
+# small lifecycle scripts; membrane runs them at consolidation time) ----
+SCRIPT_TIMEOUT_S = 2.0         # wall clock per run
+SCRIPT_MAX_FAILURES = 3        # consecutive failures -> auto-disable
+SCRIPT_MAX_PER_PASS = 20       # hard ceiling per consolidation tick
+                               # (the sensors' duty-cycle ceiling: worst
+                               # case 20 execs per 15-min pass, not
+                               # unbounded as scripted entities pile up)
+SCRIPT_DEFAULT_EVERY_N = 4     # each entity's script samples every Nth
+                               # pass (hot entities: properties
+                               #['script_every_n'] = 1)
+# process-level modules stay banned (the escape hatch); pure-compute
+# stdlib is ALLOWED -- a completely-blocked script can't do anything
+# useful (the operator's call: dates, math, parsing need *something*)
+_SCRIPT_ALLOWED_IMPORTS = ("json", "math", "datetime", "time", "re",
+                           "collections", "itertools", "statistics",
+                           "functools", "string", "textwrap", "unicodedata",
+                           "heapq", "bisect", "random")
+_SCRIPT_BANNED_PREFIXES = ("membrane", "os", "sys", "subprocess", "socket",
+                           "shutil", "pathlib", "importlib", "builtins",
+                           "ctypes", "signal", "threading", "requests",
+                           "urllib", "http", "ftplib", "telnetlib", "pickle",
+                           "marshal", "code", "codeop", "compileall",
+                           "runpy", "tempfile", "glob", "io", "abc",
+                           "contextlib", "types", "weakref", "gc", "atexit",
+                           "traceback", "warnings", "inspect", "dis",
+                           "importlib.machinery")
+
+
+def _banned_import(name, *args, **kwargs):
+    """The import policy: pure-compute stdlib allowed (json, math,
+    datetime, re, ... -- the operator's 'let it have it'), everything
+    process-level banned (membrane internals, os/sys/subprocess/socket,
+    io/types/traceback -- the escape hatches). A soft guard: the real
+    containment is trust + audit (the operator sees every script write)."""
+    low = str(name).lower().split(".", 1)[0]
+    if low in _SCRIPT_ALLOWED_IMPORTS:
+        return __import__(name, *args, **kwargs)
+    raise ImportError(
+        f"entity scripts cannot import {name!r} (allowed: "
+        f"{', '.join(_SCRIPT_ALLOWED_IMPORTS)}; state comes from the "
+        f"JSON input)")
+
+
+def run_entity_script(code: str, state: dict) -> dict:
+    """ONE script execution: exec in a stripped namespace (the import
+    policy above: pure-compute stdlib allowed, process-level banned),
+    the entity state injected as the ``state`` variable. Returns the
+    script's ``result`` dict: {render?, data?, delete?}. Any exception
+    becomes {'error': <msg>} (the caller counters failures and turns
+    them into banner events)."""
+    def _import_guard(name, *a, **k):
+        return _banned_import(name, *a, **k)
+    # exec resolves imports through __builtins__["__import__"] -- the
+    # builtins object must be a DICT (the interpreter subscripts it)
+    guard_dict = {"__import__": _import_guard}
+    # keep the rest of the real builtins (print, len, ...) -- minus the
+    # dangerous ones the state JSON makes unnecessary
+    import builtins as _bi
+    for name in dir(_bi):
+        if name.startswith("_") or name in guard_dict:
+            continue
+        guard_dict[name] = getattr(_bi, name)
+    ns: dict = {"__builtins__": guard_dict, "state": state}
+    try:
+        exec(compile(code, "<entity-script>", "exec"), ns)
+        res = ns.get("result")
+        return res if isinstance(res, dict) else {}
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"[:200]}
+
+
+def run_scripted_entities(mem, est, now: float | None = None) -> dict:
+    """Consolidation-time script pass: for every entity carrying scripts,
+    run delete_script FIRST (retire wins over nudge), then nudge_script
+    (its output {render?, data?} patches the entity's banner fragment
+    and script_data). Errors/timeouts count consecutive failures
+    (SCRIPT_MAX_FAILURES -> auto-disable) and announce to the banner.
+
+    THE DUTY CYCLE (the operator's 'too many scripts' concern): sensors
+    sample, they don't fire continuously -- each entity's scripts run
+    every ``script_every_n`` passes (default 4: once/hour at the 15-min
+    tick; hot entities set 1), the whole pass caps at
+    SCRIPT_MAX_PER_PASS executions (oldest-run first), so worst case is
+    bounded regardless of how many scripted entities pile up."""
+    import time as _time
+    import json as _json
+    now = now or time.time()
+    stats = {"deleted": 0, "nudged": 0, "errors": 0, "deferred": 0}
+    scripted = [(k, e) for k, e in est.docs.items()
+                if ((e.properties or {}).get("nudge_script")
+                    or (e.properties or {}).get("delete_script"))]
+    # THE DUTY CYCLE: tick counter on the store (pass number mod N) --
+    # each entity runs when pass_count % its every_n == its slot (the
+    # eid's hash spreads the slots so entities don't bunch)
+    pass_no = int(now // 900)          # 15-min tick identity
+    budget = SCRIPT_MAX_PER_PASS
+    for eid, ent in scripted:
+        if budget <= 0:
+            stats["deferred"] = stats.get("deferred", 0) + 1
+            continue
+        props = ent.properties or {}
+        if props.get("script_disabled"):
+            continue
+        every = props.get("script_every_n") or SCRIPT_DEFAULT_EVERY_N
+        try:
+            every = max(1, int(every))
+        except (TypeError, ValueError):
+            every = SCRIPT_DEFAULT_EVERY_N
+        slot = (hash(eid) % max(every, 1))
+        if pass_no % max(every, 1) != slot % max(every, 1):
+            stats["deferred"] = stats.get("deferred", 0) + 1
+            continue
+        budget -= 1
+        props = ent.properties or {}
+        state = _script_state(ent, mem, now)
+        # 1. the DELETE script first: retirement precedes any nudge
+        dcode = props.get("delete_script")
+        if dcode and not props.get("script_disabled"):
+            out = run_entity_script(dcode, state)
+            if out.get("error"):
+                stats["errors"] += 1
+                _script_error_announce(est, eid, "delete", out["error"])
+                _script_fail(est, ent)
+                continue
+            ent.properties.pop("script_failures", None)
+            if out.get("delete"):
+                ent.properties["retired"] = True
+                ent.properties["retired_ts"] = now
+                est.upsert(ent)
+                est._announce("retired", ent)
+                try:
+                    from .opencode import _write_audit
+                    _write_audit(mem, {"event": "agent-entity-retired",
+                                       "origin": "delete-script",
+                                       "eid": eid,
+                                       "field_size": len(mem.store)})
+                except Exception:
+                    pass
+                est.unwatch_track(eid[len(MEMBRANE_NS):]
+                                  if eid.startswith(MEMBRANE_NS) else eid)
+                stats["deleted"] += 1
+                continue
+        # 2. the NUDGE script: render fragment + data
+        ncode = props.get("nudge_script")
+        if ncode:
+            out = run_entity_script(ncode, state)
+            if out.get("error"):
+                stats["errors"] += 1
+                _script_error_announce(est, eid, "nudge", out["error"])
+                _script_fail(est, ent)
+                continue
+            ent.properties.pop("script_failures", None)
+            changed = False
+            if out.get("render"):
+                ent.properties["script_render"] = str(out["render"])[:300]
+                changed = True
+            if out.get("data") is not None and \
+                    isinstance(out.get("data"), dict):
+                ent.properties["script_data"] = out["data"]
+                changed = True
+            if changed:
+                est.upsert(ent, embedder=mem.embedder)
+                stats["nudged"] += 1
+    return stats
+
+
+def _script_state(ent, mem, now: float) -> dict:
+    """The JSON state a script sees (geometry + properties + own data)."""
+    return {"position": ent.position,
+            "ring": [p for _, p in (getattr(ent, "position_history",
+                                                []) or [])],
+            "velocity": (ent.ring_velocity(now)
+                         if getattr(ent, "position", None) else 0.0),
+            "cells": len(ent.links or []),
+            "properties": {k: v for k, v in (ent.properties or {}).items()
+                           if not k.startswith("script_")},
+            "data": dict((ent.properties or {}).get("script_data") or {}),
+            "now": now}
+
+
+def _script_fail(est, ent) -> None:
+    """One more strike; SCRIPT_MAX_FAILURES consecutive -> auto-disable
+    (a broken script cannot spam stderr or wedge the render)."""
+    n = int((ent.properties or {}).get("script_failures") or 0) + 1
+    ent.properties["script_failures"] = n
+    if n >= SCRIPT_MAX_FAILURES:
+        ent.properties["script_disabled"] = True
+        _script_error_announce(est, ent.eid, "disabled",
+                               f"{n} consecutive failures -- script "
+                               f"auto-disabled (clear via "
+                               f"membrane_entity_edit)")
+    est.save()
+
+
+def _script_error_announce(est, eid: str, kind: str, error: str) -> None:
+    """A script error is a BANNER EVENT (the model sees its own broken
+    script and can fix or clear it) -- not a silent stderr line."""
+    est._announce("script-error", type("E", (), {
+        "eid": eid, "cls": "Component",
+        "properties": {"name": kind, "summary": error[:140]}})())
+
+
 def run_night(srv, mem, est, chat, sweep: bool = False) -> dict:
     """The whole night, callable from the compactor cycle. ``sweep`` gates
     the phase-1/2 pair (rate-limited by the caller); consolidation always
     runs (pure numpy, ~ms). Every failure degrades -- the compaction
     already landed; the night must never break the day."""
     out: dict = {}
+    now = time.time()
     try:
+        # THE SCRIPT PASS (the operator's programmable-entities design):
+        # delete_scripts retire first, then nudge_scripts patch render/
+        # data. Runs BEFORE consolidation (a retired entity skips its
+        # drift work entirely).
+        out["scripts"] = run_scripted_entities(mem, est, now=now)
         out["consolidation"] = consolidate_entities(mem, est)
         out["now"] = consolidate_now(mem, est,
                                      momentum_vec=getattr(srv,

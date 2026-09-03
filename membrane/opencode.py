@@ -4557,6 +4557,17 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                               label=str(body.get("label") or ""))
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
+        # THE GEOMETRY PREREQUISITE: a fresh track needs its entity doc +
+        # seeded ring IMMEDIATELY (scripts read the ring; the night pass
+        # may be 15 minutes away). One consolidation pass over this
+        # entity's cells, synchronously -- the track's first render has
+        # geometry instead of a bare fallback.
+        try:
+            from .night import consolidate_entities
+            consolidate_entities(srv.membrane, est, materialize=0,
+                                 only_keys=[key])
+        except Exception:
+            pass
         self._json_out(res)
 
     def _entity_track_remove(self) -> None:
@@ -4628,7 +4639,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             return
         res = est.edit(spec, summary=body.get("summary"),
                        links=body.get("links"), cls=body.get("class"),
-                       merged_into=body.get("merged_into"))
+                       merged_into=body.get("merged_into"),
+                       nudge_script=body.get("nudge_script"),
+                       delete_script=body.get("delete_script"))
         self._entity_audit("edit", res)
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return

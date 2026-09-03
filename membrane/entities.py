@@ -1189,7 +1189,8 @@ class EntityStore:
                 "class": c, "name": name}
 
     def edit(self, spec: str, summary=None, links=None, cls=None,
-             merged_into=None) -> dict:
+             merged_into=None, nudge_script=None,
+             delete_script=None) -> dict:
         """Model-side entity EDIT: patch summary/links/class on the
         resolved entity. Only provided fields change.
         ``merged_into``: MARK-don't-delete subsumption (the operator's
@@ -1197,7 +1198,13 @@ class EntityStore:
         properties['merged_into'] = <dst eid>, its links union into the
         destination, and the merge ANNOUNCES (an event the model should
         see, same as a birth). The graph reader follows the pointer:
-        a merged id transparently resolves to its survivor."""
+        a merged id transparently resolves to its survivor.
+        ``nudge_script`` / ``delete_script``: PROGRAMMABLE ENTITIES (the
+        operator's design) -- small lifecycle scripts the model writes;
+        they run at consolidation time (delete first, then nudge), see
+        the entity's geometry as the ``state`` variable, and return
+        {render?, data?, delete?} as ``result``. Size-capped, audited,
+        3-strike auto-disable on failures. Empty string clears."""
         ent = self._resolve_spec(spec)
         if ent is None:
             return {"ok": False,
@@ -1212,6 +1219,27 @@ class EntityStore:
             ent.links = sorted(merged)
         if cls and cls in CLASSES:
             ent.cls = cls
+        # THE SCRIPT FIELDS (programmable entities, size-capped; ''
+        # clears the script and its failure state):
+        for field, val, cap in (("nudge_script", nudge_script,
+                                 SCRIPT_MAX_NUDGE),
+                                ("delete_script", delete_script,
+                                 SCRIPT_MAX_DELETE)):
+            if val is None:
+                continue
+            sval = str(val)
+            if len(sval) > cap:
+                return {"ok": False,
+                        "error": f"{field} too long ({len(sval)} > {cap})"}
+            if not sval.strip():
+                ent.properties.pop(field, None)
+                ent.properties.pop("script_disabled", None)
+                ent.properties.pop("script_failures", None)
+            else:
+                ent.properties[field] = sval
+                # a rewrite is a fresh start (clear the disable state)
+                ent.properties.pop("script_disabled", None)
+                ent.properties.pop("script_failures", None)
         if merged_into:
             dst = self._resolve_spec(str(merged_into))
             if dst is None or dst.eid == ent.eid:
@@ -1830,43 +1858,56 @@ class EntityStore:
             has_ring = (ent is not None
                         and len(getattr(ent, "position_history", []) or []) >= 2
                         and getattr(ent, "position", None))
-            # ---- GEOMETRY-FIRST: subject + motion + delta from the ring,
-            #      PLUS the freshest fragment as the WHY (the operator's
-            #      'curious but aint no story' call: geometry alone names
-            #      the state, the freshest beat explains it) ----
+            # ---- GEOMETRY-FIRST: subject + motion + delta from the ring.
+            #      THE SCRIPT HOOK (programmable entities): a nudge
+            #      script's stored fragment REPLACES the default parts --
+            #      the script owns its track's line (the operator's 'the
+            #      model writes small lifecycle scripts' design).
             if has_ring:
+                script_render = ((ent.properties or {}).get("script_render")
+                                 or "")
                 parts: list[str] = []
-                subj_now = self._nearest_entities(ent.position, exemplars)
-                hist = ent.position_history
-                subj_then = (self._nearest_entities(hist[0][1], exemplars)
-                             if len(hist) >= 2 else None)
-                if subj_now:
-                    names = ", ".join(f"{self.default_label(k)} ({c:.2f})"
-                                      for k, c in subj_now[:2])
-                    parts.append(f"sits near {names}")
-                # THE AXIS: the entity's own drift decoded through the
-                # tracked frame (same lens as the session pulse)
-                ax = self._axis_of_motion(ent, exclude_key=key)
-                if ax["toward"]:
-                    t_names = ", ".join(f"{self.default_label(k)} ({c:.2f})"
-                                        for k, c in ax["toward"])
-                    parts.append(f"approaching {t_names}")
-                elif ax["away"]:
-                    a_names = ", ".join(f"{self.default_label(k)} ({c:.2f})"
-                                        for k, c in ax["away"])
-                    parts.append(f"receding from {a_names}")
-                if subj_then and subj_now:
-                    k_now = subj_now[0][0]
-                    k_then = subj_then[0][0]
-                    if k_now != k_then:
-                        parts.append(f"moving from near "
-                                     f"{self.default_label(k_then)} toward "
-                                     f"{self.default_label(k_now)}")
-                vel = ent.ring_velocity(now)
-                if direction_drifting(ent, now):
-                    pace = ("fast" if vel >= 0.15
-                            else "slowly" if vel < 0.05 else "steadily")
-                    parts.append(f"moving {pace} ({vel:.2f}/h)")
+                if script_render:
+                    parts.append(script_render)
+                else:
+                    subj_now = self._nearest_entities(ent.position,
+                                                      exemplars)
+                    hist = ent.position_history
+                    subj_then = (self._nearest_entities(hist[0][1],
+                                                        exemplars)
+                                 if len(hist) >= 2 else None)
+                    if subj_now:
+                        names = ", ".join(
+                            f"{self.default_label(k)} ({c:.2f})"
+                            for k, c in subj_now[:2])
+                        parts.append(f"sits near {names}")
+                    # THE AXIS: the entity's own drift decoded through the
+                    # tracked frame (same lens as the session pulse)
+                    ax = self._axis_of_motion(ent, exclude_key=key)
+                    if ax["toward"]:
+                        t_names = ", ".join(
+                            f"{self.default_label(k)} ({c:.2f})"
+                            for k, c in ax["toward"])
+                        parts.append(f"approaching {t_names}")
+                    elif ax["away"]:
+                        a_names = ", ".join(
+                            f"{self.default_label(k)} ({c:.2f})"
+                            for k, c in ax["away"])
+                        parts.append(f"receding from {a_names}")
+                    if subj_then and subj_now:
+                        k_now = subj_now[0][0]
+                        k_then = subj_then[0][0]
+                        if k_now != k_then:
+                            parts.append(f"moving from near "
+                                         f"{self.default_label(k_then)} "
+                                         f"toward "
+                                         f"{self.default_label(k_now)}")
+                    vel = ent.ring_velocity(now)
+                    if direction_drifting(ent, now):
+                        pace = ("fast" if vel >= 0.15
+                                else "slowly" if vel < 0.05
+                                else "steadily")
+                        parts.append(f"moving {pace} ({vel:.2f}/h)")
                 # THE WHY: the freshest junk-free fragment -- geometry
                 # says WHERE, the beat says WHY (the 'aint no story' fix)
                 idxs = inv.get(key) or []
@@ -2002,6 +2043,11 @@ _GRAIN_DEFAULTS = {
     CLASS_COMPONENT: 0.05,
     CLASS_MODEL: 0.08,
 }
+
+# ---- programmable entities (the script constants live HERE -- entities.py
+# owns the entity contract; night.py imports them, no circular import) ----
+SCRIPT_MAX_NUDGE = 2048        # nudge script size cap (chars)
+SCRIPT_MAX_DELETE = 1024       # delete script size cap
 
 
 # ---- the junk-cut knob (per-track, live, anchor-vector screen) -------------

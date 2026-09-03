@@ -203,7 +203,16 @@ TOOLS: list[dict] = [
             "Edit an entity: resolve by eid or exact name, patch summary/"
             "links/class (only provided fields change). merged_into marks "
             "a subsumption: the source doc stays, pointing at its "
-            "survivor (links unioned; the merge announces)."),
+            "survivor (links unioned; the merge announces). "
+            "nudge_script/delete_script: PROGRAMMABLE ENTITIES -- small "
+            "python lifecycle scripts (<= 2048/1024 chars) that run at "
+            "consolidation time, see the entity's geometry as the "
+            "'state' variable (position, ring, velocity, properties, "
+            "data), and set 'result' = {render: str, data: dict, "
+            "delete: bool}. The nudge's render replaces the track's "
+            "default banner line; the delete script retires the entity "
+            "(tombstoned, announced). 3 consecutive failures auto-"
+            "disable; empty string clears."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -215,6 +224,14 @@ TOOLS: list[dict] = [
                 "merged_into": {"type": "string",
                                 "description": "eid or name of the "
                                                "survivor entity."},
+                "nudge_script": {"type": "string",
+                                 "description": "python; runs at "
+                                                "consolidation; sets "
+                                                "'result'."},
+                "delete_script": {"type": "string",
+                                  "description": "python; runs first; "
+                                                 "set result.delete=True "
+                                                 "to retire."},
             },
             "required": ["spec"],
         },
@@ -495,7 +512,8 @@ def tool_entity_add(args: dict, port: int) -> str:
 
 def tool_entity_edit(args: dict, port: int) -> str:
     body = {"spec": str(args.get("spec") or "").strip()}
-    for f in ("summary", "links", "class", "merged_into"):
+    for f in ("summary", "links", "class", "merged_into",
+              "nudge_script", "delete_script"):
         if args.get(f) is not None:
             body[f] = args[f]
     out = _http(port, "POST", "/membrane/entity/edit", body)
@@ -505,6 +523,13 @@ def tool_entity_edit(args: dict, port: int) -> str:
         return (f"Entity {out['eid']} MARKED merged into "
                 f"{out['merged_into']} (the source doc stays, pointing "
                 f"at its survivor; links unioned; announced).")
+    if args.get("nudge_script") is not None or \
+            args.get("delete_script") is not None:
+        return (f"Entity {out['eid']} scripts updated -- the nudge runs "
+                f"at the next consolidation pass (its 'render' replaces "
+                f"the track's default banner line); the delete script "
+                f"retires the entity when it sets result.delete=True. "
+                f"Empty string clears a script.")
     return (f"Entity {out['eid']} updated: class {out.get('class')}, "
             f"summary {out.get('summary')!r}, links {out.get('links')}.")
 
