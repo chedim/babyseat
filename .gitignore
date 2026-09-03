@@ -44,3 +44,5 @@ itll-pave-us.html
 # a smoke test that passed --audit :memory: from the repo root materializes a literal file
 :memory:
 :memory:.corrupt-*
+# the entity side-index, same mechanism (a boot/smoke from the repo root)
+entities.json
