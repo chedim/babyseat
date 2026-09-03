@@ -1872,59 +1872,60 @@ class EntityStore:
                     out.append(rel)
                 continue
             ent = self._entity_for_track(key)
+            # THE SCRIPT HOOK, FIRST AND UNCONDITIONAL (programmable
+            # entities): a nudge script's stored fragment REPLACES the
+            # track's line entirely -- geometry or not (a script on a
+            # young entity must still render; the geometry branch only
+            # applies when no script claims the line)
+            if ent is not None:
+                script_render = ((ent.properties or {}).get("script_render")
+                                 or "")
+                if script_render:
+                    out.append((key, f"{key}: {script_render}"))
+                    continue
             has_ring = (ent is not None
                         and len(getattr(ent, "position_history", []) or []) >= 2
                         and getattr(ent, "position", None))
-            # ---- GEOMETRY-FIRST: subject + motion + delta from the ring.
-            #      THE SCRIPT HOOK (programmable entities): a nudge
-            #      script's stored fragment REPLACES the default parts --
-            #      the script owns its track's line (the operator's 'the
-            #      model writes small lifecycle scripts' design).
+            # ---- GEOMETRY-FIRST: subject + motion + delta from the ring
+            #      (the script hook above already claimed scripted lines)
             if has_ring:
-                script_render = ((ent.properties or {}).get("script_render")
-                                 or "")
                 parts: list[str] = []
-                if script_render:
-                    parts.append(script_render)
-                else:
-                    subj_now = self._nearest_entities(ent.position,
-                                                      exemplars)
-                    hist = ent.position_history
-                    subj_then = (self._nearest_entities(hist[0][1],
-                                                        exemplars)
-                                 if len(hist) >= 2 else None)
-                    if subj_now:
-                        names = ", ".join(
-                            f"{self.default_label(k)} ({c:.2f})"
-                            for k, c in subj_now[:2])
-                        parts.append(f"sits near {names}")
-                    # THE AXIS: the entity's own drift decoded through the
-                    # tracked frame (same lens as the session pulse)
-                    ax = self._axis_of_motion(ent, exclude_key=key)
-                    if ax["toward"]:
-                        t_names = ", ".join(
-                            f"{self.default_label(k)} ({c:.2f})"
-                            for k, c in ax["toward"])
-                        parts.append(f"approaching {t_names}")
-                    elif ax["away"]:
-                        a_names = ", ".join(
-                            f"{self.default_label(k)} ({c:.2f})"
-                            for k, c in ax["away"])
-                        parts.append(f"receding from {a_names}")
-                    if subj_then and subj_now:
-                        k_now = subj_now[0][0]
-                        k_then = subj_then[0][0]
-                        if k_now != k_then:
-                            parts.append(f"moving from near "
-                                         f"{self.default_label(k_then)} "
-                                         f"toward "
-                                         f"{self.default_label(k_now)}")
-                    vel = ent.ring_velocity(now)
-                    if direction_drifting(ent, now):
-                        pace = ("fast" if vel >= 0.15
-                                else "slowly" if vel < 0.05
-                                else "steadily")
-                        parts.append(f"moving {pace} ({vel:.2f}/h)")
+                subj_now = self._nearest_entities(ent.position, exemplars)
+                hist = ent.position_history
+                subj_then = (self._nearest_entities(hist[0][1], exemplars)
+                             if len(hist) >= 2 else None)
+                if subj_now:
+                    names = ", ".join(
+                        f"{self.default_label(k)} ({c:.2f})"
+                        for k, c in subj_now[:2])
+                    parts.append(f"sits near {names}")
+                # THE AXIS: the entity's own drift decoded through the
+                # tracked frame (same lens as the session pulse)
+                ax = self._axis_of_motion(ent, exclude_key=key)
+                if ax["toward"]:
+                    t_names = ", ".join(
+                        f"{self.default_label(k)} ({c:.2f})"
+                        for k, c in ax["toward"])
+                    parts.append(f"approaching {t_names}")
+                elif ax["away"]:
+                    a_names = ", ".join(
+                        f"{self.default_label(k)} ({c:.2f})"
+                        for k, c in ax["away"])
+                    parts.append(f"receding from {a_names}")
+                if subj_then and subj_now:
+                    k_now = subj_now[0][0]
+                    k_then = subj_then[0][0]
+                    if k_now != k_then:
+                        parts.append(f"moving from near "
+                                     f"{self.default_label(k_then)} "
+                                     f"toward "
+                                     f"{self.default_label(k_now)}")
+                vel = ent.ring_velocity(now)
+                if direction_drifting(ent, now):
+                    pace = ("fast" if vel >= 0.15
+                            else "slowly" if vel < 0.05
+                            else "steadily")
+                    parts.append(f"moving {pace} ({vel:.2f}/h)")
                 # THE WHY: the freshest junk-free fragment -- geometry
                 # says WHERE, the beat says WHY (the 'aint no story' fix)
                 idxs = inv.get(key) or []
