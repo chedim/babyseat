@@ -1512,6 +1512,89 @@ class EntityStore:
         return {"toward": [(k, round(c, 2)) for c, k in toward[:2]],
                 "away": [(k, round(c, 2)) for c, k in away[:2]]}
 
+    def _relations_report(self, exemplars, now: float) -> tuple[str, str] | None:
+        """THE RELATIONS LINE (the operator's exploratory question: 'pure
+        geometry + speeds + acceleration?') -- with SELF-EXPLAINING
+        numbers: every distance is paired with its previous value
+        ('widened 0.31->0.38' -- the DELTA is the information, a bare
+        '0.31' is a scale the reader must memorize), every motion is
+        plain-language ('sped up' / 'slowed down' / 'steady'), and the
+        line renders only when something actually changed (a distance
+        moved > 0.02 -- stable geometry is not news). The model reads
+        RELATIONS-as-changes, not coordinates."""
+        import numpy as _np
+        positioned = []
+        for key in self.tracks:
+            if key == DEFAULT_TRACK_KEY:
+                continue
+            ent = self.docs.get(f"{MEMBRANE_NS}{key}")
+            if ent is None or not getattr(ent, "position", None):
+                continue
+            positioned.append((key, ent))
+        if len(positioned) < 2:
+            return None
+        t = self.tracks.get(DEFAULT_TRACK_KEY) or {}
+        prev_dist = (t.get("relations") or {}).get("dist") or {}
+        parts: list[str] = []
+        new_dist: dict[str, float] = {}
+        changed = False
+        for i in range(len(positioned)):
+            for j in range(i + 1, len(positioned)):
+                ka, ea = positioned[i]
+                kb, eb = positioned[j]
+                pa = _np.asarray(ea.position, dtype=float)
+                pb = _np.asarray(eb.position, dtype=float)
+                pan, pbn = _np.linalg.norm(pa), _np.linalg.norm(pb)
+                if pan < 1e-12 or pbn < 1e-12:
+                    continue
+                dist = 1.0 - float((pa / pan) @ (pb / pbn))
+                pair_key = f"{ka}|{kb}"
+                new_dist[pair_key] = dist
+                prev = prev_dist.get(pair_key)
+                la, lb = (self.default_label(ka),
+                          self.default_label(kb))
+                if prev is None:
+                    # first sighting of this pair: the BASELINE (not
+                    # news -- the next pass has something to compare)
+                    continue
+                delta = dist - prev
+                if abs(delta) < 0.02:
+                    continue            # stable: not news
+                changed = True
+                verb = "widened" if delta > 0 else "narrowed"
+                parts.append(f"{la} and {lb} {verb} "
+                             f"{prev:.2f}->{dist:.2f}")
+        # the speeds: only when a pace band FLIPPED (the event, not the
+        # per-turn number)
+        for key, ent in positioned:
+            vel = ent.ring_velocity(now)
+            h = getattr(ent, "position_history", []) or []
+            if len(h) < 3:
+                continue
+            a0 = _np.asarray(h[-3][1], dtype=float)
+            a1 = _np.asarray(h[-2][1], dtype=float)
+            dtn = (h[-2][0] - h[-3][0]) / 3600.0
+            if dtn <= 1e-6:
+                continue
+            a0n, a1n = _np.linalg.norm(a0), _np.linalg.norm(a1)
+            if a0n < 1e-12 or a1n < 1e-12:
+                continue
+            prev_vel = (1.0 - float(a0 / a0n @ (a1 / a1n))) / dtn
+            band = lambda v: (0 if v < 0.005 else
+                              1 if v < 0.05 else
+                              2 if v < 0.15 else 3)
+            if band(vel) != band(prev_vel):
+                verb = ("sped up" if vel > prev_vel else "slowed down")
+                label = self.default_label(key)
+                parts.append(f"{label} {verb}")
+                changed = True
+        if not parts or not changed:
+            return None               # stable geometry is not news
+        t["relations"] = {"sig": "|".join(parts)[:120], "ts": now,
+                          "dist": new_dist}
+        return (DEFAULT_TRACK_KEY,
+                "relations: " + "; ".join(parts) + ".")
+
     def _now_report(self, exemplars, now: float) -> tuple[str, str] | None:
         """THE NOW-TRACK'S OWN RENDERER (the operator's 'why is it so
         problematic' call answered: the tag-track pipeline never fit a
@@ -1736,6 +1819,11 @@ class EntityStore:
                 now_line = self._now_report(exemplars, now)
                 if now_line:
                     out.append(now_line)
+                # THE RELATIONS LINE (the frame-level geometry: distances
+                # + speeds as CHANGES, self-explaining)
+                rel = self._relations_report(exemplars, now)
+                if rel:
+                    out.append(rel)
                 continue
             ent = self.docs.get(f"{MEMBRANE_NS}{key}")
             has_ring = (ent is not None
