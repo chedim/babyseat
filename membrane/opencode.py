@@ -4845,9 +4845,6 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         self._json_out(out)
 
 
-PROXY_IDLE_EXIT_S = 30 * 60.0   # proxy-only mode: exit after 30 idle minutes
-
-
 def main() -> None:
     import argparse
     ap = argparse.ArgumentParser(
@@ -5871,26 +5868,44 @@ def main() -> None:
                 cmd = [opencode] + extra + list(passthrough)
                 print(f"[opencode] launching: {' '.join(cmd)}", file=sys.stderr)
                 child = subprocess.Popen(cmd, env=env)
+                # THE LIFE-HANDSHAKE: write the child's PID -- proxy-only
+                # instances (a second terminal, a manual relaunch) poll
+                # this file and exit when the seat dies (the operator's
+                # rule: the proxy's life is the seat's life)
+                try:
+                    pid_path = (Path(args.field).parent
+                                / "opencode.pid")
+                    pid_path.write_text(str(child.pid))
+                except Exception:
+                    pass
         if child is None:
-            # proxy-only mode: serve until IDLE (the operator's call: an
-            # orphaned proxy serving a stale banner is worse than no
-            # proxy). The idle clock resets on ANY request (chat turns,
-            # MCP tool calls, state reads) -- a seat actively using
-            # membrane never trips it; an abandoned one exits cleanly
-            # after PROXY_IDLE_EXIT_S.
+            # proxy-only mode: THE PROXY'S LIFE IS THE SEAT'S LIFE (the
+            # operator's rule: exits IMMEDIATELY when the opencode seat
+            # closes -- no grace period, no idle watchdog). The handshake:
+            # launch mode writes its opencode child's PID to
+            # <field>.opencode.pid; proxy-only polls that PID every
+            # second and exits the moment it's gone (an orphaned proxy
+            # serving a stale banner is worse than no proxy).
             srv.timeout = 1.0
-            last_seen = time.time()
+            pid_path = (Path(getattr(srv.membrane, "field_path", ""))
+                        .parent / "opencode.pid")
+            watched_pid = None
+            try:
+                if pid_path.exists():
+                    watched_pid = int(pid_path.read_text().strip())
+            except Exception:
+                watched_pid = None
             while True:
                 srv.handle_request()
-                now = time.time()
-                lr = getattr(srv, "_last_request_ts", 0.0)
-                if lr > last_seen:
-                    last_seen = lr
-                if now - last_seen > PROXY_IDLE_EXIT_S:
-                    print(f"\n[membrane-opencode] idle {int(PROXY_IDLE_EXIT_S/60)}m "
-                          "-- proxy exiting (orphaned; relaunch with "
-                          "'membrane opencode')", file=sys.stderr)
-                    break
+                if watched_pid:
+                    try:
+                        os.kill(watched_pid, 0)
+                    except OSError:
+                        print("\n[membrane-opencode] the opencode seat "
+                              "exited -- proxy following (the operator's "
+                              "rule: the proxy's life is the seat's life)",
+                              file=sys.stderr)
+                        break
         else:
             # launch mode: serve until the opencode child exits (or a signal).
             # serve_forever() blocks, so poll the child on a short timeout loop.
