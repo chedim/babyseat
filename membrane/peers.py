@@ -23,6 +23,7 @@ import json
 import os
 import sys
 import time
+from datetime import timedelta
 
 HEARTBEAT_S = 60.0             # registration refresh cadence
 REGISTRY_TTL_S = 3 * 180       # doc TTL: 3 missed heartbeats -> expired
@@ -57,18 +58,50 @@ class PeerSubstrate:
         self._connect()
 
     # ---- the connection (degrade covenant) ----
+    # THE OVERNIGHT-ABORT COVENANT (both seats died the same night, 06:25
+    # SIGABRT via __cxa_rethrow in _core.so -- a C++ exception escaping a
+    # couchbase asio completion callback -> std::terminate, SDK 4.6.3):
+    # an idle seat's connection dies (sleep/NAT/cluster restart), the SDK
+    # raises C++-side through the callback boundary, and the process dies
+    # with it. Three defenses below:
+    #   1. CLUSTER TIMEOUTS -- every op is bounded (microseconds in the
+    #      ClusterTimeoutOptions wire shape) so a broken connection cannot
+    #      hang the serial serve loop (the 1688 parked handler threads in
+    #      the same crash report: requests piling on the feed lock while
+    #      the loop sat in a hung couchbase call).
+    #   2. BOUNDED READY-WAIT -- a connect that can't come up inside the
+    #      window degrades at boot instead of stalling it.
+    #   3. ONE-REBUILD -- repeated failures drop the cluster and rebuild
+    #      once; a dead connection recovers instead of the seat degrading
+    #      forever (and the rebuild failure re-degrades silently).
+    _CB_TIMEOUTS = dict(
+        kv_connect_timeout=timedelta(seconds=10),
+        kv_timeout=timedelta(seconds=5),
+        query_timeout=timedelta(seconds=10),
+        view_timeout=timedelta(seconds=10),
+        management_timeout=timedelta(seconds=10),
+    )
+    _REBUILD_AFTER = 3             # consecutive failed op batches -> rebuild
+
     def _connect(self) -> None:
         try:
             from couchbase.cluster import Cluster
             from couchbase.auth import PasswordAuthenticator
-            from couchbase.options import ClusterOptions
+            from couchbase.options import (ClusterOptions,
+                                           ClusterTimeoutOptions)
             conn = os.environ.get("COUCHBASE_CONN_STRING",
                                   "couchbase://localhost")
             user = os.environ.get("COUCHBASE_USER", "Administrator")
             pw = os.environ.get("COUCHBASE_PASSWORD", "password")
             bucket_name = os.environ.get("COUCHBASE_BUCKET", "cortex-core")
             self._cluster = Cluster(conn, ClusterOptions(
-                PasswordAuthenticator(user, pw)))
+                PasswordAuthenticator(user, pw),
+                timeout_options=ClusterTimeoutOptions(**self._CB_TIMEOUTS)))
+            try:
+                from datetime import timedelta
+                self._cluster.wait_until_ready(timedelta(seconds=8))
+            except Exception:
+                pass                    # degrade per-op; never stall the boot
             self._bucket = self._cluster.bucket(bucket_name)
             self._reg, self._reg_bucket = self._ensure_eph_registry()
             self._ensure_collection(self._bucket, "peer_chat")
@@ -78,6 +111,28 @@ class PeerSubstrate:
             print(f"[peers] substrate unavailable ({str(e)[:80]}) -- "
                   f"registry + chat degrade to silent", file=sys.stderr)
             self._reg = self._chan = self._cluster = None
+
+    def _op_failed(self) -> None:
+        """The rebuild counter: consecutive couchbase failures (the
+        overnight abort's precondition -- a dead connection keeps failing).
+        Past the bar, drop the cluster AND the registry handles so the
+        next op rebuilds them fresh (register()/list_seats() re-ensure)."""
+        self._fail_streak = getattr(self, "_fail_streak", 0) + 1
+        if self._fail_streak >= self._REBUILD_AFTER \
+                and self._cluster is not None:
+            print(f"[peers] {self._fail_streak} consecutive couchbase "
+                  f"failures -- rebuilding the cluster handle",
+                  file=sys.stderr)
+            try:
+                self._cluster.close()
+            except Exception:
+                pass
+            self._cluster = self._bucket = self._reg = self._reg_bucket = None
+            self._chan = None
+            self._fail_streak = 0
+
+    def _op_ok(self) -> None:
+        self._fail_streak = 0
 
     def _ensure_collection(self, bucket, name: str) -> None:
         try:
@@ -92,9 +147,19 @@ class PeerSubstrate:
         """The ephemeral bucket + proxies collection: explicit env, then
         the canon-ephemeral convention, then create (ephemeral TTL does
         the GC -- expired proxy docs vanish without a janitor)."""
+        # THE REBUILD: a dropped cluster (the _op_failed path) reconnects
+        # here -- the covenant's degrade-and-recover, not degrade-forever.
+        if self._cluster is None:
+            self._connect()
+        if self._cluster is None:
+            return None, None
         name = os.environ.get("COUCHBASE_EPHEMERAL_BUCKET")
+        # THE REBUILD CASE: a rebuild (all handles dropped) re-enters here
+        # with _bucket None -- the canon candidates fall back to the
+        # cortex convention instead of crashing on the None.name.
+        base = self._bucket.name if self._bucket is not None else "cortex-core"
         candidates = [name] if name else [
-            f"{self._bucket.name}-ephemeral", "cortex-ephemeral"]
+            f"{base}-ephemeral", "cortex-ephemeral"]
         for cand in candidates:
             if not cand:
                 continue
@@ -106,7 +171,7 @@ class PeerSubstrate:
             except Exception:
                 continue
         try:
-            eph = f"{self._bucket.name}-ephemeral"
+            eph = f"{base}-ephemeral"
             # creation via the management REST surface (the SDK can't
             # create ephemeral buckets directly); failure degrades
             self._cluster.buckets().create_bucket(
@@ -164,8 +229,10 @@ class PeerSubstrate:
             self._reg.upsert(
                 self.seat_id, doc,
                 UpsertOptions(expiry=timedelta(seconds=REGISTRY_TTL_S)))
+            self._op_ok()
             return True
-        except Exception:
+        except BaseException:
+            self._op_failed()
             return False
 
     def heartbeat(self) -> bool:
@@ -189,8 +256,11 @@ class PeerSubstrate:
                 .format(b=self._bucket.name),
                 QueryOptions(timeout=_dt.timedelta(seconds=10),
                              named_parameters={} if False else None))
-            return [dict(r) for r in q]
-        except Exception:
+            rows = [dict(r) for r in q]
+            self._op_ok()
+            return rows
+        except BaseException:
+            self._op_failed()
             return []
 
     def list_seats(self) -> list[dict]:
@@ -210,7 +280,9 @@ class PeerSubstrate:
                 QueryOptions(timeout=_dt.timedelta(seconds=10)))
             for row in q:
                 out.append(dict(row))
-        except Exception:
+            self._op_ok()
+        except BaseException:
+            self._op_failed()
             return []
         return out
 
@@ -276,8 +348,10 @@ class PeerSubstrate:
         try:
             key = f"msg::{int(time.time() * 1000)}::{self.seat_id}"
             self._chan.upsert(key, msg)
+            self._op_ok()
             return True
-        except Exception:
+        except BaseException:
+            self._op_failed()
             return False
 
     def fetch_unread(self) -> list[dict]:
@@ -305,8 +379,10 @@ class PeerSubstrate:
                 if last:
                     self._cursor_ts = float(last)
                     self.register()   # the cursor rides the heartbeat doc
+            self._op_ok()
             return rows
-        except Exception:
+        except BaseException:
+            self._op_failed()
             return []
 
 
