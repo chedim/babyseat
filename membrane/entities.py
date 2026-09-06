@@ -582,7 +582,7 @@ class QuantumEntity:
         if self.position_history:
             doc["state_space"]["trajectory"] = [
                 [float(t), [float(x) for x in p]]
-                for t, p in self.position_history]
+                for t, p in self.position_history[-RING_MAX:]]
         return doc
 
     @staticmethod
@@ -614,8 +614,14 @@ class QuantumEntity:
                 position=([float(x) for x in tracked]
                           if isinstance(tracked, (list, tuple)) and tracked
                           else None),
+                # THE HYDRATION TRIM (the announcer-seat jetsam fix): foreign
+                # docs can carry unbounded trajectories (the fork's
+                # recordAlways pulse appends without a collapse); a hydrate
+                # that swallowed them multiplied the side-index to 58MB and
+                # RSS to 3.7GB. Trim at the door: the newest RING_MAX points
+                # are the living geometry -- the rest was era history.
                 position_history=([[float(t), [float(x) for x in p]]
-                                   for t, p in trajectory]
+                                   for t, p in trajectory][-RING_MAX:]
                                   if isinstance(trajectory, list) else []),
             )
             return q
