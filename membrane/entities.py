@@ -872,6 +872,80 @@ class QuantumEntity:
         return "drifting" if 1.0 - float(old / on @ (new / nn)) > 0.05 \
             else "holding"
 
+    def project(self, horizon_h: float = 6.0, damped: bool = True
+                ) -> list[list] | None:
+        """THE TRAJECTORY PROJECTION (the operator's question: 'what
+        happens if it continues that way?'): extrapolate the entity's
+        future positions from its ring.
+
+        Physics: constant-velocity along the FINE end's direction, with
+        optional exponential damping -- a session's drift never holds a
+        straight line (topics turn), so the honest model is v(t) = v0 *
+        exp(-t/tau) with tau from the ring's own coarse/fine velocity
+        ratio (the more the entity decelerated historically, the harder
+        the projection damps). Pure numpy, ~us.
+
+        Returns the projected polyline [[t, [x...]], ...] at hourly steps
+        to the horizon (None when the ring is too short to have motion --
+        a holding entity projects nowhere). NOT stored, NOT persisted: a
+        projection is a question about the future, never a claim about
+        it -- the banner renders it as 'toward X (projected)', the
+        reasoner may use it as ONE weak vote, and the next real
+        consolidation step overwrites any of it."""
+        import numpy as _np
+        h = getattr(self, "position_history", []) or []
+        if len(h) < 2:
+            return None
+        (t0, p0), (t1, p1) = h[-2], h[-1]
+        dt_h = (t1 - t0) / 3600.0
+        if dt_h <= 1e-6:
+            return None
+        a = unit_or_none(p0)
+        b = unit_or_none(p1)
+        if a is None or b is None:
+            return None
+        v = (b - a)                          # the fine-end velocity direction
+        speed = (1.0 - float(a @ b)) / dt_h  # the current pace (cos/h)
+        if speed < 1e-4:
+            return None                      # holding: nothing to project
+        # the damping constant from the entity's OWN history: how much
+        # slower the fine end moves than the coarse end (a decelerating
+        # entity keeps decelerating -- the one lesson the ring holds)
+        if len(h) >= 3 and damped:
+            coarse = unit_or_none(h[0][1])
+            coarse_speed = ((1.0 - float(coarse @ b))
+                            / max((t1 - h[0][0]) / 3600.0, 1e-6)
+                            if coarse is not None else 0.0)
+            ratio = speed / max(coarse_speed, 1e-6)
+            tau = max(1.0, min(24.0, horizon_h * max(ratio, 0.25)))
+        else:
+            tau = horizon_h
+        cur = _np.asarray(b, dtype=float)
+        out = []
+        steps = max(1, int(horizon_h))
+        for k in range(1, steps + 1):
+            t = t1 + k * 3600.0
+            damped_speed = speed * float(_np.exp(-k / tau)) if damped else speed
+            # the position walks the velocity direction, decaying in step
+            # length: pos_k = b + v_hat * (integral of speed) -- the damped
+            # sum converges, so a 24h projection saturates instead of
+            # flying off the sphere
+            total = speed * tau * (1.0 - float(_np.exp(-k / tau)))
+            nxt = cur + v * total
+            nn = _np.linalg.norm(nxt)
+            if nn < 1e-12:
+                break
+            nxt = nxt / nn
+            out.append([t, [float(x) for x in nxt]])
+        return out if out else None
+
+
+def unit_or_none(vec):
+    import numpy as _np
+    v = _np.asarray(vec, dtype=float)
+    n = _np.linalg.norm(v)
+    return v / n if n > 1e-12 else None
+
 
 def entity_id(kind: str, value: str) -> str:
     """Stable id for an entity mention: kind-namespaced, slug-cased."""
