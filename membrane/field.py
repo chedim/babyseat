@@ -1941,3 +1941,165 @@ class ExemplarStore:
                     ex.ephemeral = True
                 store.append(ex)
         return store
+
+class MaskedExemplarStore:
+    """A CELL-SIZED MASK over the world's store: reads fall through to the
+    parent prefix (the world AS IT WAS at mask birth -- the field_size clock),
+    writes land in a private delta, and the cell's veil is RECOMPUTED on read
+    (never baked in) from the parent vec + the cell's own nudge parameters.
+
+    THE MASK MODEL (vs the copy model the pool uses today): a copy cell
+    absorbs full world rows into a private ExemplarStore -- N cells = N
+    world-size copies, the jetsam scaling wall. A mask cell stores only:
+      - its ABSORB DECISIONS (parent refs for world rows it took)
+      - its OWN rows (genuinely-new knowledge the world lacked)
+      - its veil parameters (seed + sigma) -- the perturbation is
+        recomputed deterministically from (parent vec, seed) on every read,
+        so graze decisions are BIT-IDENTICAL to a copy cell with the same
+        seed (E12's parity requirement), and parent CORRECTIONS
+        (repair_action / supersede) propagate through the mask for free --
+        the property copies lack (E12's inheritance test).
+
+    THE VEIL CONTRACT: masks pin (parent vec, seed, sigma) at birth. A
+    situation-conditioned veil (momentum in the perturbation) would break
+    parity BY DESIGN and needs its own probe -- out of scope here.
+
+    NOT persisted, NOT a standalone artifact: a mask is a VIEW of the
+    parent's prefix plus deltas. Death = materialize (the corpse path) or
+    drop (the deltas were only a view). The parent prefix is pinned at
+    birth (frozen_size) -- the mask's meaning is stable even as the world
+    grows, because world rows are append-only (mutations repair in place
+    and propagate, appends extend beyond the frozen horizon and are
+    invisible to the mask by design: the cell never lived them).
+    """
+
+    def __init__(self, parent: "ExemplarStore", frozen_size: int,
+                 nudge_seed: int = 0, nudge_sigma: float = 0.05):
+        self.parent = parent
+        self.frozen_size = max(0, int(frozen_size))
+        self.nudge_seed = int(nudge_seed)
+        self.nudge_sigma = float(nudge_sigma)
+        self._rng = np.random.default_rng(self.nudge_seed)
+        # the delta: private rows (Exemplar) + parent refs (parent indexes
+        # into the FROZEN prefix) this mask absorbed
+        self._own: list[Exemplar] = []
+        self._taken: set[int] = set()
+        # the parent's vecs, frozen at birth (the view's ground truth)
+        base = [r for r in parent.exemplars[:self.frozen_size]
+                if getattr(r, "vec", None)]
+        self._parent_rows: list[Exemplar] = base
+        self._pvecs = np.array([r.vec for r in base], dtype=float) \
+            if base else np.zeros((0, 1), dtype=float)
+        self._pvecs_n = (self._pvecs /
+                         (np.linalg.norm(self._pvecs, axis=1,
+                                         keepdims=True) + 1e-12)
+                         if len(base) else self._pvecs)
+        self.origin = parent.origin
+        self._quarantine_failed = False
+
+    # ---- the veil (deterministic recompute) ---------------------------------
+    def _veil(self, vec) -> np.ndarray:
+        """The cell's veil, recomputed from the PARENT vec (never from a
+        stored veiled copy): deterministic given (parent vec, seed, sigma).
+        Same shape as Membrane._nudge."""
+        v = np.asarray(vec, dtype=float)
+        if self.nudge_sigma <= 0.0:
+            return v
+        noise = self._rng2(v).normal(0.0, self.nudge_sigma, size=v.shape)
+        out = v + noise
+        n = float(np.linalg.norm(out))
+        return out / n if n > 1e-12 else out
+
+    def _rng2(self, vec) -> np.random.Generator:
+        """A per-vec deterministic stream: the veil for the SAME parent vec
+        is identical on every read (parity), different across vecs."""
+        import hashlib
+        seed = int.from_bytes(
+            hashlib.sha256(vec.tobytes() + self.nudge_seed.to_bytes(8, "big")
+                           ).digest()[:8], "big")
+        return np.random.default_rng(seed)
+
+    # ---- the read surface (what Cell.graze / curiosity consume) -------------
+    @property
+    def exemplars(self) -> list["Exemplar"]:
+        """The masked view: parent rows (veiled on the fly -- the SAME list
+        objects as the parent's rows carry their CANON vec; the veil is a
+        read-time lens applied by the consumer via vec_view()) + own delta
+        rows (already veiled at absorb)."""
+        return self._parent_rows + self._own
+
+    def vec_view(self, ex: "Exemplar") -> np.ndarray:
+        """The VEILED vec of a row in this mask's view: parent rows get the
+        recomputed veil; own rows are stored already-veiled (they were born
+        inside this mask)."""
+        if ex in self._own:
+            return np.asarray(ex.vec, dtype=float)
+        pv = getattr(ex, "vec", None)
+        if pv is None:
+            return np.zeros(1024, dtype=float)
+        return self._veil(pv)
+
+    def vectors(self) -> np.ndarray:
+        vs = [self.vec_view(r) for r in self.exemplars]
+        return np.array(vs, dtype=float) if vs else np.zeros((0, 1))
+
+    def __len__(self) -> int:
+        return len(self._parent_rows) + len(self._own)
+
+    # ---- the write surface (absorb = a delta append) -------------------------
+    def take_parent_row(self, parent_idx: int) -> Exemplar | None:
+        """Absorb one PARENT row into the mask (the graze decision): the
+        delta stores the REFERENCE, not a copy of the veiled vec -- the
+        view recomputes. Returns the row, or None when out of range."""
+        if not (0 <= parent_idx < len(self._parent_rows)):
+            return None
+        r = self._parent_rows[parent_idx]
+        self._taken.add(parent_idx)
+        return r
+
+    def append_own(self, ex: "Exemplar") -> int:
+        """Absorb a GENUINELY-NEW row (knowledge the world lacked): stored
+        in the delta, veiled at birth."""
+        self._own.append(ex)
+        return len(self._own) - 1
+
+    # ---- the corpse path (materialize at death) ------------------------------
+    def materialize(self) -> "ExemplarStore":
+        """Death: the mask's view becomes a standalone store (the corpse
+        ring's input). Veils BAKE IN at this moment (the corpse is a
+        standalone artifact -- the one place the recomputed lens freezes)."""
+        out = ExemplarStore()
+        for r in self.exemplars:
+            ex = Exemplar(situation=r.situation, action=r.action,
+                          outcome=r.outcome,
+                          vec=list(self.vec_view(r)), safe=r.safe,
+                          tags=list(getattr(r, "tags", []) or []),
+                          extra=dict(getattr(r, "extra", None) or {}))
+            out.exemplars.append(ex)
+        return out
+
+    # ---- the query surface (parity with ExemplarStore) -----------------------
+    def top_k(self, q: np.ndarray, k: int = 5,
+              canon_only: bool = False,
+              live_only: bool = False) -> list[tuple["Exemplar", float]]:
+        qn = _unit(q)
+        Vn = self.vectors()
+        if Vn.size == 0 or Vn.shape[1] != len(qn):
+            return []
+        Vn = Vn / (np.linalg.norm(Vn, axis=1, keepdims=True) + 1e-12)
+        sims = Vn @ qn
+        k = min(k, len(sims))
+        idx = np.argsort(-sims)[:k]
+        exs = self.exemplars
+        return [(exs[i], float(sims[i])) for i in idx]
+
+    def index_of(self, ex: "Exemplar") -> int | None:
+        try:
+            return self.exemplars.index(ex)
+        except ValueError:
+            return None
+
+    # ---- explicitly unsupported (the mask is a view, not a store) ------------
+    def save(self, path) -> None:  # noqa: F811
+        raise TypeError("MaskedExemplarStore is a view -- materialize() "
+                        "first (the corpse path), or write through the parent")
