@@ -1984,18 +1984,20 @@ class MaskedExemplarStore:
         # into the FROZEN prefix) this mask absorbed
         self._own: list[Exemplar] = []
         self._taken: set[int] = set()
-        # the parent's vecs, frozen at birth (the view's ground truth)
-        base = [r for r in parent.exemplars[:self.frozen_size]
-                if getattr(r, "vec", None)]
-        self._parent_rows: list[Exemplar] = base
-        self._pvecs = np.array([r.vec for r in base], dtype=float) \
-            if base else np.zeros((0, 1), dtype=float)
-        self._pvecs_n = (self._pvecs /
-                         (np.linalg.norm(self._pvecs, axis=1,
-                                         keepdims=True) + 1e-12)
-                         if len(base) else self._pvecs)
+        # THE LAZY VIEW: the frozen prefix is a REFERENCE, not a copy --
+        # the parent's list is shared and the horizon is a bound. O(1)
+        # birth (the E12 124ms -> ~0 fix): the view materializes only in
+        # the accessors, and only over [0, frozen_size).
         self.origin = parent.origin
         self._quarantine_failed = False
+
+    @property
+    def _parent_rows(self) -> list["Exemplar"]:
+        """The frozen prefix, lazily: a slice-view over the parent's live
+        list (no per-birth copy). Parent row MUTATIONS (repair/supersede)
+        propagate through -- the inheritance property, now structurally
+        free."""
+        return self.parent.exemplars[:self.frozen_size]
 
     # ---- the veil (deterministic recompute) ---------------------------------
     def _veil(self, vec) -> np.ndarray:
