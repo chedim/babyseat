@@ -34,6 +34,7 @@ Run:
 from __future__ import annotations
 
 import hashlib
+import re
 import json
 import os
 import shutil
@@ -407,6 +408,51 @@ def _recall_topic(q: str) -> str:
                     t = t[len(pre):].strip()
             return t.rstrip("?.!").strip()
     return t
+
+
+# ---- THE RECEIPT LANE (E9-validated, experiments/e9_receipt_lane.py):
+# the tool-result turn class whose ack is byte-deterministic. 945/945
+# byte-exact in the audit replay (edit-ack 917, edit-fail 28); the
+# bash-call-echo class (1,344 turns) was REFUSED -- the call body varies
+# per turn, not deterministic. Response-conditioned: the class is chosen
+# from what the ack TEXT looks like (which the tool result fully
+# determines), never from memory.
+
+_EDIT_ACK = "Edit applied successfully."
+_EDIT_FAIL = ("Could not find oldString in the file. It must match "
+              "exactly, including whitespace, indentation, and line "
+              "endings.")
+_EDIT_ACK_RE = re.compile(r"^Edit applied successfully\.$")
+_EDIT_FAIL_RE = re.compile(
+    r"^Could not find oldString in the file\.")
+
+
+def _receipt_class(tool_rec: dict | None) -> str | None:
+    """The deterministic receipt class for a captured tool call + result,
+    or None (fall through to the model -- the degrade covenant). The ack
+    replays from the TOOL RESULT side (the captured record from
+    _capture_tool_results): membrane confirms what the environment already
+    said -- the stale-replay guard, structurally. No record, no result, or
+    a non-deterministic result => None (never anticipate)."""
+    if not tool_rec:
+        return None
+    name = str(tool_rec.get("name") or "")
+    if name != "edit":
+        return None                   # only edit acks are byte-deterministic
+    result = (tool_rec.get("result") or "").strip()
+    # the result-side matchers cover BOTH live opencode result shapes
+    # ("The file X was edited successfully" / oldString-miss) and the
+    # audit's model phrasings (E9's corpus) -- the lane serves the
+    # canonical ack string either way
+    if re.search(r"was edited successfully", result) \
+            or _EDIT_ACK_RE.match(result):
+        return "edit-ack"
+    if "Could not find oldString" in result or _EDIT_FAIL_RE.match(result):
+        return "edit-fail"
+    return None                       # an edit result we cannot format
+    # the ack is determined by the TOOL RESULT the previous capture
+    # recorded -- membrane looks it up, never anticipates it
+    return None
 
 
 def _is_recall_query(q: str) -> bool:
@@ -2913,7 +2959,7 @@ def _resp_has_content(resp_bytes: bytes | None) -> bool:
     except (json.JSONDecodeError, UnicodeDecodeError):
         return False
     ch = (obj.get("choices") or [{}])[0]
-    msg = ch.get("message") or {}
+    msg = ch.get("message") or obj.get("message") or {}
     c = msg.get("content")
     if isinstance(c, str) and c.strip():
         return True
@@ -3023,6 +3069,10 @@ def _capture_tool_results(srv, body: dict) -> None:
         if rec is None:
             continue                      # pre-boot result or unknown id
         result = _tool_result_text(m)
+        rec["result"] = result            # the receipt lane reads THIS
+        srv._tool_results[cid] = rec      # result-side cache (bounded)
+        if len(srv._tool_results) > 64:   # the bound: drop the oldest
+            srv._tool_results.pop(next(iter(srv._tool_results)))
         _capture(mem, f"result {rec['name']}",
                  f"tool {rec['name']} for: {_clip(rec['query'], _CAP_QUERY)}\n"
                  f"args: {_clip(rec['args'], _CAP_SIT_ARGS)}",
@@ -3509,6 +3559,35 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                     learn_hit = True
                 elif s_fam == "forget":
                     forget_hit = True
+        # ---- THE RECEIPT LANE (E9-validated, 945/945 byte-exact in the
+        # audit replay): a tool-call fragment whose ack is byte-
+        # deterministic (edit-ack / edit-fail) is served DIRECTLY from the
+        # captured tool result -- the model never wakes up. The rails: the
+        # ack replays from the TOOL RESULT side, never in anticipation
+        # (the stale-replay guard); anything not matching falls through
+        # (the degrade covenant); `model:` escapes; --no-receipts kills.
+        # Pre-gate like the other operator lanes: a receipt turn is never
+        # learned, never demoted, never nudges momentum.
+        if (not model_escaped and getattr(srv, "receipts", True)
+                and not rec_hit and not state_hit and not learn_hit
+                and not forget_hit and not _is_watch_query(q_early)
+                and not _is_intent_query(q_early)
+                and not _is_codegraph_query(q_early)):
+            # the receipt turn: the LAST message is a tool result whose
+            # pending call is cached (E9: the audit's receipt class)
+            tool_rec = None
+            for m in reversed(body.get("messages") or []):
+                cid = m.get("tool_call_id") if isinstance(m, dict) else None
+                if cid and cid in srv._tool_results:
+                    tool_rec = srv._tool_results[cid]
+                    break
+            receipt_cls = _receipt_class(tool_rec)
+            if receipt_cls in ("edit-ack", "edit-fail"):
+                text = _EDIT_ACK if receipt_cls == "edit-ack" else _EDIT_FAIL
+                _print_intercept("receipt", q_early)
+                self._serve_intercept_answer(model, text,
+                                             bool(body.get("stream", False)))
+                return
         ruling = (None if model_escaped else _match_review_ruling(q_early))
         if ruling is not None:
             v, slot = ruling
@@ -4085,6 +4164,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                         obj = json.loads(payload)
                     except json.JSONDecodeError:
                         continue
+                    if any((ch.get("delta") or {}).get("tool_calls")
+                           for ch in (obj.get("choices") or [])):
+                        print(f"[capture-dbg] SSE delta has tool_calls",
+                              flush=True)
                     for ch in obj.get("choices", []) or []:
                         d = ch.get("delta") or {}
                         t = d.get("content")
@@ -4104,6 +4187,15 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                             if fn.get("arguments"):
                                 tgt["arguments"] = (tgt.get("arguments") or "") + fn["arguments"]
             self.wfile.flush()
+            # THE STREAMING REGISTRATION (the receipt lane's missing half):
+            # the tee path accumulated `calls` from deltas but never
+            # registered them -- opencode's traffic is stream:true, so
+            # _pending_tools never populated for the real flow (the
+            # receipt lane's missing-registration exhibit, E9)
+            if calls:
+                print(f"[capture-dbg] stream registered {len(calls)}",
+                      flush=True)
+                _capture_plan_and_calls(mem, query, "".join(parts), calls)
             resp_obj = None
         else:
             # BUFFERED delivery. The empty-answer guard: a rung that answers
@@ -4165,7 +4257,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 resp_obj = None
             if resp_obj:
                 ch = (resp_obj.get("choices") or [{}])[0]
-                msg = ch.get("message") or {}
+                msg = ch.get("message") or resp_obj.get("message") or {}
                 c = msg.get("content")
                 if isinstance(c, str):
                     parts.append(c)
@@ -5090,6 +5182,11 @@ def main() -> None:
                          "frames, W3a's lint) plants a ONE-SHOT marked "
                          "warning that rides the next model-bound request. "
                          "Never blocks live traffic")
+    ap.add_argument("--no-receipts", dest="receipts",
+                    action="store_false",
+                    help="kill switch: the receipt lane (E9 -- "
+                         "byte-deterministic edit acks served model-free) "
+                         "falls back to full model path")
     ap.add_argument("--cloud-budget", type=float, default=0.0, metavar="USD",
                     help="max relative-money spend per day on cloud-routed "
                          "escalations (the cost ladder's hard cap; default 0 "
@@ -5355,6 +5452,7 @@ def main() -> None:
     srv.sem_intercept = bool(args.sem_intercept)
     srv.field_seeds = bool(args.field_seeds)
     srv.thought_intercept = bool(args.thought_intercept)
+    srv.receipts = bool(getattr(args, "receipts", True))   # the receipt lane
     srv.dev = bool(getattr(args, "dev", False))
     srv._dev_warn = None
 
@@ -5459,6 +5557,8 @@ def main() -> None:
     # cortex-experiment brain). Boot reads the JSON; read-through from the
     # couchbase commons is best-effort after the embedder resolves.
     srv._boot_ts = time.time()
+    srv._tool_results = {}     # the receipt lane's result-side cache (E9)
+    srv.receipts = True        # --no-receipts flips it (the kill switch)
     srv.entity_store = None
     try:
         from .entities import (EntityStore, JUNK_CUT_DEFAULT,
