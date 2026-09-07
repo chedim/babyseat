@@ -4164,10 +4164,6 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                         obj = json.loads(payload)
                     except json.JSONDecodeError:
                         continue
-                    if any((ch.get("delta") or {}).get("tool_calls")
-                           for ch in (obj.get("choices") or [])):
-                        print(f"[capture-dbg] SSE delta has tool_calls",
-                              flush=True)
                     for ch in obj.get("choices", []) or []:
                         d = ch.get("delta") or {}
                         t = d.get("content")
@@ -4193,8 +4189,6 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             # _pending_tools never populated for the real flow (the
             # receipt lane's missing-registration exhibit, E9)
             if calls:
-                print(f"[capture-dbg] stream registered {len(calls)}",
-                      flush=True)
                 _capture_plan_and_calls(mem, query, "".join(parts), calls)
             resp_obj = None
         else:
