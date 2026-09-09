@@ -313,11 +313,14 @@ TOOLS: list[dict] = [
             "properties": {
                 "spec": {"type": "string",
                          "description": "The child (eid or exact name)."},
-                "parent": {"type": "string",
-                           "description": "The parent concept (eid or "
-                                          "exact name)."},
+                "parents": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "The parent concepts (multiple "
+                                   "inheritance allowed).",
+                },
             },
-            "required": ["spec", "parent"],
+            "required": ["spec", "parents"],
         },
     },
 ]
@@ -625,17 +628,22 @@ def tool_peer_post(args: dict, port: int) -> str:
 
 def tool_entity_inherit(args: dict, port: int) -> str:
     spec = str(args.get("spec") or "").strip()
-    parent = str(args.get("parent") or "").strip()
-    if not spec or not parent:
-        raise ProxyError(400, "spec + parent required")
+    parents = args.get("parents") or []
+    if isinstance(parents, str):
+        parents = [parents]
+    if not spec or not parents:
+        raise ProxyError(400, "spec + parents required")
     out = _http(port, "POST", "/membrane/entity/inherit",
-                {"spec": spec, "parent": parent})
+                {"spec": spec, "parents": parents})
     if not out.get("ok"):
         return f"Inherit failed: {out.get('error', 'unknown error')}"
-    return (f"Entity {out['child']} ISA {out['parent']} -- the child "
-            f"inherits the parent's constraints (latch, `living`) down "
-            f"the ISA chain; its geometry sits at the parent's position "
-            f"plus its own offset.")
+    added = out.get("added") or []
+    if added:
+        return (f"Entity {out['child']} ISA {', '.join(added)} -- "
+                f"constraints inherited down the ISA chain (latch, "
+                f"`living`); the child's position comes from its own "
+                f"lived instances, the parents classify it.")
+    return f"Entity {out['child']} parents refreshed (no new links)."
 
 
 def tool_peer_seats(args: dict, port: int) -> str:

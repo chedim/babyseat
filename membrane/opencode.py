@@ -4899,19 +4899,24 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             pass
 
     def _entity_inherit(self) -> None:
-        """POST /membrane/entity/inherit: the ISA relation (the operator's
-        design -- 'a letter points to letters'). Child gains a parent
-        concept; constraints propagate down the chain."""
+        """POST /membrane/entity/inherit: the multi-parent ISA relation
+        (the operator's design -- 'a letter points to letters', with
+        multiple inheritance). Child gains one or more parent concepts;
+        constraints propagate across ALL branches; the child's position
+        comes from its own lived instances, the parents classify it."""
         srv = self.server
         est = getattr(srv, "entity_store", None)
         if est is None:
             self._json_err_raw(503, "entity layer unavailable"); return
         body = self._json_body()
         spec = str(body.get("spec") or "").strip()
-        parent = str(body.get("parent") or "").strip()
-        if not spec or not parent:
-            self._json_err_raw(400, "spec + parent required"); return
-        res = est.set_parent(spec, parent)
+        parents = body.get("parents") or []
+        if isinstance(parents, str):
+            parents = [parents]
+        parents = [str(p).strip() for p in parents if str(p).strip()]
+        if not spec or not parents:
+            self._json_err_raw(400, "spec + parents required"); return
+        res = est.set_parents(spec, parents)
         self._entity_audit("inherit", res)
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return

@@ -965,7 +965,229 @@ def kind_class(kind: str) -> str:
 
 # ---- the entity store (write-through to the shared collection + local JSON) -
 
-class EntityStore:
+class MultiParentOps:
+    """THE MULTI-PARENT UPGRADE (the operator's questions: 'what about
+    multiple inheritance? how do we calculate offset then?'):
+
+    - SET: add one or more parents (the ISA links), cycle-guarded
+    - UNSET: remove one or more parents (un-inherit = drop the pointer)
+    - OFFSETS: the per-relation offset, calculated live from the child's
+      position vs each parent's -- 'what makes this child distinct from
+      each parent separately'
+    - The child's position is ALWAYS its own lived centroid (its bound
+      contexts); the parents CLASSIFY it, they don't position it.
+
+    Constraint propagation across multiple branches:
+      living  -- OR across all branches (any living ancestor inherits
+                 the constraint; you can't escape it by finding a
+                 non-living branch)
+      latch   -- the MOST RESTRICTIVE (lowest) latch across all branches
+                 (multiple parents can't be used to escape a constraint
+                 by finding a lax branch)
+      fn      -- the UNION of all branches' fn schemas (the child is
+                 callable through any parent's interface)
+    """
+
+    PARENTS_KEY = "parents"        # the property key (the list of eids)
+    MAX_PARENTS = 8                # per entity (bounded, anti-flood)
+    MAX_CHAIN = 16                 # the transitive walk depth
+
+    @staticmethod
+    def _parents_of(props: dict) -> list[str]:
+        """The parents list from the entity's properties: the new
+        `parents` key (list) or the legacy `parent` key (a single eid,
+        migrated on read)."""
+        v = props.get("parents")
+        if isinstance(v, list):
+            return [str(x) for x in v if x]
+        legacy = props.get("parent")
+        return [str(legacy)] if legacy else []
+
+    @classmethod
+    def register(cls, store):
+        """Mount the multi-parent operations onto an EntityStore."""
+        store.set_parents = cls.set_parents.__get__(store)
+        store.unset_parent = cls.unset_parents.__get__(store)
+        store.parent_offsets = cls.parent_offsets.__get__(store)
+        store.all_parents = cls.all_parents.__get__(store)
+        store.inherited_multi = cls.inherited_multi.__get__(store)
+
+    @staticmethod
+    def set_parents(store, spec: str, parent_specs: list[str]) -> dict:
+        """Add multiple parents to one child, cycle-guarded per parent."""
+        child = store._resolve_spec(spec)
+        if child is None:
+            return {"ok": False, "error": f"child '{spec}' not found"}
+        props = child.properties or {}
+        current = MultiParentOps._parents_of(props)
+        added, rejected = [], []
+        for ps in parent_specs:
+            parent = store._resolve_spec(ps)
+            if parent is None:
+                rejected.append({"parent": ps, "error": "not found"})
+                continue
+            if parent.eid == child.eid:
+                rejected.append({"parent": ps, "error": "self-parent"})
+                continue
+            # THE CYCLE GUARD: walk the full ancestor DAG transitively
+            stack, seen = [parent], set()
+            cycle = False
+            while stack:
+                w = stack.pop()
+                if w.eid in seen:
+                    continue
+                seen.add(w.eid)
+                if w.eid == child.eid:
+                    cycle = True
+                    break
+                for pp in MultiParentOps._parents_of(
+                        w.properties or {}):
+                    pw = store.docs.get(pp)
+                    if pw is not None:
+                        stack.append(pw)
+            if cycle:
+                rejected.append({"parent": ps,
+                                 "error": "cycle (the child is an "
+                                          "ancestor)"})
+                continue
+            if parent.eid in current:
+                continue                    # already linked
+            current.append(parent.eid)
+            added.append(parent.eid)
+        if current != MultiParentOps._parents_of(props):
+            props["parents"] = current[:MultiParentOps.MAX_PARENTS]
+            child.properties = props
+            store.upsert(child)
+            store._announce("merged", child,
+                            f"parents {added}" if added else "refreshed")
+        return {"ok": True, "child": child.eid, "added": added,
+                "rejected": rejected,
+                "parents": current[:MultiParentOps.MAX_PARENTS]}
+
+    @staticmethod
+    def unset_parents(store, spec: str, parent_specs: list[str]) -> dict:
+        """UN-INHERIT: remove one or more parents from the child. The
+        parent pointer is dropped; the child's own position (from its
+        lived instances) is unchanged."""
+        child = store._resolve_spec(spec)
+        if child is None:
+            return {"ok": False, "error": f"child '{spec}' not found"}
+        props = child.properties or {}
+        current = MultiParentOps._parents_of(props)
+        removed, not_found = [], []
+        for ps in parent_specs:
+            p = store._resolve_spec(ps)
+            peid = p.eid if p is not None else ps
+            if peid in current:
+                current.remove(peid)
+                removed.append(peid)
+            else:
+                not_found.append(peid)
+        if removed:
+            props["parents"] = current
+            child.properties = props
+            store.upsert(child)
+        return {"ok": True, "child": child.eid, "removed": removed,
+                "not_found": not_found,
+                "remaining": current}
+
+    @staticmethod
+    def all_parents(store, spec: str) -> list["QuantumEntity"]:
+        """The full ancestor DAG (multi-parent aware): every parent,
+        transitively, across all branches, deduped, nearest first."""
+        child = store._resolve_spec(spec)
+        if child is None:
+            return []
+        out, seen, queue = [], {child.eid}, [
+            store.docs.get(pp) for pp in
+            MultiParentOps._parents_of(child.properties or {})]
+        queue = [q for q in queue if q is not None]
+        while queue:
+            w = queue.pop(0)
+            if w.eid in seen:
+                continue
+            seen.add(w.eid)
+            out.append(w)
+            for pp in MultiParentOps._parents_of(w.properties or {}):
+                pw = store.docs.get(pp)
+                if pw is not None and pw.eid not in seen:
+                    queue.append(pw)
+        return out
+
+    @staticmethod
+    def inherited_multi(store, spec: str) -> dict:
+        """The constraint inheritance, multi-parent aware:
+          latch  -- the MOST RESTRICTIVE (lowest) across all branches
+          living -- OR across all branches (any living ancestor inherits)
+          fns    -- the union of all branches' fn schemas"""
+        child = store._resolve_spec(spec)
+        if child is None:
+            return {"latch": None, "living": False, "fns": []}
+        ancestors = MultiParentOps.all_parents(store, spec)
+        latch = None
+        living = False
+        fns = []
+        for a in ancestors:
+            props = a.properties or {}
+            lv = props.get("latch")
+            if lv is not None:
+                try:
+                    lv = max(0, int(lv))
+                except (TypeError, ValueError):
+                    lv = None
+                if lv is not None:
+                    latch = lv if latch is None else min(latch, lv)
+            if props.get("living"):
+                living = True
+            fn = props.get("fn")
+            if fn:
+                fns.append({"parent": a.eid, "fn": fn})
+        own_latch = (child.properties or {}).get("latch")
+        if own_latch is not None:
+            try:
+                own = max(0, int(own_latch))
+                latch = own if latch is None else min(latch, own)
+            except (TypeError, ValueError):
+                pass
+        if (child.properties or {}).get("living"):
+            living = True
+        return {"latch": latch, "living": living, "fns": fns}
+
+    @staticmethod
+    def parent_offsets(store, spec: str) -> dict:
+        """The per-relation offset: the child's position vs each DIRECT
+        parent's position -- 'what makes this child distinct from each
+        parent separately'. Returns {parent_eid: cosine-difference}:
+        0 = the child sits ON the parent (no distinguishing direction),
+        approaching 1 = fully distinct (the offset is the meaning)."""
+        child = store._resolve_spec(spec)
+        if child is None or not getattr(child, "position", None):
+            return {}
+        import numpy as _np
+        cv = _np.asarray(child.position, dtype=float)
+        cn = _np.linalg.norm(cv)
+        if cn < 1e-12:
+            return {}
+        cv = cv / cn
+        out: dict[str, float] = {}
+        props = child.properties or {}
+        for pp in MultiParentOps._parents_of(props):
+            pw = store.docs.get(pp)
+            if pw is None or not getattr(pw, "position", None):
+                continue
+            pv = _np.asarray(pw.position, dtype=float)
+            pn = _np.linalg.norm(pv)
+            if pn < 1e-12:
+                continue
+            pv = pv / pn
+            # the offset magnitude: cosine distance between the child's
+            # position and the parent's (0 = the child IS the parent's
+            # centroid, 2 = fully opposite); normalized to [0, 1]
+            out[pp] = round((1.0 - float(cv @ pv)) / 2.0, 4)
+        return out
+
+
+class EntityStore(MultiParentOps):
     """Derived entities, three homes, one contract:
 
     1. ``cortex-core.entities`` (the cortex-experiment QuantumEntity
@@ -2713,3 +2935,4 @@ def related_entities(exemplars, q: str, qvec=None,
                 out.append({**_rec(other_key), "how": f"near ({sim:.2f})"})
                 seen.add(other_key)
     return out[:k]
+
