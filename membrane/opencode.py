@@ -6242,34 +6242,16 @@ _SPEAK_TTL_S = 6 * 3600 # held messages expire (stale observations are noise)
 
 
 def speak(srv, text: str, kind: str = "note") -> bool:
-    """Membrane says something in the room. The message enters the speech
-    queue; the next drain delivers it to THREE channels: (1) the MQTT
-    event bus -- PUSHED to every subscriber live (the primary transport,
-    no model turn, no wait); (2) the peer channel -- the couchbase
-    fallback (every connected opencode's UI, no model turn); (3) the
-    model-bound request as a marked block (the relay: the model carries
-    it into the conversation, where it enters the timeline and learns
-    from the operator's reaction).
-
-    The budget: the queue is bounded (anti-flood -- a baby that talks
-    constantly is noise, not participation); priority order: asks >
-    verification reports > alerts > observations. Full queue => the
-    lowest-priority pending message is dropped."""
+    """Membrane says something in the room. SEAT-LOCAL (the operator's
+    call: membrane's speech is private to this seat -- no MQTT broadcast,
+    no peer-channel relay, no cross-seat delivery). The message enters
+    the speech queue; the next model-bound request carries it as a marked
+    block into THIS conversation, where it enters THIS timeline and
+    learns from THIS operator's reaction."""
     q = getattr(srv, "_speak_queue", None)
     if q is None:
         srv._speak_queue = q = []
-    msg = {"text": str(text)[:2000], "kind": kind, "ts": time.time(),
-           "seat": getattr(srv, "seat_id", None) or "unknown"}
-    # THE MQTT PUSH (the primary transport): publish immediately to
-    # membrane/speech/<seat> -- every subscriber gets it live
-    bus = getattr(srv, "_event_bus", None)
-    if bus is not None:
-        try:
-            bus.publish(f"speech/{msg['seat']}",
-                        {"text": msg["text"], "kind": kind,
-                         "ts": msg["ts"]})
-        except Exception:
-            pass
+    msg = {"text": str(text)[:2000], "kind": kind, "ts": time.time()}
     q.append(msg)
     del q[:-_SPEAK_CAP]               # bounded: drop the oldest overflow
     return True
