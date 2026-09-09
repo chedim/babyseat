@@ -962,14 +962,23 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
                 for a in est.take_alerts():
                     lines.append(f"ALERT: {a['label']} {a['kind']} its "
                                  f"boundary ({a['boundary']}; {a['detail']})")
+                    # THE SPEECH LANE (the baby's voice): alerts speak in
+                    # the room -- the same event, two deliveries (the
+                    # banner whisper + the chat message)
+                    speak(srv, f"ALERT: {a['label']} {a['kind']} its "
+                               f"boundary ({a['boundary']})", kind="alert")
                 for a in est.take_announcements():
                     if a["kind"] == "merged":
                         lines.append(f"new entity: {a['eid']} — merged "
                                      f"{a.get('extra', '')}")
+                        speak(srv, f"new entity: {a['eid']} — merged "
+                                   f"{a.get('extra', '')}", kind="note")
                     else:
                         clip = a.get("summary") or a["name"]
                         lines.append(f"new entity: {a['eid']} [{a['cls']}]"
                                      f" {clip}")
+                        speak(srv, f"new entity: {a['eid']} [{a['cls']}] "
+                                   f"{clip}", kind="note")
             stories: dict[str, str] = {}
             for k, s in (est.track_report(
                     mem.store.exemplars, query_vec=vec,
@@ -3812,6 +3821,13 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                         else _where_delta(srv, _where_we_are(srv, vec)))
         if banner_block:
             ctx = (ctx + "\n\n" + banner_block) if ctx else banner_block
+        # THE SPEECH RELAY: membrane's held messages ride the next
+        # model-bound request as a marked block -- the model relays them
+        # into the conversation verbatim (the mouth), where they enter the
+        # timeline and learn from the operator's reaction.
+        speak_block = _speak_block(srv)
+        if speak_block:
+            ctx = (ctx + "\n\n" + speak_block) if ctx else speak_block
         replay_sim = float(getattr(srv, "replay_sim", 0.0) or 0.0)
         # ---- token savers, in cost order ----
         # 1. FULL REPLAY (gate act + consensus): the gate is sure the near match
@@ -5666,6 +5682,14 @@ def main() -> None:
             from .night import run_night, NIGHT_SWEEP_MIN_INTERVAL_S
             while True:
                 time.sleep(900)          # a 15-minute tick
+                # THE IDLE SPEECH DRAIN (the operator's requirement: shown
+                # in opencode even without a turn): held messages push
+                # through the peer channel -- every connected seat's UI
+                # shows them immediately, no model turn needed.
+                try:
+                    drain_speech(srv)
+                except Exception:
+                    pass
                 try:
                     est = getattr(srv, "entity_store", None)
                     if est is None:
@@ -6199,3 +6223,68 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+# ---- the speech lane: membrane's own voice, pushed into the chat ------------
+# THE OPERATOR'S DESIGN: membrane participates in the room -- it speaks when
+# it has something worth saying, in both operators' presence, and everything
+# it says is SHOWN in opencode (nothing hidden in a side channel). The
+# transport is the peer channel (the push: every connected seat's UI shows
+# peer posts) + the model-turn injection (the relay: the model carries
+# membrane's unread messages into the conversation as marked blocks).
+
+_SPEAK_CAP = 6          # the speech budget: max queued messages (anti-flood)
+_SPEAK_TTL_S = 6 * 3600 # held messages expire (stale observations are noise)
+
+
+def speak(srv, text: str, kind: str = "note") -> bool:
+    """Membrane says something in the room. The message enters the speech
+    queue; the next drain delivers it to BOTH channels: (1) the peer
+    channel -- it PUSHES into every connected opencode's UI immediately
+    (no model turn needed), (2) the model-bound request as a marked block
+    (the relay: the model carries it into the conversation, where it
+    enters the timeline and learns from the operator's reaction).
+
+    The budget: the queue is bounded (anti-flood -- a baby that talks
+    constantly is noise, not participation); priority order: asks >
+    verification reports > alerts > observations. Full queue => the
+    lowest-priority pending message is dropped."""
+    q = getattr(srv, "_speak_queue", None)
+    if q is None:
+        srv._speak_queue = q = []
+    msg = {"text": str(text)[:2000], "kind": kind, "ts": time.time()}
+    q.append(msg)
+    del q[:-_SPEAK_CAP]               # bounded: drop the oldest overflow
+    return True
+
+
+def drain_speech(srv) -> list[dict]:
+    """The drain: pop every held message (oldest first), push each through
+    the peer channel (the operator's requirement: shown in opencode), and
+    return them for the model-turn relay (the marked block). Expired
+    messages are dropped silently (stale observations are noise)."""
+    q = getattr(srv, "_speak_queue", None) or []
+    now = time.time()
+    out = []
+    while q:
+        m = q.pop(0)
+        if now - m["ts"] > _SPEAK_TTL_S:
+            continue                  # expired: never shown
+        peers = getattr(srv, "peers", None)
+        if peers is not None:
+            try:
+                peers.post(f"membrane: {m['text']}")
+            except Exception:
+                pass
+        out.append(m)
+    return out
+
+
+def _speak_block(srv) -> str | None:
+    """The model-turn relay: drained messages as ONE marked block riding
+    the next model-bound request (the same delivery the intercept answers
+    and the thought-asks use)."""
+    msgs = drain_speech(srv)
+    if not msgs:
+        return None
+    lines = [f"[membrane-says] {m['text']}" for m in msgs]
+    return "\n".join(lines)
