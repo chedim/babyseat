@@ -300,6 +300,26 @@ TOOLS: list[dict] = [
             "before posting to know who is listening."),
         "inputSchema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "membrane_entity_inherit",
+        "description": (
+            "ENTITY INHERITANCE: give an entity a parent concept ('a "
+            "letter points to letters'). The child inherits the parent's "
+            "constraints (latch level, the `living` flag) down the ISA "
+            "chain; the child's geometry sits at the parent's position "
+            "plus its own offset. Cycles are rejected."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "spec": {"type": "string",
+                         "description": "The child (eid or exact name)."},
+                "parent": {"type": "string",
+                           "description": "The parent concept (eid or "
+                                          "exact name)."},
+            },
+            "required": ["spec", "parent"],
+        },
+    },
 ]
 
 
@@ -603,6 +623,21 @@ def tool_peer_post(args: dict, port: int) -> str:
             f"every connected seat; unread messages ride their banners).")
 
 
+def tool_entity_inherit(args: dict, port: int) -> str:
+    spec = str(args.get("spec") or "").strip()
+    parent = str(args.get("parent") or "").strip()
+    if not spec or not parent:
+        raise ProxyError(400, "spec + parent required")
+    out = _http(port, "POST", "/membrane/entity/inherit",
+                {"spec": spec, "parent": parent})
+    if not out.get("ok"):
+        return f"Inherit failed: {out.get('error', 'unknown error')}"
+    return (f"Entity {out['child']} ISA {out['parent']} -- the child "
+            f"inherits the parent's constraints (latch, `living`) down "
+            f"the ISA chain; its geometry sits at the parent's position "
+            f"plus its own offset.")
+
+
 def tool_peer_seats(args: dict, port: int) -> str:
     out = _http(port, "GET", "/membrane/peer/seats")
     seats = out.get("seats") or []
@@ -632,6 +667,7 @@ TOOL_IMPLS = {
     "membrane_set_junk_cut": tool_set_junk_cut,
     "membrane_peer_post": tool_peer_post,
     "membrane_peer_seats": tool_peer_seats,
+    "membrane_entity_inherit": tool_entity_inherit,
 }
 
 

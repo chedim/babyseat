@@ -3271,6 +3271,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._junk_cut_set(); return
         if path == "/membrane/entity/edit":
             self._entity_edit(); return
+        if path == "/membrane/entity/inherit":
+            self._entity_inherit(); return
         if path == "/membrane/entity/remove":
             self._entity_remove(); return
         if path.startswith("/membrane/"):
@@ -4895,6 +4897,25 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                                "field_size": len(mem.store)})
         except Exception:
             pass
+
+    def _entity_inherit(self) -> None:
+        """POST /membrane/entity/inherit: the ISA relation (the operator's
+        design -- 'a letter points to letters'). Child gains a parent
+        concept; constraints propagate down the chain."""
+        srv = self.server
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
+        body = self._json_body()
+        spec = str(body.get("spec") or "").strip()
+        parent = str(body.get("parent") or "").strip()
+        if not spec or not parent:
+            self._json_err_raw(400, "spec + parent required"); return
+        res = est.set_parent(spec, parent)
+        self._entity_audit("inherit", res)
+        if not res.get("ok"):
+            self._json_err_raw(400, str(res.get("error"))); return
+        self._json_out(res)
 
     def _junk_cut_set(self) -> None:
         """POST /membrane/junk-cut: the live junk-cut knob. spec '#N'

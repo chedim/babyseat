@@ -1219,9 +1219,16 @@ class EntityStore:
         if cluster is None:
             return 0
         try:
+            # THE SEAT SCOPE (the context-creep fix, the operator's
+            # complaint: foreign entities in their banners): the
+            # read-through pulls ONLY membrane's own namespace + the
+            # cortex commons -- not every doc in the shared collection
             qr = cluster.query(
                 "SELECT meta().id AS id, t.* FROM "
-                f"`{self.bucket}`.`_default`.`entities` t LIMIT $lim",
+                f"`{self.bucket}`.`_default`.`entities` t "
+                "WHERE meta().id LIKE 'membrane::%' "
+                "OR meta().id LIKE 'cortex::%' "
+                "LIMIT $lim",
                 QueryOptions(timeout=_dt.timedelta(seconds=30),
                              named_parameters={"lim": limit}))
             for row in qr:
@@ -1320,6 +1327,113 @@ class EntityStore:
         self.upsert(ent)
         return {"ok": True, "eid": eid, "merged": merged,
                 "class": c, "name": name}
+
+    def set_parent(self, spec: str, parent_spec: str) -> dict:
+        """ENTITY INHERITANCE (the operator's ISA design): the child
+        entity gains a parent concept -- 'a letter points to letters'.
+        The relation is an OFFSET: the child's position sits at the
+        parent's position plus the child's distinguishing direction
+        (learned from its own instances). The parent's CONSTRAINTS
+        propagate down the chain (latch level, the `living` flag) and
+        the parent's fn schema is the child's interface superset.
+        Resolution follows the merged_into pointer pattern: a parent
+        id that itself has a parent resolves transitively."""
+        child = self._resolve_spec(spec)
+        if child is None:
+            return {"ok": False, "error": f"child '{spec}' not found"}
+        parent = self._resolve_spec(parent_spec)
+        if parent is None:
+            return {"ok": False, "error": f"parent '{parent_spec}' not found"}
+        if child.eid == parent.eid:
+            return {"ok": False, "error": "self-parent is a cycle"}
+        # THE CYCLE GUARD: follow the parent chain transitively; a cycle
+        # (the child IS its own ancestor) is rejected
+        walker = parent
+        hops = 0
+        while walker is not None and hops < 16:
+            pp = (walker.properties or {}).get("parent")
+            if pp == child.eid:
+                return {"ok": False,
+                        "error": f"cycle: {child.eid} is an ancestor of "
+                                 f"{parent_spec}"}
+            walker = self.docs.get(pp) if pp else None
+            hops += 1
+        props = child.properties or {}
+        props["parent"] = parent.eid
+        self.upsert(child)
+        self._announce("merged", child, f"ISA {parent.eid}")
+        return {"ok": True, "child": child.eid, "parent": parent.eid}
+
+    def parent_chain(self, spec: str) -> list["QuantumEntity"]:
+        """The ISA walk: the entity's full ancestor chain, nearest parent
+        first (the transitive resolution for constraint inheritance and
+        fn-schema lookup)."""
+        out = []
+        ent = self._resolve_spec(spec)
+        hops = 0
+        while ent is not None and hops < 16:
+            pp = (ent.properties or {}).get("parent")
+            if not pp:
+                break
+            parent = self.docs.get(pp)
+            if parent is None:
+                break
+            out.append(parent)
+            ent = parent
+            hops += 1
+        return out
+
+    def inherited_latch(self, spec: str) -> int | None:
+        """The latch level, inherited down the ISA chain: the child's own
+        latch if set, else the nearest ancestor's, else None."""
+        ent = self._resolve_spec(spec)
+        hops = 0
+        while ent is not None and hops < 16:
+            lv = (ent.properties or {}).get("latch")
+            if lv is not None:
+                try:
+                    return max(0, int(lv))
+                except (TypeError, ValueError):
+                    pass
+            pp = (ent.properties or {}).get("parent")
+            ent = self.docs.get(pp) if pp else None
+            hops += 1
+        return None
+
+    def inherited_living(self, spec: str) -> bool:
+        """The covenant's operational hook: `living` propagates down the
+        ISA chain -- if ANY ancestor is marked living, the child inherits
+        the constraint (all life held of highest value)."""
+        ent = self._resolve_spec(spec)
+        hops = 0
+        while ent is not None and hops < 16:
+            if (ent.properties or {}).get("living"):
+                return True
+            pp = (ent.properties or {}).get("parent")
+            ent = self.docs.get(pp) if pp else None
+            hops += 1
+        return False
+
+    def children_of(self, spec: str) -> list["QuantumEntity"]:
+        """The ISA walk reversed: entities whose parent chain passes
+        through this one."""
+        ent = self._resolve_spec(spec)
+        if ent is None:
+            return []
+        eid = ent.eid
+        out = []
+        for q in self.docs.values():
+            if q is ent:
+                continue
+            walker, hops = q, 0
+            while walker is not None and hops < 16:
+                pp = (walker.properties or {}).get("parent")
+                if pp == eid:
+                    out.append(q)
+                    break
+                walker = self.docs.get(pp) if pp else None
+                hops += 1
+        return out
 
     def edit(self, spec: str, summary=None, links=None, cls=None,
              merged_into=None, nudge_script=None,
