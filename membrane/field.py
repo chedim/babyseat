@@ -800,50 +800,20 @@ class ExemplarStore:
         return [(pool[i], float(sims[i])) for i in idx]
 
     def save(self, path: str | Path) -> None:  # noqa: F811
+        """THE CB-ONLY SAVE (the operator's call: JSON fully removed)."""
         if self._cb is not None:
             self._save_couchbase()
             return
-        self._save_json(path)
+        raise RuntimeError(
+            "couchbase unreachable -- the field has no JSON fallback "
+            "(the operator's call: cb-only, no dual backend). The "
+            "in-memory state persists until cb returns; MQTT events "
+            "announce the outage.")
 
-    def _save_json(self, path: str | Path) -> None:
-        """Atomic save: write to a temp file in the same directory, then
-        ``os.replace`` it over the target. A crash mid-write leaves the old
-        field intact (the rename is the atomic publish step) instead of a
-        truncated JSON no future load can read.
-
-        Ephemeral rows ride the same file as plain exemplars carrying their
-        ``eph_born`` in extra -- load() routes them back into the ephemeral
-        tier, so the JSON mirror has the SAME semantics as the couchbase
-        tier split. (The fallback must be a faithful tier mirror, or a
-        cluster-loss flip would promote silence by forgetting candidates.)"""
-        p = Path(path)
-        if self._quarantine_failed:
-            raise RuntimeError(
-                f"refusing to save over unreadable field {p} "
-                f"(quarantine failed at load); move the file aside first")
-        p.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(prefix=p.name + ".", suffix=".tmp",
-                                   dir=str(p.parent))
-        try:
-            with os.fdopen(fd, "w") as f:
-                # ONE list, two tiers by flag: ephemeral rows carry their
-                # eph_born in extra (the load path routes them back); the
-                # flag itself rides the record only when True (legacy rows
-                # stay byte-identical)
-                recs = []
-                for e in self.exemplars:
-                    rec = _ex_to_wire(e, stamp=False)
-                    if e.ephemeral:
-                        rec["ephemeral"] = True
-                    recs.append(rec)
-                json.dump(recs, f, indent=2)
-            os.replace(tmp, p)
-        except BaseException:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            raise
+    # THE JSON SAVE RETIRED (the operator's call: fully remove JSON). The
+    # _save_json path is gone; the field's only durable home is couchbase.
+    # The .json file on disk is read ONCE at boot (the migration read, in
+    # load()) and then archived -- not a dual backend.
 
     # ---- the cold tier (archive) -------------------------------------------
     # Cortex's episodic-buffer idea: raw turns that have been distilled into a
@@ -1940,6 +1910,19 @@ class ExemplarStore:
                     # faithful tier mirror
                     ex.ephemeral = True
                 store.append(ex)
+            # THE MIGRATION ARCHIVE (the operator's call: JSON fully removed):
+            # the file was read ONCE as a boot migration; archive it so the
+            # next boot hydrates from cb alone. The file is preserved (the
+            # append-only promise) -- just retired as a backend.
+            import sys
+            mig = p.with_name(p.name + ".migrated")
+            try:
+                os.replace(p, mig)
+                print(f"[membrane] json field {p} archived to {mig} "
+                      f"(cb-only backend; the data lives in the timeline)",
+                      file=sys.stderr)
+            except OSError:
+                pass
         return store
 
 class MaskedExemplarStore:

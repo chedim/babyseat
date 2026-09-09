@@ -65,6 +65,10 @@ class TestWhyStamp(unittest.TestCase):
         import threading as _th
         m.mut_lock = _th.RLock()
         m.cast = None                # no cast writes in these tests
+        # THE CB MOCK (the cb-only save): the store's save() needs a
+        # backend -- the tests' in-memory store fakes it with a no-op
+        m.store._cb = object()       # truthy: save routes to couchbase
+        m.store._save_couchbase = lambda: None  # the fake: no-op
         return m
 
     def test_reason_situation_gets_why_stamp(self):
