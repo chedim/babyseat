@@ -3138,6 +3138,45 @@ def _pick_default_model(models: list, preferred: str | None) -> str | None:
     return models[0] if models else None
 
 
+def _pick_idle_cortex_model(backend: str, preferred: str | None) -> str:
+    """The idle lane's local default: a LOCAL chat-capable model resolved
+    from ollama's LIVE tag list (the old hardcoded 'granite3.3:8b' 404s
+    forever on backends that never had it -- one dead compact cycle per
+    idle period). Cloud rungs are excluded (a background seat must never
+    burn cloud tokens -- the idle-cortex split's own covenant), non-chat
+    markers are screened. ``preferred`` wins if present and local; the
+    hardcoded name survives only as the last resort."""
+    fallback = preferred or "granite3.3:8b"
+    try:
+        with urllib.request.urlopen(backend + "/api/tags", timeout=30) as r:
+            tags = json.loads(r.read())
+    except Exception:
+        return fallback
+    local = []
+    for m in tags.get("models", []) or []:
+        name = m.get("name") or ""
+        if not name or _is_non_chat(name):
+            continue
+        if bool(m.get("remote_host")) or not m.get("size"):
+            continue                  # a cloud rung: not the idle lane's model
+        caps = list(m.get("capabilities") or [])
+        if caps and not all(c in caps for c in _OC_MIN_CAPS):
+            continue
+        local.append(name)
+    if not local:
+        return fallback
+    if preferred:
+        for m in local:
+            if m == preferred or m.split(":")[0] == preferred:
+                return m
+    for want in ("granite", "glm", "qwen3", "qwen2.5-coder", "qwen2.5",
+                 "llama", "mistral", "gemma", "deepseek"):
+        for m in local:
+            if m.startswith(want):
+                return m
+    return local[0]
+
+
 def _audit_tail(path, k: int = 24):
     """Last k ticker-worthy audit records ({verdict,sim,q}) + the MONOTONIC
     total (the page compares totals to detect new verdicts, not list lengths).
@@ -5492,8 +5531,11 @@ def main() -> None:
     # --compact-model pins BOTH lanes (chat-stamped + idle); --idle-cortex-
     # model overrides just the idle lane. The judge/cortex continue to follow
     # the operator's chat selection (1-per-turn, bounded by the turn itself).
+    # The default resolves from ollama's LIVE tag list (_pick_idle_cortex_
+    # model): a hardcoded name (granite3.3:8b) 404s forever on backends
+    # that never had it -- one dead compact cycle per idle period.
     srv.idle_cortex_model = (args.idle_cortex_model or args.compact_model
-                             or "granite3.3:8b")
+                             or _pick_idle_cortex_model(backend, model))
     srv.default_compact_model = srv.compact_model   # the autoselect-lane pin-back
     srv.judge_follows_chat = (not args.no_judge) and args.judge_model is None
     srv.pending_embed_error = None
