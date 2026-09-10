@@ -4978,6 +4978,17 @@ class MembraneOpenAIHandler(RAGProxyHandler):
     # ---- /membrane/state: the JSON instrument ----
     def _membrane_state(self) -> None:
         srv = self.server
+        # THE STATE CACHE (the slow-endpoint fix): the state query builds
+        # the full trajectory hydration + WHERE WE ARE + the surface ring
+        # -- O(field_size) per call, 20+ seconds on a fresh boot. Cached
+        # with a 60s TTL: the monitoring surface doesn't need to be fresh
+        # to the second, and the cache prevents the state query from
+        # blocking the serial serve loop (the operator's socket errors).
+        cached = getattr(srv, "_state_cache", None)
+        if cached and time.time() - cached.get("ts", 0) < 60:
+            self._json_out(cached["data"])
+            return
+        srv = self.server
         mem = srv.membrane
         exs = mem.store.exemplars
         tail, n_verd = _audit_tail(mem.audit_path)
@@ -5085,6 +5096,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             print(f"[opencode] state: pool_cells degraded ({_one_line(e)})",
                   file=sys.stderr)
         out["pool_cells"] = pool_cells
+        # THE CACHE STORE: the built state is cached for 60s (the TTL)
+        srv._state_cache = {"data": out, "ts": time.time()}
         self._json_out(out)
 
 
