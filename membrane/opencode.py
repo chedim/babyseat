@@ -54,7 +54,7 @@ import numpy as np
 from .embed import OllamaEmbedder
 from .global_field import PEER_ASK_SIM_MIN
 from .rag import (Compactor, RAGProxyHandler, _clip, _inject,
-                  _ollama_chat, doctrine_instructions_text)
+                  _model_chat, doctrine_instructions_text)
 from .router import (EXPLORE_LANE, AUTO_CLOUD, AUTO_LOCAL, AUTO_LANES,
                      AUTO_ALIASES, LANE_TOKENS, normalize_lane,
                      Registry)
@@ -5745,7 +5745,7 @@ def main() -> None:
                     now = time.time()
                     do_sweep = (now - getattr(srv, "_night_sweep_ts", 0.0)
                                 ) >= NIGHT_SWEEP_MIN_INTERVAL_S
-                    night = run_night(srv, mem, est, chat=_ollama_chat,
+                    night = run_night(srv, mem, est, chat=_model_chat(srv),
                                       sweep=do_sweep)
                     if do_sweep:
                         srv._night_sweep_ts = now

@@ -363,6 +363,62 @@ def _ollama_chat(backend: str, model: str, messages: list,
     return c.strip() if isinstance(c, str) else ""
 
 
+def _openai_chat(url: str, headers: dict, model: str, messages: list,
+                 temperature: float = 0.2, timeout: int = 120) -> str:
+    """One non-stream OpenAI-compatible chat call -> the assistant text
+    (or ""). The cloud-lane twin of _ollama_chat: the same distillation
+    prompts, a different wire shape (choices[0].message.content)."""
+    body = {"model": model, "stream": False, "temperature": float(temperature),
+            "messages": messages}
+    try:
+        req = urllib.request.Request(
+            url, data=json.dumps(body).encode(), method="POST",
+            headers={"Content-Type": "application/json", **headers})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            resp = json.loads(r.read())
+    except Exception as e:
+        print(f"[compact] llm call failed ({e})", file=sys.stderr)
+        return ""
+    ch = resp.get("choices") if isinstance(resp, dict) else None
+    msg = (ch[0].get("message") if isinstance(ch, list) and ch
+           and isinstance(ch[0], dict) else None)
+    c = msg.get("content") if isinstance(msg, dict) else None
+    return c.strip() if isinstance(c, str) else ""
+
+
+def _model_chat(srv):
+    """A model-aware chat(backend, model, messages) for the background
+    lanes (compactor, idle synthesis, night). The rung resolver: a cloud
+    model (srv.router.records[m].backend = a registered provider) rides
+    that provider's OpenAI-compatible chat path with its memory-only
+    auth headers -- the same wire the chat lane uses; a local model (or a
+    router-less srv) falls back to _ollama_chat. The compactor was calling
+    Ollama DIRECTLY with the judge's model name: a cloud rung (e.g.
+    glm-5.3-flash:cloud on openrouter) 404s on /api/chat forever -- the
+    background lanes were dead whenever the judge followed chat onto a
+    cloud model."""
+    router = getattr(srv, "router", None)
+    backend = getattr(srv, "backend", "")
+
+    def chat(bg: str, model: str, messages: list,
+             temperature: float = 0.2, timeout: int = 120) -> str:
+        rec = router.records.get(model) if router is not None else None
+        if rec is not None and rec.backend:
+            from .auth import PROVIDERS as _PROV
+            prov = _PROV.get(rec.backend) or {}
+            url = (prov.get("base", "") + prov.get("chat_path",
+                   "/v1/chat/completions"))
+            from . import auth as _auth
+            key = (getattr(srv, "cloud_keys", None) or {}).get(rec.backend, "")
+            headers = _auth._headers(rec.backend, key) if key else {}
+            return _openai_chat(url, headers, model, messages,
+                                temperature=temperature, timeout=timeout)
+        return _ollama_chat(bg or backend, model, messages,
+                            temperature=temperature, timeout=timeout)
+
+    return chat
+
+
 class Compactor:
     """The slow clock: cluster + distill the field's raw turns into compact notes.
 
@@ -528,7 +584,7 @@ class Compactor:
         user = ("Topic seed: " + _clip(topic, 120) + "\n\nPast exchanges "
                 "(oldest first):\n\n" + "\n----\n".join(parts) +
                 "\n\nDistill these into one compact memory note.")
-        note = _ollama_chat(srv.backend, srv.idle_cortex_model, [
+        note = _model_chat(srv)(srv.backend, srv.idle_cortex_model, [
             {"role": "system", "content": _COMPACT_SYSTEM},
             {"role": "user", "content": user}])
         if not note:
@@ -590,7 +646,7 @@ class Compactor:
             ents = ES.synthesize_from_cluster(
                 srv.backend, srv.idle_cortex_model,
                 [m.situation for m in kept], note, topic,
-                chat=_ollama_chat)
+                chat=_model_chat(srv))
             if ents:
                 sink = getattr(srv, "entity_sink", None)
                 if sink is not None:
@@ -628,7 +684,7 @@ class Compactor:
                 now = time.time()
                 last = getattr(srv, "_night_sweep_ts", 0.0)
                 do_sweep = (now - last) >= NIGHT_SWEEP_MIN_INTERVAL_S
-                night = run_night(srv, mem, est, chat=_ollama_chat,
+                night = run_night(srv, mem, est, chat=_model_chat(srv),
                                   sweep=do_sweep)
                 if do_sweep and night.get("sweep"):
                     srv._night_sweep_ts = now
