@@ -6269,9 +6269,6 @@ def main() -> None:
                 pass
 
 
-if __name__ == "__main__":
-    main()
-
 # ---- the speech lane: membrane's own voice, pushed into the chat ------------
 # THE OPERATOR'S DESIGN: membrane participates in the room -- it speaks when
 # it has something worth saying, in both operators' presence, and everything
@@ -6337,3 +6334,7 @@ def _speak_block(srv) -> str | None:
         return None
     lines = [f"[membrane-says] {m['text']}" for m in msgs]
     return "\n".join(lines)
+
+
+if __name__ == "__main__":
+    main()
