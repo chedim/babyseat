@@ -1861,6 +1861,26 @@ class ExemplarStore:
                     print(f"[membrane] local Couchbase detected but "
                         f"unusable ({e}); JSON field {path} it is.",
                         file=__import__("sys").stderr)
+            else:
+                # THE CB-ONLY FAILOUT (the operator's call: JSON fully
+                # removed, no dual backend -- cb is the only durable home).
+                # When the server is unreachable, membrane CANNOT persist:
+                # starting would mean a field that never saves. The honest
+                # move: print the error clearly and exit -- the operator
+                # starts couchbase first, then relaunches.
+                conn = os.environ.get("COUCHBASE_CONN_STRING",
+                                      "couchbase://localhost")
+                user = os.environ.get("COUCHBASE_USER", "Administrator")
+                print(f"\n{'=' * 60}", file=__import__("sys").stderr)
+                print(f"membrane cannot start: couchbase is not reachable.",
+                      file=__import__("sys").stderr)
+                print(f"  conn string: {conn}", file=__import__("sys").stderr)
+                print(f"  fix: start couchbase (docker start <container>"
+                      f" or brew services start couchbase-server)",
+                      file=__import__("sys").stderr)
+                print(f"  then relaunch membrane.", file=__import__("sys").stderr)
+                print(f"{'=' * 60}", file=__import__("sys").stderr)
+                raise SystemExit(1)
         store = cls()
         store.origin = _origin_tag(path)
         p = Path(path)
