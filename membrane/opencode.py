@@ -5494,6 +5494,15 @@ def main() -> None:
     from .events import EventBus
     srv.seat_id = f"proxy-{listen}"
     srv._event_bus = EventBus(srv.seat_id)
+    # THE SPEECH-ACT TABLE (Phase W): the quantized act vocabulary and
+    # the transition table for membrane's closed-loop participation
+    from .acts import ActTable
+    srv._act_table = ActTable()
+    # THE EVENT BUS (MQTT, cb's push transport): boot at startup, degrades
+    # to silent when the broker is unreachable (the covenant)
+    from .events import EventBus
+    srv.seat_id = f"proxy-{listen}"
+    srv._event_bus = EventBus(srv.seat_id)
     srv.dev = bool(getattr(args, "dev", False))
     srv._dev_warn = None
 
@@ -6277,7 +6286,13 @@ def speak(srv, text: str, kind: str = "note") -> bool:
     q = getattr(srv, "_speak_queue", None)
     if q is None:
         srv._speak_queue = q = []
-    msg = {"text": str(text)[:2000], "kind": kind, "ts": time.time()}
+    act = kind                        # the speech act (the kind IS the act)
+    srv_act = getattr(srv, "_act_table", None)
+    if srv_act is not None:
+        ctx_sig = getattr(srv, "_last_context_sig", "") or "unknown"
+        srv._act_table.observe(ctx_sig, act)
+    msg = {"text": str(text)[:2000], "kind": kind, "act": act,
+           "ts": time.time()}
     q.append(msg)
     del q[:-_SPEAK_CAP]               # bounded: drop the oldest overflow
     return True
