@@ -3780,6 +3780,19 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         except Exception as e:
             print(f"[opencode] gate error, forwarding raw: {e}", file=sys.stderr)
             self._forward_raw(raw); return
+        # THE PLANNER'S CONTEXT SIGNAL (the loop's first half): the turn's
+        # situation cluster = (gate verdict kind + sim band). The ActTable
+        # keys its transition table on this sig -- speak() consults it,
+        # and the reaction pass (the turn after the speech lands) labels
+        # the act. The sig is cheap (no embeds -- the gate already ran).
+        try:
+            _vk = str(verdict.get("verdict") or "unknown")
+            _vs = verdict.get("sim")
+            _band = (f"{float(_vs):.1f}" if isinstance(_vs, (int, float))
+                     else "none")
+            srv._last_context_sig = f"{_vk}|{_band}"
+        except Exception:
+            srv._last_context_sig = "unknown"
         # ---- INTERNAL: the 'model:' escape hatch only (recall/state were both
         # fully handled above, pre-gate) ----
         q = _last_user_text(body)
@@ -3866,6 +3879,28 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # model-bound request as a marked block -- the model relays them
         # into the conversation verbatim (the mouth), where they enter the
         # timeline and learn from the operator's reaction.
+        # THE REINFORCEMENT PASS (the loop's closing half): a relayed
+        # speech's act is labeled by THIS turn's flow -- the turn the
+        # speech rode into: the operator kept coding (the turn advanced
+        # past it) => +1 productive; the operator's next ask re-served the
+        # same near memory (a repeat/re-ask shape) => -1 (the speech was
+        # noise); otherwise 0 (ignored -- no adjustment). One label per
+        # delivered batch, on the sig the speech was planned under.
+        _pending = getattr(srv, "_pending_speech_label", None)
+        srv_act_tab = getattr(srv, "_act_table", None)
+        if _pending and srv_act_tab is not None and _pending[0] and _pending[1]:
+            try:
+                p_sig, p_act = _pending
+                nxt = str(verdict.get("verdict") or "")
+                nxt_sim = verdict.get("sim")
+                is_reask = (nxt.startswith("reask")
+                            or (isinstance(nxt_sim, (int, float))
+                                and float(nxt_sim) >= 0.9))
+                reward = -1 if is_reask else 1
+                srv_act_tab.learn(p_sig, p_act, reward)
+            except Exception:
+                pass
+        srv._pending_speech_label = None
         speak_block = _speak_block(srv)
         if speak_block:
             ctx = (ctx + "\n\n" + speak_block) if ctx else speak_block
@@ -6329,17 +6364,35 @@ def speak(srv, text: str, kind: str = "note") -> bool:
     no peer-channel relay, no cross-seat delivery). The message enters
     the speech queue; the next model-bound request carries it as a marked
     block into THIS conversation, where it enters THIS timeline and
-    learns from THIS operator's reaction."""
+    learns from THIS operator's reaction.
+
+    THE PLANNER (the closed loop, observe -> consult -> reinforce): the
+    ActTable is CONSULTED before the queue -- the context cluster selects
+    the act (the transition table's argmax over what was lived here).
+    The caller's proposed act stays when it's what the table wants; the
+    table's own pick (or stay-silent) otherwise governs: stay-silent
+    drops the message (the honest default -- an unlearned context says
+    nothing), any other learned act speaks with that act as the kind.
+    Alerts keep their kind (the planner chooses the realization, not
+    the content)."""
     q = getattr(srv, "_speak_queue", None)
     if q is None:
         srv._speak_queue = q = []
-    act = kind                        # the speech act (the kind IS the act)
     srv_act = getattr(srv, "_act_table", None)
+    ctx_sig = getattr(srv, "_last_context_sig", "") or "unknown"
+    act = kind
     if srv_act is not None:
-        ctx_sig = getattr(srv, "_last_context_sig", "") or "unknown"
-        srv._act_table.observe(ctx_sig, act)
+        planned = srv_act.select(ctx_sig)
+        act = kind if planned == kind else planned
+        if act == "stay-silent":
+            # the planner vetoes: an unlearned (or silent-learned) context
+            # holds its tongue. The observation still lands -- silence in
+            # this context IS the label the reinforcement learns from.
+            srv_act.observe(ctx_sig, "stay-silent")
+            return False
+        srv_act.observe(ctx_sig, act)
     msg = {"text": str(text)[:2000], "kind": kind, "act": act,
-           "ts": time.time()}
+           "sig": ctx_sig, "ts": time.time()}
     q.append(msg)
     del q[:-_SPEAK_CAP]               # bounded: drop the oldest overflow
     return True
@@ -6349,7 +6402,9 @@ def drain_speech(srv) -> list[dict]:
     """The drain: pop every held message (oldest first), push each through
     the peer channel (the operator's requirement: shown in opencode), and
     return them for the model-turn relay (the marked block). Expired
-    messages are dropped silently (stale observations are noise)."""
+    messages are dropped silently (stale observations are noise).
+    The delivered batch's (planning-sig, act) is stashed as the pending
+    reinforcement label -- the NEXT turn's flow grades it."""
     q = getattr(srv, "_speak_queue", None) or []
     now = time.time()
     out = []
@@ -6364,6 +6419,8 @@ def drain_speech(srv) -> list[dict]:
             except Exception:
                 pass
         out.append(m)
+    if out:
+        srv._pending_speech_label = (out[-1].get("sig"), out[-1].get("act"))
     return out
 
 
