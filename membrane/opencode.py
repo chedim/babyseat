@@ -5498,11 +5498,6 @@ def main() -> None:
     # the transition table for membrane's closed-loop participation
     from .acts import ActTable
     srv._act_table = ActTable()
-    # THE EVENT BUS (MQTT, cb's push transport): boot at startup, degrades
-    # to silent when the broker is unreachable (the covenant)
-    from .events import EventBus
-    srv.seat_id = f"proxy-{listen}"
-    srv._event_bus = EventBus(srv.seat_id)
     srv.dev = bool(getattr(args, "dev", False))
     srv._dev_warn = None
 

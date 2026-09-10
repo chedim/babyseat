@@ -73,17 +73,42 @@ class EventBus:
             print(f"[events] bus unavailable ({str(e)[:60]}) -- "
                   f"events degrade to silent", flush=True)
 
+    def _connect(self) -> None:
+        try:
+            import paho.mqtt.client as mqtt
+            cid = f"membrane-{self.seat_id}"
+            self._c = mqtt.Client(client_id=cid, protocol=mqtt.MQTTv311)
+            self._c.on_connect = self._on_connect
+            self._c.on_disconnect = self._on_disconnect
+            self._c.reconnect_delay_set(min_delay=5, max_delay=120)
+            self._c.connect(self.host, self.port, keepalive=30)
+            self._c.loop_start()
+            self.connected = True
+        except Exception as e:
+            self.connected = False
+            print(f"[events] bus unavailable ({str(e)[:60]}) -- "
+                  f"events degrade to silent", flush=True)
+
     def _on_connect(self, client, userdata, flags, rc, *a, **kw):
         self.connected = True
-        print(f"[events] bus connected ({self.host}:{self.port})",
-              flush=True)
+        # THE QUIET CONNECT (the operator's complaint: the connect/disconnect
+        # flood -- the reconnect loop churns on the boat's network); only
+        # the FIRST connect logs (the boot notice), reconnects are silent
+        if not getattr(self, "_ever_connected", False):
+            print(f"[events] bus connected ({self.host}:{self.port})",
+                  flush=True)
+            self._ever_connected = True
         # resubscribe on reconnect
         for topic in list(self._subs):
             client.subscribe(topic, qos=1)
 
     def _on_disconnect(self, client, userdata, *a, **kw):
-        self.connected = False
-        print(f"[events] bus disconnected", flush=True)
+        # THE QUIET DISCONNECT: the reconnect is automatic (paho's
+        # reconnect_on_failure), logging every cycle is noise -- only
+        # log if the disconnect persists (connected stays False across
+        # multiple on_disconnect calls)
+        if self.connected:
+            self.connected = False
 
     def publish(self, event: str, payload: dict, retain: bool = False,
                 qos: int = 1) -> bool:
