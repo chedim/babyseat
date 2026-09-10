@@ -1724,6 +1724,19 @@ class Membrane:
                     extra["entities"] = tags_found
             except Exception:
                 pass
+            # THE FN STAMP (Phase T): the typed transition layer -- every
+            # actuation cell gains extra["fn"] = {op, binds, returns},
+            # parsed from the tool-call capture at learn time. Zero cost
+            # for prose cells (the classifier returns None). The planner's
+            # typed search space and the distiller's structured training
+            # pairs ride this field.
+            try:
+                from .fn_schema import extract_fn_from_exemplar
+                fn = extract_fn_from_exemplar(query, content)
+                if fn:
+                    extra["fn"] = fn
+            except Exception:
+                pass
             # THE WHY STAMP (peer suggestion #2): the situation anchors near
             # "operator explains design intent" -> the cell is a REASON cell
             # (the thing a future why-ask needs first). Zero model calls: the
