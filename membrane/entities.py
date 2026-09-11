@@ -1894,7 +1894,8 @@ class EntityStore(MultiParentOps, TimelineOps):
 
     def edit(self, spec: str, summary=None, links=None, cls=None,
              merged_into=None, nudge_script=None,
-             delete_script=None) -> dict:
+             delete_script=None, mention_script=None,
+             thought_script=None, dreamed_script=None) -> dict:
         """Model-side entity EDIT: patch summary/links/class on the
         resolved entity. Only provided fields change.
         ``merged_into``: MARK-don't-delete subsumption (the operator's
@@ -1929,10 +1930,22 @@ class EntityStore(MultiParentOps, TimelineOps):
         # operator's catch: the old fixture line rode the banner
         # until the next consolidation pass otherwise) -- the new
         # script's render lands at the next pass.
+        # THE TRIGGER SCRIPTS (model-authored policy): the getter/setter
+        # organ's per-trigger bodies -- mention (0.25s, read-shape),
+        # thought (1s), dreamed (2s). The engine (night.py's
+        # run_entity_update_script) dispatches by trigger; the budgets
+        # narrow as the trigger approaches the live chat. Same
+        # size-caps/3-strikes contract as nudge/delete.
         for field, val, cap in (("nudge_script", nudge_script,
                                  SCRIPT_MAX_NUDGE),
                                 ("delete_script", delete_script,
-                                 SCRIPT_MAX_DELETE)):
+                                 SCRIPT_MAX_DELETE),
+                                ("mention_script", mention_script,
+                                 SCRIPT_MAX_NUDGE),
+                                ("thought_script", thought_script,
+                                 SCRIPT_MAX_NUDGE),
+                                ("dreamed_script", dreamed_script,
+                                 SCRIPT_MAX_NUDGE)):
             if val is None:
                 continue
             sval = str(val)

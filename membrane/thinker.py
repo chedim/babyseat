@@ -205,6 +205,29 @@ class Thinker:
               else None)
         tags = list((getattr(ex, "extra", {}) or {}).get("entities") or [])
         sim = payload.get("sim")
+        # THE MENTION SCRIPTS (model-written policy): every tagged entity
+        # carrying a mention_script gets one engine-mediated pass (0.25s
+        # budget, cooldown, the membrane API object injected). The engine
+        # applies the script's {render, patch, delete}; the render lands
+        # on the entity's banner fragment for the next turn.
+        est_all = getattr(self.srv, "entity_store", None)
+        if est is not None and tags:
+            try:
+                from .night import run_entity_update_script, \
+                    apply_entity_update
+                for tag in tags[:4]:
+                    ent = est._resolve_spec(str(tag))
+                    if ent is None:
+                        continue
+                    if not (ent.properties or {}).get("mention_script"):
+                        continue
+                    out = run_entity_update_script(
+                        self.srv, ent, "mention",
+                        extra_state={"operator_text": situation,
+                                     "label": label, "sim": sim})
+                    apply_entity_update(self.srv, ent, out, "mention")
+            except Exception:
+                pass
         # the speak bar: only a SURPRISE is worth saying (a capture whose
         # gate sim ran hot -- the field already held this, and it still
         # mattered: that is the note-pattern shape). Planner-gated.

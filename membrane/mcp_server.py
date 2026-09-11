@@ -212,7 +212,22 @@ TOOLS: list[dict] = [
             "delete: bool}. The nudge's render replaces the track's "
             "default banner line; the delete script retires the entity "
             "(tombstoned, announced). 3 consecutive failures auto-"
-            "disable; empty string clears."),
+            "disable; empty string clears. "
+            "mention_script/thought_script/dreamed_script: TRIGGER-"
+            "TYPED policy scripts (the getter/setter organ) -- run "
+            "off-turn at the thinker/dreamer hooks (mention fires when "
+            "the entity appears in a turn's tags, thought when the "
+            "thinker extends a branch under it, dreamed on dream "
+            "commits), under NARROW budgets (0.25s/1s/2s) + a per-"
+            "entity cooldown, with the READ-ONLY membrane object next "
+            "to state (membrane.field.top_k/sketch/directions, "
+            "membrane.me.describe/velocity/offsets, "
+            "membrane.entities.get, membrane.timeline.walk, "
+            "membrane.intents.open). 'result' = {render, patch: dict "
+            "of this entity's own properties (the monitoring organ: a "
+            "getter may MOVE the entity, e.g. toward 'done' "
+            "coordinates), delete}. The engine applies; scripts never "
+            "mutate directly."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -232,6 +247,22 @@ TOOLS: list[dict] = [
                                   "description": "python; runs first; "
                                                  "set result.delete=True "
                                                  "to retire."},
+                "mention_script": {"type": "string",
+                                   "description": "python; runs when the "
+                                                  "entity is mentioned "
+                                                  "(0.25s budget); sets "
+                                                  "'result' = {render, "
+                                                  "patch, delete}."},
+                "thought_script": {"type": "string",
+                                   "description": "python; runs when the "
+                                                  "thinker extends a "
+                                                  "branch under it (1s "
+                                                  "budget); sets 'result'."},
+                "dreamed_script": {"type": "string",
+                                   "description": "python; runs on dream "
+                                                  "commit/elect under it "
+                                                  "(2s budget); sets "
+                                                  "'result'."},
             },
             "required": ["spec"],
         },
@@ -563,7 +594,8 @@ def tool_entity_add(args: dict, port: int) -> str:
 def tool_entity_edit(args: dict, port: int) -> str:
     body = {"spec": str(args.get("spec") or "").strip()}
     for f in ("summary", "links", "class", "merged_into",
-              "nudge_script", "delete_script"):
+              "nudge_script", "delete_script",
+              "mention_script", "thought_script", "dreamed_script"):
         if args.get(f) is not None:
             body[f] = args[f]
     out = _http(port, "POST", "/membrane/entity/edit", body)

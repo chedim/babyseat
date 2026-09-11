@@ -827,6 +827,148 @@ def run_entity_update_script(srv, ent, trigger: str,
     return out
 
 
+def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
+                         extra: dict) -> dict:
+    """THE MEMBRANE OBJECT (read-only, the operator's design): the
+    full navigation/analysis interface injected next to ``state`` --
+    the field's read surfaces, the entity layer's reads, the
+    timeline walker, the intent steering. NO mutators (the
+    authorship covenant: scripts analyze + return results; the
+    engine applies)."""
+    mem = getattr(srv, "membrane", None)
+    store = getattr(mem, "store", None) if mem else None
+
+    class _FieldAPI:
+        """Read surfaces over the live field (degrade to {} / [] on
+        any failure -- a script can never wedge recall)."""
+        def top_k(self, vec, k: int = 5):
+            if store is None:
+                return []
+            return [(e.eid if hasattr(e, "eid") else i, round(float(s), 4))
+                    for i, (e, s) in enumerate(
+                        store.top_k(vec, k=min(k, 20)))]
+        def sketch(self):
+            return store.stats_sketch() if store else {}
+        def thermo(self):
+            try:
+                from .variety import thermo_state
+                return thermo_state(store) if store else {}
+            except Exception:
+                return {}
+        def directions(self, k: int = 6):
+            try:
+                from .variety import orient_dirs
+                return [list(d) for d in
+                        (orient_dirs(store, max(1, k), 0.5) or [])]
+            except Exception:
+                return []
+
+    class _Me:
+        """THIS entity: reads + the derived-geometry methods."""
+        def __init__(self, e):
+            self.eid = e.eid
+            self.cls = e.cls
+            self.properties = {k: v for k, v in
+                               (e.properties or {}).items()
+                               if not str(k).startswith("script_")}
+            self.position = list(e.position or [])
+            self._ent = e
+        def describe(self):
+            return self._ent.describe()
+        def velocity(self):
+            return (self._ent.ring_velocity(_t.time())
+                    if getattr(self._ent, "position", None) else 0.0)
+        def direction(self):
+            return self._ent.ring_direction()
+        def offsets(self):
+            try:
+                return MultiParentOps.parent_offsets(est, self.eid)
+            except Exception:
+                return {}
+        def parents(self):
+            return list(MultiParentOps._parents_of(
+                self._ent.properties or {}))
+        def children(self):
+            try:
+                return [c.eid for c in est.children_of(self.eid)]
+            except Exception:
+                return []
+
+    class _Entities:
+        """The symbolic layer, read-only."""
+        def get(self, spec):
+            e = est._resolve_spec(spec) if est else None
+            if e is None:
+                return None
+            return {"eid": e.eid, "cls": e.cls,
+                    "position": list(e.position or []),
+                    "properties": {k: v for k, v in
+                                   (e.properties or {}).items()
+                                   if not str(k).startswith("script_")}}
+        def timelines_of(self, spec, open_only: bool = True):
+            try:
+                return [e.eid for e in est.timelines_of(
+                    spec, open_only=open_only)]
+            except Exception:
+                return []
+        def related_by_class(self, spec, cls, limit: int = 8):
+            try:
+                return [e.eid for e in
+                        est.related_by_class(spec, cls, limit)]
+            except Exception:
+                return []
+        def count(self, cls: str | None = None):
+            if cls is None:
+                return len(est.docs)
+            return sum(1 for e in est.docs.values() if e.cls == cls)
+
+    class _Timeline:
+        """The Phase T typed walker (the fn-bridge-fed table)."""
+        def __init__(self, tl):
+            self._tl = tl
+        def distribution(self, toks):
+            return self._tl.distribution(toks) if self._tl else None
+        def walk(self, toks, max_steps: int = 14):
+            return self._tl.walk(toks, max_steps=max_steps) \
+                if self._tl else None
+
+    class _Intents:
+        """The steering wheel (open intentions, read-only)."""
+        def __init__(self, ib):
+            self._ib = ib
+        def open(self):
+            try:
+                return [i.text for i in self._ib.open_intents()]
+            except Exception:
+                return []
+        def nearest(self, vec):
+            try:
+                need, sim = self._ib.nearest(vec)
+                return {"text": need.text, "sim": round(float(sim), 3)}
+            except Exception:
+                return None
+
+    class _Membrane:
+        """The assembled read-only interface (field/me/entities/
+        timeline/intents)."""
+        def __init__(self):
+            self.field = _FieldAPI()
+            self.me = _Me(ent)
+            self.entities = _Entities()
+            tl = getattr(srv, "membrane", None)
+            tl = getattr(tl, "timeline", None) if tl else None
+            self.timeline = _Timeline(tl)
+            ib = getattr(srv, "_intent_board", None)
+            self.intents = _Intents(ib)
+            self.trigger = trigger
+            self.timeout_s = timeout
+            self.extra = dict(extra)
+
+    return _Membrane()
+
+
+
+
 def _script_state(ent, mem, now: float, extra: dict, trigger: str,
                   timeout: float) -> dict:
     """The script's state: geometry + properties (script_ internal keys
@@ -847,143 +989,43 @@ def _script_state(ent, mem, now: float, extra: dict, trigger: str,
             "extra": dict(extra)}
     return base
 
-    def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
-                             extra: dict) -> dict:
-        """THE MEMBRANE OBJECT (read-only, the operator's design): the
-        full navigation/analysis interface injected next to ``state`` --
-        the field's read surfaces, the entity layer's reads, the
-        timeline walker, the intent steering. NO mutators (the
-        authorship covenant: scripts analyze + return results; the
-        engine applies)."""
-        mem = getattr(srv, "membrane", None)
-        store = getattr(mem, "store", None) if mem else None
-
-        class _FieldAPI:
-            """Read surfaces over the live field (degrade to {} / [] on
-            any failure -- a script can never wedge recall)."""
-            def top_k(self, vec, k: int = 5):
-                if store is None:
-                    return []
-                return [(e.eid if hasattr(e, "eid") else i, round(float(s), 4))
-                        for i, (e, s) in enumerate(
-                            store.top_k(vec, k=min(k, 20)))]
-            def sketch(self):
-                return store.stats_sketch() if store else {}
-            def thermo(self):
-                try:
-                    from .variety import thermo_state
-                    return thermo_state(store) if store else {}
-                except Exception:
-                    return {}
-            def directions(self, k: int = 6):
-                try:
-                    from .variety import orient_dirs
-                    return [list(d) for d in
-                            (orient_dirs(store, max(1, k), 0.5) or [])]
-                except Exception:
-                    return []
-
-        class _Me:
-            """THIS entity: reads + the derived-geometry methods."""
-            def __init__(self, e):
-                self.eid = e.eid
-                self.cls = e.cls
-                self.properties = {k: v for k, v in
-                                   (e.properties or {}).items()
-                                   if not str(k).startswith("script_")}
-                self.position = list(e.position or [])
-                self._ent = e
-            def describe(self):
-                return self._ent.describe()
-            def velocity(self):
-                return (self._ent.ring_velocity(_t.time())
-                        if getattr(self._ent, "position", None) else 0.0)
-            def direction(self):
-                return self._ent.ring_direction()
-            def offsets(self):
-                try:
-                    return MultiParentOps.parent_offsets(est, self.eid)
-                except Exception:
-                    return {}
-            def parents(self):
-                return list(MultiParentOps._parents_of(
-                    self._ent.properties or {}))
-            def children(self):
-                try:
-                    return [c.eid for c in est.children_of(self.eid)]
-                except Exception:
-                    return []
-
-        class _Entities:
-            """The symbolic layer, read-only."""
-            def get(self, spec):
-                e = est._resolve_spec(spec) if est else None
-                if e is None:
-                    return None
-                return {"eid": e.eid, "cls": e.cls,
-                        "position": list(e.position or []),
-                        "properties": {k: v for k, v in
-                                       (e.properties or {}).items()
-                                       if not str(k).startswith("script_")}}
-            def timelines_of(self, spec, open_only: bool = True):
-                try:
-                    return [e.eid for e in est.timelines_of(
-                        spec, open_only=open_only)]
-                except Exception:
-                    return []
-            def related_by_class(self, spec, cls, limit: int = 8):
-                try:
-                    return [e.eid for e in
-                            est.related_by_class(spec, cls, limit)]
-                except Exception:
-                    return []
-            def count(self, cls: str | None = None):
-                if cls is None:
-                    return len(est.docs)
-                return sum(1 for e in est.docs.values() if e.cls == cls)
-
-        class _Timeline:
-            """The Phase T typed walker (the fn-bridge-fed table)."""
-            def __init__(self, tl):
-                self._tl = tl
-            def distribution(self, toks):
-                return self._tl.distribution(toks) if self._tl else None
-            def walk(self, toks, max_steps: int = 14):
-                return self._tl.walk(toks, max_steps=max_steps) \
-                    if self._tl else None
-
-        class _Intents:
-            """The steering wheel (open intentions, read-only)."""
-            def __init__(self, ib):
-                self._ib = ib
-            def open(self):
-                try:
-                    return [i.text for i in self._ib.open_intents()]
-                except Exception:
-                    return []
-            def nearest(self, vec):
-                try:
-                    need, sim = self._ib.nearest(vec)
-                    return {"text": need.text, "sim": round(float(sim), 3)}
-                except Exception:
-                    return None
-
-        class _Membrane:
-            """The assembled read-only interface (field/me/entities/
-            timeline/intents)."""
-            def __init__(self):
-                self.field = _Field()
-                self.me = _Me(ent)
-                self.entities = _Entities(est)
-                tl = getattr(srv, "membrane", None)
-                tl = getattr(tl, "timeline", None) if tl else None
-                self.timeline = _Timeline(tl)
-                ib = getattr(srv, "_intent_board", None)
-                self.intents = _Intents(ib)
-                self.trigger = trigger
-                self.timeout_s = timeout
-                self.extra = dict(extra)
-
-        return _Membrane()
-
-
+def apply_entity_update(srv, ent, out: dict, trigger: str) -> dict:
+    """The engine applies the script's RESULT (the authorship covenant:
+    scripts analyze + return; the engine writes). The keys:
+      render -> properties['script_render'] (the banner fragment)
+      patch  -> {prop: value} merges into the entity (bounded: values
+                clipped to 2000 chars, the entity's own keys only --
+                a script may move ITS OWN doc, never another's)
+      delete -> retire the entity (audited; the getter's delete is the
+                caller's veto shape)
+    Returns the applied summary for the caller's audit."""
+    est = getattr(srv, "entity_store", None)
+    if est is None or not out:
+        return {"applied": 0}
+    changed = 0
+    props = ent.properties or {}
+    if out.get("render"):
+        props["script_render"] = str(out["render"])[:300]
+        changed += 1
+    if isinstance(out.get("patch"), dict):
+        for k, v in list(out["patch"].items())[:16]:
+            if str(k).startswith("script_"):
+                continue               # the script cannot forge engine keys
+            props[str(k)[:80]] = (v if not isinstance(v, str)
+                                  else v[:2000])
+            changed += 1
+    if out.get("delete"):
+        ent.properties["retired"] = True
+        ent.properties["retired_ts"] = time.time()
+        changed += 1
+    if changed:
+        try:
+            est.upsert(ent)
+        except Exception:
+            pass
+    from .opencode import _write_audit
+    _write_audit(getattr(srv, "membrane", None),
+                 {"event": "agent-entity-scripted", "origin": "update-script",
+                  "eid": ent.eid, "trigger": trigger,
+                  "applied": changed})
+    return {"applied": changed}

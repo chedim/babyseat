@@ -4978,7 +4978,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                        links=body.get("links"), cls=body.get("class"),
                        merged_into=body.get("merged_into"),
                        nudge_script=body.get("nudge_script"),
-                       delete_script=body.get("delete_script"))
+                       delete_script=body.get("delete_script"),
+                       mention_script=body.get("mention_script"),
+                       thought_script=body.get("thought_script"),
+                       dreamed_script=body.get("dreamed_script"))
         self._entity_audit("edit", res)
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
