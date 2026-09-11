@@ -6,17 +6,22 @@ The degraded shape (no seed / no cb) degenerates to the own-patch
 hydrate. MEMBRANE_FIELD=world reverts to the world hydrate."""
 
 import unittest
+from unittest import mock
 
 from membrane.field import ExemplarStore
 
 
 class TestNeighborhood(unittest.TestCase):
-    def test_shape_guard_no_seed_degrades_to_own_patch(self):
-        """seed_vec=None -> the own-patch hydrate (load_couchbase's
-        filter), never the ANN. The degraded honest shape."""
-        st = ExemplarStore.load_neighborhood(field_path="")  # bare store
-        self.assertEqual(len(st.exemplars), 0)
-        self.assertFalse(getattr(st, "_keys_from_snapshot", False))
+    def test_shape_guard_no_seed_degrades_to_delta(self):
+        """seed_vec=None -> NO ANN call (the neighborhood step is
+        skipped); the delta hydrate (snapshot + ephemeral tier) runs —
+        the degraded honest shape."""
+        import membrane.ann as ann_mod
+        calls = []
+        with mock.patch.object(ann_mod, "ann_search",
+                               side_effect=lambda *a, **k: calls.append(a)):
+            st = ExemplarStore.load_neighborhood(field_path="")
+        self.assertEqual(calls, [])   # no seed -> the ANN never queried
 
     def test_radius_floor(self):
         """radius < 16 clamps to the floor (a neighborhood smaller than

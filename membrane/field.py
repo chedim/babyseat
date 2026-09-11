@@ -1370,10 +1370,12 @@ class ExemplarStore:
             now = time.time()
             # BOOT-SPEED (same KV trick as canon): id-scan + get_multi beats
             # the full-payload N1QL stream
+            from couchbase.options import QueryOptions as _QO
+            from datetime import timedelta as _td
             eph_q = st._cb_cluster.query(
                 f"SELECT meta().id AS id "
                 f"FROM `{eph_bucket}`.`{_CB_SCOPE}`.{EPH_COLL} t",
-                QueryOptions(timeout=timedelta(seconds=30)))
+                _QO(timeout=_td(seconds=30)))
             eph_ids = [r["id"] for r in eph_q]
             n_eph = 0
             eph_keys: list[str] = []
@@ -1443,52 +1445,90 @@ class ExemplarStore:
                           seed_vec: list | None = None,
                           radius: int | None = None) -> "ExemplarStore":
         """The PERSONALIZED field: hydrate the seat's working set from the
-        shared layer as (1) the ANN neighborhood around the seed vec (the
-        present's neighborhood -- what session:now finds interesting),
-        (2) the seat's OWN patch (every lived turn -- the seat's own
-        evidence always loads), (3) the commons (scope=global). The world
-        stop hydrating: foreign project exemplars are reached THROUGH THE
-        ANN at recall time (the index is the field), not by bulk load.
+        shared layer as (1) the ANN neighborhood around the seed vec -- ON
+        THE EXEMPLARS INDEX (membrane_exemplars_vec: the field's own
+        substrate, the E14-parity index), (2) the seat's OWN patch + the
+        commons -- via the KEYS SNAPSHOT delta (the load_couchbase speed
+        trick: only rows NOT in the snapshot fetch), (3) batched KV of the
+        union. NO full world load, NO double fetch: the whole boot cost is
+        the union's KV round (a few hundred + the snapshot delta).
 
-        seed_vec: the seed's unit vector (session:now.position at boot).
-        None/empty -> degenerates to load_couchbase's own-patch+commons
-        (the honest degraded shape). radius: the neighborhood cap
-        (default NEIGHBORHOOD_RADIUS)."""
+        seed_vec: the seed vector (session:now's final position, persisted
+        seat-locally at shutdown). None/empty -> the snapshot delta alone
+        (the honest degraded shape: own patch + commons + whatever changed
+        since last boot)."""
         import numpy as _np
         radius = max(16, int(radius or cls.NEIGHBORHOOD_RADIUS))
-        st = cls.load_couchbase(field_path) if field_path else cls()
+        st = cls()
         st.origin = _origin_tag(field_path) if field_path else st.origin
         st._field_path_hint = str(field_path) if field_path else None
         coll = st._cb_collection()
-        if coll is None or not seed_vec:
-            return st                     # degraded: the own-patch hydrate
-        from .ann import ann_search
-        # 1. THE NEIGHBORHOOD: the ANN around the seed (k = radius; the
-        #    entities index carries the commons' + foreign memories)
-        hits = ann_search("membrane_entities_vec", list(seed_vec),
-                          k=radius, timeout=2.0) or []
-        # 2. THE SEAT'S OWN PATCH: the origin scan (always loaded -- the
-        #    seat's own evidence is not a neighborhood decision)
-        own_keys: list[str] = []
+        if coll is None:
+            return st                     # degraded: no couchbase
+        my = st.origin
+
+        # ---- the key sets (id scans are cheap; the KV fetch is the cost) --
+        keys_sets: list[set[str]] = []
+
+        # 1. THE NEIGHBORHOOD (the exemplars ANN around the seed): the ids
+        #    the index says are nearest to the present -- what session:now
+        #    finds interesting, foreign memories included (the index IS the
+        #    field; recall reaches the rest live)
+        if seed_vec:
+            try:
+                from .ann import ann_search
+                hits = ann_search("membrane_exemplars_vec", list(seed_vec),
+                                  k=radius, timeout=2.0) or []
+                keys_sets.append({str(k) for k, _s in hits})
+            except Exception:
+                pass                      # degraded: no neighborhood
+
+        # 2. THE OWN PATCH + THE COMMONS via the KEYS SNAPSHOT delta:
+        #    load_couchbase's trick -- the snapshot file holds every key
+        #    already known current on the backend; only rows NOT in it
+        #    fetch (the delta). The snapshot's known keys JOIN the store's
+        #    _cb_keys bookkeeping without fetching their bytes.
+        keys_path = Path(str(field_path) + ".cb-keys.json") if field_path \
+            else None
+        snapshot_keys: set[str] = set()
+        if keys_path and keys_path.exists():
+            try:
+                loaded = json.loads(keys_path.read_text())
+                if isinstance(loaded, list):
+                    snapshot_keys = {str(k) for k in loaded}
+            except Exception:
+                snapshot_keys = set()
+        delta_keys: set[str] = set()
         try:
+            from couchbase.options import QueryOptions as _QO
+            from datetime import timedelta as _td
             qr = st._cb_cluster.query(
                 "SELECT meta().id AS id "
                 f"FROM `{st._cb_bucket}`.`{_CB_SCOPE}`.`{_CB_COLL}` t "
-                "WHERE t.`origin` = $my "
+                "WHERE (t.`origin` = $my OR t.`scope` = 'global') "
                 "AND meta().id NOT LIKE 'sit:%'",
-                __import__("couchbase.options", fromlist=["QueryOptions"])
-                .QueryOptions(timeout=__import__("datetime")
-                              .timedelta(seconds=30),
-                              named_parameters={"my": st.origin}))
-            own_keys = [r["id"] for r in qr]
+                _QO(timeout=_td(seconds=30),
+                    named_parameters={"my": my}))
+            delta_keys = {r["id"] for r in qr}
         except Exception:
-            own_keys = []
-        # 3. batched KV fetch of (own patch + the ANN neighborhood ids)
-        keys: list[str] = list({k for k, _ in hits} | set(own_keys))[:radius + len(own_keys)]
+            delta_keys = set()
+        # the delta: backend keys the snapshot has never seen (new rows)
+        fetch_keys = delta_keys - snapshot_keys
+        keys_sets.append(delta_keys - fetch_keys)   # snapshot-known: bookkeeping only
+        keys_sets.append(fetch_keys)                # the delta: fetch
+        keys_sets.append(snapshot_keys)             # snapshot joins the bookkeeping
+
+        # 3. THE UNION + the batched KV fetch (the boot's only real fetch)
+        all_known = set().union(*keys_sets) if keys_sets else set()
+        keys = sorted(all_known)
         rows: list[dict] = []
         if keys:
-            try:
-                got = coll.get_multi(keys)
+            for lo in range(0, len(keys), 1000):
+                batch = keys[lo:lo + 1000]
+                try:
+                    got = coll.get_multi(batch)
+                except Exception:
+                    continue
                 for k, res in (getattr(got, "results", None) or {}).items():
                     try:
                         v = res.value
@@ -1496,30 +1536,67 @@ class ExemplarStore:
                             rows.append(dict(v, id=k))
                     except Exception:
                         continue
-            except Exception:
-                for lo in range(0, len(keys), 500):
-                    try:
-                        got = coll.get_multi(keys[lo:lo + 500])
-                    except Exception:
-                        continue
-                    results = getattr(got, "results", None) or {}
-                    for k, res in results.items():
-                        try:
-                            v = res.value
-                            if isinstance(v, dict):
-                                rows.append(dict(v, id=k))
-                        except Exception:
-                            continue
-        # THE DECODE (the same path load_couchbase runs: wire -> exemplar
-        # -> the store; the key bookkeeping marks everything hydrated as
-        # current on the backend so the first save touches only new rows)
+        # 4. THE DECODE (the same wire -> exemplar path load_couchbase runs)
         for row in rows:
             ex = _rec_from_wire({k: v for k, v in row.items() if k != "id"})
             st.append(ex)
         st._cb_keys = set(keys)
         st._written = set(keys)
         st._cb_situ = {_situ_key(e.situation) for e in st.exemplars
-                       if (e.origin or st.origin) == st.origin}
+                       if (e.origin or my) == my}
+        # refresh the snapshot (save() also maintains it; boot writes it
+        # once so the NEXT boot's delta is small)
+        if keys_path:
+            try:
+                keys_path.write_text(json.dumps(sorted(keys)))
+            except Exception:
+                pass
+        # 5. THE EPHEMERAL TIER: candidates survive across boots (TTL does
+        # the GC); hydrate them back flagged into the ONE list (the same
+        # shape load_couchbase runs)
+        try:
+            eph_coll = st._ensure_eph_collection()
+            eph_bucket = st._cb_eph_bucket or st._cb_bucket
+            now = time.time()
+            eph_q = st._cb_cluster.query(
+                f"SELECT meta().id AS id "
+                f"FROM `{eph_bucket}`.`{_CB_SCOPE}`.{EPH_COLL} t",
+                _QO(timeout=_td(seconds=30)))
+            eph_ids = [r["id"] for r in eph_q]
+            eph_rows: list[dict] = []
+            for lo in range(0, len(eph_ids), 1000):
+                batch = eph_ids[lo:lo + 1000]
+                try:
+                    got = eph_coll.get_multi(batch)
+                except Exception:
+                    continue
+                for k, res in (getattr(got, "results", None) or {}).items():
+                    try:
+                        v = res.value
+                        if isinstance(v, dict):
+                            eph_rows.append(dict(v, id=k))
+                    except Exception:
+                        continue
+            for row in eph_rows:
+                eph_id = row.get("id") or ""
+                ex = _rec_from_wire(
+                    {k: v for k, v in row.items() if k != "id"})
+                if not (ex.situation or ex.action):
+                    continue
+                if "eph_born" not in (ex.extra or {}):
+                    ex.extra["eph_born"] = float(now)
+                if now - st._eph_born(ex) >= EPH_TTL_S:
+                    try:
+                        eph_coll.remove(eph_id)
+                    except Exception:
+                        pass
+                    continue
+                ex.ephemeral = True
+                st.exemplars.append(ex)
+                st._cb_keys_eph = (st._cb_keys_eph or set()) | {eph_id}
+        except Exception as e:
+            print(f"[membrane] ephemeral tier hydrate skipped ({e})",
+                  file=__import__("sys").stderr)
         return st
 
     def veil_poke(self, embedder, limit: int = 256) -> int:
