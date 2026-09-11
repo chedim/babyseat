@@ -5252,17 +5252,24 @@ def main() -> None:
                     help="compact only after the field grew this fraction "
                          "of its size since the last note (min "
                          "compact-min-field raw turns; 0 = every interval)")
-    ap.add_argument("--compact-max-field", type=int, default=0,
+    ap.add_argument("--compact-max-field", type=int, default=8000,
                     dest="compact_max_field", metavar="N",
-                    help="THE SIZE TARGET: compact every interval while "
-                         "the field exceeds N exemplars (0 = off; the "
-                         "compactor holds the field at a size)")
-    ap.add_argument("--compact-max-raw-frac", type=float, default=0.0,
+                    help="THE SIZE TARGET (default 8000: on by default -- "
+                         "the metric-targeted auto-compact): compact every "
+                         "interval while the field exceeds N exemplars "
+                         "(0 = off; the compactor holds the field at a "
+                         "size). The ANN made recall flat, so this is "
+                         "about save/scan cost, not latency")
+    ap.add_argument("--compact-max-raw-frac", type=float, default=0.4,
                     dest="compact_max_raw_frac", metavar="FRAC",
-                    help="THE RAW-RATIO TARGET: compact when un-distilled "
-                         "canon exceeds this fraction of the field (0 = "
-                         "off; the compactor's real metric: how much of "
-                         "the field is still raw)")
+                    help="THE RAW-RATIO TARGET (default 0.4: on by "
+                         "default -- the metric-targeted auto-compact): "
+                         "compact when un-distilled canon exceeds this "
+                         "fraction of the field (0 = off; the "
+                         "compactor's real metric: how much of the "
+                         "field is still raw -- enough raw material "
+                         "for good clusters, not so much the field "
+                         "drowns)")
     ap.add_argument("--compact-min-field", type=int, default=12)
     ap.add_argument("--compact-cluster-min", type=int, default=4)
     ap.add_argument("--compact-cluster-max", type=int, default=8)
