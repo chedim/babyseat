@@ -180,7 +180,7 @@ class Dreamer:
                 pass
             ent = est.make_timeline(
                 terminal=text, vec=list(vec),
-                seed_intent=(need.describe() if need is not None else None),
+                seed_intent=(need.text if need is not None else None),
                 branch_sim=branch_sim,
             )
             if ent is not None:
