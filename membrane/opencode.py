@@ -3634,7 +3634,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                     print(f"[opencode] personalized field: {_n} exemplars "
                           f"in the neighborhood of session:now "
                           f"({_t.time() - _t0:.1f}s, "
-                          f"radius {ExemplarStore.NEIGHBORHOOD_RADIUS})",
+                          f"radius {_ES.NEIGHBORHOOD_RADIUS})",
                           file=sys.stderr)
             except Exception as e:
                 print(f"[opencode] neighborhood swap skipped ({e})",
