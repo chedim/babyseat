@@ -1253,6 +1253,25 @@ class TimelineOps:
         if vec:
             ent.embedding = [float(x) for x in vec]
             ent.position = [float(x) for x in vec]
+        # THE SEAT-LOCAL QUARANTINE (the operator's ruling: "shouldn't
+        # that seat have its own session:now and tracked entities?"):
+        # quarantined + impossible branches stay RAM-only (ephemeral --
+        # the upsert's shared write-through skips ephemeral docs). A
+        # seat's unconfirmed dreams are nobody else's business -- the
+        # parallel seat's banner should render ITS OWN dreams, not this
+        # seat's speculation. CONFIRMED branches (reality voted) become
+        # part of the shared record: the elect's upsert publishes them.
+        # THE SEAT-LOCAL QUARANTINE (the operator's ruling: "shouldn't
+        # that seat have its own session:now and tracked entities?"):
+        # quarantined + impossible branches stay RAM-only (ephemeral --
+        # the upsert's shared write-through skips ephemeral docs). A
+        # seat's unconfirmed dreams are nobody else's business -- the
+        # parallel seat's banner should render ITS OWN dreams, not this
+        # seat's speculation. CONFIRMED branches (reality voted) become
+        # part of the shared record: the elect's upsert publishes them.
+        if status in (TimelineOps.TL_STATUS_QUARANTINED,
+                      TimelineOps.TL_STATUS_IMPOSSIBLE):
+            ent.properties["ephemeral"] = True
         store.upsert(ent)
         # the ISA link (the branch hangs off the true timeline); best-effort
         # -- the parent may not exist (no session:now yet): the branch stays
