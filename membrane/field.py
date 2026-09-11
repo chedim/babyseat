@@ -1429,6 +1429,99 @@ class ExemplarStore:
         # (`veil_poke`, bounded) and arbitration adoption -- never wholesale.
         return st
 
+    # THE PERSONALIZED FIELD (the cortex-experiment convergence, the
+    # operator's design: "the field is the combination of all entities"
+    # and a seat builds ITS OWN from what it finds interesting): the
+    # working set = the ANN neighborhood around a seed vector (session:
+    # now's position -- the living present) + the seat's OWN patch + the
+    # commons. The world's exemplars stop hydrating wholesale; RAM keeps
+    # a session-scoped neighborhood, the database is the field.
+    NEIGHBORHOOD_RADIUS = 400          # the working set's cap (docs)
+
+    @classmethod
+    def load_neighborhood(cls, field_path: str | Path = "",
+                          seed_vec: list | None = None,
+                          radius: int | None = None) -> "ExemplarStore":
+        """The PERSONALIZED field: hydrate the seat's working set from the
+        shared layer as (1) the ANN neighborhood around the seed vec (the
+        present's neighborhood -- what session:now finds interesting),
+        (2) the seat's OWN patch (every lived turn -- the seat's own
+        evidence always loads), (3) the commons (scope=global). The world
+        stop hydrating: foreign project exemplars are reached THROUGH THE
+        ANN at recall time (the index is the field), not by bulk load.
+
+        seed_vec: the seed's unit vector (session:now.position at boot).
+        None/empty -> degenerates to load_couchbase's own-patch+commons
+        (the honest degraded shape). radius: the neighborhood cap
+        (default NEIGHBORHOOD_RADIUS)."""
+        import numpy as _np
+        radius = max(16, int(radius or cls.NEIGHBORHOOD_RADIUS))
+        st = cls.load_couchbase(field_path) if field_path else cls()
+        st.origin = _origin_tag(field_path) if field_path else st.origin
+        st._field_path_hint = str(field_path) if field_path else None
+        coll = st._cb_collection()
+        if coll is None or not seed_vec:
+            return st                     # degraded: the own-patch hydrate
+        from .ann import ann_search
+        # 1. THE NEIGHBORHOOD: the ANN around the seed (k = radius; the
+        #    entities index carries the commons' + foreign memories)
+        hits = ann_search("membrane_entities_vec", list(seed_vec),
+                          k=radius, timeout=2.0) or []
+        # 2. THE SEAT'S OWN PATCH: the origin scan (always loaded -- the
+        #    seat's own evidence is not a neighborhood decision)
+        own_keys: list[str] = []
+        try:
+            qr = st._cb_cluster.query(
+                "SELECT meta().id AS id "
+                f"FROM `{st._cb_bucket}`.`{_CB_SCOPE}`.`{_CB_COLL}` t "
+                "WHERE t.`origin` = $my "
+                "AND meta().id NOT LIKE 'sit:%'",
+                __import__("couchbase.options", fromlist=["QueryOptions"])
+                .QueryOptions(timeout=__import__("datetime")
+                              .timedelta(seconds=30),
+                              named_parameters={"my": st.origin}))
+            own_keys = [r["id"] for r in qr]
+        except Exception:
+            own_keys = []
+        # 3. batched KV fetch of (own patch + the ANN neighborhood ids)
+        keys: list[str] = list({k for k, _ in hits} | set(own_keys))[:radius + len(own_keys)]
+        rows: list[dict] = []
+        if keys:
+            try:
+                got = coll.get_multi(keys)
+                for k, res in (getattr(got, "results", None) or {}).items():
+                    try:
+                        v = res.value
+                        if isinstance(v, dict):
+                            rows.append(dict(v, id=k))
+                    except Exception:
+                        continue
+            except Exception:
+                for lo in range(0, len(keys), 500):
+                    try:
+                        got = coll.get_multi(keys[lo:lo + 500])
+                    except Exception:
+                        continue
+                    results = getattr(got, "results", None) or {}
+                    for k, res in results.items():
+                        try:
+                            v = res.value
+                            if isinstance(v, dict):
+                                rows.append(dict(v, id=k))
+                        except Exception:
+                            continue
+        # THE DECODE (the same path load_couchbase runs: wire -> exemplar
+        # -> the store; the key bookkeeping marks everything hydrated as
+        # current on the backend so the first save touches only new rows)
+        for row in rows:
+            ex = _rec_from_wire({k: v for k, v in row.items() if k != "id"})
+            st.append(ex)
+        st._cb_keys = set(keys)
+        st._written = set(keys)
+        st._cb_situ = {_situ_key(e.situation) for e in st.exemplars
+                       if (e.origin or st.origin) == st.origin}
+        return st
+
     def veil_poke(self, embedder, limit: int = 256) -> int:
         """The veil's poke-through, run once at boot (embedder is proven by
         then). A BOUNDED sample of foreign PROJECT exemplars is fetched; a

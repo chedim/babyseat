@@ -3596,6 +3596,48 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             except Exception as e:
                 print(f"[opencode] entity read-through skipped ({e})",
                       file=sys.stderr)
+        # ---- THE PERSONALIZED FIELD (the SQL++ neighborhood, the cortex-
+        # experiment convergence): after the entity layer resolves
+        # session:now's position, the store SWAPS to the neighborhood
+        # hydrate -- the seat's working set = the ANN neighborhood around
+        # the living present + the own patch + the commons (the database
+        # is the field; RAM keeps a session-scoped neighborhood). First
+        # boot (no session:now yet): the world hydrate already ran -- the
+        # swap starts NEXT boot. MEMBRANE_FIELD=world reverts.
+        if os.environ.get("MEMBRANE_FIELD", "neighborhood") == "neighborhood":
+            try:
+                # THE SEED: the PREVIOUS session's final position (the
+                # seat-local seed file -- session:now itself is RAM-only
+                # by covenant; its position persists seat-locally only).
+                _seed = None
+                try:
+                    import json as _json
+                    _seed_path = str(mem.field_path) + ".seed.json"
+                    if os.path.exists(_seed_path):
+                        _seed = _json.load(open(_seed_path)).get("position")
+                except Exception:
+                    _seed = None
+                if not _seed:
+                    from .entities import MEMBRANE_NS as _NS
+                    _now_ent = (est.docs.get(f"{_NS}session:now")
+                                if est is not None else None)
+                    _seed = getattr(_now_ent, "position", None)
+                if _seed:
+                    import time as _t
+                    _t0 = _t.time()
+                    _new = ExemplarStore.load_neighborhood(
+                        str(mem.field_path), seed_vec=list(_seed))
+                    _n = len(_new)
+                    mem.store = _new
+                    mem.store.mut_lock = mem.mut_lock
+                    print(f"[opencode] personalized field: {_n} exemplars "
+                          f"in the neighborhood of session:now "
+                          f"({_t.time() - _t0:.1f}s, "
+                          f"radius {ExemplarStore.NEIGHBORHOOD_RADIUS})",
+                          file=sys.stderr)
+            except Exception as e:
+                print(f"[opencode] neighborhood swap skipped ({e})",
+                      file=sys.stderr)
         # ---- total capture: results from the PREVIOUS turn's tool calls ----
         # before the intercepts: even a recall/state turn may carry the previous
         # turn's tool results; pairing must not be skipped. A capture error
@@ -6328,6 +6370,26 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\n[membrane-opencode] bye", file=sys.stderr)
     finally:
+        # THE SEED PERSISTENCE (the personalized field's enabler):
+        # session:now is RAM-only by covenant (never a shared doc), but
+        # the seat's OWN seed file is the boot's neighborhood center: the
+        # position the PREVIOUS session ended on seeds the NEXT boot's
+        # working set (where the operator left off is where they return).
+        try:
+            est = getattr(srv, "entity_store", None)
+            now_ent = (est.docs.get("membrane::session:now")
+                       if est is not None else None)
+            pos = getattr(now_ent, "position", None)
+            if pos:
+                seed_path = str(mem.field_path) + ".seed.json"
+                import json as _json
+                _json.dump({"position": list(pos),
+                            "ts": time.time()},
+                           open(seed_path, "w"))
+                print(f"[opencode] seed persisted "
+                      f"({len(pos)}d -> {seed_path})", file=sys.stderr)
+        except Exception:
+            pass
         if child is not None:
             try:
                 child.terminate(); child.wait(timeout=10)
