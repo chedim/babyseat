@@ -3626,6 +3626,17 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # writes; --no-field-seeds is the kill switch). A stolen turn echoes
         # the exact marker to let the client force the model path next turn.
         q_early = _last_user_text(body)
+        # THE THINKER'S CHAT FEED (the receipt-lane retirement's voice):
+        # every operator turn lands in the think queue -- the background
+        # mind digests what the operator is saying (questions, ok's,
+        # confusion) and its speech goes through the planner gate. $0:
+        # enqueue only; the digest decides (and stays silent by default).
+        try:
+            _th = getattr(srv, "thinker", None)
+            if _th is not None:
+                _th.enqueue_chat(q_early)
+        except Exception:
+            pass
         model_escaped = q_early.strip().lower().startswith("model:")
         # ---- pre-gate detection: lexical frames first (deterministic fast
         # path); when nothing matches, the 4-family semantic gate routes on
@@ -3654,35 +3665,17 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                     learn_hit = True
                 elif s_fam == "forget":
                     forget_hit = True
-        # ---- THE RECEIPT LANE (E9-validated, 945/945 byte-exact in the
-        # audit replay): a tool-call fragment whose ack is byte-
-        # deterministic (edit-ack / edit-fail) is served DIRECTLY from the
-        # captured tool result -- the model never wakes up. The rails: the
-        # ack replays from the TOOL RESULT side, never in anticipation
-        # (the stale-replay guard); anything not matching falls through
-        # (the degrade covenant); `model:` escapes; --no-receipts kills.
-        # Pre-gate like the other operator lanes: a receipt turn is never
-        # learned, never demoted, never nudges momentum.
-        if (not model_escaped and getattr(srv, "receipts", True)
-                and not rec_hit and not state_hit and not learn_hit
-                and not forget_hit and not _is_watch_query(q_early)
-                and not _is_intent_query(q_early)
-                and not _is_codegraph_query(q_early)):
-            # the receipt turn: the LAST message is a tool result whose
-            # pending call is cached (E9: the audit's receipt class)
-            tool_rec = None
-            for m in reversed(body.get("messages") or []):
-                cid = m.get("tool_call_id") if isinstance(m, dict) else None
-                if cid and cid in srv._tool_results:
-                    tool_rec = srv._tool_results[cid]
-                    break
-            receipt_cls = _receipt_class(tool_rec)
-            if receipt_cls in ("edit-ack", "edit-fail"):
-                text = _EDIT_ACK if receipt_cls == "edit-ack" else _EDIT_FAIL
-                _print_intercept("receipt", q_early)
-                self._serve_intercept_answer(model, text,
-                                             bool(body.get("stream", False)))
-                return
+        # ---- THE RECEIPT LANE RETIRED (the operator's ruling, the
+        # zombie-ack root): byte-deterministic acks served from a cached
+        # tool result OVERRODE the model turn -- and every plain chat turn
+        # whose history carried a stale tool_call_id replayed 'Edit
+        # applied successfully.' (the operator's socket-error/zombie
+        # session). Membrane's voice now lives ENTIRELY in the thinker:
+        # it receives the chat messages (the digest feed) and speaks
+        # through the speech lane's planner gate -- suggesting, noting,
+        # asking -- but never overrides a model turn again. The E9
+        # experiment stays (library + audit replay, --no-receipts is a
+        # no-op flag kept for compat).
         ruling = (None if model_escaped else _match_review_ruling(q_early))
         if ruling is not None:
             v, slot = ruling

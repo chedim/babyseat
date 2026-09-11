@@ -202,7 +202,7 @@ class IntentBoard:
     def nearest(self, vec, now: float | None = None
                 ) -> tuple[Intention | None, float]:
         """(best open intent, cos) for a unit vector -- the steering coordinate."""
-        if not vec:
+        if vec is None or len(vec) == 0:
             return None, 0.0
         v = np.asarray(vec, dtype=float)
         n = float(np.linalg.norm(v))

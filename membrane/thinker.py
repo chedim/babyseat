@@ -79,6 +79,13 @@ class Thinker:
         self._stop.set()
         self._thread.join(timeout=join_timeout)
 
+    def enqueue_chat(self, text: str) -> None:
+        """The operator's chat turn, on the mind (the receipt lane's
+        retirement voice): the thinker digests what the operator is
+        saying -- questions, ok's, confusion -- and its speech goes
+        through the planner gate. $0: enqueue only."""
+        self.enqueue("chat", {"text": str(text)[:400]})
+
     def enqueue(self, kind: str, payload: dict) -> None:
         """One stimulus on the mind. Drop-oldest when full (the 3-7
         covenant: attention, not a backlog)."""
@@ -182,6 +189,8 @@ class Thinker:
             self._digest_dream(payload, est)
         elif kind == "night":
             self._digest_night(payload, est)
+        elif kind == "chat":
+            self._digest_chat(payload, est)
 
     def _digest_capture(self, payload: dict, est) -> None:
         """One real capture, chewed: which entities did it touch, does the
@@ -208,7 +217,39 @@ class Thinker:
         # the entity-touch pass: born stamps refresh (the night renders
         # tracks from them; no write here -- the night owns persistence)
 
-    def _digest_dream(self, payload: dict, est) -> None:
+    def _digest_chat(self, payload: dict, est) -> None:
+        """The operator's turn chewed: is anything worth SAYING? The
+        planner gate holds (stay-silent is the learned default) -- only a
+        context whose transition table has LEARNED an operator-facing act
+        (ask-operator / note-pattern) speaks, and only above the surprise
+        bar (a question shape the field already holds an answer-adjacent
+        pattern for). Deliberation, not chatter."""
+        import numpy as _np
+        text = str(payload.get("text") or "")
+        if not text:
+            return
+        mem = self.srv.membrane
+        # the surprise bar: the FIELD's own top-1 sim to this ask -- a hot
+        # match means membrane may have something to offer (the ask shape)
+        try:
+            store = mem.store
+            _exs = [e for e in store.exemplars if getattr(e, "vec", None)]
+            if len(_exs) < 2:
+                return
+            _v = _np.asarray(mem.embedder.embed([text])[0], dtype=float)
+            _vn = float(_np.linalg.norm(_v))
+            if _vn < 1e-12:
+                return
+            _v = _v / _vn
+            _V = _np.asarray([e.vec for e in _exs], dtype=float)
+            _Vn = _V / (_np.linalg.norm(_V, axis=1, keepdims=True) + 1e-12)
+            top = float((_Vn @ _v).max())
+        except Exception:
+            return
+        if top >= NOVELTY_SPEAK_BAR:
+            self._speak(f"you are near held ground: '{text[:100]}' -- "
+                        f"top field match {top:.2f}; ask me to recall it",
+                        act="ask-operator")
         """Reality's vote landed: a branch confirmed or refuted. Worth
         one sentence when it CONFIRMS (a prediction came true); refutes
         stay quiet (the dreamer's GC already handled the doc)."""

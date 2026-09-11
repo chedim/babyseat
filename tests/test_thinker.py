@@ -165,3 +165,49 @@ class TestConstantHum(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestChatDigest(unittest.TestCase):
+    """THE THINKER'S CHAT FEED (the receipt-lane retirement's voice): the
+    operator's turn lands on the mind; the digest speaks only through the
+    planner gate, and only above the surprise bar (a hot field match --
+    the ask-operator shape: 'you are near held ground')."""
+
+    def _thinker_with_learned_context(self):
+        srv = _Srv()
+        th = Thinker(srv)
+        srv.thinker = th
+        # the planner has LEARNED this context speaks (ask-operator x2)
+        srv._last_context_sig = "escalate|0.9"
+        srv._act_table.observe("escalate|0.9", "ask-operator")
+        srv._act_table.observe("escalate|0.9", "ask-operator")
+        # an embeddable field: one row near the ask + the embedder that
+        # maps the ask onto it (the digest's surprise bar needs a vec)
+        import numpy as _np
+        v = _np.zeros(1024, dtype=float)
+        v[0] = 1.0
+        for _ in range(2):     # the digest needs >=2 rows (its matrix)
+            srv.membrane.store.exemplars.append(
+                type("E", (), {"vec": v.tolist()})())
+        srv.membrane.embedder = type("Emb", (), {
+            "embed": staticmethod(lambda texts: [v.tolist()])})()
+        return srv, th, v
+
+    def test_unlearned_context_stays_silent(self):
+        srv = _Srv()
+        th = Thinker(srv)
+        srv.thinker = th
+        th.enqueue_chat("huh?")
+        th._process_one(th.queue.popleft())
+        self.assertEqual(th.stats["spoken"], 0)
+        self.assertEqual(drain_speech(srv), [])
+
+    def test_hot_match_speaks_ask_operator(self):
+        srv, th, v = self._thinker_with_learned_context()
+        srv.membrane.embedder = type("Emb", (), {
+            "embed": staticmethod(lambda texts: [v.tolist()])})()
+        th.enqueue_chat("what did we hold here?")
+        th._process_one(th.queue.popleft())
+        msgs = drain_speech(srv)
+        self.assertEqual(len(msgs), 1)
+        self.assertEqual(msgs[0]["act"], "ask-operator")
+        self.assertIn("held ground", msgs[0]["text"])
