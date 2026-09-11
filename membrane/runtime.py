@@ -81,6 +81,7 @@ import numpy as np
 from .embed import OllamaEmbedder
 from .field import Exemplar, ExemplarStore
 from .gate import decide, _action_overlap
+from .token_timeline import TokenTimeline
 from .generator import FieldNGram, MIN_ACTIONS as _GEN_MIN_ACTIONS, _tok as _gen_tokens
 from .variety import thermo_state
 from .cast import Cast
@@ -722,6 +723,13 @@ class Membrane:
         # Defaults to a private lock so a standalone Membrane is still safe.
         self.mut_lock = threading.RLock()
         self.store = ExemplarStore.load(self.field_path)
+        # THE TOKEN TIMELINE (Phase T3, now fed): the Layer-0 substrate --
+        # every (context -> next-token) transition, incrementally upserted.
+        # Fed at the fn stamp (actuation cells) and the chat capture (the
+        # chat stream's own transitions); walked by the self-author ngram
+        # mode and the distiller export. Local dict + lazy cb hydration:
+        # the timeline is a derived structure, the field remains the truth.
+        self.timeline = TokenTimeline()
         # the character ledger: scenes tag to walking regions; each character
         # carries a state_vec (EMA of its tagged scenes). Loaded alongside the
         # field (a separate -cast.json) and saved whenever the cast mutates.
@@ -1735,6 +1743,20 @@ class Membrane:
                 fn = extract_fn_from_exemplar(query, content)
                 if fn:
                     extra["fn"] = fn
+                    # THE FN->TOKEN BRIDGE (the live feed): the actuation
+                    # scene's token stream (situation + op + result) feeds
+                    # the token timeline's transition table -- the typed
+                    # cells become the timeline's highest-signal rows. The
+                    # distiller's training pairs and the ngram walk read
+                    # this table; the field cell stays the truth.
+                    try:
+                        from .token_timeline import tokenize
+                        toks = tokenize(
+                            f"{query} {fn['op']} {fn.get('returns', '')}")
+                        if len(toks) > 1:
+                            self.timeline.observe(toks, src_turn="fn-stamp")
+                    except Exception:
+                        pass
             except Exception:
                 pass
             # THE WHY STAMP (peer suggestion #2): the situation anchors near
