@@ -5820,6 +5820,15 @@ def main() -> None:
         srv.compactor = None
         print("[opencode] compactor: skipped -- fork owns the field "
               "(no second writer)", file=sys.stderr)
+    # THE INIT SPEAK (the thinker's hello, planner-gated): one line on
+    # boot -- the mind exists, the field's size, the thinker + dreamer
+    # humming. Rides speak()'s ActTable gate (stay-silent holds unless
+    # the table has learned boot contexts speak).
+    try:
+        speak(srv, f"membrane up: field {len(mem.store)} cells, "
+                   f"thinker + dreamer humming", kind="report-state")
+    except Exception:
+        pass
     # THE STANDALONE NIGHT: when the Compactor is stood down (fork owns
     # capture) the night still runs on its own slow timer -- quality
     # control is not capture (the operator's shared-field call). The
