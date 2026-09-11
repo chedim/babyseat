@@ -14,7 +14,8 @@ from membrane.acts import ActTable
 from membrane.entities import (CLASS_TIMELINE, CLASS_SESSION, EntityStore,
                                QuantumEntity, MEMBRANE_NS, CLASS_SESSION)
 from membrane.opencode import speak, drain_speech
-from membrane.thinker import Thinker, QUEUE_MAX, THINK_MODEL_CAP_PER_MIN
+from membrane.thinker import (Thinker, QUEUE_MAX, THINK_MODEL_CAP_PER_MIN,
+                              THINK_TICK_S)
 
 
 class _Srv:
@@ -100,7 +101,53 @@ class TestThinkQueue(unittest.TestCase):
         self.assertEqual(steps, ["suite green"])
 
 
-class TestModelCap(unittest.TestCase):
+class TestConstantHum(unittest.TestCase):
+    """THE CONSTANT HUM (the operator's call): a 1s heartbeat, one small
+    unit of thought per tick, throttled by the duty controller -- measured
+    think work held to THINK_CPU_TARGET (~3-5% of one core), work earns
+    sleep, the idle mind still hums."""
+
+    def test_heartbeat_processes_one_item_per_tick(self):
+        srv = _Srv()
+        th = Thinker(srv)
+        for i in range(3):
+            th.enqueue("capture", {"i": i})
+        # three heartbeats -> three processed, queue drained in order
+        for _ in range(3):
+            th._hum()
+        self.assertEqual(th.stats["processed"], 3)
+        self.assertEqual(len(th.queue), 0)
+
+    def test_duty_controller_stretches_after_heavy_work(self):
+        """A heavy chew (measured work) earns sleep: the duty controller
+        stretches the next tick until the window's duty falls under the
+        ~3-5% target."""
+        srv = _Srv()
+        th = Thinker(srv)
+        th._ema_work = 6.0            # a heavy chew just happened (~10%)
+        slept = th._hum()             # with an empty queue, the hum no-ops
+        self.assertGreater(slept, THINK_TICK_S * 1.5)
+        th._ema_work = 0.001          # a light mind
+        self.assertLessEqual(th._hum(), 1.0)
+
+    def test_idle_think_throttled_by_duty(self):
+        """The think-ahead probe runs only when the duty allows: an
+        over-target mind skips the probe (the hum stays cheap)."""
+        srv = _Srv()
+        th = Thinker(srv)
+        est = srv.entity_store
+        now = QuantumEntity(eid=f"{MEMBRANE_NS}session:now", cls="Session",
+                            properties={"name": "now", "grain": 0.003})
+        est.upsert(now)
+        est.make_timeline(terminal="probe me", vec=[1.0, 0.0])
+        calls = []
+        th._idle_think = lambda: calls.append(1)
+        th._ema_work = 3.0            # over target: no probe
+        th._hum()
+        self.assertEqual(calls, [])
+
+
+
     def test_cap_four_per_minute(self):
         srv = _Srv()
         th = Thinker(srv)

@@ -41,8 +41,16 @@ import time
 import traceback
 from collections import deque
 
-THINK_TICK_S = 10.0          # a fed item is processed within this window
-THINK_IDLE_S = 60.0          # nothing on the mind: the sleep stretches
+# THE CONSTANT HUM (the operator's call): the thinker is never off -- a
+# 1s heartbeat tick, continuously chewing what it can, throttled by the
+# DUTY-CYCLE CONTROLLER (the compactor's, retargeted): measured think work
+# over the trailing window is held to THINK_CPU_TARGET (~3-5% of one core
+# by design, not by clock). Work earns sleep: a heavy chew (a model call,
+# a long walk) stretches the next tick until the window's duty is back
+# under the target; an idle mind hums cheap no-ops (checks only).
+THINK_TICK_S = 1.0
+THINK_CPU_TARGET = 0.04      # the duty ceiling: think work / (think + window)
+THINK_IDLE_S = 60.0          # the max stretch when the duty is way over
 QUEUE_MAX = 5                # the 3-7 working memory (the covenant's 5)
 THINK_MODEL_CAP_PER_MIN = 4  # the cost dial: model calls per minute, max
 NOVELTY_SPEAK_BAR = 0.85     # a digest speaks only above this sim surprise
@@ -59,6 +67,7 @@ class Thinker:
         self._thread = threading.Thread(target=self._run,
                                         name="membrane-thinker", daemon=True)
         self._model_ts: list[float] = []   # the cost dial's window
+        self._ema_work: float = 0.0        # the duty controller's measure
         self.stats = {"processed": 0, "spoken": 0, "extended": 0,
                       "skipped": 0, "model_calls": 0}
 
@@ -82,31 +91,56 @@ class Thinker:
 
     # ---- the loop ------------------------------------------------------------
     def _run(self) -> None:
+        """The constant hum: a 1s heartbeat, every tick one SMALL unit of
+        thought under the duty controller -- measured work over the
+        trailing window held to THINK_CPU_TARGET (~3-5% of one core)."""
         while not self._stop.is_set():
-            slept = self.THINK_TICK_S
             try:
-                slept = self._cycle()
+                slept = self._hum()
             except Exception:
                 traceback.print_exc()
-                slept = self.THINK_IDLE_S
+                slept = THINK_IDLE_S
             if self._stop.wait(slept):
                 break
 
-    def _cycle(self) -> float:
-        """One tick: process at most ONE item (the rumination pace -- the
-        queue is the mind, not a drain). Returns the sleep until the next
-        tick: short when items wait, long when empty."""
-        srv = self.srv
-        if not self.queue:
-            self._idle_think()
-            return THINK_IDLE_S
-        item = self.queue.popleft()
-        try:
-            self._process_one(item)
-        except Exception:
-            traceback.print_exc()
-        self.stats["processed"] += 1
+    def _hum(self) -> float:
+        """One heartbeat: at most one unit of thought (a digest item OR
+        one think-ahead probe), then the duty controller sets the next
+        sleep. The idle mind still hums (the queue drains to nothing,
+        then think-ahead keeps the organ warm -- cheap no-op when the
+        budget says so)."""
+        t0 = time.time()
+        did_work = False
+        if self.queue:
+            item = self.queue.popleft()
+            try:
+                self._process_one(item)
+            except Exception:
+                traceback.print_exc()
+            self.stats["processed"] += 1
+            did_work = True
+        else:
+            # the idle half, throttled by the SAME duty controller: a
+            # think-ahead probe only when the recent duty allows it
+            if self._duty() < THINK_CPU_TARGET:
+                self._idle_think()
+                did_work = True
+        work = time.time() - t0
+        self._ema_work = 0.7 * self._ema_work + 0.3 * work
+        # the duty controller: work / (work + window) vs the target -- a
+        # heavy chew stretches the next sleeps until the window's duty
+        # falls back under ~3-5%
+        window = max(1e-6, 60.0)
+        duty = self._ema_work / max(self._ema_work + window, 1e-6)
+        if duty > THINK_CPU_TARGET:
+            over = min(59.0, duty / max(THINK_CPU_TARGET, 1e-6) - 1.0)
+            return max(THINK_TICK_S, THINK_IDLE_S * (1.0 + over) / 60.0)
         return THINK_TICK_S
+
+    def _duty(self) -> float:
+        """The current think duty: measured work over (work + the 60s
+        window) -- the controller's read, ~3-5% at the target."""
+        return self._ema_work / max(self._ema_work + 60.0, 1e-6)
 
     # ---- the model-call cost dial -------------------------------------------
     def _model_budget_ok(self) -> bool:
