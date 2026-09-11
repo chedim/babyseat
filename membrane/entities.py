@@ -51,10 +51,13 @@ CLASS_GOAL = "Goal"                    # an open commitment / intention
 CLASS_SENSOR = "Sensor"                # cortex-side telemetry entity
 CLASS_ACTUATOR = "Actuator"            # cortex-side control entity
 CLASS_PROJECT = "Project"              # the opened workspace (its own arc)
+CLASS_PROJECT = "Project"              # the opened workspace (its own arc)
 CLASS_SESSION = "Session"              # one conversation's dynamics
+CLASS_TIMELINE = "Timeline"            # a dreamed branch (the dreamer's output)
 CLASSES = (CLASS_COMPONENT, CLASS_DECISION, CLASS_FAILURE, CLASS_MODEL,
            CLASS_TOOL, CLASS_ENDPOINT, CLASS_CONFIG, CLASS_GOAL,
-           CLASS_SENSOR, CLASS_ACTUATOR, CLASS_PROJECT, CLASS_SESSION)
+           CLASS_SENSOR, CLASS_ACTUATOR, CLASS_PROJECT, CLASS_SESSION,
+           CLASS_TIMELINE)
 
 # membrane-namespace doc-id prefix in the shared entities collection
 MEMBRANE_NS = "membrane::"
@@ -1187,7 +1190,142 @@ class MultiParentOps:
         return out
 
 
-class EntityStore(MultiParentOps):
+class TimelineOps:
+    """The alternative-timeline organ (the dreamer's substrate): dreamed
+    branches as ENTITIES, each a child of the true timeline.
+
+    THE OPERATOR'S DESIGN (the timeline-dreaming arc): solution generation
+    IS timeline generation. session:now is the only TRUE timeline (the
+    lived present); every dreamed branch is a Timeline entity whose ISA
+    parent is session:now -- it inherits the present's latch/living
+    covenant, and its branch_sim (the parent-offset cosine) IS the
+    how-far-fetched measure. Status is reality's vote, not self-declaration:
+    quarantined (proposed) -> confirmed (a real turn served its direction)
+    / refuted (a near turn it could not serve) / impossible (the vet found
+    it violating an inherited latch or a FailureMode parent -- KEPT: the
+    field's learned physics). Nothing here ever authors a real turn; the
+    timeline renders as a suggestion only.
+    """
+
+    TL_STATUS_QUARANTINED = "quarantined"
+    TL_STATUS_CONFIRMED = "confirmed"
+    TL_STATUS_REFUTED = "refuted"
+    TL_STATUS_IMPOSSIBLE = "impossible"
+
+    @staticmethod
+    def _tl_eid(text: str) -> str:
+        """A stable eid for one dreamed branch: tl:<slug of the terminal
+        text> -- collision-merged (the union merge contract)."""
+        import hashlib as _hashlib
+        slug = _hashlib.sha256((text or "").strip().lower().encode()) \
+            .hexdigest()[:12]
+        return f"{MEMBRANE_NS}tl:{slug}"
+
+    def make_timeline(store, terminal: str, vec: list | None = None,
+                      seed_intent: str | None = None,
+                      steps: list | None = None,
+                      parent: str = "membrane::session:now",
+                      branch_sim: float | None = None,
+                      status: str = "quarantined",
+                      links: list | None = None) -> "QuantumEntity":
+        """Commit one dreamed branch as a Timeline entity. Merged on
+        collision (a re-proposed branch STRENGTHENS the existing one --
+        derived_by/links union, never a duplicate). The parent ISA link
+        is set on the entity doc directly (the dreamer's commit path is
+        hot: no MCP roundtrip)."""
+        ent = QuantumEntity(
+            eid=TimelineOps._tl_eid(terminal),
+            cls=CLASS_TIMELINE,
+            properties={
+                "name": (terminal or "")[:80],
+                "status": status,
+                "origin": "dream",
+                "seed_intent": seed_intent or "",
+                "terminal": (terminal or "")[:2000],
+                "steps": [str(s)[:300] for s in (steps or [])][:12],
+                "born": _t.time(),
+                "branch_sim": (float(branch_sim) if branch_sim is not None
+                               else None),
+                "curiosity": 0.7,
+            },
+            links=[int(x) for x in (links or []) if isinstance(x, int)],
+        )
+        if vec:
+            ent.embedding = [float(x) for x in vec]
+            ent.position = [float(x) for x in vec]
+        store.upsert(ent)
+        # the ISA link (the branch hangs off the true timeline); best-effort
+        # -- the parent may not exist (no session:now yet): the branch stays
+        # parentless rather than failing the commit.
+        try:
+            if store._resolve_spec(parent) is not None:
+                store.set_parents(ent.eid, [parent])
+        except Exception:
+            pass
+        return store.docs.get(ent.eid, ent)
+
+    def elect_timeline(store, turn_vec: list, intent_sims: dict,
+                       confirm_sim: float = 0.72) -> dict:
+        """REALITY'S VOTE, timeline-shaped: for every quarantined branch
+        near this REAL turn's vec -- the branch whose seed_intent the turn
+        actually serves (intent_sim >= STEER line) is CONFIRMED (status
+        flips in place; the branch leaves quarantine); a near branch that
+        serves nothing open is REFUTED (removed -- the dream was noise).
+        Returns the counts for the audit."""
+        import numpy as _np
+        tv = _np.asarray(turn_vec, dtype=float)
+        tn = _np.linalg.norm(tv)
+        if tn < 1e-12:
+            return {"confirmed": 0, "refuted": 0}
+        tv = tv / tn
+        confirmed = refuted = 0
+        for ent in list(store.docs.values()):
+            if ent.cls != CLASS_TIMELINE:
+                continue
+            props = ent.properties or {}
+            if props.get("status") != TimelineOps.TL_STATUS_QUARANTINED:
+                continue
+            pv = getattr(ent, "position", None) or getattr(ent, "embedding", None)
+            if not pv:
+                continue
+            pvv = _np.asarray(pv, dtype=float)
+            pn = _np.linalg.norm(pvv)
+            if pn < 1e-12:
+                continue
+            sim = float(tv @ (pvv / pn))
+            if sim < confirm_sim:
+                continue
+            served = (props.get("seed_intent") or "") in (intent_sims or {})
+            if served:
+                props["status"] = TimelineOps.TL_STATUS_CONFIRMED
+                props["confirmed_ts"] = _t.time()
+                confirmed += 1
+            else:
+                store.remove(ent.eid)
+                refuted += 1
+        return {"confirmed": confirmed, "refuted": refuted}
+
+    def open_timelines(store, parent: str = "membrane::session:now",
+                       limit: int = 8) -> list:
+        """The render surface: quarantined + confirmed branches under the
+        true timeline, newest first, bounded."""
+        out = []
+        for ent in store.docs.values():
+            if ent.cls != CLASS_TIMELINE:
+                continue
+            props = ent.properties or {}
+            if props.get("status") in (TimelineOps.TL_STATUS_QUARANTINED,
+                                       TimelineOps.TL_STATUS_CONFIRMED):
+                parents = MultiParentOps._parents_of(props)
+                if parent and parents and parent not in parents:
+                    continue
+                out.append(ent)
+        out.sort(key=lambda e: float((e.properties or {}).get("born") or 0),
+                 reverse=True)
+        return out[:max(1, int(limit))]
+
+
+class EntityStore(MultiParentOps, TimelineOps):
     """Derived entities, three homes, one contract:
 
     1. ``cortex-core.entities`` (the cortex-experiment QuantumEntity

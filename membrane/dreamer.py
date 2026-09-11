@@ -50,6 +50,8 @@ import numpy as np
 from .generator import FieldNGram
 from .intent import STEER_SIM
 from .variety import effective_rank_with, novelty, thermo_state
+from .entities import (CLASS_TIMELINE, TimelineOps, CLASS_FAILURE)
+TL_QUARANTINED = TimelineOps.TL_STATUS_QUARANTINED
 
 DREAM_IDLE_S = 60.0        # a wave only when the proxy was idle this long
 STEER_SIM_LOCAL = STEER_SIM       # 0.60 -- the dream_loop D5 steering line
@@ -133,110 +135,167 @@ class Dreamer:
             if not text or len(text.split()) < 3 or text in seen_texts:
                 continue
             vec = _unit(mem._nudge(mem.embedder.embed([text])[0]))
-            ok = self._vet(mem, vec, ib)
-            if ok:
+            verdict = self._vet(mem, vec, ib)
+            if verdict == "impossible":
+                # the learned-physics lane: recorded, not proposed (the
+                # est commit below keeps impossible branches as entities)
+                est = getattr(srv, "entity_store", None)
+                if est is not None:
+                    est.make_timeline(
+                        terminal=text, vec=list(vec),
+                        status=TimelineOps.TL_STATUS_IMPOSSIBLE)
+                    self.stats["impossible"] = \
+                        self.stats.get("impossible", 0) + 1
+                continue
+            if verdict == "quarantined":
                 commit_vecs.append((text, vec))
         if not commit_vecs:
             return self._idle * 2        # the fresh band is exhausted for now
-        # ---- commit (quarantined) ----
+        # ---- commit (TIMELINE ENTITIES -- the dreamer v2 substrate) ----
+        # The dreamed branch is an entity child of the true timeline
+        # (session:now): quarantine is a STATUS on the doc, not a field
+        # cell. The entity store write-throughs to the shared layer (the
+        # parallel seats see each other's open branches) -- but the branch
+        # itself never authors a turn (the render surface is suggestions).
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            return self._idle * 4      # no entity layer: nothing to commit TO
         for text, vec in commit_vecs:
-            idx = mem.absorb_exemplar(
-                situation=f"[dream] {text}", action=text, outcome="dream",
-                vec=list(vec), safe=True, tags=[], self_authored=True)
-            if idx is not None:
+            need, nsim = (ib.nearest(vec) if ib is not None
+                          else (None, 0.0))
+            branch_sim = 0.0
+            try:
+                now_ent = est.docs.get("membrane::session:now")
+                np_ = getattr(now_ent, "position", None)
+                if np_:
+                    import numpy as _np
+                    nv = _np.asarray(np_, dtype=float)
+                    nn = float(_np.linalg.norm(nv))
+                    if nn > 1e-12:
+                        vv = _np.asarray(vec, dtype=float)
+                        branch_sim = round(
+                            float(vv @ (nv / nn)) / max(float(_np.linalg.norm(vv)), 1e-12),
+                            4)
+            except Exception:
+                pass
+            ent = est.make_timeline(
+                terminal=text, vec=list(vec),
+                seed_intent=(need.describe() if need is not None else None),
+                branch_sim=branch_sim,
+            )
+            if ent is not None:
                 self.stats["committed"] += 1
                 from .opencode import _write_audit
-                _write_audit(mem, {"event": "dream", "op": "commit",
-                                   "text": text[:200], "ex_idx": idx})
+                _write_audit(mem, {"event": "dream", "op": "commit-tl",
+                                   "text": text[:200], "eid": ent.eid})
         self.stats["waves"] += 1
-        # ---- GC horizon ----
-        self._gc(mem)
         # sleep until likely idle again; a busy session wakes us anyway
+        # (the GC is the ephemeral TTL / the elect refutes now -- no janitor)
         return self._idle
 
-    def _vet(self, mem, vec: np.ndarray, ib) -> bool:
-        """STEER + TOPIC + FRESH + VALUE -- the lab critic, on the live field."""
+    def _vet(self, mem, vec: np.ndarray, ib) -> str | None:
+        """STEER + TOPIC + FRESH + VALUE + PHYSICS -- the lab critic, on the
+        live field. Returns "ok" (commit as quarantined), "impossible"
+        (commit as a learned-physics entity -- near a known FailureMode or
+        behind an inherited latch the branch violates), or None (not a
+        dream: unsteered/stale/dup/no-growth)."""
         steer = ib.nearest(vec)[1] if ib is not None else -1.0
         if steer < STEER_SIM_LOCAL:
-            return False
+            return None
+        # PHYSICS (the impossible lane): a branch whose path lands near a
+        # known FailureMode (cos >= 0.85) is a seductive dead end -- kept
+        # as impossible (the field's learned physics), never committed as
+        # a candidate.
+        est = getattr(self.srv, "entity_store", None)
+        if est is not None:
+            import numpy as _np
+            fv = _np.asarray(vec, dtype=float)
+            fn = float(_np.linalg.norm(fv))
+            if fn > 1e-12:
+                fv = fv / fn
+                for ent in est.docs.values():
+                    if ent.cls != CLASS_FAILURE:
+                        continue
+                    ev = getattr(ent, "position", None) \
+                        or getattr(ent, "embedding", None)
+                    if not ev:
+                        continue
+                    eav = _np.asarray(ev, dtype=float)
+                    en = float(_np.linalg.norm(eav))
+                    if en > 1e-12 and float(fv @ (eav / en)) >= 0.85:
+                        return "impossible"
         nov = novelty(vec, mem.store, keep_fraction=NOV_KEEP_FRACTION)
         _, top_sim = mem.store.top_k(vec, k=1)[0]
         topic_ok = (0.0 <= nov) and (top_sim >= TOPIC_FLOOR)
         fresh_ok = top_sim < mem.dedup_sim
         grows = effective_rank_with(mem.store, vec) > \
             thermo_state(mem.store).get("eff_rank", 0.0) + 1e-6
-        return bool(topic_ok and fresh_ok and grows)
+        if not (topic_ok and fresh_ok and grows):
+            return None
+        return "quarantined"
 
     def _gc(self, mem) -> None:
-        """Horizon: quarantine only. Dreams a real turn confirmed already had
-        their flag flipped in place; refuted ones are removed by the vote."""
+        """Horizon, timeline-shaped: quarantined branches older than the
+        horizon are removed from the entity store (the confirmed ones stay
+        -- they are the record of what reality voted for). The shared docs
+        ride the ephemeral TTL too (server-side); this in-process sweep
+        keeps the RAM layer honest."""
+        est = getattr(self.srv, "entity_store", None)
+        if est is None:
+            return
         now = time.time()
         doomed = []
-        for i, e in enumerate(mem.store.exemplars):
-            if not (e.self_authored and e.outcome == "dream"):
+        for ent in list(est.docs.values()):
+            if ent.cls != CLASS_TIMELINE:
                 continue
-            born = float(getattr(e, "extra", {}).get("dream_ts", 0.0) or now)
-            if now - born > GC_HORIZON_S:
-                doomed.append(i)
+            props = ent.properties or {}
+            if props.get("status") != TL_QUARANTINED:
+                continue
+            born = float(props.get("born") or 0.0)
+            if born and now - born > GC_HORIZON_S:
+                doomed.append(ent.eid)
+        for eid in doomed:
+            est.remove(eid)
         if doomed:
-            mem.store.forget(doomed)
             self.stats["gc"] += len(doomed)
             from .opencode import _write_audit
-            _write_audit(mem, {"event": "dream", "op": "gc",
+            _write_audit(mem, {"event": "dream", "op": "gc-tl",
                                "removed": len(doomed)})
 
 
 def vote_on_turn(srv, ex) -> None:
-    """REALITY'S ELECTION, called from the per-learn hook for every REAL
-    (non-dream) exemplar: each near quarantined dream gets the turn's signed
-    vote. GOOD (the dream's own direction matches the turn's) -> promote to
-    canon; BAD (a near dream that cannot serve the turn) -> the re-ask ->
-    remove. One embed of the new exemplar's vec only (it is already a vec) --
-    no model call, bounded by MAX_DREAMS_HOT comparisons."""
+    """REALITY'S ELECTION, timeline-shaped, called from the per-learn hook
+    for every REAL (non-dream) exemplar: quarantined branches near this
+    turn's vec get the vote -- a branch whose seed_intent the turn serves
+    is CONFIRMED (status flips in place); a near branch serving nothing
+    open is REFUTED (removed). One vec (already a vec) -- no model call,
+    bounded by the open-branch cap."""
     mem = srv.membrane
-    ib = getattr(srv, "_intent_board", None)
+    est = getattr(srv, "entity_store", None)
+    if est is None:
+        return
     try:
-        vec = np.asarray(ex.vec, dtype=float)
-        n = float(np.linalg.norm(vec))
+        import numpy as _np
+        vec = _np.asarray(ex.vec, dtype=float)
+        n = float(_np.linalg.norm(vec))
         if n <= 1e-12:
             return
-        vec = vec / n
-        # candidates: quarantined dreams near this REAL turn
-        dreams = [(i, e) for i, e in enumerate(mem.store.exemplars)
-                  if e.self_authored and e.outcome == "dream" and e.vec]
-        if not dreams:
-            return
-        sims = [(i, e, float(vec @ np.asarray(e.vec, dtype=float)
-                             / max(float(np.linalg.norm(e.vec)), 1e-12)))
-                for i, e in dreams]
-        near = [(i, e, s) for i, e, s in sims if s >= 0.72]
-        if not near:
-            return
-        from .opencode import _write_audit
-        # the turn's OWN geometric identity, against the open intents (the
-        # need: which commitment -- if any -- this turn serves)
-        promoted = 0
+        vec = (vec / n).tolist()
+        ib = getattr(srv, "_intent_board", None)
+        # which open intentions this turn serves (the elect's need check)
+        intent_sims: dict = {}
         if ib is not None:
-            need, nsim = ib.nearest(vec)
-        else:
-            need, nsim = None, 0.0
-        for i, e, s in near:
-            # GOOD: the dream sits near an open intention AND the turn
-            # matches that direction (use-with-outcome; v2 D5b)
+            need, nsim = ib.nearest(_np.asarray(vec))
             if need is not None and nsim >= STEER_SIM_LOCAL:
-                e.self_authored = False
-                e.outcome = "confirmed"
-                promoted += 1
-                _write_audit(mem, {"event": "dream", "op": "promote",
-                                   "ex_idx": i, "sim": round(s, 3),
-                                   "by_turn": (ex.situation or "")[:160]})
-            else:
-                # BAD: near the turn but serves nothing open -> refuted
-                mem.store.forget([i])
-                _write_audit(mem, {"event": "dream", "op": "refute",
-                                   "ex_idx": i, "sim": round(s, 3),
-                                   "by_turn": (ex.situation or "")[:160]})
+                intent_sims[need.describe()] = nsim
+        res = est.elect_timeline(vec, intent_sims)
+        if res.get("confirmed") or res.get("refuted"):
+            from .opencode import _write_audit
+            _write_audit(mem, {"event": "dream", "op": "elect",
+                               **res,
+                               "by_turn": (ex.situation or "")[:160]})
         if getattr(srv, "dreamer", None) is not None:
-            srv.dreamer.stats["promoted"] += promoted
+            srv.dreamer.stats["promoted"] += res.get("confirmed", 0)
+            srv.dreamer.stats["refuted"] += res.get("refuted", 0)
     except Exception:
         traceback.print_exc()
