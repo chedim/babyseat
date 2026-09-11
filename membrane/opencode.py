@@ -5252,6 +5252,17 @@ def main() -> None:
                     help="compact only after the field grew this fraction "
                          "of its size since the last note (min "
                          "compact-min-field raw turns; 0 = every interval)")
+    ap.add_argument("--compact-max-field", type=int, default=0,
+                    dest="compact_max_field", metavar="N",
+                    help="THE SIZE TARGET: compact every interval while "
+                         "the field exceeds N exemplars (0 = off; the "
+                         "compactor holds the field at a size)")
+    ap.add_argument("--compact-max-raw-frac", type=float, default=0.0,
+                    dest="compact_max_raw_frac", metavar="FRAC",
+                    help="THE RAW-RATIO TARGET: compact when un-distilled "
+                         "canon exceeds this fraction of the field (0 = "
+                         "off; the compactor's real metric: how much of "
+                         "the field is still raw)")
     ap.add_argument("--compact-min-field", type=int, default=12)
     ap.add_argument("--compact-cluster-min", type=int, default=4)
     ap.add_argument("--compact-cluster-max", type=int, default=8)
@@ -5555,6 +5566,12 @@ def main() -> None:
     srv.compact_mem_chars = max(64, int(args.compact_mem_chars))
     srv.compact_cpu_target = max(0.0, min(1.0, float(args.compact_cpu_target)))
     srv.compact_growth_frac = max(0.0, float(args.compact_growth_frac))
+    # THE METRIC TARGETS (the operator's auto-compact): the size budget
+    # + the raw-ratio target -- the compactor holds the field at a size
+    # (compact-max-field) and tracks how much of it is still un-distilled
+    # (compact-max-raw-frac); either target over -> compact every interval.
+    srv.compact_max_field = max(0, int(args.compact_max_field))
+    srv.compact_max_raw_frac = max(0.0, float(args.compact_max_raw_frac))
     srv.compact_follows_chat = args.compact_model is None
     srv.compact_model = args.compact_model or model or "granite3.3:8b"
     # THE IDLE-CORTEX SPLIT: background loops (compactor distillation, the

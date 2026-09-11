@@ -498,15 +498,42 @@ class Compactor:
             wait = self._gated() if self._should_run() else self.idle
 
     def _should_run(self) -> bool:
-        """The growth trigger: enough NEW raw turns since the last NOTE (a
-        fraction of the field). The absolute floor (compact_min_field) and
-        the cluster guard inside _pick_cluster still apply -- so a tiny field
-        never compacts and a clusterless one just retries each interval."""
+        """The trigger set (three ors -- the operator's metric-targeted
+        auto-compact):
+          1. THE GROWTH TRIGGER (today's): enough NEW raw turns since the
+             last note (a fraction of the field) -- the conservative
+             default, cluster-quality first.
+          2. THE SIZE TARGET (--compact-max-field, 0 = off): the field
+             exceeds the budget -> compact every interval until back
+             under it (the compactor's job: hold the field at a size).
+          3. THE RAW-RATIO TARGET (--compact-max-raw-frac, 0 = off): raw
+             turns (non-compacted canon) exceed the fraction of the
+             field -> compact -- the compactor's real metric: how much
+             of the field is still UN-DISTILLED.
+        The absolute floor (compact_min_field) and the cluster guard
+        inside _pick_cluster still apply -- so a tiny field never
+        compacts and a clusterless one just retries each interval."""
         srv = self.srv
         mem = srv.membrane
         n = len(mem.store)
         if n < srv.compact_min_field:
             return False
+        # 2. THE SIZE TARGET: over the budget -> compact every interval
+        max_field = float(getattr(srv, "compact_max_field", 0.0) or 0.0)
+        if max_field > 0 and n > max_field:
+            return True
+        # 3. THE RAW-RATIO TARGET: un-distilled canon over the fraction
+        # (the marker is the compactor's own outcome stamp: compacted@<c>)
+        max_raw = float(getattr(srv, "compact_max_raw_frac", 0.0))
+        if max_raw > 0.0 and n >= 2 * srv.compact_min_cluster:
+            try:
+                raw = sum(1 for e in mem.store.exemplars
+                          if e.safe and not e.ephemeral
+                          and not (e.outcome or "").startswith("compacted@"))
+                if raw / n > max_raw:
+                    return True
+            except Exception:
+                pass
         grew = n - self._n_at_compact
         frac = getattr(srv, "compact_growth_frac", 0.25)
         if frac <= 0.0:
