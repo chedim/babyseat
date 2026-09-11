@@ -534,13 +534,17 @@ def _banned_import(name, *args, **kwargs):
         f"JSON input)")
 
 
-def run_entity_script(code: str, state: dict) -> dict:
+def run_entity_script(code: str, state: dict,
+                      membrane: "dict | None" = None) -> dict:
     """ONE script execution: exec in a stripped namespace (the import
     policy above: pure-compute stdlib allowed, process-level banned),
-    the entity state injected as the ``state`` variable. Returns the
-    script's ``result`` dict: {render?, data?, delete?}. Any exception
-    becomes {'error': <msg>} (the caller counters failures and turns
-    them into banner events)."""
+    the entity state injected as the ``state`` variable, and -- when a
+    membrane api object is handed (the getter/setter triggers) -- the
+    read-only navigation interface as the ``membrane`` variable
+    (membrane.field.top_k / me.velocity / timeline.walk / intents.open).
+    Returns the script's ``result`` dict: {render?, data?, delete?,
+    patch?, veto?}. Any exception becomes {'error': <msg>} (the caller
+    counters failures and turns them into banner events)."""
     def _import_guard(name, *a, **k):
         return _banned_import(name, *a, **k)
     # exec resolves imports through __builtins__["__import__"] -- the
@@ -554,6 +558,8 @@ def run_entity_script(code: str, state: dict) -> dict:
             continue
         guard_dict[name] = getattr(_bi, name)
     ns: dict = {"__builtins__": guard_dict, "state": state}
+    if membrane is not None:
+        ns["membrane"] = membrane
     try:
         exec(compile(code, "<entity-script>", "exec"), ns)
         res = ns.get("result")
@@ -611,7 +617,10 @@ def run_scripted_entities(mem, est, now: float | None = None,
                 continue
         budget -= 1
         props = ent.properties or {}
-        state = _script_state(ent, mem, now)
+        state = _script_state(ent, mem, now,
+                              extra={"legacy": True},
+                              trigger="consolidation",
+                              timeout=SCRIPT_TIMEOUT_S)
         # 1. the DELETE script first: retirement precedes any nudge
         dcode = props.get("delete_script")
         if dcode and not props.get("script_disabled"):
@@ -661,20 +670,6 @@ def run_scripted_entities(mem, est, now: float | None = None,
                 est.upsert(ent, embedder=mem.embedder)
                 stats["nudged"] += 1
     return stats
-
-
-def _script_state(ent, mem, now: float) -> dict:
-    """The JSON state a script sees (geometry + properties + own data)."""
-    return {"position": ent.position,
-            "ring": [p for _, p in (getattr(ent, "position_history",
-                                                []) or [])],
-            "velocity": (ent.ring_velocity(now)
-                         if getattr(ent, "position", None) else 0.0),
-            "cells": len(ent.links or []),
-            "properties": {k: v for k, v in (ent.properties or {}).items()
-                           if not k.startswith("script_")},
-            "data": dict((ent.properties or {}).get("script_data") or {}),
-            "now": now}
 
 
 def _script_fail(est, ent) -> None:
@@ -743,3 +738,252 @@ def run_night(srv, mem, est, chat, sweep: bool = False) -> dict:
         except Exception as e:
             print(f"[night] registration skipped ({e})", file=sys.stderr)
     return out
+
+
+# ---- the getter/setter engine (the entity's own policy scripts) ----------
+# THE RESOURCE NARROWING (the operator's call): budgets tighten as the
+# trigger approaches the operator's live chat -- dreamed (60s idle) 2s,
+# thought (1s hum tick) 1s, mention (10s digest) 0.25s. The 15-min
+# consolidation keeps its 2s. The cooldowns bound per-entity re-fires.
+_SCRIPT_TIMEOUTS = {"consolidation": SCRIPT_TIMEOUT_S,
+                    "dreamed": 2.0,
+                    "thought": 1.0,
+                    "mention": 0.25}
+_SCRIPT_COOLDOWN_DEFAULT_S = 60.0
+
+
+def _cooldown_ok(props: dict, trigger: str, now: float) -> bool:
+    """Per-entity per-trigger cooldown: a hot entity (session:now gets
+    mentioned constantly) cannot exec every tick. properties
+    ['script_cooldown_s'] overrides downward-only (the operator's knob)."""
+    last = ((props.get("script_cooldowns") or {}).get(trigger) or 0.0)
+    cd = _SCRIPT_COOLDOWN_DEFAULT_S
+    try:
+        cd = min(cd, float((props.get("script_cooldown_s") or cd)))
+    except (TypeError, ValueError):
+        pass
+    return (now - float(last or 0.0)) >= cd
+
+
+def _stamp_cooldown(props: dict, trigger: str, now: float) -> None:
+    cds = props.get("script_cooldowns")
+    if not isinstance(cds, dict):
+        cds = {}
+    cds[trigger] = now
+    props["script_cooldowns"] = cds
+
+
+def run_entity_update_script(srv, ent, trigger: str,
+                             extra_state: dict | None = None) -> dict:
+    """The getter/setter dispatch (the thinker's + the dreamer's hooks):
+    run ONE entity's update_script for this trigger, under the narrowed
+    budget (_SCRIPT_TIMEOUTS) + the cooldown, with the full membrane
+    navigation object injected. Returns the engine's result dict
+    ({render?, patch?, veto?, delete?} or {error}).
+
+    THE AUTHORSHIP COVENANT: the script NEVER mutates directly -- it
+    returns {patch, veto, render, delete} and the CALLER applies them
+    inside the entity's mut_lock (the engine applies, the entity
+    decides). The getter shape (read-only, {render}) is enforced by the
+    caller passing read_only=True in extra_state; a setter that tries to
+    delete during a degraded read is the caller's veto."""
+    props = ent.properties or {}
+    code = None
+    if trigger == "mention":
+        code = props.get("mention_script")
+    elif trigger == "thought":
+        code = props.get("thought_script")
+    elif trigger == "dreamed":
+        code = props.get("dreamed_script")
+    elif trigger == "consolidation":
+        code = props.get("nudge_script")
+    if not code:
+        return {"error": "no script"}
+    now = time.time()
+    if props.get("script_disabled"):
+        return {"error": "disabled (3 strikes)"}
+    if not _cooldown_ok(props, trigger, now):
+        return {"error": "cooldown"}
+    timeout = _SCRIPT_TIMEOUTS.get(trigger, SCRIPT_TIMEOUT_S)
+    _stamp_cooldown(props, trigger, now)
+    extra = dict(extra_state or {})
+    extra["trigger"] = trigger
+    extra["timeout_s"] = timeout
+    api = _script_membrane_api(ent, srv,
+                               getattr(srv, "entity_store", None),
+                               trigger, timeout, extra)
+    state = _script_state(ent, getattr(srv, "membrane", None),
+                          now, extra=extra,
+                          trigger=trigger, timeout=timeout)
+    out = run_entity_script(code, state, membrane=api)
+    est = getattr(srv, "entity_store", None)
+    if out.get("error"):
+        if est is not None:
+            _script_fail(est, ent)
+            _script_error_announce(est, ent.eid, trigger, out["error"])
+    else:
+        if ent.properties.get("script_failures"):
+            ent.properties.pop("script_failures", None)
+    return out
+
+
+def _script_state(ent, mem, now: float, extra: dict, trigger: str,
+                  timeout: float) -> dict:
+    """The script's state: geometry + properties (script_ internal keys
+    hidden) + own data + THE TRIGGER SHAPE (what fired, with what) +
+    the trigger's timeout (the script can see its own budget)."""
+    base = {"position": ent.position,
+            "ring": [p for _, p in (getattr(ent, "position_history",
+                                              []) or [])],
+            "velocity": (ent.ring_velocity(now)
+                         if getattr(ent, "position", None) else 0.0),
+            "cells": len(ent.links or []),
+            "properties": {k: v for k, v in (ent.properties or {}).items()
+                           if not k.startswith("script_")},
+            "data": dict((ent.properties or {}).get("script_data") or {}),
+            "now": now,
+            "trigger": trigger,
+            "timeout_s": timeout,
+            "extra": dict(extra)}
+    return base
+
+    def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
+                             extra: dict) -> dict:
+        """THE MEMBRANE OBJECT (read-only, the operator's design): the
+        full navigation/analysis interface injected next to ``state`` --
+        the field's read surfaces, the entity layer's reads, the
+        timeline walker, the intent steering. NO mutators (the
+        authorship covenant: scripts analyze + return results; the
+        engine applies)."""
+        mem = getattr(srv, "membrane", None)
+        store = getattr(mem, "store", None) if mem else None
+
+        class _FieldAPI:
+            """Read surfaces over the live field (degrade to {} / [] on
+            any failure -- a script can never wedge recall)."""
+            def top_k(self, vec, k: int = 5):
+                if store is None:
+                    return []
+                return [(e.eid if hasattr(e, "eid") else i, round(float(s), 4))
+                        for i, (e, s) in enumerate(
+                            store.top_k(vec, k=min(k, 20)))]
+            def sketch(self):
+                return store.stats_sketch() if store else {}
+            def thermo(self):
+                try:
+                    from .variety import thermo_state
+                    return thermo_state(store) if store else {}
+                except Exception:
+                    return {}
+            def directions(self, k: int = 6):
+                try:
+                    from .variety import orient_dirs
+                    return [list(d) for d in
+                            (orient_dirs(store, max(1, k), 0.5) or [])]
+                except Exception:
+                    return []
+
+        class _Me:
+            """THIS entity: reads + the derived-geometry methods."""
+            def __init__(self, e):
+                self.eid = e.eid
+                self.cls = e.cls
+                self.properties = {k: v for k, v in
+                                   (e.properties or {}).items()
+                                   if not str(k).startswith("script_")}
+                self.position = list(e.position or [])
+                self._ent = e
+            def describe(self):
+                return self._ent.describe()
+            def velocity(self):
+                return (self._ent.ring_velocity(_t.time())
+                        if getattr(self._ent, "position", None) else 0.0)
+            def direction(self):
+                return self._ent.ring_direction()
+            def offsets(self):
+                try:
+                    return MultiParentOps.parent_offsets(est, self.eid)
+                except Exception:
+                    return {}
+            def parents(self):
+                return list(MultiParentOps._parents_of(
+                    self._ent.properties or {}))
+            def children(self):
+                try:
+                    return [c.eid for c in est.children_of(self.eid)]
+                except Exception:
+                    return []
+
+        class _Entities:
+            """The symbolic layer, read-only."""
+            def get(self, spec):
+                e = est._resolve_spec(spec) if est else None
+                if e is None:
+                    return None
+                return {"eid": e.eid, "cls": e.cls,
+                        "position": list(e.position or []),
+                        "properties": {k: v for k, v in
+                                       (e.properties or {}).items()
+                                       if not str(k).startswith("script_")}}
+            def timelines_of(self, spec, open_only: bool = True):
+                try:
+                    return [e.eid for e in est.timelines_of(
+                        spec, open_only=open_only)]
+                except Exception:
+                    return []
+            def related_by_class(self, spec, cls, limit: int = 8):
+                try:
+                    return [e.eid for e in
+                            est.related_by_class(spec, cls, limit)]
+                except Exception:
+                    return []
+            def count(self, cls: str | None = None):
+                if cls is None:
+                    return len(est.docs)
+                return sum(1 for e in est.docs.values() if e.cls == cls)
+
+        class _Timeline:
+            """The Phase T typed walker (the fn-bridge-fed table)."""
+            def __init__(self, tl):
+                self._tl = tl
+            def distribution(self, toks):
+                return self._tl.distribution(toks) if self._tl else None
+            def walk(self, toks, max_steps: int = 14):
+                return self._tl.walk(toks, max_steps=max_steps) \
+                    if self._tl else None
+
+        class _Intents:
+            """The steering wheel (open intentions, read-only)."""
+            def __init__(self, ib):
+                self._ib = ib
+            def open(self):
+                try:
+                    return [i.text for i in self._ib.open_intents()]
+                except Exception:
+                    return []
+            def nearest(self, vec):
+                try:
+                    need, sim = self._ib.nearest(vec)
+                    return {"text": need.text, "sim": round(float(sim), 3)}
+                except Exception:
+                    return None
+
+        class _Membrane:
+            """The assembled read-only interface (field/me/entities/
+            timeline/intents)."""
+            def __init__(self):
+                self.field = _Field()
+                self.me = _Me(ent)
+                self.entities = _Entities(est)
+                tl = getattr(srv, "membrane", None)
+                tl = getattr(tl, "timeline", None) if tl else None
+                self.timeline = _Timeline(tl)
+                ib = getattr(srv, "_intent_board", None)
+                self.intents = _Intents(ib)
+                self.trigger = trigger
+                self.timeout_s = timeout
+                self.extra = dict(extra)
+
+        return _Membrane()
+
+

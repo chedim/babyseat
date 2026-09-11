@@ -1327,6 +1327,52 @@ class TimelineOps:
                  reverse=True)
         return out[:max(1, int(limit))]
 
+    # ---- timeline navigation (the scripts' joints) --------------------------
+    def timelines_of(store, spec: str, open_only: bool = True
+                     ) -> list:
+        """The branches hanging off THIS entity (Timeline class via ISA or
+        link-adjacent). The dreamer's outputs, navigable from the parent
+        -- the thinker's extension path reads this."""
+        ent = store._resolve_spec(spec)
+        if ent is None:
+            return []
+        out = []
+        for e in store.docs.values():
+            if e.cls != CLASS_TIMELINE:
+                continue
+            props = e.properties or {}
+            if open_only and props.get("status") not in (
+                    TimelineOps.TL_STATUS_QUARANTINED,
+                    TimelineOps.TL_STATUS_CONFIRMED):
+                continue
+            if spec in MultiParentOps._parents_of(props) \
+                    or ent.eid in (e.links or []):
+                out.append(e)
+        out.sort(key=lambda e: float((e.properties or {}).get("born") or 0),
+                 reverse=True)
+        return out
+
+    def related_by_class(store, spec: str, cls: str, limit: int = 8
+                         ) -> list:
+        """The neighborhood by class: entities sharing a tag with spec
+        (the co-tag relation -- the soft edges), the caller's filter
+        applied. Read-only navigation for scripts."""
+        ent = store._resolve_spec(spec)
+        if ent is None:
+            return []
+        tags = set((ent.properties or {}).get("entities") or [])
+        if not tags:
+            return []
+        out = []
+        for e in store.docs.values():
+            if e.eid == ent.eid or e.cls != cls:
+                continue
+            if tags & set((e.properties or {}).get("entities") or []):
+                out.append(e)
+                if len(out) >= max(1, int(limit)):
+                    break
+        return out
+
 
 class EntityStore(MultiParentOps, TimelineOps):
     """Derived entities, three homes, one contract:
