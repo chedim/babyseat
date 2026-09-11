@@ -3516,6 +3516,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
     def _v1_chat(self) -> None:
         srv = self.server
         mem = srv.membrane
+        # THE DREAMER'S IDLE SIGNAL: every model-bound turn stamps the
+        # clock the dreamer's cycle reads (idle_for = now - last_turn_ts).
+        # Never stamped, the dreamer computed idle_for = 0 forever and
+        # never dreamed (the boot-order class of bug: a consumer wired to
+        # an attr nothing writes).
+        srv.last_turn_ts = time.time()
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length) if length else b""
         try:
