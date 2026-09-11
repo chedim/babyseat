@@ -1279,6 +1279,7 @@ class TimelineOps:
             return {"confirmed": 0, "refuted": 0}
         tv = tv / tn
         confirmed = refuted = 0
+        confirmed_eids: list[str] = []
         for ent in list(store.docs.values()):
             if ent.cls != CLASS_TIMELINE:
                 continue
@@ -1300,10 +1301,12 @@ class TimelineOps:
                 props["status"] = TimelineOps.TL_STATUS_CONFIRMED
                 props["confirmed_ts"] = _t.time()
                 confirmed += 1
+                confirmed_eids.append(ent.eid)
             else:
                 store.remove(ent.eid)
                 refuted += 1
-        return {"confirmed": confirmed, "refuted": refuted}
+        return {"confirmed": confirmed, "refuted": refuted,
+                "confirmed_eids": confirmed_eids}
 
     def open_timelines(store, parent: str = "membrane::session:now",
                        limit: int = 8) -> list:

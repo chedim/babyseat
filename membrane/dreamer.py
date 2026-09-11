@@ -297,5 +297,13 @@ def vote_on_turn(srv, ex) -> None:
         if getattr(srv, "dreamer", None) is not None:
             srv.dreamer.stats["promoted"] += res.get("confirmed", 0)
             srv.dreamer.stats["refuted"] += res.get("refuted", 0)
+        # the thinker's digest: a confirmed branch is worth one sentence
+        # (a prediction came true); the thinker decides (planner-gated).
+        th = getattr(srv, "thinker", None)
+        if th is not None:
+            for eid in res.get("confirmed_eids", []):
+                th.enqueue("dream-outcome", {"op": "elect", "confirmed": 1,
+                                             "eid": eid,
+                                             "text": (ex.situation or "")[:160]})
     except Exception:
         traceback.print_exc()

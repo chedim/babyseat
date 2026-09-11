@@ -3014,6 +3014,38 @@ def _capture(mem, label: str, situation: str, action: str, min_len: int = 1,
                         vote_on_turn(_srv, mem.store.exemplars[idx])
             except Exception:
                 pass
+            try:
+                _srv = srv_ref(mem)
+                if _srv is not None:
+                    # the digest's sim: the learned cell's top-1 match to
+                    # the REST of the field (one numpy pass) -- a hot sim
+                    # is the surprise bar's input (the pattern-note shape)
+                    _sim = None
+                    try:
+                        _exs = mem.store.exemplars
+                        _ex = _exs[idx] if 0 <= idx < len(_exs) else None
+                        if _ex is not None and getattr(_ex, "vec", None):
+                            _others = [e for e in _exs if e is not _ex]
+                            if _others:
+                                import numpy as _np
+                                _v = _np.asarray(_ex.vec, dtype=float)
+                                _vn = float(_np.linalg.norm(_v))
+                                if _vn > 1e-12:
+                                    _V = _np.asarray(
+                                        [e.vec for e in _others if
+                                         getattr(e, "vec", None)],
+                                        dtype=float)
+                                    if _V.size:
+                                        _Vn = (_V / (_np.linalg.norm(
+                                            _V, axis=1, keepdims=True)
+                                            + 1e-12))
+                                        _sim = float((_Vn @ (_v / _vn)).max())
+                    except Exception:
+                        _sim = None
+                    from .thinker import feed_capture
+                    feed_capture(_srv, label, idx, situation, sim=_sim)
+            except Exception:
+                pass
         else:
             print(f"[capture] {label} skipped (guard)", file=sys.stderr)
     except Exception as e:
@@ -5136,6 +5168,16 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 "peers_live": (len(srv.peers.livelist())
                                if getattr(srv, "peers", None) else 0),
             }
+        # THE THINK QUEUE (working memory, on the mind): what the fast
+        # clock is chewing, oldest first, bounded by the covenant.
+        th = getattr(srv, "thinker", None)
+        out["think"] = {
+            "queue": [{"kind": i.get("kind"),
+                       "age_s": round(time.time() - float(i.get("ts", 0)),
+                                      1)}
+                      for i in getattr(th, "queue", [])],
+            "stats": dict(getattr(th, "stats", {}) or {}),
+        }
         # THE CACHE STORE: the built state is cached for 60s (the TTL)
         srv._state_cache = {"data": out, "ts": time.time()}
         self._json_out(out)
@@ -5266,6 +5308,9 @@ def main() -> None:
     ap.add_argument("--no-dreamer", dest="no_dreamer", action="store_true",
                     help="stand down the dreamer (no timeline generation "
                          "on idle; the field stays exactly as lived)")
+    ap.add_argument("--no-thinker", dest="no_thinker", action="store_true",
+                    help="stand down the thinker (no background "
+                         "deliberation; nothing is chewed off-turn)")
     ap.add_argument("--cloud-budget", type=float, default=0.0, metavar="USD",
                     help="max relative-money spend per day on cloud-routed "
                          "escalations (the cost ladder's hard cap; default 0 "
@@ -5759,6 +5804,22 @@ def main() -> None:
         except Exception as e:
             print(f"[opencode] dreamer boot failed (non-fatal): {e}",
                   file=sys.stderr)
+    # THE THINKER (the fast clock, separate from the dreamer -- the
+    # operator's design: 'thinking is different from dreaming'): rumination
+    # -- the last stimuli digested (captures, dream outcomes, night
+    # findings) and, in silence, quarantined branches extended. Working
+    # memory = 5 items, drop-oldest; voice always planner-gated; model
+    # calls capped per minute. --no-thinker stands it down.
+    srv.thinker = None
+    if not getattr(args, "no_thinker", False) \
+            and not getattr(mem, "fork_owns_field", False):
+        try:
+            from .thinker import Thinker
+            srv.thinker = Thinker(srv)
+            srv.thinker.start()
+        except Exception as e:
+            print(f"[opencode] thinker boot failed (non-fatal): {e}",
+                  file=sys.stderr)
     if args.compact_every > 0 and not getattr(mem, "fork_owns_field", False):
         srv.compactor = Compactor(srv, idle=args.compact_every)
         srv.compactor.start()
@@ -5809,6 +5870,13 @@ def main() -> None:
                         print(f"[night] drifted {d['drifted']} entities "
                               f"(avg {d['avg_moved']:.3f}), materialized "
                               f"{d.get('materialized', 0)}", file=sys.stderr)
+                        # the thinker digests the night's findings (the
+                        # reportable shapes become speakable, planner-gated)
+                        th = getattr(srv, "thinker", None)
+                        if th is not None:
+                            th.enqueue("night", {
+                                "materialized": d.get("materialized", 0),
+                                "drifted": d.get("drifted", 0)})
                     srv.night_stats = {**night, "ts": now,
                                        "swept": bool(do_sweep)}
                 except Exception as e:
@@ -6232,6 +6300,11 @@ def main() -> None:
         if getattr(srv, "dreamer", None) is not None:
             try:
                 srv.dreamer.stop()
+            except Exception:
+                pass
+        if getattr(srv, "thinker", None) is not None:
+            try:
+                srv.thinker.stop()
             except Exception:
                 pass
         # the couchbase clusters FIRST (peers substrate, the field's store,
