@@ -5813,6 +5813,7 @@ def main() -> None:
         except Exception as e:
             print(f"[opencode] thinker boot failed (non-fatal): {e}",
                   file=sys.stderr)
+    _init_speak(srv)
     if args.compact_every > 0 and not getattr(mem, "fork_owns_field", False):
         srv.compactor = Compactor(srv, idle=args.compact_every)
         srv.compactor.start()
@@ -5824,11 +5825,6 @@ def main() -> None:
     # boot -- the mind exists, the field's size, the thinker + dreamer
     # humming. Rides speak()'s ActTable gate (stay-silent holds unless
     # the table has learned boot contexts speak).
-    try:
-        speak(srv, f"membrane up: field {len(mem.store)} cells, "
-                   f"thinker + dreamer humming", kind="report-state")
-    except Exception:
-        pass
     # THE STANDALONE NIGHT: when the Compactor is stood down (fork owns
     # capture) the night still runs on its own slow timer -- quality
     # control is not capture (the operator's shared-field call). The
@@ -6389,6 +6385,19 @@ def speak(srv, text: str, kind: str = "note") -> bool:
     q.append(msg)
     del q[:-_SPEAK_CAP]               # bounded: drop the oldest overflow
     return True
+
+
+def _init_speak(srv) -> None:
+    """THE THINKER'S HELLO (planner-gated): one line on boot -- the mind
+    exists, the field's size, thinker + dreamer humming. Rides speak()'s
+    ActTable gate (stay-silent holds unless the table has learned boot
+    contexts speak). A boot failure never silences the hello: this sits
+    OUTSIDE the organ-boot try blocks."""
+    try:
+        speak(srv, f"membrane up: field {len(srv.membrane.store)} cells, "
+                   f"thinker + dreamer humming", kind="report-state")
+    except Exception:
+        pass
 
 
 def drain_speech(srv) -> list[dict]:
