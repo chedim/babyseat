@@ -453,10 +453,16 @@ def consolidate_entities(mem, est, materialize: int = 8,
                           "tool membrane_entity_remove for:",
                           "tool membrane_membrane_watch_entity for:",
                           "tool membrane_membrane_unwatch_entity for:")
+        # THE INDEX GUARD (the personalized-field fix): the inversion
+        # index + entity links carry cell positions from the WORLD field
+        # (the boot's 13k hydrate); the personalized store is smaller --
+        # an out-of-range index is a foreign-world cell this neighborhood
+        # does not hold, not a crash.
         idxs = [i for i in (list(inv.get(ekey) or []))
-                if not any(str(mem.store.exemplars[i].situation or "")
-                           .lower().startswith(p)
-                           for p in _MGMT_PREFIXES)]
+                if 0 <= i < len(mem.store.exemplars)
+                and not any(str(mem.store.exemplars[i].situation or "")
+                            .lower().startswith(p)
+                            for p in _MGMT_PREFIXES)]
         if not idxs and ent.links:
             idxs = [i for i in ent.links
                     if 0 <= i < len(mem.store.exemplars)
