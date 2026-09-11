@@ -3625,7 +3625,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 if _seed:
                     import time as _t
                     _t0 = _t.time()
-                    _new = ExemplarStore.load_neighborhood(
+                    from .field import ExemplarStore as _ES
+                    _new = _ES.load_neighborhood(
                         str(mem.field_path), seed_vec=list(_seed))
                     _n = len(_new)
                     mem.store = _new
