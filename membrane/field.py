@@ -763,10 +763,26 @@ class ExemplarStore:
             return np.zeros((0, 0), dtype=float)
         return np.array([e.vec for e in self.exemplars], dtype=float)
 
+    # THE ANN INDEX NAME (the E14 hybrid's substrate): the exemplar
+    # vector index built over this store's cb collection (the E14 probe
+    # measured parity 3/3 top-1 vs the RAM path, 5-NN at 5-17ms flat).
+    ANN_INDEX = "membrane_exemplars_vec"
+    ANN_FIELD = "vec"
+
     def top_k(self, q: np.ndarray, k: int = 5,
               canon_only: bool = False,
               live_only: bool = False) -> list[tuple[Exemplar, float]]:
         """The k nearest exemplars to unit query q, by cosine similarity.
+
+        THE ANN-FIRST HYBRID (the E14 architecture): the database's vector
+        index answers primary recall (flat ~5-17ms at any field size --
+        the RAM matrix-rebuild's 80-200ms disappears); the RAM path is
+        the fallback (ANN degrade/None) AND the freshness tail (a
+        just-learned row younger than the index's ingest lag rides the
+        RAM side so it is never invisible). Tier flags (canon_only /
+        live_only) are POST-FILTERS on the ANN hits (the index fetches
+        k*2 to survive filtering). MEMBRANE_ANN=0 reverts to the pure
+        RAM path (the kill switch).
 
         ``canon_only`` excludes ephemeral CANDIDATES: the gate's replay
         decision reads canon alone (a candidate is an unconfirmed claim --
@@ -779,6 +795,15 @@ class ExemplarStore:
         archaeology lanes (forget search, compactor, codegraph, the query
         surface) keep the default -- a superseded row must stay findable so
         the links stay resolvable and the dreamer's GC can distill it."""
+        # ---- the ANN-first path (the E14 hybrid) -------------------------
+        if (not getattr(self, "_ann_disabled", False)
+                and os.environ.get("MEMBRANE_ANN", "1") != "0"):
+            hits = self._ann_top_k(q, k=k, canon_only=canon_only,
+                                   live_only=live_only)
+            if hits is not None and len(hits) >= k:
+                return hits
+            # shortfall/degrade: the ANN contributed what it could; the
+            # RAM path below fills the rest (hits is None or short)
         pool = ([e for e in self.exemplars if not e.ephemeral]
                 if canon_only else self.exemplars)
         if live_only:
@@ -798,6 +823,51 @@ class ExemplarStore:
         k = min(k, len(pool))
         idx = np.argsort(-sims)[:k]
         return [(pool[i], float(sims[i])) for i in idx]
+
+    def _ann_top_k(self, q: np.ndarray, k: int, canon_only: bool,
+                   live_only: bool) -> list[tuple[Exemplar, float]] | None:
+        """The ANN-first recall: the vector index answers, the RAM store
+        maps doc ids back to live cells (the content-key contract: the
+        ANN doc id IS the exemplar's _ex_key). The tier flags are
+        post-filters (fetch k*2, filter, trim). None on ANY failure or
+        shortfall (the RAM path fills) -- the ANN is an accelerator,
+        never a gate."""
+        if len(self.exemplars) == 0:
+            return []
+        try:
+            from .ann import ann_search
+        except Exception:
+            return None
+        # THE SHAPE GUARD (the ANN needs the full dim): legacy/stub rows
+        # of a different dim never query the index (they cannot match)
+        if len(q) != 1024:
+            return None
+        # fetch extra to survive the tier post-filters + the RAM misses
+        want = min(64, max(k * 2, k + 8))
+        from . import ann as _ann
+        hits = _ann.ann_search(self.ANN_INDEX,
+                               [float(x) for x in (q / (np.linalg.norm(q)
+                                                        + 1e-12))],
+                               k=want, timeout=0.75)
+        if hits is None:
+            return None                  # degraded: the RAM path answers
+        out: list[tuple[Exemplar, float]] = []
+        dead = (self._superseded_set() if live_only else frozenset())
+        for doc_id, score in hits:
+            idx = self.index_of_key(str(doc_id))
+            if idx is None:
+                continue                 # the index's tail the RAM lacks
+            ex = self.exemplars[idx]
+            if canon_only and ex.ephemeral:
+                continue
+            if live_only and idx in self._superseded_set():
+                continue
+            out.append((ex, score))
+            if len(out) >= k:
+                break
+        if len(out) < k:
+            return None                  # shortfall: the RAM path fills
+        return out
 
     def save(self, path: str | Path) -> None:  # noqa: F811
         """THE CB-ONLY SAVE (the operator's call: JSON fully removed)."""
