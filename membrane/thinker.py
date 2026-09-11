@@ -277,16 +277,24 @@ class Thinker:
         typed walk (TokenTimeline, fed by the fn stamps) generates the
         extension -- $0; the model call only when the budget allows and
         the walk came up empty (the composer finishes what the table
-        cannot)."""
+        cannot). THE ATTENTION RULE (curiosity): the HUNGRIEST branch is
+        extended first (highest curiosity property), not the oldest --
+        the unanswered questions get the mind's time."""
         srv = self.srv
         est = getattr(srv, "entity_store", None)
         if est is None:
             return
-        open_tl = [e for e in est.open_timelines(limit=4)
+        open_tl = [e for e in est.open_timelines(limit=8)
                    if (e.properties or {}).get("status") == "quarantined"]
         if not open_tl:
             return
-        branch = open_tl[0]
+        # THE HUNGRIEST FIRST (curiosity): the branch with the highest
+        # curiosity property gets the mind's time (ties -> newest).
+        branch = max(open_tl,
+                     key=lambda e: (float((e.properties or {})
+                                          .get("curiosity") or 0.0),
+                                    float((e.properties or {})
+                                          .get("born") or 0.0)))
         props = branch.properties or {}
         terminal = str(props.get("terminal") or "")
         if not terminal:

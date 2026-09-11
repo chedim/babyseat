@@ -239,7 +239,11 @@ class Dreamer:
         horizon are removed from the entity store (the confirmed ones stay
         -- they are the record of what reality voted for). The shared docs
         ride the ephemeral TTL too (server-side); this in-process sweep
-        keeps the RAM layer honest."""
+        keeps the RAM layer honest.
+        THE CURIOSITY GROWTH: an unconfirmed branch past 2/3 of the
+        horizon gets HUNGRIER (+0.2, cap 1.0) -- an unanswered question
+        that is about to expire gets the mind's last attention before
+        the GC lands."""
         est = getattr(self.srv, "entity_store", None)
         if est is None:
             return
@@ -252,8 +256,20 @@ class Dreamer:
             if props.get("status") != TL_QUARANTINED:
                 continue
             born = float(props.get("born") or 0.0)
-            if born and now - born > GC_HORIZON_S:
+            if not born:
+                continue
+            age = now - born
+            if age > GC_HORIZON_S:
                 doomed.append(ent.eid)
+                continue
+            # THE HUNGER GROWTH (2/3 horizon, unconfirmed): +0.2, cap 1.0
+            if age > GC_HORIZON_S * (2.0 / 3.0):
+                try:
+                    props["curiosity"] = round(
+                        min(1.0, float(props.get("curiosity", 0.7)) + 0.2),
+                        3)
+                except (TypeError, ValueError):
+                    pass
         for eid in doomed:
             est.remove(eid)
         if doomed:

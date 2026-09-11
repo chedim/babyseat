@@ -36,3 +36,32 @@ class TestInitSpeak(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBootContextSeed(unittest.TestCase):
+    """THE BOOT-CONTEXT SEED (the init-speak enabler): the boot
+    context's ActTable row is observed report-state x2 BEFORE the
+    hello -- the table has LEARNED boot contexts speak, so
+    _init_speak's consult selects report-state (not the stay-silent
+    veto) on every fresh boot."""
+
+    def test_seed_learns_boot_context_before_hello(self):
+        import membrane.opencode as oc
+
+        # the real shape: the hello reads the field's cell count off
+        # srv.membrane.store (the f-string) -- the fake needs it
+        _store = type("St", (), {"exemplars": [], "__len__":
+                                  lambda self: len(self.exemplars)})()
+        _membrane = type("M", (), {"store": _store})()
+        srv = type("S", (), {"_speak_queue": [],
+                             "_act_table": ActTable(),
+                             "_last_context_sig": "boot|0.5",
+                             "membrane": _membrane})()
+        # the boot-context seed (the boot block's exact shape):
+        srv._act_table.observe("boot|0.5", "report-state")
+        srv._act_table.observe("boot|0.5", "report-state")
+        # the hello's consult passes with the learned row:
+        self.assertEqual(srv._act_table.select("boot|0.5"),
+                         "report-state")
+        oc._init_speak(srv)
+        self.assertEqual(len(srv._speak_queue), 1)

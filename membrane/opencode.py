@@ -5813,6 +5813,19 @@ def main() -> None:
         except Exception as e:
             print(f"[opencode] thinker boot failed (non-fatal): {e}",
                   file=sys.stderr)
+    # THE BOOT-CONTEXT SEED (the init-speak enabler): the boot context's
+    # ActTable row is observed report-state x2 BEFORE the hello -- the
+    # table has LEARNED boot contexts speak, so _init_speak's consult
+    # selects report-state (not the stay-silent veto) on every fresh
+    # boot. Without this seed the hello is vetoed forever (the init
+    # speak was a no-op on any fresh boot -- the unlearned-table
+    # stay-silent default).
+    try:
+        srv._last_context_sig = "boot|0.5"
+        srv._act_table.observe("boot|0.5", "report-state")
+        srv._act_table.observe("boot|0.5", "report-state")
+    except Exception:
+        pass
     _init_speak(srv)
     if args.compact_every > 0 and not getattr(mem, "fork_owns_field", False):
         srv.compactor = Compactor(srv, idle=args.compact_every)
@@ -6393,6 +6406,10 @@ def _init_speak(srv) -> None:
     ActTable gate (stay-silent holds unless the table has learned boot
     contexts speak). A boot failure never silences the hello: this sits
     OUTSIDE the organ-boot try blocks."""
+    import sys as _s
+    print(f"[thinker] _init_speak: "
+          f"ctx={getattr(srv, '_last_context_sig', 'unknown')!r}",
+          file=_s.stderr)
     try:
         speak(srv, f"membrane up: field {len(srv.membrane.store)} cells, "
                    f"thinker + dreamer humming", kind="report-state")

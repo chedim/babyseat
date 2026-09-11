@@ -1300,8 +1300,26 @@ class TimelineOps:
             if served:
                 props["status"] = TimelineOps.TL_STATUS_CONFIRMED
                 props["confirmed_ts"] = _t.time()
+                # THE CURIOSITY DECAY (self-extinguishing): a confirmed
+                # branch's question is served -- relax the hunger (floor
+                # 0.05: never fully dead, a confirmed branch can still
+                # teach). The dreamer's proposal weighting reads this.
+                try:
+                    props["curiosity"] = round(
+                        max(0.05, float(props.get("curiosity", 0.7)) * 0.4),
+                        3)
+                except (TypeError, ValueError):
+                    pass
                 confirmed += 1
                 confirmed_eids.append(ent.eid)
+                # THE PERSISTENCE (the elect's write): the status flip +
+                # the curiosity decay land on the shared doc too (the
+                # parallel seats see the confirmation) -- best-effort,
+                # degraded mode keeps the RAM layer as the truth.
+                try:
+                    store.upsert(ent)
+                except Exception:
+                    pass
             else:
                 store.remove(ent.eid)
                 refuted += 1
