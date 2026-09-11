@@ -1349,6 +1349,16 @@ class EntityStore(MultiParentOps):
         is unshared (the test-isolation guard: tests never touch the
         shared substrate). Stashes the cluster
         handle (self._cluster_ref) for N1QL (Collections have no .query)."""
+        # THE CLUSTER-HANDLE CACHE (the memory-leak fix): this used to
+        # construct a FRESH couchbase Cluster on EVERY call -- and the
+        # write-through calls it per entity upsert. Each Cluster spawns
+        # its own SDK io workers + connection buffers and is never
+        # closed; over a session the leaked workers piled into GBs (the
+        # operator's 30GB Terminal tree with two seats). One handle per
+        # store: construct once, reuse for every read and write.
+        cached = getattr(self, "_cb_coll_cache", None)
+        if cached is not None:
+            return cached
         if not self.shared:
             return None
         try:
@@ -1373,6 +1383,7 @@ class EntityStore(MultiParentOps):
                     pass                # exists
             except Exception:
                 pass
+            self._cb_coll_cache = coll
             return coll
         except Exception as e:
             if not self._cb_warned:
