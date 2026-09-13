@@ -332,6 +332,31 @@ TOOLS: list[dict] = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "membrane_intend",
+        "description": "Plant or pin an intention (the steering wheel -- the "
+                       "fact that a goal became active makes it an intent): "
+                       "create-or-attach a shared Goal entity and give it a "
+                       "priority pin on this seat's active set. Goals are "
+                       "LONG-LIVED (no TTL; 'for 2w' pins the priority "
+                       "window, never deletes). The active set (cap 3) "
+                       "steers the dream loop; the banner shows it; "
+                       "fulfill closes the goal SHARED (the project "
+                       "commitment done is done for every seat); drop "
+                       "intent only suppresses it on THIS seat.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string",
+                         "description": "the commitment, one sentence."},
+                "ttl": {"type": "string",
+                        "description": "optional priority pin window "
+                                       "('4h'/'2d'/'2w') -- a priority "
+                                       "bonus, never an expiry."},
+            },
+            "required": ["text"],
+        },
+    },
+    {
         "name": "membrane_entity_inherit",
         "description": (
             "ENTITY INHERITANCE: give an entity a parent concept ('a "
@@ -658,6 +683,24 @@ def tool_peer_post(args: dict, port: int) -> str:
             f"every connected seat; unread messages ride their banners).")
 
 
+def tool_intend(args: dict, port: int) -> str:
+    """The model's pen on the steering wheel: create-or-pin a shared Goal
+    + give it a priority pin on THIS seat's active set. Speech announces
+    every activation; drop intent suppresses seat-locally; fulfill closes
+    the goal shared."""
+    body = {"text": str(args.get("text") or "").strip()}
+    if args.get("ttl"):
+        body["ttl"] = str(args["ttl"])
+    out = _http(port, "POST", "/membrane/intend", body)
+    if not out.get("ok"):
+        return f"Intend failed: {out.get('error', 'unknown error')}"
+    what = "created + pinned" if out.get("created") else "pinned (existing goal)"
+    return (f"Goal active ({what}): {out.get('eid')}\n"
+            f"The active set steers the dream loop; the banner shows it. "
+            f"Drop intent #N suppresses it on this seat; fulfill #N closes "
+            f"it shared.")
+
+
 def tool_entity_inherit(args: dict, port: int) -> str:
     spec = str(args.get("spec") or "").strip()
     parents = args.get("parents") or []
@@ -707,6 +750,7 @@ TOOL_IMPLS = {
     "membrane_set_junk_cut": tool_set_junk_cut,
     "membrane_peer_post": tool_peer_post,
     "membrane_peer_seats": tool_peer_seats,
+    "membrane_intend": tool_intend,
     "membrane_entity_inherit": tool_entity_inherit,
 }
 

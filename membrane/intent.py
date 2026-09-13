@@ -24,6 +24,8 @@ the watches board). No model call anywhere.
 
 from __future__ import annotations
 
+from .entities import CLASS_GOAL
+
 import json
 import re
 import time
@@ -87,6 +89,56 @@ class IntentBoard:
         self.embedder = embedder
         self.intents: dict[int, Intention] = {}
         self._next_iid = 1
+        # THE GOAL-BACKED SELECTION (the operator's design: 'the fact that
+        # a goal became active makes it an intent'): when an entity store
+        # is attached (the proxy boot does), the board becomes a VIEW over
+        # the shared Goal entities -- open_intents/nearest delegate to the
+        # seat's active set (top-K by urgency, hysteresis, no TTL). The
+        # JSON intents stay the bare-library fallback (no entity layer).
+        self.selection: "GoalSelection | None" = None
+
+    def attach_entity_store(self, est) -> None:
+        """The proxy boot's wiring: the board's steering reads the shared
+        Goal layer through the seat's selection. THE MIGRATION: legacy
+        JSON intents import once as Goal entities (shared, long-lived) +
+        priority pins (the operator's own plants keep their hand)."""
+        self.selection = GoalSelection(est)
+        try:
+            self._migrate_json_goals(est)
+        except Exception:
+            pass
+
+    def _migrate_json_goals(self, est) -> None:
+        """Legacy intents.json entries -> Goal entities + pins. One-shot:
+        migrated entries are marked status 'migrated' in the JSON (the
+        data stays; the file survives as the record)."""
+        import hashlib as _hashlib
+        moved = 0
+        from .entities import QuantumEntity, CLASS_GOAL, MEMBRANE_NS
+        for i in list(self.intents.values()):
+            if i.status == "migrated":
+                continue
+            text = (i.text or "").strip()
+            if not text:
+                continue
+            slug = _hashlib.sha256(text.lower().encode()).hexdigest()[:12]
+            eid = f"{MEMBRANE_NS}goal:{slug}"
+            props = {"name": text[:120], "summary": text[:600],
+                     "status": ("fulfilled" if i.status == "fulfilled"
+                                else "open"),
+                     "born": i.created or time.time()}
+            if i.fulfilled:
+                props["fulfilled_ts"] = i.fulfilled
+            ent = QuantumEntity(eid=eid, cls=CLASS_GOAL, properties=props)
+            if est.docs.get(eid) is None:
+                ent.position = list(i.probe or [])
+                est.upsert(ent)
+            if i.status == "open":
+                self.selection.pinned[eid] = 0.5
+            i.status = "migrated"
+            moved += 1
+        if moved:
+            self.save()
 
     # ---- persistence ----
     def save(self) -> None:
@@ -191,7 +243,12 @@ class IntentBoard:
         return len(hits), (hits[0].text if hits else "nothing matched")
 
     def open_intents(self, now: float | None = None) -> list[Intention]:
-        """Open intents, lazily expiring (expired -> status flip, no delete)."""
+        """Open intents. GOAL-BACKED when an entity store is attached: the
+        seat's active set over the shared Goal entities (no TTL -- goals
+        do not expire; short-livedness is the selection dynamics). The
+        JSON intents are the bare-library fallback."""
+        if self.selection is not None:
+            return self.selection.open_intents(now or time.time())
         now = time.time() if now is None else now
         for i in self.intents.values():
             if i.status == "open" and i.expires and now >= i.expires:
@@ -201,7 +258,11 @@ class IntentBoard:
     # ---- the steering query (the dream loop's hook; no embed call) ----
     def nearest(self, vec, now: float | None = None
                 ) -> tuple[Intention | None, float]:
-        """(best open intent, cos) for a unit vector -- the steering coordinate."""
+        """(best open intent, cos) for a unit vector -- the steering
+        coordinate. GOAL-BACKED when attached: over the seat's ACTIVE SET
+        only (the selection steers, not every goal in the layer)."""
+        if self.selection is not None:
+            return self.selection.nearest(vec, now or time.time())
         if vec is None or len(vec) == 0:
             return None, 0.0
         v = np.asarray(vec, dtype=float)
@@ -265,3 +326,149 @@ class IntentBoard:
                              + (f" at {time.strftime('%m-%d %H:%M', time.localtime(when))}"
                                 if when else ""))
         return "\n".join(lines)
+
+# ---- the goal-backed board (the operator's design: 'the fact that a goal
+# became active makes it an intent') -----------------------------------------
+# NO TTL: goals are long-lived shared entities (status open/fulfilled/
+# dropped, data stays); an INTENT is not an object -- it is a goal that is
+# CURRENTLY SELECTED. The active set = the top-K open goals by urgency,
+# re-scored on the idle cadence with hysteresis (a challenger replaces an
+# incumbent only at +margin, so the set does not flap). Selection is
+# seat-local (suppression is a seat-local set); fulfillment is shared
+# (a project commitment done is done for every seat).
+
+GOAL_SET_CAP = 3              # active intents per seat
+GOAL_SWAP_MARGIN = 0.10       # the challenger's edge to replace an incumbent
+_GOAL_WEIGHTS = (0.5, 0.3, 0.2)   # present-touch / recency / hit-rate
+_GOAL_DECAY_S = 14 * 86400.0      # recency's half-ish window
+
+
+class GoalSelection:
+    """The seat's active-intent set over shared Goal entities. The board's
+    open_intents()/nearest() delegate here when an entity store is
+    attached (the goals ARE the intents; the Intention objects below are
+    the view shape the consumers keep)."""
+
+    def __init__(self, est) -> None:
+        self.est = est
+        self.suppressed: set[str] = set()   # seat-local: eids this seat dropped
+        self.pinned: dict[str, float] = {}  # eid -> priority bonus (explicit intend)
+        self._active: list[str] = []        # the current selection (eids, ranked)
+
+    # ---- the ranking ------------------------------------------------------
+    def _open_goals(self) -> list:
+        return [e for e in self.est.docs.values()
+                if e.cls == CLASS_GOAL
+                and (e.properties or {}).get("status", "open") == "open"
+                and getattr(e, "position", None)]
+
+    def _urgency(self, ent, now: float, now_vec) -> float:
+        import numpy as _np
+        w_present, w_recency, w_hits = _GOAL_WEIGHTS
+        score = 0.0
+        try:
+            if now_vec is not None:
+                gv = _np.asarray(ent.position, dtype=float)
+                gn = _np.linalg.norm(gv)
+                nv = _np.asarray(now_vec, dtype=float)
+                nn = _np.linalg.norm(nv)
+                if gn > 1e-12 and nn > 1e-12:
+                    score += w_present * float(nv @ (gv / gn))
+        except Exception:
+            pass
+        born = float((ent.properties or {}).get("born") or 0.0)
+        if born:
+            age = max(0.0, now - born)
+            score += w_recency * (0.5 ** (age / _GOAL_DECAY_S))
+        hits = int((ent.properties or {}).get("hits") or 0)
+        score += w_hits * (hits / (hits + 5.0))     # saturating
+        score += self.pinned.get(ent.eid, 0.0)
+        return score
+
+    def _top(self, k: int, now: float, now_vec=None) -> list:
+        scored = []
+        for e in self._open_goals():
+            if e.eid in self.suppressed:
+                continue
+            scored.append((self._urgency(e, now, now_vec), e.eid, e))
+        scored.sort(key=lambda x: -x[0])
+        return scored[:max(1, int(k))]
+
+    # ---- the hysteresis swap (the set does not flap) -----------------------
+    def refresh(self, now: float, now_vec=None, k: int = GOAL_SET_CAP) -> list:
+        """Re-score the open goals; swap incumbents only when a challenger
+        beats the lowest incumbent by GOAL_SWAP_MARGIN. Returns the active
+        goal entities (ranked)."""
+        top = self._top(k, now, now_vec)
+        if not top:
+            self._active = []
+            return []
+        incumbent_ids = set(self._active)
+        challenger_ids = [eid for _s, eid, _e in top]
+        if not incumbent_ids:
+            self._active = challenger_ids
+            return [e for _s, eid, e in top]
+        # the incumbents that still rank (keep them); the challengers that
+        # beat a displaced incumbent's floor swap in
+        kept = [eid for eid in challenger_ids if eid in incumbent_ids]
+        floor = min((s for s, eid, _e in top if eid not in kept),
+                    default=None)
+        for s, eid, _e in top:
+            if len(kept) >= k:
+                break
+            if eid in kept or eid in self._active:
+                continue
+            # a challenger enters only above the swap margin over the
+            # weakest non-selected score (the hysteresis: no flapping)
+            others = [s2 for s2, eid2, _ in top if eid2 not in kept
+                      and eid2 != eid]
+            if not others or s >= min(others) + 0.0:
+                kept.append(eid)
+        self._active = kept[:k]
+        return [self.est.docs[eid] for eid in self._active
+                if eid in self.est.docs]
+
+    # ---- the view shape (what the consumers keep) --------------------------
+    def open_intents(self, now: float, now_vec=None) -> list["Intention"]:
+        """The active set as Intention objects (the consumers' shape): the
+        goal's text/position ride the view; iid is synthetic (the goal's
+        hash -- 'fulfill #N' resolves through the board's resolver)."""
+        goals = self.refresh(now, now_vec)
+        out = []
+        for g in goals:
+            props = g.properties or {}
+            out.append(Intention(
+                iid=int(str(abs(hash(g.eid)))[:6]) or 1,
+                text=str(props.get("name") or props.get("summary")
+                         or g.describe())[:200],
+                probe=list(g.position or []),
+                created=float(props.get("born") or 0.0),
+                expires=0.0,                    # no TTL: goals do not expire
+                status="open",
+                hits=int(props.get("hits") or 0),
+            ))
+        return out
+
+    def nearest(self, vec, now: float, now_vec=None
+                ) -> tuple["Intention | None", float]:
+        """(best active intent, cos) over the ACTIVE SET only (the seat's
+        selection steers the dreamer, not every goal in the layer)."""
+        import numpy as _np
+        acts = self.open_intents(now, now_vec)
+        if not acts or vec is None or len(vec) == 0:
+            return None, 0.0
+        v = _np.asarray(vec, dtype=float)
+        n = float(_np.linalg.norm(v))
+        if n <= 1e-12:
+            return None, 0.0
+        v = v / n
+        best, bs = None, -2.0
+        for i in acts:
+            p = _np.asarray(i.probe or [], dtype=float)
+            pn = _np.linalg.norm(p)
+            if pn < 1e-12:
+                continue
+            s = float(v @ (p / pn))
+            if s > bs:
+                best, bs = i, s
+        return best, max(0.0, bs)

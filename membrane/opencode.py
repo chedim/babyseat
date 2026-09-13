@@ -277,10 +277,17 @@ def _state_report(srv) -> str:
     ib = getattr(srv, "_intent_board", None)
     if ib is not None:
         open_ = ib.open_intents()
-        maybe = sum(1 for i in open_ if i.hits >= 2)
-        lines.append(f"- intentions: {len(open_)} open (cap {MAX_INTENTS})"
-                     + (f", {maybe} flagged maybe-done" if maybe else "")
-                     + " (steer the dream loop; list: `membrane: intents`)")
+        # THE ACTIVE SET (the goal-backed board): the banner shows the
+        # SELECTED goals -- what the dream loop is steered by, right now.
+        if open_:
+            names = "; ".join(f"#{i.iid} {i.text[:60]}" for i in open_[:3])
+            lines.append(f"- intent: {names}"
+                         + (f" (+{len(open_) - 3} more)" if len(open_) > 3
+                            else ""))
+        else:
+            lines.append("- intent: none active (goals rank into the set "
+                         "from what you express; `membrane: intend that X` "
+                         "pins one)")
     cg = getattr(srv, "_codegraph", None)
     if cg is not None:
         from .codegraph import summary as cg_summary
@@ -1212,6 +1219,21 @@ def _intents_board(srv) -> IntentBoard | None:
             b = srv._intent_board = None
     if b is not None and b.embedder is None and srv.membrane.embedder is not None:
         b.embedder = srv.membrane.embedder
+    # THE GOAL-BACKED BOARD (the operator's design: 'the fact that a goal
+    # became active makes it an intent'): attach the entity store -- the
+    # board's steering becomes the seat's ACTIVE SET over the shared Goal
+    # entities (top-K by urgency, hysteresis, no TTL; fulfillment shared,
+    # suppression seat-local). The JSON intents fall back to the bare
+    # library shape when no entity layer exists.
+    if b is not None and b.selection is None:
+        est = getattr(srv, "entity_store", None)
+        if est is not None:
+            try:
+                b.attach_entity_store(est)
+            except Exception as e:
+                print(f"[opencode] goal-backed intents unavailable "
+                      f"({_one_line(e)}); json board carries",
+                      file=sys.stderr)
     return b
 
 
@@ -1225,6 +1247,110 @@ def _is_intent_query(q: str) -> bool:
             or low.rstrip("?!").strip() == "membrane: intents")
 
 
+def _resolve_goal(est, spec: str):
+    """Resolve an open Goal by eid fragment or text substring (the
+    fulfill/drop spec over the goal layer)."""
+    if est is None:
+        return None
+    from .entities import CLASS_GOAL, MEMBRANE_NS
+    spec = " ".join((spec or "").split()).lower().lstrip("#")
+    if not spec:
+        return None
+    for e in est.docs.values():
+        if e.cls != CLASS_GOAL:
+            continue
+        if (e.properties or {}).get("status", "open") != "open":
+            continue
+        eid_frag = e.eid.replace(MEMBRANE_NS, "").lower()
+        name = " ".join(str((e.properties or {}).get("name") or "")
+                        .split()).lower()
+        if spec in eid_frag or (len(spec) >= 3 and spec in name):
+            return e
+    return None
+
+
+def _membrane_intent_create_or_pin(srv, text: str, ttl: str = ""
+                                   ) -> dict:
+    """THE INTENT'S CREATE-OR-PIN (the operator's design: 'the fact that a
+    goal became active makes it an intent'): match an open Goal by text ->
+    pin it on this seat's active set; no match -> create the Goal entity
+    (SHARED: goals are knowledge, not speech) + pin. The pin is a priority
+    bonus on the urgency ranking (the operator's hand beats the score) --
+    never a TTL (goals do not expire). Speech announces the activation.
+    Returns {eid, created, pinned}."""
+    est = getattr(srv, "entity_store", None)
+    board = getattr(srv, "_intent_board", None)
+    if est is None or board is None or board.selection is None:
+        return {"ok": False, "error": "no goal layer"}
+    from .entities import (QuantumEntity, CLASS_GOAL, MEMBRANE_NS,
+                           TimelineOps)
+    low = " ".join((text or "").split()).lower()
+    goal = None
+    for e in est.docs.values():
+        if e.cls != CLASS_GOAL:
+            continue
+        props = e.properties or {}
+        if (props.get("status") or "open") != "open":
+            continue
+        name = " ".join(str(props.get("name") or "").split()).lower()
+        summary = " ".join(str(props.get("summary") or "").split()).lower()
+        if low and (low == name or low in summary or name in low):
+            goal = e
+            break
+    created = False
+    if goal is None:
+        eid = f"{MEMBRANE_NS}goal:{TimelineOps._tl_eid(text).split(':')[1]}"
+        goal = QuantumEntity(
+            eid=eid, cls=CLASS_GOAL,
+            properties={"name": (text or "")[:120], "summary": (text or "")[:600],
+                        "status": "open", "born": time.time()},
+        )
+        try:
+            est.upsert(goal, embedder=getattr(srv.membrane, "embedder", None))
+            created = True
+        except Exception as e:
+            return {"ok": False, "error": f"goal upsert failed: {e}"}
+    # THE PIN (priority, never expiry): 'for 2w' parses to a window -- the
+    # bonus decays over that window (the hand's weight fades, the score
+    # carries after)
+    bonus = 0.5
+    if ttl:
+        try:
+            from .intent import parse_ttl
+            window = parse_ttl(ttl)
+            if window:
+                bonus = 0.5 * max(0.25, 1.0 - (time.time()
+                                               % window) / window)
+        except Exception:
+            pass
+    sel = board.selection
+    sel.pinned[goal.eid] = max(sel.pinned.get(goal.eid, 0.0), bonus)
+    sel.suppressed.discard(goal.eid)
+    return {"ok": True, "eid": goal.eid, "created": created, "pinned": True}
+
+
+def _membrane_intend(self) -> None:
+    """The MCP membrane_intend relay: create-or-pin + the speech
+    announcement (the activation is the visible moment the dream chain
+    starts; drop intent is one command away)."""
+    srv = self.server
+    body = self._json_body()
+    text = str(body.get("text") or "").strip()
+    if not text:
+        self._json_err_raw(400, "text required"); return
+    res = _membrane_intent_create_or_pin(srv, text,
+                                         ttl=str(body.get("ttl") or ""))
+    if not res.get("ok"):
+        self._json_err_raw(400, str(res.get("error"))); return
+    try:
+        speak(srv, f"goal active: {text[:120]}", kind="note-pattern")
+    except Exception:
+        pass
+    self._entity_audit("intend", {"ok": True, "eid": res.get("eid"),
+                                  "created": res.get("created")})
+    self._json_out(res)
+
+
 def _intent_cmd(srv, q: str) -> str:
     """Dispatch 'membrane: intend that X [for 2w]' / 'membrane: intents' /
     'membrane: fulfill #N|<fragment>' / 'membrane: drop intent #N|<fragment>'."""
@@ -1234,6 +1360,23 @@ def _intent_cmd(srv, q: str) -> str:
     low = " ".join(q.split()).lower()
     if low.startswith(_INTENT_DROP):
         spec = low[len(_INTENT_DROP):].strip().rstrip("?.!")
+        # THE GOAL-BACKED DROP (seat-local suppression): the goal stays
+        # open for other seats/future sessions -- this seat only stops
+        # SELECTING it. The json fallback keeps the legacy pop.
+        if board.selection is not None:
+            est = srv.entity_store
+            goal = _resolve_goal(est, spec)
+            if goal is not None:
+                board.selection.suppressed.add(goal.eid)
+                board.selection.pinned.pop(goal.eid, None)
+                what = (f"suppressed on this seat: "
+                        f"{goal.describe()[:100]} (the goal stays open "
+                        f"for other seats)")
+                _write_audit(srv.membrane, {"event": "intent", "op": "drop",
+                                            "spec": _clip(spec, 120),
+                                            "result": what})
+                return (f"Membrane intentions: {what}.\n\n"
+                        + _INTERCEPT_MARKER)
         n, note = board.drop(spec)
         what = f"withdrew {n} intention(s): {note}" if n \
             else f"nothing withdrawn: {note}"
@@ -1244,6 +1387,25 @@ def _intent_cmd(srv, q: str) -> str:
         return board.report() + "\n\n" + _INTERCEPT_MARKER
     if low.startswith(_INTENT_FULFILL):
         spec = low[len(_INTENT_FULFILL):].strip().rstrip("?.!")
+        # THE GOAL-BACKED FULFILL (shared close): the goal's status flips
+        # to fulfilled on the SHARED entity -- a project commitment done
+        # is done for every seat; the active sets drop it automatically.
+        if board.selection is not None:
+            est = srv.entity_store
+            goal = _resolve_goal(est, spec)
+            if goal is not None:
+                goal.properties["status"] = "fulfilled"
+                goal.properties["fulfilled_ts"] = time.time()
+                try:
+                    est.upsert(goal)
+                except Exception:
+                    pass
+                what = (f"fulfilled (shared): {goal.describe()[:100]}")
+                _write_audit(srv.membrane, {"event": "intent", "op": "fulfill",
+                                            "spec": _clip(spec, 120),
+                                            "result": what})
+                return (f"Membrane intentions: {what}.\n\n"
+                        + _INTERCEPT_MARKER)
         n, note = board.fulfill(spec)
         what = f"fulfilled {n}: {note}" if n else f"nothing fulfilled: {note}"
         _write_audit(srv.membrane, {"event": "intent", "op": "fulfill",
@@ -3307,6 +3469,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._membrane_state(); return
         if path == "/membrane/entity-track":
             self._entity_track_list(); return
+        if path == "/membrane/intend":
+            self._membrane_intend(); return
         if path == "/membrane/entity-related":
             self._entity_related(); return
         if path == "/membrane/ask":
