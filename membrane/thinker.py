@@ -270,7 +270,16 @@ class Thinker:
         except Exception:
             return
         if top >= NOVELTY_SPEAK_BAR:
-            self._speak(f"you are near held ground: '{text[:100]}' -- "
+            # THE CLEAN QUOTE (the operator's 'restarted <system-reminder>'
+            # exhibit): the speech carries the OPERATOR's actual words --
+            # machinery spans (mode banners, reminders) are stripped
+            # before the render, never relayed verbatim.
+            try:
+                from .rag import strip_machinery_text
+                clean = strip_machinery_text(text)[:100] or text[:100]
+            except Exception:
+                clean = text[:100]
+            self._speak(f"you are near held ground: '{clean}' -- "
                         f"top field match {top:.2f}; ask me to recall it",
                         act="ask-operator")
         """Reality's vote landed: a branch confirmed or refuted. Worth

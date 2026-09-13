@@ -6521,13 +6521,19 @@ def drain_speech(srv) -> list[dict]:
         m = q.pop(0)
         if now - m["ts"] > _SPEAK_TTL_S:
             continue                  # expired: never shown
-        peers = getattr(srv, "peers", None)
-        if peers is not None:
-            try:
-                peers.post(f"membrane: {m['text']}")
-            except Exception:
-                pass
+        # THE PEER PUSH RETIRED (the operator's ruling: membrane's speech
+        # is private to ITS OWN seat -- 'only inject its own messages
+        # into chat when membrane decides to'): the drain's peer-channel
+        # push made every seat's speech cross-seat (the parallel seat's
+        # UI showed the announcer's hellos + ask-operators as peer
+        # lines). The MODEL RELAY is the only delivery: the marked block
+        # rides the next model-bound request IN THE SPEAKING SEAT, where
+        # the conversation carries it and the operator's reaction grades
+        # it. Idle delivery rides the night tick (the drain call).
         out.append(m)
+    if out:
+        srv._pending_speech_label = (out[-1].get("sig"), out[-1].get("act"))
+    return out
     if out:
         srv._pending_speech_label = (out[-1].get("sig"), out[-1].get("act"))
     return out
