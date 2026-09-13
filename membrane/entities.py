@@ -607,6 +607,24 @@ class QuantumEntity:
             tracked = (((doc.get("state_space") or {})
                         .get("position") or {}).get("tracked"))
             trajectory = (doc.get("state_space") or {}).get("trajectory")
+            # THE POSITION FALLBACK (the goal-selection fix, the operator's
+            # catch: 225 Goals hydrated with position=None -- the synth
+            # goals carry semantic_embeddings / top-level vector_data but
+            # no LIVING tracked ring yet, and from_doc read only tracked):
+            # a young entity's position is its semantic embedding -- the
+            # meaning IS the location until the entity has lived enough to
+            # grow its own drift ring. The top-level vector_data (cortex's
+            # own wire key) is the last resort.
+            position: list | None = (
+                [float(x) for x in tracked]
+                if isinstance(tracked, (list, tuple)) and tracked else None)
+            if not position and isinstance(vec, list) and vec:
+                position = [float(x) for x in vec]
+            if not position and isinstance(
+                    doc.get("vector_data"), list) and doc["vector_data"]:
+                position = [float(x) for x in doc["vector_data"]]
+                if not vec:
+                    vec = doc["vector_data"]
             q = QuantumEntity(
                 eid=str(doc_id),
                 cls=str(data.get("class") or CLASS_COMPONENT),
@@ -614,9 +632,7 @@ class QuantumEntity:
                 links=[int(x) for x in links if str(x).isdigit()],
                 derived_by=[str(x) for x in derived],
                 embedding=list(vec or []),
-                position=([float(x) for x in tracked]
-                          if isinstance(tracked, (list, tuple)) and tracked
-                          else None),
+                position=position,
                 # THE HYDRATION TRIM (the announcer-seat jetsam fix): foreign
                 # docs can carry unbounded trajectories (the fork's
                 # recordAlways pulse appends without a collapse); a hydrate
