@@ -37,9 +37,17 @@ _COMMIT_LIMIT = 12          # changelog lines shown in the prompt
 
 
 def _git(repo: Path, *args: str, timeout: float = _CHECK_TIMEOUT) -> str:
+    # THE SSH GUARD (the seat-launch crash: the boot fetch against the SSH
+    # origin prompted for the key passphrase on an unauthenticated TTY --
+    # BatchMode fails fast instead of prompting, and the check degrades to
+    # 'unavailable' which the boot path treats as no-update):
+    env = dict(os.environ,
+               GIT_SSH_COMMAND=os.environ.get(
+                   "GIT_SSH_COMMAND",
+                   "ssh -o BatchMode=yes -o ConnectTimeout=5"))
     return subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True,
-        timeout=timeout).stdout.strip()
+        timeout=timeout, env=env).stdout.strip()
 
 
 def _find_repo() -> Path | None:

@@ -22,6 +22,11 @@
 # proxy and the TUI by flag name (same rules ./run.sh used to implement).
 
 set -eo pipefail
+# THE SSH-KEY GUARD (the seat-launch crash): the boot update-check runs
+# `git fetch` against the SSH origin -- an unauthenticated launch hangs on
+# the key passphrase (or crashes the TUI boot). The update check is a
+# manual `membrane update` op; the seat's boots stay local.
+export MEMBRANE_NO_UPDATE_CHECK=1
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT"
 PY="$ROOT/.venv/bin/python"
