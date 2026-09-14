@@ -1462,7 +1462,11 @@ class ExemplarStore:
         st = cls()
         st.origin = _origin_tag(field_path) if field_path else st.origin
         st._field_path_hint = str(field_path) if field_path else None
-        coll = st._cb_collection()
+        try:
+            coll = st._cb_collection()
+        except Exception:
+            coll = None                   # degraded: cb unreachable (the
+            return st                     # covenant: never raise at boot)
         if coll is None:
             return st                     # degraded: no couchbase
         my = st.origin
