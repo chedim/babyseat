@@ -228,6 +228,34 @@ class Thinker:
                     apply_entity_update(self.srv, ent, out, "mention")
             except Exception:
                 pass
+        # ---- THE FN->ENTITY STATE BRIDGE (phase 3, the operator's B):
+        # the fn stamp (op/binds/returns, parsed at learn time) updates the
+        # touched entities' live properties -- the entity layer becomes a
+        # MODEL OF PROJECT STATE (which files are hot, what the last tool
+        # result was, how many edits in the window). $0: the fn rides the
+        # exemplar's extra.
+        fn = (getattr(ex, "extra", {}) or {}).get("fn") if ex is not None \
+            else None
+        if est is not None and tags and isinstance(fn, dict):
+            try:
+                self._bridge_fn_state(fn, tags, est, label)
+            except Exception:
+                pass
+
+        # ---- THE GENERALIZED PATTERN DETECTOR (phase 2, the operator's
+        # A, generalized): three universal classes over the digest stream.
+        # 1. RECURRENCE: the same situation-signature N times in a window.
+        rec_sig = " ".join((label + " " + situation).split()).lower()[:120]
+        # 2. FAILURE RESONANCE: a live event near a known FailureMode
+        #    entity (the proactive recall push -- the field's learned
+        #    physics answering the present).
+        if est is not None and tags:
+            try:
+                self._failure_resonance(tags, est, situation)
+            except Exception:
+                pass
+        self._check_recurrence(rec_sig, tags)
+
         # the speak bar: only a SURPRISE is worth saying (a capture whose
         # gate sim ran hot -- the field already held this, and it still
         # mattered: that is the note-pattern shape). Planner-gated.
@@ -239,6 +267,107 @@ class Thinker:
                 f"the field already held it", act="note-pattern")
         # the entity-touch pass: born stamps refresh (the night renders
         # tracks from them; no write here -- the night owns persistence)
+
+    # ---- phase 3: the fn->entity state bridge -------------------------------
+    def _bridge_fn_state(self, fn: dict, tags: list, est, label: str) -> None:
+        """The fn stamp updates the touched entities' properties: the live
+        project-state model (the monitor-getter scripts' feed). op + binds
+        -> the property moves; the night's delta-write persists."""
+        import time as _t
+        now = _t.time()
+        op = str(fn.get("op") or "?")
+        for tag in tags[:4]:
+            ent = est._resolve_spec(str(tag))
+            if ent is None:
+                continue
+            props = ent.properties
+            # the edit/build counters: per-entity, windowed (bounded)
+            counts = props.get("fn_counts") if isinstance(
+                props.get("fn_counts"), dict) else {}
+            counts[op] = int(counts.get(op, 0)) + 1
+            props["fn_counts"] = counts
+            props["last_fn"] = {"op": op, "ts": round(_t.time(), 1)}
+            try:
+                est.upsert(ent, embedder=getattr(
+                    self.srv.membrane, "embedder", None))
+            except Exception:
+                pass
+
+    # ---- phase 2: the pattern classes ---------------------------------------
+    _REC_WINDOW_S = 600.0       # the recurrence window (10 min)
+    _REC_THRESHOLD = 3          # N repeats -> a pattern note
+    _REC_COOLDOWN_S = 1800.0    # per-signature cooldown (the noise guard)
+
+    def _failure_resonance(self, tags: list, est, situation: str) -> None:
+        """A live event's entity tags landing near a known FailureMode ->
+        the proactive recall push ('this matches a failure you solved').
+        The universal class: any known-bad pattern, not just builds."""
+        if not tags:
+            return                    # no event, no resonance
+        import numpy as _np
+        fails = [e for e in est.docs.values()
+                 if (e.properties or {}).get("class") == "FailureMode"
+                 or e.cls == "FailureMode"]
+        if not fails:
+            return
+        mem = self.srv.membrane
+        store = getattr(mem, "store", None)
+        if store is None:
+            return
+        try:
+            from .rag import _clip
+            _exs = [e for e in store.exemplars
+                    if getattr(e, "vec", None)]
+            if not _exs:
+                return
+            _v = _np.asarray(mem.embedder.embed([situation])[0],
+                             dtype=float)
+            _vn = _np.linalg.norm(_v)
+            if _vn < 1e-12:
+                return
+            _v = _v / _vn
+            for f in fails:
+                fpos = getattr(f, "position", None)
+                if not fpos:
+                    continue
+                fv = _np.asarray(fpos, dtype=float)
+                fn_ = _np.linalg.norm(fv)
+                if fn_ > 1e-12 and float((fv / fn_) @ _v) >= 0.85:
+                    self._speak(
+                        f"this matches a known failure: "
+                        f"{f.describe()[:80]} -- ask me to recall the fix",
+                        act="note-pattern")
+                    return                 # one resonance per digest
+        except Exception:
+            pass
+
+    def _check_recurrence(self, rec_sig: str, tags: list) -> None:
+        """Class 1: the same signature N times in the window -> one
+        pattern note (per-signature cooldown; planner-gated). The
+        signature window rides here (the digest's only job is the call)."""
+        import time as _t
+        now = _t.time()
+        sigs = getattr(self, "_sigs", None)
+        if sigs is None:
+            self._sigs = sigs = []
+        sigs.append((now, rec_sig))
+        if len(sigs) > 256:               # bounded window (drop the oldest)
+            del sigs[:-256]
+        recent = [ts for ts, s in sigs
+                  if now - ts <= self._REC_WINDOW_S and s == rec_sig]
+        if len(recent) < self._REC_THRESHOLD:
+            return
+        cooldowns = getattr(self, "_rec_cooldowns", None)
+        if cooldowns is None:
+            cooldowns = self._rec_cooldowns = {}
+        if now - float(cooldowns.get(rec_sig, 0)) < self._REC_COOLDOWN_S:
+            return
+        cooldowns[rec_sig] = now
+        tag_s = (", ".join(str(t) for t in tags[:2]) if tags
+                 else "this direction")
+        self._speak(
+            f"pattern: {rec_sig[:80]!r} came up {len(recent)}x in "
+            f"{int(self._REC_WINDOW_S / 60)} min", act="note-pattern")
 
     def _digest_chat(self, payload: dict, est) -> None:
         """The operator's turn chewed: is anything worth SAYING? The
