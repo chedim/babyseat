@@ -241,6 +241,12 @@ class Thinker:
                 self._bridge_fn_state(fn, tags, est, label)
             except Exception:
                 pass
+        # phase 4: the first touch of an entity surfaces its why-cells
+        if est is not None and tags:
+            try:
+                self._why_at_touch(tags, est)
+            except Exception:
+                pass
 
         # ---- THE GENERALIZED PATTERN DETECTOR (phase 2, the operator's
         # A, generalized): three universal classes over the digest stream.
@@ -292,6 +298,55 @@ class Thinker:
                     self.srv.membrane, "embedder", None))
             except Exception:
                 pass
+
+    # ---- phase 4: why-recall at touch-time ----------------------------------
+    _WHY_TOUCH_TOP = 2          # the why-cells surfaced per touch (cheap)
+    _WHY_TOUCH_MIN = 0.72       # the why-stamp bar (the same anchor bar)
+
+    def _why_at_touch(self, tags: list, est) -> None:
+        """C: the FIRST touch of an entity in this session surfaces its
+        why-stamped cells -- 'why this code looks this way' -- once per
+        entity per session (the seat-local cooldown; the planner gate
+        holds). The why-stamp rides the exemplar's extra['why']."""
+        if not tags or est is None:
+            return
+        touched = getattr(self, "_touched", None)
+        if touched is None:
+            self._touched = touched = set()
+        fresh = [t for t in tags[:4]
+                 if str(t) not in touched]
+        if not fresh:
+            return
+        store = getattr(self.srv.membrane, "store", None)
+        if store is None:
+            return
+        # the why-cells nearest any fresh entity's tag cells (the
+        # entity-layer links point at cell indexes)
+        why_cells: list[tuple[float, str]] = []
+        exs = getattr(store, "exemplars", [])
+        for tag in fresh:
+            ent = est._resolve_spec(str(tag))
+            if ent is None:
+                continue
+            for i in (ent.links or [])[:64]:
+                if not (0 <= i < len(exs)):
+                    continue
+                ex = exs[i]
+                w = (getattr(ex, "extra", {}) or {}).get("why")
+                if isinstance(w, (int, float)) and float(w) >=                         self._WHY_TOUCH_MIN:
+                    why_cells.append((float(w),
+                                      (ex.action or ex.situation or "")[:120]))
+        if not why_cells:
+            for t in fresh:
+                self._touched = (self._touched or set()) | {t}
+            return
+        why_cells.sort(reverse=True)
+        top = why_cells[:self._WHY_TOUCH_TOP]
+        for t in fresh:
+            self._touched = (self._touched or set()) | {t}
+        names = "; ".join(c for _s, c in top)
+        self._speak(f"design intent for {fresh[0]}: {names}",
+                    act="note-pattern")
 
     # ---- phase 2: the pattern classes ---------------------------------------
     _REC_WINDOW_S = 600.0       # the recurrence window (10 min)
