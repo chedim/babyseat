@@ -1911,9 +1911,15 @@ class EntityStore(MultiParentOps, TimelineOps):
     def edit(self, spec: str, summary=None, links=None, cls=None,
              merged_into=None, nudge_script=None,
              delete_script=None, mention_script=None,
-             thought_script=None, dreamed_script=None) -> dict:
+             thought_script=None, dreamed_script=None,
+             properties: dict | None = None) -> dict:
         """Model-side entity EDIT: patch summary/links/class on the
         resolved entity. Only provided fields change.
+        ``properties``: a bounded property patch (the model's write path
+        for goal status -- fulfill/drop via the edit surface; the same
+        guards as the script-patch contract: <=16 keys, 2000-char values,
+        script_*/status-engine keys untouchable except the goal's own
+        status/summary).
         ``merged_into``: MARK-don't-delete subsumption (the operator's
         covenant) -- the source doc STAYS, marked
         properties['merged_into'] = <dst eid>, its links union into the
@@ -1980,6 +1986,19 @@ class EntityStore(MultiParentOps, TimelineOps):
                 ent.properties.pop("script_failures", None)
                 if field == "nudge_script":
                     ent.properties.pop("script_render", None)
+        # THE PROPERTY PATCH (the model's write path for goal state):
+        # bounded like the script-patch contract -- <=16 keys, 2000-char
+        # values, the engine's script_* keys and another entity's keys
+        # untouchable. The goal's own status IS touchable (fulfill/drop
+        # via the edit surface; audited).
+        if isinstance(properties, dict) and properties:
+            for k, v in list(properties.items())[:16]:
+                kk = str(k)[:80]
+                if kk.startswith("script_"):
+                    continue
+                props2 = ent.properties or {}
+                props2[kk] = (v if not isinstance(v, str) else v[:2000])
+                ent.properties = props2
         if merged_into:
             dst = self._resolve_spec(str(merged_into))
             if dst is None or dst.eid == ent.eid:

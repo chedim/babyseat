@@ -110,3 +110,37 @@ class TestModelScripts(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPropertyPatch(unittest.TestCase):
+    """THE MODEL'S WRITE PATH FOR GOAL STATE (the read-only complaint's
+    fix): entities.edit accepts a bounded properties patch -- the goal's
+    status IS touchable (fulfill/drop via the edit surface, audited); the
+    engine's script_* keys are not."""
+
+    def test_edit_patches_goal_status(self):
+        srv = _Srv()
+        est = srv.entity_store
+        now = QuantumEntity(eid=f"{MEMBRANE_NS}session:now", cls="Session",
+                            properties={"name": "now"})
+        est.upsert(now)
+        est.make_timeline(terminal="probe", vec=[1.0, 0.0])
+        from membrane.entities import CLASS_GOAL, QuantumEntity as QE
+        goal = QE(eid=f"{MEMBRANE_NS}goal:probe-goal", cls=CLASS_GOAL,
+                  properties={"name": "probe goal", "status": "open"})
+        est.upsert(goal)
+        res = est.edit("goal:probe-goal",
+                       properties={"status": "fulfilled"})
+        self.assertTrue(res["ok"])
+        got = (est.docs.get(goal.eid).properties or {}).get("status")
+        self.assertEqual(got, "fulfilled")
+
+    def test_patch_cannot_touch_script_keys(self):
+        srv = _Srv()
+        est = srv.entity_store
+        now = QuantumEntity(eid=f"{MEMBRANE_NS}session:now", cls="Session",
+                            properties={"name": "now"})
+        est.upsert(now)
+        est.edit("session:now", properties={"script_disabled": True})
+        got = est.docs.get(f"{MEMBRANE_NS}session:now")
+        self.assertIsNone((got.properties or {}).get("script_disabled"))

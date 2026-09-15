@@ -263,6 +263,15 @@ TOOLS: list[dict] = [
                                                   "commit/elect under it "
                                                   "(2s budget); sets "
                                                   "'result'."},
+                "properties": {"type": "object",
+                               "description": "bounded property patch "
+                                              "(the model's write path "
+                                              "for goal state: status "
+                                              "'fulfilled'/'dropped', "
+                                              "progress counters, "
+                                              "etc. -- the engine's "
+                                              "script_* keys are "
+                                              "untouchable)."},
             },
             "required": ["spec"],
         },
@@ -620,7 +629,8 @@ def tool_entity_edit(args: dict, port: int) -> str:
     body = {"spec": str(args.get("spec") or "").strip()}
     for f in ("summary", "links", "class", "merged_into",
               "nudge_script", "delete_script",
-              "mention_script", "thought_script", "dreamed_script"):
+              "mention_script", "thought_script", "dreamed_script",
+              "properties"):
         if args.get(f) is not None:
             body[f] = args[f]
     out = _http(port, "POST", "/membrane/entity/edit", body)
