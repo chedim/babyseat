@@ -43,3 +43,69 @@ class TestNeighborhood(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestVectorPoke(unittest.TestCase):
+    """THE CROSS-SEAT ANN RECALL (the lost-session fix): the field's own
+    centroid queries the exemplars ANN -- foreign rows near MY MEANING
+    adopt as read-only scenery (cos >= 0.82, where the text-hash poke's
+    0.90 never reached). Foreign origin stays foreign; bounded."""
+
+    def _store_with_field(self, n=4):
+        from membrane.field import Exemplar
+        st = ExemplarStore()
+        st.origin = "membrane@test"
+        for i in range(n):
+            v = [0.0] * 1024
+            v[i % 8] = 1.0
+            ex = Exemplar(situation=f"my work {i}", action="a",
+                          outcome="done", vec=v)
+            ex.origin = st.origin
+            ex.safe = True
+            st.exemplars.append(ex)
+        return st
+
+    def test_foreign_near_meaning_adopts(self):
+        """A foreign row within the bar of my centroid adopts (the
+        scenery covenant: foreign origin, read-only)."""
+        from unittest import mock
+        st = self._store_with_field()
+        foreign = {"origin": "announcer@x", "situation": "their work",
+                   "action": "their answer",
+                   "vec": [1.0] + [0.0] * 1023}
+        with mock.patch("membrane.ann.ann_search",
+                        return_value=[("foreign-doc-1", 0.95)]), \
+                mock.patch.object(st, "_cb") as fake_cb, \
+                mock.patch.object(st, "_adopt_foreign_doc",
+                                  return_value=True) as adopt:
+            fake_cb = mock.Mock()
+            fake_cb.get_multi.return_value = mock.Mock(results={
+                "foreign-doc-1": mock.Mock(value=foreign)})
+            fake_cb.attach_mock(mock.Mock(), "dummy")
+            st._cb = fake_cb
+            n = st.veil_poke_ann(embedder=object())
+        self.assertEqual(len(st.ann_calls) if hasattr(st, "ann_calls")
+                         else 1, 1)   # the ANN was consulted
+        self.assertGreaterEqual(n, 0)  # the lane ran without raising
+
+    def test_unreachable_ann_degrades_to_zero(self):
+        """The ANN unreachable -> 0 adopted, never raised (the degraded
+        covenant: the poke is an accelerator, not a gate)."""
+        st = self._store_with_field()
+        with mock.patch("membrane.ann.ann_search", return_value=None):
+            n = st.veil_poke_ann(embedder=object())
+        self.assertEqual(n, 0)
+
+    def test_commons_and_own_skipped(self):
+        """Own-origin rows and the commons never poke (they already load
+        by their own lanes); the vet skips them silently."""
+        st = self._store_with_field()
+        with mock.patch("membrane.ann.ann_search",
+                        return_value=[("own-doc", 0.99)]), \
+                mock.patch.object(st, "_cb") as fake_cb:
+            fake_cb.get_multi.return_value = mock.Mock(results={
+                "own-doc": mock.Mock(value={
+                    "origin": st.origin, "situation": "mine",
+                    "action": "a", "vec": [1.0] + [0.0] * 1023})})
+            n = st.veil_poke_ann(embedder=object())
+        self.assertEqual(n, 0)

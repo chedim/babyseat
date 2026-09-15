@@ -6259,6 +6259,20 @@ def main() -> None:
             except Exception as e:
                 print(f"[opencode] veil poke failed (non-fatal): {e}",
                       file=sys.stderr)
+            # THE VECTOR POKE (the cross-seat ANN recall, the lost-session
+            # fix): the field's own centroid queries the exemplars ANN --
+            # foreign rows near MY MEANING adopt (cos >= 0.82, where the
+            # text-hash poke's 0.90 never reached). Bounded, read-only
+            # scenery, run once after the text-hash poke.
+            try:
+                adopted = mem.store.veil_poke_ann(mem.embedder)
+                if adopted:
+                    print(f"[opencode] ann poke adopted {adopted} foreign "
+                          f"memor(ies) (vector-based, background)",
+                          file=sys.stderr)
+            except Exception as e:
+                print(f"[opencode] ann poke failed (non-fatal): {e}",
+                      file=sys.stderr)
         threading.Thread(target=_veil_poke_bg, name="veil-poke",
                          daemon=True).start()
 

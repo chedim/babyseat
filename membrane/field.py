@@ -1656,6 +1656,96 @@ class ExemplarStore:
                   f"(cosine >= {VEIL_POKE_SIM})", file=__import__("sys").stderr)
         return n
 
+    # THE VECTOR POKE (the cross-seat ANN recall, the lost-session fix):
+    # the text-hash poke's bar is 0.90 (foreign ANSWERS differ per context
+    # -- the E2 bad-serve lesson), but the ANN + the shared exemplar index
+    # make VECTOR-based adoption possible: the field's own centroid
+    # queries membrane_exemplars_vec, and foreign rows NEAR MY FIELD'S
+    # MEANING adopt (bar 0.82 -- "a sibling learned something near this",
+    # not "the same question"). The scenery covenant holds: foreign origin,
+    # read-only, arbitration never makes a foreign row master.
+    VEIL_ANN_SIM = 0.82
+    VEIL_ANN_LIMIT = 128          # bounded: the poke's max adoptions
+
+    def veil_poke_ann(self, embedder, limit: int | None = None) -> int:
+        """The vector-based foreign adoption: the field's own centroid (the
+        mean of my live exemplars' vecs -- what THIS seat has actually
+        lived) queries the exemplars ANN index; foreign-scope rows within
+        VEIL_ANN_SIM of any of my neighborhood adopt as read-only scenery.
+        Bounded (VEIL_ANN_LIMIT), run once at boot after the world/own
+        hydrate. The lost-session fix: a sibling seat's memories about MY
+        kind of work surface at 0.82+, where the text-hash poke never
+        reached."""
+        if self._cb is None or embedder is None or not self.exemplars:
+            return 0
+        try:
+            from .ann import ann_search
+            import numpy as _np
+            V = np.asarray([e.vec for e in self.exemplars
+                            if getattr(e, "vec", None)], dtype=float)
+            if not len(V):
+                return 0
+            mu = V.mean(axis=0)
+            mun = _np.linalg.norm(mu)
+            if mun < 1e-12:
+                return 0
+            hits = ann_search(self.ANN_INDEX, (mu / mun).tolist(),
+                              k=limit or self.VEIL_ANN_LIMIT, timeout=2.0)
+            if not hits:
+                return 0
+            # resolve the hit ids -> foreign docs (batched KV, the
+            # loader's own pattern)
+            ids = [doc_id for doc_id, _s in hits]
+            docs: list[dict] = []
+            for lo in range(0, len(ids), 500):
+                batch = ids[lo:lo + 500]
+                try:
+                    got = self._cb.get_multi(batch)
+                except Exception:
+                    continue
+                for k, res in (getattr(got, "results", None) or {}).items():
+                    try:
+                        v = res.value
+                        if isinstance(v, dict):
+                            docs.append(dict(v, id=k))
+                    except Exception:
+                        continue
+            # THE VET: foreign-scope only (mine + the commons are already
+            # loaded), vec-carrying only, and the row's vec must land
+            # within VEIL_ANN_SIM of my field's shape (the ANN ordered by
+            # centroid distance; the bar is per-row cosine, not the
+            # index's score)
+            my_mean = mu / mun
+            adopted = 0
+            for doc in docs:
+                origin = str(doc.get("origin") or "")
+                if not origin or origin == my:
+                    continue                     # mine / unscoped: skip
+                if str(doc.get("scope") or "") == "global":
+                    continue                     # the commons already loads
+                vec = doc.get("vec")
+                if not isinstance(vec, list) or len(vec) != 1024:
+                    continue
+                fv = _np.asarray(vec, dtype=float)
+                fn_ = _np.linalg.norm(fv)
+                if fn_ < 1e-12:
+                    continue
+                if float((fv / fn_) @ my_mean) < self.VEIL_ANN_SIM:
+                    continue                     # not near my meaning
+                if self._adopt_foreign_doc(doc):
+                    adopted += 1
+                if adopted >= (limit or self.VEIL_ANN_LIMIT):
+                    break
+            if adopted:
+                print(f"[membrane] ann poke: {adopted} foreign memories "
+                      f"adopted (vector-based, cos >= {self.VEIL_ANN_SIM})",
+                      file=__import__("sys").stderr)
+            return adopted
+        except Exception as e:
+            print(f"[membrane] ann poke skipped ({e})",
+                  file=__import__("sys").stderr)
+            return 0
+
     # ---- the shared substrate: CAS save with CAN-style arbitration ----------
     # Two membranes sharing a bucket used to erase each other (full reconcile
     # deleted every key not in the local list). Now:
