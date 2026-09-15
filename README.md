@@ -154,12 +154,10 @@ with `/monologue`. How the token economics and routing work:
 
 | Command | What it does |
 |---|---|
-| `membrane tui` | TUI + proxy on :11435 (tears the proxy down on exit) |
-| `membrane proxy` | bare proxy, foreground |
+| `membrane tui` | retired — the opencode seat is the surface |
 | `membrane opencode` | field-backed opencode on :11500 (the daily driver) |
-| `membrane anthropic` | TUI+proxy in `--anthropic` mode (Claude Code front door) |
+| `membrane anthropic` / `demo` | retired — the opencode seat is the surface |
 | `membrane review` | print what the field learned |
-| `membrane demo` | in-process end-to-end loop (no chat model needed) |
 | `membrane connect` | (re)run shared-field onboarding for THIS project |
 | `membrane reset` | kill the proxy on the port, start fresh |
 | `membrane install` | install `.opencode/skills/*` + AGENTS.md blurb explicitly |

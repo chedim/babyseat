@@ -85,8 +85,6 @@ def _PRICE_TABLE_BY_NAME():
                     break
             out.append((rec.name, usd))
     return out
-from .cell import Cell
-from .curiosity import CURIOSITY_MIN
 from .runtime import (Membrane, OllamaChatResponder, OllamaJudge, StubJudge,
                       StubResponder, _src_label, _src_get)
 from .variety import (cells_rank, entropy_count, free_energy, orient_dirs,

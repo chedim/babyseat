@@ -635,26 +635,21 @@ def main() -> None:
         raise SystemExit(_run_module("membrane.reharvest", argv2))
     if cmd == "codegraph":
         raise SystemExit(_run_module("membrane.codegraph", args.forwarded))
-    if cmd in ("opencode", "tui", "anthropic", "reset", "proxy"):
+    if cmd in ("opencode", "reset"):
         couchbase_onboarding()
         maybe_check_on_boot(args.forwarded)
     if cmd == "reset":
         raise SystemExit(_reset(args.forwarded))
-    if cmd == "tui":
-        # THE TUI IS DEPRECATED (the operator's call): opencode is the
-        # only real seat. The command remains as a pointer, not a
-        # launcher -- a silent fall-back to a dead surface teaches the
-        # wrong habit.
-        print("membrane tui is deprecated -- the opencode seat is the "
+    if cmd in ("tui", "anthropic", "demo", "proxy"):
+        # THE TUI IS RETIRED (the operator's call): opencode is the only
+        # real seat -- the toy world's surfaces are cut. The commands
+        # remain as pointers, not launchers -- a silent fall-back to a
+        # dead surface teaches the wrong habit.
+        print(f"membrane {cmd} is retired -- the opencode seat is the "
               "real surface now:\n"
-              "  membrane opencode     (field-backed opencode on :11500)\n"
-              "  membrane proxy        (just the proxy, foreground)",
+              "  membrane opencode     (field-backed opencode on :11500)",
               file=sys.stderr)
         raise SystemExit(2)
-    if cmd == "anthropic":
-        raise SystemExit(_anthropic(args.forwarded))
-    if cmd == "demo":
-        raise SystemExit(_run_module("membrane.demo", args.forwarded))
     if cmd == "opencode":
         argv2 = _ensure_data_dir(args.forwarded)
         raise SystemExit(_run_module("membrane.opencode", argv2))
