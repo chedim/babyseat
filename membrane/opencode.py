@@ -3485,8 +3485,13 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if path == "/membrane/peer/seats":
             self._peer_seats(); return
         if getattr(self.server, "viewer", False):
-            if path in ("/viewer", "/viewer/"):
-                self._serve_viewer(); return
+            if path in ("/viewer", "/viewer/", "/universe", "/universe/"):
+                # THE VIEWER RETIRED (the operator's ruling): the old dev
+                # viewer's toy-world surfaces (the POV roster, the story
+                # panel) die with the toy world; /viewer now serves the
+                # universe map (the field as a universe, the graph
+                # overlaid, google-map controls).
+                self._serve_universe(); return
             if path in ("/three.min.js", "/PressStart2P.woff2", "/VT323.woff2"):
                 self._serve_asset(path.lstrip("/")); return
             if path in ("/neighbors", "/neighbors/"):
