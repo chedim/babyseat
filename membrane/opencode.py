@@ -3491,6 +3491,15 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 self._serve_asset(path.lstrip("/")); return
             if path in ("/neighbors", "/neighbors/"):
                 self._neighbors(); return
+        if getattr(self.server, "viewer", False):
+            if path in ("/universe", "/universe/"):
+                self._serve_universe(); return
+            if path == "/membrane/map/cloud":
+                self._map_cloud(); return
+            if path == "/membrane/map/entities":
+                self._map_entities(); return
+            if path == "/membrane/map/axes":
+                self._map_axes(); return
         super().do_GET()
 
     def do_POST(self):
@@ -3566,6 +3575,139 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         self.send_header("Content-Length", str(len(html)))
         self.end_headers()
         self.wfile.write(html)
+
+    # ---- THE UNIVERSE MAP (the entity graph + the field, one 3D scene) --
+    def _universe_projection(self):
+        """The projection, fit once per process from BOTH layers' vectors
+        (the cloud + the entities -- one universe, one fit, co-registered)."""
+        from .universe import UniverseProjection
+        proj = getattr(self.server, "_universe_proj", None)
+        if proj is not None and proj.ready():
+            return proj
+        mem = self.server.membrane
+        est = getattr(self.server, "entity_store", None)
+        vecs = []
+        for e in getattr(mem.store, "exemplars", []):
+            v = getattr(e, "vec", None)
+            if v is not None and len(v) == 1024:
+                vecs.append(v)
+        if est is not None:
+            for e in est.docs.values():
+                v = getattr(e, "position", None) or getattr(e, "embedding", None)
+                if v and len(v) == 1024:
+                    vecs.append(v)
+        proj = UniverseProjection()
+        proj.fit(vecs)
+        self.server._universe_proj = proj
+        return proj
+
+    def _serve_universe(self):
+        """The universe map: the field as a universe (stars = memories,
+        constellations = entities) with google-map-like controls."""
+        import os
+        p = os.path.join(os.path.dirname(__file__), "universe.html")
+        try:
+            mtime = os.path.getmtime(p)
+        except OSError:
+            self._json_err_raw(404, "universe.html not found"); return
+        cached = getattr(self.server, "_universe_cache", None)
+        if cached is None or cached[0] != mtime:
+            with open(p, "rb") as f:
+                html = f.read()
+            self.server._universe_cache = (mtime, html)
+        else:
+            html = cached[1]
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store, max-age=0")
+        self.send_header("Content-Length", str(len(html)))
+        self.end_headers()
+        self.wfile.write(html)
+
+    def _map_cloud(self):
+        """GET /membrane/map/cloud: the field's stars (PCA-projected,
+        sigma-normalized to the canonical radius) + the tier/safe/source
+        flags."""
+        import numpy as _np
+        proj = self._universe_projection()
+        if not proj.ready():
+            self._json_out({"stars": [], "scale": 0})
+            return
+        mem = self.server.membrane
+        pts = []
+        for e in getattr(mem.store, "exemplars", []):
+            v = getattr(e, "vec", None)
+            if v is None or len(v) != 1024:
+                continue
+            pts.append((e, v))
+        coords = proj.project([v for _e, v in pts])
+        out = []
+        if coords is not None:
+            for (e, _v), c in zip(pts, coords):
+                out.append({
+                    "p": [round(float(c[0]), 2), round(float(c[1]), 2),
+                          round(float(c[2]), 2)],
+                    "tier": "eph" if getattr(e, "ephemeral", False)
+                            else ("note" if (e.outcome or "").startswith(
+                                "compacted@") else "raw"),
+                    "safe": bool(getattr(e, "safe", False)),
+                })
+        self._json_out({"stars": out, "radius": 50.0})
+
+    def _map_entities(self):
+        """GET /membrane/map/entities: the graph (nodes + edges), the
+        entities projected in the SAME basis/scale as the cloud (the
+        constellation co-registered with the stars)."""
+        import numpy as _np
+        from .entities import MultiParentOps
+        proj = self._universe_projection()
+        if not proj.ready():
+            self._json_out({"nodes": [], "edges": [], "scale": 0})
+            return
+        est = getattr(self.server, "entity_store", None)
+        if est is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
+        ents = list(est.docs.values())
+        vecs = [getattr(e, "position", None) or getattr(e, "embedding", None)
+                for e in ents]
+        pairs = [(e, v) for e, v in zip(ents, vecs) if v and len(v) == 1024]
+        coords = proj.project([v for _e, v in pairs])
+        nodes = []
+        eid_set = set()
+        if coords is not None:
+            for (e, _v), c in zip(pairs, coords):
+                props = e.properties or {}
+                nodes.append({
+                    "id": e.eid, "cls": e.cls,
+                    "label": (e.describe() or e.eid)[:80],
+                    "p": [round(float(c[0]), 2), round(float(c[1]), 2),
+                          round(float(c[2]), 2)],
+                    "status": props.get("status"),
+                    "curiosity": props.get("curiosity"),
+                    "links": len(e.links or []),
+                    "born": props.get("born"),
+                })
+                eid_set.add(e.eid)
+        # THE EDGES: ISA (parents), links (field back-refs), merged_into
+        edges = []
+        for e, _v in pairs:
+            for p_ in (e.properties or {}).get("parents") or []:
+                if p_ in eid_set:
+                    edges.append({"s": e.eid, "t": p_, "kind": "isa"})
+            if (e.properties or {}).get("merged_into"):
+                edges.append({"s": e.eid, "kind": "merged",
+                              "t": e.properties["merged_into"]})
+            for l in (e.links or [])[:8]:
+                edges.append({"s": e.eid, "kind": "link", "cell": l})
+        self._json_out({"nodes": nodes, "edges": edges, "radius": 50.0})
+
+    def _map_axes(self):
+        """GET /membrane/map/axes: the axis selector's menu (the PCA
+        default, the class centroids, the named entities, session:now, the
+        momentum)."""
+        from .universe import axis_candidates
+        est = getattr(self.server, "entity_store", None)
+        self._json_out({"candidates": axis_candidates(self.server, est)})
 
     def _serve_asset(self, name: str):
         import os

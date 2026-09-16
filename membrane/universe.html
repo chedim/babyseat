@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>membrane universe</title>
+<style>
+  html,body{margin:0;height:100%;background:#00040a;overflow:hidden;
+            font-family:'SF Mono',Menlo,monospace;color:#9fc3e8}
+  #hud{position:fixed;top:10px;left:10px;z-index:5;color:#8fd0ff;font-size:13px;
+       text-shadow:0 0 6px #1a4a7a}
+  #panel{position:fixed;top:10px;right:10px;z-index:5;width:300px;max-height:90vh;
+         overflow:auto;background:rgba(4,12,24,.82);border:1px solid #16406b;
+         border-radius:8px;padding:10px;font-size:12px;display:none}
+  #axis{position:fixed;bottom:10px;left:10px;z-index:5;background:rgba(4,12,24,.82);
+        border:1px solid #16406b;border-radius:8px;padding:8px;font-size:12px}
+  select,button{background:#0a2036;color:#9fc3e8;border:1px solid #16406b;
+                border-radius:4px;padding:2px 6px;font-family:inherit}
+  #panel h3{margin:2px 0 8px;color:#cfe8ff}
+  .k{color:#5a88b8}
+</style>
+</head>
+<body>
+<div id="hud">universe · loading…</div>
+<div id="panel"></div>
+<div id="axis">
+  X <select id="ax-x"></select>
+  Y <select id="ax-y"></select>
+  Z <select id="ax-z"></select>
+  <button id="ax-apply">apply</button>
+  <button id="ax-reset">reset</button>
+</div>
+<script src="/three.min.js"></script>
+<script>
+const renderer=new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(devicePixelRatio);
+document.body.appendChild(renderer.domElement);
+const scene=new THREE.Scene();
+scene.fog=new THREE.FogExp2(0x00040a,0.0025);
+const camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.1,20000);
+
+// ---- the camera state (the google-map controls: orbit + log-zoom + pan) --
+const cam={theta:0.7,phi:1.1,dist:120,target:new THREE.Vector3(0,0,0)};
+function camApply(){
+  const s=Math.sin(cam.phi),c=Math.cos(cam.phi);
+  camera.position.set(
+    cam.target.x+cam.dist*s*Math.sin(cam.theta),
+    cam.target.y+cam.dist*c,
+    cam.target.z+cam.dist*s*Math.cos(cam.theta));
+  camera.lookAt(cam.target);
+}
+camApply();
+addEventListener("resize",()=>{
+  renderer.setSize(innerWidth,innerHeight);
+  camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();
+});
+
+// ---- controls: drag=orbit, wheel=log-zoom, right-drag=pan, dblclick=fly --
+let drag=null;
+renderer.domElement.addEventListener("mousedown",e=>{drag={b:e.button,x:e.clientX,y:e.clientY}});
+addEventListener("mouseup",()=>drag=null);
+addEventListener("mousemove",e=>{
+  if(!drag)return;
+  const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+  if(drag.b===0){cam.theta-=dx*0.005;cam.phi=Math.max(0.05,Math.min(Math.PI-0.05,cam.phi-dy*0.005));}
+  else{ // right-drag: pan in the camera's plane
+    const right=new THREE.Vector3().setFromMatrixColumn(camera.matrix,0);
+    const up=new THREE.Vector3().setFromMatrixColumn(camera.matrix,1);
+    cam.target.addScaledVector(right,-dx*cam.dist*0.0015);
+    cam.target.addScaledVector(up,dy*cam.dist*0.0015);
+  }
+  drag.x=e.clientX;drag.y=e.clientY;camApply();
+});
+renderer.domElement.addEventListener("contextmenu",e=>e.preventDefault());
+addEventListener("wheel",e=>{
+  // THE LOG ZOOM (the scale-fix's client half): zoom speed scales with
+  // distance; the clamp [1, 600] keeps the universe explorable
+  cam.dist=Math.max(1,Math.min(600,cam.dist*Math.exp(e.deltaY*0.0012)));
+  camApply();
+},{passive:true});
+renderer.domElement.addEventListener("dblclick",()=>{
+  ray.setFromCamera({x:(event.clientX/innerWidth)*2-1,
+                      y:-(event.clientY/innerHeight)*2+1},camera);
+  const hit=ray.intersectObjects(scene.children.filter(o=>o.userData.pick),true)[0];
+  if(hit)flyTo(hit.point);
+});
+const ray=new THREE.Raycaster();
+function flyTo(pos){
+  const t0=performance.now(),from=camera.position.clone(),fromT=cam.target.clone();
+  const to=pos.clone(),toT=pos.clone();
+  const step=()=>{
+    const f=Math.min(1,(performance.now()-t0)/700);
+    const e=1-Math.pow(1-f,3);  // ease-out glide
+    cam.target.lerpVectors(fromT,toT,e);
+    camera.position.lerpVectors(from,to.clone().addScaledVector(
+      toT.clone().sub(from).setLength(cam.dist*0.8),1),e);
+    camera.lookAt(cam.target);cam.theta=Math.atan2(
+      camera.position.x-cam.target.x,camera.position.z-cam.target.z);
+    cam.phi=Math.acos(Math.max(-1,Math.min(1,
+      (camera.position.y-cam.target.y)/cam.dist)));
+    if(f<1)requestAnimationFrame(step);
+  };
+  step();
+}
+
+// ---- the layers ------------------------------------------------------------
+const stars=new THREE.Group(),graph=new THREE.Group();
+scene.add(stars,graph);
+
+function starGeo(stars){
+  const g=new THREE.BufferGeometry();
+  const pos=new Float32Array(stars.length*3);
+  const col=new Float32Array(stars.length*3);
+  const size=new Float32Array(stars.length);
+  stars.forEach((s,i)=>{
+    pos[i*3]=s.p[0];pos[i*3+1]=s.p[1];pos[i*3+2]=s.p[2];
+    // color by tier: raw=white-blue, candidates=dim amber, notes=violet
+    let c=[0.62,0.78,1.0],sz=1.0;
+    if(s.tier==="eph"){c=[0.9,0.7,0.3];sz=0.6;}
+    else if(s.tier==="note"){c=[0.6,0.4,0.9];sz=1.4;}
+    if(!s.safe){c=[0.4,0.4,0.45];sz=0.7;}
+    col[i*3]=c[0];col[i*3+1]=c[1];col[i*3+2]=c[2];size[i]=sz;
+  });
+  g.setAttribute("position",new THREE.BufferAttribute(pos,3));
+  g.setAttribute("color",new THREE.BufferAttribute(col,3));
+  g.setAttribute("size",new THREE.BufferAttribute(size,1));
+  return g;
+}
+
+// ---- the load ---------------------------------------------------------------
+const ray=new THREE.Raycaster();
+async function load(){
+  const [cloud,entities]=await Promise.all([
+    fetch("/membrane/map/cloud").then(r=>r.json()),
+    fetch("/membrane/map/entities").then(r=>r.json())]);
+  // THE STAR LAYER (the field as a universe)
+  {
+    const g=new THREE.BufferGeometry();
+    const n=cloud.stars.length;
+    const pos=new Float32Array(n*3),col=new Float32Array(n*3),sz=new Float32Array(n);
+    const palette={raw:[0.62,0.78,1.0],eph:[0.95,0.72,0.32],
+                   note:[0.58,0.38,0.92]};
+    cloud.stars.forEach((s,i)=>{
+      pos[i*3]=s.p[0];pos[i*3+1]=s.p[1];pos[i*3+2]=s.p[2];
+      const c=palette[s.tier]||palette.raw;
+      col[i*3]=c[0];col[i*3+1]=c[1];col[i*3+2]=c[2];
+      sz[i]=s.safe?1.0:0.55;
+    });
+    g.setAttribute("position",new THREE.BufferAttribute(pos,3));
+    g.setAttribute("color",new THREE.BufferAttribute(col,3));
+    g.setAttribute("size",new THREE.BufferAttribute(sz,1));
+    const m=new THREE.PointsMaterial({size:1.4,vertexColors:true,
+      transparent:true,opacity:0.85,blending:THREE.AdditiveBlending,
+      depthWrite:false,sizeAttenuation:true});
+    stars.add(new THREE.Points(g,m));
+  }
+  // THE CONSTELLATION LAYER (the entities, color by class)
+  const clsColor={Component:0x33d6ff,Goal:0xffa03c,FailureMode:0xff4444,
+    Decision:0x44dd66,Tool:0xffdd44,AIModel:0xaa66ff,Endpoint:0x66ffcc,
+    Config:0x888899,Sensor:0x44ff88,Actuator:0xff66aa,Project:0xffffff,
+    Session:0x66ff66,Timeline:0xff44cc};
+  const nodeMat={};
+  entities.nodes.forEach(nd=>{
+    const cls=clsColor[nd.cls]||0xffffff;
+    const col=new THREE.Color(cls);
+    const sprite=new THREE.Sprite(new THREE.SpriteMaterial({
+      map:glowTexture(col),transparent:true,depthWrite:false}));
+    sprite.position.set(nd.p[0],nd.p[1],nd.p[2]);
+    const size=2.0+Math.min(3,nd.links)*0.7;
+    sprite.scale.set(size,size,1);
+    sprite.userData.pick={type:"entity",node:nd};
+    graph.add(sprite);
+  });
+  // THE EDGES (ISA solid thin, merged dashed, links faint)
+  const lineMat=new THREE.LineBasicMaterial({color:0x33d6ff,transparent:true,
+    opacity:0.25});
+  const posById={};entities.nodes.forEach(n=>posById[n.id]=n.p);
+  const segs=[];
+  entities.edges.forEach(e=>{
+    const a=posById[e.s],b=posById[e.t];
+    if(!a||!b)return;
+    if(e.kind==="link")return;         // the field back-refs: phase 2 (LOD)
+    segs.push(new THREE.Vector3(...a),new THREE.Vector3(...b));
+  });
+  graph.add(new THREE.LineSegments(
+    new THREE.BufferGeometry().setFromPoints(segs),lineMat));
+  document.getElementById("hud").textContent=
+    `universe · ${cloud.stars.length} stars · ${entities.nodes.length} entities`;
+  // THE AUTO-FIT (the scale fix): zoom-to-fit the content's bounding sphere
+  const box=new THREE.Box3().setFromObject(stars);
+  if(!box.isEmpty()){
+    const sphere=box.getBoundingSphere(new THREE.Sphere());
+    cam.target.copy(sphere.center);
+    cam.dist=Math.max(8,sphere.radius*2.4);
+    camApply();
+  }
+}
+function glowTexture(col){
+  const c=document.createElement("canvas");c.width=c.height=64;
+  const x=c.getContext("2d");
+  const g=x.createRadialGradient(32,32,0,32,32,32);
+  g.addColorStop(0,"rgba(255,255,255,1)");
+  g.addColorStop(0.35,`rgba(${col.r*255|0},${col.g*255|0},${col.b*255|0},0.9)`);
+  g.addColorStop(1,"rgba(0,0,0,0)");
+  x.fillStyle=g;x.fillRect(0,0,64,64);
+  const t=new THREE.CanvasTexture(c);return t;
+}
+
+// ---- the boot ---------------------------------------------------------------
+(function(){
+  renderer.setAnimationLoop(()=>renderer.render(scene,camera));
+  fetch("/three.min.js").then(()=>{}); // warm
+  load();
+})();
+</script>
+</body>
+</html>
