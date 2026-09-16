@@ -84,6 +84,30 @@ renderer.domElement.addEventListener("dblclick",()=>{
   const hit=ray.intersectObjects(scene.children.filter(o=>o.userData.pick),true)[0];
   if(hit)flyTo(hit.point);
 });
+renderer.domElement.addEventListener("click",e=>{
+  // THE INSPECT (click an entity -> the HUD panel: the properties, the
+  // fn_counts, the crystallized_from, the status)
+  ray.setFromCamera({x:(e.clientX/innerWidth)*2-1,
+                     y:-(e.clientY/innerHeight)*2+1},camera);
+  const hit=ray.intersectObjects(graph.children.filter(o=>o.userData.pick),
+                                 true)[0];
+  const panel=document.getElementById("panel");
+  if(!hit){panel.style.display="none";return;}
+  const nd=hit.object.userData.pick.node;
+  panel.style.display="block";
+  const props=nd.properties||{};
+  const cf=(props.crystallized_from||[]).slice(0,3)
+      .map(s=>`<div class="k">· ${s}</div>`).join("");
+  panel.innerHTML=`<h3>${nd.label}</h3>
+    <div><span class="k">class:</span> ${nd.cls}
+         ${nd.status?`<span class="k">· status:</span> ${nd.status}`:""}</div>
+    <div><span class="k">links:</span> ${nd.links}
+         ${nd.curiosity!==null&&nd.curiosity!==undefined?
+           `<span class="k">· curiosity:</span> ${nd.curiosity}`:""}</div>
+    ${nd.fn_counts?`<div><span class="k">fn:</span> ${JSON.stringify(nd.fn_counts)}</div>`:""}
+    ${cf?`<div style="margin-top:6px"><span class="k">crystallized from:</span>${cf}</div>`:""}
+    <div style="margin-top:6px"><span class="k">id:</span> ${nd.id}</div>`;
+});
 const ray=new THREE.Raycaster();
 function flyTo(pos){
   const t0=performance.now(),from=camera.position.clone(),fromT=cam.target.clone();

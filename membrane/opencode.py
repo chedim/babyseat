@@ -3777,6 +3777,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                     "curiosity": props.get("curiosity"),
                     "links": len(e.links or []),
                     "born": props.get("born"),
+                    "properties": {k: v for k, v in props.items()
+                                   if k not in ("script_",)},
+                    "fn_counts": props.get("fn_counts"),
                 })
                 eid_set.add(e.eid)
         # THE EDGES: ISA (parents), links (field back-refs), merged_into
