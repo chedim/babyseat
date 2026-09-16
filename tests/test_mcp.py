@@ -144,6 +144,7 @@ class TestMcpProtocol(unittest.TestCase):
                                  "membrane_peer_post",
                                  "membrane_peer_seats",
                                  "membrane_intend",
+                                 "membrane_graph",
                                  "membrane_entity_inherit"])
         for t in resp["result"]["tools"]:
             self.assertIn("inputSchema", t)

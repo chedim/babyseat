@@ -366,6 +366,29 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "membrane_graph",
+        "description": "The entity graph's subgraph reader (the model's "
+                       "eyes on the universe map): entities related to a "
+                       "query -- named hits first, then centroid-nearest "
+                       "-- as nodes (id/class/label/position/status/"
+                       "curiosity/fn_counts/properties) + edges (ISA/"
+                       "links/merged_into). The same data contract the "
+                       "universe viewer renders; other clients consume "
+                       "the same endpoints.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string",
+                          "description": "free text (the query's named "
+                                         "entities anchor the "
+                                         "neighborhood; empty = the "
+                                         "top-linked entities)."},
+                "k": {"type": "integer",
+                      "description": "the neighborhood's cap (default 8)."},
+            },
+        },
+    },
+    {
         "name": "membrane_entity_inherit",
         "description": (
             "ENTITY INHERITANCE: give an entity a parent concept ('a "
@@ -711,6 +734,34 @@ def tool_intend(args: dict, port: int) -> str:
             f"it shared.")
 
 
+def tool_graph(args: dict, port: int) -> str:
+    """The model's graph read: the entity graph's subgraph as nodes +
+    edges -- the same contract the universe viewer renders."""
+    import urllib.parse
+    q = urllib.parse.quote(str(args.get("query") or ""))
+    k = int(args.get("k") or 8)
+    out = _http(port, "GET",
+                f"/membrane/entity-related?q={q}&k={k}")
+    items = out.get("entities") or []
+    if not items:
+        return "no entities matched the query"
+    lines = []
+    for e in items[:k]:
+        props = e.get("properties") or {}
+        line = (f"- {e.get('eid', '?')} [{e.get('cls', '?')}] "
+                f"{(e.get('label') or e.get('name') or '')[:70]}")
+        if e.get("status"):
+            line += f" (status: {e['status']})"
+        if e.get("fn_counts"):
+            line += f" fn:{json.dumps(e['fn_counts'])}"
+        neighbors = [n.get("eid", "?") for n in
+                     (e.get("neighbors") or [])][:4]
+        line += (f" | neighbors: {', '.join(neighbors)}" if neighbors
+                 else "")
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def tool_entity_inherit(args: dict, port: int) -> str:
     spec = str(args.get("spec") or "").strip()
     parents = args.get("parents") or []
@@ -761,6 +812,7 @@ TOOL_IMPLS = {
     "membrane_peer_post": tool_peer_post,
     "membrane_peer_seats": tool_peer_seats,
     "membrane_intend": tool_intend,
+    "membrane_graph": tool_graph,
     "membrane_entity_inherit": tool_entity_inherit,
 }
 
