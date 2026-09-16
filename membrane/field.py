@@ -419,15 +419,39 @@ class ExemplarStore:
         except (TypeError, ValueError):
             return 0.0
 
-    def capture_ephemeral(self, ex: Exemplar, now: float | None = None) -> int:
+    # THE PLASTICITY KNOB (the membrain upgrade, phase A -- predictive
+    # coding): the capture's TTL scales by SURPRISE (the gate's top-1 sim
+    # = the inverse of prediction error). A capture landing on ground the
+    # field already holds (high sim) is a REPEAT -- little to learn from,
+    # short TTL. A novel-shape capture is where learning pays -- more time
+    # to earn evidence and promote. The tier's own clock becomes the
+    # plasticity; reversible via --eph-ttl (the base) + MEMBRANE_PLASTICITY=0.
+    EPH_TTL_NOVEL_X = 2.0        # novel shape (< SURPRISE_LO): TTL x 2
+    EPH_TTL_DULL = 0.3           # repeat shape (>= SURPRISE_HI): TTL x 0.3
+    SURPRISE_LO = 0.5
+    SURPRISE_HI = 0.98
+
+    def capture_ephemeral(self, ex: Exemplar, now: float | None = None,
+                          surprise: float | None = None) -> int:
         """A CANDIDATE enters the field: appended to the ONE list flagged
         ``ephemeral`` (all indexes stay coherent; the replayable set is
         canon-only by definition). Callers must NOT hand a confirmed/refuted
-        row here -- that is evidence, promote it."""
+        row here -- that is evidence, promote it.
+        ``surprise`` (the gate's top-1 sim, optional): the plasticity
+        scaling -- high sim (a repeat) shortens the TTL, a novel shape
+        lengthens it (the predictive-coding lesson: surprise drives
+        plasticity). None -> the base TTL (the conservative default)."""
         ex.ephemeral = True
         ex.extra = dict(ex.extra or {})
         ex.extra["eph_born"] = float(now if now is not None else time.time())
-        ex.extra.setdefault("eph_ttl", EPH_TTL_S)
+        ttl = EPH_TTL_S
+        if (surprise is not None
+                and os.environ.get("MEMBRANE_PLASTICITY", "1") != "0"):
+            if surprise >= self.SURPRISE_HI:
+                ttl = EPH_TTL_S * self.EPH_TTL_DULL
+            elif surprise <= self.SURPRISE_LO:
+                ttl = EPH_TTL_S * self.EPH_TTL_NOVEL_X
+        ex.extra.setdefault("eph_ttl", ttl)
         self.append(ex)
         return len(self.exemplars) - 1
 
@@ -1828,6 +1852,124 @@ class ExemplarStore:
     # TREND estimator (does the field get richer or just bigger between
     # saves), not an exact meter. safe_frac / counts are EXACT O(1) tallies
     # -- the part every --status render reads per write.
+
+    # ---- the SKETCH-FIRST GATE (the membrain upgrade, phase C) -------------
+    # The retina lesson, text-analogue: the reflex decisions (have I
+    # literally seen this shape?) answer on a CHEAP projection -- the JL
+    # sketch (96-d, one fixed seeded matrix per dim) -- and only the
+    # ambiguous band escalates to full embeddings. The projection is
+    # cosine-preserving to ~O(1/sqrt(d)) error (JL lemma), so the CLEAR
+    # band (near-dup replay >= sketch_hi, clear miss <= sketch_lo) answers
+    # at 10x less; the honest-uncertainty band pays the full embed.
+    _sketch_R: list = []          # the fixed projection matrix (per dim)
+
+    @classmethod
+    def _sketch_matrix(cls, D: int) -> "np.ndarray":
+        """The fixed JL projection (one per dim, seeded -- the same matrix
+        every call so sketches are comparable across turns and boots)."""
+        import functools
+        if not hasattr(cls, "_sketch_cache"):
+            cls._sketch_cache = {}
+        R = cls._sketch_cache.get(D)
+        if R is None:
+            rng = np.random.default_rng(_JL_SEED)
+            d = min(_SKETCH_D, D)
+            R = rng.standard_normal((d, D)) / np.sqrt(d)
+            cls._sketch_cache[D] = R
+        return R
+
+    def sketch_vec(self, vec) -> "np.ndarray":
+        """One vector -> the 96-d sketch (the reflex path's shape)."""
+        v = np.asarray(vec, dtype=float)
+        R = self._sketch_matrix(len(v))
+        return R @ v
+
+    # the reflex bars (the sketch band; the operator's skepticism is the
+    # test's job: the parity property is what makes this honest)
+    SKETCH_HI = 0.95            # near-dup replay: "literally seen this shape"
+    SKETCH_LO = 0.25            # clear miss: nothing near it in the sketch
+
+    def sketch_reflex(self, q: np.ndarray) -> dict | None:
+        """The gate's stage-0: answer the CLEAR band on sketches, fall
+        through (None) on the ambiguous band (which pays the full embed).
+        The verdicts mirror decide()'s shape minus the variety fields."""
+        if len(self.exemplars) == 0:
+            return None
+        try:
+            import numpy as _np
+            hits = self.sketch_top_k(q, k=1)
+            if not hits:
+                return None
+            _near, sim = hits[0]
+            if sim >= self.SKETCH_HI:
+                # THE SAFETY + CONSENSUS GUARDS (the auto-settle contract,
+                # the two-authority rule): a near-dup replay hint is valid
+                # only on a SAFE cell whose NEIGHBORHOOD AGREES -- an
+                # unsafe nearest (the settle machinery's territory) or a
+                # conflicted action set (two safe cells, one situation,
+                # divergent answers -- decide()'s consensus check) means
+                # the sketch verdict is not trusted -> fall through to
+                # the full path.
+                _idx = self.index_of(_near)
+                if _idx is not None and not self.exemplars[_idx].safe:
+                    return None
+                # the sketch-path consensus: the top hits' action texts
+                # must overlap (decide()'s _action_overlap bar, on the
+                # sketch's top-5 -- the strings are right there, no embed)
+                top5 = self.sketch_top_k(q, k=5, canon_only=False)
+                if len(top5) >= 2:
+                    from .gate import _action_overlap
+                    acts = [e.action or "" for e, _s in top5]
+                    agree = sum(1 for a in acts[1:]
+                                if _action_overlap(acts[0], a) >= 0.7)
+                    if agree < len(acts) - 1:
+                        return None      # conflicted: the full path rules
+                # near-dup replay at sketch cost: the replay hint rides
+                # the verdict; the caller's exact-dup lane (full-vec
+                # cosine on the one hit) confirms before serving
+                return {"verdict": "escalate-with-hint",
+                        "reason": "sketch near-dup",
+                        "sim": round(float(sim), 4), "nov": None,
+                        "ex_idx": _idx}
+            if sim <= self.SKETCH_LO:
+                return {"verdict": "escalate",
+                        "reason": "sketch clear miss",
+                        "sim": round(float(sim), 4), "nov": None,
+                        "ex_idx": None}
+        except Exception:
+            return None
+        return None                       # the ambiguous band: full embed
+
+    def sketch_top_k(self, q: np.ndarray, k: int = 5,
+                     canon_only: bool = False,
+                     live_only: bool = False
+                     ) -> list[tuple["Exemplar", float]]:
+        """The sketch-path top_k: JL-project the query + every vec, cosine
+        on the 96-d sketches. The gate's stage-1 reflex lane (cheap); the
+        parity property (E14 method): the sketch order agrees with the
+        full-embedding order on the clear band -- verified in tests."""
+        pool = ([e for e in self.exemplars if not e.ephemeral]
+                if canon_only else self.exemplars)
+        if live_only:
+            dead = self._superseded_set()
+            pool = [e for i, e in enumerate(self.exemplars)
+                    if i not in dead and (not canon_only or not e.ephemeral)]
+        if not pool:
+            return []
+        D = len(q)
+        R = self._sketch_matrix(D)
+        qs = R @ np.asarray(q, dtype=float)
+        qsn = qs / (np.linalg.norm(qs) + 1e-12)
+        # the sketches of the pool (computed per call -- the field is
+        # small enough at the gate's k; the cached-matrix reuse keeps
+        # this a single matmul)
+        S = np.array([R @ np.asarray(e.vec, dtype=float) for e in pool],
+                     dtype=float)
+        Sn = S / (np.linalg.norm(S, axis=1, keepdims=True) + 1e-12)
+        sims = Sn @ qsn
+        kk = min(5, len(pool))
+        idx = np.argsort(-sims)[:kk]
+        return [(pool[i], float(sims[i])) for i in idx]
 
     def stats_sketch(self) -> dict:
         """The mem:stats payload: exact counts + the sketched spectrum."""

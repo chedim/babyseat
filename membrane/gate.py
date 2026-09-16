@@ -89,6 +89,21 @@ def decide(
         return {"verdict": "escalate", "reason": "empty store", "sim": 0.0, "nov": None,
                 "ex_idx": None, "eff_rank": 0.0, "rank_ratio": 0.0, "sim_min": sim_min}
 
+    # ---- STAGE 0: THE SKETCH-FIRST REFLEX (the membrain upgrade) ----------
+    # The retina lesson: reflex decisions answer on the cheap projection.
+    # Sketch-vs-sketch cosine on the clear band: a near-dup replay
+    # (sketch sim >= SKETCH_HI -- "I have literally seen this shape")
+    # escalates-with-hint AT SKETCH COST (the full-embed path confirms on
+    # demand), and a clear miss (<= SKETCH_LO) escalates the same way.
+    # The ambiguous band falls through to the full-embed path below.
+    sketch_verdict = store.sketch_reflex(query) if hasattr(
+        store, "sketch_reflex") else None
+    if sketch_verdict is not None:
+        sketch_verdict.update({"eff_rank": (eff_rank or 0.0),
+                               "rank_ratio": 0.0, "sim_min": sim_min,
+                               "stage": "sketch"})
+        return sketch_verdict
+
     qn = query / (np.linalg.norm(query) + 1e-12)
     nbrs = store.top_k(qn, k=k, canon_only=canon_only, live_only=live_only)
     if not nbrs:

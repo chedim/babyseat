@@ -1658,7 +1658,16 @@ class Membrane:
                         self_authored=self_authored,
                         extra={"src": _src_of(src, fallback=dup)},
                     )
-                    self.store.capture_ephemeral(fresh)
+                    # THE PLASTICITY (the membrain upgrade, phase A):
+                    # the capture's TTL scales by the gate's top-1 sim
+                    # (the prediction error's inverse): a repeat gets a
+                    # short TTL, a novel shape earns a long one.
+                    _v_sim = verdict.get("sim")
+                    self.store.capture_ephemeral(
+                        fresh,
+                        surprise=(float(_v_sim) if isinstance(_v_sim,
+                                                             (int, float))
+                                  else None))
                     new_idx = len(self.store) - 1
                     self.store.mark_superseded(
                         dup_idx,
@@ -1793,7 +1802,14 @@ class Membrane:
                 # THE TIER RULE: a fresh capture is a CANDIDATE (lab E1 --
                 # capture leaks nothing into canon). Silence expires by TTL;
                 # promotion happens only on the evidence paths below.
-                self.store.capture_ephemeral(fresh)
+                # THE PLASTICITY: the surprise (the gate's sim) scales the
+                # TTL (a repeat short, a novel shape long).
+                _v_sim = verdict.get("sim")
+                self.store.capture_ephemeral(
+                    fresh,
+                    surprise=(float(_v_sim) if isinstance(_v_sim,
+                                                         (int, float))
+                              else None))
                 self.store.save(self.field_path)
             else:
                 self.store.append(fresh)
