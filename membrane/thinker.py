@@ -68,6 +68,10 @@ class Thinker:
                                         name="membrane-thinker", daemon=True)
         self._model_ts: list[float] = []   # the cost dial's window
         self._ema_work: float = 0.0        # the duty controller's measure
+        # THE MIND-LANE (the inner speech, visible): what the thinker
+        # chewed and what it decided -- bounded, newest last, rendered in
+        # the banner's mind line (the operator's window into the loop)
+        self.mind_log: deque = deque(maxlen=6)
         self.stats = {"processed": 0, "spoken": 0, "extended": 0,
                       "skipped": 0, "model_calls": 0}
 
@@ -176,6 +180,14 @@ class Thinker:
             return ""
 
     # ---- the fed item: DIGEST -------------------------------------------------
+    def _log_mind(self, entry: dict) -> None:
+        """One inner-speech record: what was chewed + the decision (the
+        bounded mind log; the banner's mind-lane render)."""
+        try:
+            self.mind_log.append({"ts": time.time(), **entry})
+        except Exception:
+            pass
+
     def _process_one(self, item: dict) -> None:
         kind = item.get("kind")
         payload = item.get("payload") or {}
@@ -273,6 +285,10 @@ class Thinker:
                 f"the field already held it", act="note-pattern")
         # the entity-touch pass: born stamps refresh (the night renders
         # tracks from them; no write here -- the night owns persistence)
+        self._log_mind({"kind": "capture", "label": label,
+                        "about": (tags[0] if tags else label)[:40],
+                        "acted": ("pattern" if (surprise and tags)
+                                  else "silent")})
 
     # ---- phase 3: the fn->entity state bridge -------------------------------
     def _bridge_fn_state(self, fn: dict, tags: list, est, label: str) -> None:
@@ -466,6 +482,12 @@ class Thinker:
             self._speak(f"you are near held ground: '{clean}' -- "
                         f"top field match {top:.2f}; ask me to recall it",
                         act="ask-operator")
+            self._log_mind({"kind": "chat", "about": clean[:40],
+                            "acted": "asked to recall"})
+        else:
+            self._log_mind({"kind": "chat",
+                            "about": str(payload.get("text") or "")[:40],
+                            "acted": "silent"})
         """Reality's vote landed: a branch confirmed or refuted. Worth
         one sentence when it CONFIRMS (a prediction came true); refutes
         stay quiet (the dreamer's GC already handled the doc)."""
@@ -538,7 +560,11 @@ class Thinker:
             if out.strip():
                 steps = [out.strip()[:220]]
         if not steps:
+            self._log_mind({"kind": "idle", "about": terminal[:40],
+                            "acted": "no step (table miss + budget)"})
             return
+        self._log_mind({"kind": "idle", "about": terminal[:40],
+                        "acted": f"extended: {steps[0][:40]}"})
         # commit the extension (union-merge on the doc: steps append,
         # deduped, bounded)
         have = list(props.get("steps") or [])

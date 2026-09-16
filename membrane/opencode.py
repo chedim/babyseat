@@ -286,6 +286,15 @@ def _state_report(srv) -> str:
             lines.append("- intent: none active (goals rank into the set "
                          "from what you express; `membrane: intend that X` "
                          "pins one)")
+    # THE MIND-LANE (the inner speech, visible): the thinker's last few
+    # digests -- what it chewed and what it decided. One line, bounded.
+    th = getattr(srv, "thinker", None)
+    if th is not None and getattr(th, "mind_log", None):
+        recent = list(th.mind_log)[-2:]
+        thoughts = "; ".join(
+            f"{e.get('acted')}: {e.get('about', '')}"
+            for e in recent)
+        lines.append(f"- mind: {thoughts}")
     cg = getattr(srv, "_codegraph", None)
     if cg is not None:
         from .codegraph import summary as cg_summary
@@ -5371,7 +5380,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                                if getattr(srv, "peers", None) else 0),
             }
         # THE THINK QUEUE (working memory, on the mind): what the fast
-        # clock is chewing, oldest first, bounded by the covenant.
+        # clock is chewing, oldest first, bounded by the covenant -- plus
+        # THE MIND LOG (the inner speech, visible): what it decided.
         th = getattr(srv, "thinker", None)
         out["think"] = {
             "queue": [{"kind": i.get("kind"),
@@ -5379,6 +5389,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                                       1)}
                       for i in getattr(th, "queue", [])],
             "stats": dict(getattr(th, "stats", {}) or {}),
+            "mind": list(getattr(th, "mind_log", []) or []),
         }
         # THE CACHE STORE: the built state is cached for 60s (the TTL)
         srv._state_cache = {"data": out, "ts": time.time()}
