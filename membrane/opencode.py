@@ -3500,6 +3500,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 self._map_entities(); return
             if path == "/membrane/map/axes":
                 self._map_axes(); return
+            if path == "/membrane/map/axis":
+                # the thin alias: the axis query params ride /cloud (the
+                # contract's shape; the reproject uses cloud+entities)
+                self._map_cloud(); return
         super().do_GET()
 
     def do_POST(self):
@@ -3624,11 +3628,71 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         self.end_headers()
         self.wfile.write(html)
 
+    def _map_axes_basis(self, qs) -> "object | None":
+        """The custom basis from the axis query params (x/y/z = candidate
+        ids): resolve the ids to vecs, orthonormalize, return the basis
+        (or None = the PCA default)."""
+        import numpy as _np
+        from urllib.parse import parse_qs
+        q = parse_qs(qs or "")
+        ids = [q.get(a, [None])[0] for a in ("x", "y", "z")]
+        if not any(i and i != "__pca__" for i in ids):
+            return None
+        est = getattr(self.server, "entity_store", None)
+        from .universe import axis_candidates
+        cands = axis_candidates(self.server, est)
+        by_id = {c["id"]: c["vec"] for c in cands}
+        vecs = []
+        for i in ids:
+            v = by_id.get(i)
+            if v:
+                vecs.append(_np.asarray(v, dtype=float))
+            else:
+                vecs.append(None)
+        if not any(v is not None for v in vecs):
+            return None
+        # the basis: the non-null candidates + the PCA fill (orthonormal
+        # via Gram-Schmidt against the stored mu)
+        proj = self._universe_projection()
+        mu = proj._mu
+        rows = []
+        for v in vecs:
+            if v is None:
+                rows.append(None)
+                continue
+            r = v - mu
+            n = float(_np.linalg.norm(r))
+            rows.append(r / n if n > 1e-12 else None)
+        # orthonormalize (drop the nulls, pad with the PCA basis)
+        basis = []
+        for v in rows:
+            if v is None:
+                continue
+            w = v.copy()
+            for b in basis:
+                w = w - _np.asarray(b) * float(_np.dot(w, b))
+            n = _np.linalg.norm(w)
+            if n > 1e-9:
+                basis.append((w / n).tolist())
+        while len(basis) < 3 and proj._basis is not None:
+            for row in proj._basis:
+                if len(basis) >= 3:
+                    break
+                b = _np.asarray(row, dtype=float)
+                for done in basis:
+                    b = b - _np.asarray(done, dtype=float) * float(
+                        _np.dot(b, done))
+                n = _np.linalg.norm(b)
+                if n > 1e-9:
+                    basis.append((b / n).tolist())
+        return _np.array(basis[:3], dtype=float)
+
     def _map_cloud(self):
         """GET /membrane/map/cloud: the field's stars (PCA-projected,
         sigma-normalized to the canonical radius) + the tier/safe/source
-        flags."""
+        flags. The axis query params (x/y/z candidate ids) re-project."""
         import numpy as _np
+        from urllib.parse import parse_qs
         proj = self._universe_projection()
         if not proj.ready():
             self._json_out({"stars": [], "scale": 0})
@@ -3640,7 +3704,24 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             if v is None or len(v) != 1024:
                 continue
             pts.append((e, v))
-        coords = proj.project([v for _e, v in pts])
+        # THE CUSTOM AXIS (the instrument): the query params' basis
+        # replaces the PCA default for this request
+        import numpy as _np
+        from urllib.parse import parse_qs
+        custom = self._map_axes_basis(
+            _np.parse_qs if False else self.path.split("?", 1)[-1]
+            if "?" in self.path else "")
+        if custom is not None:
+            import numpy as _np2
+            proj2 = type("P", (), {})()
+            proj2._mu = proj._mu
+            proj2._basis = custom
+            proj2._scale = proj._scale
+            coords = _np.array([(_np.asarray(v, dtype=float) - proj._mu)
+                                @ custom.T * proj._scale
+                                for _e, v in pts], dtype=float)
+        else:
+            coords = proj.project([v for _e, v in pts])
         out = []
         if coords is not None:
             for (e, _v), c in zip(pts, coords):
@@ -3671,7 +3752,17 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         vecs = [getattr(e, "position", None) or getattr(e, "embedding", None)
                 for e in ents]
         pairs = [(e, v) for e, v in zip(ents, vecs) if v and len(v) == 1024]
-        coords = proj.project([v for _e, v in pairs])
+        # THE CUSTOM AXIS (the same instrument as the cloud's)
+        import numpy as _np
+        custom = self._map_axes_basis(
+            self.path.split("?", 1)[-1] if "?" in self.path else "")
+        if custom is not None:
+            coords = _np.array([(_np.asarray(v, dtype=float) - proj._mu)
+                                @ custom.T * proj._scale
+                                for _e, v in pairs], dtype=float) \
+                if pairs else None
+        else:
+            coords = proj.project([v for _e, v in pairs])
         nodes = []
         eid_set = set()
         if coords is not None:

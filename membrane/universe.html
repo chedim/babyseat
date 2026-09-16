@@ -206,10 +206,69 @@ function glowTexture(col){
   const t=new THREE.CanvasTexture(c);return t;
 }
 
+// ---- the axis selector (the map as an instrument) ---------------------------
+const AXIS_DEFAULT = "__pca__";
+let axisVecs = {x:null,y:null,z:null};   // null = the PCA default
+async function loadAxes(){
+  const {candidates} = await fetch("/membrane/map/axes").then(r=>r.json());
+  const sels=[document.getElementById("ax-x"),
+              document.getElementById("ax-y"),
+              document.getElementById("ax-z")];
+  sels.forEach((sel,i)=>{
+    sel.innerHTML="";
+    const o=document.createElement("option");
+    o.value=AXIS_DEFAULT;o.textContent="PCA axis "+(i+1);
+    sel.appendChild(o);
+    candidates.forEach(c=>{
+      if(c.vec===null)return;
+      const o2=document.createElement("option");
+      o2.value=c.id;o2.textContent=c.label;
+      sel.appendChild(o2);
+    });
+  });
+  window.__candidates=candidates;
+}
+function candidateVec(id){
+  if(id===AXIS_DEFAULT)return null;
+  const c=(window.__candidates||[]).find(c=>c.id===id);
+  if(!c||!c.vec)return null;
+  const v=new THREE.Vector3(...c.vec).normalize();
+  return v;
+}
+document.getElementById("ax-apply").addEventListener("click",()=>{
+  // THE CUSTOM PROJECTION: the chosen directions replace the PCA basis
+  // (client-side: x/y/z vecs -> the local basis R -> re-project the raw
+  // positions with it -- the map reorients toward the chosen meaning)
+  const sels=[document.getElementById("ax-x"),
+              document.getElementById("ax-y"),
+              document.getElementById("ax-z")];
+  axisVecs={x:candidateVec(sels[0].value),
+            y:candidateVec(sels[1].value),
+            z:candidateVec(sels[2].value)};
+  reproject();
+});
+document.getElementById("ax-reset").addEventListener("click",()=>{
+  axisVecs={x:null,y:null,z:null};
+  reproject();
+});
+async function reproject(){
+  // the server's custom projection: the raw vecs are not on the client --
+  // re-fetch with the axis ids (the server projects with the chosen basis)
+  const ids=sels=>sels.map(s=>s.value).join("&");
+  const sels=[document.getElementById("ax-x"),
+              document.getElementById("ax-y"),
+              document.getElementById("ax-z")];
+  const q="?x="+sels[0].value+"&y="+sels[1].value+"&z="+sels[2].value;
+  const [cloud,entities]=await Promise.all([
+    fetch("/membrane/map/cloud"+q).then(r=>r.json()),
+    fetch("/membrane/map/entities"+q).then(r=>r.json())]);
+  renderLayers(cloud,entities);
+}
+
 // ---- the boot ---------------------------------------------------------------
 (function(){
   renderer.setAnimationLoop(()=>renderer.render(scene,camera));
-  fetch("/three.min.js").then(()=>{}); // warm
+  loadAxes();
   load();
 })();
 </script>
