@@ -69,13 +69,28 @@ def parse_entity_reply(text: str) -> list[dict]:
 def synthesize_from_cluster(backend: str, model: str,
                             members_situations: list[str],
                             note: str, topic: str,
-                            chat) -> list[QuantumEntity]:
+                            chat, members_born: list | None = None
+                            ) -> list[QuantumEntity]:
     """One idle-cortex call over a compacted cluster -> QuantumEntities.
 
     ``chat`` is the module-level _ollama_chat (injected so this module stays
     test-friendly); members_situations are the raw situation texts of the
     cluster (already clipped by the caller), ``note`` the compact note just
-    committed. Returns [] on any failure (degrade, never raise)."""
+    committed. ``members_born``: the source cells' birth timestamps (the
+    speech acts' times -- the symbol-birth rule: born = the earliest
+    utterance that crystallized the symbol, not the synthesis time).
+    Returns [] on any failure (degrade, never raise)."""
+    import time as _t
+    born = None
+    for b in (members_born or []):
+        try:
+            b = float(b)
+        except (TypeError, ValueError):
+            continue
+        if b > 0 and (born is None or b < born):
+            born = b
+    if born is None:
+        born = _t.time()
     parts = "\n----\n".join(s[:200] for s in members_situations[:8])
     user = (f"Topic: {topic[:120]}\n\nExchanges:\n\n{parts}\n\n"
             f"Compact note: {note[:600]}\n\nDerive entities as a JSON array.")
@@ -91,11 +106,22 @@ def synthesize_from_cluster(backend: str, model: str,
         cls = it["class"]
         if cls not in _CLASS_SET:
             cls = CLASS_COMPONENT
+        # THE SYMBOL-BIRTH RULE (the operator's thesis: symbols come into
+        # being through the sounds we make -- born is the speech act's
+        # timestamp): the synth entity traces to the utterances that
+        # crystallized it -- born = the EARLIEST source situation's cell
+        # birth (the speech acts' time, not the synthesis time), and the
+        # crystallized-from texts ride the properties (the symbol's
+        # grounding: which lived turns earned this symbol).
         e = QuantumEntity(
             eid=f"membrane::synth:{it['name'].strip().lower().replace(' ', '-')[:80]}",
             cls=cls,
             properties={"name": it["name"], "summary": it["summary"],
-                        "topic": topic[:80]},
+                        "topic": topic[:80],
+                        "crystallized_from": [s[:160] for s in
+                                              members_situations[:8]],
+                        "born": born,
+                        },
             derived_by=["membrane-idle"],
         )
         ents.append(e)

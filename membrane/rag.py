@@ -708,10 +708,18 @@ class Compactor:
         # Any failure degrades to no entities; the compaction already landed.
         try:
             from . import entity_synthesis as ES
+            # THE SYMBOL-BIRTH RULE (the operator's thesis: born is the
+            # speech act's timestamp): the kept cells' eph_born IS the
+            # utterance time -- the earliest one becomes the symbol's born.
+            from .field import _eph_born_of
+            _store = mem.store
+            members_born = [_eph_born_of(_store.exemplars, _store.index_of(m))
+                            for m in kept
+                            if _store.index_of(m) is not None]
             ents = ES.synthesize_from_cluster(
                 srv.backend, srv.idle_cortex_model,
                 [m.situation for m in kept], note, topic,
-                chat=_model_chat(srv))
+                chat=_model_chat(srv), members_born=members_born)
             if ents:
                 sink = getattr(srv, "entity_sink", None)
                 if sink is not None:
