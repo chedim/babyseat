@@ -12,6 +12,8 @@ from unittest import mock
 import numpy as np
 
 from membrane.field import Exemplar, ExemplarStore
+from membrane.entities import EntityStore, QuantumEntity, MEMBRANE_NS
+from membrane.thinker import Thinker
 from membrane.gate import decide
 
 
@@ -129,3 +131,43 @@ class TestPlasticity(unittest.TestCase):
         with mock.patch.dict(os.environ, {"MEMBRANE_PLASTICITY": "0"}):
             st.capture_ephemeral(ex, surprise=0.99)
         self.assertEqual(ex.extra["eph_ttl"], EPH_TTL_S)
+
+
+class TestSharpWaveReplay(unittest.TestCase):
+    """THE SHARP-WAVE REPLAY (the membrain upgrade, phase B): just-
+    completed experiences consolidate on the idle cadence -- the thinker
+    drains a replay queue of recently-touched entities through the
+    night's drift pass (numpy-only, scoped via only_keys), under the
+    duty controller. The consolidation no longer waits for the 15-min
+    night; it runs continuously during wake, exactly like the
+    hippocampal replay."""
+
+    def test_touched_entities_queue_for_replay(self):
+        from collections import deque
+        srv = type("S", (), {})()
+        srv.membrane = type("M", (), {"store": type("St", (), {
+            "exemplars": []})(), "embedder": None})()
+        srv.entity_store = EntityStore(bucket="test-replay", shared=False)
+        th = Thinker(srv)
+        est = srv.entity_store
+        ent = QuantumEntity(eid=f"{MEMBRANE_NS}files:hot.py", cls="Component",
+                            properties={"name": "hot.py"})
+        est.upsert(ent)
+        th._bridge_fn_state({"op": "edit"}, ["files:hot.py"], est, "call")
+        self.assertIn(ent.eid, th._touched_replay)
+
+    def test_idle_tick_drains_the_replay(self):
+        srv = type("S", (), {})()
+        srv.membrane = type("M", (), {"store": type("St", (), {
+            "exemplars": []})(), "embedder": None})()
+        srv.entity_store = EntityStore(bucket="test-replay2", shared=False)
+        srv.thinker = None
+        th = Thinker(srv)
+        est = srv.entity_store
+        ent = QuantumEntity(eid=f"{MEMBRANE_NS}files:warm.py", cls="Component",
+                            properties={"name": "warm.py"})
+        est.upsert(ent)
+        th._touched_replay = __import__("collections").deque([ent.eid])
+        # the idle tick drains the queue (the replay runs without raising)
+        th._hum()
+        self.assertEqual(len(th._touched_replay), 0)

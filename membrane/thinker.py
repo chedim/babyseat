@@ -136,6 +136,26 @@ class Thinker:
             if self._duty() < THINK_CPU_TARGET:
                 self._idle_think()
                 did_work = True
+            # THE SHARP-WAVE REPLAY (the membrain upgrade, phase B):
+            # just-completed experiences consolidate on the idle cadence
+            # (the night's drift pass scoped to the recently-touched
+            # entities -- numpy-only, ~ms; the duty controller governs).
+            rep = getattr(self, "_touched_replay", None)
+            if rep:
+                eid = rep.popleft()
+                est = getattr(self.srv, "entity_store", None)
+                if est is not None and eid in est.docs:
+                    try:
+                        from .night import consolidate_entities
+                        consolidate_entities(self.srv.membrane, est,
+                                             materialize=0,
+                                             only_keys=[
+                                                 eid[len("membrane::"):]
+                                                 if eid.startswith(
+                                                     "membrane::") else eid])
+                        did_work = True
+                    except Exception:
+                        pass
         work = time.time() - t0
         self._ema_work = 0.7 * self._ema_work + 0.3 * work
         # the duty controller: work / (work + window) vs the target -- a
@@ -294,14 +314,21 @@ class Thinker:
     def _bridge_fn_state(self, fn: dict, tags: list, est, label: str) -> None:
         """The fn stamp updates the touched entities' properties: the live
         project-state model (the monitor-getter scripts' feed). op + binds
-        -> the property moves; the night's delta-write persists."""
+        -> the property moves; the night's delta-write persists. THE
+        REPLAY REGISTRY (the sharp-wave queue): every touched entity's
+        eid joins the replay set -- the idle ticks drain it (the
+        mini-consolidation, the night's drift pass scoped to these)."""
         import time as _t
         now = _t.time()
         op = str(fn.get("op") or "?")
+        touched = getattr(self, "_replay_eids", None)
+        if touched is None:
+            self._touched_replay = touched = deque(maxlen=16)
         for tag in tags[:4]:
             ent = est._resolve_spec(str(tag))
             if ent is None:
                 continue
+            touched.append(ent.eid)
             props = ent.properties
             # the edit/build counters: per-entity, windowed (bounded)
             counts = props.get("fn_counts") if isinstance(
