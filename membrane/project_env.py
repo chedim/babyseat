@@ -192,7 +192,7 @@ def couchbase_onboarding(cwd: Path | str | None = None,
     vals = dict(have)
     vals.update({
         "MEMBRANE_STORE": "couchbase",
-        "COUCHBASE_CONN_STRING": conn or "couchbase://localhost",
+        "COUCHBASE_CONN_STRING": conn or "couchbase://127.0.0.1",
         "COUCHBASE_USER": user or "Administrator",
         "COUCHBASE_PASSWORD": pw or "password",
         "COUCHBASE_BUCKET": canon,

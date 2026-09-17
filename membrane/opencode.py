@@ -5653,11 +5653,13 @@ def main() -> None:
                          "semantics) instead of the ephemeral candidate tier")
     ap.add_argument("--listen", type=int, default=11500,
                     help="port for the membrane OpenAI-compatible proxy")
-    ap.add_argument("--viewer", action="store_true",
-                    help="serve the dev field viewer at /viewer (OFF by "
-                         "default; the TUI/world proxies keep theirs)")
+    ap.add_argument("--no-viewer", dest="viewer", action="store_false",
+                    default=True,
+                    help="don't serve the universe map at /viewer (ON by "
+                         "default; the old opt-in flag is retired -- the "
+                         "map is the seat's face now)")
     ap.add_argument("--no-open", dest="open_browser", action="store_false", default=True,
-                    help="don't open the dev viewer in the browser on start")
+                    help="don't open the universe map in the browser on start")
     ap.add_argument("--backend", default="http://localhost:11434",
                     help="upstream Ollama URL")
     ap.add_argument("--model", default=None, metavar="MODEL",

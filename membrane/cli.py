@@ -317,7 +317,7 @@ def _cb_ask(input_fn, getpass_fn, title: str) -> dict:
     user = input_fn("  user [Administrator]: ").strip()
     pw = getpass_fn("  password: ").strip()
     bucket = input_fn("  bucket [membrane]: ").strip()
-    return {"conn": conn or "couchbase://localhost",
+    return {"conn": conn or "couchbase://127.0.0.1",
             "user": user or "Administrator",
             "pw": pw or "password",
             "bucket": bucket or "membrane"}

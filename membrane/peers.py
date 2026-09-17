@@ -90,7 +90,7 @@ class PeerSubstrate:
             from couchbase.options import (ClusterOptions,
                                            ClusterTimeoutOptions)
             conn = os.environ.get("COUCHBASE_CONN_STRING",
-                                  "couchbase://localhost")
+                                  "couchbase://127.0.0.1")
             user = os.environ.get("COUCHBASE_USER", "Administrator")
             pw = os.environ.get("COUCHBASE_PASSWORD", "password")
             bucket_name = os.environ.get("COUCHBASE_BUCKET", "cortex-core")
