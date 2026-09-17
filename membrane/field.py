@@ -1052,7 +1052,7 @@ class ExemplarStore:
         from couchbase.cluster import Cluster
         from couchbase.auth import PasswordAuthenticator
         from couchbase.options import ClusterOptions
-        conn = os.environ.get("COUCHBASE_CONN_STRING", "couchbase://localhost")
+        conn = os.environ.get("COUCHBASE_CONN_STRING", "couchbase://127.0.0.1")
         user = os.environ.get("COUCHBASE_USER", "Administrator")
         pw = os.environ.get("COUCHBASE_PASSWORD", "password")
         bucket = os.environ.get("COUCHBASE_BUCKET", "membrane")
@@ -1149,7 +1149,7 @@ class ExemplarStore:
            ephemeral bucketType: the server TTLs docs, nothing persists.
         "" when nothing works -> callers fall back to the sibling collection
         inside the canon bucket (today's semantics, still correct)."""
-        conn = os.environ.get("COUCHBASE_CONN_STRING", "couchbase://localhost")
+        conn = os.environ.get("COUCHBASE_CONN_STRING", "couchbase://127.0.0.1")
         user = os.environ.get("COUCHBASE_USER", "Administrator")
         pw = os.environ.get("COUCHBASE_PASSWORD", "password")
         host = conn.replace("couchbase://", "").split("/")[0].split(":")[0]
@@ -1540,15 +1540,25 @@ class ExemplarStore:
             delta_keys = {r["id"] for r in qr}
         except Exception:
             delta_keys = set()
-        # the delta: backend keys the snapshot has never seen (new rows)
-        fetch_keys = delta_keys - snapshot_keys
-        keys_sets.append(delta_keys - fetch_keys)   # snapshot-known: bookkeeping only
-        keys_sets.append(fetch_keys)                # the delta: fetch
+        # THE FETCH SET (the 0-exemplar boot bug's fix): a fresh boot's
+        # RAM store holds NOTHING -- every key the field should carry must
+        # be FETCHED (the snapshot's job is the save()-side bookkeeping
+        # (cb_keys -- what is known current on the backend), NOT the
+        # hydrate's fetch filter. The fetch = the ANN neighborhood + the
+        # own patch + the commons (the delta_keys scan) -- bounded by the
+        # neighborhood radius + the own patch's size, which IS the
+        # working-set design.
+        fetch_keys = set(delta_keys)
+        keys_sets.append(delta_keys)                # own patch + commons: fetch
         keys_sets.append(snapshot_keys)             # snapshot joins the bookkeeping
 
         # 3. THE UNION + the batched KV fetch (the boot's only real fetch)
         all_known = set().union(*keys_sets) if keys_sets else set()
         keys = sorted(all_known)
+        rows: list[dict] = []
+        if keys:
+            for lo in range(0, len(keys), 1000):
+                batch = keys[lo:lo + 1000]
         rows: list[dict] = []
         if keys:
             for lo in range(0, len(keys), 1000):
@@ -1702,6 +1712,7 @@ class ExemplarStore:
         reached."""
         if self._cb is None or embedder is None or not self.exemplars:
             return 0
+        my = self.origin
         try:
             from .ann import ann_search
             import numpy as _np
@@ -2266,7 +2277,7 @@ class ExemplarStore:
         load_couchbase's convention."""
         import base64
         import urllib.request
-        conn = os.environ.get("COUCHBASE_CONN_STRING", "couchbase://localhost")
+        conn = os.environ.get("COUCHBASE_CONN_STRING", "couchbase://127.0.0.1")
         user = os.environ.get("COUCHBASE_USER", "Administrator")
         pw = os.environ.get("COUCHBASE_PASSWORD", "password")
         host = conn.replace("couchbase://", "").replace("http://", "") \
@@ -2307,7 +2318,7 @@ class ExemplarStore:
                       file=__import__("sys").stderr)
             except Exception as e:
                 conn = os.environ.get("COUCHBASE_CONN_STRING",
-                                      "couchbase://localhost")
+                                      "couchbase://127.0.0.1")
                 print(f"[membrane] Couchbase unreachable ({e}). Fix: check the "
                       f"server is up and COUCHBASE_CONN_STRING / COUCHBASE_USER "
                       f"/ COUCHBASE_PASSWORD / COUCHBASE_BUCKET are set "
@@ -2345,7 +2356,7 @@ class ExemplarStore:
                 # move: print the error clearly and exit -- the operator
                 # starts couchbase first, then relaunches.
                 conn = os.environ.get("COUCHBASE_CONN_STRING",
-                                      "couchbase://localhost")
+                                      "couchbase://127.0.0.1")
                 user = os.environ.get("COUCHBASE_USER", "Administrator")
                 print(f"\n{'=' * 60}", file=__import__("sys").stderr)
                 print(f"membrane cannot start: couchbase is not reachable.",
