@@ -4,8 +4,7 @@
 
 > A **text-based hypervector Ollama proxy hippocampus for opencode** that
 > learns as you go, shares a Couchbase-backed team memory, and **orchestrates
-> LLM calls** between local and cloud inference — or **replaces the LLM
-> completely** for mundane problems.
+> LLM calls** between local and cloud inference.
 
 A **Python lab** (sibling of `rosetta-check`, the Java linter, and
 `cortex-experiment`, the proposals/docs). It runs as a local HTTP server on
