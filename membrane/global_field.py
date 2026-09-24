@@ -21,7 +21,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from .field import Exemplar, ExemplarStore
+from .field import Exemplar, ExemplarStore, _seat_get
 import numpy as np
 
 
@@ -283,7 +283,7 @@ class GlobalField:
 
     # ---- the operator's hand ------------------------------------------------
     def promote(self, situation: str, action: str, vec: list[float],
-                origin: str = "operator") -> Exemplar:
+                origin: str = "operator", seat: str = "") -> Exemplar:
         """Operator promotes one note into the commons. Dedup-guarded (the
         same note is not appended twice); returns the exemplar. The promote is
         also VOUCHED for in this field's ledger shard -- the slice-2 consensus
@@ -302,7 +302,8 @@ class GlobalField:
                 return ex                      # already here (dedup, no grow)
         ex = Exemplar(situation=situation, action=action, outcome="pending",
                       vec=v, safe=True, scope="global", owner=self.fid,
-                      home=self.fid, votes=[(self.fid, _now())])
+                      home=self.fid, votes=[(self.fid, _now())],
+                      seat=str(seat or ""))
         ex.outcome = origin
         self.store.append(ex)
         self.save()
@@ -335,7 +336,7 @@ class GlobalField:
         """Promote a live local exemplar (its situation/action/vec) into the
         commons, crediting the local field as origin. Idempotent on text."""
         ex = self.promote(ex_ref.situation, ex_ref.action, list(ex_ref.vec),
-                          origin="promoted")
+                          origin="promoted", seat=_seat_get(ex_ref))
         self._vouch(ex)          # a second field promoting the same text = a vote
         return ex
 

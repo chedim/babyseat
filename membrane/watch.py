@@ -322,7 +322,8 @@ class WatchBoard:
         for e in pend[:6]:
             parts.append(f"- watch {e['label']!r} (sim {e['sim']}, "
                          f"exemplar #{e['ex_idx']}):\n"
-                         f"    Q: {e['situation']}\n    A: {e.get('action', '')}")
+                         f"    situation: {e['situation']}\n"
+                         f"    response: {e.get('action', '')}")
         if len(pend) > 6:
             parts.append(f"- ... and {len(pend) - 6} more (see `membrane: watches`)")
         return pend, "\n".join(parts)

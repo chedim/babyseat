@@ -23,7 +23,8 @@ from .entities import CLASSES, CLASS_COMPONENT, QuantumEntity
 
 _ENTITY_SYSTEM = (
     "You derive ENTITIES from compacted memory exchanges. The user message "
-    "holds a topic plus Q/A exchanges. Return a JSON array (max 5 items) of "
+    "holds a topic plus situation-response exchanges. Return a JSON array "
+    "(max 5 items) of "
     "discrete durable entities: reusable components, settled decisions, "
     "failure modes, tools, models, goals. Each item: {\"class\": one of "
     f"{', '.join(CLASSES)}, \"name\": short id (a file, symbol, model name, "

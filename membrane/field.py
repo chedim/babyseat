@@ -63,6 +63,14 @@ class Exemplar:
     # (bakllava/whisper/toys from the dumb-model era) -- the ordinary
     # two-authority boundary applies: the model's first contest restores.
     model: str = ""
+    # WHICH membrane seat (proxy instance) lived this exchange -- the peer
+    # registry's seat id ("proxy-<port>"), stamped at learn time from
+    # server_ref. Empty for legacy rows and bare Membranes (tests, the cell
+    # pool): single-seat provenance is noise, so the recall render only
+    # surfaces the tag when it is non-empty. Backward/forward compatible:
+    # older readers keep it via the extra-spread window; the wire trim drops
+    # the empty key so pre-seat JSON stays byte-identical.
+    seat: str = ""
     # True when this scene was authored by the cell's OWN n-gram voice (the
     # cells-act chronicle / --speak ngram path), NOT by the LLM. Such beats are
     # absorbed into the field (so the world still grows + recall stays rich) but
@@ -322,6 +330,10 @@ def _ex_to_wire(ex: "Exemplar", stamp: bool = True) -> dict:
     # the ephemeral flag: legacy shape too -- only CANDIDATES carry it
     if not rec.get("ephemeral"):
         rec.pop("ephemeral", None)
+    # the seat stamp: legacy shape too -- only cells that RODE a seat carry
+    # the key, so pre-seat JSON stays byte-identical
+    if not rec.get("seat"):
+        rec.pop("seat", None)
     extra = getattr(ex, "extra", None) or {}
     for k, v in extra.items():
         if not k.startswith("_"):
@@ -352,6 +364,26 @@ def _situ_key(situation: str) -> str:
     arbitration finds them."""
     import hashlib
     return hashlib.sha1(" ".join(situation.split()).encode("utf-8")).hexdigest()[:20]
+
+
+def _seat_get(ex: "Exemplar") -> str:
+    """A cell's seat stamp ("" = legacy/unknown): the dataclass field first,
+    falling back to the extra-spread copy (rows written before the field
+    upgrade still carry it as a wire key)."""
+    s = str(getattr(ex, "seat", "") or "")
+    if s:
+        return s
+    try:
+        return str((getattr(ex, "extra", None) or {}).get("seat") or "")
+    except Exception:
+        return ""
+
+
+def _seat_label(ex) -> str:
+    """The recall-time seat stamp: `[seat: proxy-8087]`; empty for seatless
+    cells (legacy rows, bare stores) -- single-seat provenance is noise."""
+    s = _seat_get(ex)
+    return f" [seat: {s}]" if s else ""
 
 
 def _eph_key(ex: "Exemplar") -> str:
@@ -625,7 +657,9 @@ class ExemplarStore:
                       now: float | None = None,
                       w_rec: float = 0.15, tau: float = 6 * 3600.0,
                       w_conf: float = 0.05, tau_conf: float = 7 * 86400.0,
-                      why_boost: float = 0.0
+                      why_boost: float = 0.0,
+                      vsa_lane=None, vsa_query: str | None = None,
+                      w_vsa: float = 0.08
                       ) -> list[tuple[Exemplar, float]]:
         """DURABLE + EPHEMERAL, recency-weighted (lab E3): a fresh candidate
         outranks stale canon for the same need; canon recall is untaxed when
@@ -648,7 +682,16 @@ class ExemplarStore:
         runtime.py) -- cells stamped extra["why"] (learn-time reason cells)
         take the bonus, so the distilled reason outranks its what-
         neighbors at a near-tie. Deliberately w_conf-scale: a strong
-        what-match still beats a weak why-match."""
+        what-match still beats a weak why-match.
+
+        THE VSA LANE BONUS (the rosetta transposition, the supplement):
+        ``vsa_lane`` + ``vsa_query`` (the query TEXT) arm the token-
+        geometry lane: rows carrying a same-codebook hypervector state
+        take a small bonus (w_vsa-scale -- the cosine lane stays primary;
+        the E4 lesson: a quantized geometry informs, never rules). A row
+        whose TOKEN SHAPE matches the query even when its pooled mxbai
+        vec does not -- the order-sensitive lane's unique catch -- gets
+        its chance at a near-tie."""
         if not self.exemplars:
             return []
         now = float(now if now is not None else time.time())
@@ -660,6 +703,27 @@ class ExemplarStore:
         pool = [e for i, e in enumerate(self.exemplars) if i not in dead]
         if not pool:
             return []
+        # the VSA lane's contribution: Hamming sims over same-codebook
+        # rows (computed once; a per-row bonus lookup below). Failure in
+        # the lane is silent -- the cosine answer stands alone.
+        vsa_sims: dict[int, float] = {}
+        if vsa_lane is not None and vsa_query:
+            _qs = None
+            try:
+                _qs = vsa_lane.encode(vsa_query)
+            except Exception:
+                _qs = None
+            if _qs is not None:
+                cb_id = vsa_lane.codebook.id
+                from .vsa import unpack_state as _unpack, hamming as _ham
+                for i, ex in enumerate(pool):
+                    v = (getattr(ex, "extra", None) or {}).get("vsa")
+                    if not isinstance(v, dict) or v.get("cb") != cb_id:
+                        continue
+                    try:
+                        vsa_sims[i] = 1.0 - _ham(_qs, _unpack(v["s"]))
+                    except Exception:
+                        continue
         V = np.array([e.vec for e in pool], dtype=float)
         Vn = V / (np.linalg.norm(V, axis=1, keepdims=True) + 1e-12)
         sims_all = Vn @ qn
@@ -678,6 +742,12 @@ class ExemplarStore:
                     sim += w_conf * float(np.exp(-age / tau_conf))
             if why_boost > 0.0 and (getattr(ex, "extra", None) or {}).get("why"):
                 sim += why_boost
+            # THE VSA BONUS: only when the token state AGREES with the
+            # cosine (both lanes say near) or rescues a near-tie; a
+            # Hamming-far row is never penalized (the lane informs).
+            v_sim = vsa_sims.get(i)
+            if v_sim is not None and v_sim >= 0.70:
+                sim += w_vsa * v_sim
             rows.append((ex, sim))
         rows.sort(key=lambda t: -t[1])
         return rows[:k]
@@ -847,6 +917,39 @@ class ExemplarStore:
         k = min(k, len(pool))
         idx = np.argsort(-sims)[:k]
         return [(pool[i], float(sims[i])) for i in idx]
+
+    def vsa_top_k(self, lane, q_state: "np.ndarray", k: int = 5,
+                  canon_only: bool = False, live_only: bool = False
+                  ) -> list[tuple[Exemplar, float]]:
+        """THE VSA LANE'S ANSWER: Hamming similarity over rows that carry
+        a same-codebook state (extra["vsa"]). Rows without vsa data (or
+        from a forked codebook id) are INVISIBLE here -- the cosine lane
+        rules them; this is the supplement, never the replacement. The
+        similarity is 1 - (differing-bit fraction); callers merge it
+        with cosine at their own weights."""
+        if q_state is None or not self.exemplars:
+            return []
+        dead = self._superseded_set() if live_only else set()
+        out: list[tuple[Exemplar, float]] = []
+        from .vsa import hamming as _hamming
+        cb_id = getattr(getattr(lane, "codebook", None), "id", None)
+        if not cb_id:
+            return []
+        for i, ex in enumerate(self.exemplars):
+            if i in dead or (canon_only and ex.ephemeral):
+                continue
+            v = (getattr(ex, "extra", None) or {}).get("vsa")
+            if not isinstance(v, dict) or v.get("cb") != cb_id:
+                continue
+            try:
+                from .vsa import unpack_state
+                s = unpack_state(v["s"])
+            except Exception:
+                continue
+            sim = 1.0 - _hamming(q_state, s)
+            out.append((ex, sim))
+        out.sort(key=lambda t: -t[1])
+        return out[:k]
 
     def _ann_top_k(self, q: np.ndarray, k: int, canon_only: bool,
                    live_only: bool) -> list[tuple[Exemplar, float]] | None:
@@ -2566,6 +2669,7 @@ class MaskedExemplarStore:
                           outcome=r.outcome,
                           vec=list(self.vec_view(r)), safe=r.safe,
                           tags=list(getattr(r, "tags", []) or []),
+                          seat=_seat_get(r),
                           extra=dict(getattr(r, "extra", None) or {}))
             out.exemplars.append(ex)
         return out

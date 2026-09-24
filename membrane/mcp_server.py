@@ -47,8 +47,8 @@ TOOLS: list[dict] = [
         "name": "membrane_query",
         "description": (
             "Read membrane's long-term memory: the nearest past exchanges for "
-            "a topic (Q/A pairs with similarity and answered-model "
-            "provenance). Read-only, no model call, never learned. Use "
+            "a topic (situation-response pairs with similarity, answered-model "
+            "and seat provenance). Read-only, no model call, never learned. Use "
             "before redoing known work, when past-session context would "
             "help, or to check what the field already learned."),
         "inputSchema": {
@@ -464,9 +464,11 @@ def tool_query(args: dict, port: int) -> str:
         via = f" [via {h['model']}]" if h.get("model") else ""
         tag = h.get("outcome") or "pending"
         src = h.get("src") or "user"
-        lines.append(f"({h['sim']:.2f} [{tag}]{via} [src: {src}]) "
-                     f"Q: {h['situation']}\n"
-                     f"    A: {h['action']}")
+        seat = h.get("seat") or ""
+        seat_l = f" [seat: {seat}]" if seat else ""
+        lines.append(f"({h['sim']:.2f} [{tag}]{via}{seat_l} [src: {src}]) "
+                     f"situation: {h['situation']}\n"
+                     f"    response: {h['action']}")
     return "\n".join(lines)
 
 
@@ -532,8 +534,8 @@ def tool_learn(args: dict, port: int) -> str:
     ex = out.get("exemplar") or {}
     return (f"Learned as exemplar #{out.get('ex_idx')} "
             f"(no model call). Field now {out.get('field_size')}.\n"
-            f"    Q: {ex.get('situation', '')[:280]}\n"
-            f"    A: {(ex.get('action') or '')[:280]}")
+            f"    situation: {ex.get('situation', '')[:280]}\n"
+            f"    response: {(ex.get('action') or '')[:280]}")
 
 
 def tool_forget(args: dict, port: int) -> str:

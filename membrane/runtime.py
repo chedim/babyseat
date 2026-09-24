@@ -81,7 +81,8 @@ import numpy as np
 from .embed import OllamaEmbedder
 from .field import Exemplar, ExemplarStore
 from .gate import decide, _action_overlap
-from .token_timeline import TokenTimeline
+from .token_timeline import TokenTimeline, tokenize as _shared_tokenize
+from . import binding as _binding
 from .generator import FieldNGram, MIN_ACTIONS as _GEN_MIN_ACTIONS, _tok as _gen_tokens
 from .variety import thermo_state
 from .cast import Cast
@@ -567,6 +568,16 @@ def _src_label(ex) -> str:
     return f"[src: {s} -- {why}]"
 
 
+def _seat_of(mem) -> str:
+    """The calling seat's registry id ("proxy-<port>", the peers substrate's
+    identity) via server_ref. Empty for bare Membranes (tests, the cell
+    pool): single-seat provenance is noise, so cells born seatless render
+    without the seat tag."""
+    srv = getattr(mem, "server_ref", None)
+    peers = getattr(srv, "peers", None) if srv is not None else None
+    return str(getattr(peers, "seat_id", "") or "")
+
+
 class Membrane:
     """The absorb/escalate runtime over a local exemplar field, with passive self-training.
 
@@ -704,11 +715,29 @@ class Membrane:
         # two-tier port (dedicated ephemeral bucket, delta-seeded hydration)
         # are what retired the old opt-in caution.
         ephemeral: bool = True,
+        # ---- pronoun binding (membrane/binding.py, capture-time deictic fix) ----
+        # "turn it off" for the kettle and for the lamp embed identically (sim
+        # 0.9x): a pronoun's referent lives OUTSIDE the sentence, so the vector
+        # cannot carry it. When pronoun_bind is on, a query whose pronoun
+        # resolves against the recent turns' text is REWRITTEN with the referent
+        # substituted before embed+store ("turn it off" -> "turn lamp off"),
+        # deterministically ($0, no model): same lesson as the capture-time
+        # strip -- vec must match stored text. The gate is symmetric: a recalled
+        # cell whose binding CONFLICTS with the turn's is forced to escalate
+        # (a wrong binding must never replay a device action; a missed binding
+        # just escalates, safe). Bindings ride the row as extra["bind"]
+        # (extra["sit_raw"] keeps the user's original words).
+        pronoun_bind: bool = True,
     ) -> None:
         if ephemeral is None:
             ephemeral = os.environ.get("MEMBRANE_EPHEMERAL", "1") \
                 .strip().lower() in ("1", "true", "yes", "on")
         self.ephemeral_tier = bool(ephemeral)
+        self.pronoun_bind = bool(pronoun_bind)
+        # the binding context: the last few USER texts (raw, reminder-stripped
+        # at use) for capture-time referent resolution. Ring only -- the
+        # antecedent lives in the immediate dialogue.
+        self._bind_ctx: deque = deque(maxlen=4)
         self.responder = responder
         self.field_path = Path(field_path)
         self.audit_path = Path(audit_path)
@@ -730,6 +759,24 @@ class Membrane:
         # mode and the distiller export. Local dict + lazy cb hydration:
         # the timeline is a derived structure, the field remains the truth.
         self.timeline = TokenTimeline()
+        # THE VSA TOKEN LANE (the rosetta transposition, default-on):
+        # each turn's text -> a bipolar hypervector state (the codebook is
+        # the embedder's geometry binarized; the recurrence is order-
+        # sensitive recency-weighted binding). Stored on the row
+        # (extra["vsa"]) and answered by Hamming (the supplement lane);
+        # its trajectory divergence is the advisory surprise the gate
+        # reads. The timeline is the DISCRETE readout of the same
+        # capture; this lane is the CONTINUOUS one -- the field remains
+        # the truth. MEMBRANE_VSA=0 runs lane-less (no behaviour change).
+        self.vsa_lane = None
+        try:
+            from .vsa import VSALane, enabled as _vsa_enabled
+            if _vsa_enabled():
+                self.vsa_lane = VSALane.make(
+                    embedder=self.embedder,
+                    data_dir=self.field_path.parent)
+        except Exception:
+            self.vsa_lane = None    # a lane error never blocks the boot
         # the character ledger: scenes tag to walking regions; each character
         # carries a state_vec (EMA of its tagged scenes). Loaded alongside the
         # field (a separate -cast.json) and saved whenever the cast mutates.
@@ -879,6 +926,15 @@ class Membrane:
         Returns ``(verdict, vec, query, reasked_idx)``. ``vec is None`` signals an
         empty query (the caller escalates without logging, as ``_escalate`` does).
 
+        PRONOUN BINDING (membrane/binding.py): the returned ``query`` is the
+        BOUND text when the query's pronoun resolved against the recent turns
+        ("turn it off" -> "turn lamp off"); the verdict carries ``binding``
+        (for the learn-time stamp) and ``query_raw`` (the user's original
+        words). The embed matches the stored text; an UNRESOLVED pronoun
+        query embeds raw but flags ``binding_failed``, and a recalled cell
+        whose stored binding conflicts with this turn's is forced to
+        escalate (a wrong device must never replay).
+
         The verdict also carries the field's thermodynamic state at decision time
         (``eff_rank``/``spectrum_entropy``/``free_energy``/``rank_ratio``/
         ``safe_frac``) and the effective threshold used (``sim_min_eff``) -- the
@@ -899,6 +955,25 @@ class Membrane:
         if not query.strip():
             return ({"verdict": "escalate", "reason": "empty query", "sim": 0.0,
                      "nov": None, "ex_idx": None}, None, query, None)
+        # ---- PRONOUN BINDING (membrane/binding.py, capture-time deictic fix) ----
+        # A pronoun's referent lives OUTSIDE the sentence: "turn it off" for the
+        # kettle and for the lamp embed identically, so the field merges them or
+        # replays the wrong device's answer with high confidence. Resolve the
+        # query's pronoun against the recent turns' text (deterministic, $0) and
+        # rewrite BEFORE the embed ("turn it off" -> "turn lamp off"): the vec
+        # matches the stored text (the same lesson as the capture-time strip).
+        # Unresolved (pronoun, no antecedent): embed raw + flag -- the gate
+        # below escalates any conflicting cell rather than guessing.
+        binding = None
+        binding_failed = False
+        query_raw = query
+        if self.pronoun_bind and _binding.has_pronoun(query):
+            prev = list(reversed(self._bind_ctx))     # newest first
+            binding = _binding.resolve(query, prev)
+            if binding is not None:
+                query = _binding.substitute(query, binding)
+            else:
+                binding_failed = True
         # TIME-AWARE EMBEDDINGS (the operator's call): the embed input carries
         # the universal full timestamp so the vector encodes content + era.
         # The stored query stays clean; the geometry carries the timeline.
@@ -970,6 +1045,24 @@ class Membrane:
         verdict["safe_frac"] = thermo["safe_frac"]
         verdict["sim_min_eff"] = sim_min_eff
         verdict["drift"] = verdict_drift
+        # THE VSA ADVISORY (the rosetta transposition): the token lane's
+        # trajectory surprise -- how far THIS turn's hypervector state
+        # diverges from the recent ones. ADVISORY ONLY: the number rides
+        # the verdict (audit + the plasticity scaling at learn time); a
+        # verdict NEVER flips on it (the lane discipline: supplement,
+        # never replace -- the cosine lane rules the gate).
+        try:
+            if self.vsa_lane is not None:
+                _vs = self.vsa_lane.surprise(query)
+                if _vs is not None:
+                    verdict["vsa_surprise"] = _vs
+        except Exception:
+            pass
+        # the binding rides the verdict (the learn-time stamp + the audit read
+        # it); binding_failed marks an unresolved pronoun for the gate rule.
+        verdict["binding"] = binding
+        verdict["binding_failed"] = binding_failed
+        verdict["query_raw"] = query_raw
         v = verdict["verdict"]
         # ---- the auto-settle loop (repeat-k) ----
         # A near-identical query (cosine >= settle_sim, no re-ask in flight)
@@ -1032,6 +1125,45 @@ class Membrane:
                        "sim_min": sim_min_eff, "spectrum_entropy": thermo["spectrum_entropy"],
                        "free_energy": thermo["free_energy"], "safe_frac": thermo["safe_frac"],
                        "sim_min_eff": sim_min_eff}
+        # ---- THE BINDING CONFLICT GUARD (the failure asymmetry) ----
+        # A stored cell whose binding disagrees with THIS turn's pronoun must
+        # never serve its action -- on ANY lane: the act replay, the
+        # auto-settle replay, the exact-dup replay (opencode serves
+        # `near_idx` on a plain escalate at sim >= replay_sim), and the
+        # sketch near-dup hint (stage "sketch", ex_idx set). "turn it off"
+        # for the kettle and the lamp are text-equal; only the binding tells
+        # them apart. On a conflict (or an unresolved pronoun against a BOUND
+        # cell -- a replay would be a guess) the verdict is rewritten to a
+        # PLAIN escalate: no action, no hint, no near_idx -- every downstream
+        # replay lane closes and the model call decides with full context.
+        # Unbound queries (explicit referents) and legacy unbound cells are
+        # untouched (geometry decides; binding.conflict encodes the matrix).
+        if self.pronoun_bind:
+            cand = verdict.get("ex_idx")
+            if cand is None:
+                cand = verdict.get("near_idx")
+            if (isinstance(cand, int) and 0 <= cand < len(self.store)
+                    and v in ("act", "settle-replay", "escalate",
+                              "escalate-with-hint")):
+                cb = (self.store.exemplars[cand].extra or {}).get("bind")
+                if _binding.conflict(query_raw, binding, cb):
+                    verdict = {"verdict": "escalate",
+                               "reason": ("binding conflict: stored answer was "
+                                          "for a different referent"
+                                          if not binding_failed else
+                                          "binding unresolved: not replaying a guess"),
+                               "sim": verdict.get("sim"), "nov": verdict.get("nov"),
+                               "ex_idx": None, "near_idx": None,
+                               "near_safe": False,
+                               "eff_rank": thermo["eff_rank"],
+                               "rank_ratio": thermo["rank_ratio"],
+                               "spectrum_entropy": thermo["spectrum_entropy"],
+                               "free_energy": thermo["free_energy"],
+                               "safe_frac": thermo["safe_frac"],
+                               "sim_min_eff": sim_min_eff,
+                               "binding": binding,
+                               "binding_failed": binding_failed,
+                               "query_raw": query_raw}
         return verdict, vec, query, reasked_idx
 
     def _confirm_on_use(self, vec: np.ndarray, query: str,
@@ -1150,6 +1282,16 @@ class Membrane:
         action so ``_response_text`` extracts it; ``_learn`` to append+audit; ``_remember``
         for re-ask-ring parity with ``handle``/``_observe_forward``).
 
+        THE CAPTURE-TIME STRIP (the stateless-LLM lesson): opencode's system-reminder
+        spans ride INSIDE the user turn and used to be stored verbatim -- a stale
+        '# Plan Mode ACTIVE' re-armed as live instruction whenever recall/recon
+        served the cell (in --no-context the field is the ONLY voice: the stale
+        instruction won). The situation is stripped HERE, at birth, before the
+        embed -- the vec matches the stored text, and every downstream lane
+        (recall, recon, banner, peers) is safe by construction instead of by
+        per-lane screens. Kill switch MEMBRANE_CAPTURE_STRIP=0 reverts. The
+        audit log keeps the raw bytes (the inspectable copy).
+
         The ``vec`` is embedded + veiled exactly as ``gate_turn`` does, so the stored
         ``Exemplar.vec`` is consistent with the rest of the field (dedup / top_k / decide
         assume veiled vectors). The cross-pull self-extinguishing guard (text-based, in
@@ -1160,11 +1302,46 @@ class Membrane:
         directly (rt:837, so the key must be a string) and every other field via ``.get``
         (rt:838-849 -> None when absent). ``"teed-pair"`` distinguishes these decisions in
         the audit from ``act``/``escalate``. Returns the new exemplar index, a dup index
-        ``_learn`` merged into, or None when a guard skipped the append.
+        ``_learn`` merged into, or None when a guard skipped the append (now also when
+        the situation was machinery-only and the strip left nothing).
         """
+        strip_ok = os.environ.get("MEMBRANE_CAPTURE_STRIP", "1") != "0"
+        if strip_ok:
+            try:
+                from .rag import strip_machinery_text
+                situation = strip_machinery_text(situation)
+            except Exception:
+                pass                      # never let hygiene break the intake
+        if not (situation or "").strip():
+            return None                   # nothing but machinery: no cell
+        # capture-time binding parity with gate_turn: a teed "turn it off" is
+        # stored BOUND (vec matches the stored text) and stamped, so the gate's
+        # conflict rule sees it exactly as it sees a chat-captured cell.
+        _b = None
+        if self.pronoun_bind and _binding.has_pronoun(situation):
+            _b = _binding.resolve(situation, list(reversed(self._bind_ctx)))
+            if _b is not None:
+                _qr = situation
+                situation = _binding.substitute(situation, _b)
+            else:
+                _qr = None
+        else:
+            _qr = None
         vec = self._nudge(self.embedder.embed([situation])[0])
         verdict = {"verdict": "teed-pair", "reason": "pre-completed pair",
-                   "sim": None, "nov": None, "ex_idx": None}
+                   "sim": None, "nov": None, "ex_idx": None,
+                   "binding": _b, "binding_failed": False,
+                   "query_raw": _qr}
+        # THE CHAT->TOKEN FEED (the one-capture covenant, completed): the
+        # fn-stamp bridge feeds the table for actuation cells; a teed CHAT
+        # cell feeds it here -- both structures see the same stream, one
+        # tokenizer pass, two readouts (counts + geometry).
+        try:
+            toks = _shared_tokenize(situation)
+            if len(toks) > 1:
+                self.timeline.observe(toks, src_turn="chat-capture")
+        except Exception:
+            pass
         resp = _chat_response("teed", action)
         ex_idx = self._learn(situation, vec, verdict, resp, unsafe,
                              would_absorb=False, src=src)
@@ -1649,6 +1826,7 @@ class Membrane:
                                     learned=False, dup=True,
                                     would_absorb=would_absorb)
                         return dup_idx
+                    _seat_s = _seat_of(self)
                     fresh = Exemplar(
                         situation=query, action=content, outcome="pending",
                         vec=(_unit_list(vec) if normalize else vec.tolist()),
@@ -1656,7 +1834,9 @@ class Membrane:
                         model=str(((verdict.get("route") or {}).get("route")) or ""),
                         tags=tags or [],
                         self_authored=self_authored,
-                        extra={"src": _src_of(src, fallback=dup)},
+                        seat=_seat_s,
+                        extra={"src": _src_of(src, fallback=dup),
+                               **({"seat": _seat_s} if _seat_s else {})},
                     )
                     # THE PLASTICITY (the membrain upgrade, phase A):
                     # the capture's TTL scales by the gate's top-1 sim
@@ -1724,6 +1904,21 @@ class Membrane:
                                 would_absorb=would_absorb, variety_skip=True)
                     return None
             extra: dict = {"src": _src_of(src)}
+            # THE SEAT STAMP (the operator's provenance ask): WHICH seat's
+            # membrane lived this exchange -- the peers registry id. Rides
+            # the row so recall can render "from seat X"; empty on bare
+            # Membranes (single-seat provenance is noise).
+            try:
+                _seat = _seat_of(self)
+                if _seat:
+                    extra["seat"] = _seat
+            except Exception:
+                pass
+            # the capture's pronoun binding rides the row: extra["bind"] is the
+            # binding the situation was written under (the gate's conflict rule
+            # reads it at recall), extra["sit_raw"] preserves the user's
+            # original words (the bound situation is derived text).
+            _binding.stamp(extra, verdict)
             # capture-time entity harvest (deterministic, $0): the precise
             # retrieval axis -- extra["entities"] rides the field row itself,
             # so every store (JSON + couchbase) carries its own tags. The
@@ -1768,6 +1963,22 @@ class Membrane:
                         pass
             except Exception:
                 pass
+            # THE VSA STAMP (the rosetta transposition): the situation's
+            # hypervector state rides extra["vsa"] (packed, codebook-id
+            # stamped) so the lane's Hamming recall + surprise signal can
+            # answer later turns. One capture, two readouts: the SAME
+            # tokenizer feeds TokenTimeline above (counts) and this lane
+            # (geometry); the field cell stays the truth. None on failure
+            # (the row simply rides cosine-only).
+            try:
+                if self.vsa_lane is not None:
+                    from .vsa import pack_state
+                    _st = self.vsa_lane.encode(query)
+                    if _st is not None:
+                        extra["vsa"] = {"cb": self.vsa_lane.codebook.id,
+                                        "s": pack_state(_st)}
+            except Exception:
+                pass
             # THE WHY STAMP (peer suggestion #2): the situation anchors near
             # "operator explains design intent" -> the cell is a REASON cell
             # (the thing a future why-ask needs first). Zero model calls: the
@@ -1796,6 +2007,7 @@ class Membrane:
                 model=str(((verdict.get("route") or {}).get("route")) or ""),
                 tags=tags or [],
                 self_authored=self_authored,
+                seat=str(extra.get("seat") or ""),
                 extra=extra,
             )
             if getattr(self, "ephemeral_tier", False):
@@ -1803,12 +2015,28 @@ class Membrane:
                 # capture leaks nothing into canon). Silence expires by TTL;
                 # promotion happens only on the evidence paths below.
                 # THE PLASTICITY: the surprise (the gate's sim) scales the
-                # TTL (a repeat short, a novel shape long).
+                # TTL (a repeat short, a novel shape long). The VSA lane's
+                # advisory surprise modulates in the SAME direction: a
+                # token-shape the field has recently massaged through a
+                # similar trajectory reads duller (shorter TTL), a
+                # divergent trajectory reads novel (longer) -- small
+                # multiplicative nudges, the cosine sim stays primary.
                 _v_sim = verdict.get("sim")
+                _surprise = (float(_v_sim) if isinstance(_v_sim,
+                                                         (int, float))
+                             else None)
+                _vsa = verdict.get("vsa_surprise")
+                if _vsa is not None and _v_sim is not None:
+                    # surprise near 0 (a seen shape) -> duller; high ->
+                    # slightly novel-er. The bars mirror SURPRISE_LO/HI.
+                    if _vsa <= 0.10:
+                        _v_sim = min(1.0, _v_sim * 1.15)
+                    elif _vsa >= 0.40:
+                        _v_sim = max(0.0, _v_sim * 0.85)
                 self.store.capture_ephemeral(
                     fresh,
                     surprise=(float(_v_sim) if isinstance(_v_sim,
-                                                         (int, float))
+                                                          (int, float))
                               else None))
                 self.store.save(self.field_path)
             else:
@@ -1872,7 +2100,11 @@ class Membrane:
                "free_energy": verdict.get("free_energy"),
                "safe_frac": verdict.get("safe_frac"),
                "sim_min_eff": verdict.get("sim_min_eff"),
-               "drift": verdict.get("drift")}
+               "drift": verdict.get("drift"),
+               # the VSA lane's advisory surprise (the trajectory's
+               # divergence from the recent ones; the gate read it,
+               # never flipped a verdict on it). None = lane-less.
+               "vsa_surprise": verdict.get("vsa_surprise")}
         with self.audit_path.open("a") as f:
             f.write(json.dumps(rec) + "\n")
 
@@ -1959,6 +2191,11 @@ class Membrane:
         The entry also carries the ROUTED model (the orchestrator's choice)
         so an outcome can vote against the ANSWERING model, not just the
         exemplar -- the record that feeds the router's win/loss counts."""
+        # the binding context grows from the USER'S OWN words (the raw text,
+        # before any rewrite): the antecedent of the NEXT turn's "it" is what
+        # the user named here. Machinery never enters the deque.
+        self._bind_ctx.append(_binding.strip_reminders(verdict.get("query_raw")
+                                                       or query))
         self._recent.append({
             "query": query, "vec": _unit_list(vec),
             "verdict": verdict["verdict"], "ex_idx": ex_idx,

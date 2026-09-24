@@ -65,7 +65,7 @@ Rules of the lane:
 
 ## Reading the answer
 
-Success replies `written as exemplar #N, safe=True` and shows the stored Q/A.
+Success replies `written as exemplar #N, safe=True` and shows the stored situation/response.
 It is then retrievable via the membrane-query-field skill and will surface as
 RAG context in future turns on the topic.
 
