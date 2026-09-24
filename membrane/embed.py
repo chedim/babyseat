@@ -11,6 +11,7 @@ Uses only stdlib (urllib) + numpy, so the project stays a single pip install (nu
 from __future__ import annotations
 
 import json
+import os
 import threading
 import urllib.request
 import urllib.error
