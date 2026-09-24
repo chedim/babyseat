@@ -1118,20 +1118,36 @@ class ExemplarStore:
 
     def _resolve_eph_bucket(self) -> str:
         """Which bucket holds the ephemeral tier. Resolution order:
-        1. explicit COUCHBASE_EPHEMERAL_BUCKET (must exist on the cluster)
-        2. "<canon>-ephemeral" (the cortex-core/cortex-ephemeral convention)
-        3. any existing bucket of type 'ephemeral'
-        4. CREATE "<canon>-ephemeral" (management REST; the SDK cannot) --
-           ephemeral bucketType: the server TTLs docs, nothing persists.
-        "" when nothing works -> callers fall back to the sibling collection
-        inside the canon bucket (today's semantics, still correct)."""
+         1. explicit COUCHBASE_EPHEMERAL_BUCKET (must exist on the cluster)
+         2. "<canon>-ephemeral" (the cortex-core/cortex-ephemeral convention)
+         3. any existing bucket of type 'ephemeral'
+         4. CREATE "<canon>-ephemeral" (management REST; the SDK cannot) --
+            ephemeral bucketType: the server TTLs docs, nothing persists.
+        Bucket DISCOVERY prefers the SDK (cluster.buckets() -- works on
+        Capella, where the :8091 management REST is not exposed); the
+        :8091 REST stays for the CREATE ladder (self-hosted clusters) and
+        as a fallback. "" when nothing works -> callers fall back to the
+        sibling collection inside the canon bucket (today's semantics,
+        still correct)."""
         conn = os.environ.get("COUCHBASE_CONN_STRING", "couchbase://localhost")
         user = os.environ.get("COUCHBASE_USER", "Administrator")
         pw = os.environ.get("COUCHBASE_PASSWORD", "password")
         host = conn.replace("couchbase://", "").split("/")[0].split(":")[0]
         canon = self._cb_bucket or os.environ.get("COUCHBASE_BUCKET", "membrane")
-        buckets = {b.get("name", ""): b.get("bucketType", "membase")
-                   for b in self._list_buckets(host, user, pw)}
+        buckets: dict[str, str] = {}
+        # SDK discovery first (the only path on Capella: :8091 is blocked,
+        # and the SDK's bucket manager IS the supported control surface there)
+        try:
+            for b in self._cb_cluster.buckets().get_all_buckets():
+                btype = str(getattr(b, "bucket_type", "") or "").lower()
+                # SDK enum -> REST's lowercase wire value ("couchbase"/"ephemeral")
+                buckets[b.name] = (btype.replace("buckettype.", "")
+                                   if btype else "membase")
+        except Exception:
+            buckets = {}
+        if not buckets:
+            buckets = {b.get("name", ""): b.get("bucketType", "membase")
+                       for b in self._list_buckets(host, user, pw)}
         explicit = os.environ.get("COUCHBASE_EPHEMERAL_BUCKET", "").strip()
         if explicit:
             if explicit in buckets:
