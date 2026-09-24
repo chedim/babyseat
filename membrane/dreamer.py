@@ -304,7 +304,18 @@ def vote_on_turn(srv, ex) -> None:
             need, nsim = ib.nearest(_np.asarray(vec))
             if need is not None and nsim >= STEER_SIM_LOCAL:
                 intent_sims[need.describe()] = nsim
-        res = est.elect_timeline(vec, intent_sims)
+        # the order-shaped ballot: the real turn's token state rides the
+        # vote (the elect computes the branch side lazily + cached); a
+        # lane-less seat passes None -- the vec-only ballot runs.
+        turn_state = None
+        lane = getattr(mem, "vsa_lane", None)
+        if lane is not None:
+            try:
+                turn_state = lane.encode(ex.situation or "")
+            except Exception:
+                turn_state = None
+        res = est.elect_timeline(vec, intent_sims,
+                                 turn_state=turn_state, lane=lane)
         if res.get("confirmed") or res.get("refuted"):
             from .opencode import _write_audit
             _write_audit(mem, {"event": "dream", "op": "elect",

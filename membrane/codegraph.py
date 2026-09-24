@@ -75,9 +75,37 @@ def _collect_calls(fn) -> list[str]:
 
 
 def _scan_tree(tree: ast.AST, rel: str) -> dict:
-    """Qualname -> {file, line, kind, calls} for one module. Nested defs get
-    dotted qualnames (``outer.inner``, ``Class.method``)."""
+    """Qualname -> {file, line, kind, calls, sig} for one module. Nested
+    defs get dotted qualnames (``outer.inner``, ``Class.method``). The
+    ``sig`` entry (functions/methods only): the def site's argument
+    spec -- {args: [(name, default_or_None)...], vararg, kwonly:
+    [(name, default)...], kwarg, returns} -- the SIGNATURE VERB's data
+    (the call-edge graph answers who-calls-X; this answers what-X-TAKES)."""
     syms: dict = {}
+
+    def _dflt(node) -> str:
+        try:
+            return ast.unparse(node)
+        except Exception:
+            return "?"
+
+    def _args(ch) -> dict:
+        a = ch.args
+        # ast packs `defaults` onto the TRAILING positional args: zip
+        # must offset by n_args - n_defaults (else 'messages, n=3'
+        # pairs as 'messages=3')
+        ndef = len(a.defaults)
+        pos = []
+        for i, x in enumerate(a.args):
+            d = None
+            if ndef and i >= len(a.args) - ndef:
+                d = _dflt(a.defaults[i - (len(a.args) - ndef)])
+            pos.append((x.arg, d))
+        kw = [(x.arg, (_dflt(d) if d is not None else None))
+              for x, d in zip(a.kwonlyargs, a.kw_defaults)]
+        return {"args": pos, "vararg": getattr(a.vararg, "arg", None),
+                "kwonly": kw,
+                "kwarg": getattr(a.kwarg, "arg", None)}
 
     def visit(node, prefix: str) -> None:
         for ch in ast.iter_child_nodes(node):
@@ -85,7 +113,7 @@ def _scan_tree(tree: ast.AST, rel: str) -> dict:
                 q = prefix + ch.name
                 kind = "method" if prefix else "function"
                 syms[q] = {"file": rel, "line": ch.lineno, "kind": kind,
-                           "calls": _collect_calls(ch)}
+                           "calls": _collect_calls(ch), "sig": _args(ch)}
                 visit(ch, q + ".")
             elif isinstance(ch, ast.ClassDef):
                 q = prefix + ch.name
@@ -97,6 +125,38 @@ def _scan_tree(tree: ast.AST, rel: str) -> dict:
 
     visit(tree, "")
     return syms
+
+
+def _sig_parts(info: dict, sig: dict) -> list[str]:
+    """The def site's parts: positional args (their DEFAULTS correctly
+    paired -- ast packs `defaults` onto the TRAILING positional args,
+    so the zip offsets by n_args - n_defaults), then *vararg, then
+    keyword-only args with their per-arg defaults, then **kwarg. The
+    receiver (self/cls on a method) is not a signature fact."""
+    parts: list[str] = []
+    args = sig.get("args") or []
+    kwonly = sig.get("kwonly") or []
+    ndef = sum(1 for _n, d in kwonly if d is not None) \
+        + sum(1 for _n, d in args if d is not None)
+    # positional defaults: count only the positional ones
+    ndef_pos = sum(1 for _n, d in args if d is not None)
+    for i, (n, _d) in enumerate(args):
+        if info.get("kind") == "method" and i == 0 and n in (
+                "self", "cls"):
+            continue
+        d = None
+        if ndef_pos and i >= len(args) - ndef_pos:
+            d = args[i][1]
+        parts.append(n if d is None else f"{n}={d}")
+    if kwonly and not sig.get("vararg"):
+        parts.append("*")
+    for n, d in kwonly:
+        parts.append(f"{n}={d}" if d is not None else f"*{n}")
+    if sig.get("vararg"):
+        parts.append(f"*{sig['vararg']}")
+    if sig.get("kwarg"):
+        parts.append(f"**{sig['kwarg']}")
+    return parts
 
 
 def build_graph(root: str | Path = ".") -> dict:
@@ -362,8 +422,30 @@ def query(graph: dict, spec: str) -> str:
         if not r["callees"]:
             lines.append("  (nothing)")
         return "\n".join(lines)
+    if verb == "signature":
+        # THE SIGNATURE VERB: what-X-TAKES, from the def site (a
+        # caller's override is NOT the signature -- the AST reads the
+        # def, so defaults are the source of truth, file:line for
+        # navigation). Name-resolved like every verb here.
+        hits = _resolve(graph.get("symbols") or {}, arg)
+        if not hits:
+            return (f"CodeGraph: no symbol matches {arg!r}. "
+                    "'membrane: codegraph stats' shows coverage.")
+        lines = [f"signature of {', '.join(hits[:3])}:"]
+        for q in hits[:3]:
+            info = graph["symbols"][q]
+            sig = info.get("sig")
+            if not sig:
+                lines.append(f"  {q}  ({info['file']}:{info['line']})"
+                             "  [class -- methods below]")
+                continue
+            parts = _sig_parts(info, sig)
+            lines.append(f"  {q}({', '.join(parts)})")
+            lines.append(f"    ({info['kind']}, {info['file']}:"
+                         f"{info['line']}; entity id: symbols:{q.lower()})")
+        return "\n".join(lines)
     return ("CodeGraph verbs: stats | impact <symbol|file.py> | "
-            "callers <sym> | callees <sym>")
+            "callers <sym> | callees <sym> | signature <sym>")
 
 
 def summary(graph: dict) -> str:

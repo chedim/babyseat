@@ -57,6 +57,43 @@ NOVELTY_SPEAK_BAR = 0.85     # a digest speaks only above this sim surprise
 WALK_MAX_STEPS = 14          # one extension's token budget (cheap, typed)
 
 
+def _branch_convergence(props: dict, lane) -> float:
+    """THE CONVERGENCE PRIOR (the VSA lane's #9 consumer): how close the
+    branch's terminal text is to the lane's recent REAL turns (best
+    Hamming-sim over the lane's history; 0.0 with no lane/history --
+    the vec era's behavior). The idle thinker uses it as the SECOND
+    ranking key (curiosity stays primary): a branch the world's
+    language is drifting TOWARD outranks an equally-hungry stale one.
+    $0 (the states are already encoded; the terminal encodes once and
+    caches on the props)."""
+    if lane is None or not getattr(lane, "_history", None):
+        return 0.0
+    try:
+        terminal = str((props or {}).get("terminal") or "")
+        if not terminal.strip():
+            return 0.0
+        cached = (props.get("vsa_converge") or {})
+        if cached.get("cb") == lane.codebook.id:
+            from .vsa import unpack_state as _unpack
+            from .vsa import hamming as _ham
+            st = _unpack(cached["s"])
+        else:
+            st = lane.encode(terminal)
+            if st is None:
+                return 0.0
+            from .vsa import pack_state as _pack
+            props["vsa_converge"] = {"cb": lane.codebook.id,
+                                     "s": _pack(st)}
+        return max(1.0 - vsa_hamming(st, h)
+                   for h in lane._history[:-1]) \
+            if len(lane._history) > 1 else 0.0
+    except Exception:
+        return 0.0
+
+
+from .vsa import hamming as vsa_hamming  # noqa: E402  (module-level user above)
+
+
 class Thinker:
     """One seat's rumination thread."""
 
@@ -553,13 +590,24 @@ class Thinker:
                    if (e.properties or {}).get("status") == "quarantined"]
         if not open_tl:
             return
-        # THE HUNGRIEST FIRST (curiosity): the branch with the highest
-        # curiosity property gets the mind's time (ties -> newest).
-        branch = max(open_tl,
-                     key=lambda e: (float((e.properties or {})
-                                          .get("curiosity") or 0.0),
-                                    float((e.properties or {})
-                                          .get("born") or 0.0)))
+        # THE HUNGRIEST FIRST (curiosity), converged-second: the branch
+        # with the highest curiosity property gets the mind's time; the
+        # VSA lane's convergence (the branch terminal's state vs the
+        # recent REAL turns) breaks ties and re-ranks near-ties -- the
+        # world's language drifting TOWARD a branch pulls it forward.
+        # Curiosity stays primary (the hunger covenant); convergence is
+        # a 0.1-scale nudge (the tie-band only), $0, lane-failure safe.
+        _lane = getattr(srv.membrane, "vsa_lane", None) \
+            if getattr(srv, "membrane", None) is not None else None
+
+        def _rank(e):
+            p = e.properties or {}
+            cur = float(p.get("curiosity") or 0.0)
+            conv = _branch_convergence(p, _lane) if _lane is not None \
+                else 0.0
+            return (cur, round(cur, 2) * 0.01 + 0.01 * conv,
+                    float(p.get("born") or 0.0))
+        branch = max(open_tl, key=_rank)
         props = branch.properties or {}
         terminal = str(props.get("terminal") or "")
         if not terminal:

@@ -1884,6 +1884,55 @@ class ExemplarStore:
                   file=__import__("sys").stderr)
             return 0
 
+    def veil_poke_shape(self, lane, pairs, limit: int = 128) -> int:
+        """THE SHAPE-POKE (the VSA lane's #10 consumer): foreign memories
+        adopt as read-only scenery by TOKEN SHAPE -- same-codebook-id
+        hypervector states at Hamming-sim >= VEIL_SHAPE_SIM. $0: no
+        embed call (the codebooks are shared cross-seat by
+        construction), so a FRESH project gets shape-recall from other
+        seats' fields before it has any vecs of its own (the vector
+        pokes all need 1024-d embeds). ``pairs`` is the foreign slice as
+        [(key, doc, vsa_dict)] -- the caller (the boot / the save path)
+        fetches the vsa-stamped docs' foreign-origin slice. Adopted rows
+        keep their foreign origin (the poke covenant: scenery, never
+        masters); the vsa stamp is DROPPED on adoption (my lane never
+        carries their geometry; the state rides the row's own next
+        re-encode). The two-origin rule (docs/multi-dev-field.md)
+        applies."""
+        if lane is None or not pairs:
+            return 0
+        adopted = 0
+        from .vsa import unpack_state as _unpack
+        from .vsa import hamming as _ham
+        cb_id = lane.codebook.id
+        bar = getattr(lane, "VEIL_SHAPE_SIM", 0.90)
+        for key, doc, vsa in pairs[:limit * 2]:
+            if adopted >= limit:
+                break
+            try:
+                if not isinstance(vsa, dict) or vsa.get("cb") != cb_id:
+                    continue                  # a forked geometry: skip
+                fstate = _unpack(vsa.get("s", ""))
+                if not fstate.size:
+                    continue
+            except Exception:
+                continue
+            # the shape bar: my OWN recent states (the lane's history is
+            # this seat's lived token geometry; a foreign row near it is
+            # the same shape of question)
+            best = max((1.0 - _ham(fstate, h))
+                       for h in getattr(lane, "_history", []) or []) \
+                if getattr(lane, "_history", None) else 0.0
+            if best < bar:
+                continue
+            if self._adopt_foreign_doc(dict(doc, _origin=key)):
+                adopted += 1
+        if adopted:
+            print(f"[membrane] shape poke: {adopted} foreign memories "
+                  f"adopted (token-shape, Hamming-sim >= {bar:.2f})",
+                  file=__import__("sys").stderr)
+        return adopted
+
     # ---- the shared substrate: CAS save with CAN-style arbitration ----------
     # Two membranes sharing a bucket used to erase each other (full reconcile
     # deleted every key not in the local list). Now:

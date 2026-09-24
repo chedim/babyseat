@@ -249,12 +249,32 @@ def _response_text(resp) -> str:
     return ""
 
 
+VSA_LOOP_FLAT = 0.06       # surprise <= this on repeated escalates: seen shape
+VSA_LOOP_K = 3             # consecutive unlearned flat escalates = the loop
+_VSA_SHAPE_FAR = 0.62      # shape-dup bar: sims below = a DIFFERENT-shaped
+                           # question (measured: reorderings land 0.62+,
+                           # unrelated text 0.50-0.53 -- the bar sits in the
+                           # measured gap)
+
+
+def _vsa_loop(recent) -> bool:
+    """THE LOOP FINGERPRINT (the VSA lane's #6 consumer): >= VSA_LOOP_K
+    consecutive ESCALATES that learned NOTHING (ex_idx None) whose
+    token-shape surprise stayed flat (<= VSA_LOOP_FLAT) -- the same
+    SHAPE keeps buying model calls the field cannot bank. The drift
+    precedent: an advisory signal first (the gate note + the audit
+    flag); the settle-k ring stays the authority -- this fires EARLIER
+    (the shape repeats before the cosine does, a rewording's pooled vec
+    moves while its token state does not)."""
+    flat = [r for r in recent
+            if str(r.get("verdict") or "").startswith("escalate")
+            and r.get("ex_idx") is None
+            and (r.get("vsa_surprise") is not None
+                 and float(r["vsa_surprise"]) <= VSA_LOOP_FLAT)]
+    return len(flat) >= VSA_LOOP_K
+
+
 def _last_user(request_body: dict) -> str | None:
-    """The last human-authored text turn in the conversation -- the ``situation``
-    to embed. Scans user messages in reverse and skips tool_result-only user
-    messages (system-injected tool outputs, not human turns), returning the
-    first with real text. Works for both Ollama (string content) and Anthropic
-    (content-block list) request shapes."""
     for m in reversed(request_body.get("messages", [])):
         if m.get("role") != "user":
             continue
@@ -1064,6 +1084,17 @@ class Membrane:
         verdict["binding_failed"] = binding_failed
         verdict["query_raw"] = query_raw
         v = verdict["verdict"]
+        # ---- THE VSA LOOP FINGERPRINT (the lane's #6 consumer) ----
+        # The same SHAPE keeps escalating and learning nothing: a
+        # rewording's pooled vec moves while its token state does not --
+        # this fires EARLIER than the settle-k ring (which needs cosine
+        # >= settle_sim). Advisory: the flag rides the verdict (audit +
+        # the banner read it); when the settle machinery's preconditions
+        # are ALSO met it cooperates (the ring's evidence); alone it only
+        # annotates. A verdict never flips on the lane alone.
+        if self.vsa_lane is not None and _vsa_loop(self._recent):
+            verdict["vsa_loop"] = True
+            self.gate_notes.append("vsa: loop fingerprint (flat surprise)")
         # ---- the auto-settle loop (repeat-k) ----
         # A near-identical query (cosine >= settle_sim, no re-ask in flight)
         # that has ESCALATED settle_k times in a row while learning NOTHING
@@ -1800,6 +1831,70 @@ class Membrane:
                 #     the final say: if it re-asked again (reask=2), the first contest does
                 #     NOT restore (net 1 >= threshold) -> the demotion stands (boundary rule).
                 dup = self.store.exemplars[dup_idx]
+                # ---- THE SHAPE GUARD (the VSA lane's #5 consumer, BEHAVIOR
+                # NOW per the operator's call) ----
+                # A high-cosine dup whose token state DIVERGES (Hamming-sim
+                # < 0.5) is a DIFFERENT-SHAPED question the pooled vec
+                # collapsed away: it learns as a fresh CANDIDATE (the
+                # tier's evidence machinery polices it -- use confirms,
+                # refute/expire dangles it); the old cell stays LIVE (no
+                # supersede: no correction happened, two shapes coexist).
+                # A rewording (same token multiset) keeps a near state and
+                # still dedups -- the bag component holds paraphrases
+                # together. MEMBRANE_VSA_DEDUP=0 reverts to keep-first-
+                # seen (the pre-lane covenant).
+                _vsa_dedup = (self.vsa_lane is not None and os.environ.get(
+                    "MEMBRANE_VSA_DEDUP", "1") not in ("0", "false", "off"))
+                if _vsa_dedup:
+                    try:
+                        from .vsa import unpack_state as _unpack
+                        from .vsa import hamming as _vsa_hamming
+                        _qs = self.vsa_lane.encode(query)
+                        _dv = (getattr(dup, "extra", None) or {}).get("vsa")
+                        if _qs is not None and isinstance(_dv, dict) \
+                                and _dv.get("cb") == self.vsa_lane.codebook.id:
+                            _shape_sim = 1.0 - _vsa_hamming(
+                                _qs, _unpack(_dv["s"]))
+                            if _shape_sim < _VSA_SHAPE_FAR:
+                                self.gate_notes.append(
+                                    f"learn: vec-dup but shape-far "
+                                    f"({_shape_sim:.2f}) -> fresh candidate")
+                                extra = {"src": _src_of(src, fallback=dup)}
+                                _seat_s = _seat_of(self)
+                                if _seat_s:
+                                    extra["seat"] = _seat_s
+                                _fresh = Exemplar(
+                                    situation=query, action=content,
+                                    outcome="pending",
+                                    vec=(_unit_list(vec) if normalize
+                                         else vec.tolist()),
+                                    safe=not unsafe,
+                                    model=str(((verdict.get("route") or {})
+                                               .get("route")) or ""),
+                                    tags=tags or [],
+                                    self_authored=self_authored,
+                                    seat=_seat_s,
+                                    extra=extra,
+                                )
+                                if getattr(self, "ephemeral_tier", False):
+                                    _v_sim = verdict.get("sim")
+                                    self.store.capture_ephemeral(
+                                        _fresh,
+                                        surprise=(float(_v_sim)
+                                                  if isinstance(_v_sim,
+                                                                (int, float))
+                                                  else None))
+                                    self.store.save(self.field_path)
+                                else:
+                                    self.store.append(_fresh)
+                                    self.store.save(self.field_path)
+                                self._audit(query, verdict, resp,
+                                            ex_idx=len(self.store) - 1,
+                                            learned=True, dup=True,
+                                            would_absorb=would_absorb)
+                                return len(self.store) - 1
+                    except Exception:
+                        pass          # the lane never breaks the learn
                 # ---- supersede-on-confirm (W2a) ----
                 # A fresh answer that CONFLICTS with a live SAFE canon dup is
                 # a correction, not a re-statement. The old dedup covenant
@@ -2104,7 +2199,8 @@ class Membrane:
                # the VSA lane's advisory surprise (the trajectory's
                # divergence from the recent ones; the gate read it,
                # never flipped a verdict on it). None = lane-less.
-               "vsa_surprise": verdict.get("vsa_surprise")}
+               "vsa_surprise": verdict.get("vsa_surprise"),
+               "vsa_loop": verdict.get("vsa_loop")}
         with self.audit_path.open("a") as f:
             f.write(json.dumps(rec) + "\n")
 

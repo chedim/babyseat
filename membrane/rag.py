@@ -318,6 +318,37 @@ def doctrine_instructions_text() -> str:
     line, so _inject can recognize delivered doctrine and skip re-stamping."""
     return _DOCTRINE_STAMP + "\n" + _RAG_SYSTEM
 
+def _symbol_pool_terms(srv, q_text: str) -> list[str]:
+    """THE SYMBOL-ANCHORED TERMS (the codegraph lane's recall
+    supplement): symbol entities a BARE lowercase name in prose implies
+    (the extractor needs a Capitalized/underscored/dotted signal --
+    'how does strip_context handle X' misses). The graph's symbol
+    table fills the gap: a resolvable symbol whose short name (>=5
+    chars, the noise floor) appears in the query yields
+    'symbols:<qualname>' pool keys -- the graph's precision seeds the
+    field recall. Graph-less or empty query: [] (the harvest keys
+    rule)."""
+    if not q_text or not q_text.strip():
+        return []
+    cg = getattr(srv, "_codegraph", None)
+    if not cg:
+        return []
+    out: list[str] = []
+    try:
+        from .codegraph import _short
+        syms = cg.get("symbols") or {}
+        low_q = " " + " ".join(q_text.split()).lower() + " "
+        for q in syms:
+            short = _short(q)
+            if len(short) < 5:
+                continue
+            if short.lower() in low_q:
+                out.append(f"symbols:{q.lower()}")
+    except Exception:
+        return []
+    return out[:8]
+
+
 def _transcript_index(messages) -> tuple[frozenset, set]:
     """(user-token set, exact Q/A pairkeys) for the recent transcript tail."""
     msgs = [m for m in (messages or []) if isinstance(m, dict)][-_ECHO_TRANSCRIPT_MSGS:]
@@ -1095,6 +1126,14 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
                     q_text = c if isinstance(c, str) else ""
                     break
             q_keys = query_entities(q_text) if q_text else []
+            # THE SYMBOL-ANCHORED TERMS (the codegraph lane's recall
+            # supplement, the 'default args of _strip_context' exhibit):
+            # the extractor needs a signal (Capitalized / underscored /
+            # dotted) -- a BARE lowercase name in prose misses. The
+            # codegraph's own symbol table fills the gap: a resolvable
+            # symbol whose short name appears in the query joins the
+            # pool keys, so the graph's precision seeds the field recall.
+            q_keys = list(q_keys) + _symbol_pool_terms(srv, q_text or "")
             if q_keys:
                 inv = entity_index(mem.store.exemplars)
                 seen_hits: set[int] = set()

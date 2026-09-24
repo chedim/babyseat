@@ -67,7 +67,8 @@ _FILE_RE = re.compile(
     r"(?:[\w.-]+/)*[\w.-]+\.(?:py|md|json|jsonc|ts|js|jsx|tsx|mjs|cjs|go|rs|"
     r"toml|yaml|yml|sh|bash|html|css|txt|d\.ts)\b")
 _SYMBOL_RE = re.compile(r"\b[a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*){1,3}\b"
-                        r"|\b[a-zA-Z][a-z0-9]*(?:_[a-z0-9]+)+\b")
+                        r"|\b[a-zA-Z][a-z0-9]*(?:_[a-z0-9]+)+\b"
+                        r"|\b_[a-z0-9]+(?:_[a-z0-9]+)+\b")
 _MODEL_RE = re.compile(r"\b[a-zA-Z][\w.-]*(?::[\w.-]+){1,3}\b")
 _URL_RE = re.compile(r"https?://[^\s\"'`)\]}]+")
 _HA_RE = re.compile(r"\b(?:sensor|binary_sensor|light|switch|cover|fan|pump|battery)\.[\w]+")
@@ -1300,13 +1301,28 @@ class TimelineOps:
         return store.docs.get(ent.eid, ent)
 
     def elect_timeline(store, turn_vec: list, intent_sims: dict,
-                       confirm_sim: float = 0.72) -> dict:
+                       confirm_sim: float = 0.72,
+                       turn_state: list | None = None,
+                       lane=None,
+                       confirm_shape_sim: float = 0.69,
+                       confirm_sim_shape_ok: float = 0.60) -> dict:
         """REALITY'S VOTE, timeline-shaped: for every quarantined branch
         near this REAL turn's vec -- the branch whose seed_intent the turn
         actually serves (intent_sim >= STEER line) is CONFIRMED (status
         flips in place; the branch leaves quarantine); a near branch that
         serves nothing open is REFUTED (removed -- the dream was noise).
-        Returns the counts for the audit."""
+        Returns the counts for the audit.
+
+        THE ORDER-SHAPED BALLOT (the VSA lane's #7 consumer): ``turn_state``
+        (the real turn's hypervector state) + ``lane`` (the seat's token
+        lane) arm the second sense -- a branch whose TERMINAL TEXT encodes
+        to a state near the turn's (Hamming-sim >= ``confirm_shape_sim``,
+        computed lazily and cached on the branch properties) confirms at a
+        RELAXED cosine bar (``confirm_sim_shape_ok``): reality voted by
+        SHAPE where the vec alone was shy. Still one ballot, two readings;
+        the shape lane never confirms a branch the cosine vetoes outright
+        (a far vec AND far shape stays refuted/missed). Lane failure is
+        silent: today's vec-only ballot runs."""
         import numpy as _np
         tv = _np.asarray(turn_vec, dtype=float)
         tn = _np.linalg.norm(tv)
@@ -1315,6 +1331,9 @@ class TimelineOps:
         tv = tv / tn
         confirmed = refuted = 0
         confirmed_eids: list[str] = []
+        turn_state_arr = (_np.asarray(turn_state, dtype=_np.uint8)
+                          if turn_state is not None and lane is not None
+                          else None)
         for ent in list(store.docs.values()):
             if ent.cls != CLASS_TIMELINE:
                 continue
@@ -1329,7 +1348,34 @@ class TimelineOps:
             if pn < 1e-12:
                 continue
             sim = float(tv @ (pvv / pn))
-            if sim < confirm_sim:
+            # the shape reading (lazy, cached): the branch terminal's
+            # token state vs the real turn's
+            shape_sim = None
+            if turn_state_arr is not None:
+                try:
+                    terminal = str(props.get("terminal") or "")
+                    if terminal:
+                        cached = (props.get("vsa_shape") or {})
+                        if cached.get("cb") == lane.codebook.id:
+                            from .vsa import unpack_state as _unpack
+                            from .vsa import hamming as _ham
+                            shape_sim = 1.0 - _ham(
+                                turn_state_arr, _unpack(cached["s"]))
+                        else:
+                            bs = lane.encode(terminal)
+                            if bs is not None:
+                                from .vsa import hamming as _ham, \
+                                    pack_state as _pack
+                                shape_sim = 1.0 - _ham(turn_state_arr, bs)
+                                props["vsa_shape"] = {
+                                    "cb": lane.codebook.id,
+                                    "s": _pack(bs)}
+                except Exception:
+                    shape_sim = None
+            _bar = confirm_sim
+            if shape_sim is not None and shape_sim >= confirm_shape_sim:
+                _bar = min(confirm_sim, confirm_sim_shape_ok)
+            if sim < _bar:
                 continue
             served = (props.get("seed_intent") or "") in (intent_sims or {})
             if served:

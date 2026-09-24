@@ -1571,24 +1571,62 @@ def _codegraph_refresh(srv, g) -> None:
               f"dropped)", file=sys.stderr)
 
 
-def _is_codegraph_query(q: str) -> bool:
+def _codegraph_wants(q: str) -> str | None:
+    """The codegraph intent gate's RESOLUTION form: the spec the graph
+    answers ('callers X', 'signature X', 'stats'), or None when this
+    turn is not a graph read. Symbol-like target = snake_case, dotted,
+    or .py (a stolen coding turn is worse than a missed shortcut).
+    The signature intents ('what are the args of X', 'signature of X',
+    'what does X take') answer the question class the call-edge verbs
+    never could: what-X-TAKES (the 'default args of _strip_context'
+    exhibit)."""
     low = " ".join((q or "").split()).lower()
     if not low or "```" in low or len(low) > 400:
-        return False
+        return None
     if low.startswith(_CODEGRAPH_CANON):
-        return True
-    # intent phrasing without the canon frame: the TARGET must look
-    # symbol-like (snake_case, dotted, or a .py path) -- "who calls the api"
-    # is a coding turn, "who calls learn_pair?" is a graph read (a stolen
-    # turn is worse than a missed shortcut).
+        spec = low[len(_CODEGRAPH_CANON):].strip().rstrip("?.!") \
+            .strip() or "stats"
+        return spec
     for opener in ("what calls ", "who calls ", "impact of touching ",
                    "blast radius of "):
         if low.startswith(opener):
             target = low[len(opener):].strip().rstrip("?.!").strip()
             symlike = ("_" in target or "." in target
                        or target.endswith(".py"))
-            return symlike and len(low.split()) <= 12
-    return False
+            if symlike and len(low.split()) <= 12:
+                return ("callers " + target).strip()
+            return None
+    for opener, spec_verb in (
+            ("what are the args of ", "signature"),
+            ("what are the parameters of ", "signature"),
+            ("signature of ", "signature"),
+            ("what does the signature of ", "signature"),
+            ("default args of ", "signature"),
+            ("defaults of ", "signature"),
+    ):
+        if low.startswith(opener):
+            target = low[len(opener):].strip().rstrip("?.!").strip()
+            if target.startswith("the "):
+                target = target[4:].rstrip()
+            target = target.rstrip("?.!").strip()
+            symlike = ("_" in target or "." in target
+                       or target.endswith(".py"))
+            if symlike and len(low.split()) <= 14:
+                # the target rides CASE-FAITHFUL: the query() resolver
+                # matches name-insensitively at the last segment, but
+                # the qualname lookup is exact -- slice the ORIGINAL
+                # question at the opener's offset
+                raw = " ".join((q or "").split())
+                start = raw.lower().find(opener)
+                tgt_case = raw[start + len(opener):][:len(target)] \
+                    if start >= 0 else target
+                return f"{spec_verb} {tgt_case}".strip()
+            return None
+    return None
+
+
+def _is_codegraph_query(q: str) -> bool:
+    return _codegraph_wants(q) is not None
 
 
 def _codegraph_answer(srv, q: str) -> str:
@@ -1597,21 +1635,7 @@ def _codegraph_answer(srv, q: str) -> str:
     if g is None:
         return ("[membrane-intercept] codegraph unavailable (graph failed "
                 "to build).")
-    low = " ".join(q.split()).lower()
-    if low.startswith(_CODEGRAPH_CANON):
-        spec = low[len(_CODEGRAPH_CANON):].strip().rstrip("?.!") or "stats"
-    else:
-        # intent phrasing: strip the question opener, keep the target;
-        # trailing punctuation rides the question mark in ("who calls
-        # helper?" must not resolve to the literal symbol "helper?")
-        for opener in ("what calls ", "who calls ", "impact of touching ",
-                       "blast radius of "):
-            if low.startswith(opener):
-                target = low[len(opener):].strip().rstrip("?.!").strip()
-                spec = ("callers " + target).strip()
-                break
-        else:
-            spec = "stats"
+    spec = _codegraph_wants(q) or "stats"
     return ("[membrane-intercept] codegraph (auto-refreshes: tool edits "
             "re-scan instantly, other changes within a 30s sweep):\n"
             + cg_query(g, spec) + "\n\n" + _CODEGRAPH_MARKER)
@@ -2328,6 +2352,32 @@ def _recall_report(srv, topic: str) -> str:
             hits += 1
             if hits >= 8:
                 break
+        # THE SHAPE LANE (the VSA lane's #4 consumer): hits by token
+        # ORDER -- rows whose pooled vec misses but whose hypervector
+        # state matches the ask surface here, tagged [shape]. Read-only
+        # (no learn, no audit write); the lane degrades silently.
+        _lane = getattr(mem, "vsa_lane", None)
+        if _lane is not None:
+            try:
+                _seen = {id(ex) for ex, _ in (
+                    (e, s) for e, s in mem.store.top_k(vec, k=12))} \
+                    if vec is not None else set()
+                for ex, shape_sim in _lane.hits(mem.store, topic, k=3):
+                    if id(ex) in _seen or not ex.safe or shape_sim < 0.68:
+                        continue
+                    q = _clip(ex.situation, 280)
+                    a = _clip(ex.action or "", 280)
+                    if not q or not a:
+                        continue
+                    tag = getattr(ex, "outcome", "") or "pending"
+                    lines.append(f"({shape_sim:.2f} [{tag}] [shape]"
+                                 f"{_seat_label(ex)} {_src_label(ex)} "
+                                 f"situation: {q}\n    response: {a}")
+                    hits += 1
+                    if hits >= 8:
+                        break
+            except Exception:
+                pass                    # the lane never breaks the report
     if hits == 0:
         lines.append(f"- nothing SAFE in the field about {topic!r} yet")
     # the commons top-up (docs/global-field.md): another project's promoted
@@ -3703,6 +3753,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._membrane_learn(); return
         if path == "/membrane/forget":
             self._membrane_forget(); return
+        if path == "/membrane/prefix":
+            self._membrane_prefix(); return
+        if path == "/membrane/codegraph":
+            self._membrane_codegraph(); return
         if path == "/membrane/entity-track":
             self._entity_track_set(); return
         if path == "/membrane/entity-track/remove":
@@ -5687,6 +5741,77 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
         self._json_out(res)
+
+    def _membrane_prefix(self) -> None:
+        """POST /membrane/prefix: THE STREAMING SEAM (the VSA lane's #8
+        consumer). Body {"text": "...", "k": 3}: top-k shape hits while
+        the text is still arriving (voice STT, a long paste mid-stream)
+        -- the state is incremental, so the lane answers a PREFIX the
+        pooled-vec lane cannot (mxbai needs the full turn). READ-ONLY:
+        no learn, no audit write, bounded k. Response:
+        {"hits": [{situation, action, sim, shape}, ...]} -- sim is the
+        raw Hamming similarity (a prefix lands ~0.55-0.68; the client
+        judges), shape rides as the codebook id for coherence."""
+        srv = self.server
+        body = self._json_body()
+        text = str(body.get("text") or "")
+        if not text.strip():
+            self._json_out({"hits": []}); return
+        mem = srv.membrane
+        lane = getattr(mem, "vsa_lane", None)
+        if lane is None:
+            self._json_out({"hits": [], "reason": "vsa lane off"}); return
+        try:
+            k = max(1, min(5, int(body.get("k") or 3)))
+        except (TypeError, ValueError):
+            k = 3
+        hits = []
+        try:
+            for ex, sim in lane.hits(mem.store, text, k=k):
+                if not ex.safe or not ex.situation or not ex.action:
+                    continue
+                hits.append({"situation": _clip(ex.situation, 280),
+                             "action": _clip(ex.action or "", 280),
+                             "sim": round(float(sim), 4),
+                             "shape": lane.codebook.id,
+                             "outcome": getattr(ex, "outcome", "")
+                                        or "pending"})
+        except Exception as e:
+            self._json_out({"hits": [], "error": str(e)[:120]}); return
+        self._json_out({"hits": hits})
+
+    def _membrane_codegraph(self) -> None:
+        """POST /membrane/codegraph: the MCP surface for the AST graph
+        (read-only, same query() text as the CLI + the intercept).
+        Body {"spec": "signature _strip_context"} (or {"op": "stats"}).
+        The answer carries symbols:<qualname> entity ids -- the graph's
+        qualnames ARE the entity key space (entities.py harvests the
+        same kind:value form; refine_entities promotes to these
+        qualnames), so an MCP client can chain: ask the graph, plant a
+        track on the symbol entity with the same key."""
+        srv = self.server
+        body = self._json_body()
+        spec = str(body.get("spec") or body.get("op") or "stats").strip()
+        if not spec:
+            spec = "stats"
+        g = _codegraph_graph(srv)
+        if g is None:
+            self._json_err_raw(503, "codegraph unavailable (graph failed "
+                                "to build)"); return
+        from .codegraph import query as cg_query, stats as cg_stats
+        text = cg_query(g, spec)
+        # the machine-readable half: the symbols the spec resolved to
+        # (the entity-id chain: symbols:<qualname> is a plantable track)
+        try:
+            s = cg_stats(g)
+        except Exception:
+            s = {}
+        self._json_out({"text": text, "symbols": sorted(
+            (g.get("symbols") or {}).keys())[:400],
+            "n_symbols": s.get("n_symbols"),
+            "n_files": s.get("n_files"),
+            "shape": "symbols:<qualname> -- the entity key space "
+                     "(membrane_entity_add / watch_entity compatible)"})
 
     def _junk_cut_set(self) -> None:
         """POST /membrane/junk-cut: the live junk-cut knob. spec '#N'

@@ -129,3 +129,58 @@ to these numbers, not guesses.
 - Replay-by-continuation (generate from stored trajectories -- the
   dreamer's lane): a separate experiment; the TokenTimeline walk
   (thinker.py) is the discrete forerunner.
+
+## The consumers (built, TDD-pinned in `tests/test_vsa_consumers.py`)
+
+The stored data now has SEVEN read-side users, in the order they landed:
+
+1. **Shape archaeology** (`_recall_report` in opencode.py): the
+   `membrane: query the field` report gains a shape lane -- rows whose
+   token ORDER matches the ask (but whose pooled vec misses) surface,
+   tagged `[shape]`. Read-only.
+2. **Loop fingerprint** (`_vsa_loop` in runtime.py): >= 3 consecutive
+   escalates that learned NOTHING with flat surprise (<= 0.06) = a
+   stuck loop, flagged `vsa_loop` on the verdict + a gate note. Fires
+   EARLIER than the settle-k ring (a rewording's pooled vec moves
+   while its token state does not). Advisory: the settle machinery
+   stays the authority.
+3. **Shape-aware dedup** (BEHAVIOR, in `_learn`): a high-cosine dup
+   whose token state diverges (Hamming-sim < 0.62, the measured bar --
+   reorderings land 0.61+, unrelated text 0.50-0.53) is a
+   DIFFERENT-SHAPED question: it learns as a fresh CANDIDATE; the old
+   cell stays live (two shapes coexist; no supersede -- no correction
+   happened). A reordering within margin still dedups. Kill switch
+   `MEMBRANE_VSA_DEDUP=0` reverts to keep-first-seen.
+4. **The order-shaped ballot** (`elect_timeline` + `vote_on_turn`):
+   reality's dream-election reads the token shape -- a quarantined
+   branch whose TERMINAL text encodes near the real turn's state
+   (Hamming-sim >= 0.69, lazily computed + cached on the branch) is
+   confirmed at a relaxed cosine bar (0.60, for vecs in the shy
+   0.60-0.72 band). One ballot, two readings; lane failure = the
+   vec-only vote.
+5. **Thinker convergence** (`_branch_convergence` in thinker.py): the
+   idle thinker ranks extension candidates by (curiosity,
+   convergence) -- a branch whose terminal state trends TOWARD the
+   lane's recent real-turn states outranks an equally-hungry stale
+   one (a 0.01-scale tie-band nudge; hunger stays primary).
+6. **The shape-poke** (`veil_poke_shape` in field.py, beside
+   `veil_poke_ann`): foreign memories adopt as read-only scenery by
+   token shape (same codebook id, Hamming-sim >= 0.90 vs the lane's
+   lived states) -- $0, no embed call, so a FRESH project gets
+   shape-recall from other seats before it has vecs of its own.
+   Adopted rows drop the vsa stamp (my lane never writes their
+   geometry). The two-origin scenery covenant applies.
+7. **The streaming prefix seam** (`POST /membrane/prefix` on the
+   proxy): body `{"text": "...", "k": 3}` -> top-k shape hits while
+   the text is still arriving (the state is incremental; the pooled
+   lane needs the full turn). READ-ONLY: no learn, no audit write,
+   bounded k. Prefix sims land ~0.55-0.68 (a prefix is a shorter
+   text; the client judges the number). The unique payoff for the
+   agdroid voice seat: mid-sentence grounding.
+
+All seven ride the master kill switch (`MEMBRANE_VSA=0` disables the
+lane end to end), degrade silently on any lane error, and were
+calibrated by measurement before landing (the self-encode pollution
+bug the convergence test caught: a lane's `encode` appends to its own
+history -- every consumer that compares against the history must
+exclude the entry it just wrote).
