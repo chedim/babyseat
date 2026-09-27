@@ -330,6 +330,7 @@ class EntityField:
                 self.b.insert_if_absent("sentences", sid, {
                     "_k": "sent", "text": texts[sid][:400], "model": self.model,
                     "vec": vec_list(unit(v)), "first_ts": time.time()})
+        surfaces: set = set()
         for key, ev, sents, sids in plan:
             mentions = []
             for i, s in enumerate(sents):
@@ -350,6 +351,7 @@ class EntityField:
                         seen.add(eid)
             ev["sids"] = sids
             ev["mentions"] = mentions
+            surfaces.update(m[2] for m in mentions)
             if ev.get("stream") == "distilled":
                 ev["status"] = "distilled"
             elif not sids:
@@ -363,15 +365,34 @@ class EntityField:
                     CL.ingest(self, key, ev)
                 except Exception:
                     pass                              # claims never block intake
+        self._prefetch_seeds(surfaces, batch)
         return len(evs)
+
+    def _term_key(self, surface: str) -> str:
+        return "t:" + h16(self.model + "|" + surface.lower())
+
+    def _prefetch_seeds(self, surfaces, batch: int = 64) -> None:
+        """Embed the uncached seeds of a chunk's mentions in batches (the
+        applier would otherwise make one embedder call per new term; one
+        it still makes on a miss is harmless -- same key, same text)."""
+        keys = {self._term_key(s): s.lower() for s in surfaces if s}
+        have = self.b.get_multi("terms", list(keys))
+        miss = [k for k in keys if k not in have]
+        for lo in range(0, len(miss), batch):
+            chunk = miss[lo:lo + batch]
+            vecs = self.emb.embed([keys[k] for k in chunk])
+            for k, v in zip(chunk, vecs):
+                self.b.insert_if_absent("terms", k, {"_k": "term", "term": keys[k],
+                                                     "model": self.model,
+                                                     "vec": pack_f16(unit(v))})
 
     # ---- applying --------------------------------------------------------------------
     def _seed(self, surface: str) -> np.ndarray:
-        tkey = "t:" + h16(self.model + "|" + surface.lower())
+        tkey = self._term_key(surface)
         d = self.b.get("terms", tkey)
         if d is not None:
             return unpack_f16(d["vec"])
-        packed = pack_f16(unit(self.emb.embed([surface])[0]))
+        packed = pack_f16(unit(self.emb.embed([surface.lower()])[0]))
         self.b.upsert("terms", tkey, {"_k": "term", "term": surface.lower(),
                                       "model": self.model, "vec": packed})
         # the STORED (float16) seed, even on first sight: a rebuild reads
@@ -674,7 +695,12 @@ class EntityField:
     def now(self, session: str = "") -> np.ndarray | None:
         return self._now.get(session)
 
-    def vitals(self) -> dict:
+    def vitals(self, max_age_s: float = 0.0) -> dict:
+        """Counts by stream/status and tier. Scans the origin's events, so
+        readers on the chat path pass max_age_s to reuse a recent answer."""
+        cached = getattr(self, "_vitals_cache", None)
+        if max_age_s and cached and time.time() - cached[0] < max_age_s:
+            return cached[1]
         ev = {}
         for _, d in self.b.scan("events", {"origin": self.origin}):
             k = f"{d.get('stream')}/{d.get('status')}"
@@ -682,5 +708,7 @@ class EntityField:
         tiers = {}
         for _, d in self.b.scan("entity_states", {"origin": self.origin}):
             tiers[d.get("tier")] = tiers.get(d.get("tier"), 0) + 1
-        return {"events": ev, "entities": tiers, "null_coherence": self.null_coherence(),
-                "seq_last": self._ostats.get("seq_last"), "cursor": self._ostats.get("cursor")}
+        out = {"events": ev, "entities": tiers, "null_coherence": self.null_coherence(),
+               "seq_last": self._ostats.get("seq_last"), "cursor": self._ostats.get("cursor")}
+        self._vitals_cache = (time.time(), out)
+        return out

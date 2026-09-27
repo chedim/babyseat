@@ -279,6 +279,44 @@ def _seat_card(srv, mcp_on: bool) -> str:
     return "\n".join(L) + "\n"
 
 
+def _efield_of(srv):
+    from .efield import EntityField
+    fld = getattr(srv, "efield", None)
+    return fld if isinstance(fld, EntityField) else None
+
+
+def _efield_answer(srv, q: str, budget: int = 2400) -> dict:
+    """The entity field's answer to a question: the entities it names (their
+    counters, verbatim evidence, relations, conflicts) and the rendered
+    block. {} when the seat has no entity field or it cannot answer."""
+    fld = _efield_of(srv)
+    if fld is None:
+        return {}
+    try:
+        from .entity_block import entities_for, render
+        try:
+            qvec = fld.emb.embed([q])[0]
+        except Exception:
+            qvec = None
+        views = entities_for(fld, q, qvec)
+        return {"entities": views, "block": render(views, budget)}
+    except Exception as e:
+        return {"entities": [], "block": None, "efield_error": str(e)[:200]}
+
+
+def _efield_vitals(srv) -> dict | None:
+    fld = _efield_of(srv)
+    if fld is None:
+        return None
+    try:
+        v = fld.vitals(max_age_s=60)
+        cap = getattr(srv, "capturer", None)
+        v["mode"] = getattr(cap, "mode", None)
+        return v
+    except Exception as e:
+        return {"error": str(e)[:200]}
+
+
 def _state_report(srv) -> str:
     """The internal answer for a state/math query: live numbers straight off
     the field, the compactor, and the audit. No model call."""
@@ -310,6 +348,17 @@ def _state_report(srv) -> str:
         f"- retrieval: k={srv.rag_k}, sim>={srv.rag_sim_min}, "
         f"budget {srv.rag_ctx_chars} chars",
     ]
+    ev = _efield_vitals(srv)
+    if ev and "error" not in ev:
+        by_stream = {}
+        for k, c in ev["events"].items():
+            by_stream[k.split("/")[0]] = by_stream.get(k.split("/")[0], 0) + c
+        mu, sd = ev["null_coherence"]
+        lines.append(
+            f"- entity field ({ev.get('mode')}): events "
+            + ", ".join(f"{k} {c}" for k, c in sorted(by_stream.items()))
+            + "; entities " + ", ".join(f"{k} {c}" for k, c in sorted(ev["entities"].items()))
+            + f"; coherence null {mu:.3f}+-{sd:.3f}; last #{ev.get('seq_last')}")
     if getattr(srv, "no_context", False):
         lines.append("- context: FIELD-ONLY (the stateless LLM -- the "
                      "transcript is stripped per turn; coherence comes "
@@ -5571,6 +5620,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                     out["hits"] = hits
             except Exception:
                 pass
+        if q:
+            out.update(_efield_answer(srv, q))
         self._json_out(out)
 
     # ---- /membrane/learn + /membrane/forget: the MCP write lanes -----------
@@ -5824,9 +5875,6 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         reader -- entities related to the query (named hits first, then
         centroid-nearest), each with its co-occurrence neighbors."""
         srv = self.server
-        est = getattr(srv, "entity_store", None)
-        if est is None:
-            self._json_err_raw(503, "entity layer unavailable"); return
         from urllib.parse import parse_qs
         qs = parse_qs(self.path.split("?", 1)[-1])
         q = (qs.get("q") or [""])[0].strip()
@@ -5836,6 +5884,20 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             k = min(max(int(qs.get("k", ["8"])[0]), 1), 20)
         except ValueError:
             k = 8
+        fld = _efield_of(srv)
+        if fld is not None and getattr(getattr(srv, "capturer", None), "mode", "off") == "on":
+            try:
+                from .entity_block import related
+                try:
+                    qvec = fld.emb.embed([q])[0]
+                except Exception:
+                    qvec = None
+                self._json_out({"query": q, "related": related(fld, q, qvec, k)}); return
+            except Exception as e:
+                self._json_err_raw(500, f"related lookup failed: {e}"); return
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
         mem = srv.membrane
         qvec = None
         if mem.embedder is not None:
@@ -6090,6 +6152,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                            if (getattr(e, "outcome", "") or "").startswith("compacted@")),
             "notes": sum(1 for e in exs if getattr(e, "outcome", "") == "compact-note"),
             "thermo": thermo_state(mem.store),
+            "efield": _efield_vitals(srv),
             "gate": {"sim_min": mem.sim_min, "dedup_sim": mem.dedup_sim,
                      "demote_threshold": mem.demote_threshold,
                      "reask_window_s": mem.reask_window_s,

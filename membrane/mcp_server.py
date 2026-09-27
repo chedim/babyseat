@@ -455,11 +455,15 @@ def tool_query(args: dict, port: int) -> str:
         k = 3
     qs = urllib.parse.urlencode({"q": topic[:512], "k": k})
     out = _http(port, "GET", f"/membrane/ask?{qs}")
+    block = out.get("block")
     if not out.get("hits"):
+        if block:
+            return block + "\n(read-only; this call was NOT learned)"
         return (f"Nothing SAFE in the field about {topic!r} yet "
                 f"(field holds {out.get('field_size', '?')} exemplars). "
                 "Do not invent memories; proceed and let the turn learn.")
-    lines = [f"Field recall (membrane; read-only, this call was NOT learned):"]
+    lines = ([block, ""] if block else []) + \
+        [f"Field recall (membrane; read-only, this call was NOT learned):"]
     for h in out["hits"]:
         via = f" [via {h['model']}]" if h.get("model") else ""
         tag = h.get("outcome") or "pending"
