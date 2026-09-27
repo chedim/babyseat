@@ -709,6 +709,34 @@ class EntityField:
         return {"n": n, "key": key, "entities": touched, "already": False}
 
     @_locked
+    def reembed(self, embedder, progress=None) -> int:
+        """Move the field to another embedding model: the new model's
+        sentence and term caches fill as the events are re-embedded (ids are
+        model-scoped; the old model's rows stay), then every live event is
+        re-applied in seq order -- rebuild() with a new geometry."""
+        self.emb = embedder
+        for coll in ("entity_states", "entity_deltas"):
+            for k, _ in list(self.b.scan(coll, {"origin": self.origin})):
+                self.b.delete(coll, k)
+        keep = {k: self._ostats.get(k) for k in ("seq_last", "ev_n", "conflict_n", "conflict_log",
+                                                 "backfill", "backfill_code_done", "born")}
+        self._ostats = self._fresh_ostats()
+        self._ostats.update({k: v for k, v in keep.items() if v is not None})
+        self._states, self._dirty, self._deltas, self._now = {}, set(), {}, {}
+        n = 0
+        for k, ev in list(self.b.scan("events", {"origin": self.origin,
+                                                 "status": ["applied", "embedded", "empty"]})):
+            ev.update({"status": "pending", "sids": [], "mentions": []})
+            self.b.upsert("events", k, ev)
+            n += 1
+        while self.embed_pending(512) or self.apply_pending(1000):
+            if progress:
+                progress(self._ostats.get("cursor"))
+        self.refresh_null()
+        self.flush()
+        return n
+
+    @_locked
     def recompute(self, eid: str) -> EntityState | None:
         """Re-derive one entity from its seed and its stored deltas (in seq
         order); back to the nursery when a word loses its distinct

@@ -441,6 +441,24 @@ def _doctor() -> int:
         for p in sorted(DATA_DIR.iterdir()):
             print(f"    {p.name}  {p.stat().st_size}B")
 
+    try:
+        from .capture import mode_from_env
+        from .efstore import open_backend
+        from .efield import EntityField
+        from .field import _origin_tag
+        mode = mode_from_env()
+        fpath = str(DATA_DIR / "field.json")
+        be = open_backend(fpath)
+        v = EntityField(be, None, _origin_tag(fpath)).vitals()
+        by: dict = {}
+        for k, c in v["events"].items():
+            by[k.split("/")[0]] = by.get(k.split("/")[0], 0) + c
+        print(f"  entity field: MEMBRANE_EFIELD={mode} on {type(be).__name__}; events "
+              + (", ".join(f"{k} {c}" for k, c in sorted(by.items())) or "none")
+              + "; entities " + (", ".join(f"{k} {c}" for k, c in sorted(v["entities"].items()))
+                                 or "none"))
+    except Exception as e:
+        print(f"  entity field: unreadable ({str(e)[:80]})")
     print(f"  opencode proxy port 11500: "
           f"{'LISTENING' if _port_open(11500) else 'free'}")
 
@@ -483,6 +501,7 @@ def main() -> None:
         "             project's field lives, asks for the target mechanism\n"
         "             (and creds when Couchbase is involved), then runs move\n"
         "  ingest     cold-start: absorb docs/README into the field (no model call)\n"
+        "  backfill   rebuild the entity field from the audit log + the codebase\n"
         "  codegraph  stdlib-AST call graph (stats | impact | callers | callees)\n"
         "  doctor     what's installed/running (CLI, skills, Ollama)\n"
         "\n"
@@ -497,7 +516,7 @@ def main() -> None:
     cmd = argv[0] if argv and not argv[0].startswith("-") else None
     if cmd not in ("tui", "proxy", "opencode", "anthropic", "review",
                    "demo", "reset", "install", "doctor", "connect",
-                   "ingest", "reharvest", "codegraph", "update", "move",
+                   "ingest", "backfill", "codegraph", "update", "move",
                    "migrate", "auth"):
         if cmd is None and not argv:
             print(__doc__)
@@ -544,13 +563,14 @@ def main() -> None:
     if cmd == "ingest":
         argv2 = _ensure_data_dir(args.forwarded)
         raise SystemExit(_run_module("membrane.ingest", argv2))
-    if cmd == "reharvest":
-        # --field only: reharvest has no --audit (the _ensure_data_dir
-        # binding made every run die on "unrecognized arguments")
+    if cmd == "backfill":
+        # the entity field rebuilt from the audit log + the codebase
         argv2 = args.forwarded
         if "--field" not in argv2:
             argv2 = ["--field", str(FIELD)] + argv2
-        raise SystemExit(_run_module("membrane.reharvest", argv2))
+        if "--audit" not in argv2:
+            argv2 = ["--audit", str(DATA_DIR / "audit.jsonl")] + argv2
+        raise SystemExit(_run_module("membrane.backfill", argv2))
     if cmd == "codegraph":
         raise SystemExit(_run_module("membrane.codegraph", args.forwarded))
     if cmd in ("opencode", "reset"):

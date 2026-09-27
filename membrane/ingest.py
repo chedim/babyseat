@@ -194,6 +194,44 @@ def ingest(mem, paths: list[str] | None = None, root: str | Path = ".",
             "truncated": max(0, len(chunks) - max_chunks)}
 
 
+def ingest_events(field, paths: list[str] | None = None, root: str | Path = ".",
+                  max_chunks: int = 400, dry_run: bool = False) -> dict:
+    """The ingest lane on the entity field: each chunk is a DOC event
+    (discourse, role 'doc', src 'ingest:<file>'); content keys make a second
+    ingest of the same text a no-op."""
+    from .streams import Event
+    rootp = Path(root)
+    files = _candidate_files(list(paths or []), rootp)
+    chunks, skipped_binary = [], 0
+    for f in files:
+        try:
+            raw = f.read_bytes()
+            text = raw.decode("utf-8") if b"\x00" not in raw[:4096] else None
+        except (OSError, UnicodeDecodeError):
+            text = None
+        if text is None:
+            skipped_binary += 1
+            continue
+        src = f.relative_to(rootp).as_posix() if f.is_relative_to(rootp) else f.as_posix()
+        chunks += _chunk_text(text, src)
+    absorbed = dups = 0
+    for label, body in chunks[:max_chunks]:
+        if dry_run:
+            absorbed += 1
+            continue
+        before = int(field._ostats.get("ev_n") or 0)
+        field.write_events([Event(stream="discourse", role="doc", text=body,
+                                  src="ingest:" + label.split(" :: ", 1)[0])], session="ingest")
+        if int(field._ostats.get("ev_n") or 0) > before:
+            absorbed += 1
+        else:
+            dups += 1
+    if not dry_run:
+        field.process()
+    return {"files": len(files), "chunks": len(chunks), "absorbed": absorbed, "dedup": dups,
+            "skipped_binary": skipped_binary, "truncated": max(0, len(chunks) - max_chunks)}
+
+
 def report(res: dict, dry_run: bool = False) -> str:
     head = ("dry run -- nothing written" if dry_run
             else "absorbed through learn_pair (same guards as any turn)")
@@ -219,6 +257,19 @@ def main() -> None:
     args = ap.parse_args()
 
     from .embed import OllamaEmbedder
+    from .capture import mode_from_env
+    if mode_from_env() == "on":
+        from .efield import EntityField
+        from .efstore import open_backend
+        from .field import _origin_tag
+        from .project_env import load_project_env
+        load_project_env()
+        fld = EntityField(open_backend(args.field), OllamaEmbedder(), _origin_tag(args.field))
+        res = ingest_events(fld, args.paths or [], root=args.root,
+                            max_chunks=args.max_chunks, dry_run=args.dry_run)
+        print(report(res, args.dry_run).replace("absorbed through learn_pair (same guards as any turn)",
+                                                 "written as DOC events on the entity field"))
+        return
     from .runtime import Membrane
     mem = Membrane(responder=None, field_path=args.field,
                    audit_path=args.audit,

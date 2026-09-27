@@ -4115,6 +4115,29 @@ def _cloud_points(srv, exs):
     return pts
 
 
+def _entity_points(srv, fld, m: int = 400) -> list[dict]:
+    """The viewer's cloud on the entity field: the top-m live states by mass,
+    PCA 3D (the basis fit once per process), each point carrying its eid,
+    kind (the color), mass (the brightness) and whether it holds a conflict."""
+    rows = [d for _, d in fld.b.scan("entity_states", {"origin": fld.origin, "tier": "live"})
+            if d.get("state")]
+    rows.sort(key=lambda d: -int(d.get("accr") or 0))
+    rows = rows[:m]
+    if not rows:
+        return []
+    V = np.asarray([d["state"] for d in rows], dtype=float)
+    mu = V.mean(0)
+    basis = getattr(srv, "_ef_basis", None)
+    if basis is None and len(rows) >= 4:
+        _, _, Vt = np.linalg.svd(V - mu, full_matrices=False)
+        basis = srv._ef_basis = Vt[:3]
+    coords = (V - mu) @ basis.T if basis is not None else np.zeros((len(rows), 3))
+    return [{"p": [round(float(c), 4) for c in coords[i]], "eid": d["eid"],
+             "tags": [d.get("kind") or "?"], "mass": int(d.get("accr") or 0),
+             "safe": not d.get("conflicts"), "reask": 0, "contest": len(d.get("conflicts") or [])}
+            for i, d in enumerate(rows)]
+
+
 class MembraneOpenAIHandler(RAGProxyHandler):
     """The RAG handler + the OpenAI-compatible surface: /v1/models,
     /v1/chat/completions (the RAG gate + the internal state/math intercept),
@@ -6446,7 +6469,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                           "no_context": bool(getattr(srv, "no_context",
                                                      False))},
             # dev-viewer surface: the 3D field cloud + the verdict ticker
-            "exemplars": _cloud_points(srv, exs),
+            "exemplars": (_entity_points(srv, _efield_on(srv)) if _efield_on(srv) is not None
+                          else _cloud_points(srv, exs)),
             "verdicts": tail,
             "n_verdicts": n_verd,
             "compact": dict(srv.compactor.stats) if srv.compactor else None,

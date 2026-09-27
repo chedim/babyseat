@@ -579,6 +579,8 @@ function renderCloud(exs){
     let c;const tg=exs[i].tags;
     if(tg&&tg.length){c=castColor(tg[0]);if(!exs[i].safe)c=[c[0]*0.5,c[1]*0.5,c[2]*0.5];}
     else{c=exs[i].safe?[0.36,0.83,0.48]:[0.94,0.35,0.29];}
+    if(exs[i].mass!=null){const b=0.35+0.65*Math.min(1,Math.log1p(exs[i].mass)/Math.log1p(64));
+      c=[c[0]*b,c[1]*b,c[2]*b];}          // entity field: brightness = mass
     col[i*3]=c[0];col[i*3+1]=c[1];col[i*3+2]=c[2];}
   const g=new THREE.BufferGeometry();
   g.setAttribute("position",new THREE.BufferAttribute(pos,3));
