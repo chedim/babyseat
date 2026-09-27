@@ -411,15 +411,13 @@ def open_backend(field_path: str = ""):
     (degrade, never raise at boot)."""
     import os
     import sys
-    from .field import _is_lab_field_path
+    from .substrate import _is_lab_field_path, cb_open
     if os.environ.get("MEMBRANE_EFIELD_STORE", "auto") == "mem" or (
             field_path and _is_lab_field_path(field_path)):
         return MemBackend()
     try:
-        from .field import ExemplarStore
-        st = ExemplarStore()
-        st._cb_collection("live")                 # the shared bucket bootstrap
-        be = CouchbaseBackend(st._cb_cluster, st._cb_bucket)
+        cluster, bucket = cb_open()
+        be = CouchbaseBackend(cluster, bucket)
         if be.created:
             print(f"[efield] bootstrapped: {', '.join(be.created)}", file=sys.stderr)
         return be

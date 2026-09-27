@@ -120,9 +120,14 @@ class TestOpenBackend(unittest.TestCase):
         with mock.patch.dict(os.environ, {"MEMBRANE_EFIELD_STORE": "mem"}):
             self.assertIsInstance(efstore.open_backend("/home/x/.membrane/field.json"), MemBackend)
 
+    def test_the_bucket_ladder_prefers_a_cortex_bucket(self):
+        from membrane.substrate import reuse_choice
+        self.assertEqual(reuse_choice(["alpha", "cortex-ephemeral", "cortex-core"]), "cortex-core")
+        self.assertEqual(reuse_choice(["beta", "alpha"]), "beta")
+        self.assertIsNone(reuse_choice([]))
+
     def test_an_unreachable_cluster_degrades_to_ram(self):
-        with mock.patch("membrane.field.ExemplarStore._cb_collection",
-                        side_effect=RuntimeError("down")):
+        with mock.patch("membrane.substrate.cb_open", side_effect=RuntimeError("down")):
             self.assertIsInstance(efstore.open_backend("/home/x/.membrane/field.json"), MemBackend)
 
 

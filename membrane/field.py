@@ -227,66 +227,7 @@ _JL_SEED = 5                # picked for low basis crosstalk at toy scale (lab E
 _SKETCH_D = 96              # production sketch dim (D=1024 -> d=96)
 
 
-def _is_lab_field_path(field_path: str | Path) -> bool:
-    """EXPERIMENTS-ISOLATION predicate: does this field path smell like a LAB
-    field (the experiments/ dir, a tempdir, or a pytest tmp fixture)? Lab
-    membranes build Membrane(field_path=tempfile...) with the default store
-    autodetect; without this guard they silently join the LIVE shared
-    substrate -- the observed failure was a dream-loop field reusing the
-    cortex-core bucket. False for everything that looks like a real membrane
-    (a .membrane/ data dir, an explicit user path) -- those keep auto-detect."""
-    p = Path(field_path).resolve()
-    parts = p.parts
-    if any(seg.startswith("dream-loop-") or seg == "pytest-" or
-           seg.startswith("pytest-of-") for seg in parts):
-        return True
-    if "experiments" in parts and p.suffix == ".json" and \
-            parts[-1].startswith("field-"):
-        return True
-    if "site-packages" in parts:      # never expected; kept out of paranoia
-        return False
-    try:
-        tmp_roots = {Path(tempfile.gettempdir()).resolve()}
-        have_common = any(p.is_relative_to(t) for t in tmp_roots)
-    except (OSError, ValueError):
-        have_common = False
-    return have_common
-
-
-def _origin_tag(field_path: str | Path) -> str:
-    """The origin axis: "<start-folder>@<hostname>", computed from the RESOLVED
-    field path (so two membranes started from the same folder agree on the tag
-    regardless of symlinks/relative paths). This is the wire identity every
-    write stamps and every read filters by. The START FOLDER is the project
-    directory, not the data dir: for the per-project layout (<proj>/.membrane/
-    field.json) that is the PARENT of the field's directory.
-
-    PERSISTED IDENTITY: the derived tag is only a DEFAULT. On first boot the
-    tag is written to <data-dir>/origin (mode 600, gitignored like the rest of
-    .membrane/) and every later boot reuses it -- so renaming the repo (or
-    moving it) keeps the same origin: your couchbase patch stays YOURS, your
-    memories keep their provenance, forgets keep matching them. Rename-
-    migration is zero-step for the common case; delete <data-dir>/origin to
-    deliberately fork a new identity. Hand-edit it to ADOPT an old identity
-    (e.g. after restoring a clone from a backup path)."""
-    import socket
-    p = Path(field_path).resolve()
-    data_dir = (p.parent if p.parent.name == DATA_DIRNAME
-                else p.parent / DATA_DIRNAME)
-    tag_file = data_dir / "origin"
-    if tag_file.is_file():
-        stored = tag_file.read_text().strip()
-        if stored:
-            return stored
-    tag = (f"{p.parent.name if p.parent.name != DATA_DIRNAME
-            else p.parent.parent.name}@{socket.gethostname()}")
-    try:
-        data_dir.mkdir(parents=True, exist_ok=True)
-        tag_file.write_text(tag + "\n")
-        tag_file.chmod(0o600)
-    except OSError:
-        pass                    # read-only cwd: fall back to the derived tag
-    return tag
+from .substrate import _is_lab_field_path, _origin_tag  # noqa: E402,F401 (moved)
 
 
 # ---- wire decode/encode (the schema window's moving parts) ------------------
