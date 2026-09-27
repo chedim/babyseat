@@ -349,6 +349,12 @@ class EntityField:
             else:
                 ev["status"] = "embedded"
             self.b.upsert("events", key, ev)
+            if ev.get("role") in ("model", "note"):
+                try:
+                    from . import claims as CL
+                    CL.ingest(self, key, ev)
+                except Exception:
+                    pass                              # claims never block intake
         return len(evs)
 
     # ---- applying --------------------------------------------------------------------
@@ -492,15 +498,27 @@ class EntityField:
         self.flush()
         return len(evs)
 
-    def process(self, limit: int = 256) -> int:
-        """Embed then apply everything pending (the worker's step)."""
+    CLAIM_EVAL_EVERY_S = 60.0
+
+    def process(self, limit: int = 256, now: float | None = None) -> int:
+        """Embed then apply everything pending (the worker's step); settle
+        claims whose evidence window closed (throttled: it scans observations)."""
         n = 0
         while True:
             a = self.embed_pending(limit)
             b = self.apply_pending(limit)
             n += b
             if a == 0 and b == 0:
-                return n
+                break
+        t = time.time()
+        if t - getattr(self, "_last_claim_eval", 0.0) >= self.CLAIM_EVAL_EVERY_S:
+            self._last_claim_eval = t
+            try:
+                from . import claims as CL
+                CL.evaluate(self, now=now)
+            except Exception:
+                pass
+        return n
 
     def flush(self) -> None:
         if self._dirty:
