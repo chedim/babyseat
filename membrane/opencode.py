@@ -6734,20 +6734,22 @@ def main() -> None:
     srv._tool_results = {}     # the receipt lane's result-side cache (E9)
     # THE ENTITY FIELD's intake (the rewrite; MEMBRANE_EFIELD=off|shadow|on):
     # events from the hooks, written by a worker thread -- never in the chat
-    # path. RAM backend until the Couchbase backend lands.
+    # path. Couchbase for a real seat; RAM for lab paths or an unreachable
+    # cluster (open_backend degrades, never raises).
     srv.capturer = srv.efield = None
     try:
         from .capture import Capturer, LazyEmbedder, mode_from_env
         if mode_from_env() != "off":
             from .efield import EntityField
-            from .efstore import MemBackend
+            from .efstore import open_backend
+            be = open_backend(args.field)
             srv.efield = EntityField(
-                MemBackend(), LazyEmbedder(mem),
+                be, LazyEmbedder(mem),
                 getattr(mem.store, "origin", "") or "seat",
                 graph_fn=lambda: _codegraph_graph(srv))
             srv.capturer = Capturer(srv.efield)
-            print(f"[efield] capture {srv.capturer.mode} (RAM backend)",
-                  file=sys.stderr)
+            print(f"[efield] capture {srv.capturer.mode} "
+                  f"({type(be).__name__})", file=sys.stderr)
     except Exception as e:
         print(f"[efield] capture off ({e})", file=sys.stderr)
     # (srv.receipts is set above from --no-receipts; a re-assignment here

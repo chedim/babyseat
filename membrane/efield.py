@@ -56,6 +56,12 @@ def unit(v) -> np.ndarray:
     return v / (np.linalg.norm(v) + 1e-12)
 
 
+def vec_list(v) -> list[float]:
+    """An ANN-indexed vector as JSON floats, rounded to 6 decimals (float32-
+    level precision, far below embedder noise): ~2.5x smaller documents."""
+    return [round(float(x), 6) for x in v]
+
+
 def fit(x, A) -> np.ndarray:
     """Non-negative-clipped least squares of x on the rows of A (E18)."""
     A = np.asarray(A, dtype=float)
@@ -122,7 +128,7 @@ class EntityState:
             d["pending"] = [list(p) for p in self.pending]
             d["distinct"] = list(self.distinct)
         else:
-            d["state"] = [float(x) for x in self.state]
+            d["state"] = vec_list(self.state)
             d["seed"] = pack_f16(self.seed)
             d["mean"] = pack_f16(self.mean) if self.mean is not None else None
             d["rsum"] = pack_f16(self.rsum)
@@ -295,9 +301,8 @@ class EntityField:
         return out
 
     def embed_pending(self, limit: int = 256, batch: int = 64) -> int:
-        evs = list(self.b.scan("events", where=lambda d: d.get("origin") == self.origin
-                               and d.get("status") == "pending",
-                               order=lambda d: d.get("seq", 0), limit=limit))
+        evs = list(self.b.scan("events", {"origin": self.origin, "status": "pending"},
+                               order=("seq",), limit=limit))
         if not evs:
             return 0
         graph = self.graph_fn()
@@ -316,7 +321,7 @@ class EntityField:
             for sid, v in zip(chunk, vecs):
                 self.b.insert_if_absent("sentences", sid, {
                     "_k": "sent", "text": texts[sid][:400], "model": self.model,
-                    "vec": [float(x) for x in unit(v)], "first_ts": time.time()})
+                    "vec": vec_list(unit(v)), "first_ts": time.time()})
         for key, ev, sents, sids in plan:
             mentions = []
             for i, s in enumerate(sents):
@@ -464,9 +469,8 @@ class EntityField:
     def apply_pending(self, limit: int = 200) -> int:
         if not self.b.lease(f"applier:{self.o}", self.holder, 60.0):
             return 0
-        evs = list(self.b.scan("events", where=lambda d: d.get("origin") == self.origin
-                               and d.get("status") == "embedded",
-                               order=lambda d: d.get("seq", 0), limit=limit))
+        evs = list(self.b.scan("events", {"origin": self.origin, "status": "embedded"},
+                               order=("seq",), limit=limit))
         for key, ev in evs:
             self._apply(key, ev)
             ev["status"] = "applied"
@@ -500,15 +504,14 @@ class EntityField:
         """Wipe this origin's states and deltas and re-apply its events in
         seq order: the escape hatch for any parameter change (no re-embed)."""
         for coll in ("entity_states", "entity_deltas"):
-            for k, _ in list(self.b.scan(coll, where=lambda d: d.get("origin") == self.origin)):
+            for k, _ in list(self.b.scan(coll, {"origin": self.origin})):
                 self.b.delete(coll, k)
         keep_seq = self._ostats.get("seq_last", 0)
         null = self._ostats.get("null_coh")
         self._ostats = self._fresh_ostats()
         self._ostats["seq_last"], self._ostats["null_coh"] = keep_seq, null
         self._states, self._dirty, self._deltas, self._now = {}, set(), {}, {}
-        for k, ev in list(self.b.scan("events", where=lambda d: d.get("origin") == self.origin
-                                      and d.get("status") == "applied")):
+        for k, ev in list(self.b.scan("events", {"origin": self.origin, "status": "applied"})):
             ev["status"] = "embedded"
             self.b.upsert("events", k, ev)
         n = 0
@@ -522,8 +525,7 @@ class EntityField:
     def refresh_null(self, sets: int = 200, sizes=(4, 8, 16), seed: int = 23) -> tuple:
         """Coherence of RANDOM sentence sets of this origin (E23's null)."""
         sids = []
-        for _, ev in self.b.scan("events", where=lambda d: d.get("origin") == self.origin
-                                 and d.get("status") == "applied"):
+        for _, ev in self.b.scan("events", {"origin": self.origin, "status": "applied"}):
             sids.extend(ev.get("sids") or [])
         got = self.b.get_multi("sentences", list(dict.fromkeys(sids)))
         if len(got) < max(sizes) + 1:
@@ -543,8 +545,7 @@ class EntityField:
 
     def deltas_of(self, eid: str) -> list[dict]:
         return [d for _, d in self.b.scan(
-            "entity_deltas", where=lambda d: d.get("origin") == self.origin
-            and d.get("eid") == eid, order=lambda d: (d.get("seq", 0), d.get("sidx", 0)))]
+            "entity_deltas", {"origin": self.origin, "eid": eid}, order=("seq", "sidx"))]
 
     def refresh_activity(self, eid: str) -> float | None:
         """Drift between the first and second half of an entity's mentions."""
@@ -585,8 +586,8 @@ class EntityField:
         field_name = "state"
         hits = self.b.vector_top_k(
             "entity_states", field_name, vec, k * 4,
-            where=lambda d: d.get("origin") == self.origin and d.get("tier") == tier
-            and (kinds is None or d.get("kind") in kinds))
+            eq={"origin": self.origin, "tier": tier,
+                **({"kind": list(kinds)} if kinds else {})})
         out = []
         for key, s in hits:
             d = self.b.get("entity_states", key)
@@ -621,11 +622,11 @@ class EntityField:
 
     def vitals(self) -> dict:
         ev = {}
-        for _, d in self.b.scan("events", where=lambda d: d.get("origin") == self.origin):
+        for _, d in self.b.scan("events", {"origin": self.origin}):
             k = f"{d.get('stream')}/{d.get('status')}"
             ev[k] = ev.get(k, 0) + 1
         tiers = {}
-        for _, d in self.b.scan("entity_states", where=lambda d: d.get("origin") == self.origin):
+        for _, d in self.b.scan("entity_states", {"origin": self.origin}):
             tiers[d.get("tier")] = tiers.get(d.get("tier"), 0) + 1
         return {"events": ev, "entities": tiers, "null_coherence": self.null_coherence(),
                 "seq_last": self._ostats.get("seq_last"), "cursor": self._ostats.get("cursor")}
