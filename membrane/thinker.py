@@ -269,10 +269,16 @@ class Thinker:
         label = str(payload.get("label") or "")
         situation = str(payload.get("situation") or "")[:180]
         idx = payload.get("idx")
-        exs = getattr(self.srv.membrane.store, "exemplars", [])
-        ex = (exs[idx] if isinstance(idx, int) and 0 <= idx < len(exs)
-              else None)
-        tags = list((getattr(ex, "extra", {}) or {}).get("entities") or [])
+        if payload.get("tags") is not None:
+            # the entity field's stimulus: the event carries its own tags
+            # and fn stamp (idx is the event's '#N', not an exemplar)
+            ex = None
+            tags = list(payload["tags"])
+        else:
+            exs = getattr(self.srv.membrane.store, "exemplars", [])
+            ex = (exs[idx] if isinstance(idx, int) and 0 <= idx < len(exs)
+                  else None)
+            tags = list((getattr(ex, "extra", {}) or {}).get("entities") or [])
         sim = payload.get("sim")
         # THE MENTION SCRIPTS (model-written policy): every tagged entity
         # carrying a mention_script gets one engine-mediated pass (0.25s
@@ -304,7 +310,7 @@ class Thinker:
         # result was, how many edits in the window). $0: the fn rides the
         # exemplar's extra.
         fn = (getattr(ex, "extra", {}) or {}).get("fn") if ex is not None \
-            else None
+            else payload.get("fn")
         if est is not None and tags and isinstance(fn, dict):
             try:
                 self._bridge_fn_state(fn, tags, est, label)
@@ -667,14 +673,17 @@ class Thinker:
             pass
 
 
-def feed_capture(srv, label: str, idx, situation: str, sim=None) -> None:
+def feed_capture(srv, label: str, idx, situation: str, sim=None,
+                 tags: list | None = None, fn: dict | None = None) -> None:
     """The message-path hook: one real capture becomes a digest item
     (drop-oldest; a busy session's early stimuli fall off the mind)."""
     th = getattr(srv, "thinker", None)
     if th is None:
         return
     try:
-        th.enqueue("capture", {"label": label, "idx": idx,
-                               "situation": situation, "sim": sim})
+        item = {"label": label, "idx": idx, "situation": situation, "sim": sim}
+        if tags is not None:
+            item.update({"tags": tags, "fn": fn})
+        th.enqueue("capture", item)
     except Exception:
         pass

@@ -114,18 +114,27 @@ class Dreamer:
             # no board / empty board: dreaming is unsteered -> skip (v2's
             # lesson: unsteered dreams confirm near-randomly and read salad)
             return self._idle * 4
+        src = getattr(srv, "dream_source", None)      # the entity field's corpus
         store = mem.store
-        trusted = [e.action for e in store.exemplars if not e.self_authored]
+        if src is not None:
+            trusted = src.trusted_texts()
+            est0 = getattr(srv, "entity_store", None)
+            hot = sum(1 for e in (est0.docs.values() if est0 is not None else [])
+                      if e.cls == CLASS_TIMELINE
+                      and (e.properties or {}).get("status") == TL_QUARANTINED)
+            seen_texts = set(trusted)
+        else:
+            trusted = [e.action for e in store.exemplars if not e.self_authored]
+            hot = sum(1 for e in store.exemplars
+                      if e.self_authored and e.outcome == "dream")
+            seen_texts = {e.action for e in store.exemplars}
         if len(trusted) < 4:
             return self._idle * 4        # a young field has nothing to dream ON
-        hot = sum(1 for e in store.exemplars
-                  if e.self_authored and e.outcome == "dream")
         if hot >= MAX_DREAMS_HOT:
             return self._idle * 2        # board backed up: let reality vote first
         # ---- propose ----
         ngram = FieldNGram(trusted, n=3)
         commit_vecs: list[tuple[str, np.ndarray]] = []
-        seen_texts = {e.action for e in store.exemplars}
         attempts = 0
         while attempts < MAX_PROPOSE and len(commit_vecs) < 3:
             attempts += 1
@@ -134,8 +143,12 @@ class Dreamer:
                                   max_tokens=12).strip()
             if not text or len(text.split()) < 3 or text in seen_texts:
                 continue
-            vec = _unit(mem._nudge(mem.embedder.embed([text])[0]))
-            verdict = self._vet(mem, vec, ib)
+            if src is not None:
+                vec = src.embed(text)
+                verdict = self._vet_on(src, vec, ib)
+            else:
+                vec = _unit(mem._nudge(mem.embedder.embed([text])[0]))
+                verdict = self._vet(mem, vec, ib)
             if verdict == "impossible":
                 # the learned-physics lane: recorded, not proposed (the
                 # est commit below keeps impossible branches as entities)
@@ -193,6 +206,37 @@ class Dreamer:
         # (the GC is the ephemeral TTL / the elect refutes now -- no janitor)
         return self._idle
 
+    def _vet_on(self, src, vec: np.ndarray, ib) -> str | None:
+        """The critic on the entity field: STEER + PHYSICS as below, then the
+        source's topic / fresh / surprise-band check."""
+        steer = ib.nearest(vec)[1] if ib is not None else -1.0
+        if steer < STEER_SIM_LOCAL:
+            return None
+        if self._near_failure(vec):
+            return "impossible"
+        return "quarantined" if src.vet(vec) else None
+
+    def _near_failure(self, vec) -> bool:
+        est = getattr(self.srv, "entity_store", None)
+        if est is None:
+            return False
+        fv = np.asarray(vec, dtype=float)
+        fn = float(np.linalg.norm(fv))
+        if fn <= 1e-12:
+            return False
+        fv = fv / fn
+        for ent in est.docs.values():
+            if ent.cls != CLASS_FAILURE:
+                continue
+            ev = getattr(ent, "position", None) or getattr(ent, "embedding", None)
+            if not ev:
+                continue
+            eav = np.asarray(ev, dtype=float)
+            en = float(np.linalg.norm(eav))
+            if en > 1e-12 and float(fv @ (eav / en)) >= 0.85:
+                return True
+        return False
+
     def _vet(self, mem, vec: np.ndarray, ib) -> str | None:
         """STEER + TOPIC + FRESH + VALUE + PHYSICS -- the lab critic, on the
         live field. Returns "ok" (commit as quarantined), "impossible"
@@ -206,24 +250,8 @@ class Dreamer:
         # known FailureMode (cos >= 0.85) is a seductive dead end -- kept
         # as impossible (the field's learned physics), never committed as
         # a candidate.
-        est = getattr(self.srv, "entity_store", None)
-        if est is not None:
-            import numpy as _np
-            fv = _np.asarray(vec, dtype=float)
-            fn = float(_np.linalg.norm(fv))
-            if fn > 1e-12:
-                fv = fv / fn
-                for ent in est.docs.values():
-                    if ent.cls != CLASS_FAILURE:
-                        continue
-                    ev = getattr(ent, "position", None) \
-                        or getattr(ent, "embedding", None)
-                    if not ev:
-                        continue
-                    eav = _np.asarray(ev, dtype=float)
-                    en = float(_np.linalg.norm(eav))
-                    if en > 1e-12 and float(fv @ (eav / en)) >= 0.85:
-                        return "impossible"
+        if self._near_failure(vec):
+            return "impossible"
         nov = novelty(vec, mem.store, keep_fraction=NOV_KEEP_FRACTION)
         _, top_sim = mem.store.top_k(vec, k=1)[0]
         topic_ok = (0.0 <= nov) and (top_sim >= TOPIC_FLOOR)

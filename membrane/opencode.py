@@ -3828,7 +3828,7 @@ def _capture(mem, label: str, situation: str, action: str, min_len: int = 1,
                 if idx is not None:
                     _srv = srv_ref(mem)
                     if _srv is not None and getattr(_srv, "dreamer", None) \
-                            is not None:
+                            is not None and _efield_on(_srv) is None:
                         from .dreamer import vote_on_turn
                         vote_on_turn(_srv, mem.store.exemplars[idx])
             except Exception:
@@ -3862,7 +3862,8 @@ def _capture(mem, label: str, situation: str, action: str, min_len: int = 1,
                     except Exception:
                         _sim = None
                     from .thinker import feed_capture
-                    feed_capture(_srv, label, idx, situation, sim=_sim)
+                    if _efield_on(_srv) is None:     # the field feeds the thinker itself
+                        feed_capture(_srv, label, idx, situation, sim=_sim)
             except Exception:
                 pass
         else:
@@ -7102,6 +7103,9 @@ def main() -> None:
             srv._efield_boot_seq = int(srv.efield._ostats.get("seq_last") or 0)
             if srv.capturer.mode == "on":
                 srv.efield.listeners.append(_efield_watch_listener(srv))
+                from .efmind import DreamSource, on_applied_fn
+                srv.efield.listeners.append(on_applied_fn(srv, lambda: _own_session_prefix(srv)))
+                srv.dream_source = DreamSource(srv.efield)
                 _install_judges(srv)
             print(f"[efield] capture {srv.capturer.mode} "
                   f"({type(be).__name__})", file=sys.stderr)
@@ -7248,7 +7252,11 @@ def main() -> None:
     except Exception:
         pass
     _init_speak(srv)
-    if args.compact_every > 0 and not getattr(mem, "fork_owns_field", False):
+    if _efield_on(srv) is not None:
+        srv.compactor = None             # the entity field keeps no summaries
+        print("[opencode] compactor: off -- the entity field is on (the "
+              "NightClock runs the night)", file=sys.stderr)
+    elif args.compact_every > 0 and not getattr(mem, "fork_owns_field", False):
         srv.compactor = Compactor(srv, idle=args.compact_every)
         srv.compactor.start()
     elif args.compact_every > 0:
@@ -7280,6 +7288,20 @@ def main() -> None:
                     drain_speech(srv)
                 except Exception:
                     pass
+                fld = _efield_on(srv)
+                if fld is not None:
+                    try:
+                        from .efmind import night as _ef_night
+                        srv.night_stats = _ef_night(srv, fld, getattr(srv, "entity_store", None))
+                        b = srv.night_stats.get("births")
+                        if b:
+                            print(f"[night] born: {', '.join(b)}", file=sys.stderr)
+                            th = getattr(srv, "thinker", None)
+                            if th is not None:
+                                th.enqueue("night", {"materialized": len(b), "drifted": 0})
+                    except Exception as e:
+                        print(f"[night] loop error ({e})", file=sys.stderr)
+                    continue
                 try:
                     est = getattr(srv, "entity_store", None)
                     if est is None:
