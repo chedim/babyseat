@@ -174,7 +174,9 @@ GSI = (("events", ("origin", "status", "seq")),
        ("entity_deltas", ("origin", "eid", "seq", "sidx")),
        ("entity_deltas", ("origin", "seq")),          # the state diff since a watermark
        ("entity_deltas", ("origin", "sid")),          # the gate: sentence -> its events
-       ("entity_states", ("origin", "tier", "kind")))
+       ("entity_states", ("origin", "tier", "kind")),
+       ("entity_states", ("eid", "tier")),            # merged reads across seats
+       ("entity_deltas", ("eid", "origin", "seq")))
 CHUNK = 500
 
 

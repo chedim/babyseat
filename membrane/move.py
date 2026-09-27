@@ -262,6 +262,63 @@ def _parse_endpoint(spec: str) -> dict:
                      f"cbs://, or cb:// -- got {spec!r}")
 
 
+# ---- the entity field's collections ---------------------------------------------
+def copy_efield(src, dst, origins: set | None = None) -> dict:
+    """Every entity-field collection from one backend to another (docs keep
+    their keys, so re-running is idempotent; `origins` limits the per-origin
+    collections -- sentences and terms are shared, content-addressed, and
+    always copied). Returns per-collection counts."""
+    from .efstore import COLLECTIONS
+    out = {}
+    for coll in COLLECTIONS:
+        rows = {}
+        for k, d in src.scan(coll, None):
+            if origins and coll not in ("sentences", "terms") and d.get("origin") not in origins:
+                continue
+            rows[k] = d
+            if len(rows) >= 500:
+                dst.upsert_multi(coll, rows)
+                out[coll] = out.get(coll, 0) + len(rows)
+                rows = {}
+        if rows:
+            dst.upsert_multi(coll, rows)
+        out[coll] = out.get(coll, 0) + len(rows)
+    return out
+
+
+def dump_efield(src, path: Path, origins: set | None = None) -> dict:
+    """The collections as <path>/<collection>.jsonl ({"k": key, "d": doc})."""
+    from .efstore import COLLECTIONS
+    path.mkdir(parents=True, exist_ok=True)
+    out = {}
+    for coll in COLLECTIONS:
+        n = 0
+        with (path / f"{coll}.jsonl").open("w") as fh:
+            for k, d in src.scan(coll, None):
+                if origins and coll not in ("sentences", "terms") and d.get("origin") not in origins:
+                    continue
+                fh.write(json.dumps({"k": k, "d": d}) + "\n")
+                n += 1
+        out[coll] = n
+    return out
+
+
+def _efield_main(a, src: dict, dst: dict) -> int:
+    from .efstore import CouchbaseBackend
+    if src["kind"] != "cb":
+        print("[membrane move] --efield reads from a cb endpoint", file=sys.stderr)
+        return 1
+    sb = CouchbaseBackend(_connect(src["conn"], src["user"], src["pw"]), src["bucket"])
+    origins = set(a.origin) if a.origin else None
+    if dst["kind"] == "json":
+        counts = dump_efield(sb, dst["path"], origins)
+    else:
+        db = CouchbaseBackend(_connect(dst["conn"], dst["user"], dst["pw"]), dst["bucket"])
+        counts = copy_efield(sb, db, origins)
+    print(f"[membrane move] entity field: {json.dumps(counts)}", file=sys.stderr)
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         prog="membrane move",
@@ -279,6 +336,14 @@ def main() -> int:
                          "origin (default: keep source origins; only blanks "
                          "are stamped -- a normal move keeps the source's "
                          "patches readable as scenery)")
+    ap.add_argument("--efield", action="store_true",
+                    help="move the ENTITY FIELD's collections (events, sentences, "
+                         "terms, entity states/deltas, relations, claims, "
+                         "annotations, origin stats) instead of exemplars: "
+                         "cb -> cb, or cb -> json:DIR (one .jsonl per collection)")
+    ap.add_argument("--origin", action="append", default=None,
+                    help="--efield: only these origins' docs (repeatable; "
+                         "sentences and terms are shared and always copied)")
     a = ap.parse_args()
 
     src, dst = _parse_endpoint(a.src), _parse_endpoint(a.dst)
@@ -287,6 +352,8 @@ def main() -> int:
         print("[membrane move] refusing: source and target are the same "
               "cluster/bucket", file=sys.stderr)
         return 1
+    if a.efield:
+        return _efield_main(a, src, dst)
 
     # the origin tag for stamping: the json endpoint's identity if one is a
     # json: endpoint, else the --field project's persisted tag

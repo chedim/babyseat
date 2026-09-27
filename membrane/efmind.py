@@ -132,8 +132,18 @@ def night(srv, fld, est, now: float | None = None) -> dict:
             out["scripts"] = run_scripted_entities(mem, est, now=now)
         except Exception as e:
             out["scripts"] = {"error": str(e)[:120]}
+    from . import claims as CL
+
+    def commons():
+        n = 0
+        gf = getattr(srv, "global_field", None)
+        if gf is not None and not fld._ostats.get("global_converted"):
+            n += CL.convert_global(fld.b, gf.store.exemplars, fld.graph_fn())
+            fld._ostats["global_converted"] = True
+        return n + CL.promote_commons(fld.b)
     for name, step in (("births", lambda: [a["eid"] for a in births(fld, est)]),
-                       ("junk", lambda: len(junk(fld)))):
+                       ("junk", lambda: len(junk(fld))),
+                       ("commons", commons)):
         try:
             out[name] = step()
         except Exception as e:

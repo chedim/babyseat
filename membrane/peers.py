@@ -312,6 +312,8 @@ class PeerSubstrate:
                 data = json.loads(r.read())
         except Exception:
             return None
+        if data.get("block"):
+            return data                   # v2: the sibling's entity field answered
         try:
             if float(data.get("sim", 0.0)) < sim_min:
                 return None

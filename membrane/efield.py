@@ -825,6 +825,79 @@ class EntityField:
     def now(self, session: str = "") -> np.ndarray | None:
         return self._now.get(session)
 
+    # ---- sharing: disjoint writers, merged reads ------------------------------------
+    DIVERGE_COS = 0.0          # displacements from the seed pointing apart
+
+    def origins_of(self, eid: str) -> list[dict]:
+        """Every origin's live state doc for this entity (this bucket's seats)."""
+        return [d for _, d in self.b.scan("entity_states", {"eid": eid, "tier": "live"})]
+
+    def merged(self, eid: str) -> dict | None:
+        """The entity across seats: seed + the mass-weighted mean of each
+        origin's displacement from it; DIVERGENCE when two seats moved it in
+        opposing directions (a cross-seat conflict -- they learned different
+        things about the same name)."""
+        docs = self.origins_of(eid)
+        if not docs:
+            return None
+        seed = next((unpack_f16(d["seed"]) for d in docs if d.get("seed")), None)
+        if seed is None:
+            return None
+        disp, w, per = [], [], []
+        for d in docs:
+            x = np.asarray(d["state"], dtype=float) - seed
+            disp.append(x)
+            w.append(max(int(d.get("accr") or 0), 1))
+            per.append({"origin": d["origin"], "n": int(d.get("n") or 0),
+                        "n_by_stream": d.get("n_by_stream") or {}, "last_ts": d.get("last_ts")})
+        W = np.asarray(w, dtype=float)
+        state = unit(seed + (W[:, None] * np.asarray(disp)).sum(axis=0) / W.sum())
+        diverge = []
+        for i in range(len(docs)):
+            for j in range(i + 1, len(docs)):
+                a, b = disp[i], disp[j]
+                na, nb = float(np.linalg.norm(a)), float(np.linalg.norm(b))
+                if na > 1e-6 and nb > 1e-6 and float(a @ b) / (na * nb) < self.DIVERGE_COS:
+                    diverge.append((docs[i]["origin"], docs[j]["origin"],
+                                    round(float(a @ b) / (na * nb), 3)))
+        return {"eid": eid, "state": state, "origins": per, "divergence": diverge}
+
+    def working_set(self, vec, k: int = 8, foreign: int = 4) -> list[tuple[str, float, str]]:
+        """What this seat reads near a direction: its own states, then other
+        seats' states it does not hold itself. (eid, sim, origin)."""
+        own = [(e, s, self.origin) for e, s in self.recall(vec, k=k)]
+        have = {e for e, _, _ in own}
+        out = list(own)
+        if foreign:
+            for key, s in self.b.vector_top_k("entity_states", "state", vec, (k + foreign) * 3,
+                                              eq={"tier": "live"}):
+                d = self.b.get("entity_states", key)
+                if d is None or d["origin"] == self.origin or d["eid"] in have:
+                    continue
+                out.append((d["eid"], s, d["origin"]))
+                have.add(d["eid"])
+                if len(out) >= k + foreign:
+                    break
+        return out
+
+    def foreign_evidence(self, eid: str, k: int = 1) -> list[dict]:
+        """The newest sentences other seats were moved by on this entity."""
+        rows = [d for _, d in self.b.scan("entity_deltas", {"eid": eid})
+                if d.get("origin") != self.origin]
+        rows.sort(key=lambda d: -(d.get("seq") or 0))
+        got = self.b.get_multi("sentences", list(dict.fromkeys(d["sid"] for d in rows[:k * 4])))
+        out, seen = [], set()
+        for d in rows:
+            s = got.get(d["sid"])
+            if s is None or d["sid"] in seen:
+                continue
+            seen.add(d["sid"])
+            out.append({"origin": d["origin"], "text": s["text"], "stream": d["stream"],
+                        "ts": d.get("ts")})
+            if len(out) >= k:
+                break
+        return out
+
     def geometry(self, m: int = 512, max_age_s: float = 300.0) -> dict:
         """The field's thermodynamics on entity states: the top-m live states
         by mass -> effective rank (exp of the entropy of the normalized

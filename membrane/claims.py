@@ -323,3 +323,62 @@ class JudgeQueue:
                                                             + [e for e, _ in ev])))
             done += 1
         return done
+
+
+# ---- the commons: claims more than one seat made -------------------------------------------
+COMMONS = "commons"
+
+
+def commons_key(text: str) -> str:
+    return "cc:" + h16(" ".join(ST.content_words(text or "")) or (text or "").lower())
+
+
+def promote_commons(backend, min_origins: int = 2) -> int:
+    """The same claim (by content words) from >= min_origins seats becomes a
+    commons claim; any seat's contradiction marks it disputed. Idempotent."""
+    groups: dict = {}
+    for _, c in backend.scan("claims", {"_k": "claim"}):
+        if c.get("origin") in (None, COMMONS) or c.get("status") in ("n/a", "forgotten"):
+            continue
+        groups.setdefault(commons_key(c.get("text") or ""), []).append(c)
+    n = 0
+    for key, cs in groups.items():
+        origins = sorted({c["origin"] for c in cs})
+        if len(origins) < min_origins:
+            continue
+        statuses = sorted({c.get("status") or "?" for c in cs})
+        backend.upsert("claims", key, {
+            "_k": "commons", "origin": COMMONS, "text": cs[0]["text"], "origins": origins,
+            "n": len(cs), "statuses": statuses,
+            "status": "disputed" if "contradicted" in statuses else "consensus",
+            "subjects": sorted({s for c in cs for s in c.get("subjects") or []}),
+            "source": "claims"})
+        n += 1
+    return n
+
+
+def convert_global(backend, exemplars, graph=None) -> int:
+    """One-time: the old global field's curated notes become commons claims
+    (their subjects from the note's specific entities)."""
+    n = 0
+    for ex in exemplars or []:
+        text = " ".join(((getattr(ex, "action", "") or getattr(ex, "situation", "")) or "").split())
+        if not text:
+            continue
+        key = commons_key(text)
+        if backend.get("claims", key) is not None:
+            continue
+        subj = [e for e, _ in E.mentions_of(text, graph) if E.is_specific(e)]
+        backend.upsert("claims", key, {
+            "_k": "commons", "origin": COMMONS, "text": text[:600], "origins": ["global-field"],
+            "n": 1, "statuses": ["curated"], "status": "curated", "subjects": subj,
+            "source": "global-field"})
+        n += 1
+    return n
+
+
+def commons_of(backend, eid: str, k: int = 2) -> list[dict]:
+    rows = [d for _, d in backend.scan("claims", {"origin": COMMONS})
+            if eid in (d.get("subjects") or [])]
+    rows.sort(key=lambda d: (-len(d.get("origins") or []), -(d.get("n") or 0)))
+    return rows[:k]

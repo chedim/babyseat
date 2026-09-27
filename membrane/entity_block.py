@@ -17,6 +17,7 @@ from __future__ import annotations
 import math
 import time
 
+from . import claims as CL
 from . import eids as E
 from . import streams as ST
 
@@ -36,6 +37,11 @@ def _age(ts, now=None) -> str:
     return "just now"
 
 
+def _seat(origin: str) -> str:
+    """A seat's short name: 'membrane@host' -> 'host'."""
+    return (origin or "?").split("@", 1)[-1]
+
+
 def _num(ev: dict) -> str:
     """An event's citable handle: '#N'."""
     return f"#{ev['n']}" if ev.get("n") is not None else "#?"
@@ -47,6 +53,8 @@ def question_entities(field, text: str, qvec=None, k: int = 5) -> list[str]:
     for eid, _ in E.mentions_of(text or "", graph, field.phrases):
         st = field.get(eid)
         if st is None or st.tier != "live":
+            if E.is_specific(eid) and field.origins_of(eid):
+                named.append(eid)                 # only another seat knows it
             continue
         if not E.is_specific(eid) and not field.is_coherent(st):
             continue                              # an everyday word here
@@ -54,6 +62,8 @@ def question_entities(field, text: str, qvec=None, k: int = 5) -> list[str]:
 
     def rank(eid):
         st = field.get(eid)
+        if st is None:
+            return (0, 0)
         return (0 if E.is_specific(eid) else 1,
                 -(st.coherence * math.log1p(max(st.mass, 0)) if not E.is_specific(eid) else st.n))
     named = sorted(dict.fromkeys(named), key=rank)
@@ -71,6 +81,22 @@ def question_entities(field, text: str, qvec=None, k: int = 5) -> list[str]:
 
 def entity_view(field, eid: str, qvec=None, n_evidence: int = 2) -> dict:
     st = field.get(eid)
+    m = field.merged(eid)
+    seats = [o for o in (m or {}).get("origins", []) if o["origin"] != field.origin]
+    shared = {"seats": [{"origin": o["origin"], "counts": o["n_by_stream"]} for o in seats],
+              "divergence": [d for d in (m or {}).get("divergence", [])],
+              "foreign": field.foreign_evidence(eid, k=1) if seats else [],
+              "commons": [{"text": c["text"][:200], "status": c["status"],
+                           "seats": len(c.get("origins") or [])}
+                          for c in CL.commons_of(field.b, eid)]}
+    if st is None or st.tier != "live":
+        c: dict = {}
+        for o in seats:
+            for k2, v in o["n_by_stream"].items():
+                c[k2] = c.get(k2, 0) + v
+        return {"eid": eid, "kind": eid.split(":", 1)[0], "counts": c, "n": sum(c.values()),
+                "last_ts": max((o.get("last_ts") or 0 for o in seats), default=None),
+                "evidence": [], "observed": None, "relations": [], "conflicts": [], **shared}
     said = field.evidence(eid, k=n_evidence, query_vec=qvec, streams=("discourse", "code"))
     observed = field.evidence(eid, k=1, streams=("observation",))    # the latest
     rels = []
@@ -90,7 +116,7 @@ def entity_view(field, eid: str, qvec=None, n_evidence: int = 2) -> dict:
     return {"eid": eid, "kind": st.kind, "counts": dict(st.n_by_stream), "n": st.n,
             "last_ts": st.last_ts, "evidence": [e["text"] for e in said],
             "observed": observed[0]["text"] if observed else None,
-            "relations": rels[:3], "conflicts": conflicts}
+            "relations": rels[:3], "conflicts": conflicts, **shared}
 
 
 def entities_for(field, text: str, qvec=None, k: int = 5) -> list[dict]:
@@ -113,8 +139,17 @@ def render(views: list[dict], budget: int = 2400, now: float | None = None) -> s
             block.append(f"  observed: {v['observed']}")
         if v["relations"]:
             block.append("  relations: " + " · ".join(v["relations"]))
+        for f in v.get("foreign") or []:
+            block.append(f"  another seat ({_seat(f['origin'])}): {f['text'][:200]}")
+        if v.get("seats") and not v.get("foreign"):
+            block.append("  also known to: " + ", ".join(_seat(x["origin"]) for x in v["seats"][:3]))
+        for c in v.get("commons") or []:
+            block.append(f"  commons ({c['status']}, {c['seats']} seat{'s' if c['seats'] != 1 else ''}): "
+                         f"{c['text']}")
         for cf in v["conflicts"]:
             block.append(f"  ! conflict: \"{cf['claim']}\" ({cf['status']}: {cf['why']})")
+        for a, b, cos in v.get("divergence") or []:
+            block.append(f"  ! seats diverge: {_seat(a)} and {_seat(b)} moved it apart (cos {cos})")
         text = "\n".join(block)
         if sum(len(x) + 1 for x in lines) + len(text) > budget:
             break
