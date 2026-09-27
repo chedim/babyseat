@@ -472,6 +472,12 @@ class EntityField:
             self._update(st, X[sidx], stream, sids[sidx], seq, sidx, key, ts)
         for i in live_idx:
             self._bg_update(stream, X[i])
+        if stream == "observation":
+            from . import relations as R
+            f_eid = next((m[0] for m in ev.get("mentions") or [] if m[0].startswith("f:")), None)
+            for subj, rel, obj in R.observation_triples(ev.get("tool") or "",
+                                                        ev.get("outcome") or "", f_eid):
+                R.upsert(self.b, self.origin, subj, rel, obj, "observation", key, ts)
 
     def apply_pending(self, limit: int = 200) -> int:
         if not self.b.lease(f"applier:{self.o}", self.holder, 60.0):
@@ -625,6 +631,10 @@ class EntityField:
         for r in sorted(rows, key=lambda r: -r["_s"]):
             uniq.setdefault(r["sid"], r)
         return [{k2: v for k2, v in r.items() if k2 != "_s"} for r in list(uniq.values())[:k]]
+
+    def relations_of(self, eid: str, rel: str | None = None) -> list[dict]:
+        from . import relations as R
+        return R.of(self.b, self.origin, eid, rel)
 
     def now(self, session: str = "") -> np.ndarray | None:
         return self._now.get(session)

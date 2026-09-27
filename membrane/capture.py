@@ -117,6 +117,7 @@ class Capturer:
 
         def after(keys):
             CE.supersede(self.field, rels, keys)
+            CE.store_relations(self.field, graph, rels)
         self._put(lambda: (evs, after))
 
     def on_events(self, evs: list) -> None:

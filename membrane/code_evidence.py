@@ -91,3 +91,23 @@ def supersede(field, rels, keep_keys) -> int:
             field.b.upsert("events", key, ev)
             n += 1
     return n
+
+
+def store_relations(field, graph: dict | None, rels) -> int:
+    """Upsert the code relations of the given files; relations those files'
+    definitions no longer have are superseded."""
+    from . import relations as R
+    rels = list(rels or [])
+    defs = (graph or {}).get("defs") or {}
+    now = set()
+    for subj, rel, obj in code_relations(graph, rels):
+        file = (defs.get(subj[2:]) or {}).get("file")
+        R.upsert(field.b, field.origin, subj, rel, obj, "code", file=file)
+        now.add((subj, rel, obj))
+    want = set(rels)
+    for key, d in list(field.b.scan("relations", {"origin": field.origin, "source": "code",
+                                                  "superseded": False})):
+        if d.get("file") in want and (d["subj"], d["rel"], d["obj"]) not in now:
+            d["superseded"] = True
+            field.b.upsert("relations", key, d)
+    return len(now)
