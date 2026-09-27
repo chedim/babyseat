@@ -353,9 +353,14 @@ def _efield_vitals(srv) -> dict | None:
     if fld is None:
         return None
     try:
-        v = fld.vitals(max_age_s=60)
+        v = dict(fld.vitals(max_age_s=60))
         cap = getattr(srv, "capturer", None)
         v["mode"] = getattr(cap, "mode", None)
+        try:
+            from .efgate import ab_report
+            v["replay_ab"] = ab_report(fld)
+        except Exception:
+            v["replay_ab"] = None
         return v
     except Exception as e:
         return {"error": str(e)[:200]}
@@ -402,7 +407,17 @@ def _state_report(srv) -> str:
             f"- entity field ({ev.get('mode')}): events "
             + ", ".join(f"{k} {c}" for k, c in sorted(by_stream.items()))
             + "; entities " + ", ".join(f"{k} {c}" for k, c in sorted(ev["entities"].items()))
-            + f"; coherence null {mu:.3f}+-{sd:.3f}; last #{ev.get('seq_last')}")
+            + f"; coherence null {mu:.3f}+-{sd:.3f}")
+        g = ev.get("geometry") or {}
+        if g.get("eff_rank") is not None:
+            lines.append(f"- entity geometry (top {g['entities']} by mass): effective rank "
+                         f"{g['eff_rank']:.1f} (ratio {g['rank_ratio']:.3f}); free energy "
+                         f"{g['free_energy']:.3f} (conflict share {g['conflict_frac']:.3f})")
+        ab = ev.get("replay_ab") or {}
+        if ab.get("eligible"):
+            lines.append(f"- replay A/B: {ab['eligible']} replayable turns ({ab['served_replay']} "
+                         f"served), {ab['paired']} paired, answer sim {ab['mean_answer_sim']}, "
+                         f"judge {ab['verdicts'] or 'pending'}")
     if getattr(srv, "no_context", False):
         lines.append("- context: FIELD-ONLY (the stateless LLM -- the "
                      "transcript is stripped per turn; coherence comes "
@@ -935,6 +950,49 @@ def _write_audit(mem, rec: dict) -> None:
     except Exception as e:
         print(f"[opencode] operator-audit write failed: {_one_line(e)}",
               file=sys.stderr)
+
+
+def _install_judges(srv) -> None:
+    """The idle local model judges state claims and A/B pairs -- only while
+    no chat request came in for a minute, bounded per tick and per hour."""
+    from .claims import JudgeQueue, OllamaClaimJudge
+    from .efgate import ab_judge_pending
+    model = getattr(srv, "idle_cortex_model", None)
+    if not model:
+        return
+    base = str(getattr(srv, "backend", "") or "http://localhost:11434").rstrip("/")
+    judge = OllamaClaimJudge(model, base_url=base)
+
+    def idle() -> bool:
+        return time.time() - float(getattr(srv, "_last_request_ts", 0) or 0) > 60
+
+    jq = JudgeQueue(srv.efield, judge, idle=idle)
+    srv.capturer.idle_hooks.append(jq.tick)
+    srv.capturer.idle_hooks.append(
+        lambda: ab_judge_pending(srv.efield, judge.ask) if idle() else 0)
+
+
+def _swallow(fn, *a):
+    try:
+        return fn(*a)
+    except Exception as e:
+        print(f"[efield] {getattr(fn, '__name__', 'task')} error: {e}", file=sys.stderr)
+
+
+def _tool_round(body: dict) -> bool:
+    """A continuation of the model's own tool loop, not a new user turn: the
+    last message is a tool result -- OpenAI's role 'tool' (or an assistant
+    message carrying tool_calls), or Anthropic-style tool_result blocks in
+    the last user message."""
+    msgs = [m for m in (body.get("messages") or []) if isinstance(m, dict)]
+    if not msgs:
+        return False
+    last = msgs[-1]
+    if last.get("role") == "tool" or (last.get("role") == "assistant" and last.get("tool_calls")):
+        return True
+    content = last.get("content")
+    return isinstance(content, list) and any(
+        isinstance(b, dict) and b.get("type") == "tool_result" for b in content)
 
 
 class _EventView:
@@ -4922,11 +4980,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # and re-streams a different header per round. A REAL operator
         # turn's last message is the original text, not a tool payload;
         # tool results carry tool_use_id blocks. Only real turns nudge.
-        _is_tool_round = any(
-            isinstance(b, dict) and b.get("type") == "tool_result"
-            for m in reversed(body.get("messages") or [])
-            for b in (m.get("content") if isinstance(m.get("content"), list)
-                      else []))
+        _is_tool_round = _tool_round(body)
         if not _is_tool_round:
             self.momentum_update(vec, query)
         # THE NULL-RECALL LANE (peer-reported from rosetta-check: 3 of 5
@@ -4958,6 +5012,37 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             if cur is not None:
                 cur.pop("query", None)
                 cur.pop("sim", None)
+        # THE GATE ON ANSWER EVENTS + the replay A/B (every real turn): an
+        # earlier ask of the same thing, its answer, the staleness guard.
+        # Eligible turns are logged as A/B pairs (closed when the model's
+        # own answer lands); --replay-ab P serves the replay on a fraction.
+        srv._ab_key = None
+        _fld = _efield_on(srv)
+        if _fld is not None and not _is_tool_round:
+            try:
+                from . import efgate as EG
+                gv = EG.candidate(_fld, query, binding_failed=bool(verdict.get("binding_failed")))
+                verdict["efgate"] = {k: gv.get(k) for k in
+                                     ("eligible", "reason", "sim", "agree", "consensus",
+                                      "q_event", "a_event")}
+                if gv["eligible"]:
+                    served = EG.serve_replay(float(getattr(srv, "replay_ab", 0.0) or 0.0))
+                    k_ab = EG.ab_open(_fld, gv, query, served)
+                    if served:
+                        _cap = getattr(srv, "capturer", None)
+                        if _cap is not None:
+                            _cap.on_turn(query)
+                        print(f"[efgate] replay #{gv['a_event']} for {query[:60]!r} "
+                              f"(sim {gv['sim']})", file=sys.stderr)
+                        _write_audit(mem, {"event": "efgate-replay", "ab": k_ab,
+                                           "q_event": gv["q_event"], "a_event": gv["a_event"],
+                                           "sim": gv["sim"], "query": _clip(query, 300)})
+                        self._serve_intercept_answer(model, gv["answer"],
+                                                     bool(body.get("stream", False)))
+                        return
+                    srv._ab_key = k_ab
+            except Exception as e:
+                print(f"[efgate] error: {e}", file=sys.stderr)
         # THE UNIFIED BANNER: ONE _where_we_are call, ONE delta-gate
         # evaluation (the double-call bug: the first call consumed the
         # delta gate, the second saw 'unchanged' and returned None -- the
@@ -5542,6 +5627,14 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         _cap = getattr(srv, "capturer", None)
         if _cap is not None:
             _cap.on_turn(query, content, thought or "")
+        # the A/B pair closes on the model's final answer (a text turn)
+        k_ab = getattr(srv, "_ab_key", None)
+        if k_ab and content.strip() and not tool_calls and _efield_on(srv) is not None:
+            srv._ab_key = None
+            import threading as _th
+            from .efgate import ab_close
+            _th.Thread(target=lambda: _swallow(ab_close, srv.efield, k_ab, content),
+                       daemon=True, name="ab-close").start()
         # learn text turns; a pure tool-call turn has no human prose to ground
         # future turns on and the gate may have already learned from its user
         # text -- so only text-bearing answers are learned here.
@@ -6617,6 +6710,11 @@ def main() -> None:
                          "the user from memory -- every turn reaches the "
                          "model, memories ride along as context. Set >0 "
                          "(e.g. 0.97) to re-enable the replay token saver.")
+    ap.add_argument("--replay-ab", type=float, default=0.0, metavar="P",
+                    help="entity field: serve the replay on a fraction P of the "
+                         "turns the gate finds replayable (default 0: every such "
+                         "turn is only logged as an A/B pair -- the replay next to "
+                         "the model's own answer; `membrane review --ab` reports)")
     ap.add_argument("--no-state-intercept", dest="state_intercept",
                     action="store_false",
                     help="proxy every turn to the model, even membrane math/"
@@ -6891,6 +6989,7 @@ def main() -> None:
     srv._served_thought_asks = {}
     srv.gate_monologue = bool(args.gate_monologue)
     srv.replay_sim = max(0.0, min(1.0, float(args.replay_sim)))
+    srv.replay_ab = max(0.0, min(1.0, float(args.replay_ab)))
     srv.embed_model_arg = args.embed_model
     srv.resolved_embed_name = args.embed_model
 
@@ -7003,6 +7102,7 @@ def main() -> None:
             srv._efield_boot_seq = int(srv.efield._ostats.get("seq_last") or 0)
             if srv.capturer.mode == "on":
                 srv.efield.listeners.append(_efield_watch_listener(srv))
+                _install_judges(srv)
             print(f"[efield] capture {srv.capturer.mode} "
                   f"({type(be).__name__})", file=sys.stderr)
     except Exception as e:

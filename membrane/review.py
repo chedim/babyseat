@@ -289,8 +289,50 @@ def main() -> None:
     ap.add_argument("--audit", default="membrane-audit.jsonl", help="path to the audit log")
     ap.add_argument("--field", default="membrane-field.json", help="path to the exemplar field")
     ap.add_argument("--metrics", action="store_true", help="print only the metrics readout")
+    ap.add_argument("--ab", action="store_true",
+                    help="the entity field's replay A/B: replayable turns, the replay "
+                         "next to the model's answer, the judge's verdicts")
+    ap.add_argument("--origin", default=None, help="the field origin (--ab; default: this seat's)")
+    ap.add_argument("--last", type=int, default=10, help="pairs to list (--ab)")
     args = ap.parse_args()
+    if args.ab:
+        print(ab_summary(args.field, args.origin, args.last))
+        return
     print(metrics(args.audit, args.field) if args.metrics else summarize(args.audit, args.field))
+
+
+def ab_summary(field_path: str, origin: str | None = None, last: int = 10, backend=None) -> str:
+    """The replay A/B report: every turn the gate found replayable, the
+    served mode, and -- once the model answered -- the answer similarity
+    and the idle judge's verdict."""
+    from .efgate import ab_report
+    if backend is None:
+        from .efstore import open_backend
+        from .project_env import load_project_env
+        load_project_env()
+        backend = open_backend(field_path)
+    if origin is None:
+        from .field import _origin_tag
+        origin = _origin_tag(field_path)
+
+    from types import SimpleNamespace
+    r = ab_report(SimpleNamespace(b=backend, origin=origin))   # reads backend + origin only
+    lines = [f"Replay A/B ({origin}): {r['eligible']} replayable turns, "
+             f"{r['served_replay']} served from the field, {r['paired']} paired with the "
+             f"model's answer (mean answer similarity {r['mean_answer_sim']}), "
+             f"{r['judged']} judged {r['verdicts'] or ''}".rstrip()]
+    rows = sorted((d for _, d in backend.scan("annotations", {"origin": origin, "_k": "ab"})),
+                  key=lambda d: -(d.get("ts") or 0))[:last]
+    for d in rows:
+        j = d.get("judge") or {}
+        lines.append(f"\n- {d.get('query', '')[:120]!r}  [q #{d.get('q_event')} -> a "
+                     f"#{d.get('a_event')}, sim {d.get('sim')}, {d.get('served')}]")
+        lines.append(f"    replay: {' '.join((d.get('replay') or '').split())[:200]}")
+        if d.get("model_answer") is not None:
+            lines.append(f"    model:  {' '.join(d['model_answer'].split())[:200]}")
+            lines.append(f"    answer sim {d.get('answer_sim')}; judge "
+                         f"{j.get('verdict', 'pending')}{': ' + j['reason'] if j.get('reason') else ''}")
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":

@@ -825,6 +825,38 @@ class EntityField:
     def now(self, session: str = "") -> np.ndarray | None:
         return self._now.get(session)
 
+    def geometry(self, m: int = 512, max_age_s: float = 300.0) -> dict:
+        """The field's thermodynamics on entity states: the top-m live states
+        by mass -> effective rank (exp of the entropy of the normalized
+        squared singular values), its ratio to m, and free energy = the
+        mass-weighted variety minus a conflict tax (the share of those
+        entities carrying a contradicted claim). Cached."""
+        cached = getattr(self, "_geom_cache", None)
+        if cached and time.time() - cached[0] < max_age_s:
+            return cached[1]
+        rows = [d for _, d in self.b.scan("entity_states", {"origin": self.origin, "tier": "live"})
+                if d.get("state")]
+        rows.sort(key=lambda d: -int(d.get("accr") or 0))
+        rows = rows[:m]
+        if len(rows) < 2:
+            out = {"entities": len(rows), "eff_rank": None, "rank_ratio": None,
+                   "free_energy": None, "conflict_frac": None}
+        else:
+            X = np.asarray([d["state"] for d in rows], dtype=float)
+            sv = np.linalg.svd(X - X.mean(axis=0), compute_uv=False)
+            p = sv ** 2 / max(float(np.sum(sv ** 2)), 1e-12)
+            p = p[p > 1e-12]
+            eff = float(np.exp(-np.sum(p * np.log(p))))
+            w = np.asarray([max(int(d.get("accr") or 0), 1) for d in rows], dtype=float)
+            conflicted = np.asarray([1.0 if d.get("conflicts") else 0.0 for d in rows])
+            cf = float((w * conflicted).sum() / w.sum())
+            variety = eff / len(rows)
+            out = {"entities": len(rows), "eff_rank": round(eff, 3),
+                   "rank_ratio": round(variety, 4),
+                   "free_energy": round(variety - cf, 4), "conflict_frac": round(cf, 4)}
+        self._geom_cache = (time.time(), out)
+        return out
+
     def vitals(self, max_age_s: float = 0.0) -> dict:
         """Counts by stream/status and tier. Scans the origin's events, so
         readers on the chat path pass max_age_s to reuse a recent answer."""
@@ -839,6 +871,7 @@ class EntityField:
         for _, d in self.b.scan("entity_states", {"origin": self.origin}):
             tiers[d.get("tier")] = tiers.get(d.get("tier"), 0) + 1
         out = {"events": ev, "entities": tiers, "null_coherence": self.null_coherence(),
+               "geometry": self.geometry(),
                "seq_last": self._ostats.get("seq_last"), "cursor": self._ostats.get("cursor")}
         self._vitals_cache = (time.time(), out)
         return out

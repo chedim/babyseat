@@ -263,16 +263,20 @@ class OllamaClaimJudge:
     def __init__(self, model: str, base_url: str = "http://localhost:11434", timeout: float = 60):
         self.model, self.base, self.timeout = model, base_url, timeout
 
-    def judge(self, claim: str, evidence: list[str]) -> tuple[str, str]:
+    def ask(self, prompt: str) -> str:
+        """One temperature-0 completion from the local model."""
         import json
         import urllib.request
         body = json.dumps({"model": self.model, "stream": False, "options": {"temperature": 0},
-                           "messages": [{"role": "user", "content": self.PROMPT.format(
-                               claim=claim, evidence="\n".join(f"- {e}" for e in evidence))}]})
+                           "messages": [{"role": "user", "content": prompt}]})
         rq = urllib.request.Request(self.base + "/api/chat", data=body.encode(),
                                     headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(rq, timeout=self.timeout) as r:
-            text = json.load(r)["message"]["content"].strip()
+            return json.load(r)["message"]["content"].strip()
+
+    def judge(self, claim: str, evidence: list[str]) -> tuple[str, str]:
+        text = self.ask(self.PROMPT.format(
+            claim=claim, evidence="\n".join(f"- {e}" for e in evidence)))
         word = (text.split() or ["UNRELATED"])[0].upper().strip(".,:")
         verdict = {"SUPPORTS": "supports", "CONTRADICTS": "contradicts"}.get(word, "unrelated")
         return verdict, text[:300]

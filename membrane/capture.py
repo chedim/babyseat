@@ -81,6 +81,7 @@ class Capturer:
         self.sessions = sessions or Sessions()
         self.q: queue.Queue = queue.Queue(maxsize=maxsize)
         self.errors = 0
+        self.idle_hooks: list = []
         self._lock = threading.Lock()
         self._busy = 0
         self._t = None
@@ -157,9 +158,15 @@ class Capturer:
         if self.mode == "on":
             self.field.process()
 
+    IDLE_S = 30.0
+
     def _run(self) -> None:
         while True:
-            build, session = self.q.get()
+            try:
+                build, session = self.q.get(timeout=self.IDLE_S)
+            except queue.Empty:
+                self._idle()
+                continue
             try:
                 self._step(build, session)
             except Exception as e:                 # never into the chat path
@@ -168,6 +175,17 @@ class Capturer:
                     print(f"[efield] capture error #{self.errors}: {e}", file=sys.stderr)
             finally:
                 self.q.task_done()
+
+    def _idle(self) -> None:
+        """The queue stayed empty for IDLE_S: the budgeted background work
+        (the claim judge, the A/B judge). Each hook swallows its own errors."""
+        for fn in list(self.idle_hooks):
+            try:
+                fn()
+            except Exception as e:
+                self.errors += 1
+                if self.errors <= 3 or self.errors % 100 == 0:
+                    print(f"[efield] idle hook error: {e}", file=sys.stderr)
 
     def flush(self, timeout: float = 5.0) -> bool:
         """Wait until the queue drains (tests, shutdown)."""
