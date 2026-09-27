@@ -33,6 +33,16 @@ class TestSQL(unittest.TestCase):
                               "WHERE t.`origin` = $p0 AND t.`status` IN $p1 ORDER BY t.`seq` LIMIT 5")
         self.assertEqual(p, {"p0": "o", "p1": ["a", "b"]})
 
+    def test_range_filters(self):
+        sql, p = scan_sql("b", "membrane", "entity_deltas", {"origin": "o", "seq": {"gt": 7, "lte": 9}})
+        self.assertIn("t.`seq` > $p1_0 AND t.`seq` <= $p1_1", sql)
+        self.assertEqual(p, {"p0": "o", "p1_0": 7, "p1_1": 9})
+        for b in (MemBackend(), cb()):
+            b.upsert_multi("entity_deltas", {f"d{i}": {"origin": "o", "seq": i} for i in range(12)})
+            b.upsert("entity_deltas", "none", {"origin": "o"})
+            got = sorted(d["seq"] for _, d in b.scan("entity_deltas", {"origin": "o", "seq": {"gt": 7, "lte": 9}}))
+            self.assertEqual(got, [8, 9], type(b).__name__)
+
     def test_knn_filter(self):
         self.assertEqual(knn_filter({"tier": "live"}), {"term": "live", "field": "tier"})
         f = knn_filter({"origin": "o", "kind": ["w", "p"]})

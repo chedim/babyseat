@@ -2182,21 +2182,22 @@ class EntityStore(MultiParentOps, TimelineOps):
         op, n = m.group(1) or "enter", int(m.group(2))
         return {"enter": n} if op == "enter" else {"exit": n}
 
-    def evaluate_tracks(self, exemplars) -> list[dict]:
+    def evaluate_tracks(self, exemplars, count_fn=None) -> list[dict]:
         """The per-turn state machine step: for every bounded track, compute
         the live safe-cell count and transition the inside/outside state.
         Returns the ALERTS fired this turn (one per transition; re-entry
-        re-arms by construction). Count-only tracks never alert. Persistence
+        re-arms by construction). ``count_fn(key)`` replaces the cell count
+        (the entity field passes its mention count). Count-only tracks never alert. Persistence
         only when something actually changed."""
         alerts: list[dict] = []
         bounded = {k: t for k, t in self.tracks.items()
                    if t.get("enter") is not None or t.get("exit") is not None}
         if not bounded:
             return alerts
-        inv = entity_index(exemplars)
+        inv = entity_index(exemplars) if count_fn is None else {}
         changed = False
         for key, t in bounded.items():
-            n = len(inv.get(key) or [])
+            n = count_fn(key) if count_fn is not None else len(inv.get(key) or [])
             enter, exit_ = t.get("enter"), t.get("exit")
             inside: bool
             reason = ""

@@ -172,10 +172,19 @@ class FakeCluster:
         for part in (where.split(" AND ") if where else []):
             f = re.search(r"t\.`([^`]+)`", part).group(1)
             p = re.search(r"\$(\w+)", part).group(1)
-            conds.append((f, " IN " in part, params[p]))
+            op = re.search(r"` (IN|=|>=|<=|>|<) \$", part).group(1)
+            conds.append((f, op, params[p]))
         docs = self.scopes.get(scope, {}).get(coll, FakeCollection()).docs
+
+        def ok(got, op, v):
+            if op == "IN":
+                return got in v
+            if op == "=":
+                return got == v
+            return got is not None and {">": got > v, ">=": got >= v,
+                                        "<": got < v, "<=": got <= v}[op]
         rows = [(k, d) for k, d in docs.items()
-                if all((d.get(f) in v) if isin else d.get(f) == v for f, isin, v in conds)]
+                if all(ok(d.get(f), op, v) for f, op, v in conds)]
         if order:
             fields = re.findall(r"t\.`([^`]+)`", order)
             rows.sort(key=lambda kd: tuple(kd[1].get(f, 0) for f in fields))

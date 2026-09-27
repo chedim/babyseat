@@ -142,3 +142,67 @@ def related(field, text: str, qvec=None, k: int = 8) -> list[dict]:
                     "neighbors": [{"key": o, "shared": n} for o, n in
                                   sorted(nb.items(), key=lambda t: -t[1])[:6]]})
     return out
+
+
+# ---- tracks + the now line (WHERE WE ARE on entity states) ----------------------
+CANON_KINDS = ("w", "p", "f", "s", "c", "port", "m", "u", "ha", "tool", "ctx")
+
+
+def track_eid(field, key: str) -> str | None:
+    """A track key (canonical 'f:x', legacy 'files:x', or lower-cased by the
+    track store) -> the entity this field knows under it."""
+    graph = field.graph_fn()
+    head, _, val = (key or "").partition(":")
+    cands = []
+    if head in CANON_KINDS:
+        cands.append(key)
+    legacy = E.legacy_to_canon(key, graph)
+    if legacy:
+        cands.append(legacy)
+    for c in cands:
+        if field.get(c) is not None:
+            return c
+    return field.resolve(val or key)
+
+
+def track_count(field, key: str) -> int:
+    eid = track_eid(field, key)
+    st = field.get(eid) if eid else None
+    return st.n if st else 0
+
+
+def track_line(field, key: str, label: str = "", now: float | None = None) -> str:
+    """'track: f:x (label) — said 41 · observed 17, last 2h ago; latest: <the
+    newest sentence that moved it>'."""
+    eid = track_eid(field, key)
+    st = field.get(eid) if eid else None
+    lab = f" ({label})" if label and label != key else ""
+    if st is None:
+        return f"track: {key}{lab} — nothing in the field yet"
+    c = st.n_by_stream
+    counts = " · ".join(f"{name} {c[s]}" for s, name in
+                        (("discourse", "said"), ("observation", "observed"), ("code", "code"))
+                        if c.get(s))
+    latest = field.evidence(eid, k=1)
+    tail = f"; latest: {latest[0]['text'][:160]}" if latest else ""
+    return f"track: {eid}{lab} — {counts or 'waiting'}, last {_age(st.last_ts, now)}{tail}"
+
+
+def now_line(field, since_seq: int, k: int = 5) -> str | None:
+    """What this session has been about: the entities moved most since the
+    session began (specific identifiers first, coherent words after)."""
+    ds = field.changes_since(since_seq)
+    if not ds:
+        return None
+    scored = []
+    for eid, rows in ds.items():
+        st = field.get(eid)
+        if st is None or st.tier != "live":
+            continue
+        if not E.is_specific(eid) and not field.is_coherent(st):
+            continue
+        scored.append((0 if E.is_specific(eid) else 1, -len(rows), eid))
+    scored.sort()
+    if not scored:
+        return None
+    return "now: " + ", ".join(f"{eid} ({-n})" for _, n, eid in scored[:k])

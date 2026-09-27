@@ -75,5 +75,33 @@ class TestBlock(unittest.TestCase):
         self.assertIn({"key": "tool:edit", "shared": 1}, rel[0]["neighbors"])
 
 
+class TestTracks(unittest.TestCase):
+    def test_changes_since_a_watermark(self):
+        f = seeded()
+        ch = f.changes_since(0)
+        self.assertIn("f:membrane/router.py", ch)
+        last = f._ostats["seq_last"]
+        self.assertEqual(f.changes_since(last), {})
+        f.write_events([ST.Event(stream="discourse", role="user", ts=T0 + 99,
+                                 text="membrane/router.py needs a timeout.")], session="s")
+        f.process()
+        self.assertEqual(list(f.changes_since(last)), ["f:membrane/router.py"])
+
+    def test_track_keys_resolve_and_render(self):
+        f = seeded()
+        self.assertEqual(EB.track_eid(f, "files:membrane/router.py"), "f:membrane/router.py")
+        self.assertEqual(EB.track_count(f, "f:membrane/router.py"), 3)
+        ln = EB.track_line(f, "files:membrane/router.py", "router.py", now=T0 + 20)
+        self.assertTrue(ln.startswith("track: f:membrane/router.py (router.py) — "
+                                      "said 2 · observed 1, last just now; latest: "), ln)
+        self.assertIn("nothing in the field yet", EB.track_line(f, "files:nope.py"))
+        self.assertEqual(EB.track_count(f, "files:nope.py"), 0)
+
+    def test_now_line(self):
+        f = seeded()
+        self.assertTrue(EB.now_line(f, 0).startswith("now: f:membrane/router.py (3)"))
+        self.assertIsNone(EB.now_line(f, f._ostats["seq_last"]))
+
+
 if __name__ == "__main__":
     unittest.main()

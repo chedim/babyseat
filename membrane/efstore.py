@@ -54,10 +54,20 @@ def unpack_f16(s) -> np.ndarray:
     return np.asarray(s, dtype=np.float64)
 
 
+_RANGE = {"gt": ">", "gte": ">=", "lt": "<", "lte": "<="}
+
+
 def matches(d: dict, eq: dict | None) -> bool:
+    """eq: {field: value} (equal), {field: [values]} (IN), {field: {"gt": v}}
+    (a range; gt / gte / lt / lte, combinable)."""
     for f, want in (eq or {}).items():
         got = d.get(f)
-        if isinstance(want, (list, tuple, set, frozenset)):
+        if isinstance(want, dict):
+            if got is None or not all(
+                    {"gt": got > v, "gte": got >= v, "lt": got < v, "lte": got <= v}[op]
+                    for op, v in want.items()):
+                return False
+        elif isinstance(want, (list, tuple, set, frozenset)):
             if got not in want:
                 return False
         elif got != want:
@@ -158,9 +168,10 @@ class MemBackend:
 # ---- the Couchbase home ----------------------------------------------------------
 SCOPE = "membrane"
 # composite secondary indexes: the scans the field actually runs
-GSI = {"events": ("origin", "status", "seq"),
-       "entity_deltas": ("origin", "eid", "seq", "sidx"),
-       "entity_states": ("origin", "tier", "kind")}
+GSI = (("events", ("origin", "status", "seq")),
+       ("entity_deltas", ("origin", "eid", "seq", "sidx")),
+       ("entity_deltas", ("origin", "seq")),          # the state diff since a watermark
+       ("entity_states", ("origin", "tier", "kind")))
 CHUNK = 500
 
 
@@ -174,7 +185,11 @@ def scan_sql(bucket: str, scope: str, coll: str, eq: dict | None,
     where, params = [], {}
     for i, (f, want) in enumerate((eq or {}).items()):
         p = f"p{i}"
-        if isinstance(want, (list, tuple, set, frozenset)):
+        if isinstance(want, dict):
+            for j, (op, v) in enumerate(want.items()):
+                where.append(f"t.`{f}` {_RANGE[op]} ${p}_{j}")
+                params[f"{p}_{j}"] = v
+        elif isinstance(want, (list, tuple, set, frozenset)):
             where.append(f"t.`{f}` IN ${p}")
             params[p] = list(want)
         else:
@@ -239,7 +254,7 @@ class CouchbaseBackend:
                             f"`{self.bucket_name}`.`{self.scope_name}`.`{c}`")
             except Exception:
                 pass
-        for c, fields in GSI.items():
+        for c, fields in GSI:
             name = f"ef_{c}_{'_'.join(fields)}"
             try:
                 self._query(f"CREATE INDEX `{name}` IF NOT EXISTS ON "

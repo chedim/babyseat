@@ -285,6 +285,13 @@ def _efield_of(srv):
     return fld if isinstance(fld, EntityField) else None
 
 
+def _efield_on(srv):
+    """The entity field when the seat's capture runs it (mode 'on')."""
+    fld = _efield_of(srv)
+    cap = getattr(srv, "capturer", None)
+    return fld if fld is not None and getattr(cap, "mode", "off") == "on" else None
+
+
 def _efield_answer(srv, q: str, budget: int = 2400) -> dict:
     """The entity field's answer to a question: the entities it names (their
     counters, verbatim evidence, relations, conflicts) and the rendered
@@ -1077,7 +1084,12 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
             #    state peek passes drain=False and consumes nothing)
             # 2. TRACKS: the printf stories, ID-prefixed; the fallback
             #    carries the ID + the honest empty state.
-            est.evaluate_tracks(mem.store.exemplars)
+            fld = _efield_on(srv)
+            if fld is not None:
+                from .entity_block import track_count
+                est.evaluate_tracks(None, count_fn=lambda k: track_count(fld, k))
+            else:
+                est.evaluate_tracks(mem.store.exemplars)
             if drain:
                 for a in est.take_alerts():
                     lines.append(f"ALERT: {a['label']} {a['kind']} its "
@@ -1099,35 +1111,45 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
                                      f" {clip}")
                         speak(srv, f"new entity: {a['eid']} [{a['cls']}] "
                                    f"{clip}", kind="note")
-            stories: dict[str, str] = {}
-            for k, s in (est.track_report(
-                    mem.store.exemplars, query_vec=vec,
-                    session_since=getattr(srv, "_boot_ts", None),
-                    embedder=mem.embedder) or []):
-                # STRUCTURED: (track_key, text) -- no string-splitting a
-                # colon-rich ID out of prose (the 'files' mis-key)
-                stories[k.lower()] = s
-            for t in est.list_tracks():
-                key = t["key"]
-                label = t.get("label") or key
-                story = stories.get(key.lower())
-                if story:
-                    lines.append("track: " + story)
-                    continue
-                # the story was silent: the fallback must still TRACE --
-                # a compact temporal line (the honest minimum), never a
-                # bare name (the operator's 'I want stories' call). The
-                # ID leads (actionable), the label glosses.
-                idxs2 = entity_index(mem.store.exemplars).get(key) or []
-                if idxs2:
-                    newest = max((_eph_born_of(mem.store.exemplars, i)
-                                  for i in idxs2), default=0.0)
-                    import time as _tmod
-                    ago = _ago(newest, _tmod.time()) or "unknown age"
-                    lines.append(f"track: {key} ({label}) — {len(idxs2)} "
-                                 f"cells, last active {ago}")
-                else:
-                    lines.append(f"track: {key} ({label}) — no cells yet")
+            if fld is not None:
+                from .entity_block import now_line, track_line
+                for t in est.list_tracks():
+                    if t["key"] == "session:now":
+                        ln = now_line(fld, getattr(srv, "_efield_boot_seq", 0))
+                        if ln:
+                            lines.append(ln)
+                        continue
+                    lines.append(track_line(fld, t["key"], t.get("label") or ""))
+            else:
+                stories: dict[str, str] = {}
+                for k, s in (est.track_report(
+                        mem.store.exemplars, query_vec=vec,
+                        session_since=getattr(srv, "_boot_ts", None),
+                        embedder=mem.embedder) or []):
+                    # STRUCTURED: (track_key, text) -- no string-splitting a
+                    # colon-rich ID out of prose (the 'files' mis-key)
+                    stories[k.lower()] = s
+                for t in est.list_tracks():
+                    key = t["key"]
+                    label = t.get("label") or key
+                    story = stories.get(key.lower())
+                    if story:
+                        lines.append("track: " + story)
+                        continue
+                    # the story was silent: the fallback must still TRACE --
+                    # a compact temporal line (the honest minimum), never a
+                    # bare name (the operator's 'I want stories' call). The
+                    # ID leads (actionable), the label glosses.
+                    idxs2 = entity_index(mem.store.exemplars).get(key) or []
+                    if idxs2:
+                        newest = max((_eph_born_of(mem.store.exemplars, i)
+                                      for i in idxs2), default=0.0)
+                        import time as _tmod
+                        ago = _ago(newest, _tmod.time()) or "unknown age"
+                        lines.append(f"track: {key} ({label}) — {len(idxs2)} "
+                                     f"cells, last active {ago}")
+                    else:
+                        lines.append(f"track: {key} ({label}) — no cells yet")
         except Exception as e:
             print(f"[opencode] banner render error: {e}", file=sys.stderr)
     # 4. THE NULL-RECALL NOTICE (absence is information): a fresh all-
@@ -5884,8 +5906,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             k = min(max(int(qs.get("k", ["8"])[0]), 1), 20)
         except ValueError:
             k = 8
-        fld = _efield_of(srv)
-        if fld is not None and getattr(getattr(srv, "capturer", None), "mode", "off") == "on":
+        fld = _efield_on(srv)
+        if fld is not None:
             try:
                 from .entity_block import related
                 try:
@@ -6816,6 +6838,9 @@ def main() -> None:
                 # that belongs to the chat thread
                 graph_fn=lambda: getattr(srv, "_codegraph", None))
             srv.capturer = Capturer(srv.efield)
+            # the session's first event number: the 'now' line counts what
+            # moved since the seat booted
+            srv._efield_boot_seq = int(srv.efield._ostats.get("seq_last") or 0)
             print(f"[efield] capture {srv.capturer.mode} "
                   f"({type(be).__name__})", file=sys.stderr)
     except Exception as e:

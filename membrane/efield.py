@@ -30,7 +30,9 @@ and reproduces every state without re-embedding."""
 from __future__ import annotations
 
 import os
+import functools
 import socket
+import threading
 import time
 from dataclasses import dataclass, field
 
@@ -162,11 +164,22 @@ class EntityState:
         return st
 
 
+def _locked(fn):
+    """The applier (the capture worker) and the readers (the chat thread)
+    share the state cache and the write-behind buffers."""
+    @functools.wraps(fn)
+    def wrap(self, *a, **kw):
+        with self._lock:
+            return fn(self, *a, **kw)
+    return wrap
+
+
 class EntityField:
     """The facade: write events, embed them, apply them, read the field."""
 
     def __init__(self, backend, embedder, origin: str, graph_fn=None,
                  phrase_vocab=None, holder: str | None = None):
+        self._lock = threading.RLock()
         self.b = backend
         self.emb = embedder
         self.origin = origin
@@ -243,6 +256,7 @@ class EntityField:
             ident = f"x|{h16(ev.text)}"
         return f"v:{self.o}:{h16(ident)}"
 
+    @_locked
     def write_events(self, evs: list, session: str = "", seqs: list | None = None) -> list[str]:
         """Idempotent: a re-sent event keeps its key and is not re-applied;
         a tool RESULT upgrades its call-only observation (same call id)."""
@@ -402,6 +416,7 @@ class EntityField:
     def _state_key(self, eid: str) -> str:
         return f"e:{self.o}:{h16(eid)}"
 
+    @_locked
     def get(self, eid: str) -> EntityState | None:
         st = self._states.get(eid)
         if st is None:
@@ -516,6 +531,7 @@ class EntityField:
                                                         ev.get("outcome") or "", f_eid):
                 R.upsert(self.b, self.origin, subj, rel, obj, "observation", key, ts)
 
+    @_locked
     def apply_pending(self, limit: int = 200) -> int:
         if not self.b.lease(f"applier:{self.o}", self.holder, 60.0):
             return 0
@@ -551,6 +567,7 @@ class EntityField:
                 pass
         return n
 
+    @_locked
     def flush(self) -> None:
         if self._dirty:
             self.b.upsert_multi("entity_states", {
@@ -562,6 +579,7 @@ class EntityField:
             self._deltas = {}
         self.b.upsert("origin_stats", self._okey, self._ostats)
 
+    @_locked
     def trim_cache(self, max_states: int = 5000) -> None:
         """Drop clean cached states (they reload from the backend on demand):
         a backfill touches tens of thousands of entities."""
@@ -569,6 +587,7 @@ class EntityField:
             self.flush()
             self._states = {}
 
+    @_locked
     def rebuild(self) -> int:
         """Wipe this origin's states and deltas and re-apply its events in
         seq order: the escape hatch for any parameter change (no re-embed)."""
@@ -615,6 +634,18 @@ class EntityField:
     def deltas_of(self, eid: str) -> list[dict]:
         return [d for _, d in self.b.scan(
             "entity_deltas", {"origin": self.origin, "eid": eid}, order=("seq", "sidx"))]
+
+    @_locked
+    def changes_since(self, seq: int) -> dict[str, list[dict]]:
+        """The deltas applied after event #seq, grouped by entity (in order):
+        what moved since a watermark -- discourse, observations, code or an
+        entity script's event alike."""
+        self.flush()
+        out: dict[str, list[dict]] = {}
+        for _, d in self.b.scan("entity_deltas", {"origin": self.origin, "seq": {"gt": seq}},
+                                order=("seq", "sidx")):
+            out.setdefault(d["eid"], []).append(d)
+        return out
 
     def refresh_activity(self, eid: str) -> float | None:
         """Drift between the first and second half of an entity's mentions."""
