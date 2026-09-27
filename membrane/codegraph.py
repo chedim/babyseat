@@ -113,12 +113,14 @@ def _scan_tree(tree: ast.AST, rel: str) -> dict:
                 q = prefix + ch.name
                 kind = "method" if prefix else "function"
                 syms[q] = {"file": rel, "line": ch.lineno, "kind": kind,
-                           "calls": _collect_calls(ch), "sig": _args(ch)}
+                           "calls": _collect_calls(ch), "sig": _args(ch),
+                           "doc": (ast.get_docstring(ch) or "")[:600]}
                 visit(ch, q + ".")
             elif isinstance(ch, ast.ClassDef):
                 q = prefix + ch.name
                 syms[q] = {"file": rel, "line": ch.lineno, "kind": "class",
-                           "calls": []}
+                           "calls": [],
+                           "doc": (ast.get_docstring(ch) or "")[:600]}
                 visit(ch, q + ".")
             else:
                 visit(ch, prefix)
@@ -165,6 +167,7 @@ def build_graph(root: str | Path = ".") -> dict:
     rootp = Path(root).resolve()
     files: dict = {}
     symbols: dict = {}
+    defs: dict = {}
     for path in _py_files(rootp):
         rel = path.relative_to(rootp).as_posix()
         try:
@@ -184,9 +187,40 @@ def build_graph(root: str | Path = ".") -> dict:
             mt = 0.0
         files[rel] = {"mtime": mt, "symbols": sorted(syms)}
         symbols.update(syms)
-    graph = {"root": str(rootp), "files": files, "symbols": symbols}
+        defs.update(_qualify(syms, rel))
+    graph = {"root": str(rootp), "files": files, "symbols": symbols,
+             "defs": defs}
     graph["callers_index"] = _callers_index(symbols)
+    graph["short_index"] = _short_index(defs)
     return graph
+
+
+def module_of(rel: str) -> str:
+    """'membrane/opencode.py' -> 'membrane.opencode' (a package's
+    __init__.py is the package itself)."""
+    mod = rel[:-3] if rel.endswith(".py") else rel
+    mod = mod.replace("/", ".")
+    return mod[:-len(".__init__")] if mod.endswith(".__init__") else mod
+
+
+def _qualify(syms: dict, rel: str) -> dict:
+    """The COLLISION-FREE view: '<module>.<qualname>' -> info (+ qual,
+    mod). `symbols` keys on bare qualnames and a later file overwrites an
+    earlier one (58 collisions in this repo -- main, Class.__init__ ...);
+    `defs` keeps every definition. Additive: nothing that reads
+    `symbols` changes."""
+    mod = module_of(rel)
+    return {f"{mod}.{q}": {**info, "qual": q, "mod": mod}
+            for q, info in syms.items()}
+
+
+def _short_index(defs: dict) -> dict:
+    """short name (last segment) -> [full defs names] -- how a bare name
+    in prose resolves (unique -> that def; several -> ambiguous)."""
+    idx: dict = {}
+    for full in defs:
+        idx.setdefault(_short(full), []).append(full)
+    return idx
 
 
 def _short(name: str) -> str:
@@ -294,6 +328,7 @@ def rebuild_paths(graph: dict, rels) -> dict:
     rootp = Path(graph["root"])
     symbols = graph["symbols"]
     files = graph["files"]
+    defs = graph.setdefault("defs", {})
     owner: dict = {}
     for rel2, meta2 in files.items():
         for s in meta2["symbols"]:
@@ -307,6 +342,8 @@ def rebuild_paths(graph: dict, rels) -> dict:
             for s in files.get(rel, {}).get("symbols", ()):
                 if owner.get(s) == rel:
                     symbols.pop(s, None)
+            for full in [d for d in defs if defs[d].get("file") == rel]:
+                defs.pop(full, None)
             files.pop(rel, None)
             dropped.append(rel)
             touched.append(rel)
@@ -325,8 +362,12 @@ def rebuild_paths(graph: dict, rels) -> dict:
         syms = _scan_tree(tree, rel)
         files[rel] = {"mtime": mt, "symbols": sorted(syms)}
         symbols.update(syms)
+        for full in [d for d in defs if defs[d].get("file") == rel]:
+            defs.pop(full, None)
+        defs.update(_qualify(syms, rel))
         touched.append(rel)
     graph["callers_index"] = _callers_index(symbols)
+    graph["short_index"] = _short_index(defs)
     return {"touched": touched, "dropped": dropped}
 
 

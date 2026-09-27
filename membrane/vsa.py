@@ -261,8 +261,8 @@ class VSALane:
             pass
 
     # -- the recurrence: recency-weighted positional majority -----------------
-    def encode(self, text: str, checkpoints: int = 0
-               ) -> np.ndarray | None:
+    def encode(self, text: str, checkpoints: int = 0,
+               remember: bool = True) -> np.ndarray | None:
         """Text -> the final state (the turn after all tokens massaged
         it). THREE components, one weighted majority (the measured
         shape; every bar in tests/test_vsa.py is calibrated to it):
@@ -307,7 +307,8 @@ class VSALane:
                                           7)))
                 weights.append((decay ** d) * 1.0)
         state = self._state(items, weights)
-        self._remember(state)
+        if remember:                  # composites/queries must not shift
+            self._remember(state)     # the surprise baseline
         return state
 
     @staticmethod

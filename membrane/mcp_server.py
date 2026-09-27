@@ -744,20 +744,19 @@ def tool_graph(args: dict, port: int) -> str:
     k = int(args.get("k") or 8)
     out = _http(port, "GET",
                 f"/membrane/entity-related?q={q}&k={k}")
-    items = out.get("entities") or []
+    # the endpoint answers {"query", "related": [{key, cells, neighbors:
+    # [{key, shared}], how}]} (the old reader looked for "entities" with
+    # eid/cls/properties -- keys it never sends -- and always said
+    # "no entities matched")
+    items = out.get("related") or out.get("entities") or []
     if not items:
         return "no entities matched the query"
     lines = []
     for e in items[:k]:
-        props = e.get("properties") or {}
-        line = (f"- {e.get('eid', '?')} [{e.get('cls', '?')}] "
-                f"{(e.get('label') or e.get('name') or '')[:70]}")
-        if e.get("status"):
-            line += f" (status: {e['status']})"
-        if e.get("fn_counts"):
-            line += f" fn:{json.dumps(e['fn_counts'])}"
-        neighbors = [n.get("eid", "?") for n in
-                     (e.get("neighbors") or [])][:4]
+        line = (f"- {e.get('key') or e.get('eid', '?')}"
+                f" ({e.get('cells', 0)} cells, {e.get('how', '')})")
+        neighbors = [f"{n.get('key') or n.get('eid', '?')}x{n.get('shared', '')}"
+                     for n in (e.get("neighbors") or [])][:4]
         line += (f" | neighbors: {', '.join(neighbors)}" if neighbors
                  else "")
         lines.append(line)

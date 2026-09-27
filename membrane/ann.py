@@ -28,17 +28,22 @@ def _search_host() -> str:
 
 def ann_search(index: str, vec: list, k: int = 5,
                timeout: float = 1.0,
-               host: str | None = None) -> list[tuple[str, float]] | None:
+               host: str | None = None, field: str = "vec",
+               filter: dict | None = None) -> list[tuple[str, float]] | None:
     """One ANN query -> [(doc_id, score)] (best first), or None on ANY
     failure (the caller falls back to the RAM store). The vec must be
     the FULL dimension the index was built at (short vecs return 0
-    hits silently)."""
+    hits silently). ``field`` names the indexed vector field (the
+    exemplars index uses 'vec', entity states 'state'); ``filter`` is a
+    search query pre-filtering the candidates (e.g. {"term": "live",
+    "field": "tier"})."""
     if not vec:
         return None
     host = host or _search_host()
-    body = json.dumps({"top_n": int(k),
-                       "knn": [{"field": "vec", "vector": list(vec),
-                                "k": int(k)}]}).encode()
+    knn = {"field": field, "vector": list(vec), "k": int(k)}
+    if filter:
+        knn["filter"] = filter
+    body = json.dumps({"top_n": int(k), "knn": [knn]}).encode()
     req = urllib.request.Request(
         f"{host}/api/index/{index}/query",
         data=body, method="POST",
@@ -57,3 +62,45 @@ def _basic_auth() -> str:
     user = os.environ.get("COUCHBASE_USER", "Administrator")
     pw = os.environ.get("COUCHBASE_PASSWORD", "password")
     return "Basic " + base64.b64encode(f"{user}:{pw}".encode()).decode()
+
+
+def vector_index_def(name: str, bucket: str, scope: str, collection: str,
+                     field: str, dims: int,
+                     keyword_fields: tuple[str, ...] = ()) -> dict:
+    """The search-index definition for one vector field (+ keyword fields
+    usable as knn filters), in the server's JSON shape."""
+    props = {field: {"enabled": True, "dynamic": False, "fields": [{
+        "name": field, "type": "vector", "dims": int(dims),
+        "similarity": "dot_product", "index": True}]}}
+    for kf in keyword_fields:
+        props[kf] = {"enabled": True, "dynamic": False, "fields": [{
+            "name": kf, "type": "text", "analyzer": "keyword",
+            "index": True}]}
+    return {
+        "name": name, "type": "fulltext-index", "sourceType": "gocbcore",
+        "sourceName": bucket,
+        "params": {"doc_config": {"mode": "scope.collection.type_field",
+                                  "type_field": "type"},
+                   "mapping": {"default_mapping": {"enabled": False},
+                               "types": {f"{scope}.{collection}": {
+                                   "enabled": True, "dynamic": False,
+                                   "properties": props}}}},
+        "planParams": {"indexPartitions": 1},
+    }
+
+
+def ensure_vector_index(scope_handle, name: str, bucket: str, scope: str,
+                        collection: str, field: str, dims: int,
+                        keyword_fields: tuple[str, ...] = ()) -> bool:
+    """Create-or-update a vector index through the SDK's scope search
+    index manager (works where the :8094 REST surface is closed, e.g.
+    Capella). False on any failure: recall then stays on the RAM path
+    (the degraded-mode covenant)."""
+    try:
+        from couchbase.management.search import SearchIndex
+        d = vector_index_def(name, bucket, scope, collection, field, dims,
+                             keyword_fields)
+        scope_handle.search_indexes().upsert_index(SearchIndex.from_json(d))
+        return True
+    except Exception:
+        return False
