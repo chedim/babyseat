@@ -225,3 +225,48 @@ class TestTheClaims(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLearnForget(unittest.TestCase):
+    def test_learn_writes_a_note(self):
+        f = field()
+        k = f.learn("  membrane/router.py   prefers free models ")
+        f.process()
+        d = f.b.get("events", k)
+        self.assertEqual((d["role"], d["text"], d["status"]), ("note", "membrane/router.py prefers free models", "applied"))
+        self.assertEqual(f.get("f:membrane/router.py").n, 1)
+        self.assertIsNone(f.learn("   "))
+
+    def test_forget_equals_never_having_seen_it(self):
+        texts = ["membrane/router.py picks the gateway model",
+                 "the gateway in membrane/router.py times out",
+                 "membrane/router.py retries the gateway twice",
+                 "the gateway is slow on mondays"]
+        a = field()
+        say(a, texts)
+        b = field()
+        say(b, [t for i, t in enumerate(texts) if i != 1])
+        n = next(d["n"] for _, d in a.b.scan("events") if "times out" in d["text"])
+        r = a.forget(n)
+        self.assertIn("f:membrane/router.py", r["entities"])
+        ra, rb = a.get("f:membrane/router.py"), b.get("f:membrane/router.py")
+        self.assertEqual((ra.n, ra.tier), (rb.n, rb.tier))
+        np.testing.assert_allclose(ra.state, rb.state, atol=1e-5)
+        # 'gateway' drops below K_MAT distinct sentences: back to the nursery
+        self.assertEqual(a.get("w:gateway").tier, b.get("w:gateway").tier)
+        ev = a.event_by_number(n)[1]
+        self.assertEqual((ev["status"], ev["text"]), ("forgotten", ""))
+        self.assertTrue(a.forget(n)["already"])
+        self.assertIsNone(a.forget(99999))
+        a.rebuild()                                   # a rebuild keeps it forgotten
+        self.assertEqual(a.get("f:membrane/router.py").n, 2)
+
+    def test_event_numbers_are_short_and_backfillable(self):
+        f = field()
+        say(f, ["one thing about membrane/a.py", "another about membrane/b.py"])
+        self.assertEqual(sorted(d["n"] for _, d in f.b.scan("events")), [1, 2])
+        k, d = next(iter(f.b.scan("events")))
+        d.pop("n")
+        f.b.upsert("events", k, d)
+        self.assertEqual(f.number_events(), 1)
+        self.assertEqual(f.b.get("events", k)["n"], 3)

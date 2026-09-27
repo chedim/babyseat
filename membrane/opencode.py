@@ -204,6 +204,32 @@ def _mcp_tool_lines() -> list[str]:
     return out
 
 
+_ENTITY_CARD_NORMAL = [
+    "- ENTITY FIELD: on. Membrane remembers per ENTITY (every file, symbol, "
+    "command, port, model, phrase and word), not per exchange. A 'SINCE YOUR "
+    "LAST MESSAGE' block rides a turn when entities changed after the last "
+    "message you processed: changes from OUTSIDE this conversation (code "
+    "edits, entity scripts, other sessions) are quoted; your own turns only "
+    "count. No block = nothing changed."]
+_ENTITY_CARD_NO_CONTEXT = [
+    "- ENTITY FIELD: on. Membrane remembers per ENTITY (every file, symbol, "
+    "command, port, model, phrase and word), not per exchange. Each turn "
+    "carries 'THE CONVERSATION SO FAR' (the session's messages and one-line "
+    "tool facts from the event log) and an 'ENTITIES' block for what the "
+    "ask names."]
+_ENTITY_CARD_COMMON = [
+    "- READING THE BLOCKS: '▸ <id> [kind · said N · observed M · code K · "
+    "age]' then the sentences that shaped it, verbatim. SAID = someone "
+    "wrote it (the user, you, a note); OBSERVED = a tool result showed it; "
+    "CODE = the codebase's own definitions and docstrings. Trust order: "
+    "observed and code > the user > model prose. A '! conflict' is a claim "
+    "the evidence contradicts -- check before you repeat it.",
+    "- '#N' is an EVENT number (a message, a tool fact, a code definition, "
+    "a note). 'membrane: forget #N' / membrane_forget remove that event and "
+    "recompute the entities it moved; 'membrane: learn that ...' writes a "
+    "note event."]
+
+
 def _seat_card(srv, mcp_on: bool) -> str:
     """THE SEAT CARD: this session's live configuration, rendered for the
     MODEL -- what membrane does in the current mode and how to drive it.
@@ -239,6 +265,10 @@ def _seat_card(srv, mcp_on: bool) -> str:
             "- CONTEXT: full transcript. opencode's history reaches you as "
             "usual; recalled memories ride as a system block just before "
             "the latest user message.")
+    if _efield_on(srv) is not None:
+        L.extend(_ENTITY_CARD_NO_CONTEXT if getattr(srv, "no_context", False)
+                 else _ENTITY_CARD_NORMAL)
+        L.extend(_ENTITY_CARD_COMMON)
     rs = float(getattr(srv, "replay_sim", 0.0) or 0.0)
     L.append(
         f"- REPLAY: near-duplicate asks (sim >= {rs:.2f}) on trusted "
@@ -290,6 +320,13 @@ def _efield_on(srv):
     fld = _efield_of(srv)
     cap = getattr(srv, "capturer", None)
     return fld if fld is not None and getattr(cap, "mode", "off") == "on" else None
+
+
+def _own_session_prefix(srv) -> str:
+    """The session ids this seat's live capture writes ('s:<boot>:')."""
+    cap = getattr(srv, "capturer", None)
+    boot = getattr(getattr(cap, "sessions", None), "boot", None)
+    return f"s:{boot}:" if boot is not None else "s:"
 
 
 def _efield_answer(srv, q: str, budget: int = 2400) -> dict:
@@ -900,13 +937,52 @@ def _write_audit(mem, rec: dict) -> None:
               file=sys.stderr)
 
 
+class _EventView:
+    """An applied event, shaped like the exemplar the watch and intent
+    boards read (vec, situation, action, extra['entities'])."""
+
+    def __init__(self, ev: dict, vec):
+        self.vec = [float(x) for x in vec]
+        self.situation = ev.get("text") or ev.get("served") or ""
+        self.action = ""
+        from .eids import _LEGACY_KIND
+        legacy = {v: k for k, v in _LEGACY_KIND.items()}   # watch filters: 'files:x'
+        ents: dict = {}
+        for eid, _i, _s in ev.get("mentions") or []:
+            kind, _, val = eid.partition(":")
+            if kind not in ("w", "p"):
+                ents.setdefault(legacy.get(kind, kind), []).append(val)
+        self.extra = {"entities": ents}
+
+
+def _efield_watch_listener(srv):
+    """The boards on the entity field: every applied live event (discourse or
+    observation; not code, not history) is an arrival; '#N' is its number."""
+    def on_applied(key, ev, vec):
+        if ev.get("stream") not in ("discourse", "observation"):
+            return
+        if not str(ev.get("session") or "").startswith(_own_session_prefix(srv)):
+            return
+        view = _EventView(ev, vec)
+        board = getattr(srv, "_watch_board", None)
+        if board is not None:
+            hit = board.on_learn(view, int(ev.get("n") or 0))
+            if hit is not None:
+                print(f"[watch] #{ev.get('n')} inside watch {hit['label']!r} "
+                      f"(sim {hit['sim']})", file=sys.stderr)
+        ib = getattr(srv, "_intent_board", None)
+        if ib is not None:
+            ib.on_turn(view)
+    return on_applied
+
+
 def _watch_notify(srv, mem, ex_idx: int | None) -> None:
     """Feed one learned/merged exemplar to the watch board (the spatial
     triggers' gravity check) and the intent board (near-turn context counters;
     NEVER auto-close -- cos >= 0.9 only flags 'maybe-done?' in the listing).
     Never raises into the learning path."""
-    if ex_idx is None:
-        return
+    if ex_idx is None or _efield_on(srv) is not None:
+        return                     # the field feeds the boards (on_applied)
     board = getattr(srv, "_watch_board", None)
     if board is not None:
         try:
@@ -1971,6 +2047,22 @@ def _forget_targets(srv, spec: str) -> list[tuple[int, float]]:
 
 def _forget_report(srv, spec: str) -> str:
     mem = srv.membrane
+    nums = _parse_agent_forget(spec) if _efield_on(srv) is not None else None
+    if nums:
+        # the field is on: '#N' names EVENTS (the numbers the blocks cite)
+        res = _efield_forget(srv, nums)
+        _write_audit(mem, {"event": "forget-events", "origin": "operator",
+                           "results": res, "spec": _clip(spec, 200)})
+        lines = ["Membrane forget (entity field, operator path, no model call):"]
+        for r in res:
+            if r.get("missing"):
+                lines.append(f"- #{r['n']}: no such event")
+            elif r.get("error"):
+                lines.append(f"- #{r['n']}: failed ({r['error']})")
+            else:
+                lines.append(f"- #{r['n']}: {'already forgotten' if r['already'] else 'forgotten'}"
+                             f"; {len(r['entities'])} entities recomputed")
+        return "\n".join(lines) + _INTERCEPT_MARKER
     is_window = _window_seconds(spec) is not None
     targets = _forget_targets(srv, spec)
     if not targets:
@@ -2152,8 +2244,34 @@ def _agent_learn(srv, payload: str) -> str:
             f"    response: {_clip(ex.action or '', 280)}")
 
 
+def _efield_learn(srv, payload: str, src: str) -> str:
+    """The lesson as a NOTE event on the entity field ('' when off)."""
+    fld = _efield_on(srv)
+    if fld is None or not payload.strip():
+        return ""
+    try:
+        k = fld.learn(payload, src=src)
+        d = fld.b.get("events", k) or {}
+        return f" Entity field: note #{d.get('n', '?')}."
+    except Exception as e:
+        return f" Entity field: not written ({str(e)[:80]})."
+
+
+def _efield_forget(srv, nums: list[int]) -> list[dict]:
+    fld = _efield_on(srv)
+    out = []
+    for n in nums:
+        try:
+            r = fld.forget(n)
+        except Exception as e:
+            r = {"n": n, "error": str(e)[:120]}
+        out.append(r or {"n": n, "missing": True})
+    return out
+
+
 def _learn_report(srv, payload: str) -> str:
     mem = srv.membrane
+    ef_note = _efield_learn(srv, payload, "user")
     if not payload.strip() or not mem.embedder:
         return ("Membrane learn (operator path): nothing to learn or embedder "
                 "unresolved -- nothing written.\n\n" + _INTERCEPT_MARKER)
@@ -2177,7 +2295,7 @@ def _learn_report(srv, payload: str) -> str:
     ex = mem.store.exemplars[idx]
     return (f"Membrane learn (operator path, no model call): written as "
             f"exemplar #{idx}, safe=True. Field now "
-            f"{len(mem.store)}.\n    situation: {_clip(ex.situation, 280)}\n"
+            f"{len(mem.store)}.{ef_note}\n    situation: {_clip(ex.situation, 280)}\n"
             f"    response: {_clip(ex.action or '', 280)}\n\n" + _INTERCEPT_MARKER)
 
 
@@ -4852,6 +4970,24 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                         else _where_delta(srv, _where_we_are(srv, vec)))
         if banner_block:
             ctx = (ctx + "\n\n" + banner_block) if ctx else banner_block
+        # THE ENTITY DIFF (normal mode): what changed in the entities since
+        # the last message the model processed -- code, entity scripts and
+        # other sessions quoted, this conversation's own turns counted. The
+        # watermark advances only once this turn is delivered.
+        fld = _efield_on(srv)
+        efield_mark = None
+        if fld is not None:
+            try:
+                from .entity_block import state_diff, watermark
+                efield_mark = watermark(fld)
+                if not getattr(srv, "no_context", False):
+                    diff = state_diff(fld, getattr(srv, "_efield_mark", None) or efield_mark,
+                                      _own_session_prefix(srv),
+                                      include_own=not _is_tool_round)
+                    if diff:
+                        ctx = (ctx + "\n\n" + diff) if ctx else diff
+            except Exception as e:
+                print(f"[efield] diff error: {e}", file=sys.stderr)
         # THE SPEECH RELAY: membrane's held messages ride the next
         # model-bound request as a marked block -- the model relays them
         # into the conversation verbatim (the mouth), where they enter the
@@ -4974,7 +5110,18 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             if _saved:
                 print(f"[opencode] no-context: elided {_saved} chars of "
                       f"older in-turn tool traffic", file=sys.stderr)
-            recon = _reconstruct_history(mem.store)
+            if fld is not None:
+                recon = None
+                try:
+                    from .entity_block import reconstruct, render_for
+                    recon = reconstruct(fld, _own_session_prefix(srv))
+                    eblock = render_for(fld, query, vec)
+                    if eblock:
+                        recon = (recon + "\n\n" + eblock) if recon else eblock
+                except Exception as e:
+                    print(f"[efield] reconstruction error: {e}", file=sys.stderr)
+            else:
+                recon = _reconstruct_history(mem.store)
             ctx = (ctx + "\n\n" + recon) if (ctx and recon) else (recon or ctx)
             up["messages"] = (_inject(stripped, ctx) if ctx
                               else stripped)
@@ -5080,6 +5227,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                       file=sys.stderr)
         try:
             self._v1_deliver(up, raw, query, vec, verdict, ctx)
+            if efield_mark is not None:
+                srv._efield_mark = efield_mark
             if thought_asks:
                 _serve_thoughts_served(srv, thought_asks)
             if w_events is not None:
@@ -5671,9 +5820,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._json_out({"written": False,
                             "reason": f"payload too long ({len(payload)} > "
                                       f"{_AGENT_LEARN_MAX_CHARS} chars)"}); return
+        ef_note = _efield_learn(srv, payload, "model")
         idx = mem.learn_pair(payload, payload, src="model")
         if idx is None:
-            self._json_out({"written": False,
+            self._json_out({"written": bool(ef_note), "note": ef_note.strip(),
                             "reason": "dedup or variety gate: nothing new"}); return
         _watch_notify(srv, mem, idx)
         _write_audit(mem, {"event": "agent-learn", "origin": "mcp",
@@ -5681,7 +5831,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                            "field_size": len(mem.store),
                            "payload": _clip(payload, 400)})
         ex = mem.store.exemplars[idx]
-        self._json_out({"written": True, "ex_idx": idx,
+        self._json_out({"written": True, "ex_idx": idx, "note": ef_note.strip(),
                         "field_size": len(mem.store),
                         "exemplar": {"situation": ex.situation,
                                      "action": ex.action or ""}})
@@ -5697,6 +5847,16 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._json_out({"removed": None, "candidates": [],
                             "reason": "field store or embedder unresolved"}); return
         idxs = _parse_agent_forget(spec)
+        if idxs is not None and _efield_on(srv) is not None:
+            if len(idxs) > _AGENT_FORGET_LIMIT:
+                self._json_out({"removed": None, "candidates": [],
+                                "reason": f"{len(idxs)} events exceed the agent cap "
+                                          f"({_AGENT_FORGET_LIMIT})"}); return
+            res = _efield_forget(srv, idxs)
+            _write_audit(mem, {"event": "forget-events", "origin": "mcp",
+                               "results": res, "spec": _clip(spec, 200)})
+            self._json_out({"removed": sum(1 for r in res if r.get("key") and not r.get("already")),
+                            "events": res}); return
         if idxs is None:
             # wordy -> PROPOSAL ONLY (never delete from a wordy spec)
             try:
@@ -6841,6 +7001,8 @@ def main() -> None:
             # the session's first event number: the 'now' line counts what
             # moved since the seat booted
             srv._efield_boot_seq = int(srv.efield._ostats.get("seq_last") or 0)
+            if srv.capturer.mode == "on":
+                srv.efield.listeners.append(_efield_watch_listener(srv))
             print(f"[efield] capture {srv.capturer.mode} "
                   f"({type(be).__name__})", file=sys.stderr)
     except Exception as e:

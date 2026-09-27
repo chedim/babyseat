@@ -169,6 +169,8 @@ class MemBackend:
 SCOPE = "membrane"
 # composite secondary indexes: the scans the field actually runs
 GSI = (("events", ("origin", "status", "seq")),
+       ("events", ("origin", "ts")),                  # the --no-context reconstruction
+       ("events", ("origin", "n")),                   # '#N' -> the event
        ("entity_deltas", ("origin", "eid", "seq", "sidx")),
        ("entity_deltas", ("origin", "seq")),          # the state diff since a watermark
        ("entity_states", ("origin", "tier", "kind")))

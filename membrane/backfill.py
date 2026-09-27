@@ -127,6 +127,7 @@ def _flush(field, buf) -> int:
 
 def finish(field, progress=_progress) -> dict:
     field.process()
+    field.number_events()
     null = field.refresh_null()
     settled = CL.evaluate(field, now=float("inf"))
     progress(f"null coherence {null[0]:.3f} +- {null[1]:.3f}; {settled} claims settled")

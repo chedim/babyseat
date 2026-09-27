@@ -180,6 +180,9 @@ class EntityField:
     def __init__(self, backend, embedder, origin: str, graph_fn=None,
                  phrase_vocab=None, holder: str | None = None):
         self._lock = threading.RLock()
+        # called (key, event doc, message vector) after each live event is
+        # applied -- the watch and intent boards; must be cheap, never raise
+        self.listeners: list = []
         self.b = backend
         self.emb = embedder
         self.origin = origin
@@ -286,7 +289,11 @@ class EntityField:
                    "call_id": ev.call_id, "served": ev.served_text, "ts": ev.ts,
                    "src": ev.src, "clipped": ev.clipped, "code": ev.code,
                    "seq": seq, "status": "pending"}
-            self.b.insert_if_absent("events", key, doc)
+            # '#N': the short per-origin number the model and the operator cite
+            # (seq orders; it is a microsecond clock, too long to quote)
+            doc["n"] = int(self._ostats.get("ev_n") or 0) + 1
+            if self.b.insert_if_absent("events", key, doc):
+                self._ostats["ev_n"] = doc["n"]
             keys.append(key)
         self.b.upsert("origin_stats", self._okey, self._ostats)
         return keys
@@ -495,6 +502,11 @@ class EntityField:
             ev["surprise"] = None
             return
         x_msg = unit(np.sum([X[i] for i in live_idx], axis=0))
+        for fn in self.listeners:
+            try:
+                fn(key, ev, x_msg)
+            except Exception:
+                pass
         mentioned = {m[0] for m in ev.get("mentions") or [] if m[1] in live_idx}
         A = [st.state for st in (self.get(e) for e in sorted(mentioned))
              if st is not None and st.tier == "live"]
@@ -634,6 +646,93 @@ class EntityField:
     def deltas_of(self, eid: str) -> list[dict]:
         return [d for _, d in self.b.scan(
             "entity_deltas", {"origin": self.origin, "eid": eid}, order=("seq", "sidx"))]
+
+    @_locked
+    def number_events(self) -> int:
+        """Give '#N' numbers to events written before numbering existed (in
+        seq order, after the numbered ones)."""
+        todo = sorted(((d.get("seq") or 0, k, d) for k, d in self.b.scan(
+            "events", {"origin": self.origin}) if d.get("n") is None), key=lambda t: t[:2])
+        for _, k, d in todo:
+            self._ostats["ev_n"] = int(self._ostats.get("ev_n") or 0) + 1
+            d["n"] = self._ostats["ev_n"]
+            self.b.upsert("events", k, d)
+        self.b.upsert("origin_stats", self._okey, self._ostats)
+        return len(todo)
+
+    def learn(self, text: str, src: str = "user", session: str = "learn") -> str | None:
+        """An explicit lesson: a NOTE event (discourse, role 'note'; the
+        claims layer reads it), applied on the next process()."""
+        text = " ".join((text or "").split())
+        if not text:
+            return None
+        ev = ST.Event(stream="discourse", role="note", text=text, ts=time.time(), src=src)
+        return self.write_events([ev], session=session)[0]
+
+    @_locked
+    def forget(self, n: int) -> dict | None:
+        """'forget #N': tombstone the event (its text and results cleared, its
+        key kept so a re-capture stays idempotent), drop its deltas and
+        claims, and recompute the entities it touched from their remaining
+        deltas. The recompute uses today's stream backgrounds (rebuild() is
+        the exact path)."""
+        hit = self.event_by_number(n)
+        if hit is None:
+            return None
+        key, ev = hit
+        if ev.get("status") == "forgotten":
+            return {"n": n, "key": key, "entities": [], "already": True}
+        self.flush()
+        touched = []
+        for dk, d in list(self.b.scan("entity_deltas", {"origin": self.origin, "event": key})):
+            self.b.delete("entity_deltas", dk)
+            touched.append(d["eid"])
+        touched = list(dict.fromkeys(touched))
+        # a nursery entity may hold the event's mention in its pending buffer
+        for eid, _i, _s in ev.get("mentions") or []:
+            st = self.get(eid)
+            if st is not None and st.tier == "nursery":
+                st.pending = [p for p in st.pending if p[4] != key]
+                st.distinct = list(dict.fromkeys(p[0] for p in st.pending))
+                self._dirty.add(eid)
+        for ck, c in list(self.b.scan("claims", {"origin": self.origin, "event": key})):
+            c["status"] = "forgotten"
+            self.b.upsert("claims", ck, c)
+        for f in ("text", "result_head", "result_tail", "served"):
+            if ev.get(f):
+                ev[f] = ""
+        ev.update({"status": "forgotten", "sids": [], "mentions": [], "forgotten_ts": time.time()})
+        self.b.upsert("events", key, ev)
+        for eid in touched:
+            self.recompute(eid)
+        self.flush()
+        return {"n": n, "key": key, "entities": touched, "already": False}
+
+    @_locked
+    def recompute(self, eid: str) -> EntityState | None:
+        """Re-derive one entity from its seed and its stored deltas (in seq
+        order); back to the nursery when a word loses its distinct
+        sentences."""
+        old = self.get(eid)
+        if old is None:
+            return None
+        ds = self.deltas_of(eid)
+        for d in ds:
+            self.b.delete("entity_deltas", f"d:{self.o}:{h16(eid)}:{d['seq']}:{d['sidx']}")
+        st = EntityState(eid=eid, kind=old.kind, surface=old.surface,
+                         conflicts=list(old.conflicts), activity=old.activity)
+        self._states[eid] = st
+        st.pending = [[d["sid"], d["seq"], d["sidx"], d["stream"], d["event"], d["ts"]] for d in ds]
+        st.distinct = list(dict.fromkeys(d["sid"] for d in ds))
+        if st.pending and (E.is_specific(eid) or len(st.distinct) >= K_MAT):
+            self._materialize(st)
+        self._dirty.add(eid)
+        return st
+
+    def event_by_number(self, n: int) -> tuple[str, dict] | None:
+        for k, d in self.b.scan("events", {"origin": self.origin, "n": int(n)}, limit=1):
+            return k, d
+        return None
 
     @_locked
     def changes_since(self, seq: int) -> dict[str, list[dict]]:

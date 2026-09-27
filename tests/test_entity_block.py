@@ -103,5 +103,90 @@ class TestTracks(unittest.TestCase):
         self.assertIsNone(EB.now_line(f, f._ostats["seq_last"]))
 
 
+class TestDiff(unittest.TestCase):
+    def test_nothing_moved_nothing_said(self):
+        f = seeded()
+        self.assertIsNone(EB.state_diff(f, EB.watermark(f), "s"))
+
+    def test_own_turns_count_external_news_quotes(self):
+        f = seeded()
+        mark = EB.watermark(f)
+        f.write_events([ST.Event(stream="discourse", role="user", ts=T0 + 50,
+                                 text="membrane/router.py should log the pick like membrane/gate.py does.")], session="s:1:0")
+        f.write_events([ST.Event(stream="code", role="code", ts=T0 + 60,
+                                 text="pick(model) in membrane/router.py: choose the cheapest model.",
+                                 code={"file": "membrane/router.py", "full": "membrane.router.pick",
+                                       "qual": "pick"})], session="code")
+        f.process()
+        d = EB.state_diff(f, mark, "s:1:")
+        self.assertTrue(d.startswith(EB.DIFF_HEADER))
+        self.assertIn("▸ f:membrane/router.py — code #", d)
+        self.assertIn("choose the cheapest model", d)
+        self.assertNotIn("should log the pick", d)            # own turn: counted, not quoted
+        self.assertIn("this conversation moved: f:membrane/gate.py (1 discourse)", d)
+        self.assertNotIn("this conversation moved:",
+                         EB.state_diff(f, mark, "s:1:", include_own=False) or "")
+        self.assertIsNone(EB.state_diff(f, EB.watermark(f), "s:1:"))
+
+    def test_new_conflicts_after_the_mark(self):
+        from membrane import claims as CL
+        f = seeded()
+        mark = EB.watermark(f)
+        f.b.upsert("claims", "cl:9", {"text": "I updated membrane/router.py.", "status": "contradicted"})
+        CL._conflict(f, "cl:9", ["f:membrane/router.py"])
+        d = EB.state_diff(f, mark, "s")
+        self.assertIn('! new conflict on f:membrane/router.py: "I updated membrane/router.py." '
+                      '(contradicted)', d)
+        self.assertIsNone(EB.state_diff(f, EB.watermark(f), "s"))
+
+
+class TestReconstruct(unittest.TestCase):
+    def test_the_conversation_as_events(self):
+        f = seeded()
+        r = EB.reconstruct(f, "s", now=T0 + 60)
+        lines = r.splitlines()
+        self.assertTrue(lines[0].startswith("THE CONVERSATION SO FAR"))
+        self.assertIn("user: membrane/router.py picks the free model for each ask.", lines[1])
+        self.assertIn("you: The fallback in membrane/router.py", lines[2])
+        self.assertTrue(lines[-1].startswith("  [#") and "edit membrane/router.py" in lines[-1])
+        self.assertIsNone(EB.reconstruct(f, "other-seat", now=T0 + 60))
+        self.assertIsNone(EB.reconstruct(f, "s", now=T0 + 10 * 3600))
+        short = EB.reconstruct(f, "s", budget=120, now=T0 + 60)
+        self.assertIn("edit membrane/router.py", short)
+        self.assertNotIn("picks the free model", short)
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestListeners(unittest.TestCase):
+    def test_the_watch_board_sees_applied_live_events(self):
+        import tempfile
+        from membrane import opencode as oc
+        from membrane.watch import WatchBoard
+        f = EF.EntityField(MemBackend(), FakeEmbedder(), "seat@host")
+
+        class _Cap:
+            mode = "on"
+
+            class sessions:
+                boot = 7
+
+        class _Srv:
+            efield, capturer = f, _Cap()
+        srv = _Srv()
+        with tempfile.TemporaryDirectory() as d:
+            srv._watch_board = WatchBoard(Path(d) / "w.json")
+            srv._intent_board = None
+            probe = FakeEmbedder().embed(["membrane/router.py retries the gateway"])[0]
+            srv._watch_board.set_watch("router retries", probe)
+            f.listeners.append(oc._efield_watch_listener(srv))
+            f.write_events([ST.Event(stream="discourse", role="user", ts=T0,
+                                     text="membrane/router.py retries the gateway")], session="s:7:0")
+            f.write_events([ST.Event(stream="discourse", role="user", ts=T0 + 1,
+                                     text="membrane/router.py retries the gateway")], session="b:0")
+            f.process()
+            evs = srv._watch_board.events
+            self.assertEqual(len(evs), 1)                       # history is not an arrival
+            self.assertEqual(evs[0]["ex_idx"], 1)               # '#N' = the event number

@@ -213,13 +213,27 @@ def evaluate(fld, now: float | None = None, limit: int = 500) -> int:
     return n
 
 
+CONFLICT_LOG = 64
+
+
 def _conflict(fld, claim_key_: str, eids_: list) -> None:
-    for eid in eids_:
-        st = fld.get(eid)
-        if st is not None and claim_key_ not in st.conflicts:
-            st.conflicts.append(claim_key_)
-            fld._dirty.add(eid)
-    fld.flush()
+    """Attach the claim to its entities and log it (numbered, bounded): the
+    normal-mode diff shows the conflicts logged since its watermark."""
+    with fld._lock:
+        hit = []
+        for eid in eids_:
+            st = fld.get(eid)
+            if st is not None and claim_key_ not in st.conflicts:
+                st.conflicts.append(claim_key_)
+                fld._dirty.add(eid)
+                hit.append(eid)
+        if hit:
+            n = int(fld._ostats.get("conflict_n") or 0) + 1
+            fld._ostats["conflict_n"] = n
+            log = fld._ostats.setdefault("conflict_log", [])
+            log.append({"n": n, "claim": claim_key_, "eids": hit})
+            del log[:-CONFLICT_LOG]
+        fld.flush()
 
 
 # ---- the judge ------------------------------------------------------------------------------

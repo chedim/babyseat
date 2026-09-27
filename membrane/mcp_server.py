@@ -547,6 +547,17 @@ def tool_forget(args: dict, port: int) -> str:
     if not spec:
         raise ProxyError(400, "spec required")
     out = _http(port, "POST", "/membrane/forget", {"spec": spec})
+    if out.get("events") is not None:
+        lines = [f"Forgot {out['removed']} event(s) (the entity field):"]
+        for r in out["events"]:
+            if r.get("missing"):
+                lines.append(f"- #{r['n']}: no such event")
+            elif r.get("error"):
+                lines.append(f"- #{r['n']}: failed ({r['error']})")
+            else:
+                lines.append(f"- #{r['n']}: {'already forgotten' if r.get('already') else 'forgotten'}; "
+                             f"{len(r.get('entities') or [])} entities recomputed")
+        return "\n".join(lines)
     if out.get("removed") is not None:
         lines = [f"Removed {out['removed']} of {out.get('field_size_before')} "
                  f"(index form). Field now {out.get('field_size')}."]

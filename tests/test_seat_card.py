@@ -2,7 +2,11 @@
 for the model -- mode-specific, tool list from the MCP registry, never
 claiming a state the seat is not in."""
 
+import sys
 import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
 
 from membrane.opencode import _seat_card, _mcp_tool_lines
 from membrane.mcp_server import TOOLS
@@ -118,3 +122,23 @@ class TestNoContextEnvDefault(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestEntityCard(unittest.TestCase):
+    def _srv(self, **kw):
+        from membrane.efield import EntityField
+        from membrane.efstore import MemBackend
+        from _ef_fakes import FakeEmbedder
+
+        class _Cap:
+            mode = "on"
+        return _Srv(efield=EntityField(MemBackend(), FakeEmbedder(), "o"), capturer=_Cap(), **kw)
+
+    def test_the_field_is_described_only_when_on(self):
+        self.assertNotIn("ENTITY FIELD", _seat_card(_Srv(), mcp_on=False))
+        card = _seat_card(self._srv(), mcp_on=False)
+        self.assertIn("SINCE YOUR LAST MESSAGE", card)
+        self.assertIn("'#N' is an EVENT number", card)
+        nc = _seat_card(self._srv(no_context=True), mcp_on=False)
+        self.assertIn("THE CONVERSATION SO FAR", nc)
+        self.assertNotIn("SINCE YOUR LAST MESSAGE", nc)
