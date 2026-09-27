@@ -11,6 +11,7 @@ Uses only stdlib (urllib) + numpy, so the project stays a single pip install (nu
 from __future__ import annotations
 
 import json
+import os
 import threading
 import urllib.request
 import urllib.error
@@ -32,9 +33,14 @@ EMBED_CACHE_MAX = 64
 class OllamaEmbedder:
     def __init__(self, base_url: str = DEFAULT_URL, model: str = DEFAULT_MODEL,
                  timeout: int = 120, token: str | None = None):
+        # cold-start reality on edge hardware (the agdroid): the FIRST embed
+        # after model load from flash measured ~28-30s; under proot/flash
+        # pressure it can exceed 120s. Env override exists for exactly this:
+        # MEMBRANE_EMBED_TIMEOUT=300 on the seat. Steady-state is ~50-300ms.
         self.base_url = base_url.rstrip("/")
         self.model = model
-        self.timeout = timeout
+        self.timeout = int(os.environ.get("MEMBRANE_EMBED_TIMEOUT",
+                                          str(timeout)))
         self.token = token        # optional bearer token; in-memory only, never persisted
         self._cache: dict[tuple[str, str], np.ndarray] = {}
         self._cache_lock = threading.Lock()

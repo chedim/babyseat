@@ -3356,7 +3356,10 @@ def _known_embed_names(backend: str) -> list:
 def _probe_embedder(backend: str, model: str):
     """An OllamaEmbedder for ``model`` iff a real embed call succeeds."""
     try:
-        emb = OllamaEmbedder(base_url=backend, model=model, timeout=60)
+        # 180s: cold llama-server startup (model load from flash) can take
+        # minutes on edge hardware (the agdroid measured ~30s first embed);
+        # steady-state is ~50ms. The timeout only binds the first call.
+        emb = OllamaEmbedder(base_url=backend, model=model, timeout=180)
         emb.embed(["probe"])
         return emb
     except Exception as e:
