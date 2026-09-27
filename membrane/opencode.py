@@ -6162,7 +6162,18 @@ def main() -> None:
                     help="don't serve the universe map at /viewer (ON by "
                          "default; the old opt-in flag is retired -- the "
                          "map is the seat's face now)")
+    # MEMBRANE_NO_CONTEXT=1 makes the stateless seat the DEFAULT for every
+    # spawner that sources the seat env (a supervisor, an HA self-heal, a
+    # manual launch) -- one env line instead of N launch lines to keep in
+    # sync; --with-context overrides it for one run.
+    _nc_env = os.environ.get("MEMBRANE_NO_CONTEXT", "").strip().lower() \
+        not in ("", "0", "false", "no", "off")
+    ap.add_argument("--with-context", dest="no_context", action="store_false",
+                    default=_nc_env,   # shared dest: the FIRST default wins
+                    help="keep opencode's transcript even when "
+                         "MEMBRANE_NO_CONTEXT=1 is set")
     ap.add_argument("--no-context", dest="no_context", action="store_true",
+                    default=_nc_env,
                     help="THE STATELESS LLM (the field is the only "
                          "memory): strip opencode's transcript history per "
                          "turn -- keep the system prompts + the current "

@@ -65,5 +65,56 @@ class TestSeatCard(unittest.TestCase):
                       _seat_card(_Srv(router=_Router(2.5)), True))
 
 
+class _Parsed(Exception):
+    pass
+
+
+def _parse(argv, env):
+    """Run opencode.main's REAL parser on argv under env, stop right after
+    parse_args (no server boots)."""
+    import argparse
+    import os
+    import sys
+    from unittest import mock
+    from membrane import opencode
+    real = argparse.ArgumentParser.parse_args
+    got = {}
+
+    def grab(self, *a, **k):
+        got["ns"] = real(self, *a, **k)
+        raise _Parsed()
+    with mock.patch.object(argparse.ArgumentParser, "parse_args", grab), \
+            mock.patch.object(sys, "argv", ["membrane-opencode"] + argv), \
+            mock.patch.dict(os.environ, env, clear=False):
+        os.environ.pop("MEMBRANE_NO_CONTEXT", None) if "MEMBRANE_NO_CONTEXT" \
+            not in env else None
+        try:
+            opencode.main()
+        except _Parsed:
+            pass
+    return got["ns"]
+
+
+class TestNoContextEnvDefault(unittest.TestCase):
+    """MEMBRANE_NO_CONTEXT=1 makes the stateless seat the default for any
+    spawner; the flags still win both ways."""
+
+    def test_off_by_default(self):
+        self.assertFalse(_parse([], {}).no_context)
+
+    def test_flag_turns_it_on(self):
+        self.assertTrue(_parse(["--no-context"], {}).no_context)
+
+    def test_env_turns_it_on(self):
+        self.assertTrue(_parse([], {"MEMBRANE_NO_CONTEXT": "1"}).no_context)
+
+    def test_env_zero_stays_off(self):
+        self.assertFalse(_parse([], {"MEMBRANE_NO_CONTEXT": "0"}).no_context)
+
+    def test_with_context_overrides_env(self):
+        self.assertFalse(_parse(["--with-context"],
+                                {"MEMBRANE_NO_CONTEXT": "1"}).no_context)
+
+
 if __name__ == "__main__":
     unittest.main()
