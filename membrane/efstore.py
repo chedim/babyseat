@@ -38,9 +38,19 @@ def pack_f16(v) -> str:
     return "f16:" + base64.b64encode(a.tobytes()).decode()
 
 
+def pack_f32(v) -> str:
+    """Running sums (mean, residual sum) need float32: float16 keeps ~3
+    significant digits and a sum of thousands of unit vectors drifts."""
+    a = np.asarray(v, dtype=np.float32)
+    return "f32:" + base64.b64encode(a.tobytes()).decode()
+
+
 def unpack_f16(s) -> np.ndarray:
+    """Any packed vector ('f16:' / 'f32:') or a plain float list."""
     if isinstance(s, str) and s.startswith("f16:"):
         return np.frombuffer(base64.b64decode(s[4:]), dtype=np.float16).astype(np.float64)
+    if isinstance(s, str) and s.startswith("f32:"):
+        return np.frombuffer(base64.b64decode(s[4:]), dtype=np.float32).astype(np.float64)
     return np.asarray(s, dtype=np.float64)
 
 

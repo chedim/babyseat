@@ -85,11 +85,11 @@ class TestApplication(unittest.TestCase):
         emb = FakeEmbedder()
         # seeds are stored float16 (the terms cache): expect the rounded seed
         from membrane.efstore import pack_f16, unpack_f16
-        s = unpack_f16(pack_f16(EF.unit(emb.embed(["gateway"])[0])))
+        s = EF.at_stored(unpack_f16(pack_f16(EF.unit(emb.embed(["gateway"])[0]))))
         for t in texts:                           # sentences stored at 6 decimals
             x = EF.unit(np.asarray(EF.vec_list(EF.unit(emb.embed([t])[0]))))
-            s = EF.unit(s + EF.GAIN * (x - s))
-        np.testing.assert_allclose(f.get("w:gateway").state, s, atol=1e-9)
+            s = EF.at_stored(EF.unit(s + EF.GAIN * (x - s)))   # stored precision
+        np.testing.assert_allclose(f.get("w:gateway").state, s, atol=1e-12)
 
     def test_processing_twice_changes_nothing(self):
         f = field()

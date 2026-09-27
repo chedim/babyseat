@@ -38,7 +38,7 @@ import numpy as np
 
 from . import eids as E
 from . import streams as ST
-from .efstore import h16, o8, pack_f16, unpack_f16
+from .efstore import h16, o8, pack_f16, pack_f32, unpack_f16
 
 EF_SCHEMA = 1
 GAIN = 0.5
@@ -60,6 +60,14 @@ def vec_list(v) -> list[float]:
     """An ANN-indexed vector as JSON floats, rounded to 6 decimals (float32-
     level precision, far below embedder noise): ~2.5x smaller documents."""
     return [round(float(x), 6) for x in v]
+
+
+def at_stored(v) -> np.ndarray:
+    return np.asarray(vec_list(v), dtype=float)
+
+
+def f32(v) -> np.ndarray:
+    return np.asarray(v, dtype=np.float32).astype(np.float64)
 
 
 def fit(x, A) -> np.ndarray:
@@ -130,8 +138,8 @@ class EntityState:
         else:
             d["state"] = vec_list(self.state)
             d["seed"] = pack_f16(self.seed)
-            d["mean"] = pack_f16(self.mean) if self.mean is not None else None
-            d["rsum"] = pack_f16(self.rsum)
+            d["mean"] = pack_f32(self.mean) if self.mean is not None else None
+            d["rsum"] = pack_f32(self.rsum)
         return d
 
     @classmethod
@@ -398,10 +406,12 @@ class EntityField:
         before = st.state
         align = (float(unit(st.mean) @ x) - float(self._ostats["pair"])
                  if st.mean is not None else 0.0)
-        st.state = unit(before + GAIN * (x - before))
-        st.mean = x.copy() if st.mean is None else st.mean + (x - st.mean) / (st.n + 1)
+        # every value kept at its STORED precision, so a restart (a reload
+        # from the backend) never changes a later result
+        st.state = at_stored(unit(before + GAIN * (x - before)))
+        st.mean = f32(x if st.mean is None else st.mean + (x - st.mean) / (st.n + 1))
         r = unit(x - bg) if bg is not None else x
-        st.rsum = r.copy() if st.rsum is None else st.rsum + r
+        st.rsum = f32(r if st.rsum is None else st.rsum + r)
         st.n += 1
         st.n_by_stream[stream] = st.n_by_stream.get(stream, 0) + 1
         st.net_align += align
@@ -419,7 +429,7 @@ class EntityField:
 
     def _materialize(self, st: EntityState) -> None:
         st.seed = self._seed(st.surface or st.eid.split(":", 1)[-1])
-        st.state = st.seed.copy()
+        st.state = at_stored(st.seed)
         st.tier = "live"
         pend = sorted(st.pending, key=lambda p: (p[1], p[2]))
         vecs = self.b.get_multi("sentences", [p[0] for p in pend])
@@ -530,6 +540,13 @@ class EntityField:
             self.b.upsert_multi("entity_deltas", self._deltas)
             self._deltas = {}
         self.b.upsert("origin_stats", self._okey, self._ostats)
+
+    def trim_cache(self, max_states: int = 5000) -> None:
+        """Drop clean cached states (they reload from the backend on demand):
+        a backfill touches tens of thousands of entities."""
+        if len(self._states) > max_states:
+            self.flush()
+            self._states = {}
 
     def rebuild(self) -> int:
         """Wipe this origin's states and deltas and re-apply its events in
