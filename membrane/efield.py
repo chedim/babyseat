@@ -327,6 +327,13 @@ class EntityField:
             for i, s in enumerate(sents):
                 for eid, surf in E.mentions_of(s, graph, self.phrases):
                     mentions.append([eid, i, surf])
+            if ev.get("stream") == "code" and sents:
+                c = ev.get("code") or {}
+                own = [(f"s:{c['full']}", c.get("qual") or c["full"])] if c.get("full") else []
+                if c.get("file"):
+                    own.append((E.canon("f", c["file"], graph), c["file"]))
+                seen = {m[0] for m in mentions}
+                mentions = [[e, 0, s] for e, s in own if e not in seen] + mentions
             if ev.get("stream") == "observation" and sents:
                 seen = {m[0] for m in mentions}
                 for eid, surf in self._obs_mentions(ev, graph):
@@ -601,6 +608,8 @@ class EntityField:
 
     def evidence(self, eid: str, k: int = 6, query_vec=None, streams=None) -> list[dict]:
         ds = [d for d in self.deltas_of(eid) if streams is None or d["stream"] in streams]
+        evs = self.b.get_multi("events", list(dict.fromkeys(d["event"] for d in ds)))
+        ds = [d for d in ds if (evs.get(d["event"]) or {}).get("status") != "superseded"]
         got = self.b.get_multi("sentences", list(dict.fromkeys(d["sid"] for d in ds)))
         rows = []
         for d in ds:

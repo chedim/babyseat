@@ -103,6 +103,22 @@ class Capturer:
         self._put(lambda: _served(ST.split_turn(
             "", results=[(call_id, name, args, result)], ts=ts), query))
 
+    def on_code(self, graph: dict, rels) -> None:
+        """Definitions in the re-scanned files -> CODE events; older code
+        events of those files are superseded once the new ones land. The
+        events are built HERE (the graph is only read on this thread)."""
+        from . import code_evidence as CE
+        rels = list(rels or [])
+        try:
+            evs = CE.code_events(graph, rels)
+        except Exception:
+            self.errors += 1
+            return
+
+        def after(keys):
+            CE.supersede(self.field, rels, keys)
+        self._put(lambda: (evs, after))
+
     def on_events(self, evs: list) -> None:
         """Already-built events (code evidence, notes, ingest)."""
         self._put(lambda: list(evs))
@@ -129,9 +145,14 @@ class Capturer:
 
     def _step(self, build, session: str) -> None:
         evs = build()
-        if not evs:
+        after = None
+        if isinstance(evs, tuple):
+            evs, after = evs
+        if not evs and after is None:
             return
-        self.field.write_events(evs, session=session)
+        keys = self.field.write_events(evs, session=session) if evs else []
+        if after is not None:
+            after(keys)
         if self.mode == "on":
             self.field.process()
 

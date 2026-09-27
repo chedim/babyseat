@@ -1657,6 +1657,9 @@ def _codegraph_refresh(srv, g) -> None:
               file=sys.stderr)
         return
     srv._cg_dirty = []
+    cap = getattr(srv, "capturer", None)
+    if cap is not None and (r["touched"] or r["dropped"]):
+        cap.on_code(g, r["touched"])       # the code as evidence
     if r["touched"] or r["dropped"]:
         print(f"[opencode] codegraph refreshed "
               f"({len(r['touched'])} re-scanned, {len(r['dropped'])} "
@@ -6746,7 +6749,9 @@ def main() -> None:
             srv.efield = EntityField(
                 be, LazyEmbedder(mem),
                 getattr(mem.store, "origin", "") or "seat",
-                graph_fn=lambda: _codegraph_graph(srv))
+                # read the CACHED graph only: refreshing mutates it, and
+                # that belongs to the chat thread
+                graph_fn=lambda: getattr(srv, "_codegraph", None))
             srv.capturer = Capturer(srv.efield)
             print(f"[efield] capture {srv.capturer.mode} "
                   f"({type(be).__name__})", file=sys.stderr)
