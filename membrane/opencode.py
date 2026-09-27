@@ -3648,6 +3648,9 @@ def _capture_plan_and_calls(mem, query: str, content: str, calls: dict) -> None:
     call registers in mem._pending_tools so its RESULT (next request) captures
     the full situational loop: 'tool bash for: <query> / args' -> result.
     File-touching calls (edit/write) also mark the codegraph dirty."""
+    cap = getattr(srv_ref(mem), "capturer", None)
+    if cap is not None and calls:
+        cap.on_calls(query, calls)          # full arguments, idempotent by call id
     if calls:
         for idx, c in sorted(calls.items()):
             fn = c.get("function") or {}
@@ -3686,6 +3689,9 @@ def _capture_tool_results(srv, body: dict) -> None:
         if rec is None:
             continue                      # pre-boot result or unknown id
         result = _tool_result_text(m)
+        cap = getattr(srv, "capturer", None)
+        if cap is not None:               # the UNCLIPPED result, by call id
+            cap.on_tool_result(cid, rec["name"], rec["args"], result, rec["query"])
         rec["result"] = result            # the receipt lane reads THIS
         srv._tool_results[cid] = rec      # result-side cache (bounded)
         if len(srv._tool_results) > 64:   # the bound: drop the oldest
@@ -5307,6 +5313,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # now"; consolidate.py's controller analogue for the chat lane).
         srv._last_fwd_dt = time.time()
         srv._last_fwd_dur = time.monotonic() - t0
+        # the entity field's discourse intake: the user's text + the model's
+        # prose + its reasoning -- mixed prose+tool turns included (the
+        # exemplar path below drops them); tool calls ride on_calls
+        _cap = getattr(srv, "capturer", None)
+        if _cap is not None:
+            _cap.on_turn(query, content, thought or "")
         # learn text turns; a pure tool-call turn has no human prose to ground
         # future turns on and the gate may have already learned from its user
         # text -- so only text-bearing answers are learned here.
@@ -6720,6 +6732,24 @@ def main() -> None:
     # couchbase commons is best-effort after the embedder resolves.
     srv._boot_ts = time.time()
     srv._tool_results = {}     # the receipt lane's result-side cache (E9)
+    # THE ENTITY FIELD's intake (the rewrite; MEMBRANE_EFIELD=off|shadow|on):
+    # events from the hooks, written by a worker thread -- never in the chat
+    # path. RAM backend until the Couchbase backend lands.
+    srv.capturer = srv.efield = None
+    try:
+        from .capture import Capturer, LazyEmbedder, mode_from_env
+        if mode_from_env() != "off":
+            from .efield import EntityField
+            from .efstore import MemBackend
+            srv.efield = EntityField(
+                MemBackend(), LazyEmbedder(mem),
+                getattr(mem.store, "origin", "") or "seat",
+                graph_fn=lambda: _codegraph_graph(srv))
+            srv.capturer = Capturer(srv.efield)
+            print(f"[efield] capture {srv.capturer.mode} (RAM backend)",
+                  file=sys.stderr)
+    except Exception as e:
+        print(f"[efield] capture off ({e})", file=sys.stderr)
     # (srv.receipts is set above from --no-receipts; a re-assignment here
     # to True used to silently kill the kill switch)
     srv.entity_store = None

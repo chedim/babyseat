@@ -159,13 +159,17 @@ class EntityField:
         self.o = o8(origin)
         self.graph_fn = graph_fn or (lambda: None)
         self.phrases = set(phrase_vocab or ())
-        self.model = getattr(embedder, "model", "?") or "?"
         self.holder = holder or f"{os.getpid()}@{socket.gethostname()}"
         self._states: dict[str, EntityState] = {}
         self._dirty: set[str] = set()
         self._deltas: dict[str, dict] = {}
         self._now: dict[str, np.ndarray] = {}      # session -> context (RAM only)
         self._ostats = self.b.get("origin_stats", self._okey) or self._fresh_ostats()
+
+    @property
+    def model(self) -> str:
+        """Read live: the seat's embedder resolves after boot."""
+        return getattr(self.emb, "model", "?") or "?"
 
     # ---- origin bookkeeping --------------------------------------------------------
     @property
