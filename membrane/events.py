@@ -149,7 +149,7 @@ class EventBus:
 
 def _mqtt_client(client_id: str):
     import paho.mqtt.client as mqtt
-    return _mqtt.Client(client_id=client_id, protocol=_mqtt.MQTTv311)
+    return mqtt.Client(client_id=client_id, protocol=mqtt.MQTTv311)
 
 
 def _mqtt_wrapper():

@@ -1,14 +1,10 @@
 """membrane CLI -- one entry point for every membrane surface.
 
-    membrane tui          TUI + proxy on :11435 (tears down the proxy it
-                          started when the TUI exits)
-    membrane proxy        just the proxy, foreground
     membrane opencode     field-backed opencode: OpenAI-compatible proxy on
                           :11500 + opencode pointed at it
-    membrane anthropic    TUI+proxy in --anthropic mode (Claude Code front door)
     membrane review       print what the field learned
-    membrane demo         in-process end-to-end loop (no chat model needed)
-    membrane reset         kill the port's proxy, then start fresh
+    membrane reset        kill the seat on :11500 (or --listen), then
+                          start opencode fresh
     membrane update        check the install source, show what changed,
                            update + re-exec (MEMBRANE_NO_UPDATE_CHECK=1
                            disables the automatic startup check)
@@ -95,7 +91,8 @@ Couchbase unreachable -> transparent fallback to the JSON field.
 Skills are project-scoped: .opencode/skills/ in THIS repo only (an opencode
 launched outside never sees them). Read those skills (membrane-query-field,
 membrane-write-memory, membrane-forget-memory, membrane-state,
-membrane-global-field, membrane-codegraph, membrane-ingest) for the full
+membrane-global-field, membrane-codegraph, membrane-ingest,
+membrane-restart) for the full
 contract, guards, and model-collapse hazards. Facts true BEYOND this repo
 (user/machine/team preferences) belong in the global commons:
 `membrane: remember globally: <fact>` (see membrane-global-field). Do not
@@ -166,93 +163,12 @@ def _port_open(port: int) -> bool:
     return True
 
 
-def _tui(argv: list[str], data_dir: bool = False) -> int:
-    if data_dir:
-        argv = _ensure_data_dir(argv)
-        PROXY_LOG.parent.mkdir(parents=True, exist_ok=True)
-    # Route flags between proxy and TUI exactly like ./run.sh did.
-    proxy_flags = ("--judge", "--no-judge", "--no-neg-followup", "--anthropic",
-                   "--observer", "--absorb", "--no-vague-filter",
-                   "--variety-gate", "--variety-temp")
-    proxy_kv = ("--listen", "--backend", "--sim-min", "--consensus-min",
-                "--dedup-sim", "--demote-threshold", "--judge-model",
-                "--judge-timeout", "--judge-backend", "--vague-min-tokens",
-                "--temp-driver", "--temp-tau", "--sim-min-floor", "--nudge-sigma",
-                "--nudge-seed", "--system", "--warmup", "--warmup-model",
-                "--warmup-seed", "--tag", "--cells")
-    tui_kv = ("--refresh",)
-    both_kv = ("--field", "--audit")
-
-    proxy_args: list[str] = []
-    tui_args: list[str] = []
-    it, n = 0, len(argv)
-    while it < n:
-        a = argv[it]
-        def _kv(dest: list[str]) -> None:
-            nonlocal it
-            dest.append(argv[it]); it += 1
-            if it < n:
-                dest.append(argv[it]); it += 1
-        if any(a == f for f in proxy_flags):
-            proxy_args.append(a); it += 1
-        elif any(a == f for f in tui_kv):
-            _kv(tui_args)
-        elif any(a == f for f in both_kv):
-            _kv(proxy_args); _kv(tui_args)
-        elif any(a == f for f in proxy_kv):
-            _kv(proxy_args)
-        else:
-            proxy_args.append(a); tui_args.append(a); it += 1
-
-    # Which port will the proxy bind? (default 11435)
-    port = 11435
-    for i, a in enumerate(proxy_args):
-        if a == "--listen" and i + 1 < len(proxy_args):
-            port = int(proxy_args[i + 1]); break
-
-    started: subprocess.Popen | None = None
-    log = open(PROXY_LOG if data_dir else "membrane-proxy.log", "a")
-    if not _port_open(port):
-        started = subprocess.Popen(
-            [sys.executable, "-m", "membrane.proxy"] + proxy_args,
-            stdout=log, stderr=subprocess.STDOUT)
-        for _ in range(40):
-            if _port_open(port):
-                break
-            if started.poll() is not None:
-                started = None
-                break
-            time.sleep(0.25)
-        if started is not None and not _port_open(port):
-            print("warning: proxy did not come up on :%d -- see "
-                  "membrane-proxy.log" % port, file=sys.stderr)
-            print("         (the TUI still works; it shows the last field "
-                  "state)", file=sys.stderr)
-
-    try:
-        return subprocess.call(
-            [sys.executable, "-m", "membrane.tui"] + tui_args)
-    finally:
-        if started is not None:
-            started.terminate()
-            try:
-                started.wait(timeout=5)
-            except Exception:
-                pass
-            log.close()
-
-
-def _anthropic(argv: list[str]) -> int:
-    # TUI+proxy in --anthropic mode: prepend --anthropic if absent.
-    if "--anthropic" not in argv:
-        argv = ["--anthropic"] + argv
-    return _tui(argv, data_dir=True)
-
-
 def _reset(argv: list[str]) -> int:
-    # `membrane reset <args...>`: kill what's on the proxy port, then start
-    # fresh (TUI+proxy) -- run.sh's `restart`.
-    port = 11435
+    # `membrane reset <args...>`: kill what listens on the opencode seat's
+    # port (--listen, default 11500), then boot the seat fresh -- run.sh's
+    # `restart`. (It used to relaunch the TUI+proxy pair on :11435; those
+    # modules are retired, so the seat is the only thing to restart.)
+    port = 11500
     prev = ""
     for a in argv:
         if prev == "--listen":
@@ -270,7 +186,7 @@ def _reset(argv: list[str]) -> int:
     else:
         print("[cli] reset: nothing on :%d, starting fresh" % port,
               file=sys.stderr)
-    return _tui(argv)
+    return _run_module("membrane.opencode", _ensure_data_dir(argv))
 
 
 def _install(args: argparse.Namespace) -> int:
@@ -313,7 +229,7 @@ def _install(args: argparse.Namespace) -> int:
 def _cb_ask(input_fn, getpass_fn, title: str) -> dict:
     """Interactive Couchbase endpoint (creds typed, never echoed)."""
     print(f"  {title}")
-    conn = input_fn("  conn string [couchbase://localhost]: ").strip()
+    conn = input_fn("  conn string [couchbase://127.0.0.1]: ").strip()
     user = input_fn("  user [Administrator]: ").strip()
     pw = getpass_fn("  password: ").strip()
     bucket = input_fn("  bucket [membrane]: ").strip()
@@ -525,9 +441,8 @@ def _doctor() -> int:
         for p in sorted(DATA_DIR.iterdir()):
             print(f"    {p.name}  {p.stat().st_size}B")
 
-    for name, port, up in (("TUI proxy", 11435, None),
-                           ("opencode proxy", 11500, None)):
-        print(f"  {name} port {port}: {'LISTENING' if _port_open(port) else 'free'}")
+    print(f"  opencode proxy port 11500: "
+          f"{'LISTENING' if _port_open(11500) else 'free'}")
 
     backend = "http://localhost:11434"
     try:
@@ -551,11 +466,8 @@ def main() -> None:
     # and those are exactly what we must pass through untouched.
     sub_help = (
         "\n"
-        "  proxy      proxy only, foreground\n"
         "  opencode   field-backed opencode (OpenAI-compatible proxy on :11500)\n"
-        "  anthropic  --anthropic mode (Claude Code front door)\n"
         "  review     print what the field learned\n"
-        "  demo       in-process end-to-end loop (no chat model needed)\n"
         "  reset      kill the proxy on the port, then opencode fresh\n"
         "  update     check the install source for updates, show what\n"
         "             changed, apply (git pull --ff-only) and re-exec\n"
@@ -563,7 +475,7 @@ def main() -> None:
         "  connect    offer to connect a shared Couchbase field for THIS\n"
         "             project (creds go to ~/.membrane/projects/, not the repo)\n"
         "  auth       store a cloud API key (anthropic, openrouter, gemini,\n"
-        "             groq, github, mistral): ~/.membrane/auth.json (600);\n"
+        "             groq, github, zen, mistral): ~/.membrane/auth.json (600);\n"
         "             its models become routable rungs + picker entries\n"
         "  move       migrate the field between stores (cb<->cb, cb->json,\n"
         "             json->cb); see --help for endpoint forms\n"
@@ -575,16 +487,18 @@ def main() -> None:
         "  doctor     what's installed/running (CLI, skills, Ollama)\n"
         "\n"
         "Everything after the subcommand is forwarded verbatim to the\n"
-        "underlying module (proxy/TUI flags by name).\n")
+        "underlying module.\n"
+        "\n"
+        "Retired (print a pointer to opencode): tui, proxy, anthropic, demo.\n")
     argv = sys.argv[1:]
     if argv and argv[0] in ("-h", "--help", "help"):
         print(__doc__)
         return
     cmd = argv[0] if argv and not argv[0].startswith("-") else None
-    if cmd not in ("proxy", "opencode", "anthropic", "review",
+    if cmd not in ("tui", "proxy", "opencode", "anthropic", "review",
                    "demo", "reset", "install", "doctor", "connect",
-                   "ingest", "codegraph", "update", "move", "migrate",
-                   "auth"):
+                   "ingest", "reharvest", "codegraph", "update", "move",
+                   "migrate", "auth"):
         if cmd is None and not argv:
             print(__doc__)
             return
@@ -602,7 +516,7 @@ def main() -> None:
             forwarded = [a for a in forwarded if a != "--force"]
         raise SystemExit(_install(args))
     # opencode surfaces: bind per-project data + auto-install skills first
-    if cmd in ("opencode", "anthropic", "reset"):
+    if cmd in ("opencode", "reset"):
         _autoinstall_skills()
     # shared-field onboarding: hydrate the per-project env (secrets live in
     # ~/.membrane/projects/, never in the repo), and -- when nothing
@@ -631,7 +545,11 @@ def main() -> None:
         argv2 = _ensure_data_dir(args.forwarded)
         raise SystemExit(_run_module("membrane.ingest", argv2))
     if cmd == "reharvest":
-        argv2 = _ensure_data_dir(args.forwarded)
+        # --field only: reharvest has no --audit (the _ensure_data_dir
+        # binding made every run die on "unrecognized arguments")
+        argv2 = args.forwarded
+        if "--field" not in argv2:
+            argv2 = ["--field", str(FIELD)] + argv2
         raise SystemExit(_run_module("membrane.reharvest", argv2))
     if cmd == "codegraph":
         raise SystemExit(_run_module("membrane.codegraph", args.forwarded))

@@ -3,23 +3,19 @@
 #
 # The canonical interface is now the CLI itself, from any directory:
 #
-#   uvx --from "membrane @ git+ssh://git@github.com/chedim/membrane" membrane tui
-#   ... membrane opencode | proxy | anthropic | review | demo | reset | install
+#   uvx --from "membrane @ git+ssh://git@github.com/chedim/membrane" membrane opencode
+#   ... membrane opencode | review | reset | install | doctor | connect
 #
 # This wrapper keeps the old ./run.sh surface working in-repo:
 #
-#   ./run.sh                TUI, and starts a proxy on :11435 if one isn't
-#                           already up; tears it down when the TUI exits
-#   ./run.sh tui            same as above (explicit alias)
-#   ./run.sh restart        kill any proxy on the port, then start fresh
-#   ./run.sh proxy          just the proxy, foreground (no TUI)
-#   ./run.sh opencode       field-backed opencode on :11500
-#   ./run.sh anthropic      TUI+proxy in --anthropic mode
+#   ./run.sh                field-backed opencode on :11500 (the default)
+#   ./run.sh opencode       same as above (explicit)
+#   ./run.sh restart        kill the seat on :11500, then start it fresh
+#                           (an alias of `membrane reset`)
 #   ./run.sh review         print what the field learned
-#   ./run.sh demo           in-process end-to-end loop
 #
-# Flags are forwarded verbatim to the CLI, which routes them between the
-# proxy and the TUI by flag name (same rules ./run.sh used to implement).
+# Flags are forwarded verbatim to the CLI. (tui / proxy / anthropic / demo
+# are retired; the CLI prints a pointer to opencode for them.)
 
 set -eo pipefail
 # THE SSH-KEY GUARD (the seat-launch crash): the boot update-check runs
@@ -34,7 +30,9 @@ PY="$ROOT/.venv/bin/python"
 
 case "${1:-}" in
   -h|--help|help)
-    sed -n '7,15p' "$0"; exit 0 ;;
+    sed -n '9,17p' "$0"; exit 0 ;;
+  restart)
+    shift; exec "$PY" -m membrane.cli reset "$@" ;;
 esac
 
-exec "$PY" -m membrane.cli "${@:-tui}"
+exec "$PY" -m membrane.cli "${@:-opencode}"

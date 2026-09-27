@@ -10,8 +10,9 @@
 This document covers the organs built in the timeline-dreaming arc
 (commits `e7a6f2d` through `eb99522`). The dev organism (cells) that this
 supersedes is described in [dev-organism.md](dev-organism.md); the cell
-pool is retired from the seat — `membrane/cell.py` / `pool.py` stay as
-library + experiment code.
+pool is retired — `membrane/cell.py` / `pool.py` were deleted in
+`070af25` (the `experiments/multi_*.py` rigs that import them are broken,
+kept as history).
 
 ---
 
@@ -193,4 +194,6 @@ The **cell pool** (dev-organism.md's cells) is retired from the seat:
 each cell was a second full Membrane whose grazed side-field nothing in
 the recall path read back. The dreaming direction replaces them — same
 idle-cognition role, on the main field, no parallel Membranes. The cell
-machinery stays as library + experiment code; `--cells` no longer exists.
+machinery is gone (`cell.py` / `pool.py` deleted in `070af25`; the
+`experiments/multi_*.py` rigs importing them are broken); `--cells` no
+longer exists.

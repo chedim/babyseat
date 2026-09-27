@@ -153,8 +153,12 @@ class VSACodebook:
         self.dim = int(dim)
         self.seed = int(seed)
         self.model = model or (getattr(embedder, "model", "") or "hash")
-        self.id = codebook_id(self.model, self.dim, self.seed,
-                              abs(hash(self.FORMAT)) % 10_000)
+        # sha256, never hash(): str hashes are salted PER PROCESS, so the
+        # old scheme forked the id (and every role vector) on each boot --
+        # the persisted codebook never matched, no two seats agreed
+        scheme = int(hashlib.sha256(self.FORMAT.encode()).hexdigest()[:8],
+                     16) % 10_000
+        self.id = codebook_id(self.model, self.dim, self.seed, scheme)
         self._book: dict[str, np.ndarray] = {}
         self._proj = self._matrix()
         self._role_cache: dict[str, np.ndarray] = {}

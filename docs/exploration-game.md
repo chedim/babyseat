@@ -1,7 +1,12 @@
 # Playing membrane as an exploration game
 
+> **RETIRED — kept as history.** The toy world, its proxy, TUI and world
+> viewer were cut (`070af25` / `b01b111`: membrane is the opencode seat
+> only). Nothing below runs any more; the manual stays as the record of
+> what the field did when worn as a world.
+
 > **For the gamer, not the engineer.** This is a player's manual. The build/run
-> details live in the [`readme`](../readme.md); you don't need them here. Assume
+> details live in the [`readme`](../README.md); you don't need them here. Assume
 > a world is already running and the viewer is open in your browser
 > (`http://127.0.0.1:8770/viewer`).
 

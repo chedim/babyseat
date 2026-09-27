@@ -18,8 +18,13 @@ class TestNeighborhood(unittest.TestCase):
         the degraded honest shape."""
         import membrane.ann as ann_mod
         calls = []
+        # a fake collection: field_path="" is not a lab path, so the real
+        # _cb_collection() would join the LIVE cluster (and POST a bucket
+        # create) -- the isolation leak this stub closes
         with mock.patch.object(ann_mod, "ann_search",
-                               side_effect=lambda *a, **k: calls.append(a)):
+                               side_effect=lambda *a, **k: calls.append(a)), \
+                mock.patch.object(ExemplarStore, "_cb_collection",
+                                  return_value=mock.MagicMock()):
             st = ExemplarStore.load_neighborhood(field_path="")
         self.assertEqual(calls, [])   # no seed -> the ANN never queried
 

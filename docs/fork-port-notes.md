@@ -206,7 +206,7 @@ absorb path), gate it behind the same `replay-sim > 0` check.
 **Decision:** background/idle membranes must not be able to burn paid tokens
 by default (the three-stuck-seats incident). A **$0 budget is a free-tier
 covenant, not a blackout**: rungs priced <= 0.1 (the `:free` pins) stay
-reachable; paid rungs require an explicit `--budget`.
+reachable; paid rungs require an explicit `--cloud-budget`.
 
 - `membrane/opencode.py` `--cloud-budget` default `0.0`.
 - `membrane/router.py`: in BOTH `route()` and `_ladder_under()`, the

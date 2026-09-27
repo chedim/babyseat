@@ -4,11 +4,16 @@ turn's exchanges (the turn boundary), drops the transcript history; the
 reconstruction block rebuilds coherence from the field (the last N
 learned turns, bounded); the recall budget scales generously."""
 
+import json
+import os
+import shutil
+import tempfile
 import unittest
 
 import numpy as np
 
-from membrane.opencode import _strip_context, _reconstruct_history
+from membrane.opencode import (_strip_context, _reconstruct_history,
+                               _elide_tool_tail)
 from membrane.field import Exemplar, ExemplarStore
 
 
@@ -311,8 +316,13 @@ class TestCaptureStrip(unittest.TestCase):
                     n = float(np.linalg.norm(v))
                     out.append(v / n if n > 1e-12 else v)
                 return out
-        mem = Membrane(StubResponder(), field_path=":memory:",
-                       audit_path=":memory:", embedder=_Emb())
+        # a tempdir, never ":memory:" -- that is a literal file in the cwd
+        # the lab-isolation guard does not recognize (it joined the live
+        # shared substrate and left :memory:.* files in the repo root)
+        td = tempfile.mkdtemp(prefix="membrane-test-")
+        self.addCleanup(shutil.rmtree, td, True)
+        mem = Membrane(StubResponder(), field_path=os.path.join(td, "field.json"),
+                       audit_path=os.path.join(td, "audit.jsonl"), embedder=_Emb())
         # THE ISOLATION (the lab-isolation lesson): the constructor's store
         # may have auto-detected the shared Couchbase substrate -- swap in a
         # RAM-only store so the test never touches shared memories.
@@ -363,6 +373,66 @@ class TestReconStampTiebreak(unittest.TestCase):
         # the near-tie (1s apart): the stamped cell takes the slot
         self.assertIsNotNone(block)
         self.assertIn("a stamped provenance question", block or "")
+
+
+def _loop(n_tools: int, size: int = 2000) -> list:
+    """A system prompt, the turn's ask, then n tool exchanges with big
+    results and a big edit argument each."""
+    msgs = [{"role": "system", "content": "you are opencode"},
+            {"role": "user", "content": "refactor the gate"}]
+    for i in range(n_tools):
+        args = json.dumps({"filePath": f"f{i}.py",
+                           "newString": "x" * size})
+        msgs.append({"role": "assistant", "content": "",
+                     "tool_calls": [{"id": f"c{i}", "type": "function",
+                                     "function": {"name": "edit",
+                                                  "arguments": args}}]})
+        msgs.append({"role": "tool", "tool_call_id": f"c{i}",
+                     "content": f"result {i} " + "y" * size})
+    return msgs
+
+
+class TestToolElision(unittest.TestCase):
+    """--no-context's in-turn half: old tool traffic shrinks, the recent
+    exchanges and the call/result structure survive."""
+
+    def test_old_results_shrink_recent_stay(self):
+        msgs = _loop(6)
+        out, saved = _elide_tool_tail(msgs, keep_last=3)
+        tools = [m for m in out if m["role"] == "tool"]
+        self.assertTrue(all("elided" in m["content"] for m in tools[:3]))
+        self.assertEqual([m["content"] for m in tools[3:]],
+                         [m["content"] for m in msgs if m["role"] == "tool"][3:])
+        self.assertGreater(saved, 3 * 1500)
+
+    def test_pairing_and_order_survive(self):
+        msgs = _loop(6)
+        out, _ = _elide_tool_tail(msgs, keep_last=2)
+        self.assertEqual([m["role"] for m in out], [m["role"] for m in msgs])
+        ids = [tc["id"] for m in out if m.get("tool_calls")
+               for tc in m["tool_calls"]]
+        res = [m["tool_call_id"] for m in out if m["role"] == "tool"]
+        self.assertEqual(ids, res)
+
+    def test_old_args_stay_valid_json_small_fields_whole(self):
+        out, _ = _elide_tool_tail(_loop(4), keep_last=1)
+        first = json.loads(out[2]["tool_calls"][0]["function"]["arguments"])
+        self.assertEqual(first["filePath"], "f0.py")
+        self.assertIn("elided", first["newString"])
+        last = json.loads(out[-2]["tool_calls"][0]["function"]["arguments"])
+        self.assertEqual(last["newString"], "x" * 2000)   # recent: verbatim
+
+    def test_small_traffic_and_disabled_are_untouched(self):
+        msgs = _loop(6, size=100)
+        self.assertEqual(_elide_tool_tail(msgs, keep_last=1), (msgs, 0))
+        big = _loop(6)
+        self.assertEqual(_elide_tool_tail(big, keep_last=-1), (big, 0))
+
+    def test_input_is_never_mutated(self):
+        msgs = _loop(5)
+        snap = json.dumps(msgs)
+        _elide_tool_tail(msgs, keep_last=1)
+        self.assertEqual(json.dumps(msgs), snap)
 
 
 if __name__ == "__main__":

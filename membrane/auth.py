@@ -131,6 +131,21 @@ PROVIDERS: dict[str, dict] = {
         "default_price": 1.0,
         "key_hint": "github_pat_... (classic PAT works too)",
     },
+    # OpenCode Zen: paid by default (1.0) -- only the ids it DECLARES free
+    # (big-pickle, the *-free rows) pin near-floor, so a zero budget never
+    # opens its paid models. Free-period caveat (Zen docs): prompts on
+    # some free models may be used for training.
+    "zen": {
+        "base": "https://opencode.ai/zen/v1",
+        "chat_path": "/chat/completions",
+        "models_path": "/models",
+        "auth_style": "bearer",
+        "env": ("OPENCODE_API_KEY", "OPENCODE_ZEN_API_KEY"),
+        "default_price": 1.0,
+        "free_ids": ("big-pickle",),
+        "free_suffixes": ("-free",),
+        "key_hint": "the OpenCode Zen API key (opencode.ai/auth)",
+    },
     "mistral": {
         "base": "https://api.mistral.ai/v1",
         "chat_path": "/chat/completions",
@@ -163,12 +178,19 @@ def fetch_models(provider: str, key: str, timeout: float = 8.0) -> list[str]:
                                                           timeout)]
 
 
-def is_free_model(row: dict, mid: str) -> bool:
+def is_free_model(row: dict, mid: str, provider: str | None = None) -> bool:
     """Zero-token-cost detection for a listing row: OpenRouter carries
     per-token `pricing` (prompt/completion "0" == free tier) and marks free
-    ids with a `:free` suffix; other providers just don't charge for their
-    listing shape (no pricing data -> not free by declaration)."""
-    if str(mid).lower().endswith(":free"):
+    ids with a `:free` suffix; a provider may DECLARE its free ids / id
+    suffixes in PROVIDERS (Zen: big-pickle, *-free); everyone else just
+    doesn't charge for their listing shape (no pricing data -> not free by
+    declaration)."""
+    low = str(mid).lower()
+    if low.endswith(":free"):
+        return True
+    prov = PROVIDERS.get(provider or "") or {}
+    if low in prov.get("free_ids", ()) or any(
+            low.endswith(sfx) for sfx in prov.get("free_suffixes", ())):
         return True
     p = row.get("pricing")
     if isinstance(p, dict):
@@ -205,7 +227,7 @@ def fetch_models_info(provider: str, key: str,
             if isinstance(m, dict):
                 mid = str(m.get("id") or m.get("name") or "").strip()
                 if mid:
-                    out.append((mid, is_free_model(m, mid),
+                    out.append((mid, is_free_model(m, mid, provider),
                                 int(m.get("context_length") or 0)))
         return out
     except Exception as e:

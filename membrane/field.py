@@ -451,6 +451,15 @@ class ExemplarStore:
         except (TypeError, ValueError):
             return 0.0
 
+    @staticmethod
+    def _eph_ttl(ex: Exemplar) -> float:
+        """The candidate's OWN TTL (the plasticity-scaled one stamped at
+        capture), the base EPH_TTL_S when absent/unreadable."""
+        try:
+            return float((ex.extra or {}).get("eph_ttl") or EPH_TTL_S)
+        except (TypeError, ValueError):
+            return EPH_TTL_S
+
     # THE PLASTICITY KNOB (the membrain upgrade, phase A -- predictive
     # coding): the capture's TTL scales by SURPRISE (the gate's top-1 sim
     # = the inverse of prediction error). A capture landing on ground the
@@ -531,7 +540,7 @@ class ExemplarStore:
         this trims the RAM mirror to match."""
         now = float(now if now is not None else time.time())
         return [i for i, e in enumerate(self.exemplars)
-                if e.ephemeral and now - self._eph_born(e) >= EPH_TTL_S]
+                if e.ephemeral and now - self._eph_born(e) >= self._eph_ttl(e)]
 
     # ---- supersede-on-confirm (W2a: stale-cell defense) --------------------
     # When a CORRECTION is learned and an old canon cell contradicts it (high
@@ -1530,7 +1539,7 @@ class ExemplarStore:
                     continue
                 if "eph_born" not in (ex.extra or {}):
                     ex.extra["eph_born"] = float(now)
-                if now - st._eph_born(ex) >= EPH_TTL_S:
+                if now - st._eph_born(ex) >= st._eph_ttl(ex):
                     # server TTL lag: retire on sight (not loaded at all)
                     try:
                         eph_coll.remove(eph_id)
@@ -1726,7 +1735,7 @@ class ExemplarStore:
                     continue
                 if "eph_born" not in (ex.extra or {}):
                     ex.extra["eph_born"] = float(now)
-                if now - st._eph_born(ex) >= EPH_TTL_S:
+                if now - st._eph_born(ex) >= st._eph_ttl(ex):
                     try:
                         eph_coll.remove(eph_id)
                     except Exception:
@@ -2256,7 +2265,6 @@ class ExemplarStore:
         ephemeral doc is removed here (its content moved to canon); TTL
         handles the silent rest."""
         coll = self._ensure_eph_collection()
-        upsert = getattr(coll, "upsert_with_expiry", None)
         live: set[str] = set()
         for ex in self.exemplars:
             if not ex.ephemeral:
@@ -2271,14 +2279,21 @@ class ExemplarStore:
             if k not in self._written_eph:
                 rec = self._cb_doc(ex)
                 rec["eph_born"] = self._eph_born(ex)
-                rec["eph_ttl"] = EPH_TTL_S
+                ttl = self._eph_ttl(ex)
+                rec["eph_ttl"] = ttl
+                # the server-side doc TTL (the SDK 4 form is UpsertOptions
+                # (expiry=) -- the old getattr(coll, "upsert_with_expiry")
+                # never existed, so candidates never expired server-side):
+                # the time LEFT of the cell's own TTL, floored at a minute
+                left = max(60, int(rec["eph_born"] + ttl - time.time()))
                 try:
-                    if upsert is not None:
+                    try:
+                        from couchbase.options import UpsertOptions
                         from datetime import timedelta as _td
-                        upsert(k, rec, expiry=_td(seconds=int(EPH_TTL_S)))
-                    else:  # old SDK: no expiry API -- plain upsert; the JSON
-                           # mirror's eph_born still retires it at load
-                        coll.upsert(k, rec)
+                        coll.upsert(k, rec, UpsertOptions(
+                            expiry=_td(seconds=left)))
+                    except ImportError:  # no SDK options: plain upsert;
+                        coll.upsert(k, rec)  # eph_born retires it at load
                 except Exception:
                     continue
                 self._written_eph.add(k)

@@ -85,5 +85,5 @@ rendered. Fewer bytes by EARNING, not by hiding.
 
 ## Toggle
 
-`/monologue` in the TUI (or send `membrane: monologue on|off|toggle` as a
+`/monologue` in opencode (or send `membrane: monologue on|off|toggle` as a
 plain message). Handled pre-gate, zero model calls. Default ON.

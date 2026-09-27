@@ -18,6 +18,9 @@ correction AND left the stale cell live in recall. Now:
 
 import math
 import sys
+import os
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -178,8 +181,13 @@ class TestLearnDedupSupersede(unittest.TestCase):
 
     def _mem(self):
         from membrane.runtime import Membrane, StubResponder
-        mem = Membrane(StubResponder(), field_path=":memory:",
-                       audit_path=":memory:", embedder=_Emb(),
+        # a tempdir, never ":memory:" -- that is a literal file in the cwd
+        # the lab-isolation guard does not recognize (it joined the live
+        # shared substrate and left :memory:.* files in the repo root)
+        td = tempfile.mkdtemp(prefix="membrane-test-")
+        self.addCleanup(shutil.rmtree, td, True)
+        mem = Membrane(StubResponder(), field_path=os.path.join(td, "field.json"),
+                       audit_path=os.path.join(td, "audit.jsonl"), embedder=_Emb(),
                        ephemeral=True)
         mem.store = _Store()
         return mem
@@ -241,8 +249,13 @@ class TestLearnDedupSupersede(unittest.TestCase):
         """Without the candidate tier there is no evidence path to police the
         successor -- the conservative keep-first-seen covenant holds."""
         from membrane.runtime import Membrane, StubResponder
-        mem = Membrane(StubResponder(), field_path=":memory:",
-                       audit_path=":memory:", embedder=_Emb(),
+        # a tempdir, never ":memory:" -- that is a literal file in the cwd
+        # the lab-isolation guard does not recognize (it joined the live
+        # shared substrate and left :memory:.* files in the repo root)
+        td = tempfile.mkdtemp(prefix="membrane-test-")
+        self.addCleanup(shutil.rmtree, td, True)
+        mem = Membrane(StubResponder(), field_path=os.path.join(td, "field.json"),
+                       audit_path=os.path.join(td, "audit.jsonl"), embedder=_Emb(),
                        ephemeral=False)
         mem.store = _Store()
         q = "what port does the viewer use"

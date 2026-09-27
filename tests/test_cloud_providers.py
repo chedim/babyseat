@@ -66,6 +66,16 @@ class TestAuthStore(unittest.TestCase):
             self.assertIn(prov.get("auth_style"), ("bearer", "anthropic"),
                           name)
 
+    def test_zen_free_ids_are_declared_paid_stay_paid(self):
+        # only what Zen declares free pins near-floor: a zero budget must
+        # never open its paid models
+        self.assertTrue(A.is_free_model({}, "big-pickle", "zen"))
+        self.assertTrue(A.is_free_model({}, "nemotron-3-ultra-free", "zen"))
+        self.assertFalse(A.is_free_model({}, "claude-sonnet-5", "zen"))
+        # the declaration is per provider: another provider's id is not free
+        self.assertFalse(A.is_free_model({}, "big-pickle", "groq"))
+        self.assertEqual(A.PROVIDERS["zen"]["default_price"], 1.0)
+
     def test_header_styles(self):
         h = A._headers("anthropic", "K")
         self.assertEqual(h["x-api-key"], "K")

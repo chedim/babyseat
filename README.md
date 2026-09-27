@@ -67,13 +67,16 @@ hacking on membrane):
 MEMBRANE_REPO=/path/to/membrane bash install.sh
 ```
 
-Requires only Python ≥ 3.10 + numpy; embeddings/chat come from a running
+Requires Python ≥ 3.10 (numpy is the only import-time dep); embeddings/chat come from a running
 [Ollama](https://ollama.com). Without installing anything, one-off via uvx:
 `uvx --from "membrane @ git+ssh://git@github.com/chedim/membrane" membrane install`.
 
 **Dependencies, honestly:**
 
-- **Python ≥ 3.10** + **numpy** — the only hard pip deps (`pip install -r requirements.txt`).
+- **Python ≥ 3.10** + **numpy** — the only import-time dep. `couchbase` (the shared
+  field) and `paho-mqtt` (the event bus) are installed by default (`pip install -r
+  requirements.txt` / the pyproject) but imported lazily; either one missing degrades
+  that feature, never the boot.
 - **Ollama** (`brew install ollama` / <https://ollama.com>) — NOT auto-installed; embeddings
   and local chat need it running on `:11434`. Optional: a **Couchbase** cluster for shared
   team fields (the `couchbase` pip package is imported only when you actually connect,
@@ -81,7 +84,7 @@ Requires only Python ≥ 3.10 + numpy; embeddings/chat come from a running
 - **[opencode](https://opencode.ai)** — NOT auto-installed either; `membrane opencode`
   launches it if found on PATH (`sh <(curl ... opencode.ai/install.sh)`), otherwise the
   proxy runs bare and you point any OpenAI-compatible client at `http://127.0.0.1:11500/v1`
-  (`--no-launch` skips the spawn entirely). The other surfaces (TUI, viewer, review,
+  (`--no-launch` skips the spawn entirely). The other surfaces (viewer, review,
   ingest, codegraph) need nothing beyond Python.
 - The **viewer** ships inside the package (three.js + both pixel fonts are vendored,
   served same-origin at `/viewer`, opened in your browser on start; `--no-viewer --no-open`
@@ -97,8 +100,8 @@ membrane opencode
 That's the whole workflow. On first run in a directory it bootstraps that
 project:
 
-- auto-installs the seven agent skills (query / learn / forget / state /
-  global-field / codegraph / ingest)
+- auto-installs the eight agent skills (query / learn / forget / state /
+  global-field / codegraph / ingest / restart)
   into `.opencode/skills/` there (project-scoped on purpose — an opencode
   launched elsewhere never sees them; skip with `MEMBRANE_NO_AUTOINSTALL=1`),
 - creates the per-project memory data in `.membrane/` there (`field.json`,
@@ -144,8 +147,9 @@ pure observer; set >0 to re-enable the replay saver), and the router picks
 the cheapest eligible model — free-tier-only by default (`--cloud-budget 0`;
 paid rungs need an explicit budget). Idle background loops (compaction,
 entity synthesis) distill on a LOCAL cortex by default (`--idle-cortex-model`,
-default `granite3.3:8b`) so a stuck background seat can never burn cloud
-tokens. The `[membrane]` monologue in your thinking channel shows the gate
+default = the first local Ollama chat model by family preference — granite,
+glm, qwen3, qwen2.5-coder, … — `granite3.3:8b` only when the tag list is
+unreadable) so a stuck background seat can never burn cloud tokens. The `[membrane]` monologue in your thinking channel shows the gate
 verdict, field vitals, and the per-turn memory flow (gave/learned); toggle it
 with `/monologue`. How the token economics and routing work:
 [docs/token-economics.md](docs/token-economics.md).
@@ -154,32 +158,31 @@ with `/monologue`. How the token economics and routing work:
 
 | Command | What it does |
 |---|---|
-| `membrane tui` | retired — the opencode seat is the surface |
 | `membrane opencode` | field-backed opencode on :11500 (the daily driver) |
-| `membrane anthropic` / `demo` | retired — the opencode seat is the surface |
 | `membrane review` | print what the field learned |
 | `membrane connect` | (re)run shared-field onboarding for THIS project |
-| `membrane reset` | kill the proxy on the port, start fresh |
-| `membrane install` | install `.opencode/skills/*` + AGENTS.md blurb explicitly |
+| `membrane reset` | kill the seat on :11500 (or `--listen`), relaunch `membrane opencode` fresh |
+| `membrane install` | install `.opencode/skills/*` explicitly (+ `.gitignore` entry); prints the AGENTS.md blurb |
+| `membrane auth` | store a cloud API key (anthropic, openrouter, gemini, groq, github, mistral) in `~/.membrane/auth.json` (600) — its models become routable rungs + picker entries |
+| `membrane move` | migrate the field between stores (cb↔cb, cb→json, json→cb) |
+| `membrane migrate` | interactive migration front door: detects where the field lives, asks for the target, runs `move` |
+| `membrane update` | check the install source, show what changed, apply (`git pull --ff-only`) and re-exec |
+| `membrane ingest` | cold start: absorb docs/README into the field (no model call) |
+| `membrane codegraph` | stdlib-AST call graph (stats / impact / callers / callees) |
 | `membrane doctor` | what's installed/running (CLI, skills, Ollama) |
+| `membrane tui` / `proxy` / `anthropic` / `demo` | RETIRED — print a pointer to `membrane opencode` |
 
-`./run.sh` still works in-repo and delegates to the same CLI.
+`./run.sh` still works in-repo and delegates to the same CLI (bare = opencode;
+`./run.sh restart` = `membrane reset`).
 
-### Claude Code (Anthropic cloud)
+### Claude Code (Anthropic cloud) — RETIRED
 
-```bash
-ANTHROPIC_BASE_URL=http://127.0.0.1:11435 ./run.sh anthropic
-```
-
-Observation-only mode: coding answers are never replayed (always forward +
-learn + label; the gate's would-be absorb is audited as `would_absorb`).
-Ambient quality signals (tool-error, re-ask-after-escalate) make the judge
-fire from *what happened*, not a button. The `ANTHROPIC_API_KEY` is
-passthrough only: read from the client's `x-api-key` header per request,
-forwarded to `api.anthropic.com`, and **never stored on the instance, written
-to the field or audit, or printed**. The judge stays Ollama on
-`localhost:11434` even in `--anthropic` mode — **local judging for cloud
-inference**.
+The old `./run.sh anthropic` / `--anthropic` observer mode (a proxy on
+`:11435` in front of Claude Code) was cut with the proxy — `membrane
+anthropic` now only prints the retirement pointer. The opencode seat is the
+surface; to route Anthropic models through it, `membrane auth` stores the
+key (`~/.membrane/auth.json`, mode 600) and its models become rungs on the
+router's ladder.
 
 ---
 
@@ -198,14 +201,14 @@ Run in the project directory; answer four prompts:
 
 ```bash
 membrane connect
-#   conn string   [couchbase://localhost]
+#   conn string   [couchbase://127.0.0.1]
 #   user          [Administrator]
 #   password      (hidden)
 #   bucket        [membrane]
 ```
 
 The same offer appears automatically on the first `membrane opencode` /
-`membrane tui` in a project that has no store configured (interactive shell
+`membrane reset` in a project that has no store configured (interactive shell
 only; declining is remembered — it becomes a private field, and `membrane
 connect` re-opens the question).
 
@@ -266,7 +269,7 @@ What the numbers mean and how the field's "thermodynamics" work:
 
 ## Lifecycle: updates, restarts, schema compatibility
 
-- **Update check at boot.** On `membrane tui/opencode/proxy`, membrane
+- **Update check at boot.** On `membrane opencode` / `membrane reset`, membrane
   checks its install source (the git checkout it runs from, or the pip/uv
   direct URL it was installed from). If an update exists it prints the
   CHANGELOG (the commits between you and the remote tip) and asks
@@ -274,8 +277,10 @@ What the numbers mean and how the field's "thermodynamics" work:
   (`--ff-only`, a dirty tree is refused) and re-execs with the same argv.
   Non-interactive sessions are never interrupted; `membrane update` runs
   the same path manually. Opt out with `MEMBRANE_NO_UPDATE_CHECK=1`.
-- **Restart only from the shell.** `./run.sh restart` (or `membrane
-  reset`) is the safe procedure — see the membrane-restart skill. Membrane
+- **Restart only from the shell.** `./run.sh restart` (= `membrane
+  reset`: kills the seat listening on :11500 — or `--listen` — and
+  relaunches `membrane opencode`) is the safe procedure — see the
+  membrane-restart skill. Membrane
   never restarts itself while running (no file watcher, no self-re-exec);
   a restart loses nothing: the field re-hydrates from its backend.
 - **The schema sliding window.** The field's record schema carries a
@@ -289,10 +294,11 @@ What the numbers mean and how the field's "thermodynamics" work:
 ## Easter egg: a self-authoring virtual world
 
 The same field, worn as a world: point the proxy at a fictional premise and
-it grows a **self-authoring world on its own clock**; you inhabit it as a
-voiced protagonist. Kept, playable, documented — **[docs/exploration-game.md](docs/exploration-game.md)**
-(player's manual) covers the screen, controls, and world-drive modes, and
-shows the launch command.
+it grew a **self-authoring world on its own clock**; you inhabited it as a
+voiced protagonist. **RETIRED** — the toy world and its proxy/TUI surfaces
+were cut (`070af25` / `b01b111`: membrane is the opencode seat only). The
+player's manual **[docs/exploration-game.md](docs/exploration-game.md)** is
+kept as history; its launch commands no longer run.
 
 ---
 
@@ -304,7 +310,7 @@ shows the launch command.
 | [docs/multi-dev-field.md](docs/multi-dev-field.md) | **Team field: the substrate.** Origin axis, veil, arbitration — what makes multi-seat sharing collision-free |
 | [docs/background-mind.md](docs/background-mind.md) | **The background mind: thinker + dreamer + the timeline organ.** Three clocks (turns / thinker hum / dreamer waves), timeline entities under session:now with reality's vote, the curiosity loop, model-authored entity scripts, ANN recall + the personalized field, metric-targeted auto-compact, kill switches |
 | [docs/vsa-token-lane.md](docs/vsa-token-lane.md) | **The VSA token lane (the rosetta transposition).** Every token a transition: the embedder-seeded hypervector codebook, the order-sensitive recurrence, the dual-lane recall + advisory surprise, the seven consumers (shape recall, loop fingerprint, shape-aware dedup, the order-shaped dream ballot, thinker convergence, the shape-poke, the streaming prefix seam), the kill switches |
-| [docs/dev-organism.md](docs/dev-organism.md) | The dev organism (RETIRED from the seat — library/experiment code now): cells that grazed the field — curiosity veils, the bud/death economy |
+| [docs/dev-organism.md](docs/dev-organism.md) | The dev organism (RETIRED — `cell.py` / `pool.py` deleted in `070af25`; history only): cells that grazed the field — curiosity veils, the bud/death economy |
 | [docs/global-field.md](docs/global-field.md) | The global commons: facts true beyond one repo; operator promotion, consensus, residency drift |
 | [docs/token-economics.md](docs/token-economics.md) | Where the savings come from (intercepts, replay, compaction) + the router: the ladder, the ceiling, the outage fallback, the free-tier default budget |
 | [docs/monologue.md](docs/monologue.md) | The `[membrane]` thinking-channel banner: every line explained, the memory flow (gave/learned), `/monologue` toggle |
@@ -312,15 +318,17 @@ shows the launch command.
 | [docs/principle.md](docs/principle.md) | "Only variety absorbs variety" — Ashby's law with the telos flipped; free_energy, effective_rank, the veil, multi-membrane |
 | [docs/math-findings.md](docs/math-findings.md) | The substrate-phase math: three experiments, one self-correcting conclusion (cosine primary, novelty specialist) |
 | [docs/ab-critic-scorecard.md](docs/ab-critic-scorecard.md) | The A/B scorecard vs a plain cosine cache — six criticisms faced honestly |
-| [docs/exploration-game.md](docs/exploration-game.md) | The easter egg: membrane as a self-authoring exploration game (player's manual) |
+| [docs/exploration-game.md](docs/exploration-game.md) | The easter egg (RETIRED — history only): membrane as a self-authoring exploration game (player's manual) |
+| [docs/close-the-gap.md](docs/close-the-gap.md) | Closing the TencentDB-Agent-Memory gap: warehouse vs dynamical system, the two gaps closed (cold-start ingest, CodeGraph-lite), what stays deliberately un-adopted (ACL panel, versioned assets) |
+| [docs/symbol-birth.md](docs/symbol-birth.md) | The symbol crystallization: how the hierarchy is born — symbols come into being through language; the thesis, its structural membrane mapping, the consequence to keep |
 | [docs/post-restart-plan.md](docs/post-restart-plan.md) | Working notes: routing-fix verification and the roadmap |
-| [cycled_environment.md](cycled_environment.md) / [endless_environment.md](endless_environment.md) | The theory notes behind the principle (the loop, and the trap unbounded variety sets) |
+| *the cycled / endless environment* (sibling `cortex-experiment` repo) | The theory notes behind the principle (the loop, and the trap unbounded variety sets) |
 
 ---
 
 ## Development
 
-Source layout: `membrane/` (proxy, field, router, opencode host, TUI),
+Source layout: `membrane/` (field, router, opencode host + seat proxy),
 `experiments/` (variety toys, multi-membrane rigs), `tests/` (unittest,
 plain-python runnable), `worlds/` (saved easter-egg worlds).
 

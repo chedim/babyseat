@@ -58,7 +58,12 @@ cross-check on `effective_rank` with no eigensolve.
 
 ---
 
-## The filter cutoff — where absorb ends and escalate begins (`membrane/knee.py`)
+## The filter cutoff — where absorb ends and escalate begins (`experiments/filter_knee.py`)
+
+> `membrane/knee.py` (the library home of `valley_knee` / `valley_knee_robust`)
+> was deleted in `070af25`; `experiments/filter_knee.py` keeps a standalone
+> `valley_knee`, while `experiments/real_knee.py` / `consolidate.py` still
+> import the removed module and no longer run as-is.
 
 A real workload is **trimodal**: a clear-routine mass (low novelty), a
 borderline band (medium), and a clear-novel mass (high). The absorb/escalate
@@ -217,13 +222,14 @@ the chat window and the model server — the window used to call the model
 directly; Membrane slides in, embeds each request, gates it, and either replays a
 recalled action (no model call) or forwards to the model and logs the turn. The
 field is a **local file the proxy owns** (local-first; a shared Core would be a
-later move where several proxies point at the same store). In `membrane/proxy.py`:
+later move where several proxies point at the same store). In `membrane/proxy.py`
+(since removed — `070af25`; the opencode seat's proxy in `membrane/opencode.py` carries the role now):
 the proxy gates `/api/chat` in **both** stream and non-stream modes — an absorb
 synthesizes an NDJSON stream from the recalled action (no model call), an
 escalation tees the backend stream to the client while accumulating the response
 into the field; all other routes pass through. So any GUI/IDE Ollama client
 (Continue, Open WebUI, …) pointed at the proxy drives the field for real. Loop
-proven in `experiments/proxy_demo.py` (non-stream) and the streaming smoke test.
+proven in `experiments/proxy_demo.py` (non-stream; since removed) and the streaming smoke test.
 
 **The training loop (Tier 1 landed — passive self-train on re-asks; boundary softening
 landed).** The decision loop (absorb/escalate) is built. The **training** loop is how the

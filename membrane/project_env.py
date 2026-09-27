@@ -183,7 +183,7 @@ def couchbase_onboarding(cwd: Path | str | None = None,
 
     print("  (enter to accept the default; ~/.membrane/projects/ keeps the"
           " secrets off the repo)")
-    conn = input_fn("  conn string [couchbase://localhost]: ").strip()
+    conn = input_fn("  conn string [couchbase://127.0.0.1]: ").strip()
     user = input_fn("  user [Administrator]: ").strip()
     pw = getpass_fn("  password: ").strip()
     bucket = input_fn("  bucket [membrane]: ").strip()

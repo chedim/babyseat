@@ -748,7 +748,7 @@ class Compactor:
             # THE SYMBOL-BIRTH RULE (the operator's thesis: born is the
             # speech act's timestamp): the kept cells' eph_born IS the
             # utterance time -- the earliest one becomes the symbol's born.
-            from .field import _eph_born_of
+            from .entities import _eph_born_of
             _store = mem.store
             members_born = [_eph_born_of(_store.exemplars, _store.index_of(m))
                             for m in kept
@@ -1445,6 +1445,7 @@ def main() -> None:
         audit_path=args.audit,
         embedder=OllamaEmbedder(base_url=backend, model=args.embed_model),
         sim_min=args.sim_min,
+        dedup_sim=args.dedup_sim,
         demote_threshold=args.demote_threshold,
         reask_window_s=args.reask_window,
         judge=judge,
@@ -1465,7 +1466,7 @@ def main() -> None:
     srv.compact_max_cluster = max(srv.compact_min_cluster,
                                   int(args.compact_cluster_max))
     srv.compact_cluster_sim = max(0.0, min(1.0, float(args.compact_cluster_sim)))
-    srv.compact_mem_chars = max(64, int(args.mem_chars))
+    srv.compact_mem_chars = max(64, int(args.compact_mem_chars))
     srv.compact_model = (args.compact_model
                          or getattr(args, "judge_model", "granite3.3:8b"))
     # THE IDLE-CORTEX SPLIT: background loops (compactor, entity synthesis)

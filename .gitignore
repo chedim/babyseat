@@ -42,7 +42,8 @@ itll-pave-us.html
 .launcher.py
 
 # a smoke test that passed --audit :memory: from the repo root materializes a literal file
+# (+ its .cb-keys.json / .migrated / .corrupt-* siblings)
 :memory:
-:memory:.corrupt-*
+:memory:.*
 # the entity side-index, same mechanism (a boot/smoke from the repo root)
 entities.json

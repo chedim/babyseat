@@ -358,7 +358,7 @@ class Thinker:
         import time as _t
         now = _t.time()
         op = str(fn.get("op") or "?")
-        touched = getattr(self, "_replay_eids", None)
+        touched = getattr(self, "_touched_replay", None)
         if touched is None:
             self._touched_replay = touched = deque(maxlen=16)
         for tag in tags[:4]:

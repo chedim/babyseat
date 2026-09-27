@@ -16,14 +16,13 @@ From a shell (Bash tool) in the project root:
 
     ./run.sh restart          # or: membrane reset
 
-That kills whatever listens on the proxy port, then boots a fresh TUI+proxy
-with the same flags. For the opencode surface:
-
-    membrane reset opencode   # or kill the :11500 process, then relaunch
+That kills whatever listens on the opencode seat's port (:11500, or the
+`--listen` you pass), then boots a fresh `membrane opencode` with the same
+flags.
 
 If ONLY a boot smoke on a spare port is wanted (never disturb the live one):
 
-    .venv/bin/python -m membrane.proxy --listen 18787 --field .membrane/field.json ...
+    .venv/bin/python -m membrane.opencode --listen 18787 --no-launch --field .membrane/field.json ...
 
 Then verify with `field state` (the membrane-state skill) that the field
 re-hydrated: exemplar count in the expected range, safe_frac sane.

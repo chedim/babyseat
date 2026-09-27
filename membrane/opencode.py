@@ -187,6 +187,98 @@ def _hygiene_demote_screened_models(srv) -> int:
     return demoted
 
 
+def _mcp_tool_lines() -> list[str]:
+    """One line per MCP tool, straight from the server's registry (the
+    card can never drift from what opencode actually mounts)."""
+    try:
+        from .mcp_server import TOOLS
+    except Exception:
+        return []
+    out = []
+    for t in TOOLS:
+        d = " ".join(str(t.get("description") or "").split())
+        first = re.split(r"(?<=\.)\s", d, maxsplit=1)[0]
+        if len(first) > 160:
+            first = first[:157].rsplit(" ", 1)[0] + "..."
+        out.append(f"  - {t.get('name')}: {first}")
+    return out
+
+
+def _seat_card(srv, mcp_on: bool) -> str:
+    """THE SEAT CARD: this session's live configuration, rendered for the
+    MODEL -- what membrane does in the current mode and how to drive it.
+    Appended to the doctrine instructions file at boot: the switches are
+    fixed for the session, so the card is byte-stable (the system prefix
+    stays cacheable); live NUMBERS stay in `field state` / the banner.
+    The card is authoritative where the generic doctrine is not."""
+    L = ["", "MEMBRANE SEAT -- this session's live configuration "
+         "(authoritative over the general doctrine above where they differ; "
+         "fixed for the session -- `field state` / membrane_state reads the "
+         "live numbers):"]
+    if getattr(srv, "no_context", False):
+        keep = int(getattr(srv, "tool_keep", 3))
+        L.append(
+            "- CONTEXT: FIELD-ONLY (--no-context). opencode's transcript "
+            "before the current turn is NOT sent to you. In its place: a "
+            "reconstruction block (this session's last few exchanges, as "
+            "the field remembers them) + recalled memories. The current "
+            "turn arrives whole: your opening ask, and your tool loop.")
+        if keep >= 0:
+            L.append(
+                f"- IN-TURN ELISION: only the last {keep} tool exchanges of "
+                "this turn arrive verbatim; older big tool results and "
+                "arguments show a head + a '[membrane: ... elided ...]' "
+                "marker. Re-run the tool when you need one verbatim; never "
+                "guess at the elided part.")
+        L.append(
+            "- MISSING EARLIER CONTEXT is expected here, not an error: if "
+            "you need something from earlier in the session that is not in "
+            "front of you, query the field for it instead of assuming.")
+    else:
+        L.append(
+            "- CONTEXT: full transcript. opencode's history reaches you as "
+            "usual; recalled memories ride as a system block just before "
+            "the latest user message.")
+    rs = float(getattr(srv, "replay_sim", 0.0) or 0.0)
+    L.append(
+        f"- REPLAY: near-duplicate asks (sim >= {rs:.2f}) on trusted "
+        "memories may be answered from the field without you."
+        if rs > 0 else
+        "- REPLAY: off (pure observer) -- membrane never answers for you; "
+        "every turn reaches you.")
+    L.append(
+        "- YOUR WRITES: 'membrane: learn that ...' / 'membrane: forget #N' "
+        "frames in your reply EXECUTE (audited as origin: agent)."
+        if getattr(srv, "agent_writes", True) else
+        "- YOUR WRITES: report-only (--no-agent-writes) -- frames in your "
+        "prose are proposals the operator confirms; nothing is written.")
+    tools = _mcp_tool_lines() if mcp_on else []
+    if tools:
+        L.append("- TOOLS: the membrane MCP server is mounted -- prefer "
+                 "these typed tools over prose frames (no one-turn wait, "
+                 "same guards):")
+        L.extend(tools)
+    else:
+        L.append("- TOOLS: MCP off -- drive membrane with the prose frames "
+                 "(one per reply, last line).")
+    gf = getattr(srv, "global_field", None)
+    L.append("- GLOBAL FIELD: on -- facts true beyond this repo can be "
+             "promoted to the cross-project commons."
+             if gf is not None else
+             "- GLOBAL FIELD: off -- memory is this project's only.")
+    router = getattr(srv, "router", None)
+    if router is not None:
+        b = getattr(router, "cloud_budget", None)   # None = uncapped
+        spend = ("uncapped cloud spend" if b is None else
+                 "free-tier only" if b <= 0 else f"cloud budget ${b:.2f}/day")
+        L.append(f"- ROUTING: membrane picks the model per turn ({spend})"
+                 "; you may be a different model than last turn -- do not "
+                 "assume your own earlier reasoning is in your weights.")
+    if not getattr(srv, "receipts", True):
+        L.append("- RECEIPTS: off (--no-receipts).")
+    return "\n".join(L) + "\n"
+
+
 def _state_report(srv) -> str:
     """The internal answer for a state/math query: live numbers straight off
     the field, the compactor, and the audit. No model call."""
@@ -2474,6 +2566,82 @@ def _strip_context(messages: list) -> list:
     return [m for i, m in enumerate(msgs) if i in keep]
 
 
+_ELIDE_MARK = ("[membrane: older tool {what} elided ({n} chars; head shown) -- "
+               "the full result is in the field; re-run the tool if you "
+               "need it verbatim]")
+
+
+def _elide_text(text: str, head: int, what: str) -> str:
+    return (text[:head].rstrip() + "\n"
+            + _ELIDE_MARK.format(what=what, n=len(text)))
+
+
+def _elide_args(args: str, head: int, min_chars: int) -> str:
+    """Shrink the big STRING fields of a tool call's JSON arguments (an
+    edit's newString, a write's content) -- the JSON stays valid, the
+    small fields (paths, flags) stay whole. Non-JSON args pass as-is."""
+    try:
+        obj = json.loads(args)
+    except (TypeError, ValueError):
+        return args
+    if not isinstance(obj, dict):
+        return args
+    changed = False
+    for k, v in obj.items():
+        if isinstance(v, str) and len(v) > min_chars:
+            obj[k] = _elide_text(v, head, "argument")
+            changed = True
+    return json.dumps(obj) if changed else args
+
+
+def _elide_tool_tail(messages: list, keep_last: int = 3, head: int = 300,
+                     min_chars: int = 800) -> tuple[list, int]:
+    """THE IN-TURN ELISION (the stateless LLM's second half): the strip
+    bounds the transcript BEFORE the turn, but a long agent loop still
+    grows the turn itself without bound. Every tool exchange older than
+    the last ``keep_last`` shrinks: a big tool RESULT to its head + a
+    marker, a big tool-call ARGUMENT string the same way. The structure
+    is untouched -- every message and every tool_call_id stays, so the
+    call/result pairing providers enforce still holds. Returns (messages,
+    chars_saved); the input dicts are never mutated."""
+    msgs = list(messages or [])
+    if keep_last < 0:
+        return msgs, 0
+    tool_idx = [i for i, m in enumerate(msgs)
+                if isinstance(m, dict) and m.get("role") == "tool"]
+    old = set(tool_idx[:max(0, len(tool_idx) - keep_last)])
+    if not old:
+        return msgs, 0
+    cutoff = max(old)                    # calls after this are recent
+    saved = 0
+    for i, m in enumerate(msgs):
+        if not isinstance(m, dict):
+            continue
+        if i in old:
+            c = m.get("content")
+            if isinstance(c, list):      # multi-part: the text parts
+                c = "\n".join(p.get("text", "") for p in c
+                              if isinstance(p, dict))
+            if isinstance(c, str) and len(c) > min_chars:
+                new = _elide_text(c, head, "result")
+                saved += len(c) - len(new)
+                msgs[i] = dict(m, content=new)
+        elif (i < cutoff and m.get("role") == "assistant"
+              and m.get("tool_calls")):
+            calls = []
+            for tc in m["tool_calls"]:
+                fn = (tc or {}).get("function") or {}
+                a = fn.get("arguments")
+                if isinstance(a, str) and len(a) > min_chars:
+                    na = _elide_args(a, head, min_chars)
+                    if na != a:
+                        saved += len(a) - len(na)
+                        tc = dict(tc, function=dict(fn, arguments=na))
+                calls.append(tc)
+            msgs[i] = dict(m, tool_calls=calls)
+    return msgs, saved
+
+
 def _reconstruct_history(store, n: int = 6, budget: int = 3000) -> str | None:
     """THE RECONSTRUCTION (the coherence block): the last N learned turns
     (time-ordered by eph_born / the capture clock) rendered as compact
@@ -4718,6 +4886,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             # remembers it, bounded ~3k chars instead of the transcript's
             # unbounded growth).
             stripped = _strip_context(body.get("messages") or [])
+            stripped, _saved = _elide_tool_tail(
+                stripped, keep_last=int(getattr(srv, "tool_keep", 3)))
+            if _saved:
+                print(f"[opencode] no-context: elided {_saved} chars of "
+                      f"older in-turn tool traffic", file=sys.stderr)
             recon = _reconstruct_history(mem.store)
             ctx = (ctx + "\n\n" + recon) if (ctx and recon) else (recon or ctx)
             up["messages"] = (_inject(stripped, ctx) if ctx
@@ -4890,7 +5063,13 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                             else " (auth)")
                 print(f"[opencode] ladder failover {model_name} -> {nxt} "
                       f"({why})", file=sys.stderr)
-                router.note_outage(model_name, why)
+                # the lookup, not the bare name: `router` is assigned in
+                # the except-Exception branch below, which makes it LOCAL
+                # here -- a bare use raised UnboundLocalError on every
+                # HTTP rung-down
+                router = getattr(srv, "router", None)
+                if router is not None:
+                    router.note_outage(model_name, why)
                 route["failover"] = nxt
                 return _open_backend(nxt)
             except Exception as first_err:
@@ -5991,6 +6170,12 @@ def main() -> None:
                          "RAG budget scales generously: k x8, ctx x3). "
                          "No prompt-too-long crashes, ever: the context "
                          "is bounded by the field, not the session's age.")
+    ap.add_argument("--tool-keep", type=int, default=3, metavar="N",
+                    help="with --no-context: the current turn's last N "
+                         "tool exchanges ride verbatim; older big tool "
+                         "results/arguments shrink to a head + a marker "
+                         "(the call/result pairing is kept). -1 disables "
+                         "the in-turn elision.")
     ap.add_argument("--no-open", dest="open_browser", action="store_false", default=True,
                     help="don't open the universe map in the browser on start")
     ap.add_argument("--backend", default="http://localhost:11434",
@@ -6073,9 +6258,12 @@ def main() -> None:
                          "the model selected in opencode)")
     ap.add_argument("--idle-cortex-model", default=None, metavar="MODEL",
                     help="model for BACKGROUND loops only (compactor "
-                         "distillation, entity synthesis); default "
-                         "granite3.3:8b (local-first: a stray background "
-                         "seat never burns cloud tokens). --compact-model "
+                         "distillation, entity synthesis); default: the "
+                         "first local Ollama chat model by family preference "
+                         "(granite, glm, qwen3, qwen2.5-coder, ...), "
+                         "granite3.3:8b when the tag list is unreadable "
+                         "(local-first: a stray background seat never burns "
+                         "cloud tokens). --compact-model "
                          "overrides for both lanes.")
     ap.add_argument("--archive", dest="archive", action="store_true",
                     help="after each compaction, move the retired raw turns "
@@ -6180,6 +6368,11 @@ def main() -> None:
                          "system prefix every provider can cache -- and the "
                          "proxy skips its per-turn copy when the stamp line "
                          "is present)")
+    ap.add_argument("--no-seat-card", dest="seat_card", action="store_false",
+                    help="don't append the seat card (this session's live "
+                         "switches -- context mode, replay, writes, the MCP "
+                         "tool list, routing -- rendered for the model) to "
+                         "the doctrine instructions file")
     ap.add_argument("--no-thought-intercept", dest="thought_intercept",
                     action="store_false",
                     help="do not answer the AGENT's own asks found in its "
@@ -6311,6 +6504,7 @@ def main() -> None:
         audit_path=args.audit,
         embedder=None,          # resolved by the ladder (below)
         sim_min=args.sim_min,
+        dedup_sim=args.dedup_sim,
         demote_threshold=args.demote_threshold,
         reask_window_s=args.reask_window,
         judge=judge,
@@ -6352,6 +6546,7 @@ def main() -> None:
     # strips the transcript history per turn; coherence comes from the
     # reconstruction block + the recall (the RAG budget scales).
     srv.no_context = bool(getattr(args, "no_context", False))
+    srv.tool_keep = int(getattr(args, "tool_keep", 3))
     mem.server_ref = srv          # the router-outcome loop reads srv.router
     srv.backend = backend
     srv.rag_k = args.k
@@ -6511,7 +6706,8 @@ def main() -> None:
     # couchbase commons is best-effort after the embedder resolves.
     srv._boot_ts = time.time()
     srv._tool_results = {}     # the receipt lane's result-side cache (E9)
-    srv.receipts = True        # --no-receipts flips it (the kill switch)
+    # (srv.receipts is set above from --no-receipts; a re-assignment here
+    # to True used to silently kill the kill switch)
     srv.entity_store = None
     try:
         from .entities import (EntityStore, JUNK_CUT_DEFAULT,
@@ -6931,21 +7127,42 @@ def main() -> None:
     # Fork stand-down: the fork's /api/chat stamps its own doctrine; this seat
     # ships NO instructions file when the fork owns the field.
     instr_path = None
-    # TRUST-THE-DELIVERY: the doctrine ships once (the generated instructions
-    # file when this seat generates it; the transcript's first injection when
-    # the fork owns the field) — _inject never re-stamps the ~2k preamble
-    # per turn. Set BEFORE the fork branch so it holds in both worlds.
+    # TRUST-THE-DELIVERY: the doctrine ships once (the instructions file
+    # when THIS seat launches opencode on its generated config; the
+    # transcript's first injection when the fork owns the field) -- _inject
+    # never re-stamps the ~2k preamble per turn. With --no-launch an
+    # EXTERNAL opencode runs on its own config: delivery is only real if
+    # that config lists the stable file below, so the proxy trusts the
+    # stamp check (_has_doctrine_stamp) instead -- no stamp, per-turn
+    # injection (the agdroid exhibit: a static opencode.json + the blind
+    # trust = a seat whose model never saw the doctrine at all).
     import membrane.rag as _rag
-    if getattr(args, "doctrine_move", True):
+    if getattr(args, "doctrine_move", True) and (
+            args.launch or getattr(mem, "fork_owns_field", False)):
         _rag._inject.doctrine_delivered = True
     if not getattr(mem, "fork_owns_field", False):
         if getattr(args, "doctrine_move", True):
             try:
-                ifd, instr_path = tempfile.mkstemp(prefix="membrane-doctrine-",
-                                                   suffix=".md")
-                with os.fdopen(ifd, "w") as f:
-                    f.write(doctrine_instructions_text())
-                cfg["instructions"] = [instr_path]
+                # the STABLE path next to the field: an external opencode's
+                # config can list it ("instructions": [...]) and it survives
+                # seat restarts (never unlinked at shutdown)
+                instr_path = str(Path(args.field).resolve().parent
+                                 / "doctrine.md")
+                text = doctrine_instructions_text()
+                # the seat card: THIS session's switches, for the model
+                # (--no-seat-card keeps the doctrine generic)
+                if getattr(args, "seat_card", True):
+                    text += _seat_card(srv, bool(getattr(args, "mcp", True)))
+                tmp = instr_path + ".tmp"
+                with open(tmp, "w") as f:
+                    f.write(text)
+                os.replace(tmp, instr_path)      # atomic: a reader never
+                cfg["instructions"] = [instr_path]   # sees half a file
+                if not args.launch:
+                    print(f"[opencode] doctrine + seat card: {instr_path} "
+                          "(an external opencode picks it up only if its "
+                          "config lists it under \"instructions\"; until "
+                          "then it rides per turn)", file=sys.stderr)
             except Exception as e:
                 instr_path = None
                 print(f"[opencode] doctrine-move skipped ({e}); per-turn "
@@ -6969,7 +7186,7 @@ def main() -> None:
             "enabled": True,
             "timeout": 60_000,
         }}
-        mcp_state = "on (membrane_query/learn/forget/state)"
+        mcp_state = f"on ({len(_mcp_tool_lines())} membrane_* tools)"
     # ---- LSP servers (built-ins) ----------------------------------------------
     # Diagnostics lane for the agent: pyright/gopls/typescript etc. start
     # automatically when matching files open. --no-lsp reverts to off.
@@ -7191,7 +7408,7 @@ def main() -> None:
                 closer()
             except Exception:
                 pass
-        for p in (cfg_path, instr_path):
+        for p in (cfg_path,):          # the doctrine file is stable: kept
             if not p:
                 continue
             try:

@@ -11,6 +11,9 @@
 
 import math
 import sys
+import os
+import shutil
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -69,8 +72,13 @@ class _Rec:
 class TestAutoSettle(unittest.TestCase):
     def _mem(self, settle_k=3):
         from membrane.runtime import Membrane, StubResponder
-        mem = Membrane(StubResponder(), field_path=":memory:",
-                       audit_path=":memory:", embedder=_Emb(),
+        # a tempdir, never ":memory:" -- that is a literal file in the cwd
+        # the lab-isolation guard does not recognize (it joined the live
+        # shared substrate and left :memory:.* files in the repo root)
+        td = tempfile.mkdtemp(prefix="membrane-test-")
+        self.addCleanup(shutil.rmtree, td, True)
+        mem = Membrane(StubResponder(), field_path=os.path.join(td, "field.json"),
+                       audit_path=os.path.join(td, "audit.jsonl"), embedder=_Emb(),
                        settle_k=settle_k)
         mem.store = _Store()
         return mem

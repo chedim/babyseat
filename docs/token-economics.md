@@ -41,11 +41,12 @@ field then *answers without asking a model again*:
    compaction work backs off mid-task and digs in while idle
    (`--compact-every` 90s stays the base cadence; `--compact-cpu-target 0`
    or `--compact-growth-frac 0` reverts each dial).
-4. **Self-author mode (0 tokens per turn).** The extreme dial: the cell
-   *recites* its nearest lived scene instead of calling the model, and the
-   genesis cache amortizes one LLM call over ~8 world scenes (the virtual
-   world runs this way end-to-end; see
-   [exploration-game.md](exploration-game.md)).
+4. **Self-author mode (0 tokens per turn) — RETIRED, historical.** The
+   extreme dial: the cell *recited* its nearest lived scene instead of
+   calling the model, and the genesis cache amortized one LLM call over ~8
+   world scenes (the virtual world ran this way end-to-end; the toy world
+   and its cells were cut in `070af25` — see
+   [exploration-game.md](exploration-game.md), kept as history).
 5. **Momentum + cold tier (indirect).** Momentum-skew raises first-shot
    recall precision (fewer clarifying re-asks); the cold tier keeps the hot
    field small so kNN stays fast *and* the retrieval surface stays small.
@@ -89,14 +90,17 @@ Per turn the gate picks one of:
   observer covenant) to a safe past turn → the stored answer, zero model
   calls. Opt in with `--replay-sim 0.97`.
 - **ESCALATE** — forward to the routed backend (free-tier cloud rungs by
-  default under the $0 budget; `--budget` opens paid rungs; local Ollama for
+  default under the $0 budget; `--cloud-budget` opens paid rungs; local Ollama for
   the `autoselect-local` lane).
 - **OBSERVE** — forward + learn. The default path for everything: the model
   always answers; the field banks the exchange.
 
 Idle background loops (compaction distillation, entity synthesis) run on a
-LOCAL cortex by default (`--idle-cortex-model`, default `granite3.3:8b`) —
-a stuck background seat burns zero cloud tokens. The router's free-tier
+LOCAL cortex by default (`--idle-cortex-model`, default = the first local
+Ollama chat model by family preference — granite, glm, qwen3,
+qwen2.5-coder, qwen2.5, llama, mistral, gemma, deepseek; `granite3.3:8b`
+only when the tag list is unreadable) — a stuck background seat burns zero
+cloud tokens. The router's free-tier
 covenant: `--cloud-budget` defaults to $0, which keeps free-tier rungs
 (price ≤ 0.1) reachable and paid rungs unreachable until an explicit budget.
 

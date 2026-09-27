@@ -38,7 +38,8 @@ import time
 # entities.py owns the entity contract; this module imports them) ----
 from .entities import (MEMBRANE_NS, CLASS_COMPONENT, CLASS_SESSION,
                        entity_index, _eph_born_of, QuantumEntity,
-                       _KIND_CLASS, SCRIPT_MAX_NUDGE, SCRIPT_MAX_DELETE)
+                       _KIND_CLASS, SCRIPT_MAX_NUDGE, SCRIPT_MAX_DELETE,
+                       MultiParentOps)
 
 # ---- knobs (the audited defaults; all overridable per call) ---------------
 NIGHT_SWEEP_CUT = 0.70     # demote threshold (stricter than display 0.62)
@@ -484,8 +485,8 @@ def consolidate_entities(mem, est, materialize: int = 8,
             total_moved += res["moved"]
         if res["moved"] > ent.grain():
             est.upsert(ent, embedder=mem.embedder)   # persist the motion
-        elif len(ent.position_history) == 1 and not getattr(
-                ent.properties or {}, "_ring_persisted", False):
+        elif len(ent.position_history) == 1 and not (
+                ent.properties or {}).get("_ring_persisted", False):
             # THE SEED PERSISTENCE (the re-seed-every-boot fix): a fresh
             # ring's seed moves 0.0 (below grain) -- without persisting,
             # every boot re-seeds into RAM and the geometry never
@@ -882,7 +883,7 @@ def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
         def describe(self):
             return self._ent.describe()
         def velocity(self):
-            return (self._ent.ring_velocity(_t.time())
+            return (self._ent.ring_velocity(time.time())
                     if getattr(self._ent, "position", None) else 0.0)
         def direction(self):
             return self._ent.ring_direction()

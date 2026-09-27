@@ -1,5 +1,12 @@
 # The dev organism — cells that graze the field
 
+> **RETIRED — history only.** The flags below (`--cells`,
+> `--cells-interval`, `--cpu-target`) no longer exist, and the modules
+> (`membrane/cell.py`, `membrane/pool.py`) were deleted in `070af25`; the
+> `experiments/multi_*.py` rigs that import them no longer run. The
+> dreaming direction replaced the organism — see
+> [background-mind.md](background-mind.md).
+
 `membrane opencode` runs a **self-balancing population of curiosity-driven
 cells** alongside the dev field (default 4; `--cells 0` disables). The
 machinery is the world pool's (`membrane/pool.py`, proven in
