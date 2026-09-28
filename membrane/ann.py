@@ -43,7 +43,8 @@ def ann_search(index: str, vec: list, k: int = 5,
     knn = {"field": field, "vector": list(vec), "k": int(k)}
     if filter:
         knn["filter"] = filter
-    body = json.dumps({"top_n": int(k), "knn": [knn]}).encode()
+    # size: the search API pages its hits (10 by default) whatever knn's k says
+    body = json.dumps({"top_n": int(k), "size": int(k), "knn": [knn]}).encode()
     req = urllib.request.Request(
         f"{host}/api/index/{index}/query",
         data=body, method="POST",
@@ -102,5 +103,7 @@ def ensure_vector_index(scope_handle, name: str, bucket: str, scope: str,
                              keyword_fields)
         scope_handle.search_indexes().upsert_index(SearchIndex.from_json(d))
         return True
-    except Exception:
-        return False
+    except Exception as e:
+        # an upsert without the live index's UUID is refused as a create:
+        # the index is there, and that is what the caller needs to know
+        return "already exists" in str(e) or "AlreadyExists" in type(e).__name__

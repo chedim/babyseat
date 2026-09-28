@@ -255,14 +255,14 @@ class CouchbaseBackend:
                 pass
         for c in COLLECTIONS:
             try:
-                self._query(f"CREATE PRIMARY INDEX IF NOT EXISTS ON "
+                self._run(f"CREATE PRIMARY INDEX IF NOT EXISTS ON "
                             f"`{self.bucket_name}`.`{self.scope_name}`.`{c}`")
             except Exception:
                 pass
         for c, fields in GSI:
             name = f"ef_{c}_{'_'.join(fields)}"
             try:
-                self._query(f"CREATE INDEX `{name}` IF NOT EXISTS ON "
+                self._run(f"CREATE INDEX `{name}` IF NOT EXISTS ON "
                             f"`{self.bucket_name}`.`{self.scope_name}`.`{c}`"
                             f"({', '.join(f'`{f}`' for f in fields)})")
             except Exception:
@@ -281,6 +281,11 @@ class CouchbaseBackend:
         return self.cluster.query(sql, QueryOptions(
             named_parameters=params or {},
             scan_consistency=QueryScanConsistency.REQUEST_PLUS))
+
+    def _run(self, sql: str) -> list:
+        """Execute a statement now (the SDK's query result is lazy: an
+        un-iterated CREATE INDEX never runs)."""
+        return list(self._query(sql))
 
     # ---- KV ------------------------------------------------------------------------
     def get(self, coll: str, key: str) -> dict | None:
@@ -386,7 +391,9 @@ class CouchbaseBackend:
                 field, len(vec), tuple((eq or {}).keys()))
         if not self._vec_ready[name]:
             return None
-        return ann.ann_search(name, list(vec), k=k, field=field, filter=knn_filter(eq))
+        # a scope-level search index answers only to its full name
+        return ann.ann_search(f"{self.bucket_name}.{self.scope_name}.{name}", list(vec), k=k,
+                              field=field, filter=knn_filter(eq), timeout=5.0)
 
     def lease(self, name: str, holder: str, ttl_s: float) -> bool:
         now = time.time()

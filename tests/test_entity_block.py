@@ -202,3 +202,29 @@ class TestPickEvidence(unittest.TestCase):
         got = [r["text"] for r in EB.pick_evidence(rows, 2)]
         self.assertEqual(got[0], "a restart takes about 6.5 s, most of it the embedder warmup")
         self.assertNotIn("how long do the restarts take?", got)
+
+
+class TestPastAnswers(unittest.TestCase):
+    def test_what_was_worked_out_after_a_similar_ask(self):
+        f = EF.EntityField(MemBackend(), FakeEmbedder(), "seat@host")
+        f.write_events([
+            ST.Event(stream="discourse", role="user", ts=T0, text="how long do membrane restarts take?"),
+            ST.Event(stream="discourse", role="reasoning", ts=T0 + 1,
+                     text="The user is asking how long membrane restarts take. "
+                          "The boot spends most of its time streaming the field rows through the parser."),
+            ST.Event(stream="discourse", role="model", ts=T0 + 2, text="Membrane restart timing"),
+            ST.Event(stream="discourse", role="model", ts=T0 + 3,
+                     text="A restart now takes about 1.2 seconds after the id-only scan landed."),
+            ST.Event(stream="discourse", role="user", ts=T0 + 9, text="thanks, next topic")],
+            session="s:1:0")
+        f.process()
+        rows = EB.past_answers(f, "how long do membrane restarts take?", sim_min=0.5)
+        self.assertEqual(len(rows), 1)
+        text = " ".join(rows[0]["answer"])
+        self.assertIn("about 1.2 seconds", text)
+        self.assertIn("streaming the field rows", text)
+        self.assertNotIn("The user is asking", text)          # a restatement
+        self.assertNotIn("Membrane restart timing", text)     # a session title
+        block = EB.render_past(rows, now=T0 + 10)
+        self.assertTrue(block.startswith(EB.PAST_HEADER))
+        self.assertIn("worked out (#", block)

@@ -15,6 +15,7 @@ Every evidence line is a verbatim sentence the entity was moved by."""
 from __future__ import annotations
 
 import math
+import re
 import time
 
 from . import claims as CL
@@ -198,8 +199,85 @@ def render(views: list[dict], budget: int = 2400, now: float | None = None) -> s
     return "\n".join(lines) if len(lines) > 1 else None
 
 
+PAST_HEADER = ("PAST ANSWERS (earlier asks like this one and what was answered then; "
+               "newer evidence below may supersede them):")
+PAST_SIM_MIN = 0.70
+
+
+def past_answers(field, text: str, qvec=None, k: int = 3, sim_min: float = PAST_SIM_MIN,
+                 n_sent: int = 3) -> list[dict]:
+    """The earlier asks nearest this one (distinct, sim >= sim_min) and, from
+    each one's answer, the sentences closest to the ask."""
+    from . import efgate as G
+    from .efield import unit
+    import numpy as np
+    qv = G.message_vec(field, text) if qvec is None else unit(qvec)
+    if qv is None:
+        return []
+    out, seen_answers = [], set()
+    for sim, _key, q in G.near_asks(field, qv, k * 3):
+        if sim < sim_min or len(out) >= k:
+            break
+        evs = [e for e in G.worked_out(field, q)
+               if e.get("n") not in seen_answers and not _title_like(e)]
+        if not evs:
+            continue
+        seen_answers.update(e.get("n") for e in evs)
+        pv = G.message_vec(field, q.get("text") or "", embed_missing=False)
+        sents = [(i, e, x) for e in evs for i, x in enumerate(ST.sentences(e.get("text") or ""))]
+        got = field.b.get_multi("sentences", list({field.sentence_id(x) for _, _, x in sents}))
+        scored = []
+        for order, (i, e, x) in enumerate(sents):
+            d = got.get(field.sentence_id(x))
+            if d is None or len(x.split()) < 5:
+                continue
+            xv = unit(np.asarray(d["vec"]))
+            s = float(xv @ qv)
+            if s >= 0.88 or (pv is not None and float(xv @ pv) >= 0.80) or _RESTATE.match(x):
+                continue                        # the ask restated, not answered
+            scored.append((s + (0.05 if e.get("role") == "model" else 0.0), order, e, x))
+        best = sorted(sorted(scored, key=lambda t: -t[0])[:n_sent], key=lambda t: t[1])
+        if not best:
+            continue
+        out.append({"sim": round(sim, 3), "q": q.get("text") or "", "q_n": q.get("n"),
+                    "a_n": [e.get("n") for _, _, e, _ in best], "ts": best[-1][2].get("ts"),
+                    "answer": [x for _, _, _, x in best]})
+    return out
+
+
+_RESTATE = re.compile(r"\s*(?:the user(?:'s)?|they|so the user)\b.{0,40}\b(?:ask|want|say|wonder)",
+                      re.IGNORECASE)
+
+
+def _title_like(ev: dict) -> bool:
+    """A client's session-title generation captured as a model reply: one
+    short line, no sentence punctuation."""
+    t = " ".join((ev.get("text") or "").split())
+    return ev.get("role") == "model" and len(t.split()) <= 12 and not re.search(r"[.!?:;]", t)
+
+
+def render_past(rows: list[dict], budget: int = 1600, now: float | None = None) -> str | None:
+    if not rows:
+        return None
+    lines = [PAST_HEADER]
+    for r in rows:
+        q = " ".join(r["q"].split())[:160]
+        body = " ".join(" ".join(x.split()) for x in r["answer"])[:600]
+        nums = ", ".join(f"#{n}" for n in dict.fromkeys(r["a_n"]))
+        ln = (f"▸ #{r['q_n']} ({_age(r['ts'], now)}, sim {r['sim']:.2f}) asked: \"{q}\"\n"
+              f"  worked out ({nums}): {body}")
+        if sum(len(x) + 1 for x in lines) + len(ln) > budget:
+            break
+        lines.append(ln)
+    return "\n".join(lines) if len(lines) > 1 else None
+
+
 def render_for(field, text: str, qvec=None, budget: int = 2400, k: int = 5) -> str | None:
-    return render(entities_for(field, text, qvec, k), budget)
+    """The full ask-time block: past answers first (they answer), then the
+    entities (they ground and correct)."""
+    past = render_past(past_answers(field, text, qvec), budget=budget // 2)
+    ents = render(entities_for(field, text, qvec, k), budget - (len(past) + 2 if past else 0))
+    return "\n\n".join(x for x in (past, ents) if x) or None
 
 
 def related(field, text: str, qvec=None, k: int = 8) -> list[dict]:

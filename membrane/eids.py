@@ -27,6 +27,7 @@ encode order."""
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from . import vsa
 from .entities import extract_entities
@@ -48,20 +49,35 @@ def norm_word(w: str) -> str:
     return w
 
 
+def _abs_root(graph: dict | None) -> str:
+    """The repo root as an absolute path without its leading '/', lowered
+    (extracted paths sometimes lose the slash: 'Users/x/repo/a.py')."""
+    root = str((graph or {}).get("root") or ".")
+    try:
+        root = str(Path(root).resolve())
+    except OSError:
+        pass
+    return root.strip("/").lower() + "/"
+
+
 def _resolve_file(path: str, graph: dict | None) -> str:
-    p = (path or "").strip().strip("`'\"").lower()
+    p = (path or "").strip().strip("`'\"")
+    root = _abs_root(graph)
+    if p.lstrip("/").lower().startswith(root):
+        p = p.lstrip("/")[len(root):]            # an absolute path into this repo
+    low = p.lower()
     if graph:
         files = graph.get("files") or {}
-        root = str(graph.get("root") or "").lower().rstrip("/") + "/"
-        if root != "/" and p.startswith(root):
-            p = p[len(root):]
         if p in files:
             return "f:" + p
-        hits = [f for f in files if f.lower() == p or f.lower().endswith("/" + p)]
+        hits = [f for f in files if f.lower() == low or f.lower().endswith("/" + low)]
         if len(hits) == 1:
             return "f:" + hits[0]
     if "/" in p and not p.startswith(("/", "~", "..")):
         return "f:" + p
+    if p and not p.startswith(("/", "~")) and graph and graph.get("root") \
+            and (Path(str(graph["root"])) / p).is_file():
+        return "f:" + p                          # a top-level repo file (README.md)
     return "f:~" + p.rsplit("/", 1)[-1]
 
 

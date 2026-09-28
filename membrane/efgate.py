@@ -70,13 +70,29 @@ def jaccard(a: set, b: set) -> float:
     return 1.0 if not a and not b else len(a & b) / len(a | b)
 
 
+def worked_out(field, q_ev: dict, limit: int = 400) -> list[dict]:
+    """What was said in answer to q', model prose AND reasoning, up to the
+    next user message of its session (historical captures often hold the
+    reasoning and no final prose)."""
+    sess, seq = q_ev.get("session"), int(q_ev.get("seq") or 0)
+    out = []
+    for _, d in field.b.scan("events", {"origin": field.origin, "session": sess,
+                                        "stream": "discourse", "seq": {"gt": seq}},
+                             order=("seq",), limit=limit):
+        if d.get("role") == "user":
+            break
+        if d.get("role") in ("model", "reasoning") and d.get("status") != "forgotten":
+            out.append(d)
+    return out
+
+
 def answer_of(field, q_ev: dict) -> tuple[str, dict] | None:
     """The last model message after q' and before the next user message of
     its session."""
     sess, seq = q_ev.get("session"), int(q_ev.get("seq") or 0)
-    rows = sorted((d.get("seq") or 0, k, d) for k, d in field.b.scan(
+    rows = [(d.get("seq") or 0, k, d) for k, d in field.b.scan(
         "events", {"origin": field.origin, "session": sess, "stream": "discourse",
-                   "seq": {"gt": seq}}))
+                   "seq": {"gt": seq}}, order=("seq",), limit=400)]
     ans = None
     for _, k, d in rows:
         if d.get("role") == "user":
@@ -89,7 +105,7 @@ def answer_of(field, q_ev: dict) -> tuple[str, dict] | None:
 def _user_events_near(field, qvec, k: int):
     """Earlier user events whose sentences are nearest the ask (sentence ANN
     -> the deltas that name those sentences -> their events)."""
-    hits = field.b.vector_top_k("sentences", "vec", qvec, k * 4)
+    hits = field.b.vector_top_k("sentences", "vec", qvec, k * 12)
     sids = [sid for sid, _ in hits]
     if not sids:
         return []
@@ -98,6 +114,17 @@ def _user_events_near(field, qvec, k: int):
     evs = field.b.get_multi("events", evkeys)
     return [(key, d) for key, d in evs.items()
             if d.get("role") == "user" and d.get("status") == "applied"]
+
+
+def near_asks(field, qv, k: int = TOP_K) -> list[tuple[float, str, dict]]:
+    """Earlier user asks by message similarity to qv, best first."""
+    out = []
+    for key, d in _user_events_near(field, qv, k):
+        v = message_vec(field, d.get("text") or "", embed_missing=False)
+        if v is not None:
+            out.append((float(v @ qv), key, d))
+    out.sort(key=lambda t: -t[0])
+    return out
 
 
 def _stale(field, eids: set, since_ts: float) -> str | None:
@@ -126,15 +153,9 @@ def candidate(field, query: str, qvec=None, binding_failed: bool = False,
     if qv is None:
         return {**out, "reason": "empty ask"}
     qe = specifics(field, query)
-    scored = []
-    for key, d in _user_events_near(field, qv, TOP_K):
-        if exclude_session and d.get("session") == exclude_session \
-                and ST.clean(d.get("text") or "") == ST.clean(query):
-            continue                                  # this very turn, captured
-        v = message_vec(field, d.get("text") or "", embed_missing=False)
-        if v is not None:
-            scored.append((float(v @ qv), key, d))
-    scored.sort(key=lambda t: -t[0])
+    scored = [(s, key, d) for s, key, d in near_asks(field, qv)
+              if not (exclude_session and d.get("session") == exclude_session
+                      and ST.clean(d.get("text") or "") == ST.clean(query))]
     if not scored:
         return {**out, "reason": "no earlier ask"}
     sim, qkey, qd = scored[0]

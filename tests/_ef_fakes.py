@@ -151,6 +151,14 @@ _SELECT = re.compile(r"FROM `[^`]+`\.`([^`]+)`\.`([^`]+)` t(?: WHERE (.*?))?"
                      r"(?: ORDER BY (.*?))?(?: LIMIT (\d+))?$")
 
 
+class _Lazy:
+    def __init__(self, fn):
+        self.fn = fn
+
+    def __iter__(self):
+        return iter(self.fn())
+
+
 class FakeCluster:
     """Runs exactly the SQL++ efstore.scan_sql emits; CREATE is a no-op."""
 
@@ -162,6 +170,11 @@ class FakeCluster:
         return _Bucket(self)
 
     def query(self, sql, opts=None):
+        """Lazy, like the SDK's: nothing runs until the result is iterated
+        (an un-iterated CREATE INDEX never reaches the server)."""
+        return _Lazy(lambda: self._execute(sql, opts))
+
+    def _execute(self, sql, opts=None):
         self.statements.append(sql)
         if not sql.startswith("SELECT"):
             return []
