@@ -839,12 +839,14 @@ class EntityField:
             score = float(d["seq"])
             if query_vec is not None:
                 score = float(unit(s["vec"]) @ unit(query_vec))
+            ev = evs.get(d["event"]) or {}
             rows.append({"sid": d["sid"], "text": s["text"], "stream": d["stream"],
-                         "event": d["event"], "ts": d["ts"], "seq": d["seq"], "_s": score})
+                         "role": ev.get("role") or "", "n": ev.get("n"),
+                         "event": d["event"], "ts": d["ts"], "seq": d["seq"], "score": score})
         uniq = {}
-        for r in sorted(rows, key=lambda r: -r["_s"]):
+        for r in sorted(rows, key=lambda r: -r["score"]):
             uniq.setdefault(r["sid"], r)
-        return [{k2: v for k2, v in r.items() if k2 != "_s"} for r in list(uniq.values())[:k]]
+        return list(uniq.values())[:k]
 
     def relations_of(self, eid: str, rel: str | None = None) -> list[dict]:
         from . import relations as R

@@ -88,3 +88,16 @@ class TestKeys(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestCommandsInProse(unittest.TestCase):
+    def test_a_verb_in_prose_is_not_a_command(self):
+        from membrane.eids import mentions_of
+
+        def cmds(t):
+            return [e for e, _ in mentions_of(t) if e.startswith("c:")]
+        self.assertEqual(cmds("why does membrane keep picking the dumbest models"), [])
+        self.assertEqual(cmds("make sure the tests pass"), [])
+        self.assertEqual(cmds("run `membrane opencode --no-launch` now"), ["c:membrane"])
+        self.assertEqual(cmds("use `git rm --cached` here"), ["c:git"])
+        self.assertEqual(cmds("$ git status shows it"), ["c:git"])

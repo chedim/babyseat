@@ -97,6 +97,28 @@ def canon(kind: str, surface: str, graph: dict | None = None) -> str:
     return f"{kind}:{surface.strip().lower()}"
 
 
+def _is_command_use(sentence: str, verb: str) -> bool:
+    """A shell verb in prose is a COMMAND only when it is written as one: in
+    backticks or after a '$ ' prompt (tool observations take their commands
+    from the call's args instead)."""
+    v = re.escape(verb)
+    if re.search(rf"`[^`]*(?:^|[\s/]){v}\b[^`]*`", sentence, re.IGNORECASE):
+        return True
+    return re.search(rf"(?:^|\s)\$\s+{v}\b", sentence, re.IGNORECASE) is not None
+
+
+def _backtick_commands(sentence: str) -> list[str]:
+    """The shell verbs that open a backticked span (`git status`)."""
+    from .entities import _SHELL_VERBS
+    verbs = {v.lower() for v in _SHELL_VERBS}
+    out = []
+    for span in re.findall(r"`([^`\n]+)`", sentence or ""):
+        head = span.strip().split()[0].rsplit("/", 1)[-1].lower() if span.strip() else ""
+        if head in verbs:
+            out.append(head)
+    return out
+
+
 def mentions_of(sentence: str, graph: dict | None = None,
                 phrase_vocab: set | frozenset | None = None
                 ) -> list[tuple[str, str]]:
@@ -117,8 +139,13 @@ def mentions_of(sentence: str, graph: dict | None = None,
         if not k:
             continue
         for v in vals:
+            if k == "c" and not _is_command_use(sentence, v):
+                continue                      # 'membrane keeps picking...' is prose
             add(canon(k, v, graph), v)
             covered.update(w.lower() for w in _WORD.findall(v))
+    for v in _backtick_commands(sentence):
+        add(canon("c", v, graph), v)
+        covered.add(v)
     words = [w for w in _WORD.findall(sentence or "")]
     low = [w.lower() for w in words]
     if phrase_vocab:

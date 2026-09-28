@@ -66,7 +66,17 @@ def question_entities(field, text: str, qvec=None, k: int = 5) -> list[str]:
             return (0, 0)
         return (0 if E.is_specific(eid) else 1,
                 -(st.coherence * math.log1p(max(st.mass, 0)) if not E.is_specific(eid) else st.n))
-    named = sorted(dict.fromkeys(named), key=rank)
+    named = sorted(dict.fromkeys(named), key=rank)[:k]
+    if qvec is not None:
+        # the code and files nearest the ask, even when it names none of
+        # them: 'can it select another port?' -> _pick_listen_port
+        extra = 0
+        for eid, _s in field.recall(qvec, k=8, kinds=["s", "f"]):
+            if eid not in named:
+                named.append(eid)
+                extra += 1
+            if extra >= CODE_SLOTS:
+                break
     if len(named) < k and qvec is not None:
         for eid, _s in field.recall(qvec, k=k * 2):
             st = field.get(eid)
@@ -76,7 +86,10 @@ def question_entities(field, text: str, qvec=None, k: int = 5) -> list[str]:
                 named.append(eid)
             if len(named) >= k:
                 break
-    return named[:k]
+    return named[:k + CODE_SLOTS]
+
+
+CODE_SLOTS = 2           # nearest code/file entities added to every ask
 
 
 def entity_view(field, eid: str, qvec=None, n_evidence: int = 2) -> dict:
@@ -97,7 +110,8 @@ def entity_view(field, eid: str, qvec=None, n_evidence: int = 2) -> dict:
         return {"eid": eid, "kind": eid.split(":", 1)[0], "counts": c, "n": sum(c.values()),
                 "last_ts": max((o.get("last_ts") or 0 for o in seats), default=None),
                 "evidence": [], "observed": None, "relations": [], "conflicts": [], **shared}
-    said = field.evidence(eid, k=n_evidence, query_vec=qvec, streams=("discourse", "code"))
+    said = pick_evidence(field.evidence(eid, k=n_evidence * 6, query_vec=qvec,
+                                        streams=("discourse", "code")), n_evidence)
     observed = field.evidence(eid, k=1, streams=("observation",))    # the latest
     rels = []
     for r in field.relations_of(eid)[:6]:
@@ -117,6 +131,33 @@ def entity_view(field, eid: str, qvec=None, n_evidence: int = 2) -> dict:
             "last_ts": st.last_ts, "evidence": [e["text"] for e in said],
             "observed": observed[0]["text"] if observed else None,
             "relations": rels[:3], "conflicts": conflicts, **shared}
+
+
+ECHO_COS = 0.88          # a sentence this close to the ask is the ask, asked before
+
+
+def pick_evidence(rows: list[dict], n: int) -> list[dict]:
+    """The evidence worth showing for an ask: answers over restatements. A
+    sentence nearly identical to the ask is an earlier asking of it; the
+    user's own sentences rank below what the model, the code and the notes
+    said; near-duplicates of a kept sentence are skipped."""
+    def rank(r):
+        s = float(r.get("score") or 0.0)
+        if s >= ECHO_COS:
+            s -= 0.5
+        if r.get("role") == "user":
+            s -= 0.15
+        return -s
+    out, seen = [], []
+    for r in sorted(rows, key=rank):
+        words = set(r["text"].lower().split())
+        if any(len(words & w) >= 0.8 * max(len(words), 1) for w in seen):
+            continue
+        seen.append(words)
+        out.append(r)
+        if len(out) >= n:
+            break
+    return out
 
 
 def entities_for(field, text: str, qvec=None, k: int = 5) -> list[dict]:

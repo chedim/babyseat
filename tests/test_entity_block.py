@@ -190,3 +190,15 @@ class TestListeners(unittest.TestCase):
             evs = srv._watch_board.events
             self.assertEqual(len(evs), 1)                       # history is not an arrival
             self.assertEqual(evs[0]["ex_idx"], 1)               # '#N' = the event number
+
+
+class TestPickEvidence(unittest.TestCase):
+    def test_answers_beat_restatements(self):
+        rows = [{"text": "how long do restarts take?", "score": 0.97, "role": "user"},
+                {"text": "how long do the restarts take?", "score": 0.95, "role": "user"},
+                {"text": "a restart takes about 6.5 s, most of it the embedder warmup", "score": 0.71,
+                 "role": "model"},
+                {"text": "restarts are slow today", "score": 0.74, "role": "user"}]
+        got = [r["text"] for r in EB.pick_evidence(rows, 2)]
+        self.assertEqual(got[0], "a restart takes about 6.5 s, most of it the embedder warmup")
+        self.assertNotIn("how long do the restarts take?", got)
