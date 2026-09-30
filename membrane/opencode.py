@@ -2975,6 +2975,96 @@ def _pick_listen_port(preferred: int) -> int:
         f"(probed 64); pass --listen explicitly")
 
 
+def _pick_serve_port(preferred: int) -> int:
+    """The port `opencode serve` will bind (same walk, own flag in the error)."""
+    port = preferred
+    for _ in range(64):
+        if _port_free(port):
+            return port
+        port += 1
+        if port > 65535:
+            break
+    raise SystemExit(
+        f"[opencode] no free serve port found at or above {preferred} "
+        f"(probed 64); pass --serve-port explicitly")
+
+
+def _lan_ip() -> str:
+    """The address a LAN peer would reach this seat on: the OS's own route
+    choice to the outside (a UDP 'connect' writes no packet and binds no
+    port -- it is read-only). localhost when nothing else applies."""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.5)
+        try:
+            s.connect(("8.8.8.8", 80))
+            ip = s.getsockname()[0]
+        finally:
+            s.close()
+        if ip and not ip.startswith("127."):
+            return ip
+    except Exception:
+        pass
+    return "127.0.0.1"
+
+
+def _serve_credentials(path: str, user: str, password: str | None) -> tuple[str, str, bool]:
+    """The basic-auth pair the headless serve speaks (user, password, first_boot).
+
+    `opencode serve` reads OPENCODE_SERVER_USERNAME/_PASSWORD (a password
+    without a username serves under the default 'opencode' user) -- the same
+    pair the companion app types. A generated password is written ONCE
+    (0600, beside the field) and reused on every later boot so a device's
+    saved connection survives seat restarts; --serve-pass overrides both,
+    --serve-user overrides the user (also persisting it).
+    """
+    import secrets
+    if password:
+        return user or "opencode", password, False
+    import secrets
+    p = Path(path)
+    d = None
+    try:                     # a kept file wins -- corrupt or missing regenerates
+        if p.is_file():
+            d = json.loads(p.read_text())
+    except Exception:
+        d = None
+    try:
+        if not (d and d.get("user") and d.get("password")):
+            d = {"user": user or "opencode",
+                 "password": secrets.token_urlsafe(15)}
+            tmp = path + ".tmp"
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            try:
+                os.write(fd, json.dumps(d).encode())
+            finally:
+                os.close(fd)
+            os.replace(tmp, path)            # a reader never sees half a file
+            os.chmod(path, 0o600)
+            return d["user"], d["password"], True
+        return d["user"], d["password"], False
+    except Exception as e:
+        # no writable home for the file: ephemeral credentials (printed
+        # once, gone on restart -- never a silent all-open serve)
+        print(f"[opencode] serve auth NOT persisted ({_one_line(e)}); "
+              "this boot's pair is ephemeral", file=sys.stderr)
+        return user or "opencode", secrets.token_urlsafe(15), True
+
+
+def _serve_board(serve_port: int, serve_host: str, user: str, password: str,
+                 first_boot: bool, cred_path: str) -> None:
+    """One board line for the serve child: the URL a client connects to."""
+    addr = "localhost" if serve_host in ("127.0.0.1", "localhost") else _lan_ip()
+    shown = password if first_boot else f"<saved in {cred_path}>"
+    print(f"[opencode] serve: http://{addr}:{serve_port}  (user {user}, "
+          f"password {shown}; opencode basic-auth env -- clients type "
+          "these, or the companion app fills the URL + pair)",
+          file=sys.stderr)
+    if first_boot:
+        print(f"[opencode] serve: credentials persisted at {cred_path} "
+              "(0600); they survive restarts", file=sys.stderr)
+
+
 def _audit_count(path: str) -> int:
     try:
         with open(path, "rb") as f:
@@ -5556,6 +5646,27 @@ def main() -> None:
                     help="cosine floor for commons top-up in recall")
     ap.add_argument("--no-launch", dest="launch", action="store_false",
                     help="run only the proxy (don't start opencode)")
+    ap.add_argument("--serve", action="store_true",
+                    help="launch `opencode serve` instead of the TUI: a "
+                         "headless opencode server (the mobile companion "
+                         "app's surface) whose LLM traffic still goes "
+                         "through THIS proxy, so capture/injection covers "
+                         "it like any other client. Basic auth is "
+                         "opencode's built-in (generated once, kept "
+                         "beside the field); WiFi-only for now.")
+    ap.add_argument("--serve-port", type=int, default=4096,
+                    help="port for the headless opencode serve (default "
+                         "4096; walks up if taken)")
+    ap.add_argument("--serve-host", default="0.0.0.0",
+                    help="bind address for opencode serve (default "
+                         "0.0.0.0 -- WiFi/VPN reach; 127.0.0.1 keeps it "
+                         "local-only)")
+    ap.add_argument("--serve-user", default="opencode",
+                    help="basic-auth user the serve asks for (default "
+                         "opencode)")
+    ap.add_argument("--serve-pass", default=None,
+                    help="basic-auth password override (default: "
+                         "generated once and persisted beside the field)")
     ap.add_argument("--no-continue", dest="cont", action="store_false",
                     help="don't resume opencode's last session (default: "
                          "resume; -c/-s in passthrough still win)")
@@ -5565,6 +5676,9 @@ def main() -> None:
     passthrough = args.passthrough
     if passthrough and passthrough[0] == "--":
         passthrough = passthrough[1:]
+    if args.serve and not args.launch:
+        ap.error("--serve needs membrane to launch the opencode server "
+                 "(drop --no-launch)")
 
     # In launch mode opencode owns the terminal, so membrane's own stderr
     # (the [opencode]/[rag]/[compact] debug lines) would corrupt the TUI.
@@ -5596,6 +5710,10 @@ def main() -> None:
     if listen != args.listen:
         print(f"[opencode] port {args.listen} busy -> using {listen} "
               f"(pass --listen to pin)", file=sys.stderr)
+    serve_port = _pick_serve_port(args.serve_port) if args.serve else None
+    if serve_port is not None and serve_port != args.serve_port:
+        print(f"[opencode] serve port {args.serve_port} busy -> using "
+              f"{serve_port} (pass --serve-port to pin)", file=sys.stderr)
     srv = ThreadingHTTPServer(("127.0.0.1", listen), MembraneOpenAIHandler)
     srv.membrane = mem
     srv.viewer = bool(args.viewer)   # dev field viewer at /viewer (OFF default)
@@ -6191,6 +6309,22 @@ def main() -> None:
                      ", ".join(f"{k} {c}" for k, c in sorted(v["entities"].items())))
         except Exception:
             fld_s = type(fld.b).__name__
+    # the serve lane's credentials BEFORE the board (both print the pair's
+    # provenance): generated once, persisted beside the field, reused by
+    # every later boot (a device's saved connection survives restarts)
+    serve_su = serve_sp = serve_cred_path = None
+    serve_pw_new = False
+    serve_addr = None
+    if args.serve:
+        serve_cred_path = str(Path(args.field).resolve().parent
+                              / "serve-auth.json")
+        serve_su, serve_sp, serve_pw_new = _serve_credentials(
+            serve_cred_path, args.serve_user, args.serve_pass)
+        env["OPENCODE_SERVER_USERNAME"] = serve_su
+        env["OPENCODE_SERVER_PASSWORD"] = serve_sp
+        serve_addr = ("localhost" if args.serve_host in ("127.0.0.1",
+                                                         "localhost")
+                      else _lan_ip())
     print(f"membrane opencode  http://127.0.0.1:{listen}/v1  ->  {backend}\n"
           f"  field={args.field}  audit={args.audit}\n"
           f"  chain: opencode -> membrane (entity field + replay A/B) -> Ollama\n"
@@ -6213,8 +6347,12 @@ def main() -> None:
           f" (model {getattr(srv, 'idle_cortex_model', None) or 'unresolved'})\n"
           f"  mcp tools: {mcp_state}\n"
           f"  lsp: {lsp_state}\n"
+          f"  serve: {f'http://{serve_addr}:{serve_port} (headless opencode, basic auth user {serve_su})' if args.serve else 'off (--serve)'}\n"
           f"  opencode config: {cfg_path}",
           file=sys.stderr)
+    if args.serve:
+        _serve_board(serve_port, args.serve_host, serve_su, serve_sp,
+                     serve_pw_new, serve_cred_path)
 
     # ---- signal + child lifecycle -------------------------------------------
     # In launch mode opencode owns the terminal: ctrl+c must interrupt opencode
@@ -6251,6 +6389,23 @@ def main() -> None:
             if opencode is None:
                 print("[opencode] `opencode` not on PATH; proxy-only "
                       "(point opencode at the /v1 URL above)", file=sys.stderr)
+            elif args.serve:
+                # --serve: the child is `opencode serve`, not the TUI. Same
+                # generated config (provider baseURL -> this proxy), so the
+                # headless server's model traffic is captured/injected like
+                # any client's; the REST surface is opencode's own (the
+                # companion app or any opencode client speaks it directly).
+                cmd = [opencode, "serve", "--hostname", args.serve_host,
+                       "--port", str(serve_port or 4096)]
+                print(f"[opencode] launching: {' '.join(cmd)}",
+                      file=sys.stderr)
+                child = subprocess.Popen(cmd, env=env)
+                # same life-handshake as the TUI child below
+                try:
+                    pid_path = (Path(args.field).parent / "opencode.pid")
+                    pid_path.write_text(str(child.pid))
+                except Exception:
+                    pass
             else:
                 extra = []
                 if model and not any(a.startswith("--model") or a.startswith("-m")

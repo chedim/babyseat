@@ -475,6 +475,8 @@ def main() -> None:
     sub_help = (
         "\n"
         "  opencode   field-backed opencode (OpenAI-compatible proxy on :11500)\n"
+        "  serve      field-backed headless opencode server (basic auth; the\n"
+        "             mobile companion app's surface; the proxy on :11500)\n"
         "  review     print what the field learned\n"
         "  reset      kill the proxy on the port, then opencode fresh\n"
         "  update     check the install source for updates, show what\n"
@@ -507,7 +509,7 @@ def main() -> None:
     if cmd not in ("tui", "proxy", "opencode", "anthropic", "review",
                    "demo", "reset", "install", "doctor", "connect",
                    "ingest", "backfill", "codegraph", "update", "move",
-                   "migrate", "auth"):
+                   "migrate", "auth", "serve"):
         if cmd is None and not argv:
             print(__doc__)
             return
@@ -525,7 +527,7 @@ def main() -> None:
             forwarded = [a for a in forwarded if a != "--force"]
         raise SystemExit(_install(args))
     # opencode surfaces: bind per-project data + auto-install skills first
-    if cmd in ("opencode", "reset"):
+    if cmd in ("opencode", "reset", "serve"):
         _autoinstall_skills()
     # shared-field onboarding: hydrate the per-project env (secrets live in
     # ~/.membrane/projects/, never in the repo), and -- when nothing
@@ -562,7 +564,7 @@ def main() -> None:
         raise SystemExit(_run_module("membrane.backfill", argv2))
     if cmd == "codegraph":
         raise SystemExit(_run_module("membrane.codegraph", args.forwarded))
-    if cmd in ("opencode", "reset"):
+    if cmd in ("opencode", "reset", "serve"):
         couchbase_onboarding()
         maybe_check_on_boot(args.forwarded)
     if cmd == "reset":
@@ -579,6 +581,9 @@ def main() -> None:
         raise SystemExit(2)
     if cmd == "opencode":
         argv2 = _ensure_data_dir(args.forwarded)
+        raise SystemExit(_run_module("membrane.opencode", argv2))
+    if cmd == "serve":
+        argv2 = _ensure_data_dir(["--serve"] + args.forwarded)
         raise SystemExit(_run_module("membrane.opencode", argv2))
     if cmd == "review":
         argv2 = _ensure_data_dir(args.forwarded)

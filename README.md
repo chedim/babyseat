@@ -166,6 +166,7 @@ routing: [docs/token-economics.md](docs/token-economics.md).
 | Command | What it does |
 |---|---|
 | `membrane opencode` | field-backed opencode on :11500 (the daily driver) |
+| `membrane serve` | the same seat, headless: `opencode serve` behind the proxy, basic-authed (the phone/companion surface) |
 | `membrane backfill` | rebuild the field from history (code first, then the audit log; idempotent, resumable) |
 | `membrane review` | print what the field learned (annotations, replay A/B with `--ab`) |
 | `membrane connect` | (re)run shared-field onboarding for THIS project |
@@ -186,6 +187,35 @@ routing: [docs/token-economics.md](docs/token-economics.md).
 
 `MEMBRANE_EFIELD` selects the field's mode: `on` (the default: capture,
 embed, apply), `shadow` (capture events only — a lab ablation), `off`.
+
+### Serving headless (`membrane serve`)
+
+`membrane serve` runs the same proxy + opencode pair, but the child is
+`opencode serve` — a **headless opencode server** instead of the TUI. Any
+opencode client talks to its REST API directly: the [mobile companion
+app](https://opencode.app/), the IDE plugins, a script. The generated
+config (`OPENCODE_CONFIG`, same as the TUI seat) points the server's
+provider at `http://127.0.0.1:<proxy-port>/v1`, so a session created from
+the phone is captured into the field and injected into exactly like a
+desktop turn — the serve surface adds no separate memory.
+
+The connection triple is printed at boot:
+
+    serve: http://<lan-ip>:4096  (user opencode, password …; opencode basic-auth …)
+
+- **Auth is opencode's built-in basic auth** (`OPENCODE_SERVER_USERNAME` /
+  `OPENCODE_SERVER_PASSWORD` injected as env): no/incorrect/wrong credentials
+  get `401`, only the pair in `.membrane/serve-auth.json` (mode 600,
+  generated once, `--serve-pass` / `--serve-user` to override) gets through.
+  Credentials survive restarts, so a device's saved connection keeps
+  working.
+- **Exposure is WiFi-only for now** (`--serve-host` defaults to `0.0.0.0`,
+  the LAN): reach the server only from a network you own. The planned
+  route makes the seat's phone (the boat's agDroid HA server) the host —
+  the security model (VPN or LAN-only, no public exposure) gets designed
+  there.
+- `--serve-port` (default 4096, walks up if busy) and `--listen` (the
+  proxy, still never leaves 127.0.0.1) are independent.
 
 ### Claude Code (Anthropic cloud) — RETIRED
 
