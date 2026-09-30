@@ -5,60 +5,61 @@ with the control-theory skin peeled off. Control theory's telos is
 *anti-variety* — the regulator exists to **collapse** a disturbance's variety
 into a controlled, low-variety output ("destroy variety"). The membrane
 inverts the ethics: variety is not the threat to be contained, it is the
-**life to be grown**. `free_energy` (safe variety) is the field's vitality —
-a field with no safe variety is inert (it escalates everything, acts on
-nothing: dead). Same law, opposite telos: control theory says "grow enough
-control variety to *keep the output controlled*"; the membrane says "grow
-enough field variety to *absorb more of the world*."
+**life to be grown**. `free_energy` is the field's vitality — a field with
+no safe variety is inert (it escalates everything, acts on nothing: dead).
+Same law, opposite telos: control theory says "grow enough control variety
+to *keep the output controlled*"; the membrane says "grow enough field
+variety to *absorb more of the world*."
 
 The quantitative backing — where these measures were run, what was settled,
 and how one experiment corrected another — is
-[math-findings.md](math-findings.md). The theory notes behind it:
+[math-findings.md](math-findings.md) (the substrate-phase math), continued
+by the entity-field evidence e18–e25. The theory notes behind it:
 *the endless environment* (the trap unbounded variety sets) and *the cycled
 environment* (the self-looping closure) — kept in the sibling
 `cortex-experiment` repo, not this one.
 
-## In the code
+## Where it is measured now
 
-(The knobs below are `Membrane(...)` constructor args in
-`membrane/runtime.py`, driven by the `experiments/` rigs — the retired
-proxy's `--variety-temp` / `--sim-min-floor` / `--nudge-sigma` / `--tag`
-flags are gone; the seat's live gate dial is `--sim-min`.)
+On the **entity field** (docs/entity-field.md): `EntityField.geometry()`
+takes the top-512 live entity states by mass, rows of the `state` matrix —
+and reads the field's thermodynamics straight off them:
 
-- **`effective_rank`** = the field's requisite variety, *measured* not
-  assumed. A query off the experienced manifold (high `novelty`) can't be
-  absorbed → escalate. Only a field with variety *in that direction* can
-  absorb a query in it.
-- **`free_energy`** = `(safe fraction)·effective_rank − ¼·(unsafe
-  fraction)·rank` — the *one number* that says whether the field is getting
-  richer or just bigger. Surfaced in `field state` and `membrane review`.
-- **adaptive temperature** (`variety_temp=`, default off) is the field
-  *spending* its requisite variety: `sim_min` eases toward `sim_min_floor`
-  (0.70, the validated safe cutoff) as `free_energy` grows. "Only **safe**
-  variety absorbs variety" — a junk field pays the disorder tax, keeps
-  `free_energy` low, and stays conservative.
-- **the veil** (`nudge_sigma=`, default 0 = identity) is the per-instance
-  perturbation of the incoming situation embedding: Gaussian noise added then
-  renormalized, applied to everything that transits this membrane. The
-  forwarded prompt text is **never** garbled; only the field's representation
-  is veiled. A low-variety workload can't grow a varied field on its own;
-  the nudge injects the variety it lacks.
-- **multi-veil** — "run multiple of them" is **decentralized**, not
-  orchestrated. No central input, no live router (a central oracle is a
-  rank-1 field — one perspective — and rank-1 cannot absorb variety). Each
-  membrane is autonomous — own field, own audit, own nudge seed, own
-  temperature — pulling the same public workload. Each rig membrane's
-  tag names its own field/audit files. Comparison is **offline**, reading each membrane's
-  saved audit afterward.
+- **`eff_rank`** = exp of the entropy of the normalized squared singular
+  values of that matrix — the field's requisite variety, *measured* not
+  assumed. A query off the experienced manifold cannot be absorbed by a
+  field with no variety in that direction; the entities that hold the
+  direction ARE the variety.
+- **`rank_ratio`** = `eff_rank / m` — the safe fraction. This is the field's
+  whole free-energy term: `free_energy = rank_ratio − conflict_frac`.
+- **the conflict tax** (`conflict_frac`) = the mass-weighted share of those
+  entities carrying a contradicted claim. This replaced the old "unsafe
+  fraction ¼·rank" of the retired exemplar gate: the field's disorder used
+  to be simulated with a temperature knob; now it is read off the evidence
+  — a contradicted claim on a live entity is exactly the tax of absorbing
+  by it.
 
-```bash
-PYTHONPATH=. .venv/bin/python experiments/multi_veil.py   # four autonomous membranes, one workload; compare free_energy offline
-```
+Surfaced in `field state` / `membrane doctor` (the `geometry` readout) and
+the `/membrane/state` payload.
 
-## The gate, in one breath
+## What the variety IS now
 
-Cosine is the primary gate; the null-space novelty is a narrow low-rank
-specialist — it earns a role only on genuinely low-rank fields
-(`effective_rank / N < 0.5`). Recall is momentum-skewed kNN, the context
-block is MMR-deduped, and the confidence gate's calibration is the whole
-subject of [math-findings.md](math-findings.md).
+The old field held one vector per situation/response pair — variety over
+*situations*. The entity field holds ten thousand entity states; variety
+over *things the project talks about*, each moved by only the sentences
+that mention it. The experiments that justified the move (e18: per-entity
+tracking distinguishes 68% vs whole-message 59%; e23: coherence separates
+project terms from filler) are in [math-findings.md](math-findings.md).
+A field that has only heard about routers has no variety in "ports" — the
+replay gate's staleness guard and the injection block's empty-entity case
+are the escalation to the model.
+
+## Absorption, in one breath
+
+The field absorbs through **the block** (the entities named, their evidence
+verbatim — no model call), escalates through **the gate** (the replay A/B:
+an eligible earlier ask is answered-again-and-judged but never served by
+default), and grows through **capture**: every turn writes events; every
+mention moves its entities. A stale answer does not come out of the field
+at all — the staleness guard reads whether anything moved the ask's
+entities since.

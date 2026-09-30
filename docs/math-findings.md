@@ -280,3 +280,42 @@ self-builds → routine queries start getting absorbed. `sim_min` starts
 conservative (0.85, near-exact) and loosens once the audit proves replays are
 safe. The demo shows this end-to-end with no chat model (a stub responder), so
 the loop is runnable before any model is attached.
+## The entity field (e17–e25): whole-message vectors are the wrong unit
+
+The substrate-phase math settled how to gate one situation vector against a
+store of situation vectors. The next question — what a turn of real work
+SHOULD be in the first place — failed the same gate: run on this repo's own
+history, whole-message recall buried the answer it had once given.
+
+- **e17** — the three real questions this repo asks ("how much does a restart
+  cost?", "can it select another port?", "why does it keep picking the slow
+  routing?"): the restart answer ranked 21st; a real answer was MMR-dropped
+  as a duplicate of an unrelated note at cos 0.91; a compact note ("the seat
+  cannot select another port") contradicted the code, whose docstring says
+  the probe walks up. Capture wrappers and tool output dominated every
+  message vector.
+- **e18** — a message's embedding can be rebuilt from its ENTITIES' states
+  well above a random-entity null; tracking each entity by the sentences
+  that mention it beats whole-message tracking (68% vs 59%
+  distinguishability). The local sentence, not the pooled message, is the
+  observation.
+- **e19–e21** — filters selecting "which candidates deserve to be entities"
+  gained little over random same-size sets; MASS (accrued agreeing evidence)
+  is the stable, predictable property. Conclusion: treat EVERYTHING as an
+  entity and let the statistics decide what it means.
+- **e23** — a word's residual coherence (mean pairwise cosine of its
+  per-sentence residuals, above the random-set null) separates the project's
+  real terms from filler — measurable on the live field, the null refreshed
+  daily.
+- **e24** — tool output mixed into conversation text poisons every word
+  statistic. Two streams, split at capture: 77% of discourse entities have
+  OBSERVED evidence once the streams are clean.
+- **e25** — claims are checkable mechanically: test-count claims match their
+  measured run ≥ 83%; action claims against the apply/write window; state
+  claims against code + observation evidence. And relation text is
+  order-blind in the embedder ("A calls B" ≡ "B calls A" at cos 0.975) —
+  VSA role binding with hash-random roles is the structure carrier.
+
+Where these were run: the `experiments/` rigs of this repo read the audit
+log through `membrane.streams`; the numbers and the design that follows them
+live in [entity-field.md](entity-field.md).

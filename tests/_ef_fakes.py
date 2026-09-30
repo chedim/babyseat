@@ -148,7 +148,7 @@ class _Bucket:
 
 
 _SELECT = re.compile(r"FROM `[^`]+`\.`([^`]+)`\.`([^`]+)` t(?: WHERE (.*?))?"
-                     r"(?: ORDER BY (.*?))?(?: LIMIT (\d+))?$")
+                     r"(?: GROUP BY (.*?))?(?: ORDER BY (.*?))?(?: LIMIT (\d+))?$")
 
 
 class _Lazy:
@@ -179,7 +179,7 @@ class FakeCluster:
         if not sql.startswith("SELECT"):
             return []
         m = _SELECT.search(sql)
-        scope, coll, where, order, limit = m.groups()
+        scope, coll, where, group, order, limit = m.groups()
         params = (opts or {}).get("named_parameters") or {}
         conds = []
         for part in (where.split(" AND ") if where else []):
@@ -198,9 +198,19 @@ class FakeCluster:
                                         "<": got < v, "<=": got <= v}[op]
         rows = [(k, d) for k, d in docs.items()
                 if all(ok(d.get(f), op, v) for f, op, v in conds)]
+        gf = re.findall(r"t\.`([^`]+)`", group or "") if "COUNT(*)" in sql else []
+        if gf:
+            agg: dict = {}
+            for _, d in rows:
+                key = tuple(d.get(f) for f in gf)
+                agg[key] = agg.get(key, 0) + 1
+            return [dict(zip(gf, ks), n=n) for ks, n in agg.items()]
+        if "COUNT(*)" in sql:
+            return [{"n": len(rows)}]
         if order:
-            fields = re.findall(r"t\.`([^`]+)`", order)
-            rows.sort(key=lambda kd: tuple(kd[1].get(f, 0) for f in fields))
+            for spec in reversed(re.findall(r"t\.`([^`]+)`( DESC)?", order)):
+                rows.sort(key=lambda kd, f=spec[0]: kd[1].get(f, 0),
+                          reverse=bool(spec[1]))
         if limit:
             rows = rows[:int(limit)]
         return [{"k": k, "d": _copy.deepcopy(d)} for k, d in rows]

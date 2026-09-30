@@ -36,6 +36,7 @@ import os
 import re
 import time as _t
 import sys
+import threading
 from dataclasses import dataclass, field as dfield
 from pathlib import Path
 
@@ -1225,6 +1226,9 @@ class EntityStore(MultiParentOps, TimelineOps):
         self.announcements: list[dict] = []
         self.junk_screen = JunkScreen(self)
         self._cb_warned = False
+        self._dirty = False
+        self._save_timer = None
+        self._mirror = None                   # the parsed file, kept warm
         self._load()
         self._load_tracks()
         self._seed_junk_anchors()
@@ -1284,6 +1288,7 @@ class EntityStore(MultiParentOps, TimelineOps):
             return
         try:
             d = json.loads(self.path.read_text())
+            self._mirror = d
             for k, rec in (d.get("docs") or {}).items():
                 q = QuantumEntity.from_doc(k, rec)
                 if q is not None:
@@ -1301,8 +1306,11 @@ class EntityStore(MultiParentOps, TimelineOps):
             # preserve tracks: docs-save must not clobber the track lane
             # (the old shape wrote {"docs": ...} bare -- every save wiped
             # the planted tracks; the silent tracking-death bug)
-            d = json.loads(self.path.read_text()) if self.path.exists() \
-                else {}
+            d = self._mirror
+            if d is None:
+                d = json.loads(self.path.read_text()) if self.path.exists() \
+                    else {}
+            self._mirror = d
             # EPHEMERAL docs (a session's living present) stay RAM-only:
             # a dead session's 'now' must not pollute the next boot
             d["docs"] = {k: q.to_doc() for k, q in self.docs.items()
@@ -1315,11 +1323,54 @@ class EntityStore(MultiParentOps, TimelineOps):
             print(f"[entities] side-index save failed ({e})",
                   file=sys.stderr)
 
+    SAVE_DEBOUNCE_S = 10.0
+
+    def save_soon(self) -> None:
+        """Mark dirty and coalesce: ONE whole-file write per interval. The
+        mirror is large (each doc carries vectors); rewriting it per
+        upsert wedged every bulk pass (the boot consolidation included)
+        behind multi-second writes."""
+        self._dirty = True
+        if self._save_timer is None:
+            th = threading.Timer(self.SAVE_DEBOUNCE_S, self._flush_save)
+            th.daemon = True
+            self._save_timer = th
+            th.start()
+
+    def _flush_save(self) -> None:
+        self._save_timer = None
+        if not self._dirty:
+            return
+        self._dirty = False
+        try:
+            self.save()
+        except Exception as e:
+            print(f"[entities] debounced save failed ({e})", file=sys.stderr)
+
+    def flush(self) -> None:
+        """Make pending store writes durable NOW (tests, shutdown)."""
+        self._cancel_save_timer()
+        if self._dirty:
+            self._dirty = False
+            self.save()
+
+    def _cancel_save_timer(self) -> None:
+        if self._save_timer is not None:
+            self._save_timer.cancel()
+            self._save_timer = None
+
     # ---- couchbase (the shared collection) ----------------------------------
     def close(self) -> None:
         """Shutdown: close the couchbase cluster so its IO threads stop
         BEFORE interpreter finalization (a live asio thread touching
         CPython during Py_Finalize is a SIGSEGV, seen in the wild)."""
+        self._cancel_save_timer()
+        if self._dirty:
+            self._dirty = False
+            try:
+                self.save()
+            except Exception as e:
+                print(f"[entities] save on close failed ({e})", file=sys.stderr)
         cluster = getattr(self, "_cluster_ref", None)
         if cluster is None:
             return
@@ -1400,7 +1451,7 @@ class EntityStore(MultiParentOps, TimelineOps):
             ent = existing
         else:
             self.docs[ent.eid] = ent
-        self.save()
+        self.save_soon()
         if is_new and not (ent.properties or {}).get("ephemeral"):
             self._announce("new", ent)
         if (ent.properties or {}).get("ephemeral"):
@@ -1975,14 +2026,21 @@ class EntityStore(MultiParentOps, TimelineOps):
         if not self.path:
             return
         try:
-            d = json.loads(self.path.read_text()) if self.path.exists() \
-                else {}
+            d = self._mirror
+            if d is None:
+                d = json.loads(self.path.read_text()) if self.path.exists() \
+                    else {}
+                self._mirror = d
             d["tracks"] = self.tracks
             self.path.write_text(json.dumps(d))
         except Exception as e:
             print(f"[entities] track save failed ({e})", file=sys.stderr)
 
     def _load_tracks(self) -> None:
+        if self._mirror is not None:
+            for k, t in (self._mirror.get("tracks") or {}).items():
+                self.tracks[k] = t
+            return
         if not self.path or not self.path.exists():
             return
         try:

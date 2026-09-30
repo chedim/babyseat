@@ -107,6 +107,7 @@ class TestEntityStore(unittest.TestCase):
             # carries the 7 junk-anchor seeds)
             self.assertEqual(len([k for k in st.docs
                                   if "junk-anchor" not in k]), 1)
+            st.flush()                              # durability is debounced
             st2 = EntityStore(path=p)               # reload from JSON
             self.assertEqual(len([k for k in st2.docs
                                   if "junk-anchor" not in k]), 1)

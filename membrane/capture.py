@@ -8,8 +8,9 @@ events (membrane/streams.py), writes them (idempotent), and -- in mode
 path or blocks it; a full queue drops the oldest DISCOURSE, never an
 observation.
 
-Mode (MEMBRANE_EFIELD): off | shadow (write events only) | on (write +
-embed + apply)."""
+Mode (MEMBRANE_EFIELD): on (write + embed + apply; the default) | shadow
+(write events only) | off -- the switch survives as a lab/ablation
+override only."""
 
 from __future__ import annotations
 
@@ -25,7 +26,7 @@ SESSION_GAP_S = 30 * 60
 
 
 def mode_from_env() -> str:
-    m = os.environ.get("MEMBRANE_EFIELD", "off").strip().lower()
+    m = os.environ.get("MEMBRANE_EFIELD", "on").strip().lower()
     return m if m in ("off", "shadow", "on") else "off"
 
 

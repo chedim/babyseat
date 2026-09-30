@@ -1,186 +1,98 @@
-# The VSA token lane (the rosetta transposition)
+# The VSA lane — entity keys and relations
 
-*Status: built, default-on, TDD-pinned (`tests/test_vsa.py`). The lane
-supplements the cosine; it never rules it.*
+*Status: the lane two this document describes is built on; the token-lane
+recurrence it came from was retired with the exemplar field (git history
+is the archive — see the last section).*
 
-## The idea
+## What the VSA machinery is now
 
-rosetta-check's lab treated each statement as something that CHANGES the
-field into a new state -- the field's state represents the program after
-all statements have "massaged" it. Membrane's turn was atomic: one pooled
-mxbai vector per situation, order and per-token surprise collapsed into a
-bag-of-meaning point. The token lane transposes the rosetta idea to chat:
-each TOKEN is a transition; the turn's final hypervector state is the
-turn after all its tokens have massaged it.
+Every entity and every role on the field gets a **hypervector** derived
+deterministically from its NAME — not from the embedder:
 
-Membrane already held the DISCRETE half of this: `TokenTimeline`
-(`membrane/token_timeline.py`, Phase T3) stores every
-(context -> next-token) pair as a durable transition table, feeds the
-thinker's typed walk, and backs off K=3 -> K=1. This lane is the
-CONTINUOUS sibling: one capture pass feeds both structures (the same
-tokenizer, `vsa.shared_tokenize` = `token_timeline.tokenize`), and the
-field cell remains the truth for both.
+- `eids.entity_key(eid)` = the hash-token binding of the canonical id
+  (`vsa.hash_token_vec("ek|" + eid)`, D=8192);
+- `eids.role_key(role)` = hash-random (never the semantic codebook —
+  near-equal strings produce near-equal vectors, which cannot encode
+  order; that was the E25 lesson, below).
 
-## The pieces
+Deterministic keys mean every seat computes the same vectors for the same
+entities with zero shared state: relations compose identically
+cross-origin, which is what makes them shareable in the commons.
 
-### The codebook (`VSACodebook`)
+## Relations = composites (membrane/relations.py)
 
-`V_tok = sign(R @ e_tok)` -- R a fixed seeded Gaussian (D=8192 x 1024,
-seed 5), e_tok the BARE token string's embedding through the seat's own
-Ollama embedder, lazy on first sighting, persisted at
-`<data-dir>/vsa-codebook.json`.
+A (subject, relation, object) triple is encoded as
 
-THE ISOMETRY: the codebook is not random -- it is the embedder's geometry
-binarized. Hamming distance in the codebook approximates cosine in
-embedding space (measured: cat/dog 5% apart, cat/database 51%), so the
-lane has pretrained semantics from day one with zero marginal cost after
-the first embed per token type. The same (model, dim, seed) on every seat
-yields the same codebook -- the shared substrate stays coherent
-cross-origin, guarded by the id stamp.
+    bind(role_subj, key(A)) ⊕ bind(role_rel, key(r)) ⊕ bind(role_obj, key(B))
 
-No embedder (Ollama down): deterministic hash vectors -- no pretrained
-semantics, the lane still binds, just weaker recall. Degrade, never fail.
+a bundle whose parts stay recoverable by unbinding the role. Stored in the
+`relations` collection per origin: `{subj, rel, obj, source, n, ts,
+evidence event keys, the packed composite}`.
 
-Roles are seeded-random and STRUCTURAL (not semantic): the rosetta design
-carries over unchanged.
+**Why VSA and not the embedder:** mxbai is nearly order-blind for
+relations — "A calls B" vs "B calls A" at cos 0.975 (structure-awareness
+0.06). With random role vectors, order structure comes back: the E25 run
+measured 0.28 → 0.58 when the hash-random roles replaced the semantic
+codebook roles, and the code graph's `calls` triples read structure
+correctly (membrane's own lane 0.80). Read-back is
+`unbind_role(composite, role)` → a noisy estimate of the role's payload,
+then `cleanup()` against the known entity keys (nearest key wins).
 
-### The recurrence (the "massage")
+**Sources** (built and maintained automatically):
+- the code graph: `call:` relations per def pair, `defined_in` per file,
+  superseded when a file's code events are replaced;
+- observations: `tool:edit edited f:x`, `*_failed` on error outcomes.
 
-THREE components in one weighted-majority state (calibrated in tests):
+**Readers:** the ENTITIES block's "top relations" lines, and co-mention
+answers in `related_entities`.
 
-- BAG: each distinct token once (paraphrase recall -- the isometry's
-  cosine preservation).
-- RECENCY ROLES: each token xored with the slot permuted by its distance
-  from the END of the turn (order + tail dominance: weight 0.75^distance
-  -- the forgetting).
-- ADJACENT PAIRS: token_i x token_i+1 at a distinct offset (local order
-  structure; a reordered stream breaks every pair, the state moves).
+## The canonical id space (membrane/eids.py)
 
-Measured property set (the tests pin them): deterministic; same tokens
-reordered -> the state moves but stays nearer than unrelated text;
-paraphrase nearer than unrelated; near-substitution nearer than
-far-substitution; the tail dominates a long stream (crosstalk bounded by
-the 128-token window).
+`canon(kind, surface, graph)` — every mention lands on `kind:norm`:
 
-`pack_state` -> base64 of the packed bits: ~1 KB/state at D=8192.
+| kind | example |
+|---|---|
+| `f:` | `f:membrane/router.py` (repo-relative file) |
+| `s:` | `s:membrane.router.Router` (module-qualified; a bare symbol resolves through the codegraph defs to its qualname, else `s:?name`) |
+| `c:` | `c:git` (discourse commands count only in backticks / after `$ `) |
+| `port:`, `m:`, `u:` | ports, models, urls |
+| `tool:` | `tool:edit` |
+| `p:`, `w:` | phrases, words (plural-folded) |
+| `ctx:` | `ctx:session:<sid>` (the RAM-only session context) |
 
-### The row stamp
+Legacy overlay keys (`membrane::files:x`, `Membrane::Component:…`) map
+through `_LEGACY_KIND` to the same canonical ids — the entity layer and
+the field share one id space, which is why `forget #N`, the watch layer
+and the overlay docs all key on `canon_eid`.
 
-`extra["vsa"] = {"cb": <codebook-id>, "s": <packed-state>}` rides the
-exemplar. The wire schema already tolerates unknown keys
-(`_rec_from_wire` preserves them; `_scm` versioning) -- non-breaking,
-JSON and couchbase both carry it. Rows without the stamp (all legacy
-rows) simply ride cosine-only.
+`mentions_of(sentence)` picks the entities a sentence moves: **specific
+kinds win over phrases, phrases over words, maximal phrases**.
 
-### The dual lane (supplement, never replace)
+## The determinism covenants
 
-- `ExemplarStore.vsa_top_k(lane, q_state, k)`: Hamming similarity over
-  same-codebook rows; other rows invisible.
-- `recall_merged(..., vsa_lane=..., vsa_query=...)`: rows whose token
-  state AGREES with the query (Hamming-sim >= 0.70) take a small bonus
-  (w_vsa=0.08 -- cosine-primary; the E4 lesson: projections floor rank,
-  a quantized geometry informs, never rules). A Hamming-far row is
-  never penalized.
+- `vsa.DEFAULT_DIM = 8192`, all lanes seed-hash the same way: the same
+  (dim, seed, scheme) on every seat yields the same vectors — shareable
+  without a shared codebook.
+- Degradation: the lane never requires the embedder or Couchbase; binding
+  is pure numpy.
+- Lab isolation: nothing under `tests/` or the lab paths persists into a
+  real cluster's collections (the `_is_lab_field_path` guard).
 
-### The advisory surprise
+## What the token lane was
 
-`VSALane.surprise(text)`: how far the live trajectory diverges from the
-recent ones (0.0 = a shape just seen). The gate stamps it on the verdict
-(`vsa_surprise`), the audit records it, and the ephemeral tier's
-plasticity scaling modulates in the same direction as the cosine sim
-(a seen token-shape reads duller -> shorter TTL; a divergent trajectory
-reads novel -> longer). A verdict NEVER flips on this lane.
+Before the entity field, this document described the **VSA token lane**: a
+per-turn hypervector "massage" (bag + recency roles + adjacent pairs,
+packed ~1 KB/state) riding exemplar rows, with seven consumers (shape
+archaeology, loop fingerprint, shape-aware dedup, the order-shaped ballot,
+thinker convergence, the shape-poke, the streaming prefix seam) and the
+measured properties (order 19% at 6 tokens, paraphrase nearer than
+unrelated at 37%, tail dominance 18%-vs-43%).
 
-## The covenants
-
-- **Dual-lane covenant**: mxbai cosine stays primary. The lane is a
-  second sense organ on the existing skeleton, not a replacement.
-- **Degrade, never fail**: no embedder -> hash vectors; any lane error
-  never touches the turn (every seam is try/except).
-- **One capture, two readouts**: the shared tokenizer feeds
-  TokenTimeline (counts) and this lane (geometry) -- the fn-stamp bridge
-  (actuation cells) and the chat-capture feed (teed pairs) both run.
-- **Derived structure**: the field cell remains the truth; the lane and
-  the timeline are both projections of it.
-- **Coherence**: `codebook_id` = hash(model, dim, seed, scheme), stamped
-  on every state; recall compares only same-id docs; a forked id rides
-  read-only until re-encoded.
-- **Kill switch**: `MEMBRANE_VSA=0` disables the lane end to end
-  (`VSALane.make` returns None, no stamp, no bonus, no signal).
-- **Lab isolation**: the codebook persists only next to a real field --
-  lab paths (the `_is_lab_field_path` guard) skip persistence.
-
-## What was measured before building (the honest calibration)
-
-The first recurrence (pure recency-roles) failed its own order test:
-3-token micro-strings moved only ~4% under reorder -- correlated tokens
-average toward the same majority. The shipped shape (bag + roles + pairs)
-was chosen by measurement: order 19% on 6-token turns (vs 4% at 3
-tokens -- order structure grows with length), paraphrase 37% (nearer
-than the 50% unrelated floor), tail dominance 18%-vs-43%, prefix
-similarity ~0.60 (the surprise baseline). The test bars are calibrated
-to these numbers, not guesses.
-
-## Not built (deliberately, per the operator's call)
-
-- Gloss distillation (LLM-written one-line senses for polysemous
-  project vocabulary, quantized into the codebook): revisit only if the
-  recall probe shows polysemous-token pain.
-- Replay-by-continuation (generate from stored trajectories -- the
-  dreamer's lane): a separate experiment; the TokenTimeline walk
-  (thinker.py) is the discrete forerunner.
-
-## The consumers (built, TDD-pinned in `tests/test_vsa_consumers.py`)
-
-The stored data now has SEVEN read-side users, in the order they landed:
-
-1. **Shape archaeology** (`_recall_report` in opencode.py): the
-   `membrane: query the field` report gains a shape lane -- rows whose
-   token ORDER matches the ask (but whose pooled vec misses) surface,
-   tagged `[shape]`. Read-only.
-2. **Loop fingerprint** (`_vsa_loop` in runtime.py): >= 3 consecutive
-   escalates that learned NOTHING with flat surprise (<= 0.06) = a
-   stuck loop, flagged `vsa_loop` on the verdict + a gate note. Fires
-   EARLIER than the settle-k ring (a rewording's pooled vec moves
-   while its token state does not). Advisory: the settle machinery
-   stays the authority.
-3. **Shape-aware dedup** (BEHAVIOR, in `_learn`): a high-cosine dup
-   whose token state diverges (Hamming-sim < 0.62, the measured bar --
-   reorderings land 0.61+, unrelated text 0.50-0.53) is a
-   DIFFERENT-SHAPED question: it learns as a fresh CANDIDATE; the old
-   cell stays live (two shapes coexist; no supersede -- no correction
-   happened). A reordering within margin still dedups. Kill switch
-   `MEMBRANE_VSA_DEDUP=0` reverts to keep-first-seen.
-4. **The order-shaped ballot** (`elect_timeline` + `vote_on_turn`):
-   reality's dream-election reads the token shape -- a quarantined
-   branch whose TERMINAL text encodes near the real turn's state
-   (Hamming-sim >= 0.69, lazily computed + cached on the branch) is
-   confirmed at a relaxed cosine bar (0.60, for vecs in the shy
-   0.60-0.72 band). One ballot, two readings; lane failure = the
-   vec-only vote.
-5. **Thinker convergence** (`_branch_convergence` in thinker.py): the
-   idle thinker ranks extension candidates by (curiosity,
-   convergence) -- a branch whose terminal state trends TOWARD the
-   lane's recent real-turn states outranks an equally-hungry stale
-   one (a 0.01-scale tie-band nudge; hunger stays primary).
-6. **The shape-poke** (`veil_poke_shape` in field.py, beside
-   `veil_poke_ann`): foreign memories adopt as read-only scenery by
-   token shape (same codebook id, Hamming-sim >= 0.90 vs the lane's
-   lived states) -- $0, no embed call, so a FRESH project gets
-   shape-recall from other seats before it has vecs of its own.
-   Adopted rows drop the vsa stamp (my lane never writes their
-   geometry). The two-origin scenery covenant applies.
-7. **The streaming prefix seam** (`POST /membrane/prefix` on the
-   proxy): body `{"text": "...", "k": 3}` -> top-k shape hits while
-   the text is still arriving (the state is incremental; the pooled
-   lane needs the full turn). READ-ONLY: no learn, no audit write,
-   bounded k. Prefix sims land ~0.55-0.68 (a prefix is a shorter
-   text; the client judges the number). The unique payoff for the
-   agdroid voice seat: mid-sentence grounding.
-
-All seven ride the master kill switch (`MEMBRANE_VSA=0` disables the
-lane end to end), degrade silently on any lane error, and were
-calibrated by measurement before landing (the self-encode pollution
-bug the convergence test caught: a lane's `encode` appends to its own
-history -- every consumer that compares against the history must
-exclude the entry it just wrote).
+The exemplar field went away outright (stage 17 of the rewrite;
+git history is the archive). What survived is the **deterministic
+binding**: the entity keys are the lane's `hash_token_vec` applied to
+canonical ids, and its role-binding insight — random role vectors, not
+semantic codebook ones — is exactly why the relations composites hold
+order. The whole-message "one vector per turn" shape itself was abandoned
+(e18: tracking entities by their mentioning sentences distinguishes 68%
+vs 59%).

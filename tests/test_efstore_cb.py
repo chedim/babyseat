@@ -133,3 +133,95 @@ class TestOpenBackend(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+from membrane.efstore import count_sql  # noqa: E402
+
+
+class TestCounts(unittest.TestCase):
+    def test_count_sql_pure(self):
+        sql, p = count_sql("b", "membrane", "events",
+                           {"origin": "o"}, group=("stream", "status"))
+        self.assertEqual(
+            sql,
+            "SELECT t.`stream` AS `stream`, t.`status` AS `status`, "
+            "COUNT(*) AS `n` FROM `b`.`membrane`.`events` t "
+            "WHERE t.`origin` = $p0 GROUP BY t.`stream`, t.`status`")
+        self.assertEqual(p, {"p0": "o"})
+        sql2, p2 = count_sql("b", "membrane", "events", None)
+        self.assertEqual(sql2, "SELECT COUNT(*) AS `n` FROM `b`.`membrane`.`events` t")
+        self.assertEqual(p2, {})
+
+    def test_count_groups_backend_parity(self):
+        be = MemBackend()
+        be.upsert("events", "a", {"origin": "o", "stream": "discourse", "status": "user"})
+        be.upsert("events", "b", {"origin": "o", "stream": "discourse", "status": "user"})
+        be.upsert("events", "c", {"origin": "o", "stream": "tool", "status": "result"})
+        be.upsert("events", "d", {"origin": "other", "stream": "discourse", "status": "user"})
+        mem = be.count("events", {"origin": "o"}, group=("stream", "status"))
+        self.assertEqual(sorted((r["stream"], r["status"], r["n"]) for r in mem),
+                         [("discourse", "user", 2), ("tool", "result", 1)])
+        self.assertEqual(be.count("events"), {"n": 4})
+        cbbe = cb()
+        cbbe.upsert("events", "a", {"origin": "o", "stream": "discourse", "status": "user"})
+        cbbe.upsert("events", "b", {"origin": "o", "stream": "discourse", "status": "user"})
+        cbbe.upsert("events", "c", {"origin": "o", "stream": "tool", "status": "result"})
+        cbbe.upsert("events", "d", {"origin": "other", "stream": "discourse", "status": "user"})
+        remote = cbbe.count("events", {"origin": "o"}, group=("stream", "status"))
+        self.assertEqual(sorted((r["stream"], r["status"], r["n"]) for r in remote),
+                         [("discourse", "user", 2), ("tool", "result", 1)])
+        self.assertEqual(cbbe.count("events"), {"n": 4})
+
+    def test_scan_desc_order_top_m(self):
+        for be in (MemBackend(), cb()):
+            be.upsert("entity_states", "a", {"origin": "o", "tier": "live", "accr": 3})
+            be.upsert("entity_states", "b", {"origin": "o", "tier": "live", "accr": 9})
+            be.upsert("entity_states", "c", {"origin": "o", "tier": "live", "accr": 6})
+            keys = [k for k, d in be.scan(
+                "entity_states", {"origin": "o", "tier": "live"},
+                order=(("accr", "DESC"),), limit=2)]
+            self.assertEqual(keys, ["b", "c"])
+            keys = [k for k, d in be.scan(
+                "entity_states", {"origin": "o", "tier": "live"},
+                order=(("accr", "DESC"),))]
+            self.assertEqual(keys, ["b", "c", "a"])
+
+    def test_vitals_counts_without_doc_scans(self):
+        from membrane.efield import EntityField
+        be = MemBackend()
+        fld = EntityField(be, FakeEmbedder(), "o")
+        fld.write_events([
+            ST.Event(stream="discourse", role="user", text="the router picks models", ts=5.0),
+            ST.Event(stream="observation", role="tool", tool="edit", ts=6.0),
+        ], session="s:0:0")
+        fld.b.upsert("entity_states", "x", {"origin": "o", "tier": "live",
+                                            "accr": 5, "state": list(FakeEmbedder().embed(("a b",))[0])})
+        seen = []
+        real = fld.b
+
+        class Seen:
+            def __getattr__(self, name):
+                return getattr(real, name)
+
+            def count(self, *a, **kw):
+                seen.append("count")
+                return real.count(*a, **kw)
+
+            def scan(self, coll=None, *a, **kw):
+                seen.append(f"scan {coll}")
+                return real.scan(coll, *a, **kw)
+
+        fld.b = Seen()
+        try:
+            v = fld.vitals(max_age_s=0)
+        finally:
+            fld.b = real
+        self.assertEqual(sorted(v["events"]),
+                         ["discourse/pending", "observation/pending"])
+        self.assertEqual(v["entities"], {"live": 1})
+        self.assertEqual(v["events"]["discourse/pending"], 1)
+        self.assertTrue(seen, "vitals made no backend calls")
+        self.assertEqual(seen[:2], ["count", "count"])
+        # geometry's top-m states pull may scan (ordered, bounded); the
+        # events collection must NEVER be doc-scanned for a count
+        self.assertTrue(all(s != "scan events" for s in seen))

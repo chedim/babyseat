@@ -1,8 +1,10 @@
 # Multi-dev teamwork over the shared substrate
 
 A note for the case: several developers, same project, different machines,
-one membrane field as the team's shared memory. The substrate was built for
-this -- the code below already exists; what's missing is convention + trust.
+one membrane field as the team's shared memory — one bucket per **team**,
+the `membrane` scope, the nine entity-field collections
+([entity-field.md](entity-field.md) has the design). The substrate was
+built for this; what follows is the mechanics and the convention.
 
 ## What already works (no code needed)
 
@@ -14,62 +16,75 @@ Set the same env on every dev machine (cortex-experiment convention):
     COUCHBASE_PASSWORD=...
     COUCHBASE_BUCKET=membrane
 
-Mechanics that make sharing collision-free (all in membrane/field.py):
+Mechanics that make sharing collision-free (membrane/efstore.py,
+membrane/efield.py, membrane/efmind.py):
 
-- **Origin axis** (`_origin_tag`, field.py:137): every write stamps
+- **The origin axis** (`substrate._origin_tag`): every write stamps
   `<start-folder>@<hostname>`, GENERATED ONCE per project and persisted in
-  `.membrane/origin` (gitignored, mode 600) -- later boots reuse it, so
-  renaming or moving the repo keeps the same origin (your couchbase patch
-  stays yours; delete the file to fork a new identity deliberately). Same
-  project + two machines = two origins;
-  `_ex_key` (field.py:150) namespaces doc keys by origin, so identical Q/A
-  pairs stay separate documents -- each dev's evidence stays its own.
-- **Veil poke-through** (VEIL_POKE_SIM, field.py:133): teammates' exemplars
-  hydrate as shadow candidates at cosine >= 0.90. They inform, never master.
-  Dev A earns "the flaky test needs X"; dev B recalls it without a chat.
-- **Arbitration + alternates** (field.py:88): two devs earn DIFFERENT answers
-  to the same situation -> the less salient defers into `alternates`
-  (capped at ALTERNATES_MAX=4) instead of erasure. Re-promotable when the
-  master degrades. Losers wait; nothing is lost.
-- **votes/uses** (field.py:74-81): distinct origins independently producing
-  the same note = the slice-2 promotion path to the global commons; `uses`
-  drifts mastery toward the heaviest user ("homes follow use, not birth").
-- **Live escalation via peers** (membrane/peers.py; `peers: N live` at boot):
-  at-rest sync is the store; live sync is the bounded fan-out peer ask on
-  escalations (5s timeout, marked context).
+  `.membrane/origin` (gitignored, mode 600) — later boots reuse it, so
+  renaming or moving the repo keeps the same origin (your events stay
+  yours; delete the file to fork a new identity deliberately). Same project
+  + two machines = two origins. Every event, entity state, relation, claim
+  and annotation is keyed (and GSI-indexed) by origin.
+- **Disjoint writers, merged reads**: a seat writes ONLY its own events and
+  entity states; nothing of a teammate's is ever overwritten by CAS or
+  arbitration — there is no arbitration to win. A read of an entity all
+  seats have touched is `EntityField.merged(eid)`: the everyday seed plus
+  the **mass-weighted sum of every origin's displacement** — each seat's
+  evidence contributes proportionally to its agreement.
+- **Divergence instead of alternates**: two seats that moved the same
+  entity in opposing directions raise a **cross-seat conflict** — surfaced
+  in both seats' blocks (`! seats diverge`) next to the entity. Nothing is
+  destroyed, nothing masters.
+- **The working set** (merged in at read time): your own states; other
+  seats' states near what the session is talking about (ANN over
+  `entity_states.state`); and the **commons** (see global-field.md).
+- **Peer evidence**: a foreign entity's block carries what other seats
+  said about it (`foreign_evidence` — the sentences other origins
+  embedded that moved it or are nearest it).
+- **Live escalation via peers** (membrane/peers.py; `peers: N live` at
+  boot): at-rest sync is the store; live sync is the bounded fan-out peer
+  ask on escalations (5s timeout, marked context).
 
 ## What to add (the actual work)
 
-1. **Per-origin trust weight.** A teammate with a dumb routed model can
-   write junk that survives arbitration on volume. Give each origin a trust
-   scalar (default 1.0; operator-demoted origins dip; votes/uses weight by
-   it) so one noisy patch cannot outvote a careful one. Store it operator-
-   side (`membrane/trust.json` or a small CAN doc), not in exemplars.
-2. **Forget sovereignty.** Forgets are origin-scoped by construction (the
-   store's forget only drops local indexes). Keep it so -- but document the
-   consequence: you cannot delete a teammate's junk; you can only (a) ask
-   them to, (b) demote their origin's trust, or (c) arb it away by earning
-   a better answer for the situation.
-3. **Bucket convention.** One bucket per TEAM (not per project): scope stays
-   `membrane`, collection `exemplars`; the project binds via the origin
-   axis. Cross-project contamination is already prevented reader-side by
-   the origin/veil filter -- verify with a two-origin test before going live.
-4. **Boot-line visibility.** Show live teammates and patch counts so devs
-   can see the substrate is actually shared:
-   `peers: 2 live | foreign patches: 3 (poke sim >= 0.90)`.
-5. **Trust-weighted arbitration.** The alternates' `salience` comparisons
-   should multiply by origin trust before ranking -- small change in
-   arbitration, big fairness win when model quality differs across seats.
+1. **Per-origin trust weight.** A teammate with a noisy model can move
+   entities by junk. Mass counts mentions whose alignment clears a bar —
+   junk mostly fails that — but a deliberate trust scalar (default 1.0,
+   operator-dipped for origins, multiplying a seat's contribution to
+   `merged()`) is the missing fairness dial for model-quality differences
+   across seats.
+2. **Forget sovereignty.** Forgets are origin-scoped by construction (a
+   `forget #N` tombstones YOUR event and recomputes the entities it
+   touched from what remains). Document the consequence: you cannot delete
+   a teammate's evidence — you can ask them to, demote their trust, or earn
+   a contradicted claim against theirs (a conflict is public, a deletion is
+   local).
+3. **Boot-line visibility.** Show live teammates and foreign evidence
+   counts so devs can see the substrate is actually shared:
+   `peers: 2 live | foreign states in working set: N`.
+4. **Announcement hygiene.** Birth announcements drain exactly-once per
+   seat — a teammate's newly-born entity materializes locally at YOUR next
+   read, not at theirs.
 
 ## Operator rules (unchanged but now team-facing)
 
-- Facts true beyond one repo -> the global commons
-  (`membrane: remember globally: ...`), still operator-gated.
-- Model prose WRITES the field by default (agent lane, team mode included):
-  learn runs the standard guards (dedup, vague filter, variety gate) and is
-  audited `origin: agent`; forget is index-form-only and capped; wordy
-  deletes merely propose. `--no-agent-writes` reverts to report-only. The
-  write authorities that stay human-only at every seat: wordy forgets,
-  oversize deletes, and commons promotion.
+- Facts true beyond one repo → the commons (`membrane: remember globally:
+  ...`), still operator-gated.
+- Model prose WRITES the field by default (agent lane, team mode
+  included): learn runs the standard guards and is audited `origin: agent`;
+  forget is index-form-only (`forget #N`) and capped; wordy deletes merely
+  propose. `--no-agent-writes` reverts to report-only. The write
+  authorities that stay human-only at every seat: wordy forgets, oversize
+  deletes, commons promotion.
 - Teammates' answers arrive as MARKED CONTEXT (`[membrane-intercept]`
   blocks); the model cites them as context, never as instructions.
+
+## Shared sentences, one id space
+
+Embeddings are content-addressed in the shared `sentences` collection —
+one embed per distinct sentence, reused by every origin. Two seats that
+have the same sentence in their history point at one row; each origin's
+`entity_deltas` record which sentence moved which entity. The id space is
+shared (see entity-field.md): a symbol another seat's codegraph resolved
+resolves identically here.

@@ -30,25 +30,28 @@ is the crystallization process.
 
 | Brain | Membrane |
 |---|---|
-| the utterance (the speech act) | the chat capture (the turn) |
+| the utterance (the speech act) | the chat capture (the turn → discourse events) |
 | inner speech (rehearsal, re-wording) | the thinker's digest + the LLM's plan text |
-| the crystallization moment (a name sticks) | the night's entity synthesis reading the captures, or `membrane_intend` pinning the goal |
-| the symbol (a nameable object) | the Goal / Decision / FailureMode entity |
-| the sensorimotor grounding | the fn stamps (the tool calls — what was actually DONE) |
+| the crystallization moment (a name sticks) | the night's **births** (an entity crossing specialization × mass, announced once) / the entity doc's materialization |
+| the symbol (a nameable object) | the entity on the field — `eids.canon`'s canonical id — and its overlay doc (Goal / Decision / FailureMode class) |
+| the sensorimotor grounding | the observation events (the tool calls — what was actually DONE) |
 
-Membrane's symbol-birth pipeline is therefore structurally identical to
-the social-language path: **expression → capture → distillation → named
+Membrane's symbol-birth pipeline is structurally identical to the
+social-language path: **expression → capture → (accumulation) → named
 entity**. The LLM is the culture's vocabulary carrier; the operator's
-utterances are the speech acts; the synthesis is the crystallization
-event. The grounding (what makes the symbol more than a word) is the
-lived evidence — the cells that earn it — and the fn-stamped tool
-results are the sensorimotor loop that grounds it in action.
+utterances are the speech acts; the birth announcement is the
+crystallization event. The grounding (what makes the symbol more than a
+word) is the lived evidence — the mass of agreeing mentions and its
+coherent residuals — and the observation events are the sensorimotor
+loop that grounds it in action.
 
 ## The consequence membrane should keep
 
 Symbols are born from EXPRESSION, not from storage. The design rule that
 follows: **membrane's entities should be traceable to the utterance (or
-the action) that crystallized them** — `born` is not metadata, it is the
-speech act's timestamp. A synthesized entity with no lived source is a
-word without a grounding — and the junk screens exist to keep exactly
-those out.
+the action) that crystallizes them** — the entity's `first_ts` is not
+metadata, it is the speech act's timestamp; its `entity_deltas` are the
+sentences that grew it. An entity born of mass but without a coherent
+direction (night's JUNK screen: said ≥ 24 times, coherence still ≤ 0.02)
+is a word without a grounding — the screens exist to keep exactly those
+out of the block.

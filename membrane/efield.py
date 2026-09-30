@@ -993,10 +993,9 @@ class EntityField:
         cached = getattr(self, "_geom_cache", None)
         if cached and time.time() - cached[0] < max_age_s:
             return cached[1]
-        rows = [d for _, d in self.b.scan("entity_states", {"origin": self.origin, "tier": "live"})
-                if d.get("state")]
-        rows.sort(key=lambda d: -int(d.get("accr") or 0))
-        rows = rows[:m]
+        rows = [d for _, d in self.b.scan(
+            "entity_states", {"origin": self.origin, "tier": "live"},
+            order=(("accr", "DESC"),), limit=m) if d.get("state")]
         if len(rows) < 2:
             out = {"entities": len(rows), "eff_rank": None, "rank_ratio": None,
                    "free_energy": None, "conflict_frac": None}
@@ -1017,18 +1016,22 @@ class EntityField:
         return out
 
     def vitals(self, max_age_s: float = 0.0) -> dict:
-        """Counts by stream/status and tier. Scans the origin's events, so
-        readers on the chat path pass max_age_s to reuse a recent answer."""
+        """Counts by stream/status and tier (server-side GROUP BY over the
+        composite GSI -- no doc ever crosses to the client for a number),
+        so read cheaply; readers on the chat path pass max_age_s to reuse
+        a recent answer."""
         cached = getattr(self, "_vitals_cache", None)
         if max_age_s and cached and time.time() - cached[0] < max_age_s:
             return cached[1]
         ev = {}
-        for _, d in self.b.scan("events", {"origin": self.origin}):
-            k = f"{d.get('stream')}/{d.get('status')}"
-            ev[k] = ev.get(k, 0) + 1
+        for r in self.b.count("events", {"origin": self.origin},
+                              group=("stream", "status")):
+            k = f"{r.get('stream')}/{r.get('status')}"
+            ev[k] = int(r.get("n") or 0)
         tiers = {}
-        for _, d in self.b.scan("entity_states", {"origin": self.origin}):
-            tiers[d.get("tier")] = tiers.get(d.get("tier"), 0) + 1
+        for r in self.b.count("entity_states", {"origin": self.origin},
+                              group=("tier",)):
+            tiers[r.get("tier") or "?"] = int(r.get("n") or 0)
         out = {"events": ev, "entities": tiers, "null_coherence": self.null_coherence(),
                "geometry": self.geometry(),
                "seq_last": self._ostats.get("seq_last"), "cursor": self._ostats.get("cursor")}

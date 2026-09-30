@@ -5066,7 +5066,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # geometry instead of a bare fallback.
         try:
             from .night import consolidate_entities
-            consolidate_entities(srv.membrane, est, mem=srv.membrane,
+            if getattr(srv, "efield", None) is None:
+                raise RuntimeError("entity field is off: no deltas to drift on")
+            consolidate_entities(getattr(srv, "efield"), est, mem=srv.membrane,
                                  materialize=0, only_keys=[key])
         except Exception:
             pass
@@ -5730,8 +5732,9 @@ def main() -> None:
     # couchbase commons is best-effort after the embedder resolves.
     srv._boot_ts = time.time()
     srv._tool_results = {}     # the receipt lane's result-side cache (E9)
-    # THE ENTITY FIELD's intake (the rewrite; MEMBRANE_EFIELD=off|shadow|on):
-    # events from the hooks, written by a worker thread -- never in the chat
+    # THE ENTITY FIELD's intake (the rewrite; MEMBRANE_EFIELD defaults on,
+    # off|shadow as lab ablations): events from the hooks, written by a
+    # worker thread -- never in the chat
     # path. Couchbase for a real seat; RAM for lab paths or an unreachable
     # cluster (open_backend degrades, never raises).
     srv.capturer = srv.efield = None
@@ -5807,14 +5810,22 @@ def main() -> None:
                 if k != "session:now":
                     srv.entity_store.ensure_track_entity(k)
             from .night import consolidate_entities, run_scripted_entities
-            consolidate_entities(srv.membrane, srv.entity_store,
-                                 mem=mem, materialize=0,
-                                 only_keys=[k for k in srv.entity_store.tracks.keys()
-                                            if k != "session:now"])
+            _bfld = getattr(srv, "efield", None)
+            if _bfld is None:
+                raise RuntimeError("entity field is off: no deltas to drift on")
+            # only_keys=[] means 'no filter' in night.py -- it would drift
+            # EVERY overlay doc at boot (2248 here); bootstrap tracks only,
+            # and only when there are any.
+            _tk = [k for k in srv.entity_store.tracks.keys()
+                   if k != "session:now"]
+            if _tk:
+                consolidate_entities(_bfld, srv.entity_store,
+                                     mem=mem, materialize=0,
+                                     only_keys=_tk)
             # THE SCRIPT PASS AT BOOT: a script edit between boots must
             # echo immediately (the stale script_render otherwise rides
             # the banner until the next 15-min night tick)
-            out = run_scripted_entities(srv.membrane, srv.entity_store,
+            out = run_scripted_entities(_bfld, srv.entity_store,
                                         mem=mem, force=True)
             if out.get("errors"):
                 print(f"[opencode] script pass: {out['errors']} error(s)",

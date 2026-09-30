@@ -126,13 +126,26 @@ class MemBackend:
         """Rows whose fields equal `eq` (a list value means IN), ordered by
         the `order` fields ascending -- the shape SQL++ can express."""
         items = [(k, d) for k, d in self._c(coll).items() if matches(d, eq)]
-        if order:
-            items.sort(key=lambda kd: tuple(kd[1].get(f) if kd[1].get(f) is not None
-                                            else 0 for f in order))
+        for f in reversed(order):                        # stable multi-key sort
+            fld = f[0] if isinstance(f, tuple) else f
+            rev = isinstance(f, tuple) and not str(f[1]).upper().startswith("ASC")
+            items.sort(key=lambda kd, fld=fld: 0 if kd[1].get(fld) is None
+                       else kd[1].get(fld), reverse=rev)
         for i, (k, d) in enumerate(items):
             if limit is not None and i >= limit:
                 break
             yield k, dict(d)
+
+    def count(self, coll: str, eq: dict | None = None, group: tuple = ()) -> list[dict]:
+        """Grouped counts (rows of 'n' + the group fields); RAM aggregation
+        over the same matches() path the scan uses."""
+        if not group:
+            return {"n": sum(1 for _ in self.scan(coll, eq))}
+        counts: dict[tuple, int] = {}
+        for _, d in self.scan(coll, eq):
+            key = tuple(d.get(f) if d.get(f) is not None else "?" for f in group)
+            counts[key] = counts.get(key, 0) + 1
+        return [dict(zip(group, ks), n=n) for ks, n in counts.items()]
 
     def vector_top_k(self, coll: str, field: str, vec, k: int,
                      eq: dict | None = None) -> list[tuple[str, float]]:
@@ -176,6 +189,8 @@ GSI = (("events", ("origin", "status", "seq")),
        ("entity_deltas", ("origin", "sid")),          # the gate: sentence -> its events
        ("entity_states", ("origin", "tier", "kind")),
        ("entity_states", ("eid", "tier")),            # merged reads across seats
+       ("events", ("origin", "stream", "status")),  # grouped counts (vitals)
+       ("entity_states", ("origin", "tier", "accr")),  # top-m by mass
        ("entity_deltas", ("eid", "origin", "seq")))
 CHUNK = 500
 
@@ -204,10 +219,34 @@ def scan_sql(bucket: str, scope: str, coll: str, eq: dict | None,
     if where:
         sql += " WHERE " + " AND ".join(where)
     if order:
-        sql += " ORDER BY " + ", ".join(f"t.`{f}`" for f in order)
+        parts = []
+        for f in order:
+            if isinstance(f, tuple):
+                parts.append(f"t.`{f[0]}` {f[1]}")
+            else:
+                parts.append(f"t.`{f}`")
+        sql += " ORDER BY " + ", ".join(parts)
     if limit is not None:
         sql += f" LIMIT {int(limit)}"
     return sql, params
+
+
+def count_sql(bucket: str, scope: str, coll: str, eq: dict | None = None,
+              group: tuple = ()) -> tuple[str, dict]:
+    """SQL++ for server-side counts over one collection (pure: tested
+    without a cluster): rows of `n` -- plus the group fields when
+    grouped -- served from the composite GSI, never a client scan."""
+    where, params = [], {}
+    for i, (f, want) in enumerate((eq or {}).items()):
+        p = f"p{i}"
+        where.append(f"t.`{f}` = ${p}")
+        params[p] = want
+    gsel = ", ".join(f"t.`{f}` AS `{f}`" for f in group)
+    gby = " GROUP BY " + ", ".join(f"t.`{f}`" for f in group) if group else ""
+    sql = f"SELECT {gsel + ', ' if gsel else ''}COUNT(*) AS `n` FROM `{bucket}`.`{scope}`.`{coll}` t"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    return sql + gby, params
 
 
 def knn_filter(eq: dict | None) -> dict | None:
@@ -362,6 +401,14 @@ class CouchbaseBackend:
         sql, params = scan_sql(self.bucket_name, self.scope_name, coll, eq, order, limit)
         for row in self._query(sql, params):
             yield row["k"], row["d"]
+
+    def count(self, coll: str, eq: dict | None = None, group: tuple = ()) -> list[dict]:
+        """Server-side counts (SQL++ COUNT(*) with an indexed GROUP BY):
+        no doc ever crosses to the client for a number."""
+        sql, params = count_sql(self.bucket_name, self.scope_name, coll, eq, group)
+        rows = self._query(sql, params)
+        return {"n": next(iter(rows))["n"]} if not group \
+            else [dict(r) for r in rows]
 
     def vector_top_k(self, coll: str, field: str, vec, k: int,
                      eq: dict | None = None) -> list[tuple[str, float]]:
