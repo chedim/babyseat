@@ -162,20 +162,6 @@ class TestRecurrence(unittest.TestCase):
 
 
 class TestFieldLane(unittest.TestCase):
-    def test_vsa_rides_exemplar_extra_and_wire(self):
-        """The wire window: extra['vsa'] survives _ex_to_wire ->
-        _rec_from_wire losslessly (the schema-tolerance covenant)."""
-        from membrane.field import Exemplar, _ex_to_wire, _rec_from_wire
-        lane = VSALane(VSACodebook(embedder=None, dim=D))
-        st = lane.encode("hello world")
-        ex = Exemplar(situation="s", action="a", outcome="pending",
-                      vec=[0.0], extra={"vsa": {"cb": "x", "s": pack_state(st)}})
-        rec = _ex_to_wire(ex)
-        back = _rec_from_wire(rec)
-        self.assertIn("vsa", back.extra)
-        np.testing.assert_array_equal(
-            unpack_state(back.extra["vsa"]["s"]), st)
-
     def test_empty_text_no_state(self):
         lane = VSALane(VSACodebook(embedder=None, dim=D))
         self.assertIsNone(lane.encode(""))
@@ -191,38 +177,23 @@ class TestFieldLane(unittest.TestCase):
 
 
 class TestDualLaneRecall(unittest.TestCase):
-    def _store_with_vsa(self):
-        from membrane.field import Exemplar, ExemplarStore
-        st = ExemplarStore()
-        lane = VSALane(VSACodebook(embedder=_FakeEmbedder(), dim=D))
-        return st, lane
-
     def test_vsa_top_k_finds_semantic_neighbor(self):
         """THE LANE PROPERTY: a query whose mxbai vec is far from a
-        stored cell but whose token state is near -- vsa_top_k surfaces
-        it by Hamming (the order-sensitive supplement)."""
-        from membrane.field import Exemplar, ExemplarStore
-        st = ExemplarStore()
+        stored row but whose token state is near -- hits() surfaces it
+        by Hamming (the order-sensitive supplement)."""
         lane = VSALane(VSACodebook(embedder=_FakeEmbedder(), dim=D))
-        ex = Exemplar(situation="dog chases cat", action="a",
-                      outcome="pending", vec=[1.0])
-        ex.extra["vsa"] = {"cb": lane.codebook.id,
-                           "s": pack_state(lane.encode("dog chases cat"))}
-        st.exemplars.append(ex)
-        hits = lane.hits(st, "the dog chases the cat", k=1)
+        rows = [("row-0", {"cb": lane.codebook.id,
+                           "s": pack_state(lane.encode("dog chases cat"))})]
+        hits = lane.hits(rows, "the dog chases the cat", k=1)
         self.assertEqual(len(hits), 1)
         near, sim = hits[0]
-        self.assertEqual(st.index_of(near), 0)
+        self.assertEqual(near, "row-0")
         self.assertGreater(sim, 0.68)
 
-    def test_store_vsa_top_k_skips_rows_without_state(self):
-        from membrane.field import Exemplar, ExemplarStore
-        st = ExemplarStore()
+    def test_rows_without_state_are_invisible(self):
         lane = VSALane(VSACodebook(embedder=None, dim=D))
-        st.exemplars.append(Exemplar(situation="no state row", action="a",
-                                     outcome="pending", vec=[1.0]))
-        self.assertEqual(st.vsa_top_k(lane, lane.encode("anything"), k=3),
-                         [])
+        self.assertEqual(lane.hits([("x", {"cb": lane.codebook.id})],
+                                   "anything", k=3), [])
 
 
 class TestSurprise(unittest.TestCase):
@@ -250,9 +221,9 @@ class TestSurprise(unittest.TestCase):
     def test_lab_guard(self):
         """The isolation guard: a lab field path never persists a
         codebook file (the same rule the shared substrate runs)."""
-        from membrane.field import _is_lab_field_path
+        from membrane.substrate import _is_lab_field_path
         self.assertTrue(_is_lab_field_path(
-            Path(tempfile.mkdtemp(prefix="dream-loop-x")) / "field.json"))
+            str(Path(tempfile.mkdtemp(prefix="dream-loop-x")) / "field.json")))
 
 
 class TestCaptureFeed(unittest.TestCase):

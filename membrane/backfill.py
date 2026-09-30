@@ -147,7 +147,7 @@ def main() -> None:
     from .efield import EntityField
     from .efstore import MemBackend, open_backend
     from .embed import OllamaEmbedder
-    from .field import _origin_tag
+    from .substrate import _origin_tag
     from .project_env import load_project_env
     load_project_env()
     be = MemBackend() if args.store == "mem" else open_backend(args.field)

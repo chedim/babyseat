@@ -83,7 +83,6 @@ _PRONOUN_HEADS = ("it", "we", "i", "they", "he", "she", "you", "this",
 # URL-encoded "<start_of_turn"; "u003c" prefix = the encoded "<")
 _CAPTURE_TOKEN_JUNK = re.compile(r"u003[cde][\w]*", re.I)
 
-
 def extract_entities(situation: str, action: str = "") -> dict:
     """Deterministic entity harvest from one cell's text. $0, no model.
 
@@ -114,7 +113,6 @@ def extract_entities(situation: str, action: str = "") -> dict:
             merged = f"{situation}\n{action or ''}"
             return _harvest(merged)
     return _harvest(situation)   # SITUATION ONLY: what the cell is ABOUT
-
 
 def _harvest(text: str) -> dict:
     out: dict[str, list[str]] = {}
@@ -182,7 +180,6 @@ def _harvest(text: str) -> dict:
     add("symbols", syms)
     return out
 
-
 def entities_of(ex) -> dict:
     """A cell's harvested entity tags ({} for legacy rows / misses)."""
     extra = getattr(ex, "extra", None)
@@ -192,62 +189,11 @@ def entities_of(ex) -> dict:
             return e
     return {}
 
-
-def iter_entities(ex) -> list[str]:
-    """'kind:value' keys for one exemplar (lowercase, the index key space)."""
-    return [f"{kind}:{v.lower()}"
-            for kind, values in entities_of(ex).items()
-            for v in (values or [])]
-
-
 def query_entities(text: str) -> list[str]:
     """Entity keys a QUERY mentions (same extractor, query side)."""
     return [f"{kind}:{v.lower()}"
             for kind, values in extract_entities(text).items()
             for v in values]
-
-
-def entity_index(exemplars) -> dict[str, list[int]]:
-    """Invert the field: 'kind:value' -> [SAFE cell indexes, oldest first].
-
-    Rebuilt on demand (the recall path embeds anyway; the scan is ~ms at
-    field scale) -- no persistent index to invalidate."""
-    inv: dict[str, list[int]] = {}
-    for i, ex in enumerate(exemplars):
-        if not getattr(ex, "safe", False):
-            continue
-        for k in iter_entities(ex):
-            inv.setdefault(k, []).append(i)
-    return inv
-
-
-def _action_overlap(a: str, b: str) -> float:
-    """Token-overlap between two action texts (0..1) -- the story-beat dedup
-    measure (the same _action_overlap semantics runtime.py uses)."""
-    sa = set((a or "").lower().split())
-    sb = set((b or "").lower().split())
-    if not sa or not sb:
-        return 0.0
-    return len(sa & sb) / len(sa | sb)
-
-
-ALIGN_FLOOR = 0.5
-STALE_STORY_S = 24 * 3600.0   # a story whose newest beat is older -> silence
-FRESH_HALF_LIFE = 6 * 3600.0  # a beat's freshness credit halves every 6h
-FRESH_WEIGHT = 0.25           # freshness weight vs alignment (sim 0..1)
-
-# ---- the zoom ladder (black-hole geometry for story beats) -----------------
-# ONE rule, scaled at every grain: windows are GEOMETRIC (each ZOOM_STEP x
-# wider than the last) with HALVING beat budgets (2, 1, 0, 0...) -- so the
-# beat DENSITY vanishes into the past (~1/h now, ~1/8h, then bare counts).
-# A window whose cell mass exceeds its budget COLLAPSES to an era count
-# (the black-hole guard: precision x span stays bounded -- you cannot have
-# a too-precise view of a too-large slice); a window with nothing starves
-# silently. The ladder iterates until it covers the entity's whole age.
-ZOOM_NOW_S = 2 * 3600.0       # the first (finest) window's span
-ZOOM_STEP = 4.0               # each next window is 4x wider
-ZOOM_BUDGETS = (3, 2)         # beat budgets per window (then 0: era counts)
-ZOOM_ERA_MIN = 3              # cells in a window below this render prose
 
 # ---- the scarcity covenant (the operator's ratio, revised: 6 tracks) ------
 # TRACKS are the EXPENSIVE lane (every one renders a paragraph in WHERE WE
@@ -258,185 +204,6 @@ ZOOM_ERA_MIN = 3              # cells in a window below this render prose
 # track (never the default now-track).
 MAX_TRACKS = 6
 DEFAULT_TRACK_KEY = "session:now"
-
-
-def _era(n: int, span_s: float) -> str:
-    """A collapsed window: the mass without the detail."""
-    h = max(1, round(span_s / 3600))
-    return f"{n} changes over ~{h}h"
-
-
-def _zoom_windows(oldest_age: float):
-    """(start_age, end_age, budget) youngest-first, geometric until the
-    entity's origin is covered. Budgets: ZOOM_BUDGETS then 0."""
-    lo, wi = 0.0, 0
-    while lo < max(oldest_age, ZOOM_NOW_S):
-        span = ZOOM_NOW_S * (ZOOM_STEP ** wi)
-        budget = ZOOM_BUDGETS[wi] if wi < len(ZOOM_BUDGETS) else 0
-        yield lo, lo + span, budget
-        lo += span
-        wi += 1
-
-
-def _arc(beats: list, borns: list, now: float, goal: str = "",
-         era_min: int = ZOOM_ERA_MIN) -> str:
-    """The story ARC, told the way stories are told: ORIGIN -> development
-    -> NOW -> aiming. ``beats``: (born, frag), junk-screened, deduped,
-    chronological. ``borns``: every junk-free cell birth (the window
-    masses). The zoom ladder's vanishing-density rule holds at every
-    grain -- NOW renders up to its beat budget, each older geometric
-    window renders less per hour, and mass beyond a window's budget
-    collapses to an era count (the black-hole guard: precision x span
-    stays bounded). The origin era earns ONE coarse beat (the classic
-    'began with' bookend); the arc always ENDS at the now.
-    ``era_min``: the collapse threshold (the now-track earns a higher
-    one -- its pool is pre-curated, so the detail lives at 'now')."""
-    age_of = sorted(now - b for b in borns if b > 0)
-    if not age_of:
-        return ""
-    oldest_age = age_of[-1]
-    wins = list(_zoom_windows(oldest_age))
-    chron: list[str] = []            # rendered oldest -> newest
-    rendered: set[float] = set()     # beat birth stamps already in the arc
-    # the window loop covers wi >= 1 only: the NOW window (wi == 0) is the
-    # story's ANCHOR, rendered last by the block below (rendering it in the
-    # loop too duplicated every fresh beat)
-    for wi in range(len(wins) - 1, 0, -1):
-        lo, hi, budget = wins[wi]
-        in_win = [a for a in age_of if lo <= a < hi]
-        if not in_win:
-            continue                 # starved: silence, next window
-        n = len(in_win)
-        win_beats = [b for b in beats if lo <= now - b[0] < hi]
-        is_origin = (wi == len(wins) - 1)
-        if is_origin:
-            # the bookend earns its coarse beats -- the origin era may
-            # render up to 2 of its oldest clean fragments (a paragraph
-            # deserves a real opening, not a single clause)
-            piece = f"It began {_ago(now - oldest_age, now) or 'long ago'}"
-            openers = win_beats[:2] if win_beats else []
-            if openers:
-                frags = [f[0].lower() + f[1:] for _, f in openers]
-                piece += " with " + "; ".join(frags)
-                rendered.update(b[0] for b in openers)
-            if n > 2:
-                piece += f" ({n} cells since)"
-            chron.append(piece + ".")
-        elif n <= ZOOM_ERA_MIN and budget > 0 and win_beats:
-            frags = [f[0].lower() + f[1:] for _, f in win_beats[-budget:]]
-            chron.append("Then " + "; ".join(frags) + ".")
-            rendered.update(b[0] for b in win_beats[-budget:])
-        else:
-            chron.append(f"Then {_era(n, hi - lo)}.")
-    # the NOW anchor last: the point the whole story lands on (and for a
-    # young entity — one window total — it is the WHOLE story; the early
-    # bail below must not fire before this block runs)
-    lo, hi, budget = wins[0]
-    in_now = [a for a in age_of if a < hi]
-    now_beats = [b for b in beats if now - b[0] < hi]
-    if in_now and len(in_now) <= era_min and now_beats:
-        frags = [f[0].lower() + f[1:] for _, f in now_beats[-budget:]]
-        chron.append("Right now: " + "; ".join(frags) + ".")
-    elif in_now:
-        chron.append(f"Right now it is active — {_era(len(in_now), hi)}.")
-    elif [b for b in beats if b[0] not in rendered]:
-        # the now-window starved but the entity LIVES (newest beat within
-        # the stale gate): anchor on the last known state NOT already in
-        # the arc (a duplicate anchor reads as stutter). NOTE: beats carry
-        # ABSOLUTE birth stamps; _ago wants the timestamp, not the age.
-        nb_born, nb_frag = max((b for b in beats if b[0] not in rendered),
-                               key=lambda b: b[0], default=(0, ""))
-        if nb_frag:
-            chron.append(f"Last active {_ago(nb_born, now) or 'recently'}: "
-                         f"{nb_frag[0].lower() + nb_frag[1:]}.")
-    if not chron:
-        return ""
-    if goal:
-        chron.append(f"Aiming for: {goal}.")
-    return " ".join(chron)
-
-
-_ENTITY_MGMT_PREFIXES = (
-    "tool membrane_membrane_watch_entity for: ",
-    "tool membrane_membrane_unwatch_entity for: ",
-    "tool membrane_membrane_entity_add for: ",
-    "tool membrane_membrane_entity_edit for: ",
-    "tool membrane_membrane_entity_remove for: ",
-    "tool membrane_entity_add for: ",
-    "tool membrane_entity_edit for: ",
-    "tool membrane_entity_remove for: ",
-)
-
-
-def _strip_tool_prefix(s: str) -> str:
-    """Tool-capture prefixes off: the REST is the operator's words (the
-    narrative fragment). Includes the entity-management captures -- their
-    remainder is the planting request, a real story fragment."""
-    for pre in ("tool edit for: ", "tool bash for: ", "tool call for: ",
-                "reasoning: ", "plan: ", "compact note: ",
-                *_ENTITY_MGMT_PREFIXES):
-        if s.startswith(pre):
-            return s[len(pre):].strip()
-    return s
-
-
-def _sit_text_of(exemplars, i):
-    s = " ".join(str(exemplars[i].situation).split())
-    for pre in ("tool edit for: ", "tool bash for: ", "tool call for: ",
-                "tool membrane_membrane_state for: ",
-                "tool membrane_membrane_query for: "):
-        if s.startswith(pre):
-            return s[len(pre):].strip()
-    return s
-
-
-def _frag_of(exemplars, i):
-    e = exemplars[i]
-    sit = _strip_tool_prefix(" ".join(str(e.situation).split()))
-    if " args: {" in sit:
-        sit = sit.split(" args:", 1)[0]
-    act = " ".join(str(e.action or "").split())
-    return sit, act
-
-
-def _eph_born_of(exemplars, i):
-    try:
-        return float((getattr(exemplars[i], "extra", None) or {})
-                     .get("eph_born", 0) or 0)
-    except (TypeError, ValueError):
-        return 0.0
-
-
-_MACHINERY_RES = (
-    re.compile(r"\[\s*\d{1,3}%\]"),                # pytest progress bars
-    re.compile(r"\d+ passed in [\d.]+s"),          # raw pytest summaries
-    re.compile(r"\d+\.\d\s+\d+\.\d\s+\d{6,}"),     # ps CPU% MEM% VSZ columns
-    re.compile(r'"(?:route|verdict|sim|field_size)":'),  # proxy JSON tables
-    re.compile(r"\[opencode\] |\[membrane\] |\[rag\] "), # proxy log lines
-    re.compile(r"<system-reminder>|</system-reminder>", re.I),  # harness noise
-    re.compile(r'"(?:\$schema|autoupdate|npm|model|provider)"\s*:'),  # config JSON
-    re.compile(r"COMMAND\s+PID\s+USER\s+FD\s+TYPE"),   # lsof tables
-    re.compile(r"PID\s+STARTED\s+COMMAND"),            # ps lstart header
-    # ps lines: time followed by a path -- 12h glued (1:38PM), 24h (08:52),
-    # or lstart ("Mon Aug 31 02:24:06 2026"); prose "at 5:30 we met" has no path
-    re.compile(r"\b\d{1,2}:\d{2}(?:[AP]M)?\s+[\w./\\-]*[\w-]+/[\w./-]+"),
-    re.compile(r"\b\w{3}\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4}\s+[\w./-]*/"),
-    re.compile(r"^#!/(usr/)?bin/(env )?\w+", re.M),   # shell script source
-    re.compile(r"[\w-]+-[\w-]+-[\w-]+-[\w-]+-[0-9a-f]{8}\.env\b"),  # tmp env files
-    # a model CATALOG (3+ 'name:tag' rungs in one line) is an inventory dump,
-    # not a story: prose mentions one or two models, never eight
-    re.compile(r"(?:[\w.-]+:[\w.-]+\s+){3,}"),
-    # a tool-call args dump embedded mid-fragment: '-> edit({' / '— write({'
-    re.compile(r"[-—>]+\s*\w+\(\s*[\{\"']"),
-)
-
-
-def _machinery_junk(s: str) -> bool:
-    """Raw tool/proxy output (pytest bars, ps listings, route tables, log
-    lines) -- never a story beat. The narrative form ('all 326 tests pass'
-    inside a prose sentence) survives; the raw dump dies."""
-    return any(rx.search(s) for rx in _MACHINERY_RES)
-
 
 def _narrative(s: str, cap: int) -> str:
     """A cell's text -> clean story fragment: tool machinery stripped,
@@ -485,56 +252,6 @@ def _narrative(s: str, cap: int) -> str:
         if p > cap * 0.5:
             return cut[:p + 1].strip()
     return cut.rstrip(",;:") + "…"
-
-
-def _tool_artifact(act: str) -> bool:
-    """A tool dump / diagnostics blob -> never a story action. "Edit
-    applied successfully" is a real beat (the fix landed); what makes a
-    beat junk is being PURE machinery -- raw tool args, a diagnostics wall
-    with no narrative, or a banner echo."""
-    a = " ".join(act.split())
-    if not a:
-        return True
-    if a.startswith(("write(", "bash(", "grep(", "read(", "edit(",
-                     "glob(", "task(", "todowrite(", "question(",
-                     "membrane_", "{'", '{"',
-                     "Field recall (membrane", "[membrane] route=",
-                     "[membrane] turn:")):
-        return True
-    # trim a leading Edit-applied stamp: the REST decides
-    core = a
-    for lead in ("Edit applied successfully.", "Edit applied successfully",
-                 "Edit applied",
-                 "Entity track planted:",          # tool RESULT stamps
-                 "Entity track planted"):
-        if a.startswith(lead):
-            a = a[len(lead):].strip()
-            break
-    if not a:
-        return True                     # nothing but the stamp
-    if a.startswith(("LSP errors", "LSP")):
-        return True                     # diagnostics wall, no story
-    return False
-
-
-def _ago(born: float, now: float) -> str:
-    """A birth stamp -> a human time reference for story beats."""
-    if born <= 0 or born > now:
-        return ""
-    dt = max(0, now - born)
-    if dt > 365 * 86400:            # absurd age (epoch-1970 test data)
-        return ""
-    dt = max(0, now - born)
-    if dt < 90:
-        return "just now"
-    if dt < 3600:
-        return f"{int(dt // 60)}m ago"
-    if dt < 48 * 3600:
-        return f"{int(dt // 3600)}h ago"
-    return f"{int(dt // 86400)}d ago"
-
-
-# ---- the cortex-compatible entity doc ---------------------------------------
 
 @dataclass
 class QuantumEntity:
@@ -959,29 +676,24 @@ class QuantumEntity:
             out.append([t, [float(x) for x in nxt]])
         return out if out else None
 
-
 def unit_or_none(vec):
     import numpy as _np
     v = _np.asarray(vec, dtype=float)
     n = _np.linalg.norm(v)
     return v / n if n > 1e-12 else None
 
-
 def entity_id(kind: str, value: str) -> str:
     """Stable id for an entity mention: kind-namespaced, slug-cased."""
     slug = value.strip().lower().replace(" ", "-")[:80]
     return f"{MEMBRANE_NS}{kind}:{slug}"
-
 
 # deterministic extractor kind -> shared class (the write-through mapping)
 _KIND_CLASS = {"files": CLASS_COMPONENT, "symbols": CLASS_COMPONENT,
                "models": CLASS_MODEL, "urls": CLASS_ENDPOINT,
                "shell": CLASS_TOOL, "ha": CLASS_SENSOR}
 
-
 def kind_class(kind: str) -> str:
     return _KIND_CLASS.get(kind, CLASS_CONFIG)
-
 
 # ---- the entity store (write-through to the shared collection + local JSON) -
 
@@ -1205,7 +917,6 @@ class MultiParentOps:
             # centroid, 2 = fully opposite); normalized to [0, 1]
             out[pp] = round((1.0 - float(cv @ pv)) / 2.0, 4)
         return out
-
 
 class TimelineOps:
     """The alternative-timeline organ (the dreamer's substrate): dreamed
@@ -1472,7 +1183,6 @@ class TimelineOps:
                     break
         return out
 
-
 class EntityStore(MultiParentOps, TimelineOps):
     """Derived entities, three homes, one contract:
 
@@ -1567,16 +1277,6 @@ class EntityStore(MultiParentOps, TimelineOps):
         self._save_tracks()
         return {"ok": True, "spec": spec, "junk_sim": val,
                 "tracks": len(targets)}
-
-    def junk_beat_ok(self, key: str, vec, embedder=None) -> bool:
-        """The per-track junk gate for one beat: the track's own cut (or
-        the default) against the anchor screen. Tracks with no cut and no
-        anchors degrade to always-True (the regexes still run)."""
-        cut = (self.tracks.get(key) or {}).get("junk_sim")
-        cut = JUNK_CUT_DEFAULT if cut is None else cut
-        if not self.junk_screen._vecs and embedder is None:
-            return True
-        return self.junk_screen.sim_of(vec, embedder) < cut
 
     # ---- persistence --------------------------------------------------------
     def _load(self) -> None:
@@ -2182,22 +1882,23 @@ class EntityStore(MultiParentOps, TimelineOps):
         op, n = m.group(1) or "enter", int(m.group(2))
         return {"enter": n} if op == "enter" else {"exit": n}
 
-    def evaluate_tracks(self, exemplars, count_fn=None) -> list[dict]:
+    def evaluate_tracks(self, count_fn=None) -> list[dict]:
         """The per-turn state machine step: for every bounded track, compute
         the live safe-cell count and transition the inside/outside state.
         Returns the ALERTS fired this turn (one per transition; re-entry
-        re-arms by construction). ``count_fn(key)`` replaces the cell count
-        (the entity field passes its mention count). Count-only tracks never alert. Persistence
-        only when something actually changed."""
+        re-arms by construction). ``count_fn(key)`` = the entity's live
+        mention count (the entity field passes its own; None counts 0 --
+        which un-arms every bounded track until a count source is wired).
+        Count-only tracks never alert. Persistence only when something
+        actually changed."""
         alerts: list[dict] = []
         bounded = {k: t for k, t in self.tracks.items()
                    if t.get("enter") is not None or t.get("exit") is not None}
         if not bounded:
             return alerts
-        inv = entity_index(exemplars) if count_fn is None else {}
         changed = False
         for key, t in bounded.items():
-            n = count_fn(key) if count_fn is not None else len(inv.get(key) or [])
+            n = count_fn(key) if count_fn is not None else 0
             enter, exit_ = t.get("enter"), t.get("exit")
             inside: bool
             reason = ""
@@ -2291,390 +1992,6 @@ class EntityStore(MultiParentOps, TimelineOps):
         except Exception:
             pass
 
-    def _axis_of_motion(self, ent, exclude_key: str = DEFAULT_TRACK_KEY,
-                        min_cos: float = 0.15) -> dict:
-        """The movement vector decoded through the tracked frame (the
-        operator's approaching/receding design): ring newest − oldest,
-        normalized, projected onto the directions toward each OTHER
-        positioned track. Returns {'toward': [(key, cos)...],
-        'away': [(key, cos)...]} — strongest first, below-threshold
-        pairs dropped. The session:now pulse and every entity's drift
-        decode through the same lens; the tracked set is the frame,
-        the loose centroid set is the fallback, nothing pinned."""
-        import numpy as _np
-        hist = getattr(ent, "position_history", []) or []
-        if len(hist) < 2 or not getattr(ent, "position", None):
-            return {"toward": [], "away": []}
-        newest = _np.asarray(hist[-1][1], dtype=float)
-        oldest = _np.asarray(hist[0][1], dtype=float)
-        nn, on = _np.linalg.norm(newest), _np.linalg.norm(oldest)
-        if nn < 1e-12 or on < 1e-12:
-            return {"toward": [], "away": []}
-        move = newest - oldest
-        mn = _np.linalg.norm(move)
-        if mn < 1e-12:
-            return {"toward": [], "away": []}
-        mv = move / mn
-        toward, away = [], []
-        now_pos = _np.asarray(ent.position, dtype=float)
-        npn = _np.linalg.norm(now_pos)
-        if npn < 1e-12:
-            return {"toward": [], "away": []}
-        now_pos = now_pos / npn
-        for key, t in self.tracks.items():
-            if key == exclude_key:
-                continue
-            o_ent = self.docs.get(f"{MEMBRANE_NS}{key}")
-            if o_ent is None or not getattr(o_ent, "position", None):
-                continue
-            op = _np.asarray(o_ent.position, dtype=float)
-            opn = _np.linalg.norm(op)
-            if opn < 1e-12:
-                continue
-            op = op / opn
-            # the direction from the tracker toward the landmark
-            d_land = op - now_pos
-            dn = _np.linalg.norm(d_land)
-            if dn < 1e-12:
-                continue
-            cos = float(mv @ (d_land / dn))
-            if cos >= min_cos:
-                toward.append((cos, key))
-            elif cos <= -min_cos:
-                away.append((-cos, key))
-        toward.sort(reverse=True)
-        away.sort(reverse=True)
-        return {"toward": [(k, round(c, 2)) for c, k in toward[:2]],
-                "away": [(k, round(c, 2)) for c, k in away[:2]]}
-
-    def _relations_report(self, exemplars, now: float) -> tuple[str, str] | None:
-        """THE RELATIONS LINE (the operator's exploratory question: 'pure
-        geometry + speeds + acceleration?') -- with SELF-EXPLAINING
-        numbers: every distance is paired with its previous value
-        ('widened 0.31->0.38' -- the DELTA is the information, a bare
-        '0.31' is a scale the reader must memorize), every motion is
-        plain-language ('sped up' / 'slowed down' / 'steady'), and the
-        line renders only when something actually changed (a distance
-        moved > 0.02 -- stable geometry is not news). The model reads
-        RELATIONS-as-changes, not coordinates."""
-        import numpy as _np
-        positioned = []
-        for key in self.tracks:
-            if key == DEFAULT_TRACK_KEY:
-                continue
-            ent = self.docs.get(f"{MEMBRANE_NS}{key}")
-            if ent is None or not getattr(ent, "position", None):
-                continue
-            positioned.append((key, ent))
-        if len(positioned) < 2:
-            return None
-        t = self.tracks.get(DEFAULT_TRACK_KEY) or {}
-        prev_dist = (t.get("relations") or {}).get("dist") or {}
-        parts: list[str] = []
-        new_dist: dict[str, float] = {}
-        changed = False
-        for i in range(len(positioned)):
-            for j in range(i + 1, len(positioned)):
-                ka, ea = positioned[i]
-                kb, eb = positioned[j]
-                pa = _np.asarray(ea.position, dtype=float)
-                pb = _np.asarray(eb.position, dtype=float)
-                pan, pbn = _np.linalg.norm(pa), _np.linalg.norm(pb)
-                if pan < 1e-12 or pbn < 1e-12:
-                    continue
-                dist = 1.0 - float((pa / pan) @ (pb / pbn))
-                pair_key = f"{ka}|{kb}"
-                new_dist[pair_key] = dist
-                prev = prev_dist.get(pair_key)
-                la, lb = (self.default_label(ka),
-                          self.default_label(kb))
-                if prev is None:
-                    # first sighting of this pair: the BASELINE (not
-                    # news -- the next pass has something to compare)
-                    continue
-                delta = dist - prev
-                if abs(delta) < 0.02:
-                    continue            # stable: not news
-                changed = True
-                verb = "widened" if delta > 0 else "narrowed"
-                parts.append(f"{la} and {lb} {verb} "
-                             f"{prev:.2f}->{dist:.2f}")
-        # the speeds: only when a pace band FLIPPED (the event, not the
-        # per-turn number)
-        for key, ent in positioned:
-            vel = ent.ring_velocity(now)
-            h = getattr(ent, "position_history", []) or []
-            if len(h) < 3:
-                continue
-            a0 = _np.asarray(h[-3][1], dtype=float)
-            a1 = _np.asarray(h[-2][1], dtype=float)
-            dtn = (h[-2][0] - h[-3][0]) / 3600.0
-            if dtn <= 1e-6:
-                continue
-            a0n, a1n = _np.linalg.norm(a0), _np.linalg.norm(a1)
-            if a0n < 1e-12 or a1n < 1e-12:
-                continue
-            prev_vel = (1.0 - float(a0 / a0n @ (a1 / a1n))) / dtn
-            band = lambda v: (0 if v < 0.005 else
-                              1 if v < 0.05 else
-                              2 if v < 0.15 else 3)
-            if band(vel) != band(prev_vel):
-                verb = ("sped up" if vel > prev_vel else "slowed down")
-                label = self.default_label(key)
-                parts.append(f"{label} {verb}")
-                changed = True
-        if not parts or not changed:
-            return None               # stable geometry is not news
-        t["relations"] = {"sig": "|".join(parts)[:120], "ts": now,
-                          "dist": new_dist}
-        return (DEFAULT_TRACK_KEY,
-                "relations: " + "; ".join(parts) + ".")
-
-    def _motion_target(self, ent, exemplars, exclude_key: str,
-                       floor: float = 0.3) -> tuple[str, float] | None:
-        """THE DRIFT DECODE (the sensor panel's target reading): the
-        movement vector (ring newest - oldest, unit-normalized) decoded
-        through the field -- the entities whose centroids sit nearest
-        the direction of travel. The max-cos decode below the floor is
-        the per-track null signal, informative by design: 'drifting
-        into unclaimed space'. Returns (key, cos) or None."""
-        import numpy as _np
-        hist = getattr(ent, "position_history", []) or []
-        if len(hist) < 2:
-            return None
-        newest = _np.asarray(hist[-1][1], dtype=float)
-        oldest = _np.asarray(hist[0][1], dtype=float)
-        nn, on = _np.linalg.norm(newest), _np.linalg.norm(oldest)
-        if nn < 1e-12 or on < 1e-12:
-            return None
-        move = (newest / nn) - (oldest / on)
-        mn = _np.linalg.norm(move)
-        if mn < 1e-12:
-            return None
-        move = move / mn
-        return self._decode_direction(move, exemplars, exclude_key, floor)
-
-    def _null_direction(self, ent, exemplars, exclude_key: str,
-                        floor: float = 0.25) -> tuple[str, float] | None:
-        """THE VOID DECODE (the operator's 'what do the null-fields point
-        toward'): the complement of the local mass -- the direction away
-        from every positioned neighbor's centroid -- decoded at a LOW
-        floor (0.25: the frontier is by definition weakly related; the
-        standard 0.4 floor would erase it). Requires >= 3 positioned
-        neighbors (a void is defined AGAINST structure; 1-2 neighbors is
-        just the receding clause). Returns (key, cos) or None (the
-        'void points nowhere known' signal is the caller's)."""
-        import numpy as _np
-        positioned = []
-        for k in self.tracks:
-            if k == exclude_key or k == DEFAULT_TRACK_KEY:
-                continue
-            o = self._entity_for_track(k)
-            if o is not None and getattr(o, "position", None):
-                positioned.append((k, o))
-        # non-tracked positioned entities count too (the index's keys
-        # with cells): the neighborhood is the field, not just the frame
-        if len(positioned) < 3:
-            return None
-        center = _np.asarray(ent.position, dtype=float)
-        cn = _np.linalg.norm(center)
-        if cn < 1e-12:
-            return None
-        center = center / cn
-        mass = _np.zeros_like(center)
-        used = 0
-        for k, o in positioned:
-            op = _np.asarray(o.position, dtype=float)
-            opn = _np.linalg.norm(op)
-            if opn < 1e-12:
-                continue
-            mass += op / opn
-            used += 1
-        if used < 3:
-            return None
-        mn = _np.linalg.norm(mass)
-        if mn < 1e-12:
-            return None
-        void_vec = center - (mass / mn) * 0.8   # mostly-away, some keep
-        vn = _np.linalg.norm(void_vec)
-        if vn < 1e-12:
-            return None
-        void_vec = void_vec / vn
-        return self._decode_direction(void_vec, exemplars, exclude_key,
-                                      floor)
-
-    def _decode_direction(self, vec, exemplars, exclude_key: str,
-                          floor: float) -> tuple[str, float] | None:
-        """The shared decode: a unit direction vector -> the nearest
-        entity centroid (reuses _nearest_entities' junk screens, label
-        dedup, self-exclusion). None below the floor."""
-        import numpy as _np
-        v = _np.asarray(vec, dtype=float)
-        vn = _np.linalg.norm(v)
-        if vn < 1e-12:
-            return None
-        v = v / vn
-        inv = entity_index(exemplars)
-        best: tuple[float, str] | None = None
-        for other_key, idxs in inv.items():
-            if other_key == exclude_key:
-                continue
-            ovecs = [exemplars[i].vec for i in idxs
-                     if getattr(exemplars[i], "vec", None)]
-            if not ovecs:
-                continue
-            o = _np.asarray(ovecs, dtype=float).mean(axis=0)
-            on = _np.linalg.norm(o)
-            if on < 1e-12:
-                continue
-            cos = float(v @ (o / on))
-            if best is None or cos > best[0]:
-                best = (cos, other_key)
-        if best is None or best[0] < floor:
-            return None
-        return (best[1], round(best[0], 2))
-
-    def _now_report(self, exemplars, now: float) -> tuple[str, str] | None:
-        """THE NOW-TRACK'S SENSOR PANEL (the same readings as the entity
-        panel, for the session's momentum): subject (the position
-        decode), the TARGET (what the momentum drift points toward),
-        the FRAME (approaching/receding the tracked set), pace. The
-        session's momentum made legible -- the highest-value reads in
-        the panel."""
-        ent = self.docs.get(f"{MEMBRANE_NS}session:now")
-        if ent is None or not getattr(ent, "position", None):
-            return None
-        subj = self._nearest_entities(ent.position, exemplars,
-                                     exclude=DEFAULT_TRACK_KEY)
-        vel = ent.ring_velocity(now)
-        direction = ent.ring_direction()
-        parts: list[str] = []
-        if subj:
-            names = ", ".join(f"{k} ({c:.2f})" for k, c in subj)
-            parts.append(f"The session's present is around: {names}")
-        # THE TARGET: the momentum drift decoded through the field
-        target = self._motion_target(ent, exemplars,
-                                     exclude_key=DEFAULT_TRACK_KEY)
-        if target:
-            parts.append(f"moving toward {target[0]} ({target[1]:.2f})")
-        # THE AXIS: the momentum pulse decoded through the tracked frame
-        ax = self._axis_of_motion(ent, exclude_key=DEFAULT_TRACK_KEY)
-        if ax["toward"]:
-            t_names = ", ".join(f"{k} ({c:.2f})"
-                                for k, c in ax["toward"])
-            parts.append(f"moving toward {t_names}")
-        elif ax["away"]:
-            a_names = ", ".join(f"{k} ({c:.2f})"
-                                for k, c in ax["away"])
-            parts.append(f"receding from {a_names}")
-        if direction == "drifting":
-            pace = ("fast" if vel >= 0.15
-                    else "slowly" if vel < 0.05 else "steadily")
-            parts.append(f"{pace} ({vel:.2f}/h)")
-        elif vel > 0.005:
-            parts.append("holding steady")
-        if not parts:
-            return None
-        # NO silence-on-unchanged here: WHERE WE ARE is rebuilt fresh
-        # every turn -- the model's context NEEDS the subject each turn
-        # (constant tracking is the now-track's whole job). The old sig
-        # gate made the story render once and then fall back to 'no
-        # cells yet' on every later turn -- the rendered-once bug. The
-        # sig stays only as observability.
-        sig = "|".join(parts)[:80]
-        t = self.tracks.get(DEFAULT_TRACK_KEY) or {}
-        t["drift"] = {"sig": sig, "ts": now}
-        self._save_tracks()
-        return (DEFAULT_TRACK_KEY,
-                f"{DEFAULT_TRACK_KEY}: {parts[0]}"
-                + (f", {parts[1]}." if len(parts) > 1 else ".")
-                + (" Right now the work is moving between these."
-                   if direction == "drifting" else ""))
-
-    def _nearest_entities(self, position, exemplars,
-                          top: int = 3, exclude: str = "") -> list[tuple[str, float]]:
-        """The entities whose cell-centroids sit nearest a position
-        vector -- 'what is this session about right now' from the
-        now-tracker's own geometry. $0: one pass over the inverted
-        index's centroids. ``exclude``: a track key never rendered as
-        its own subject (the self-match is tautology).
-        THE TOPIC RANKING (the 'subject reads tools, not topics' fix):
-        shell verbs and model names tag aggressively and dominate recent
-        mass, but the session's SUBJECT lives in files/symbols/topics.
-        Kind-weighted ranking: files/symbols 1.0, everything else 0.75
-        of its cosine -- a shell verb must beat a file by 25% cosine to
-        lead the subject line."""
-        import numpy as _np
-        if not position:
-            return []
-        inv = entity_index(exemplars)
-        p = _np.asarray(position, dtype=float)
-        pn = _np.linalg.norm(p)
-        if pn < 1e-12:
-            return []
-        p = p / pn
-        scored: list[tuple[float, str]] = []
-        for other_key, idxs in inv.items():
-            if other_key == DEFAULT_TRACK_KEY:
-                continue
-            # THE JUNK-SYMBOL SCREEN (the ex_idx/tslog.info/nv_glvys
-            # exhibit): log-path fragments, temp-dir slugs, pure hashes
-            # and field-dump keys never lead the subject
-            if any(rx.search(other_key) for rx in _SUBJECT_JUNK_RES):
-                continue
-            ovecs = [exemplars[i].vec for i in idxs
-                     if getattr(exemplars[i], "vec", None)]
-            if not ovecs:
-                continue
-            o = _np.asarray(ovecs, dtype=float).mean(axis=0)
-            on = _np.linalg.norm(o)
-            if on < 1e-12:
-                continue
-            sim = float(p @ (o / on))
-            kind = other_key.split(":", 1)[0]
-            sim *= _SUBJECT_KIND_WEIGHT.get(kind, 0.75)
-            scored.append((sim, other_key))
-        scored.sort(reverse=True)
-        # THE FILE GRAIN PREFERENCE (peer-reported from rosetta-check: the
-        # subject grain drifted to symbols after an edit -- the package
-        # exhibit AND the 'symbols:com.couchbase.rosetta.check (0.94),
-        # files:field.py (0.94)' co-lead): when a files:* candidate sits
-        # within _FILE_GRAIN_MARGIN of the top sim, the symbol-grain
-        # candidates cede the lead -- the session's subject lives in the
-        # EDITED FILE, a symbol co-leading at the same cosine is grain
-        # mush. Genuine symbols still lead when no file is near (the
-        # 'symbols:load_couchbase' exhibit stays).
-        top_sim = scored[0][0] if scored else 0.0
-        best_file = next((s for s, k in scored
-                          if k.startswith("files:")), 0.0)
-        if best_file >= top_sim - _FILE_GRAIN_MARGIN:
-            scored = [(s, k) for s, k in scored
-                      if not k.startswith("symbols:")
-                      or s >= best_file + _FILE_GRAIN_MARGIN]
-        # THE KEY DEDUP (the 'opencode.py (0.95), opencode.py (0.95)'
-        # exhibit): multiple entity docs can decode to the same label --
-        # one rendering per distinct key. THE SELF-EXCLUSION: a track's
-        # own subject match (its position vs its own cells' centroid,
-        # cos ~0.95) is tautology, not information.
-        out: list[tuple[str, float]] = []
-        seen_keys: set[str] = set()
-        seen_labels: set[str] = set()
-        for s, k in scored:
-            # THE KEY + LABEL DEDUP (the 'run.sh twice' exhibit): the key
-            # dedup catches one eid twice; the LABEL dedup catches
-            # different keys decoding to the same label ('files:run.sh'
-            # vs 'shell:run.sh' both render 'run.sh')
-            label = self.default_label(k).lower()
-            if k in seen_keys or label in seen_labels \
-                    or (exclude and k == exclude):
-                continue
-            seen_keys.add(k)
-            seen_labels.add(label)
-            out.append((k, round(s, 2)))
-            if len(out) >= top:
-                break
-        return [x for x in out if x[1] >= 0.4]
-
     def _announce(self, kind: str, ent: QuantumEntity,
                   extra: str = "") -> None:
         """Queue one entity event for the banner (bounded, in-memory).
@@ -2705,27 +2022,26 @@ class EntityStore(MultiParentOps, TimelineOps):
         del self.announcements[:max_per_pass]
         return out
 
+    def _poorest_track(self, incoming_key: str | None = None) -> str | None:
+        """The eviction candidate: the OLDEST PLANTED non-default track.
+        (The exemplar-count pool is gone with the exemplar field; the
+        age-based default is the story-poorest proxy that costs nothing.)"""
+        return min((k for k in self.tracks
+                    if k != DEFAULT_TRACK_KEY and k != incoming_key),
+                   key=lambda k: self.tracks[k].get("planted_ts", 0.0),
+                   default=None)
+
     def _enforce_cap(self) -> list[str]:
-        """THE CAP, enforced wherever the roster stands: story-poorest
-        (fewest tagged cells via _exemplars_hint, tie: oldest planted)
-        evicted down to MAX_TRACKS; the default now-track immune. Called
-        at boot (after the hint wires) and at plant time. Returns the
+        """THE CAP, enforced wherever the roster stands: the
+        oldest-planted track evicted down to MAX_TRACKS; the default
+        now-track immune. Called at boot and at plant time. Returns the
         evicted keys."""
         evicted: list[str] = []
         over = len(self.tracks) - MAX_TRACKS
         if over <= 0:
             return evicted
-        est_idx = entity_index(getattr(self, "_exemplars_hint", []) or [])
-
-        def _pool(k):
-            return (len(est_idx.get(k) or []),
-                    -self.tracks[k].get("planted_ts", 0.0))
-
         for _ in range(over):
-            poorest = min((k for k in self.tracks
-                           if k != DEFAULT_TRACK_KEY),
-                          key=lambda k: _pool(k),
-                          default=None)
+            poorest = self._poorest_track()
             if poorest is None:
                 break
             del self.tracks[poorest]
@@ -2738,28 +2054,16 @@ class EntityStore(MultiParentOps, TimelineOps):
         """Plant-time variant: make room for `incoming_key` BEFORE it
         lands (the incoming track must not be an eviction candidate --
         it arrives with zero cells and would always be the poorest)."""
-        over = len(self.tracks) - MAX_TRACKS + 1
         evicted: list[str] = []
+        over = len(self.tracks) - MAX_TRACKS + 1
         if over <= 0:
             return evicted
-        est_idx = entity_index(getattr(self, "_exemplars_hint", []) or [])
-
-        def _pool(k):
-            return (len(est_idx.get(k) or []),
-                    -self.tracks[k].get("planted_ts", 0.0))
-
         for _ in range(over):
-            poorest = min((k for k in self.tracks
-                           if k != DEFAULT_TRACK_KEY
-                           and k != incoming_key),
-                          key=lambda k: _pool(k),
-                          default=None)
+            poorest = self._poorest_track(incoming_key=incoming_key)
             if poorest is None:
                 break
             del self.tracks[poorest]
             evicted.append(poorest)
-        if evicted:
-            self._save_tracks()
         return evicted
 
     def ensure_track_entity(self, key: str) -> QuantumEntity:
@@ -2802,245 +2106,12 @@ class EntityStore(MultiParentOps, TimelineOps):
                 return q
         return None
 
-    def track_report(self, exemplars, query_vec=None,
-                     session_since: float | None = None,
-                     goal: str = "", embedder=None) -> list[tuple[str, str]] | None:
-        """THE GEOMETRY-FIRST RENDER (the operator's side question -- 'why
-        render cells, not entities/entity vectors or deltas?' -- was the
-        design flaw): the ENTITY already IS the aggregation. Its position
-        holds the meaning, its ring holds the deltas. Per track:
-          - SUBJECT: position -> nearest entity centroids (what this
-            entity is about / sits near NOW)
-          - MOTION: ring velocity (drifting/holding) + the DELTA (oldest
-            ring point vs now: 'moved from near A to near B')
-          - CELLS only backfill for young entities (no ring or ring too
-            short to decode): the newest junk-free fragment + count/age.
-        Kept: the junk screens, the echo guard, the structured return."""
-        if not self.tracks:
-            return None
-        import time as _t
-        now = _t.time()
-        inv = entity_index(exemplars)
-        out: list[tuple[str, str]] = []
-        claimed_cells: set[int] = set()
-        for key, t in self.tracks.items():
-            if key == DEFAULT_TRACK_KEY:
-                now_line = self._now_report(exemplars, now)
-                if now_line:
-                    out.append(now_line)
-                # THE RELATIONS LINE (the frame-level geometry: distances
-                # + speeds as CHANGES, self-explaining)
-                rel = self._relations_report(exemplars, now)
-                if rel:
-                    out.append(rel)
-                continue
-            ent = self._entity_for_track(key)
-            # THE SCRIPT HOOK, FIRST AND UNCONDITIONAL (programmable
-            # entities): a nudge script's stored fragment REPLACES the
-            # track's line entirely -- geometry or not (a script on a
-            # young entity must still render; the geometry branch only
-            # applies when no script claims the line)
-            if ent is not None:
-                script_render = ((ent.properties or {}).get("script_render")
-                                 or "")
-                if script_render:
-                    out.append((key, f"{key}: {script_render}"))
-                    continue
-            # THE GEOMETRY GATE, corrected (the 'still recites cells'
-            # proof-failure): ONE point is geometry -- the subject
-            # renders from the position alone; motion needs two points
-            # and simply doesn't render for a 1-point entity. The cell
-            # backfill is only for entities with NO position at all.
-            has_geometry = (ent is not None
-                            and getattr(ent, "position", None))
-            # ---- GEOMETRY-FIRST: THE SENSOR PANEL (the operator's
-            #      reframe: each track is a FIELD SENSOR, not a story --
-            #      the banner is an instrument panel). Fixed reading
-            #      order: near, pace, toward, frame, void, why-tail
-            #      (capped 80ch -- the receipt for the readings), state.
-            if has_geometry:
-                parts: list[str] = []
-                subj_now = self._nearest_entities(ent.position, exemplars,
-                                                  exclude=key)
-                hist = ent.position_history
-                if subj_now:
-                    names = ", ".join(
-                        f"{k} ({c:.2f})" for k, c in subj_now[:2])
-                    parts.append(f"near {names}")
-                vel = ent.ring_velocity(now)
-                pace_band = (0 if vel < 0.005 else
-                             1 if vel < 0.05 else
-                             2 if vel < 0.15 else 3)
-                pace_word = ("fast" if pace_band >= 3 else
-                             "slowly" if pace_band == 1 else "steadily")
-                # THE TARGET: the drift vector decoded through the field
-                # (the panel's pointer reading -- what the drift heads at)
-                target = self._motion_target(ent, exemplars, key)
-                if target:
-                    parts.append(f"{pace_word} ({vel:.2f}/h) toward "
-                                 f"{target[0]} ({target[1]:.2f})")
-                elif vel >= 0.005:
-                    parts.append(f"drifting into unclaimed space "
-                                 f"({vel:.2f}/h)")
-                # THE FRAME: approaching/receding the tracked set
-                ax = self._axis_of_motion(ent, exclude_key=key)
-                if ax["toward"]:
-                    t_names = ", ".join(f"{k} ({c:.2f})"
-                                        for k, c in ax["toward"])
-                    parts.append(f"approaching {t_names}")
-                elif ax["away"]:
-                    a_names = ", ".join(f"{k} ({c:.2f})"
-                                        for k, c in ax["away"])
-                    parts.append(f"receding from {a_names}")
-                # THE VOID: the null direction decoded at the low floor
-                # (the frontier reading -- what the local null-field
-                # points toward)
-                nd = self._null_direction(ent, exemplars, key)
-                if nd:
-                    parts.append(f"void→{nd[0]} ({nd[1]:.2f})")
-                # THE WHY-TAIL (the receipt, capped): the freshest beat
-                # follows the readings -- evidence for them, demoted
-                idxs = inv.get(key) or []
-                for i in sorted(idxs, key=lambda i: -_eph_born_of(exemplars, i)):
-                    if i in claimed_cells:
-                        continue
-                    sit, act = _frag_of(exemplars, i)
-                    sit = _narrative(sit, 80)
-                    if not sit or _machinery_junk(sit):
-                        continue
-                    born = _eph_born_of(exemplars, i)
-                    parts.append(f"why: {_ago(born, now) or 'recently'}"
-                                 f" -- {sit[0].lower() + sit[1:]}")
-                    claimed_cells.add(i)
-                    break                     # one beat is the receipt
-                if not parts:
-                    continue
-                n = len(inv.get(key) or [])
-                parts.append(f"{n} cells")
-                out.append((key, f"{key}: " + ", ".join(parts) + "."))
-                continue
-            # ---- the cell backfill (young entities: no geometry yet) ----
-            idxs = inv.get(key) or []
-            if not idxs:
-                out.append((key, f"{key}: no cells yet"))
-                continue
-            label = t.get("label") or self.default_label(key)
-            beats: list[tuple[float, str]] = []
-            seen_frags: set[str] = set()
-            for i in sorted(idxs, key=lambda i: -_eph_born_of(exemplars, i)):
-                if i in claimed_cells:
-                    continue
-                sit, act = _frag_of(exemplars, i)
-                sit = _narrative(sit, 200)
-                act = _narrative(act, 240)
-                if not sit or _machinery_junk(sit):
-                    continue
-                if act and (_tool_artifact(act) or _machinery_junk(act)):
-                    act = ""
-                if act and act.startswith(("Entity track planted", "Entity ",
-                                           "Removed ", "Track not planted")):
-                    act = ""
-                born = _eph_born_of(exemplars, i)
-                frag = f"{_ago(born, now) or 'recently'}: {sit[0].lower() + sit[1:]}"
-                if act and _action_overlap(act, sit) < 0.6:
-                    frag += f" — {act[0].lower() + act[1:]}"
-                if frag.rsplit(": ", 1)[-1] in seen_frags:
-                    continue
-                seen_frags.add(frag.rsplit(": ", 1)[-1])
-                beats.append((born, frag))
-                claimed_cells.add(i)
-                if len(beats) >= 3:
-                    break
-            if not beats:
-                out.append((key, f"{key} ({label}): no clean beats yet"))
-                continue
-            body = beats[0][1]
-            if len(beats) > 1:
-                body += " Then " + "; ".join(f[0].lower() + f[1:]
-                                             for _, f in beats[1:])
-            n = len(idxs)
-            last = max((_eph_born_of(exemplars, i) for i in idxs),
-                       default=0.0)
-            body += (f" ({n} cells, last active "
-                     f"{_ago(last, now) or 'unknown'}).")
-            out.append((key, f"{key}: {body}"))
-        return out or None
-
-def direction_drifting(ent, now: float) -> bool:
-    """True when the entity's ring shows real motion (the fine-end delta
-    crosses the drift floor). The geometry renderer's motion test."""
-    try:
-        return ent.ring_direction() == "drifting"
-    except Exception:
-        return False
-
-
-def _clip_entity(s: str, cap: int = 60) -> str:
-    """A situation line -> the entity story's 'new' fragment."""
-    line = " ".join((s or "").split())
-    line = line.replace("tool edit for: ", "").replace("tool bash for: ", "")
-    return (line[:cap] + "…") if len(line) > cap else line
-
-
-# ---- the SURROUNDINGS block (per-track semantic neighborhood) --------------
-# The banner's STRUCTURE lane: for every tracked entity, WHAT LIVES AROUND
-# IT in the field -- co-occurring entities (cells that mention both; a real
-# graph edge) with an embedding-centroid fallback when the entity has no
-# co-occurrences yet. History (the story lane) answers "what happened";
-# surroundings answers "what is this connected to" -- the thing a fresh
-# session cannot reconstruct from working context. Rendered EVENT-
-# CONDITIONALLY: only when the neighborhood CHANGES (a new neighbor or a
-# weight drift), never per-turn recitation.
-
-SURR_MAX = 5               # neighbors per track, most-linked first
-SURR_DRIFT = 0.25          # weight change fraction that re-renders
-SURR_MIN_LINKS = 2         # a co-occurrence edge needs >= this many cells
-
-
-# ---- the living geometry (entity consolidation) ----------------------------
-# CELLS are evidence (immutable, full-precision). ENTITIES are trackers:
-# position drifts toward recent linked cells (half-life time-decay), and
-# the position HISTORY coarsens with age -- delta-perceptual storage plus
-# era anchors on the half-life's own timescale. The knob (per-entity
-# 'grain') lives in the SHARED doc so both seats see the same control.
 POSITION_HALF_LIFE_S = 24 * 3600.0   # default drift half-life (24h)
 RING_MAX = 16                        # history ring cap (entries)
 GRAIN_DEFAULT = 0.05                 # delta-perception threshold (cosine)
 # the now-subject's kind weights (the 'subject reads tools, not topics'
 # fix): the session's subject lives in files/symbols; shell verbs and
 # model names tag aggressively and dominate recent mass
-_SUBJECT_KIND_WEIGHT = {
-    "files": 1.0, "symbols": 1.0,
-    "shell": 0.75, "models": 0.75, "urls": 0.5,
-}
-# junk symbols that must never lead the subject (the ex_idx/tslog.info/
-# nv_glvys... exhibit): log-path fragments, temp-dir slugs, pure hashes.
-# NOTE: the subject keys are 'kind:value' form -- the screen searches the
-# WHOLE key (a '^[\\w-]*tempdir' anchor can never match past the colon)
-_SUBJECT_JUNK_RES = (
-    re.compile(r"\.(info|log|json|tmp|pid)\b", re.I),
-    re.compile(r"\b[0-9a-f]{16,}\b"),              # hex slugs
-    re.compile(r"\b(ex_idx|field_size|sent_blocks|ctx_chars)\b"),
-    re.compile(r"glvys3kgcw706nvfkvgf40000gr", re.I),  # temp dirs
-    # THE INTERNALS SCREEN (the srv.entity_store / self._cb_warned
-    # exhibit): membrane's own implementation symbols are machinery
-    # about the build session, never the session's subject
-    re.compile(r"\b(?:self|srv|cls)\._\w+"),
-    re.compile(r"\bsrv\.\w+"),
-    re.compile(r"\b(?:nudge_script|delete_script|script_render|"
-               r"script_every_n|script_failures|script_disabled)\b"),
-    # THE PACKAGE-NAMESPACE SCREEN (the com.couchbase.rosetta.check
-    # exhibit, peer-reported from rosetta-check): dotted chains of
-    # all-lowercase parts under the package TLDs are Java/gradle
-    # BUILD-OUTPUT names, harvested from tool captures, never the
-    # session's subject. The chain qualifies in _harvest only on the
-    # len>=3 rule (no capitals, no underscores -- the two real symbol
-    # signals); a real code symbol looks like load_couchbase or
-    # ExemplarStore.load. Screened at RENDER time, not harvest: a query
-    # legitimately naming a package must still pull its cells.
-    re.compile(r"symbols:(?:com|org|net|io|edu|gov)\.[a-z0-9.]+$"),
-)
-# class-tuned defaults: hot things resolve fine, slow things coarsen
 _GRAIN_DEFAULTS = {
     CLASS_SESSION: 0.03,             # a session's dynamics move fast
     CLASS_FAILURE: 0.03,             # failure modes need fine tracking
@@ -3052,13 +2123,11 @@ _GRAIN_DEFAULTS = {
 # THE FILE GRAIN MARGIN: a symbol must OUTSCORE the best file by this
 # much to lead the subject at all when a file is near (the near-tie
 # cede). 0.03 = one grain step: inside it, same-grain mush.
-_FILE_GRAIN_MARGIN = 0.03
 
 # ---- programmable entities (the script constants live HERE -- entities.py
 # owns the entity contract; night.py imports them, no circular import) ----
 SCRIPT_MAX_NUDGE = 2048        # nudge script size cap (chars)
 SCRIPT_MAX_DELETE = 1024       # delete script size cap
-
 
 # ---- the junk-cut knob (per-track, live, anchor-vector screen) -------------
 # The regex screens (_machinery_junk et al) catch KNOWN junk forms; the
@@ -3088,7 +2157,6 @@ JUNK_ANCHOR_SEEDS = (
     "model inventory listing: LLM names with tags and sizes in a row",
 )
 
-
 def junk_anchor_docs() -> list[QuantumEntity]:
     """The seed anchors as entities (written once; merge-on-collision)."""
     out = []
@@ -3099,7 +2167,6 @@ def junk_anchor_docs() -> list[QuantumEntity]:
                         "junk_anchor": True},
             derived_by=["membrane-junk"]))
     return out
-
 
 class JunkScreen:
     """Max cosine of a text's vector against the junk-anchor set. Anchors
@@ -3153,116 +2220,3 @@ class JunkScreen:
             return 0.0
         v = v / vn
         return max(float(v @ a) for a in self._vecs)
-
-
-def cooccurrence_neighbors(exemplars, key: str, inv=None,
-                           min_links: int = SURR_MIN_LINKS) -> list[tuple[str, int]]:
-    """Entity keys that share CELLS with `key`, strongest first. Pure tag
-    arithmetic, $0: each of the entity's cells contributes 1 to every other
-    entity tagged in it (<= 8 tags/cell, bounded). Pass `inv` to reuse a
-    prebuilt index."""
-    inv = inv if inv is not None else entity_index(exemplars)
-    mine = inv.get(key) or []
-    counts: dict[str, int] = {}
-    for i in mine:
-        for other in iter_entities(exemplars[i]):
-            if other != key:
-                counts[other] = counts.get(other, 0) + 1
-    out = [(k, c) for k, c in counts.items() if c >= min_links]
-    out.sort(key=lambda x: (-x[1], x[0]))
-    return out[:SURR_MAX]
-
-
-def centroid_neighbors(exemplars, key: str, inv=None,
-                       top: int = SURR_MAX) -> list[tuple[str, float]]:
-    """The fallback neighborhood: cosine between the tracked entity's cell
-    centroid and every OTHER entity's cell centroid. Co-occurrence is the
-    honest edge; this is the geometric shadow (used only when the entity
-    has no co-occurrences yet)."""
-    inv = inv if inv is not None else entity_index(exemplars)
-    mine = inv.get(key) or []
-    if not mine:
-        return []
-    vecs = [exemplars[i].vec for i in mine
-            if getattr(exemplars[i], "vec", None)]
-    if not vecs:
-        return []
-    import numpy as _np
-    center = _np.asarray(vecs, dtype=float).mean(axis=0)
-    cn = _np.linalg.norm(center)
-    if cn < 1e-12:
-        return []
-    center = center / cn
-    scored: dict[str, float] = {}
-    for other_key, idxs in inv.items():
-        if other_key == key or other_key.startswith(key + "/"):
-            continue
-        ovecs = [exemplars[i].vec for i in idxs
-                 if getattr(exemplars[i], "vec", None)]
-        if not ovecs:
-            continue
-        o = _np.asarray(ovecs, dtype=float).mean(axis=0)
-        on = _np.linalg.norm(o)
-        if on < 1e-12:
-            continue
-        scored[other_key] = float(center @ (o / on))
-    out = sorted(scored.items(), key=lambda x: -x[1])[:top]
-    return out
-
-
-def related_entities(exemplars, q: str, qvec=None,
-                     k: int = 8) -> list[dict]:
-    """The entity-graph READER: entities related to a free-text query.
-    Named hits (the query's harvested entities present in the index) come
-    first with their co-occurrence neighbors; the centroid-shadow
-    (cosine between qvec and each entity's cell centroid) fills the rest.
-    Deterministic, $0 beyond one query embed (done by the caller)."""
-    inv = entity_index(exemplars)
-    if not inv:
-        return []
-    out: list[dict] = []
-    seen: set[str] = set()
-
-    def _rec(key: str) -> dict:
-        idxs = inv.get(key) or []
-        links = cooccurrence_neighbors(exemplars, key, inv=inv,
-                                       min_links=1)
-        return {"key": key, "cells": len(idxs),
-                "neighbors": [{"key": nk, "shared": c}
-                              for nk, c in links[:5]]}
-
-    # 1. named hits: entities the query text itself mentions
-    for key in query_entities(q):
-        if key in inv and key not in seen:
-            out.append({**_rec(key), "how": "named"})
-            seen.add(key)
-    # 2. centroid fill: nearest entity centroids to the query vector
-    if qvec is not None and len(out) < k:
-        import numpy as _np
-        qv = _np.asarray(qvec, dtype=float)
-        qn = _np.linalg.norm(qv)
-        if qn > 1e-12:
-            qv = qv / qn
-            scored: list[tuple[float, str]] = []
-            for other_key, idxs in inv.items():
-                if other_key in seen:
-                    continue
-                ovecs = [exemplars[i].vec for i in idxs
-                         if getattr(exemplars[i], "vec", None)]
-                if not ovecs:
-                    continue
-                o = _np.asarray(ovecs, dtype=float).mean(axis=0)
-                on = _np.linalg.norm(o)
-                if on < 1e-12:
-                    continue
-                scored.append((float(qv @ (o / on)), other_key))
-            scored.sort(reverse=True)
-            for sim, other_key in scored:
-                if len(out) >= k:
-                    break
-                if sim < 0.35:
-                    break           # below the floor: silence, not noise
-                out.append({**_rec(other_key), "how": f"near ({sim:.2f})"})
-                seen.add(other_key)
-    return out[:k]
-

@@ -65,9 +65,11 @@ TOOLS: list[dict] = [
     {
         "name": "membrane_state",
         "description": (
-            "Membrane's own live state: field size, safe ratio, effective "
-            "rank, free energy, compactor status. Read-only, computed from "
-            "the running proxy. Use for memory-health checks."),
+            "Membrane's own live state: the entity field's vitals "
+            "(live entities, events by stream, entities by tier, "
+            "conflicts), the replay A/B ledger, and the last night pass. "
+            "Read-only, computed from the running proxy. Use for "
+            "memory-health checks."),
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
@@ -109,7 +111,7 @@ TOOLS: list[dict] = [
         "name": "membrane_watch_entity",
         "description": (
             "Manage your banner ENTITY TRACKS. A track shows the entity's "
-            "live safe-cell count in the WHERE WE ARE header every turn "
+            "live state in the WHERE WE ARE header every turn "
             "(constant tracking), and an optional boundary turns it into an "
             "EVENT trigger: 'enter N' alerts when the count rises to N+, "
             "'exit N' alerts when it falls below N. Alerts fire ONCE per "
@@ -159,9 +161,9 @@ TOOLS: list[dict] = [
         "name": "membrane_related_entities",
         "description": (
             "Read the entity graph: entities related to a free-text query "
-            "(named hits first, then semantic nearness), each with cell "
-            "count and co-occurrence neighbors. Use to explore what the "
-            "field knows about a component before acting on it."),
+            "(named hits first, then semantic nearness), each with its "
+            "mention count and co-occurrence neighbors. Use to explore what "
+            "the field knows about a component before acting on it."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -220,8 +222,8 @@ TOOLS: list[dict] = [
             "thinker extends a branch under it, dreamed on dream "
             "commits), under NARROW budgets (0.25s/1s/2s) + a per-"
             "entity cooldown, with the READ-ONLY membrane object next "
-            "to state (membrane.field.top_k/sketch/directions, "
-            "membrane.me.describe/velocity/offsets, "
+            "to state (membrane.field.recall/vitals, "
+            "membrane.me.describe/velocity/direction, "
             "membrane.entities.get, membrane.timeline.walk, "
             "membrane.intents.open). 'result' = {render, patch: dict "
             "of this entity's own properties (the monitoring organ: a "
@@ -460,7 +462,7 @@ def tool_query(args: dict, port: int) -> str:
         if block:
             return block + "\n(read-only; this call was NOT learned)"
         return (f"Nothing SAFE in the field about {topic!r} yet "
-                f"(field holds {out.get('field_size', '?')} exemplars). "
+                f"(field knows {out.get('field_size', '?')} live entities). "
                 "Do not invent memories; proceed and let the turn learn.")
     lines = ([block, ""] if block else []) + \
         [f"Field recall (membrane; read-only, this call was NOT learned):"]
@@ -478,27 +480,42 @@ def tool_query(args: dict, port: int) -> str:
 
 def tool_state(args: dict, port: int) -> str:
     out = _http(port, "GET", "/membrane/state?mcp=1")
-    th = out.get("thermo") or {}
-    comp = out.get("compact") or {}
+    ef = out.get("efield") or {}
     lines = [
         "Membrane state (live from the running proxy):",
-        f"- field: {out.get('field_size', '?')} exemplars "
-        f"({out.get('safe', '?')} safe / "
-        f"{max(0, (out.get('field_size') or 0) - (out.get('safe') or 0))} unsafe; "
-        f"{out.get('notes', 0)} compact notes)",
-        f"- effective rank {th.get('eff_rank', 0):.2f} "
-        f"(ratio {th.get('rank_ratio', 0):.2f}); free energy "
-        f"{th.get('free_energy', 0):.2f} (safe_frac {th.get('safe_frac', 0):.2f})",
-        f"- embed model {out.get('embed_model') or 'unresolved'} "
-        f"| gate sim_min={((out.get('gate') or {}).get('sim_min'))}",
+        f"- field: {out.get('field_size', '?')} live entities "
+        f"| embed model {out.get('embed_model') or 'unresolved'}",
     ]
-    if comp:
-        lines.append(f"- compactor: cycles={comp.get('cycles', 0)} "
-                     f"clusters={comp.get('clusters', 0)} "
-                     f"notes={comp.get('notes', 0)} "
-                     f"model={out.get('compact_model') or '?'}")
-    if out.get("review_pending"):
-        lines.append(f"- review pending: {out['review_pending']}")
+    if ef and "error" not in ef:
+        ev = ef.get("events") or {}
+        if ev:
+            by = {}
+            for k, c in ev.items():
+                head = k.split("/")[0]
+                by[head] = by.get(head, 0) + c
+            lines.append("- events: "
+                         + ", ".join(f"{k} {c}"
+                                     for k, c in sorted(by.items())))
+        ents = ef.get("entities") or {}
+        if ents:
+            lines.append("- entities: "
+                         + ", ".join(f"{k} {c}"
+                                     for k, c in sorted(ents.items())))
+        g = ef.get("geometry") or {}
+        if g.get("eff_rank") is not None:
+            lines.append(f"- geometry: eff rank {g['eff_rank']:.2f}")
+        ab = ef.get("replay_ab") or {}
+        if ab.get("eligible"):
+            sim = ab.get("mean_answer_sim")
+            sim_l = f"{sim:.2f}" if sim is not None else "?"
+            lines.append(f"- replay A/B: {ab['eligible']} eligible, "
+                         f"{ab.get('served_replay', 0)} served as pure "
+                         f"replay (mean answer sim {sim_l})")
+    night = out.get("night")
+    if night:
+        lines.append(f"- last night: births={night.get('births', 0)} "
+                     f"junk={night.get('junk', 0)}")
+
     # THE 'I' TRACK over MCP: the same WHERE WE ARE the chat seat's model
     # gets -- position, commitments, entity tracks.
     wwa = out.get("where_we_are")
@@ -567,8 +584,8 @@ def tool_forget(args: dict, port: int) -> str:
     cands = out.get("candidates") or []
     if not cands:
         return ("Wordy forgets propose, never delete: nothing matched "
-                "(sim >= 0.55, safe cells only). Nothing removed.")
-    lines = ["Wordy asks never delete from tool calls. Nearest safe cells:",
+                "(the nearest past events only). Nothing removed.")
+    lines = ["Wordy asks never delete from tool calls. Nearest events:",
              ", ".join(f"#{c['idx']} (sim {c['sim']:.2f})"
                        for c in cands[:8]),
              "To remove, re-ask membrane_forget with explicit indexes. "
@@ -592,7 +609,7 @@ def tool_watch_entity(args: dict, port: int) -> str:
     e, x = out.get("enter"), out.get("exit")
     bs = (f" with boundary: enter {e}" if e is not None
           else f" with boundary: exit {x}" if x is not None else "")
-    return (f"Entity track planted: {out['key']}{bs}. Its live cell count "
+    return (f"Entity track planted: {out['key']}{bs}. Its live state "
             f"rides the WHERE WE ARE header each turn; a boundary "
             f"transition (enter/exit) alerts once via the banner.")
 
@@ -636,7 +653,7 @@ def tool_related_entities(args: dict, port: int) -> str:
     rel = out.get("related") or []
     if not rel:
         return (f"No entities related to {q!r} yet. The index grows as "
-                f"cells are learned (deterministic harvest) and as you "
+                f"events land on the field (deterministic harvest) and as you "
                 f"add abstract entities via membrane_entity_add.")
     lines = [f"Entities related to {q!r}:"]
     for r in rel:
@@ -644,7 +661,7 @@ def tool_related_entities(args: dict, port: int) -> str:
         if r.get("neighbors"):
             nb = " -- " + ", ".join(f"{n['key']} ({n['shared']} shared)"
                                     for n in r["neighbors"][:3])
-        lines.append(f"- {r['key']} ({r['cells']} cells, {r.get('how', '')})"
+        lines.append(f"- {r['key']} ({r['cells']} mentions, {r.get('how', '')})"
                      f"{nb}")
     return "\n".join(lines)
 

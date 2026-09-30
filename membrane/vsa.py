@@ -331,10 +331,9 @@ class VSALane:
     def hits(self, store_or_pairs, query: str, k: int = 5
              ) -> list[tuple[int, float]]:
         """The lane's answer: [(index_or_key, similarity)] over rows that
-        carry a same-codebook state. Accepts an ExemplarStore (delegates
-        to its vsa_top_k) or a plain [(key, vsa_dict)] iterable (the
-        isolation-friendly path). Rows without vsa data are invisible
-        here -- cosine rules them."""
+        carry a same-codebook state. Takes a plain [(key, vsa_dict)]
+        iterable. Rows without vsa data are invisible here -- cosine
+        rules them."""
         q = self.encode(query)
         if q is None:
             return []

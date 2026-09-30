@@ -1,34 +1,10 @@
-"""membrane: a field-first runtime memory / decision substrate.
+"""membrane: a shared entity field as long-term memory for coding agents.
 
-The field is the default actor; the LLM is the escalation. See README.md for the
-full design and the "measure variety" open problem.
+Every turn's text is embedded as EVENTS on an entity field (Couchbase
+collections), where every word/phrase/identifier is an entity moved by the
+mentions that name it; recall, replay and injection read the field's live
+entity states. The field is the memory; the LLM is the only escalator.
+
+See docs/entity-field.md for the design and the experiments behind it.
+Real surface: python -m membrane.opencode (the seat / proxy).
 """
-
-from .field import Exemplar, ExemplarStore
-from .variety import effective_rank, spread, novelty
-from .gate import decide
-from .embed import OllamaEmbedder
-from .runtime import (Membrane, Responder, StubResponder, OllamaChatResponder,
-                     Judge, StubJudge, ScriptedJudge, OllamaJudge)
-from .review import summarize, metrics, compute_metrics
-
-__all__ = [
-    "Exemplar",
-    "ExemplarStore",
-    "effective_rank",
-    "spread",
-    "novelty",
-    "decide",
-    "OllamaEmbedder",
-    "Membrane",
-    "Responder",
-    "StubResponder",
-    "OllamaChatResponder",
-    "Judge",
-    "StubJudge",
-    "ScriptedJudge",
-    "OllamaJudge",
-    "summarize",
-    "metrics",
-    "compute_metrics",
-]

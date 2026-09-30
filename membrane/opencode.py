@@ -1,26 +1,24 @@
 """opencode-on-membrane: `python -m membrane.opencode`.
 
-Starts the RAG proxy (membrane field + background compactor, from
-membrane/rag.py), extends it with the OpenAI-compatible surface opencode
-speaks, and launches opencode pointed at it:
+Starts the proxy on the entity field, extends it with the OpenAI-compatible
+surface opencode speaks, and launches opencode pointed at it:
 
-    you (opencode) --> membrane (field: RAG + state) --> Ollama
+    you (opencode) --> membrane (entity field + background mind) --> Ollama
 
 What is INTERNAL vs PROXIED (the split this entrypoint implements):
-  * INTERNAL -- everything about the membrane's own math and state:
+  * INTERNAL -- everything about the membrane's own state:
       /v1/models       built here (Ollama's tag list, embed models filtered)
       /v1/embeddings   served by the field's own embedder
-      /membrane/state  the JSON instrument (thermo, gate, compactor, audit)
-      chat turns that ask about the system (field size, effective rank,
-      free energy, compactor, ...) are ANSWERED HERE from the live field --
-      computed, deterministic, zero model calls.
-  * PROXIED -- everything model-shaped: /v1/chat/completions (grounded by the
-    field's RAG injection, learned back into the field every turn) and any
-    other path.
+      /membrane/state  the JSON instrument (field, gate, replay A/B, audit,
+                       the background mind's boards)
+      chat turns that ask about the system (entities, conflicts, replay
+      pairs, the night's births, ...) are ANSWERED HERE from the live
+      field -- computed, deterministic, zero model calls.
+  * PROXIED -- everything model-shaped: /v1/chat/completions (grounded by
+    the entity blocks injected from the field, captured back as events
+    every turn) and any other path.
 
-The model selected in opencode is the CORTEX's model too: each chat request
-stamps `srv.compact_model`, so the background compactor distills with the same
-model the user picked (unless --compact-model pins one). Embeddings are the
+The model selected in opencode is the JUDGE LADDER's pick too. Embeddings are the
 one place the selected model may not qualify: the resolver tries
 --embed-model > a known Ollama embed model > the selected model, and if
 nothing can embed, every chat turn returns 503 (err and block -- the field
@@ -53,7 +51,7 @@ import numpy as np
 
 from .embed import OllamaEmbedder
 from .global_field import PEER_ASK_SIM_MIN
-from .rag import (Compactor, RAGProxyHandler, _clip, _inject,
+from .rag import (RAGProxyHandler, _clip, _inject,
                   _model_chat, doctrine_instructions_text)
 from .router import (EXPLORE_LANE, AUTO_CLOUD, AUTO_LOCAL, AUTO_LANES,
                      AUTO_ALIASES, LANE_TOKENS, normalize_lane,
@@ -61,35 +59,9 @@ from .router import (EXPLORE_LANE, AUTO_CLOUD, AUTO_LOCAL, AUTO_LANES,
 from .watch import MAX_WATCHES, WatchBoard
 from .intent import IntentBoard, MAX_INTENTS
 
+from .seat import Seat
+
 CLOUD_DEFAULT_PRICE = 3.0   # an unknown cloud model's relative money/turn
-
-
-def _PRICE_TABLE_BY_NAME():
-    """(name, usd) pairs for the judge ladder: the router's discovered
-    candidates priced via the table (unknown -> default), locals priced 0.
-    Only OPencode-ELIGIBLE candidates are proposed: a whisper or a
-    vision-only model never adjudicates an answer."""
-    from .router import local_is_eligible
-    router = globals().get("_BOOT_ROUTER")
-    out = []
-    if router is not None:
-        from .router import PRICE_TABLE
-        for rec in router.records.values():
-            if rec.kind == "local" and not local_is_eligible(rec):
-                continue
-            low = rec.name.lower()
-            usd = CLOUD_DEFAULT_PRICE if rec.kind == "cloud" else 0.0
-            for frag, p in PRICE_TABLE:
-                if frag in low:
-                    usd = p
-                    break
-            out.append((rec.name, usd))
-    return out
-from .runtime import (Membrane, OllamaChatResponder, OllamaJudge, StubJudge,
-                      StubResponder, _src_label, _src_get)
-from .field import _seat_get, _seat_label
-from .variety import (cells_rank, entropy_count, free_energy, orient_dirs,
-                      thermo_state)
 
 # name markers meaning "not a chat model" (the picker's screen). CLOUD models
 # (e.g. glm-4.7:cloud, deepseek-v4-pro:cloud, gpt-oss:20b-cloud) never match these
@@ -116,7 +88,7 @@ _STATE_STRONG = ("field state", "field stats", "system state",
                  "free energy", "effective rank", "eff rank", "eff_rank",
                  "rank ratio", "safe frac", "spectrum entropy",
                  "what do you remember", "memory stats", "audit stats",
-                 "how many exemplars", "field size")
+                 "how many entities", "field size")
 _STATE_QSTARTS = ("what", "how", "show", "tell", "give", "print", "report",
                   "dump", "status")
 _STATE_EXACT = ("status", "state", "field state", "field stats", "stats",
@@ -145,46 +117,6 @@ def _is_state_query(q: str) -> bool:
     if not ("?" in low or low.startswith(_STATE_QSTARTS)):
         return False
     return any(m in low for m in _STATE_STRONG)
-
-
-# ---- the boot hygiene sweep (recall hygiene, plan #4) -----------------------
-def _hygiene_demote_screened_models(srv) -> int:
-    """Dumb-model-era cleanup: mass-demote exemplars whose ANSWERING model
-    the opencode-compatibility screen now rejects (bakllava / whisper / toy
-    routers that took chat turns before the screen existed -- plan #4).
-    Non-destructive: the ordinary two-authority boundary applies, so the
-    model's first contest restores any that were actually fine. Runs once at
-    boot, silently no-ops without a router. Returns the count demoted."""
-    from .router import local_is_eligible
-    mem = srv.membrane
-    rtr = getattr(srv, "router", None)
-    if rtr is None or len(mem.store) == 0:
-        return 0
-    bad = set()
-    for rec in rtr.records.values():
-        if rec.kind == "local" and not local_is_eligible(rec):
-            bad.add(rec.name.split(":")[0])
-    if not bad:
-        return 0
-    demoted = 0
-    with mem.mut_lock:
-        for i, ex in enumerate(mem.store.exemplars):
-            m = (getattr(ex, "model", "") or "").lower()
-            if not m:
-                continue                       # pre-provenance row: leave it
-            if any(m == b or m.startswith(b + ":") or b in m
-                   for b in bad):
-                if ex.safe:
-                    mem.store.add_reask(i)
-                    ex.recompute_safe(mem.demote_threshold)
-                    demoted += 1
-        if demoted:
-            mem.store.save(mem.field_path)
-    if demoted:
-        print(f"[opencode] hygiene: demoted {demoted} exemplar(s) answered "
-              f"by screened-out models ({', '.join(sorted(bad))})",
-              file=sys.stderr)
-    return demoted
 
 
 def _mcp_tool_lines() -> list[str]:
@@ -269,13 +201,15 @@ def _seat_card(srv, mcp_on: bool) -> str:
         L.extend(_ENTITY_CARD_NO_CONTEXT if getattr(srv, "no_context", False)
                  else _ENTITY_CARD_NORMAL)
         L.extend(_ENTITY_CARD_COMMON)
-    rs = float(getattr(srv, "replay_sim", 0.0) or 0.0)
+    ab = float(getattr(srv, "replay_ab", 0.0) or 0.0)
     L.append(
-        f"- REPLAY: near-duplicate asks (sim >= {rs:.2f}) on trusted "
-        "memories may be answered from the field without you."
-        if rs > 0 else
-        "- REPLAY: off (pure observer) -- membrane never answers for you; "
-        "every turn reaches you.")
+        f"- REPLAY A/B: replayable asks ({ab:.1%} served as pure replay) are "
+        "logged as pairs -- the stored answer next to yours, judged for "
+        "agreement; you are never bypassed."
+        if ab > 0 else
+        "- REPLAY A/B: off (shadow) -- replayable asks are logged as pairs "
+        "(stored answer next to yours; an idle judge scores the agreement) "
+        "but you answer every turn.")
     L.append(
         "- YOUR WRITES: 'membrane: learn that ...' / 'membrane: forget #N' "
         "frames in your reply EXECUTE (audited as origin: agent)."
@@ -291,11 +225,10 @@ def _seat_card(srv, mcp_on: bool) -> str:
     else:
         L.append("- TOOLS: MCP off -- drive membrane with the prose frames "
                  "(one per reply, last line).")
-    gf = getattr(srv, "global_field", None)
-    L.append("- GLOBAL FIELD: on -- facts true beyond this repo can be "
-             "promoted to the cross-project commons."
-             if gf is not None else
-             "- GLOBAL FIELD: off -- memory is this project's only.")
+    L.append("- COMMONS: a claim two or more seats make becomes a commons claim; "
+             "the operator promotes one with 'membrane: remember globally: ...'."
+             + (" Peers are live: a sibling seat's entities may ride a turn."
+                if getattr(srv, "peers", None) is not None else ""))
     router = getattr(srv, "router", None)
     if router is not None:
         b = getattr(router, "cloud_budget", None)   # None = uncapped
@@ -368,34 +301,11 @@ def _efield_vitals(srv) -> dict | None:
 
 def _state_report(srv) -> str:
     """The internal answer for a state/math query: live numbers straight off
-    the field, the compactor, and the audit. No model call."""
+    the entity field and the audit. No model call."""
     mem = srv.membrane
-    exs = list(mem.store.exemplars)
-    n = len(exs)
-    safe = sum(1 for e in exs if e.safe)
-    retired = sum(1 for e in exs
-                  if (getattr(e, "outcome", "") or "").startswith("compacted@"))
-    notes = sum(1 for e in exs if getattr(e, "outcome", "") == "compact-note")
-    th = thermo_state(mem.store)
-    comp = (srv.compactor.stats if srv.compactor
-            else {"cycles": 0, "clusters": 0, "notes": 0})
     lines = [
         "Membrane state (computed live on this server, no model call):",
         f"- backend {srv.backend} | embed model {getattr(mem.embedder, 'model', None) or 'unresolved'}",
-        f"- field: {n} exemplars ({safe} safe / {n - safe} unsafe; "
-        f"{retired} compacted, {notes} compact notes"
-        + (f"; {len(mem.store._superseded_set())} superseded" 
-           if mem.store._superseded_set() else "") + ")",
-        f"- effective rank {th['eff_rank']:.2f} (rank ratio {th['rank_ratio']:.2f}); "
-        f"free energy {th['free_energy']:.2f} (safe_frac {th['safe_frac']:.2f}, "
-        f"spectrum entropy {th['spectrum_entropy']:.2f})",
-        f"- cells level {cells_rank(mem.store):.2f} "
-        f"(entropy flood {entropy_count(mem.store)}/{max(0, round(cells_rank(mem.store)))} "
-        f"of cap; earned variety, injected entropy excluded)",
-        f"- gate: sim_min={mem.sim_min} dedup={mem.dedup_sim} "
-        f"reask_window={mem.reask_window_s:.0f}s demote_threshold={mem.demote_threshold}",
-        f"- retrieval: k={srv.rag_k}, sim>={srv.rag_sim_min}, "
-        f"budget {srv.rag_ctx_chars} chars",
     ]
     ev = _efield_vitals(srv)
     if ev and "error" not in ev:
@@ -404,7 +314,8 @@ def _state_report(srv) -> str:
             by_stream[k.split("/")[0]] = by_stream.get(k.split("/")[0], 0) + c
         mu, sd = ev["null_coherence"]
         lines.append(
-            f"- entity field ({ev.get('mode')}): events "
+            f"- entity field on {type(srv.efield.b).__name__} (origin "
+            f"{srv.efield.origin}): events "
             + ", ".join(f"{k} {c}" for k, c in sorted(by_stream.items()))
             + "; entities " + ", ".join(f"{k} {c}" for k, c in sorted(ev["entities"].items()))
             + f"; coherence null {mu:.3f}+-{sd:.3f}")
@@ -422,31 +333,9 @@ def _state_report(srv) -> str:
         lines.append("- context: FIELD-ONLY (the stateless LLM -- the "
                      "transcript is stripped per turn; coherence comes "
                      "from the reconstruction + the recall)")
-    if getattr(mem, "fork_owns_field", False):
-        lines.append("- FORK STAND-DOWN: ollama-membrane fork owns the field "
-                     "-- no capture, no recall injection, no doctrine from "
-                     "this seat; operator lanes stay read-only")
-    if srv.compactor is not None:
-        lines.append(f"- cortex/compactor: cycles={comp['cycles']} "
-                     f"clusters={comp['clusters']} notes={comp['notes']}  "
-                     f"model={srv.compact_model}  every={srv.compactor.idle:.0f}s")
-    else:
-        lines.append("- cortex/compactor: disabled")
-    if getattr(srv, "archive", False):
-        n_arch = len(mem.store.archived(mem.field_path))
-        lines.append(f"- cold tier: {n_arch} archived turns "
-                     f"(session archived {getattr(srv, 'archived_total', 0)}); "
-                     f"hot field stays small, raw turns stay queryable")
-    else:
-        lines.append("- cold tier: off (--archive)")
     router = getattr(srv, "router", None)
     if router is not None:
         lines.append(router.summary())
-    if getattr(srv, "momentum", False):
-        lines.append(f"- momentum: on (alpha={srv.momentum_alpha}, "
-                     f"decay={srv.momentum_decay})")
-    else:
-        lines.append("- momentum: off (--momentum)")
     lines.append(f"- audit: {_audit_count(mem.audit_path)} records")
     fw = _frame_wait_summary(srv)
     if fw:
@@ -504,32 +393,14 @@ def _state_report(srv) -> str:
     if cg is not None:
         from .codegraph import summary as cg_summary
         lines.append(f"- " + cg_summary(cg))
-    if getattr(mem.store, "_cb", None) is not None:
-        own = sum(1 for e in mem.store.exemplars
-                  if (getattr(e, "origin", "") or mem.store.origin)
-                  == mem.store.origin)
-        glo = sum(1 for e in mem.store.exemplars
-                  if getattr(e, "scope", "") == "global")
-        forn = len(mem.store.exemplars) - own - glo
-        lines.append(f"- shared store: couchbase ({mem.store._cb_bucket}) | "
-                     f"origin {mem.store.origin} | own {own} + commons {glo}"
-                     + (f" + foreign {forn} (poked through)" if forn else ""))
-    else:
-        lines.append(f"- shared store: off (JSON field; "
-                     f"MEMBRANE_STORE=couchbase to share across membranes)")
-    gf = getattr(srv, "global_field", None)
-    if gf is not None:
-        st = gf.merge_ledgers()
-        live = len(srv.peers.livelist()) if getattr(srv, "peers", None) else 0
-        lines.append(f"- global field: {len(gf.store)} notes "
-                     f"(field-id {gf.fid}; ledger shards {st['shards']}, "
-                     f"entries {st['entries']}, consensus groups "
-                     f"{st['clusters']}; peers live {live})")
-        pend = _read_suggestions(srv)
-        lines.append(f"- scope suggestions pending: {len(pend)} "
-                     f"(`membrane: suggest` to review)")
-    else:
-        lines.append("- global field: off")
+    if getattr(srv, "efield", None) is not None:
+        from .claims import COMMONS
+        commons = [d for _, d in srv.efield.b.scan("claims", {"origin": COMMONS})]
+        live = len(srv.gpeers.livelist()) if getattr(srv, "gpeers", None) else 0
+        lines.append(f"- commons: {len(commons)} claims "
+                     f"({sum(1 for d in commons if d.get('status') == 'consensus')} consensus, "
+                     f"{sum(1 for d in commons if d.get('status') == 'disputed')} disputed); "
+                     f"peers live {live}")
     ledger = getattr(srv, "user_ledger", None)
     lines.append(f"- user ledger: {ledger.count() if ledger else 0} verbatim "
                  f"decision(s){' (' + ledger.path + ')' if ledger else ' (unavailable)'}")
@@ -537,10 +408,11 @@ def _state_report(srv) -> str:
 
 
 # ---- the recall intercept (internal, no model, never learned) ---------------
-# Turns that ASK what the field remembers are served straight from the store:
-# the topic is embedded, top-k SAFE exemplars come back formatted. The turn is
-# intercepted BEFORE the gate -> it never learns, never demotes, never nudges:
-# the field cannot eat its own readback (the collapse route). The skills
+# Turns that ASK what the field remembers are served straight from the field:
+# the render is the past answers nearest the topic plus the entities it
+# names. The turn is intercepted BEFORE the gate -> it never learns, never
+# demotes, never nudges: the field cannot eat its own readback (the collapse
+# route). The skills
 # shipped in membrane/skills/ (installed into .opencode/skills/) teach the
 # agent the canonical phrasings; to the agent
 # they look like ordinary skills, but the SKILL.md bodies say they are served
@@ -685,9 +557,8 @@ _AGENT_FORGET_LIMIT = 12    # max cells an INDEX-FORM agent forget may drop
 
 _PROMOTE_CANON = "membrane: remember globally: "
 _PROMOTE_ALT = "membrane: promote globally: "
-_PROMOTE_REF = "membrane: promote #"          # promote existing exemplar #N
+_PROMOTE_REF = "membrane: promote #"          # promote event #N
 _FORGET_GLOBAL_CANON = "membrane: forget globally "
-_SUGGEST_CANON = "membrane: suggest"          # list pending / 'suggest drop #S'
 
 
 def _is_promote_query(low: str) -> bool:
@@ -699,239 +570,84 @@ def _is_forget_global_query(low: str) -> bool:
     return low.startswith(_FORGET_GLOBAL_CANON)
 
 
-def _is_suggest_query(low: str) -> bool:
-    return low.startswith(_SUGGEST_CANON)
-
-
-def _read_suggestions(srv) -> list[dict]:
-    """Pending scope suggestions (slice 3 review queue), parse-tolerant."""
-    p = getattr(srv, "_scope_suggestions_path", None)
-    if p is None:
-        return []
-    out = []
-    try:
-        for ln in p.read_text().splitlines():
-            ln = ln.strip()
-            if not ln:
-                continue
-            try:
-                r = json.loads(ln)
-            except json.JSONDecodeError:
-                continue
-            if r.get("status") == "pending":
-                out.append(r)
-    except OSError:
-        return []
-    return out
-
-
-def _resolve_suggestions(srv, ex_idx: int) -> int:
-    """Mark pending suggestions for local exemplar #ex_idx resolved
-    ('promoted') -- the operator ratified them via the normal promote path."""
-    p = getattr(srv, "_scope_suggestions_path", None)
-    if p is None:
-        return 0
-    try:
-        lines = [l for l in p.read_text().splitlines() if l.strip()]
-    except OSError:
-        return 0
-    marked = 0
-    out = []
-    for ln in lines:
-        try:
-            r = json.loads(ln)
-        except json.JSONDecodeError:
-            out.append(ln)
-            continue
-        if r.get("status") == "pending" and r.get("ex_idx") == ex_idx:
-            r["status"] = "promoted"
-            marked += 1
-        out.append(json.dumps(r, ensure_ascii=False))
-    if marked:
-        p.write_text("\n".join(out) + "\n")
-    return marked
-
-
-def _suggestions_report(srv) -> str:
-    """The scope-suggestion review surface: pending promotions the scope axis
-    wants the operator to ratify or dismiss."""
-    pend = _read_suggestions(srv)
-    if not pend:
-        return ("Membrane suggestions: none pending (the scope axis suggests "
-                "memories worth promoting when the local field holds "
-                "commons-flavored notes).\n\n" + _INTERCEPT_MARKER)
-    lines = [f"Membrane scope suggestions ({len(pend)} pending): ratify with "
-             f"`membrane: promote #<ex_idx>`; dismiss with "
-             f"`membrane: suggest drop <slot>`."]
-    seen_ex = set()
-    for r in pend[:12]:
-        ex_i = r.get("ex_idx")
-        mark = "" if ex_i is None or ex_i in seen_ex else f" (local #{ex_i})"
-        if ex_i is not None:
-            seen_ex.add(ex_i)
-        lines.append(f"- slot {r['slot']}  conf {r.get('scope_confidence')}"
-                     f"{mark}: {_clip(r.get('text', ''), 120)}")
-    return "\n".join(lines) + "\n\n" + _INTERCEPT_MARKER
-
-
-def _suggest_drop(srv, spec: str) -> str:
-    """'membrane: suggest drop <slot>' -- dismiss one suggestion."""
-    import re
-    p = getattr(srv, "_scope_suggestions_path", None)
-    m = re.search(r"#?(\d{5,})", spec)
-    if p is None or not m:
-        return ("Membrane suggest drop: give a slot number, e.g. "
-                "`membrane: suggest drop 1735600000000`.\n\n"
-                + _INTERCEPT_MARKER)
-    slot = int(m.group(1))
-    try:
-        lines = [l for l in p.read_text().splitlines() if l.strip()]
-    except OSError:
-        return ("Membrane suggest drop: no suggestion file yet.\n\n"
-                + _INTERCEPT_MARKER)
-    out = []
-    marked = 0
-    for ln in lines:
-        try:
-            r = json.loads(ln)
-        except json.JSONDecodeError:
-            out.append(ln)
-            continue
-        if r.get("slot") == slot and r.get("status") == "pending":
-            r["status"] = "dropped"
-            marked += 1
-        out.append(json.dumps(r, ensure_ascii=False))
-    if marked:
-        p.write_text("\n".join(out) + "\n")
-    verb = "dismissed" if marked else "not found (already resolved?)"
-    return (f"Membrane suggest drop: slot {slot} {verb}.\n\n"
-            + _INTERCEPT_MARKER)
-
-
 def _print_intercept(kind: str, q: str) -> None:
     print(f"[opencode] intercept ({kind}): {q[:60]!r}", file=sys.stderr)
 
 
+def _commons_write(fld, text: str, origin: str, source: str) -> tuple[str, bool]:
+    """One curated commons claim (the operator's hand); (key, new?)."""
+    from . import claims as CL
+    from .eids import is_specific, mentions_of
+    key = CL.commons_key(text)
+    cur = fld.b.get("claims", key)
+    origins = sorted(set((cur or {}).get("origins") or []) | {origin})
+    subj = [e for e, _ in mentions_of(text, fld.graph_fn()) if is_specific(e)]
+    fld.b.upsert("claims", key, {
+        **(cur or {}), "_k": "commons", "origin": CL.COMMONS, "text": text[:600],
+        "origins": origins, "n": int((cur or {}).get("n") or 0) + 1,
+        "statuses": sorted(set((cur or {}).get("statuses") or []) | {"curated"}),
+        "status": (cur or {}).get("status") or "curated",
+        "subjects": sorted(set((cur or {}).get("subjects") or []) | set(subj)),
+        "source": source})
+    return key, cur is None
+
+
 def _promote_global(srv, q: str, vec) -> str:
-    """'membrane: remember globally: X' -> write X into the commons now.
-    'membrane: promote #N' -> promote existing local exemplar #N."""
-    gfield = getattr(srv, "global_field", None)
-    if gfield is None:
-        return ("[membrane-intercept] the global field is off "
-                "(--no-global or no path); nothing promoted.")
+    """'membrane: remember globally: X' -> X becomes a curated commons claim;
+    'membrane: promote #N' -> event #N's text does."""
+    fld = _efield_of(srv)
+    if fld is None:
+        return "[membrane-intercept] the entity field is off; nothing promoted."
     mem = srv.membrane
     low = " ".join(q.split()).lower()
     if low.startswith(_PROMOTE_REF):
-        import re
         m = re.search(r"#(\d+)", low)
-        if not m:
-            return ("Membrane promote: give an index, e.g. "
+        hit = fld.event_by_number(int(m.group(1))) if m else None
+        if hit is None or not (hit[1].get("text") or "").strip():
+            return ("Membrane promote: give an event number with text, e.g. "
                     "`membrane: promote #12`.\n\n" + _INTERCEPT_MARKER)
-        idx = int(m.group(1))
-        if idx >= len(mem.store.exemplars):
-            return (f"Membrane promote: no exemplar #{idx} in the local "
-                    f"field (size {len(mem.store)}).\n\n" + _INTERCEPT_MARKER)
-        src = mem.store.exemplars[idx]
-        vec = list(src.vec)
-        n_before = len(gfield.store)
-        ex = gfield.promote_existing(src)
-        g_idx = gfield.store.index_of(ex)
-        _resolve_suggestions(srv, idx)    # slice-3 queue: ratified = resolved
-        _write_audit(mem, {"event": "promote-global", "ex_idx": idx,
-                           "global_ex_idx": g_idx,
-                           "global_size": len(gfield.store),
-                           "situation": _clip(src.situation, 200)})
-        dup_s = " (already in the commons -- text dedup, just re-credited)"
-        return (f"Membrane promote (operator hand -> commons): local #{idx} "
-                f"promoted as global #{g_idx}"
-                f"{dup_s if n_before == len(gfield.store) and ex.votes else ''} "
-                f"(owner {ex.owner or gfield.fid}, votes {len(ex.votes)}). "
-                f"Commons now {len(gfield.store)}.\n"
-                f"    situation: {_clip(src.situation, 240)}\n"
-                f"    response: {_clip(src.action or '', 240)}\n\n"
-                + _INTERCEPT_MARKER)
-    payload = (_after_frame(q, (_PROMOTE_CANON,)) or
-               _after_frame(q, (_PROMOTE_ALT,)))
-    if not payload.strip():
-        return ("Membrane promote: nothing to promote -- give the memory, "
-                "e.g. `membrane: remember globally: user runs macOS+zsh`."
-                "\n\n" + _INTERCEPT_MARKER)
-    try:
-        v = mem.embedder.embed([payload])[0]
-    except Exception as e:
-        return (f"Membrane promote: embed failed ({_one_line(e)}); "
-                f"nothing written.\n\n" + _INTERCEPT_MARKER)
-    ex = gfield.promote(payload, payload, list(map(float, v)),
-                        origin="operator")
-    g_idx = gfield.store.index_of(ex)
-    _write_audit(mem, {"event": "promote-global", "origin": "operator",
-                       "global_ex_idx": g_idx,
-                       "global_size": len(gfield.store),
-                       "payload": _clip(payload, 200)})
-    return (f"Membrane promote (operator hand -> commons): written as "
-            f"global #{g_idx}, owner {ex.owner or gfield.fid}. "
-            f"Commons now {len(gfield.store)}.\n"
-            f"    situation: {_clip(ex.situation, 240)}\n"
-            f"    response: {_clip(ex.action or '', 240)}\n\n" + _INTERCEPT_MARKER)
+        text, src = " ".join(hit[1]["text"].split()), f"event #{m.group(1)}"
+    else:
+        text = " ".join((_after_frame(q, (_PROMOTE_CANON,)) or
+                         _after_frame(q, (_PROMOTE_ALT,)) or "").split())
+        src = "operator"
+        if not text:
+            return ("Membrane promote: nothing to promote -- give the fact, e.g. "
+                    "`membrane: remember globally: user runs macOS+zsh`.\n\n"
+                    + _INTERCEPT_MARKER)
+    key, new = _commons_write(fld, text, fld.origin, src)
+    _write_audit(mem, {"event": "promote-global", "origin": "operator", "key": key,
+                       "source": src, "text": _clip(text, 200)})
+    return (f"Membrane promote (operator hand -> commons): {'written' if new else 're-credited'} "
+            f"as {key}.\n    {_clip(text, 300)}\n\n" + _INTERCEPT_MARKER)
 
 
 def _forget_global(srv, q: str) -> str:
-    """'membrane: forget globally <spec>' -> operator delete from the commons
-    only (by index, index range, or text match -- same semantics as the local
-    forget, but scoped to the commons)."""
-    gfield = getattr(srv, "global_field", None)
-    if gfield is None:
-        return ("[membrane-intercept] the global field is off; nothing "
-                "forgotten.")
+    """'membrane: forget globally <text | everything>' -> delete matching
+    commons claims (content-word overlap >= 0.6, or all)."""
+    from . import claims as CL
+    from .streams import content_words
+    fld = _efield_of(srv)
+    if fld is None:
+        return "[membrane-intercept] the entity field is off; nothing forgotten."
     spec = q[len(_FORGET_GLOBAL_CANON):].strip().rstrip("?.!")
-    if not spec or spec.startswith("everything"):
-        targets = list(range(len(gfield.store.exemplars)))
+    rows = list(fld.b.scan("claims", {"origin": CL.COMMONS}))
+    if not spec or spec.lower().startswith("everything"):
+        targets = rows
     else:
-        toks = [t.strip().lstrip("#") for t in spec.replace(",", " ").split()]
-        if toks and all(t.isdigit() or ("-" in t and
-                                        all(p.isdigit() for p in t.split("-", 1)))
-                        for t in toks):
-            idx = set()
-            for t in toks:
-                if "-" in t:
-                    a, b = (int(p) for p in t.split("-", 1))
-                    idx.update(range(min(a, b), max(a, b) + 1))
-                else:
-                    idx.add(int(t))
-            targets = sorted(i for i in idx if i < len(gfield.store.exemplars))
-        else:
-            mem = srv.membrane
-            try:
-                v = np.asarray(mem.embedder.embed([spec])[0], dtype=float)
-            except Exception:
-                return (f"Membrane forget (global): embed failed; nothing "
-                        f"removed.\n\n" + _INTERCEPT_MARKER)
-            n = np.linalg.norm(v)
-            if n <= 1e-12:
-                targets = []
-            else:
-                v = v / n
-                hits = []
-                for ex, sim in gfield.store.top_k(v, k=_FORGET_LIMIT):
-                    if sim >= 0.55:
-                        hits.append(gfield.store.index_of(ex))
-                targets = sorted(i for i in hits if i is not None)
+        want = set(content_words(spec))
+        targets = [(k, d) for k, d in rows if want and len(
+            want & set(content_words(d.get("text") or ""))) >= 0.6 * len(want)]
+    for k, _ in targets:
+        fld.b.delete("claims", k)
+    _write_audit(srv.membrane, {"event": "forget-global", "removed": len(targets),
+                                "spec": _clip(spec, 200)})
     if not targets:
         return ("Membrane forget (global): nothing in the commons matches; "
                 "nothing removed.\n\n" + _INTERCEPT_MARKER)
-    n0 = len(gfield.store)
-    shown = [(i, _clip(gfield.store.exemplars[i].situation, 160))
-             for i in targets[:8]]
-    removed = gfield.forget(targets)
-    mem = srv.membrane
-    _write_audit(mem, {"event": "forget-global", "removed": removed,
-                       "global_size_before": n0,
-                       "global_size_after": len(gfield.store),
-                       "spec": _clip(spec, 200)})
-    lines = [f"Membrane forget (global, operator path): removed {removed} of "
-             f"{n0}; commons now {len(gfield.store)}."]
-    for i, s in shown:
-        lines.append(f"- #{i}: {s}")
+    lines = [f"Membrane forget (global, operator path): removed {len(targets)} "
+             f"commons claim(s)."]
+    lines += [f"- {_clip(d.get('text', ''), 160)}" for _, d in targets[:8]]
     return "\n".join(lines) + "\n\n" + _INTERCEPT_MARKER
 
 # appended to every write/forget answer so the client can SEE the turn was
@@ -1034,36 +750,6 @@ def _efield_watch_listener(srv):
     return on_applied
 
 
-def _watch_notify(srv, mem, ex_idx: int | None) -> None:
-    """Feed one learned/merged exemplar to the watch board (the spatial
-    triggers' gravity check) and the intent board (near-turn context counters;
-    NEVER auto-close -- cos >= 0.9 only flags 'maybe-done?' in the listing).
-    Never raises into the learning path."""
-    if ex_idx is None or _efield_on(srv) is not None:
-        return                     # the field feeds the boards (on_applied)
-    board = getattr(srv, "_watch_board", None)
-    if board is not None:
-        try:
-            ex = mem.store.exemplars[ex_idx]
-            ev = board.on_learn(ex, ex_idx)
-            if ev is not None:
-                print(f"[watch] #{ex_idx} inside watch {ev['label']!r} "
-                      f"(sim {ev['sim']})", file=sys.stderr)
-        except Exception as e:
-            print(f"[opencode] watch-notify error: {_one_line(e)}",
-                  file=sys.stderr)
-    ib = getattr(srv, "_intent_board", None)
-    if ib is not None:
-        try:
-            hit = ib.on_turn(mem.store.exemplars[ex_idx])
-            if hit is not None:
-                print(f"[intent] near open intention #{hit.iid} "
-                      f"{hit.text!r} (hits {hit.hits})", file=sys.stderr)
-        except Exception as e:
-            print(f"[opencode] intent-notify error: {_one_line(e)}",
-                  file=sys.stderr)
-
-
 def _after_frame(q: str, frames: tuple[str, ...]) -> str:
     t = " ".join(q.split()).lower()
     for f in sorted(frames, key=len, reverse=True):
@@ -1103,24 +789,6 @@ def _is_learn_query(q: str) -> bool:
     if any(t.startswith(f) for f in _LEARN_FRAMES) and "you" in t:
         return True
     return False
-
-
-# ---- human-review surfacing (the judge ESCALATE loop -> the question window) -
-# When the demotion judge cannot rule (verdict ESCALATE), the case is parked in
-# <field>.review.jsonl (runtime._escalate_to_human). This block is what the
-# operator actually SEES: the pending cases are serialized into the RAG system
-# context with an instruction to ask the user through opencode's NATIVE
-# question tool. The user's pick arrives as the next user turn; the pre-gate
-# resolver below matches it (keep/drop/discuss) and closes the case.
-
-_REVIEW_MATCHERS = (
-    ("keep", "membrane: keep #"),
-    ("drop", "membrane: drop #"),
-    ("keep", "membrane: keep the memory"),
-    ("drop", "membrane: drop the memory"),
-    ("discuss", "membrane: discuss review"),
-    ("discuss", "membrane: review discuss"),
-)
 
 
 def _intents_context_block(srv) -> str | None:
@@ -1196,8 +864,6 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
     reader passes drain=False -- a PEEK: it shows pending counts without
     consuming them (the state-instrument read must never eat the model's
     alerts -- the curl-drained-the-ALERT bug)."""
-    mem = srv.membrane
-    from .entities import entity_index, _eph_born_of, _ago
     lines: list[str] = []
     # THE MINIMAL HEADER (the operator's call: 'only tracks and
     # notifications'): the focus/commitments/field-stats lines moved to
@@ -1219,33 +885,32 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
             # 2. TRACKS: the printf stories, ID-prefixed; the fallback
             #    carries the ID + the honest empty state.
             fld = _efield_on(srv)
-            if fld is not None:
-                from .entity_block import track_count
-                est.evaluate_tracks(None, count_fn=lambda k: track_count(fld, k))
+            if fld is None:
+                pass                 # the field is off: no tracks, honest silence
             else:
-                est.evaluate_tracks(mem.store.exemplars)
-            if drain:
-                for a in est.take_alerts():
-                    lines.append(f"ALERT: {a['label']} {a['kind']} its "
-                                 f"boundary ({a['boundary']}; {a['detail']})")
-                    # THE SPEECH LANE (the baby's voice): alerts speak in
-                    # the room -- the same event, two deliveries (the
-                    # banner whisper + the chat message)
-                    speak(srv, f"ALERT: {a['label']} {a['kind']} its "
-                               f"boundary ({a['boundary']})", kind="alert")
-                for a in est.take_announcements():
-                    if a["kind"] == "merged":
-                        lines.append(f"new entity: {a['eid']} — merged "
-                                     f"{a.get('extra', '')}")
-                        speak(srv, f"new entity: {a['eid']} — merged "
-                                   f"{a.get('extra', '')}", kind="note")
-                    else:
-                        clip = a.get("summary") or a["name"]
-                        lines.append(f"new entity: {a['eid']} [{a['cls']}]"
-                                     f" {clip}")
-                        speak(srv, f"new entity: {a['eid']} [{a['cls']}] "
-                                   f"{clip}", kind="note")
-            if fld is not None:
+                from .entity_block import track_count
+                est.evaluate_tracks(count_fn=lambda k: track_count(fld, k))
+                if drain:
+                    for a in est.take_alerts():
+                        lines.append(f"ALERT: {a['label']} {a['kind']} its "
+                                     f"boundary ({a['boundary']}; {a['detail']})")
+                        # THE SPEECH LANE (the baby's voice): alerts speak in
+                        # the room -- the same event, two deliveries (the
+                        # banner whisper + the chat message)
+                        speak(srv, f"ALERT: {a['label']} {a['kind']} its "
+                                   f"boundary ({a['boundary']})", kind="alert")
+                    for a in est.take_announcements():
+                        if a["kind"] == "merged":
+                            lines.append(f"new entity: {a['eid']} — merged "
+                                         f"{a.get('extra', '')}")
+                            speak(srv, f"new entity: {a['eid']} — merged "
+                                       f"{a.get('extra', '')}", kind="note")
+                        else:
+                            clip = a.get("summary") or a["name"]
+                            lines.append(f"new entity: {a['eid']} [{a['cls']}]"
+                                         f" {clip}")
+                            speak(srv, f"new entity: {a['eid']} [{a['cls']}] "
+                                       f"{clip}", kind="note")
                 from .entity_block import now_line, track_line
                 for t in est.list_tracks():
                     if t["key"] == "session:now":
@@ -1254,36 +919,6 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
                             lines.append(ln)
                         continue
                     lines.append(track_line(fld, t["key"], t.get("label") or ""))
-            else:
-                stories: dict[str, str] = {}
-                for k, s in (est.track_report(
-                        mem.store.exemplars, query_vec=vec,
-                        session_since=getattr(srv, "_boot_ts", None),
-                        embedder=mem.embedder) or []):
-                    # STRUCTURED: (track_key, text) -- no string-splitting a
-                    # colon-rich ID out of prose (the 'files' mis-key)
-                    stories[k.lower()] = s
-                for t in est.list_tracks():
-                    key = t["key"]
-                    label = t.get("label") or key
-                    story = stories.get(key.lower())
-                    if story:
-                        lines.append("track: " + story)
-                        continue
-                    # the story was silent: the fallback must still TRACE --
-                    # a compact temporal line (the honest minimum), never a
-                    # bare name (the operator's 'I want stories' call). The
-                    # ID leads (actionable), the label glosses.
-                    idxs2 = entity_index(mem.store.exemplars).get(key) or []
-                    if idxs2:
-                        newest = max((_eph_born_of(mem.store.exemplars, i)
-                                      for i in idxs2), default=0.0)
-                        import time as _tmod
-                        ago = _ago(newest, _tmod.time()) or "unknown age"
-                        lines.append(f"track: {key} ({label}) — {len(idxs2)} "
-                                     f"cells, last active {ago}")
-                    else:
-                        lines.append(f"track: {key} ({label}) — no cells yet")
         except Exception as e:
             print(f"[opencode] banner render error: {e}", file=sys.stderr)
     # 4. THE NULL-RECALL NOTICE (absence is information): a fresh all-
@@ -1345,118 +980,6 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
     if not lines:
         return None
     return ("WHERE WE ARE:\n- " + "\n- ".join(lines))
-
-
-def _review_request_block(srv) -> str | None:
-    """The pending-review notice for the chat context, or None when the queue
-    is empty. Capped: at most 3 cases so the notice never crowds out real
-    memories. Each case is presented as a COMPLETE ruling package: what the
-    question actually is, the options, and what each option CONSEQUES -- so
-    the user can rule from the question window alone, without follow-ups."""
-    try:
-        pending = srv.membrane.review_pending()
-    except Exception:
-        return None
-    if not pending:
-        return None
-    lines = ["PENDING HUMAN REVIEWS (membrane's judge declined to rule; the "
-             "human is the final authority). Each case: the question, the "
-             "options, and the consequences of each option -- relay ALL "
-             "three when you ask."]
-    for rec in pending[:3]:
-        slot = rec["slot"]
-        lines.append(
-            f"- review slot {slot} (exemplar #{rec.get('ex_idx')}):\n"
-            f"    THE QUESTION: a memory was demoted because the user "
-            f"re-asked right after it was used (signal: "
-            f"{rec.get('signal')}, sim {rec.get('sim')}, "
-            f"reasks {rec.get('reask_count', 0)}, "
-            f"contests {rec.get('contest_count', 0)}); the judge declined "
-            f"to rule because: {_clip(rec.get('judge_reason', ''), 160)}. "
-            f"Is this memory worth keeping?\n"
-            f"    the demoted memory:\n"
-            f"      situation: {_clip(rec.get('situation', ''), 200)}\n"
-            f"      response: {_clip(rec.get('action', ''), 200)}\n"
-            f"      user re-asked: {_clip(rec.get('reask_query', ''), 120)}\n"
-            f"    THE OPTIONS and CONSEQUENCES:\n"
-            f"      Keep this memory -- restores it to safe; the field "
-            f"recalls it again, the re-ask is treated as a misunderstanding "
-            f"(wrong: a bad memory stays servable).\n"
-            f"      Drop this memory -- the demotion stands permanently; "
-            f"similar asks escalate to the model fresh instead (wrong: a "
-            f"good memory is lost and its question re-paid each time).\n"
-            f"      Let's discuss -- case stays open; you explain the "
-            f"trade-off and the user decides later.")
-    lines.append(
-        "Ask the user to rule on these NOW via your question tool (one "
-        "question per pending case; use its slot number verbatim). The "
-        "question must state WHAT is being judged, and each option's "
-        "description must state its consequence. Exact choices: `Keep this "
-        "memory` / `Drop this memory` / `Let's discuss`. When the user "
-        "answers, send the ruling as your NEXT chat turn (no tools) phrased "
-        "exactly `membrane: keep #<slot>`, `membrane: drop #<slot>`, or "
-        "`membrane: discuss review #<slot>`. Do not restate the case text "
-        "back into chat; just relay the ruling.")
-    return "\n".join(lines)
-
-
-def _match_review_ruling(q: str) -> tuple[str, int] | None:
-    """A user turn ruling on a pending review -> (keep|drop|discuss, slot).
-    Canonical forms first; then free text the model might relay. Returns None
-    when the turn is not a ruling."""
-    low = " ".join((q or "").split()).lower().rstrip("?.!")
-    for verdict, canon in _REVIEW_MATCHERS:
-        if low.startswith(canon):
-            tail = low.replace(canon, "", 1).strip().lstrip("# ")
-            slot = _slot_of(low) or _slot_of(tail)
-            if slot is not None:
-                return verdict, slot
-    m = _slot_of(low)
-    if m is not None:
-        # 'keep #N' / 'drop #N' / 'memory #N is right/wrong' freeforms
-        if "keep" in low or "correct" in low or "right" in low or "restore" in low:
-            return "keep", m
-        if "drop" in low or "delete" in low or "remove" in low or "wrong" in low:
-            return "drop", m
-    return None
-
-
-def _slot_of(low: str) -> int | None:
-    import re
-    ms = re.findall(r"#?(\d{5,})", low)      # slots are epoch-based (10 digits)
-    return int(ms[0]) if ms else None
-
-
-def _review_report(srv, verdict: str, slot: int) -> str:
-    mem = srv.membrane
-    if verdict == "discuss":
-        cases = [r for r in mem.review_pending() if r["slot"] == slot]
-        if not cases:
-            return (f"Membrane review: no pending case with slot {slot}.\n\n"
-                    + _INTERCEPT_MARKER)
-        c = cases[0]
-        return (f"Membrane review case {c['slot']} (exemplar "
-                f"#{c.get('ex_idx')}) -- DETAILS FOR THE DISCUSSION:\n"
-                f"  situation: {c.get('situation', '')[:400]}\n"
-                f"  response: {c.get('action', '')[:400]}\n"
-                f"  The user re-asked: {c.get('reask_query', '')[:200]}\n"
-                f"  Judge declined because: {c.get('judge_reason', '')}\n"
-                f"  Demotion signal: {c.get('signal')} (sim "
-                f"{c.get('sim')})\n\n"
-                f"Discuss this with the user freely; the case stays pending "
-                f"until they rule with 'membrane: keep/drop #{slot}'."
-                f"\n\n{_INTERCEPT_MARKER}")
-    keep = verdict == "keep"
-    rec = mem.resolve_review(slot, keep)
-    if rec is None:
-        return (f"Membrane review: no pending case with slot {slot} (already "
-                f"resolved or unknown).\n\n" + _INTERCEPT_MARKER)
-    what = ("KEPT -> contest filed; the memory re-promotes if the judge path "
-            "agrees" if keep else
-            "DROPPED -> the demotion is confirmed (human-dropped)")
-    return (f"Membrane review: human verdict '{verdict}' on case {slot} "
-            f"(exemplar #{rec.get('ex_idx')}) recorded. {what}. Case closed."
-            f"\n\n{_INTERCEPT_MARKER}")
 
 
 # ---- the watch layer (spatial triggers, docs: membrane/watch.py) -----------
@@ -2050,102 +1573,63 @@ def _window_seconds(spec: str) -> float | None:
 
 
 def _forget_targets(srv, spec: str) -> list[tuple[int, float]]:
-    """Resolve a forget spec against the field: a time window ('last hour',
-    'this session'), by direct index ('#12', '12', '3-7'), else embed the text
-    and take SAFE exemplars above sim_min. Returns [(index, sim)] sorted by
-    index; emptiness = nothing matched. Window and index targets carry no
-    similarity (sim 0.0).
-
-    Window resolution is by FIELD SIZE AT BOOT (srv._boot_field_size, stamped
-    in main()): the store is append-ordered, so 'this session' = every
-    exemplar appended since the proxy booted. Wall-clock windows ('last hour')
-    would need per-record timestamps, which the audit log does not carry -- so
-    they resolve to the same boot-anchored approximation (conservative: it can
-    only under-remove, never over-remove)."""
-    exs = srv.membrane.store.exemplars
+    """Resolve an OPERATOR forget spec to event numbers: '#12' / '3-7' (the
+    numbers the blocks cite), a time window of this seat's own sessions
+    ('the last hour'; 'this session' = since the seat booted), 'everything'
+    (this origin's live events, code aside), else the events with a sentence
+    near the spec's meaning (sim >= 0.55, up to 40). [(n, sim)] by number."""
+    fld = _efield_of(srv)
+    if fld is None:
+        return []
     spec_l = spec.strip().lower()
+    nums = _parse_agent_forget(spec)
+    if nums:
+        return [(n, 0.0) for n in nums]
     win = _window_seconds(spec_l)
     if win is not None:
-        booted = getattr(srv, "_boot_field_size", None)
-        if booted is None:
-            return []                    # probe/handler-only context: refuse
-        return [(i, 0.0) for i in range(booted, len(exs))]
+        since = float(getattr(srv, "_boot_ts", 0.0) or 0.0) if win < 0 else time.time() - win
+        return [(d["n"], 0.0) for d in fld.events_since(since, _own_session_prefix(srv))
+                if d.get("n") is not None]
     if not spec_l or spec_l.startswith("everything") or spec_l in _FORGET_ALL:
-        return [(i, 0.0) for i in range(len(exs))]
-    # ranges/indices first: '#12', '12', '3-7' (comma lists allowed)
-    toks = [t.strip().lstrip("#") for t in spec.replace(",", " ").split()]
-    if toks and all(t.isdigit() or ("-" in t and
-                                    all(p.isdigit() for p in t.split("-", 1)))
-                    for t in toks):
-        idx = set()
-        for t in toks:
-            if "-" in t:
-                a, b = (int(p) for p in t.split("-", 1))
-                idx.update(range(min(a, b), max(a, b) + 1))
-            else:
-                idx.add(int(t))
-        return [(i, 0.0) for i in sorted(idx) if i < len(exs)]
-    # text match: embed the spec, keep SAFE exemplars over the sim floor
-    mem = srv.membrane
+        return sorted((d["n"], 0.0) for _, d in fld.b.scan("events", {"origin": fld.origin})
+                      if d.get("n") is not None and d.get("stream") != "code"
+                      and d.get("status") != "forgotten")
     try:
-        vec = mem.embedder.embed([spec])[0]
+        vec = srv.membrane.embedder.embed([spec])[0]
     except Exception:
         return []
-    qn = np.asarray(vec, dtype=float)
-    n = np.linalg.norm(qn)
-    if n <= 1e-12:
-        return []
-    qn = qn / n
-    hits = []
-    for ex, sim in mem.store.top_k(qn, k=_FORGET_LIMIT):
-        if sim >= 0.55 and ex.safe:
-            hits.append((mem.store.index_of(ex), float(sim)))
-    return [(i, s) for i, s in sorted(hits) if i is not None]
+    return sorted((d["n"], s) for d, s in fld.events_near(vec, k=_FORGET_LIMIT)
+                  if d.get("n") is not None)
 
 
 def _forget_report(srv, spec: str) -> str:
+    """The operator's forget (pre-gate, no model call): the events the spec
+    resolves to are forgotten and the entities they moved recomputed."""
     mem = srv.membrane
-    nums = _parse_agent_forget(spec) if _efield_on(srv) is not None else None
-    if nums:
-        # the field is on: '#N' names EVENTS (the numbers the blocks cite)
-        res = _efield_forget(srv, nums)
-        _write_audit(mem, {"event": "forget-events", "origin": "operator",
-                           "results": res, "spec": _clip(spec, 200)})
-        lines = ["Membrane forget (entity field, operator path, no model call):"]
-        for r in res:
-            if r.get("missing"):
-                lines.append(f"- #{r['n']}: no such event")
-            elif r.get("error"):
-                lines.append(f"- #{r['n']}: failed ({r['error']})")
-            else:
-                lines.append(f"- #{r['n']}: {'already forgotten' if r['already'] else 'forgotten'}"
-                             f"; {len(r['entities'])} entities recomputed")
-        return "\n".join(lines) + _INTERCEPT_MARKER
+    if _efield_of(srv) is None:
+        return ("Membrane forget: the entity field is unavailable; nothing removed."
+                "\n\n" + _INTERCEPT_MARKER)
     is_window = _window_seconds(spec) is not None
     targets = _forget_targets(srv, spec)
     if not targets:
-        if is_window:
-            return ("Membrane forget (time window): nothing was appended since "
-                    "boot; nothing removed.\n\n" + _INTERCEPT_MARKER)
-        return ("Membrane forget (operator path, no model call): nothing in the "
-                "field matches that; nothing removed.\n\n" + _INTERCEPT_MARKER)
-    n0 = len(mem.store)
-    # capture the situation texts BEFORE removal (indexes shift after)
-    shown = [(i, sim, _clip(mem.store.exemplars[i].situation, 160))
-             for i, sim in targets[:8] if i < n0]
-    removed = mem.store.forget([i for i, _ in targets])
-    mem.store.save(mem.field_path)
-    _write_audit(mem, {"event": "forget", "removed": removed,
-                       "window": is_window,
-                       "field_size_before": n0,
-                       "field_size_after": len(mem.store),
-                       "spec": _clip(spec, 200)})
-    head = ("Membrane forget (time window, operator path, no model call): "
-            "removed" if is_window else
-            "Membrane forget (operator path, no model call): removed")
-    lines = [f"{head} {removed} of {n0} exemplars; field now {len(mem.store)}."]
-    for i, sim, q in shown:
-        lines.append(f"- #{i}{'' if sim == 0.0 else f' (sim {sim:.2f})'}: {q}")
+        return ("Membrane forget (operator path, no model call): "
+                + ("nothing was captured in that window" if is_window
+                   else "nothing in the field matches that")
+                + "; nothing removed.\n\n" + _INTERCEPT_MARKER)
+    fld = srv.efield
+    shown = {}
+    for n, sim in targets[:8]:
+        hit = fld.event_by_number(n)
+        if hit:
+            shown[n] = (sim, _clip(hit[1].get("text") or hit[1].get("tool") or "", 160))
+    res = fld.forget_many([n for n, _ in targets])
+    done = [r for r in res if r.get("key") and not r.get("already")]
+    _write_audit(mem, {"event": "forget-events", "origin": "operator", "window": is_window,
+                       "removed": len(done), "spec": _clip(spec, 200)})
+    lines = [f"Membrane forget (operator path, no model call): forgot {len(done)} of "
+             f"{len(targets)} event(s); the entities they moved are recomputed."]
+    for n, (sim, text) in shown.items():
+        lines.append(f"- #{n}{'' if sim == 0.0 else f' (sim {sim:.2f})'}: {text}")
     if len(targets) > 8:
         lines.append(f"- ... and {len(targets) - 8} more")
     return "\n".join(lines) + _INTERCEPT_MARKER
@@ -2190,133 +1674,95 @@ def _parse_agent_forget(spec: str) -> list[int] | None:
 
 
 def _agent_forget(srv, spec: str) -> str:
-    """The thought-path forget executor. Index form -> DELETE (capped at
-    AGENT_FORGET_LIMIT; the remainder is named so the agent can re-ask in
-    batches). Anything wordier -> a PROPOSAL of candidate indexes (top-K
-    safe sim hits), never a deletion. Both replies carry the intercept
-    marker (the ask itself is never learned)."""
-    mem = srv.membrane
-    if mem.store is None or mem.embedder is None:
-        return ("[membrane-intercept] forget unavailable: the field store or "
-                "embedder is not resolved yet; retry once the field is up.")
-    idxs = _parse_agent_forget(spec)
-    if idxs is None:
-        # PROPOSAL ONLY: embed the spec, list sim>=0.55 SAFE candidates.
+    """The thought-path forget: index form ('#12', '3-7') forgets those
+    events, capped at AGENT_FORGET_LIMIT; anything wordier only PROPOSES the
+    nearest events -- free text never deletes from model prose."""
+    fld = _efield_of(srv)
+    if fld is None or srv.membrane.embedder is None:
+        return ("[membrane-intercept] forget unavailable: the entity field or the "
+                "embedder is not up yet; retry once it is.")
+    nums = _parse_agent_forget(spec)
+    if nums is None:
         try:
-            vec = mem.embedder.embed([spec])[0]
+            near = fld.events_near(srv.membrane.embedder.embed([spec])[0], k=8)
         except Exception:
-            vec = None
-        cands: list[tuple[int, float]] = []
-        if vec is not None:
-            qn = np.asarray(vec, dtype=float)
-            n = float(np.linalg.norm(qn))
-            if n > 1e-12:
-                for ex, sim in mem.store.top_k(qn / n, k=_FORGET_LIMIT):
-                    if sim >= 0.55 and ex.safe:
-                        i = mem.store.index_of(ex)
-                        if i is not None:
-                            cands.append((i, float(sim)))
-        if not cands:
+            near = []
+        if not near:
             return ("[membrane-intercept] forget proposal: nothing near that "
-                    "(sim >= 0.55, safe cells only). Nothing removed. Point "
-                    "at explicit indexes instead.")
-        lst = ", ".join(f"#{i} (sim {s:.2f})"
-                        for i, s in cands[:8])
-        return ("[membrane-intercept] wordy asks never delete from agent "
-                "prose. Nearest safe cells: " + lst +
-                ". To remove, re-ask in index form "
+                    "(sim >= 0.55). Nothing removed. Point at event numbers instead.")
+        lst = ", ".join(f"#{d['n']} (sim {s_:.2f})" for d, s_ in near if d.get("n"))
+        return ("[membrane-intercept] wordy asks never delete from agent prose. "
+                f"Nearest events: {lst}. To remove, re-ask in index form "
                 "(e.g. 'membrane: forget #3-7, 9'). Nothing removed.")
-    n0 = len(mem.store)
-    in_range = [i for i in idxs if 0 <= i < n0]
-    if not in_range:
-        return (f"[membrane-intercept] forget: none of those indexes exist "
-                f"(field has {n0} cells). Nothing removed.")
-    if len(in_range) > _AGENT_FORGET_LIMIT:
-        return (f"[membrane-intercept] forget: {len(in_range)} indexes exceed "
-                f"the agent cap ({_AGENT_FORGET_LIMIT}). Ask the operator for "
-                f"a larger delete. Nothing removed.")
-    shown = [(i, _clip(mem.store.exemplars[i].situation, 120))
-             for i in in_range]
-    removed = mem.store.forget(in_range)
-    mem.store.save(mem.field_path)
-    _write_audit(mem, {"event": "forget", "origin": "agent",
-                       "removed": removed,
-                       "field_size_before": n0,
-                       "field_size_after": len(mem.store),
-                       "spec": _clip(spec, 200)})
-    lines = ([f"[membrane-intercept] agent forget (index-form, no model "
-              f"call): removed {removed} of {n0}; field now "
-              f"{len(mem.store)}."]
-             + [f"- #{i}: {q}" for i, q in shown])
+    if len(nums) > _AGENT_FORGET_LIMIT:
+        return (f"[membrane-intercept] forget: {len(nums)} events exceed the agent cap "
+                f"({_AGENT_FORGET_LIMIT}). Ask the operator for a larger delete. "
+                "Nothing removed.")
+    res = _efield_forget(srv, nums)
+    _write_audit(srv.membrane, {"event": "forget-events", "origin": "agent",
+                                "results": res, "spec": _clip(spec, 200)})
+    lines = ["[membrane-intercept] agent forget (index form, no model call):"]
+    for r in res:
+        if r.get("missing"):
+            lines.append(f"- #{r['n']}: no such event")
+        elif r.get("error"):
+            lines.append(f"- #{r['n']}: failed ({r['error']})")
+        else:
+            lines.append(f"- #{r['n']}: {'already forgotten' if r['already'] else 'forgotten'}; "
+                         f"{len(r['entities'])} entities recomputed")
     return "\n".join(lines)
 
 
 _AGENT_LEARN_MAX_CHARS = 2000   # one note, not a transcript dump
 
 
-def _agent_learn(srv, payload: str) -> str:
-    """The thought-path learn executor (agent writes, ON by default).
-
-    The model can now write its OWN earned lessons: a `membrane: learn that X`
-    found in assistant prose goes through the SAME pipeline as a teed turn
-    (learn_pair: vague filter, dedup, variety gate) -- so a junk note is
-    skipped by the same guards that skip junk turns, a dup is merged, and the
-    note starts safe but STAYS answerable to a re-ask demotion. Differences
-    from the operator path: the audit carries `origin: agent` (trust
-    forensics; a noisy seat's agent notes are visible and, one day,
-    demotable wholesale) and the tag is `agent-note` (vs the operator's
-    `operator-note`). Length-capped: a lesson is a note, not a paste.
-
-    --no-agent-writes reverts to the report-only covenant (the executor is
-    never called; _thought_answer answers with the proposal wording)."""
-    mem = srv.membrane
-    if mem.store is None or mem.embedder is None:
-        return ("[membrane-intercept] learn unavailable: the field store or "
-                "embedder is not resolved yet; retry once the field is up.")
-    payload = (payload or "").strip()
+def _learn_refusal(payload: str) -> str | None:
+    """Why a lesson is not memory material (None when it is)."""
     if not payload:
-        return ("[membrane-intercept] learn: nothing to learn (the payload "
-                "after 'learn that' was empty). Nothing written.")
+        return "nothing to learn (the payload was empty)"
     if "```" in payload:
-        return ("[membrane-intercept] learn: fenced code blocks are not "
-                "memory material -- summarize the LESSON in prose instead. "
-                "Nothing written.")
+        return "fenced code blocks are not memory material -- state the LESSON in prose"
     if len(payload) > _AGENT_LEARN_MAX_CHARS:
-        return (f"[membrane-intercept] learn: payload too long "
-                f"({len(payload)} > {_AGENT_LEARN_MAX_CHARS} chars) -- a "
-                f"lesson is a note, not a transcript. Nothing written.")
-    idx = mem.learn_pair(payload, payload, src="model")
-    if idx is None:
-        return ("[membrane-intercept] agent learn: the field already holds "
-                "that (dedup) or the variety gate skipped it -- nothing new "
-                "written.")
-    _watch_notify(srv, mem, idx)
-    _write_audit(mem, {"event": "agent-learn", "origin": "agent",
-                       "ex_idx": idx, "tag": "agent-note",
-                       "field_size": len(mem.store),
-                       "payload": _clip(payload, 400)})
-    ex = mem.store.exemplars[idx]
-    return (f"[membrane-intercept] agent learn (no model call): written as "
-            f"exemplar #{idx}, safe=True. Field now {len(mem.store)}.\n"
-            f"    situation: {_clip(ex.situation, 280)}\n"
-            f"    response: {_clip(ex.action or '', 280)}")
+        return (f"payload too long ({len(payload)} > {_AGENT_LEARN_MAX_CHARS} chars) -- "
+                "a lesson is a note, not a transcript")
+    return None
+
+
+def _agent_learn(srv, payload: str) -> str:
+    """The thought-path learn (agent writes, on by default): `membrane: learn
+    that X` in the model's prose becomes a NOTE event (src 'model'), whose
+    claims the evidence checks like any other model claim."""
+    payload = (payload or "").strip()
+    why = _learn_refusal(payload)
+    if why:
+        return f"[membrane-intercept] learn: {why}. Nothing written."
+    note = _efield_learn(srv, payload, "model")
+    if not note:
+        return ("[membrane-intercept] learn unavailable: the entity field is not up; "
+                "nothing written.")
+    _write_audit(srv.membrane, {"event": "agent-learn", "origin": "agent",
+                                "tag": "agent-note", "payload": _clip(payload, 400),
+                                "note": note.strip()})
+    return f"[membrane-intercept] agent learn (no model call):{note}"
 
 
 def _efield_learn(srv, payload: str, src: str) -> str:
-    """The lesson as a NOTE event on the entity field ('' when off)."""
-    fld = _efield_on(srv)
+    """The lesson as a NOTE event: ' Written as note #N.' ('' when the field
+    is unavailable or the payload is empty)."""
+    fld = _efield_of(srv)
     if fld is None or not payload.strip():
         return ""
     try:
         k = fld.learn(payload, src=src)
         d = fld.b.get("events", k) or {}
-        return f" Entity field: note #{d.get('n', '?')}."
+        return f" Written as note #{d.get('n', '?')}."
     except Exception as e:
-        return f" Entity field: not written ({str(e)[:80]})."
+        print(f"[efield] learn failed: {e}", file=sys.stderr)
+        return ""
 
 
 def _efield_forget(srv, nums: list[int]) -> list[dict]:
-    fld = _efield_on(srv)
+    fld = _efield_of(srv)
     out = []
     for n in nums:
         try:
@@ -2328,33 +1774,26 @@ def _efield_forget(srv, nums: list[int]) -> list[dict]:
 
 
 def _learn_report(srv, payload: str) -> str:
-    mem = srv.membrane
-    ef_note = _efield_learn(srv, payload, "user")
-    if not payload.strip() or not mem.embedder:
-        return ("Membrane learn (operator path): nothing to learn or embedder "
-                "unresolved -- nothing written.\n\n" + _INTERCEPT_MARKER)
-    idx = mem.learn_pair(payload, payload)
-    if idx is None:
-        return ("Membrane learn (operator path): the field already holds that "
-                "(dedup) or the variety gate skipped it -- nothing new written."
-                "\n\n" + _INTERCEPT_MARKER)
-    # W4b: the operator's verbatim words also land in the user ledger
-    # (model-unwritable; this executor is reached only from USER turns).
+    """The operator's learn (pre-gate, no model call): a NOTE event, and the
+    verbatim words in the user ledger."""
+    payload = (payload or "").strip()
+    why = _learn_refusal(payload) if payload else "nothing to learn"
+    if why:
+        return f"Membrane learn (operator path): {why}; nothing written.\n\n" + _INTERCEPT_MARKER
+    note = _efield_learn(srv, payload, "user")
+    if not note:
+        return ("Membrane learn (operator path): the entity field is unavailable; "
+                "nothing written.\n\n" + _INTERCEPT_MARKER)
     ledger = getattr(srv, "user_ledger", None)
     if ledger is not None:
         try:
-            ledger.append(payload)
+            ledger.append(payload)          # the operator's verbatim words
         except Exception:
             pass
-    _watch_notify(srv, mem, idx)
-    _write_audit(mem, {"event": "operator-learn", "ex_idx": idx,
-                       "tag": _LEARN_TAG, "field_size": len(mem.store),
-                       "payload": _clip(payload, 400)})
-    ex = mem.store.exemplars[idx]
-    return (f"Membrane learn (operator path, no model call): written as "
-            f"exemplar #{idx}, safe=True. Field now "
-            f"{len(mem.store)}.{ef_note}\n    situation: {_clip(ex.situation, 280)}\n"
-            f"    response: {_clip(ex.action or '', 280)}\n\n" + _INTERCEPT_MARKER)
+    _write_audit(srv.membrane, {"event": "operator-learn", "tag": _LEARN_TAG,
+                                "payload": _clip(payload, 400), "note": note.strip()})
+    return (f"Membrane learn (operator path, no model call):{note}\n"
+            f"    {_clip(payload, 280)}\n\n" + _INTERCEPT_MARKER)
 
 
 # ---- semantic fallback for the intercepts (the field grows its own detector) -
@@ -2426,12 +1865,13 @@ _INTERCEPT_ANTI_SEEDS = [
 
 # runtime caches (populated on the MembraneOpenAIHandler's server): the embedded
 # seed matrix + threshold for the FIXED layer, and the same for the FIELD-GROWN
-# layer (canon-frame exemplars harvested from the live store, cached on field
-# size). Per-call embedding of the query costs one /api/embeddings round-trip
-# (~ms local) and only fires when the lexical frames miss.
+# layer (canon-frame asks harvested from the discourse events, cached on the
+# origin's event count). Per-call embedding of the query costs one
+# /api/embeddings round-trip (~ms local) and only fires when the lexical
+# frames miss.
 _SEED_CACHE = {"matrix": None, "thr": None, "tuned": False,
                "field": {"size": -1, "matrix": None, "thr": None,
-                         "topics": []}}
+                         "topics": [], "scanned": False}}
 
 
 def _tune_threshold(srv, Vn, tag: str) -> float | None:
@@ -2442,6 +1882,8 @@ def _tune_threshold(srv, Vn, tag: str) -> float | None:
     None is the honest 'cannot separate' and that layer stays off (lexical
     frames carry it)."""
     mem = srv.membrane
+    if mem.embedder is None:
+        return None
     anti = np.asarray(mem.embedder.embed(_INTERCEPT_ANTI_SEEDS), dtype=float)
     norms = np.linalg.norm(anti, axis=1)
     norms[norms <= 1e-12] = 1.0
@@ -2515,40 +1957,39 @@ def _embed_seed_matrix(srv) -> bool:
 
 # ---- field-grown seed layer -------------------------------------------------
 # The 524-note paradox ("intercepted asks are never learned, so the field cannot
-# grow its own detector") is broken by the CANON-FRAME PAYLOADS that DO enter
-# the field: operator-note writes (the learn skill's payload), forget-command
-# echoes, and any escaped (`model:`) skill ask that later settled. Those
-# exemplars carry the canonical frames verbatim -- harvest them as a second
-# seed layer so the detector grows from the operator's own hand, not from raw
-# model traffic (which would let junk reasoning poison the semantic gate).
-# Labeling: which canon frame the exemplar text carries -> its family.
+# grow its own detector") is broken by the CANON-FRAME TURNS that DO enter the
+# field: operator-note writes (the learn skill's payload), forget-command
+# echoes, and any escaped (`model:`) skill ask the capture takes. Those
+# discourse events carry the canonical frames verbatim -- harvest them as a
+# second seed layer so the detector grows from the operator's own hand, not
+# from raw model traffic (which would let junk reasoning poison the gate).
+# Labeling: which canon frame the event text carries -> its family (model
+# prose and reasoning are excluded by their stream/role, not by prefix: the
+# old captured-thought misroute cannot happen on events).
 
 
 def _field_seed_topics(srv) -> list:
-    """(text, family, ex_idx) for every store exemplar carrying a canonical
-    skill frame (learn-tag payloads, recall/learn/forget canon lines, escaped
-    model: asks). Cached on field size -- a forget that removes the seed
-    exemplars de-activates the field layer (a feature: forgetting also
-    un-teaches the detector). Empty when --no-field-seeds."""
+    """(text, family, #n) for every discourse event carrying a canonical
+    skill frame (user/model prose only -- not reasoning turns). Cached on
+    the origin's event count; empty when --no-field-seeds."""
     if not getattr(srv, "field_seeds", True):
         return []
-    mem = srv.membrane
-    n = len(mem.store)
+    fld = _efield_of(srv)
+    if fld is None:
+        return []
+    n = int(fld._ostats.get("ev_n") or 0)
     c = _SEED_CACHE["field"]
-    if c["size"] == n and c["matrix"] is not None:
+    if c["size"] == n and c["scanned"]:
         return c["topics"]
     topics: list = []
-    for ex in mem.store.exemplars:
-        # total-capture kinds (reasoning:/plan:/call/result) are model traffic
-        # -- the exact junk the field layer must never learn from: a captured
-        # thought merely QUOTING "remember that ..." must not become a learn
-        # seed (misroute seen live: plan-mode reasoning hijacked the learn
-        # family and ate an operator ask).
-        sit = " ".join(ex.situation.split()).lower()
-        if (sit.startswith("reasoning:") or sit.startswith("plan:")
-                or sit.startswith("call ") or sit.startswith("result ")):
+    for _k, d in fld.b.scan("events", {"origin": fld.origin,
+                                       "stream": "discourse",
+                                       "role": ["user", "model"]}):
+        if d.get("status") == "forgotten":
             continue
-        text = " ".join((ex.situation + " " + (ex.action or "")).split())
+        text = " ".join((d.get("text") or "").split())
+        if not text:
+            continue
         low = text.lower()
         # frames only at the START of the text: prose that merely MENTIONS
         # "note that" mid-sentence is not a memory command (prefix-only).
@@ -2556,7 +1997,7 @@ def _field_seed_topics(srv) -> list:
             fam = "recall"
         elif low.startswith(_FORGET_CANON) or any(low.startswith(f) for f in _FORGET_FRAMES):
             fam = "forget"
-        elif low.startswith("membrane: learn that") or any(low.startswith(f) for f in _LEARN_FRAMES):
+        elif low.startswith(_LEARN_CANON) or any(low.startswith(f) for f in _LEARN_FRAMES):
             fam = "learn"
         elif any(low.startswith(f) for f in _RECALL_FRAMES):
             fam = "recall"
@@ -2568,9 +2009,10 @@ def _field_seed_topics(srv) -> list:
                    "recall")
         else:
             continue
-        topics.append((text, fam, mem.store.index_of(ex)))
+        topics.append((text, fam, d.get("n")))
     c["topics"] = topics
     c["size"] = n
+    c["scanned"] = True
     c["matrix"] = None            # force re-embed on next use
     return topics
 
@@ -2664,94 +2106,57 @@ def _semantic_recall_hit(srv, q: str) -> tuple[bool, bool]:
 
 
 def _recall_report(srv, topic: str) -> str:
-    """The internal recall answer: top-k SAFE exemplars for the topic, or the
-    newest slice of the field for a dump. Read-only: no learn, no audit write,
-    no nudge -- the only embed call is of the TOPIC itself (an outbound
-    query, never stored)."""
-    mem = srv.membrane
-    exs = mem.store.exemplars
+    """The internal recall answer: the field's block for the topic (the past
+    answers nearest it + the entities it names), or the newest numbered
+    events for a dump. Read-only: no learn, no audit write, no nudge --
+    the only embed call is of the TOPIC itself (an outbound query, never
+    stored)."""
+    fld = _efield_of(srv)
     head = ("Field recall (computed live by membrane, no model call; "
             "this turn was intercepted and NOT learned):")
-    if mem.embedder is None:
-        return head + "\n- embedder unresolved; cannot search the field"
+    if fld is None:
+        return head + "\n- the entity field is off (the field is memory)"
+    try:
+        from .entity_block import render_for
+    except ImportError:
+        render_for = None
     lines = [head]
-    vec = None
-    hits = 0
+    if topic and fld.embedder is None:
+        return head + "\n- embedder unresolved; cannot search the field"
     if topic:
-        vec = mem.embedder.embed([topic])[0]
-        for ex, sim in mem.store.top_k(vec, k=12):
-            if sim < 0.25 or not ex.safe:
-                continue
-            q = _clip(ex.situation, 280)
-            a = _clip(ex.action or "", 280)
-            if not q or not a:
-                continue
-            tag = getattr(ex, "outcome", "") or "pending"
-            via = f" [via {ex.model}]" if getattr(ex, "model", "") else ""
-            lines.append(f"({sim:.2f} [{tag}]{via}{_seat_label(ex)} "
-                         f"{_src_label(ex)} "
-                         f"situation: {q}\n    response: {a}")
-            hits += 1
-            if hits >= 8:
-                break
-        # THE SHAPE LANE (the VSA lane's #4 consumer): hits by token
-        # ORDER -- rows whose pooled vec misses but whose hypervector
-        # state matches the ask surface here, tagged [shape]. Read-only
-        # (no learn, no audit write); the lane degrades silently.
-        _lane = getattr(mem, "vsa_lane", None)
-        if _lane is not None:
-            try:
-                _seen = {id(ex) for ex, _ in (
-                    (e, s) for e, s in mem.store.top_k(vec, k=12))} \
-                    if vec is not None else set()
-                for ex, shape_sim in _lane.hits(mem.store, topic, k=3):
-                    if id(ex) in _seen or not ex.safe or shape_sim < 0.68:
-                        continue
-                    q = _clip(ex.situation, 280)
-                    a = _clip(ex.action or "", 280)
-                    if not q or not a:
-                        continue
-                    tag = getattr(ex, "outcome", "") or "pending"
-                    lines.append(f"({shape_sim:.2f} [{tag}] [shape]"
-                                 f"{_seat_label(ex)} {_src_label(ex)} "
-                                 f"situation: {q}\n    response: {a}")
-                    hits += 1
-                    if hits >= 8:
-                        break
-            except Exception:
-                pass                    # the lane never breaks the report
-    if hits == 0:
-        lines.append(f"- nothing SAFE in the field about {topic!r} yet")
-    # the commons top-up (docs/global-field.md): another project's promoted
-    # memories surface here too, provenance-tagged. Read-only; degrades
-    # silently when the global layer is off. The dump branch (no topic) is
-    # independent: a topic-less print of the NEWEST local slice.
-    gf = getattr(srv, "global_field", None)
-    if gf is not None and topic:
+        block = None
         try:
-            for ex, sim in gf.top_up(vec, k=2,
-                                     sim_min=float(getattr(
-                                         srv, "global_sim_min", 0.55))):
-                q = _clip(ex.situation, 280)
-                a = _clip(ex.action or "", 280)
-                if q and a:
-                    tag = getattr(ex, "outcome", "") or "pending"
-                    lines.append(f"[global · owned by {ex.owner or '?'} · "
-                                 f"sim {sim:.2f}]{_seat_label(ex)} "
-                                 f"situation: {q}\n    response: {a}")
+            block = render_for(fld, topic) if render_for else None
         except Exception as e:
-            lines.append(f"- (global top-up skipped: {_one_line(e)})")
-    if not topic:
-        lines.append(f"- field holds {len(exs)} exemplars; newest {min(12, len(exs))}:")
-        for i, ex in enumerate(exs[-12:]):
-            tag = getattr(ex, "outcome", "") or "pending"
-            mark = "" if ex.safe else " [UNSAFE]"
-            lines.append(f"#{len(exs) - len(exs[-12:]) + i} [{tag}]{mark} "
-                         f"{_seat_label(ex)} "
-                         f"{_src_label(ex)} "
-                         f"situation: {_clip(ex.situation, 200)}\n"
-                         f"    response: {_clip(ex.action or '', 200)}")
-    lines.append("- trust: ground (environment-verified) > user (operator) "
+            lines.append(f"- (render skipped: {_one_line(e)})")
+        if not block:
+            lines.append(f"- nothing in the field about {topic!r} yet")
+        else:
+            lines.append(block)
+    else:
+        # dump: the newest numbered events, ~40 back from the last seq
+        try:
+            last_seq = int(fld._ostats.get("seq_last") or 0)
+        except Exception:
+            last_seq = 0
+        rows = []
+        try:
+            rows = [d for _, d in fld.b.scan("events", {"origin": fld.origin,
+                                                        "seq": {"gt": max(0, last_seq - 40)}})]
+        except Exception as e:
+            lines.append(f"- (event dump skipped: {_one_line(e)})")
+        rows = [d for d in rows
+                if d.get("stream") in ("discourse", "observation", "code")
+                and d.get("status") != "forgotten"][-12:]
+        lines.append(f"- field holds {int(fld._ostats.get('ev_n') or 0)} numbered events; newest:")
+        for d in rows:
+            num = f"#{d['n']} " if d.get("n") is not None else ""
+            head_txt = " ".join((d.get("text") or d.get("served") or "").split())
+            tag = d.get("stream")
+            if d.get("stream") == "observation":
+                tag = f"tool {d.get('tool')}"
+            lines.append(f"{num}[{tag}] {_clip(head_txt, 200)}")
+    lines.append("- trust: ground (observed + code) > user (operator) "
                  "> model (own prior guess -- verify against ground)")
     return "\n".join(lines)
 
@@ -2890,102 +2295,6 @@ def _elide_tool_tail(messages: list, keep_last: int = 3, head: int = 300,
                 calls.append(tc)
             msgs[i] = dict(m, tool_calls=calls)
     return msgs, saved
-
-
-def _reconstruct_history(store, n: int = 6, budget: int = 3000) -> str | None:
-    """THE RECONSTRUCTION (the coherence block): the last N learned turns
-    (time-ordered by eph_born / the capture clock) rendered as compact
-    Q/A pairs -- the conversation as the FIELD remembers it, compressed
-    ~50:1 vs the raw transcript. The transcript is the memory that kept
-    crashing; this is its bounded replacement."""
-    import time as _t
-    from .entities import _eph_born_of
-    exs = getattr(store, "exemplars", [])
-    # recall hygiene on the recon (Bug: the capture lanes -- 'plan:/reasoning:/
-    # tool X for:' cells -- were learned verbatim AND rendered into the
-    # coherence block, because _memory_block's surface screens never ran
-    # here). Same covenant, same screens: capture-lane cells skip the recon;
-    # machinery spans are stripped from the RENDERED text.
-    try:
-        from .rag import is_capture_junk, strip_machinery_text
-    except Exception:                      # never let hygiene break the recon
-        def is_capture_junk(situation: str) -> bool:
-            return False
-        def strip_machinery_text(text: str) -> str:
-            return text
-    now = _t.time()
-    any_stamped = any(_eph_born_of(exs, j) > 0.0
-                      for j in range(len(exs)))
-    # the learned turns: non-ephemeral + this-session candidates, by
-    # eph_born (the capture clock) descending
-    def _born(i: int) -> float:
-        """The capture clock with a stamp-less fallback: a cell without
-        eph_born (legacy rows, a capture where the clock didn't stick) used
-        to vanish from the recon entirely. Capture order IS time order, so
-        the birth is interpolated from the nearest stamped neighbors; a
-        stamp-less cell in a stamp-less field stays dropped (no recency
-        evidence at all), and a head stamp-less cell predates the first
-        stamp (conservative-old)."""
-        b = _eph_born_of(exs, i)
-        if b > 0.0:
-            return b
-        if not any_stamped:
-            return 0.0
-        lo = hi = None
-        for j in range(i - 1, -1, -1):
-            bj = _eph_born_of(exs, j)
-            if bj > 0.0:
-                lo = (j, bj)
-                break
-        for j in range(i + 1, len(exs)):
-            bj = _eph_born_of(exs, j)
-            if bj > 0.0:
-                hi = (j, bj)
-                break
-        if hi is None:
-            if lo is None:
-                return 0.0
-            return min(now, lo[1] + (i - lo[0]) * 1.0)  # the tail: just after
-        if lo is None:
-            return hi[1]
-        frac = (i - lo[0]) / float(hi[0] - lo[0])
-        return lo[1] + (hi[1] - lo[1]) * frac
-    items: list[tuple[float, int]] = []
-    for i, e in enumerate(exs):
-        if not (e.situation or "").strip() or not (e.action or "").strip():
-            continue
-        if (e.outcome or "").startswith("compacted@"):
-            continue                 # the distillate: the recall lane's job
-        if is_capture_junk(e.situation or ""):
-            continue                 # capture lanes: learned, never the recon
-        t = _born(i)
-        if t and now - t <= 6 * 3600.0:   # the session window (6h)
-            # THE STAMP TIEBREAK (w_conf-scale, 'evidence beats recency'):
-            # a provenance-stamped cell (the why / the fix / the tool op)
-            # ranks as if 90s fresher -- it wins the near-tie against a
-            # bare neighbor when the n-slot is contested.
-            _x = getattr(e, "extra", {}) or {}
-            if _x.get("why") or _x.get("fix") or _x.get("fn"):
-                t += 90.0
-            items.append((t, i))
-    items.sort(reverse=True)
-    lines = []
-    used = 0
-    for _born_t, i in items[:n * 2]:    # over-fetch: the budget clips
-        e = exs[i]
-        q = " ".join(strip_machinery_text(e.situation or "").split())[:200]
-        a = " ".join(strip_machinery_text(e.action or "").split())[:400]
-        if not q or not a:
-            continue
-        line = f"situation: {q}\nresponse: {a}"
-        if used + len(line) > budget:
-            break
-        lines.append(line)
-        used += len(line)
-        if len(lines) >= n:
-            break
-    lines.reverse()                     # oldest first (the conversation's
-    return ("\n".join(lines)) if lines else None
 
 
 def _last_user_text(body: dict) -> str:
@@ -3269,35 +2578,6 @@ def _auth_headers(provider: str, keys: dict) -> dict:
     from .auth import _headers
     key = str(keys.get(provider) or "")
     return _headers(provider, key) if key else {}
-
-
-# ---- the ollama-membrane fork: detect-and-stand-down -------------------------
-# The Go fork (ollama-membrane) embeds its own capture/recall stack. When it is
-# live, THIS seat must not write a second stream of memories for the same
-# project: no capture, no recall injection, no doctrine. The operator's launch
-# choice decides which seat runs; a probe failure = normal operation again
-# (re-checked every boot, never cached across restarts).
-
-_FORK_PROBE_TIMEOUT = 2      # seconds; a fork probe must never delay boot
-
-
-def _ollama_membrane_present(host: str | None = None) -> dict | None:
-    """The fork advertises itself at GET /api/membrane with an X-Membrane
-    header + an `impl: ollama-membrane` body. Returns the JSON info dict when
-    the fork owns the field, else None (probe failure or foreign server)."""
-    import urllib.request
-    host = host or os.environ.get("MEMBRANE_UPSTREAM",
-                                  "http://127.0.0.1:11435")
-    try:
-        with urllib.request.urlopen(host + "/api/membrane",
-                                    timeout=_FORK_PROBE_TIMEOUT) as r:
-            if r.headers.get("X-Membrane") == "ollama-membrane":
-                info = json.loads(r.read())
-                if info.get("impl") == "ollama-membrane":
-                    return info
-    except Exception:
-        return None
-    return None
 
 
 def _dev_frame_warning(kinds: list[str]) -> str:
@@ -3640,33 +2920,28 @@ def _now_iso() -> str:
         "%Y-%m-%dT%H:%M:%SZ")
 
 
-def _gfield_thread(srv) -> None:
-    """The commons slow clock (slice 2+3 maintenance), a daemon thread:
-    merge ledger shards (consensus promotion may add/vouch notes) and run
-    the residency rebalance. Suggest-scope runs only when the local field
-    grew by >= 8 since the last pass (suggestions are reviewed by a human;
-    a firehose is worse than a lag). Never touches the chat path."""
-    gf = srv.global_field
-    while not srv._gstop.wait(120.0):
-        try:
-            stats = gf.merge_ledgers()
-            if stats.get("promoted") or stats.get("vouched"):
-                print(f"[global] consensus merge: {stats}", file=sys.stderr)
-            rb = gf.rebalance()
-            if rb.get("moved"):
-                print(f"[global] residency drift: {rb}", file=sys.stderr)
-            field_grew = (len(srv.membrane.store) -
-                          getattr(srv, "_last_suggest_size", 0) >= 8)
-            if field_grew:
-                srv._last_suggest_size = len(srv.membrane.store)
-                recs = gf.suggest_scope(srv.membrane.store.exemplars,
-                                        srv._scope_suggestions_path)
-                for r in recs:
-                    print(f"[global] scope suggestion (conf "
-                          f"{r['scope_confidence']}): {r['text'][:70]!r}",
-                          file=sys.stderr)
-        except Exception as e:
-            print(f"[global] maintenance error: {_one_line(e)}", file=sys.stderr)
+def _convert_old_commons(srv, path: str) -> int:
+    """One-time: the old global-field file's curated notes become commons
+    claims (claims.convert_global); flagged in origin_stats."""
+    fld = _efield_of(srv)
+    p = Path(path)
+    if fld is None or not p.is_file() or fld._ostats.get("global_converted"):
+        return 0
+    try:
+        from types import SimpleNamespace
+        from .claims import convert_global
+        recs = json.loads(p.read_text() or "[]")
+        n = convert_global(fld.b, [SimpleNamespace(situation=r.get("situation", ""),
+                                                   action=r.get("action", ""))
+                                   for r in recs if isinstance(r, dict)], fld.graph_fn())
+        fld._ostats["global_converted"] = True
+        fld.b.upsert("origin_stats", fld._okey, fld._ostats)
+        print(f"[opencode] commons: {n} notes of {p} converted to commons claims",
+              file=sys.stderr)
+        return n
+    except Exception as e:
+        print(f"[opencode] commons conversion skipped ({_one_line(e)})", file=sys.stderr)
+        return 0
 
 
 def _peer_heartbeat(srv) -> None:
@@ -3674,7 +2949,7 @@ def _peer_heartbeat(srv) -> None:
     as live. Failures are silent (peers are optional)."""
     while not srv._gstop.wait(60.0):
         try:
-            srv.peers.register(srv.listen_port, str(srv.membrane.field_path))
+            srv.gpeers.register(srv.listen_port, str(srv.membrane.field_path))
         except Exception:
             pass
 
@@ -3709,27 +2984,13 @@ def _audit_count(path: str) -> int:
 
 
 # ---- total capture: plans, tool calls, tool results, reasoning ---------------
-# Everything the model emits between your prompts is also memory-worthy: the
-# tool plan (what it intended), each tool call (what it ran), the tool result
-# (what actually came back -- it arrives on the NEXT request as a role:"tool"
-# message), and the reasoning deltas (what it thought). Each becomes an
-# ordinary Q/A exemplar (situation -> action) learned by the standard pipeline,
-# so recall + compaction treat a tool trace exactly like a chat turn.
+# Everything the model emits between your prompts is evidence: its prose and
+# reasoning (discourse events), each tool call and -- on the NEXT request, as a
+# role:"tool" message -- its result (one observation event per call). The
+# capture hooks hand them to srv.capturer (membrane/capture.py).
 
 _THINK_KEYS = ("reasoning", "reasoning_content", "thinking")
 
-# capture clips. The situation side is embedded at learn time (the default
-# mxbai-embed-large has a 512-token window), so what rides inside it stays
-# modest; the action side is stored clipped. CAPTURE-MACHINERY QUOTA (plan
-# #2): tool/result/reasoning captures were ~95% of the store, so machinery
-# clips MUCH harder than prose (prose turns learned via the main path don't
-# use these caps at all) -- recall re-clips to --mem-chars anyway, so long
-# stored actions cost storage, not context.
-_CAP_QUERY = 400      # query head inside a captured situation (embedded)
-_CAP_SIT_ARGS = 600   # args head inside a captured situation (embed budget)
-_CAP_ARGS = 900       # args head kept in the stored action (machinery: hard)
-_CAP_BODY = 2400      # body cap for captured results/thoughts (machinery)
-_CAP_THOUGHT = 24     # min chars for a reasoning capture (noise floor)
 
 
 def _msg_reasoning(msg: dict) -> str:
@@ -3802,83 +3063,6 @@ def _tool_result_text(msg: dict) -> str:
     return ""
 
 
-def _capture(mem, label: str, situation: str, action: str, min_len: int = 1,
-             src: str = "model") -> None:
-    """Learn one observed artifact (plan / call / result / reasoning) as a plain
-    Q/A exemplar. NEVER breaks the chat path: a capture error is logged and
-    dropped. The standard pipeline (vague + dedup guards, repair path) applies,
-    so a retry of the same tool call merges instead of piling up.
-    W4a provenance: a RESULT capture is `ground` (the environment signed it --
-    a tool actually returned this); plans/calls/reasoning are `model` claims."""
-    # fork stand-down: the ollama-membrane fork owns capture for this project;
-    # a second writer would fork the field's evidence.
-    if getattr(mem, "fork_owns_field", False):
-        return
-    try:
-        if not (situation.strip() and action.strip()) or len(action) < min_len:
-            return
-        idx = mem.learn_pair(situation, action, src=src)
-        if idx is not None:
-            print(f"[capture] {label} -> exemplar #{idx}", file=sys.stderr)
-            _watch_notify(getattr(mem, "server_ref", None), mem, idx)
-            # REALITY'S ELECTION (the dreamer's hook): every REAL capture
-            # votes on the near quarantined timeline branches (confirm /
-            # refute). Zero model calls -- one vec, bounded comparisons.
-            try:
-                if idx is not None:
-                    _srv = srv_ref(mem)
-                    if _srv is not None and getattr(_srv, "dreamer", None) \
-                            is not None and _efield_on(_srv) is None:
-                        from .dreamer import vote_on_turn
-                        vote_on_turn(_srv, mem.store.exemplars[idx])
-            except Exception:
-                pass
-            try:
-                _srv = srv_ref(mem)
-                if _srv is not None:
-                    # the digest's sim: the learned cell's top-1 match to
-                    # the REST of the field (one numpy pass) -- a hot sim
-                    # is the surprise bar's input (the pattern-note shape)
-                    _sim = None
-                    try:
-                        _exs = mem.store.exemplars
-                        _ex = _exs[idx] if 0 <= idx < len(_exs) else None
-                        if _ex is not None and getattr(_ex, "vec", None):
-                            _others = [e for e in _exs if e is not _ex]
-                            if _others:
-                                import numpy as _np
-                                _v = _np.asarray(_ex.vec, dtype=float)
-                                _vn = float(_np.linalg.norm(_v))
-                                if _vn > 1e-12:
-                                    _V = _np.asarray(
-                                        [e.vec for e in _others if
-                                         getattr(e, "vec", None)],
-                                        dtype=float)
-                                    if _V.size:
-                                        _Vn = (_V / (_np.linalg.norm(
-                                            _V, axis=1, keepdims=True)
-                                            + 1e-12))
-                                        _sim = float((_Vn @ (_v / _vn)).max())
-                    except Exception:
-                        _sim = None
-                    from .thinker import feed_capture
-                    if _efield_on(_srv) is None:     # the field feeds the thinker itself
-                        feed_capture(_srv, label, idx, situation, sim=_sim)
-            except Exception:
-                pass
-        else:
-            print(f"[capture] {label} skipped (guard)", file=sys.stderr)
-    except Exception as e:
-        # THE DEGRADED-FIELD FLAG (the stale-receipt fix, half 2): a failed
-        # capture means the seat cannot durably learn right now (cb down,
-        # the covenant's cb-only failout). Any byte-deterministic lane that
-        # replays from a CACHE (the receipt lane) must stand down while the
-        # field is degraded -- a stale ack replayed into a live tool-flow
-        # corrupts the agent's edit state (the zombie-ack session).
-        _mark_field_degraded(srv_ref(mem), e)
-        print(f"[capture] {label} error: {_one_line(e)}", file=sys.stderr)
-
-
 def _mark_field_degraded(srv, err: str) -> None:
     """One failed capture marks the seat field-degraded for 90s: the
     receipt lane stands down (never replay from a cache the field could
@@ -3895,10 +3079,10 @@ def srv_ref(mem):
 
 
 def _capture_plan_and_calls(mem, query: str, content: str, calls: dict) -> None:
-    """One response turn: learn the visible plan text and each tool call. Each
-    call registers in mem._pending_tools so its RESULT (next request) captures
-    the full situational loop: 'tool bash for: <query> / args' -> result.
-    File-touching calls (edit/write) also mark the codegraph dirty."""
+    """One response turn's tool calls: each becomes an observation (the full
+    arguments) and registers in mem._pending_tools so its RESULT (next
+    request) completes it. File-touching calls (edit/write) also mark the
+    codegraph dirty."""
     cap = getattr(srv_ref(mem), "capturer", None)
     if cap is not None and calls:
         cap.on_calls(query, calls)          # full arguments, idempotent by call id
@@ -3907,28 +3091,18 @@ def _capture_plan_and_calls(mem, query: str, content: str, calls: dict) -> None:
             fn = c.get("function") or {}
             name = fn.get("name") or "?"
             args = (fn.get("arguments") or "").strip()
-            _capture(mem, f"call {name}",
-                     f"tool call for: {_clip(query, _CAP_QUERY)} -> {name}(args)",
-                     f"{name}({_clip(args, _CAP_ARGS)})")
             cid = c.get("id")
             if cid:
                 mem._pending_tools[cid] = {"query": query, "name": name, "args": args}
         _codegraph_note_dirty(srv_ref(mem), [
             _tool_arg_path(c.get("function") or {})
             for c in calls.values()])
-        if content.strip():
-            _capture(mem, "plan",
-                     f"plan: {_clip(query, _CAP_QUERY)}",
-                     _clip(content, _CAP_BODY))
-    elif content.strip():
-        # (text-only turns are learned by the main path; nothing extra here)
-        pass
 
 
 def _capture_tool_results(srv, body: dict) -> None:
-    """Scan the incoming request for role:'tool' messages and learn each one
-    paired with its pending call (query + args -> what the tool returned).
-    Runs BEFORE the gate so it never disturbs the chat verdict."""
+    """Scan the incoming request for role:'tool' messages: each result, paired
+    with its pending call, completes that call's observation (unclipped).
+    Runs before the gate."""
     mem = srv.membrane
     for m in body.get("messages") or []:
         if not isinstance(m, dict):
@@ -3947,15 +3121,6 @@ def _capture_tool_results(srv, body: dict) -> None:
         srv._tool_results[cid] = rec      # result-side cache (bounded)
         if len(srv._tool_results) > 64:   # the bound: drop the oldest
             srv._tool_results.pop(next(iter(srv._tool_results)))
-        _capture(mem, f"result {rec['name']}",
-                 f"tool {rec['name']} for: {_clip(rec['query'], _CAP_QUERY)}\n"
-                 f"args: {_clip(rec['args'], _CAP_SIT_ARGS)}",
-                 _clip(result, _CAP_BODY), src="ground")
-
-
-def _capture_reasoning(mem, query: str, reasoning: str) -> None:
-    _capture(mem, "reasoning", f"reasoning: {_clip(query, _CAP_QUERY)}",
-             _clip(reasoning, _CAP_BODY), min_len=_CAP_THOUGHT)
 
 
 def _chat_capable_models(backend: str) -> list:
@@ -4081,60 +3246,40 @@ def _audit_tail(path, k: int = 24):
     return out[-k:], len(out)
 
 
-def _cloud_points(srv, exs):
-    """PCA 3D projection of the field for the dev viewer's renderCloud — the
-    same math as the world proxy's /state (one stable basis, fit once per
-    process, so the cloud grows instead of spinning)."""
-    n = len(exs)
-    if not n:
-        return []
-    V = np.array([np.asarray(e.vec, dtype=float) for e in exs])
-    mu = V.mean(0)
-    basis = getattr(srv, "_v_basis", None)
-    if basis is None and n >= 4:
-        try:
-            _, _, Vt = np.linalg.svd(V - mu, full_matrices=False)
-            basis = Vt[:3]; srv._v_basis = basis
-        except Exception:
-            basis = None
-    if basis is not None:
-        coords = (V - mu) @ basis.T
-    else:                                   # too few for PCA: first raw dims
-        k = min(3, V.shape[1]); coords = np.zeros((n, 3))
-        if k:
-            coords[:, :k] = (V - mu)[:, :k] * 3.0
-    pts = []
-    for i, e in enumerate(exs):
-        pts.append({"p": [round(float(coords[i, 0]), 4),
-                          round(float(coords[i, 1]), 4),
-                          round(float(coords[i, 2]), 4)],
-                    "safe": bool(e.safe),
-                    "reask": int(getattr(e, "reask_count", 0)),
-                    "contest": int(getattr(e, "contest_count", 0)),
-                    "tags": list(getattr(e, "tags", []))})
-    return pts
+def _efield_state_rows(srv, fld, m: int = 400) -> list[dict]:
+    """The m brightest live states by mass (the cloud's rows)."""
+    rows = [d for _, d in fld.b.scan("entity_states", {"origin": fld.origin, "tier": "live"})
+            if d.get("state")]
+    rows.sort(key=lambda d: -int(d.get("accr") or 0))
+    return rows[:m]
 
 
 def _entity_points(srv, fld, m: int = 400) -> list[dict]:
     """The viewer's cloud on the entity field: the top-m live states by mass,
-    PCA 3D (the basis fit once per process), each point carrying its eid,
-    kind (the color), mass (the brightness) and whether it holds a conflict."""
-    rows = [d for _, d in fld.b.scan("entity_states", {"origin": fld.origin, "tier": "live"})
-            if d.get("state")]
-    rows.sort(key=lambda d: -int(d.get("accr") or 0))
-    rows = rows[:m]
+    PCA 3D in the shared universe projection (the basis fit once per
+    process, the entities of the graph co-registered), each point carrying
+    its eid, kind (the color), mass (the brightness) and whether it holds a
+    conflict."""
+    from .universe import UniverseProjection
+    rows = _efield_state_rows(srv, fld, m)
     if not rows:
         return []
     V = np.asarray([d["state"] for d in rows], dtype=float)
-    mu = V.mean(0)
-    basis = getattr(srv, "_ef_basis", None)
-    if basis is None and len(rows) >= 4:
-        _, _, Vt = np.linalg.svd(V - mu, full_matrices=False)
-        basis = srv._ef_basis = Vt[:3]
-    coords = (V - mu) @ basis.T if basis is not None else np.zeros((len(rows), 3))
+    proj = getattr(srv, "_universe_proj", None)
+    coords = None
+    if proj is not None and proj.ready():
+        coords = proj.project(V)
+    if coords is None:
+        mu = V.mean(0)
+        basis = getattr(srv, "_ef_basis", None)
+        if basis is None and len(rows) >= 4:
+            _, _, Vt = np.linalg.svd(V - mu, full_matrices=False)
+            basis = srv._ef_basis = Vt[:3]
+        coords = (V - mu) @ basis.T if basis is not None else np.zeros((len(rows), 3))
     return [{"p": [round(float(c), 4) for c in coords[i]], "eid": d["eid"],
              "tags": [d.get("kind") or "?"], "mass": int(d.get("accr") or 0),
-             "safe": not d.get("conflicts"), "reask": 0, "contest": len(d.get("conflicts") or [])}
+             "safe": not d.get("conflicts"), "reask": 0,
+             "contest": len(d.get("conflicts") or [])}
             for i, d in enumerate(rows)]
 
 
@@ -4204,8 +3349,6 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._membrane_learn(); return
         if path == "/membrane/forget":
             self._membrane_forget(); return
-        if path == "/membrane/prefix":
-            self._membrane_prefix(); return
         if path == "/membrane/codegraph":
             self._membrane_codegraph(); return
         if path == "/membrane/entity-track":
@@ -4272,22 +3415,21 @@ class MembraneOpenAIHandler(RAGProxyHandler):
     # ---- THE UNIVERSE MAP (the entity graph + the field, one 3D scene) --
     def _universe_projection(self):
         """The projection, fit once per process from BOTH layers' vectors
-        (the cloud + the entities -- one universe, one fit, co-registered)."""
+        (the field's brightest entity states + the graph entities -- one
+        universe, one fit, co-registered)."""
         from .universe import UniverseProjection
         proj = getattr(self.server, "_universe_proj", None)
         if proj is not None and proj.ready():
             return proj
-        mem = self.server.membrane
+        fld = _efield_of(self.server)
         est = getattr(self.server, "entity_store", None)
         vecs = []
-        for e in getattr(mem.store, "exemplars", []):
-            v = getattr(e, "vec", None)
-            if v is not None and len(v) == 1024:
-                vecs.append(v)
+        if fld is not None:
+            vecs = [d["state"] for d in _efield_state_rows(self.server, fld, m=600)]
         if est is not None:
             for e in est.docs.values():
                 v = getattr(e, "position", None) or getattr(e, "embedding", None)
-                if v and len(v) == 1024:
+                if v and (not vecs or len(v) == len(vecs[0])):
                     vecs.append(v)
         proj = UniverseProjection()
         proj.fit(vecs)
@@ -4377,50 +3519,45 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         return _np.array(basis[:3], dtype=float)
 
     def _map_cloud(self):
-        """GET /membrane/map/cloud: the field's stars (PCA-projected,
-        sigma-normalized to the canonical radius) + the tier/safe/source
-        flags. The axis query params (x/y/z candidate ids) re-project."""
+        """GET /membrane/map/cloud: the field's brightest entity states
+        (PCA-projected in the shared universe basis, a star per state,
+        brightness = mass) + conflicts. The axis query params (x/y/z
+        candidate ids) re-project."""
         import numpy as _np
-        from urllib.parse import parse_qs
+        fld = _efield_of(self.server)
+        if fld is None:
+            self._json_out({"stars": [], "scale": 0})
+            return
         proj = self._universe_projection()
         if not proj.ready():
             self._json_out({"stars": [], "scale": 0})
             return
-        mem = self.server.membrane
-        pts = []
-        for e in getattr(mem.store, "exemplars", []):
-            v = getattr(e, "vec", None)
-            if v is None or len(v) != 1024:
-                continue
-            pts.append((e, v))
+        rows = _efield_state_rows(self.server, fld, m=400)
+        if not rows:
+            self._json_out({"stars": [], "scale": 0})
+            return
+        V = [d["state"] for d in rows]
         # THE CUSTOM AXIS (the instrument): the query params' basis
         # replaces the PCA default for this request
-        import numpy as _np
-        from urllib.parse import parse_qs
         custom = self._map_axes_basis(
-            _np.parse_qs if False else self.path.split("?", 1)[-1]
-            if "?" in self.path else "")
+            self.path.split("?", 1)[-1] if "?" in self.path else "")
         if custom is not None:
-            import numpy as _np2
-            proj2 = type("P", (), {})()
-            proj2._mu = proj._mu
-            proj2._basis = custom
-            proj2._scale = proj._scale
             coords = _np.array([(_np.asarray(v, dtype=float) - proj._mu)
-                                @ custom.T * proj._scale
-                                for _e, v in pts], dtype=float)
+                                @ custom.T * proj._scale for v in V],
+                               dtype=float)
         else:
-            coords = proj.project([v for _e, v in pts])
+            coords = proj.project(V)
         out = []
         if coords is not None:
-            for (e, _v), c in zip(pts, coords):
+            for d, c in zip(rows, coords):
                 out.append({
                     "p": [round(float(c[0]), 2), round(float(c[1]), 2),
                           round(float(c[2]), 2)],
-                    "tier": "eph" if getattr(e, "ephemeral", False)
-                            else ("note" if (e.outcome or "").startswith(
-                                "compacted@") else "raw"),
-                    "safe": bool(getattr(e, "safe", False)),
+                    "eid": d.get("eid"),
+                    "tags": [d.get("kind") or "?"],
+                    "mass": int(d.get("accr") or 0),
+                    "safe": not d.get("conflicts"),
+                    "contest": len(d.get("conflicts") or []),
                 })
         self._json_out({"stars": out, "radius": 50.0})
 
@@ -4510,42 +3647,44 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    # ---- /neighbors: the field's association graph (read-only) --------------
+    # ---- /neighbors: the entity field's association graph (read-only) ----
     def _neighbors(self):
         from urllib.parse import urlparse, parse_qs
         import numpy as np
-        mem = self.server.membrane
-        store = mem.store
+        fld = _efield_of(self.server)
         qs = parse_qs(urlparse(self.path).query)
-        K, COH = 8, 15
+        K = 8
         query = qs.get("q", [""])[0]
         rows: list = []
         try:
-            if "idx" in qs:
-                i = int(qs["idx"][0])
-                if i < 0 or i >= len(store):
-                    raise ValueError("idx out of range")
-                qn = np.asarray(store.exemplars[i].vec, dtype=float)
+            if fld is None:
+                raise ValueError("the entity field is off")
+            eid = None
+            if "eid" in qs:
+                eid = qs["eid"][0]
+                st = fld.get(eid)
+                if st is None:
+                    raise ValueError("unknown entity")
+                anchor = {"eid": eid}
+                near = [(e2, s) for e2, s in fld.recall(st.state, k=K + 1)
+                        if e2 != st.eid][:K]
             else:
                 if not query.strip():
                     self._json_out({"query": "", "anchor": None,
                                     "neighbors": []}); return
-                vec = mem._nudge(mem.embedder.embed([query])[0])
-                qn = np.asarray(vec, dtype=float)
-            qn = qn / (np.linalg.norm(qn) + 1e-12)
-            recalled = False
-            for ex, sim in store.top_k(qn, k=K):
-                a = ex.action or ""
-                words = len(a.split())
-                is_rec = (not recalled) and words >= COH
-                if is_rec:
-                    recalled = True
-                rows.append({"idx": store.index_of(ex),
+                anchor = {"query": query}
+                qv = np.asarray(fld.embedder.embed([query])[0], dtype=float)
+                n = float(np.linalg.norm(qv))
+                near = fld.recall(qv / (n or 1.0), k=K) if n > 1e-12 else []
+            for e2, sim in near:
+                st2 = fld.get(e2)
+                if st2 is None:
+                    continue
+                rows.append({"eid": e2,
+                             "kind": st2.kind,
                              "sim": round(float(sim), 3),
-                             "safe": bool(ex.safe), "words": words,
-                             "recalled": is_rec, "action": a})
-            anchor = ({"idx": int(qs["idx"][0])} if "idx" in qs
-                      else {"query": query})
+                             "mass": int(st2.accr),
+                             "conflicts": len(st2.conflicts or [])})
             self._json_out({"query": query, "anchor": anchor,
                             "neighbors": rows})
         except Exception as e:
@@ -4657,15 +3796,15 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         except json.JSONDecodeError:
             self._forward_raw(raw); return
         model = str(body.get("model", "membrane"))
-        # the opencode-selected model is the cortex's AND the judge's model
-        # (unless pinned): the follow-chat judge reads srv.compact_model live
-        if srv.compact_follows_chat:
-            srv.compact_model = model
+        # the opencode-selected model is the seat's AND the judge's model
+        # (unless pinned): the follow-chat judge reads srv.seat_model live
+        if srv.model_follows_chat:
+            srv.seat_model = model
         # the AUTOSELECT sentinels: the operator picked the ROUTER as the
-        # model. The judge/cortex keep the lane name; the compact model
-        # resolves to nothing real, so pin it back to the boot default.
+        # model. The judge keeps the lane name; the seat model resolves to
+        # nothing real, so pin it back to the boot default.
         if normalize_lane(model) in AUTO_LANES:
-            srv.compact_model = srv.default_compact_model
+            srv.seat_model = srv.default_seat_model
         # the operator's ceiling for delegated work: whatever model opencode
         # selected is the SESSION's law -- delegate requests may not raise it
         # (an autoselect selection delegates the CHOOSING to the lane, so the
@@ -4692,49 +3831,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             except Exception as e:
                 print(f"[opencode] entity read-through skipped ({e})",
                       file=sys.stderr)
-        # ---- THE PERSONALIZED FIELD (the SQL++ neighborhood, the cortex-
-        # experiment convergence): after the entity layer resolves
-        # session:now's position, the store SWAPS to the neighborhood
-        # hydrate -- the seat's working set = the ANN neighborhood around
-        # the living present + the own patch + the commons (the database
-        # is the field; RAM keeps a session-scoped neighborhood). First
-        # boot (no session:now yet): the world hydrate already ran -- the
-        # swap starts NEXT boot. MEMBRANE_FIELD=world reverts.
-        if os.environ.get("MEMBRANE_FIELD", "neighborhood") == "neighborhood":
-            try:
-                # THE SEED: the PREVIOUS session's final position (the
-                # seat-local seed file -- session:now itself is RAM-only
-                # by covenant; its position persists seat-locally only).
-                _seed = None
-                try:
-                    import json as _json
-                    _seed_path = str(mem.field_path) + ".seed.json"
-                    if os.path.exists(_seed_path):
-                        _seed = _json.load(open(_seed_path)).get("position")
-                except Exception:
-                    _seed = None
-                if not _seed:
-                    from .entities import MEMBRANE_NS as _NS
-                    _now_ent = (est.docs.get(f"{_NS}session:now")
-                                if est is not None else None)
-                    _seed = getattr(_now_ent, "position", None)
-                if _seed:
-                    import time as _t
-                    _t0 = _t.time()
-                    from .field import ExemplarStore as _ES
-                    _new = _ES.load_neighborhood(
-                        str(mem.field_path), seed_vec=list(_seed))
-                    _n = len(_new)
-                    mem.store = _new
-                    mem.store.mut_lock = mem.mut_lock
-                    print(f"[opencode] personalized field: {_n} exemplars "
-                          f"in the neighborhood of session:now "
-                          f"({_t.time() - _t0:.1f}s, "
-                          f"radius {_ES.NEIGHBORHOOD_RADIUS})",
-                          file=sys.stderr)
-            except Exception as e:
-                print(f"[opencode] neighborhood swap skipped ({e})",
-                      file=sys.stderr)
+        # The exemplar-personalized neighborhood (RAM swap of the working
+        # set) is retired: on the entity field the working set is the ANN
+        # read of entity_states itself (the field lives in the store and
+        # reads merge seats) -- nothing to swap.
         # ---- total capture: results from the PREVIOUS turn's tool calls ----
         # before the intercepts: even a recall/state turn may carry the previous
         # turn's tool results; pairing must not be skipped. A capture error
@@ -4815,15 +3915,6 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # asking -- but never overrides a model turn again. The E9
         # experiment stays (library + audit replay, --no-receipts is a
         # no-op flag kept for compat).
-        ruling = (None if model_escaped else _match_review_ruling(q_early))
-        if ruling is not None:
-            v, slot = ruling
-            text = _review_report(srv, v, slot)
-            print(f"[opencode] intercept (review-{v} {slot}): "
-                  f"{q_early[:60]!r}", file=sys.stderr)
-            self._serve_intercept_answer(model, text,
-                                         bool(body.get("stream", False)))
-            return
         # ---- the watch layer (spatial triggers): operator set/list/drop,
         # handled pre-gate like every other operator write.
         if not model_escaped and _is_watch_query(q_early):
@@ -4887,10 +3978,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._serve_intercept_answer(model, _surface_report(srv),
                                          bool(body.get("stream", False)))
             return
-        # ---- the global-field layer (docs/global-field.md): the operator's
-        # promote / forget-commons / suggest-review turns, handled pre-gate
-        # like every other operator write. Disabled with --no-global.
-        if getattr(srv, "global_field", None) is not None:
+        # ---- the commons: the operator's promote / forget-commons turns,
+        # handled pre-gate like every other operator write
+        if _efield_of(srv) is not None:
             gq = q_early.lower()
             if _is_promote_query(gq):
                 text = _promote_global(srv, q_early, vec=None)
@@ -4901,16 +3991,6 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             if _is_forget_global_query(gq):
                 text = _forget_global(srv, q_early)
                 _print_intercept("forget-global", q_early)
-                self._serve_intercept_answer(model, text,
-                                             bool(body.get("stream", False)))
-                return
-            if _is_suggest_query(gq):
-                body_txt = q_early[len(_SUGGEST_CANON):].strip()
-                if body_txt.lower().startswith("drop"):
-                    text = _suggest_drop(srv, body_txt[4:])
-                else:
-                    text = _suggestions_report(srv)
-                _print_intercept("suggest", q_early)
                 self._serve_intercept_answer(model, text,
                                              bool(body.get("stream", False)))
                 return
@@ -4951,12 +4031,35 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                                          bool(body.get("stream", False)))
             return
         try:
-            verdict, vec, query, reasked_idx = mem.gate_turn(body)
-            if vec is None:
-                self._forward_raw(raw); return
+            turn = mem.turn(body)
         except Exception as e:
-            print(f"[opencode] gate error, forwarding raw: {e}", file=sys.stderr)
+            print(f"[opencode] turn front error, forwarding raw: {e}", file=sys.stderr)
             self._forward_raw(raw); return
+        if turn.vec is None:
+            self._forward_raw(raw); return
+        vec, query = turn.vec, turn.query
+        _is_tool_round = _tool_round(body)
+        verdict = {"verdict": "escalate", "reason": "the model answers", "sim": None,
+                   "nov": None, "ex_idx": None, "query_raw": turn.query_raw,
+                   "binding": turn.binding, "binding_failed": turn.binding_failed,
+                   "drift": turn.drift}
+        # THE GATE ON ANSWER EVENTS (every real turn): the earlier ask of the
+        # same thing, its answer, the staleness guard -- its similarity is the
+        # turn's 'sim' (the null-recall lane and the planner's sig read it)
+        gv = None
+        _fld = _efield_on(srv)
+        if _fld is not None and not _is_tool_round:
+            try:
+                from . import efgate as EG
+                gv = EG.candidate(_fld, query, binding_failed=turn.binding_failed)
+                verdict["efgate"] = {k: gv.get(k) for k in
+                                     ("eligible", "reason", "sim", "agree", "consensus",
+                                      "q_event", "a_event")}
+                verdict["sim"] = gv.get("sim")
+            except Exception as e:
+                print(f"[efgate] error: {e}", file=sys.stderr)
+        if not _is_tool_round:
+            mem.remember(turn.query_raw)
         # THE PLANNER'S CONTEXT SIGNAL (the loop's first half): the turn's
         # situation cluster = (gate verdict kind + sim band). The ActTable
         # keys its transition table on this sig -- speak() consults it,
@@ -4973,40 +4076,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # ---- INTERNAL: the 'model:' escape hatch only (recall/state were both
         # fully handled above, pre-gate) ----
         q = _last_user_text(body)
-        # fork stand-down, SPLIT AUTHORITY: the fork owns CAPTURE (no second
-        # writer -- our learn/capture stays off) but NOT recall: this seat's
-        # field is the operator's rich one, and a read-only injection is not
-        # a second writer. (The old full stand-down left BOTH seats silent
-        # when the fork's own recall was thin -- the hollow-world bug.)
-        # THE OPERATOR'S RULE (final): the recall block is REMOVED from
-        # this seat's injection -- 'remove the recall block and it looks
-        # nice'. The fork's membraneRecallInject owns recall; the banner
-        # (tracks + alerts) is this seat's whole injection.
         ctx = None
-        # NO provenance narration (the operator's 'useless' call): the
-        # fork-standdown header repeated every turn -- the per-entry
-        # provenance stamps ([src: ...]) already carry origin; the
-        # narration was bytes without information.
-        self.momentum_update(vec, query)
-        # pending human reviews ride along as a system-level notice: the model
-        # is told to ASK the user via its native question tool. The user's
-        # answer arrives as the next turn and is matched by the pre-gate
-        # 'membrane: keep/drop' resolver below.
-        # THE UNIFIED BANNER's neighborhood: review/intent/ledger blocks
-        # are RETIRED from the injection (the operator's rule -- tracks +
-        # alerts only; they live in /membrane/state and the doctrine).
-        # THE 'I' TRACK: the where-we-are header -- computed live each
-        # turn, zero model calls.
-        # THE TOOL-ROUND GUARD (the operator's flicker catch): a tool
-        # round's last 'user' message is the TOOL RESULT (role=user in
-        # the tool protocol) -- nudging momentum with it wobbles the
-        # session:now subject mid-turn (make -> opencode.py -> model name)
-        # and re-streams a different header per round. A REAL operator
-        # turn's last message is the original text, not a tool payload;
-        # tool results carry tool_use_id blocks. Only real turns nudge.
-        _is_tool_round = _tool_round(body)
-        if not _is_tool_round:
-            self.momentum_update(vec, query)
         # THE NULL-RECALL LANE (peer-reported from rosetta-check: 3 of 5
         # field queries returned empty and nothing said so -- absence is
         # information; saying it prevents re-deriving from git):
@@ -5027,8 +4097,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             srv._recall_null = {"query": _clip(query, 90), "sim": round(
                 float(v_sim), 2), "ts": time.time(), "count": n}
         elif not _is_tool_round and isinstance(v_sim, (int, float)) \
-                and float(v_sim) >= float(getattr(
-                    mem, "sim_min", 0.7)):
+                and float(v_sim) >= float(__import__("membrane.efgate",
+                                                     fromlist=["SIM_MIN"]).SIM_MIN):
             # a real hit: the counter STAYS (the session's honest metric)
             # but the 'current miss' retires -- the banner line is about
             # the live edge, not history
@@ -5041,14 +4111,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # Eligible turns are logged as A/B pairs (closed when the model's
         # own answer lands); --replay-ab P serves the replay on a fraction.
         srv._ab_key = None
-        _fld = _efield_on(srv)
-        if _fld is not None and not _is_tool_round:
+        if gv is not None:
             try:
                 from . import efgate as EG
-                gv = EG.candidate(_fld, query, binding_failed=bool(verdict.get("binding_failed")))
-                verdict["efgate"] = {k: gv.get(k) for k in
-                                     ("eligible", "reason", "sim", "agree", "consensus",
-                                      "q_event", "a_event")}
                 if gv["eligible"]:
                     served = EG.serve_replay(float(getattr(srv, "replay_ab", 0.0) or 0.0))
                     k_ab = EG.ab_open(_fld, gv, query, served)
@@ -5126,85 +4191,6 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         speak_block = _speak_block(srv)
         if speak_block:
             ctx = (ctx + "\n\n" + speak_block) if ctx else speak_block
-        replay_sim = float(getattr(srv, "replay_sim", 0.0) or 0.0)
-        # ---- token savers, in cost order ----
-        # 1. FULL REPLAY (gate act + consensus): the gate is sure the near match
-        #    answers the query; replay when it also clears the strict line.
-        # 2. EXACT-DUP REPLAY (escalate but sim >= replay_sim on a SAFE exemplar):
-        #    a near-identical repeat of a trusted memory needs no consensus --
-        #    the field already holds and trusts this exact answer. The re-ask
-        #    demotion loop inside gate_turn still catches instant repeats
-        #    (reasked_idx forces this turn down to the model with a hint).
-        # Tool-call answers stay excluded: their action text is environment
-        # state ("ran X -> result Y"), not a chat answer to re-serve.
-        ex = None
-        near_match = (verdict.get("near_idx") is not None
-                      and 0 <= verdict["near_idx"] < len(mem.store))
-        if near_match:
-            ex = mem.store.exemplars[verdict["near_idx"]]
-            # total-capture artifacts (reasoning:/plan:/call/result/tool) are
-            # machinery echoes, not servable chat answers.
-            sit_l = " ".join(ex.situation.split()).lower()
-            replay_blocked = sit_l.startswith(_THOUGHT_CAPTURE_PREFIXES)
-        else:
-            replay_blocked = False
-        # ---- auto-settle delivery (the repeat-k rule, plan #3): the gate
-        # settled a stuck unlearned-repeat loop; serve the stored answer with
-        # no model call. Verdict mapped to act-replayed so the existing re-ask
-        # demotion loop stays armed (a bad settle replay is still demotable).
-        # OBSERVER GUARD: pure-observer mode (replay_sim == 0) never answers
-        # the user from memory -- settle degrades to escalate-with-hint (the
-        # gate already mapped an UNSAFE near match there).
-        if verdict["verdict"] == "settle-replay" and replay_sim <= 0:
-            verdict = {"verdict": "escalate-with-hint",
-                       "hint": verdict.get("action", ""),
-                       "action": verdict.get("action", ""),
-                       "sim": verdict.get("sim"), "nov": verdict.get("nov"),
-                       "ex_idx": verdict.get("ex_idx"),
-                       "reason": "auto-settle (observer: hint, not replay)",
-                       "spectrum_entropy": verdict.get("spectrum_entropy"),
-                       "free_energy": verdict.get("free_energy"),
-                       "rank_ratio": verdict.get("rank_ratio"),
-                       "safe_frac": verdict.get("safe_frac"),
-                       "sim_min_eff": verdict.get("sim_min_eff")}
-        if verdict["verdict"] == "settle-replay":
-            answer = verdict.get("action", "")
-            v = {**verdict, "verdict": "act-replayed"}
-            self._serve_intercept_answer(model, answer,
-                                         bool(body.get("stream", False)),
-                                         thinking=None)
-            if not getattr(mem, "fork_owns_field", False):
-                mem.record_act(query, vec, v, model, answer)
-            self._log_turn(v, ctx, None, len(mem.store),
-                           replayed=v.get("ex_idx"))
-            return
-        if (replay_sim > 0 and not reasked_idx and not replay_blocked
-                and (verdict["verdict"] == "act"
-                     or (verdict["verdict"] == "escalate"
-                         and verdict.get("nov") is None))
-                and (verdict.get("sim") or 0.0) >= replay_sim
-                and near_match and ex.safe):
-            if verdict["verdict"] != "act":
-                v = {"verdict": "act-replayed", "reason": "exact-dup replay",
-                     "sim": verdict.get("sim"), "nov": verdict.get("nov"),
-                     "ex_idx": verdict["near_idx"], "spectrum_entropy": verdict.get("spectrum_entropy"),
-                     "free_energy": verdict.get("free_energy"), "rank_ratio": verdict.get("rank_ratio"),
-                     "safe_frac": verdict.get("safe_frac"), "sim_min_eff": verdict.get("sim_min_eff")}
-            else:
-                v = {"verdict": "act-replayed", "reason": verdict.get("reason", ""),
-                     "sim": verdict.get("sim"), "nov": verdict.get("nov"),
-                     "ex_idx": verdict["ex_idx"], "spectrum_entropy": verdict.get("spectrum_entropy"),
-                     "free_energy": verdict.get("free_energy"), "rank_ratio": verdict.get("rank_ratio"),
-                     "safe_frac": verdict.get("safe_frac"), "sim_min_eff": verdict.get("sim_min_eff")}
-            answer = ex.action
-            self._serve_intercept_answer(model, answer,
-                                         bool(body.get("stream", False)),
-                                         thinking=None)
-            if not getattr(mem, "fork_owns_field", False):
-                mem.record_act(query, vec, v, model, answer)
-            self._log_turn(v, ctx, None, len(mem.store),
-                           replayed=v["ex_idx"])
-            return
         up = dict(body)
         if getattr(srv, "no_context", False):
             # THE STATELESS LLM (the field is the only memory): strip the
@@ -5219,8 +4205,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             if _saved:
                 print(f"[opencode] no-context: elided {_saved} chars of "
                       f"older in-turn tool traffic", file=sys.stderr)
+            recon = None
             if fld is not None:
-                recon = None
                 try:
                     from .entity_block import reconstruct, render_for
                     recon = reconstruct(fld, _own_session_prefix(srv))
@@ -5229,8 +4215,6 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                         recon = (recon + "\n\n" + eblock) if recon else eblock
                 except Exception as e:
                     print(f"[efield] reconstruction error: {e}", file=sys.stderr)
-            else:
-                recon = _reconstruct_history(mem.store)
             ctx = (ctx + "\n\n" + recon) if (ctx and recon) else (recon or ctx)
             up["messages"] = (_inject(stripped, ctx) if ctx
                               else stripped)
@@ -5271,11 +4255,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # fan-out, tight timeout (a hung peer must not stall a turn). A hit
         # rides along as MARKED CONTEXT; all failures degrade to "no help"
         # and the model path proceeds exactly as before (the safe direction).
-        if (getattr(srv, "peers", None) is not None
+        if (getattr(srv, "gpeers", None) is not None
                 and str(verdict.get("verdict", "")).startswith("escalate")):
             try:
-                for peer in srv.peers.livelist()[:4]:
-                    phit = srv.peers.ask(peer, query, timeout=5.0)
+                for peer in srv.gpeers.livelist()[:4]:
+                    phit = srv.gpeers.ask(peer, query, timeout=5.0)
                     if phit and phit.get("block"):
                         verdict["peer_hit"] = {k: phit.get(k) for k in ("fid", "entities")}
                         up["messages"] = _inject(
@@ -5312,7 +4296,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         lane = normalize_lane(str(body.get("model") or "").split("/", 1)[-1])
         autoselect = router is not None and lane in AUTO_LANES
         if autoselect:
-            up["model"] = (srv.default_compact_model
+            up["model"] = (srv.default_seat_model
                            or _pick_default_model(_chat_capable_models(
                                srv.backend), None) or "membrane")
         if autoselect and str(verdict.get("verdict", "")) \
@@ -5648,9 +4632,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 print(f"[opencode] router bookkeeping error: {e}",
                       file=sys.stderr)
         ex_idx = None
-        # the compactor's traffic signal: when the last real model forward
-        # landed and how long it took (the duty loop reads both as "busy
-        # now"; consolidate.py's controller analogue for the chat lane).
+        # the traffic signal: when the last real model forward landed and
+        # how long it took (the background duty loops read both as "busy
+        # now").
         srv._last_fwd_dt = time.time()
         srv._last_fwd_dur = time.monotonic() - t0
         # the entity field's discourse intake: the user's text + the model's
@@ -5667,21 +4651,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             from .efgate import ab_close
             _th.Thread(target=lambda: _swallow(ab_close, srv.efield, k_ab, content),
                        daemon=True, name="ab-close").start()
-        # learn text turns; a pure tool-call turn has no human prose to ground
-        # future turns on and the gate may have already learned from its user
-        # text -- so only text-bearing answers are learned here.
-        # Fork stand-down: no field writes -- the fork captures its own turns.
-        if content.strip() and not tool_calls \
-                and not getattr(mem, "fork_owns_field", False):
-            try:
-                ex_idx = mem.record_escalation(query, vec, verdict, content,
-                                               up.get("model", "membrane"),
-                                               False)
-            except Exception as e:
-                print(f"[opencode] learn error (response already served): {e}",
-                      file=sys.stderr)
-        # the watch layer: report new memories landing inside planted watches
-        _watch_notify(srv, mem, ex_idx)
+        # the captured turn's events (cap.on_turn above) already carry the
+        # answer; nothing exemplar-shaped is written back here.
         # total capture: the model's intent + machinery + thought, as plain Q/A.
         # W3a rides the same lane: the delivered text is linted for frame-
         # discipline violations (stacked/buried canon frames) so the poison
@@ -5691,8 +4662,6 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 _frame_lint(srv, content, source="assistant-text")
             if calls:
                 _capture_plan_and_calls(mem, query, content, calls)
-            if thought:
-                _capture_reasoning(mem, query, thought)
         except Exception as e:
             print(f"[opencode] capture error (response already served): {e}",
                   file=sys.stderr)
@@ -5719,7 +4688,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             })
         except Exception as s_e:
             print(f"[opencode] surface-log error: {s_e}", file=sys.stderr)
-        self._log_turn(verdict, ctx, ex_idx, len(mem.store))
+        self._log_turn(verdict, ctx, None)
 
     # ---- the [membrane] monologue (thinking channel) ----------------------
     def _gate_monologue(self, verdict: dict, ctx: str | None, query: str,
@@ -5736,7 +4705,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         est = getattr(srv, "entity_store", None)
         if est is not None and getattr(est, "tracks", None):
             try:
-                est.evaluate_tracks(mem.store.exemplars)
+                fld = _efield_on(srv)
+                from .entity_block import track_count as _tc
+                if fld is not None:
+                    est.evaluate_tracks(count_fn=lambda k: _tc(fld, k))
                 for a in est.take_alerts():
                     lines.append(f"ALERT: {a['label']} {a['kind']} its "
                                  f"boundary ({a['boundary']}; {a['detail']})")
@@ -5810,23 +4782,22 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                  f"({why}).",
                  "[membrane] The answer below comes from lived memory alone "
                  "-- it may be stale; verify before acting on it.", ""]
-        hits = 0
+        served = False
         try:
-            if vec is not None and mem.embedder is not None:
-                for ex, sim in mem.store.top_k(vec, k=3):
-                    if sim < float(getattr(srv, "rag_sim_min", 0.5)) \
-                            or not ex.safe:
-                        break
-                    q = _clip(ex.situation, 280)
-                    a = _clip(ex.action or "", 600)
-                    if not q or not a:
-                        continue
-                    lines.append(f"({sim:.2f}){_seat_label(ex)} "
-                                 f"situation: {q}\n    response: {a}")
-                    hits += 1
+            if vec is not None and query:
+                # the field's own answer: the past answers nearest the ask
+                # + the entities it names, one rendered block (render_for
+                # returns None when nothing matches)
+                from .entity_block import render_for
+                fld = _efield_of(srv)
+                block = render_for(fld, query, budget=1800) \
+                    if fld is not None else None
+                if block:
+                    lines.append(block)
+                    served = True
         except Exception:
             pass
-        if not hits:
+        if not served:
             lines.append("- nothing trusted in the field matched this "
                          "question; retry when the model ladder recovers.")
         text = "\n".join(lines)
@@ -5851,7 +4822,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._serve_intercept_answer(model, text, False)
         # captured for the audit trail only -- never learned into the field.
         try:
-            self._log_turn(verdict, None, None, len(mem.store))
+            self._log_turn(verdict, None, None)
         except Exception:
             pass
 
@@ -5864,9 +4835,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
     # safe, non-capture-lane, above the bar) + field_size. The k=1 shape is
     # byte-compatible with the peer contract (hit/sim/situation/action/ts).
     def _membrane_ask(self) -> None:
+        """GET /membrane/ask?q=...[&k=N]: the field's answer to a question --
+        'block' (past answers + entities, rendered) and 'entities' (the
+        views), plus the v1 keys a sibling seat reads: 'hit', 'sim',
+        'situation'/'action' (the best past answer) and 'hits' (k of them)."""
         import urllib.parse
         srv = self.server
-        mem = srv.membrane
         qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
         q = (qs.get("q") or [""])[0].strip()
         try:
@@ -5877,47 +4851,24 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             k = max(1, min(8, int((qs.get("k") or ["1"])[0])))
         except ValueError:
             k = 1
-        out = {"fid": srv.global_field.fid if getattr(srv, "global_field", None)
-               else "?", "hit": False}
-        if q and mem.embedder is not None:
+        out = {"fid": getattr(srv, "fid", "?"), "hit": False, "hits": []}
+        fld = _efield_of(srv)
+        if q and fld is not None:
             try:
-                vec = mem.embedder.embed([q])[0]
-                if k == 1:
-                    for ex, sim in mem.store.top_k(vec, k=1):
-                        sit_l = " ".join(ex.situation.split()).lower()
-                        cap_junk = sit_l.startswith(_THOUGHT_CAPTURE_PREFIXES)
-                        if sim >= sim_min and ex.safe and not cap_junk \
-                                and ex.situation and ex.action:
-                            out.update({"hit": True, "sim": round(float(sim), 4),
-                                        "situation": ex.situation[:400],
-                                        "action": ex.action[:1200],
-                                        "seat": _seat_get(ex),
-                                        "ts": _now_iso()})
-                        break
-                else:
-                    hits = []
-                    for ex, sim in mem.store.top_k(vec, k=k * 4):
-                        if sim < 0.25:
-                            break               # sorted desc; nothing closer remains
-                        sit_l = " ".join(ex.situation.split()).lower()
-                        if sim >= sim_min and ex.safe \
-                                and not sit_l.startswith(_THOUGHT_CAPTURE_PREFIXES) \
-                                and ex.situation and ex.action:
-                            hits.append({"sim": round(float(sim), 4),
-                                         "situation": ex.situation[:400],
-                                         "action": ex.action[:1200],
-                                         "outcome": getattr(ex, "outcome", "") or "pending",
-                                         "model": getattr(ex, "model", "") or "",
-                                         "seat": _seat_get(ex),
-                                         "src": _src_get(ex) or "user"})
-                        if len(hits) >= k:
-                            break
-                    out["field_size"] = len(mem.store)
-                    out["hits"] = hits
-            except Exception:
-                pass
-        if q:
+                from .entity_block import past_answers
+                rows = past_answers(fld, q, k=k, sim_min=sim_min)
+                out["hits"] = [{"sim": r["sim"], "situation": r["q"][:400],
+                                "action": " ".join(r["answer"])[:1200], "q_event": r["q_n"],
+                                "events": r["a_n"], "seat": fld.origin, "src": "field"}
+                               for r in rows]
+                if out["hits"]:
+                    out.update({"hit": True, **{kk: out["hits"][0][kk] for kk in
+                                                ("sim", "situation", "action", "seat")},
+                                "ts": _now_iso()})
+            except Exception as e:
+                out["efield_error"] = str(e)[:200]
             out.update(_efield_answer(srv, q))
+            out["field_size"] = int(((_efield_vitals(srv) or {}).get("entities") or {}).get("live", 0))
         self._json_out(out)
 
     # ---- /membrane/learn + /membrane/forget: the MCP write lanes -----------
@@ -5928,98 +4879,57 @@ class MembraneOpenAIHandler(RAGProxyHandler):
     # JSON mirrors of the executors' text (the MCP layer formats for the
     # model); failures degrade to {"written": false} / {"removed": null}.
     def _membrane_learn(self) -> None:
+        """POST /membrane/learn {lesson}: the MCP write lane -- a NOTE event."""
         srv = self.server
-        body = self._json_body()
-        payload = str(body.get("lesson") or "").strip()
+        payload = str(self._json_body().get("lesson") or "").strip()
         if not payload:
             self._json_err_raw(400, "lesson required"); return
         if not getattr(srv, "agent_writes", True):
             self._json_out({"written": False,
-                            "reason": "agent writes are off "
-                                      "(--no-agent-writes)"}); return
-        mem = srv.membrane
-        if mem.store is None or mem.embedder is None:
-            self._json_out({"written": False,
-                            "reason": "field store or embedder unresolved"}); return
-        if len(payload) > _AGENT_LEARN_MAX_CHARS:
-            self._json_out({"written": False,
-                            "reason": f"payload too long ({len(payload)} > "
-                                      f"{_AGENT_LEARN_MAX_CHARS} chars)"}); return
-        ef_note = _efield_learn(srv, payload, "model")
-        idx = mem.learn_pair(payload, payload, src="model")
-        if idx is None:
-            self._json_out({"written": bool(ef_note), "note": ef_note.strip(),
-                            "reason": "dedup or variety gate: nothing new"}); return
-        _watch_notify(srv, mem, idx)
-        _write_audit(mem, {"event": "agent-learn", "origin": "mcp",
-                           "ex_idx": idx, "tag": "agent-note",
-                           "field_size": len(mem.store),
-                           "payload": _clip(payload, 400)})
-        ex = mem.store.exemplars[idx]
-        self._json_out({"written": True, "ex_idx": idx, "note": ef_note.strip(),
-                        "field_size": len(mem.store),
-                        "exemplar": {"situation": ex.situation,
-                                     "action": ex.action or ""}})
+                            "reason": "agent writes are off (--no-agent-writes)"}); return
+        why = _learn_refusal(payload)
+        if why:
+            self._json_out({"written": False, "reason": why}); return
+        note = _efield_learn(srv, payload, "model")
+        if not note:
+            self._json_out({"written": False, "reason": "the entity field is unavailable"})
+            return
+        _write_audit(srv.membrane, {"event": "agent-learn", "origin": "mcp",
+                                    "tag": "agent-note", "payload": _clip(payload, 400),
+                                    "note": note.strip()})
+        self._json_out({"written": True, "note": note.strip()})
 
     def _membrane_forget(self) -> None:
+        """POST /membrane/forget {spec}: '#N' / '3-7' forget those events
+        (agent cap); anything wordier returns the nearest events as
+        candidates and deletes nothing."""
         srv = self.server
-        body = self._json_body()
-        spec = str(body.get("spec") or "").strip()
+        spec = str(self._json_body().get("spec") or "").strip()
         if not spec:
             self._json_err_raw(400, "spec required"); return
-        mem = srv.membrane
-        if mem.store is None or mem.embedder is None:
+        fld = _efield_of(srv)
+        if fld is None or srv.membrane.embedder is None:
             self._json_out({"removed": None, "candidates": [],
-                            "reason": "field store or embedder unresolved"}); return
-        idxs = _parse_agent_forget(spec)
-        if idxs is not None and _efield_on(srv) is not None:
-            if len(idxs) > _AGENT_FORGET_LIMIT:
-                self._json_out({"removed": None, "candidates": [],
-                                "reason": f"{len(idxs)} events exceed the agent cap "
-                                          f"({_AGENT_FORGET_LIMIT})"}); return
-            res = _efield_forget(srv, idxs)
-            _write_audit(mem, {"event": "forget-events", "origin": "mcp",
-                               "results": res, "spec": _clip(spec, 200)})
-            self._json_out({"removed": sum(1 for r in res if r.get("key") and not r.get("already")),
-                            "events": res}); return
-        if idxs is None:
-            # wordy -> PROPOSAL ONLY (never delete from a wordy spec)
+                            "reason": "the entity field or the embedder is unavailable"}); return
+        nums = _parse_agent_forget(spec)
+        if nums is None:
             try:
-                vec = mem.embedder.embed([spec])[0]
+                near = fld.events_near(srv.membrane.embedder.embed([spec])[0], k=_FORGET_LIMIT)
             except Exception:
-                vec = None
-            cands = []
-            if vec is not None:
-                qn = np.asarray(vec, dtype=float)
-                n = float(np.linalg.norm(qn))
-                if n > 1e-12:
-                    for ex, sim in mem.store.top_k(qn / n, k=_FORGET_LIMIT):
-                        if sim >= 0.55 and ex.safe:
-                            i = mem.store.index_of(ex)
-                            if i is not None:
-                                cands.append({"idx": i, "sim": round(float(sim), 4)})
-            self._json_out({"removed": None, "candidates": cands}); return
-        n0 = len(mem.store)
-        in_range = [i for i in idxs if 0 <= i < n0]
-        if not in_range:
-            self._json_out({"removed": 0, "field_size_before": n0,
-                            "field_size": n0, "removed_cells": [],
-                            "reason": "none of those indexes exist"}); return
-        if len(in_range) > _AGENT_FORGET_LIMIT:
+                near = []
+            self._json_out({"removed": None, "candidates": [
+                {"n": d.get("n"), "sim": round(float(s_), 4),
+                 "text": _clip(d.get("text") or d.get("tool") or "", 120)}
+                for d, s_ in near if d.get("n") is not None]}); return
+        if len(nums) > _AGENT_FORGET_LIMIT:
             self._json_out({"removed": None, "candidates": [],
-                            "reason": f"{len(in_range)} indexes exceed the "
-                                      f"agent cap ({_AGENT_FORGET_LIMIT})"}); return
-        shown = [{"idx": i, "situation": _clip(mem.store.exemplars[i].situation, 120)}
-                 for i in in_range]
-        removed = mem.store.forget(in_range)
-        mem.store.save(mem.field_path)
-        _write_audit(mem, {"event": "forget", "origin": "mcp",
-                           "removed": removed,
-                           "field_size_before": n0,
-                           "field_size_after": len(mem.store),
-                           "spec": _clip(spec, 200)})
-        self._json_out({"removed": removed, "field_size_before": n0,
-                        "field_size": len(mem.store), "removed_cells": shown})
+                            "reason": f"{len(nums)} events exceed the agent cap "
+                                      f"({_AGENT_FORGET_LIMIT})"}); return
+        res = _efield_forget(srv, nums)
+        _write_audit(srv.membrane, {"event": "forget-events", "origin": "mcp",
+                                    "results": res, "spec": _clip(spec, 200)})
+        self._json_out({"removed": sum(1 for r in res if r.get("key") and not r.get("already")),
+                        "events": res})
 
     # ---- /membrane/delegate: model-pointed work, router-disposed ------------
     def _membrane_delegate(self) -> None:
@@ -6103,12 +5013,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             router.note_outcome(model, situ, survived=survived)
         except Exception:
             pass
-        if survived and mem.embedder is not None:
-            try:
-                _capture(mem, "delegate", f"delegated: {_clip(task, 200)}",
-                         _clip(content, 1024), min_len=0, src="model")
-            except Exception:
-                pass
+        cap = getattr(srv, "capturer", None)
+        if survived and cap is not None:
+            cap.on_turn(f"delegated: {task}", content)
         self._json_out({"ok": survived, "model": model,
                         "reason": info.get("reason"), "explored":
                         bool(info.get("explored")), "latency_s": round(dt, 3),
@@ -6144,7 +5051,6 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._json_err_raw(503, "entity layer unavailable"); return
         # the eviction covenant counts cells: refresh the hint so the
         # story-poorest eviction sees the live field
-        est._exemplars_hint = srv.membrane.store.exemplars
         body = self._json_body()
         key = str(body.get("key") or "").strip()
         if not key:
@@ -6160,8 +5066,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # geometry instead of a bare fallback.
         try:
             from .night import consolidate_entities
-            consolidate_entities(srv.membrane, est, materialize=0,
-                                 only_keys=[key])
+            consolidate_entities(srv.membrane, est, mem=srv.membrane,
+                                 materialize=0, only_keys=[key])
         except Exception:
             pass
         self._json_out(res)
@@ -6202,22 +5108,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 self._json_out({"query": q, "related": related(fld, q, qvec, k)}); return
             except Exception as e:
                 self._json_err_raw(500, f"related lookup failed: {e}"); return
-        est = getattr(srv, "entity_store", None)
-        if est is None:
-            self._json_err_raw(503, "entity layer unavailable"); return
-        mem = srv.membrane
-        qvec = None
-        if mem.embedder is not None:
-            try:
-                qvec = mem.embedder.embed([q])[0]
-            except Exception:
-                qvec = None
-        try:
-            from .entities import related_entities
-            res = related_entities(mem.store.exemplars, q, qvec=qvec, k=k)
-        except Exception as e:
-            self._json_err_raw(500, f"related lookup failed: {e}"); return
-        self._json_out({"query": q, "related": res})
+        self._json_err_raw(503, "the entity field is off"); return
 
     def _entity_add(self) -> None:
         srv = self.server
@@ -6279,8 +5170,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             _write_audit(mem, {"event": f"agent-entity-{op}",
                                "origin": "mcp",
                                "eid": str(res.get("eid") or ""),
-                               "ok": bool(res.get("ok")),
-                               "field_size": len(mem.store)})
+                               "ok": bool(res.get("ok"))})
         except Exception:
             pass
 
@@ -6307,44 +5197,6 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
         self._json_out(res)
-
-    def _membrane_prefix(self) -> None:
-        """POST /membrane/prefix: THE STREAMING SEAM (the VSA lane's #8
-        consumer). Body {"text": "...", "k": 3}: top-k shape hits while
-        the text is still arriving (voice STT, a long paste mid-stream)
-        -- the state is incremental, so the lane answers a PREFIX the
-        pooled-vec lane cannot (mxbai needs the full turn). READ-ONLY:
-        no learn, no audit write, bounded k. Response:
-        {"hits": [{situation, action, sim, shape}, ...]} -- sim is the
-        raw Hamming similarity (a prefix lands ~0.55-0.68; the client
-        judges), shape rides as the codebook id for coherence."""
-        srv = self.server
-        body = self._json_body()
-        text = str(body.get("text") or "")
-        if not text.strip():
-            self._json_out({"hits": []}); return
-        mem = srv.membrane
-        lane = getattr(mem, "vsa_lane", None)
-        if lane is None:
-            self._json_out({"hits": [], "reason": "vsa lane off"}); return
-        try:
-            k = max(1, min(5, int(body.get("k") or 3)))
-        except (TypeError, ValueError):
-            k = 3
-        hits = []
-        try:
-            for ex, sim in lane.hits(mem.store, text, k=k):
-                if not ex.safe or not ex.situation or not ex.action:
-                    continue
-                hits.append({"situation": _clip(ex.situation, 280),
-                             "action": _clip(ex.action or "", 280),
-                             "sim": round(float(sim), 4),
-                             "shape": lane.codebook.id,
-                             "outcome": getattr(ex, "outcome", "")
-                                        or "pending"})
-        except Exception as e:
-            self._json_out({"hits": [], "error": str(e)[:120]}); return
-        self._json_out({"hits": hits})
 
     def _membrane_codegraph(self) -> None:
         """POST /membrane/codegraph: the MCP surface for the AST graph
@@ -6406,7 +5258,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 _write_audit(srv.membrane,
                              {"event": "agent-junk-cut", "origin": "mcp",
                               "spec": spec, "cut": w.junk_sim,
-                              "field_size": len(srv.membrane.store)})
+                              "eid": spec})
             except Exception:
                 pass
             self._json_out({"ok": True, "spec": spec, "junk_sim": w.junk_sim,
@@ -6420,7 +5272,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 _write_audit(srv.membrane,
                              {"event": "agent-junk-cut", "origin": "mcp",
                               "spec": spec, "cut": res.get("junk_sim"),
-                              "field_size": len(srv.membrane.store)})
+                              "eid": spec})
             except Exception:
                 pass
         self._json_out(res)
@@ -6445,71 +5297,45 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if cached and time.time() - cached.get("ts", 0) < 60:
             self._json_out(cached["data"])
             return
-        srv = self.server
         mem = srv.membrane
-        exs = mem.store.exemplars
+        fld = _efield_of(srv)
         tail, n_verd = _audit_tail(mem.audit_path)
+        vit = _efield_vitals(srv) or {}
         out = {
             "mode": "DEV",
             "backend": srv.backend,
             "embed_model": getattr(mem.embedder, "model", None),
-            "field_size": len(exs),
-            "safe": sum(1 for e in exs if e.safe),
-            "retired": sum(1 for e in exs
-                           if (getattr(e, "outcome", "") or "").startswith("compacted@")),
-            "notes": sum(1 for e in exs if getattr(e, "outcome", "") == "compact-note"),
-            "thermo": thermo_state(mem.store),
-            "efield": _efield_vitals(srv),
-            "gate": {"sim_min": mem.sim_min, "dedup_sim": mem.dedup_sim,
-                     "demote_threshold": mem.demote_threshold,
-                     "reask_window_s": mem.reask_window_s,
-                     "vague_filter": mem.vague_filter},
-            "retrieval": {"k": srv.rag_k, "rag_sim_min": srv.rag_sim_min,
-                          "ctx_chars": srv.rag_ctx_chars,
-                          "no_context": bool(getattr(srv, "no_context",
-                                                     False))},
-            # dev-viewer surface: the 3D field cloud + the verdict ticker
-            "exemplars": (_entity_points(srv, _efield_on(srv)) if _efield_on(srv) is not None
-                          else _cloud_points(srv, exs)),
+            # the viewer's counters and cloud: live entities, their states
+            "field_size": int((vit.get("entities") or {}).get("live", 0)),
+            "efield": vit or None,
+            "retrieval": {"ctx_chars": srv.rag_ctx_chars,
+                          "no_context": bool(getattr(srv, "no_context", False))},
+            "exemplars": _entity_points(srv, fld) if fld is not None else [],
             "verdicts": tail,
             "n_verdicts": n_verd,
-            "compact": dict(srv.compactor.stats) if srv.compactor else None,
-            "compact_model": srv.compact_model,
-            "compact_follows_chat": srv.compact_follows_chat,
-            # THE COMPACTOR NIGHT: the maintenance clock's last pass (the
-            # sweep's demotions, the gray-band size, anchors grown, the
-            # consolidation's drift stats). None until the first cycle.
+            # the NightClock's last pass (births, junk, activity, commons)
             "night": (getattr(srv, "night_stats", None) or None),
             "state_intercept": srv.state_intercept,
             "audit_records": _audit_count(mem.audit_path),
             "frame_wait": _frame_wait_summary(srv) or None,
-            # the null-recall lane (peer suggestion #3): the session's
-            # all-orthogonal asks -- the honest absence metric
+            # the null-recall lane: the session's all-orthogonal asks
             "recall_null": (getattr(srv, "_recall_null", None) or None),
-            "review_pending": len(mem.review_pending()),
             # THE TOTALITY VIEW: everything membrane sent to / received from
-            # the model on the last turns (the full API surface per turn --
-            # doctrine, recall, where-we-are, peer blocks, watch reports,
-            # thought asks -- and what came back). The surface log the
-            # operator reads; capped ring, newest last.
+            # the model on the last turns; capped ring, newest last.
             "surface": _surface_tail(srv),
-            # THE 'I' TRACK over MCP: the same WHERE WE ARE the opencode
-            # seat's model gets -- so the tool lane sees position + tracks.
+            # the same WHERE WE ARE the seat's model gets (a peek: drains nothing)
             "where_we_are": _where_we_are(srv, None, drain=False),
-            # entity tracks raw (the JSON form of the banner section)
             "entity_tracks": (getattr(srv, "entity_store", None).list_tracks()
                               if getattr(srv, "entity_store", None) else []),
         }
-        gf = getattr(srv, "global_field", None)
-        if gf is not None:
-            out["global_field"] = {
-                "path": str(gf.path), "fid": gf.fid,
-                "notes": len(gf.store),
-                "shard_entries": len(gf.ledger.entries()),
-                "suggestions_pending": len(_read_suggestions(srv)),
-                "peers_live": (len(srv.peers.livelist())
-                               if getattr(srv, "peers", None) else 0),
-            }
+        if fld is not None:
+            from .claims import COMMONS
+            commons = [d for _, d in fld.b.scan("claims", {"origin": COMMONS})]
+            out["commons"] = {"claims": len(commons),
+                              "consensus": sum(1 for d in commons if d.get("status") == "consensus"),
+                              "disputed": sum(1 for d in commons if d.get("status") == "disputed"),
+                              "peers_live": (len(srv.gpeers.livelist())
+                                             if getattr(srv, "gpeers", None) else 0)}
         # THE THINK QUEUE (working memory, on the mind): what the fast
         # clock is chewing, oldest first, bounded by the covenant -- plus
         # THE MIND LOG (the inner speech, visible): what it decided.
@@ -6533,14 +5359,6 @@ def main() -> None:
         description="Membrane field + opencode: a local field-backed coding "
                     "agent (math/state answered internally; model work proxied "
                     "to Ollama).")
-    ap.add_argument("--ephemeral", dest="ephemeral", action="store_true",
-                    default=None,
-                    help="force the ephemeral candidate tier ON (captures "
-                         "enter as TTL candidates; evidence promotes)")
-    ap.add_argument("--no-ephemeral", dest="ephemeral", action="store_false",
-                    default=None,
-                    help="route fresh captures straight to CANON (pre-tier "
-                         "semantics) instead of the ephemeral candidate tier")
     ap.add_argument("--listen", type=int, default=11500,
                     help="port for the membrane OpenAI-compatible proxy")
     ap.add_argument("--no-viewer", dest="viewer", action="store_false",
@@ -6589,101 +5407,26 @@ def main() -> None:
                     help="the field's embedding model (default: auto -- known "
                          "Ollama embed models, then the selected model; chat "
                          "BLOCKS when nothing can embed)")
-    ap.add_argument("-k", dest="k", type=int, default=3,
-                    help="memories retrieved per turn")
-    ap.add_argument("--rag-sim-min", type=float, default=0.72,
-                    help="cosine floor below which a memory is not "
-                         "injected (0.72: the 0.65-0.72 band measured as "
-                         "mostly stale background -- it rode every turn "
-                         "and taught the model to echo context)")
-    ap.add_argument("--mem-chars", type=int, default=220,
-                    help="max chars per recalled Q and per A (the "
-                         "operator's unbounded-essay fix: a memory is a "
-                         "pointer to a narrative, not the narrative)")
     ap.add_argument("--ctx-chars", type=int, default=2400)
-    ap.add_argument("--rag-mmr-sim", type=float, default=0.90,
-                    help="recall-time dedup: a memory this similar to one "
-                         "already injected is skipped")
-    ap.add_argument("--sim-min", type=float, default=0.85,
-                    help="gate absorb threshold (audit-only in RAG mode)")
-    ap.add_argument("--demote-threshold", type=int, default=1)
-    ap.add_argument("--dedup-sim", type=float, default=0.95)
-    ap.add_argument("--no-vague-filter", dest="vague_filter", action="store_false")
-    ap.add_argument("--reask-window", type=float, default=300.0)
-    ap.add_argument("--no-judge", dest="no_judge", action="store_true",
-                    help="disable the demotion judge (default ON: the "
-                         "selected chat model adjudicates demotions)")
-    ap.add_argument("--judge-model", default=None, metavar="MODEL",
-                    help="pin the demotion judge model (default: follows the "
-                         "model selected in opencode)")
-    ap.add_argument("--compact-every", type=float, default=90.0, metavar="S",
-                    help="base seconds between cortex compaction cycles "
-                         "(0 disables); the duty loop stretches this under "
-                         "load and the growth trigger skips quiet periods")
-    ap.add_argument("--compact-cpu-target", type=float, default=0.10,
-                    dest="compact_cpu_target", metavar="FRAC",
-                    help="target fraction of wall time the compactor may "
-                         "spend while traffic is live (the consolidate.py "
-                         "closed loop; 0 = fixed-interval mode)")
-    ap.add_argument("--compact-growth-frac", type=float, default=0.25,
-                    dest="compact_growth_frac", metavar="FRAC",
-                    help="compact only after the field grew this fraction "
-                         "of its size since the last note (min "
-                         "compact-min-field raw turns; 0 = every interval)")
-    ap.add_argument("--compact-max-field", type=int, default=8000,
-                    dest="compact_max_field", metavar="N",
-                    help="THE SIZE TARGET (default 8000: on by default -- "
-                         "the metric-targeted auto-compact): compact every "
-                         "interval while the field exceeds N exemplars "
-                         "(0 = off; the compactor holds the field at a "
-                         "size). The ANN made recall flat, so this is "
-                         "about save/scan cost, not latency")
-    ap.add_argument("--compact-max-raw-frac", type=float, default=0.4,
-                    dest="compact_max_raw_frac", metavar="FRAC",
-                    help="THE RAW-RATIO TARGET (default 0.4: on by "
-                         "default -- the metric-targeted auto-compact): "
-                         "compact when un-distilled canon exceeds this "
-                         "fraction of the field (0 = off; the "
-                         "compactor's real metric: how much of the "
-                         "field is still raw -- enough raw material "
-                         "for good clusters, not so much the field "
-                         "drowns)")
-    ap.add_argument("--compact-min-field", type=int, default=12)
-    ap.add_argument("--compact-cluster-min", type=int, default=4)
-    ap.add_argument("--compact-cluster-max", type=int, default=8)
-    ap.add_argument("--compact-cluster-sim", type=float, default=0.60)
-    ap.add_argument("--compact-mem-chars", type=int, default=400)
     ap.add_argument("--compact-model", default=None, metavar="MODEL",
-                    help="pin the cortex/distillation model (default: follows "
-                         "the model selected in opencode)")
+                    help="pin the seat's model of record (the one the "
+                         "router-less backstop and the follow-chat judge "
+                         "use; default: follows the model selected in "
+                         "opencode)")
     ap.add_argument("--idle-cortex-model", default=None, metavar="MODEL",
-                    help="model for BACKGROUND loops only (compactor "
-                         "distillation, entity synthesis); default: the "
-                         "first local Ollama chat model by family preference "
-                         "(granite, glm, qwen3, qwen2.5-coder, ...), "
-                         "granite3.3:8b when the tag list is unreadable "
-                         "(local-first: a stray background seat never burns "
-                         "cloud tokens). --compact-model "
+                    help="model for BACKGROUND loops only (claim + A/B "
+                         "judging, entity scripts, synthesis); default: "
+                         "the first local Ollama chat model by family "
+                         "preference (granite, glm, qwen3, "
+                         "qwen2.5-coder, ...) resolved from the LIVE tag "
+                         "list, local-first so a stray stuck background "
+                         "seat never burns cloud tokens. --compact-model "
                          "overrides for both lanes.")
-    ap.add_argument("--archive", dest="archive", action="store_true",
-                    help="after each compaction, move the retired raw turns "
-                         "OUT of the hot field into the cold tier "
-                         "(<field>.archive.jsonl, or couchbase collection "
-                         "exemplars_archive when MEMBRANE_STORE=couchbase). "
-                         "The note stays in the field; the raw turns stay "
-                         "queryable via 'membrane: query the field'.")
-    ap.add_argument("--no-archive", dest="archive", action="store_false")
-    ap.add_argument("--momentum", dest="momentum", action="store_true",
-                    help="momentum-skewed retrieval (cortex's laser projector): "
-                         "a frictional EMA of recent turn embeddings shifts the "
-                         "query vector before top_k, biasing recall toward the "
-                         "live working context (--no-momentum for exact recall).")
-    ap.add_argument("--no-momentum", dest="momentum", action="store_false")
     ap.add_argument("--no-banner", dest="no_banner", action="store_true",
                     help="the ablation arm: inject NO banner (tracks/"
                          "alerts/announcements off; recall stays) -- "
                          "port-notes 24's measurement flag")
-    ap.set_defaults(archive=True, momentum=True)
+    ap.set_defaults(no_banner=False)
     ap.add_argument("--no-router", "--disable-llm-router", dest="router",
                     action="store_false",
                     help="disable the LLM orchestration router and always "
@@ -6736,13 +5479,6 @@ def main() -> None:
                     help="where the router persists model records (wins, "
                          "imprints, latency EWMAs, calibration, spend); "
                          "default <field-dir>/router.json")
-    ap.add_argument("--replay-sim", type=float, default=0.0, metavar="SIM",
-                    help="cosine above which an ACT verdict replays the stored "
-                         "answer with NO model call (the token saver). "
-                         "DEFAULT 0 = pure observer: membrane NEVER answers "
-                         "the user from memory -- every turn reaches the "
-                         "model, memories ride along as context. Set >0 "
-                         "(e.g. 0.97) to re-enable the replay token saver.")
     ap.add_argument("--replay-ab", type=float, default=0.0, metavar="P",
                     help="entity field: serve the replay on a fraction P of the "
                          "turns the gate finds replayable (default 0: every such "
@@ -6852,93 +5588,7 @@ def main() -> None:
     if model is None and args.model:
         model = args.model          # respect an explicit choice even if unlisted
 
-    if args.no_judge:
-        judge = StubJudge()          # demotions always stand
-    else:
-        # The JUDGE LADDER: adjudication starts one rung up the COST STACK
-        # from the model that answered (the responder is the least qualified
-        # to check itself) and propagates upward through the price table
-        # until a rung rules CONTEST/ACCEPT; ESCALATE -- or every rung
-        # failing -- parks the case for the human (the top rung, asked with
-        # question + options + consequences). The ladder itself is computed
-        # AFTER the router boots (srv.judge_ladder, priced candidates,
-        # cheapest first); until then contest() falls back to the selected
-        # chat model.
-        _judge_impl = OllamaJudge(backend=backend,
-                                  model=args.judge_model or model or "granite3.3:8b",
-                                  timeout=120)
-
-        class _LadderJudge:
-            """Walks the cost stack: for each rung (cheapest capable first)
-            ask CONTEST/ACCEPT/ESCALATE; ESCALATE or error -> next rung;
-            stack exhausted -> None (ACCEPT: degrade toward the environment,
-            the safe direction) and the human-escalation path in _demote
-            takes over. No ladder (router off / single model) -> the selected
-            chat model judges, the old behavior."""
-
-            def contest(self, situation, action, query, reask_count):
-                ladder = getattr(srv, "judge_ladder", None)
-                if not ladder:
-                    _judge_impl.model = (getattr(srv, "compact_model", None)
-                                         or _judge_impl.model)
-                    return _judge_impl.contest(situation, action, query,
-                                               reask_count)
-                last_exc = None
-                for name, _usd in ladder:
-                    try:
-                        _judge_impl.model = name
-                        r = _judge_impl.contest(situation, action, query,
-                                                reask_count)
-                    except Exception as e:
-                        last_exc = e
-                        continue
-                    if r is None:
-                        continue          # this rung erred -> try above
-                    if str(r).upper().startswith("ESCALATE"):
-                        continue          # genuinely undecidable -> rung up
-                    return r              # CONTEST/ACCEPT: a rung ruled
-                if last_exc:
-                    print(f"[judge-ladder] all rungs failed ({last_exc}) "
-                          f"-> ACCEPT (human may be asked)", file=sys.stderr)
-                return None
-
-        judge = _LadderJudge()
-    mem = Membrane(
-        responder=OllamaChatResponder(backend),
-        field_path=args.field,
-        audit_path=args.audit,
-        embedder=None,          # resolved by the ladder (below)
-        sim_min=args.sim_min,
-        dedup_sim=args.dedup_sim,
-        demote_threshold=args.demote_threshold,
-        reask_window_s=args.reask_window,
-        judge=judge,
-        observer=True,          # never replay: always forward, always learn
-        vague_filter=bool(args.vague_filter),
-        ephemeral=(bool(getattr(args, "ephemeral", False))
-                   if getattr(args, "ephemeral", None) is not None
-                   else os.environ.get("MEMBRANE_EPHEMERAL", "1")
-                       .strip().lower() in ("1", "true", "yes", "on")),
-    )
-    # Membrane defaults embedder to OllamaEmbedder() when None; we want the
-    # lazy resolution ladder instead, so clear it after construction.
-    mem.embedder = None
-
-    # ---- the ollama-membrane fork stand-down (re-probed every boot) ----
-    # When the Go fork advertises /api/membrane with its own origin, it owns
-    # capture/recall for this project: this seat writes NOTHING to the field
-    # (capture off) and injects NOTHING into turns (recall + doctrine off).
-    # The operator's lanes (state/learn/forget queries, ledger, MCP) stay up --
-    # this is a write stand-down, not a handoff: the fork keeps its own origin.
-    mem.fork_owns_field = False
-    fork_info = _ollama_membrane_present()
-    if fork_info:
-        mem.fork_owns_field = True
-        print(f"membrane: ollama-membrane fork detected at "
-              f"{os.environ.get('MEMBRANE_UPSTREAM', 'http://127.0.0.1:11435')} "
-              f"(origin={fork_info.get('origin')}, "
-              f"bucket={fork_info.get('bucket')}) -- proxy standing down",
-              file=sys.stderr)
+    mem = Seat(args.field, args.audit)   # the seat: audit, embedder ladder, locks
 
     listen = _pick_listen_port(args.listen)
     if listen != args.listen:
@@ -6954,43 +5604,23 @@ def main() -> None:
     srv.tool_keep = int(getattr(args, "tool_keep", 3))
     mem.server_ref = srv          # the router-outcome loop reads srv.router
     srv.backend = backend
-    srv.rag_k = args.k
-    srv.rag_sim_min = max(0.0, min(1.0, float(args.rag_sim_min)))
     # THE ABLATION FLAG (port-notes 24): --no-banner arms the
     # banner-off measurement
     srv.no_banner = bool(getattr(args, "no_banner", False))
     srv.rag_ctx_chars = max(200, int(args.ctx_chars))
-    srv.rag_mem_chars = max(64, int(args.mem_chars))
-    srv.rag_mmr_sim = max(0.0, min(1.0, float(args.rag_mmr_sim)))
-    srv.compact_min_field = max(6, int(args.compact_min_field))
-    srv.compact_min_cluster = max(2, int(args.compact_cluster_min))
-    srv.compact_max_cluster = max(srv.compact_min_cluster,
-                                  int(args.compact_cluster_max))
-    srv.compact_cluster_sim = max(0.0, min(1.0, float(args.compact_cluster_sim)))
-    srv.compact_mem_chars = max(64, int(args.compact_mem_chars))
-    srv.compact_cpu_target = max(0.0, min(1.0, float(args.compact_cpu_target)))
-    srv.compact_growth_frac = max(0.0, float(args.compact_growth_frac))
-    # THE METRIC TARGETS (the operator's auto-compact): the size budget
-    # + the raw-ratio target -- the compactor holds the field at a size
-    # (compact-max-field) and tracks how much of it is still un-distilled
-    # (compact-max-raw-frac); either target over -> compact every interval.
-    srv.compact_max_field = max(0, int(args.compact_max_field))
-    srv.compact_max_raw_frac = max(0.0, float(args.compact_max_raw_frac))
-    srv.compact_follows_chat = args.compact_model is None
-    srv.compact_model = args.compact_model or model or "granite3.3:8b"
-    # THE IDLE-CORTEX SPLIT: background loops (compactor distillation, the
-    # entity synthesizer) run on a LOCAL model by default -- a stray stuck
-    # background seat can never burn cloud tokens again. An explicit
+    srv.model_follows_chat = args.compact_model is None
+    srv.seat_model = args.compact_model or model or "granite3.3:8b"
+    # THE IDLE-CORTEX SPLIT: background loops (claim + A/B judging, the
+    # entity synthesis scripts) run on a LOCAL model by default -- a stray
+    # stuck background seat can never burn cloud tokens again. An explicit
     # --compact-model pins BOTH lanes (chat-stamped + idle); --idle-cortex-
-    # model overrides just the idle lane. The judge/cortex continue to follow
+    # model overrides just the idle lane. The judge continues to follow
     # the operator's chat selection (1-per-turn, bounded by the turn itself).
     # The default resolves from ollama's LIVE tag list (_pick_idle_cortex_
-    # model): a hardcoded name (granite3.3:8b) 404s forever on backends
-    # that never had it -- one dead compact cycle per idle period.
+    # model); the fallback reads the tag list first and only then guesses.
     srv.idle_cortex_model = (args.idle_cortex_model or args.compact_model
                              or _pick_idle_cortex_model(backend, model))
-    srv.default_compact_model = srv.compact_model   # the autoselect-lane pin-back
-    srv.judge_follows_chat = (not args.no_judge) and args.judge_model is None
+    srv.default_seat_model = srv.seat_model   # the autoselect-lane pin-back
     srv.pending_embed_error = None
     srv.state_intercept = bool(args.state_intercept)
     srv.sem_intercept = bool(args.sem_intercept)
@@ -7021,49 +5651,35 @@ def main() -> None:
     srv.agent_writes = bool(getattr(args, "agent_writes", True))
     srv._served_thought_asks = {}
     srv.gate_monologue = bool(args.gate_monologue)
-    srv.replay_sim = max(0.0, min(1.0, float(args.replay_sim)))
     srv.replay_ab = max(0.0, min(1.0, float(args.replay_ab)))
     srv.embed_model_arg = args.embed_model
     srv.resolved_embed_name = args.embed_model
 
-    # ---- the global-field layer (docs/global-field.md, slice 1) ----
-    # Opt-in via --global-field (default path ~/.membrane/global-field.json);
-    # --no-global is the kill switch. The commons is a FILE, not a server: no
-    # election, no leader, auto-join by path convention, crash-safe by atomic
-    # save + mtime re-read on the read path.
+    # ---- the peers and the commons ----
+    # Peers: every live seat registers itself (the registry heartbeat) and
+    # answers /membrane/ask from its own field; --no-global turns it off. The
+    # commons are claims in the shared store (claims.promote_commons at night,
+    # the operator's `remember globally:`); the old commons file is converted
+    # once.
+    srv._gstop = threading.Event()
     srv.global_field = None
     srv.global_sim_min = max(0.0, min(1.0, float(args.global_sim_min)))
+    from .global_field import field_id_for as _fid_for
+    srv.fid = _fid_for(args.field)
     if args.use_global:
-        gpath = (args.global_field
-                 or os.path.expanduser("~/.membrane/global-field.json"))
         try:
-            from .global_field import GlobalField, field_id_for, Peers
-            srv.global_field = GlobalField(gpath, field_id_for(args.field))
-            print(f"[opencode] global field: {gpath} "
-                  f"(field-id {srv.global_field.fid}, "
-                  f"{len(srv.global_field.store)} notes)", file=sys.stderr)
-            # slice 4: peer self-registration + the commons slow clock
+            from .global_field import Peers, field_id_for
             srv.listen_port = listen
-            srv.peers = Peers(srv.global_field.fid)
-            srv.peers.register(listen, str(args.field))
-            n_live = len(srv.peers.livelist())
-            print(f"[opencode] peers: {n_live} other membrane(s) live",
+            srv.gpeers = Peers(field_id_for(args.field))
+            srv.gpeers.register(listen, str(args.field))
+            print(f"[opencode] gpeers: {len(srv.gpeers.livelist())} other membrane(s) live",
                   file=sys.stderr)
-            srv._gstop = threading.Event()
-            srv._last_suggest_size = len(mem.store)
-            srv._scope_suggestions_path = (
-                srv.global_field.path.parent / "scope-suggestions.jsonl")
-            threading.Thread(target=_gfield_thread, args=(srv,),
-                             name="global-maintenance", daemon=True).start()
             threading.Thread(target=_peer_heartbeat, args=(srv,),
                              name="peer-heartbeat", daemon=True).start()
         except Exception as e:
-            print(f"[opencode] global field disabled ({_one_line(e)})",
-                  file=sys.stderr)
-            srv.global_field = None
-    # the append-ordered store means 'this session' / 'the last hour' (the
-    # time-window forget) resolves to everything appended after boot
-    srv._boot_field_size = len(mem.store)
+            print(f"[opencode] peers disabled ({_one_line(e)})", file=sys.stderr)
+        _convert_old_commons(srv, args.global_field
+                             or os.path.expanduser("~/.membrane/global-field.json"))
 
     # ---- the watch layer (spatial triggers, membrane/watch.py) ----
     # Probes live beside the field (<field-dir>/watches.json); events are
@@ -7071,13 +5687,15 @@ def main() -> None:
     srv._watch_board = None
     try:
         _wdir = Path(args.field).parent
-        _est = srv.entity_store
+        # the entity store boots LATER than this block; the gate reads it
+        # lazily per call
+        _est = lambda: getattr(srv, "entity_store", None)
 
         def _watch_junk_gate(vec, w) -> bool:
             """Per-watch junk cut: machinery never trips a spatial watch.
             The watch's own junk_sim, else the entity-track default; the
             anchor screen comes from the entity store (lazily embedded)."""
-            est = getattr(srv, "entity_store", None)
+            est = _est()
             if est is None:
                 return True
             cut = getattr(w, "junk_sim", None)
@@ -7122,10 +5740,11 @@ def main() -> None:
         if mode_from_env() != "off":
             from .efield import EntityField
             from .efstore import open_backend
+            from .substrate import _origin_tag
             be = open_backend(args.field)
             srv.efield = EntityField(
                 be, LazyEmbedder(mem),
-                getattr(mem.store, "origin", "") or "seat",
+                _origin_tag(args.field),
                 # read the CACHED graph only: refreshing mutates it, and
                 # that belongs to the chat thread
                 graph_fn=lambda: getattr(srv, "_codegraph", None))
@@ -7147,8 +5766,7 @@ def main() -> None:
     # to True used to silently kill the kill switch)
     srv.entity_store = None
     try:
-        from .entities import (EntityStore, JUNK_CUT_DEFAULT,
-                               related_entities)
+        from .entities import EntityStore, JUNK_CUT_DEFAULT
         srv.entity_store = EntityStore(path=str(_wdir / "entities.json"))
         # THE PEER SUBSTRATES (the operator's design): the proxy REGISTRY
         # (ephemeral bucket, TTL docs, heartbeats -- who else is connected)
@@ -7159,7 +5777,7 @@ def main() -> None:
             from .peers import PeerSubstrate
             srv.peers = PeerSubstrate(
                 field_path=str(_wdir / "field.json"),
-                port=listen, model=str(srv.compact_model))
+                port=listen, model=str(srv.seat_model))
             srv.peers.register()
             print(f"[opencode] peers: registered as {srv.peers.seat_id} "
                   f"(heartbeat {int(srv.peers.heartbeat_s)}s)",
@@ -7171,14 +5789,7 @@ def main() -> None:
         # living present. The model is a vessel (constant, uninformative);
         # the conversation's direction is the thing worth watching. The
         # story renders from the fresh tail (nothing tags 'now'; everything
-        # is now); the position drifts with the momentum EMA + fresh cells.
-        # THE SCARCITY COVENANT WIRE: the store gets the field so
-        # story-poorest eviction counts cells (never evicts a rich track
-        # for a fresh plant); the cap then ENFORCES at boot -- a
-        # pre-covenant roster (or a previous boot's oldest-trimmed
-        # mistake) trims by story-poverty here, recovering a rich track
-        # if a stub can be evicted instead.
-        srv.entity_store._exemplars_hint = mem.store.exemplars
+        # is now); the position drifts with the momentum EMA + fresh states.
         evicted_boot = srv.entity_store._enforce_cap()
         if evicted_boot:
             print(f"[opencode] track cap: evicted {evicted_boot} "
@@ -7197,14 +5808,14 @@ def main() -> None:
                     srv.entity_store.ensure_track_entity(k)
             from .night import consolidate_entities, run_scripted_entities
             consolidate_entities(srv.membrane, srv.entity_store,
-                                 materialize=0,
+                                 mem=mem, materialize=0,
                                  only_keys=[k for k in srv.entity_store.tracks.keys()
                                             if k != "session:now"])
             # THE SCRIPT PASS AT BOOT: a script edit between boots must
             # echo immediately (the stale script_render otherwise rides
             # the banner until the next 15-min night tick)
             out = run_scripted_entities(srv.membrane, srv.entity_store,
-                                        force=True)
+                                        mem=mem, force=True)
             if out.get("errors"):
                 print(f"[opencode] script pass: {out['errors']} error(s)",
                       file=sys.stderr)
@@ -7223,9 +5834,8 @@ def main() -> None:
               file=sys.stderr)
 
     def _entity_sink(ents, links):
-        """The compactor synthesizer's commit path: merge + write-through,
-        back-linked to the cluster's cell indexes (where they still exist --
-        the compactor may have retired them into the note)."""
+        """The synthesis scripts' commit path: merge + write-through the
+        curated overlay."""
         est = getattr(srv, "entity_store", None)
         if est is None:
             return
@@ -7245,8 +5855,7 @@ def main() -> None:
     # pool's replacement (the same idle-cognition role, on the main
     # field, no parallel Membranes). --no-dreamer stands it down.
     srv.dreamer = None
-    if not getattr(args, "no_dreamer", False) \
-            and not getattr(mem, "fork_owns_field", False):
+    if not getattr(args, "no_dreamer", False):
         try:
             from .dreamer import Dreamer
             srv.dreamer = Dreamer(srv, idle=60.0)
@@ -7261,8 +5870,7 @@ def main() -> None:
     # memory = 5 items, drop-oldest; voice always planner-gated; model
     # calls capped per minute. --no-thinker stands it down.
     srv.thinker = None
-    if not getattr(args, "no_thinker", False) \
-            and not getattr(mem, "fork_owns_field", False):
+    if not getattr(args, "no_thinker", False):
         try:
             from .thinker import Thinker
             srv.thinker = Thinker(srv)
@@ -7284,32 +5892,16 @@ def main() -> None:
     except Exception:
         pass
     _init_speak(srv)
-    if _efield_on(srv) is not None:
-        srv.compactor = None             # the entity field keeps no summaries
-        print("[opencode] compactor: off -- the entity field is on (the "
-              "NightClock runs the night)", file=sys.stderr)
-    elif args.compact_every > 0 and not getattr(mem, "fork_owns_field", False):
-        srv.compactor = Compactor(srv, idle=args.compact_every)
-        srv.compactor.start()
-    elif args.compact_every > 0:
-        srv.compactor = None
-        print("[opencode] compactor: skipped -- fork owns the field "
-              "(no second writer)", file=sys.stderr)
-    # THE INIT SPEAK (the thinker's hello, planner-gated): one line on
-    # boot -- the mind exists, the field's size, the thinker + dreamer
-    # humming. Rides speak()'s ActTable gate (stay-silent holds unless
-    # the table has learned boot contexts speak).
-    # THE STANDALONE NIGHT: when the Compactor is stood down (fork owns
-    # capture) the night still runs on its own slow timer -- quality
-    # control is not capture (the operator's shared-field call). The
-    # sweep self-rate-limits to 1/hour; consolidation is pure numpy.
-    # When the Compactor IS running, the night rides its cycle instead
-    # (rag.py step 5) and this loop is not started.
-    if srv.compactor is None and getattr(mem, "store", None) is not None:
+    if _efield_on(srv) is None:
+        print("[opencode] night: idle -- the entity field is unavailable "
+              "(no backend; the NightClock does not start)", file=sys.stderr)
+    # THE STANDALONE NIGHT: the NightClock runs the night on the entity
+    # field (the entity scripts, births, junk, the activity, the daily
+    # coherence null) on its own 15-minute timer -- no compactor rides it.
+    else:
         import threading as _th
 
         def _night_loop():
-            from .night import run_night, NIGHT_SWEEP_MIN_INTERVAL_S
             while True:
                 time.sleep(900)          # a 15-minute tick
                 # THE IDLE SPEECH DRAIN (the operator's requirement: shown
@@ -7321,68 +5913,26 @@ def main() -> None:
                 except Exception:
                     pass
                 fld = _efield_on(srv)
-                if fld is not None:
-                    try:
-                        from .efmind import night as _ef_night
-                        srv.night_stats = _ef_night(srv, fld, getattr(srv, "entity_store", None))
-                        b = srv.night_stats.get("births")
-                        if b:
-                            print(f"[night] born: {', '.join(b)}", file=sys.stderr)
-                            th = getattr(srv, "thinker", None)
-                            if th is not None:
-                                th.enqueue("night", {"materialized": len(b), "drifted": 0})
-                    except Exception as e:
-                        print(f"[night] loop error ({e})", file=sys.stderr)
+                if fld is None:
                     continue
                 try:
-                    est = getattr(srv, "entity_store", None)
-                    if est is None:
-                        continue
-                    now = time.time()
-                    do_sweep = (now - getattr(srv, "_night_sweep_ts", 0.0)
-                                ) >= NIGHT_SWEEP_MIN_INTERVAL_S
-                    night = run_night(srv, mem, est, chat=_model_chat(srv),
-                                      sweep=do_sweep)
-                    if do_sweep:
-                        srv._night_sweep_ts = now
-                        sw = night.get("sweep") or {}
-                        if sw.get("checked"):
-                            print(f"[night] demoted {sw.get('demoted', 0)} "
-                                  f"(gray {sw.get('gray', 0)}) of "
-                                  f"{sw.get('checked', 0)}", file=sys.stderr)
-                    if night.get("consolidation", {}).get("drifted") or \
-                            night.get("consolidation", {}).get("materialized"):
-                        d = night["consolidation"]
-                        print(f"[night] drifted {d['drifted']} entities "
-                              f"(avg {d['avg_moved']:.3f}), materialized "
-                              f"{d.get('materialized', 0)}", file=sys.stderr)
-                        # the thinker digests the night's findings (the
-                        # reportable shapes become speakable, planner-gated)
+                    from .efmind import night as _ef_night
+                    srv.night_stats = _ef_night(srv, fld,
+                                                getattr(srv, "entity_store", None))
+                    b = srv.night_stats.get("births")
+                    if b:
+                        print(f"[night] born: {', '.join(b)}", file=sys.stderr)
                         th = getattr(srv, "thinker", None)
                         if th is not None:
-                            th.enqueue("night", {
-                                "materialized": d.get("materialized", 0),
-                                "drifted": d.get("drifted", 0)})
-                    srv.night_stats = {**night, "ts": now,
-                                       "swept": bool(do_sweep)}
+                            th.enqueue("night",
+                                       {"materialized": len(b), "drifted": 0})
                 except Exception as e:
                     print(f"[night] loop error ({e})", file=sys.stderr)
 
         _th.Thread(target=_night_loop, daemon=True,
                    name="membrane-night").start()
-        print("[opencode] night: standalone timer on (15-min tick; the "
-              "compactor is stood down)", file=sys.stderr)
-    else:
-        srv.compactor = None
-    srv.archive = bool(args.archive)
-    srv.archived_total = 0
-    # the momentum EMA (feature 2): updated on every gated turn in _v1_chat,
-    # consumed by _memory_block; alpha/friction follow cortex's geometry.py.
-    srv.momentum = bool(args.momentum)
-    srv.momentum_vec = None          # unit EMA of recent query embeddings
-    srv.momentum_alpha = 1.2         # skew weight (geometry.py's alpha_weight)
-    srv.momentum_decay = 0.95        # friction (geometry.py's decay_factor)
-
+        print("[opencode] night: standalone NightClock on (15-min tick)",
+              file=sys.stderr)
     # the orchestration router (model-vs-model): discovered from the live
     # Ollama (locals AND remote-backed cloud entries), imprints seeded in the
     # background, records persisted beside the field. OFF with --no-router.
@@ -7445,14 +5995,6 @@ def main() -> None:
             # that never become routable never cost a boot chat call.
             n_local = sum(1 for r in srv.router.records.values()
                           if r.kind == "local")
-            globals()["_BOOT_ROUTER"] = srv.router   # the judge ladder reads it
-            # the judge ladder: priced candidates, cheapest first, minus the
-            # default chat model (the one that ANSWERS judges worst). The
-            # human is the implicit top rung via the review queue.
-            srv.judge_ladder = [(name, usd) for name, usd in
-                                sorted(_PRICE_TABLE_BY_NAME(),
-                                       key=lambda kv: kv[1])
-                                if name != (model or "")]
             print(f"[opencode] router: {len(srv.router.records)} candidates "
                   f"({n_local} local, {len(srv.router.records) - n_local} "
                   f"cloud), imprints seeding in background", file=sys.stderr)
@@ -7481,41 +6023,6 @@ def main() -> None:
                 print(f"[opencode] embedder resolved: {cand}", file=sys.stderr)
                 break
 
-    # the veil's poke-through, now that the embedder is proven: adopt foreign
-    # memories whose situation is near-identical to one I hold (bounded pass).
-    # OFF the boot-critical path (the same lazy treatment imprints got): the
-    # poke embeds up to 256 foreign situations in ONE /api/embed batch — under
-    # a loaded Ollama (busy peers, big fields) that is minutes of synchronous
-    # stall BEFORE the server binds, which reads as "membrane fails to start".
-    # A daemon thread keeps the boot snappy; poke failures were always
-    # non-fatal, so losing the try/except into the thread is safe.
-    if mem.embedder is not None and getattr(mem.store, "_cb", None) is not None:
-        def _veil_poke_bg():
-            try:
-                adopted = mem.store.veil_poke(mem.embedder)
-                if adopted:
-                    print(f"[opencode] veil poke adopted {adopted} foreign "
-                          f"memor(ies) (background)", file=sys.stderr)
-            except Exception as e:
-                print(f"[opencode] veil poke failed (non-fatal): {e}",
-                      file=sys.stderr)
-            # THE VECTOR POKE (the cross-seat ANN recall, the lost-session
-            # fix): the field's own centroid queries the exemplars ANN --
-            # foreign rows near MY MEANING adopt (cos >= 0.82, where the
-            # text-hash poke's 0.90 never reached). Bounded, read-only
-            # scenery, run once after the text-hash poke.
-            try:
-                adopted = mem.store.veil_poke_ann(mem.embedder)
-                if adopted:
-                    print(f"[opencode] ann poke adopted {adopted} foreign "
-                          f"memor(ies) (vector-based, background)",
-                          file=sys.stderr)
-            except Exception as e:
-                print(f"[opencode] ann poke failed (non-fatal): {e}",
-                      file=sys.stderr)
-        threading.Thread(target=_veil_poke_bg, name="veil-poke",
-                         daemon=True).start()
-
     # now that the embedder is proven, the router's imprint seeding can run
     # (it embeds the models' self-descriptions); a router built before this
     # point holds embedder=None and would never seed.
@@ -7523,25 +6030,6 @@ def main() -> None:
             and srv.router.embedder is None:
         srv.router.embedder = mem.embedder
 
-    # recall hygiene (plan #4): mass-demote the dumb-model-era exemplars
-    # (answered by bakllava/whisper/toys the compat screen now rejects).
-    # Evidence-path demotion: the model's first contest still restores.
-    # Fork stand-down: the fork owns demotion policy for its turns too.
-    if not getattr(mem, "fork_owns_field", False):
-        try:
-            _hygiene_demote_screened_models(srv)
-        except Exception as e:
-            print(f"[opencode] hygiene sweep skipped (non-fatal): {e}",
-                  file=sys.stderr)
-
-    # THE CELL POOL RETIRED (the operator's call, the timeline-dreaming arc):
-    # the dev organism's parallel learners are off the seat -- each cell was
-    # a second full Membrane (own field/audit/veil/gate) whose grazed side
-    # field nothing in the recall path read back; the cost was threads, RAM
-    # and embed traffic, the benefit was a stage-1 experiment. The dreaming
-    # direction replaces them: Dreamer v2 on the MAIN field, its outputs
-    # timeline entities (cheap, shared-layer-native). cell.py/pool.py stay
-    # as library + experiment code.
     srv.cell_pool = None
 
     # ---- the opencode config + launch ----
@@ -7592,36 +6080,34 @@ def main() -> None:
     # injection (the agdroid exhibit: a static opencode.json + the blind
     # trust = a seat whose model never saw the doctrine at all).
     import membrane.rag as _rag
-    if getattr(args, "doctrine_move", True) and (
-            args.launch or getattr(mem, "fork_owns_field", False)):
+    if getattr(args, "doctrine_move", True) and args.launch:
         _rag._inject.doctrine_delivered = True
-    if not getattr(mem, "fork_owns_field", False):
-        if getattr(args, "doctrine_move", True):
-            try:
-                # the STABLE path next to the field: an external opencode's
-                # config can list it ("instructions": [...]) and it survives
-                # seat restarts (never unlinked at shutdown)
-                instr_path = str(Path(args.field).resolve().parent
-                                 / "doctrine.md")
-                text = doctrine_instructions_text()
-                # the seat card: THIS session's switches, for the model
-                # (--no-seat-card keeps the doctrine generic)
-                if getattr(args, "seat_card", True):
-                    text += _seat_card(srv, bool(getattr(args, "mcp", True)))
-                tmp = instr_path + ".tmp"
-                with open(tmp, "w") as f:
-                    f.write(text)
-                os.replace(tmp, instr_path)      # atomic: a reader never
-                cfg["instructions"] = [instr_path]   # sees half a file
-                if not args.launch:
-                    print(f"[opencode] doctrine + seat card: {instr_path} "
-                          "(an external opencode picks it up only if its "
-                          "config lists it under \"instructions\"; until "
-                          "then it rides per turn)", file=sys.stderr)
-            except Exception as e:
-                instr_path = None
-                print(f"[opencode] doctrine-move skipped ({e}); per-turn "
-                      "injection stays", file=sys.stderr)
+    if getattr(args, "doctrine_move", True):
+        try:
+            # the STABLE path next to the field: an external opencode's
+            # config can list it ("instructions": [...]) and it survives
+            # seat restarts (never unlinked at shutdown)
+            instr_path = str(Path(args.field).resolve().parent
+                             / "doctrine.md")
+            text = doctrine_instructions_text()
+            # the seat card: THIS session's switches, for the model
+            # (--no-seat-card keeps the doctrine generic)
+            if getattr(args, "seat_card", True):
+                text += _seat_card(srv, bool(getattr(args, "mcp", True)))
+            tmp = instr_path + ".tmp"
+            with open(tmp, "w") as f:
+                f.write(text)
+            os.replace(tmp, instr_path)      # atomic: a reader never
+            cfg["instructions"] = [instr_path]   # sees half a file
+            if not args.launch:
+                print(f"[opencode] doctrine + seat card: {instr_path} "
+                      "(an external opencode picks it up only if its "
+                      "config lists it under \"instructions\"; until "
+                      "then it rides per turn)", file=sys.stderr)
+        except Exception as e:
+            instr_path = None
+            print(f"[opencode] doctrine-move skipped ({e}); per-turn "
+                  "injection stays", file=sys.stderr)
     if model:
         cfg["model"] = f"membrane/{model}"
         cfg["small_model"] = f"membrane/{model}"
@@ -7685,30 +6171,35 @@ def main() -> None:
     env = dict(os.environ)
     env["OPENCODE_CONFIG"] = cfg_path
 
-    judge_s = ("off (demotions stand)" if args.no_judge else
-               args.judge_model or
-               srv.compact_model + (" (follows opencode selection)"
-                                    if srv.judge_follows_chat else ""))
+    fld = getattr(srv, "efield", None)
+    fld_s = "UNAVAILABLE"
+    if fld is not None:
+        try:
+            v = fld.vitals()
+            fld_s = (f"{type(fld.b).__name__}, " +
+                     ", ".join(f"{k} {c}" for k, c in sorted(v["entities"].items())))
+        except Exception:
+            fld_s = type(fld.b).__name__
     print(f"membrane opencode  http://127.0.0.1:{listen}/v1  ->  {backend}\n"
-          f"  field={args.field}  audit={args.audit}  field_size={len(mem.store)}\n"
-          f"  chain: opencode -> membrane (RAG + learning) -> Ollama\n"
-          f"  default model: {model or '?'}  |  cortex model: {srv.compact_model}"
-          f"{' (follows opencode selection)' if srv.compact_follows_chat else ' (pinned)'}\n"
+          f"  field={args.field}  audit={args.audit}\n"
+          f"  chain: opencode -> membrane (entity field + replay A/B) -> Ollama\n"
+          f"  default model: {model or '?'}  |  seat model: {srv.seat_model}"
+          f"{' (follows opencode selection)' if srv.model_follows_chat else ' (pinned)'}\n"
           f"  embedder: {getattr(mem.embedder, 'model', None) or 'UNRESOLVED -- chat blocked until an embed model is available'}\n"
-          f"  field writes: {'STOOD DOWN (ollama-membrane fork owns capture/recall; operator lanes read-only)' if getattr(mem, 'fork_owns_field', False) else 'on (this proxy captures + injects)'}\n"
+          f"  entity field: {fld_s} (capture "
+          f"{getattr(getattr(srv, 'capturer', None), 'mode', 'off')})\n"
           f"  state/math: {'answered internally from the live field' if srv.state_intercept else 'off'}\n"
           f"  thoughts: {'agent asks answered as marked context' if srv.thought_intercept else 'off'}\n"
           f"  dev: {'on (one-shot frame-discipline warnings)' if srv.dev else 'off (--dev)'}\n"
-          f"  global field: {'on (' + str(len(srv.global_field.store)) + ' notes)' if srv.global_field else 'off'}\n"
+          f"  peers: {'on' if getattr(srv, 'peers', None) else 'off'}\n"
           f"  user ledger: {srv.user_ledger.count() if srv.user_ledger else 0} verbatim decisions\n"
           f"  watches: {'on (' + str(len(srv._watch_board.watches)) + ' planted, cap ' + str(MAX_WATCHES) + ')' if getattr(srv, '_watch_board', None) is not None else 'off'}\n"
-          f"  cells: retired (the timeline-dreaming direction; dreamer v2 owns idleness)\n"
-          f"  peers: {len(srv.peers.livelist()) if getattr(srv, 'peers', None) else 0} live\n"
-          f"  replay: {'sim>=' + format(srv.replay_sim, '.2f') + ' -> stored answer, no model call' if srv.replay_sim > 0 else 'off (pure observer)'}\n"
-          f"  archive: {'on (cold tier after each compaction)' if getattr(srv, 'archive', False) else 'off (--archive)'}\n"
-          f"  momentum: {'on (recall skewed toward working context)' if getattr(srv, 'momentum', False) else 'off (--momentum)'}\n"
+          f"  gpeers: {len(srv.gpeers.livelist()) if getattr(srv, 'gpeers', None) else 0} live\n"
+          f"  replay A/B: {'serve ' + format(getattr(srv, 'replay_ab', 0.0), '.0%') + ' of eligible turns' if getattr(srv, 'replay_ab', 0.0) > 0 else 'shadow (pairs logged, never served)'}\n"
+          f"  momentum: {'on (working-context EMA: session:now + the momentum axis)' if getattr(srv, 'momentum', False) else 'off (--momentum)'}\n"
           f"  router: {'on (' + str(len(srv.router.records)) + ' candidates' + (', prefer-local' if getattr(srv.router, 'prefer_local', False) else ', cloud-floor') + ')' if getattr(srv, 'router', None) else 'off (--disable-llm-router to keep it off)'}\n"
-          f"  judge: {judge_s}\n"
+          f"  idle judges: claims + A/B pairs"
+          f" (model {getattr(srv, 'idle_cortex_model', None) or 'unresolved'})\n"
           f"  mcp tools: {mcp_state}\n"
           f"  lsp: {lsp_state}\n"
           f"  opencode config: {cfg_path}",
@@ -7836,8 +6327,6 @@ def main() -> None:
                 child.terminate(); child.wait(timeout=10)
             except Exception:
                 pass
-        if srv.compactor is not None:
-            srv.compactor.stop()
         if getattr(srv, "dreamer", None) is not None:
             try:
                 srv.dreamer.stop()
@@ -7854,9 +6343,7 @@ def main() -> None:
         # (a live _core.so thread at finalize is a SIGSEGV).
         for closer in (
                 getattr(getattr(srv, "peers", None), "close", None),
-                getattr(getattr(srv.membrane, "store", None), "close", None),
-                getattr(getattr(srv, "entity_store", None), "close", None),
-                getattr(getattr(srv, "global_field", None), "close", None)):
+                getattr(getattr(srv, "entity_store", None), "close", None)):
             if closer is None:
                 continue
             try:
@@ -7871,6 +6358,7 @@ def main() -> None:
             except OSError:
                 pass
         srv.server_close()
+        srv._gstop.set()               # the peer heartbeats stop
         if _log_fh is not None:
             try:
                 _log_fh.close()
@@ -7941,8 +6429,15 @@ def _init_speak(srv) -> None:
           f"ctx={getattr(srv, '_last_context_sig', 'unknown')!r}",
           file=_s.stderr)
     try:
-        speak(srv, f"membrane up: field {len(srv.membrane.store)} cells, "
-                   f"thinker + dreamer humming", kind="report-state")
+        _fld = getattr(srv, "efield", None)
+        _n = ""
+        if _fld is not None:
+            try:
+                _n = f"field {len(_fld.vitals().get('events', {}))} events, "
+            except Exception:
+                _n = ""
+        speak(srv, f"membrane up: {_n}thinker + dreamer humming",
+              kind="report-state")
     except Exception:
         pass
 

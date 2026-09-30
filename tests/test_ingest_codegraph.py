@@ -1,27 +1,30 @@
 """The cold-start ingest lane + the codegraph lane (the Tencent close-the-gap
 slice).
 
-ingest: candidates respect the skip set + extension rules; chunks are
-situation/action pairs; a second run dedups through learn_pair; --max
-truncates; binary/NUL files are skipped.
+ingest: candidates respect the skip set + extension rules; chunks become
+DOC events on the entity field (content keys make a second run dedup);
+--max truncates; binary/NUL files are skipped.
 
 codegraph: symbol extraction with qualnames, name-resolved callers (the
 impact BFS), file impact, and the opencode query matcher (_is_codegraph_query:
 canon frame + intent phrasing, with coding-turn non-matches).
 """
 
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import _ef_fakes as _fakes
 from membrane import opencode as OC
 from membrane import codegraph as CG
-from membrane.ingest import _candidate_files, _chunk_text, ingest
-
-
-class _Store:
-    def __init__(self):
-        self.exemplars = []
+from membrane import streams as ST
+from membrane.efield import EntityField
+from membrane.efstore import MemBackend
+from membrane.ingest import _candidate_files, _chunk_text, ingest_events
 
 
 class IngestTest(unittest.TestCase):
@@ -36,28 +39,6 @@ class IngestTest(unittest.TestCase):
         (self.root / "state.jsonl").write_text("{\"n\": 1}\n")
         (self.root / "big.md").write_text("x" * (600 * 1024))
 
-    def _mem(self):
-        from membrane.field import Exemplar
-
-        class FakeEmb:
-            def embed(self, texts):
-                return [[0.1, 0.2, 0.3] for _ in texts]
-
-        class Mem:
-            store = _Store()
-            embedder = FakeEmb()
-
-            def learn_pair(self, s, a, unsafe=False, src="user"):
-                for e in self.store.exemplars:
-                    if e.situation == s:
-                        return None
-                self.store.exemplars.append(
-                    Exemplar(situation=s, action=a, outcome="ingested",
-                             vec=[0.1, 0.2, 0.3]))
-                return len(self.store.exemplars) - 1
-
-        return Mem()
-
     def test_default_sweep_picks_docs_and_readme_only(self):
         files = _candidate_files([], self.root)
         names = [f.name for f in files]
@@ -68,25 +49,26 @@ class IngestTest(unittest.TestCase):
         self.assertNotIn("big.md", names)          # size cap
 
     def test_chunks_are_pairs_with_source_headings(self):
-        chunks = _chunk_text(self.root.joinpath("docs", "a.md").read_text(),
+        chunks = _chunk_text((self.root / "docs" / "a.md").read_text(),
                              "docs/a.md")
         self.assertTrue(chunks)
         sit, act = chunks[0]
         self.assertTrue(sit.startswith("docs/a.md :: "))
         self.assertIn("Alpha", sit)
-        self.assertLessEqual(len(act), 1200)
+        self.assertLessEqual(len(act), 2400)
 
     def test_ingest_absorbs_then_dedups(self):
-        mem = self._mem()
-        res = ingest(mem, [], root=self.root)
-        self.assertEqual(res["absorbed"], res["chunks"])
+        f = EntityField(MemBackend(), _fakes.FakeEmbedder(), "seat@host")
+        res = ingest_events(f, [], root=self.root)
         self.assertGreater(res["absorbed"], 0)
-        res2 = ingest(mem, [], root=self.root)
+        self.assertEqual(res["absorbed"], res["chunks"])
+        res2 = ingest_events(f, [], root=self.root)
         self.assertEqual(res2["absorbed"], 0)
         self.assertEqual(res2["dedup"], res2["chunks"])
 
     def test_max_truncates(self):
-        res = ingest(self._mem(), [], root=self.root, max_chunks=1)
+        f = EntityField(MemBackend(), _fakes.FakeEmbedder(), "seat@host")
+        res = ingest_events(f, [], root=self.root, max_chunks=1)
         self.assertGreater(res["truncated"], 0)
 
 
@@ -123,7 +105,7 @@ class CodeGraphTest(unittest.TestCase):
         r = CG.impact_of_file(self.g, "pkg/mod.py")
         self.assertIn("caller", r["symbols"])
         self.assertTrue(any("caller" in e["caller"]
-                            for lvl in r["levels"] for e in lvl))
+                             for lvl in r["levels"] for e in lvl))
 
     def test_query_text_forms(self):
         self.assertIn("symbols in", CG.query(self.g, "stats"))
@@ -149,8 +131,9 @@ class CodegraphBridgeTest(unittest.TestCase):
         (self.root / "pkg" / "a.py").write_text(text)
         # guarantee a different stored mtime even on coarse filesystems
         import os
-        st = (self.root / "pkg" / "a.py").stat()
-        os.utime((self.root / "pkg" / "a.py"), (st.st_atime, st.st_mtime + 2))
+        p = self.root / "pkg" / "a.py"
+        st = p.stat()
+        os.utime(p, (st.st_atime, st.st_mtime + 2))
 
     def test_rebuild_renames_symbol(self):
         self._write_a("def helper_v2():\n    return 2\n\n\n"
@@ -204,7 +187,8 @@ class CodegraphBridgeTest(unittest.TestCase):
 
 class CodegraphDirtyMarkTest(unittest.TestCase):
     """_tool_arg_path parses edit/write args; _codegraph_note_dirty maps them
-    to repo-relative dirty entries that _codegraph_refresh consumes."""
+    to repo-relative dirty entries that _codegraph_refresh consumes (the
+    capture lane marks them through _capture_plan_and_calls)."""
 
     def setUp(self):
         self.root = Path(tempfile.mkdtemp())
@@ -221,14 +205,10 @@ class CodegraphDirtyMarkTest(unittest.TestCase):
         self.assertEqual(OC._tool_arg_path({}), "")
 
     def test_note_dirty_and_refresh(self):
-        class Srv:
-            _codegraph = self.g
-            _cg_dirty = []
-            _cg_swept = 0.0
-
-        srv = Srv()
+        srv = type("S", (), {"_codegraph": self.g, "_cg_dirty": [],
+                             "_cg_swept": 0.0})()
         OC._codegraph_note_dirty(srv, [str(self.root / "pkg" / "a.py"),
-                                       str(self.root / "notes.txt")])
+                                        str(self.root / "notes.txt")])
         self.assertEqual(srv._cg_dirty, ["pkg/a.py"])
         # refresh via the real path: sweep interval already elapsed (0.0)
         self._w_a()
@@ -240,24 +220,17 @@ class CodegraphDirtyMarkTest(unittest.TestCase):
         (self.root / "pkg" / "a.py").write_text("def helper_v2():\n    return 1\n")
 
     def test_capture_lane_marks_dirty(self):
-        class Mem:
-            _pending_tools = {}
-            store = _Store()
-
-        orig_capture = OC._capture
-        OC._capture = lambda *a, **k: None  # silence learning for this test
-        try:
-            mem = Mem()
-            mem.server_ref = type("S", (), {})()
-            mem.server_ref._codegraph = self.g
-            mem.server_ref._cg_dirty = []
-            calls = {0: {"id": "t1", "function": {
-                "name": "edit",
-                "arguments": '{"filePath": "%s"}' % (self.root / "pkg" / "a.py")}}}
-            OC._capture_plan_and_calls(mem, "fix helper", "editing", calls)
-            self.assertEqual(mem.server_ref._cg_dirty, ["pkg/a.py"])
-        finally:
-            OC._capture = orig_capture
+        """The capture lane: a mem with the server backref marks file paths
+        dirty on the spot (the observer keeps nothing else here)."""
+        mem = type("M", (), {"_pending_tools": {}})()
+        mem.server_ref = type("S", (), {
+            "_codegraph": self.g, "_cg_dirty": [], "_cg_swept": 0.0})()
+        calls = {0: {"id": "t1", "function": {
+            "name": "edit",
+            "arguments": '{"filePath": "%s"}' % (self.root / "pkg" / "a.py")}}}
+        OC._capture_plan_and_calls(mem, "fix helper", "editing", calls)
+        self.assertEqual(mem.server_ref._cg_dirty, ["pkg/a.py"])
+        self.assertIn("t1", mem._pending_tools)
 
 
 class CodegraphMatcherTest(unittest.TestCase):

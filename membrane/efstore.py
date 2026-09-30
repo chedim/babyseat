@@ -431,3 +431,27 @@ def open_backend(field_path: str = ""):
     except Exception as e:
         print(f"[efield] couchbase unavailable ({e}); RAM backend", file=sys.stderr)
         return MemBackend()
+
+def probe_local_couchbase() -> bool:
+    """Cheap one-shot probe: does a local Couchbase answer at the default
+    (or env-provided) endpoint with default (or env-provided) creds?
+
+    Plain HTTP GET /pools with Basic auth -- no SDK import, ~1s cap. True
+    only when the server responds 200; auth failures, DNS failures,
+    timeouts, and every other refusal are all 'no' (a memory backend, as
+    always, the safe fallback). Env vars override defaults."""
+    import base64
+    import urllib.request
+    conn = os.environ.get("COUCHBASE_CONN_STRING", "couchbase://127.0.0.1")
+    user = os.environ.get("COUCHBASE_USER", "Administrator")
+    pw = os.environ.get("COUCHBASE_PASSWORD", "password")
+    host = conn.replace("couchbase://", "").replace("http://", "") \
+               .split("/")[0].split(":")[0]
+    try:
+        req = urllib.request.Request(f"http://{host}:8091/pools")
+        req.add_header("Authorization", "Basic " + base64.b64encode(
+            f"{user}:{pw}".encode()).decode())
+        with urllib.request.urlopen(req, timeout=2.0) as r:
+            return r.status == 200
+    except Exception:
+        return False

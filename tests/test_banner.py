@@ -8,9 +8,12 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import membrane.opencode as oc
+import _ef_fakes as _fff
+from _ef_fakes import FakeEmbedder  # noqa: F401
 
 VERDICT = {"verdict": "escalate", "sim": 0.67,
            "route": {"route": "glm-5.3-flash:cloud", "kind": "cloud",
@@ -20,7 +23,18 @@ CTX = ("Recalled exchanges (...):\n\nQ: a memory about the tool skills\n"
        "WHERE WE ARE:\n- field: 6539 memories (99% trusted)")
 
 
-def _handler(store_len=6539, tracks_store=None):
+def _tracks_store():
+    """An RAM-only EntityStore with the one track planted (no couchbase)."""
+    from membrane.entities import EntityStore
+    import tempfile
+    from pathlib import Path
+    tmp = tempfile.mkdtemp()
+    est = EntityStore(path=str(Path(tmp) / "entities.json"))
+    est.watch_track("files:router.py", label="router")
+    return est
+
+
+def _handler(store_len=6539, tracks_store=None, efield=None):
     h = object.__new__(oc.MembraneOpenAIHandler)
     srv = MagicMock()
     srv.membrane.store.__len__ = lambda s: store_len
@@ -30,6 +44,10 @@ def _handler(store_len=6539, tracks_store=None):
         srv.entity_store = tracks_store
     else:
         srv.entity_store = None
+    srv.efield = efield
+    srv._efield_boot_seq = 0
+    if efield is not None:
+        srv.capturer = type("C", (), {"mode": "on", "sessions": None})()
     h.server = srv
     return h
 
@@ -57,180 +75,86 @@ class TestTransparency(unittest.TestCase):
         ARE -- one home, one renderer; the banner keeps vitals+alerts
         only (the old split-brain: stories in the banner, fallbacks in
         WHERE WE ARE, same tracks)."""
-        import tempfile, time as _t
-        from membrane.entities import EntityStore, extract_entities
+        import time as _t
+        from membrane import efield as EF
+        from membrane import streams as ST
+        from membrane import entities as E
+        from membrane.efstore import MemBackend
+        from _ef_fakes import FakeEmbedder
 
-        class E:
-            def __init__(self, situation, action, born=None):
-                self.situation, self.action, self.safe = situation, action, True
-                self.extra, self.model = {}, {}
-                if born:
-                    self.extra["eph_born"] = born
-                t = extract_entities(situation, " " + action)
-                if t:
-                    self.extra["entities"] = t
-
-        with tempfile.TemporaryDirectory() as tmp:
-            est = EntityStore(path=str(Path(tmp) / "entities.json"))
-            est.watch_track("files:router.py", label="router")
-            cells = [E("tool edit for: fix x1 in router.py",
-                       "Applied the failover patch; the ladder walks on",
-                       born=_t.time())]
-            from membrane.embed import OllamaEmbedder
-            emb = OllamaEmbedder(model="mxbai-embed-large")
-            qv = emb.embed(["what changed in router.py?"])[0]
-            cells[0].vec = list(qv)
-            h = _handler(tracks_store=est)
-            h.server.membrane.store.exemplars = cells
-            out = oc._where_we_are(h.server, qv)
-            # the prose story rides WHERE WE ARE: ENTITY ID prefix + arc
-            self.assertIn("files:router.py:", out)
-            self.assertIn("applied the failover patch", out.lower())
-            # the banner (monologue) carries NO stories -- vitals+alerts only
-            mono = h._gate_monologue(VERDICT, CTX, "test", query_vec=qv)
-            self.assertNotIn("files:router.py", mono)
-
-    def test_geometry_first_after_bootstrap(self):
-        """THE GEOMETRY PROOF (the operator's demand: 'prove that its
-        fixed and will appear as unified single banner after restart'):
-        the exact boot path in-process -- ensure_track_entity for every
-        track, consolidate to seed rings, then the unified render.
-        Asserts: a positioned entity renders GEOMETRY ('sits near ...')
-        never cell recitation as the lead; the self-match is excluded;
-        the ring persists across boots (the seed-persistence stamp)."""
-        import tempfile, time as _t
-        from membrane.entities import EntityStore, extract_entities
-
-        class E:
-            def __init__(self, situation, action, born, vec):
-                self.situation, self.action, self.safe = situation, action, True
-                self.extra, self.model = {}, {}
-                self.extra["eph_born"] = born
-                self.extra["entities"] = extract_entities(situation, action)
-                self.vec = vec
-
-        with tempfile.TemporaryDirectory() as tmp:
-            est = EntityStore(path=str(Path(tmp) / "entities.json"))
-            est.watch_track("files:router.py", label="router")
-            # the bootstrap: guarantee the doc, consolidate to seed the ring
-            est.ensure_track_entity("files:router.py")
-            cells = [E("tool edit for: fix x1 in router.py",
-                       "Applied the failover patch",
-                       _t.time(), None) for _ in range(3)]
-            from membrane.embed import OllamaEmbedder
-            emb = OllamaEmbedder(model="mxbai-embed-large")
-            qv = emb.embed(["what changed in router.py?"])[0]
-            for c in cells:
-                c.vec = list(qv)
-            from membrane.night import consolidate_entities
-            # a SECOND entity in the world: the subject needs something
-            # to point at (the self-exclusion removes the track's own key)
-            qv2 = emb.embed(["the watch.py collapse guards"])[0]
-            watch_cells = [type("C", (), {
-                "situation": "the watch.py collapse guards fire",
-                "action": "", "safe": True,
-                "extra": {"eph_born": _t.time(),
-                          "entities": extract_entities("watch.py collapse guards", "")},
-                "model": "", "vec": list(emb.embed(["watch.py collapse guards"])[0])})()
-                for _ in range(3)]
-            cells = cells + watch_cells
-            store = type("S", (), {"exemplars": cells,
-                                   "mut_lock": type("L", (), {
-                                       "__enter__": lambda s: None,
-                                       "__exit__": lambda s, *a: None})(),
-                                   "field_path": "/tmp/x",
-                                   "__len__": lambda s: len(cells)})()
-            class Mem: pass
-            mem = Mem(); mem.store, mem.embedder = store, emb
-            mem.mut_lock = store.mut_lock
-            mem.field_path = "/tmp/x"
-            consolidate_entities(mem, est, materialize=0,
-                                 only_keys=["files:router.py"])
-            ent = est._entity_for_track("files:router.py")
-            self.assertTrue(ent.position, "ring/position must seed")
-            # the render: GEOMETRY, not cell recitation -- the panel's
-            # 'near' lead (the sensor framing renamed 'sits near')
-            h = _handler(tracks_store=est)
-            h.server.membrane.store.exemplars = cells
-            out = oc._where_we_are(h.server, qv) or ""
-            self.assertIn("near ", out)              # the geometry lead
-            self.assertIn("files:router.py:", out)   # the id prefix
-            # THE SELF-EXCLUSION: the track never sits near itself
-            self.assertNotIn("near files:router.py", out)
+        t0 = _t.time()
+        f = EF.EntityField(MemBackend(), FakeEmbedder(), "seat@host")
+        f.write_events(ST.split_turn(
+            "tool edit for: fix x1 in router.py",
+            "Applied the failover patch; the ladder walks on", ts=t0),
+            session="s")
+        f.process()
+        est = _tracks_store()
+        from membrane import entity_block as EB
+        eid = EB.track_eid(f, "files:router.py")
+        qv = f.emb.embed(["what changed in router.py?"])[0]
+        h = _handler(tracks_store=est, efield=f)
+        out = oc._where_we_are(h.server, qv)
+        # the prose story rides WHERE WE ARE: ENTITY ID prefix + evidence
+        self.assertIn(eid, out)
+        self.assertIn("router.py", out.lower())   # the evidence carries the ask
+        # the banner (monologue) carries NO stories -- vitals+alerts only
+        mono = h._gate_monologue(VERDICT, CTX, "test", query_vec=qv)
+        self.assertNotIn(eid, mono)
 
     def test_stale_story_told_with_age(self):
         """THE STALE COVENANT (revised, the operator's 'I want stories'
         call): an old story is told WITH ITS AGE ATTACHED ('last active
         25h ago: ...') -- silence was the lie of omission. Rendered in
         WHERE WE ARE (the unified home)."""
-        import tempfile, time as _t
-        from membrane.entities import EntityStore, extract_entities
+        import time as _t
+        from membrane import efield as EF
+        from membrane import streams as ST
+        from membrane.efstore import MemBackend
+        from _ef_fakes import FakeEmbedder
 
-        class E:
-            def __init__(self, situation, action, born):
-                self.situation, self.action, self.safe = situation, action, True
-                self.extra, self.model = {}, {}
-                self.extra["eph_born"] = born
-                t = extract_entities(situation, " " + action)
-                if t:
-                    self.extra["entities"] = t
-
-        with tempfile.TemporaryDirectory() as tmp:
-            est = EntityStore(path=str(Path(tmp) / "entities.json"))
-            est.watch_track("files:router.py", label="router")
-            cells = [E("tool edit for: fix x1 in router.py",
-                       "Applied the failover patch",
-                       born=_t.time() - 25 * 3600)]   # 25h old
-            from membrane.embed import OllamaEmbedder
-            emb = OllamaEmbedder(model="mxbai-embed-large")
-            qv = emb.embed(["what changed in router.py?"])[0]
-            cells[0].vec = list(qv)
-            h = _handler(tracks_store=est)
-            h.server.membrane.store.exemplars = cells
-            out = oc._where_we_are(h.server, qv)
-            # the story IS told -- with the honest age stamp
-            self.assertIn("router", out)
-            self.assertIn("25h ago", out)
+        f = EF.EntityField(MemBackend(), FakeEmbedder(), "seat@host")
+        f.write_events(ST.split_turn(
+            "tool edit for: fix x1 in router.py",
+            "Applied the failover patch; the ladder walks on",
+            ts=_t.time() - 25 * 3600),            # 25h old
+            session="s")
+        f.process()
+        est = _tracks_store()
+        qv = f.emb.embed(["what changed in router.py?"])[0]
+        h = _handler(tracks_store=est, efield=f)
+        out = oc._where_we_are(h.server, qv)
+        # the story IS told -- with the honest age stamp
+        self.assertIn("router", out)
+        self.assertIn("1d ago", out)   # 25h renders at its day bucket
 
     def test_what_model_sees_is_what_operator_sees(self):
-        """THE TRANSPARENCY CONTRACT AS A TEST (the operator's call):
-        render BOTH lanes in the same turn and assert they never
-        contradict -- a track's story appears in WHERE WE ARE; the banner
-        never re-renders stories (split-brain is the failure mode:
-        stories in one lane, fallbacks in the other, same tracks)."""
-        import tempfile, time as _t
-        from membrane.entities import EntityStore, extract_entities
+        """THE TRANSPARENCY CONTRACT: render BOTH lanes in the same turn
+        and assert they never contradict -- a track's story appears in
+        WHERE WE ARE; the banner never re-renders stories."""
+        import time as _t
+        from membrane import efield as EF
+        from membrane import streams as ST
+        from membrane.efstore import MemBackend
+        from _ef_fakes import FakeEmbedder
 
-        class E:
-            def __init__(self, situation, action, born):
-                self.situation, self.action, self.safe = situation, action, True
-                self.extra, self.model = {}, {}
-                self.extra["eph_born"] = born
-                t = extract_entities(situation, " " + action)
-                if t:
-                    self.extra["entities"] = t
-
-        with tempfile.TemporaryDirectory() as tmp:
-            est = EntityStore(path=str(Path(tmp) / "entities.json"))
-            est.watch_track("files:router.py", label="router")
-            cells = [E("tool edit for: fix x1 in router.py",
-                       "Applied the failover patch",
-                       born=_t.time() - 25 * 3600)]
-            from membrane.embed import OllamaEmbedder
-            emb = OllamaEmbedder(model="mxbai-embed-large")
-            qv = emb.embed(["what changed in router.py?"])[0]
-            cells[0].vec = list(qv)
-            h = _handler(tracks_store=est)
-            h.server.membrane.store.exemplars = cells
-            wwa = oc._where_we_are(h.server, qv) or ""
-            mono = h._gate_monologue(VERDICT, CTX, "test", query_vec=qv)
-            # WHERE WE ARE: the story (id-prefixed)
-            self.assertIn("files:router.py:", wwa)
-            # the banner: NO story bytes (one home, one renderer)
-            self.assertNotIn("files:router.py:", mono)
-            # no fallback/story CONTRADICTION: a track that renders a
-            # story in WHERE WE ARE must never render its fallback there
-            self.assertNotIn("files:router.py (router)", wwa)
+        f = EF.EntityField(MemBackend(), FakeEmbedder(), "seat@host")
+        f.write_events(ST.split_turn(
+            "tool edit for: fix x1 in router.py",
+            "Applied the failover patch; the ladder walks on", ts=_t.time()),
+            session="s")
+        f.process()
+        est = _tracks_store()
+        from membrane import entity_block as EB
+        qv = f.emb.embed(["what changed in router.py?"])[0]
+        h = _handler(tracks_store=est, efield=f)
+        wwa = oc._where_we_are(h.server, qv) or ""
+        mono = h._gate_monologue(VERDICT, CTX, "test", query_vec=qv)
+        eid = EB.track_eid(f, "files:router.py")
+        # WHERE WE ARE: the story (id-prefixed)
+        self.assertIn(eid, wwa)
+        # the banner: NO story bytes (one home, one renderer)
+        self.assertNotIn(eid, mono)
 
     def test_meta_voice_stripped(self):
         """The teed meta-voice ('The user is laughing about ...') is
@@ -268,38 +192,18 @@ class TestNullRecall(unittest.TestCase):
     is information; it prevents re-deriving from git."""
 
     def _state_handler(self, null):
-        """A handler whose store passes _state_report's thermo SVD: a
-        REAL ExemplarStore with two orthogonal exemplars (a MagicMock
-        store mocks vectors() into a non-array -- the SVD dies)."""
-        from membrane.field import Exemplar, ExemplarStore
+        """A handler with the live state-report surface (no exemplar
+        store -- _state_report reads the entity field (off here) + the
+        frame-wait counters + the null-recall state)."""
         h = _handler()
-        st = ExemplarStore()
-        st.exemplars = [Exemplar("situation about the router", "an action",
-                                 "pending", vec=[1.0, 0.0]),
-                        Exemplar("another situation about the gate",
-                                 "another action", "pending",
-                                 vec=[0.0, 1.0])]
-        for e in st.exemplars:
-            e.safe = True
-        h.server.membrane.store = st
-        h.server.membrane.embedder = None
-        h.server.membrane.sim_min = 0.7
-        h.server.membrane.dedup_sim = 0.95
-        h.server.membrane.reask_window_s = 120.0
-        h.server.membrane.demote_threshold = 2
-        h.server.membrane.store_origin_json = True   # not a MagicMock path
-        h.server.membrane.store._cb = None           # the JSON-field branch
-        h.server.membrane.audit_path = "/tmp/audit.jsonl"
-        h.server.user_ledger = None
-        h.server.global_field = None                 # off: the gf block skips
-        h.server.compactor = None
-        h.server._watch_board = None                 # no board: the lines skip
+        h.server.membrane.audit_path = "/tmp/membrane-banner-test-audit.jsonl"
+        h.server._watch_board = None
         h.server._intent_board = None
         h.server._codegraph = None
+        h.server.efield = None
+        h.server._efield_boot_seq = 0
         h.server.router = None
-        h.server.peers = None
-        h.server.rag_k, h.server.rag_sim_min = 4, 0.5
-        h.server.rag_ctx_chars = 1200
+        h.server.momentum = False
         if null is not None:
             h.server._recall_null = null
         return h

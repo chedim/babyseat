@@ -5,7 +5,7 @@ The field's weakness is the first week: nothing learned yet, so recall is
 empty and the gate has nothing to replay. Yet the knowledge EXISTS -- in
 README, docs/*.md, design notes, agent logs. This module reads those files,
 chunks them on headings/size, and absorbs each chunk as a PRE-COMPLETED
-(situation, action) pair through ``Membrane.learn_pair`` -- the SAME guarded
+(one DOC event per chunk -- the SAME guarded
 pipeline as teed turns (vague/dedup/variety; an embedding per chunk, one at a
 time, no model call, local mxbai only).
 
@@ -152,48 +152,6 @@ def _chunk_text(text: str, source: str) -> list[tuple[str, str]]:
     return out
 
 
-def ingest(mem, paths: list[str] | None = None, root: str | Path = ".",
-           max_chunks: int = 400, dry_run: bool = False) -> dict:
-    """The ingest lane. ``mem`` is a Membrane (needs ``learn_pair`` +
-    ``embedder``). Returns the report dict; the caller decides whether to
-    print, audit separately, etc. Every absorbed chunk goes through
-    learn_pair -- dedup protects against a SECOND ingest of the same file."""
-    rootp = Path(root)
-    chunks: list[tuple[str, str]] = []
-    files = _candidate_files(list(paths or []), rootp)
-    skipped_binary = 0
-    for f in files:
-        try:
-            raw = f.read_bytes()
-        except OSError:
-            continue
-        if b"\x00" in raw[:4096]:
-            skipped_binary += 1
-            continue
-        try:
-            text = raw.decode("utf-8")
-        except UnicodeDecodeError:
-            skipped_binary += 1
-            continue
-        src = f.relative_to(rootp).as_posix() if f.is_relative_to(rootp) \
-            else f.as_posix()
-        chunks += _chunk_text(text, src)
-    absorbed, dups = 0, 0
-    for sit, act in chunks[:max_chunks]:
-        if dry_run:
-            absorbed += 1
-            continue
-        idx = mem.learn_pair(sit, act, src="ingest")
-        if idx is None:
-            dups += 1
-        else:
-            absorbed += 1
-    return {"files": len(files), "chunks": len(chunks),
-            "absorbed": absorbed, "dedup": dups,
-            "skipped_binary": skipped_binary,
-            "truncated": max(0, len(chunks) - max_chunks)}
-
-
 def ingest_events(field, paths: list[str] | None = None, root: str | Path = ".",
                   max_chunks: int = 400, dry_run: bool = False) -> dict:
     """The ingest lane on the entity field: each chunk is a DOC event
@@ -234,7 +192,7 @@ def ingest_events(field, paths: list[str] | None = None, root: str | Path = ".",
 
 def report(res: dict, dry_run: bool = False) -> str:
     head = ("dry run -- nothing written" if dry_run
-            else "absorbed through learn_pair (same guards as any turn)")
+            else "written as DOC events on the entity field")
     return (f"[membrane-ingest] {head}: {res['files']} files -> "
             f"{res['chunks']} chunks ({res['absorbed']} absorbed, "
             f"{res['dedup']} deduped, {res['skipped_binary']} binary skipped"
@@ -261,25 +219,13 @@ def main() -> None:
     if mode_from_env() == "on":
         from .efield import EntityField
         from .efstore import open_backend
-        from .field import _origin_tag
+        from .substrate import _origin_tag
         from .project_env import load_project_env
         load_project_env()
         fld = EntityField(open_backend(args.field), OllamaEmbedder(), _origin_tag(args.field))
         res = ingest_events(fld, args.paths or [], root=args.root,
-                            max_chunks=args.max_chunks, dry_run=args.dry_run)
-        print(report(res, args.dry_run).replace("absorbed through learn_pair (same guards as any turn)",
-                                                 "written as DOC events on the entity field"))
+                        max_chunks=args.max_chunks, dry_run=args.dry_run)
+        print(report(res, args.dry_run))
         return
-    from .runtime import Membrane
-    mem = Membrane(responder=None, field_path=args.field,
-                   audit_path=args.audit,
-                   embedder=OllamaEmbedder())
-    res = ingest(mem, args.paths or [], root=args.root,
-                 max_chunks=args.max_chunks, dry_run=args.dry_run)
-    print(report(res, args.dry_run))
-    for ex in mem.store.exemplars[-min(5, len(mem.store)):]:
-        print(f"    #{mem.store.index_of(ex)}  {ex.situation[:100]}")
-
-
 if __name__ == "__main__":
     main()

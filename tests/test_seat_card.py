@@ -57,9 +57,13 @@ class TestSeatCard(unittest.TestCase):
         self.assertNotIn("membrane_query", card)
 
     def test_writes_and_replay_follow_the_switches(self):
-        card = _seat_card(_Srv(agent_writes=False, replay_sim=0.93), True)
+        card = _seat_card(_Srv(agent_writes=False), True)
         self.assertIn("report-only", card)
-        self.assertIn("sim >= 0.93", card)
+        self.assertIn("REPLAY A/B: off (shadow)", card)
+        served = _seat_card(_Srv(replay_ab=0.3), True)
+        self.assertIn("REPLAY A/B: replayable asks", served)
+        self.assertIn("30.0% served as pure replay", served)
+        self.assertIn("you are never bypassed", served)
 
     def test_budget_none_is_uncapped_not_free(self):
         self.assertIn("uncapped", _seat_card(_Srv(router=_Router(None)), True))

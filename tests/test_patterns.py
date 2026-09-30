@@ -9,7 +9,6 @@ import unittest
 from membrane.entities import (CLASS_FAILURE, EntityStore, QuantumEntity,
                                MEMBRANE_NS)
 from membrane.thinker import Thinker
-from membrane.field import Exemplar
 
 
 class _Srv:
@@ -84,9 +83,6 @@ class TestPatterns(unittest.TestCase):
         # the seat's embedder maps the event ONTO the failure's position
         srv.membrane.embedder = type("Emb", (), {
             "embed": staticmethod(lambda texts: [[1.0, 0.0, 0.0]])})()
-        store = srv.membrane.store
-        store.exemplars = [Exemplar(situation="s", action="a",
-                                    outcome="done", vec=[1.0, 0.0, 0.0])]
         th._failure_resonance(["tools:pytest"], est,
                               "the benchmark hangs again")
         self.assertEqual(th.stats["spoken"], 1)

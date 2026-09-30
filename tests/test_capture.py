@@ -114,8 +114,7 @@ class TestSeatHooks(unittest.TestCase):
             capturer = mock.Mock()
         big = "x" * 9000
         body = {"messages": [{"role": "tool", "tool_call_id": "call_1", "content": big}]}
-        with mock.patch.object(oc, "_capture"):
-            oc._capture_tool_results(Srv, body)
+        oc._capture_tool_results(Srv, body)
         Srv.capturer.on_tool_result.assert_called_once()
         self.assertEqual(Srv.capturer.on_tool_result.call_args[0][3], big)
 
@@ -123,7 +122,7 @@ class TestSeatHooks(unittest.TestCase):
         from membrane import opencode as oc
         srv = mock.Mock()
         mem = mock.Mock(server_ref=srv, _pending_tools={})
-        with mock.patch.object(oc, "_capture"), mock.patch.object(oc, "_codegraph_note_dirty"):
+        with mock.patch.object(oc, "_codegraph_note_dirty"):
             oc._capture_plan_and_calls(mem, "q", "", CALLS)
         srv.capturer.on_calls.assert_called_once_with("q", CALLS)
 

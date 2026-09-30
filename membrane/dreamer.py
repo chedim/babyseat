@@ -1,41 +1,39 @@
-"""The dreamer: the cells' idle THOUGHT cycle, folded from the lab prototype
-(experiments/dream_loop.py, OVERALL GREEN) into a background daemon.
+"""The dreamer: the seat's idle THOUGHT cycle.
 
 The loop (no model, no responder call -- all numpy + one embed per candidate):
-  1. PROPOSE   -- the field n-gram (membrane/generator.py FieldNGram) continued
-                  from a trusted action's lead tokens: the word-granularity
-                  generator, steered by the kNN neighborhood.
+  1. PROPOSE   -- the trusted corpus's n-gram (membrane/generator.py
+                  FieldNGram) continued from a trusted model sentence's lead
+                  tokens: the word-granularity generator, steered by the kNN
+                  neighborhood. The corpus is the entity field's DISCOURSE
+                  (DreamSource, efmind.py) -- the model's applied sentences.
   2. STEER     -- the dream must serve an OPEN INTENTION (membrane/intent.py
                   board, cos >= STEER_SIM): thought without commitment is
                   daydreaming; the intention board is the steering wheel.
-  3. VET       -- the gate as critic, three gates on the candidate vec:
+  3. VET       -- SurpriseSource.critic, two gates on the candidate vec:
        topic : novelty residual inside the field's on-manifold band AND the
                candidate near enough to the field (TOPIC_FLOOR) -- the dream
                must be about what the field KNOWS;
-       fresh : not a near-duplicate of anything stored (below DUP_SIM);
-       value : effective_rank_with would grow (information, not words).
-  4. COMMIT    -- survivors enter via Membrane.absorb_exemplar with
-                  self_authored=True: the QUARANTINE (absorbed for recall,
-                  excluded from trusted corpora). A dream can never teacher
-                  itself into canon on its own authority.
-  5. ELECT     -- reality's vote, delivered HERE: a REAL turn landing near a
-                  dream with the dream's topic is a GOOD outcome (promote:
-                  self_authored -> False, outcome=confirmed); a near turn the
-                  dream cannot serve is the re-ask (refute: remove). Promotion
-                  is USE-WITH-GOOD-OUTCOME, never proximity, never self-declared.
-  6. GC        -- dreams no real turn ever neared by the horizon are forgotten
-                  (the discard move; nothing quarantined lives forever).
+       fresh : not a near-duplicate of anything stored (below DUP_SIM).
+       physics: a branch whose path lands near a known FailureMode is
+               kept as IMPOSSIBLE -- learned physics, never a candidate.
+  4. COMMIT    -- survivors are TIMELINE ENTITIES (the dreamer v2 substrate):
+                  quarantine is a STATUS on the doc, not a field cell. A dream
+                  never authors a turn on its own authority (the render
+                  surface is suggestions).
+  5. ELECT     -- reality's vote, delivered via vote_on_turn (the per-learn
+                  hook): a REAL turn landing near a dream with its topic is a
+                  GOOD outcome (CONFIRM); a near turn serving nothing is the
+                  REFUTE. Promotion is USE-WITH-GOOD-OUTCOME, never proximity,
+                  never self-declared.
 
-DUTY CYCLE: a closed-loop idle controller like the Consolidator -- one dream
-wave when the proxy has been idle for ``idle`` seconds; the sleep stretches
-when nothing is proposed (the n-gram exhausted its fresh band) and shrinks
-when confirmations are flowing (demand for candidates). Hard caps:
-MAX_DREAMS_HOT quarantined dreams in the field at once (a backed-up board
-pauses proposing -- dreams are never evicted to make room for dreams).
+DUTY CYCLE: a closed-loop idle controller -- one dream wave only when the
+proxy has been idle `idle` seconds; the sleep stretches when the fresh band
+exhausts and shrinks when confirmations flow. Hard caps: MAX_DREAMS_HOT
+quarantined branches at once (a backed-up board pauses proposing).
 
 Everything here NEVER runs on the chat path: the thread catches its own
-exceptions, the store is only touched through the public mutators, and a
-stop() joins cleanly. --no-dreamer leaves the field exactly as before.
+exceptions, and a stop() joins cleanly. --no-dreamer leaves the field
+exactly as before.
 """
 
 from __future__ import annotations
@@ -49,7 +47,6 @@ import numpy as np
 
 from .generator import FieldNGram
 from .intent import STEER_SIM
-from .variety import effective_rank_with, novelty, thermo_state
 from .entities import (CLASS_TIMELINE, TimelineOps, CLASS_FAILURE)
 TL_QUARANTINED = TimelineOps.TL_STATUS_QUARANTINED
 
@@ -115,19 +112,13 @@ class Dreamer:
             # lesson: unsteered dreams confirm near-randomly and read salad)
             return self._idle * 4
         src = getattr(srv, "dream_source", None)      # the entity field's corpus
-        store = mem.store
-        if src is not None:
-            trusted = src.trusted_texts()
-            est0 = getattr(srv, "entity_store", None)
-            hot = sum(1 for e in (est0.docs.values() if est0 is not None else [])
-                      if e.cls == CLASS_TIMELINE
-                      and (e.properties or {}).get("status") == TL_QUARANTINED)
-            seen_texts = set(trusted)
-        else:
-            trusted = [e.action for e in store.exemplars if not e.self_authored]
-            hot = sum(1 for e in store.exemplars
-                      if e.self_authored and e.outcome == "dream")
-            seen_texts = {e.action for e in store.exemplars}
+        if src is None:
+            return self._idle * 4       # field off: nothing to dream ON
+        trusted = src.trusted_texts()
+        est0 = getattr(srv, "entity_store", None)
+        hot = sum(1 for e in (est0.docs.values() if est0 is not None else [])
+                  if e.cls == CLASS_TIMELINE
+                  and (e.properties or {}).get("status") == TL_QUARANTINED)
         if len(trusted) < 4:
             return self._idle * 4        # a young field has nothing to dream ON
         if hot >= MAX_DREAMS_HOT:
@@ -141,14 +132,10 @@ class Dreamer:
             anchor = trusted[self._rng.randrange(len(trusted))]
             text = ngram.generate(anchor.split()[:2], self._rng,
                                   max_tokens=12).strip()
-            if not text or len(text.split()) < 3 or text in seen_texts:
+            if not text or len(text.split()) < 3 or text in trusted:
                 continue
-            if src is not None:
-                vec = src.embed(text)
-                verdict = self._vet_on(src, vec, ib)
-            else:
-                vec = _unit(mem._nudge(mem.embedder.embed([text])[0]))
-                verdict = self._vet(mem, vec, ib)
+            vec = src.embed(text)
+            verdict = self._vet_on(src, vec, ib)
             if verdict == "impossible":
                 # the learned-physics lane: recorded, not proposed (the
                 # est commit below keeps impossible branches as entities)
@@ -181,13 +168,12 @@ class Dreamer:
                 now_ent = est.docs.get("membrane::session:now")
                 np_ = getattr(now_ent, "position", None)
                 if np_:
-                    import numpy as _np
-                    nv = _np.asarray(np_, dtype=float)
-                    nn = float(_np.linalg.norm(nv))
+                    nv = np.asarray(np_, dtype=float)
+                    nn = float(np.linalg.norm(nv))
                     if nn > 1e-12:
-                        vv = _np.asarray(vec, dtype=float)
+                        vv = np.asarray(vec, dtype=float)
                         branch_sim = round(
-                            float(vv @ (nv / nn)) / max(float(_np.linalg.norm(vv)), 1e-12),
+                            float(vv @ (nv / nn)) / max(float(np.linalg.norm(vv)), 1e-12),
                             4)
             except Exception:
                 pass
@@ -203,64 +189,8 @@ class Dreamer:
                                    "text": text[:200], "eid": ent.eid})
         self.stats["waves"] += 1
         # sleep until likely idle again; a busy session wakes us anyway
-        # (the GC is the ephemeral TTL / the elect refutes now -- no janitor)
+        # (the elect refutes; the shared docs ride the ephemeral TTL)
         return self._idle
-
-    def _vet_on(self, src, vec: np.ndarray, ib) -> str | None:
-        """The critic on the entity field: STEER + PHYSICS as below, then the
-        source's topic / fresh / surprise-band check."""
-        steer = ib.nearest(vec)[1] if ib is not None else -1.0
-        if steer < STEER_SIM_LOCAL:
-            return None
-        if self._near_failure(vec):
-            return "impossible"
-        return "quarantined" if src.vet(vec) else None
-
-    def _near_failure(self, vec) -> bool:
-        est = getattr(self.srv, "entity_store", None)
-        if est is None:
-            return False
-        fv = np.asarray(vec, dtype=float)
-        fn = float(np.linalg.norm(fv))
-        if fn <= 1e-12:
-            return False
-        fv = fv / fn
-        for ent in est.docs.values():
-            if ent.cls != CLASS_FAILURE:
-                continue
-            ev = getattr(ent, "position", None) or getattr(ent, "embedding", None)
-            if not ev:
-                continue
-            eav = np.asarray(ev, dtype=float)
-            en = float(np.linalg.norm(eav))
-            if en > 1e-12 and float(fv @ (eav / en)) >= 0.85:
-                return True
-        return False
-
-    def _vet(self, mem, vec: np.ndarray, ib) -> str | None:
-        """STEER + TOPIC + FRESH + VALUE + PHYSICS -- the lab critic, on the
-        live field. Returns "ok" (commit as quarantined), "impossible"
-        (commit as a learned-physics entity -- near a known FailureMode or
-        behind an inherited latch the branch violates), or None (not a
-        dream: unsteered/stale/dup/no-growth)."""
-        steer = ib.nearest(vec)[1] if ib is not None else -1.0
-        if steer < STEER_SIM_LOCAL:
-            return None
-        # PHYSICS (the impossible lane): a branch whose path lands near a
-        # known FailureMode (cos >= 0.85) is a seductive dead end -- kept
-        # as impossible (the field's learned physics), never committed as
-        # a candidate.
-        if self._near_failure(vec):
-            return "impossible"
-        nov = novelty(vec, mem.store, keep_fraction=NOV_KEEP_FRACTION)
-        _, top_sim = mem.store.top_k(vec, k=1)[0]
-        topic_ok = (0.0 <= nov) and (top_sim >= TOPIC_FLOOR)
-        fresh_ok = top_sim < mem.dedup_sim
-        grows = effective_rank_with(mem.store, vec) > \
-            thermo_state(mem.store).get("eff_rank", 0.0) + 1e-6
-        if not (topic_ok and fresh_ok and grows):
-            return None
-        return "quarantined"
 
     def _gc(self, mem) -> None:
         """Horizon, timeline-shaped: quarantined branches older than the
@@ -305,6 +235,37 @@ class Dreamer:
             from .opencode import _write_audit
             _write_audit(mem, {"event": "dream", "op": "gc-tl",
                                "removed": len(doomed)})
+
+    def _vet_on(self, src, vec: np.ndarray, ib) -> str | None:
+        """The critic on the entity field: STEER + PHYSICS, then the
+        source's topic / fresh / surprise-band check."""
+        steer = ib.nearest(vec)[1] if ib is not None else -1.0
+        if steer < STEER_SIM_LOCAL:
+            return None
+        if self._near_failure(vec):
+            return "impossible"
+        return "quarantined" if src.vet(vec) else None
+
+    def _near_failure(self, vec) -> bool:
+        est = getattr(self.srv, "entity_store", None)
+        if est is None:
+            return False
+        fv = np.asarray(vec, dtype=float)
+        fn = float(np.linalg.norm(fv))
+        if fn <= 1e-12:
+            return False
+        fv = fv / fn
+        for ent in est.docs.values():
+            if ent.cls != CLASS_FAILURE:
+                continue
+            ev = getattr(ent, "position", None) or getattr(ent, "embedding", None)
+            if not ev:
+                continue
+            eav = np.asarray(ev, dtype=float)
+            en = float(np.linalg.norm(eav))
+            if en > 1e-12 and float(fv @ (eav / en)) >= 0.85:
+                return True
+        return False
 
 
 def vote_on_turn(srv, ex) -> None:

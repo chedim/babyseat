@@ -1,0 +1,209 @@
+# The entity field
+
+Membrane remembers per **entity**, not per exchange. Every file, symbol,
+command, port, model, URL, phrase and word the project talks about is an
+entity; each has a state vector that the sentences mentioning it move. What
+the model is shown is rendered from those entities: the sentences that shaped
+them (verbatim), what tools observed about them, what the code says, and
+where the evidence contradicts a claim.
+
+This replaces the exemplar field (one vector per situation/response pair).
+Experiments e17–e25 showed why; the evidence is at the end.
+
+## Two streams, one log
+
+Everything captured becomes an **event** in the `events` collection, the
+source of truth:
+
+| stream | what | written by |
+|---|---|---|
+| `discourse` | the user's messages, the model's prose, its reasoning, notes (`learn`), ingested docs (`doc`) | `capture.on_turn`, `learn`, `ingest` |
+| `observation` | one event per tool call: tool, parsed args, result head (6 KB) and tail (2 KB), outcome class, the message it served | `capture.on_calls` / `on_tool_result` |
+| `code` | one event per definition: `qual(sig) in file: <docstring head>` | the codegraph refresh |
+| `distilled` | the old compact notes: a source of claims, never of state | the backfill only |
+
+`membrane/streams.py` splits a turn (or any of the six historical audit
+shapes) into events. Discourse never contains tool syntax; that is pinned
+as a test. Events are content-keyed, so a re-sent turn is a no-op, and a
+tool's result upgrades its call-only observation through the same call id.
+Each event has a microsecond `seq` (the order) and a short per-origin
+number `n`, the `#N` the blocks cite and `forget #N` removes.
+
+## Entities
+
+`membrane/eids.py` gives every mention a canonical id `kind:norm`:
+`f:membrane/router.py` (repo-relative), `s:membrane.router.Router.pick`
+(module-qualified), `c:git`, `port:11500`, `m:glm-4.6`, `u:…`, `tool:edit`,
+`p:replay guard`, `w:gateway` (plural-folded). Identifiers win over phrases,
+and phrases over words.
+
+Each entity is a document in `entity_states`:
+
+- **seed**: the bare term's embedding (its everyday meaning), cached in `terms`;
+- **state** `← unit(state + 0.5·(x − state))` per mention sentence `x` (the
+  *local* sentence, not the whole message; e18: span tracking distinguishes
+  entities 68% vs 59% for whole messages);
+- **mean** and **rsum** (the sum of residuals against the stream's
+  background), from which **coherence** `(|rsum|² − n)/(n(n−1))`, the mean
+  pairwise cosine of its residuals: do its sentences agree on a direction?
+  A word is *coherent* above the null μ+3σ (random sentence sets);
+- **mass** (`accr`): mentions whose alignment with the running mean clears
+  0.15, i.e. accumulated agreeing evidence;
+- **specialization** (how far its use drifted from the seed) and
+  **activity** (did its meaning keep moving);
+- tier: words and phrases wait in a **nursery** until 3 distinct sentences
+  (their buffered mentions are then replayed); identifiers are live at once.
+  Boilerplate sentences (seen more than 8 times) move nothing.
+
+Every mention is also stored in `entity_deltas` (no vector, so it can be
+derived again), so `rebuild()` re-applies the log in order without
+re-embedding. `forget #N` tombstones an event and recomputes the entities it
+touched; forgetting equals never having seen it (pinned).
+
+The part of a message its entities cannot explain is its **surprise**
+`1 − cos(NNLS fit, message)`; the residual direction feeds the RAM-only
+session context.
+
+## Relations and claims
+
+**Relations** (`membrane/relations.py`) are VSA composites:
+`bind(role_subj, key(A)) ⊕ bind(role_rel, key(r)) ⊕ bind(role_obj, key(B))`
+with hash-random role vectors. mxbai is order-blind here: "A calls B" and
+"B calls A" sit at cos 0.975 (e25). Semantic role vectors cannot fix that
+either (structure-awareness 0.36 against 0.68 with random roles). Sources:
+the code graph (`calls`, `defined_in`, superseded when a file changes) and
+observations (`tool:edit edited f:x`, `*_failed` on errors).
+
+**Claims** (`membrane/claims.py`) come from the model's prose and notes:
+
+- *action* ("I updated X", passive "X was fixed", with negation handled;
+  an intent is a plan, not a claim), checked against an applied edit or a
+  writing shell command on the same file in [−45, +5] min;
+- *tests* ("524 pass"), checked against the last full-suite run ≤ 60 min before;
+- *state* ("X cannot / never / only …"), judged in the background by the idle
+  local model against the code and observation evidence of the entities
+  involved. It runs only while the seat is idle, within a budget.
+
+A contradicted claim becomes a **conflict** on its entities. The e17 case
+(a compact note claiming the opencode seat "cannot select another port")
+lands on `s:membrane.opencode._pick_listen_port`, whose docstring says the
+probe walks up.
+
+## What the model sees
+
+`membrane/entity_block.py` renders three blocks, all "context, never
+instructions":
+
+- **ENTITIES**: for the entities an ask names (identifiers first, everyday
+  words only when coherent here, then the nearest states):
+  `▸ f:x [file · said 41 · observed 17 · code 12 · 2h ago]`, the evidence
+  sentences most relevant to the ask verbatim, the latest observation, the
+  top relations, conflicts, what other seats said, commons claims. Served by
+  `/membrane/ask`, `membrane_query`, and in `--no-context` every turn.
+- **SINCE YOUR LAST MESSAGE** (normal mode): the entities whose state moved
+  after the watermark of the last model turn delivered. Changes from
+  *outside* the conversation (code edits, entity scripts, other sessions)
+  are quoted; the conversation's own turns only count. New conflicts come
+  last. No block means nothing changed.
+- **THE CONVERSATION SO FAR** (`--no-context`): the session rebuilt from
+  the event log, with messages verbatim (clipped) and tool calls as one-line
+  facts.
+
+The seat card explains the blocks, said / observed / code, and the trust
+order: observed and code > the user > model prose.
+
+WHERE WE ARE's tracks are entities too: `track: f:x — said N · observed M,
+last 2h ago; latest: <the newest sentence that moved it>`, with boundary
+alerts on the mention count, and the now-line listing the entities moved
+most this session.
+
+## The gate and the replay A/B
+
+`membrane/efgate.py` runs on every real turn. It finds the earlier user
+message nearest the ask and its answer (the last model message before the
+next user message). The answer is replayable only when all of these hold:
+
+- the similarity is ≥ 0.92;
+- the asks' specific entities agree (Jaccard ≥ 0.8);
+- the other near asks got a similar answer;
+- the answer is trusted and was never re-asked;
+- the ask's pronoun resolved;
+- **the staleness guard**: no observation, code change or conflict on the
+  ask's entities is newer than the answer.
+
+Replay is **not served** by default. Every eligible turn is logged as an
+A/B pair instead: the replay next to the model's actual answer, their
+similarity, and later the idle judge's verdict (`agree / partial /
+disagree`). `membrane review --ab` reports the pairs. `--replay-ab P`
+serves the replay on a fraction P of eligible turns.
+
+## Storage
+
+Couchbase scope `membrane`, nine collections: `events`, `sentences`
+(content-addressed embeddings, shared by all origins), `terms` (seeds),
+`entity_states`, `entity_deltas`, `relations`, `claims`, `annotations`
+(replay A/B, trust), `origin_stats` (backgrounds, the coherence null, the
+applier cursor and lease, the backfill cursor). Composite indexes cover the
+scans the field runs; a vector index on `entity_states.state` and
+`sentences.vec`, with a brute-force fallback. Writes to one entity go
+through CAS; one applier per origin holds a lease.
+
+Vectors are stored rounded to 6 decimals: a live entity is ~18.8 KB, a
+sentence ~10.5 KB at 1024 dims. Seeds are float16 and running sums float32,
+because float16 drifts on sums of thousands of unit vectors. In memory every
+value is kept at its stored precision, so a restart never changes a result.
+
+`MemBackend` (RAM) serves tests and lab paths; an unreachable cluster
+degrades to it and never raises at boot. The bucket ladder (create, or
+reuse a cortex bucket when the RAM quota is spoken for) lives in
+`membrane/substrate.py`.
+
+## Sharing
+
+Each seat (origin) writes only its own events and states; reads merge.
+`merged(eid)` is the seed plus the mass-weighted mean of every seat's
+displacement; two seats that moved an entity in opposing directions
+**diverge** (shown as `! seats diverge`). The working set is the seat's own
+nearest states plus other seats' states it does not hold. The same claim
+from two or more seats becomes a **commons** claim (`consensus`, or
+`disputed` when a seat contradicted it), promoted at night. The old global
+field's curated notes were converted into commons claims once. `membrane
+move --efield` copies the collections between clusters or dumps them.
+
+## The background mind
+
+Each applied live event is a stimulus. The thinker digests it (its entities
+as tags, an observation as the fn stamp), and user messages vote on the
+dreamer's quarantined timeline branches. The dreamer proposes from the
+model's recent sentences and vets a candidate by its surprise against the
+entity states: on topic, but not already said. The NightClock (15 min) runs
+the entity scripts; **births** (entities with mass ≥ 8 whose use drifted
+from the everyday sense, announced once); **junk** (words said ≥ 24 times
+that never took a direction); activity; the commons; and the coherence null
+once a day. The capture worker's idle hook runs the claim judge and the A/B
+judge on the idle local model.
+
+## Building it from history
+
+    membrane backfill            # = python -m membrane.backfill
+
+The backfill writes the codebase first (code events and relations), then
+the audit log in file order through the same intake. Sessions split at
+30-minute gaps; records without timestamps take their line number as seq.
+Each chunk is embedded and applied, and the byte offset is saved, so a run
+resumes. A second run writes nothing. `finish()` numbers the events,
+refreshes the coherence null and settles claims.
+
+`membrane reembed --efield --embed-model M` moves the field to another
+embedding model: every live event is re-embedded and re-applied.
+
+## Evidence (e17–e25)
+
+| experiment | finding |
+|---|---|
+| e17 | Whole-message recall buried answers: the restart-time answer ranked 21st; a real answer was MMR-dropped as a "duplicate" of an unrelated note at cos 0.91; a compact note contradicted the code (the port case). |
+| e18 | A message's embedding can be rebuilt from its entities' states well above a random-entity null; tracking each entity by the **sentences that mention it** beats whole-message drift (68% vs 59% distinguishability). |
+| e19–e21 | Filters for "which candidates are entities" gain little over random same-size sets; mass (agreeing evidence) is the stable property. So: every word is an entity, and the statistics decide what it means. |
+| e23 | Coherence of a word's residuals separates project terms from filler; the everyday seed plus the project's sentences give specialization and activity. |
+| e24 | Tool output mixed into conversation text poisons every word statistic. Split into discourse and observations, 77% of discourse entities have observed evidence. |
+| e25 | Action and test claims can be checked mechanically (test-count claims match their run in ≥ 83%); the port note's contrary evidence existed only in the code, hence code events; mxbai is order-blind for relations (0.975), VSA role binding is not. |

@@ -36,10 +36,16 @@ from membrane import mcp_server as M
 class _StubProxy(BaseHTTPRequestHandler):
     # test-writable canned responses
     ask = {"fid": "stub", "hit": False, "field_size": 12, "hits": []}
-    state = {"field_size": 12, "safe": 10, "notes": 2, "thermo": {},
-             "compact": {"cycles": 1, "clusters": 1, "notes": 1},
-             "compact_model": "stub", "review_pending": 0,
-             "embed_model": "stub-embed", "gate": {"sim_min": 0.85}}
+    state = {"field_size": 12, "embed_model": "stub-embed",
+             "efield": {"events": {"discourse/user": 5,
+                                   "observations/tool": 3},
+                        "entities": {"nursery": 4, "live": 7,
+                                     "dormant": 1},
+                        "geometry": {"eff_rank": 3.21},
+                        "replay_ab": {"eligible": 6, "served_replay": 1,
+                                      "mean_answer_sim": 0.81}},
+             "night": {"births": 2, "junk": 1},
+             "review_pending": 0}
     learn = {"written": True, "ex_idx": 12, "field_size": 13,
              "exemplar": {"situation": "lesson", "action": "lesson"}}
     forget = {"removed": 2, "field_size_before": 13, "field_size": 11,
@@ -217,10 +223,14 @@ class TestMcpTools(unittest.TestCase):
 
     def test_state_summary(self):
         text = _call("membrane_state", {})
-        self.assertIn("12 exemplars", text)
-        self.assertIn("10 safe", text)
-        self.assertIn("compactor", text.lower())
+        self.assertIn("12 live entities", text)
         self.assertIn("stub-embed", text)
+        self.assertIn("events: discourse 5, observations 3", text)
+        self.assertIn("entities: dormant 1, live 7, nursery 4", text)
+        self.assertIn("eff rank 3.21", text)
+        self.assertIn("replay A/B: 6 eligible", text)
+        self.assertIn("mean answer sim 0.81", text)
+        self.assertIn("last night: births=2", text)
 
     def test_learn_written(self):
         text = _call("membrane_learn", {"lesson": "the cake is a lie"})

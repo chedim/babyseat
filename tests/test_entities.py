@@ -1,6 +1,6 @@
-"""Entity layer: deterministic extraction, the entity index, QuantumEntity
-docs (cortex compat), the synthesizer's parser, and the EntityStore merge
-contract. Pure-data tests (no Ollama, no Couchbase -- the store degrades to
+"""Entity layer: deterministic extraction, QuantumEntity docs (cortex
+compat), the boundary state machine, and the EntityStore merge contract.
+Pure-data tests (no Ollama, no Couchbase -- the store degrades to
 JSON-only)."""
 
 import json
@@ -11,12 +11,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from membrane.entities import (extract_entities, entity_index, iter_entities,
+from membrane.entities import (extract_entities,
                                query_entities, QuantumEntity, EntityStore,
                                CLASS_DECISION, CLASS_MODEL, CLASSES,
                                CLASS_COMPONENT, CLASS_SESSION,
                                MEMBRANE_NS, entity_id)
-from membrane.entity_synthesis import parse_entity_reply, synthesize_from_cluster
 
 
 class TestExtract(unittest.TestCase):
@@ -59,24 +58,6 @@ class TestExtract(unittest.TestCase):
         self.assertIn("models:ling-3.0-flash-fin:free", keys)
 
 
-class TestIndex(unittest.TestCase):
-    def test_invert_and_roundtrip(self):
-        class E:
-            def __init__(self, sit, act, safe=True):
-                self.situation, self.action, self.safe = sit, act, safe
-                self.extra = {"entities": extract_entities(sit, act)}
-                self.model = ""
-        cells = [
-            E("the router.py ladder skips empty answers",
-              "note_outage cools the rung down"),
-            E("unrelated prose", "nothing here"),
-            E("unsafe one", "x", safe=False),
-        ]
-        inv = entity_index(cells)
-        self.assertIn("files:router.py", inv)
-        self.assertEqual(inv["files:router.py"], [0])   # the unsafe one out
-
-
 class TestQuantumEntity(unittest.TestCase):
     def test_doc_roundtrip_and_merge(self):
         e = QuantumEntity(eid="membrane::synth:x", cls=CLASS_DECISION,
@@ -107,31 +88,6 @@ class TestQuantumEntity(unittest.TestCase):
         self.assertIn(CLASS_MODEL, CLASSES)
 
 
-class TestParseReply(unittest.TestCase):
-    def test_json_with_prose(self):
-        items = parse_entity_reply(
-            'Entities:\n[{"class": "FailureMode", "name": "empty-200",'
-            ' "summary": "free rung answers 200 empty"}] done.')
-        self.assertEqual(len(items), 1)
-        self.assertEqual(items[0]["class"], "FailureMode")
-
-    def test_garbage_degrades(self):
-        self.assertEqual(parse_entity_reply("no json here"), [])
-        self.assertEqual(parse_entity_reply("[]"), [])
-        self.assertEqual(parse_entity_reply(""), [])
-        # unknown class -> Component (safest)
-        items = parse_entity_reply(
-            '[{"class": "Weird", "name": "some-entity", "summary": "s"}]')
-        self.assertEqual(items[0]["class"], "Component")
-
-    def test_no_name_dropped(self):
-        self.assertEqual(parse_entity_reply(
-            '[{"class": "Decision", "summary": "no name"}]'), [])
-        # a 1-char name is noise -> dropped
-        self.assertEqual(parse_entity_reply(
-            '[{"class": "Decision", "name": "x", "summary": "s"}]'), [])
-
-
 class TestEntityStore(unittest.TestCase):
     def test_merge_persist_reload(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -157,28 +113,26 @@ class TestEntityStore(unittest.TestCase):
             self.assertEqual(st2.find("a").eid, "membrane::synth:a")
 
 
+class _Count:
+    """The count side of the tracks: the field counts mentions of a track
+    key (opencode passes track_count(fld, k)) -- the test mutates one
+    integer instead of seeding exemplar cells."""
+
+    def __init__(self, n: int = 0):
+        self.n = n
+
+    def __call__(self, key: str) -> int:
+        return self.n
+
+
 class TestBoundaryStateMachine(unittest.TestCase):
     """The banner's EVENT lane: 'enter N'/'exit N' boundaries over the live
-    safe-cell count -- a state machine (alert once per transition; re-entry
+    mention count -- a state machine (alert once per transition; re-entry
     re-arms by construction), not a level check."""
 
     def _store(self, tmp):
         p = str(Path(tmp) / "entities.json")
         return EntityStore(path=p)
-
-    class E:
-        def __init__(self, sit, act="", safe=True):
-            self.situation, self.action, self.safe = sit, act, safe
-            self.extra = {"entities": extract_entities(sit, act)}
-            self.model = ""
-
-    def _seed(self, st, n, sit="work on router.py"):
-        st.docs = {}
-        cells = [self.E(sit) for _ in range(n)]
-        # safe cells only: entity_index skips unsafe
-        for c in cells:
-            st_field = type("F", (), {"exemplars": cells})()
-        return cells
 
     def test_parse_boundary(self):
         self.assertEqual(EntityStore.parse_boundary(""), {})
@@ -194,38 +148,38 @@ class TestBoundaryStateMachine(unittest.TestCase):
     def test_enter_transition_fires_once_and_rearms(self):
         with tempfile.TemporaryDirectory() as tmp:
             st = self._store(tmp)
-            cells = [self.E("touch router.py") for _ in range(3)]
+            cnt = _Count(3)
             r = st.watch_track("files:router.py", boundary="enter 3")
             self.assertTrue(r["ok"])
             # seed eval: silent (no alert on plant)
-            self.assertEqual(st.evaluate_tracks(cells), [])
+            self.assertEqual(st.evaluate_tracks(cnt), [])
             self.assertTrue(st.list_tracks()[0]["inside"])
-            # +1 cell -> no transition -> no alert (still inside)
-            cells.append(self.E("touch router.py"))
-            self.assertEqual(st.evaluate_tracks(cells), [])
+            # +1 -> no transition -> no alert (still inside)
+            cnt.n = 4
+            self.assertEqual(st.evaluate_tracks(cnt), [])
             # drop to 1 -> EXIT transition -> one alert
-            del cells[1:]
-            alerts = st.evaluate_tracks(cells)
+            cnt.n = 1
+            alerts = st.evaluate_tracks(cnt)
             self.assertEqual(len(alerts), 1)
             self.assertEqual(alerts[0]["kind"], "exited")
             # re-grow to 3 -> RE-ENTER fires again (re-arm by construction)
-            cells.extend(self.E("touch router.py") for _ in range(2))
-            alerts = st.evaluate_tracks(cells)
+            cnt.n = 3
+            alerts = st.evaluate_tracks(cnt)
             self.assertEqual(len(alerts), 1)
             self.assertEqual(alerts[0]["kind"], "entered")
             # stable inside -> no more alerts
-            self.assertEqual(st.evaluate_tracks(cells), [])
+            self.assertEqual(st.evaluate_tracks(cnt), [])
 
     def test_exit_boundary(self):
         with tempfile.TemporaryDirectory() as tmp:
             st = self._store(tmp)
-            cells = [self.E("touch router.py") for _ in range(5)]
+            cnt = _Count(5)
             st.watch_track("files:router.py", boundary="exit 2")
-            self.assertEqual(st.evaluate_tracks(cells), [])  # seed: inside
-            del cells[2:]                                    # 5 -> 2, still in
-            self.assertEqual(st.evaluate_tracks(cells), [])
-            del cells[1:]                                    # 2 -> 1: out
-            alerts = st.evaluate_tracks(cells)
+            self.assertEqual(st.evaluate_tracks(cnt), [])  # seed: inside
+            cnt.n = 2                                      # still in
+            self.assertEqual(st.evaluate_tracks(cnt), [])
+            cnt.n = 1                                      # 2 -> 1: out
+            alerts = st.evaluate_tracks(cnt)
             self.assertEqual(len(alerts), 1)
             self.assertEqual(alerts[0]["kind"], "exited")
             self.assertEqual(st.list_tracks()[0]["inside"], False)
@@ -233,13 +187,13 @@ class TestBoundaryStateMachine(unittest.TestCase):
     def test_take_alerts_drains_exactly_once(self):
         with tempfile.TemporaryDirectory() as tmp:
             st = self._store(tmp)
-            cells = [self.E("touch router.py")]
+            cnt = _Count(1)
             st.watch_track("files:router.py", boundary="enter 2")
-            st.evaluate_tracks(cells)                        # seed (silent)
-            cells.append(self.E("touch router.py"))          # -> inside
-            alerts = st.evaluate_tracks(cells)
+            st.evaluate_tracks(cnt)                        # seed (silent)
+            cnt.n = 2                                      # -> inside
+            alerts = st.evaluate_tracks(cnt)
             self.assertEqual(len(alerts), 1)
-            # drained exactly once; second drain empty
+            # drained exactly-once; second drain empty
             self.assertEqual(len(st.take_alerts()), 1)
             self.assertEqual(st.take_alerts(), [])
             # list shows the state, no pending
@@ -250,11 +204,11 @@ class TestBoundaryStateMachine(unittest.TestCase):
     def test_count_only_track_never_alerts(self):
         with tempfile.TemporaryDirectory() as tmp:
             st = self._store(tmp)
-            cells = [self.E("touch router.py")]
+            cnt = _Count(1)
             st.watch_track("files:router.py")
-            self.assertEqual(st.evaluate_tracks(cells), [])
-            cells.append(self.E("touch router.py"))
-            self.assertEqual(st.evaluate_tracks(cells), [])
+            self.assertEqual(st.evaluate_tracks(cnt), [])
+            cnt.n = 2
+            self.assertEqual(st.evaluate_tracks(cnt), [])
             self.assertEqual(st.take_alerts(), [])
             t = st.list_tracks()[0]
             self.assertNotIn("enter", t)
@@ -270,14 +224,14 @@ class TestBoundaryStateMachine(unittest.TestCase):
     def test_boundary_change_resets_state(self):
         with tempfile.TemporaryDirectory() as tmp:
             st = self._store(tmp)
-            cells = [self.E("touch router.py") for _ in range(5)]
+            cnt = _Count(5)
             st.watch_track("files:router.py", boundary="enter 2")
-            st.evaluate_tracks(cells)                        # seed: inside
+            st.evaluate_tracks(cnt)                        # seed: inside
             self.assertTrue(st.list_tracks()[0]["inside"])
             # changed boundary -> fresh machine; new seed is silent
             st.watch_track("files:router.py", boundary="enter 9")
             self.assertIsNone(st.list_tracks()[0].get("inside"))
-            self.assertEqual(st.evaluate_tracks(cells), [])  # silent seed
+            self.assertEqual(st.evaluate_tracks(cnt), [])  # silent seed
             self.assertFalse(st.list_tracks()[0]["inside"])
 
     def test_tracks_persist_across_reload(self):
@@ -286,15 +240,14 @@ class TestBoundaryStateMachine(unittest.TestCase):
             st = EntityStore(path=p)
             st.watch_track("files:router.py", boundary="enter 3",
                            label="router watch")
-            cells = [self.E("touch router.py") for _ in range(3)]
-            st.evaluate_tracks(cells)                        # seed: inside
-            st2 = EntityStore(path=p)                        # reload
+            cnt = _Count(3)
+            st.evaluate_tracks(cnt)                        # seed: inside
+            st2 = EntityStore(path=p)                      # reload
             t = st2.list_tracks()[0]
             self.assertEqual(t["key"], "files:router.py")
             self.assertEqual(t["label"], "router watch")
             self.assertEqual(t["enter"], 3)
             self.assertEqual(t["inside"], True)
-
 
 class TestAnnouncements(unittest.TestCase):
     """The announcement queue: entity births and merges announce once to
@@ -361,89 +314,3 @@ class TestAnnouncements(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
-class TestSubjectGrain(unittest.TestCase):
-    """THE SUBJECT-GRAIN CONTRACT (peer-reported from rosetta-check): the
-    session:now subject names the session's FILES, not machinery. Two
-    screens: (a) package-namespace chains (com.couchbase.rosetta.check --
-    a gradle name harvested from build output) never lead the subject;
-    (b) at a near-tie the file grain beats symbols -- the subject lives
-    in the edited file, a symbol co-leading at the same cosine is mush."""
-
-    class E:
-        def __init__(self, sit, vec, safe=True):
-            self.situation, self.action, self.safe = sit, "", safe
-            self.model = ""
-            self.extra = {"entities": extract_entities(sit)}
-            self.vec = vec
-
-    def _store_with_cells(self, tmp, cells):
-        st = EntityStore(path=str(Path(tmp) / "entities.json"))
-        st.watch_track("files:router.py", label="router")
-        st.ensure_track_entity("files:router.py")
-        from membrane import night as _n
-        class M:
-            store = type("F", (), {"exemplars": cells})()
-            embedder = None
-        _n.consolidate_now(M(), st)
-        return st
-
-    def test_package_chain_never_leads(self):
-        """The com.couchbase.rosetta.check exhibit: a dotted all-lowercase
-        chain under a package TLD is build-output machinery. Screened at
-        RENDER time (a query naming a package still pulls its cells)."""
-        with tempfile.TemporaryDirectory() as tmp:
-            base = [1.0, 0.0, 0.0]
-            cells = [
-                self.E("tool bash for: make com.couchbase.rosetta.check",
-                       [1.0, 0.0, 0.0]),
-                self.E("fix router.py the failover patch",
-                       [0.99, 0.05, 0.0]),
-            ]
-            st = self._store_with_cells(tmp, cells)
-            ent = st.docs.get(f"{MEMBRANE_NS}session:now")
-            subj = st._nearest_entities(ent.position, cells,
-                                        exclude="session:now")
-            self.assertFalse(any("com.couchbase" in k for k, _ in subj),
-                             f"package chain led: {subj}")
-
-    def test_file_beats_equal_sim_symbol(self):
-        """files:field.py (0.94), symbols:pkg.chain (0.94) -- the file
-        leads, the symbol cedes within the margin (a symbol must OUTSCORE
-        the best file by _FILE_GRAIN_MARGIN to appear at all)."""
-        with tempfile.TemporaryDirectory() as tmp:
-            cells = [
-                self.E("edit field.py the recall lane", [0.99, 0.02, 0.0]),
-                self.E("touch symbols like Somepkg.Sub.symbol",
-                       [0.98, 0.03, 0.0]),
-            ]
-            st = self._store_with_cells(tmp, cells)
-            ent = st.docs.get(f"{MEMBRANE_NS}session:now")
-            subj = st._nearest_entities(ent.position, cells,
-                                        exclude="session:now")
-            file_sims = [s for k, s in subj if k.startswith("files:")]
-            # a files:* candidate is near: any symbols:* survivor must
-            # outscore the best file by the margin (the near-tie cede)
-            if file_sims:
-                best_file = max(file_sims)
-                for k, s in subj:
-                    if k.startswith("symbols:"):
-                        self.assertGreaterEqual(
-                            s, best_file + 0.03 - 1e-9,
-                            f"{k} ({s}) ceded-grain violation vs "
-                            f"file {best_file}: {subj}")
-
-    def test_symbol_leads_when_no_file_near(self):
-        """The load_couchbase exhibit: a genuine symbol must still lead
-        when no files:* candidate is near."""
-        with tempfile.TemporaryDirectory() as tmp:
-            cells = [
-                self.E("reading load_couchbase internals", [1.0, 0.0, 0.0]),
-            ]
-            st = self._store_with_cells(tmp, cells)
-            ent = st.docs.get(f"{MEMBRANE_NS}session:now")
-            subj = st._nearest_entities(ent.position, cells,
-                                        exclude="session:now")
-            self.assertTrue(any("load_couchbase" in k for k, _ in subj)
-                            or subj == [],
-                            f"genuine symbol vanished: {subj}")

@@ -736,6 +736,62 @@ class EntityField:
         self.flush()
         return n
 
+    def forget_many(self, nums: list[int], rebuild_over: int = 200) -> list[dict]:
+        """forget() for several events; past rebuild_over it tombstones them
+        all and rebuilds the origin once (cheaper than per-entity recomputes)."""
+        if len(nums) <= rebuild_over:
+            return [self.forget(n) or {"n": n, "missing": True} for n in nums]
+        out = []
+        with self._lock:
+            for n in nums:
+                hit = self.event_by_number(n)
+                if hit is None:
+                    out.append({"n": n, "missing": True})
+                    continue
+                key, ev = hit
+                if ev.get("status") == "forgotten":
+                    out.append({"n": n, "key": key, "entities": [], "already": True})
+                    continue
+                for ck, c in list(self.b.scan("claims", {"origin": self.origin, "event": key})):
+                    c["status"] = "forgotten"
+                    self.b.upsert("claims", ck, c)
+                for f in ("text", "result_head", "result_tail", "served"):
+                    if ev.get(f):
+                        ev[f] = ""
+                ev.update({"status": "forgotten", "sids": [], "mentions": [],
+                           "forgotten_ts": time.time()})
+                self.b.upsert("events", key, ev)
+                out.append({"n": n, "key": key, "entities": [], "already": False})
+            self.rebuild()
+        return out
+
+    def events_since(self, ts: float, session_prefix: str = "") -> list[dict]:
+        """This origin's live events at or after ts (a session prefix narrows
+        them to this seat's sessions); code events never."""
+        return sorted((d for _, d in self.b.scan("events", {"origin": self.origin,
+                                                            "ts": {"gte": ts}})
+                       if d.get("stream") != "code" and d.get("status") != "forgotten"
+                       and str(d.get("session") or "").startswith(session_prefix)),
+                      key=lambda d: d.get("seq") or 0)
+
+    def events_near(self, vec, k: int = 40, sim_min: float = 0.55) -> list[tuple[dict, float]]:
+        """This origin's events with a sentence near vec (sentence ANN), best
+        first, one row per event."""
+        hits = dict(self.b.vector_top_k("sentences", "vec", vec, k * 4))
+        if not hits:
+            return []
+        best: dict = {}
+        for _, d in self.b.scan("entity_deltas", {"origin": self.origin, "sid": list(hits)}):
+            s = hits.get(d["sid"], 0.0)
+            if s >= sim_min and s > best.get(d["event"], -1):
+                best[d["event"]] = s
+        evs = self.b.get_multi("events", list(best))
+        rows = [(evs[k2], s) for k2, s in best.items()
+                if k2 in evs and evs[k2].get("status") != "forgotten"
+                and evs[k2].get("stream") != "code"]
+        rows.sort(key=lambda t: -t[1])
+        return rows[:k]
+
     @_locked
     def recompute(self, eid: str) -> EntityState | None:
         """Re-derive one entity from its seed and its stored deltas (in seq

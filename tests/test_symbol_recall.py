@@ -1,21 +1,17 @@
 """SYMBOL-FACT RECALL (the 'default args of _strip_context' gap, the
-codegraph lane wired into the field's surfaces): three pieces, each
-pinned per the E-discipline.
+codegraph lane wired into the field's surfaces).
 
 1. THE SIGNATURE VERB: codegraph gains `signature <sym>` (and the
    intercept intent 'what are the args of X' / 'signature of X') --
    the AST reads args + defaults + annotations; a call-edge graph
    answered WHO-CALLS-X, never WHAT-X-TAKES.
-2. THE SYMBOL-ANCHORED RECALL POOL: rag.py's entity pool hot-loads
-   cells whose harvested tags name the query's symbol (term evidence,
-   sim 0.99) -- 'default args for _strip_context' recalls the cells
-   that TOUCHED it by NAME, before cosine gets a vote.
-3. THE MCP SURFACE: /membrane/codegraph (read-only, same query()
-   text as the CLI + intercept), and the returned data carries
-   symbols:* entity ids -- the graph's qualnames ARE the entity id
-   space (entities.py's harvest produces the same kind:value keys),
-   so MCP clients can chain: ask the graph, then plant a track on
-   the symbol entity with the same key.
+2. THE MCP SURFACE: /membrane/codegraph (read-only, same query()
+   text as the CLI + intercept), and the returned graph's qualnames
+   ARE the entity id space (eids.canon('s', qualname) keeps the
+   qualname verbatim), so MCP clients can chain: ask the graph, then
+   plant a track on the symbol entity with the same key. (The old
+   exemplar-pool lane died with the exemplar store; symbol evidence
+   now rides CODE events from code_evidence.py.)
 
 All $0 (the graph is prebuilt at boot; no embeds, no model)."""
 
@@ -27,8 +23,7 @@ from pathlib import Path
 
 os.environ.setdefault("MEMBRANE_STORE", "json")
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
+import membrane.codegraph as CG  # noqa: E402
 from membrane.codegraph import build_graph, query  # noqa: E402
 
 
@@ -103,47 +98,6 @@ class TestSignatureVerb(unittest.TestCase):
         self.assertIsNone(_codegraph_wants("what is love"))
 
 
-class TestSymbolAnchoredRecall(unittest.TestCase):
-    def _cell(self, situation: str, action: str, tags: dict):
-        from membrane.field import Exemplar
-        ex = Exemplar(situation=situation, action=action,
-                      outcome="pending", vec=[1.0])
-        ex.safe = True
-        ex.extra["entities"] = tags
-        return ex
-
-    def test_symbol_term_hit_joins_pool(self):
-        """THE POOL PROPERTY: a query naming a symbol hot-loads the cell
-        that harvested that tag -- the cell's own harvest key resolves
-        via the entity index; the GRAPH supplements bare-name cases."""
-        from membrane.field import ExemplarStore
-        from membrane.entities import entity_index, query_entities
-        st = ExemplarStore()
-        cell = self._cell("tool read for: checked _strip_context",
-                          "default n=3; keep_system=True",
-                          {"symbols": ["_strip_context"]})
-        st.exemplars.append(cell)
-        inv = entity_index(st.exemplars)
-        self.assertIn("symbols:_strip_context", inv)
-        # the extractor's query-side signal screen: a leading-underscore
-        # bare name DOES harvest (the snake_case alternative matches)
-        q = "what are the default args for _strip_context?"
-        self.assertIn("symbols:_strip_context", query_entities(q))
-
-    def test_bare_lowercase_name_via_graph(self):
-        """THE GRAPH SUPPLEMENT: a bare lowercase function name in prose
-        (the extractor's signal miss) joins the pool keys through the
-        codegraph's symbol table -- srv._codegraph armed."""
-        from membrane import rag as rag_mod
-        from membrane.codegraph import build_graph
-        with _Proj() as root:
-            cg = build_graph(root)
-            srv = type("S", (), {"_codegraph": cg})()
-            q = "how does caller handle empty input"
-            terms = rag_mod._symbol_pool_terms(srv, q)
-            self.assertIn("symbols:caller", terms)
-
-
 class TestMcpSurface(unittest.TestCase):
     def test_route_registered(self):
         """/membrane/codegraph is on the proxy's route table (read-only,
@@ -154,29 +108,32 @@ class TestMcpSurface(unittest.TestCase):
         self.assertIn("_strip_context", out)
 
     def test_graph_symbols_share_entity_key_space(self):
-        """THE ID COMPATIBILITY: a graph symbol qualname + 'symbols:'
-        IS the entity harvest's key form (kind:value, lowercase in the
-        iter_entities key space) -- the same string a planted track
-        ('symbols:_strip_context') uses, and refine_entities promotes
-        harvests to exactly these qualnames."""
+        """THE ID COMPATIBILITY: the graph's qualname IS the entity
+        field's symbol id ('s:' + qualname, case kept) -- the same key
+        a planted track on the symbol uses, and the same key the
+        extractor's symbol mentions resolve to against the graph."""
+        from membrane import eids
+        from membrane.entities import extract_entities
         with _Proj() as root:
             g = build_graph(root)
             self.assertIn("_strip_context", g["symbols"])
             self.assertIn("Widget.paint", g["symbols"])
-        from membrane.entities import extract_entities, iter_entities
+            quals = {info.get("qual")
+                     for info in g["defs"].values()}
+            for qual in ("_strip_context", "Widget.paint"):
+                # a bare mention resolves through defs to the
+                # module-qualified qualname: one id for both
+                full = next(k for k, info in g["defs"].items()
+                            if info.get("qual") == qual)
+                self.assertEqual(eids.canon("s", qual, g),
+                                 "s:" + full)
+                # the qualname itself round-trips verbatim
+                self.assertEqual(eids.canon("s", full, g),
+                                 "s:" + full)
         tags = extract_entities(
             "checked _strip_context and Widget.paint today")
-        keys = iter_entities(self._fake_cell(tags))
-        self.assertIn("symbols:_strip_context", keys)
-        self.assertIn("symbols:widget.paint", keys)
-
-    @staticmethod
-    def _fake_cell(tags):
-        from membrane.field import Exemplar
-        ex = Exemplar(situation="s", action="a", outcome="pending",
-                      vec=[1.0])
-        ex.extra["entities"] = tags
-        return ex
+        self.assertIn("_strip_context", tags.get("symbols", []))
+        self.assertIn("Widget.paint", tags.get("symbols", []))
 
 
 if __name__ == "__main__":

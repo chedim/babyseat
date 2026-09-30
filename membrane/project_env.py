@@ -150,8 +150,8 @@ def couchbase_onboarding(cwd: Path | str | None = None,
         probe = probe_fn
         if probe is None:
             def probe() -> bool:
-                from .field import ExemplarStore
-                return ExemplarStore._probe_local_couchbase()
+                from .efstore import probe_local_couchbase
+                return probe_local_couchbase()
         try:
             if probe():
                 return False          # local cluster: auto-detect handles it

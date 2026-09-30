@@ -13,9 +13,9 @@
     membrane connect      offer to connect a shared Couchbase field for THIS
                           project (creds go to ~/.membrane/projects/, never
                           into the repo)
-    membrane move         migrate the field between stores: cb<->cb, cb->json,
-                          json->cb (--from/--to; origins kept -- a moved patch
-                          stays scenery on the target unless --reorigin)
+    membrane move         move the entity field's collections: cb -> cb, or
+                          dump cb -> json:DIR (one jsonl per collection;
+                          --origin filters the per-origin docs)
     membrane ingest       cold-start: absorb docs/README into the field
                           (no model call; same learn guards as any turn)
     membrane codegraph    stdlib-AST call graph of this repo (stats / impact /
@@ -242,11 +242,11 @@ def _cb_ask(input_fn, getpass_fn, title: str) -> dict:
 def _migrate(argv: list[str]) -> int:
     """`membrane migrate`: the interactive front door to `membrane move`.
 
-    Detects where THIS project's field lives (MEMBRANE_STORE env / project
-    env file -> couchbase; anything else -> memory), asks what to migrate
-    TO (offering the sane default), asks creds when the target is Couchbase,
-    then runs the production `move` path (same endpoint grammar, idempotent,
-    content-keyed). Passthrough flags (--reorigin, --field) ride along."""
+    Detects where THIS project's store lives (the project env file ->
+    couchbase; anything else -> a memory-only seat), asks what to move TO
+    (offering the sane default), asks creds when the target is Couchbase,
+    then runs the production `move` path (same endpoint grammar,
+    idempotent, content-keyed)."""
     import getpass as _getpass
     from .project_env import project_env_path, parse_env_file
 
@@ -257,7 +257,7 @@ def _migrate(argv: list[str]) -> int:
     have = parse_env_file(project_env_path())
     on_cb = (os.environ.get("MEMBRANE_STORE", "").strip().lower() == "couchbase"
              or have.get("MEMBRANE_STORE", "").strip().lower() == "couchbase")
-    src_desc = "couchbase" if on_cb else "memory (local json field)"
+    src_desc = "couchbase" if on_cb else "off (a local seat boots memory-only)"
     print(f"[membrane migrate] this project's field lives on: {src_desc}")
     print("  migrate to: [1] couchbase  [2] memory")
     to = _ask("  target [{}]: ".format(
@@ -265,22 +265,15 @@ def _migrate(argv: list[str]) -> int:
         "1" if not on_cb else "2")
     to_cb = to.strip() in ("1", "couchbase", "cb")
 
-    field = str(FIELD)
     extra: list[str] = []
-    if "--field" in argv:
-        i = argv.index("--field")
-        if i + 1 < len(argv):
-            field = argv[i + 1]
-    extra = [a for a in argv if a in ("--reorigin",)]
 
     if on_cb and not to_cb:
-        # cb -> json: the target is this project's private field file; the
-        # source endpoint is cb:BUCKET with the CURRENT env/project creds
+        # cb -> json dump: the nine collections as one .jsonl each
         bucket = (os.environ.get("COUCHBASE_BUCKET", "").strip()
                   or have.get("COUCHBASE_BUCKET", "").strip() or "membrane")
         src = "cb:" + bucket
-        dst = "json:" + field
-        print(f"[membrane migrate] couchbase ({bucket}) -> {field}")
+        dst = "json:" + str(FIELD.parent / "efield-dump")
+        print(f"[membrane migrate] couchbase ({bucket}) -> {dst}")
     elif on_cb and to_cb:
         # cb -> cb: source = current cluster (env creds), target = NEW creds
         cur_bucket = (os.environ.get("COUCHBASE_BUCKET", "").strip()
@@ -297,18 +290,13 @@ def _migrate(argv: list[str]) -> int:
                .replace("couchbases://", "").rstrip("/")
                + f"/{tgt['bucket']}")
     elif (not on_cb) and to_cb:
-        # json -> cb: source is the local json field; ask target creds
+        # off-cluster -> couchbase: a memory seat has no collections to
+        # move; this CONFIGURES the project for the new cluster (the seat
+        # joins the shared bucket; the entity field grows there from scratch
+        # or arrives with the peers via copy).
         tgt = _cb_ask(input, _getpass.getpass,
                       "target cluster (creds are stored in "
                       "~/.membrane/projects/, never the repo):")
-        scheme = "cbs" if tgt["conn"].startswith("couchbases") else "cb"
-        src = "json:" + field
-        dst = (f"{scheme}://{tgt['user']}:{tgt['pw']}@"
-               + tgt["conn"].replace("couchbase://", "")
-               .replace("couchbases://", "").rstrip("/")
-               + f"/{tgt['bucket']}")
-        # persist the target as this project's store (the migration's point:
-        # the project now LIVES on the new cluster)
         try:
             from .project_env import _write_env_file, DECLINE_KEY
             path = project_env_path()
@@ -327,9 +315,12 @@ def _migrate(argv: list[str]) -> int:
         except Exception as e:
             print(f"[membrane migrate] warning: could not save store config "
                   f"({e}); the move itself still runs.", file=sys.stderr)
+        return 0                  # a memory seat holds no collections
     else:
-        print("[membrane migrate] already on memory and memory was chosen "
-              "-- nothing to do.", file=sys.stderr)
+        print("[membrane migrate] not on couchbase -- nothing to do "
+              "(a memory-only seat has nothing to move; MEMBRANE_STORE="
+              "couchbase puts a project on the shared cluster).",
+              file=sys.stderr)
         return 0
 
     dst_show = dst
@@ -338,8 +329,7 @@ def _migrate(argv: list[str]) -> int:
         dst_show = _re.sub(r"(cb://[^:@/]+):[^@/]*@", r"\1:***@", dst)
     print(f"[membrane migrate] running: membrane move --from {src} "
           f"--to {dst_show}")
-    sys.argv = ["membrane move", "--from", src, "--to", dst, "--field", field] \
-        + extra
+    sys.argv = ["membrane move", "--from", src, "--to", dst] + extra
     from .move import main as move_main
     return move_main()
 
@@ -445,7 +435,7 @@ def _doctor() -> int:
         from .capture import mode_from_env
         from .efstore import open_backend
         from .efield import EntityField
-        from .field import _origin_tag
+        from .substrate import _origin_tag
         mode = mode_from_env()
         fpath = str(DATA_DIR / "field.json")
         be = open_backend(fpath)
@@ -495,8 +485,8 @@ def main() -> None:
         "  auth       store a cloud API key (anthropic, openrouter, gemini,\n"
         "             groq, github, zen, mistral): ~/.membrane/auth.json (600);\n"
         "             its models become routable rungs + picker entries\n"
-        "  move       migrate the field between stores (cb<->cb, cb->json,\n"
-        "             json->cb); see --help for endpoint forms\n"
+        "  move       move the entity field's collections (cb->cb, cb->json\n"
+        "             dumps); see --help for endpoint forms\n"
         "  migrate    interactive migration front door: detects where this\n"
         "             project's field lives, asks for the target mechanism\n"
         "             (and creds when Couchbase is involved), then runs move\n"
@@ -550,12 +540,11 @@ def main() -> None:
         ap2 = argparse.ArgumentParser(prog="membrane move")
         ap2.add_argument("--from", dest="src", required=True)
         ap2.add_argument("--to", dest="dst", required=True)
-        ap2.add_argument("--field", default=str(FIELD))
-        ap2.add_argument("--reorigin", action="store_true")
+        ap2.add_argument("--origin", action="append", default=None,
+                         help="only these origins' docs (repeatable)")
         mv = ap2.parse_args(args.forwarded)
-        sys.argv = ["membrane move", "--from", mv.src, "--to", mv.dst,
-                    "--field", mv.field] + (["--reorigin"] if mv.reorigin
-                                            else [])
+        sys.argv = ["membrane move", "--from", mv.src, "--to", mv.dst] \
+            + (["--origin"] + [o for o in mv.origin] if mv.origin else [])
         from .move import main as move_main
         raise SystemExit(move_main())
     if cmd == "migrate":

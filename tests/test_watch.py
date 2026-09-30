@@ -11,6 +11,7 @@ Under test (membrane/watch.py + the opencode glue):
 import json
 import tempfile
 import time
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -18,9 +19,7 @@ from unittest.mock import patch
 import numpy as np
 
 from membrane import opencode as OC
-from membrane.field import Exemplar, ExemplarStore
-from membrane.watch import (COLLAPSE_RATE, DORM_RATE, MAX_WATCHES,
-                            RADIUS_DEFAULT, WatchBoard)
+from membrane.watch import DORM_RATE, MAX_WATCHES, WatchBoard
 
 
 class _Emb:
@@ -46,16 +45,14 @@ class _Emb:
         return out
 
 
-class _Store(ExemplarStore):
-    def save(self, path=None):
-        pass
-
-
 def _ex(dir_idx, situation="a migration ran"):
+    """A captured arrival: anything with .vec/.situation/.action -- the
+    watch board reads only those (watch.py:220); the entity field's
+    capture replaced the exemplar store."""
     v = np.zeros(8)
     v[dir_idx] = 1.0
-    return Exemplar(situation=situation, action="did the thing", outcome="ok",
-                    vec=list(v))
+    return types.SimpleNamespace(situation=situation, action="did the thing",
+                                 outcome="ok", vec=list(v), extra={})
 
 
 def _board(**kw):
@@ -219,9 +216,8 @@ class TestOpencodeGlue(unittest.TestCase):
         self.field_path = str(Path(self._tmp.name) / "field.json")
 
     def _srv(self):
-        store = _Store()
         return type("S", (), {"membrane": type("M", (), {
-            "store": store, "embedder": _Emb(),
+            "store": None, "embedder": _Emb(),
             "field_path": self.field_path,
             "audit_path": ""})()})()
 
