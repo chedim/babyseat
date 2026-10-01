@@ -22,11 +22,13 @@ every mutation carries an audit event"""
 
 from __future__ import annotations
 
+import sys
 import time
 
 import numpy as np
 
 from . import eids as E
+from . import streams as ST
 from .entities import (MEMBRANE_NS, CLASS_COMPONENT, CLASS_SESSION,
                        QuantumEntity, _KIND_CLASS, MultiParentOps)
 
@@ -369,8 +371,8 @@ def run_scripted_entities(fld, est, mem=None, now: float | None = None,
             out = run_entity_script(dcode, state)
             if out.get("error"):
                 stats["errors"] += 1
-                _script_error_announce(est, eid, "delete", out["error"])
-                _script_fail(est, ent)
+                _script_record_fail(fld, est, ent, eid, "delete",
+                                    out["error"], mem=mem)
                 continue
             ent.properties.pop("script_failures", None)
             if out.get("delete"):
@@ -390,10 +392,11 @@ def run_scripted_entities(fld, est, mem=None, now: float | None = None,
             out = run_entity_script(ncode, state)
             if out.get("error"):
                 stats["errors"] += 1
-                _script_error_announce(est, eid, "nudge", out["error"])
-                _script_fail(est, ent)
+                _script_record_fail(fld, est, ent, eid, "nudge",
+                                    out["error"], mem=mem)
                 continue
             ent.properties.pop("script_failures", None)
+            ent.properties.pop("script_last_error", None)
             changed = False
             if out.get("render"):
                 ent.properties["script_render"] = str(out["render"])[:300]
@@ -405,10 +408,13 @@ def run_scripted_entities(fld, est, mem=None, now: float | None = None,
             if changed:
                 est.upsert(ent, embedder=getattr(fld, "emb", None))
                 stats["nudged"] += 1
+                _script_tell(fld, eid, "nudge", True,
+                             f"its nudge script rendered: "
+                             f"{str(out.get('render') or '')[:160]}")
     return stats
 
 
-def _script_fail(est, ent) -> None:
+def _script_fail(est, ent, fld=None) -> None:
     """One more strike; SCRIPT_MAX_FAILURES consecutive -> auto-disable
     (a broken script cannot spam stderr or wedge the render)."""
     n = int((ent.properties or {}).get("script_failures") or 0) + 1
@@ -428,6 +434,50 @@ def _script_error_announce(est, eid: str, kind: str, error: str) -> None:
     est._announce("script-error", type("E", (), {
         "eid": eid, "cls": "Component",
         "properties": {"name": kind, "summary": error[:140]}})())
+
+
+def _script_tell(fld, eid: str, kind: str, ok: bool, text: str) -> None:
+    """A script run SPEAKS TO THE FIELD (2026-10-01, the owner's ask):
+    a discourse note tagged src='script:<kind>' whose subject is the
+    entity itself (prose mentions can't resolve a synthetic eid --
+    streams.Event.subject carries it, efield.embed_pending pins it as
+    the first own-mention like the code stream's def). The consequence:
+    the entity's state drifts toward the event sentence -- errored
+    scripts become findable BY SIMILARITY (an ask near the error text
+    surfaces the broken entity); and the state diff quotes the
+    event (the dormant src-lane in entity_block.state_diff finally has
+    a writer). session='' keeps it off the conversation's own lane.
+    Degrades everywhere (the field's embedder may still be unresolved;
+    the run must never break the script engine)."""
+    if fld is None:
+        return
+    try:
+        subj = canon_eid(eid) or ""
+        fld.write_events([ST.Event(stream="discourse", role="note",
+                                   text=text, ts=time.time(),
+                                   src=f"script:{kind}", subject=subj)],
+                         session="")
+        if subj and getattr(fld.emb, "model", "?") != "?":
+            fld.process(limit=8)
+    except Exception as e:
+        print(f"[night] script event skipped ({e})", file=sys.stderr)
+
+
+def _script_record_fail(fld, est, ent, eid: str, kind: str,
+                        msg: str, mem=None) -> None:
+    """ONE failure, all its lanes: the error lands on the entity doc
+    (script_last_error -- the error TEXT was never persisted; 3-strikes
+    needs it survived), announced (the banner render), spoken into the
+    field (the similarity hook) and audited. _script_fail stays the
+    strike counter; this is the full record around it."""
+    ent.properties["script_last_error"] = msg[:300]
+    _script_error_announce(est, eid, kind, msg)
+    _script_fail(est, ent, fld=fld)
+    _script_tell(fld, eid, kind, False,
+                 f"the {kind} script on {eid} errored: {msg}")
+    if mem is not None:
+        _audit(mem, {"event": "agent-script-error", "origin": kind,
+                     "eid": eid, "error": msg[:200]})
 
 
 def run_night(srv, fld, est, now: float | None = None) -> dict:
@@ -524,11 +574,15 @@ def run_entity_update_script(srv, ent, trigger: str,
     est = getattr(srv, "entity_store", None)
     if out.get("error"):
         if est is not None:
-            _script_fail(est, ent)
-            _script_error_announce(est, ent.eid, trigger, out["error"])
+            fld = getattr(srv, "efield", None)
+            _script_record_fail(fld, est, ent, ent.eid, trigger,
+                                out["error"],
+                                mem=getattr(srv, "membrane", None))
     else:
         if ent.properties.get("script_failures"):
             ent.properties.pop("script_failures", None)
+        if ent.properties.get("script_last_error"):
+            ent.properties.pop("script_last_error", None)
     return out
 
 
@@ -700,6 +754,13 @@ def apply_entity_update(srv, ent, out: dict, trigger: str) -> dict:
             est.upsert(ent)
         except Exception:
             pass
+        # the applied render/patch is field news too (what the entity's
+        # own organ decided about itself)
+        what = (('render: ' + (props.get("script_render") or '')[:140])
+                if out.get("render") else
+                'patch: ' + ", ".join(sorted(out.get("patch") or {}))[:140])
+        _script_tell(getattr(srv, "efield", None), ent.eid, trigger,
+                     True, f"its {trigger} script applied {what}")
     from .opencode import _write_audit
     _write_audit(getattr(srv, "membrane", None),
                  {"event": "agent-entity-scripted", "origin": "update-script",

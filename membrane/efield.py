@@ -288,7 +288,7 @@ class EntityField:
                    "result_len": ev.result_len, "outcome": ev.outcome,
                    "call_id": ev.call_id, "served": ev.served_text, "ts": ev.ts,
                    "src": ev.src, "clipped": ev.clipped, "code": ev.code,
-                   "seq": seq, "status": "pending"}
+                   "seq": seq, "status": "pending", "subject": ev.subject}
             # '#N': the short per-origin number the model and the operator cite
             # (seq orders; it is a microsecond clock, too long to quote)
             doc["n"] = int(self._ostats.get("ev_n") or 0) + 1
@@ -370,6 +370,15 @@ class EntityField:
                     if eid not in seen:
                         mentions.append([eid, 0, surf])
                         seen.add(eid)
+            if ev.get("subject") and sents:
+                # THE NAMED SUBJECT (the script lanes): prose mentions can't
+                # resolve a synthetic eid, so the event names it like the
+                # code stream names its own def (first, above the patterns)
+                subj = ev["subject"]
+                seen = {m[0] for m in mentions}
+                if subj not in seen:
+                    mentions.insert(0, [subj, 0,
+                                        subj.split(":", 1)[-1] or subj])
             ev["sids"] = sids
             ev["mentions"] = mentions
             surfaces.update(m[2] for m in mentions)

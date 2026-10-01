@@ -66,6 +66,10 @@ class Event:
     src: str = "live"
     clipped: bool = False
     code: dict | None = None         # {file, qual, mod, line, kind, sig, doc}
+    subject: str = ""                # the entity this event is ABOUT (the
+                                     # script lanes name their subject
+                                     # explicitly; prose mentions can't
+                                     # resolve a synthetic eid)
 
 
 # ---- cleaning -------------------------------------------------------------------

@@ -162,6 +162,23 @@ _ENTITY_CARD_COMMON = [
     "note event."]
 
 
+def announce_line(a: dict) -> str:
+    """One EntityStore announcement -> one banner line, KIND-AWARE.
+    The render used to fall everything into the generic new-entity lane:
+    a script-error announcement (kind 'script-error', name = the trigger
+    that fired) rendered as 'new entity: <eid> [Component] <error>' --
+    the kind and the trigger both dropped. Now: script errors render as
+    script lines (the model reads its own broken organs at a glance);
+    births keep their lane; merges keep theirs."""
+    if a.get("kind") == "merged":
+        return f"new entity: {a['eid']} — merged {a.get('extra', '')}"
+    if str(a.get("kind") or "").startswith("script"):
+        return (f"script: {a['eid']} {a.get('name') or '?'} → "
+                f"{(a.get('summary') or '')[:140]}")
+    clip = a.get("summary") or a.get("name") or ""
+    return f"new entity: {a['eid']} [{a.get('cls') or '?'}] {clip}"
+
+
 def _seat_card(srv, mcp_on: bool) -> str:
     """THE SEAT CARD: this session's live configuration, rendered for the
     MODEL -- what membrane does in the current mode and how to drive it.
@@ -900,17 +917,9 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
                         speak(srv, f"ALERT: {a['label']} {a['kind']} its "
                                    f"boundary ({a['boundary']})", kind="alert")
                     for a in est.take_announcements():
-                        if a["kind"] == "merged":
-                            lines.append(f"new entity: {a['eid']} — merged "
-                                         f"{a.get('extra', '')}")
-                            speak(srv, f"new entity: {a['eid']} — merged "
-                                       f"{a.get('extra', '')}", kind="note")
-                        else:
-                            clip = a.get("summary") or a["name"]
-                            lines.append(f"new entity: {a['eid']} [{a['cls']}]"
-                                         f" {clip}")
-                            speak(srv, f"new entity: {a['eid']} [{a['cls']}] "
-                                       f"{clip}", kind="note")
+                        ln = announce_line(a)
+                        lines.append(ln)
+                        speak(srv, ln, kind="note")
                 from .entity_block import now_line, track_line
                 for t in est.list_tracks():
                     if t["key"] == "session:now":
@@ -4809,13 +4818,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 # night grew and what it registered itself (the loop that
                 # makes the registration habit stick)
                 for a in est.take_announcements():
-                    if a["kind"] == "merged":
-                        lines.append(f"new entity: {a['eid']} — merged "
-                                     f"{a.get('extra', '')}")
-                    else:
-                        clip = a.get("summary") or a["name"]
-                        lines.append(f"new entity: {a['eid']} [{a['cls']}]"
-                                     f" {clip}")
+                    lines.append(announce_line(a))
             except Exception as e:
                 print(f"[opencode] banner render error: {e}",
                       file=sys.stderr)
@@ -5422,6 +5425,24 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             "entity_tracks": (getattr(srv, "entity_store", None).list_tracks()
                               if getattr(srv, "entity_store", None) else []),
         }
+        _est = getattr(srv, "entity_store", None)
+        if _est is not None:
+            # THE SCRIPT INSTRUMENT: entities whose scripts errored -- the
+            # strike counter, the disable flag, and (since the script lane
+            # speaks to the field) the persisted last-error text
+            failing, disabled = [], 0
+            for eid, ent in (_est.docs or {}).items():
+                p = ent.properties or {}
+                if not (p.get("script_failures") or p.get("script_disabled")):
+                    continue
+                if p.get("script_disabled"):
+                    disabled += 1
+                failing.append({"eid": eid,
+                                "failures": int(p.get("script_failures") or 0),
+                                "disabled": bool(p.get("script_disabled")),
+                                "last_error": (p.get("script_last_error")
+                                               or "")[:200]})
+            out["scripts"] = {"failing": failing[:20], "disabled": disabled}
         if fld is not None:
             from .claims import COMMONS
             commons = [d for _, d in fld.b.scan("claims", {"origin": COMMONS})]
