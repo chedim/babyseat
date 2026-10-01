@@ -57,7 +57,9 @@ class _FakeEmbedder:
         for t in texts:
             theta = self._DIRS.get(t.strip().lower())
             if theta is None:
-                h = np.random.default_rng(abs(hash(t)) % (2**32))
+                h = np.random.default_rng(int.from_bytes(
+                    __import__("hashlib").sha256(t.encode()).digest()[:4],
+                    "big"))
                 out.append(h.standard_normal(1024))
                 continue
             v = np.zeros(1024)

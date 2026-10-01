@@ -2121,7 +2121,9 @@ def _recall_report(srv, topic: str) -> str:
     except ImportError:
         render_for = None
     lines = [head]
-    if topic and fld.embedder is None:
+    # the EntityField carries the LazyEmbedder; 'unresolved' is the Seat's
+    # embedder still None (fld.emb.model is the read-safe view of it)
+    if topic and getattr(fld.emb, "model", "?") == "?":
         return head + "\n- embedder unresolved; cannot search the field"
     if topic:
         block = None
@@ -3763,7 +3765,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                     self._json_out({"query": "", "anchor": None,
                                     "neighbors": []}); return
                 anchor = {"query": query}
-                qv = np.asarray(fld.embedder.embed([query])[0], dtype=float)
+                qv = np.asarray(fld.emb.embed([query])[0], dtype=float)
                 n = float(np.linalg.norm(qv))
                 near = fld.recall(qv / (n or 1.0), k=K) if n > 1e-12 else []
             for e2, sim in near:
