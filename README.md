@@ -166,7 +166,7 @@ routing: [docs/token-economics.md](docs/token-economics.md).
 | Command | What it does |
 |---|---|
 | `membrane opencode` | field-backed opencode on :11500 (the daily driver) |
-| `membrane serve` | the same seat, headless: `opencode serve` behind the proxy, basic-authed (the phone/companion surface) |
+| `membrane serve` | the same seat, headless: membrane's OWN opencode-compatible REST/SSE server on :4096 (opencode replaced, no child process) |
 | `membrane backfill` | rebuild the field from history (code first, then the audit log; idempotent, resumable) |
 | `membrane review` | print what the field learned (annotations, replay A/B with `--ab`) |
 | `membrane connect` | (re)run shared-field onboarding for THIS project |
@@ -190,25 +190,31 @@ embed, apply), `shadow` (capture events only — a lab ablation), `off`.
 
 ### Serving headless (`membrane serve`)
 
-`membrane serve` runs the same proxy + opencode pair, but the child is
-`opencode serve` — a **headless opencode server** instead of the TUI. Any
-opencode client talks to its REST API directly: the [mobile companion
-app](https://opencode.app/), the IDE plugins, a script. The generated
-config (`OPENCODE_CONFIG`, same as the TUI seat) points the server's
-provider at `http://127.0.0.1:<proxy-port>/v1`, so a session created from
-the phone is captured into the field and injected into exactly like a
-desktop turn — the serve surface adds no separate memory.
+`membrane serve` runs the seat with **no TUI and no opencode at all** —
+membrane hosts its OWN opencode-compatible REST/SSE server
+(`membrane/server.py`): sessions, messages, turns, tool parts, aborts, the
+SSE event stream. Any opencode client connects unchanged: the [mobile
+companion app](https://opencode.app/), IDE plugins, a script. The turn
+loop calls the seat's OWN `/v1` on loopback — gate, injection, capture,
+banner and the routing ladder run through the exact code path every other
+client's turn uses, so the serve surface adds no separate memory, and the
+model's membrane tool invocations (the MCP lane, built-ins all off) appear
+to the client as ordinary tool parts riding `message.part.updated`
+(pending → completed), so you can watch what it's doing from the room.
 
 The connection triple is printed at boot:
 
-    serve: http://<lan-ip>:4096  (user opencode, password …; opencode basic-auth …)
+    serve: http://<lan-ip>:4096  (native serve, basic auth user opencode)
 
-- **Auth is opencode's built-in basic auth** (`OPENCODE_SERVER_USERNAME` /
-  `OPENCODE_SERVER_PASSWORD` injected as env): no/incorrect/wrong credentials
-  get `401`, only the pair in `.membrane/serve-auth.json` (mode 600,
-  generated once, `--serve-pass` / `--serve-user` to override) gets through.
-  Credentials survive restarts, so a device's saved connection keeps
-  working.
+- **Auth is basic auth** (opencode's env names, `OPENCODE_SERVER_USERNAME`
+  / `OPENCODE_SERVER_PASSWORD`): no/incorrect credentials get `401`, only
+  the pair in `.membrane/serve-auth.json` (mode 600, generated once,
+  `--serve-pass` / `--serve-user` to override) gets through. Credentials
+  survive restarts, so a device's saved connection keeps working.
+- **Sessions and messages persist** beside the field
+  (`serve-sessions.json` / `serve-msgs.json`, atomic write-through), so a
+  device's history survives a seat restart. `--serve` + `--no-launch` is
+  legal now — the surface is a thread, independent of the launch decision.
 - **Exposure is WiFi-only for now** (`--serve-host` defaults to `0.0.0.0`,
   the LAN): reach the server only from a network you own. The planned
   route makes the seat's phone (the boat's agDroid HA server) the host —
@@ -216,6 +222,10 @@ The connection triple is printed at boot:
   there.
 - `--serve-port` (default 4096, walks up if busy) and `--listen` (the
   proxy, still never leaves 127.0.0.1) are independent.
+- The old lane survives as an ablation: `MEMBRANE_LEGACY_SERVE=1` restores
+  the previous design (launch an `opencode serve` child). A failed serve
+  bind prints loudly and the seat keeps running without the room-facing
+  surface — never a dead seat over a surface.
 
 ### Claude Code (Anthropic cloud) — RETIRED
 
@@ -371,9 +381,10 @@ and `dev-organism.md` (the toy world and the cell organism — cut in
 ## Development
 
 Source layout: `membrane/` (the field: `streams` → `efield`/`efstore` →
-`entity_block`/`efgate`/`night`, the opencode host + seat proxy, the CLI),
-`experiments/` (the e-series rigs behind math-findings), `tests/` (unittest +
-pytest, plain-python runnable).
+`entity_block`/`efgate`/`night`, the seat proxy, the native serve server
+(`server.py`, opencode-compatible), the opencode host (the legacy ablation),
+the CLI), `experiments/` (the e-series rigs behind math-findings), `tests/`
+(unittest + pytest, plain-python runnable).
 
 ### Run the tests
 

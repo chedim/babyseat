@@ -29,6 +29,12 @@ tool's result upgrades its call-only observation through the same call id.
 Each event has a microsecond `seq` (the order) and a short per-origin
 number `n`, the `#N` the blocks cite and `forget #N` removes.
 
+Turns arrive from every surface through the same door: the TUI seat, the
+native `membrane serve` room-facing server (opencode replaced; its turn
+loop calls the proxy's own `/v1` on loopback, so gate, injection, capture
+and banner are never bypassed), and the desktop seat. There is no second
+capture path.
+
 ## Entities
 
 `membrane/eids.py` gives every mention a canonical id `kind:norm`:
