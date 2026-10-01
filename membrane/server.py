@@ -27,6 +27,7 @@ What is deliberately NOT here: opencode's file/VCS/LSP/share surface (a
 client needs to work on the room through membrane_run and the field's
 readers, which the doctrine already teaches).
 """
+import copy
 import base64
 import hashlib
 import hmac
@@ -382,7 +383,8 @@ class TurnRunner:
         # the user message rides the stream BEFORE busy: message.updated,
         # one part event per part, then the session refresh (real serve
         # 1.18 order)
-        self.hub.publish({"type": "message.updated", "info": dict(info)})
+        self.hub.publish({"type": "message.updated", "sessionID": sid,
+                          "info": dict(info)})
         for p in parts or []:
             self.hub.publish({"type": "message.part.updated",
                               "part": dict(p), "sessionID": sid,
@@ -423,8 +425,13 @@ class TurnRunner:
                                           "cache": {"read": 0, "write": 0}},
                   "time": {"created": now}}
         # real serve announces the ASSISTANT message before any of its
-        # parts, with a session refresh beside it
-        self.hub.publish({"type": "message.updated", "info": dict(a_info)})
+        # parts, with a session refresh beside it. the ATTACHED TUI's
+        # render reducer drops message.updated frames without a TOP-LEVEL
+        # properties.sessionID (the assistant role never registers in its
+        # message store and the reply vanishes at the completion
+        # re-render), so every message.updated carries it
+        self.hub.publish({"type": "message.updated", "sessionID": sid,
+                          "info": dict(a_info)})
         self._touch_session(sid)
         parts: list = []
 
@@ -433,8 +440,12 @@ class TurnRunner:
             p = {"id": _gen_id("prt"), "sessionID": sid, "messageID": aid,
                  **p}
             parts.append(p)
+            # a DEEP snapshot: the wire event must not share the live
+            # part's nested dicts (the runner mutates time/state after
+            # the open publish -- real serve streams the open with time
+            # {start} only)
             self.hub.publish({"type": "message.part.updated",
-                              "part": dict(p),
+                              "part": copy.deepcopy(p),
                               "time": int(time.time() * 1000),
                               "sessionID": sid})
             return p
@@ -472,10 +483,26 @@ class TurnRunner:
             reason = "tool-calls" if tcs else "stop"
             if msg.get("reasoning") or msg.get("thinking"):
                 now = int(time.time() * 1000)
-                mkpart({"type": "reasoning",
-                        "text": str(msg.get("reasoning")
-                                    or msg.get("thinking") or ""),
-                        "time": {"start": now}})
+                # the REAL serve streams the reasoning part exactly like
+                # the text one: it opens EMPTY with time.start, the
+                # deltas ride on the text field, a final part.updated
+                # closes it with time.end -- a part left unclosed pins
+                # the attached TUI's Thought block on a Thinking spinner
+                # (the sync POST /message lane renders the STORED part)
+                rtext = str(msg.get("reasoning") or msg.get("thinking")
+                            or "")
+                rpart = mkpart({"type": "reasoning", "text": "",
+                                "time": {"start": now}})
+                rpart["text"] = rtext
+                self.hub.publish({"type": "message.part.delta",
+                                  "sessionID": sid, "messageID": aid,
+                                  "partID": rpart["id"], "field": "text",
+                                  "delta": rtext})
+                rpart["time"]["end"] = int(time.time() * 1000)
+                self.hub.publish({"type": "message.part.updated",
+                                  "part": dict(rpart),
+                                  "time": int(time.time() * 1000),
+                                  "sessionID": sid})
             if tcs:
                 a_info["time"].setdefault("start", int(time.time() * 1000))
                 asst_msg = {"role": "assistant", "content": content or "",
@@ -558,7 +585,8 @@ class TurnRunner:
             a_info.pop("finish", None)
         a_info["time"]["completed"] = int(time.time() * 1000)
         self.messages.append(sid, a_info, parts)
-        self.hub.publish({"type": "message.updated", "info": dict(a_info)})
+        self.hub.publish({"type": "message.updated", "sessionID": sid,
+                          "info": dict(a_info)})
         self._busy.pop(sid, None)
         self._aborting.discard(sid)
         self.sessions.touch(sid)
@@ -670,7 +698,7 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
 
         # -- SSE --------------------------------------------------------------
 
-        def _sse(self) -> None:
+        def _sse(self, wrap: bool = False) -> None:
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
@@ -678,11 +706,12 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
             self.end_headers()
             q = hub.subscribe()
             try:
-                self._sse_flush(q)
+                self._sse_flush(q, wrap=wrap)
             finally:
                 hub.unsubscribe(q)
 
-        def _sse_flush(self, q, keepalive_s: float = 15.0):
+        def _sse_flush(self, q, keepalive_s: float = 15.0,
+                       wrap: bool = False):
             while True:
                 try:
                     ev = q.get(timeout=keepalive_s)
@@ -693,17 +722,24 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                     except (BrokenPipeError, ConnectionResetError, OSError):
                         return
                     continue
-                # the real serve's SSE envelope: {id, type, properties}
-                # -- the TUI reads properties.* and CRASHES (undefined
-                # .length) on a flat payload; server.connected arrives
-                # from the hub pre-wrapped, so unwrap-then-wrap
+                # the real serve's two SSE schemas: /event is the bare
+                # Event ({id, type, properties}); /global/event wraps
+                # every frame as GlobalEvent
+                # {directory, project, payload:{id, type, properties}} --
+                # the attached TUI's event client UNWRAPS payload and
+                # DROPS bare frames, so without the wrapper its LIVE SSE
+                # render path is dead (the sync POST response was the
+                # only render that ever worked)
                 props = {k: v for k, v in ev.items() if k != "type"}
                 if list(props) == ["properties"]:
                     props = props["properties"]
                 env = {"id": _gen_id("evt"), "type": ev.get("type"),
                        "properties": props}
+                if wrap:
+                    env = {"directory": os.getcwd(), "project": "global",
+                           "payload": env}
                 data = json.dumps(env, default=str)
-                self.wfile.write(f"event: {env['type']}\n".encode())
+                self.wfile.write(f"event: {ev.get('type')}\n".encode())
                 self.wfile.write(f"data: {data}\n\n".encode())
                 try:
                     self.wfile.flush()
@@ -723,8 +759,10 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
             path = self.path.split("?", 1)[0]
             if path == "/global/health":
                 self._json_out({"healthy": True, "version": VERSION})
-            elif path == "/event" or path == "/global/event":
+            elif path == "/event":
                 self._sse()
+            elif path == "/global/event":
+                self._sse(wrap=True)
             elif path == "/session":
                 self._json_out(sessions.list())
             elif path.startswith("/session/") and path.endswith("/message"):

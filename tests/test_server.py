@@ -14,6 +14,7 @@ Deterministic fakes only: stub ladder + stub executor, an ephemeral port.
 """
 import base64
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -76,8 +77,10 @@ TOOLCALL = {"id": "call_1", "type": "function",
                          "arguments": json.dumps({"command": "echo hi"})}}
 
 
-def _resp(content=None, calls=None):
+def _resp(reasoning=None, content=None, calls=None):
     m = {"content": content}
+    if reasoning is not None:
+        m["reasoning"] = reasoning
     if calls:
         m["tool_calls"] = calls
     return {"choices": [{"message": m, "finish_reason":
@@ -162,6 +165,81 @@ class TestTurnLoop(unittest.TestCase):
             "session.updated", "session.diff"])
         with self.assertRaises(Exception):
             q.get(timeout=0.2)    # nothing further
+
+    def test_message_updated_events_carry_a_top_level_session_id(self):
+        # the attached TUI's render reducer drops message.updated frames
+        # without a TOP-LEVEL properties.sessionID (its first check) --
+        # the assistant role never registers and the reply vanishes at
+        # the completion re-render
+        w = self._world([_resp(content="pong")])
+        q = w["hub"].subscribe()
+        q.get(timeout=2)          # server.connected
+        w["t"].run(w["s"]["id"], "say pong")
+        evs = [q.get(timeout=2) for _ in range(18)]
+        mu = [e for e in evs if e["type"] == "message.updated"]
+        self.assertEqual(len(mu), 3)
+        for e in mu:
+            self.assertEqual(e["sessionID"], w["s"]["id"])
+
+    def test_reasoning_part_streams_empty_deltas_and_closes(self):
+        # the REAL serve's reasoning lifecycle (captured off 1.18.34): the
+        # part opens EMPTY with time.start, one text-field delta rides,
+        # then the close carries the full text AND time.end -- a part left
+        # unclosed pins the client's Thought block on a Thinking spinner
+        # (the sync POST /message lane renders the STORED part, so the
+        # close must land there too)
+        w = self._world([_resp(reasoning="the user asked", content="pong")])
+        q = w["hub"].subscribe()
+        q.get(timeout=2)          # server.connected
+        w["t"].run(w["s"]["id"], "say pong")
+        evs = [q.get(timeout=2) for _ in range(21)]
+        types = [e["type"] for e in evs]
+        self.assertEqual(types, [
+            "message.updated", "message.part.updated",
+            "session.updated", "session.diff",
+            "session.status",
+            "message.updated", "session.updated", "session.diff",
+            "message.part.updated",              # step-start
+            "message.part.updated",              # reasoning opens EMPTY
+            "message.part.delta",                # one text-field delta
+            "message.part.updated",              # reasoning CLOSED
+            "message.part.updated",              # text opens EMPTY
+            "message.part.delta", "message.part.updated",
+            "message.part.updated",              # step-finish
+            "message.updated",
+            "session.status", "session.idle",
+            "session.updated", "session.diff"])
+        # the reasoning open is EMPTY with time.start and no end; the
+        # close carries the full text and both times
+        ups = [e for e in evs if e["type"] == "message.part.updated"]
+        rps = [e["part"] for e in ups if e["part"]["type"] == "reasoning"]
+        self.assertEqual(len(rps), 2)
+        self.assertEqual(rps[0]["text"], "")
+        self.assertIn("start", rps[0]["time"])
+        self.assertNotIn("end", rps[0]["time"])
+        self.assertEqual(rps[1]["text"], "the user asked")
+        self.assertGreaterEqual(rps[1]["time"]["end"],
+                                rps[1]["time"]["start"])
+        self.assertEqual(rps[0]["id"], rps[1]["id"])
+        # the delta rides as field:text against the same part
+        dl = [e for e in evs if e["type"] == "message.part.delta"]
+        self.assertEqual(dl[0]["partID"], rps[0]["id"])
+        self.assertEqual(dl[0]["field"], "text")
+        self.assertEqual(dl[0]["delta"], "the user asked")
+        for e in evs:
+            if e["type"] in ("message.updated", "message.part.updated",
+                             "message.part.delta", "session.status",
+                             "session.updated", "session.diff",
+                             "session.idle"):
+                self.assertEqual(e.get("sessionID"), w["s"]["id"], e)
+        # the STORED part carries the close too (the sync POST /message
+        # lane renders the stored part)
+        row = w["msgs"].list(w["s"]["id"])[-1]
+        srp = [p for p in row["parts"] if p["type"] == "reasoning"][0]
+        self.assertEqual(srp["time"]["end"], rps[1]["time"]["end"])
+        self.assertEqual(srp["text"], "the user asked")
+        # ... and the message is completed
+        self.assertIn("completed", row["info"]["time"])
 
     def test_part_events_carry_a_top_level_time(self):
         w = self._world([_resp(content="pong")])
@@ -513,11 +591,9 @@ class TestHttpSurface(unittest.TestCase):
         code, out = self._req("/config/providers")
         self.assertEqual(out["default"], {"membrane": "glm-x"})
 
-    def test_global_event_serves_sse(self):
-        # the attached TUI polls /global/event (NOT /event); a 404 there
-        # leaves it without an event stream
+    def _first_sse_frame(self, route: str) -> str:
         r = urllib.request.Request(
-            f"http://127.0.0.1:{self.port}/global/event",
+            f"http://127.0.0.1:{self.port}{route}",
             headers={"Authorization": "Basic " + base64.b64encode(
                 b"opencode:pw").decode()})
         resp = urllib.request.urlopen(r, timeout=5)
@@ -529,7 +605,42 @@ class TestHttpSurface(unittest.TestCase):
                     break
         finally:
             resp.close()
+        return buf
+
+    def test_global_event_serves_sse(self):
+        # the attached TUI polls /global/event (NOT /event); a 404 there
+        # leaves it without an event stream
+        buf = self._first_sse_frame("/global/event")
         self.assertIn("server.connected", buf)
+
+    def test_global_event_frames_carry_the_payload_envelope(self):
+        # the TUI's event client (us/uo in chunk-5h0b1bsy) unwraps
+        # GlobalEvent = Struct({directory, project?, payload: {...}});
+        # a BARE {id, type, properties} frame has no payload, the unwrap
+        # drops it, and the LIVE SSE render path is dead -- proven by a
+        # curl-external turn not rendering while the instant-burst
+        # sync-response path did. Real serve wraps:
+        # {directory: cwd, project: "global", payload: {id, type, properties}}
+        buf = self._first_sse_frame("/global/event")
+        line = [l for l in buf.splitlines() if l.startswith("data: ")][0]
+        frame = json.loads(line[len("data: "):])
+        self.assertEqual(sorted(frame), ["directory", "payload", "project"])
+        self.assertEqual(frame["directory"], os.getcwd())
+        self.assertEqual(frame["project"], "global")
+        payload = frame["payload"]
+        self.assertEqual(sorted(payload), ["id", "properties", "type"])
+        self.assertEqual(payload["type"], "server.connected")
+        self.assertIsInstance(payload["id"], str)
+        self.assertIn("properties", payload)
+
+    def test_event_frames_stay_bare_for_the_event_schema(self):
+        # /event serves Event = {id, type, properties} unwrapped (the
+        # legacy single-session schema); only /global/event wraps
+        buf = self._first_sse_frame("/event")
+        line = [l for l in buf.splitlines() if l.startswith("data: ")][0]
+        frame = json.loads(line[len("data: "):])
+        self.assertEqual(sorted(frame), ["id", "properties", "type"])
+        self.assertEqual(frame["type"], "server.connected")
 
     def test_session_diff_route_is_an_array(self):
         # the attached TUI seeds its Modified Files sidebar state from
