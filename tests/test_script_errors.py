@@ -114,7 +114,10 @@ class TestScriptEvents(unittest.TestCase):
         the field the same way -- srv.efield is the writer, degrade-safe."""
         f, est = _world()
         ent = _seed_entity(est, NS + "files:router.py", script="")
-        ent.properties["mention_script"] = "result = __import__('os')"
+        # the sandbox is lifted (test_run_lane pins it), so an os import
+        # is NOT an error anymore -- pin the trigger-error lane with a
+        # genuine failure instead
+        ent.properties["mention_script"] = "result = 1/0"
         est.upsert(ent)
         srv = types.SimpleNamespace(efield=f, entity_store=est,
                                     membrane=None)

@@ -137,7 +137,8 @@ class TestMcpProtocol(unittest.TestCase):
     def test_tools_list_four_tools(self):
         (resp,) = _rpc([{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}])
         names = [t["name"] for t in resp["result"]["tools"]]
-        self.assertEqual(names, ["membrane_query", "membrane_state",
+        self.assertEqual(names, ["membrane_run",
+                                 "membrane_query", "membrane_state",
                                  "membrane_learn", "membrane_forget",
                                  "membrane_watch_entity",
                                  "membrane_unwatch_entity",

@@ -44,6 +44,29 @@ HTTP_TIMEOUT_S = 30.0
 
 TOOLS: list[dict] = [
     {
+        "name": "membrane_run",
+        "description": (
+            "Run ONE shell command; the run goes THROUGH a membrane "
+            "entity -- one command head -> one `c:<head>` entity created "
+            "or reused for throwaway repeats, its result (rc, outcome, "
+            "head/tail) on the doc and the run spoken into the field, so "
+            "commands are findable later by similarity and their errors "
+            "reach the banner. Prefer over 0-arg probes: reads (cat, "
+            "ls, head, grep), builds, tests. Errors are announced "
+            "next-banner; script_last_error persists on the entity."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string",
+                            "description": "One shell command line."},
+                "timeout_s": {"type": "number",
+                              "description": "Kill after N seconds "
+                                             "(default 20, max 600)."},
+            },
+            "required": ["command"],
+        },
+    },
+    {
         "name": "membrane_query",
         "description": (
             "Read membrane's long-term memory: the nearest past exchanges for "
@@ -815,6 +838,32 @@ def tool_entity_inherit(args: dict, port: int) -> str:
     return f"Entity {out['child']} parents refreshed (no new links)."
 
 
+def tool_run(args: dict, port: int) -> str:
+    command = str(args.get("command") or "").strip()
+    if not command:
+        raise ProxyError(400, "command required")
+    timeout_s = args.get("timeout_s")
+    body = {"command": command}
+    if timeout_s is not None:
+        body["timeout_s"] = timeout_s
+    out = _http(port, "POST", "/membrane/run", body)
+    if not out.get("ok"):
+        err = out.get("error") or out.get("reason") or "unknown"
+        return (f"Run refused by membrane: {err}. (The lane may be off "
+                f"with MEMBRANE_RUN=0; check /membrane/state.)")
+    lines = [f"{command} -> rc {out.get('rc')} ({out.get('outcome')}, "
+             f"{out.get('ms', 0)} ms)"
+             + (f", entity {out.get('eid')} {'created' if out.get('created')
+                else 'reused'}" if out.get("eid") else "")]
+    head = str(out.get("head") or "")
+    if head:
+        lines.append(f"out[:600]: {head}")
+    tail = str(out.get("tail") or "")
+    if tail:
+        lines.append(f"tail: {tail}")
+    return "\n".join(lines)
+
+
 def tool_peer_seats(args: dict, port: int) -> str:
     out = _http(port, "GET", "/membrane/peer/seats")
     seats = out.get("seats") or []
@@ -847,6 +896,7 @@ TOOL_IMPLS = {
     "membrane_intend": tool_intend,
     "membrane_graph": tool_graph,
     "membrane_entity_inherit": tool_entity_inherit,
+    "membrane_run": tool_run,
 }
 
 

@@ -179,6 +179,22 @@ def announce_line(a: dict) -> str:
     return f"new entity: {a['eid']} [{a.get('cls') or '?'}] {clip}"
 
 
+_OC_BUILTIN_TOOLS = ("bash", "edit", "write", "read", "grep", "glob", "lsp",
+                     "apply_patch", "skill", "todowrite", "webfetch",
+                     "websearch", "question")
+
+
+def _tools_block() -> dict | None:
+    """opencode's built-in toolbelt OFF in the generated config (the
+    owner's 2026-10-01 call: membrane takes the surface over -- the
+    model's exec goes through the field via membrane_run, its memory
+    via the membrane_* MCP tools). None -- the block omitted, built-ins
+    kept -- when MEMBRANE_BUILTIN_TOOLS=1 (the ablation)."""
+    if os.environ.get("MEMBRANE_BUILTIN_TOOLS") == "1":
+        return None
+    return {t: False for t in _OC_BUILTIN_TOOLS}
+
+
 def _seat_card(srv, mcp_on: bool) -> str:
     """THE SEAT CARD: this session's live configuration, rendered for the
     MODEL -- what membrane does in the current mode and how to drive it.
@@ -234,6 +250,19 @@ def _seat_card(srv, mcp_on: bool) -> str:
         "- YOUR WRITES: report-only (--no-agent-writes) -- frames in your "
         "prose are proposals the operator confirms; nothing is written.")
     tools = _mcp_tool_lines() if mcp_on else []
+    if _tools_block() is not None:
+        L.append(
+            "- EXEC: you have NO built-in tools this seat (bash/read/edit/"
+            "grep/... are switched off in the config) -- every command, "
+            "file read and patch goes through membrane_run (one shell "
+            "command -> one `c:<head>` membrane entity it runs THROUGH: "
+            "the result lands on the entity, errors reach your next "
+            "banner). Entity scripts run UNSANDBOXED: imports allowed, "
+            "the engine's budgets are the only bounds."
+            + ("" if mcp_on else
+               " The MCP layer is OFF too, so you have no exec lane at "
+               "all right now -- tell the operator to start the seat with "
+               "--mcp."))
     if tools:
         L.append("- TOOLS: the membrane MCP server is mounted -- prefer "
                  "these typed tools over prose frames (no one-turn wait, "
@@ -3470,6 +3499,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._entity_inherit(); return
         if path == "/membrane/entity/remove":
             self._entity_remove(); return
+        if path == "/membrane/run":
+            self._membrane_run(); return
         if path.startswith("/membrane/"):
             self._json_out({"error": "read-only; GET /membrane/state"}); return
         super().do_POST()
@@ -5381,6 +5412,36 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._json_err_raw(503, "entity layer unavailable"); return
         self._json_out({"tracks": est.list_tracks()})
 
+    def _membrane_run(self) -> None:
+        """POST /membrane/run {command, timeout_s?}: the run lane -- the
+        model's exec goes THROUGH its entities (one command -> one c:
+        entity, engine-executed, the result on the doc, an observation in
+        the field, errors in the script-error lanes). The kill switch:
+        MEMBRANE_RUN=0 refuses (the seat runs zero-built-ins by default;
+        this is the operator's ablation)."""
+        srv = self.server
+        if os.environ.get("MEMBRANE_RUN") == "0":
+            self._json_out({"ok": False, "reason": "the run lane is off "
+                            "(MEMBRANE_RUN=0)"}); return
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
+        b = self._json_body()
+        command = str(b.get("command") or "").strip()
+        timeout_s = b.get("timeout_s")
+        if not command:
+            self._json_err_raw(400, "command required"); return
+        try:
+            from .night import run_command_entity
+            out = run_command_entity(_efield_of(srv), est, srv.membrane,
+                                     command, timeout_s=timeout_s)
+        except Exception as e:
+            self._json_out({"ok": False, "error": f"{type(e).__name__}: {e}"[:200]})
+            return
+        out.pop("doc", None)          # the doc summary is the reply's core
+        out["command"] = command
+        self._json_out(out)
+
     # ---- /membrane/state: the JSON instrument ----
     def _membrane_state(self) -> None:
         srv = self.server
@@ -5433,7 +5494,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             failing, disabled = [], 0
             for eid, ent in (_est.docs or {}).items():
                 p = ent.properties or {}
-                if not (p.get("script_failures") or p.get("script_disabled")):
+                if not (p.get("script_failures") or p.get("script_disabled")
+                        or p.get("script_last_error")):
+                    # a run-lane error persists script_last_error without a
+                    # strike counter (commands never auto-disable) -- it
+                    # still counts as failing here, the finding surface
                     continue
                 if p.get("script_disabled"):
                     disabled += 1
@@ -6268,6 +6333,9 @@ def main() -> None:
     # (membrane/mcp_server.py) relays typed tool calls to THIS proxy's
     # /membrane/* endpoints -- no prose-frame parsing, no one-turn wait, and
     # the same proxy-side guards. --no-mcp reverts to frames-only.
+    # THE TAKEOVER (stage B): opencode's own built-in toolbelt turns OFF
+    # here (zero built-ins -- the owner's call); the model's exec lane is
+    # membrane_run / POST /membrane/run.
     mcp_state = "off (--no-mcp)"
     if getattr(args, "mcp", True):
         # prefer the venv python RUNNING this process over the ambient PATH
@@ -6280,6 +6348,11 @@ def main() -> None:
             "timeout": 60_000,
         }}
         mcp_state = f"on ({len(_mcp_tool_lines())} membrane_* tools)"
+    else:
+        cfg["mcp"] = {}
+    tools_off = _tools_block()
+    if tools_off:
+        cfg["tools"] = tools_off
     # ---- LSP servers (built-ins) ----------------------------------------------
     # Diagnostics lane for the agent: pyright/gopls/typescript etc. start
     # automatically when matching files open. --no-lsp reverts to off.

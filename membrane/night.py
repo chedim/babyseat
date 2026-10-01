@@ -22,6 +22,8 @@ every mutation carries an audit event"""
 
 from __future__ import annotations
 
+import os
+import subprocess
 import sys
 import time
 
@@ -30,7 +32,8 @@ import numpy as np
 from . import eids as E
 from . import streams as ST
 from .entities import (MEMBRANE_NS, CLASS_COMPONENT, CLASS_SESSION,
-                       QuantumEntity, _KIND_CLASS, MultiParentOps)
+                       CLASS_TOOL, QuantumEntity, _KIND_CLASS,
+                       MultiParentOps)
 
 
 # ---- programmable entities (the script constants live in entities.py --
@@ -41,21 +44,14 @@ SCRIPT_MAX_FAILURES = 3        # consecutive failures -> auto-disable
 SCRIPT_MAX_PER_PASS = 20       # hard ceiling per consolidation tick
 SCRIPT_DEFAULT_EVERY_N = 4     # each entity's script samples every Nth
                                # pass (hot entities set 1)
-# process-level modules stay banned (the escape hatch); pure-compute
-# stdlib is ALLOWED -- dates, math, parsing need *something*
-_SCRIPT_ALLOWED_IMPORTS = ("json", "math", "datetime", "time", "re",
-                           "collections", "itertools", "statistics",
-                           "functools", "string", "textwrap", "unicodedata",
-                           "heapq", "bisect", "random")
-_SCRIPT_BANNED_PREFIXES = ("membrane", "os", "sys", "subprocess", "socket",
-                           "shutil", "pathlib", "importlib", "builtins",
-                           "ctypes", "signal", "threading", "requests",
-                           "urllib", "http", "ftplib", "telnetlib", "pickle",
-                           "marshal", "code", "codeop", "compileall",
-                           "runpy", "tempfile", "glob", "io", "abc",
-                           "contextlib", "types", "weakref", "gc", "atexit",
-                           "traceback", "warnings", "inspect", "dis",
-                           "importlib.machinery")
+# the SANDBOX IS LIFTED (the operator's 2026-10-01 call): scripts may
+# import anything -- os/subprocess included -- and shell out; the engine's
+# own budgets (per-run timeouts, the per-pass cap, the output caps) are
+# the bounds. No import policy remains.
+
+RUN_TIMEOUT_DEFAULT_S = 20.0   # one membrane_run's budget (the MCP call
+RUN_TIMEOUT_MAX_S = 600.0      # transport allows ~30s; longer work goes
+                               # through a script on a duty cycle)
 
 
 def overlay_key(eid: str) -> str:
@@ -273,41 +269,20 @@ def consolidate_now(fld, est, mem=None, momentum_vec=None) -> dict:
 # ---- the script engine ----------------------------------------------------------------
 
 
-def _banned_import(name, *args, **kwargs):
-    """The import policy: pure-compute stdlib allowed (json, math,
-    datetime, re, ... -- the operator's 'let it have it'), everything
-    process-level banned (membrane internals, os/sys/subprocess/socket,
-    io/types/traceback -- the escape hatches). A soft guard: the real
-    containment is trust + audit (the operator sees every script write)."""
-    low = str(name).lower().split(".", 1)[0]
-    if low in _SCRIPT_ALLOWED_IMPORTS:
-        return __import__(name, *args, **kwargs)
-    raise ImportError(
-        f"entity scripts cannot import {name!r} (allowed: "
-        f"{', '.join(_SCRIPT_ALLOWED_IMPORTS)}; state comes from the "
-        f"JSON input)")
-
-
 def run_entity_script(code: str, state: dict,
                       membrane: "dict | None" = None) -> dict:
-    """ONE script execution: exec in a stripped namespace (the import
-    policy above: pure-compute stdlib allowed, process-level banned),
-    the entity state injected as the ``state`` variable, and -- when a
-    membrane api object is handed -- the read-only navigation interface
-    as the ``membrane`` variable (membrane.field.recall / me.velocity /
-    entities.get / timeline.walk / intents.open).
+    """ONE script execution: exec with the real builtins available (the
+    SANDBOX IS LIFTED -- the operator's 2026-10-01 call: scripts may
+    import/shell anything; the ENGINE's own budgets -- this call is
+    wrapped by the run site's timeout, the pass cap, the output caps --
+    are the bounds now), the entity state injected as ``state``, and --
+    when a membrane api object is handed -- the read-only navigation
+    interface as the ``membrane`` variable.
     Returns the script's ``result`` dict: {render?, data?, delete?,
     patch?, veto?}. Any exception becomes {'error': <msg>} (the caller
     counters failures and turns them into banner events)."""
-    def _import_guard(name, *a, **k):
-        return _banned_import(name, *a, **k)
-    guard_dict = {"__import__": _import_guard}
     import builtins as _bi
-    for name in dir(_bi):
-        if name.startswith("_") or name in guard_dict:
-            continue
-        guard_dict[name] = getattr(_bi, name)
-    ns: dict = {"__builtins__": guard_dict, "state": state}
+    ns: dict = {"__builtins__": dict(_bi.__dict__), "state": state}
     if membrane is not None:
         ns["membrane"] = membrane
     try:
@@ -478,6 +453,88 @@ def _script_record_fail(fld, est, ent, eid: str, kind: str,
     if mem is not None:
         _audit(mem, {"event": "agent-script-error", "origin": kind,
                      "eid": eid, "error": msg[:200]})
+
+
+def run_command_entity(fld, est, mem, command: str,
+                       timeout_s: float | None = None) -> dict:
+    """THE MODEL'S HANDS (membrane_run, the owner's 2026-10-01 design):
+    a shell command is executed THROUGH its entity. One command -> one
+    command entity -- the field's own canon id (`c:<head>`; throwaway
+    repeats REUSE the same doc, real commands get their own), class
+    Tool, the command line on it. The ENGINE execs it (not the
+    user-script sandbox: shell line, subprocess.run, the seat's working
+    dir, streams' result head/tail caps), then every lane speaks: the
+    doc's run_* result props, an observation event into the field
+    (subject-pinned -- the state drifts toward the outcome, so similar
+    asks/surfaces find the command), errors in the script-error lanes
+    (announce + script_last_error + audit). Returns
+    {ok, eid, key, rc, outcome, head, tail, ms, doc, created}."""
+    cmd = str(command or "").strip()
+    if not cmd:
+        return {"ok": False, "error": "empty command"}
+    try:
+        t = float(timeout_s or RUN_TIMEOUT_DEFAULT_S)
+    except (TypeError, ValueError):
+        t = RUN_TIMEOUT_DEFAULT_S
+    t = max(0.5, min(t, RUN_TIMEOUT_MAX_S))
+    heads = ST.shell_heads(cmd)[:1]
+    canon_e = E.canon("c", heads[0] if heads else
+                      (cmd.split() or ["cmd"])[0][:40])
+    key = MEMBRANE_NS + overlay_key(canon_e)
+    doc = (est.docs or {}).get(key)
+    created = doc is None
+    if created:
+        doc = QuantumEntity(eid=key, cls=CLASS_TOOL,
+                            properties={"command": cmd,
+                                        "name": canon_e.split(":", 1)[-1],
+                                        "silent_birth": True})
+    else:
+        doc.properties["command"] = cmd
+        doc.properties.pop("silent_birth", None)
+    t0 = time.time()
+    err = ""
+    try:
+        p = subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                           timeout=t, cwd=os.getcwd())
+        rc = p.returncode
+        text = "\n".join(x for x in ((p.stdout or "").rstrip("\n"),
+                                     (p.stderr or "").rstrip("\n")) if x)
+    except subprocess.TimeoutExpired as e:
+        rc = -1
+        err = f"timeout after {t:g}s"
+        text = "\n".join(x.decode(errors="replace") if isinstance(x, bytes)
+                         else (x or "") for x in (e.stdout, e.stderr))
+    ms = int((time.time() - t0) * 1000)
+    head, tail = text[:ST.RESULT_HEAD], text[-ST.RESULT_TAIL:]
+    oc = "timeout" if err else ST.outcome(canon_e, head, tail)
+    ok = rc == 0 and not err
+    props = doc.properties
+    props["run_rc"], props["run_outcome"] = rc, oc
+    props["run_head"], props["run_tail"], props["run_ms"] = head, tail, ms
+    est.upsert(doc)
+    if fld is not None:
+        try:
+            fld.write_events([ST.Event(
+                stream="observation", tool="shell",
+                args={"command": cmd, "eid": canon_e},
+                result_head=head, result_tail=tail, result_len=len(text),
+                outcome=oc, ts=time.time(), subject=canon_e)], session="")
+            if getattr(fld.emb, "model", "?") != "?":
+                fld.process(limit=8)
+        except Exception as e:
+            print(f"[night] run event skipped ({e})", file=sys.stderr)
+    if not ok:
+        msg = err or f"rc={rc}; " + (tail[:140] or "(no output)")
+        _script_error_announce(est, key, "run", msg)
+        props["script_last_error"] = msg[:300]
+        est.upsert(doc)
+    if mem is not None:
+        _audit(mem, {"event": "agent-shell-run", "origin": "membrane_run",
+                     "eid": canon_e, "rc": rc, "ok": ok, "ms": ms,
+                     "command": cmd[:200]})
+    return {"ok": ok, "eid": canon_e, "key": key, "rc": rc, "outcome": oc,
+            "head": head, "tail": tail, "ms": ms, "doc": doc,
+            "created": created}
 
 
 def run_night(srv, fld, est, now: float | None = None) -> dict:
