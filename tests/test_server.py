@@ -113,8 +113,10 @@ class TestTurnLoop(unittest.TestCase):
     def test_plain_turn_shape(self):
         w = self._world([_resp(content="pong")])
         out = w["t"].run(w["s"]["id"], "say pong")
-        self.assertEqual(out["parts"][0]["type"], "text")
-        self.assertEqual(out["parts"][0]["text"], "pong")
+        self.assertEqual(out["parts"][0]["type"], "step-start")
+        self.assertEqual(out["parts"][1]["type"], "text")
+        self.assertEqual(out["parts"][1]["text"], "pong")
+        self.assertEqual(out["parts"][-1]["type"], "step-finish")
         b = w["calls"][0]
         self.assertEqual(b["model"], "glm-x")
         self.assertEqual(b["messages"][0]["role"], "system")
@@ -137,6 +139,76 @@ class TestTurnLoop(unittest.TestCase):
         self.assertEqual(u["sessionID"], w["s"]["id"])
         self.assertEqual(u["model"]["providerID"], "membrane")
 
+    def test_turn_sse_sequence_matches_real_serve(self):
+        # the REAL serve's turn sequence (captured off 1.18.34): the user
+        # message announced first, then session, then busy, then the
+        # assistant info BEFORE its parts, deltas mid-stream, and the
+        # closing session.updated AFTER session.idle
+        w = self._world([_resp(content="pong")])
+        q = w["hub"].subscribe()
+        q.get(timeout=2)          # server.connected
+        w["t"].run(w["s"]["id"], "say pong")
+        types = [q.get(timeout=2)["type"] for _ in range(18)]
+        self.assertEqual(types, [
+            "message.updated", "message.part.updated",
+            "session.updated", "session.diff",
+            "session.status",
+            "message.updated", "session.updated", "session.diff",
+            "message.part.updated", "message.part.updated",
+            "message.part.delta", "message.part.updated",
+            "message.part.updated",
+            "message.updated",
+            "session.status", "session.idle",
+            "session.updated", "session.diff"])
+        with self.assertRaises(Exception):
+            q.get(timeout=0.2)    # nothing further
+
+    def test_part_events_carry_a_top_level_time(self):
+        w = self._world([_resp(content="pong")])
+        q = w["hub"].subscribe()
+        q.get(timeout=2)
+        w["t"].run(w["s"]["id"], "say pong")
+        evs = []
+        for _ in range(18):
+            evs.append(q.get(timeout=2))
+        ups = [e for e in evs if e["type"] == "message.part.updated"]
+        for e in ups:
+            self.assertIsInstance(e.get("time"), int)
+        # the user's part first (full text), the assistant's opens EMPTY,
+        # deltas in, closes with the full text
+        texts = [e["part"].get("text") for e in ups
+                 if e["part"]["type"] == "text"]
+        self.assertEqual(texts, ["say pong", "", "pong"])
+        dl = [e for e in evs if e["type"] == "message.part.delta"]
+        self.assertEqual([d["delta"] for d in dl], ["pong"])
+        empty = [e["part"]["id"] for e in ups
+                 if e["part"]["type"] == "text"][1]
+        self.assertEqual(dl[0]["partID"], empty)
+        su = [e for e in evs if e["type"] == "session.updated"]
+        self.assertTrue(su and su[0]["info"].get("path"))
+        self.assertEqual(su[0]["info"]["summary"],
+                         {"additions": 0, "deletions": 0, "files": 0})
+
+    def test_session_gains_path_and_summary_keys(self):
+        s = NS.SessionStore().create()
+        self.assertTrue(s.get("path") and not s["path"].startswith("/"))
+        self.assertEqual(s["summary"],
+                         {"additions": 0, "deletions": 0, "files": 0})
+        self.assertEqual(s["model"]["variant"], "default")
+
+    def test_touch_records_epoch_ms_updated(self):
+        # the attached TUI's -c/continue lane sorts sessions by
+        # time.updated DESC and takes the first parentLESS one -- a
+        # seconds-valued updated sorted as ancient and broke the lane
+        st = NS.SessionStore()
+        s = st.create()
+        self.assertTrue(str(s["time"]["created"]).startswith("17")
+                        or s["time"]["created"] > 10**12)
+        st.touch(s["id"])
+        self.assertGreater(s["time"]["updated"], 10**12)
+        st.patch(s["id"], "renamed")
+        self.assertGreater(s["time"]["updated"], 10**12)
+
     def test_tool_round_trip(self):
         w = self._world([_resp(calls=[TOOLCALL]), _resp(content="done")])
         w["t"].run(w["s"]["id"], "run it")
@@ -150,13 +222,17 @@ class TestTurnLoop(unittest.TestCase):
         last = w["msgs"].list(w["s"]["id"])[-1]
         self.assertEqual(last["info"]["role"], "assistant")
         kinds = [p["type"] for p in last["parts"]]
-        self.assertEqual(kinds, ["tool", "text"])
+        self.assertEqual(kinds, ["step-start", "tool", "step-finish",
+                                 "step-start", "text", "step-finish"])
+        self.assertEqual(kinds[0], "step-start")
         tp = last["parts"][0]
+        tp = next(p for p in last["parts"] if p["type"] == "tool")
         self.assertEqual(tp["tool"], "membrane_run")
         self.assertEqual(tp["callID"], "call_1")
         self.assertEqual(tp["state"]["status"], "completed")
         self.assertEqual(tp["state"]["output"], "hi\n")
-        self.assertEqual(last["parts"][-1]["text"], "done")
+        self.assertEqual(next(p for p in last["parts"]
+                              if p["type"] == "text")["text"], "done")
 
     def test_ladder_carries_the_openai_tool_format(self):
         w = self._world([_resp(calls=[TOOLCALL]), _resp(content="d")])
@@ -197,6 +273,39 @@ class TestTurnLoop(unittest.TestCase):
         self.assertEqual(len(tool_parts), 2)
         self.assertEqual(tool_parts[0]["state"]["status"], "pending")
         self.assertEqual(tool_parts[1]["state"]["status"], "completed")
+
+    def test_parts_carry_sdk_ids_and_ms_times(self):
+        w = self._world([_resp(calls=[TOOLCALL]), _resp(content="done")])
+        out = w["t"].run(w["s"]["id"], "run it")
+        ui = out["info"]
+        self.assertEqual(ui["parentID"],
+                         w["msgs"].list(w["s"]["id"])[0]["info"]["id"])
+        self.assertEqual(ui["finish"], "stop")
+        self.assertIn("total", ui["tokens"])
+        for p in out["parts"]:
+            self.assertTrue(p["id"].startswith("prt_"), str(p)[:80])
+            self.assertEqual(p["sessionID"], w["s"]["id"])
+            self.assertEqual(p["messageID"], ui["id"])
+        kinds = [p["type"] for p in out["parts"]]
+        self.assertEqual(kinds, ["step-start", "tool", "step-finish",
+                                 "step-start", "text", "step-finish"])
+        tp = out["parts"][1]
+        self.assertGreater(tp["state"]["time"]["start"], 1e9)
+        sf = out["parts"][2]
+        self.assertEqual(sf["reason"], "tool-calls")
+        text = out["parts"][4]
+        self.assertEqual(text["time"]["end"], text["time"]["start"])
+        self.assertGreater(text["time"]["start"], 1e9)
+
+    def test_user_parts_carry_sdk_ids(self):
+        w = self._world([_resp(content="ok")])
+        w["t"].run(w["s"]["id"], "hi")
+        rows = w["msgs"].list(w["s"]["id"])
+        up = rows[0]["parts"][0]
+        self.assertTrue(up["id"].startswith("prt_"))
+        self.assertEqual(up["sessionID"], w["s"]["id"])
+        self.assertEqual(up["messageID"], rows[0]["info"]["id"])
+        self.assertEqual(rows[0]["info"]["role"], "user")
 
     def test_abort_stops_the_loop(self):
         w = self._world([_resp(calls=[TOOLCALL])])
@@ -362,7 +471,10 @@ class TestHttpSurface(unittest.TestCase):
             resp.close()
         self.assertIn("server.connected", buf)
         payload = json.loads(buf.split("data: ")[-1])
-        self.assertIn("type", payload)
+        # the real serve's envelope: the TUI crashes on a flat payload
+        self.assertEqual(payload["type"], "server.connected")
+        self.assertTrue(payload["id"].startswith("evt_"))
+        self.assertEqual(payload["properties"], {})
 
     def test_config_providers_is_the_sdk_array_shape(self):
         # the ATTACHED TUI crashes on the bare config dict: opencode's own
@@ -385,6 +497,130 @@ class TestHttpSurface(unittest.TestCase):
         self.assertIn("limit", m)
         self.assertEqual(m["status"], "active")
         self.assertEqual(m["variants"], {})
+
+    def test_provider_route_is_the_all_default_connected_shape(self):
+        # /provider is a DIFFERENT endpoint from /config/providers: the
+        # TUI resolves the model it submits with from `default`'s
+        # providerID->modelID map; with {} it silently refuses Enter
+        code, out = self._req("/provider")
+        self.assertEqual(code, 200)
+        self.assertIsInstance(out["all"], list)
+        self.assertEqual(out["all"][0]["id"], "membrane")
+        self.assertEqual(out["default"], {"membrane": "glm-x"})
+        self.assertEqual(out["connected"], ["membrane"])
+
+    def test_config_providers_default_names_a_model(self):
+        code, out = self._req("/config/providers")
+        self.assertEqual(out["default"], {"membrane": "glm-x"})
+
+    def test_global_event_serves_sse(self):
+        # the attached TUI polls /global/event (NOT /event); a 404 there
+        # leaves it without an event stream
+        r = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/global/event",
+            headers={"Authorization": "Basic " + base64.b64encode(
+                b"opencode:pw").decode()})
+        resp = urllib.request.urlopen(r, timeout=5)
+        try:
+            buf = ""
+            for _ in range(30):
+                buf += resp.readline().decode()
+                if 'data: {' in buf:
+                    break
+        finally:
+            resp.close()
+        self.assertIn("server.connected", buf)
+
+    def test_session_diff_route_is_an_array(self):
+        # the attached TUI seeds its Modified Files sidebar state from
+        # GET /session/:id/diff; the fall-through here used to return the
+        # SESSION OBJECT, the client's diff getters then read undefined
+        # and the sidebar crashes the TUI at wide terminals
+        _, s = self._req("/session", "POST", {})
+        sid = s["id"]
+        self.assertEqual(self._req(f"/session/{sid}/diff")[1], [])
+        self.assertEqual(self._req(f"/session/{sid}/todo")[1], [])
+
+    def test_boot_404s_become_sdk_stubs(self):
+        # the shapes real opencode serve 1.18.34 returns for the TUI's
+        # boot probes (captured via curl); a 404 leaves the TUI with
+        # missing client-side state
+        caps = {"experimental/capabilities":
+                {"backgroundSubagents": False},
+                "provider/auth": {},
+                "mcp": {},
+                "formatter": [],
+                "lsp": [],
+                "experimental/resource": {},
+                "experimental/workspace": [],
+                "experimental/console":
+                {"consoleManagedProviders": [],
+                 "switchableOrgCount": 0},
+                "project/global/directories": []}
+        for p, body in caps.items():
+            code, out = self._req("/" + p)
+            self.assertEqual(code, 200, p)
+            self.assertEqual(out, body, p)
+        code, out = self._req("/vcs")
+        self.assertEqual(code, 200)
+        self.assertIn("branch", out)
+        self.assertIn("default_branch", out)
+
+    def test_agent_route_carries_a_primary_agent(self):
+        # REAL probe: /agent=[] in front of the REAL opencode serve makes
+        # the attached TUI refuse Enter silently (no primary agent -> no
+        # model chip -> no POST at all)
+        code, out = self._req("/agent")
+        self.assertEqual(code, 200)
+        self.assertIsInstance(out, list)
+        names = [a["name"] for a in out]
+        self.assertIn("build", names)
+        build = next(a for a in out if a["name"] == "build")
+        self.assertEqual(build["mode"], "primary")
+        self.assertTrue(build.get("native"))
+        self.assertIn("description", build)
+        self.assertTrue(any(p.get("permission") == "*" for p in
+                            build.get("permission", [])))
+
+    def test_session_shape_matches_the_sdk(self):
+        # captured from real opencode serve 1.18: slug/cost/tokens/agent/
+        # model/version on the session, epoch-ms times; the attached TUI
+        # crashes on missing SDK fields
+        s = self.sessions.create(title="sdk")
+        for k in ("slug", "cost", "tokens", "agent", "model", "version"):
+            self.assertIn(k, s)
+        self.assertIn("total", s["tokens"])
+        self.assertEqual(s["agent"], "build")
+        self.assertIn("providerID", s["model"])
+        self.assertIn("id", s["model"])
+
+    def test_agent_route_carries_a_primary_agent(self):
+        # REAL probe: /agent=[] in front of the REAL opencode serve makes
+        # the attached TUI refuse Enter silently (no primary agent -> no
+        # model chip -> no POST at all)
+        code, out = self._req("/agent")
+        self.assertEqual(code, 200)
+        self.assertIsInstance(out, list)
+        names = [a["name"] for a in out]
+        self.assertIn("build", names)
+        build = next(a for a in out if a["name"] == "build")
+        self.assertEqual(build["mode"], "primary")
+        self.assertTrue(build.get("native"))
+        self.assertIn("description", build)
+        self.assertTrue(any(p.get("permission") == "*" for p in
+                            build.get("permission", [])))
+
+    def test_session_shape_matches_the_sdk(self):
+        # captured from real opencode serve 1.18: slug/cost/tokens/agent/
+        # model/version on the session, epoch-ms times; the attached TUI
+        # crashes on missing SDK fields
+        s = self.sessions.create(title="sdk")
+        for k in ("slug", "cost", "tokens", "agent", "model", "version"):
+            self.assertIn(k, s)
+        self.assertIn("total", s["tokens"])
+        self.assertEqual(s["agent"], "build")
+        self.assertIn("providerID", s["model"])
+        self.assertIn("id", s["model"])
 
     def test_path_shape(self):
         code, out = self._req("/path")

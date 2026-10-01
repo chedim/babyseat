@@ -54,6 +54,16 @@ def _gen_id(prefix: str) -> str:
     return prefix + "_" + secrets.token_hex(12)
 
 
+_SLUG_A = ("misty", "tidy", "calm", "quiet", "swift", "soft", "amber",
+           "early", "humble", "silver", "violet", "gentle")
+_SLUG_B = ("lagoon", "wolf", "meadow", "harbor", "cedar", "ember", "dune",
+           "fjord", "grove", "brook", "reef", "tide")
+
+
+def _slug() -> str:
+    return (secrets.choice(_SLUG_A) + "-" + secrets.choice(_SLUG_B))
+
+
 def _auth_header(user: str, password: str) -> str:
     return "Basic " + base64.b64encode(
         f"{user}:{password}".encode()).decode()
@@ -81,11 +91,20 @@ class SessionStore:
 
     def create(self, title: str | None = None, parent_id: str | None = None
                ) -> dict:
-        now = time.time()
+        now = int(time.time() * 1000)
         d = os.getcwd()
         s = {"id": _gen_id("ses"), "projectID": PROJECT_ID, "directory": d,
-             "title": title or f"New session {time.strftime('%H:%M')}",
-             "version": VERSION, "time": {"created": now, "updated": now}}
+             "path": os.path.relpath(d, "/"),
+             "slug": _slug(), "title":
+             title or f"New session {time.strftime('%H:%M')}",
+             "version": VERSION, "agent": "build",
+             "model": {"id": "", "providerID": "membrane",
+                       "variant": "default"},
+             "cost": 0, "tokens": {"total": 0, "input": 0, "output": 0,
+                                   "reasoning": 0,
+                                   "cache": {"read": 0, "write": 0}},
+             "summary": {"additions": 0, "deletions": 0, "files": 0},
+             "time": {"created": now, "updated": now}}
         if parent_id:
             s["parentID"] = parent_id
         with self._lock:
@@ -109,6 +128,7 @@ class SessionStore:
                 return None
             if title is not None:
                 s["title"] = title
+            s["time"]["updated"] = int(time.time() * 1000)
             self._flush()
             return s
 
@@ -116,7 +136,10 @@ class SessionStore:
         with self._lock:
             s = self.sessions.get(sid)
             if s is not None:
-                s["time"]["updated"] = time.time()
+                # epoch-ms, like every other SDK time: the attached TUI's
+                # -c/continue lane sorts sessions by time.updated desc --
+                # a seconds value sorted as ancient broke the lane
+                s["time"]["updated"] = int(time.time() * 1000)
                 self._flush()
 
     def delete(self, sid: str) -> bool:
@@ -226,6 +249,17 @@ class SSEHub:
 
 # ---- the turn loop ------------------------------------------------------------
 
+def _provider_default(config: dict) -> dict:
+    """The providerID -> default-modelID map every provider with a
+    configured key advertises (real serve 1.18: `{"cortecs":
+    "claude-sonnet-4", ...}`). The ATTACHED TUI resolves the model it
+    submits with from THIS map — `{"default": {}}` leaves it with no
+    model and Enter silently does nothing."""
+    return {pid: next(iter(p.get("models") or {}), "")
+            for pid, p in (config.get("provider") or {}).items()
+            if next(iter(p.get("models") or {}), "")}
+
+
 def _provider_shapes(config: dict) -> list:
     """The opencode SDK's /config/providers shape: an ARRAY of providers,
     each carrying full model metas (capabilities/cost/limit/...). The bare
@@ -261,6 +295,32 @@ def _provider_shapes(config: dict) -> list:
                      "source": "api", "env": [], "key": "any",
                      "options": opts, "models": models})
     return prov
+
+
+def _agent_shapes() -> list:
+    """The /agent list the attached TUI needs to arm Submit: with NO
+    primary agent the model chip stays empty and Enter is silently
+    refused client-side (probed against real opencode serve 1.18.34 --
+    rewriting its /agent response to [] reproduces the dead Enter).
+    Membrane keeps its own turn prompts -- these are the client's UI
+    rows only -- and allows everything, since the seat's exec runs
+    through membrane entities, not opencode's permissions."""
+    allow = [{"permission": "*", "pattern": "*", "action": "allow"}]
+    return [
+        {"name": "build", "native": True, "mode": "primary",
+         "description": "The default agent. Executes tools based on "
+                        "configured permissions.",
+         "permission": allow, "options": {}},
+        {"name": "plan", "native": True, "mode": "primary",
+         "description": "Plan mode.",
+         "permission": allow, "options": {}},
+        {"name": "general", "native": True, "mode": "subagent",
+         "description": "General-purpose subagent.",
+         "permission": allow, "options": {}},
+        {"name": "explore", "native": True, "mode": "subagent",
+         "description": "Exploration subagent.",
+         "permission": allow, "options": {}},
+    ]
 
 
 def _openai_tools(mcp_tools: list | None = None) -> list:
@@ -311,46 +371,73 @@ class TurnRunner:
         self._aborting = getattr(self, "_aborting", None) or set()
         self._aborting.add(sid)
 
+    def _touch_session(self, sid: str) -> None:
+        info = self.sessions.get(sid)
+        self.hub.publish({"type": "session.updated", "sessionID": sid,
+                          "info": dict(info) if info else {"id": sid}})
+        self.hub.publish({"type": "session.diff", "sessionID": sid,
+                          "diff": []})
+
+    def _announce_user(self, sid: str, info: dict, parts: list) -> None:
+        # the user message rides the stream BEFORE busy: message.updated,
+        # one part event per part, then the session refresh (real serve
+        # 1.18 order)
+        self.hub.publish({"type": "message.updated", "info": dict(info)})
+        for p in parts or []:
+            self.hub.publish({"type": "message.part.updated",
+                              "part": dict(p), "sessionID": sid,
+                              "time": int(time.time() * 1000)})
+        self._touch_session(sid)
+
     # -- the loop ---------------------------------------------------------------
 
     def run(self, sid: str, text: str, user_info: dict | None = None,
             user_parts: list | None = None) -> dict:
         self._aborting = getattr(self, "_aborting", None) or set()
-        t0 = time.time()
+        now = int(time.time() * 1000)
         self._busy[sid] = {"type": "busy"}
-        self.hub.publish({"type": "session.status",
-                          "status": {"type": "busy"}, "sessionID": sid})
         if user_info is None:
-            now = time.time()
             user_info = {"id": _gen_id("msg"), "sessionID": sid,
                          "role": "user", "agent": "build",
                          "model": {"providerID": "membrane",
                                    "modelID": self.model},
                          "time": {"created": now}}
-            user_parts = [{"type": "text", "text": text,
-                           "time": {"start": now}}]
+            user_parts = [{"id": _gen_id("prt"), "sessionID": sid,
+                           "messageID": user_info["id"], "type": "text",
+                           "text": text, "time": {"start": now}}]
             self.messages.append(sid, user_info, user_parts)
-            self.hub.publish({"type": "message.updated",
-                              "info": dict(user_info)})
-        else:
-            user_parts = user_parts
+        self._announce_user(sid, user_info, user_parts)
+        self.hub.publish({"type": "session.status",
+                          "status": {"type": "busy"}, "sessionID": sid})
         # the raw OpenAI history this turn sends up: the doctrine system
         # message + the user turn, then assistant/tool pairs as they form
         history = [{"role": "user", "content": text}]
         aid = _gen_id("msg")
         a_info = {"id": aid, "sessionID": sid, "role": "assistant",
-                  "parentID": "", "modelID": self.model,
+                  "parentID": user_info["id"], "modelID": self.model,
                   "providerID": "membrane", "mode": "build",
+                  "agent": "build",
                   "path": {"cwd": os.getcwd(), "root": os.getcwd()},
-                  "cost": 0.0, "tokens": {"input": 0, "output": 0,
-                                          "reasoning": 0},
-                  "cache": {"read": 0, "write": 0}, "time": {"created": t0}}
+                  "cost": 0.0, "tokens": {"total": 0, "input": 0,
+                                          "output": 0, "reasoning": 0,
+                                          "cache": {"read": 0, "write": 0}},
+                  "time": {"created": now}}
+        # real serve announces the ASSISTANT message before any of its
+        # parts, with a session refresh beside it
+        self.hub.publish({"type": "message.updated", "info": dict(a_info)})
+        self._touch_session(sid)
         parts: list = []
 
-        def publish_part(p):
+        def mkpart(p: dict) -> dict:
+            # EVERY part carries the SDK base {id, sessionID, messageID}
+            p = {"id": _gen_id("prt"), "sessionID": sid, "messageID": aid,
+                 **p}
+            parts.append(p)
             self.hub.publish({"type": "message.part.updated",
                               "part": dict(p),
+                              "time": int(time.time() * 1000),
                               "sessionID": sid})
+            return p
 
         err_done = False
         rounds = 0
@@ -366,15 +453,15 @@ class TurnRunner:
                 else _openai_tools()
             if tools:
                 body["tools"] = tools
+            mkpart({"type": "step-start"})
             try:
                 resp = self.call_ladder(body)
             except Exception as e:
-                parts.append({"type": "text",
-                              "text": f"model ladder failed: "
-                                      f"{type(e).__name__}: {e}"[:300],
-                              "time": {"start": time.time(),
-                                       "end": time.time()}})
-                publish_part(parts[-1])
+                now = int(time.time() * 1000)
+                mkpart({"type": "text",
+                        "text": f"model ladder failed: "
+                                f"{type(e).__name__}: {e}"[:300],
+                        "time": {"start": now, "end": now}})
                 a_info["error"] = {"name": "Error", "data":
                                    {"message": str(e)[:300]}}
                 break
@@ -382,14 +469,15 @@ class TurnRunner:
                    or {})
             tcs = msg.get("tool_calls")
             content = (msg.get("content") or "").strip()
+            reason = "tool-calls" if tcs else "stop"
             if msg.get("reasoning") or msg.get("thinking"):
-                parts.append({"type": "reasoning",
-                              "text": str(msg.get("reasoning")
-                                          or msg.get("thinking") or ""),
-                              "time": {"start": time.time()}})
-                publish_part(parts[-1])
+                now = int(time.time() * 1000)
+                mkpart({"type": "reasoning",
+                        "text": str(msg.get("reasoning")
+                                    or msg.get("thinking") or ""),
+                        "time": {"start": now}})
             if tcs:
-                a_info["time"].setdefault("start", time.time())
+                a_info["time"].setdefault("start", int(time.time() * 1000))
                 asst_msg = {"role": "assistant", "content": content or "",
                             "tool_calls": tcs}
                 if msg.get("reasoning"):
@@ -405,14 +493,14 @@ class TurnRunner:
                             args = {}
                     except json.JSONDecodeError:
                         args = {}
-                    tstart = time.time()
-                    part = {"type": "tool", "callID": call_id,
-                            "tool": name,
-                            "state": {"status": "pending", "input": args,
-                                      "raw": json.dumps(args)}}
-                    parts.append(part)
+                    tstart = int(time.time() * 1000)
+                    part = mkpart({"type": "tool", "callID": call_id,
+                                   "tool": name,
+                                   "state": {"status": "pending",
+                                             "input": args,
+                                             "raw": json.dumps(args)},
+                                   "time": {"start": tstart}})
                     self.messages.append(sid, a_info, list(parts))
-                    publish_part(part)
                     if sid in self._aborting:
                         break
                     try:
@@ -422,30 +510,53 @@ class TurnRunner:
                                          "output": str(output or ""),
                                          "title": _tool_title(name, args),
                                          "time": {"start": tstart,
-                                                  "end": time.time()}}
+                                                  "end": int(
+                                                      time.time() * 1000)}}
                     except Exception as e:
                         part["state"] = {"status": "error", "input": args,
                                          "error": (f"{type(e).__name__}:"
                                                    f" {e}")[:300],
                                          "title": _tool_title(name, args),
                                          "time": {"start": tstart,
-                                                  "end": time.time()}}
-                    publish_part(part)
+                                                  "end": int(
+                                                      time.time() * 1000)}}
+                    self.hub.publish({"type": "message.part.updated",
+                                      "part": dict(part),
+                                      "time": int(time.time() * 1000),
+                                      "sessionID": sid})
                     self.messages.append(sid, a_info, list(parts))
                     history.append({"role": "tool", "tool_call_id": call_id,
                                     "content":
                                     (part["state"].get("output") or
                                      part["state"].get("error") or "")[:8000],
                                     "name": name})
+                mkpart({"type": "step-finish", "reason": "tool-calls",
+                        "cost": 0, "tokens": dict(a_info["tokens"])})
                 continue
             if content:
-                now = time.time()
-                p = {"type": "text", "text": content,
-                     "time": {"start": now, "end": now}}
-                parts.append(p)
-                publish_part(p)
+                now = int(time.time() * 1000)
+                # real serve streams the text part: it opens EMPTY with
+                # time.start, the deltas ride, a final part.updated closes
+                # it with time.end
+                part = mkpart({"type": "text", "text": "",
+                               "time": {"start": now}})
+                part["text"] = content
+                self.hub.publish({"type": "message.part.delta",
+                                  "sessionID": sid, "messageID": aid,
+                                  "partID": part["id"], "field": "text",
+                                  "delta": content})
+                part["time"]["end"] = int(time.time() * 1000)
+                self.hub.publish({"type": "message.part.updated",
+                                  "part": dict(part),
+                                  "time": int(time.time() * 1000),
+                                  "sessionID": sid})
+            a_info["finish"] = "stop"
+            mkpart({"type": "step-finish", "reason": "stop", "cost": 0,
+                    "tokens": dict(a_info["tokens"])})
             break
-        a_info["time"]["completed"] = time.time()
+        if "error" in a_info:
+            a_info.pop("finish", None)
+        a_info["time"]["completed"] = int(time.time() * 1000)
         self.messages.append(sid, a_info, parts)
         self.hub.publish({"type": "message.updated", "info": dict(a_info)})
         self._busy.pop(sid, None)
@@ -454,6 +565,7 @@ class TurnRunner:
         self.hub.publish({"type": "session.status",
                           "status": {"type": "idle"}, "sessionID": sid})
         self.hub.publish({"type": "session.idle", "sessionID": sid})
+        self._touch_session(sid)
         return {"info": a_info, "parts": parts}
 
 
@@ -581,8 +693,17 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                     except (BrokenPipeError, ConnectionResetError, OSError):
                         return
                     continue
-                data = json.dumps(ev, default=str)
-                self.wfile.write(f"event: {ev.get('type')}\n".encode())
+                # the real serve's SSE envelope: {id, type, properties}
+                # -- the TUI reads properties.* and CRASHES (undefined
+                # .length) on a flat payload; server.connected arrives
+                # from the hub pre-wrapped, so unwrap-then-wrap
+                props = {k: v for k, v in ev.items() if k != "type"}
+                if list(props) == ["properties"]:
+                    props = props["properties"]
+                env = {"id": _gen_id("evt"), "type": ev.get("type"),
+                       "properties": props}
+                data = json.dumps(env, default=str)
+                self.wfile.write(f"event: {env['type']}\n".encode())
                 self.wfile.write(f"data: {data}\n\n".encode())
                 try:
                     self.wfile.flush()
@@ -602,7 +723,7 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
             path = self.path.split("?", 1)[0]
             if path == "/global/health":
                 self._json_out({"healthy": True, "version": VERSION})
-            elif path == "/event":
+            elif path == "/event" or path == "/global/event":
                 self._sse()
             elif path == "/session":
                 self._json_out(sessions.list())
@@ -628,6 +749,13 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 if segments_len(segs) == 2:
                     if segs[1] in ("todo", "children"):
                         return self._json_out([])
+                    if segs[1] == "diff":
+                        # the attached TUI seeds its Modified Files
+                        # sidebar state from this fetch; the old
+                        # fall-through returned the SESSION OBJECT and
+                        # the client's diff getter then read undefined
+                        # (`J().length`) -- a wide-terminal crasher
+                        return self._json_out([])
                     if segs[1] == "message":
                         return self._json_out(messages.list(sid))
                 s = sessions.get(sid)
@@ -636,12 +764,83 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 self._json_out(s)
             elif path == "/config":
                 self._json_out(config)
-            elif path.startswith("/config/providers") or path == "/provider":
+            elif path.startswith("/config/providers"):
                 self._json_out({"providers": _provider_shapes(config),
-                                "default": {}})
-            elif path == "/command":
+                                "default": _provider_default(config)})
+            elif path == "/provider":
+                # the SDK's Provider route: the TUI's model picker reads
+                # `default` and `connected` here (a DIFFERENT endpoint
+                # from /config/providers; the array shape there crashed
+                # it). `connected` is a LIST of provider ids with auth;
+                # an empty one leaves the TUI with no model chip and
+                # Enter silently does nothing.
+                self._json_out({"all": _provider_shapes(config),
+                                "default": _provider_default(config),
+                                "connected":
+                                [p["id"] for p in
+                                 _provider_shapes(config)]})
+            elif path == "/experimental/capabilities":
+                self._json_out({"backgroundSubagents": False})
+            elif path == "/experimental/console":
+                self._json_out({"consoleManagedProviders": [],
+                                "switchableOrgCount": 0})
+            elif path == "/experimental/resource":
+                self._json_out({})
+            elif path == "/experimental/workspace" or \
+                    path == "/experimental/workspace/status":
+                self._json_out([])
+            elif path == "/provider/auth":
+                self._json_out({})
+            elif path == "/mcp":
+                self._json_out({})
+            elif path == "/formatter":
+                self._json_out([])
+            elif path == "/lsp":
+                self._json_out([])
+            elif path == "/vcs":
+                self._json_out({"branch": None, "default_branch": None})
+            elif path.startswith("/api/"):
+                # the /api/* family the TUI probes at boot (real serve
+                # answers them all 200): {location, data} envelope,
+                # `data` empty for everything but the model list
+                loc = {"directory": os.getcwd(),
+                       "project": {"id": PROJECT_ID,
+                                   "directory": os.getcwd()}}
+                if path == "/api/model":
+                    out = [{"id": mid, "providerID": pid,
+                            "name": (m or {}).get("name", mid),
+                            "api": {"id": mid, "type": "aisdk",
+                                    "package": p.get("npm",
+                                                     "@ai-sdk/openai"
+                                                     "-compatible"),
+                                    "url": (p.get("options") or {})
+                                    .get("baseURL", "")},
+                            "capabilities": {"tools": True,
+                                             "input": ["text"],
+                                             "output": ["text"]}}
+                           for pid, p in (config.get("provider") or {})
+                           .items()
+                           for mid, m in (p.get("models") or {}).items()]
+                elif path == "/api/provider":
+                    out = [{"id": pid, "name": p.get("name", pid),
+                            "api": {"type": "aisdk",
+                                    "package": p.get("npm",
+                                                     "@ai-sdk/openai"
+                                                     "-compatible"),
+                                    "url": (p.get("options") or {})
+                                    .get("baseURL", "")},
+                            "request": {"headers": {}, "body": {}}}
+                           for pid, p in (config.get("provider") or {})
+                           .items()]
+                else:
+                    out = []
+                self._json_out({"location": loc, "data": out})
+                return
+            elif path == "/experimental/workspace/status":
                 self._json_out([])
             elif path == "/agent":
+                self._json_out(_agent_shapes())
+            elif path == "/command":
                 self._json_out([])
             elif path == "/path":
                 # the SDK's Path.Info: worktree/directory are opencode's
@@ -653,6 +852,9 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                                     "~/.config/opencode"),
                                 "worktree": os.getcwd(),
                                 "directory": os.getcwd()})
+            elif path.startswith("/project/") and \
+                    path.endswith("/directories"):
+                self._json_out([])
             elif path == "/project/current" or path == "/project":
                 cur = {"id": PROJECT_ID,
                        "worktree": os.getcwd(),
@@ -676,8 +878,16 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
             path = self.path.split("?", 1)[0]
             if path == "/session":
                 b = self._read_body()
-                self._json_out(sessions.create(title=b.get("title"),
-                                               parent_id=b.get("parentID")))
+                s = sessions.create(title=b.get("title"),
+                                    parent_id=b.get("parentID"))
+                # the seat's turn model rides the session shape (the TUI
+                # shows it; the runner keeps its own routing anyway)
+                dm = _provider_default(config)
+                if dm:
+                    pid = next(iter(dm))
+                    s["model"] = {"id": dm[pid], "providerID": pid,
+                                  "variant": "default"}
+                self._json_out(s)
                 return
             if path.startswith("/session/"):
                 rest = path[len("/session/"):]
@@ -724,7 +934,7 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 if isinstance(p, dict) and p.get("type") == "text")
             if not text.strip():
                 return self._json_err(400, "message needs a text part")
-            user_info, row = self._record_user(sid, text)
+            user_info, row = self._record_user(sid, text, b)
             if async_:
                 threading.Thread(target=runner.run,
                                  args=(sid, text, user_info),
@@ -741,14 +951,32 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 out = {"info": result, "parts": []}
             self._json_out(out)
 
-        def _record_user(self, sid: str, text: str) -> tuple[dict, dict]:
+        def _record_user(self, sid: str, text: str,
+                         body: dict | None = None) -> tuple[dict, dict]:
+            # the TUI POSTs {agent, model{providerID, modelID}, parts};
+            # the server enriches (ids, times) -- a user message with an
+            # EMPTY modelID crashes the attached TUI's model lookup
+            body = body or {}
+            dm = _provider_default(config)
+            model = body.get("model")
+            if not isinstance(model, dict) or not model.get("modelID"):
+                model = ({"providerID": next(iter(dm)),
+                          "modelID": dm[next(iter(dm))]} if dm
+                         else {"providerID": "membrane",
+                               "modelID": getattr(runner, "model", "")})
+            now = int(time.time() * 1000)
             info = {"id": _gen_id("msg"), "sessionID": sid, "role": "user",
-                    "agent": "build",
-                    "model": {"providerID": "membrane", "modelID": ""},
-                    "time": {"created": time.time()}}
-            row = messages.append(sid, info, [{"type": "text", "text": text,
-                                               "time": {"start": time.time()}}])
-            hub.publish({"type": "message.updated", "info": dict(info)})
+                    "agent": body.get("agent") or "build",
+                    "model": model,
+                    "time": {"created": now}, "summary": {"diffs": []}}
+            row = messages.append(sid, info, [{"id": _gen_id("prt"),
+                                               "sessionID": sid,
+                                               "messageID": info["id"],
+                                               "type": "text",
+                                               "text": text}])
+            # the announcement (message.updated + part + session refresh)
+            # is the TurnRunner's _announce_user, so the event order is
+            # identical whichever lane created the user message
             return info, row
 
         def do_PATCH(self):
