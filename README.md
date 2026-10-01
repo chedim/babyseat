@@ -165,7 +165,7 @@ routing: [docs/token-economics.md](docs/token-economics.md).
 
 | Command | What it does |
 |---|---|
-| `membrane opencode` | field-backed opencode on :11500 (the daily driver) |
+| `membrane opencode` | the daily driver: seat proxy on :11500 + membrane's own serve surface (loopback) with the opencode TUI **attached as a thin client** — sessions, turns and tool parts live in membrane; opencode is display only (`MEMBRANE_TUI_DIRECT=1` restores the old direct-provider lane) |
 | `membrane serve` | the same seat, headless: membrane's OWN opencode-compatible REST/SSE server on :4096 (opencode replaced, no child process) |
 | `membrane backfill` | rebuild the field from history (code first, then the audit log; idempotent, resumable) |
 | `membrane review` | print what the field learned (annotations, replay A/B with `--ab`) |
@@ -215,6 +215,14 @@ The connection triple is printed at boot:
   (`serve-sessions.json` / `serve-msgs.json`, atomic write-through), so a
   device's history survives a seat restart. `--serve` + `--no-launch` is
   legal now — the surface is a thread, independent of the launch decision.
+- **The TUI is a client too.** Every launch boot starts the serve surface
+  (loopback-only unless `--serve`) and opens the opencode TUI **attached**
+  to it (`opencode attach`, same basic-auth pair) — so a desktop session
+  and a phone session are the same store: membrane's. The TUI's own turn
+  loop, tool loop and local session storage are bypassed entirely; the
+  attached client only displays what the server publishes. Old lanes:
+  `MEMBRANE_TUI_DIRECT=1` (TUI fronting `/v1` directly) and
+  `MEMBRANE_LEGACY_SERVE=1` (the `opencode serve` child).
 - **Exposure is WiFi-only for now** (`--serve-host` defaults to `0.0.0.0`,
   the LAN): reach the server only from a network you own. The planned
   route makes the seat's phone (the boat's agDroid HA server) the host —

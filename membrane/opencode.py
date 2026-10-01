@@ -195,7 +195,34 @@ def _tools_block() -> dict | None:
     return {t: False for t in _OC_BUILTIN_TOOLS}
 
 
-def _seat_card(srv, mcp_on: bool) -> str:
+def _attach_cmd(opencode: str, port: int, passthrough=(), cont: bool = False) -> list:
+    """The TUI-AS-CLIENT command (stage 3.5): the child does not RUN opencode
+    -- it ATTACHES to membrane's serve server (opencode-compatible REST/SSE).
+    Sessions/messages live in membrane's stores, turns run in the
+    TurnRunner, tool parts stream from the SSE hub; opencode is the
+    operator's watchpoint, display only. No model flag is passed: the
+    SERVER picks the model (the seat's routing ladder)."""
+    cmd = [opencode, "attach", f"http://127.0.0.1:{port}"]
+    if cont and not any(a in ("-c", "--continue") or
+                        a in ("-s", "--session") or
+                        a.startswith("--session=") for a in passthrough):
+        cmd.append("-c")
+    return cmd + list(passthrough)
+
+
+def _attach_env(env: dict, su: str, sp: str) -> dict:
+    """The attach child's env: auth for membrane's serve server, and NO
+    OPENCODE_CONFIG/_CONTENT -- the provider/session config is the SERVER's
+    business; an attached TUI must not front its own /v1 lane."""
+    e = dict(env)
+    e["OPENCODE_SERVER_USERNAME"] = su
+    e["OPENCODE_SERVER_PASSWORD"] = sp
+    e.pop("OPENCODE_CONFIG", None)
+    e.pop("OPENCODE_CONFIG_CONTENT", None)
+    return e
+
+
+def _seat_card(srv, mcp_on: bool, serve: bool = False) -> str:
     """THE SEAT CARD: this session's live configuration, rendered for the
     MODEL -- what membrane does in the current mode and how to drive it.
     Appended to the doctrine instructions file at boot: the switches are
@@ -206,6 +233,13 @@ def _seat_card(srv, mcp_on: bool) -> str:
          "(authoritative over the general doctrine above where they differ; "
          "fixed for the session -- `field state` / membrane_state reads the "
          "live numbers):"]
+    if serve:
+        L.append(
+            "- SURFACE: headless serve -- your clients are REMOTE "
+            "opencode-compatible apps over the network (the room-facing "
+            "REST/SSE surface; an attached opencode client is display "
+            "only, never a second surface with its own memory). "
+            "Everything else is unchanged: same field, same lanes.")
     if getattr(srv, "no_context", False):
         keep = int(getattr(srv, "tool_keep", 3))
         L.append(
@@ -5799,7 +5833,8 @@ def main() -> None:
     if listen != args.listen:
         print(f"[opencode] port {args.listen} busy -> using {listen} "
               f"(pass --listen to pin)", file=sys.stderr)
-    serve_port = _pick_serve_port(args.serve_port) if args.serve else None
+    serve_wanted = bool(args.serve) or bool(args.launch)
+    serve_port = _pick_serve_port(args.serve_port) if serve_wanted else None
     if serve_port is not None and serve_port != args.serve_port:
         print(f"[opencode] serve port {args.serve_port} busy -> using "
               f"{serve_port} (pass --serve-port to pin)", file=sys.stderr)
@@ -6311,7 +6346,8 @@ def main() -> None:
             # the seat card: THIS session's switches, for the model
             # (--no-seat-card keeps the doctrine generic)
             if getattr(args, "seat_card", True):
-                text += _seat_card(srv, bool(getattr(args, "mcp", True)))
+                text += _seat_card(srv, bool(getattr(args, "mcp", True)),
+                                   serve=bool(getattr(args, "serve", False)))
             tmp = instr_path + ".tmp"
             with open(tmp, "w") as f:
                 f.write(text)
@@ -6413,16 +6449,19 @@ def main() -> None:
     serve_pw_new = False
     serve_addr = None
     legacy_serve = os.environ.get("MEMBRANE_LEGACY_SERVE") == "1"
-    if args.serve:
+    # THE SURFACE runs for every launch boot (the TUI attaches to it as a
+    # client -- stage 3.5), loopback-only unless --serve exposes it to the
+    # room; --serve keeps its credentials/board semantics.
+    surf_host = args.serve_host if args.serve else "127.0.0.1"
+    if serve_wanted:
         serve_cred_path = str(Path(args.field).resolve().parent
                               / "serve-auth.json")
         serve_su, serve_sp, serve_pw_new = _serve_credentials(
             serve_cred_path, args.serve_user, args.serve_pass)
-        if legacy_serve:
+        if args.serve and legacy_serve:
             env["OPENCODE_SERVER_USERNAME"] = serve_su
             env["OPENCODE_SERVER_PASSWORD"] = serve_sp
-        serve_addr = ("localhost" if args.serve_host in ("127.0.0.1",
-                                                         "localhost")
+        serve_addr = ("localhost" if surf_host in ("127.0.0.1", "localhost")
                       else _lan_ip())
     print(f"membrane opencode  http://127.0.0.1:{listen}/v1  ->  {backend}\n"
           f"  field={args.field}  audit={args.audit}\n"
@@ -6446,13 +6485,14 @@ def main() -> None:
           f" (model {getattr(srv, 'idle_cortex_model', None) or 'unresolved'})\n"
           f"  mcp tools: {mcp_state}\n"
           f"  lsp: {lsp_state}\n"
-          f"  serve: {f'http://{serve_addr}:{serve_port} (native serve, basic auth user {serve_su})' if args.serve else 'off (--serve)'}\n"
+                    f"  serve: {f'http://{serve_addr}:{serve_port} (native serve, basic auth user {serve_su})' if serve_wanted else 'off'}\n"
           f"  opencode config: {cfg_path}",
           file=sys.stderr)
     if args.serve:
         _serve_board(serve_port, args.serve_host, serve_su, serve_sp,
                      serve_pw_new, serve_cred_path)
-    if args.serve and not legacy_serve:
+    native_up = False
+    if serve_wanted and not legacy_serve:
         # THE REPLACEMENT (stage 3): no opencode child -- the native
         # server (membrane/server.py) IS the serve surface:
         # opencode-compatible REST/SSE (the companion app's endpoint),
@@ -6480,8 +6520,9 @@ def main() -> None:
                                 loopback_ladder(listen),
                                 mcp_executor(listen),
                                 system=system, model=_srv_model)
-            start(serve_port or 4096, args.serve_host, serve_su,
+            start(serve_port or 4096, surf_host, serve_su,
                   serve_sp, cfg, runner, sess_store, msg_store)
+            native_up = True
             print(f"[opencode] native serve up: session store "
                   f"{d / 'serve-sessions.json'}; the proxy's /v1 is "
                   "the turn lane", file=sys.stderr)
@@ -6521,6 +6562,7 @@ def main() -> None:
             threading.Thread(target=_open_dev_viewer, name="dev-viewer-open",
                              daemon=True).start()
         if args.launch:
+            tui_direct = os.environ.get("MEMBRANE_TUI_DIRECT") == "1"
             if args.serve and legacy_serve:
                 # MEMBRANE_LEGACY_SERVE=1: the OLD lane -- `opencode serve`
                 # as a child (the generated config's provider baseURL -> the
@@ -6539,6 +6581,34 @@ def main() -> None:
                     child = subprocess.Popen(cmd, env=env)
                     try:
                         pid_path = (Path(args.field).parent / "opencode.pid")
+                        pid_path.write_text(str(child.pid))
+                    except Exception:
+                        pass
+            elif serve_wanted and not native_up:
+                # the native surface failed to bind -- no child to point at
+                print("[opencode] serve surface is down; no TUI child "
+                      "(proxy only -- point any client at a surface "
+                      "manually)", file=sys.stderr)
+            elif not tui_direct and not legacy_serve:
+                # THE CLIENT (stage 3.5): the TUI attaches to membrane's
+                # serve server -- sessions/messages in membrane's stores,
+                # turns in the TurnRunner, tool parts from the SSE hub.
+                # opencode is display only.
+                opencode = shutil.which("opencode")
+                if opencode is None:
+                    print("[opencode] `opencode` not on PATH; serve surface "
+                          "up without an attached TUI (point a client at "
+                          "it manually)", file=sys.stderr)
+                else:
+                    cmd = _attach_cmd(opencode, serve_port or 4096,
+                                      passthrough, cont=args.cont)
+                    print(f"[opencode] launching TUI as a client "
+                          f"(attach): {' '.join(cmd)}", file=sys.stderr)
+                    child = subprocess.Popen(
+                        cmd, env=_attach_env(env, serve_su, serve_sp))
+                    try:
+                        pid_path = (Path(args.field).parent
+                                    / "opencode.pid")
                         pid_path.write_text(str(child.pid))
                     except Exception:
                         pass

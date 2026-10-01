@@ -1,7 +1,8 @@
 """membrane CLI -- one entry point for every membrane surface.
 
-    membrane opencode     field-backed opencode: OpenAI-compatible proxy on
-                          :11500 + opencode pointed at it
+    membrane opencode     field-backed seat on :11500 + its serve server
+                          (loopback) with the opencode TUI ATTACHED as a
+                          thin client -- opencode is display only
     membrane review       print what the field learned
     membrane reset        kill the seat on :11500 (or --listen), then
                           start opencode fresh

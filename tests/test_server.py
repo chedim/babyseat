@@ -35,6 +35,14 @@ def _store(dir_=None):
                             if dir_ else None))
 
 
+_CFG = {"$schema": "https://opencode.ai/config.json",
+        "provider": {"membrane": {"name": "Membrane (field)",
+                                  "npm": "@ai-sdk/openai-compatible",
+                                  "options": {"baseURL":
+                                              "http://127.0.0.1:9/v1"},
+                                  "models": {"glm-x": {"name": "glm-x"}}}}}
+
+
 class TestSessionStore(unittest.TestCase):
     def test_create_shape_and_persist(self):
         d = tempfile.mkdtemp()
@@ -250,7 +258,7 @@ class TestHttpSurface(unittest.TestCase):
         stub = _StubRunner(cls.abort_seen)
         handler = NS.make_handler(hub=hub, sessions=cls.sessions,
                                   messages=cls.msgs, user="opencode",
-                                  password="pw", config={}, runner=stub)
+                                  password="pw", config=_CFG, runner=stub)
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         cls.port = cls.httpd.server_address[1]
         threading.Thread(target=cls.httpd.serve_forever,
@@ -355,6 +363,41 @@ class TestHttpSurface(unittest.TestCase):
         self.assertIn("server.connected", buf)
         payload = json.loads(buf.split("data: ")[-1])
         self.assertIn("type", payload)
+
+    def test_config_providers_is_the_sdk_array_shape(self):
+        # the ATTACHED TUI crashes on the bare config dict: opencode's own
+        # serve 1.18 returns providers as an ARRAY with full model metas
+        code, out = self._req("/config/providers")
+        self.assertEqual(code, 200)
+        ps = out["providers"]
+        self.assertIsInstance(ps, list)
+        self.assertEqual(len(ps), 1)
+        p = ps[0]
+        self.assertEqual(p["id"], "membrane")
+        self.assertEqual(p["source"], "api")
+        m = p["models"]["glm-x"]
+        self.assertEqual(m["id"], "glm-x")
+        self.assertEqual(m["providerID"], "membrane")
+        self.assertEqual(m["api"]["url"], "http://127.0.0.1:9/v1")
+        self.assertEqual(m["api"]["npm"], "@ai-sdk/openai-compatible")
+        self.assertIs(m["capabilities"]["toolcall"], True)
+        self.assertIn("cost", m)
+        self.assertIn("limit", m)
+        self.assertEqual(m["status"], "active")
+        self.assertEqual(m["variants"], {})
+
+    def test_path_shape(self):
+        code, out = self._req("/path")
+        self.assertEqual(code, 200)
+        for k in ("home", "state", "config", "worktree", "directory"):
+            self.assertIn(k, out)
+
+    def test_project_current_shape(self):
+        code, out = self._req("/project/current")
+        self.assertEqual(code, 200)
+        self.assertIn(out["vcs"], ("git", None))
+        self.assertIsInstance(out["sandboxes"], list)
+        self.assertIn("time", out)
 
 
 class _StubRunner:

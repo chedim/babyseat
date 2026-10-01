@@ -226,6 +226,43 @@ class SSEHub:
 
 # ---- the turn loop ------------------------------------------------------------
 
+def _provider_shapes(config: dict) -> list:
+    """The opencode SDK's /config/providers shape: an ARRAY of providers,
+    each carrying full model metas (capabilities/cost/limit/...). The bare
+    config dict crashes the attached TUI; opencode's own serve 1.18 ships
+    this shape and the TUI's UI reads it directly."""
+    prov = []
+    for pid, p in (config.get("provider") or {}).items():
+        opts = p.get("options") or {}
+        models = {}
+        for mid, m in (p.get("models") or {}).items():
+            models[mid] = {
+                "id": mid, "providerID": pid,
+                "api": {"id": mid, "url": opts.get("baseURL", ""),
+                        "npm": p.get("npm",
+                                     "@ai-sdk/openai-compatible")},
+                "name": (m or {}).get("name", mid), "family": "",
+                "capabilities": {"temperature": True, "reasoning": True,
+                                 "attachment": True, "toolcall": True,
+                                 "input": {"text": True, "audio": False,
+                                           "image": False, "video": False,
+                                           "pdf": False},
+                                 "output": {"text": True, "audio": False,
+                                            "image": False, "video": False,
+                                            "pdf": False},
+                                 "interleaved": False},
+                "cost": {"input": 0, "output": 0,
+                         "cache": {"read": 0, "write": 0}},
+                "limit": {"context": 128000, "output": 8192},
+                "status": "active", "options": {}, "headers": {},
+                "release_date": "", "variants": {},
+            }
+        prov.append({"id": pid, "name": p.get("name", pid),
+                     "source": "api", "env": [], "key": "any",
+                     "options": opts, "models": models})
+    return prov
+
+
 def _openai_tools(mcp_tools: list | None = None) -> list:
     """The MCP tool list in the OpenAI chat-completions format (the wire
     name is `function`, parameters come from the MCP inputSchema)."""
@@ -600,17 +637,29 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
             elif path == "/config":
                 self._json_out(config)
             elif path.startswith("/config/providers") or path == "/provider":
-                self._json_out({"providers": config.get("provider") or {},
+                self._json_out({"providers": _provider_shapes(config),
                                 "default": {}})
             elif path == "/command":
                 self._json_out([])
             elif path == "/agent":
                 self._json_out([])
             elif path == "/path":
-                self._json_out({"cwd": os.getcwd(), "root": os.getcwd()})
+                # the SDK's Path.Info: worktree/directory are opencode's
+                # runtime cwd (the TUI's file panel lives there)
+                self._json_out({"home": os.path.expanduser("~"),
+                                "state": os.path.expanduser(
+                                    "~/.local/state/opencode"),
+                                "config": os.path.expanduser(
+                                    "~/.config/opencode"),
+                                "worktree": os.getcwd(),
+                                "directory": os.getcwd()})
             elif path == "/project/current" or path == "/project":
-                cur = {"id": PROJECT_ID, "worktree": "/",
-                       "directory": os.getcwd()}
+                cur = {"id": PROJECT_ID,
+                       "worktree": os.getcwd(),
+                       "vcs": "git",
+                       "time": {"created": int(time.time() * 1000),
+                                "updated": int(time.time() * 1000)},
+                       "sandboxes": []}
                 self._json_out(
                     cur if not path.endswith("/current") else cur)
             else:
