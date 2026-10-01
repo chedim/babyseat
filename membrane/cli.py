@@ -475,8 +475,9 @@ def main() -> None:
     sub_help = (
         "\n"
         "  opencode   field-backed opencode (OpenAI-compatible proxy on :11500)\n"
-        "  serve      field-backed headless opencode server (basic auth; the\n"
-        "             mobile companion app's surface; the proxy on :11500)\n"
+        "  serve      the seat headless: membrane's own opencode-compatible\n"
+        "             REST/SSE server on :4096 (basic auth; sessions, turns on\n"
+        "             the /v1 loopback) -- opencode replaced, no child process\n"
         "  review     print what the field learned\n"
         "  reset      kill the proxy on the port, then opencode fresh\n"
         "  update     check the install source for updates, show what\n"

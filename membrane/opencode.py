@@ -3093,12 +3093,13 @@ def _serve_credentials(path: str, user: str, password: str | None) -> tuple[str,
 
 def _serve_board(serve_port: int, serve_host: str, user: str, password: str,
                  first_boot: bool, cred_path: str) -> None:
-    """One board line for the serve child: the URL a client connects to."""
+    """One board line for the native serve surface: the URL a client
+    connects to."""
     addr = "localhost" if serve_host in ("127.0.0.1", "localhost") else _lan_ip()
     shown = password if first_boot else f"<saved in {cred_path}>"
     print(f"[opencode] serve: http://{addr}:{serve_port}  (user {user}, "
-          f"password {shown}; opencode basic-auth env -- clients type "
-          "these, or the companion app fills the URL + pair)",
+          f"password {shown}; basic auth -- clients type these, or the "
+          "companion app fills the URL + pair)",
           file=sys.stderr)
     if first_boot:
         print(f"[opencode] serve: credentials persisted at {cred_path} "
@@ -5735,18 +5736,21 @@ def main() -> None:
     ap.add_argument("--no-launch", dest="launch", action="store_false",
                     help="run only the proxy (don't start opencode)")
     ap.add_argument("--serve", action="store_true",
-                    help="launch `opencode serve` instead of the TUI: a "
-                         "headless opencode server (the mobile companion "
-                         "app's surface) whose LLM traffic still goes "
-                         "through THIS proxy, so capture/injection covers "
-                         "it like any other client. Basic auth is "
-                         "opencode's built-in (generated once, kept "
-                         "beside the field); WiFi-only for now.")
+                    help="THE NATIVE SERVE (opencode replaced): serve "
+                         "membrane's own opencode-compatible REST/SSE "
+                         "surface (the companion app's endpoint; basic "
+                         "auth generated once beside the field) -- "
+                         "session/message/abort/event, the turn loop "
+                         "riding THIS seat's /v1 loopback (injection, "
+                         "capture, banner, routing all real), tool "
+                         "parts streamed as message.part.updated "
+                         "events. MEMBRANE_LEGACY_SERVE=1 restores the "
+                         "old opencode child lane.")
     ap.add_argument("--serve-port", type=int, default=4096,
-                    help="port for the headless opencode serve (default "
+                    help="port for the native serve surface (default "
                          "4096; walks up if taken)")
     ap.add_argument("--serve-host", default="0.0.0.0",
-                    help="bind address for opencode serve (default "
+                    help="bind address for the serve surface (default "
                          "0.0.0.0 -- WiFi/VPN reach; 127.0.0.1 keeps it "
                          "local-only)")
     ap.add_argument("--serve-user", default="opencode",
@@ -5764,9 +5768,6 @@ def main() -> None:
     passthrough = args.passthrough
     if passthrough and passthrough[0] == "--":
         passthrough = passthrough[1:]
-    if args.serve and not args.launch:
-        ap.error("--serve needs membrane to launch the opencode server "
-                 "(drop --no-launch)")
 
     # In launch mode opencode owns the terminal, so membrane's own stderr
     # (the [opencode]/[rag]/[compact] debug lines) would corrupt the TUI.
@@ -6411,13 +6412,15 @@ def main() -> None:
     serve_su = serve_sp = serve_cred_path = None
     serve_pw_new = False
     serve_addr = None
+    legacy_serve = os.environ.get("MEMBRANE_LEGACY_SERVE") == "1"
     if args.serve:
         serve_cred_path = str(Path(args.field).resolve().parent
                               / "serve-auth.json")
         serve_su, serve_sp, serve_pw_new = _serve_credentials(
             serve_cred_path, args.serve_user, args.serve_pass)
-        env["OPENCODE_SERVER_USERNAME"] = serve_su
-        env["OPENCODE_SERVER_PASSWORD"] = serve_sp
+        if legacy_serve:
+            env["OPENCODE_SERVER_USERNAME"] = serve_su
+            env["OPENCODE_SERVER_PASSWORD"] = serve_sp
         serve_addr = ("localhost" if args.serve_host in ("127.0.0.1",
                                                          "localhost")
                       else _lan_ip())
@@ -6443,12 +6446,49 @@ def main() -> None:
           f" (model {getattr(srv, 'idle_cortex_model', None) or 'unresolved'})\n"
           f"  mcp tools: {mcp_state}\n"
           f"  lsp: {lsp_state}\n"
-          f"  serve: {f'http://{serve_addr}:{serve_port} (headless opencode, basic auth user {serve_su})' if args.serve else 'off (--serve)'}\n"
+          f"  serve: {f'http://{serve_addr}:{serve_port} (native serve, basic auth user {serve_su})' if args.serve else 'off (--serve)'}\n"
           f"  opencode config: {cfg_path}",
           file=sys.stderr)
     if args.serve:
         _serve_board(serve_port, args.serve_host, serve_su, serve_sp,
                      serve_pw_new, serve_cred_path)
+    if args.serve and not legacy_serve:
+        # THE REPLACEMENT (stage 3): no opencode child -- the native
+        # server (membrane/server.py) IS the serve surface:
+        # opencode-compatible REST/SSE (the companion app's endpoint),
+        # the turn loop riding THIS seat's /v1 loopback (the gate,
+        # injection, capture, banner and routing all run through the
+        # same code path every other client uses), tool calls executed
+        # in-process against the MCP tool impls and streamed as
+        # message.part.updated events. Works with or without --launch.
+        try:
+            from .server import (SessionStore, MessageStore,
+                                 TurnRunner, SSEHub, loopback_ladder,
+                                 mcp_executor, start)
+            d = Path(args.field).resolve().parent
+            sess_store = SessionStore(str(d / "serve-sessions.json"))
+            msg_store = MessageStore(str(d / "serve-msgs.json"))
+            system = ""
+            try:
+                if instr_path and os.path.isfile(instr_path):
+                    system = open(instr_path).read()
+            except Exception:
+                system = ""
+            _srv_model = (srv.seat_model if not srv.model_follows_chat
+                          else model or srv.seat_model or "membrane")
+            runner = TurnRunner(SSEHub(), sess_store, msg_store,
+                                loopback_ladder(listen),
+                                mcp_executor(listen),
+                                system=system, model=_srv_model)
+            start(serve_port or 4096, args.serve_host, serve_su,
+                  serve_sp, cfg, runner, sess_store, msg_store)
+            print(f"[opencode] native serve up: session store "
+                  f"{d / 'serve-sessions.json'}; the proxy's /v1 is "
+                  "the turn lane", file=sys.stderr)
+        except Exception as e:
+            print(f"[opencode] native serve FAILED ({e}) -- seat keeps "
+                  "running without the room-facing surface",
+                  file=sys.stderr)
 
     # ---- signal + child lifecycle -------------------------------------------
     # In launch mode opencode owns the terminal: ctrl+c must interrupt opencode
@@ -6481,52 +6521,63 @@ def main() -> None:
             threading.Thread(target=_open_dev_viewer, name="dev-viewer-open",
                              daemon=True).start()
         if args.launch:
-            opencode = shutil.which("opencode")
-            if opencode is None:
-                print("[opencode] `opencode` not on PATH; proxy-only "
-                      "(point opencode at the /v1 URL above)", file=sys.stderr)
-            elif args.serve:
-                # --serve: the child is `opencode serve`, not the TUI. Same
-                # generated config (provider baseURL -> this proxy), so the
-                # headless server's model traffic is captured/injected like
-                # any client's; the REST surface is opencode's own (the
-                # companion app or any opencode client speaks it directly).
-                cmd = [opencode, "serve", "--hostname", args.serve_host,
-                       "--port", str(serve_port or 4096)]
-                print(f"[opencode] launching: {' '.join(cmd)}",
-                      file=sys.stderr)
-                child = subprocess.Popen(cmd, env=env)
-                # same life-handshake as the TUI child below
-                try:
-                    pid_path = (Path(args.field).parent / "opencode.pid")
-                    pid_path.write_text(str(child.pid))
-                except Exception:
-                    pass
+            if args.serve and legacy_serve:
+                # MEMBRANE_LEGACY_SERVE=1: the OLD lane -- `opencode serve`
+                # as a child (the generated config's provider baseURL -> the
+                # proxy; the REST surface is opencode's own). Without the
+                # env the native surface (above) IS the serve lane.
+                opencode = shutil.which("opencode")
+                if opencode is None:
+                    print("[opencode] `opencode` not on PATH; no legacy "
+                          "serve child (proxy + native surface only)",
+                          file=sys.stderr)
+                else:
+                    cmd = [opencode, "serve", "--hostname", args.serve_host,
+                           "--port", str(serve_port or 4096)]
+                    print(f"[opencode] launching legacy serve: "
+                          f"{' '.join(cmd)}", file=sys.stderr)
+                    child = subprocess.Popen(cmd, env=env)
+                    try:
+                        pid_path = (Path(args.field).parent / "opencode.pid")
+                        pid_path.write_text(str(child.pid))
+                    except Exception:
+                        pass
             else:
-                extra = []
-                if model and not any(a.startswith("--model") or a.startswith("-m")
-                                     for a in passthrough):
-                    extra = ["--model", f"membrane/{model}"]
-                # resume by default: opencode -c continues the last session.
-                # An explicit -c/-s/--session in passthrough wins; --no-continue
-                # opts out (fresh session).
-                if args.cont and not any(
-                        a in ("-c", "--continue") or a in ("-s", "--session")
-                        or a.startswith("--session=") for a in passthrough):
-                    extra += ["-c"]
-                cmd = [opencode] + extra + list(passthrough)
-                print(f"[opencode] launching: {' '.join(cmd)}", file=sys.stderr)
-                child = subprocess.Popen(cmd, env=env)
-                # THE LIFE-HANDSHAKE: write the child's PID -- proxy-only
-                # instances (a second terminal, a manual relaunch) poll
-                # this file and exit when the seat dies (the operator's
-                # rule: the proxy's life is the seat's life)
-                try:
-                    pid_path = (Path(args.field).parent
-                                / "opencode.pid")
-                    pid_path.write_text(str(child.pid))
-                except Exception:
-                    pass
+                opencode = shutil.which("opencode")
+                if opencode is None:
+                    print("[opencode] `opencode` not on PATH; proxy-only "
+                          "(point opencode at the /v1 URL above)",
+                          file=sys.stderr)
+                else:
+                    extra = []
+                    if model and not any(
+                            a.startswith("--model") or
+                            a.startswith("-m") for a in passthrough):
+                        extra = ["--model", f"membrane/{model}"]
+                    # resume by default: opencode -c continues the last
+                    # session. An explicit -c/-s/--session in passthrough
+                    # wins; --no-continue opts out (fresh session).
+                    if args.cont and not any(
+                            a in ("-c", "--continue") or
+                            a in ("-s", "--session") or
+                            a.startswith("--session=") for a in
+                            passthrough):
+                        extra += ["-c"]
+                    cmd = [opencode] + extra + list(passthrough)
+                    print(f"[opencode] launching: {' '.join(cmd)}",
+                          file=sys.stderr)
+                    child = subprocess.Popen(cmd, env=env)
+                    # THE LIFE-HANDSHAKE: write the child's PID --
+                    # proxy-only instances (a second terminal, a manual
+                    # relaunch) poll this file and exit when the seat
+                    # dies (the operator's rule: the proxy's life is the
+                    # seat's life)
+                    try:
+                        pid_path = (Path(args.field).parent
+                                    / "opencode.pid")
+                        pid_path.write_text(str(child.pid))
+                    except Exception:
+                        pass
         if child is None:
             # proxy-only mode: THE PROXY'S LIFE IS THE SEAT'S LIFE (the
             # operator's rule: exits IMMEDIATELY when the opencode seat
