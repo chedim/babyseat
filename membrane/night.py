@@ -180,7 +180,7 @@ def consolidate_entities(fld, est, mem=None, materialize: int = 8,
     # -- the drift pass --
     drifted = 0
     total_moved = 0.0
-    for ent in est.docs.values():
+    for ent in list(est.docs.values()):
         key = ent.eid[len(MEMBRANE_NS):] \
             if ent.eid.startswith(MEMBRANE_NS) else ""
         if key == "session:now" or key == "global:now":

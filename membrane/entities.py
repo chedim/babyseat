@@ -1124,7 +1124,7 @@ class TimelineOps:
         """The render surface: quarantined + confirmed branches under the
         true timeline, newest first, bounded."""
         out = []
-        for ent in store.docs.values():
+        for ent in list(store.docs.values()):
             if ent.cls != CLASS_TIMELINE:
                 continue
             props = ent.properties or {}
@@ -1148,7 +1148,7 @@ class TimelineOps:
         if ent is None:
             return []
         out = []
-        for e in store.docs.values():
+        for e in list(store.docs.values()):
             if e.cls != CLASS_TIMELINE:
                 continue
             props = e.properties or {}
@@ -1175,7 +1175,7 @@ class TimelineOps:
         if not tags:
             return []
         out = []
-        for e in store.docs.values():
+        for e in list(store.docs.values()):
             if e.eid == ent.eid or e.cls != cls:
                 continue
             if tags & set((e.properties or {}).get("entities") or []):
@@ -1694,7 +1694,7 @@ class EntityStore(MultiParentOps, TimelineOps):
     def find(self, name_l: str) -> QuantumEntity | None:
         """Case-insensitive name lookup (the viewer/join path)."""
         name_l = (name_l or "").strip().lower()
-        for q in self.docs.values():
+        for q in list(self.docs.values()):
             props = q.properties or {}
             if str(props.get("name", "")).strip().lower() == name_l \
                     or q.eid.lower().endswith(":" + name_l):
@@ -1735,7 +1735,7 @@ class EntityStore(MultiParentOps, TimelineOps):
             low = MEMBRANE_NS + low
         if low in self.docs:
             return self.docs[low]
-        hits = [q for q in self.docs.values()
+        hits = [q for q in list(self.docs.values())
                 if q.eid.endswith(":" + spec.lower())
                 or str((q.properties or {}).get("name", "")).lower()
                 == spec.lower()]
@@ -1860,7 +1860,7 @@ class EntityStore(MultiParentOps, TimelineOps):
             return []
         eid = ent.eid
         out = []
-        for q in self.docs.values():
+        for q in list(self.docs.values()):
             if q is ent:
                 continue
             walker, hops = q, 0
@@ -2151,7 +2151,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         Count-only tracks never alert. Persistence only when something
         actually changed."""
         alerts: list[dict] = []
-        bounded = {k: t for k, t in self.tracks.items()
+        bounded = {k: t for k, t in list(self.tracks.items())
                    if t.get("enter") is not None or t.get("exit") is not None}
         if not bounded:
             return alerts
@@ -2196,7 +2196,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         transition). Exactly-once: the pending queue is the delivery
         ledger."""
         out: list[dict] = []
-        for t in self.tracks.values():
+        for t in list(self.tracks.values()):
             pend = t.get("pending") or []
             if pend:
                 out.extend(pend)
@@ -2209,7 +2209,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         """Remove tracks by key or kind prefix (e.g. 'files:router.py' or
         'files:' for the whole kind)."""
         spec = spec.strip().lower()
-        hits = [k for k in self.tracks if k == spec or k.startswith(spec)]
+        hits = [k for k in list(self.tracks) if k == spec or k.startswith(spec)]
         for k in hits:
             del self.tracks[k]
         if hits:
@@ -2367,7 +2367,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         if direct is not None:
             return direct
         suffix = ":" + key.lower()
-        for q in self.docs.values():
+        for q in list(self.docs.values()):
             if q.eid.lower().endswith(suffix):
                 return q
         return None

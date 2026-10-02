@@ -1161,7 +1161,7 @@ def _resolve_goal(est, spec: str):
     spec = " ".join((spec or "").split()).lower().lstrip("#")
     if not spec:
         return None
-    for e in est.docs.values():
+    for e in list(est.docs.values()):
         if e.cls != CLASS_GOAL:
             continue
         if (e.properties or {}).get("status", "open") != "open":
@@ -1191,7 +1191,7 @@ def _membrane_intent_create_or_pin(srv, text: str, ttl: str = ""
                            TimelineOps)
     low = " ".join((text or "").split()).lower()
     goal = None
-    for e in est.docs.values():
+    for e in list(est.docs.values()):
         if e.cls != CLASS_GOAL:
             continue
         props = e.properties or {}
@@ -3579,7 +3579,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if fld is not None:
             vecs = [d["state"] for d in _efield_state_rows(self.server, fld, m=600)]
         if est is not None:
-            for e in est.docs.values():
+            for e in list(est.docs.values()):
                 v = getattr(e, "position", None) or getattr(e, "embedding", None)
                 if v and (not vecs or len(v) == len(vecs[0])):
                     vecs.append(v)
@@ -6228,7 +6228,7 @@ def main() -> None:
             # only_keys=[] means 'no filter' in night.py -- it would drift
             # EVERY overlay doc at boot (2248 here); bootstrap tracks only,
             # and only when there are any.
-            _tk = [k for k in srv.entity_store.tracks.keys()
+            _tk = [k for k in list(srv.entity_store.tracks.keys())
                    if k != "session:now"]
             if _tk:
                 consolidate_entities(_bfld, srv.entity_store,
@@ -7029,6 +7029,13 @@ def _init_speak(srv) -> None:
                 _n = ""
         speak(srv, f"membrane up: {_n}thinker + dreamer humming",
               kind="report-state")
+        # THE STARTUP POKE (the operator's request): the flag turns the
+        # thinker's first idle tick into a one-line greeting composed
+        # from live field state -- never a model call on the boot path.
+        try:
+            srv._boot_greeting_pending = True
+        except Exception:
+            pass
     except Exception:
         pass
 

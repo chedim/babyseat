@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+import time
 import urllib.request
 import urllib.error
 
@@ -92,7 +93,30 @@ class OllamaEmbedder:
                 self._cache_put(keyed[i], v)
         return np.array([c for c in cached], dtype=float)
 
+    # THE DUTY PACE (the operator's ruling: 'learn slower, not hot CPU'):
+    # a big backfill arrives as ONE list -- send it in CHUNKS with a
+    # breathing pause between them so the ollama core never pegs a whole
+    # core for the whole batch. Single-text query embeds stay instant
+    # (one chunk, no pause). Knobs: MEMBRANE_EMBED_CHUNK (default 32),
+    # MEMBRANE_EMBED_PACE_S (default 0.25, 0 disables).
+    _CHUNK_DEFAULT = 32
+    _PACE_DEFAULT_S = 0.25
+
     def _embed_remote(self, texts: list[str]) -> list[np.ndarray]:
+        if len(texts) <= self._CHUNK_DEFAULT:
+            return self._embed_chunk(texts)
+        pace = float(os.environ.get("MEMBRANE_EMBED_PACE_S",
+                                    str(self._PACE_DEFAULT_S)))
+        chunk_n = max(1, int(os.environ.get("MEMBRANE_EMBED_CHUNK",
+                                            str(self._CHUNK_DEFAULT))))
+        out: list[np.ndarray] = []
+        for i in range(0, len(texts), chunk_n):
+            if out and pace > 0:
+                time.sleep(pace)
+            out.extend(self._embed_chunk(texts[i:i + chunk_n]))
+        return out
+
+    def _embed_chunk(self, texts: list[str]) -> list[np.ndarray]:
         body = json.dumps({"model": self.model, "input": texts}).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if self.token:

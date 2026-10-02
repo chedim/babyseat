@@ -533,6 +533,12 @@ class FileBackend(MemBackend):
         self.dir.mkdir(parents=True, exist_ok=True)
         self._events_log = self.dir / "events.jsonl"
         self._dirty: set = set()
+        # THE DIRTY-SET LOCK (the 'Set changed size during iteration'
+        # flood, class 2): _touch runs on the write threads; flush runs
+        # on the worker/timer threads -- both iterate/mutate _dirty.
+        # Same lesson MemBackend's scans learned: a shared set is only
+        # safe under a lock.
+        self._flush_lock = threading.RLock()
         self._last_flush = time.time()
         self._load()
 
@@ -569,8 +575,10 @@ class FileBackend(MemBackend):
                   file=sys.stderr)
 
     def _touch(self, coll: str) -> None:
-        self._dirty.add(coll)
-        if time.time() - self._last_flush >= self.DEBOUNCE_S:
+        with self._flush_lock:
+            self._dirty.add(coll)
+            due = time.time() - self._last_flush >= self.DEBOUNCE_S
+        if due:
             self.flush()
 
     def upsert(self, coll: str, key: str, doc: dict) -> None:
@@ -606,34 +614,48 @@ class FileBackend(MemBackend):
     def flush(self) -> None:
         """Write the dirty collections atomically; the events log is
         compacted (not snapshotted -- it IS the event store)."""
+        # THE SNAPSHOT-THEN-WRITE: the dirty set is taken + cleared UNDER
+        # the flush lock (a concurrent _touch re-dirties for the next
+        # round); the serialization itself reads stable dicts
+        # (per-collection data locks live in MemBackend now).
+        with self._flush_lock:
+            todo = list(self._dirty)
+            self._dirty.clear()
+            self._last_flush = time.time()
         self.dir.mkdir(parents=True, exist_ok=True)
-        for coll in self._dirty:
+        for coll in todo:
             if coll == "events":
                 self._compact_events()
                 continue
             f = self.dir / f"{coll}.json"
             tmp = f.with_suffix(".json.tmp")
             try:
-                tmp.write_text(self._json.dumps(self.colls[coll]))
+                with self._ram_lock:
+                    data = self._json.dumps(self.colls.get(coll, {}))
+                tmp.write_text(data)
                 tmp.replace(f)
             except Exception as e:
                 print(f"[efield] {coll} snapshot failed ({e}); RAM carries",
                       file=sys.stderr)
-        self._dirty.clear()
-        self._last_flush = time.time()
+        return
 
     def _compact_events(self) -> None:
         """The log's GC: when the appended writes out-carry the live
         events (statuses churn ~2-3 lines per event), rewrite one row
-        per live key -- atomic tmp + replace, same replay format."""
+        per live key -- atomic tmp + replace, same replay format.
+        THE ITERATION GUARD: the events dict is snapshot under the RAM
+        lock (an upsert mid-compaction used to tear the walk too)."""
         try:
             n_lines = sum(1 for _ in self._events_log.open())
-            n_live = len(self.colls["events"])
-            if n_lines <= 2 * n_live + 256:
-                return
+            with self._ram_lock:
+                n_live = len(self.colls["events"])
+                if n_lines <= 2 * n_live + 256:
+                    return
+                rows = [(k, dict(d)) for k, d in
+                        self.colls["events"].items()]
             tmp = self._events_log.with_suffix(".jsonl.tmp")
             with tmp.open("w") as fh:
-                for k, d in self.colls["events"].items():
+                for k, d in rows:
                     fh.write(self._json.dumps({"k": k, "d": d}) + "\n")
             tmp.replace(self._events_log)
         except Exception as e:

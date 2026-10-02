@@ -216,6 +216,16 @@ class Thinker:
             # the idle half, throttled by the SAME duty controller: a
             # think-ahead probe only when the recent duty allows it
             if self._duty() < THINK_CPU_TARGET:
+                # THE STARTUP POKE (the operator's ask): a boot greeting
+                # pending? compose it here -- the thinker's first idle
+                # breath, budget- and duty-gated, flag cleared first.
+                if getattr(self.srv, "_boot_greeting_pending", False) \
+                        and self._model_budget_ok():
+                    self.srv._boot_greeting_pending = False
+                    try:
+                        self._boot_greeting()
+                    except Exception:
+                        traceback.print_exc()
                 self._idle_think()
                 did_work = True
             # THE SHARP-WAVE REPLAY (the membrain upgrade, phase B):
@@ -647,6 +657,56 @@ class Thinker:
         if mat > 0:
             self._speak(f"night materialized {mat} entities from "
                         f"hot cells", act="report-state")
+
+    # ---- the boot greeting: the startup poke's voice ---------------------------
+    def _boot_greeting(self) -> None:
+        """THE STARTUP POKE'S VOICE (the operator's request): the boot's
+        static 'membrane up' line is the boring poke; the thinker's first
+        idle tick converts the pending flag into a one-line greeting
+        composed FROM the field's live state (size, events, open
+        branches). One per boot, budget-gated (rides _model_call's 4/min
+        dial) and duty-gated (the thinker's idle half) -- never a boot-
+        time model call on the hot path. The flag self-clears BEFORE the
+        call: a failed greeting is a lost greeting, never a loop."""
+        srv = self.srv
+        est = getattr(srv, "entity_store", None)
+        fld = getattr(srv, "efield", None)
+        facts: list[str] = []
+        try:
+            if est is not None:
+                facts.append(f"{len(est.docs)} live entities")
+        except Exception:
+            pass
+        try:
+            if fld is not None:
+                vit = fld.vitals() or {}
+                ev = vit.get("events") or {}
+                n_ev = sum(int(v or 0) for v in ev.values())
+                if n_ev:
+                    facts.append(f"{n_ev} field events")
+        except Exception:
+            pass
+        try:
+            if est is not None:
+                q = [e for e in est.open_timelines(limit=64)
+                     if (e.properties or {}).get("status") == "quarantined"]
+                if q:
+                    facts.append(f"{len(q)} open timeline branches")
+        except Exception:
+            pass
+        prompt = ("You are a memory-seat's background mind writing its boot "
+                  "greeting to its operator: ONE line, max 25 words, no emoji, "
+                  "no prefix. Ground it in this field state: "
+                  + ("; ".join(facts) or "field still warming up")
+                  + ". Name the single most notable thing about the state.")
+        out = ""
+        try:
+            out = self._model_call([{"role": "user", "content": prompt}]) or ""
+        except Exception:
+            out = ""
+        out = str(out).strip()
+        if out:
+            self._speak(out[:200], act="report-state")
 
     # ---- the idle half: THINK AHEAD -------------------------------------------
     def _idle_think(self) -> None:

@@ -255,7 +255,7 @@ class Dreamer:
         if fn <= 1e-12:
             return False
         fv = fv / fn
-        for ent in est.docs.values():
+        for ent in list(est.docs.values()):
             if ent.cls != CLASS_FAILURE:
                 continue
             ev = getattr(ent, "position", None) or getattr(ent, "embedding", None)

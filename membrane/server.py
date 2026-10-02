@@ -755,6 +755,53 @@ class TurnRunner:
         with self._queue_lock:
             return self._drain_results.get(qid)
 
+    # -- the tool watchdog (the swirl post-mortem, now LIVE) -----------------
+    # The kill-artifact pattern (two sessions: a tool part 'pending'
+    # forever, the operator kills, no evidence): executor calls are now
+    # timed + name-stamped; a call over TOOL_SLOW_S warns ONCE (the
+    # stderr names the tool + args head); a call over TOOL_DUMP_S
+    # dumps EVERY thread's stack (faulthandler) so a real thread-stall
+    # carries its own evidence into the log -- no more post-mortems on
+    # a corpse.
+    TOOL_SLOW_S = 5.0
+    TOOL_DUMP_S = 45.0
+
+    def _tool_watchdog_start(self, sid: str, name: str, call_id: str,
+                             args: dict) -> None:
+        if not hasattr(self, "_tool_t0"):
+            self._tool_t0 = {}
+        self._tool_t0[call_id] = (time.time(), name,
+                                  str(args)[:120])
+
+    def _tool_watchdog_end(self, call_id: str, name: str) -> None:
+        t0 = (getattr(self, "_tool_t0", {}) or {}).pop(call_id, None)
+        if t0 is None:
+            return
+        el = time.time() - t0[0]
+        if el > self.TOOL_SLOW_S:
+            print(f"[serve] tool {name!r} SLOW: {el:.1f}s "
+                  f"(args {t0[2][:80]})", file=sys.stderr)
+
+    def _tool_watchdog_dump(self, call_id: str) -> None:
+        """The thread-stall dump: a timer thread armed per slow call;
+        cancelled on completion (the normal path never fires)."""
+        t0 = (getattr(self, "_tool_t0", {}) or {}).get(call_id)
+        if t0 is None:
+            return
+        name, args_head = t0[1], t0[2]
+        time.sleep(self.TOOL_DUMP_S)
+        live = (getattr(self, "_tool_t0", {}) or {}).get(call_id)
+        if live is None:
+            return                    # completed meanwhile
+        print(f"[serve] tool {name!r} STILL PENDING after "
+              f"{self.TOOL_DUMP_S}s (args {args_head}); ALL THREADS:",
+              file=sys.stderr)
+        import faulthandler, io as _io
+        buf = _io.StringIO()
+        faulthandler.dump_traceback(file=buf, all_threads=True)
+        for line in buf.getvalue().splitlines()[:160]:
+            print(f"[serve]   {line}", file=sys.stderr)
+
     def _run_inner(self, sid: str, text: str, user_info: dict | None = None,
             user_parts: list | None = None) -> dict:
         self._aborting = getattr(self, "_aborting", None) or set()
@@ -904,8 +951,14 @@ class TurnRunner:
                     self.messages.append(sid, a_info, list(parts))
                     if sid in self._aborting:
                         break
+                    self._tool_watchdog_start(sid, name, call_id, args)
                     try:
+                        _wd = threading.Thread(
+                            target=self._tool_watchdog_dump,
+                            args=(call_id,), daemon=True)
+                        _wd.start()
                         output = self.executor(name, args, call_id)
+                        self._tool_watchdog_end(call_id, name)
                         part["state"] = {"status": "completed",
                                          "input": args,
                                          "output": str(output or ""),
