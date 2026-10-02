@@ -36,6 +36,7 @@ import os
 import secrets
 import socket
 import threading
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -793,13 +794,23 @@ class TurnRunner:
         live = (getattr(self, "_tool_t0", {}) or {}).get(call_id)
         if live is None:
             return                    # completed meanwhile
-        print(f"[serve] tool {name!r} STILL PENDING after "
-              f"{self.TOOL_DUMP_S}s (args {args_head}); ALL THREADS:",
-              file=sys.stderr)
-        import faulthandler, io as _io
-        buf = _io.StringIO()
-        faulthandler.dump_traceback(file=buf, all_threads=True)
-        for line in buf.getvalue().splitlines()[:160]:
+        try:
+            print(f"[serve] tool {name!r} STILL PENDING after "
+                  f"{self.TOOL_DUMP_S}s (args {args_head}); ALL THREADS:",
+                  file=sys.stderr)
+            import faulthandler, io as _io
+            buf = _io.StringIO()
+            faulthandler.dump_traceback(file=buf, all_threads=True)
+        except Exception as dump_e:
+            print(f"[serve] tool {name!r} STILL PENDING after "
+                  f"{self.TOOL_DUMP_S}s; stack dump failed ({dump_e})",
+                  file=sys.stderr)
+            return
+        lines = buf.getvalue().splitlines()
+        # THE ANSWER FIRST: which frame is the CALLER'S (the tool's own
+        # stack)? Print a compressed map: thread name + its top frame
+        # + any frame names containing tool hints.
+        for line in lines[:160]:
             print(f"[serve]   {line}", file=sys.stderr)
 
     def _run_inner(self, sid: str, text: str, user_info: dict | None = None,

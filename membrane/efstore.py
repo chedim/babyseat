@@ -539,6 +539,8 @@ class FileBackend(MemBackend):
         # Same lesson MemBackend's scans learned: a shared set is only
         # safe under a lock.
         self._flush_lock = threading.RLock()
+        self._flushing = False
+        self._last_bytes: dict = {}
         self._last_flush = time.time()
         self._load()
 
@@ -577,7 +579,8 @@ class FileBackend(MemBackend):
     def _touch(self, coll: str) -> None:
         with self._flush_lock:
             self._dirty.add(coll)
-            due = time.time() - self._last_flush >= self.DEBOUNCE_S
+            due = (time.time() - self._last_flush >= self.DEBOUNCE_S
+                   and not self._flushing)
         if due:
             self.flush()
 
@@ -613,31 +616,63 @@ class FileBackend(MemBackend):
 
     def flush(self) -> None:
         """Write the dirty collections atomically; the events log is
-        compacted (not snapshotted -- it IS the event store)."""
-        # THE SNAPSHOT-THEN-WRITE: the dirty set is taken + cleared UNDER
-        # the flush lock (a concurrent _touch re-dirties for the next
-        # round); the serialization itself reads stable dicts
-        # (per-collection data locks live in MemBackend now).
+        compacted (not snapshotted -- it IS the event store).
+        THE WRITE BUDGET (the disk-full swirl): the seat's snapshots
+        were re-serialized on EVERY flush (sentences.json alone is
+        285MB -- a 6.9k field rewrites ~1GB per 2s-debounced flush,
+        GIL-held json.dumps, blocking every other thread; on a full
+        disk the write STALLS and the stall wedges the turn's tools).
+        Now: one flush in flight (_flushing), and each collection is
+        re-written only when its DATA changed (a content hash per
+        collection -- the identical snapshot never hits the disk
+        twice)."""
         with self._flush_lock:
+            if self._flushing:
+                return
+            self._flushing = True
             todo = list(self._dirty)
             self._dirty.clear()
             self._last_flush = time.time()
-        self.dir.mkdir(parents=True, exist_ok=True)
-        for coll in todo:
-            if coll == "events":
-                self._compact_events()
-                continue
-            f = self.dir / f"{coll}.json"
-            tmp = f.with_suffix(".json.tmp")
-            try:
-                with self._ram_lock:
-                    data = self._json.dumps(self.colls.get(coll, {}))
-                tmp.write_text(data)
-                tmp.replace(f)
-            except Exception as e:
-                print(f"[efield] {coll} snapshot failed ({e}); RAM carries",
-                      file=sys.stderr)
-        return
+        try:
+            self.dir.mkdir(parents=True, exist_ok=True)
+            for coll in todo:
+                if coll == "events":
+                    self._compact_events()
+                    continue
+                f = self.dir / f"{coll}.json"
+                tmp = f.with_suffix(".json.tmp")
+                try:
+                    with self._ram_lock:
+                        data = self._json.dumps(self.colls.get(coll, {}))
+                    if self._same_bytes(coll, data):
+                        continue        # unchanged: the disk keeps its copy
+                    tmp.write_text(data)
+                    tmp.replace(f)
+                except Exception as e:
+                    print(f"[efield] {coll} snapshot failed ({e}); RAM "
+                          "carries", file=sys.stderr)
+        finally:
+            with self._flush_lock:
+                self._flushing = False
+
+    def _same_bytes(self, coll: str, data: str) -> bool:
+        """The content hash (the no-change skip): True when the last
+        WRITTEN snapshot's bytes hash equals this one's.
+        BOOT NOTE: the first flush after boot re-writes (no cached
+        hash) -- honest, one disk pass per collection per boot."""
+        import hashlib as _hl
+        h = _hl.sha256(data.encode()).digest()[:16]
+        if self._last_bytes.get(coll) == h:
+            return True
+        self._last_bytes[coll] = h
+        return False
+        import hashlib as _hl
+        h = _hl.sha256(data.encode()).digest()[:16]
+        self._last_bytes.setdefault(coll, None)
+        if self._last_bytes.get(coll) == h:
+            return True
+        self._last_bytes[coll] = h
+        return False
 
     def _compact_events(self) -> None:
         """The log's GC: when the appended writes out-carry the live
