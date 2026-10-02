@@ -15,7 +15,10 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import os
+import sys
 import time
+from pathlib import Path
 from typing import Callable, Iterator
 
 import numpy as np
@@ -459,24 +462,180 @@ class CouchbaseBackend:
         pass
 
 
+# ---- the FILE home (stage 4, the seat-first flip) ---------------------------------
+FIELD_DIRNAME = ".membrane/field"
+
+
+class FileBackend(MemBackend):
+    """THE SEAT-FIRST HOME (stage 4): the entity field lives under the
+    seat's OWN folder -- ``<seat>/.membrane/field/`` -- and survives
+    every restart without couchbase. RAM speed (it IS a MemBackend --
+    scans and vectors are inherited exactly) with persistence:
+
+      events.jsonl  the append-only log. EVERY write appends; replay is
+                    LAST LINE WINS (a status change -- pending ->
+                    applied -> served -- appends too). Compacted to the
+                    live rows on flush when the log runs > 2x live.
+      <coll>.json   every OTHER collection: a debounced full snapshot,
+                    written atomically (tmp + rename).
+
+    A crash loses at most one flush window of snapshot updates -- no
+    event is ever lost (appended the moment it was written). The couchbase
+    field state write-throughs are RETIRED by default (the global tier
+    holds only published entities now); MEMBRANE_FIELD_CLOUD=1 opts back
+    into the cloud field for a seat that wants merged reads."""
+
+    DEBOUNCE_S = 2.0
+
+    def __init__(self, path):
+        import json
+        self._json = json
+        super().__init__()
+        self.dir = Path(path)
+        self.dir.mkdir(parents=True, exist_ok=True)
+        self._events_log = self.dir / "events.jsonl"
+        self._dirty: set = set()
+        self._last_flush = time.time()
+        self._load()
+
+    def _load(self) -> None:
+        """Replay the log (torn finals skipped -- a kill mid-append) and
+        load the snapshots."""
+        if self._events_log.exists():
+            with self._events_log.open() as fh:
+                for line in fh:
+                    try:
+                        row = self._json.loads(line)
+                    except Exception:
+                        continue
+                    k, d = row.get("k"), row.get("d")
+                    if k and isinstance(d, dict):
+                        self.colls["events"][k] = d
+        colls = self.colls
+        for coll in COLLECTIONS:
+            if coll == "events":
+                continue
+            f = self.dir / f"{coll}.json"
+            if f.exists():
+                try:
+                    colls[coll] = self._json.loads(f.read_text())
+                except Exception:
+                    pass
+
+    def _append(self, key, doc) -> None:
+        try:
+            with self._events_log.open("a") as fh:
+                fh.write(self._json.dumps({"k": key, "d": doc}) + "\n")
+        except Exception as e:
+            print(f"[efield] event append failed ({e}); RAM carries",
+                  file=sys.stderr)
+
+    def _touch(self, coll: str) -> None:
+        self._dirty.add(coll)
+        if time.time() - self._last_flush >= self.DEBOUNCE_S:
+            self.flush()
+
+    def upsert(self, coll: str, key: str, doc: dict) -> None:
+        super().upsert(coll, key, doc)
+        if coll == "events":
+            self._append(key, doc)
+        self._touch(coll)
+
+    def upsert_multi(self, coll: str, docs: dict) -> None:
+        super().upsert_multi(coll, docs)
+        if coll == "events":
+            for k, d in docs.items():
+                self._append(k, d)
+        self._touch(coll)
+
+    def insert_if_absent(self, coll: str, key: str, doc: dict) -> bool:
+        added = super().insert_if_absent(coll, key, doc)
+        if added:
+            if coll == "events":
+                self._append(key, doc)
+            self._touch(coll)
+        return added
+
+    def cas_update(self, coll: str, key, fn):
+        new = super().cas_update(coll, key, fn)
+        self._touch(coll)
+        return new
+
+    def delete(self, coll: str, key: str) -> None:
+        super().delete(coll, key)
+        self._touch(coll)
+
+    def flush(self) -> None:
+        """Write the dirty collections atomically; the events log is
+        compacted (not snapshotted -- it IS the event store)."""
+        for coll in self._dirty:
+            if coll == "events":
+                self._compact_events()
+                continue
+            f = self.dir / f"{coll}.json"
+            tmp = f.with_suffix(".json.tmp")
+            try:
+                tmp.write_text(self._json.dumps(self.colls[coll]))
+                tmp.replace(f)
+            except Exception as e:
+                print(f"[efield] {coll} snapshot failed ({e}); RAM carries",
+                      file=sys.stderr)
+        self._dirty.clear()
+        self._last_flush = time.time()
+
+    def _compact_events(self) -> None:
+        """The log's GC: when the appended writes out-carry the live
+        events (statuses churn ~2-3 lines per event), rewrite one row
+        per live key -- atomic tmp + replace, same replay format."""
+        try:
+            n_lines = sum(1 for _ in self._events_log.open())
+            n_live = len(self.colls["events"])
+            if n_lines <= 2 * n_live + 256:
+                return
+            tmp = self._events_log.with_suffix(".jsonl.tmp")
+            with tmp.open("w") as fh:
+                for k, d in self.colls["events"].items():
+                    fh.write(self._json.dumps({"k": k, "d": d}) + "\n")
+            tmp.replace(self._events_log)
+        except Exception as e:
+            print(f"[efield] events compaction failed ({e}); log carries",
+                  file=sys.stderr)
+
+    def close(self) -> None:
+        self.flush()
+
+
 def open_backend(field_path: str = ""):
-    """RAM for lab paths / MEMBRANE_EFIELD_STORE=mem (the isolation guard);
-    Couchbase for real seats; RAM again if the cluster is unreachable
-    (degrade, never raise at boot)."""
+    """THE SEAT-FIRST LADDER (the operator's stage 4): RAM for lab paths /
+    MEMBRANE_EFIELD_STORE=mem (the isolation guard); the FILE home under
+    the seat's own folder by DEFAULT (the field survives restarts, and
+    the raw per-origin state write-throughs are retired); the couchbase
+    field only when MEMBRANE_FIELD_CLOUD=1 -- and a down cluster degrades
+    to FILE, never to RAM (RAM forgets on restart)."""
     import os
     import sys
-    from .substrate import _is_lab_field_path, cb_open
+    from .substrate import _is_lab_field_path
     if os.environ.get("MEMBRANE_EFIELD_STORE", "auto") == "mem" or (
             field_path and _is_lab_field_path(field_path)):
         return MemBackend()
+    if os.environ.get("MEMBRANE_FIELD_CLOUD", "0") == "1":
+        try:
+            from .substrate import cb_open
+            cluster, bucket = cb_open()
+            be = CouchbaseBackend(cluster, bucket)
+            if be.created:
+                print(f"[efield] bootstrapped: {', '.join(be.created)}",
+                      file=sys.stderr)
+            return be
+        except Exception as e:
+            print(f"[efield] couchbase unavailable ({e}); file backend",
+                  file=sys.stderr)
+    base = Path(field_path).resolve().parent if field_path else Path.cwd()
     try:
-        cluster, bucket = cb_open()
-        be = CouchbaseBackend(cluster, bucket)
-        if be.created:
-            print(f"[efield] bootstrapped: {', '.join(be.created)}", file=sys.stderr)
-        return be
+        return FileBackend(base / FIELD_DIRNAME)
     except Exception as e:
-        print(f"[efield] couchbase unavailable ({e}); RAM backend", file=sys.stderr)
+        print(f"[efield] file backend unavailable ({e}); RAM backend",
+              file=sys.stderr)
         return MemBackend()
 
 def probe_local_couchbase() -> bool:

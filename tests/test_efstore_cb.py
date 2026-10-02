@@ -126,9 +126,20 @@ class TestOpenBackend(unittest.TestCase):
         self.assertEqual(reuse_choice(["beta", "alpha"]), "beta")
         self.assertIsNone(reuse_choice([]))
 
-    def test_an_unreachable_cluster_degrades_to_ram(self):
-        with mock.patch("membrane.substrate.cb_open", side_effect=RuntimeError("down")):
-            self.assertIsInstance(efstore.open_backend("/home/x/.membrane/field.json"), MemBackend)
+    def test_an_unreachable_cluster_degrades_to_file(self):
+        """THE SEAT-FIRST FLIP (stage 4): the couchbase field answers
+        only behind MEMBRANE_FIELD_CLOUD=1 now -- and a down cluster
+        degrades to the FILE home under the seat's folder, never to RAM
+        (RAM forgets on restart; the file survives)."""
+        with tempfile.TemporaryDirectory() as d:
+            fp = os.path.join(d, "rag-field.json")
+            with mock.patch.dict(os.environ, {"MEMBRANE_FIELD_CLOUD": "1"}), \
+                    mock.patch("membrane.substrate.cb_open",
+                               side_effect=RuntimeError("down")), \
+                    mock.patch("membrane.substrate._is_lab_field_path",
+                               return_value=False):
+                self.assertIsInstance(efstore.open_backend(fp),
+                                      efstore.FileBackend)
 
 
 if __name__ == "__main__":

@@ -6070,9 +6070,14 @@ def main() -> None:
         # couchbase is down (the same covenant as the entity layer).
         try:
             from .peers import PeerSubstrate
+            # THE ROSTER FALLBACK (stage 5): when the ephemeral registry
+            # reads empty (down, or a seat-first world), the peers reads
+            # answer from the seat's own presence organ (est.peers()).
+            _roster = getattr(srv, "entity_store", None)
             srv.peers = PeerSubstrate(
                 field_path=str(_wdir / "field.json"),
-                port=listen, model=str(srv.seat_model))
+                port=listen, model=str(srv.seat_model),
+                roster_fn=(_roster.peers if _roster is not None else None))
             srv.peers.register()
             print(f"[opencode] peers: registered as {srv.peers.seat_id} "
                   f"(heartbeat {int(srv.peers.heartbeat_s)}s)",
@@ -6770,6 +6775,15 @@ def main() -> None:
                 srv.thinker.stop()
             except Exception:
                 pass
+        # THE FIELD'S LAST FLUSH (the file home, stage 4): the debounced
+        # snapshots close their window NOW -- a clean stop loses nothing.
+        try:
+            _fld = getattr(srv, "efield", None)
+            if _fld is not None:
+                _fld.flush()
+                getattr(getattr(_fld, "b", None), "flush", lambda: None)()
+        except Exception:
+            pass
         # the couchbase clusters FIRST (peers substrate, the field's store,
         # the entity layer): each close() joins the SDK's asio IO threads so
         # no C-extension thread touches the interpreter during Py_Finalize

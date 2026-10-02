@@ -24,6 +24,7 @@ import os
 import sys
 import time
 from datetime import timedelta
+from typing import Callable
 
 HEARTBEAT_S = 60.0             # registration refresh cadence
 REGISTRY_TTL_S = 3 * 180       # doc TTL: 3 missed heartbeats -> expired
@@ -41,11 +42,15 @@ class PeerSubstrate:
     return empty). One class, one connection attempt, no leaks."""
 
     def __init__(self, field_path: str, port: int, model: str = "",
-                 heartbeat_s: float = HEARTBEAT_S) -> None:
+                 heartbeat_s: float = HEARTBEAT_S,
+                 roster_fn: "Callable[[], list] | None" = None) -> None:
         self.field_path = field_path
         self.port = port
         self.model = model
         self.heartbeat_s = heartbeat_s
+        # THE SEAT-FIRST FALLBACK (stage 5): when the ephemeral registry
+        # is down or empty, the PRESENCE entities answer who's-alive.
+        self._roster_fn = roster_fn
         self.cwd = os.getcwd()
         self.seat_id = f"proxy-{self.port}"
         self._cluster = None
@@ -265,25 +270,57 @@ class PeerSubstrate:
 
     def list_seats(self) -> list[dict]:
         """The live seats: every registry doc (expired ones are gone by
-        TTL -- the GC is the clock)."""
+        TTL -- the GC is the clock). THE SEAT-FIRST FALLBACK (stage 5,
+        the peers re-point): an EMPTY registry -- down, or a seat-first
+        world where seats no longer register ephemeral docs -- answers
+        from the PRESENCE roster instead (the published membrane::
+        presence entities; stale ones pruned)."""
         if self._reg is None:
             self._reg, self._reg_bucket = self._ensure_eph_registry()
-        if self._reg is None:
+        out = []
+        if self._reg is not None:
+            try:
+                from couchbase.options import QueryOptions
+                import datetime as _dt
+                b = self._reg_bucket
+                q = self._cluster.query(
+                    f"SELECT t.* FROM `{b.name}`.`_default`.`proxies` t",
+                    QueryOptions(timeout=_dt.timedelta(seconds=10)))
+                for row in q:
+                    out.append(dict(row))
+                self._op_ok()
+            except BaseException:
+                self._op_failed()
+                return []
+        if out:
+            return out
+        return self._presence_seats()
+
+    _PRESENCE_STALE_S = 600.0        # a quiet seat older than 10min is
+                                     # presumed dead (TTL without TTLs)
+
+    def _presence_seats(self) -> list[dict]:
+        """The roster fallback: map the foreign presence entities into
+        seat-doc shapes. Raises never (the covenant)."""
+        now = time.time()
+        try:
+            rows = list(self._roster_fn()) if self._roster_fn else []
+        except Exception:
             return []
         out = []
-        try:
-            from couchbase.options import QueryOptions
-            import datetime as _dt
-            b = self._reg_bucket
-            q = self._cluster.query(
-                f"SELECT t.* FROM `{b.name}`.`_default`.`proxies` t",
-                QueryOptions(timeout=_dt.timedelta(seconds=10)))
-            for row in q:
-                out.append(dict(row))
-            self._op_ok()
-        except BaseException:
-            self._op_failed()
-            return []
+        for p in rows:
+            props = p.get("properties") or {}
+            ts = float(props.get("presence_ts") or 0)
+            if ts and now - ts > self._PRESENCE_STALE_S:
+                continue             # a dead seat's last word is not life
+            seat = str(p.get("origin") or props.get("seat") or "?")
+            out.append({"origin": seat, "seat": seat,
+                        "port": None,               # not the registry's unit
+                        "branch": props.get("branch"),
+                        "head": props.get("head"),
+                        "uptime_s": props.get("uptime"),
+                        "docs": props.get("docs"),
+                        "presence_ts": props.get("presence_ts")})
         return out
 
     # ---- the slice-4 Peers compat surface (opencode call sites written
