@@ -51,9 +51,12 @@ TOOLS: list[dict] = [
             "or reused for throwaway repeats, its result (rc, outcome, "
             "head/tail) on the doc and the run spoken into the field, so "
             "commands are findable later by similarity and their errors "
-            "reach the banner. Prefer over 0-arg probes: reads (cat, "
-            "ls, head, grep), builds, tests. Errors are announced "
-            "next-banner; script_last_error persists on the entity."),
+            "reach the banner. The tool itself is one entity too: every "
+            "run auto-updates `tool:membrane_run` (run/fail counts, last "
+            "command + rc/outcome, cumulative ms). Prefer over 0-arg "
+            "probes: reads (cat, ls, head, grep), builds, tests. Errors "
+            "are announced next-banner; script_last_error persists on "
+            "the entity."),
         "inputSchema": {
             "type": "object",
             "properties": {

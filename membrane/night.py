@@ -481,6 +481,28 @@ def run_command_entity(fld, est, mem, command: str,
     canon_e = E.canon("c", heads[0] if heads else
                       (cmd.split() or ["cmd"])[0][:40])
     key = MEMBRANE_NS + overlay_key(canon_e)
+    t0 = time.time()
+    err = ""
+    try:
+        p = subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                           timeout=t, cwd=os.getcwd())
+        rc = p.returncode
+        text = "\n".join(x for x in ((p.stdout or "").rstrip("\n"),
+                                     (p.stderr or "").rstrip("\n")) if x)
+    except subprocess.TimeoutExpired as e:
+        rc = -1
+        err = f"timeout after {t:g}s"
+        text = "\n".join(x.decode(errors="replace") if isinstance(x, bytes)
+                         else (x or "") for x in (e.stdout, e.stderr))
+    ms = int((time.time() - t0) * 1000)
+    head, tail = text[:ST.RESULT_HEAD], text[-ST.RESULT_TAIL:]
+    oc = "timeout" if err else ST.outcome(canon_e, head, tail)
+    ok = rc == 0 and not err
+    if est is None:
+        # no entity store mounted: exec, report, degrade (never wedge)
+        return {"ok": ok, "eid": canon_e, "key": key, "rc": rc,
+                "outcome": oc, "head": head, "tail": tail, "ms": ms,
+                "doc": None, "created": False}
     doc = (est.docs or {}).get(key)
     created = doc is None
     if created:
@@ -512,6 +534,25 @@ def run_command_entity(fld, est, mem, command: str,
     props["run_rc"], props["run_outcome"] = rc, oc
     props["run_head"], props["run_tail"], props["run_ms"] = head, tail, ms
     est.upsert(doc)
+    # THE TOOL'S OWN ENTITY (the owner's design: membrane_run is itself
+    # ONE entity, auto-updated by every run it executes): the
+    # `tool:membrane_run` singleton keeps the rolling record (run/fail
+    # counts, last command + rc/outcome, cumulative ms) while each
+    # command keeps its own doc; scripts and the night read the
+    # singleton to watch the tool lived.
+    tk = MEMBRANE_NS + "tool:membrane_run"
+    tdoc = (est.docs or {}).get(tk)
+    if tdoc is None:
+        tdoc = QuantumEntity(eid=tk, cls=CLASS_TOOL,
+                             properties={"name": "membrane_run",
+                                         "silent_birth": True})
+    tp = tdoc.properties
+    tp["run_count"] = int(tp.get("run_count") or 0) + 1
+    tp["fail_count"] = int(tp.get("fail_count") or 0) + (0 if ok else 1)
+    tp["total_ms"] = int(tp.get("total_ms") or 0) + ms
+    tp["last_command"], tp["last_rc"] = cmd, rc
+    tp["last_outcome"], tp["last_ts"] = oc, time.time()
+    est.upsert(tdoc)
     if fld is not None:
         try:
             fld.write_events([ST.Event(

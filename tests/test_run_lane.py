@@ -155,5 +155,39 @@ class TestMcpRunTool(unittest.TestCase):
         self.assertTrue(callable(M.TOOL_IMPLS["membrane_run"]))
 
 
+class TestRunToolSelfEntity(unittest.TestCase):
+    def test_run_auto_updates_the_tool_s_own_entity(self):
+        """membrane_run is itself ONE entity: every executed command
+        auto-updates the `tool:membrane_run` singleton (its rolling
+        record: counts, rc/outcome, cumulative ms, last command) while
+        each command keeps its own `c:<head>` doc."""
+        f, est = _world()
+        run_command_entity(f, est, None, "echo one")
+        run_command_entity(f, est, None, "false")
+        run_command_entity(f, est, None, "echo two")
+        tk = est.docs.get(NS + "tool:membrane_run")
+        self.assertIsNotNone(tk)
+        p = tk.properties
+        self.assertEqual(p.get("run_count"), 3)
+        self.assertEqual(p.get("fail_count"), 1)          # `false` rc=1
+        self.assertEqual(p.get("last_command"), "echo two")
+        self.assertEqual(p.get("last_rc"), 0)
+        self.assertEqual(p.get("last_outcome"), "ok")
+        self.assertGreater(p.get("total_ms"), 0)
+        self.assertTrue(p.get("last_ts"))
+        # the singleton never replaces the per-command docs (both `echo`
+        # commands share their head entity, `false` has its own)
+        self.assertEqual(
+            len([k for k in est.docs if k.startswith(NS + "shell:")]), 2)
+        self.assertEqual(tk.cls, CLASS_TOOL)
+
+    def test_run_tool_entity_degrades_without_store(self):
+        """est=None (no entity store mounted): the run still execs and
+        returns (the lane never wedges on a missing store)."""
+        out = run_command_entity(None, None, None, "echo bare")
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["rc"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
