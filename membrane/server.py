@@ -430,10 +430,12 @@ def _tool_title(name: str, args: dict) -> str:
 
 
 def _chronological(rows: list) -> list:
-    """Replay rows in created-ts order: the user's message rides above the
+    """Replay rows in arrival order (completed-when-set, else created-ts): the user's message rides above the
     reply it prompted, even if a multi-writer race left the store scrambled
     (stable sort -- store insertion order survives equal timestamps)."""
     return sorted(rows, key=lambda r: ((r.get("info") or {})
+                                       .get("time") or {}).get("completed")
+                  or ((r.get("info") or {})
                                        .get("time") or {}).get("created") or 0)
 
 
@@ -480,6 +482,9 @@ def _tokens_estimate(history: list, parts: list) -> dict:
             "reasoning": rsn, "cache": {"read": 0, "write": 0}}
 
 
+BUSY_WAIT_S = 300.0   # a queued second POST waits this long, then gets a visible busy stub
+HEARTBEAT_S = 15.0    # busy-heartbeat cadence while a turn runs
+
 class TurnRunner:
     """THE TURN LOOP: client text -> the seat's own /v1 (all of the
     proxy's machinery, in-process, via loopback) -> tool_calls executed
@@ -497,6 +502,10 @@ class TurnRunner:
         self.model = model
         self.tools = tools if tools is not None else None
         self._busy: dict[str, dict] = {}
+        self._guards: dict[str, threading.Lock] = {}
+        self._busy_lock = threading.Lock()
+        self.busy_wait_s: float = BUSY_WAIT_S
+        self.heartbeat_s: float = HEARTBEAT_S
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -505,7 +514,7 @@ class TurnRunner:
             return self._busy.get(sid) or {"type": "idle"}
 
     def _lock_guard(self):
-        return _NL()
+        return self._busy_lock
 
     def abort(self, sid: str) -> None:
         self._aborting = getattr(self, "_aborting", None) or set()
@@ -556,7 +565,50 @@ class TurnRunner:
             out.append({"role": role, "content": text[:HISTORY_TEXT_CAP]})
         return out[-HISTORY_MAX_MESSAGES:]
 
+    # -- THE BUSY CONTRACT ----------------------------------------------------
+    def _guard(self, sid: str):
+        g = self._guards.get(sid)
+        if g is None:
+            g = self._guards.setdefault(sid, threading.Lock())
+        return g
+
+    def _heartbeat(self, sid: str, stop: threading.Event) -> None:
+        start = time.time()
+        while not stop.wait(max(0.05, float(self.heartbeat_s))):
+            self.hub.publish({"type": "session.status",
+                              "status": {"type": "busy",
+                                         "elapsed_ms": int((time.time() - start) * 1000)},
+                              "sessionID": sid})
+
     def run(self, sid: str, text: str, user_info: dict | None = None,
+            user_parts: list | None = None) -> dict:
+        """THE GUARDED ENTRY: a second message on a busy session is
+        QUEUED -- it first publishes a visible {session.status busy
+        queued:true} event, then waits busy_wait_s for the running turn
+        and only then returns an explicit {'status': 'busy'} stub. A
+        heartbeat thread publishes elapsed_ms while the turn runs. The
+        finally-block guaranties the guard frees and _busy cleans even
+        if the turn body raises (no stuck-busy after a crash)."""
+        guard = self._guard(sid)
+        if not guard.acquire(blocking=False):
+            self.hub.publish({"type": "session.status",
+                              "status": {"type": "busy", "queued": True},
+                              "sessionID": sid})
+            if not guard.acquire(timeout=float(self.busy_wait_s)):
+                return {"status": "busy", "sessionID": sid}
+        stop = threading.Event()
+        hb = threading.Thread(target=self._heartbeat, args=(sid, stop),
+                              daemon=True)
+        hb.start()
+        try:
+            return self._run_inner(sid, text, user_info, user_parts)
+        finally:
+            stop.set()
+            guard.release()
+            self._busy.pop(sid, None)
+            (getattr(self, "_aborting", None) or set()).discard(sid)
+
+    def _run_inner(self, sid: str, text: str, user_info: dict | None = None,
             user_parts: list | None = None) -> dict:
         self._aborting = getattr(self, "_aborting", None) or set()
         now = int(time.time() * 1000)
@@ -633,6 +685,14 @@ class TurnRunner:
             mkpart({"type": "step-start"})
             try:
                 resp = self.call_ladder(body)
+                if not isinstance(resp, dict):
+                    raise RuntimeError(
+                        f"call_ladder returned {type(resp).__name__}, "
+                        f"not a response object")
+                if not isinstance(resp, dict):
+                    raise RuntimeError(
+                        f"call_ladder returned {type(resp).__name__}, "
+                        f"not a response object")
             except Exception as e:
                 now = int(time.time() * 1000)
                 mkpart({"type": "text",

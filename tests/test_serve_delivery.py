@@ -1,12 +1,13 @@
-"""THE LATE-REPLY POSITION PIN (red first): a reply whose completion
-lands after newer user messages must play at the BOTTOM of the chat --
-arrival order, never retroactively re-slotted where its turn started.
+"""THE LATE-REPLY POSITION PIN: a reply whose completion lands after
+newer user messages must play at the BOTTOM of the chat -- arrival
+order, never retroactively re-slotted where its turn started.
 Root seen live: _chronological sorted by created-ts only, while
 MessageStore writes the assistant row EMPTY ~20ms after the user turn
 (created = turn start) and completes it minutes later -- so the late
 answer replayed UNDER older messages (operator report: answers arrive
 under my messages, not at the bottom). Contract: display key is
-info.time.completed when set, else info.time.created."""
+info.time.completed when set, else info.time.created (the same recency
+notion _flush already versions rows by)."""
 from membrane.server import MessageStore, _chronological
 
 SID = "ses_test"
@@ -36,6 +37,15 @@ def test_late_completed_reply_lands_at_bottom():
 def test_normal_flow_reply_stays_under_prompt():
     rows = [_user("u1", 1000, "q"),
             _assistant("a1", 1001, 1002, "a"),
+            _user("u2", 1040, "next")]
+    order = [r["info"]["id"] for r in _chronological(rows)]
+    assert order == ["u1", "a1", "u2"], order
+
+
+def test_streaming_row_without_completed_stays_by_created():
+    "Mid-stream guard: an assistant row with created only (no completed yet) keeps its created position -- never sort to key 0 above the user message."
+    rows = [_user("u1", 1000, "q"),
+            _assistant("a1", 1001, None, ""),
             _user("u2", 1040, "next")]
     order = [r["info"]["id"] for r in _chronological(rows)]
     assert order == ["u1", "a1", "u2"], order

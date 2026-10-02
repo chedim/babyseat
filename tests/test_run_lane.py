@@ -191,3 +191,25 @@ class TestRunToolSelfEntity(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestRunExecOnce(unittest.TestCase):
+    """The exec-once pin: run_command_entity once shipped a DUPLICATED
+    subprocess.run block in the est-branch -- every est-mounted command
+    executed TWICE, the rerun silently overwriting the first's results
+    (non-idempotent commands like 'echo >>' double-fired). One sentinel
+    file, one line, one singleton count."""
+
+    def test_shell_command_executes_exactly_once(self):
+        import shutil
+        import tempfile
+        f = EntityField(MemBackend(), FakeEmbedder(), "seat@host")
+        est = EntityStore(path=None, shared=False)
+        d = tempfile.mkdtemp(prefix="m-exec-once-")
+        self.addCleanup(shutil.rmtree, d, True)
+        sentinel = os.path.join(d, "count.txt")
+        out = run_command_entity(f, est, None, f"echo hit >> {sentinel}")
+        self.assertTrue(out.get("ok"), out)
+        self.assertEqual(Path(sentinel).read_text(), "hit" + chr(10))
+        doc = est.docs.get(NS + "tool:run")
+        self.assertIsNotNone(doc)
+        self.assertEqual((doc.properties or {}).get("run_count"), 1)
