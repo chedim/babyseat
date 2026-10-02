@@ -44,6 +44,15 @@ from .entities import (MEMBRANE_NS, CLASS_COMPONENT, CLASS_SESSION,
 _TICK_PERSIST_S = 60.0
 _TICK_LAST_PERSIST: dict[str, float] = {}
 
+# THE WATCH WINDOW (the autonode's churn guard)
+_WATCH_TELL_MIN_S = 10.0
+_WATCH_TELL_TS: dict[str, float] = {}
+
+
+def _watch_tell_ok(eid: str) -> bool:
+    last = _WATCH_TELL_TS.get(eid)
+    return last is None or (time.time() - float(last)) >= _WATCH_TELL_MIN_S
+
 SCRIPT_TIMEOUT_S = 2.0         # wall clock per run
 SCRIPT_MAX_FAILURES = 3        # consecutive failures -> auto-disable
 SCRIPT_MAX_PER_PASS = 20       # hard ceiling per consolidation tick
@@ -631,8 +640,18 @@ _SCRIPT_TIMEOUTS = {"consolidation": SCRIPT_TIMEOUT_S,
                     "mention": 0.25,
                     # the clock organ's pace: the hum's 1s heartbeat is
                     # the trigger, the budget stays sub-perception
-                    "tick": 0.25}
+                    "tick": 0.25,
+                    # the autonode's trigger (membrane/autonode.py): the
+                    # BOUNDED POOL (4 threads) is the real limit -- this
+                    # budget only strikes the 3-strikes lane on overrun,
+                    # the thread cannot be killed
+                    "watch": 10.0}
 _SCRIPT_COOLDOWN_DEFAULT_S = 60.0
+# The watch trigger's own, gentler default: a 60s cooldown would make a
+# watcher a per-minute organ -- dead for the thing it exists for. 5s
+# coalesces file churn while staying responsive; the real flood guards
+# are the 10s tell window, the 4-worker pool and the 64-place backlog.
+_SCRIPT_COOLDOWN_WATCH_S = 5.0
 
 
 # THE CLOCK (the operator's 2026-10-01 ask): ONE seeded entity whose
@@ -679,7 +698,8 @@ def _cooldown_ok(props: dict, trigger: str, now: float) -> bool:
     mentioned constantly) cannot exec every tick. properties
     ['script_cooldown_s'] overrides downward-only (the operator's knob)."""
     last = ((props.get("script_cooldowns") or {}).get(trigger) or 0.0)
-    cd = _SCRIPT_COOLDOWN_DEFAULT_S
+    cd = (_SCRIPT_COOLDOWN_WATCH_S if trigger == "watch"
+          else _SCRIPT_COOLDOWN_DEFAULT_S)
     try:
         cd = min(cd, float((props.get("script_cooldown_s") or cd)))
     except (TypeError, ValueError):
@@ -718,6 +738,8 @@ def run_entity_update_script(srv, ent, trigger: str,
         code = props.get("nudge_script")
     elif trigger == "tick":
         code = props.get("tick_script")
+    elif trigger == "watch":
+        code = props.get("watch_script")
     if not code:
         return {"error": "no script"}
     now = time.time()
@@ -955,13 +977,22 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
                 except Exception:
                     pass
     if changed and not silent:
-        # the applied render/patch is field news too (what the entity's
-        # own organ decided about itself)
-        what = (('render: ' + (props.get("script_render") or '')[:140])
-                if out.get("render") else
-                'patch: ' + ", ".join(sorted(out.get("patch") or {}))[:140])
-        _script_tell(getattr(srv, "efield", None), ent.eid, trigger,
-                     True, f"its {trigger} script applied {what}")
+        # THE WATCH WINDOW (the autonode's churn guard): a hot file
+        # tree (or a script_cooldown_s=0 watcher) would flood the field
+        # corpus -- ONE apply-tell per eid per 10s window; the event
+        # cadence is still bounded by the script cooldown above.
+        if trigger == "watch" and not _watch_tell_ok(ent.eid):
+            pass
+        else:
+            # the applied render/patch is field news too (what the entity's
+            # own organ decided about itself)
+            what = (('render: ' + (props.get("script_render") or '')[:140])
+                    if out.get("render") else
+                    'patch: ' + ", ".join(sorted(out.get("patch") or {}))[:140])
+            _script_tell(getattr(srv, "efield", None), ent.eid, trigger,
+                         True, f"its {trigger} script applied {what}")
+            if trigger == "watch":
+                _WATCH_TELL_TS[ent.eid] = time.time()
     if changed and not silent:
         from .opencode import _write_audit
         _write_audit(getattr(srv, "membrane", None),

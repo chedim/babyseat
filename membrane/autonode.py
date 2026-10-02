@@ -1,0 +1,462 @@
+"""THE AUTONODE (the operator's 2026-10-01 design: 'the model should be
+the one who writes those watcher scripts').
+
+A seat watches its world. Not source-specifically: collectors differ,
+dispatch doesn't. A file appears, an MQTT topic speaks, a signal
+arrives -- each lands on the same bounded queue as one ``Trigger``,
+and every ENTITY carrying a ``watch_script`` whose ``watch`` prop
+selects the trigger fires. The scripts are authored through the same
+entity edit surface as the clock's tick_script; watching starts by
+``membrane_entity_edit(eid, watch_script=..., watch={...})``.
+
+THE BLOCKING TRADE (the honest one): watch scripts may block --
+subprocesses, sleeps, network reads. Threads cannot be killed, so the
+bounds are: a ThreadPoolExecutor of TRIGGER_WORKERS (4) -- at most 4
+scripts may wedge at once --, a fire budget WATCH_TIMEOUT_S whose
+overrun STRIKES the script (the usual 3-strikes lane) but cannot stop
+the thread (its result still applies when it finally lands), and a
+drop-oldest backlog TRIGGER_BACKLOG (64) -- a burst of churn can never
+wedge the seat or flood the room. Hard-kill would need subprocess
+isolation; the pool is the limit that's real.
+
+The seeded ``tool:filetree`` entity is the template the model copies.
+"""
+
+import fnmatch
+import os
+import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from .codegraph import _SKIP_DIRS as SKIP_DIRS, _MAX_FILES
+
+MEMBRANE_AUTONODE_SCAN_S = float(
+    os.environ.get("MEMBRANE_AUTONODE_SCAN_S") or 2.0)
+TRIGGER_WORKERS = 4            # how many (possibly blocking) scripts at once
+TRIGGER_BACKLOG = 64           # queued triggers before drop-oldest bites
+WATCH_TIMEOUT_S = 10.0         # a fire's budget; overrun strikes, not kills
+WATCH_TELL_MIN_S = 10.0        # the field's churn guard (night.py owns it)
+
+# The seat's own runtime files (beside the watched tree when the seat is
+# started from its seat dir) -- the scanner never emits them.
+_OWN_NAMES = {"entities.json", "field.json"}
+
+
+# ---- the generic model ------------------------------------------------------
+
+@dataclass
+class Trigger:
+    kind: str                      # file | mqtt | signal
+    payload: dict = field(default_factory=dict)
+    ts: float = field(default_factory=time.time)
+
+
+def watcher_matches(props: dict, trig: Trigger) -> bool:
+    """The CHEAP pre-filter per fire (the script does the real reading):
+    kind required (absent watch prop defaults to 'file'), plus the
+    optional glob/topic/name narrowing. Script presence + disabled/retired
+    state is the census's AND the retired guard's (a stale watcher can't
+    fire); the watch_script census lives in Autonode._watchers."""
+    if props.get("script_disabled") or props.get("retired"):
+        return False
+    w = props.get("watch")
+    w = w if isinstance(w, dict) else {}
+    kind = str(w.get("kind") or "file")
+    if kind != str(trig.kind):
+        return False
+    p = trig.payload or {}
+    if trig.kind == "file":
+        globs = w.get("glob")
+        path = str(p.get("path") or "")
+        if globs:
+            pats = [globs] if isinstance(globs, str) else list(globs)
+            if not any(fnmatch.fnmatch(path, str(g)) for g in pats):
+                return False
+    elif trig.kind == "mqtt":
+        topic = str(w.get("topic") or "")
+        if topic and not str(p.get("topic") or "").startswith(topic):
+            return False
+    elif trig.kind == "signal":
+        name = str(w.get("name") or "")
+        if name and str(p.get("name") or "") != name:
+            return False
+    return True
+
+
+# ---- collector 1: the file tree (fingerprint poll, no watchdog dep) --------
+
+class FileTreeScanner:
+    """A recursive (mtime_ns, size) fingerprint poll -- the ledger and
+    codegraph's scheme. The FIRST scan primes the baseline (no flood of
+    'created' at boot); afterwards every diff is one Trigger per file."""
+
+    def __init__(self, root: Path):
+        self.root = Path(root)
+        self._fps: dict[str, tuple[int, int]] = {}
+        self._primed = False
+
+    def scan(self) -> list[Trigger]:
+        fps: dict[str, tuple[int, int]] = {}
+        root = self.root
+        try:
+            for dirpath, dirnames, filenames in os.walk(root, topdown=True):
+                dirnames[:] = [dn for dn in dirnames
+                               if dn not in SKIP_DIRS and
+                               not dn.startswith(".")]
+                if len(fps) >= _MAX_FILES:
+                    break
+                for fn in filenames:
+                    # THE FEEDBACK GUARD (found in the boot smoke): the
+                    # seat's own state files churn every apply -- watching
+                    # them is the watcher reporting its own reporting. The
+                    # .membrane dot-dir is skipped above.
+                    if fn in _OWN_NAMES or fn.startswith("serve-") or \
+                            fn.endswith(".seed.json"):
+                        continue
+                    fp = Path(dirpath) / fn
+                    rel = str(fp.relative_to(root))
+                    try:
+                        st = fp.stat()
+                    except OSError:
+                        continue
+                    fps[rel] = (st.st_mtime_ns, st.st_size)
+        except Exception as e:
+            print(f"[autonode] scan failed ({str(e)[:60]})", file=sys.stderr)
+            return []
+        if not self._primed:
+            self._fps, self._primed = fps, True
+            return []
+        ts = []
+        old = self._fps
+        for rel, fp in fps.items():
+            if rel not in old:
+                ts.append(Trigger("file", {"event": "created",
+                                           "path": rel}))
+            elif old[rel] != fp:
+                ts.append(Trigger("file", {"event": "changed",
+                                           "path": rel,
+                                           "mtime_ns": fp[0],
+                                           "size": fp[1]}))
+        for rel in old:
+            if rel not in fps:
+                ts.append(Trigger("file", {"event": "deleted",
+                                           "path": rel}))
+        self._fps = fps
+        return ts
+
+
+# ---- collector 2 + 3 live in the Autonode (bus subscriptions, signals) ------
+
+class Autonode:
+    """The runner: one daemon thread ('membrane-autonode') driving the
+    scanner tick, the queue, the bounded pool and the subscription sync.
+    All decisions stay test-steppable through pump()."""
+
+    def __init__(self, srv, est, root: Path | None = None,
+                 bus=None, scan_s: float = MEMBRANE_AUTONODE_SCAN_S,
+                 backlog: int = TRIGGER_BACKLOG,
+                 workers: int = TRIGGER_WORKERS,
+                 fire_timeout: float = WATCH_TIMEOUT_S):
+        self.srv = srv
+        self.est = est
+        self.root = Path(root) if root is not None else None
+        self.scan_s = max(0.5, float(scan_s))
+        self.fire_timeout = float(fire_timeout)
+        self.workers = max(1, int(workers))
+        self.scanner = FileTreeScanner(self.root) if self.root else None
+        self.bus = bus
+        self._subs: set[str] = set()
+        self._active = 0                      # scripts running right now
+        self._lock = threading.Lock()
+        self._pending: dict = {}              # future -> {eid, start, struck}
+        self._last_scan = 0.0
+        self.q = self._DropQ(backlog)
+        self.pool = ThreadPoolExecutor(max_workers=self.workers,
+                                       thread_name_prefix="membrane-autonode")
+        self.alive = True
+        self._thread: threading.Thread | None = None
+
+    # ---- the queue (drop-oldest, a burst cannot wedge or flood) ----------
+    class _DropQ:
+        def __init__(self, maxsize: int):
+            self._max = max(1, int(maxsize))
+            self._items: list = []
+            self._lk = threading.Lock()
+
+        def put(self, t) -> None:
+            with self._lk:
+                if len(self._items) >= self._max:
+                    self._items.pop(0)        # drop-OLDEST
+                self._items.append(t)
+
+        def qsize(self) -> int:
+            with self._lk:
+                return len(self._items)
+
+        def drain(self) -> list:
+            with self._lk:
+                out, self._items = self._items, []
+                return out
+
+        def get_nowait(self):
+            with self._lk:
+                return self._items.pop(0) if self._items else None
+
+    def backlog_size(self):
+        return self.q.qsize()
+
+    @property
+    def active(self) -> int:
+        """The scripts running RIGHT NOW -- never above TRIGGER_WORKERS."""
+        return self._active
+
+    # ---- collectors ------------------------------------------------------
+    def dispatch(self, trig: Trigger) -> None:
+        self.q.put(trig)
+
+    def sync_subscriptions(self) -> None:
+        """The MQTT lane: one subscription per DISTINCT topic pattern any
+        active mqtt-watcher declares. Never raises into the caller's
+        thread (paho drives its own network thread)."""
+        if self.bus is None:
+            return
+        want = set()
+        try:
+            for e in self._watchers():
+                w = (e.properties or {}).get("watch")
+                w = w if isinstance(w, dict) else {}
+                if str(w.get("kind") or "file") == "mqtt" and w.get("topic"):
+                    want.add(str(w["topic"]))
+        except Exception:
+            return
+        for topic in sorted(want - self._subs):
+            try:
+                self.bus.subscribe(topic, self._on_msg)
+                self._subs.add(topic)
+            except Exception as e:
+                print(f"[autonode] subscribe {topic} failed "
+                      f"({str(e)[:60]})", file=sys.stderr)
+
+    def _on_msg(self, topic: str, payload) -> None:
+        """The paho-callback lane -- drop a Trigger; NEVER raise."""
+        try:
+            pure = topic[len("membrane/"):] if topic.startswith(
+                "membrane/") else topic
+            if not isinstance(payload, (dict, str, int, float, bool)):
+                payload = ""
+            self.q.put(Trigger("mqtt", {"topic": pure, "payload": payload}))
+        except Exception:
+            pass
+
+    def install_signals(self) -> None:
+        """The signal lane: SIGUSR1 nudges the watchers (SIGINT/SIGTERM
+        stay teardown-only)."""
+        import signal as sg
+
+        def _on(_s, _f):
+            try:
+                self.q.put(Trigger("signal", {"name": "SIGUSR1"}))
+            except Exception:
+                pass
+        try:
+            sg.signal(sg.SIGUSR1, _on)
+        except Exception:
+            pass
+
+    # ---- the watcher census ----------------------------------------------
+    def _watchers(self) -> list:
+        out = []
+        try:
+            for e in (self.est.docs or {}).values():
+                p = e.properties or {}
+                if p.get("watch_script"):
+                    out.append(e)
+        except Exception:
+            return []
+        return out
+
+    def _file_watch(self) -> bool:
+        try:
+            for e in self._watchers():
+                p = e.properties or {}
+                if p.get("script_disabled") or p.get("retired"):
+                    continue
+                w = p.get("watch")
+                w = w if isinstance(w, dict) else {}
+                if str(w.get("kind") or "file") == "file":
+                    return True
+        except Exception:
+            return False
+        return False
+
+    # ---- the bounded fire ------------------------------------------------
+    def _fire(self, eid: str, trig: Trigger) -> dict:
+        try:
+            ent = (self.est.docs or {}).get(eid)
+            if ent is None:
+                return {"applied": 0}
+            from .night import (apply_entity_update,
+                                run_entity_update_script)
+            extra = dict(trig.payload)
+            extra.setdefault("payload", trig.payload)
+            extra["kind"] = trig.kind
+            out = run_entity_update_script(self.srv, ent, "watch",
+                                           extra_state=extra)
+            if not out.get("error"):
+                apply_entity_update(self.srv, ent, out, "watch",
+                                    silent=False)
+            return out
+        except Exception as e:
+            return {"error": f"fire failed: {type(e).__name__}: {e}"[:200]}
+
+    def pump(self) -> None:
+        """One duty pass: scan (gated), reap the strays, dispatch what
+        the slots allow. The runner thread calls this; tests call it
+        directly."""
+        now = time.time()
+        if self.scanner is not None and self._file_watch() and \
+                now - self._last_scan >= self.scan_s:
+            self._last_scan = now
+            try:
+                for t in self.scanner.scan():
+                    self.q.put(t)
+            except Exception as e:
+                print(f"[autonode] scanner tick failed ({e})",
+                      file=sys.stderr)
+        self._reap(now)
+        self.sync_subscriptions()
+        # the submit lane: while a slot is free, take one trigger and
+        # fire every watcher it matches (up to the free slots)
+        watchers = self._watchers()
+        while self._active < self.workers:
+            trig = self.q.get_nowait()
+            if trig is None:
+                break
+            for e in watchers:
+                if self._active >= self.workers:
+                    break
+                if not watcher_matches(e.properties or {}, trig):
+                    continue
+                with self._lock:
+                    self._active += 1
+                fut = self.pool.submit(self._fire, e.eid, trig)
+                self._pending[fut] = {"eid": e.eid,
+                                      "start": now, "struck": False}
+
+    def _reap(self, now: float) -> None:
+        """Strays: a fire past its budget strikes ONCE (the thread can't
+        be killed -- its result still applies when it lands)."""
+        for fut, info in list(self._pending.items()):
+            if fut.done():
+                try:
+                    res = fut.result()
+                    if isinstance(res, dict) and res.get("error") and \
+                            res["error"] != "cooldown":
+                        # cooldown is a NORMAL gate refusal -- never a
+                        # failure print (the smoke showed it spamming)
+                        print(f"[autonode] fire {info['eid']}: "
+                              f"{str(res['error'])[:120]}", file=sys.stderr)
+                except Exception as e:
+                    print(f"[autonode] fire {info['eid']} failed "
+                          f"({str(e)[:80]})", file=sys.stderr)
+                with self._lock:
+                    self._active -= 1
+                self._pending.pop(fut, None)
+            elif not info["struck"] and \
+                    now - info["start"] > self.fire_timeout:
+                info["struck"] = True
+                try:
+                    from .night import _script_record_fail
+                    ent = (self.est.docs or {}).get(info["eid"])
+                    if ent is not None:
+                        _script_record_fail(
+                            getattr(self.srv, "efield", None), self.est,
+                            ent, ent.eid, "watch",
+                            f"watch-fire overrun (budget "
+                            f"{self.fire_timeout}s) -- the thread cannot "
+                            f"be killed, the result still applies",
+                            mem=getattr(self.srv, "membrane", None))
+                except Exception as e:
+                    print(f"[autonode] overrun strike failed ({e})",
+                          file=sys.stderr)
+
+    def join_fires(self, timeout: float = 5.0) -> bool:
+        """Test/teardown hook: wait for every pending fire's future."""
+        import concurrent.futures as cf
+        futs = list(self._pending)
+        if not futs:
+            return True
+        done, _ = cf.wait(futs, timeout=timeout)
+        for fut in done:
+            self._pending.pop(fut, None)
+            with self._lock:
+                self._active -= 1
+            try:
+                fut.result()
+            except Exception:
+                pass
+        return not self._pending
+
+    def run(self) -> None:
+        """The daemon loop (the clock's heartbeat pattern, own thread)."""
+        while self.alive:
+            try:
+                self.pump()
+            except Exception as e:
+                print(f"[autonode] loop skipped ({str(e)[:80]})",
+                      file=sys.stderr)
+            time.sleep(min(1.0, self.scan_s))
+
+    def start(self) -> threading.Thread:
+        t = threading.Thread(target=self.run, name="membrane-autonode",
+                             daemon=True)
+        t.start()
+        self._thread = t
+        return t
+
+    def close(self) -> None:
+        self.alive = False
+        try:
+            self.pool.shutdown(wait=False, cancel_futures=True)
+        except Exception:
+            pass
+
+
+# ---- the seeded template ----------------------------------------------------
+
+DEFAULT_FILETREE_WATCH_SCRIPT = (
+    "import time as _t\n"
+    "x = state.get('extra') or {}\n"
+    "py = x.get('payload') or {}\n"
+    "ev = py.get('event') or x.get('kind') or '?'\n"
+    "pth = py.get('path') or py.get('topic') or py.get('name') or ''\n"
+    "result = {'render': 'filetree: ' + str(ev) + ' ' + str(pth),\n"
+    "          'patch': {'last_change': {'event': str(ev),\n"
+    "                                    'path': str(pth),\n"
+    "                                    'ts': _t.time()}}}"
+)
+
+
+def seed_filetree_entity(est) -> bool:
+    """The boot seeding: plant `tool:filetree` ONCE (idempotent -- a
+    model-rewritten watcher survives every restart). The template the
+    model copies when it wants anything else watched."""
+    if est is None:
+        return False
+    from .entities import (CLASS_TOOL, MEMBRANE_NS, QuantumEntity)
+    eid = MEMBRANE_NS + "tool:filetree"
+    if eid in (est.docs or {}):
+        return False
+    est.upsert(QuantumEntity(eid=eid, cls=CLASS_TOOL, properties={
+        "name": "filetree",
+        "watch_script": DEFAULT_FILETREE_WATCH_SCRIPT,
+        "watch": {"kind": "file"},
+        "silent_birth": True}))
+    try:
+        est.flush()
+    except Exception:
+        pass
+    return True

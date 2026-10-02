@@ -322,6 +322,34 @@ TOOLS: list[dict] = [
                                                "'result'. The seat's own "
                                                "clock (tool:clock) is "
                                                "seeded with one."},
+                "watch_script": {"type": "string",
+                                 "description": "python; the AUTONODE's "
+                                                "watcher body -- runs when "
+                                                "an external event this "
+                                                "entity watches arrives "
+                                                "(file changes under the "
+                                                "seat dir, MQTT topics, "
+                                                "signals). May block but "
+                                                "only 4 run at once, a >"
+                                                "10s fire strikes the "
+                                                "3-strikes lane (the "
+                                                "thread can't be killed). "
+                                                "The trigger's payload "
+                                                "rides state.extra"
+                                                ".payload (path/event/"
+                                                "topic/name); the seeded "
+                                                "tool:filetree is the "
+                                                "template."},
+                "watch": {"type": "object",
+                          "description": "what external events fire the "
+                                         "watch_script: {kind: "
+                                         "'file'|'mqtt'|'signal', "
+                                         "glob/topic/name optional "
+                                         "narrowing -- the CHEAP "
+                                         "pre-filter; the script does "
+                                         "the real filtering}. "
+                                         "kind 'file' is the default "
+                                         "for any watcher without one."},
                 "properties": {"type": "object",
                                "description": "bounded property patch "
                                               "(the model's write path "
@@ -744,7 +772,7 @@ def tool_entity_edit(args: dict, port: int) -> str:
     for f in ("summary", "links", "class", "merged_into",
               "nudge_script", "delete_script",
               "mention_script", "thought_script", "dreamed_script",
-              "tick_script", "properties"):
+              "tick_script", "watch_script", "watch", "properties"):
         if args.get(f) is not None:
             body[f] = args[f]
     for f in ("publish", "unpublish"):        # the tier-2 gestures
@@ -783,6 +811,14 @@ def tool_entity_edit(args: dict, port: int) -> str:
                 f"script now fires on the thinker's ~1s heartbeat "
                 f"(paced by the entity's `tick_every` property, "
                 f"cooldown-free, 0.25s budget). Empty string clears it.")
+    if args.get("watch_script") is not None:
+        return (f"Entity {out['eid']} is a WATCHER now -- its "
+                f"watch_script fires when an external event arrives "
+                f"(file changes under the seat dir, MQTT topics, "
+                f"signals; the trigger's payload rides state.extra"
+                f".payload). Watchers may block but only 4 run at "
+                f"once, a >10s fire strikes (3 = auto-disabled). "
+                f"The seeded tool:filetree is the template.")
     return (f"Entity {out['eid']} updated: class {out.get('class')}, "
             f"summary {out.get('summary')!r}, links {out.get('links')}.")
 

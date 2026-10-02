@@ -5290,6 +5290,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                        thought_script=body.get("thought_script"),
                        dreamed_script=body.get("dreamed_script"),
                        tick_script=body.get("tick_script"),
+                       watch_script=body.get("watch_script"),
+                       watch=body.get("watch"),
                        properties=body.get("properties"),
                        publish=bool(body.get("publish")),
                        unpublish=bool(body.get("unpublish")))
@@ -5811,6 +5813,8 @@ def main() -> None:
                     help="don't absorb external-agent sessions on boot")
     ap.add_argument("--new-session", action="store_true",
                     help="skip absorption AND resume: start fresh")
+    ap.add_argument("--no-autonode", action="store_true",
+                    help="don't run the trigger layer (no file watchers)")
     ap.add_argument("passthrough", nargs="*",
                     help="extra args passed to opencode (use -- to separate)")
     args = ap.parse_args()
@@ -6069,6 +6073,35 @@ def main() -> None:
                       "the thinker's pulse carries it up)", file=sys.stderr)
         except Exception as e:
             print(f"[seat] presence seeding skipped ({e})", file=sys.stderr)
+        # THE AUTONODE (the operator's 2026-10-01 design): seed the
+        # filetree template, then run the trigger layer -- file metadata
+        # under the starting dir, MQTT topics, signals -- firing every
+        # watcher entity's watch_script. Degrades never raising (the
+        # seat works without watchers); --no-autonode opts out.
+        try:
+            from .autonode import seed_filetree_entity
+            if seed_filetree_entity(srv.entity_store):
+                print("[seat] the filetree watcher is planted "
+                      "(tool:filetree -- give any entity a watch_script "
+                      "to watch like it)", file=sys.stderr)
+        except Exception as e:
+            print(f"[seat] filetree seeding skipped ({e})", file=sys.stderr)
+        srv.autonode = None
+        if not args.no_autonode:
+            try:
+                from .autonode import Autonode
+                srv.autonode = Autonode(srv, srv.entity_store,
+                                        root=os.getcwd(),
+                                        bus=getattr(srv, "_event_bus",
+                                                    None))
+                srv.autonode.install_signals()
+                srv.autonode.start()
+                print("[seat] the autonode is listening (file/mqtt/"
+                      "signal triggers -> watcher entities; --no-autonode "
+                      "to silence)", file=sys.stderr)
+            except Exception as e:
+                srv.autonode = None
+                print(f"[seat] autonode off ({e})", file=sys.stderr)
         # THE PEER SUBSTRATES (the operator's design): the proxy REGISTRY
         # (ephemeral bucket, TTL docs, heartbeats -- who else is connected)
         # + the PEER CHANNEL (permanent, a chat lane between the LLMs,
@@ -6767,6 +6800,14 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\n[membrane-opencode] bye", file=sys.stderr)
     finally:
+        # THE AUTONODE'S TEARDOWN: stop the trigger layer before the field
+        # flushes below (a half-landed fire then never writes into a
+        # closing backend).
+        try:
+            if getattr(srv, "autonode", None) is not None:
+                srv.autonode.close()
+        except Exception:
+            pass
         # THE SEED PERSISTENCE (the personalized field's enabler):
         # session:now is RAM-only by covenant (never a shared doc), but
         # the seat's OWN seed file is the boot's neighborhood center: the

@@ -1860,6 +1860,7 @@ class EntityStore(MultiParentOps, TimelineOps):
              delete_script=None, mention_script=None,
              thought_script=None, dreamed_script=None,
              tick_script=None,
+             watch_script=None, watch: dict | None = None,
              properties: dict | None = None,
              publish: bool = False, unpublish: bool = False) -> dict:
         """Model-side entity EDIT: patch summary/links/class on the
@@ -1925,6 +1926,13 @@ class EntityStore(MultiParentOps, TimelineOps):
                                 # clock organ; cooldown-free, paced by
                                 # the entity's own `tick_every` prop)
                                 ("tick_script", tick_script,
+                                 SCRIPT_MAX_NUDGE),
+                                # the autonode trigger (the operator's
+                                # 2026-10-01 ask: the model authors its
+                                # own watchers) -- fires on external
+                                # events (file/mqtt/signal) through the
+                                # bounded pool
+                                ("watch_script", watch_script,
                                  SCRIPT_MAX_NUDGE)):
             if val is None:
                 continue
@@ -1944,6 +1952,18 @@ class EntityStore(MultiParentOps, TimelineOps):
                 ent.properties.pop("script_failures", None)
                 if field == "nudge_script":
                     ent.properties.pop("script_render", None)
+        # THE WATCH SELECTOR (the autonode): what external events fire
+        # this entity's watch_script -- {kind: file|mqtt|signal, plus
+        # the optional glob/topic/name narrowing}. This is the CHEAP
+        # pre-filter; the script does the real filtering. Empty dict
+        # clears it.
+        if watch is not None:
+            if isinstance(watch, dict) and watch:
+                ent.properties["watch"] = {
+                    str(k)[:40]: (v if k == "glob" else str(v)[:120])
+                    for k, v in list(watch.items())[:8]}
+            else:
+                ent.properties.pop("watch", None)
         # THE PROPERTY PATCH (the model's write path for goal state):
         # bounded like the script-patch contract -- <=16 keys, 2000-char
         # values, the engine's script_* keys and another entity's keys
