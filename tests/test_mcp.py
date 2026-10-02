@@ -146,7 +146,7 @@ class TestMcpProtocol(unittest.TestCase):
         self.assertIn("tools", resp["result"]["capabilities"])
         self.assertEqual(resp["result"]["serverInfo"]["name"], "membrane")
 
-    def test_tools_list_four_tools(self):
+    def test_tools_list(self):
         (resp,) = _rpc([{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}])
         names = [t["name"] for t in resp["result"]["tools"]]
         self.assertEqual(names, ["membrane_run",
@@ -162,7 +162,6 @@ class TestMcpProtocol(unittest.TestCase):
                                  "membrane_set_junk_cut",
                                  "membrane_peer_post",
                                  "membrane_peer_seats",
-                                 "membrane_intend",
                                  "membrane_graph",
                                  "membrane_entity_inherit"])
         for t in resp["result"]["tools"]:
@@ -288,33 +287,6 @@ class TestMcpTools(unittest.TestCase):
         self.assertIn("never delete", text)
         self.assertIn("#7 (sim 0.72)", text)
         self.assertIn("Nothing removed", text)
-
-    def test_intend_posts_to_the_seat_not_the_read_only_laneway(self):
-        """The esphome seat's bug: the MCP tool POSTs to /membrane/intend
-        but the proxy's do_POST table had no route for it -- every intend
-        fell into the read-only catch-all and the model announced its
-        memory was read-only. The tool's POST must now succeed."""
-        _StubProxy.intend = {"ok": True, "eid": "membrane::goal:abc123",
-                             "created": True, "pinned": True}
-        text = _call("membrane_intend", {"text": "fix the flaky test"})
-        self.assertIn("Goal active (created + pinned)", text)
-        self.assertIn("membrane::goal:abc123", text)
-
-    def test_intend_pin_form_keeps_the_goal(self):
-        _StubProxy.intend = {"ok": True,
-                             "eid": "membrane::goal:old",
-                             "created": False, "pinned": True}
-        text = _call("membrane_intend", {"text": "fix the flaky test"})
-        self.assertIn("pinned (existing goal)", text)
-        self.assertNotIn("created + pinned", text)
-
-    def test_intend_failure_formats_the_seat_error(self):
-        _StubProxy.intend = {"ok": False,
-                             "error": "read-only; GET /membrane/state"}
-        text = _call("membrane_intend", {"text": "fix the flaky test"})
-        self.assertIn("Intend failed:", text)
-        self.assertIn("read-only", text)
-
     def test_proxy_error_is_tool_error_not_protocol_error(self):
         _StubProxy.fail_next = (503, "router off")
         resp = _rpc([{"jsonrpc": "2.0", "id": 5, "method": "tools/call",

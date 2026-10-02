@@ -426,6 +426,5 @@ against the high-variety store reads as in-manifold (gate acts).
 Working lab, in daily use on its own development (dogfooded: this repo's own
 field learned the codebase while it was being written — the backfilled field
 answers `membrane state` with ~14k live entities, and its background mind
-digests, dreams, and speaks about its own work). Not yet
-version-released; API and flag surfaces may move. **Private project** — no
+digests, dreams, and speaks about its own work). Version **0.2.0b1** — the first beta-testing release; API and flag surfaces may still move. **Private project** — no
 license yet; all rights reserved by the author.

@@ -47,3 +47,19 @@ itll-pave-us.html
 :memory:.*
 # the entity side-index, same mechanism (a boot/smoke from the repo root)
 entities.json
+serve-*.json
+pytest-beta.log
+
+# serve-lane runtime stores + credentials (never source, never commit)
+serve-*.json
+# edit-time backup copies (*.bak-foot, *.bak-m, *.bak-delta)
+*.bak-*
+# json atomic-write temporaries
+*.tmp
+
+# serve-lane runtime stores + credentials (never source, never commit)
+serve-*.json
+# edit-time backup copies (*.bak-foot, *.bak-m, *.bak-delta)
+*.bak-*
+# json atomic-write temporaries
+*.tmp

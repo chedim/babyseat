@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "membrane"
-version = "0.1.0"
+version = "0.2.0b1"
 description = "A local-first memory field for coding agents: RAG + learning gate + thermodynamics, served through an OpenAI-compatible proxy."
 readme = "README.md"
 requires-python = ">=3.10"
