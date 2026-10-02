@@ -51,7 +51,7 @@ import numpy as np
 
 from .embed import OllamaEmbedder
 from .global_field import PEER_ASK_SIM_MIN
-from .rag import (RAGProxyHandler, _clip, _inject,
+from .rag import (RAGProxyHandler, _clip, _inject, _inject_after,
                   _model_chat, doctrine_instructions_text)
 from .router import (EXPLORE_LANE, AUTO_CLOUD, AUTO_LOCAL, AUTO_LANES,
                      AUTO_ALIASES, LANE_TOKENS, normalize_lane,
@@ -4338,9 +4338,14 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             except Exception:
                 pass
         srv._pending_speech_label = None
+        # THE SPEECH FOOTER (the model response rides the bottom): the
+        # [membrane-says] batch is carried in this scope and injected
+        # AFTER the last user turn (the transcript's bottom edge), not
+        # as the tail of the ctx block that sits ABOVE the user's
+        # message. The relay contract (the model re-utters marked lines
+        # into the conversation) and the reinforcement label are
+        # unchanged.
         speak_block = _speak_block(srv)
-        if speak_block:
-            ctx = (ctx + "\n\n" + speak_block) if ctx else speak_block
         up = dict(body)
         if getattr(srv, "no_context", False):
             # THE STATELESS LLM (the field is the only memory): strip the
@@ -4432,6 +4437,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             except Exception as e:
                 print(f"[opencode] peer-ask error (ignored): {e}",
                       file=sys.stderr)
+        # THE SPEECH FOOTER INJECTION: the last block of all -- below
+        # the user's turn, so the speech is the bottom edge of the
+        # transcript and the model's response begins right under it.
+        if speak_block:
+            _msgs = up.get("messages") or (body.get("messages") or [])
+            up["messages"] = _inject_after(_msgs, speak_block)
         # ---- the orchestration router: model-vs-model on escalations ----
         # Score proposes (fit_hat - delay - price); the REVERSED cost-floor
         # disposes (cheapest eligible cloud holds the floor; locals must

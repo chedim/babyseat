@@ -986,7 +986,7 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
         else:
             # the applied render/patch is field news too (what the entity's
             # own organ decided about itself)
-            what = (('render: ' + (props.get("script_render") or '')[:140])
+            what = (('render: ' + (props.get("script_render") or '')[:220])
                     if out.get("render") else
                     'patch: ' + ", ".join(sorted(out.get("patch") or {}))[:140])
             _script_tell(getattr(srv, "efield", None), ent.eid, trigger,

@@ -54,6 +54,107 @@ class Trigger:
     ts: float = field(default_factory=time.time)
 
 
+# ---- THE DELTA-RENDER CONTRACT (the engine runs the diff) ------------------
+# A watcher opting in with result['delta']=True gets ITS OWN geometry
+# diffed by the engine against the persisted _delta_prev props stash --
+# no per-script bookkeeping, and the entity doc's true vocabulary
+# (position / ring_velocity / trajectory ring / status), never guessed
+# accessors. No delta -> empty render -> a no-op apply (no tell: the
+# debounce lives HERE). result['delta'] may also be a dict of extra
+# metrics to snapshot alongside the defaults. A big velocity jump
+# speaks (planner-gated, opencode.speak; per-entity speak_thresh).
+
+def _geometry_snap(ent) -> dict:
+    snap = {}
+    try:
+        pos = ent.position or []
+        snap["pos"] = ",".join(f"{float(x):.2f}" for x in pos[:3])
+        snap["dim"] = len(pos)
+    except Exception:
+        pass
+    try:
+        snap["vel"] = round(float(ent.ring_velocity(time.time())), 3)
+    except Exception:
+        pass
+    try:
+        snap["ring"] = len(getattr(ent, "position_history", None) or [])
+    except Exception:
+        pass
+    try:
+        snap["status"] = str((ent.properties or {}).get("status") or "")[:40]
+    except Exception:
+        pass
+    return snap
+
+
+def _delta_string(prev, cur, eps: float = 0.02) -> str:
+    parts = []
+    for k in sorted(cur):
+        a = (prev or {}).get(k)
+        b = cur[k]
+        if a is None:
+            parts.append(f"{k}={b}")
+            continue
+        try:
+            fa, fb = float(a), float(b)
+            if abs(fb - fa) >= eps:
+                parts.append(f"{k} {fa}->{fb}")
+            continue
+        except (TypeError, ValueError):
+            pass
+        if str(a) != str(b):
+            sa, sb = str(a), str(b)
+            if len(sa) + len(sb) > 48:
+                sa, sb = sa[:20], sb[:20]
+            parts.append(f"{k} {sa}->{sb}")
+    return "; ".join(parts)
+
+
+def _delta_apply(srv, ent, out, trig) -> None:
+    "The engine-side delta: snapshot, diff, render, stash, big-jump speak."
+    props = ent.properties or {}
+    prev = props.get("_delta_prev")
+    prev = prev if isinstance(prev, dict) else {}
+    cur = _geometry_snap(ent)
+    extra = out.get("delta")
+    if isinstance(extra, dict):
+        for k, v in list(extra.items())[:8]:
+            try:
+                cur[str(k)[:24]] = round(float(v), 3)
+            except Exception:
+                pass
+    dstr = _delta_string(prev, cur)
+    if not dstr:
+        # NOTHING moved: a pure delta watcher stays silent (no
+        # tell), but a script with its own render keeps it -- a
+        # real event with an unmoved geometry keeps its voice.
+        if not str(out.get("render") or ""):
+            out["render"] = ""
+        return
+    pl = getattr(trig, "payload", None) or {}
+    sub = str(pl.get("path") or pl.get("topic") or pl.get("name") or "")
+    sub = sub.rsplit("/", 1)[-1][:32]
+    dline = "delta: " + dstr + " [" + str(getattr(trig, "kind", "watch"))
+    if sub:
+        dline += ":" + sub
+    dline += "]"
+    old_r = str(out.get("render") or "")
+    out["render"] = (dline + ((" | " + old_r) if old_r else ""))[:600]
+    pd = out.get("patch") if isinstance(out.get("patch"), dict) else {}
+    pd = dict(pd)
+    pd["_delta_prev"] = cur
+    out["patch"] = pd
+    try:
+        vd = abs(float(cur.get("vel", 0.0)) - float(prev.get("vel", 0.0)))
+        th = float(props.get("speak_thresh", 0.3))
+        if prev and vd >= th:
+            from .opencode import speak
+            speak(srv, "delta-jump: " + str(ent.eid) + " " + dline[:160],
+                  kind="report-state")
+    except Exception:
+        pass
+
+
 def watcher_matches(props: dict, trig: Trigger) -> bool:
     """The CHEAP pre-filter per fire (the script does the real reading):
     kind required (absent watch prop defaults to 'file'), plus the
@@ -306,8 +407,16 @@ class Autonode:
             out = run_entity_update_script(self.srv, ent, "watch",
                                            extra_state=extra)
             if not out.get("error"):
+                # THE DELTA-RENDER CONTRACT: opt in with
+                # result['delta']=True -> the engine diffs, renders and
+                # stashes; result['silent']=True rides the apply's
+                # silence lever.
+                # delta opt-in: the script's result['delta']=True
+                # flag OR the entity's delta_render prop.
+                if out.get("delta") or (ent.properties or {}).get("delta_render"):
+                    _delta_apply(self.srv, ent, out, trig)
                 apply_entity_update(self.srv, ent, out, "watch",
-                                    silent=False)
+                                    silent=bool(out.get("silent", False)))
             return out
         except Exception as e:
             return {"error": f"fire failed: {type(e).__name__}: {e}"[:200]}

@@ -61,10 +61,18 @@ def on_applied_fn(srv, own_prefix):
     def on_applied(key, ev, vec):
         if ev.get("stream") not in ("discourse", "observation"):
             return
-        if not str(ev.get("session") or "").startswith(own_prefix()):
+        src = str(ev.get("src") or "")
+        own = str(ev.get("session") or "").startswith(own_prefix())
+        # the SCRIPT LANE (2026-10-02, the owner's ask: a watcher fire must
+        # trigger thinking): script apply-tells are born session='' to stay
+        # off the conversation lane, so the gate above would starve the
+        # thinker. The render sentence is the stimulus; the tick pace stays
+        # out entirely (silent applies write no tells at all).
+        if not own and not src.startswith("script:"):
             return
         surprise = ev.get("surprise")
-        label = ev.get("role") if ev["stream"] == "discourse" else f"tool {ev.get('tool')}"
+        label = src if src.startswith("script:") else (
+            ev.get("role") if ev["stream"] == "discourse" else f"tool {ev.get('tool')}")
         feed_capture(srv, label or "?", ev.get("n"),
                      (ev.get("text") or ev.get("served") or "")[:300],
                      sim=(1.0 - surprise) if isinstance(surprise, float) else None,

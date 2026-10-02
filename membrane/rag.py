@@ -269,6 +269,18 @@ def _inject(messages, block: str) -> list:
     return msgs
 
 
+def _inject_after(messages, block: str) -> list:
+    """Append the block as a system message AFTER the last user turn --
+    the transcript's bottom edge. The speech-relay footer: membrane's
+    voice (marked [membrane-says]) rides BELOW the user's message (the
+    model reads it last, the TUI renders it at the bottom of the
+    exchange) instead of inside the context block that sits above the
+    user's message."""
+    msgs = list(messages) if isinstance(messages, list) else []
+    msgs.append({"role": "system", "content": str(block)})
+    return msgs
+
+
 def _ollama_chat(backend: str, model: str, messages: list,
                  temperature: float = 0.2, timeout: int = 120) -> str:
     """One non-stream Ollama /api/chat call -> the assistant text (or "")."""

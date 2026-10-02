@@ -420,39 +420,6 @@ TOOLS: list[dict] = [
         },
     },
     {
-        "name": "membrane_peer_seats",
-        "description": (
-            "List the connected membrane seats (the registry: each proxy "
-            "registers on boot and heartbeats; dead seats expire). Use "
-            "before posting to know who is listening."),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "membrane_intend",
-        "description": "Plant or pin an intention (the steering wheel -- the "
-                       "fact that a goal became active makes it an intent): "
-                       "create-or-attach a shared Goal entity and give it a "
-                       "priority pin on this seat's active set. Goals are "
-                       "LONG-LIVED (no TTL; 'for 2w' pins the priority "
-                       "window, never deletes). The active set (cap 3) "
-                       "steers the dream loop; the banner shows it; "
-                       "fulfill closes the goal SHARED (the project "
-                       "commitment done is done for every seat); drop "
-                       "intent only suppresses it on THIS seat.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "text": {"type": "string",
-                         "description": "the commitment, one sentence."},
-                "ttl": {"type": "string",
-                        "description": "optional priority pin window "
-                                       "('4h'/'2d'/'2w') -- a priority "
-                                       "bonus, never an expiry."},
-            },
-            "required": ["text"],
-        },
-    },
-    {
         "name": "membrane_graph",
         "description": "The entity graph's subgraph reader (the model's "
                        "eyes on the universe map): entities related to a "
@@ -985,7 +952,6 @@ TOOL_IMPLS = {
     "membrane_set_junk_cut": tool_set_junk_cut,
     "membrane_peer_post": tool_peer_post,
     "membrane_peer_seats": tool_peer_seats,
-    "membrane_intend": tool_intend,
     "membrane_graph": tool_graph,
     "membrane_entity_inherit": tool_entity_inherit,
     "membrane_run": tool_run,
