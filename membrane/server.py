@@ -207,6 +207,8 @@ class MessageStore:
         self.path = path
         self.msgs: dict[str, list[dict]] = {}
         self._lock = threading.Lock()
+        self._last_flush_ts = 0.0
+        self._dirty_sessions: set | None = None
         if path is not None:
             try:
                 d = json.loads(Path(path).read_text())
@@ -244,8 +246,33 @@ class MessageStore:
         with self._lock:
             if existing is None:
                 self.msgs.setdefault(sid, []).append(row)
-            self._flush()
+                # a REAL new message: flush now (the completion lanes
+                # read the disk); a tool-state snapshot waits for the
+                # cadence (the 24-round turn rewrote the 10MB file per
+                # state change before)
+                self._dirty_sessions = (self._dirty_sessions or set())
+                self._dirty_sessions.add(sid)
+                self._flush()
+                self._last_flush_ts = time.time()
+            else:
+                self._dirty_sessions = (self._dirty_sessions or set())
+                self._dirty_sessions.add(sid)
+                self._flush_maybe()
         return row
+
+    FLUSH_MIN_S = 5.0        # the disk is not the RAM: tool-state
+                             # snapshots land per turn-end + cadence;
+                             # a 24-round turn rewrote the 10MB file per
+                             # tool state change (the busy-slow tax)
+
+    def _flush_maybe(self) -> None:
+        """The cadence flush: a tool-state change waits FLUSH_MIN_S; a
+        real message append (_flush direct) never waits."""
+        now = time.time()
+        if now - self._last_flush_ts >= self.FLUSH_MIN_S:
+            self._flush()
+            self._last_flush_ts = now
+        return
 
     def list(self, sid: str) -> list[dict]:
         with self._lock:
@@ -277,9 +304,19 @@ class MessageStore:
                 disk = json.loads(Path(self.path).read_text())
             except Exception:
                 disk = {}
+            # THE DIRTY SET (the throttle fix): only the sessions THIS
+            # writer touched merge + rewrite; the untouched sides ride
+            # disk-bytes-forward (a sibling writer's file stays theirs)
+            disk_out: dict = {}
+            merged_targets = self._dirty_sessions or set(self.msgs) or \
+                set(disk)
+            disk_out = disk
+            self._dirty_sessions = None
             merged: dict = {}
             for src in (disk, self.msgs):
                 for sid, rows in (src or {}).items():
+                    if sid not in merged_targets:
+                        continue          # untouched: another writer's lane
                     bucket = merged.setdefault(sid, {})
                     for r in rows:
                         info = r.get("info") or {}
@@ -291,14 +328,18 @@ class MessageStore:
                         cur = bucket.get(mid)
                         if cur is None or cur[0] <= ver:
                             bucket[mid] = (ver, r)
-            out = {sid: [v[1] for v in b.values()]
-                   for sid, b in merged.items() if b}
+            out = dict(disk)
+            for sid, b in merged.items():
+                if b:
+                    out[sid] = [v[1] for v in b.values()]
             tmp = self.path + ".tmp"
             with open(tmp, "w") as f:
                 json.dump(out, f)
             os.replace(tmp, self.path)
         except Exception:
             pass
+
+    _dirty_sessions: set | None = None
 
     def flush(self) -> None:
         with self._lock:

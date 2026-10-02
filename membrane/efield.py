@@ -552,17 +552,30 @@ class EntityField:
                                                         ev.get("outcome") or "", f_eid):
                 R.upsert(self.b, self.origin, subj, rel, obj, "observation", key, ts)
 
-    @_locked
     def apply_pending(self, limit: int = 200) -> int:
+        # THE LOCK-HOLD FIX (the swirl exhibit): the old
+        # @apply_pending held the field lock for the WHOLE scan+apply+
+        # flush -- a 200-event burst (the night tick, a big capture
+        # backlog) held it 30s+; the run-lane relay's write_events
+        # (a live turn's tool call) blocked behind it and false-errored
+        # on its 30s HTTP timeout -> the model burned rounds retrying
+        # (the 24-round turn, the two 'proxy unreachable (timed out)'
+        # tool errors). Now the LEASE is taken once, the scan runs
+        # free, and EACH event applies under a SHORT lock (the state
+        # mutations stay atomic; the lock releases between events), the
+        # status upsert + cursor ride the same short lock, and flush
+        # gets its own.
         if not self.b.lease(f"applier:{self.o}", self.holder, 60.0):
             return 0
         evs = list(self.b.scan("events", {"origin": self.origin, "status": "embedded"},
                                order=("seq",), limit=limit))
         for key, ev in evs:
-            self._apply(key, ev)
-            ev["status"] = "applied"
-            self.b.upsert("events", key, ev)
-            self._ostats["cursor"] = max(int(self._ostats["cursor"]), int(ev["seq"]))
+            with self._lock:
+                self._apply(key, ev)
+                ev["status"] = "applied"
+                self.b.upsert("events", key, ev)
+                self._ostats["cursor"] = max(int(self._ostats["cursor"]),
+                                             int(ev["seq"]))
         self.flush()
         return len(evs)
 

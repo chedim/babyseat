@@ -41,7 +41,11 @@ SERVER_VERSION = "1.0.0"
 
 # A query/state read can embed + search; a learn may dedup-embed. Generous
 # but bounded: a hung proxy fails the tool call, it never wedges opencode.
-HTTP_TIMEOUT_S = 30.0
+HTTP_TIMEOUT_S = 120.0   # the relay headroom: a live turn's tool call may
+                         # queue behind the field's lock (the capture
+                         # worker's burst); 30s false-errored healthy work.
+                         # The handlers' own caps (subprocess 20s/600s)
+                         # bound the real work.
 
 TOOLS: list[dict] = [
     {
@@ -543,7 +547,17 @@ class ProxyError(Exception):
 
 
 def _http(port: int, method: str, path: str, body: dict | None = None,
-          timeout: float = HTTP_TIMEOUT_S) -> dict:
+          timeout: float | None = None) -> dict:
+    """One relay call to the seat's proxy. THE TIMEOUT HEADROOM (the
+    swirl exhibit): the default relay budget covers a live turn's
+    contention -- the run lane's handler can queue behind the entity
+    field's lock (the capture worker's burst applies) for tens of
+    seconds WITHOUT being dead; a 30s timeout false-errored the tool
+    ('proxy unreachable (timed out)') and the model burned rounds
+    retrying. The handler-side subprocess cap (20s default / 600s
+    max) still bounds the real work."""
+    if timeout is None:
+        timeout = HTTP_TIMEOUT_S
     url = f"http://127.0.0.1:{int(port)}{path}"
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method,
