@@ -137,5 +137,73 @@ class TestMigration(unittest.TestCase):
         self.assertEqual(board.intents[i.iid].status, "migrated")
 
 
+class TestMcpIntendRoute(unittest.TestCase):
+    """POST /membrane/intend on the real proxy's route table: the MCP
+    membrane_intend relay POSTs -- the esphome seat's read-only verdict
+    ("memory service is read-only") was the do_POST catch-all catching a
+    body-bearing route the table never routed. The same text that works
+    on the GET lane must work POSTed."""
+
+    @classmethod
+    def setUpClass(cls):
+        import threading
+        from http.server import ThreadingHTTPServer
+        from membrane import opencode as OC
+        cls.est = _store()
+
+        class _Sel:
+            pinned, suppressed = {}, set()
+
+        class _Board:
+            selection = _Sel()
+
+        handler = OC.MembraneOpenAIHandler
+
+        class _Srv(ThreadingHTTPServer):
+            pass
+
+        class _Membrane:
+            embedder = None
+            store = None
+            gate_notes = []
+
+        srv = _Srv(("127.0.0.1", 0), handler)
+        srv.membrane = _Membrane()
+        srv.entity_store = cls.est
+        srv._intent_board = _Board()
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        cls.srv = srv
+        cls.port = srv.server_address[1]
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.srv.shutdown()
+
+    def _post(self, body):
+        import json as _json
+        import urllib.request
+        rq = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/membrane/intend",
+            data=_json.dumps(body).encode(), method="POST",
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(rq, timeout=10) as resp:
+            return _json.loads(resp.read())
+
+    def test_post_intend_creates_the_goal(self):
+        out = self._post({"text": "route the intend POST"})
+        self.assertTrue(out.get("ok"), out)
+        self.assertTrue(out.get("created"), out)
+        self.assertIn(out.get("eid"), self.est.docs)
+        # the pin landed on the active set
+        self.assertIn(out["eid"], self.srv._intent_board.selection.pinned)
+
+    def test_post_intend_pins_an_existing_goal(self):
+        g = _goal(self.est, "route the intend POST", [0.1, 0.2])
+        out = self._post({"text": "route the intend POST"})
+        self.assertTrue(out.get("ok"), out)
+        self.assertFalse(out.get("created"), out)
+        self.assertEqual(out.get("eid"), g.eid)
+
+
 if __name__ == "__main__":
     unittest.main()

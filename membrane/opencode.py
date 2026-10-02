@@ -1204,7 +1204,10 @@ def _membrane_intent_create_or_pin(srv, text: str, ttl: str = ""
             break
     created = False
     if goal is None:
-        eid = f"{MEMBRANE_NS}goal:{TimelineOps._tl_eid(text).split(':')[1]}"
+        # the slug rides LAST (':' is safe inside 'membrane::' -- split[1]
+        # on 'membrane::tl:<slug>' was '' and every goal collided)
+        slug = TimelineOps._tl_eid(text).rsplit(":", 1)[-1]
+        eid = f"{MEMBRANE_NS}goal:{slug}"
         goal = QuantumEntity(
             eid=eid, cls=CLASS_GOAL,
             properties={"name": (text or "")[:120], "summary": (text or "")[:600],
@@ -1232,28 +1235,6 @@ def _membrane_intent_create_or_pin(srv, text: str, ttl: str = ""
     sel.pinned[goal.eid] = max(sel.pinned.get(goal.eid, 0.0), bonus)
     sel.suppressed.discard(goal.eid)
     return {"ok": True, "eid": goal.eid, "created": created, "pinned": True}
-
-
-def _membrane_intend(self) -> None:
-    """The MCP membrane_intend relay: create-or-pin + the speech
-    announcement (the activation is the visible moment the dream chain
-    starts; drop intent is one command away)."""
-    srv = self.server
-    body = self._json_body()
-    text = str(body.get("text") or "").strip()
-    if not text:
-        self._json_err_raw(400, "text required"); return
-    res = _membrane_intent_create_or_pin(srv, text,
-                                         ttl=str(body.get("ttl") or ""))
-    if not res.get("ok"):
-        self._json_err_raw(400, str(res.get("error"))); return
-    try:
-        speak(srv, f"goal active: {text[:120]}", kind="note-pattern")
-    except Exception:
-        pass
-    self._entity_audit("intend", {"ok": True, "eid": res.get("eid"),
-                                  "created": res.get("created")})
-    self._json_out(res)
 
 
 def _intent_cmd(srv, q: str) -> str:
@@ -3536,6 +3517,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._entity_remove(); return
         if path == "/membrane/run":
             self._membrane_run(); return
+        if path == "/membrane/intend":
+            self._membrane_intend(); return
         if path.startswith("/membrane/"):
             self._json_out({"error": "read-only; GET /membrane/state"}); return
         super().do_POST()
@@ -5336,6 +5319,31 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                                "ok": bool(res.get("ok"))})
         except Exception:
             pass
+
+    def _membrane_intend(self) -> None:
+        """POST /membrane/intend: the MCP membrane_intend relay -- the
+        create-or-pin + the speech announcement (the activation is the
+        visible moment the dream chain starts; drop intent is one
+        command away). The method lives ON the handler: the route
+        existed but the body sat at module level, so every called lane
+        died with RemoteDisconnected (and POST fell to the read-only
+        catch-all before the route existed at all)."""
+        srv = self.server
+        body = self._json_body()
+        text = str(body.get("text") or "").strip()
+        if not text:
+            self._json_err_raw(400, "text required"); return
+        res = _membrane_intent_create_or_pin(srv, text,
+                                             ttl=str(body.get("ttl") or ""))
+        if not res.get("ok"):
+            self._json_err_raw(400, str(res.get("error"))); return
+        try:
+            speak(srv, f"goal active: {text[:120]}", kind="note-pattern")
+        except Exception:
+            pass
+        self._entity_audit("intend", {"ok": True, "eid": res.get("eid"),
+                                      "created": res.get("created")})
+        self._json_out(res)
 
     def _entity_inherit(self) -> None:
         """POST /membrane/entity/inherit: the multi-parent ISA relation

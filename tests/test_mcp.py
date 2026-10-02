@@ -51,6 +51,8 @@ class _StubProxy(BaseHTTPRequestHandler):
     forget = {"removed": 2, "field_size_before": 13, "field_size": 11,
               "removed_cells": [{"idx": 3, "situation": "junk"},
                                 {"idx": 4, "situation": "junk2"}]}
+    intend = {"ok": True, "eid": "membrane::goal:abc123",
+              "created": True, "pinned": True}
     fail_next = None      # (status, msg) -> next request errors
 
     def _reply(self, code, obj):
@@ -87,6 +89,8 @@ class _StubProxy(BaseHTTPRequestHandler):
                 code, body = 200, _StubProxy.learn
             elif self.path == "/membrane/forget":
                 code, body = 200, _StubProxy.forget
+            elif self.path == "/membrane/intend":
+                code, body = 200, _StubProxy.intend
             else:
                 code, body = 404, {"error": "no route"}
         self._reply(code, body)
@@ -257,6 +261,32 @@ class TestMcpTools(unittest.TestCase):
         self.assertIn("never delete", text)
         self.assertIn("#7 (sim 0.72)", text)
         self.assertIn("Nothing removed", text)
+
+    def test_intend_posts_to_the_seat_not_the_read_only_laneway(self):
+        """The esphome seat's bug: the MCP tool POSTs to /membrane/intend
+        but the proxy's do_POST table had no route for it -- every intend
+        fell into the read-only catch-all and the model announced its
+        memory was read-only. The tool's POST must now succeed."""
+        _StubProxy.intend = {"ok": True, "eid": "membrane::goal:abc123",
+                             "created": True, "pinned": True}
+        text = _call("membrane_intend", {"text": "fix the flaky test"})
+        self.assertIn("Goal active (created + pinned)", text)
+        self.assertIn("membrane::goal:abc123", text)
+
+    def test_intend_pin_form_keeps_the_goal(self):
+        _StubProxy.intend = {"ok": True,
+                             "eid": "membrane::goal:old",
+                             "created": False, "pinned": True}
+        text = _call("membrane_intend", {"text": "fix the flaky test"})
+        self.assertIn("pinned (existing goal)", text)
+        self.assertNotIn("created + pinned", text)
+
+    def test_intend_failure_formats_the_seat_error(self):
+        _StubProxy.intend = {"ok": False,
+                             "error": "read-only; GET /membrane/state"}
+        text = _call("membrane_intend", {"text": "fix the flaky test"})
+        self.assertIn("Intend failed:", text)
+        self.assertIn("read-only", text)
 
     def test_proxy_error_is_tool_error_not_protocol_error(self):
         _StubProxy.fail_next = (503, "router off")
