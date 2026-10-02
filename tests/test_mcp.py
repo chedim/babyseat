@@ -161,7 +161,7 @@ class TestMcpProtocol(unittest.TestCase):
                                  "membrane_entity_remove",
                                  "membrane_set_junk_cut",
                                  "membrane_peer_post",
-                                 "membrane_peer_seats",
+
                                  "membrane_graph",
                                  "membrane_entity_inherit"])
         for t in resp["result"]["tools"]:

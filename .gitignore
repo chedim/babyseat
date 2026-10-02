@@ -63,3 +63,5 @@ serve-*.json
 *.bak-*
 # json atomic-write temporaries
 *.tmp
+pytest-*.log
+pytest-*.log
