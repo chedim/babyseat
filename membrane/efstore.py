@@ -17,6 +17,7 @@ import base64
 import hashlib
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Callable, Iterator
@@ -84,51 +85,71 @@ class MemBackend:
     def __init__(self):
         self.colls: dict[str, dict[str, dict]] = {c: {} for c in COLLECTIONS}
         self._leases: dict[str, tuple[str, float]] = {}
+        # THE SCAN LOCK (the 'dictionary changed size during iteration'
+        # flood: the capture worker's embed/apply scans + the chat
+        # thread's write_events upserts share one RAM dict -- the
+        # iteration must be atomic against upserts). The Couchbase
+        # backend inherits nothing here: its scans run server-side
+        # (N1QL), the RAM race does not exist there.
+        self._ram_lock = threading.RLock()
 
     def _c(self, coll: str) -> dict:
-        return self.colls.setdefault(coll, {})
+        with self._ram_lock:
+            return self.colls.setdefault(coll, {})
 
     def get(self, coll: str, key: str) -> dict | None:
-        d = self._c(coll).get(key)
-        return dict(d) if d is not None else None
+        with self._ram_lock:
+            d = self._c(coll).get(key)
+            return dict(d) if d is not None else None
 
     def get_multi(self, coll: str, keys) -> dict[str, dict]:
-        c = self._c(coll)
-        return {k: dict(c[k]) for k in keys if k in c}
+        with self._ram_lock:
+            c = self._c(coll)
+            return {k: dict(c[k]) for k in keys if k in c}
 
     def upsert(self, coll: str, key: str, doc: dict) -> None:
-        self._c(coll)[key] = dict(doc)
+        with self._ram_lock:
+            self._c(coll)[key] = dict(doc)
 
     def upsert_multi(self, coll: str, docs: dict[str, dict]) -> None:
-        c = self._c(coll)
-        for k, d in docs.items():
-            c[k] = dict(d)
+        with self._ram_lock:
+            c = self._c(coll)
+            for k, d in docs.items():
+                c[k] = dict(d)
 
     def insert_if_absent(self, coll: str, key: str, doc: dict) -> bool:
-        c = self._c(coll)
-        if key in c:
-            return False
-        c[key] = dict(doc)
-        return True
+        with self._ram_lock:
+            c = self._c(coll)
+            if key in c:
+                return False
+            c[key] = dict(doc)
+            return True
 
     def delete(self, coll: str, key: str) -> None:
-        self._c(coll).pop(key, None)
+        with self._ram_lock:
+            self._c(coll).pop(key, None)
 
     def cas_update(self, coll: str, key: str,
                    fn: Callable[[dict | None], dict | None]) -> dict | None:
-        c = self._c(coll)
-        new = fn(dict(c[key]) if key in c else None)
-        if new is None:
-            c.pop(key, None)
-        else:
-            c[key] = dict(new)
-        return new
+        with self._ram_lock:
+            c = self._c(coll)
+            new = fn(dict(c[key]) if key in c else None)
+            if new is None:
+                c.pop(key, None)
+            else:
+                c[key] = dict(new)
+            return new
 
     def scan(self, coll: str, eq: dict | None = None, order: tuple = (),
              limit: int | None = None) -> Iterator[tuple[str, dict]]:
         """Rows whose fields equal `eq` (a list value means IN), ordered by
-        the `order` fields ascending -- the shape SQL++ can express."""
-        items = [(k, d) for k, d in self._c(coll).items() if matches(d, eq)]
+        the `order` fields ascending -- the shape SQL++ can express.
+        THE SNAPSHOT (the 'Set changed size during iteration' flood):
+        the matches+sort run on a COPY taken under the RAM lock --
+        another thread's upsert mid-scan never tears the iteration."""
+        with self._ram_lock:
+            items = [(k, dict(d)) for k, d in self._c(coll).items()
+                     if matches(d, eq)]
         for f in reversed(order):                        # stable multi-key sort
             fld = f[0] if isinstance(f, tuple) else f
             rev = isinstance(f, tuple) and not str(f[1]).upper().startswith("ASC")
@@ -137,7 +158,7 @@ class MemBackend:
         for i, (k, d) in enumerate(items):
             if limit is not None and i >= limit:
                 break
-            yield k, dict(d)
+            yield k, d
 
     def count(self, coll: str, eq: dict | None = None, group: tuple = ()) -> list[dict]:
         """Grouped counts (rows of 'n' + the group fields); RAM aggregation

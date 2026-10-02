@@ -1234,6 +1234,13 @@ class EntityStore(MultiParentOps, TimelineOps):
         self._dirty = False
         self._save_timer = None
         self._mirror = None                   # the parsed file, kept warm
+        # THE STORE LOCK (the '[entities] side-index save failed'
+        # flood + the announcer seat's 37MB TORN entities.json): the
+        # debounced save timer thread serializes self.docs WHILE the
+        # chat/night/thinker threads upsert-merge -> the json.dumps read
+        # a dict mutating mid-walk. Every docs mutation goes through
+        # upsert/remove/merge; the save snapshots UNDER this lock.
+        self._store_lock = threading.RLock()
         self._load()
         self._load_tracks()
         self._seed_junk_anchors()
@@ -1308,20 +1315,31 @@ class EntityStore(MultiParentOps, TimelineOps):
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".tmp")
+            # THE TORN-SAVE GUARD (the 37MB corrupt exhibit): the docs
+            # snapshot is taken UNDER the store lock (a stable copy of
+            # eid -> serializable doc) -- the json.dumps reads the copy,
+            # so a chat/night thread's mid-walk mutation can never tear
+            # the file (the old code serialized the LIVE dict).
+            with self._store_lock:
+                snapshot = {k: q.to_doc() for k, q in
+                            list(self.docs.items())
+                             if not ((q.properties or {})
+                                     .get("ephemeral"))}
+                tracks = dict(self.tracks) if self.tracks else None
             # preserve tracks: docs-save must not clobber the track lane
             # (the old shape wrote {"docs": ...} bare -- every save wiped
             # the planted tracks; the silent tracking-death bug)
-            d = self._mirror
-            if d is None:
-                d = json.loads(self.path.read_text()) if self.path.exists() \
-                    else {}
+            try:
+                d = json.loads(self.path.read_text()) \
+                    if self.path.exists() else {}
+            except Exception:
+                d = {}
             self._mirror = d
-            # EPHEMERAL docs (a session's living present) stay RAM-only:
-            # a dead session's 'now' must not pollute the next boot
-            d["docs"] = {k: q.to_doc() for k, q in self.docs.items()
-                         if not (q.properties or {}).get("ephemeral")}
-            if self.tracks:
-                d["tracks"] = self.tracks
+            d["docs"] = snapshot
+            if tracks:
+                d["tracks"] = tracks
+            elif "tracks" in d and not self.tracks:
+                d.pop("tracks", None)     # tracks dropped while down
             tmp.write_text(json.dumps(d))
             os.replace(tmp, self.path)
         except Exception as e:
