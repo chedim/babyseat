@@ -260,9 +260,42 @@ class MessageStore:
         if self.path is None:
             return
         try:
+            # THE MULTI-WRITER MERGE (the vanishing-reply fix): two seats can
+            # serve out of one cwd (an old seat that survived its restart, a
+            # sibling test seat) and this is a WHOLE-FILE snapshot flush --
+            # a stale boot copy would clobber the other writer's final-text
+            # rows with this boot's older view: the assistant row reverts to
+            # its empty opening state, the client's completion re-render
+            # shows a vanished reply, and the exchange reads as 'my message
+            # sitting under the model's previous response'. So the flush
+            # re-reads disk first, unions sessions, unions rows by message
+            # id, and lets the NEWER row win -- an unfinished row (created
+            # only) never displaces a finished one (completed), and our RAM
+            # row only displaces an OLDER disk row. Disk-first insertion
+            # keeps first positions stable, per the load contract.
+            try:
+                disk = json.loads(Path(self.path).read_text())
+            except Exception:
+                disk = {}
+            merged: dict = {}
+            for src in (disk, self.msgs):
+                for sid, rows in (src or {}).items():
+                    bucket = merged.setdefault(sid, {})
+                    for r in rows:
+                        info = r.get("info") or {}
+                        mid = str(info.get("id") or "")
+                        if not mid:
+                            continue
+                        tm = info.get("time") or {}
+                        ver = tm.get("completed") or tm.get("created") or 0
+                        cur = bucket.get(mid)
+                        if cur is None or cur[0] <= ver:
+                            bucket[mid] = (ver, r)
+            out = {sid: [v[1] for v in b.values()]
+                   for sid, b in merged.items() if b}
             tmp = self.path + ".tmp"
             with open(tmp, "w") as f:
-                json.dump(self.msgs, f)
+                json.dump(out, f)
             os.replace(tmp, self.path)
         except Exception:
             pass
@@ -394,6 +427,57 @@ def _openai_tools(mcp_tools: list | None = None) -> list:
 def _tool_title(name: str, args: dict) -> str:
     s = json.dumps(args) if args else ""
     return f"{name}({s[:80]})"
+
+
+def _chronological(rows: list) -> list:
+    """Replay rows in created-ts order: the user's message rides above the
+    reply it prompted, even if a multi-writer race left the store scrambled
+    (stable sort -- store insertion order survives equal timestamps)."""
+    return sorted(rows, key=lambda r: ((r.get("info") or {})
+                                       .get("time") or {}).get("created") or 0)
+
+
+def _tokens_fill(a_info: dict, resp: dict) -> None:
+    """Real token accounting: upstream usage when the ladder provides it,
+    SUMMED across the tool-loop's rounds. The hardcoded {total: 0} era is
+    over -- the TUI and the companion feed were reading that placeholder."""
+    t = a_info.setdefault("tokens", {"total": 0, "input": 0, "output": 0,
+                                     "reasoning": 0,
+                                     "cache": {"read": 0, "write": 0}})
+    u = (resp or {}).get("usage")
+    if not isinstance(u, dict) or not u:
+        return
+
+    def _i(v):
+        try:
+            return int(v or 0)
+        except Exception:
+            return 0
+
+    det = u.get("completion_tokens_details")
+    pdet = u.get("prompt_tokens_details")
+    t["total"] = _i(t.get("total")) + _i(u.get("total_tokens"))
+    t["input"] = _i(t.get("input")) + _i(u.get("prompt_tokens"))
+    t["output"] = _i(t.get("output")) + _i(u.get("completion_tokens"))
+    t["reasoning"] = _i(t.get("reasoning")) + (
+        _i(det.get("reasoning_tokens")) if isinstance(det, dict) else 0)
+    c = t.setdefault("cache", {"read": 0, "write": 0})
+    c["read"] = _i(c.get("read")) + (
+        _i(pdet.get("cached_tokens")) if isinstance(pdet, dict) else 0)
+
+
+def _tokens_estimate(history: list, parts: list) -> dict:
+    """The estimate fallback (the ladder answered without usage): ~4 chars
+    per token over the request history and the produced text/reasoning."""
+    def _n(s):
+        return max(1, len(str(s or "")) // 4)
+    inn = sum(_n(m.get("content")) for m in (history or []))
+    out = sum(_n(p.get("text")) for p in (parts or [])
+              if isinstance(p, dict) and p.get("type") == "text")
+    rsn = sum(_n(p.get("text")) for p in (parts or [])
+              if isinstance(p, dict) and p.get("type") == "reasoning")
+    return {"total": inn + out, "input": inn, "output": out,
+            "reasoning": rsn, "cache": {"read": 0, "write": 0}}
 
 
 class TurnRunner:
@@ -560,6 +644,7 @@ class TurnRunner:
                 break
             msg = ((resp.get("choices") or [{}])[0].get("message")
                    or {})
+            _tokens_fill(a_info, resp)
             tcs = msg.get("tool_calls")
             content = (msg.get("content") or "").strip()
             reason = "tool-calls" if tcs else "stop"
@@ -665,6 +750,8 @@ class TurnRunner:
             break
         if "error" in a_info:
             a_info.pop("finish", None)
+        if not (a_info.get("tokens") or {}).get("total"):
+            a_info["tokens"] = _tokens_estimate(history, parts)
         a_info["time"]["completed"] = int(time.time() * 1000)
         self.messages.append(sid, a_info, parts)
         self.hub.publish({"type": "message.updated", "sessionID": sid,
@@ -877,7 +964,12 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                         # (`J().length`) -- a wide-terminal crasher
                         return self._json_out([])
                     if segs[1] == "message":
-                        return self._json_out(messages.list(sid))
+                        # display order heals whatever the store survived:
+                        # rows ride created-ts order (chronological), so the
+                        # user's turn sits above the reply it prompted even
+                        # if a multi-writer race scrambled the rows
+                        return self._json_out(
+                            _chronological(messages.list(sid)))
                 s = sessions.get(sid)
                 if s is None:
                     return self._notfound()

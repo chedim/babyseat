@@ -25,7 +25,6 @@ rag-field.json
 rag-audit.jsonl
 rag-field.json.review.jsonl
 membrane-opencode.log
-membrane-proxy.log
 # the dev organism's persistent cell fields + audits (graze state, not source)
 cell-field-*
 cell-audit-*
@@ -51,17 +50,10 @@ serve-*.json
 pytest-beta.log
 
 # serve-lane runtime stores + credentials (never source, never commit)
-serve-*.json
 # edit-time backup copies (*.bak-foot, *.bak-m, *.bak-delta)
 *.bak-*
 # json atomic-write temporaries
 *.tmp
 
-# serve-lane runtime stores + credentials (never source, never commit)
-serve-*.json
-# edit-time backup copies (*.bak-foot, *.bak-m, *.bak-delta)
-*.bak-*
-# json atomic-write temporaries
-*.tmp
 pytest-*.log
-pytest-*.log
+mcp-test.log

@@ -4644,6 +4644,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                         reasoning=True):
                     self.wfile.write(chunk)
                 self.wfile.flush()
+            usage_seen: dict | None = None
             try:
                 backend_r = _open_backend(up.get("model", "membrane"))
             except Exception as e:
@@ -4663,11 +4664,35 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                         continue
                     payload = s[len(b"data:"):].strip()
                     if not payload or payload == b"[DONE]":
+                        # THE USAGE PASS-THROUGH (the 0-token display fix):
+                        # the backend's own usage already tees through
+                        # verbatim; when it gives none, a final
+                        # estimated-usage chunk rides just before [DONE] so
+                        # the client's context meter reads real-ish numbers,
+                        # never a hardcoded zero
+                        if payload == b"[DONE]" and usage_seen is None:
+                            est_in = Registry.estimate_tokens(
+                                up.get("messages"))
+                            est_out = (len("".join(parts))
+                                       + len("".join(think))) // 4
+                            self.wfile.write(_sse_line({
+                                "id": "chatcmpl-membrane-usage",
+                                "object": "chat.completion.chunk",
+                                "created": 0,
+                                "model": up.get("model", "membrane"),
+                                "choices": [{"index": 0, "delta": {},
+                                             "finish_reason": "stop"}],
+                                "usage": {"prompt_tokens": est_in,
+                                          "completion_tokens": est_out,
+                                          "total_tokens": est_in + est_out}}))
+                            self.wfile.flush()
                         continue
                     try:
                         obj = json.loads(payload)
                     except json.JSONDecodeError:
                         continue
+                    if usage_seen is None and isinstance(obj.get("usage"), dict)                             and obj["usage"]:
+                        usage_seen = obj["usage"]
                     for ch in obj.get("choices", []) or []:
                         d = ch.get("delta") or {}
                         t = d.get("content")
@@ -4743,16 +4768,27 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                             route, mid_stream=False, err=e)
                         return
                     raise
+            try:
+                resp_obj = json.loads(resp_bytes or b"{}")
+            except json.JSONDecodeError:
+                resp_obj = None
+            # THE USAGE PASS-THROUGH (the 0-token display fix): the
+            # backend's own usage stays verbatim; when it gives none, an
+            # estimate rides along so no client ever reads a hardcoded zero
+            if resp_obj is not None and not (resp_obj.get("usage") or {}):
+                est_in = Registry.estimate_tokens(up.get("messages"))
+                m0 = (resp_obj.get("choices") or [{}])[0].get("message") or {}
+                est_out = len(str(m0.get("content") or "")) // 4
+                resp_obj["usage"] = {"prompt_tokens": est_in,
+                                     "completion_tokens": est_out,
+                                     "total_tokens": est_in + est_out}
+                resp_bytes = json.dumps(resp_obj).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(resp_bytes or b"")))
             self.end_headers()
             self.wfile.write(resp_bytes or b"")
             self.wfile.flush()
-            try:
-                resp_obj = json.loads(resp_bytes or b"{}")
-            except json.JSONDecodeError:
-                resp_obj = None
             if resp_obj:
                 ch = (resp_obj.get("choices") or [{}])[0]
                 msg = ch.get("message") or resp_obj.get("message") or {}
