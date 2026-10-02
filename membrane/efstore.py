@@ -409,9 +409,10 @@ class CouchbaseBackend:
         """Server-side counts (SQL++ COUNT(*) with an indexed GROUP BY):
         no doc ever crosses to the client for a number."""
         sql, params = count_sql(self.bucket_name, self.scope_name, coll, eq, group)
-        rows = self._query(sql, params)
-        return {"n": next(iter(rows))["n"]} if not group \
-            else [dict(r) for r in rows]
+        rows = list(self._query(sql, params))
+        if not group:
+            return {"n": rows[0]["n"]} if rows else {"n": 0}
+        return [dict(r) for r in rows]
 
     def vector_top_k(self, coll: str, field: str, vec, k: int,
                      eq: dict | None = None) -> list[tuple[str, float]]:
