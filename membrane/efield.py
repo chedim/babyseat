@@ -45,6 +45,17 @@ from .efstore import h16, o8, pack_f16, pack_f32, unpack_f16
 EF_SCHEMA = 1
 GAIN = 0.5
 K_MAT = 3
+# THE WRITE-AMPLIFICATION FIX (the 'membranes are stuck again'
+# exhibit): words DO materialize at K_MAT (the recall contract keeps
+# its entity-states lane) -- but they carry NO per-event delta rows:
+# the measured 6344 live w: entities x ~8 mentions/event = 216k delta
+# rows, and the consumers that scan deltas (the night drift's
+# _cell_points, refresh_activity, the diff) made every tick O(words x
+# deltas) -- the seat burned a core flat. Word states still UPDATE
+# per event (cheap), their evidence rides the EVENT-INDEX DELTA
+# below (one row per event, kind 'e:' -- the sentence->event route
+# past_answers/near_asks need). Specific kinds keep their deltas
+# (the drift/diff work is FOR specific entities, few per event).
 ACCRETE = 0.15
 BOILER_MIN = 8
 CTX_MIN_RESID = 0.2
@@ -442,6 +453,17 @@ class EntityField:
                 self._states[eid] = st
         return st
 
+    @staticmethod
+    def _mat_bar(eid: str) -> int:
+        """The materialization bar per entity kind: specific kinds
+        (files/symbols/commands/models -- the subjects a cell is ABOUT)
+        live at their first mention; words and phrases at K_MAT
+        (distinct sentences) like every generic kind. (The word-bar
+        idea was reverted: the recall contract's entity-states lane
+        needs word entities; the amplification fix lives in
+        _update's word-delta skip.)"""
+        return 1 if E.is_specific(eid) else K_MAT
+
     def _get_or_new(self, eid: str, surface: str) -> EntityState:
         st = self.get(eid)
         if st is None:
@@ -473,6 +495,15 @@ class EntityField:
         st.last_pos = pos
         st.recent = ([s for s in st.recent if s != sid] + [sid])[-RECENT:]
         self._dirty.add(st.eid)
+        # THE WORD-DELTA SKIP (the write-amplification fix): words and
+        # phrases carry NO per-event delta row -- their states update
+        # above (cheap), their event mapping rides the event-index
+        # delta (one row per event); a per-word row per mention was
+        # 8 rows/event (the 216k-delta bomb), and the deltas' consumers
+        # (the night drift's _cell_points, refresh_activity, the diff)
+        # are FOR specific entities. Specific kinds keep full deltas.
+        if st.eid.split(":", 1)[0] in ("w", "p"):
+            return
         dkey = f"d:{self.o}:{h16(st.eid)}:{seq}:{sidx}"
         self._deltas[dkey] = {"_k": "dl", "eid": st.eid, "origin": self.origin,
                               "sid": sid, "event": evkey, "stream": stream, "ts": ts,
@@ -539,12 +570,30 @@ class EntityField:
                 if sids[sidx] not in st.distinct:
                     st.distinct.append(sids[sidx])
                 self._dirty.add(eid)
-                if E.is_specific(eid) or len(st.distinct) >= K_MAT:
+                if self._mat_bar(eid) <= len(st.distinct):
                     self._materialize(st)
                 continue
             self._update(st, X[sidx], stream, sids[sidx], seq, sidx, key, ts)
         for i in live_idx:
             self._bg_update(stream, X[i])
+        # THE EVENT-INDEX DELTA (the word-bar's companion): EVERY
+        # applied event writes ONE delta row under a meta-entity
+        # ('e:<event-key>' -- no state, no drift, kind excluded from
+        # reads): the sentence->event index no longer depends on any
+        # entity materializing (past_answers/near_asks route through
+        # the deltas; the word bar means most events now touch no
+        # live entity at all -- without this row the recall loses
+        # them wholesale, the test_past_answers exhibit). One row per
+        # event: the cost the word bar saved, spent on the index.
+        idx_eid = f"e:{key}"
+        dkey = f"d:{self.o}:{h16(idx_eid)}:{seq}:0"
+        self._deltas[dkey] = {"_k": "dl", "eid": idx_eid,
+                              "origin": self.origin,
+                              "sid": sids[0] if sids else "",
+                              "event": key, "stream": stream, "ts": ts,
+                              "seq": seq, "sidx": 0, "gain": 0.0,
+                              "align": 0.0, "cos_before": 1.0}
+        self._dirty.add(idx_eid)
         if stream == "observation":
             from . import relations as R
             f_eid = next((m[0] for m in ev.get("mentions") or [] if m[0].startswith("f:")), None)
@@ -830,7 +879,7 @@ class EntityField:
         self._states[eid] = st
         st.pending = [[d["sid"], d["seq"], d["sidx"], d["stream"], d["event"], d["ts"]] for d in ds]
         st.distinct = list(dict.fromkeys(d["sid"] for d in ds))
-        if st.pending and (E.is_specific(eid) or len(st.distinct) >= K_MAT):
+        if st.pending and len(st.distinct) >= self._mat_bar(eid):
             self._materialize(st)
         self._dirty.add(eid)
         return st
@@ -849,6 +898,11 @@ class EntityField:
         out: dict[str, list[dict]] = {}
         for _, d in self.b.scan("entity_deltas", {"origin": self.origin, "seq": {"gt": seq}},
                                 order=("seq", "sidx")):
+            # the event-index meta-entities ('e:<event-key>' rows, the
+            # word-bar's recall route) are BOOKKEEPING, not entity
+            # state -- the diff reads real entities only
+            if d.get("eid", "").startswith("e:"):
+                continue
             out.setdefault(d["eid"], []).append(d)
         return out
 
@@ -906,6 +960,28 @@ class EntityField:
 
     def evidence(self, eid: str, k: int = 6, query_vec=None, streams=None) -> list[dict]:
         ds = [d for d in self.deltas_of(eid) if streams is None or d["stream"] in streams]
+        # THE WORD-ENTITY ROUTE (the word-delta skip's companion): a
+        # word/phrase carries no per-event deltas -- its evidence is
+        # rebuilt from the events' OWN mention lists (the events doc
+        # carries mentions; the newest 400 events scan is the cap):
+        # same shape, the delta rows replaced by mention rows.
+        if not ds and eid.split(":", 1)[0] in ("w", "p"):
+            synth: list[dict] = []
+            for _key, ev in self.b.scan("events", {"origin": self.origin},
+                                        order=("seq",), limit=400):
+                if ev.get("status") == "superseded":
+                    continue
+                if streams is not None and ev.get("stream") not in streams:
+                    continue
+                for mid, msidx, _surf in ev.get("mentions") or []:
+                    if mid == eid:
+                        synth.append({"eid": eid, "origin": self.origin,
+                                      "sid": (ev.get("sids") or [None] * (msidx + 1))[msidx],
+                                      "event": _key, "stream": ev.get("stream") or "",
+                                      "ts": ev.get("ts"), "seq": ev.get("seq"),
+                                      "sidx": msidx})
+                        break
+            ds = [d for d in synth if d["sid"]]
         evs = self.b.get_multi("events", list(dict.fromkeys(d["event"] for d in ds)))
         ds = [d for d in ds if (evs.get(d["event"]) or {}).get("status") != "superseded"]
         got = self.b.get_multi("sentences", list(dict.fromkeys(d["sid"] for d in ds)))
