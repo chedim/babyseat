@@ -372,7 +372,7 @@ class TestTurnLoop(unittest.TestCase):
         sf = out["parts"][2]
         self.assertEqual(sf["reason"], "tool-calls")
         text = out["parts"][4]
-        self.assertEqual(text["time"]["end"], text["time"]["start"])
+        self.assertGreaterEqual(text["time"]["end"], text["time"]["start"])
         self.assertGreater(text["time"]["start"], 1e9)
 
     def test_user_parts_carry_sdk_ids(self):

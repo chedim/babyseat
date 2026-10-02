@@ -5807,10 +5807,16 @@ def main() -> None:
     ap.add_argument("--no-continue", dest="cont", action="store_false",
                     help="don't resume opencode's last session (default: "
                          "resume; -c/-s in passthrough still win)")
+    ap.add_argument("--no-absorb", action="store_true",
+                    help="don't absorb external-agent sessions on boot")
+    ap.add_argument("--new-session", action="store_true",
+                    help="skip absorption AND resume: start fresh")
     ap.add_argument("passthrough", nargs="*",
                     help="extra args passed to opencode (use -- to separate)")
     args = ap.parse_args()
     passthrough = args.passthrough
+    if args.new_session:
+        args.cont = False
     if passthrough and passthrough[0] == "--":
         passthrough = passthrough[1:]
 
@@ -6581,6 +6587,27 @@ def main() -> None:
             print(f"[opencode] native serve up: session store "
                   f"{d / 'serve-sessions.json'}; the proxy's /v1 is "
                   "the turn lane", file=sys.stderr)
+            # ---- absorb external-agent sessions (part of the seat's
+            # boot breath): anything OpenCode/Claude Code did since the
+            # seat's last run lands in the store (the hard filter
+            # refuses Anthropic's models wholesale), and the newest
+            # absorbed session wins -c purely by recency. Flagged
+            # off --no-absorb / --new-session; lab seats never absorb.
+            try:
+                from .absorb import absorb_gate
+                if absorb_gate(str(args.field), args.new_session,
+                               args.no_absorb, native_up):
+                    from .absorb import absorb as _absorb, \
+                        banner as _absorb_banner
+                    _rep = _absorb(sess_store, msg_store,
+                                   getattr(srv, "efield", None),
+                                   cwd=os.getcwd(),
+                                   marker_path=str(d / "serve-absorb.json"),
+                                   model_id=_srv_model)
+                    print(_absorb_banner(_rep), file=sys.stderr)
+            except Exception as _e:
+                print(f"[absorb] failed ({_e}) -- seat continues",
+                      file=sys.stderr)
         except Exception as e:
             print(f"[opencode] native serve FAILED ({e}) -- seat keeps "
                   "running without the room-facing surface",

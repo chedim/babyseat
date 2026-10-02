@@ -123,6 +123,31 @@ class SessionStore:
             return sorted(self.sessions.values(),
                           key=lambda s: s["time"]["created"])
 
+    def import_session(self, d: dict) -> dict:
+        """ABSORPTION (the import lane): a caller-supplied session doc
+        (foreign id/model/time, provenance in 'absorbed'). An existing
+        id WITHOUT the absorbed key is a native session's id -- a hard
+        collision, refused (ValueError); an absorbed id returns the
+        existing doc (the top-up branch: message rows extend by id and
+        time.updated only ever rises -- the TUI's -c lane sorts on it).
+        """
+        sid = str(d.get("id") or "")
+        with self._lock:
+            cur = self.sessions.get(sid)
+            if cur is not None:
+                if isinstance(cur.get("absorbed"), dict):
+                    nu = int(d.get("time", {}).get("updated") or 0)
+                    if nu:
+                        cur["time"]["updated"] = max(
+                            int(cur["time"].get("updated") or 0), nu)
+                    return cur
+                raise ValueError(
+                    f"session {sid} already exists and is not an "
+                    "absorbed session")
+            self.sessions[sid] = d
+            self._flush()
+        return d
+
     def get(self, sid: str) -> dict | None:
         with self._lock:
             return self.sessions.get(sid)
