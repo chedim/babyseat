@@ -35,7 +35,7 @@ MEMBRANE SEAT -- this session's live configuration (authoritative over the gener
   - membrane_list_tracks: List your planted entity tracks: key, label, boundary, current inside/outside state, and pending alert count.
   - membrane_related_entities: Read the entity graph: entities related to a free-text query (named hits first, then semantic nearness), each with its mention count and co-occurrence...
   - membrane_entity_add: Add an abstract entity to the symbolic layer: a decision, failure mode, component, or goal with a one-line summary.
-  - membrane_entity_edit: Edit an entity: resolve by eid or exact name, patch summary/links/class (only provided fields change).
+  - membrane_entity_edit: Edit an entity: resolve by eid or exact name, patch summary/links/class (only provided fields change) -- and this is WHERE YOU AUTHOR THE ENTITY SCRIPTS (mention_script/thought_script/dreamed_script/nudge_script/delete_script; see PROGRAMMABLE ENTITIES above).
   - membrane_entity_remove: Remove an entity (noise cleanup): resolve by eid or exact name.
   - membrane_set_junk_cut: Tune the junk cut: how aggressively machinery (raw tool output -- ps/lsof tables, test bars, log lines, config dumps) is kept out of YOUR banner stories and...
   - membrane_peer_post: Post a message to the PEER CHANNEL: a chat lane between the LLMs, visible to the operator on every connected opencode seat.
