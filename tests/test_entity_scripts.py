@@ -5,6 +5,7 @@ The engine applies (the authorship covenant): the script returns
 {render, patch, delete}; apply_entity_update writes inside the store
 (a script may move ITS OWN doc, never another's)."""
 
+import json
 import re
 import unittest
 
@@ -193,6 +194,46 @@ class TestTickScripts(unittest.TestCase):
             self.assertEqual(fld.events, [])
             self.assertEqual(audit_probe.call_count, 0)
 
+    def test_silent_apply_persists_rate_limited_json_only(self):
+        """THE TICK-PERSIST GATE (the esphome seat's sluggishness): a
+        silent apply is a per-second RAM perspective -- its est.upsert
+        would mark the 154MB store dirty EVERY second (a whole-file JSON
+        rewrite every 10s, forever) AND re-embed + couchbase-write the
+        doc every second. Silent applies persist at most once per 60s
+        window and NEVER ride the couchbase write-through (the clock's
+        time is seat-local); non-silent applies are untouched."""
+        from membrane import night as N
+        N._TICK_LAST_PERSIST.clear()
+        srv = _Srv()
+        est = srv.entity_store
+        ent = self._clock(srv, "")
+        real_upsert = est.upsert
+        calls = []
+
+        def spy(e, embedder=None, sync=True):
+            calls.append(sync)
+            return real_upsert(e, embedder=embedder, sync=sync)
+
+        est.upsert = spy
+        ent.properties["tick_script"] = "result = {'render': 'x'}"
+        out = {"render": "clock 13:11:05", "patch": {"last_tick": "13:11:05"}}
+        apply_entity_update(srv, ent, out, "tick", silent=True)   # first
+        apply_entity_update(srv, ent, out, "tick", silent=True)   # inside
+        # ... the 60s window: the doc is RAM-fresh (2 patches), ONE persist
+        self.assertEqual((est.docs.get(ent.eid).properties or {})
+                         .get("last_tick"), "13:11:05")
+        self.assertEqual(len(calls), 1)
+        self.assertIs(calls[0], False)              # JSON-only, no couchbase
+        import time as _t
+        N._TICK_LAST_PERSIST[ent.eid] = _t.time() - 61.0
+        apply_entity_update(srv, ent, out, "tick", silent=True)
+        self.assertEqual(len(calls), 2)             # the next window persists
+        # the plain (non-silent) path keeps its upsert-every-time contract
+        N._TICK_LAST_PERSIST.clear()
+        apply_entity_update(srv, ent, out, "mention", silent=False)
+        self.assertEqual(len(calls), 3)
+        self.assertIs(calls[2], True)
+
     def test_seed_clock_entity(self):
         """The seat plants the clock ONCE at boot: `tool:clock`, class
         Tool, the default script + tick_every=1, silent_birth; a second
@@ -216,6 +257,21 @@ class TestTickScripts(unittest.TestCase):
             f"{MEMBRANE_NS}tool:clock").properties or {}).get(
             "tick_every"), 7)
         self.assertTrue(seed_clock_entity(None) is False)
+
+    def test_seed_is_durable_before_the_first_tick(self):
+        """THE DURABILITY FIX (the double '[seat] the clock entity is
+        planted' across boots): the seed is FLUSHed to the store file at
+        boot -- a restart inside the 10s debounce window used to lose it
+        and re-plant."""
+        import tempfile
+        from pathlib import Path
+        from membrane.night import seed_clock_entity
+        with tempfile.TemporaryDirectory() as d:
+            est = EntityStore(path=str(Path(d) / "entities.json"),
+                              shared=False)
+            self.assertTrue(seed_clock_entity(est))
+            on_disk = json.loads((Path(d) / "entities.json").read_text())
+            self.assertIn(f"{MEMBRANE_NS}tool:clock", on_disk.get("docs", {}))
 
     def test_default_clock_script_prints_the_time(self):
         """The default script: render 'clock <HH:MM:SS>' + the patch that

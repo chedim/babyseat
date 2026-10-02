@@ -38,6 +38,11 @@ from .entities import (MEMBRANE_NS, CLASS_COMPONENT, CLASS_SESSION,
 
 # ---- programmable entities (the script constants live in entities.py --
 # entities.py owns the entity contract; this module imports them) ----
+# THE TICK-PERSIST GATE (the silent applies): at most one store write per
+# silent entity per window -- the clock's per-second perspective stays RAM
+# (the last tick re-renders within a second of any restart anyway).
+_TICK_PERSIST_S = 60.0
+_TICK_LAST_PERSIST: dict[str, float] = {}
 
 SCRIPT_TIMEOUT_S = 2.0         # wall clock per run
 SCRIPT_MAX_FAILURES = 3        # consecutive failures -> auto-disable
@@ -173,7 +178,25 @@ def consolidate_entities(fld, est, mem=None, materialize: int = 8,
         cell_pts = _cell_points(fld, eid)
         if not cell_pts:
             continue
-        res = ent.consolidate_position(cell_pts, now)
+        # THE MALSIZED REPAIR (the esphome seat): a hydrate residue or
+        # foreign-embedder vector (8-dim position vs 1024-dim cells) made
+        # consolidate_position's broadcast fail -- and ONE bad entity used
+        # to abort the WHOLE drift+now pass, every pass (15x '[night]
+        # consolidation skipped' per boot). Drop the stale position; it
+        # re-seeds from this entity's own field cells below (the next
+        # drift step) -- and the repair persists.
+        repaired = False
+        if ent.position and len(ent.position) != len(cell_pts[0][0]):
+            ent.properties["position_repaired"] = now
+            ent.position = None
+            repaired = True
+        try:
+            res = ent.consolidate_position(cell_pts, now)
+        except Exception:
+            continue                 # one entity's failure is its own
+        if repaired:
+            est.upsert(ent, embedder=getattr(fld, "emb", None))
+            continue
         if res["moved"] > 0:
             drifted += 1
             total_moved += res["moved"]
@@ -642,6 +665,12 @@ def seed_clock_entity(est) -> bool:
         "tick_script": DEFAULT_CLOCK_TICK_SCRIPT,
         "tick_every": 1,
         "silent_birth": True}))
+    # THE DURABILITY FIX: flush NOW -- the debounce window (10s) used to
+    # outlive a quick restart and re-plant the clock every boot.
+    try:
+        est.flush()
+    except Exception:
+        pass
     return True
 
 
@@ -891,10 +920,26 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
         ent.properties["retired_ts"] = time.time()
         changed += 1
     if changed:
-        try:
-            est.upsert(ent)
-        except Exception:
-            pass
+        # THE TICK-PERSIST GATE: a silent apply is a per-second RAM
+        # perspective -- its properties land on the doc (in place, above)
+        # but persisting it would mark the 154MB store dirty EVERY second
+        # (a whole-file JSON rewrite every debounce, forever) and
+        # re-embed + couchbase-write the doc per tick (86k/day). Silence
+        # persists at most once per window, JSON-only; non-silent applies
+        # (bounded by their cooldowns) upsert every time as before.
+        if not silent:
+            try:
+                est.upsert(ent)
+            except Exception:
+                pass
+        else:
+            _last = _TICK_LAST_PERSIST.get(ent.eid)
+            if _last is None or time.time() - _last >= _TICK_PERSIST_S:
+                _TICK_LAST_PERSIST[ent.eid] = time.time()
+                try:
+                    est.upsert(ent, sync=False)
+                except Exception:
+                    pass
     if changed and not silent:
         # the applied render/patch is field news too (what the entity's
         # own organ decided about itself)

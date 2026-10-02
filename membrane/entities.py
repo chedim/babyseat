@@ -1431,13 +1431,20 @@ class EntityStore(MultiParentOps, TimelineOps):
             return None
 
     # ---- the merge contract --------------------------------------------------
-    def upsert(self, ent: QuantumEntity, embedder=None) -> bool:
+    def upsert(self, ent: QuantumEntity, embedder=None,
+               sync: bool = True) -> bool:
         """Merge one entity (union on collision), persist both homes.
         Returns True when written (new or merged).
         EPHEMERAL entities (properties['ephemeral']) stay LOCAL: a
         session's living present is nobody else's business -- it never
         rides the couchbase write-through (two parallel seats would
         otherwise fight over one 'now' doc).
+        ``sync=False`` (the tick-pace applies: the clock's silent
+        upsert): JSON + RAM only -- no couchbase write-through. The
+        write-through would re-embed the doc and upsert a 1024-point
+        vector EVERY SECOND (86k embeds/day); the tick's truth is
+        seat-local liveliness, and the fork read-through bonus never
+        needs it.
         BIRTHS announce: a NEW store doc (any creation path -- night
         synthesis, model add, materialization, gray-band growth) queues
         an announcement; merges-into-existing stay silent here (the
@@ -1456,18 +1463,17 @@ class EntityStore(MultiParentOps, TimelineOps):
             self._announce("new", ent)
         if (ent.properties or {}).get("ephemeral"):
             return True
-        coll = (self._entities_collection()
-                if (ent.properties or {}).get("ephemeral") is None or True
-                else None)
-        if coll is not None:
-            try:
-                coll.upsert(ent.eid, ent.to_doc(embedder))
-                return True
-            except Exception as e:
-                if not self._cb_warned:
-                    print(f"[entities] write-through failed ({str(e)[:80]})",
-                          file=sys.stderr)
-                    self._cb_warned = True
+        if sync:
+            coll = self._entities_collection()
+            if coll is not None:
+                try:
+                    coll.upsert(ent.eid, ent.to_doc(embedder))
+                    return True
+                except Exception as e:
+                    if not self._cb_warned:
+                        print(f"[entities] write-through failed ({str(e)[:80]})",
+                              file=sys.stderr)
+                        self._cb_warned = True
         # THE RETURN SEMANTICS fix (the shared=False test failures): the
         # RAM/JSON write IS the success -- the couchbase write-through is
         # best-effort (a fork read-through bonus, not the contract)

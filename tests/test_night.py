@@ -73,6 +73,41 @@ class TestConsolidation(unittest.TestCase):
         r2 = consolidate_entities(f, est)
         self.assertEqual(r2["materialized"], 0)   # one doc, never doubled
 
+    def test_malsized_position_is_repaired_and_the_night_survives(self):
+        """THE MALSIZED REPAIR (the esphome seat's 15x '[night] consolidation
+        skipped (operands could not be broadcast together with shapes (8,)
+        (1024,))'): a hydrate residue (a foreign embedder's vector) used to
+        ABORT the whole drift+now pass, every pass. The bad position is
+        dropped, the entity re-seeds from its field cells, and the night
+        keeps flowing."""
+        f, emb, est = self._world()
+        self._turns(f)
+        consolidate_entities(f, est)
+        ent = next(d for k, d in est.docs.items()
+                   if k.startswith("membrane::files:")
+                   and "router.py" in k)
+        ent.position = [0.5] * 8                       # the foreign 8-dim
+        ent.position_history = []
+        r = consolidate_entities(f, est)
+        self.assertEqual(len(ent.position), emb.dim)   # re-seeded 64-dim
+        self.assertTrue((ent.properties or {}).get("position_repaired"))
+        self.assertIsInstance(r, dict)
+
+    def test_a_broken_entity_never_stops_the_others(self):
+        """THE BELT: any single entity's drift failure is ITS failure --
+        consolidate_entities degrades per entity (the operator's night
+        contract: the night must never break the day)."""
+        f, emb, est = self._world()
+        self._turns(f)
+        consolidate_entities(f, est)
+        victim = next(d for k, d in est.docs.items()
+                      if k.startswith("membrane::files:")
+                      and "router.py" in k)
+        victim.consolidate_position = lambda *a, **k: (_ for _ in ()).throw(
+            ValueError("synthetic drift failure"))
+        r = consolidate_entities(f, est)
+        self.assertIsInstance(r, dict)                 # whole pass completed
+
     def test_only_keys_skips_materialization(self):
         """The plant-time path: consolidate ONLY the planted track's key --
         a fresh ring must not wait for a night nor materialize others."""
