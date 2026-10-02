@@ -8,6 +8,8 @@
 - The seat-first two-tier field: local authoritative entity store, a published global tier on your terms
 - Session absorb: foreign opencode sessions import into a fresh seat (fail-closed gates, lab-path refusal)
 - The act planner: the background mind's speak/act lane, stay-silent as the learned default
+- The crash covenant closed on evidence (docs/crash-covenant.md): drain/rebuild guards for the couchbase 4.6.3 abandoned-stream SIGABRTs, and the wrong-package label story written down
+- The vanishing-reply fix: serve store merge-on-flush (newer row wins, a stale boot copy never erases final text), chronological replay stable on ties, real token accounting summed across tool-loop rounds
 
 ## 0.1.0
 
