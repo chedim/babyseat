@@ -1,6 +1,7 @@
 # Changelog
 
 ## 0.2.0b1 — 2026-10-02 (first beta-testing release)
+- MCP tools shed the `membrane_` prefix (beta breaking change): run, query, state, learn, forget, entity_watch/entity_unwatch, entity_tracks, entities_related, entity_add/entity_edit/entity_remove/entity_inherit, junk_cut, peer_post, graph
 
 - The entity field: per-entity long-term memory (files, symbols, commands, seats, words) with graceful couchbase/JSON-RAM degrade covenant
 - The autonode: model-authored watcher entities over file/MQTT/signal triggers, engine-side delta-render, planner-gated speech

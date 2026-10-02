@@ -149,21 +149,24 @@ class TestMcpProtocol(unittest.TestCase):
     def test_tools_list(self):
         (resp,) = _rpc([{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}])
         names = [t["name"] for t in resp["result"]["tools"]]
-        self.assertEqual(names, ["membrane_run",
-                                 "membrane_query", "membrane_state",
-                                 "membrane_learn", "membrane_forget",
-                                 "membrane_watch_entity",
-                                 "membrane_unwatch_entity",
-                                 "membrane_list_tracks",
-                                 "membrane_related_entities",
-                                 "membrane_entity_add",
-                                 "membrane_entity_edit",
-                                 "membrane_entity_remove",
-                                 "membrane_set_junk_cut",
-                                 "membrane_peer_post",
+        self.assertEqual(names, ["run",
+                                 "query", "state",
+                                 "learn", "forget",
+                                 "entity_watch",
+                                 "entity_unwatch",
+                                 "entity_tracks",
+                                 "entities_related",
+                                 "entity_add",
+                                 "entity_edit",
+                                 "entity_remove",
+                                 "junk_cut",
+                                 "peer_post",
 
-                                 "membrane_graph",
-                                 "membrane_entity_inherit"])
+                                 "graph",
+                                 "entity_inherit",
+                                 "read",
+                                 "write",
+                                 "edit"])
         for t in resp["result"]["tools"]:
             self.assertIn("inputSchema", t)
             self.assertTrue(t["description"].strip())
@@ -217,20 +220,20 @@ class TestMcpTools(unittest.TestCase):
             {"sim": 0.91, "situation": "how to run tests",
              "action": ".venv/bin/python -m pytest", "outcome": "teed-pair",
              "model": "glm-5.3-flash:cloud"}]}
-        text = _call("membrane_query", {"topic": "running the tests"})
+        text = _call("query", {"topic": "running the tests"})
         self.assertIn("0.91", text)
         self.assertIn("[via glm-5.3-flash:cloud]", text)
         self.assertIn("how to run tests", text)
         self.assertIn("NOT learned", text)
 
     def test_query_empty_field(self):
-        text = _call("membrane_query", {"topic": "anything"})
+        text = _call("query", {"topic": "anything"})
         self.assertIn("Nothing SAFE", text)
         self.assertIn("12", text)          # field size surfaces
 
     def test_query_k_clamped(self):
         # k=99 arrives at the proxy as k=8 (clamped); the stub echoes nothing
-        _call("membrane_query", {"topic": "t", "k": 99})
+        _call("query", {"topic": "t", "k": 99})
         # (proxy contract tested endpoint-side; here just no crash)
 
     def test_entity_edit_relays_and_writes_tick_scripts(self):
@@ -238,7 +241,7 @@ class TestMcpTools(unittest.TestCase):
         the tool's schema carries tick_script, the call relays it in
         the POST body, and the reply teaches the tick's contract."""
         del _StubProxy.edits[:]
-        _call("membrane_entity_edit",
+        _call("entity_edit",
               {"spec": "tool:clock",
                "tick_script": "import time\nresult = {'render': 'x'}",
                "properties": {"tick_every": 2}})
@@ -247,13 +250,13 @@ class TestMcpTools(unittest.TestCase):
         self.assertEqual(body["properties"], {"tick_every": 2})
         # the SCHEMA names the trigger too (the model discovers it)
         edit_tool = next(t for t in M.TOOLS
-                         if t["name"] == "membrane_entity_edit")
+                         if t["name"] == "entity_edit")
         self.assertIn("tick_script", edit_tool["description"])
         self.assertIn("tick_script", json.dumps(
             edit_tool["inputSchema"]))
 
     def test_state_summary(self):
-        text = _call("membrane_state", {})
+        text = _call("state", {})
         self.assertIn("12 live entities", text)
         self.assertIn("stub-embed", text)
         self.assertIn("events: discourse 5, observations 3", text)
@@ -264,33 +267,33 @@ class TestMcpTools(unittest.TestCase):
         self.assertIn("last night: births=2", text)
 
     def test_learn_written(self):
-        text = _call("membrane_learn", {"lesson": "the cake is a lie"})
+        text = _call("learn", {"lesson": "the cake is a lie"})
         self.assertIn("#12", text)
         self.assertIn("Field now 13", text)
 
     def test_learn_skipped_by_guards(self):
         _StubProxy.learn = {"written": False,
                             "reason": "dedup or variety gate: nothing new"}
-        text = _call("membrane_learn", {"lesson": "dup"})
+        text = _call("learn", {"lesson": "dup"})
         self.assertIn("skipped", text)
         self.assertIn("nothing new", text)
 
     def test_forget_index_form_deletes(self):
-        text = _call("membrane_forget", {"spec": "#3"})
+        text = _call("forget", {"spec": "#3"})
         self.assertIn("Removed 2 of 12", text)
         self.assertIn("#3: junk", text)
 
     def test_forget_wordy_proposes_never_deletes(self):
         _StubProxy.forget = {"removed": None, "candidates": [
             {"idx": 7, "sim": 0.72}, {"idx": 9, "sim": 0.61}]}
-        text = _call("membrane_forget", {"spec": "that thing about the cake"})
+        text = _call("forget", {"spec": "that thing about the cake"})
         self.assertIn("never delete", text)
         self.assertIn("#7 (sim 0.72)", text)
         self.assertIn("Nothing removed", text)
     def test_proxy_error_is_tool_error_not_protocol_error(self):
         _StubProxy.fail_next = (503, "router off")
         resp = _rpc([{"jsonrpc": "2.0", "id": 5, "method": "tools/call",
-                      "params": {"name": "membrane_learn",
+                      "params": {"name": "learn",
                                  "arguments": {"lesson": "x"}}}])[0]
         self.assertIn("result", resp)                     # RESULT, not error
         self.assertTrue(resp["result"]["isError"])

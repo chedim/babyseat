@@ -11,7 +11,7 @@ model call, and the turn is NOT learned into the field.
 
 ## How to ask
 
-Use the `membrane_state` MCP tool (registered by default) — answer in the
+Use the `state` MCP tool (registered by default) — answer in the
 same turn, straight from the live field.
 
 Tool not registered (`--no-mcp`, or the MCP server failed to start)? Do NOT

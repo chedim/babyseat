@@ -105,7 +105,7 @@ instructions":
   `▸ f:x [file · said 41 · observed 17 · code 12 · 2h ago]`, the evidence
   sentences most relevant to the ask verbatim, the latest observation, the
   top relations, conflicts, what other seats said, commons claims. Served by
-  `/membrane/ask`, `membrane_query`, and in `--no-context` every turn.
+  `/membrane/ask`, `query`, and in `--no-context` every turn.
 - **SINCE YOUR LAST MESSAGE** (normal mode): the entities whose state moved
   after the watermark of the last model turn delivered. Changes from
   *outside* the conversation (code edits, entity scripts, other sessions)

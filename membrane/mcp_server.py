@@ -14,10 +14,10 @@ MCP layer can only do what the operator's proxy allows; kill it with
 --no-mcp and nothing but the convenience is lost.
 
 Tools (each maps 1:1 to a canonical frame / endpoint):
-  membrane_query    read recall (GET  /membrane/ask?q=...&k=N)     [read-only]
-  membrane_state    field health/stats (GET /membrane/state?mcp=1) [read-only]
-  membrane_learn    write one earned lesson (POST /membrane/learn) [guarded]
-  membrane_forget   delete cells (POST /membrane/forget)           [guarded]
+  query    read recall (GET  /membrane/ask?q=...&k=N)     [read-only]
+  state    field health/stats (GET /membrane/state?mcp=1) [read-only]
+  learn    write one earned lesson (POST /membrane/learn) [guarded]
+  forget   delete cells (POST /membrane/forget)           [guarded]
 
 Protocol: MCP stdio transport -- newline-delimited JSON-RPC 2.0 on stdin/
 stdout (initialize / tools/list / tools/call + notifications). Only stdlib.
@@ -29,6 +29,7 @@ paths chat uses (reads are pre-gate; writes run the ordinary learn guards).
 from __future__ import annotations
 
 import json
+import os
 import sys
 import urllib.error
 import urllib.parse
@@ -44,7 +45,7 @@ HTTP_TIMEOUT_S = 30.0
 
 TOOLS: list[dict] = [
     {
-        "name": "membrane_run",
+        "name": "run",
         "description": (
             "Run ONE shell command; the run goes THROUGH a membrane "
             "entity -- one command head -> one `c:<head>` entity created "
@@ -52,7 +53,7 @@ TOOLS: list[dict] = [
             "head/tail) on the doc and the run spoken into the field, so "
             "commands are findable later by similarity and their errors "
             "reach the banner. The tool itself is one entity too: every "
-            "run auto-updates `tool:membrane_run` (run/fail counts, last "
+            "run auto-updates `tool:run` (run/fail counts, last "
             "command + rc/outcome, cumulative ms). Prefer over 0-arg "
             "probes: reads (cat, ls, head, grep), builds, tests. Errors "
             "are announced next-banner; script_last_error persists on "
@@ -70,7 +71,7 @@ TOOLS: list[dict] = [
         },
     },
     {
-        "name": "membrane_query",
+        "name": "query",
         "description": (
             "Read membrane's long-term memory: the nearest past exchanges for "
             "a topic (situation-response pairs with similarity, answered-model "
@@ -89,7 +90,7 @@ TOOLS: list[dict] = [
         },
     },
     {
-        "name": "membrane_state",
+        "name": "state",
         "description": (
             "Membrane's own live state: the entity field's vitals "
             "(live entities, events by stream, entities by tier, "
@@ -99,7 +100,7 @@ TOOLS: list[dict] = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "membrane_learn",
+        "name": "learn",
         "description": (
             "Write ONE durable earned lesson into membrane's field. A lesson "
             "is a note, not a transcript: no secrets, no user personal data, "
@@ -117,12 +118,12 @@ TOOLS: list[dict] = [
         },
     },
     {
-        "name": "membrane_forget",
+        "name": "forget",
         "description": (
             "Delete memories. Index form (e.g. '#3-7, 9' or '12') DELETES "
             "those cells (capped). Wordier asks return candidate indexes as "
             "a PROPOSAL -- they never delete. After deleting, prefer a "
-            "membrane_learn that overwrites the lesson with the correction."),
+            "learn that overwrites the lesson with the correction."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -134,7 +135,7 @@ TOOLS: list[dict] = [
         },
     },
     {
-        "name": "membrane_watch_entity",
+        "name": "entity_watch",
         "description": (
             "Manage your banner ENTITY TRACKS. A track shows the entity's "
             "live state in the WHERE WE ARE header every turn "
@@ -163,7 +164,7 @@ TOOLS: list[dict] = [
         },
     },
     {
-        "name": "membrane_unwatch_entity",
+        "name": "entity_unwatch",
         "description": (
             "Remove entity tracks: exact key ('files:router.py') or a kind "
             "prefix ('files:' removes all file tracks)."),
@@ -176,7 +177,7 @@ TOOLS: list[dict] = [
         },
     },
     {
-        "name": "membrane_list_tracks",
+        "name": "entity_tracks",
         "description": (
             "List your planted entity tracks: key, label, boundary, current "
             "inside/outside state, and pending alert count. Use before "
@@ -184,7 +185,7 @@ TOOLS: list[dict] = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "membrane_related_entities",
+        "name": "entities_related",
         "description": (
             "Read the entity graph: entities related to a free-text query "
             "(named hits first, then semantic nearness), each with its "
@@ -202,7 +203,7 @@ TOOLS: list[dict] = [
         },
     },
     {
-        "name": "membrane_entity_add",
+        "name": "entity_add",
         "description": (
             "Add an abstract entity to the symbolic layer: a decision, "
             "failure mode, component, or goal with a one-line summary. "
@@ -226,7 +227,7 @@ TOOLS: list[dict] = [
         },
     },
     {
-        "name": "membrane_entity_edit",
+        "name": "entity_edit",
         "description": (
             "Edit an entity: resolve by eid or exact name, patch summary/"
             "links/class (only provided fields change). merged_into marks "
@@ -364,7 +365,7 @@ TOOLS: list[dict] = [
         },
     },
     {
-        "name": "membrane_entity_remove",
+        "name": "entity_remove",
         "description": (
             "Remove an entity (noise cleanup): resolve by eid or exact "
             "name. Ambiguous fragments remove nothing."),
@@ -377,7 +378,7 @@ TOOLS: list[dict] = [
         },
     },
     {
-        "name": "membrane_set_junk_cut",
+        "name": "junk_cut",
         "description": (
             "Tune the junk cut: how aggressively machinery (raw tool "
             "output -- ps/lsof tables, test bars, log lines, config "
@@ -401,7 +402,7 @@ TOOLS: list[dict] = [
         },
     },
     {
-        "name": "membrane_peer_post",
+        "name": "peer_post",
         "description": (
             "Post a message to the PEER CHANNEL: a chat lane between the "
             "LLMs, visible to the operator on every connected opencode "
@@ -420,7 +421,7 @@ TOOLS: list[dict] = [
         },
     },
     {
-        "name": "membrane_graph",
+        "name": "graph",
         "description": "The entity graph's subgraph reader (the model's "
                        "eyes on the universe map): entities related to a "
                        "query -- named hits first, then centroid-nearest "
@@ -443,7 +444,7 @@ TOOLS: list[dict] = [
         },
     },
     {
-        "name": "membrane_entity_inherit",
+        "name": "entity_inherit",
         "description": (
             "ENTITY INHERITANCE: give an entity a parent concept ('a "
             "letter points to letters'). The child inherits the parent's "
@@ -463,6 +464,70 @@ TOOLS: list[dict] = [
                 },
             },
             "required": ["spec", "parents"],
+        },
+    },
+    {
+        "name": "read",
+        "description": (
+            "Read a local file with line numbers (opencode-shaped): path "
+            "(absolute or cwd-relative), optional 1-based offset and limit "
+            "(default 2000 lines; page instead of one giant read). The "
+            "observation is relayed to the running proxy, which files an "
+            "event and keeps the f:<path> entity -- the field sees what "
+            "you read."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string",
+                         "description": "absolute or cwd-relative path."},
+                "offset": {"type": "integer",
+                           "description": "1-based first line (default 1)."},
+                "limit": {"type": "integer",
+                          "description": "lines to show (default 2000)."},
+            },
+            "required": ["path"],
+        },
+    },
+    {
+        "name": "write",
+        "description": (
+            "Write/overwrite a local file (parents auto-created) -- "
+            "prefer edit for in-place changes. The effect is relayed to "
+            "the running proxy: an event is filed and the f:<path> entity "
+            "is minted, so the field sees what you wrote."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string",
+                         "description": "absolute or cwd-relative path."},
+                "content": {"type": "string",
+                            "description": "the full new file content."},
+            },
+            "required": ["path", "content"],
+        },
+    },
+    {
+        "name": "edit",
+        "description": (
+            "In-place exact-string replacement in a local file (the "
+            "opencode-shaped edit): old must match exactly once, or pass "
+            "replace_all=True; a not-found or ambiguous match errors "
+            "instead of guessing -- read first. The effect is relayed as "
+            "an event + the f:<path> entity in the field."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string",
+                         "description": "absolute or cwd-relative path."},
+                "old": {"type": "string",
+                        "description": "the exact string to replace."},
+                "new": {"type": "string",
+                        "description": "the replacement string."},
+                "replace_all": {"type": "boolean",
+                                "description": "replace every occurrence "
+                                               "(default false)."},
+            },
+            "required": ["path", "old", "new"],
         },
     },
 ]
@@ -640,7 +705,7 @@ def tool_forget(args: dict, port: int) -> str:
     lines = ["Wordy asks never delete from tool calls. Nearest events:",
              ", ".join(f"#{c['idx']} (sim {c['sim']:.2f})"
                        for c in cands[:8]),
-             "To remove, re-ask membrane_forget with explicit indexes. "
+             "To remove, re-ask forget with explicit indexes. "
              "Nothing removed."]
     return "\n".join(lines)
 
@@ -673,7 +738,7 @@ def tool_unwatch_entity(args: dict, port: int) -> str:
     out = _http(port, "POST", "/membrane/entity-track/remove", {"key": key})
     n = int(out.get("removed") or 0)
     return f"Removed {n} entity track(s)." if n \
-        else "No matching tracks (list them via membrane_list_tracks)."
+        else "No matching tracks (list them via entity_tracks)."
 
 
 def tool_list_tracks(args: dict, port: int) -> str:
@@ -681,7 +746,7 @@ def tool_list_tracks(args: dict, port: int) -> str:
     tracks = out.get("tracks") or []
     if not tracks:
         return ("No entity tracks planted. Plant one with "
-                "membrane_watch_entity (key + optional boundary).")
+                "entity_watch (key + optional boundary).")
     lines = ["Your entity tracks (live in the WHERE WE ARE banner):"]
     for t in tracks:
         b = (f", boundary enter {t['enter']}" if t.get("enter") is not None
@@ -706,7 +771,7 @@ def tool_related_entities(args: dict, port: int) -> str:
     if not rel:
         return (f"No entities related to {q!r} yet. The index grows as "
                 f"events land on the field (deterministic harvest) and as you "
-                f"add abstract entities via membrane_entity_add.")
+                f"add abstract entities via entity_add.")
     lines = [f"Entities related to {q!r}:"]
     for r in rel:
         nb = ""
@@ -730,7 +795,7 @@ def tool_entity_add(args: dict, port: int) -> str:
     how = "merged into the existing entity" if out.get("merged") \
         else "created"
     return (f"Entity {out['name']!r} [{out['class']}] {how}: {out['eid']} "
-            f"(visible to membrane_related_entities; audited to the "
+            f"(visible to entities_related; audited to the "
             f"operator).")
 
 
@@ -937,24 +1002,127 @@ def tool_peer_seats(args: dict, port: int) -> str:
     return "\n".join(lines)
 
 
+
+# ---- the file tools (opencode-shaped; every effect mints into the field) ----
+
+def _fpath(args: dict) -> str:
+    p = str(args.get("path") or "").strip()
+    if not p:
+        raise ProxyError(400, "path required")
+    return os.path.abspath(os.path.expanduser(p))
+
+
+def _file_mint(port: int, op: str, abspath: str, detail: str) -> str:
+    """Relay the file effect to the running proxy: POST /membrane/filetool
+    files an event and upserts the f:<path> entity (run-lane style). The
+    FS effect is primary: if the proxy is down the file change STANDS and
+    the note degrades to a plain warning text."""
+    try:
+        rel = os.path.relpath(abspath, os.getcwd())
+    except ValueError:
+        rel = abspath
+    ent = f"f:{rel}"
+    try:
+        out = _http(port, "POST", "/membrane/filetool",
+                    {"op": op, "path": rel, "ent": ent, "detail": detail})
+        if not out.get("ok"):
+            return f"field note failed: {out.get('error', 'unknown')}"
+        how = out.get("how") or "updated"
+        return (f"field: {ent} {how} (event #{out.get('event', '?')}, "
+                f"eid {out.get('eid', '?')})")
+    except Exception as e:
+        return f"field note failed ({e}); the file change stands"
+
+
+def tool_read(args: dict, port: int) -> str:
+    abspath = _fpath(args)
+    try:
+        with open(abspath, encoding="utf-8", errors="replace") as fh:
+            lines = fh.readlines()
+    except FileNotFoundError:
+        raise ProxyError(404, f"no such file: {abspath}") from None
+    except IsADirectoryError:
+        raise ProxyError(400, f"is a directory: {abspath}") from None
+    off = max(int(args.get("offset") or 1), 1)
+    limit = max(int(args.get("limit") or 2000), 1)
+    total = len(lines)
+    sl = lines[off - 1: off - 1 + limit]
+    block = "".join(f"{n}: {lines[n - 1]}" for n in range(off, off + len(sl)))
+    note = _file_mint(port, "read", abspath,
+                      f"read {len(sl)}/{total} lines (offset {off})")
+    return (f"{abspath} -- {total} lines (showing {off}.."
+            f"{max(off - 1 + len(sl), 0)})\n{note}\n{block}")
+
+
+def tool_write(args: dict, port: int) -> str:
+    abspath = _fpath(args)
+    content = args.get("content")
+    if not isinstance(content, str):
+        raise ProxyError(400, "content required (string)")
+    d = os.path.dirname(abspath)
+    if d:
+        os.makedirs(d, exist_ok=True)
+    existed = os.path.exists(abspath)
+    with open(abspath, "w", encoding="utf-8") as fh:
+        fh.write(content)
+    n = len(content.encode("utf-8"))
+    note = _file_mint(port, "write", abspath,
+                      f"{'overwrote' if existed else 'created'}, {n} bytes")
+    tag = "overwrote" if existed else "created"
+    return f"wrote {abspath} ({n} bytes, {tag})\n{note}"
+
+
+def tool_edit(args: dict, port: int) -> str:
+    abspath = _fpath(args)
+    old = args.get("old")
+    new = args.get("new")
+    if not isinstance(old, str) or not old:
+        raise ProxyError(400, "old required (the exact string to replace)")
+    if not isinstance(new, str):
+        raise ProxyError(400, "new required (the replacement string)")
+    try:
+        content = open(abspath, encoding="utf-8", errors="replace").read()
+    except FileNotFoundError:
+        raise ProxyError(404, f"no such file: {abspath}") from None
+    except IsADirectoryError:
+        raise ProxyError(400, f"is a directory: {abspath}") from None
+    occurrences = content.count(old)
+    if occurrences == 0:
+        raise ProxyError(404,
+                         f"old string not found in {abspath} -- read first")
+    replace_all = bool(args.get("replace_all"))
+    if occurrences > 1 and not replace_all:
+        raise ProxyError(409, f"old string matches {occurrences} times in "
+                              f"{abspath}; pass replace_all or narrow old")
+    out = content.replace(old, new, -1 if replace_all else 1)
+    with open(abspath, "w", encoding="utf-8") as fh:
+        fh.write(out)
+    note = _file_mint(port, "edit", abspath,
+                      f"replaced {occurrences} occurrence(s)")
+    return (f"edited {abspath}: {old[:80]!r} -> {new[:80]!r} "
+            f"({occurrences} place(s))\n{note}")
+
 TOOL_IMPLS = {
-    "membrane_query": tool_query,
-    "membrane_state": tool_state,
-    "membrane_learn": tool_learn,
-    "membrane_forget": tool_forget,
-    "membrane_watch_entity": tool_watch_entity,
-    "membrane_unwatch_entity": tool_unwatch_entity,
-    "membrane_list_tracks": tool_list_tracks,
-    "membrane_related_entities": tool_related_entities,
-    "membrane_entity_add": tool_entity_add,
-    "membrane_entity_edit": tool_entity_edit,
-    "membrane_entity_remove": tool_entity_remove,
-    "membrane_set_junk_cut": tool_set_junk_cut,
-    "membrane_peer_post": tool_peer_post,
-    "membrane_peer_seats": tool_peer_seats,
-    "membrane_graph": tool_graph,
-    "membrane_entity_inherit": tool_entity_inherit,
-    "membrane_run": tool_run,
+    "query": tool_query,
+    "state": tool_state,
+    "learn": tool_learn,
+    "forget": tool_forget,
+    "entity_watch": tool_watch_entity,
+    "entity_unwatch": tool_unwatch_entity,
+    "entity_tracks": tool_list_tracks,
+    "entities_related": tool_related_entities,
+    "entity_add": tool_entity_add,
+    "entity_edit": tool_entity_edit,
+    "entity_remove": tool_entity_remove,
+    "junk_cut": tool_set_junk_cut,
+    "peer_post": tool_peer_post,
+    "peer_seats": tool_peer_seats,
+    "graph": tool_graph,
+    "entity_inherit": tool_entity_inherit,
+    "run": tool_run,
+    "read": tool_read,
+    "write": tool_write,
+    "edit": tool_edit,
 }
 
 

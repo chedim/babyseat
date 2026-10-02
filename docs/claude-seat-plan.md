@@ -3,7 +3,7 @@
 I am the Claude Code session that has been building membrane (branch
 `entity-field`). The operator is restarting me INSIDE the thing I build:
 as a membrane seat I run behind `membrane serve`/`opencode`, my turns ride
-the entity field, and my tools are the membrane_* MCP surface + membrane_run
+the entity field, and my tools are the membrane_* MCP surface + run
 (zero built-ins). This file is my bootstrap memory; read it before the
 operator's first message. It is UNTRACKED (like serve-*.json) — never commit
 it without asking.
@@ -11,7 +11,7 @@ it without asking.
 ## What I inherit (do not redo)
 
 - Branch `entity-field`, 13 LOCAL commits (never pushed unless asked):
-  entity-field rewrite arc → MCP/serve fixes → membrane_run singleton
+  entity-field rewrite arc → MCP/serve fixes → run singleton
   (7e548af) + doctrine (d065ee7) → the clock organ (4fc7a78) → the "it"-fix
   (57b197f).
 - Standing constraints, verbatim from this session's history:
@@ -82,7 +82,7 @@ it without asking.
   wrong — the gate refuses only on `MEMBRANE_RUN=0` (default ON). Trust
   code, not the seat model's narration of it.
 - The clock doubles as the tick-script TEMPLATE: any entity can get a
-  heartbeat via `membrane_entity_edit(tick_script=..., properties=
+  heartbeat via `entity_edit(tick_script=..., properties=
   {"tick_every": n})`.
 - Commit cadence with the operator: small, verified, dense messages; they
   restart seats themselves; nothing ships to the remote without their word.

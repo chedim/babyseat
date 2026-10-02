@@ -5,7 +5,7 @@ replaced; a phone companion or a script is a first-class client, no editor
 in the world). Pins:
 
   - the STATIC doctrine (_RAG_SYSTEM) is client-neutral: it never claims
-    the editor; it names the run lane (membrane_run -> a command entity)
+    the editor; it names the run lane (run -> a command entity)
     and the zero-builtin default;
   - it still teaches the frames and the lane discipline (the parts that
     earned their keep unchanged);
@@ -50,7 +50,7 @@ class TestDoctrineNative(unittest.TestCase):
         self.assertIn("REMOTE clients", self.text)
 
     def test_doctrine_names_the_run_lane(self):
-        self.assertIn("membrane_run", self.text)
+        self.assertIn("run", self.text)
         self.assertIn("command entity", self.text)
 
     def test_doctrine_says_builtin_free_by_default(self):
@@ -73,8 +73,8 @@ class TestDoctrineNative(unittest.TestCase):
         # the card's EXEC paragraph (session-conditional) and the doctrine's
         # static bullet both teach the run lane, so the model hears it twice
         card = _seat_card(_Srv(), True)
-        self.assertIn("membrane_run", card)
-        self.assertIn("membrane_run", self.text)
+        self.assertIn("run", card)
+        self.assertIn("run", self.text)
 
 
 if __name__ == "__main__":

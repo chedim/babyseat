@@ -70,10 +70,10 @@ class TestSessionStore(unittest.TestCase):
         self.assertFalse(st.delete(a["id"]))
 
 
-TC = {"name": "membrane_run", "description": "run one command",
+TC = {"name": "run", "description": "run one command",
       "inputSchema": {"type": "object", "properties": {}}}
 TOOLCALL = {"id": "call_1", "type": "function",
-            "function": {"name": "membrane_run",
+            "function": {"name": "run",
                          "arguments": json.dumps({"command": "echo hi"})}}
 
 
@@ -290,7 +290,7 @@ class TestTurnLoop(unittest.TestCase):
     def test_tool_round_trip(self):
         w = self._world([_resp(calls=[TOOLCALL]), _resp(content="done")])
         w["t"].run(w["s"]["id"], "run it")
-        self.assertEqual(w["ec"][0], ("membrane_run",
+        self.assertEqual(w["ec"][0], ("run",
                                       {"command": "echo hi"}))
         body2 = w["calls"][1]
         tool_msgs = [m for m in body2["messages"] if m["role"] == "tool"]
@@ -305,7 +305,7 @@ class TestTurnLoop(unittest.TestCase):
         self.assertEqual(kinds[0], "step-start")
         tp = last["parts"][0]
         tp = next(p for p in last["parts"] if p["type"] == "tool")
-        self.assertEqual(tp["tool"], "membrane_run")
+        self.assertEqual(tp["tool"], "run")
         self.assertEqual(tp["callID"], "call_1")
         self.assertEqual(tp["state"]["status"], "completed")
         self.assertEqual(tp["state"]["output"], "hi\n")
@@ -318,7 +318,7 @@ class TestTurnLoop(unittest.TestCase):
         for b in w["calls"]:
             self.assertEqual(b["tools"],
                              [{"type": "function",
-                               "function": {"name": "membrane_run",
+                               "function": {"name": "run",
                                             "description": "run one command",
                                             "parameters":
                                             {"type": "object",

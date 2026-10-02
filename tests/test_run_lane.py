@@ -1,6 +1,6 @@
 """THE RUN LANE (stage B, TDD): commands execute THROUGH entities. The
 owner's two calls: entity scripts go UNsandboxed (os/subprocess allowed,
-engine-level budgets stay); and the model runs shell via membrane_run --
+engine-level budgets stay); and the model runs shell via run --
 one command -> one command entity (`c:<head>` -- the field's own canon
 id, so every prose mention binds it) created or REUSED for throwaway
 repeats, its result on the doc, the run spoken into the field, errors in
@@ -128,7 +128,7 @@ class TestToolsOff(unittest.TestCase):
         blk = _tools_block()
         for t in _OC_BUILTIN_TOOLS:
             self.assertIs(blk[t], False)
-        self.assertNotIn("membrane_query", blk)   # MCP tools are unaffected
+        self.assertNotIn("query", blk)   # MCP tools are unaffected
 
     def test_env_keep_builtins(self):
         from membrane.opencode import _tools_block
@@ -141,31 +141,31 @@ class TestToolsOff(unittest.TestCase):
 
 class TestMcpRunTool(unittest.TestCase):
     def test_membrane_run_listed_and_relayed(self):
-        """membrane_run in the MCP surface, its schema names the
+        """run in the MCP surface, its schema names the
         arguments, its relay is wired (the full request loop against a
         stub proxy lives in test_mcp.py's suite)."""
         import json as _json
         from membrane import mcp_server as M
-        self.assertIn("membrane_run", [t["name"] for t in M.TOOLS])
-        self.assertIn("membrane_run", M.TOOL_IMPLS)
-        tool = next(t for t in M.TOOLS if t["name"] == "membrane_run")
+        self.assertIn("run", [t["name"] for t in M.TOOLS])
+        self.assertIn("run", M.TOOL_IMPLS)
+        tool = next(t for t in M.TOOLS if t["name"] == "run")
         schema = _json.dumps(tool["inputSchema"]).lower()
         self.assertIn("command", schema)
         self.assertIn("timeout_s", schema)
-        self.assertTrue(callable(M.TOOL_IMPLS["membrane_run"]))
+        self.assertTrue(callable(M.TOOL_IMPLS["run"]))
 
 
 class TestRunToolSelfEntity(unittest.TestCase):
     def test_run_auto_updates_the_tool_s_own_entity(self):
-        """membrane_run is itself ONE entity: every executed command
-        auto-updates the `tool:membrane_run` singleton (its rolling
+        """run is itself ONE entity: every executed command
+        auto-updates the `tool:run` singleton (its rolling
         record: counts, rc/outcome, cumulative ms, last command) while
         each command keeps its own `c:<head>` doc."""
         f, est = _world()
         run_command_entity(f, est, None, "echo one")
         run_command_entity(f, est, None, "false")
         run_command_entity(f, est, None, "echo two")
-        tk = est.docs.get(NS + "tool:membrane_run")
+        tk = est.docs.get(NS + "tool:run")
         self.assertIsNotNone(tk)
         p = tk.properties
         self.assertEqual(p.get("run_count"), 3)

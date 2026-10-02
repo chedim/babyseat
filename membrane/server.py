@@ -24,7 +24,7 @@ opencode-compatible where clients care:
   from the same serve-auth.json pair.
 
 What is deliberately NOT here: opencode's file/VCS/LSP/share surface (a
-client needs to work on the room through membrane_run and the field's
+client needs to work on the room through run and the field's
 readers, which the doctrine already teaches).
 """
 import copy

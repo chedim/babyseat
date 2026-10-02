@@ -1,6 +1,6 @@
 """Stage-1 prerequisites of the entity field: codegraph defs + docstrings,
 the VSA lane's non-remembering encode, the ANN client's field/filter and
-index definition, and the membrane_graph tool reading the real shape."""
+index definition, and the graph tool reading the real shape."""
 
 import json
 import os

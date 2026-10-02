@@ -30,9 +30,9 @@ remains the deterministic path; when in doubt, use it.
 
 ## How to write (from YOUR OWN work -- the agent lane, ON by default)
 
-Use the `membrane_learn` MCP tool (registered by default):
+Use the `learn` MCP tool (registered by default):
 
-    membrane_learn {"lesson": "<the lesson you just earned>"}
+    learn {"lesson": "<the lesson you just earned>"}
 
 Guards run proxy-side, confirmation in the same tool result. Same rules as
 the prose lane: earned lessons only, no secrets, no user personal data, no

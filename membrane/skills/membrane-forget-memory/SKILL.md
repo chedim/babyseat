@@ -34,9 +34,9 @@ so windows can only under-remove, never over-remove anything older).
 
 ## How to forget (from YOUR OWN work -- the agent lane, index-form ONLY)
 
-Use the `membrane_forget` MCP tool (registered by default):
+Use the `forget` MCP tool (registered by default):
 
-    membrane_forget {"spec": "#12"}          (also: "#3-7", "3-7, 9")
+    forget {"spec": "#12"}          (also: "#3-7", "3-7, 9")
 
 Rules of the lane:
 

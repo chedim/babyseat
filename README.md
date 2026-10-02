@@ -327,7 +327,7 @@ time zones, the watch layer, operator rules — is
   (nursery/live/dormant), geometry (effective rank, free energy, the conflict
   fraction), replay A/B ledger, the last night pass.
 - `membrane review` (`--ab` for the replay pairs) — what the field learned.
-- The MCP `membrane_state` tool exposes the same payload to the agent.
+- The MCP `state` tool exposes the same payload to the agent.
 
 What the numbers mean and how the field's "thermodynamics" work:
 [docs/principle.md](docs/principle.md) (plain words) and

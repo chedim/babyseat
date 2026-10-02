@@ -7,7 +7,7 @@ arrives -- each lands on the same bounded queue as one ``Trigger``,
 and every ENTITY carrying a ``watch_script`` whose ``watch`` prop
 selects the trigger fires. The scripts are authored through the same
 entity edit surface as the clock's tick_script; watching starts by
-``membrane_entity_edit(eid, watch_script=..., watch={...})``.
+``entity_edit(eid, watch_script=..., watch={...})``.
 
 THE BLOCKING TRADE (the honest one): watch scripts may block --
 subprocesses, sleeps, network reads. Threads cannot be killed, so the

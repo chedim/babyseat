@@ -1,6 +1,6 @@
 """THE AUTONODE (the trigger layer, the operator's 2026-10-01 design + the
 mid-plan corrections): a GENERIC trigger bus -- watchers are ENTITIES
-(model-authored via membrane_entity_edit), the engine stays
+(model-authored via entity_edit), the engine stays
 source-agnostic (file/mqtt/signal all land as the same Trigger), watch
 scripts may BLOCK and run in parallel under a bounded pool (<=4 at
 once; an overrun strikes the 3-strikes lane but can't be killed --

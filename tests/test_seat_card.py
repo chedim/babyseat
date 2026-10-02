@@ -54,7 +54,7 @@ class TestSeatCard(unittest.TestCase):
     def test_mcp_off_falls_back_to_frames(self):
         card = _seat_card(_Srv(), mcp_on=False)
         self.assertIn("MCP off", card)
-        self.assertNotIn("membrane_query", card)
+        self.assertNotIn("query", card)
 
     def test_writes_and_replay_follow_the_switches(self):
         card = _seat_card(_Srv(agent_writes=False), True)

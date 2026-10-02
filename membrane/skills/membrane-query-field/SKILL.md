@@ -11,9 +11,9 @@ its live field — no model call, and the turn is NOT learned into the field.
 
 ## How to query
 
-Use the `membrane_query` MCP tool (registered by default):
+Use the `query` MCP tool (registered by default):
 
-    membrane_query {"topic": "<what to recall>"}
+    query {"topic": "<what to recall>"}
 
 Structured arguments, answer in the same turn, same guarantees as the
 frame: read-only, no model call, never learned.

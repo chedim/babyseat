@@ -18,14 +18,14 @@ import json
 import re
 
 # the tool names whose args parse as fn schemas (the known shapes)
-_KNOWN_OPS = ("edit", "bash", "read", "write", "membrane_query",
-              "membrane_learn", "membrane_state", "membrane_forget",
-              "membrane_watch_entity", "membrane_unwatch_entity",
-              "membrane_list_tracks", "membrane_related_entities",
-              "membrane_entity_add", "membrane_entity_edit",
-              "membrane_entity_remove", "membrane_set_junk_cut",
-              "membrane_peer_post", "membrane_peer_seats",
-              "membrane_entity_inherit")
+_KNOWN_OPS = ("edit", "bash", "read", "write", "query",
+              "learn", "state", "forget",
+              "watch", "unwatch",
+              "tracks", "related",
+              "entity_add", "entity_edit",
+              "entity_remove", "junk_cut",
+              "peer", "peer_seats",
+              "entity_inherit")
 
 
 def _safe_json(text: str) -> dict:

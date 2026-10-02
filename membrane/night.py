@@ -22,6 +22,7 @@ every mutation carries an audit event"""
 
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -63,8 +64,20 @@ SCRIPT_DEFAULT_EVERY_N = 4     # each entity's script samples every Nth
 # own budgets (per-run timeouts, the per-pass cap, the output caps) are
 # the bounds. No import policy remains.
 
-RUN_TIMEOUT_DEFAULT_S = 20.0   # one membrane_run's budget (the MCP call
+RUN_TIMEOUT_DEFAULT_S = 20.0   # one run's budget (the MCP call
 RUN_TIMEOUT_MAX_S = 600.0      # transport allows ~30s; longer work goes
+# ---- the file hands (read/write/edit/grep/glob -- the owner's 2026-10-02
+# ask: opencode-native hands that LAND on entities like run does) ----
+FILE_READ_LINES_DEFAULT = 200  # read's line bound
+FILE_READ_LINES_MAX = 600
+FILE_LINE_TRUNC = 400          # per-line cap in read output
+FILE_GREP_MAX_FILES = 5000     # walk ceiling per search
+FILE_LAND_MAX = 12             # matched file docs touched per search
+FILE_RESULT_FILES = 60         # matches reported back per search
+FILE_SKIP_DIRS = frozenset({
+    "node_modules", ".git", "__pycache__", ".venv", ".venv312",
+    ".membrane", ".opencode", ".mypy_cache", ".pytest_cache",
+    ".tox", "dist", "build"})
                                # through a script on a duty cycle)
 
 
@@ -431,7 +444,7 @@ def _script_fail(est, ent, fld=None) -> None:
         _script_error_announce(est, ent.eid, "disabled",
                                f"{n} consecutive failures -- script "
                                f"auto-disabled (clear via "
-                               f"membrane_entity_edit)")
+                               f"entity_edit)")
     est.save()
 
 
@@ -489,7 +502,7 @@ def _script_record_fail(fld, est, ent, eid: str, kind: str,
 
 def run_command_entity(fld, est, mem, command: str,
                        timeout_s: float | None = None) -> dict:
-    """THE MODEL'S HANDS (membrane_run, the owner's 2026-10-01 design):
+    """THE MODEL'S HANDS (run, the owner's 2026-10-01 design):
     a shell command is executed THROUGH its entity. One command -> one
     command entity -- the field's own canon id (`c:<head>`; throwaway
     repeats REUSE the same doc, real commands get their own), class
@@ -545,38 +558,21 @@ def run_command_entity(fld, est, mem, command: str,
     else:
         doc.properties["command"] = cmd
         doc.properties.pop("silent_birth", None)
-    t0 = time.time()
-    err = ""
-    try:
-        p = subprocess.run(cmd, shell=True, capture_output=True, text=True,
-                           timeout=t, cwd=os.getcwd())
-        rc = p.returncode
-        text = "\n".join(x for x in ((p.stdout or "").rstrip("\n"),
-                                     (p.stderr or "").rstrip("\n")) if x)
-    except subprocess.TimeoutExpired as e:
-        rc = -1
-        err = f"timeout after {t:g}s"
-        text = "\n".join(x.decode(errors="replace") if isinstance(x, bytes)
-                         else (x or "") for x in (e.stdout, e.stderr))
-    ms = int((time.time() - t0) * 1000)
-    head, tail = text[:ST.RESULT_HEAD], text[-ST.RESULT_TAIL:]
-    oc = "timeout" if err else ST.outcome(canon_e, head, tail)
-    ok = rc == 0 and not err
     props = doc.properties
     props["run_rc"], props["run_outcome"] = rc, oc
     props["run_head"], props["run_tail"], props["run_ms"] = head, tail, ms
     est.upsert(doc)
-    # THE TOOL'S OWN ENTITY (the owner's design: membrane_run is itself
+    # THE TOOL'S OWN ENTITY (the owner's design: run is itself
     # ONE entity, auto-updated by every run it executes): the
-    # `tool:membrane_run` singleton keeps the rolling record (run/fail
+    # `tool:run` singleton keeps the rolling record (run/fail
     # counts, last command + rc/outcome, cumulative ms) while each
     # command keeps its own doc; scripts and the night read the
     # singleton to watch the tool lived.
-    tk = MEMBRANE_NS + "tool:membrane_run"
+    tk = MEMBRANE_NS + "tool:run"
     tdoc = (est.docs or {}).get(tk)
     if tdoc is None:
         tdoc = QuantumEntity(eid=tk, cls=CLASS_TOOL,
-                             properties={"name": "membrane_run",
+                             properties={"name": "run",
                                          "silent_birth": True})
     tp = tdoc.properties
     tp["run_count"] = int(tp.get("run_count") or 0) + 1
@@ -602,13 +598,308 @@ def run_command_entity(fld, est, mem, command: str,
         props["script_last_error"] = msg[:300]
         est.upsert(doc)
     if mem is not None:
-        _audit(mem, {"event": "agent-shell-run", "origin": "membrane_run",
+        _audit(mem, {"event": "agent-shell-run", "origin": "run",
                      "eid": canon_e, "rc": rc, "ok": ok, "ms": ms,
                      "command": cmd[:200]})
     return {"ok": ok, "eid": canon_e, "key": key, "rc": rc, "outcome": oc,
             "head": head, "tail": tail, "ms": ms, "doc": doc,
             "created": created}
 
+
+
+# ---- THE FILE HANDS (read/write/edit/grep/glob, the owner's 2026-10-02
+# design): one call -> one `f:<path>` file entity via the standard canon
+# (born cls Component or reused), the action's counters on the doc, an
+# observation event subject-pinned to the file, errors down the
+# script-error lanes, an audit per op. Same trust as the run lane;
+# MEMBRANE_RUN=0 gates both hand families (the check lives in the proxy
+# handlers).
+
+def _file_resolve(path) -> str:
+    """~ expands, seat-relative joins the cwd -> one absolute path."""
+    fp = os.path.expanduser(str(path or "").strip())
+    if not fp:
+        return ""
+    if not os.path.isabs(fp):
+        fp = os.path.join(os.getcwd(), fp)
+    return os.path.abspath(fp)
+
+
+def _file_land(fld, est, mem, fp, action, ok, head, detail, err_msg=""):
+    """One file call -> its entity: born or reused, counters + detail
+    props on the doc, an observation event, errors in the script-error
+    lanes, the audit. Returns (eid, key, created)."""
+    eid = E.canon("f", fp)
+    key = MEMBRANE_NS + overlay_key(eid)
+    created = False
+    if est is not None:
+        doc = (est.docs or {}).get(key)
+        if doc is None:
+            doc = QuantumEntity(eid=key, cls=CLASS_COMPONENT,
+                                properties={"name": os.path.basename(fp) or fp,
+                                            "silent_birth": True})
+            created = True
+        props = doc.properties
+        props[f"{action}_count"] = int(props.get(f"{action}_count") or 0) + 1
+        props[f"last_{action}_ts"] = props["last_ts"] = time.time()
+        for k, v in detail.items():
+            props[k] = v
+        if not ok:
+            props["script_last_error"] = err_msg[:300]
+        est.upsert(doc)
+    oc = "ok" if ok else "error"
+    if fld is not None:
+        try:
+            fld.write_events([ST.Event(
+                stream="observation", tool=action, args={"path": fp},
+                result_head=head, result_tail="", result_len=len(head),
+                outcome=oc, ts=time.time(), subject=eid)], session="")
+            if getattr(fld.emb, "model", "?") != "?":
+                fld.process(limit=8)
+        except Exception as e:
+            print(f"[night] file {action} event skipped ({e})", file=sys.stderr)
+    if est is not None and not ok:
+        _script_error_announce(est, key, action, err_msg)
+    if mem is not None:
+        _audit(mem, {"event": "agent-file-op", "origin": action,
+                     "eid": eid, "ok": ok, "path": fp[:200]})
+    return eid, key, created
+
+
+def file_read_entity(fld, est, mem, path, offset=None, limit=None) -> dict:
+    """THE READ HAND: bounded content (default 200 lines, max 600, long
+    lines trimmed), the file's f: entity born or touched, the read
+    observed. line strings are 'N: text' like the code readers print."""
+    fp = _file_resolve(path)
+    if not fp:
+        return {"ok": False, "error": "path required"}
+    if not os.path.isfile(fp):
+        eid = E.canon("f", fp)
+        key = MEMBRANE_NS + overlay_key(eid)
+        _file_land(fld, est, mem, fp, "read", False, "", {}, f"no such file: {fp}")
+        return {"ok": False, "eid": eid, "key": key, "path": fp,
+                "error": f"no such file: {fp}"[:200]}
+    try:
+        off = max(0, int(offset or 0))
+        lim = max(1, min(int(limit or FILE_READ_LINES_DEFAULT),
+                         FILE_READ_LINES_MAX))
+    except (TypeError, ValueError):
+        return {"ok": False, "error": "offset/limit must be integers"}
+    t0 = time.time()
+    try:
+        lines, total = [], 0
+        with open(fp, "r", encoding="utf-8", errors="replace") as fh:
+            for n, line in enumerate(fh, 1):
+                total = n
+                if n > off:
+                    lines.append(f"{n}: {line.rstrip(chr(10))[:FILE_LINE_TRUNC]}")
+                    if len(lines) >= lim:
+                        break
+        text = "\n".join(lines)
+        head = text[:ST.RESULT_HEAD]
+    except OSError as e:
+        err = f"{type(e).__name__}: {e}"
+        eid, key, _c = _file_land(fld, est, mem, fp, "read", False, "", {}, err)
+        return {"ok": False, "eid": eid, "key": key, "path": fp, "error": err[:200]}
+    ms = int((time.time() - t0) * 1000)
+    eid, key, created = _file_land(fld, est, mem, fp, "read", True, head,
+                                   {"read_lines": len(lines),
+                                    "last_read_offset": off,
+                                    "total_lines_hint": total})
+    return {"ok": True, "eid": eid, "key": key, "path": fp, "created": created,
+            "lines": lines, "scanned_lines": total, "ms": ms}
+
+
+def file_write_entity(fld, est, mem, path, content, create_dirs=True) -> dict:
+    """THE WRITE HAND: full-content overwrite (parents made), a no-op
+    when the content already matches; the f: entity carries write_count,
+    last_write_bytes, last_sha1."""
+    fp = _file_resolve(path)
+    if not fp:
+        return {"ok": False, "error": "path required"}
+    body = "" if content is None else str(content)
+    t0 = time.time()
+    try:
+        parent = os.path.dirname(fp)
+        if create_dirs and parent and not os.path.isdir(parent):
+            os.makedirs(parent, exist_ok=True)
+        file_created = not os.path.exists(fp)
+        if not file_created:
+            with open(fp, "r", encoding="utf-8", errors="replace") as fh:
+                if fh.read() == body:
+                    ms = int((time.time() - t0) * 1000)
+                    eid, key, _c = _file_land(
+                        fld, est, mem, fp, "write", True,
+                        f"write {fp}: unchanged ({len(body)} bytes)",
+                        {"write_unchanged": True,
+                         "last_sha1": hashlib.sha1(body.encode()).hexdigest()[:10]})
+                    return {"ok": True, "eid": eid, "key": key, "path": fp,
+                            "bytes": len(body), "unchanged": True, "ms": ms}
+        with open(fp, "w", encoding="utf-8") as fh:
+            fh.write(body)
+    except OSError as e:
+        err = f"{type(e).__name__}: {e}"
+        eid, key, _c = _file_land(fld, est, mem, fp, "write", False, "", {}, err)
+        return {"ok": False, "eid": eid, "key": key, "path": fp, "error": err[:200]}
+    ms = int((time.time() - t0) * 1000)
+    head = f"write {fp}: {len(body)} bytes (" + ("created" if file_created else "overwrote") + ")"
+    eid, key, ent_created = _file_land(
+        fld, est, mem, fp, "write", True, head,
+        {"last_write_bytes": len(body),
+         "last_sha1": hashlib.sha1(body.encode()).hexdigest()[:10],
+         "last_write_created": file_created})
+    return {"ok": True, "eid": eid, "key": key, "path": fp,
+            "created": file_created, "entity_created": ent_created,
+            "bytes": len(body), "ms": ms}
+
+
+def file_edit_entity(fld, est, mem, path, old_string, new_string,
+                     replace_all=False) -> dict:
+    """THE EDIT HAND: exact literal replace -- one match (or
+    replace_all); zero matches and ambiguous matches are REFUSED and
+    announced with the refusal on the entity."""
+    fp = _file_resolve(path)
+    if not fp:
+        return {"ok": False, "error": "path required"}
+    old = "" if old_string is None else str(old_string)
+    new = "" if new_string is None else str(new_string)
+    if not old:
+        return {"ok": False, "error": "old_string required"}
+    t0 = time.time()
+    try:
+        with open(fp, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError as e:
+        err = f"{type(e).__name__}: {e}"
+        eid, key, _c = _file_land(fld, est, mem, fp, "edit", False, "", {}, err)
+        return {"ok": False, "eid": eid, "key": key, "path": fp, "error": err[:200]}
+    n = text.count(old)
+    if n == 0:
+        err = "old_string not found"
+        eid, key, _c = _file_land(fld, est, mem, fp, "edit", False, "", {}, err)
+        return {"ok": False, "eid": eid, "key": key, "path": fp, "matches": 0,
+                "error": err}
+    if n > 1 and not replace_all:
+        err = (f"old_string matches {n} times (ambiguous); pass "
+               "replace_all=true or a longer literal")
+        eid, key, _c = _file_land(fld, est, mem, fp, "edit", False, "", {}, err)
+        return {"ok": False, "eid": eid, "key": key, "path": fp, "matches": n,
+                "error": err}
+    subs = n if replace_all else 1
+    new_text = text.replace(old, new, subs)
+    try:
+        with open(fp, "w", encoding="utf-8") as fh:
+            fh.write(new_text)
+    except OSError as e:
+        err = f"{type(e).__name__}: {e}"
+        eid, key, _c = _file_land(fld, est, mem, fp, "edit", False, "", {}, err)
+        return {"ok": False, "eid": eid, "key": key, "path": fp, "error": err[:200]}
+    ms = int((time.time() - t0) * 1000)
+    head = (f"edit {fp}: {subs} substitution" + ("s" if subs != 1 else "") +
+            f" ({len(text)} -> {len(new_text)} chars)")
+    eid, key, ent_created = _file_land(
+        fld, est, mem, fp, "edit", True, head,
+        {"last_edit_subs": subs,
+         "last_sha1": hashlib.sha1(new_text.encode()).hexdigest()[:10]})
+    return {"ok": True, "eid": eid, "key": key, "path": fp, "subs": subs,
+            "created": ent_created, "ms": ms}
+
+
+def _walk_files(root: str, cap: int = FILE_GREP_MAX_FILES):
+    out = []
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dirnames[:] = sorted(d for d in dirnames if d not in FILE_SKIP_DIRS)
+        for fn in sorted(filenames):
+            out.append(os.path.join(dirpath, fn))
+            if len(out) >= cap:
+                return out
+    return out
+
+
+def file_grep_entity(fld, est, mem, pattern, path=None, glob=None,
+                     max_results=None) -> dict:
+    """THE GREP HAND: a regex over the seat's files (machinery dirs
+    skipped), matches grouped per file with sample lines; the top matched
+    files' entities get the pattern pinned (last_grep, grep_hits)."""
+    import fnmatch
+    import re
+    pat = str(pattern or "").strip()
+    if not pat:
+        return {"ok": False, "error": "pattern required"}
+    root = _file_resolve(path) or os.getcwd()
+    if not os.path.isdir(root):
+        return {"ok": False, "error": f"not a directory: {root}"}
+    gfn = str(glob or "").strip()
+    try:
+        mr = max(1, int(max_results or FILE_RESULT_FILES))
+    except (TypeError, ValueError):
+        mr = FILE_RESULT_FILES
+    mr = min(mr, 240)
+    try:
+        rx = re.compile(pat)
+    except re.error as e:
+        return {"ok": False, "error": f"bad pattern: {e}"}
+    t0 = time.time()
+    files, scanned = [], 0
+    for full in _walk_files(root):
+        scanned += 1
+        rel = os.path.relpath(full, root)
+        if gfn and not fnmatch.fnmatch(rel, gfn):
+            continue
+        hits, samples = 0, []
+        try:
+            with open(full, "r", errors="ignore") as fh:
+                for line in fh:
+                    if rx.search(line):
+                        hits += 1
+                        if len(samples) < 2:
+                            samples.append(line.strip()[:160])
+                        if hits >= 200:
+                            break
+        except OSError:
+            continue
+        if hits:
+            files.append((rel, hits, samples))
+            if len(files) >= mr:
+                break
+    files.sort(key=lambda t: (-t[1], t[0]))
+    ms = int((time.time() - t0) * 1000)
+    for rel, hits, _samples in files[:FILE_LAND_MAX]:
+        _file_land(fld, est, mem, os.path.join(root, rel), "grep", True,
+                   f"grep /{pat[:80]}/: {hits} hits",
+                   {"last_grep": pat[:120], "grep_hits": hits})
+    return {"ok": True, "pattern": pat, "root": root, "scanned": scanned,
+            "match_files": len(files), "ms": ms,
+            "files": [{"path": rel, "hits": h, "samples": s}
+                      for rel, h, s in files]}
+
+
+def file_glob_entity(fld, est, mem, pattern, path=None) -> dict:
+    """THE GLOB HAND: fnmatch on seat-relative paths over the walk, the
+    matched files listed (machinery dirs skipped) and their entities
+    touched (last_glob)."""
+    import fnmatch
+    pat = str(pattern or "").strip()
+    if not pat:
+        return {"ok": False, "error": "pattern required"}
+    root = _file_resolve(path) or os.getcwd()
+    if not os.path.isdir(root):
+        return {"ok": False, "error": f"not a directory: {root}"}
+    t0 = time.time()
+    matches = []
+    for full in _walk_files(root):
+        rel = os.path.relpath(full, root)
+        if fnmatch.fnmatch(rel, pat):
+            matches.append(rel)
+            if len(matches) >= FILE_RESULT_FILES * 3:
+                break
+    matches.sort()
+    ms = int((time.time() - t0) * 1000)
+    for rel in matches[:FILE_LAND_MAX]:
+        _file_land(fld, est, mem, os.path.join(root, rel), "glob", True,
+                   f"glob {pat[:80]}: hit", {"last_glob": pat[:120]})
+    return {"ok": True, "pattern": pat, "root": root, "count": len(matches),
+            "files": matches, "ms": ms}
 
 def run_night(srv, fld, est, now: float | None = None) -> dict:
     """The whole night, callable from the NightClock (efmind.night calls

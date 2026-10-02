@@ -68,7 +68,7 @@ confirm near-randomly — a measured lesson).
 ## Programmatic entities (the scripts — model-authored)
 
 **Scripts are the model's to write** (the doctrine teaches the lane; the
-MCP `membrane_entity_edit` is the pen). They run **off-turn** in the night
+MCP `entity_edit` is the pen). They run **off-turn** in the night
 pass and its boot-time echo (`run_scripted_entities(..., force=True)` runs
 at boot — a script edited between boots does not wait for the next 15-min
 tick); duty-cycled (`script_every_n`, default 4 passes) and per-pass

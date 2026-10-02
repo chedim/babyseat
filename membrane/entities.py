@@ -107,9 +107,9 @@ def extract_entities(situation: str, action: str = "") -> dict:
                 "tool membrane_membrane_entity_add for:",
                 "tool membrane_membrane_entity_edit for:",
                 "tool membrane_membrane_entity_remove for:",
-                "tool membrane_entity_add for:",
-                "tool membrane_entity_edit for:",
-                "tool membrane_entity_remove for:"):
+                "tool entity_add for:",
+                "tool entity_edit for:",
+                "tool entity_remove for:"):
         if sit_l.startswith(pre):
             merged = f"{situation}\n{action or ''}"
             return _harvest(merged)
@@ -1272,7 +1272,7 @@ class EntityStore(MultiParentOps, TimelineOps):
                    else [self.tracks[spec]] if spec in self.tracks else [])
         if not targets:
             return {"ok": False, "error": f"no track {spec!r} "
-                    "(list via membrane_list_tracks)"}
+                    "(list via tracks)"}
         try:
             val = None if cut in (None, "") else max(0.0, min(1.0, float(cut)))
         except (TypeError, ValueError):
@@ -1890,7 +1890,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         if ent is None:
             return {"ok": False,
                     "error": f"no entity matches {spec!r} "
-                             f"(list via membrane_related_entities)"}
+                             f"(list via related)"}
         if summary is not None:
             ent.properties["summary"] = str(summary).strip()
         if links is not None:
@@ -2038,8 +2038,8 @@ class EntityStore(MultiParentOps, TimelineOps):
     # when the region is entered; re-entering after leaving re-arms it) --
     # a state machine, not a level check. The track ALSO always shows the
     # live count in the WHERE WE ARE banner. Management (add/remove/list)
-    # is unified for the LLM via MCP (membrane_watch_entity /
-    # membrane_unwatch_entity / membrane_list_tracks) and the proxy
+    # is unified for the LLM via MCP (watch /
+    # unwatch / tracks) and the proxy
     # endpoints they relay to.
 
     @staticmethod
@@ -2384,7 +2384,7 @@ SCRIPT_MAX_DELETE = 1024       # delete script size cap
 # USER COMMAND columns"), prose stays far. Anchors live IN the store as
 # entities (eid prefix membrane::junk-anchor:) -- the shared couchbase
 # substrate ships them to the fork, the model can add more via
-# membrane_entity_add, and every track carries its own cut (junk_sim):
+# entity_add, and every track carries its own cut (junk_sim):
 # raise it for a paranoid trace, lower it for a permissive one. Beats are
 # screened with the cell's EXISTING vector -- zero new embed calls.
 JUNK_CUT_DEFAULT = 0.62    # calibrated: ps/lsof 0.62-0.66, prose ~0.37

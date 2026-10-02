@@ -157,7 +157,7 @@ _ENTITY_CARD_COMMON = [
     "observed and code > the user > model prose. A '! conflict' is a claim "
     "the evidence contradicts -- check before you repeat it.",
     "- '#N' is an EVENT number (a message, a tool fact, a code definition, "
-    "a note). 'membrane: forget #N' / membrane_forget remove that event and "
+    "a note). 'membrane: forget #N' / forget remove that event and "
     "recompute the entities it moved; 'membrane: learn that ...' writes a "
     "note event."]
 
@@ -187,7 +187,7 @@ _OC_BUILTIN_TOOLS = ("bash", "edit", "write", "read", "grep", "glob", "lsp",
 def _tools_block() -> dict | None:
     """opencode's built-in toolbelt OFF in the generated config (the
     owner's 2026-10-01 call: membrane takes the surface over -- the
-    model's exec goes through the field via membrane_run, its memory
+    model's exec goes through the field via run, its memory
     via the membrane_* MCP tools). None -- the block omitted, built-ins
     kept -- when MEMBRANE_BUILTIN_TOOLS=1 (the ablation)."""
     if os.environ.get("MEMBRANE_BUILTIN_TOOLS") == "1":
@@ -231,7 +231,7 @@ def _seat_card(srv, mcp_on: bool, serve: bool = False) -> str:
     The card is authoritative where the generic doctrine is not."""
     L = ["", "MEMBRANE SEAT -- this session's live configuration "
          "(authoritative over the general doctrine above where they differ; "
-         "fixed for the session -- `field state` / membrane_state reads the "
+         "fixed for the session -- `field state` / state reads the "
          "live numbers):"]
     if serve:
         L.append(
@@ -288,7 +288,7 @@ def _seat_card(srv, mcp_on: bool, serve: bool = False) -> str:
         L.append(
             "- EXEC: you have NO built-in tools this seat (bash/read/edit/"
             "grep/... are switched off in the config) -- every command, "
-            "file read and patch goes through membrane_run (one shell "
+            "file work rides run + the file hands read/write/edit/grep/glob (one shell "
             "command -> one `c:<head>` membrane entity it runs THROUGH: "
             "the result lands on the entity, errors reach your next "
             "banner). Entity scripts run UNSANDBOXED: imports allowed, "
@@ -3515,6 +3515,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._entity_inherit(); return
         if path == "/membrane/entity/remove":
             self._entity_remove(); return
+        if path == "/membrane/filetool":
+            self._filetool(); return
         if path == "/membrane/run":
             self._membrane_run(); return
         if path == "/membrane/intend":
@@ -5318,6 +5320,33 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._json_err_raw(400, str(res.get("error"))); return
         self._json_out(res)
 
+    def _filetool(self) -> None:
+        """POST /membrane/filetool {op, path, ent, detail}: the file tools'
+        mint lane -- files the effect into the entity field (the f:<path>
+        entity + audit), run-lane style: the field sees every MCP-side
+        file effect."""
+        srv = self.server
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
+        body = self._json_body()
+        opx = str(body.get("op") or "?")
+        rel = str(body.get("path") or "")
+        ent = str(body.get("ent") or f"f:{rel}")
+        detail = str(body.get("detail") or "")
+        if not rel:
+            self._json_err_raw(400, "path required"); return
+        res = est.add(cls="file", name=ent,
+                      summary=(detail or f"{opx} {rel}").strip(),
+                      links=[])
+        aud = dict(res); aud.update({"op": opx, "path": rel})
+        self._entity_audit("filetool", aud)
+        if not res.get("ok"):
+            self._json_err_raw(400, str(res.get("error"))); return
+        res.setdefault("op", opx); res.setdefault("path", rel)
+        res.setdefault("how", "merged" if res.get("merged") else "created")
+        self._json_out(res)
+
     def _entity_edit(self) -> None:
         srv = self.server
         est = getattr(srv, "entity_store", None)
@@ -5452,7 +5481,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             "n_symbols": s.get("n_symbols"),
             "n_files": s.get("n_files"),
             "shape": "symbols:<qualname> -- the entity key space "
-                     "(membrane_entity_add / watch_entity compatible)"})
+                     "(entity_add / watch_entity compatible)"})
 
     def _junk_cut_set(self) -> None:
         """POST /membrane/junk-cut: the live junk-cut knob. spec '#N'
@@ -5537,7 +5566,6 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         out["command"] = command
         self._json_out(out)
 
-    # ---- /membrane/state: the JSON instrument ----
     def _membrane_state(self) -> None:
         srv = self.server
         # THE STATE CACHE (the slow-endpoint fix): the state query builds
@@ -5669,7 +5697,8 @@ def main() -> None:
                          "results/arguments shrink to a head + a marker "
                          "(the call/result pairing is kept). -1 disables "
                          "the in-turn elision.")
-    ap.add_argument("--no-open", dest="open_browser", action="store_false", default=True,
+    ap.add_argument("--open", dest="open_browser", action="store_true", default=False, help="open the universe map in the browser on start (default off)")
+    ap.add_argument("--no-open", dest="open_browser", action="store_false", default=False,
                     help="don't open the universe map in the browser on start")
     ap.add_argument("--backend", default="http://localhost:11434",
                     help="upstream Ollama URL")
@@ -5805,7 +5834,7 @@ def main() -> None:
     ap.add_argument("--no-mcp", dest="mcp", action="store_false",
                     help="do not wire the MCP tool surface into the generated "
                          "opencode config (default ON: opencode gets a local "
-                         "stdio MCP server exposing membrane_query/learn/"
+                         "stdio MCP server exposing query/learn/"
                          "forget/state as structured tools; the frames keep "
                          "working either way)")
     ap.add_argument("--no-lsp", dest="lsp", action="store_false",
@@ -6513,7 +6542,7 @@ def main() -> None:
     # the same proxy-side guards. --no-mcp reverts to frames-only.
     # THE TAKEOVER (stage B): opencode's own built-in toolbelt turns OFF
     # here (zero built-ins -- the owner's call); the model's exec lane is
-    # membrane_run / POST /membrane/run.
+    # run / POST /membrane/run.
     mcp_state = "off (--no-mcp)"
     if getattr(args, "mcp", True):
         # prefer the venv python RUNNING this process over the ambient PATH
@@ -6525,7 +6554,7 @@ def main() -> None:
             "enabled": True,
             "timeout": 60_000,
         }}
-        mcp_state = f"on ({len(_mcp_tool_lines())} membrane_* tools)"
+        mcp_state = f"on ({len(_mcp_tool_lines())} MCP tools)"
     else:
         cfg["mcp"] = {}
     tools_off = _tools_block()
@@ -6709,8 +6738,8 @@ def main() -> None:
     try:
         # dev viewer: served at /viewer (world controls hidden) + auto-open once
         # the server is bound. Daemon thread; never fatal on browser failure.
-        # --no-open or MEMBRANE_NO_OPEN=1 silences the tab for headless runs.
-        if args.viewer and args.open_browser:
+        # --open opens the tab; MEMBRANE_NO_OPEN=1 also silences. Default: NO auto-open.
+        if (args.viewer or os.environ.get("MEMBRANE_VIEWER", "").lower() in ("1", "on", "true", "yes")) and args.open_browser:
             def _open_dev_viewer():
                 time.sleep(1.0)
                 if os.environ.get("MEMBRANE_NO_OPEN"):
