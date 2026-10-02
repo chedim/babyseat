@@ -1,6 +1,9 @@
 """The busy contract (red-first): parallel messages on one session QUEUE
-with a visible busy event, heartbeat while working, explicit busy stub
-after the wait, and a crash never leaves the session stuck."""
+with a visible busy event, heartbeat while working, and -- the
+queued-forever fix -- a queued turn RUNS after the running turn
+completes (the old 300s stub lane only covers the pathological flood
+now), and a crash never leaves the session stuck."""
+import json
 import threading
 import time
 import types
@@ -80,20 +83,69 @@ def test_second_message_queues_not_races():
 
 
 def test_queued_post_returns_busy_after_wait():
+    """THE OLD STUB LANE, reduced to the pathological case only: the
+    flood guard (queue at depth-max) refuses fast -- a NORMAL queued
+    POST now returns {'status':'queued'} and RUNS when its turn comes
+    (the queued-forever fix, test_queued_turns_eventually_run)."""
     r, hub = make_runner(_turn("slow"))
+    r.queue_depth_max = 0          # every queue joins -> instant refusal
     hold = threading.Event()
     r.call_ladder = lambda body: (hold.wait(timeout=5) or
                                   {"choices": [{"message": {"content": "slow"}}]})
-    r.busy_wait_s = 0.1
     t1 = threading.Thread(target=lambda: r.run("s1", "hi"))
     t1.start()
     time.sleep(0.2)
     out2 = r.run("s1", "again")
     assert out2.get("status") == "busy", out2
     assert out2.get("sessionID") == "s1"
-    assert [e for e in _statuses(hub) if (e["status"] or {}).get("queued")]
+    assert len([e for e in _statuses(hub)
+                if (e["status"] or {}).get("queued")]) >= 1
     hold.set()
     t1.join(timeout=5)
+
+
+def test_queued_turns_eventually_run():
+    """THE QUEUED-FOREVER FIX (the announcer seat's 'all messages stuck
+    in Queued' exhibit): a message posted while a LONG turn runs (the
+    old 300s stub lane) must EXECUTE after the running turn completes
+    -- its own turn, its own assistant row, its own idle -- never a
+    discarded busy stub. The synchronous lane's result arrives (the
+    result rides result_of) even when the POST already returned the
+    queued ack."""
+    r, hub = make_runner()
+    r.busy_wait_s = 0.2            # the wait gives up fast; the drain owns it
+    hold = threading.Event()
+    calls = []
+    def ladder(body):
+        calls.append(1)
+        if len(calls) == 1:
+            hold.wait(timeout=5)   # turn 1: the long one (0.5s > wait)
+        return {"choices": [{"message": {"content": "done %d" % len(calls)}}]}
+    r.call_ladder = ladder
+    out2 = {}
+    t1 = threading.Thread(target=lambda: r.run("s1", "hi"))
+    t1.start()
+    time.sleep(0.2)
+    t2 = threading.Thread(target=lambda: out2.update(r.run("s1", "again")))
+    t2.start()
+    time.sleep(0.5)                # > busy_wait_s: the old code stubs HERE
+    time.sleep(0.1)
+    hold.set()                     # turn 1 finishes; the drain starts turn 2
+    t1.join(timeout=5)
+    t2.join(timeout=5)
+    time.sleep(0.8)                # the drained turn completes
+    ids = [m.get("info", {}).get("id")
+           for m in getattr(r.messages, "msgs", {}).get("s1", [])
+           if isinstance(m, dict)]
+    # the queued turn RAN: a second assistant answer exists
+    # (via the messages store or the drain results)
+    texts2 = [p.get("text") for p in (out2.get("parts") or [])
+              if p.get("type") == "text"]
+    drained = [v for v in r._drain_results.values()
+               if isinstance(v, dict)]
+    assert (texts2 == ["done 2"]
+            or any("done 2" in json.dumps(v) for v in drained)), \
+        (out2, dict(r._drain_results))
 
 
 def test_busy_heartbeat_publishes_elapsed():

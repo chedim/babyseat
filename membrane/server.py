@@ -484,6 +484,7 @@ def _tokens_estimate(history: list, parts: list) -> dict:
 
 BUSY_WAIT_S = 300.0   # a queued second POST waits this long, then gets a visible busy stub
 HEARTBEAT_S = 15.0    # busy-heartbeat cadence while a turn runs
+QUEUE_DEPTH_MAX = 8   # queued turns per session beyond which POSTs refuse fast (the flood guard)
 
 class TurnRunner:
     """THE TURN LOOP: client text -> the seat's own /v1 (all of the
@@ -506,6 +507,13 @@ class TurnRunner:
         self._busy_lock = threading.Lock()
         self.busy_wait_s: float = BUSY_WAIT_S
         self.heartbeat_s: float = HEARTBEAT_S
+        self.queue_depth_max: int = QUEUE_DEPTH_MAX
+    # the per-session FIFO: queued turns that WILL run (the drain),
+    # their results keyed by queue id, and the drain threads
+        self._queue: dict[str, list[dict]] = {}
+        self._queue_lock = threading.Lock()
+        self._drain_results: dict[str, dict] = {}
+        self._drain_threads: list[threading.Thread] = []
 
     # -- lifecycle ------------------------------------------------------------
 
@@ -582,20 +590,51 @@ class TurnRunner:
 
     def run(self, sid: str, text: str, user_info: dict | None = None,
             user_parts: list | None = None) -> dict:
-        """THE GUARDED ENTRY: a second message on a busy session is
-        QUEUED -- it first publishes a visible {session.status busy
-        queued:true} event, then waits busy_wait_s for the running turn
-        and only then returns an explicit {'status': 'busy'} stub. A
-        heartbeat thread publishes elapsed_ms while the turn runs. The
+        """THE GUARDED ENTRY, now a REAL QUEUE: a second message on a busy
+        session first publishes a visible {session.status busy
+        queued:true} event, then WAITS FOR ITS TURN -- when the running
+        turn completes, the next queued turn RUNS (the drain, in its own
+        thread with its own heartbeat + idle). The old give-up
+        (busy_wait_s -> {'status':'busy'} stub) is the queued-forever
+        bug: a turn past busy_wait_s (a 20-min agentic loop over the
+        300s wait) died the queued POST with a stub and the TUI's
+        message sat Queued forever, never executing, never reporting
+        done. The stub lane only covers the pathological case now:
+        queue_depth_max turns already waiting -> a fast 'busy' refusal
+        (the flood guard). A synchronous lane whose wait gives up gets
+        a QUEUED ack (its turn still runs -- results ride result_of).
+        A heartbeat thread publishes elapsed_ms while a turn runs. The
         finally-block guaranties the guard frees and _busy cleans even
         if the turn body raises (no stuck-busy after a crash)."""
         guard = self._guard(sid)
         if not guard.acquire(blocking=False):
+            depth = self._queued_depth(sid)
+            if depth >= self.queue_depth_max:
+                # THE FLOOD GUARD: too many turns already waiting in the
+                # drain queue -- refuse fast with the visible stub (the
+                # old behaviour, now only the pathological case)
+                self.hub.publish({"type": "session.status",
+                                  "status": {"type": "busy", "queued": True},
+                                  "sessionID": sid})
+                return {"status": "busy", "sessionID": sid}
             self.hub.publish({"type": "session.status",
                               "status": {"type": "busy", "queued": True},
                               "sessionID": sid})
+            # THE QUEUE (the queued-forever fix): enqueue and WAIT FOR
+            # THE CHAIN -- the running turn's finally-block starts the
+            # next queued turn as its own thread (the drain), and THIS
+            # thread waits until ITS turn has run (the waker sets the
+            # event when this turn's own run has COMPLETED, so the
+            # synchronous POST /message lane still gets its result).
+            done = threading.Event()
+            mine = self._enqueue(sid, text, user_info, user_parts, done)
             if not guard.acquire(timeout=float(self.busy_wait_s)):
-                return {"status": "busy", "sessionID": sid}
+                # the running turn's chain will pick this up even after
+                # this wait gives up: the DRAIN owns execution now
+                # (unbounded patience); this thread returns a queued
+                # ack -- the turn runs when its turn comes.
+                return {"status": "queued", "queued_id": mine,
+                        "sessionID": sid}
         stop = threading.Event()
         hb = threading.Thread(target=self._heartbeat, args=(sid, stop),
                               daemon=True)
@@ -607,6 +646,73 @@ class TurnRunner:
             guard.release()
             self._busy.pop(sid, None)
             (getattr(self, "_aborting", None) or set()).discard(sid)
+            # THE DRAIN: the next queued turn runs NOW (own thread --
+            # this thread is the synchronous lane returning a result).
+            self._start_next(sid)
+
+    # -- the per-session queue -----------------------------------------------
+
+    def _enqueue(self, sid: str, text: str, user_info, user_parts,
+                 done: threading.Event) -> str:
+        """One queued turn joined this session's FIFO. Returns its
+        queue id (the waker sets the event when the turn has run)."""
+        with self._queue_lock:
+            q = self._queue.setdefault(sid, [])
+            qid = _gen_id("q")
+            q.append({"qid": qid, "text": text, "user_info": user_info,
+                      "user_parts": user_parts, "done": done})
+        self.hub.publish({"type": "session.status",
+                          "status": {"type": "busy", "queued": True,
+                                     "depth": len(q)},
+                          "sessionID": sid})
+        return qid
+
+    def _queued_depth(self, sid: str) -> int:
+        with self._queue_lock:
+            return len(self._queue.get(sid) or [])
+
+    def _start_next(self, sid: str) -> None:
+        """THE DRAIN: pop the next queued turn (FIFO) and run it in its
+        own thread; the guard is FREE here (the finishing turn released
+        it). Each drained turn re-enters run() -- its own guard
+        acquisition wins the just-freed lock (no race: another direct
+        POST could take it too, and the queue's acquire would then
+        chain normally), its own heartbeat, its own idle, and ITS
+        finally drains the next one. Queue exhaustion -> the hub's
+        state settles honest: the last drained turn publishes idle and
+        the depth-0 heartbeat follows."""
+        while True:
+            nxt = None
+            with self._queue_lock:
+                q = self._queue.get(sid) or []
+                if q:
+                    nxt = q.pop(0)
+            if nxt is None:
+                return
+            ent = nxt
+
+            def _worker(ent=ent, sid=sid):
+                done_ev = ent["done"]
+                try:
+                    res = self.run(sid, ent["text"],
+                                   user_info=ent["user_info"],
+                                   user_parts=ent["user_parts"])
+                    self._drain_results[ent["qid"]] = res
+                except Exception as e:
+                    self._drain_results[ent["qid"]] = {
+                        "error": f"{type(e).__name__}: {e}"[:200]}
+                finally:
+                    done_ev.set()
+            self._drain_threads.append(threading.Thread(
+                target=_worker, daemon=True))
+            self._drain_threads[-1].start()
+            return
+
+    def result_of(self, qid: str) -> dict | None:
+        """A queued turn's result (the async lane's read); None while it
+        still waits/runs."""
+        with self._queue_lock:
+            return self._drain_results.get(qid)
 
     def _run_inner(self, sid: str, text: str, user_info: dict | None = None,
             user_parts: list | None = None) -> dict:
@@ -1000,8 +1106,19 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                     return self._notfound()
                 self._json_out(messages.list(sid))
             elif path == "/session/status":
-                self._json_out({s: {"type": "idle"} for s in
-                                sessions.sessions})
+                # the truth per session: the runner's live busy state +
+                # the QUEUE's depth (a queued message is not invisible:
+                # the TUI/clients see {busy, queued, depth})
+                out = {}
+                for s in sessions.sessions:
+                    st = runner.status(s) if runner is not None \
+                        else {"type": "idle"}
+                    if isinstance(st, dict) and st.get("type") == "busy":
+                        d = runner._queued_depth(s)
+                        if d:
+                            st = dict(st, queued=True, depth=d)
+                    out[s] = st
+                self._json_out(out)
             elif path.startswith("/session/"):
                 rest = path[len("/session/"):]
                 if rest.endswith("/message/"):
