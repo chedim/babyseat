@@ -51,6 +51,8 @@ from collections import deque
 THINK_TICK_S = 1.0
 THINK_CPU_TARGET = 0.04      # the duty ceiling: think work / (think + window)
 THINK_IDLE_S = 60.0          # the max stretch when the duty is way over
+TICK_FIELD_EVERY = 60        # one field-move observation per clock, every
+                             # 60 beats -- the seat's drift pace, not 1/s
 QUEUE_MAX = 5                # the 3-7 working memory (the covenant's 5)
 THINK_MODEL_CAP_PER_MIN = 4  # the cost dial: model calls per minute, max
 NOVELTY_SPEAK_BAR = 0.85     # a digest speaks only above this sim surprise
@@ -110,7 +112,10 @@ class Thinker:
         # the banner's mind line (the operator's window into the loop)
         self.mind_log: deque = deque(maxlen=6)
         self.stats = {"processed": 0, "spoken": 0, "extended": 0,
-                      "skipped": 0, "model_calls": 0}
+                      "skipped": 0, "model_calls": 0, "ticks": 0}
+        # THE CLOCK COUNTER: the hum's beat number (the tick trigger's
+        # pacing wheel -- each entity's tick_every reads against it)
+        self._beat = 0
 
     # ---- lifecycle -----------------------------------------------------------
     def start(self) -> None:
@@ -159,6 +164,15 @@ class Thinker:
         budget says so)."""
         t0 = time.time()
         did_work = False
+        # THE TICK PASS (the clock organ): every heartbeat, before the
+        # queue unit, the seat's tick-scripted entities fire (the clock
+        # is one of them -- its render + last_tick prop advance; every
+        # TICK_FIELD_EVERY beats its position moves). Never raises.
+        try:
+            self._beat += 1
+            self._tick_scripts()
+        except Exception:
+            traceback.print_exc()
         if self.queue:
             item = self.queue.popleft()
             try:
@@ -210,6 +224,66 @@ class Thinker:
         """The current think duty: measured work over (work + the 60s
         window) -- the controller's read, ~3-5% at the target."""
         return self._ema_work / max(self._ema_work + 60.0, 1e-6)
+
+    # ---- the tick trigger (the clock organ) ---------------------------------
+    def _tick_scripts(self) -> None:
+        """The hum's tick pass: per heartbeat, every tick-scripted
+        entity fires paced by its own `tick_every` (cooldown-free --
+        time is a per-second fact), under the engine's 0.25s budget and
+        3-strikes lanes; the result is applied SILENTLY (render + props,
+        no field tell, no per-tick audit). Every TICK_FIELD_EVERY beats
+        the movers speak ONE observation event (the clock drifts on the
+        global field). Degrades everywhere: no store or field, no fire."""
+        est = getattr(self.srv, "entity_store", None)
+        if not est or not est.docs:
+            return
+        beat = self._beat
+        fired, movers = [], []
+        for ent in list(est.docs.values()):
+            props = ent.properties or {}
+            if props.get("script_disabled") or not props.get("tick_script"):
+                continue
+            try:
+                every = max(1, int(props.get("tick_every") or 1))
+            except (TypeError, ValueError):
+                every = 1
+            if beat % every:
+                continue
+            from .night import run_entity_update_script, apply_entity_update
+            out = run_entity_update_script(self.srv, ent, "tick")
+            if out.get("error"):
+                continue         # the error lanes already spoke (struck)
+            if out.get("render") or isinstance(out.get("patch"), dict):
+                apply_entity_update(self.srv, ent, out, "tick", silent=True)
+                fired.append(ent)
+                self.stats["ticks"] += 1
+        if fired and beat % TICK_FIELD_EVERY == 0:
+            self._tick_field_move(fired)
+
+    def _tick_field_move(self, movers: list) -> None:
+        """The mover's ONE field event per TICK_FIELD_EVERY beats: an
+        observation with the entity as SUBJECT -- its position drifts
+        (the default clock's 'clock <time>' as the fact head)."""
+        fld = getattr(self.srv, "efield", None)
+        if fld is None:
+            return
+        try:
+            from . import streams as ST
+            evs = []
+            for ent in movers:
+                props = ent.properties or {}
+                head = str(props.get("script_render") or
+                           props.get("last_tick") or "tick")[:120]
+                evs.append(ST.Event(stream="observation", tool="tick",
+                                    args={"beat": self._beat},
+                                    result_head=head,
+                                    outcome="ok", ts=time.time(),
+                                    subject=ent.eid))
+            if evs:
+                fld.write_events(evs, session="")
+                fld.process(limit=8)
+        except Exception:
+            traceback.print_exc()
 
     # ---- the model-call cost dial -------------------------------------------
     def _model_budget_ok(self) -> bool:

@@ -5289,6 +5289,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                        mention_script=body.get("mention_script"),
                        thought_script=body.get("thought_script"),
                        dreamed_script=body.get("dreamed_script"),
+                       tick_script=body.get("tick_script"),
                        properties=body.get("properties"))
         self._entity_audit("edit", res)
         if not res.get("ok"):
@@ -6021,6 +6022,17 @@ def main() -> None:
     try:
         from .entities import EntityStore, JUNK_CUT_DEFAULT
         srv.entity_store = EntityStore(path=str(_wdir / "entities.json"))
+        # THE CLOCK (the operator's 2026-10-01 ask): plant `tool:clock`
+        # once at boot -- idempotent (an already-living, model- or
+        # operator-Rewritten clock survives every restart). Degrades
+        # silently (the store is the guard).
+        try:
+            from .night import seed_clock_entity
+            if seed_clock_entity(srv.entity_store):
+                print("[seat] the clock entity is planted (tool:clock, "
+                      "fires on the thinker's heartbeat)", file=sys.stderr)
+        except Exception as e:
+            print(f"[seat] clock seeding skipped ({e})", file=sys.stderr)
         # THE PEER SUBSTRATES (the operator's design): the proxy REGISTRY
         # (ephemeral bucket, TTL docs, heartbeats -- who else is connected)
         # + the PEER CHANNEL (permanent, a chat lane between the LLMs,

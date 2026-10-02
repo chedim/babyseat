@@ -605,8 +605,44 @@ def run_night(srv, fld, est, now: float | None = None) -> dict:
 _SCRIPT_TIMEOUTS = {"consolidation": SCRIPT_TIMEOUT_S,
                     "dreamed": 2.0,
                     "thought": 1.0,
-                    "mention": 0.25}
+                    "mention": 0.25,
+                    # the clock organ's pace: the hum's 1s heartbeat is
+                    # the trigger, the budget stays sub-perception
+                    "tick": 0.25}
 _SCRIPT_COOLDOWN_DEFAULT_S = 60.0
+
+
+# THE CLOCK (the operator's 2026-10-01 ask): ONE seeded entity whose
+# tick_script fires on the thinker's heartbeat -- its default script
+# prints the current time (the render) and stores it as `last_tick`
+# (the last output survives on the doc, across restarts).
+DEFAULT_CLOCK_TICK_SCRIPT = (
+    "import time as _t\n"
+    "now = _t.strftime('%H:%M:%S')\n"
+    "result = {'render': 'clock ' + now, 'patch': {'last_tick': now}}"
+)
+
+
+def seed_clock_entity(est) -> bool:
+    """The boot seeding: plant `tool:clock` ONCE (idempotent -- a
+    REWRITTEN or model-edited clock survives every restart; only a
+    missing doc plants the default). False when there is no store or
+    the clock already lives."""
+    if est is None:
+        return False
+    eid = MEMBRANE_NS + "tool:clock"
+    if eid in (est.docs or {}):
+        return False
+    doc = (est.docs or {}).get(eid)
+    if doc is not None:
+        return False
+    from .entities import CLASS_TOOL, QuantumEntity
+    est.upsert(QuantumEntity(eid=eid, cls=CLASS_TOOL, properties={
+        "name": "clock",
+        "tick_script": DEFAULT_CLOCK_TICK_SCRIPT,
+        "tick_every": 1,
+        "silent_birth": True}))
+    return True
 
 
 def _cooldown_ok(props: dict, trigger: str, now: float) -> bool:
@@ -651,15 +687,18 @@ def run_entity_update_script(srv, ent, trigger: str,
         code = props.get("dreamed_script")
     elif trigger == "consolidation":
         code = props.get("nudge_script")
+    elif trigger == "tick":
+        code = props.get("tick_script")
     if not code:
         return {"error": "no script"}
     now = time.time()
     if props.get("script_disabled"):
         return {"error": "disabled (3 strikes)"}
-    if not _cooldown_ok(props, trigger, now):
-        return {"error": "cooldown"}
+    if trigger != "tick" and not _cooldown_ok(props, trigger, now):
+        return {"error": "cooldown"}   # the tick is paced by tick_every
     timeout = _SCRIPT_TIMEOUTS.get(trigger, SCRIPT_TIMEOUT_S)
-    _stamp_cooldown(props, trigger, now)
+    if trigger != "tick":              # tick needs no stamp (never gated)
+        _stamp_cooldown(props, trigger, now)
     extra = dict(extra_state or {})
     extra["trigger"] = trigger
     extra["timeout_s"] = timeout
@@ -819,7 +858,8 @@ def _script_state(ent, now: float, extra: dict, trigger: str,
             "extra": dict(extra)}
 
 
-def apply_entity_update(srv, ent, out: dict, trigger: str) -> dict:
+def apply_entity_update(srv, ent, out: dict, trigger: str,
+                        silent: bool = False) -> dict:
     """The engine applies the script's RESULT (the authorship covenant:
     scripts analyze + return; the engine writes). The keys:
       render -> properties['script_render'] (the banner fragment)
@@ -827,6 +867,9 @@ def apply_entity_update(srv, ent, out: dict, trigger: str) -> dict:
                 clipped to 2000 chars, the entity's own keys only --
                 a script may move ITS OWN doc, never another's)
       delete -> retire the entity (audited)
+    ``silent=True`` (the tick pace): the apply lands render + props but
+    writes NO field tell and NO audit row -- the apply is engine noise
+    at that rate, and the mover speaks only via the field-move event.
     Returns the applied summary for the caller's audit."""
     est = getattr(srv, "entity_store", None)
     if est is None or not out:
@@ -852,6 +895,7 @@ def apply_entity_update(srv, ent, out: dict, trigger: str) -> dict:
             est.upsert(ent)
         except Exception:
             pass
+    if changed and not silent:
         # the applied render/patch is field news too (what the entity's
         # own organ decided about itself)
         what = (('render: ' + (props.get("script_render") or '')[:140])
@@ -859,9 +903,10 @@ def apply_entity_update(srv, ent, out: dict, trigger: str) -> dict:
                 'patch: ' + ", ".join(sorted(out.get("patch") or {}))[:140])
         _script_tell(getattr(srv, "efield", None), ent.eid, trigger,
                      True, f"its {trigger} script applied {what}")
-    from .opencode import _write_audit
-    _write_audit(getattr(srv, "membrane", None),
-                 {"event": "agent-entity-scripted", "origin": "update-script",
-                  "eid": ent.eid, "trigger": trigger,
-                  "applied": changed})
+    if changed and not silent:
+        from .opencode import _write_audit
+        _write_audit(getattr(srv, "membrane", None),
+                     {"event": "agent-entity-scripted", "origin": "update-script",
+                      "eid": ent.eid, "trigger": trigger,
+                      "applied": changed})
     return {"applied": changed}

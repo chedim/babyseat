@@ -1709,6 +1709,7 @@ class EntityStore(MultiParentOps, TimelineOps):
              merged_into=None, nudge_script=None,
              delete_script=None, mention_script=None,
              thought_script=None, dreamed_script=None,
+             tick_script=None,
              properties: dict | None = None) -> dict:
         """Model-side entity EDIT: patch summary/links/class on the
         resolved entity. Only provided fields change.
@@ -1764,6 +1765,11 @@ class EntityStore(MultiParentOps, TimelineOps):
                                 ("thought_script", thought_script,
                                  SCRIPT_MAX_NUDGE),
                                 ("dreamed_script", dreamed_script,
+                                 SCRIPT_MAX_NUDGE),
+                                # the hum's 1s-heartbeat trigger (the
+                                # clock organ; cooldown-free, paced by
+                                # the entity's own `tick_every` prop)
+                                ("tick_script", tick_script,
                                  SCRIPT_MAX_NUDGE)):
             if val is None:
                 continue

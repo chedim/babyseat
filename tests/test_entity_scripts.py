@@ -5,6 +5,7 @@ The engine applies (the authorship covenant): the script returns
 {render, patch, delete}; apply_entity_update writes inside the store
 (a script may move ITS OWN doc, never another's)."""
 
+import re
 import unittest
 
 from membrane.entities import (CLASS_SESSION, EntityStore, QuantumEntity,
@@ -106,6 +107,126 @@ class TestModelScripts(unittest.TestCase):
         second = run_entity_update_script(srv, ent, "mention", {})
         self.assertNotIn("error", first)
         self.assertEqual(second.get("error"), "cooldown")
+
+
+class _Fld:
+    """A field fake that records the events written to it."""
+
+    def __init__(self):
+        self.events = []
+
+    def write_events(self, evs, session=None):
+        self.events.extend(evs)
+
+    def process(self, limit=8):
+        return 0
+
+
+class TestTickScripts(unittest.TestCase):
+    """THE TICK TRIGGER (the clock organ, the operator's 2026-10-01
+    design): a tick_script fires on the THINKER'S HEARTBEAT (the seat's
+    1s hum), paced by the entity's own `tick_every`, cooldown-free --
+    time is a per-second fact, a 60s cooldown would make it a per-minute
+    lie. The engine applies the result SILENTLY (render + props, no
+    per-tick field tell, no per-tick audit -- ~86k applies/day would be
+    spam); failures keep the 3-strikes lanes."""
+
+    def _clock(self, srv, script):
+        est = srv.entity_store
+        ent = QuantumEntity(eid=f"{MEMBRANE_NS}tool:clock", cls="Tool",
+                            properties={"name": "clock",
+                                        "tick_script": script,
+                                        "tick_every": 1})
+        est.upsert(ent)
+        return est._resolve_spec("tool:clock")
+
+    def test_tick_dispatches_cooldown_free(self):
+        srv = _Srv()
+        ent = self._clock(
+            srv, "result = {'render': 'clock ' + "
+                 "state['extra'].get('now', '')}")
+        # two fires in the SAME instant: the cooldown never gates tick
+        a = run_entity_update_script(srv, ent, "tick",
+                                     extra_state={"now": "12:00:01"})
+        b = run_entity_update_script(srv, ent, "tick",
+                                     extra_state={"now": "12:00:01"})
+        self.assertNotIn("error", a)
+        self.assertNotIn("error", b)
+        self.assertEqual(a["render"], "clock 12:00:01")
+
+    def test_tick_budget_is_registered(self):
+        from membrane.night import _SCRIPT_TIMEOUTS
+        self.assertLessEqual(_SCRIPT_TIMEOUTS["tick"], 0.5)
+
+    def test_erroring_tick_script_strikes_out(self):
+        srv = _Srv()
+        ent = self._clock(srv, "result = 1/0")
+        errs = [run_entity_update_script(srv, ent, "tick")
+                for _ in range(3)]
+        self.assertTrue(all("error" in e for e in errs))
+        self.assertEqual((ent.properties or {}).get("script_failures"), 3)
+        self.assertTrue((ent.properties or {}).get("script_disabled"))
+        # the disabled entity's 4th fire is refused (never a wedge)
+        self.assertIn("disabled",
+                      run_entity_update_script(srv, ent, "tick").get(
+                          "error", ""))
+
+    def test_silent_apply_skips_the_tell_and_the_audit(self):
+        """A silent (tick-pace) apply lands render + props on the doc
+        but writes NO field event and NO audit row (the noisy pace)."""
+        srv = _Srv()
+        ent = self._clock(srv, "")
+        out = {"render": "clock 13:11:05",
+               "patch": {"last_tick": "13:11:05"}}
+        res = apply_entity_update(srv, ent, out, "tick", silent=True)
+        self.assertEqual(res["applied"], 2)
+        got = srv.entity_store.docs.get(ent.eid)
+        self.assertEqual((got.properties or {}).get("last_tick"),
+                         "13:11:05")
+        # probe both lanes with REAL recorders: none of them heard it
+        fld = _Fld()
+        srv.efield = fld
+        from unittest import mock as _mock
+        with _mock.patch(
+                "membrane.opencode._write_audit") as audit_probe:
+            apply_entity_update(srv, ent, out, "tick", silent=True)
+            self.assertEqual(fld.events, [])
+            self.assertEqual(audit_probe.call_count, 0)
+
+    def test_seed_clock_entity(self):
+        """The seat plants the clock ONCE at boot: `tool:clock`, class
+        Tool, the default script + tick_every=1, silent_birth; a second
+        seed does not touch it (an operator- or model-REWRITTEN clock
+        survives a restart)."""
+        from membrane.night import (DEFAULT_CLOCK_TICK_SCRIPT,
+                                    seed_clock_entity)
+        srv = _Srv()
+        est = srv.entity_store
+        self.assertTrue(seed_clock_entity(est))
+        doc = est.docs.get(f"{MEMBRANE_NS}tool:clock")
+        self.assertIsNotNone(doc)
+        self.assertEqual(doc.cls, "Tool")
+        p = doc.properties or {}
+        self.assertEqual(p.get("tick_script"), DEFAULT_CLOCK_TICK_SCRIPT)
+        self.assertEqual(p.get("tick_every"), 1)
+        self.assertTrue(p.get("silent_birth"))
+        est.edit("tool:clock", properties={"tick_every": 7})
+        self.assertFalse(seed_clock_entity(est))
+        self.assertEqual((est.docs.get(
+            f"{MEMBRANE_NS}tool:clock").properties or {}).get(
+            "tick_every"), 7)
+        self.assertTrue(seed_clock_entity(None) is False)
+
+    def test_default_clock_script_prints_the_time(self):
+        """The default script: render 'clock <HH:MM:SS>' + the patch that
+        stores the tick as last_tick (the operator's ask -- the last
+        output survives on the doc)."""
+        from membrane.night import DEFAULT_CLOCK_TICK_SCRIPT
+        out = run_entity_script(DEFAULT_CLOCK_TICK_SCRIPT, {}, membrane={})
+        m = re.fullmatch(r"clock (\d\d:\d\d:\d\d)", str(out.get("render")))
+        self.assertIsNotNone(m)
+        self.assertEqual(out["patch"], {"last_tick": m.group(1)})
+        self.assertEqual(out["patch"]["last_tick"], out["render"][6:])
 
 
 if __name__ == "__main__":

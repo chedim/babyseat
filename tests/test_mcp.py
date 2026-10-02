@@ -53,6 +53,10 @@ class _StubProxy(BaseHTTPRequestHandler):
                                 {"idx": 4, "situation": "junk2"}]}
     intend = {"ok": True, "eid": "membrane::goal:abc123",
               "created": True, "pinned": True}
+    edit = {"ok": True, "eid": "membrane::tool:clock",
+            "class": "Tool", "summary": None, "links": [],
+            "merged_into": None}
+    edits = []            # captured /membrane/entity/edit bodies
     fail_next = None      # (status, msg) -> next request errors
 
     def _reply(self, code, obj):
@@ -82,7 +86,9 @@ class _StubProxy(BaseHTTPRequestHandler):
         self._reply(code, body)
 
     def do_POST(self):
-        self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        raw = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        if self.path == "/membrane/entity/edit":
+            _StubProxy.edits.append(json.loads(raw or b"{}"))
         code, body = self._canned()
         if body is None:
             if self.path == "/membrane/learn":
@@ -91,6 +97,8 @@ class _StubProxy(BaseHTTPRequestHandler):
                 code, body = 200, _StubProxy.forget
             elif self.path == "/membrane/intend":
                 code, body = 200, _StubProxy.intend
+            elif self.path == "/membrane/entity/edit":
+                code, body = 200, _StubProxy.edit
             else:
                 code, body = 404, {"error": "no route"}
         self._reply(code, body)
@@ -225,6 +233,25 @@ class TestMcpTools(unittest.TestCase):
         # k=99 arrives at the proxy as k=8 (clamped); the stub echoes nothing
         _call("membrane_query", {"topic": "t", "k": 99})
         # (proxy contract tested endpoint-side; here just no crash)
+
+    def test_entity_edit_relays_and_writes_tick_scripts(self):
+        """The tick authorship path end to end THROUGH the MCP surface:
+        the tool's schema carries tick_script, the call relays it in
+        the POST body, and the reply teaches the tick's contract."""
+        del _StubProxy.edits[:]
+        _call("membrane_entity_edit",
+              {"spec": "tool:clock",
+               "tick_script": "import time\nresult = {'render': 'x'}",
+               "properties": {"tick_every": 2}})
+        body = _StubProxy.edits[0]
+        self.assertIn("tick_script", body)
+        self.assertEqual(body["properties"], {"tick_every": 2})
+        # the SCHEMA names the trigger too (the model discovers it)
+        edit_tool = next(t for t in M.TOOLS
+                         if t["name"] == "membrane_entity_edit")
+        self.assertIn("tick_script", edit_tool["description"])
+        self.assertIn("tick_script", json.dumps(
+            edit_tool["inputSchema"]))
 
     def test_state_summary(self):
         text = _call("membrane_state", {})

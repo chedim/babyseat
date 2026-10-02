@@ -241,13 +241,15 @@ TOOLS: list[dict] = [
             "default banner line; the delete script retires the entity "
             "(tombstoned, announced). 3 consecutive failures auto-"
             "disable; empty string clears. "
-            "mention_script/thought_script/dreamed_script: TRIGGER-"
+            "thought_script/dreamed_script/tick_script: TRIGGER-"
             "TYPED policy scripts (the getter/setter organ) -- run "
             "off-turn at the thinker/dreamer hooks (mention fires when "
             "the entity appears in a turn's tags, thought when the "
             "thinker extends a branch under it, dreamed on dream "
-            "commits), under NARROW budgets (0.25s/1s/2s) + a per-"
-            "entity cooldown, with the READ-ONLY membrane object next "
+            "commits, tick on the THINKER'S ~1s heartbeat, paced by "
+            "the entity's own `tick_every` property, cooldown-free), "
+            "under NARROW budgets (0.25s/1s/2s, the tick 0.25s) with "
+            "the READ-ONLY membrane object next "
             "to state (membrane.field.recall/vitals, "
             "membrane.me.describe/velocity/direction, "
             "membrane.entities.get, membrane.timeline.walk, "
@@ -291,6 +293,17 @@ TOOLS: list[dict] = [
                                                   "commit/elect under it "
                                                   "(2s budget); sets "
                                                   "'result'."},
+                "tick_script": {"type": "string",
+                                "description": "python; runs on the "
+                                               "THINKER'S ~1s heartbeat, "
+                                               "paced by this entity's "
+                                               "`tick_every` property "
+                                               "(default 1 = every "
+                                               "heartbeat), cooldown-free "
+                                               "(0.25s budget); sets "
+                                               "'result'. The seat's own "
+                                               "clock (tool:clock) is "
+                                               "seeded with one."},
                 "properties": {"type": "object",
                                "description": "bounded property patch "
                                               "(the model's write path "
@@ -713,7 +726,7 @@ def tool_entity_edit(args: dict, port: int) -> str:
     for f in ("summary", "links", "class", "merged_into",
               "nudge_script", "delete_script",
               "mention_script", "thought_script", "dreamed_script",
-              "properties"):
+              "tick_script", "properties"):
         if args.get(f) is not None:
             body[f] = args[f]
     out = _http(port, "POST", "/membrane/entity/edit", body)
@@ -730,6 +743,11 @@ def tool_entity_edit(args: dict, port: int) -> str:
                 f"the track's default banner line); the delete script "
                 f"retires the entity when it sets result.delete=True. "
                 f"Empty string clears a script.")
+    if args.get("tick_script") is not None:
+        return (f"Entity {out['eid']} scripts updated -- the tick "
+                f"script now fires on the thinker's ~1s heartbeat "
+                f"(paced by the entity's `tick_every` property, "
+                f"cooldown-free, 0.25s budget). Empty string clears it.")
     return (f"Entity {out['eid']} updated: class {out.get('class')}, "
             f"summary {out.get('summary')!r}, links {out.get('links')}.")
 

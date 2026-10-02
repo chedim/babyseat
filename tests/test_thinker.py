@@ -15,7 +15,7 @@ from membrane.entities import (CLASS_TIMELINE, CLASS_SESSION, EntityStore,
                                QuantumEntity, MEMBRANE_NS, CLASS_SESSION)
 from membrane.opencode import speak, drain_speech
 from membrane.thinker import (Thinker, QUEUE_MAX, THINK_MODEL_CAP_PER_MIN,
-                              THINK_TICK_S)
+                              THINK_TICK_S, TICK_FIELD_EVERY)
 
 
 class _Srv:
@@ -161,6 +161,101 @@ class TestConstantHum(unittest.TestCase):
             th._model_call([{"role": "user", "content": "x"}])
         except Exception:
             pass
+
+
+class TestTickScripts(unittest.TestCase):
+    """THE CLOCK ON THE HUM (the operator's 2026-10-01 design): the
+    thinker's 1s heartbeat IS the clock's trigger -- every heartbeat,
+    each entity with a tick_script fires (paced by its own `tick_every`,
+    cooldown-free), the engine applies the result SILENTLY, and every
+    TICK_FIELD_EVERY beats the movers speak ONE field-move observation
+    (the clock's position drifts on the global field)."""
+
+    def _server(self, clock):
+        srv = _Srv()
+
+        class _Fld:
+            def __init__(self):
+                self.events = []
+
+            def write_events(self, evs, session=None):
+                self.events.extend(evs)
+
+            def process(self, limit=8):
+                return 0
+
+        srv.efield = _Fld()
+        est = srv.entity_store
+        ent = QuantumEntity(eid=f"{MEMBRANE_NS}tool:clock", cls="Tool",
+                            properties={"name": "clock",
+                                        "tick_script":
+                                            "import time as _t\n"
+                                            "now = _t.strftime('%H:%M:%S')\n"
+                                            "result = {'render': 'clock ' +"
+                                            " now, "
+                                            "'patch': {'last_tick': now}}",
+                                        "tick_every": clock})
+        est.upsert(ent)
+        return srv, est._resolve_spec("tool:clock"), srv.efield
+
+    def test_fires_per_beat_and_paces_by_tick_every(self):
+        srv, ent, _ = self._server(clock=2)
+        th = Thinker(srv)
+        th._beat += 1
+        th._tick_scripts()                     # beat 1 (odd): no fire
+        self.assertIsNone((ent.properties or {}).get("last_tick"))
+        th._beat += 1
+        th._tick_scripts()                     # beat 2: the clock ticks
+        import re as _re
+        self.assertIsNotNone((ent.properties or {}).get("last_tick"))
+        self.assertTrue(_re.fullmatch(r"\d\d:\d\d:\d\d",
+                                      ent.properties["last_tick"]))
+        self.assertEqual(ent.properties.get("script_render",
+                                            "").startswith("clock "), True)
+
+    def test_field_move_every_sixty_beats(self):
+        srv, ent, fld = self._server(clock=1)
+        th = Thinker(srv)
+        th._beat = TICK_FIELD_EVERY - 1
+        th._tick_scripts()                     # ticks but does NOT move
+        self.assertEqual(fld.events, [])
+        th._beat += 1
+        th._tick_scripts()                     # beat 60: ONE move event
+        self.assertEqual(len(fld.events), 1)
+        ev = fld.events[0]
+        self.assertEqual(getattr(ev, "subject", None), ent.eid)
+        self.assertEqual(getattr(ev, "stream", None), "observation")
+        self.assertEqual(getattr(ev, "outcome", None), "ok")
+        self.assertEqual(ev.args.get("beat"), TICK_FIELD_EVERY)
+        # the applies themselves were silent -- the move is the speech
+        self.assertEqual(th.stats.get("ticks", 0) > 0, True)
+
+    def test_disabled_or_unticked_entities_stay_quiet(self):
+        srv, ent, fld = self._server(clock=1)
+        est = srv.entity_store
+        bad = QuantumEntity(eid=f"{MEMBRANE_NS}files:broken.py",
+                            properties={"tick_script": "result = 1/0",
+                                        "script_disabled": True})
+        est.upsert(bad)
+        plain = QuantumEntity(eid=f"{MEMBRANE_NS}files:plain.py",
+                              properties={"name": "plain"})
+        est.upsert(plain)
+        th = Thinker(srv)
+        th._beat = 1
+        th._tick_scripts()
+        self.assertNotIn((bad.properties or {}).get("script_failures"),
+                         (1, 2, 3))
+        self.assertIsNone((plain.properties or {}).get("script_render"))
+        self.assertEqual(fld.events, [])
+
+    def test_degrades_without_store_or_field(self):
+        srv = _Srv()
+        srv.entity_store = None
+        srv.efield = None
+        th = Thinker(srv)
+        th._beat = 60
+        th._tick_scripts()         # no store, no field: never a wedge
+        self.assertEqual(th._beat, 60)
 
 
 if __name__ == "__main__":
