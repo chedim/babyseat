@@ -49,6 +49,11 @@ VERSION = "1.0"
 PROJECT_ID = "membrane"
 CLOUD_TIMEOUT_S = 1800.0              # a model turn is allowed minutes
 MAX_ROUNDS = 24                       # tool-loop budget per turn
+HISTORY_MAX_MESSAGES = 12             # prior conversation rows replayed
+                                      # into a serve turn's history (the
+                                      # narrative: 'it' needs an
+                                      # antecedent in the transcript)
+HISTORY_TEXT_CAP = 4000               # per-prior-message text cap
 
 
 def _gen_id(prefix: str) -> str:
@@ -416,7 +421,31 @@ class TurnRunner:
                               "time": int(time.time() * 1000)})
         self._touch_session(sid)
 
-    # -- the loop ---------------------------------------------------------------
+        # -- the loop ---------------------------------------------------------------
+
+    def _prior_history(self, sid: str, exclude_id: str) -> list[dict]:
+        """THE SERVE-MODE NARRATIVE: the seat's turns used to carry the
+        current ask ONLY -- the model never saw the conversation, so
+        'who created it?' had no antecedent anywhere (the 'it'-word
+        complaint). The stored conversation is replayed as real history:
+        prior user/assistant TEXT parts in order (the machinery -- tool
+        rounds, reasoning -- never replays), bounded to the last
+        HISTORY_MAX_MESSAGES rows, each text capped."""
+        out: list[dict] = []
+        for row in self.messages.list(sid):
+            info = row.get("info") or {}
+            if exclude_id and str(info.get("id") or "") == exclude_id:
+                continue
+            role = info.get("role")
+            if role not in ("user", "assistant"):
+                continue
+            text = "\n".join(
+                str(p.get("text") or "") for p in row.get("parts") or []
+                if isinstance(p, dict) and p.get("type") == "text").strip()
+            if not text:
+                continue
+            out.append({"role": role, "content": text[:HISTORY_TEXT_CAP]})
+        return out[-HISTORY_MAX_MESSAGES:]
 
     def run(self, sid: str, text: str, user_info: dict | None = None,
             user_parts: list | None = None) -> dict:
@@ -437,8 +466,11 @@ class TurnRunner:
         self.hub.publish({"type": "session.status",
                           "status": {"type": "busy"}, "sessionID": sid})
         # the raw OpenAI history this turn sends up: the doctrine system
-        # message + the user turn, then assistant/tool pairs as they form
-        history = [{"role": "user", "content": text}]
+        # message + the session's prior narrative + the user turn, then
+        # assistant/tool pairs as they form
+        history = self._prior_history(sid, str(user_info.get("id") or "")) \
+            if user_info else []
+        history.append({"role": "user", "content": text})
         aid = _gen_id("msg")
         a_info = {"id": aid, "sessionID": sid, "role": "assistant",
                   "parentID": user_info["id"], "modelID": self.model,

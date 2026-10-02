@@ -59,7 +59,12 @@ class TestBlock(unittest.TestCase):
                                       "evidence": [{"tool": "edit", "outcome": "failed"}]})
         st.conflicts.append("cl:1")
         text = EB.render(EB.entities_for(f, "membrane/router.py"), now=T0)
-        self.assertIn("relations: tool:edit edited it", text)
+        # THE 'IT' FIX: a relation where the entity is the OBJECT names
+        # the entity itself -- the block used to render the literal word
+        # 'it' (the model read 'tool:edit edited it' every turn and
+        # learned the pronoun as a fact)
+        self.assertIn("relations: tool:edit edited f:membrane/router.py",
+                      text)
         self.assertIn('! conflict: "I updated membrane/router.py." (contradicted: edit failed)', text)
 
     def test_budget_and_empty(self):

@@ -404,6 +404,111 @@ class TestTurnLoop(unittest.TestCase):
         self.assertIn("session.idle", [e["type"] for e in evs])
 
 
+class TestServeHistory(unittest.TestCase):
+    """THE NARRATIVE GAP (the 'it' word, the fix): a serve turn used to
+    send ZERO prior conversation to the model -- 'who created it?' had
+    no antecedent in ANY message the model ever saw, and the entity
+    block's relation lines even read 'tool:edit edited it', feeding the
+    pronoun habit. The runner now replays the session's stored
+    conversation as real history: prior user/assistant TEXT parts
+    (bounded to the last HISTORY_MAX_MESSAGES, per-message capped),
+    then the new ask; tool and reasoning parts never replay."""
+
+    def _world(self, responses):
+        hub = NS.SSEHub()
+        sessions = _store()
+        msgs = NS.MessageStore()
+        calls, exec_calls = [], []
+        ladder = _stub_ladder(responses, calls)
+        executor = lambda name, args, call_id: "hi\n"  # noqa: E731
+        s = sessions.create()
+        t = NS.TurnRunner(hub, sessions, msgs, ladder, executor,
+                          system="SYS", model="glm-x", tools=[TC])
+        return dict(hub=hub, sessions=sessions, msgs=msgs, calls=calls,
+                    s=s, t=t)
+
+    def _row(self, role: str, parts: list) -> dict:
+        return {"info": {"id": NS._gen_id("msg"), "role": role},
+                "parts": parts}
+
+    def test_prior_turns_riding_the_history(self):
+        w = self._world([_resp(content="pong")])
+        sid = w["s"]["id"]
+        w["msgs"].append(sid, {"id": NS._gen_id("msg"), "role": "user"},
+                         [{"id": "p1", "type": "text", "text":
+                           "does it work?"}])
+        w["msgs"].append(
+            sid, {"id": NS._gen_id("msg"), "role": "assistant"},
+            [{"id": "p2", "type": "text",
+              "text": "yes -- the clock was born at boot"}])
+        w["t"].run(sid, "who created it?")
+        msgs = w["calls"][0]["messages"]
+        self.assertEqual([m["role"] for m in msgs],
+                         ["system", "user", "assistant", "user"])
+        self.assertEqual(msgs[1], {"role": "user",
+                                   "content": "does it work?"})
+        self.assertEqual(msgs[2]["content"],
+                         "yes -- the clock was born at boot")
+        self.assertEqual(msgs[-1], {"role": "user",
+                                    "content": "who created it?"})
+
+    def test_history_is_bounded(self):
+        w = self._world([_resp(content="pong")])
+        sid = w["s"]["id"]
+        total = NS.HISTORY_MAX_MESSAGES + 8
+        for i in range(total):
+            w["msgs"].append(sid, {"id": NS._gen_id("msg"), "role": "user"},
+                             [{"id": f"u{i}", "type": "text",
+                               "text": f"turn {i}"}])
+            w["msgs"].append(sid,
+                             {"id": NS._gen_id("msg"), "role": "assistant"},
+                             [{"id": f"a{i}", "type": "text",
+                               "text": f"reply {i}"}])
+            w["msgs"].append(sid, {"id": NS._gen_id("msg"), "role": "user"},
+                             [{"id": f"n{i}", "type": "text",
+                               "text": f"go {i}"}])
+        w["t"].run(sid, "and now?")
+        msgs = w["calls"][0]["messages"]
+        # system + the LAST HISTORY_MAX_MESSAGES prior rows + the ask
+        self.assertEqual(len(msgs), 2 + NS.HISTORY_MAX_MESSAGES)
+        self.assertEqual(msgs[-2]["content"],
+                         f"go {total - 1}")
+        self.assertEqual(msgs[-1], {"role": "user", "content": "and now?"})
+
+    def test_machinery_parts_never_replay(self):
+        """Reasoning and tool parts are the turn's machinery -- only the
+        TEXT narrative replays (a tool's raw output in a chat history
+        poisons the same way capture did pre-entity-field)."""
+        w = self._world([_resp(content="pong")])
+        sid = w["s"]["id"]
+        w["msgs"].append(sid, {"id": NS._gen_id("msg"), "role": "assistant"},
+                         [{"id": "r", "type": "reasoning", "text":
+                           "internal thought not for history"},
+                          {"id": "t", "type": "tool", "callID": "c1",
+                           "state": {"output": "the whole ps table"}},
+                          {"id": "x", "type": "text", "text": "the answer"}])
+        w["t"].run(sid, "gotcha")
+        msgs = w["calls"][0]["messages"]
+        self.assertEqual([m["role"] for m in msgs],
+                         ["system", "assistant", "user"])
+        self.assertEqual(msgs[1]["content"], "the answer")
+        self.assertNotIn("ps table", json.dumps(msgs))
+
+    def test_empty_rows_and_beyond_cap_texts(self):
+        w = self._world([_resp(content="pong")])
+        sid = w["s"]["id"]
+        w["msgs"].append(sid, {"id": NS._gen_id("msg"), "role": "assistant"},
+                         [{"id": "e", "type": "text", "text": ""}])
+        w["msgs"].append(sid, {"id": NS._gen_id("msg"), "role": "assistant"},
+                         [{"id": "x", "type": "text",
+                           "text": "x" * (NS.HISTORY_TEXT_CAP + 100)}])
+        w["t"].run(sid, "hmm")
+        msgs = w["calls"][0]["messages"]
+        self.assertEqual([m["role"] for m in msgs],
+                         ["system", "assistant", "user"])
+        self.assertEqual(len(msgs[1]["content"]), NS.HISTORY_TEXT_CAP)
+
+
 class TestMessageStore(unittest.TestCase):
     def test_rows_and_persist(self):
         d = tempfile.mkdtemp()

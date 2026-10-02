@@ -119,7 +119,9 @@ def entity_view(field, eid: str, qvec=None, n_evidence: int = 2) -> dict:
         if r["subj"] == eid:
             rels.append(f"{r['rel']} {r['obj']}")
         else:
-            rels.append(f"{r['subj']} {r['rel']} it")
+            # the entity is the OBJECT: name it (the literal 'it' here
+            # taught the model the pronoun as an every-turn fact)
+            rels.append(f"{r['subj']} {r['rel']} {eid}")
     conflicts = []
     for ck in st.conflicts[:3]:
         c = field.b.get("claims", ck)
