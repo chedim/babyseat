@@ -487,6 +487,22 @@ class CouchbaseBackend:
 # ---- the FILE home (stage 4, the seat-first flip) ---------------------------------
 FIELD_DIRNAME = ".membrane/field"
 
+def _field_dirname_for(field_path) -> str:
+    """THE NESTED-DIR GUARD (the '[efield] sentences snapshot failed'
+    exhibit: '/…/membrane/.membrane/.membrane/field/sentences.json' --
+    the join doubled .membrane when the field path's parent WAS the
+    .membrane dir (a field path of .membrane/field.json). A data dir
+    already under .membrane joins just 'field'; the canonical seat
+    (rag-field.json in the cwd) keeps '.membrane/field'."""
+    try:
+        parent = Path(field_path).resolve().parent \
+            if field_path else Path.cwd()
+        if parent.name == ".membrane":
+            return "field"
+    except Exception:
+        pass
+    return FIELD_DIRNAME
+
 
 class FileBackend(MemBackend):
     """THE SEAT-FIRST HOME (stage 4): the entity field lives under the
@@ -590,6 +606,7 @@ class FileBackend(MemBackend):
     def flush(self) -> None:
         """Write the dirty collections atomically; the events log is
         compacted (not snapshotted -- it IS the event store)."""
+        self.dir.mkdir(parents=True, exist_ok=True)
         for coll in self._dirty:
             if coll == "events":
                 self._compact_events()
@@ -654,7 +671,7 @@ def open_backend(field_path: str = ""):
                   file=sys.stderr)
     base = Path(field_path).resolve().parent if field_path else Path.cwd()
     try:
-        return FileBackend(base / FIELD_DIRNAME)
+        return FileBackend(base / _field_dirname_for(field_path))
     except Exception as e:
         print(f"[efield] file backend unavailable ({e}); RAM backend",
               file=sys.stderr)
