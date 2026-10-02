@@ -52,13 +52,13 @@ CLASS_GOAL = "Goal"                    # an open commitment / intention
 CLASS_SENSOR = "Sensor"                # cortex-side telemetry entity
 CLASS_ACTUATOR = "Actuator"            # cortex-side control entity
 CLASS_PROJECT = "Project"              # the opened workspace (its own arc)
-CLASS_PROJECT = "Project"              # the opened workspace (its own arc)
 CLASS_SESSION = "Session"              # one conversation's dynamics
 CLASS_TIMELINE = "Timeline"            # a dreamed branch (the dreamer's output)
+CLASS_SEAT = "Seat"                    # a seat's presence/identity (the auto-published organ)
 CLASSES = (CLASS_COMPONENT, CLASS_DECISION, CLASS_FAILURE, CLASS_MODEL,
            CLASS_TOOL, CLASS_ENDPOINT, CLASS_CONFIG, CLASS_GOAL,
            CLASS_SENSOR, CLASS_ACTUATOR, CLASS_PROJECT, CLASS_SESSION,
-           CLASS_TIMELINE)
+           CLASS_TIMELINE, CLASS_SEAT)
 
 # membrane-namespace doc-id prefix in the shared entities collection
 MEMBRANE_NS = "membrane::"
@@ -1201,7 +1201,7 @@ class EntityStore(MultiParentOps, TimelineOps):
     copies carry on."""
 
     def __init__(self, path: str | None = None, bucket: str = "cortex-core",
-                 shared: bool = True) -> None:
+                 shared: bool = True, origin: str | None = None) -> None:
         self.path = Path(path) if path else None
         self.bucket = bucket
         # THE TEST-ISOLATION GUARD (the 'doomed.py in the fork's banner'
@@ -1211,6 +1211,11 @@ class EntityStore(MultiParentOps, TimelineOps):
         # fork's banner via its read-through. Tests pass shared=False:
         # RAM/JSON only, the shared substrate never touched.
         self.shared = shared
+        # THE SEAT-FIRST FIELD (the operator's 2026-10-01 design): tier 1
+        # is local and authoritative; tier 2 (couchbase) holds ONLY
+        # published entities. The origin is the pub-namespace identity
+        # (the persisted <data-dir>/origin tag, same as the field's).
+        self.origin = origin or "seat@local"
         self.docs: dict[str, QuantumEntity] = {}
         # entity TRACKS: key -> {key, label, op, n, alerted}. The banner
         # lane: live cell counts in WHERE WE ARE, optional boundary alerts.
@@ -1432,19 +1437,18 @@ class EntityStore(MultiParentOps, TimelineOps):
 
     # ---- the merge contract --------------------------------------------------
     def upsert(self, ent: QuantumEntity, embedder=None,
-               sync: bool = True) -> bool:
-        """Merge one entity (union on collision), persist both homes.
+               sync: bool = False) -> bool:
+        """Merge one entity (union on collision), persist its LOCAL home.
         Returns True when written (new or merged).
-        EPHEMERAL entities (properties['ephemeral']) stay LOCAL: a
-        session's living present is nobody else's business -- it never
-        rides the couchbase write-through (two parallel seats would
-        otherwise fight over one 'now' doc).
+        THE SEAT-FIRST FIELD (the operator's 2026-10-01 design): the
+        auto write-through is RETIRED -- upsert never touches the cloud
+        (couchbase down changes nothing; tier 1 is authoritative). The
+        ``sync`` parameter is kept for the call sites/tick gate and is
+        now inert (no caller can share by accident; only publish() puts
+        anything on the wire).
         ``sync=False`` (the tick-pace applies: the clock's silent
-        upsert): JSON + RAM only -- no couchbase write-through. The
-        write-through would re-embed the doc and upsert a 1024-point
-        vector EVERY SECOND (86k embeds/day); the tick's truth is
-        seat-local liveliness, and the fork read-through bonus never
-        needs it.
+        upsert): the tick's truth is seat-local liveliness, and the
+        fork read-through bonus never needs it.
         BIRTHS announce: a NEW store doc (any creation path -- night
         synthesis, model add, materialization, gray-band growth) queues
         an announcement; merges-into-existing stay silent here (the
@@ -1461,70 +1465,210 @@ class EntityStore(MultiParentOps, TimelineOps):
         self.save_soon()
         if is_new and not (ent.properties or {}).get("ephemeral"):
             self._announce("new", ent)
-        if (ent.properties or {}).get("ephemeral"):
-            return True
-        if sync:
-            coll = self._entities_collection()
-            if coll is not None:
-                try:
-                    coll.upsert(ent.eid, ent.to_doc(embedder))
-                    return True
-                except Exception as e:
-                    if not self._cb_warned:
-                        print(f"[entities] write-through failed ({str(e)[:80]})",
-                              file=sys.stderr)
-                        self._cb_warned = True
         # THE RETURN SEMANTICS fix (the shared=False test failures): the
-        # RAM/JSON write IS the success -- the couchbase write-through is
-        # best-effort (a fork read-through bonus, not the contract)
+        # RAM/JSON write IS the success.
         return True
 
-    def hydrate_from_couchbase(self, limit: int = 2000) -> int:
-        """READ-THROUGH: pull cortex's entities into RAM (both systems see
-        one symbolic layer). Foreign entities (no membrane:: prefix) load
-        as-is -- the shared vocabulary makes them directly usable."""
+    # ---- tier 2: PUBLISH (the model's explicit exports) ----------------------
+    @staticmethod
+    def _strip_code(props: dict) -> dict:
+        """THE NO-INFECTION RULE (the operator's 2026-10-01 call): an
+        exported doc carries the entity's STATE, never the foreign
+        seat's executable scripts (a leaked tick_script would RUN
+        inside the importing seat -- the seat-first rule: every seat's
+        code is local, only data travels). Strips the trigger scripts
+        AND the engine's script-* state; ``script_render`` (the last
+        rendered line, inert text) survives."""
+        return {k: v for k, v in props.items()
+                if not k.endswith("_script")
+                and k not in ("script_disabled", "script_failures",
+                              "script_every_n")}
+
+    def publish(self, spec, embedder=None) -> dict:
+        """EXPORT an entity to the global namespace (tier 2): a snapshot
+        doc under a PER-ORIGIN key (``pub:<origin>:<eid>`` -- two seats
+        publishing the same eid never contend, there is no other seat's
+        doc to fight) stamped {by, at, ver, eid}. Versioned: republishing
+        bumps ``published_ver`` (the import organ upgrades only on newer
+        versions). The model's decision -- the store NEVER publishes
+        alone (only the presence entity is seat-published, by the
+        organ's design). Degrades when couchbase is down."""
+        ent = self._resolve_spec(spec) if isinstance(spec, str) else spec
+        if ent is None:
+            return {"ok": False, "error": f"no entity matches {spec!r}"}
         coll = self._entities_collection()
         if coll is None:
-            return 0
-        # Collections have no .query(); N1QL lives on the cluster. Scope the
-        # keyspace explicitly (same bucket the collection handle came from).
-        from couchbase.options import QueryOptions
-        import datetime as _dt
-        n = 0
+            return {"ok": False, "error": "couchbase unavailable; "
+                    "the local tier carries (publish again when up)"}
+        props = ent.properties or {}
+        ver = int(props.get("published_ver") or 0) + 1
+        props["published_ver"] = ver
+        props["published_at"] = _t.time()
+        key = f"pub:{self.origin}:{ent.eid}"
+        doc = ent.to_doc(embedder)
+        doc["data"]["properties"] = self._strip_code(
+            doc["data"].get("properties") or {})
+        doc["published"] = {"by": self.origin, "at": props["published_at"],
+                            "ver": ver, "eid": ent.eid}
+        try:
+            coll.upsert(key, doc)
+        except Exception as e:
+            return {"ok": False, "error": f"publish failed ({str(e)[:80]})"}
+        self.save_soon()                 # the local stamps, persisted
+        self._announce("published", ent)
+        return {"ok": True, "key": key, "ver": ver, "eid": ent.eid}
+
+    def unpublish(self, spec) -> dict:
+        """RETRACT: remove THIS seat's pub doc for the entity (an original
+        author's retraction; a foreign seat's pub doc is never touched).
+        The import stays local -- a retraction freezes the imported copy
+        at its last version (the local graph is the authority)."""
+        ent = self._resolve_spec(spec) if isinstance(spec, str) else spec
+        if ent is None:
+            return {"ok": False, "error": f"no entity matches {spec!r}"}
+        coll = self._entities_collection()
+        if coll is None:
+            return {"ok": False,
+                    "error": "couchbase unavailable; nothing to retract"}
+        key = f"pub:{self.origin}:{ent.eid}"
+        try:
+            coll.remove(key)
+        except Exception as e:
+            return {"ok": False, "error": f"unpublish failed ({str(e)[:80]})"}
+        props = ent.properties or {}
+        props.pop("published_ver", None)
+        props.pop("published_at", None)
+        self.save_soon()
+        return {"ok": True, "key": key, "eid": ent.eid}
+
+    def _pub_query(self, key_prefix: str = "pub:%", limit: int = 2000):
+        """The pull: N1QL over the shared entities collection for
+        published docs (per-origin ``pub:`` keys only -- the raw
+        per-origin state write-throughs are retired; the shared layer is
+        the UNION of published entities). Yields (doc_id, doc)."""
+        coll = self._entities_collection()
+        if coll is None:
+            return
         cluster = getattr(self, "_cluster_ref", None)
         if cluster is None:
-            return 0
-        try:
-            # THE SEAT SCOPE (the context-creep fix, the operator's
-            # complaint: foreign entities in their banners): the
-            # read-through pulls ONLY membrane's own namespace + the
-            # cortex commons -- not every doc in the shared collection
-            qr = cluster.query(
-                "SELECT meta().id AS id, t.* FROM "
-                f"`{self.bucket}`.`_default`.`entities` t "
-                "WHERE meta().id LIKE 'membrane::%' "
-                "OR meta().id LIKE 'cortex::%' "
-                "LIMIT $lim",
-                QueryOptions(timeout=_dt.timedelta(seconds=30),
-                             named_parameters={"lim": limit}))
+            # THE FAKE/DEGRADED PATH (tests): a stub collection that can
+            # answer queries itself. Real couchbase always hands the
+            # store a cluster (the N1QL home); collections alone have
+            # no .query -- so this fallback never runs on real seats.
+            qr = coll.query("published", limit=limit)
             for row in qr:
-                q = QuantumEntity.from_doc(row.get("id", ""),
-                                           {k: v for k, v in row.items()
-                                            if k != "id"})
-                if q is None:
-                    continue
-                ex = self.docs.get(q.eid)
-                if ex is not None:
-                    ex.merge(q)          # two systems, one entity
-                else:
-                    self.docs[q.eid] = q
-                n += 1
+                yield row.get("id", ""), {k: v for k, v in row.items()
+                                          if k != "id"}
+            return
+        from couchbase.options import QueryOptions
+        import datetime as _dt
+        qr = cluster.query(
+            "SELECT meta().id AS id, t.* FROM "
+            f"`{self.bucket}`.`_default`.`entities` t "
+            f"WHERE meta().id LIKE '{key_prefix}' "
+            "LIMIT $lim",
+            QueryOptions(timeout=_dt.timedelta(seconds=30),
+                         named_parameters={"lim": limit}))
+        for row in qr:
+            yield row.get("id", ""), {k: v for k, v in row.items()
+                                      if k != "id"}
+
+    def import_published(self, limit: int = 2000, skip_own: bool = True) -> int:
+        """The MAPPING organ (tier 2 -> tier 1): pull every published
+        entity, FOREIGN origins first-class -- each maps onto the local
+        graph under its shared-vocabulary eid, stamped ``imported_by``
+        (the published owner), and from then on it RUNS LOCALLY (drift,
+        tracks, its own scripts). The local doc is ALWAYS the authority:
+        an existing local eid is never clobbered by a foreign snapshot
+        (the imported copy only lands when the entity doesn't live
+        here). Idempotent; returns the count imported this pull."""
+        n = 0
+        try:
+            rows = list(self._pub_query(limit=limit))
         except Exception as e:
-            print(f"[entities] read-through skipped ({str(e)[:80]})",
+            print(f"[entities] published pull skipped ({str(e)[:80]})",
                   file=sys.stderr)
+            return 0
+        for doc_id, doc in rows:
+            meta = doc.get("published") or {}
+            owner = meta.get("by")
+            eid = meta.get("eid") or doc_id
+            if not eid or (skip_own and owner == self.origin):
+                continue
+            if eid in self.docs:
+                continue           # the local copy is the authority
+            q = QuantumEntity.from_doc(eid, doc)
+            if q is None:
+                continue
+            # DEFENSE IN DEPTH: old publishers (or a hostile row) may
+            # carry code -- an imported doc never runs foreign scripts.
+            props = q.properties or {}
+            props.update(self._strip_code(props))
+            props["imported_by"] = owner
+            if meta.get("at"):
+                props["imported_at"] = meta["at"]
+            self.docs[eid] = q
+            n += 1
         if n:
-            self.save()
+            self.save_soon()
         return n
+
+    def hydrate_from_couchbase(self, limit: int = 2000) -> int:
+        """The read-through (SEAT-FIRST: the pull is pub-only now) --
+        foreign PUBLISHED entities map onto the local graph and run
+        locally. The raw per-origin state write-throughs are retired;
+        the old membrane::/cortex:: read is delegated to import's
+        contract (same organ, tier-2 semantics)."""
+        return self.import_published(limit=limit)
+
+    def update_presence(self, extra: dict | None = None) -> dict:
+        """THE PRESENCE ORGAN (the operator's 2026-10-01 design): the
+        seat's own ``Seat`` entity describing THIS seat and its NOW,
+        published to the global tier on the SLOW cadence (the thinker's
+        every-60-beats pulse -- a lot slower than the 1Hz clock, which
+        stays the tick primitive). The ONE seat-auto publish lane: the
+        model never has to remember to announce itself, and every OTHER
+        seat reads it as the roster (peers). Properties: ``seat`` (the
+        origin) + the caller's facts (branch, head, uptime, docs,
+        ports...) + ``presence_ts``."""
+        eid = f"{MEMBRANE_NS}presence"
+        ent = self.docs.get(eid)
+        if ent is None:
+            ent = QuantumEntity(eid=eid, cls=CLASS_SEAT, properties={})
+        props = ent.properties or {}
+        props["seat"] = self.origin
+        if extra:
+            props.update(extra)
+        props["presence_ts"] = _t.time()
+        ent.properties = props
+        self.upsert(ent)
+        return self.publish(ent)
+
+    def peers(self, limit: int = 200) -> list:
+        """THE ROSTER (the thinker's anchor): the OTHER seats' presence
+        entities off the global tier -- who is alive, what they run, how
+        long up. A seat never introduces itself to itself (own-origin
+        rows are skipped). Degrades to [] couchbase-down."""
+        rows = self._pub_query(key_prefix=f"pub:%:{MEMBRANE_NS}presence",
+                               limit=limit)
+        out = []
+        try:
+            listed = list(rows)
+        except Exception as e:
+            print(f"[entities] peers pull skipped ({str(e)[:80]})",
+                  file=sys.stderr)
+            return []
+        for doc_id, doc in listed:
+            meta = doc.get("published") or {}
+            owner = meta.get("by")
+            if not owner or owner == self.origin:
+                continue
+            data = doc.get("data") or {}
+            out.append({"origin": owner,
+                        "eid": meta.get("eid") or doc_id,
+                        "ver": meta.get("ver"),
+                        "properties": data.get("properties") or {}})
+        return out
 
     def all(self) -> list[QuantumEntity]:
         return list(self.docs.values())
@@ -1716,9 +1860,14 @@ class EntityStore(MultiParentOps, TimelineOps):
              delete_script=None, mention_script=None,
              thought_script=None, dreamed_script=None,
              tick_script=None,
-             properties: dict | None = None) -> dict:
+             properties: dict | None = None,
+             publish: bool = False, unpublish: bool = False) -> dict:
         """Model-side entity EDIT: patch summary/links/class on the
         resolved entity. Only provided fields change.
+        ``publish=True`` exports the entity to the global namespace
+        (tier 2 -- the model's decision: a versioned, per-origin-key
+        snapshot; republishing bumps the version). ``unpublish=True``
+        retracts this seat's export (the imported copy stays local).
         ``properties``: a bounded property patch (the model's write path
         for goal status -- fulfill/drop via the edit surface; the same
         guards as the script-patch contract: <=16 keys, 2000-char values,
@@ -1831,9 +1980,18 @@ class EntityStore(MultiParentOps, TimelineOps):
                     "merged_into": dst.eid}
         ent.derived_by = sorted(set(ent.derived_by or []) | {"model-edit"})
         self.upsert(ent)
-        return {"ok": True, "eid": ent.eid, "class": ent.cls,
-                "summary": ent.properties.get("summary", ""),
-                "links": ent.links}
+        res = {"ok": True, "eid": ent.eid, "class": ent.cls,
+               "summary": ent.properties.get("summary", ""),
+               "links": ent.links}
+        # THE PUBLISH VEHICLE (the seat-first field, the model's decision):
+        # edit(spec, publish=True) exports to the global namespace;
+        # edit(spec, unpublish=True) retracts this seat's export. A
+        # republish bumps the version (imports upgrade only on newer).
+        if publish:
+            res["published"] = self.publish(ent)
+        if unpublish:
+            res["unpublished"] = self.unpublish(ent)
+        return res
 
     def remove(self, spec: str) -> int:
         """Model-side entity REMOVE by eid/name fragment (exact single

@@ -258,6 +258,86 @@ class TestTickScripts(unittest.TestCase):
         self.assertEqual(th._beat, 60)
 
 
+class _PubColl:
+    """A fake published-collection: captures the presence upsert, answers
+    the roster pull with N1QL-shaped rows (an ``id`` key, doc fields flat)."""
+
+    def __init__(self, docs=None):
+        self.docs = dict(docs or {})
+        self.upserts = []
+
+    def upsert(self, k, d):
+        self.upserts.append((k, d))
+        self.docs[k] = d
+
+    def query(self, q, **kw):
+        return iter([{"id": k, **v} for k, v in list(self.docs.items())])
+
+
+class TestPresencePulse(unittest.TestCase):
+    """THE PRESENCE PULSE (the operator's 2026-10-01 design): every
+    PRESENCE_EVERY beats (~1/min, much slower than the 1Hz clock) the
+    seat republishes its presence entity (identity + uptime + docs) --
+    the ONE seat-auto publish lane -- and reads the ROSTER of foreign
+    seats off the global tier (the thinker's anchor)."""
+
+    def test_pulse_fires_only_on_the_sixtieth_beat(self):
+        """The gate reads the INCREMENTED beat (the hum hums first):
+        59 -> 60 fires; 60 -> 61 does not."""
+        srv = _Srv()
+        th = Thinker(srv)
+        th._beat = 59
+        with mock.patch.object(th, "_presence_pulse") as pulse, \
+                mock.patch.object(th, "_tick_scripts"), \
+                mock.patch.object(th, "_duty", return_value=1.0):
+            th._hum()
+            self.assertEqual(pulse.call_count, 1)
+        th._beat = 60
+        with mock.patch.object(th, "_presence_pulse") as pulse, \
+                mock.patch.object(th, "_tick_scripts"), \
+                mock.patch.object(th, "_duty", return_value=1.0):
+            th._hum()
+            self.assertEqual(pulse.call_count, 0)
+
+    def test_pulse_publishes_and_anchors_the_roster(self):
+        srv = _Srv()
+        srv._boot_ts = time.time() - 240
+        th = Thinker(srv)
+        est = srv.entity_store
+        foreign = {"pub:laptop@mac:membrane::presence": {
+            "published": {"by": "laptop@mac", "ver": 3,
+                          "eid": "membrane::presence"},
+            "data": {"properties": {"seat": "laptop@mac", "uptime": 900,
+                                    "branch": "entity-field"}}}}
+        est._entities_collection = lambda c=_PubColl(foreign): c
+        th._presence_pulse()
+        r = th.stats["presence"]
+        self.assertTrue(r["ok"])
+        coll = est._entities_collection()
+        key = f"pub:seat@local:{MEMBRANE_NS}presence"
+        self.assertEqual([k for k, _ in coll.upserts], [key])
+        p = est.docs.get(f"{MEMBRANE_NS}presence").properties or {}
+        self.assertEqual(p.get("seat"), "seat@local")
+        self.assertEqual(p.get("branch"), "entity-field")  # this repo's
+        self.assertGreater(p.get("uptime"), 200)
+        self.assertGreaterEqual(p.get("docs"), 1)
+        # the roster: the OTHER seat only (self never makes the list)
+        self.assertEqual([q["origin"] for q in srv._presence_roster],
+                         ["laptop@mac"])
+        self.assertEqual(srv._presence_roster[0]["properties"]["uptime"], 900)
+
+    def test_pulse_degrades_couchbase_down_never_raises(self):
+        """No collection (couchbase down): the LOCAL presence doc still
+        lands, the pulse reports not-ok, the roster is empty -- the
+        thinker hums on."""
+        srv = _Srv()
+        th = Thinker(srv)
+        th._presence_pulse()
+        self.assertIn(f"{MEMBRANE_NS}presence", srv.entity_store.docs)
+        self.assertFalse(th.stats["presence"]["ok"])
+        self.assertEqual(srv._presence_roster, [])
+
+
 if __name__ == "__main__":
     unittest.main()
 

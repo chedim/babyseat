@@ -5290,7 +5290,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                        thought_script=body.get("thought_script"),
                        dreamed_script=body.get("dreamed_script"),
                        tick_script=body.get("tick_script"),
-                       properties=body.get("properties"))
+                       properties=body.get("properties"),
+                       publish=bool(body.get("publish")),
+                       unpublish=bool(body.get("unpublish")))
         self._entity_audit("edit", res)
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
@@ -6019,9 +6021,16 @@ def main() -> None:
     # (srv.receipts is set above from --no-receipts; a re-assignment here
     # to True used to silently kill the kill switch)
     srv.entity_store = None
+    srv._presence_roster = []
     try:
         from .entities import EntityStore, JUNK_CUT_DEFAULT
-        srv.entity_store = EntityStore(path=str(_wdir / "entities.json"))
+        # THE SEAT-FIRST FIELD: the store's identity is the PERSISTED
+        # origin tag (``<start-folder>@<hostname>`` -- every boot of this
+        # folder reuses it), so the pub- and import lanes address THIS
+        # seat by the same name on every restart.
+        from .substrate import _origin_tag
+        srv.entity_store = EntityStore(path=str(_wdir / "entities.json"),
+                                       origin=_origin_tag(args.field))
         # THE CLOCK (the operator's 2026-10-01 ask): plant `tool:clock`
         # once at boot -- idempotent (an already-living, model- or
         # operator-Rewritten clock survives every restart). Degrades
@@ -6033,6 +6042,27 @@ def main() -> None:
                       "fires on the thinker's heartbeat)", file=sys.stderr)
         except Exception as e:
             print(f"[seat] clock seeding skipped ({e})", file=sys.stderr)
+        # THE PRESENCE ORGAN (the seat-first field's heartbeat): the seat
+        # announces itself the moment it boots -- published to the global
+        # tier (the ONE seat-auto lane) and read as the roster by every
+        # other seat's thinker. Degrades couchbase-down: the LOCAL doc
+        # still lands; the thinker's 60-beat pulse carries the publish up.
+        try:
+            from .thinker import _git_identity
+            _pfacts = dict(_git_identity())
+            _pfacts.update({"uptime": 0, "beats": 0,
+                            "docs": len(srv.entity_store.docs)})
+            _pres = srv.entity_store.update_presence(_pfacts)
+            srv._presence_roster = srv.entity_store.peers()
+            if _pres.get("ok"):
+                print(f"[seat] presence published ({srv.entity_store.origin}; "
+                      f"{len(srv._presence_roster)} peer(s) on the roster)",
+                      file=sys.stderr)
+            else:
+                print("[seat] presence planted locally (couchbase down; "
+                      "the thinker's pulse carries it up)", file=sys.stderr)
+        except Exception as e:
+            print(f"[seat] presence seeding skipped ({e})", file=sys.stderr)
         # THE PEER SUBSTRATES (the operator's design): the proxy REGISTRY
         # (ephemeral bucket, TTL docs, heartbeats -- who else is connected)
         # + the PEER CHANNEL (permanent, a chat lane between the LLMs,

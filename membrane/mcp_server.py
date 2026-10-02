@@ -253,16 +253,34 @@ TOOLS: list[dict] = [
             "to state (membrane.field.recall/vitals, "
             "membrane.me.describe/velocity/direction, "
             "membrane.entities.get, membrane.timeline.walk, "
-            "membrane.intents.open). 'result' = {render, patch: dict "
+            "membrane.intents.open, membrane.speak -- the planner-gated "
+            "voice: ONE line per fire, stay-silent holds). 'result' = {render, patch: dict "
             "of this entity's own properties (the monitoring organ: a "
             "getter may MOVE the entity, e.g. toward 'done' "
             "coordinates), delete}. The engine applies; scripts never "
-            "mutate directly."),
+            "mutate directly. The SEAT-FIRST FIELD: your entity store "
+            "is LOCAL (authoritative, never auto-synced) and the "
+            "global tier holds only PUBLISHED entities. "
+            "publish=True exports the entity under a per-origin key "
+            "(pub:<origin>:<eid>) -- your decision, your version line "
+            "(republishing bumps it); imports elsewhere take the last "
+            "STATE, never your code. unpublish=True retracts YOUR "
+            "export (their import freezes at its last version). "
+            "membrane::presence is published for you once a minute."),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "spec": {"type": "string",
                          "description": "eid or exact name."},
+                "publish": {"type": "boolean",
+                            "description": "export to the global tier "
+                                           "(per-origin key, versioned; "
+                                           "your call -- the wire "
+                                           "carries state, no code)."},
+                "unpublish": {"type": "boolean",
+                              "description": "retract YOUR export "
+                                             "(imports elsewhere freeze "
+                                             "at their last version)."},
                 "summary": {"type": "string"},
                 "links": {"type": "array"},
                 "class": {"type": "string"},
@@ -729,9 +747,26 @@ def tool_entity_edit(args: dict, port: int) -> str:
               "tick_script", "properties"):
         if args.get(f) is not None:
             body[f] = args[f]
+    for f in ("publish", "unpublish"):        # the tier-2 gestures
+        if args.get(f):
+            body[f] = True
     out = _http(port, "POST", "/membrane/entity/edit", body)
     if not out.get("ok"):
         return f"Edit failed: {out.get('error', 'unknown error')}"
+    if out.get("published"):
+        if out["published"].get("ok"):
+            return (f"Entity {out['eid']} PUBLISHED to the global tier "
+                    f"({out['published']['key']}, version "
+                    f"{out['published']['ver']}) -- foreign seats import "
+                    f"its last STATE, never your code. Publish is "
+                    f"per-origin (yours); republish to bump the version.")
+        return (f"Publish failed: {out['published'].get('error')} "
+                f"(the local tier carries; publish again when up).")
+    if out.get("unpublished"):
+        if out["unpublished"].get("ok"):
+            return (f"Entity {out['eid']} UNPUBLISHED (your foreign "
+                    f"imports freeze at their last version).")
+        return (f"Unpublish failed: {out['unpublished'].get('error')}")
     if out.get("merged_into"):
         return (f"Entity {out['eid']} MARKED merged into "
                 f"{out['merged_into']} (the source doc stays, pointing "

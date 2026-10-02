@@ -53,6 +53,9 @@ THINK_CPU_TARGET = 0.04      # the duty ceiling: think work / (think + window)
 THINK_IDLE_S = 60.0          # the max stretch when the duty is way over
 TICK_FIELD_EVERY = 60        # one field-move observation per clock, every
                              # 60 beats -- the seat's drift pace, not 1/s
+PRESENCE_EVERY = 60          # the presence pulse: every 60 beats (~1/min)
+                             # the slow seat-auto publish, the clock's
+                             # 1Hz tick stays the heartbeat PRIMITIVE
 QUEUE_MAX = 5                # the 3-7 working memory (the covenant's 5)
 THINK_MODEL_CAP_PER_MIN = 4  # the cost dial: model calls per minute, max
 NOVELTY_SPEAK_BAR = 0.85     # a digest speaks only above this sim surprise
@@ -96,6 +99,23 @@ def _branch_convergence(props: dict, lane) -> float:
 from .vsa import hamming as vsa_hamming  # noqa: E402  (module-level user above)
 
 
+def _git_identity() -> dict:
+    """The seat's git identity (branch + short head) for the presence
+    entity -- read ONCE at the first pulse, never per beat. Empty on any
+    failure (not a repo, no git binary): the presence runs without."""
+    out: dict = {}
+    try:
+        import subprocess
+        for flag, key in (("--abbrev-ref", "branch"), ("--short=7", "head")):
+            r = subprocess.run(["git", "rev-parse", flag, "HEAD"],
+                               capture_output=True, text=True, timeout=3)
+            if r.returncode == 0 and r.stdout.strip():
+                out[key] = r.stdout.strip()
+    except Exception:
+        pass
+    return out
+
+
 class Thinker:
     """One seat's rumination thread."""
 
@@ -112,10 +132,14 @@ class Thinker:
         # the banner's mind line (the operator's window into the loop)
         self.mind_log: deque = deque(maxlen=6)
         self.stats = {"processed": 0, "spoken": 0, "extended": 0,
-                      "skipped": 0, "model_calls": 0, "ticks": 0}
+                      "skipped": 0, "model_calls": 0, "ticks": 0,
+                      "presence": {"ok": False}}
         # THE CLOCK COUNTER: the hum's beat number (the tick trigger's
         # pacing wheel -- each entity's tick_every reads against it)
         self._beat = 0
+        # THE PRESENCE GEAR: the seat's git identity read ONCE (the pulse
+        # never shells out per beat)
+        self._presence_git: dict | None = None
 
     # ---- lifecycle -----------------------------------------------------------
     def start(self) -> None:
@@ -173,6 +197,13 @@ class Thinker:
             self._tick_scripts()
         except Exception:
             traceback.print_exc()
+        # THE PRESENCE PULSE (the roster anchor): on the SLOW cadence the
+        # seat re-announces itself + reads who else is alive. Never raises.
+        if self._beat % PRESENCE_EVERY == 0:
+            try:
+                self._presence_pulse()
+            except Exception:
+                traceback.print_exc()
         if self.queue:
             item = self.queue.popleft()
             try:
@@ -284,6 +315,32 @@ class Thinker:
                 fld.process(limit=8)
         except Exception:
             traceback.print_exc()
+
+    def _presence_pulse(self) -> None:
+        """THE PRESENCE PULSE (the operator's 2026-10-01 design, the
+        thinker's anchor): on the slow cadence this seat (re)publishes
+        its presence entity -- who it is, what it runs, how long up --
+        and reads the ROSTER of foreign seats off the global tier. The
+        roster also feeds the mind log (who is alive around us). Degrades
+        everywhere: no store, not-ok publish (couchbase down), empty
+        roster -- the hum never breaks."""
+        est = getattr(self.srv, "entity_store", None)
+        if est is None:
+            return
+        if self._presence_git is None:
+            self._presence_git = _git_identity()
+        uptime = int(time.time() -
+                     float(getattr(self.srv, "_boot_ts", 0.0) or time.time()))
+        facts = dict(self._presence_git)
+        facts.update({"uptime": uptime, "docs": len(est.docs),
+                      "beats": self._beat,
+                      "processed": self.stats["processed"]})
+        self.stats["presence"] = est.update_presence(facts)
+        self.srv._presence_roster = est.peers()
+        if self.srv._presence_roster:
+            names = ", ".join(p["origin"] for p in self.srv._presence_roster)
+            self._log_mind({"kind": "presence", "note":
+                            f"roster refreshed: {names}"})
 
     # ---- the model-call cost dial -------------------------------------------
     def _model_budget_ok(self) -> bool:

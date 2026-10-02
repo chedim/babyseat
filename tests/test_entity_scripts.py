@@ -285,6 +285,65 @@ class TestTickScripts(unittest.TestCase):
         self.assertEqual(out["patch"]["last_tick"], out["render"][6:])
 
 
+class TestScriptSpeak(unittest.TestCase):
+    """THE VOICE (the operator's 'the word'): an entity script CAN speak
+    -- membrane.speak(text) -- but only through the SAME planner gate as
+    every other voice (the ActTable consults, stay-silent holds) and ONE
+    line per fire (the quota: a chatty script never spams the room).
+    No direct channel write exists on the script's side."""
+
+    def _speakable_ent(self):
+        srv = _Srv()
+        est = srv.entity_store
+        now = QuantumEntity(eid=f"{MEMBRANE_NS}session:now", cls="Session",
+                            properties={"name": "now"})
+        est.upsert(now)
+        srv._last_context_sig = "boot|0.5"
+        ent = est._resolve_spec("session:now")
+        return srv, ent
+
+    def test_speak_enters_the_gated_queue_once_per_fire(self):
+        srv, ent = self._speakable_ent()
+        ent.properties["mention_script"] = (
+            "a = membrane.speak('the ladder moved')\n"
+            "b = membrane.speak('and again')\n"
+            "result = {'render': f'spoke {a} then {b}'}")
+        est = srv.entity_store
+        est.upsert(ent)
+        ent = est._resolve_spec("session:now")
+        out = run_entity_update_script(srv, ent, "mention")
+        self.assertNotIn("error", out)
+        self.assertEqual(out["render"], "spoke True then False")
+        q = srv._speak_queue
+        self.assertEqual(len(q), 1)               # the quota: ONE per fire
+        self.assertEqual(q[0]["text"], "the ladder moved")
+        self.assertEqual(q[0]["kind"], "report-state")
+
+    def test_speak_stay_silent_still_governs(self):
+        """THE COVENANT HOLDS: the planner's stay-silent drops the
+        script's voice too (an unlearned/silent context says nothing;
+        the observe records the silence)."""
+        srv, ent = self._speakable_ent()
+        ent.properties["mention_script"] = (
+            "a = membrane.speak('loud')\nresult = {'render': f'gate {a}'}")
+        srv.entity_store.upsert(ent)
+        ent = srv.entity_store._resolve_spec("session:now")
+
+        class _SilentTable:
+            def select(self, sig):
+                return "stay-silent"
+
+            def observe(self, sig, act):
+                self.seen = (sig, act)
+
+        tbl = _SilentTable()
+        srv._act_table = tbl
+        out = run_entity_update_script(srv, ent, "mention")
+        self.assertEqual(out["render"], "gate False")
+        self.assertEqual(getattr(srv, "_speak_queue", []), [])
+        self.assertEqual(tbl.seen, ("boot|0.5", "stay-silent"))
+
+
 if __name__ == "__main__":
     unittest.main()
 

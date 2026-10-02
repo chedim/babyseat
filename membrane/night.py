@@ -853,7 +853,7 @@ def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
 
     class _Membrane:
         """The assembled read-only interface (field/me/entities/
-        intents)."""
+        intents) + speak (the planner-gated voice)."""
         def __init__(self):
             self.field = _FieldAPI()
             self.me = _Me(ent)
@@ -863,6 +863,20 @@ def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
             self.trigger = trigger
             self.timeout_s = timeout
             self.extra = dict(extra)
+            # THE VOICE (the operator's 2026-10-01 'the word'): an
+            # entity script CAN speak into the room -- routed through
+            # the SAME planner gate as every other voice (opencode.speak:
+            # the ActTable consults, stay-silent drops) and capped at
+            # ONE line per fire (the second call within this script
+            # returns False -- a chatty script never spams the room).
+            said = [False]
+            def _speak(text, kind: str = "report-state") -> bool:
+                if said[0]:
+                    return False
+                said[0] = True
+                from . import opencode as _oc
+                return bool(_oc.speak(srv, str(text)[:500], kind=kind))
+            self.speak = _speak
 
     return _Membrane()
 
