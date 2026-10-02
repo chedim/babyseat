@@ -181,14 +181,39 @@ class MessageStore:
             try:
                 d = json.loads(Path(path).read_text())
                 if isinstance(d, dict):
-                    self.msgs = d
+                    # a stored file may predate the snapshot upsert (one
+                    # message saved once per tool-part state change):
+                    # dedupe ON LOAD -- last parts win, first position
+                    # stays, or resumed history still duplicates
+                    for sid, rows in d.items():
+                        merged: dict[str, dict] = {}
+                        ordered: list[str] = []
+                        for r in rows:
+                            mid = str(r.get("info", {}).get("id") or "")
+                            if mid not in merged:
+                                ordered.append(mid)
+                            merged[mid] = r
+                        self.msgs[sid] = [merged[m] for m in ordered]
             except Exception:
                 pass
 
     def append(self, sid: str, info: dict, parts: list) -> dict:
-        row = {"info": info, "parts": parts}
+        # the TurnRunner re-appends the SAME assistant message per
+        # tool-part state change -- those are snapshots, not new messages:
+        # an existing id UPSERTS in place or resumed history duplicates
+        # the turn once per tool call
+        mid = str(info.get("id") or "")
+        existing = next((r for r in self.msgs.get(sid) or []
+                         if r["info"].get("id") == mid), None) if mid \
+            else None
+        if existing is not None:
+            existing["info"], existing["parts"] = info, parts
+            row = existing
+        else:
+            row = {"info": info, "parts": parts}
         with self._lock:
-            self.msgs.setdefault(sid, []).append(row)
+            if existing is None:
+                self.msgs.setdefault(sid, []).append(row)
             self._flush()
         return row
 

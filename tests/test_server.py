@@ -415,6 +415,63 @@ class TestMessageStore(unittest.TestCase):
         m2 = NS.MessageStore(str(Path(d) / "m.json"))
         self.assertEqual([r["info"]["id"] for r in m2.list(sess)], ["a", "b"])
 
+    def test_append_upserts_by_message_id(self):
+        """The TurnRunner appends the SAME assistant message per tool-part
+        state change (pending -> completed -> final); those are snapshots
+        of one message, not new messages -- re-append must UPSERT in
+        place, or resumed history duplicates the turn once per tool call
+        (the 'thoughts mixed with your messages' seat bug)."""
+        m = NS.MessageStore(None)
+        sess = "ses_u"
+        info = {"id": "msg_a", "role": "assistant"}
+        m.append(sess, {"id": "u", "role": "user"}, [])
+        m.append(sess, dict(info), [{"type": "tool", "callID": "t1",
+                                     "state": {"status": "pending"}}])
+        m.append(sess, dict(info), [{"type": "tool", "callID": "t1",
+                                     "state": {"status": "completed"}}])
+        # the FINAL snapshot of the same assistant message replaces the
+        # row in place -- still in conversation order, exactly one row
+        final_parts = [{"type": "tool", "callID": "t1",
+                        "state": {"status": "completed"}},
+                       {"type": "step-finish", "reason": "stop"}]
+        m.append(sess, dict(info), final_parts)
+        rows = m.list(sess)
+        self.assertEqual([r["info"]["id"] for r in rows], ["u", "msg_a"])
+        self.assertEqual(rows[1]["parts"], final_parts)
+        self.assertEqual(rows[1]["info"]["role"], "assistant")
+        # a DIFFERENT message id is a genuinely new row
+        m.append(sess, {"id": "msg_b", "role": "assistant"}, [])
+        self.assertEqual([r["info"]["id"] for r in m.list(sess)],
+                         ["u", "msg_a", "msg_b"])
+        # get_msg picks the single (latest) row for the id
+        self.assertEqual(m.get_msg(sess, "msg_a")["info"]["role"],
+                         "assistant")
+
+    def test_load_dedupes_stored_snapshot_rows(self):
+        """A store file written BEFORE the upsert carries one message as
+        33 snapshot rows -- loading dedupes (last parts win, first
+        position stays) so the resumed history renders correctly."""
+        d = tempfile.mkdtemp()
+        path = str(Path(d) / "m.json")
+        Path(path).write_text(json.dumps({"ses_d": [
+            {"info": {"id": "u", "role": "user"}, "parts": []},
+            {"info": {"id": "a", "role": "assistant"},
+             "parts": [{"type": "tool", "callID": "t",
+                        "state": {"status": "pending"}}]},
+            {"info": {"id": "a", "role": "assistant"},
+             "parts": [{"type": "step-finish"}]},
+            {"info": {"id": "b", "role": "assistant"}, "parts": []},
+        ]}))
+        m = NS.MessageStore(path)
+        rows = m.list("ses_d")
+        self.assertEqual([r["info"]["id"] for r in rows], ["u", "a", "b"])
+        self.assertEqual(rows[1]["parts"], [{"type": "step-finish"}])
+        # the deduped shape survives a rewrite
+        m.flush()
+        self.assertEqual([r["info"]["id"]
+                          for r in NS.MessageStore(path).list("ses_d")],
+                         ["u", "a", "b"])
+
 
 def _drain_hub(hub, runner=None, sid=None, text=None):
     q = hub.subscribe()
