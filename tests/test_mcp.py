@@ -156,6 +156,7 @@ class TestMcpProtocol(unittest.TestCase):
                                  "entity_unwatch",
                                  "entity_tracks",
                                  "entities_related",
+                                 "entity_query",
                                  "entity_add",
                                  "entity_edit",
                                  "entity_remove",

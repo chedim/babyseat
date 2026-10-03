@@ -3508,6 +3508,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._membrane_forget(); return
         if path == "/membrane/codegraph":
             self._membrane_codegraph(); return
+        if path == "/membrane/entity-query":
+            self._membrane_entity_query(); return
         if path == "/membrane/entity-track":
             self._entity_track_set(); return
         if path == "/membrane/entity-track/remove":
@@ -5460,6 +5462,31 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
         self._json_out(res)
+
+    def _membrane_entity_query(self) -> None:
+        """POST /membrane/entity-query {q, k?, count?}: the entity
+        graph's query language (enumerate/list/count; the grammar in
+        membrane/entity_query.py). $0; the RAM graph scan."""
+        srv = self.server
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
+        body = self._json_body()
+        q = str(body.get("q") or "").strip()
+        try:
+            k = max(1, min(50, int(body.get("k") or 20)))
+        except (TypeError, ValueError):
+            k = 20
+        count = bool(body.get("count"))
+        try:
+            from .entity_query import run as _eq_run, render as _eq_render
+            out = _eq_run(est, q, k=k, count=count)
+            text = out if isinstance(out, str) else _eq_render(out)
+            self._json_out({"text": text, "rows": None if count else out})
+        except ValueError as e:
+            self._json_err_raw(400, str(e)); return
+        except Exception as e:
+            self._json_err_raw(500, f"query failed: {e}"); return
 
     def _membrane_codegraph(self) -> None:
         """POST /membrane/codegraph: the MCP surface for the AST graph

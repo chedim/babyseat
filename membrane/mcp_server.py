@@ -207,6 +207,29 @@ TOOLS: list[dict] = [
         },
     },
     {
+        "name": "entity_query",
+        "description": (
+            "The entity graph's QUERY LANGUAGE: enumerate/list/count "
+            "with a one-line grammar. Terms: 'kind:<k|*>' (the eid's "
+            "kind: f/s/m/c/tool/...), 'name~:<prefix>', "
+            "'parent:<spec>' (the ISA ancestor chain includes spec), "
+            "'children:<spec>' (the reverse walk), 'status:<s>', "
+            "'near:<text>' (semantic). '&' conjoins, '|' disjoins. "
+            "count=true renders 'N entity(ies)'. Examples: "
+            "'kind:tool:* & status:open', 'children:membrane::c:deploy'"),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "q": {"type": "string",
+                      "description": "the query line ('' = match all)."},
+                "k": {"type": "integer",
+                      "description": "the row cap (default 20)."},
+                "count": {"type": "boolean",
+                          "description": "the bare count form."},
+            },
+        },
+    },
+    {
         "name": "entity_add",
         "description": (
             "Add an abstract entity to the symbolic layer: a decision, "
@@ -1116,6 +1139,19 @@ def tool_edit(args: dict, port: int) -> str:
     return (f"edited {abspath}: {old[:80]!r} -> {new[:80]!r} "
             f"({occurrences} place(s))\n{note}")
 
+def tool_entity_query(args: dict, port: int) -> str:
+    """The entity graph's enumerate/list/count (the query language)."""
+    q = str(args.get("q") or "").strip()
+    k = max(1, min(50, int(args.get("k") or 20)))
+    count = bool(args.get("count"))
+    out = _http(port, "POST", "/membrane/entity-query",
+                {"q": q, "k": k, "count": count})
+    if out.get("text"):
+        return str(out["text"])
+    return "no entities match"
+
+
+
 TOOL_IMPLS = {
     "query": tool_query,
     "state": tool_state,
@@ -1132,6 +1168,7 @@ TOOL_IMPLS = {
     "peer_post": tool_peer_post,
     "peer_seats": tool_peer_seats,
     "graph": tool_graph,
+    "entity_query": tool_entity_query,
     "entity_inherit": tool_entity_inherit,
     "run": tool_run,
     "read": tool_read,
@@ -1238,3 +1275,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
