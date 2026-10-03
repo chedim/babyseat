@@ -61,6 +61,47 @@ THINK_MODEL_CAP_PER_MIN = 4  # the cost dial: model calls per minute, max
 NOVELTY_SPEAK_BAR = 0.85     # a digest speaks only above this sim surprise
 WALK_MAX_STEPS = 14          # one extension's token budget (cheap, typed)
 
+# ---- THE NIGHT MODE (the animal covenant: ears open, body at rest) ----
+# The room's quiet = the body slows: the 1s pulse drops to NIGHT_PULSE_S,
+# tick scripts pause (the body stops), the capture sweeps stretch, the
+# composed speech holds -- and ANY signal (a turn, a script error, a
+# peer miss, a watch fire) wakes it: the next beat returns to day. The
+# mode is the seat's OWN call (it exits/enters on its own signals).
+NIGHT_IDLE_S = 60.0          # the room's quiet bar (the dreamer's already)
+NIGHT_PULSE_S = 30.0         # the night heartbeat (the operator's pick)
+NIGHT_SWEEP_X = 4            # the mtime/codegraph sweeps stretch xN
+# THE WAKEUP SIGNALS (what an animal wakes for): a fire of these kinds
+# is worth a beat even at night -- the ear kinds (the watchdog bark),
+# not the chatter kinds (a delta's noise).
+WAKEUP_SIGNALS = frozenset((
+    "script-error",            # a script struck/broke
+    "peer-miss",               # the room changed (a seat gone/answered)
+    "watch-attached",          # a sensor armed/unarmed
+    "watch-detached",
+    "watch",                   # a watch fire -- the loop lane's raw kind
+    "operator-message",        # the operator talks
+))
+
+
+def is_wakeup_signal(kind: str) -> bool:
+    return str(kind or "") in WAKEUP_SIGNALS
+
+
+def note_wakeup_signal(srv, kind: str, payload: dict | None = None) -> bool:
+    """THE WAKE CALL: the ambient mind's signal lane -- a wakeup-kind
+    event flips the night mode to day immediately (the next beat is a
+    day beat) and records the why (the banner/mind rows show it). True
+    when it woke something (day and the reason recorded)."""
+    if not is_wakeup_signal(kind):
+        return False
+    srv.ambient_mode = "day"
+    try:
+        srv.note_wakeup({"kind": kind, "ts": time.time(),
+                         "payload": dict(payload or {})})
+    except Exception:
+        pass
+    return True
+
 
 def _branch_convergence(props: dict, lane) -> float:
     """THE CONVERGENCE PRIOR (the VSA lane's #9 consumer): how close the
@@ -185,16 +226,46 @@ class Thinker:
         one think-ahead probe), then the duty controller sets the next
         sleep. The idle mind still hums (the queue drains to nothing,
         then think-ahead keeps the organ warm -- cheap no-op when the
-        budget says so)."""
+        budget says so).
+        THE NIGHT MODE (the animal covenant): the mode is decided FIRST
+        (the room's quiet vs the idle bar; --no-night holds day), the
+        pulse carries it (30s at night), the tick pass pauses (the body
+        stops), and a QUEUE ITEM's arrival next beat flips day (the
+        wakeup signals flip it even BEFORE their beat)."""
         t0 = time.time()
         did_work = False
+        # THE MODE: enter night when the room's been quiet past the bar
+        # and nothing is pending; wake to day when a turn arrived
+        # recently (inside the bar), on a queued item (any kind -- a
+        # chat/capture beat IS the day's work), or on a wakeup signal.
+        srv = self.srv
+        if getattr(srv, "ambient_night", True):
+            idle_for = time.time() - getattr(srv, "last_turn_ts", t0)
+            _pool_depth = 0
+            try:
+                _pool_depth = srv.events_pool.depth() \
+                    if srv.events_pool is not None else 0
+            except Exception:
+                _pool_depth = 0
+            if idle_for >= NIGHT_IDLE_S and not self.queue \
+                    and not _pool_depth:
+                srv.ambient_mode = "night"
+            elif srv.ambient_mode == "night" and (idle_for <= 2.0
+                                                  or _pool_depth):
+                srv.ambient_mode = "day"    # the room moved -- wake
+        if self.queue:
+            srv.ambient_mode = "day"
         # THE TICK PASS (the clock organ): every heartbeat, before the
         # queue unit, the seat's tick-scripted entities fire (the clock
         # is one of them -- its render + last_tick prop advance; every
         # TICK_FIELD_EVERY beats its position moves). Never raises.
+        # NIGHT: the body pauses EXCEPT the whiskers (scripts flagged
+        # 'wakes: true' -- the animal's ear-lane: their fires ARE the
+        # night's work; a whisker's night fire never wakes the room).
         try:
             self._beat += 1
-            self._tick_scripts()
+            self._tick_scripts(night=(getattr(srv, "ambient_mode", "day")
+                                      == "night"))
         except Exception:
             traceback.print_exc()
         # THE PRESENCE PULSE (the roster anchor): on the SLOW cadence the
@@ -253,13 +324,22 @@ class Thinker:
         self._ema_work = 0.7 * self._ema_work + 0.3 * work
         # the duty controller: work / (work + window) vs the target -- a
         # heavy chew stretches the next sleeps until the window's duty
-        # falls back under ~3-5%
+        # falls back under ~3-5%. NIGHT: the pulse is the night's (the
+        # duty's stretch never goes below the night pulse).
         window = max(1e-6, 60.0)
         duty = self._ema_work / max(self._ema_work + window, 1e-6)
+        pulse = NIGHT_PULSE_S if getattr(srv, "ambient_mode", "day") \
+            == "night" else THINK_TICK_S
+        try:
+            pulses = getattr(srv, "ambient_pulse", None) or (THINK_TICK_S,
+                                                             NIGHT_PULSE_S)
+            pulse = pulse if pulse == NIGHT_PULSE_S else pulses[0]
+        except Exception:
+            pass
         if duty > THINK_CPU_TARGET:
             over = min(59.0, duty / max(THINK_CPU_TARGET, 1e-6) - 1.0)
-            return max(THINK_TICK_S, THINK_IDLE_S * (1.0 + over) / 60.0)
-        return THINK_TICK_S
+            return max(pulse, THINK_IDLE_S * (1.0 + over) / 60.0)
+        return pulse
 
     def _duty(self) -> float:
         """The current think duty: measured work over (work + the 60s
@@ -267,14 +347,17 @@ class Thinker:
         return self._ema_work / max(self._ema_work + 60.0, 1e-6)
 
     # ---- the tick trigger (the clock organ) ---------------------------------
-    def _tick_scripts(self) -> None:
+    def _tick_scripts(self, night: bool = False) -> None:
         """The hum's tick pass: per heartbeat, every tick-scripted
         entity fires paced by its own `tick_every` (cooldown-free --
         time is a per-second fact), under the engine's 0.25s budget and
         3-strikes lanes; the result is applied SILENTLY (render + props,
         no field tell, no per-tick audit). Every TICK_FIELD_EVERY beats
         the movers speak ONE observation event (the clock drifts on the
-        global field). Degrades everywhere: no store or field, no fire."""
+        global field). Degrades everywhere: no store or field, no fire.
+        NIGHT (the animal covenant): the body pauses -- only the
+        whiskers (scripts flagged `wakes: true`) keep their ear open,
+        and their night fires count as the night's one beat of work."""
         est = getattr(self.srv, "entity_store", None)
         if not est or not est.docs:
             return
@@ -284,6 +367,8 @@ class Thinker:
             props = ent.properties or {}
             if props.get("script_disabled") or not props.get("tick_script"):
                 continue
+            if night and not props.get("wakes"):
+                continue          # the body at rest; the whisker listens
             try:
                 every = max(1, int(props.get("tick_every") or 1))
             except (TypeError, ValueError):

@@ -506,13 +506,23 @@ def _mind_rows(srv, allow) -> list:
                            f"{queued} event(s) queued.",
             "permission": allow, "options": {}})
     # the ambient minds (their stats dicts are the honest readout)
+    _mode = getattr(srv, "ambient_mode", "day")
+    _wakes = ""
+    try:
+        ws = getattr(srv, "_wakeups", None)
+        if ws:
+            _wakes = f"; last wakeup: {ws[-1].get('kind')}"
+    except Exception:
+        _wakes = ""
     th = getattr(srv, "thinker", None)
     if th is not None:
         st = getattr(th, "stats", {}) or {}
         rows.append({
             "name": "thinker", "native": True, "mode": "subagent",
-            "description": f"The seat's inner speech: {st.get('processed', 0)} "
-                           f"beats processed, {st.get('spoken', 0)} spoken, "
+            "description": f"The seat's inner speech ({_mode}: the "
+                           f"{_mode == 'night' and '30s night pulse' or '1s pulse'})"
+                           f"{_wakes}: {st.get('processed', 0)} beats "
+                           f"processed, {st.get('spoken', 0)} spoken, "
                            f"{st.get('ticks', 0)} ticks.",
             "permission": allow, "options": {}})
     dr = getattr(srv, "dreamer", None)

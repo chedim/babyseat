@@ -422,6 +422,14 @@ class _LoopDrainer:
             if pool is not None:
                 evs = pool.take()
             for ev in evs:
+                # THE WAKE CALL: a watch fire is a real sound -- the
+                # night mind opens its eyes before its next beat.
+                try:
+                    from .thinker import note_wakeup_signal
+                    note_wakeup_signal(self.srv, str(ev.get("kind") or ""),
+                                       ev)
+                except Exception:
+                    pass
                 if is_operator_event(ev):
                     continue        # the operator lane: the chat is it
                 loops = getattr(self.srv, "loops", None)

@@ -640,16 +640,24 @@ def mdns_peers(zc_impl=None, now: float | None = None) -> list[dict]:
 
 
 def note_peer_miss(pool, peer: dict, situation: str,
-                   why: str | None) -> None:
+                   why: str | None, srv=None) -> None:
     """THE ESCALATION EVENT (the operator's 2026-10-02 ask): a peer ask
     that found NOTHING is an event in the watch-events lane (the loops'
     pool sees failed escalations); an ANSWERED ask is quiet (the answer
-    rode as context)."""
+    rode as context). THE WAKE CALL (srv passed): the room changed --
+    the night mind opens its eyes."""
     if pool is None or why is None:
         return
-    pool.put({"kind": "peer-miss",
-              "peer": str((peer or {}).get("seat")
-                          or (peer or {}).get("port") or "?"),
-              "situation": str(situation or "")[:160],
-              "why": str(why)[:80],
-              "ts": time.time()})
+    ev = {"kind": "peer-miss",
+          "peer": str((peer or {}).get("seat")
+                      or (peer or {}).get("port") or "?"),
+          "situation": str(situation or "")[:160],
+          "why": str(why)[:80],
+          "ts": time.time()}
+    pool.put(ev)
+    if srv is not None:
+        try:
+            from .thinker import note_wakeup_signal
+            note_wakeup_signal(srv, "peer-miss", ev)
+        except Exception:
+            pass

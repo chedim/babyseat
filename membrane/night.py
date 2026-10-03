@@ -1162,12 +1162,20 @@ def _run_script_locked(srv, ent, trigger, code, props, now, is_cron,
             _script_record_fail(fld, est, ent, ent.eid, trigger,
                                 out["error"],
                                 mem=getattr(srv, "membrane", None))
-        # THE POOL NOTIFY (errors are events, never stderr dust)
+        # THE POOL NOTIFY (errors are events, never stderr dust) +
+        # THE WAKE CALL (the animal's bark: a script broke -- the
+        # night mind opens its eyes, its next beat is a day beat)
         if pool is not None:
-            pool.put({"kind": "script-error", "entity": ent.eid,
-                      "trigger": trigger,
-                      "error": str(out.get("error"))[:200],
-                      "ts": time.time()})
+            ev = {"kind": "script-error", "entity": ent.eid,
+                  "trigger": trigger,
+                  "error": str(out.get("error"))[:200],
+                  "ts": time.time()}
+            pool.put(ev)
+            try:
+                from .thinker import note_wakeup_signal
+                note_wakeup_signal(srv, "script-error", ev)
+            except Exception:
+                pass
     else:
         if ent.properties.get("script_failures"):
             ent.properties.pop("script_failures", None)

@@ -472,6 +472,13 @@ def _state_report(srv) -> str:
             f"{e.get('acted')}: {e.get('about', '')}"
             for e in recent)
         lines.append(f"- mind: {thoughts}")
+    # THE AMBIENT MODE (the animal covenant, visible): the seat's own
+    # day/night + when it last woke (the wakeup lane's why).
+    _am = getattr(srv, "ambient_mode", None)
+    if _am is not None:
+        _wu = getattr(srv, "_wakeups", None) or []
+        _last = f", last wake {(_wu[-1].get('kind') or '?')}" if _wu else ""
+        lines.append(f"- minds: {_am}{_last}")
     cg = getattr(srv, "_codegraph", None)
     if cg is not None:
         from .codegraph import summary as cg_summary
@@ -1431,7 +1438,16 @@ def _codegraph_refresh(srv, g) -> None:
     throttled whole-tree mtime sweep (everything else). Never fatal."""
     now = time.time()
     rels = list(getattr(srv, "_cg_dirty", ()))
-    if now - getattr(srv, "_cg_swept", 0.0) >= _CG_SWEEP_INTERVAL:
+    # THE NIGHT SWEEP STRETCH (the animal's stillness): the mtime walk
+    # at night is 4x slower (an idle room shouldn't scandir per 30s)
+    interval = _CG_SWEEP_INTERVAL
+    if getattr(srv, "ambient_mode", "day") == "night":
+        try:
+            from .thinker import NIGHT_SWEEP_X
+            interval *= NIGHT_SWEEP_X
+        except Exception:
+            interval *= 4.0
+    if now - getattr(srv, "_cg_swept", 0.0) >= interval:
         try:
             from .codegraph_lane import locked_stale_paths
             rels += locked_stale_paths(g)
@@ -5804,6 +5820,16 @@ def main() -> None:
     ap.add_argument("--no-thinker", dest="no_thinker", action="store_true",
                     help="stand down the thinker (no background "
                          "deliberation; nothing is chewed off-turn)")
+    ap.add_argument("--no-night", dest="no_night", action="store_true",
+                    help="hold day mode forever (the mind never sleeps: "
+                         "the 1s pulse runs at idle; the animal covenant "
+                         "off)")
+    ap.add_argument("--ambient-pulse", default="1.0/30.0", metavar="DAY/NIGHT",
+                    help="the ambient mind's heartbeats in seconds, day/night "
+                         "(default 1.0/30.0: the 1s hum when awake, a 30s "
+                         "pulse at night; night enters on 60s idle and any "
+                         "signal -- a turn, a script error, a peer miss, a "
+                         "watch fire -- wakes it)")
     ap.add_argument("--cloud-budget", type=float, default=0.0, metavar="USD",
                     help="max relative-money spend per day on cloud-routed "
                          "escalations (the cost ladder's hard cap; default 0 "
@@ -6355,7 +6381,20 @@ def main() -> None:
     srv.thinker = None
     if not getattr(args, "no_thinker", False):
         try:
-            from .thinker import Thinker
+            from .thinker import Thinker, NIGHT_PULSE_S
+            # THE NIGHT MODE'S KNOBS (the animal covenant): the pulse
+            # pair + the night hold live on the seat; the thinker's
+            # _hum reads both every beat.
+            srv.ambient_night = not getattr(args, "no_night", False)
+            _pair = "1.0/30.0"
+            try:
+                _pair = str(getattr(args, "ambient_pulse", "") or "1.0/30.0")
+                _day, _night = (_x.strip() for _x in _pair.split("/", 1))
+                srv.ambient_pulse = (max(0.2, float(_day)),
+                                     max(2.0, float(_night)))
+            except Exception:
+                srv.ambient_pulse = (1.0, NIGHT_PULSE_S)
+            srv.ambient_mode = "day"
             srv.thinker = Thinker(srv)
             srv.thinker.start()
         except Exception as e:
@@ -7126,6 +7165,19 @@ def speak(srv, text: str, kind: str = "note") -> bool:
         if planned != "stay-silent" and planned != kind:
             act = planned
         srv_act.observe(ctx_sig, act)
+    # THE NIGHT SPEECH GATE (the animal doesn't chatter in its sleep):
+    # at night only the ALERT kinds compose (a bark at a real sound);
+    # the chatter kinds (delta-jump/report-states/notes) hold. The
+    # compose site's intent is preserved -- night just holds the
+    # queue's INPUT, never its already-stored lines (they deliver on
+    # the next turn as always).
+    try:
+        if getattr(srv, "ambient_mode", "day") == "night" \
+                and kind not in ("alert", "operator-message") \
+                and not getattr(srv, "_boot_greeting_pending", False):
+            return True          # held (the contract: silence at night)
+    except Exception:
+        pass
     msg = {"text": str(text)[:2000], "kind": kind, "act": act,
            "sig": ctx_sig, "ts": time.time()}
     q.append(msg)
