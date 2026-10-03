@@ -79,7 +79,12 @@ def question_entities(field, text: str, qvec=None, k: int = 5) -> list[str]:
             if extra >= CODE_SLOTS:
                 break
     if len(named) < k and qvec is not None:
-        for eid, _s in field.recall(qvec, k=k * 2):
+        # THE SELF-FEEDING GUARD (the seat's #4): the query's own
+        # capture rides the CURRENT turn's session -- entities whose
+        # ONLY deltas ride it don't feed the read (an elder's evidence
+        # passes; the field carries the cut as its boot prefix).
+        cut = getattr(field, "_current_session_cut", None)
+        for eid, _s in field.recall(qvec, k=k * 2, exclude_session=cut):
             st = field.get(eid)
             if eid in named or st is None:
                 continue

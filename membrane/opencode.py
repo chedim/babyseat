@@ -341,7 +341,8 @@ def _efield_on(srv):
 def _own_session_prefix(srv) -> str:
     """The session ids this seat's live capture writes ('s:<boot>:')."""
     cap = getattr(srv, "capturer", None)
-    boot = getattr(getattr(cap, "sessions", None), "boot", None)
+    boot = getattr(cap, "sessions", None)
+    boot = getattr(boot, "boot", None)
     return f"s:{boot}:" if boot is not None else "s:"
 
 
@@ -6231,6 +6232,11 @@ def main() -> None:
                 # that belongs to the chat thread
                 graph_fn=lambda: getattr(srv, "_codegraph", None))
             srv.capturer = Capturer(srv.efield)
+            # THE SELF-FEEDING GUARD'S CUT (the seat's #4): the fields
+            # recall excludes entities whose ONLY deltas ride the
+            # CURRENT turn's session (the boot's own session prefix
+            # cut -- the query's own words can't feed the read)
+            srv.efield._current_session_cut = _own_session_prefix(srv)
             # THE MODEL'S EVENT POOL (the reactive lane, live now):
             srv.events_pool = srv._events_pool = WatchEvents()
             # the store's watch lanes put through it
