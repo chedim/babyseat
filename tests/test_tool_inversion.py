@@ -99,10 +99,10 @@ class TestEngineRunVerdict(unittest.TestCase):
         props = est.docs.get(ent.eid).properties or {}
         self.assertEqual(props.get("run_outcome"), "ok", props)
         self.assertEqual(props.get("run_head"), "engine-run-ok", props)
-        # the pool saw the exec:
+        # THE COVENANT: the pool hears NOTHING (the model's watchers
+        # decide what to watch; the exec's surface = the entity's props)
         evs = srv.events_pool.take()
-        self.assertTrue(any(e.get("kind") == "entity-run" and
-                            e.get("ok") for e in evs), evs)
+        self.assertEqual(evs, [])
 
     def test_run_without_command_honest_refusal(self):
         est = _Srv().entity_store

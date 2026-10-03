@@ -460,11 +460,55 @@ def _script_fail(est, ent, fld=None) -> None:
 
 
 def _script_error_announce(est, eid: str, kind: str, error: str) -> None:
-    """A script error is a BANNER EVENT (the model sees its own broken
-    script and can fix or clear it) -- not a silent stderr line."""
-    est._announce("script-error", type("E", (), {
-        "eid": eid, "cls": "Component",
-        "properties": {"name": kind, "summary": error[:140]}})())
+    """THE ERROR BUBBLE (the entity-scripts covenant: everything is an
+    entity; the model sees entities only): an error surfaces as a NEW
+    ENTITY dropped near the errored one -- no pool events, no pushed
+    banner lines. The bubble:
+      eid   membrane::error:<fingerprint>  (the errored eid + trigger +
+            the error head -- dedupe is identity)
+      pos   the errored entity's position (or the store-free None --
+            the bubble drifts in the field when evidence lands)
+      props errored (= the origin eid), kind, error, n_hits, first_ts,
+            last_ts (refreshed WHILE the error recurs -- active errors
+            stay near the top; when fixed, no refreshes happen and the
+            bubble drifts back in time on the UPDATED axis by itself).
+    ``_script_error_announce`` (the old banner push lane) is RETIRED.
+    ``kind`` here is the script trigger (tick/watch/...) for an EXEC
+    error, or a lane name ('cron-overrun', 'disabled'...) for the
+    engine's own verdicts.
+    ``pos``: the errored entity's position — the bubble is dropped NEAR it."""
+    if est is None:
+        return
+    err_head = (error or "")[:80]
+    fp_src = f"{eid}|{kind}|{err_head}"
+    fp = hashlib.sha1(fp_src.encode()).hexdigest()[:12]
+    bub_eid = f"{MEMBRANE_NS}error:{fp}"
+    now = time.time()
+    old = est.docs.get(bub_eid)
+    origin = est.docs.get(eid)
+    pos = list(origin.position) if origin is not None and \
+        getattr(origin, "position", None) else None
+    if old is not None:
+        # THE REFRESH: the same error recurred -- one entity, n_hits
+        # up, last_ts re-stamped (active errors STAY near the top).
+        props = old.properties or {}
+        props["n_hits"] = int(props.get("n_hits") or 1) + 1
+        props["last_ts"] = now
+        props["error"] = err_head          # the latest rendering
+        if pos:
+            old.position = pos             # re-dropped near its origin
+        est.upsert(old, embedder=None)
+        return
+    props = {"name": f"error: {kind}",
+             "errored": eid, "kind": kind, "error": err_head,
+             "n_hits": 1, "first_ts": now, "last_ts": now,
+             "guest": False}
+    bub = QuantumEntity(eid=bub_eid, cls="Component",
+                        properties=props)
+    if pos:
+        bub.position = pos                 # dropped near its origin
+    est.docs[bub_eid] = bub
+    est.upsert(bub, embedder=None)
 
 
 def _script_tell(fld, eid: str, kind: str, ok: bool, text: str) -> None:
@@ -1128,22 +1172,17 @@ def _run_script_locked(srv, ent, trigger, code, props, now, is_cron,
         if not _te_s:
             props["tick_every_s"] = interval
         if last_started and last_ms >= interval:
-            ev = {"kind": "script-cron-overrun", "entity": ent.eid,
-                  "trigger": trigger,
-                  "ran_s": round(last_ms, 2),
-                  "interval_s": round(interval, 2), "ts": now}
-            if pool is not None:
-                pool.put(ev)
-            try:
-                est = getattr(srv, "entity_store", None)
-                if est is not None:
-                    _script_error_announce(est, ent.eid, "cron-overrun",
-                                           f"{trigger} script ran "
-                                           f"{last_ms:.0f}s > interval "
-                                           f"{interval:.0f}s; next run "
-                                           "blocked")
-            except Exception:
-                pass
+            # THE OVERRUN'S SURFACE (the covenant): the bubble entity
+            # (the entity graph), never the pool.
+            est = getattr(srv, "entity_store", None)
+            if est is not None:
+                try:
+                    _script_error_announce(
+                        est, ent.eid, "cron-overrun",
+                        f"{trigger} script ran {last_ms:.0f}s > interval "
+                        f"{interval:.0f}s; next run blocked")
+                except Exception:
+                    pass
             return {"error": "cron-overrun: next run blocked",
                     "blocked": True}
     if trigger != "tick" and not _cooldown_ok(props, trigger, now):
@@ -1202,18 +1241,10 @@ def _run_script_locked(srv, ent, trigger, code, props, now, is_cron,
                                 mem=getattr(srv, "membrane", None))
         # THE POOL NOTIFY (errors are events, never stderr dust) +
         # THE WAKE CALL (the animal's bark: a script broke -- the
-        # night mind opens its eyes, its next beat is a day beat)
-        if pool is not None:
-            ev = {"kind": "script-error", "entity": ent.eid,
-                  "trigger": trigger,
-                  "error": str(out.get("error"))[:200],
-                  "ts": time.time()}
-            pool.put(ev)
-            try:
-                from .thinker import note_wakeup_signal
-                note_wakeup_signal(srv, "script-error", ev)
-            except Exception:
-                pass
+        # RETIRED (the entity-scripts covenant): the error's surface
+        # IS THE BUBBLE ENTITY (_script_error_announce's new form).
+        # The model's watchers decide what to watch; the engine's
+        # lanes never leak into the model's event pool.
     else:
         if ent.properties.get("script_failures"):
             ent.properties.pop("script_failures", None)
@@ -1377,15 +1408,24 @@ def _script_state(ent, now: float, extra: dict, trigger: str,
 def apply_entity_update(srv, ent, out: dict, trigger: str,
                         silent: bool = False) -> dict:
     """The engine applies the script's RESULT (the authorship covenant:
-    scripts analyze + return; the engine writes). The keys:
-      render -> properties['script_render'] (the banner fragment)
-      patch  -> {prop: value} merges into the entity (bounded: values
-                clipped to 2000 chars, the entity's own keys only --
-                a script may move ITS OWN doc, never another's)
-      delete -> retire the entity (audited)
-    ``silent=True`` (the tick pace): the apply lands render + props but
-    writes NO field tell and NO audit row -- the apply is engine noise
-    at that rate, and the mover speaks only via the field-move event.
+    scripts analyze + return; the engine writes). THE MUTATOR
+    WHITELIST (the entity-scripts covenant, the operator's ruling:
+    everything is an entity, the model sees entities only, a script
+    is a PART of its entity -- the script's ways outward are its own
+    shape):
+      render  -> properties['script_render'] (the banner fragment --
+                 the heartbeat's visible line, the entity's voice)
+      position-> the patch's 'position' key MOVES the entity in the
+                 field (a list vector; normed on the way in)
+      links   -> the FIELD-WATCH lane only (trigger == 'change'):
+                 link/unlink via the patch's 'links' key
+      script_data -> the patch's 'script_data' dict (its own lane)
+      run     -> the {run: true} verdict (the engine execs the entity's
+                 own 'command')
+    NOTHING ELSE: arbitrary prop-writes and delete are REFUSED (the
+    model decides retirement via entity_edit, never a script).
+    ``silent=True`` (the tick pace): the apply lands render + position
+    but writes NO field tell and NO audit row.
     Returns the applied summary for the caller's audit."""
     est = getattr(srv, "entity_store", None)
     if est is None or not out:
@@ -1396,22 +1436,45 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
         props["script_render"] = str(out["render"])[:300]
         changed += 1
     if isinstance(out.get("patch"), dict):
-        # THE SCREEN AT THE WRITE (the 251-save-failures exhibit): a
-        # script's patch value is whatever the script returned -- a
-        # function/module/handle in properties poisons its doc and
-        # the side-index save died 251 times on it. Values pass the
-        # json-safe screen (anything stranger wraps to a readable
-        # str); the entity survives json.dumps -- ALWAYS.
+        # THE WHITELIST AT THE WRITE (the covenant's teeth): patch
+        # keys outside the whitelist are REFUSED (counted, visible in
+        # the return); 'position' is the geometry move; 'links' is
+        # the field-change lane's privilege. The json-safe screen
+        # still runs on every admitted value (the 251-failures
+        # poison guard).
         from .entities import json_safe as _json_safe
+        refused = []
+        _WHITELIST = {"position", "script_data"} | \
+            ({"links"} if trigger == "change" else set())
         for k, v in list(out["patch"].items())[:16]:
-            if str(k).startswith("script_"):
+            if str(k).startswith("script_") and str(k) != "script_data":
                 continue               # the script cannot forge engine keys
-            props[str(k)[:80]] = _json_safe(v)
+            if str(k) not in _WHITELIST:
+                refused.append(str(k)[:40])
+                continue
+            val = _json_safe(v)
+            if str(k) == "position":
+                try:
+                    import numpy as _np
+                    vec = _np.asarray(val, dtype=float)
+                    n = float(_np.linalg.norm(vec))
+                    ent.position = list(vec / (n + 1e-12))
+                    changed += 1
+                except Exception:
+                    refused.append("position(unparseable)")
+                continue
+            if str(k) == "links":
+                try:
+                    clean = [int(i) for i in (val or [])][:16]
+                    ent.properties["links"] = clean
+                    changed += 1
+                except Exception:
+                    refused.append("links(unparseable)")
+                continue
+            props[str(k)[:80]] = val
             changed += 1
-    if out.get("delete"):
-        ent.properties["retired"] = True
-        ent.properties["retired_ts"] = time.time()
-        changed += 1
+        if refused:
+            out["patch_refused"] = refused   # the visible refusal
     # THE RUN VERDICT (the exec's only lane, the operator's ruling
     # 2026-10-02): a script returning {run: true} makes the ENGINE
     # exec the entity's OWN 'command' prop (run_command_entity -- the
@@ -1439,13 +1502,10 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
                          ("run_ms", run_out.get("ms"))):
                 if v is not None:
                     props[k] = v
-            # THE POOL NOTIFY (the exec is an event the loops see)
-            pool = getattr(srv, "events_pool", None)
-            if pool is not None:
-                pool.put({"kind": "entity-run", "entity": ent.eid,
-                          "command": cmd[:120],
-                          "ok": bool(run_out.get("ok")),
-                          "rc": run_out.get("rc"), "ts": time.time()})
+            # THE RUN'S SURFACE (the covenant): the result props ride
+            # the asking entity (above); the pool hears NOTHING (the
+            # model's watchers decide what to watch; the engine's
+            # exec isn't an announcement).
         else:
             out["run_result"] = {"ok": False,
                                  "error": "run: true but the entity "
@@ -1495,4 +1555,7 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
                      {"event": "agent-entity-scripted", "origin": "update-script",
                       "eid": ent.eid, "trigger": trigger,
                       "applied": changed})
-    return {"applied": changed}
+    _ret = {"applied": changed}
+    if out.get("patch_refused"):
+        _ret["patch_refused"] = out["patch_refused"]
+    return _ret

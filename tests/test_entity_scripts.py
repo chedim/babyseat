@@ -70,13 +70,20 @@ class TestModelScripts(unittest.TestCase):
                             properties={"name": "now", "progress": 0})
         est.upsert(now)
         ent = est._resolve_spec("session:now")
+        # THE WHITELIST (the covenant): a getter's outward moves = the
+        # render + a POSITION move (the geometry); arbitrary status
+        # props are refused (visible in patch_refused).
         out = {"render": "progress advanced",
-               "patch": {"progress": 50, "status": "running"}}
+               "patch": {"position": [0.3, 0.4, 0.5],
+                         "status": "running"}}
         res = apply_entity_update(srv, ent, out, "mention")
-        self.assertEqual(res["applied"], 3)   # render + 2 patches
+        self.assertEqual(res["applied"], 2)   # render + the position
         got = est.docs.get(ent.eid)
-        self.assertEqual((got.properties or {}).get("progress"), 50)
-        self.assertEqual((got.properties or {}).get("status"), "running")
+        self.assertEqual(res.get("patch_refused"), ["status"])
+        import numpy as _np
+        _pos = _np.asarray(got.position or [])
+        self.assertAlmostEqual(float(_np.linalg.norm(_pos)), 1.0, places=6)
+        self.assertNotIn("status", got.properties or {})
 
     def test_script_cannot_forge_engine_keys(self):
         """The patch boundary: script_* keys (the engine's own) are
@@ -177,13 +184,16 @@ class TestTickScripts(unittest.TestCase):
         but writes NO field event and NO audit row (the noisy pace)."""
         srv = _Srv()
         ent = self._clock(srv, "")
+        # THE WHITELIST (the covenant): the tick's mutators = render
+        # (+position); the refusal is visible; apply = 1
         out = {"render": "clock 13:11:05",
                "patch": {"last_tick": "13:11:05"}}
         res = apply_entity_update(srv, ent, out, "tick", silent=True)
-        self.assertEqual(res["applied"], 2)
+        self.assertEqual(res["applied"], 1)
+        self.assertEqual(res.get("patch_refused"), ["last_tick"])
         got = srv.entity_store.docs.get(ent.eid)
-        self.assertEqual((got.properties or {}).get("last_tick"),
-                         "13:11:05")
+        self.assertEqual((got.properties or {}).get("script_render"),
+                         "clock 13:11:05")
         # probe both lanes with REAL recorders: none of them heard it
         fld = _Fld()
         srv.efield = fld
@@ -216,12 +226,14 @@ class TestTickScripts(unittest.TestCase):
 
         est.upsert = spy
         ent.properties["tick_script"] = "result = {'render': 'x'}"
-        out = {"render": "clock 13:11:05", "patch": {"last_tick": "13:11:05"}}
+        # THE WHITELIST (the covenant): the tick's mutators = render +
+        # position; the visible time RIDES the render (no prop patch)
+        out = {"render": "clock 13:11:05"}
         apply_entity_update(srv, ent, out, "tick", silent=True)   # first
         apply_entity_update(srv, ent, out, "tick", silent=True)   # inside
         # ... the 60s window: the doc is RAM-fresh (2 patches), ONE persist
         self.assertEqual((est.docs.get(ent.eid).properties or {})
-                         .get("last_tick"), "13:11:05")
+                         .get("script_render"), "clock 13:11:05")
         self.assertEqual(len(calls), 1)
         self.assertIs(calls[0], False)              # JSON-only, no couchbase
         import time as _t

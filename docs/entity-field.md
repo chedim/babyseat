@@ -213,3 +213,63 @@ embedding model: every live event is re-embedded and re-applied.
 | e23 | Coherence of a word's residuals separates project terms from filler; the everyday seed plus the project's sentences give specialization and activity. |
 | e24 | Tool output mixed into conversation text poisons every word statistic. Split into discourse and observations, 77% of discourse entities have observed evidence. |
 | e25 | Action and test claims can be checked mechanically (test-count claims match their run in ≥ 83%); the port note's contrary evidence existed only in the code, hence code events; mxbai is order-blind for relations (0.975), VSA role binding is not. |
+
+## The entity-scripts covenant (2026-10-03)
+
+Everything is an entity; the model sees entities; a script is a **part** of
+its entity. The script's only ways outward are its own shape:
+
+- **render** — the banner fragment (the heartbeat's visible line)
+- **position** — the patch may move the entity in the field (unit-normed)
+- **script_data** — its own data lane
+- **`{run: true}`** — the engine execs the entity's own `command` prop
+- (field-watch lane only) **links / unlink**
+
+`membrane.speak()` is REMOVED from the script API (a legacy call strikes);
+script `delete` is refused — retirement is `entity_edit`, the model's move.
+Arbitrary prop-writes refuse (`patch_refused` in the apply's return).
+
+**An error is an entity**: a raising or over-budget script bubbles as
+`membrane::error:<fingerprint>` — a doc dropped at the errored entity's
+position, refreshed while the error recurs (`n_hits`, `last_ts`), never
+refreshed when fixed (so it drifts back in time on the updated axis by
+itself). The event pool never hears engine lanes: what the model's
+watchers watch is the model's own choice.
+
+## Script budgets (the resource matrix)
+
+| trigger | budget | pacing | gravity? |
+|---|---|---|---|
+| tick (heartbeat cron) | 0.25s hard (abandon + strike) | authored `tick_every` | yes: heat ×1–8 |
+| mention (digest) | 0.25s | the digest's 10s | yes |
+| watch (autonode listener) | 10s + the 4-thread pool, abandon+strike | event arrival (5s cooldown) | no |
+| getter (read-back) | 1.0s | the read's 5s LRU | no |
+| thought / dreamed | 1s / 2s | the hum / 60s idle | no |
+| consolidation (nudge) | 2s | the 15-min pass | yes (every_n × gravity) |
+| change (field-watch) | 0.25s + gravity + freeze | crossing + hysteresis | by design |
+
+A tick is the hum's beat — one at a time, on the heartbeat thread; slow
+ticks stall the pulse, hence the hard budget. Watchers run on the bounded
+pool away from the pulse. Over-budget = the fire is ABANDONED (the script's
+thread lands out-of-band; the per-entity lock holds the next fire) and the
+overrun STRIKES — a slow-success counts, 3 strikes disable.
+
+## Heat, gravity, freeze (the limiter)
+
+Every entity carries `entity_heat` (0→∞): the max of its field-churn EMA
+(updates/s) and its scripts' CPU EMA (`process_time` ms per run, so a
+sleeping script never reads hot). Effects, continuous:
+
+- **gravity**: the effective tick interval = authored `tick_every` ×
+  (1 + k·heat), ceiling ×8 — hot entities tick rarer, cold exactly as
+  authored. The consolidation `script_every_n` stretches the same way;
+  the overrun gate reads the EFFECTIVE interval (a stretched cron can't
+  wedge).
+- **freeze** (heat over `MEMBRANE_HEAT_FREEZE`, default 1.5): the
+  entity's field-watches PAUSE (`frozen_ts` stamped, visible) and ticks
+  sit at the gravity ceiling; **melt** after `MEMBRANE_HEAT_MELT_S`
+  (60s) under the bar — a suppressed burst then delivers as ONE grouped
+  event (n_changes + span).
+
+Knobs: `MEMBRANE_HEAT_COLD` (0.3), `MEMBRANE_HEAT_FREEZE` (1.5),
+`MEMBRANE_HEAT_MELT_S` (60), gravity ceiling ×8, churn half-life 20s.

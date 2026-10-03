@@ -148,7 +148,7 @@ class TestBoundedPool(unittest.TestCase):
         srv, est, an = self._anon()
         _watcher(est, "tool:w1",
                  script="result = {'render': 'saw a file', "
-                        "'patch': {'last_seen': 'now'}}",
+                        "'patch': {'script_data': {'last_seen': 'now'}}}",
                  watch={"kind": "file"})
         an.dispatch(AN.Trigger("file", {"path": "a.py",
                                         "event": "created"}))
@@ -156,7 +156,8 @@ class TestBoundedPool(unittest.TestCase):
         self.assertTrue(an.join_fires(timeout=5))
         ent = est.docs[f"{MEMBRANE_NS}tool:w1"]
         self.assertEqual(ent.properties.get("script_render"), "saw a file")
-        self.assertEqual(ent.properties.get("last_seen"), "now")
+        self.assertEqual((ent.properties.get("script_data") or {})
+                         .get("last_seen"), "now")   # the whitelist lane
         self.assertEqual(an.active, 0)   # the pool drained
 
     def test_blocking_scripts_dont_wedge_and_slots_are_respected(self):
@@ -524,6 +525,9 @@ class TestNightDispatch(unittest.TestCase):
                          "ValueError: nope")
 
     def test_the_apply_lands_and_tells(self):
+        """THE WHITELIST (the covenant): a watcher's arbitrary prop
+        ('n') is REFUSED (counted in patch_refused); the render
+        applies. The apply lands 1 (the render), the refusal visible."""
         srv = _Srv()
         srv.membrane = None
         _srv_store = srv.entity_store
@@ -533,9 +537,10 @@ class TestNightDispatch(unittest.TestCase):
         out = apply_entity_update(srv, ent,
                                   {"render": "r", "patch": {"n": 1}},
                                   "watch", silent=False)
-        self.assertEqual(out["applied"], 2)
-        self.assertEqual(_srv_store.docs[f"{MEMBRANE_NS}tool:w1"]
-                         .properties.get("n"), 1)
+        self.assertEqual(out["applied"], 1)
+        self.assertEqual(out.get("patch_refused"), ["n"])
+        self.assertIsNone(_srv_store.docs[f"{MEMBRANE_NS}tool:w1"]
+                          .properties.get("n"))
 
     def test_dispatch_does_not_match_non_watchers(self):
         srv = _Srv()

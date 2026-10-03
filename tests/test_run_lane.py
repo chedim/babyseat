@@ -84,16 +84,20 @@ class TestRunLane(unittest.TestCase):
         self.assertIn("membrane-run-ok", fact)
 
     def test_failure_rides_the_error_lanes(self):
-        """rc != 0: the script-error lanes (announce + persisted
-        script_last_error) plus an 'error-outcome' observation."""
+        """rc != 0: THE COVENANT (the entity-scripts reshape) -- the
+        failure BUBBLES as an error ENTITY (the entity graph's surface);
+        the persisted script_last_error stays on the command's doc."""
         f, est = _world()
         out = run_command_entity(f, est, None,
                                  'python3 -c "raise SystemExit(3)"')
         self.assertFalse(out["ok"])
         doc = est.docs[NS + "shell:python3"]
         self.assertTrue((doc.properties or {}).get("script_last_error"))
-        kinds = [a["kind"] for a in est.take_announcements()]
-        self.assertIn("script-error", kinds)
+        bubbles = [e for e in est.docs.values()
+                   if str(e.eid).startswith("membrane::error:")]
+        self.assertTrue(bubbles, "the run failure must bubble")
+        self.assertEqual((bubbles[0].properties or {}).get("errored"),
+                         NS + "shell:python3")
         evs = [d for _, d in f.b.scan("events")
                if d.get("stream") == "observation"
                and d.get("tool") == "shell"]

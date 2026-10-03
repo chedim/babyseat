@@ -118,15 +118,15 @@ def test_patch_lane_screens_the_write(tmp_path):
             return [[0.1] * 4]
     srv.membrane.embedder = _Emb()
     srv.membrane.field_path = str(tmp_path / "f.json")
-    out = {"patch": {"custom": lambda s: s, "keep": 42}}
+    out = {"patch": {"custom": lambda s: s}}
     try:
         apply_entity_update(srv, ent, out, "tick", silent=True)
     except Exception:
         pass   # the apply's other lanes may degrade on the fake -- the
                # CONTRACT is what landed in properties
     props = st.docs[ent.eid].properties
-    assert props.get("keep") == 42
-    assert not callable(props.get("custom"))   # screened (str-wrapped)
+    # THE WHITELIST (the covenant's reshape): arbitrary props refuse
+    assert "custom" not in props
 
 
 def test_load_after_screen_cures_old_poison(tmp_path):

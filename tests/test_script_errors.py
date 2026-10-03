@@ -127,8 +127,9 @@ class TestScriptEvents(unittest.TestCase):
         self.assertIn("mention", ev["text"])
 
     def test_disabled_announces_once_still(self):
-        """3 strikes -> script_disabled, and the disable is announced
-        (exactly-once machinery unchanged)."""
+        """3 strikes -> script_disabled; THE COVENANT: the disable
+        surfaces as an error-bubble ENTITY (a birth on the graph),
+        not a banner push."""
         f, est = _world()
         _seed_entity(est, NS + "files:router.py")
         for _ in range(3):
@@ -136,7 +137,10 @@ class TestScriptEvents(unittest.TestCase):
         p = est.docs[NS + "files:router.py"].properties or {}
         self.assertTrue(p.get("script_disabled"))
         kinds = [a["kind"] for a in est.take_announcements()]
-        self.assertIn("script-error", kinds)
+        self.assertIn("new", kinds)          # the bubble's birth
+        bubbles = [e for e in est.docs.values()
+                   if str(e.eid).startswith("membrane::error:")]
+        self.assertTrue(bubbles)
 
     def test_unresolved_embedder_degrades(self):
         """The seat's embedder still unresolved: the event is WRITTEN and

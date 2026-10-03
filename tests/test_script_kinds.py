@@ -148,16 +148,22 @@ class TestCronOverrun(unittest.TestCase):
         props["script_last_ms"] = 9000.0                    # ran long
         est.upsert(ent)
         took = N.run_entity_update_script(srv, ent, "tick")
-        # the engine BLOCKED the overdue next run + notified the pool
+        # the engine BLOCKED the overdue next run; THE COVENANT (the
+        # entity-scripts reshape): the surface is the BUBBLE ENTITY --
+        # the pool hears nothing, the error doc exists near the field
         pool_events = srv.events_pool.take()
-        self.assertTrue(any(e.get("kind") == "script-cron-overrun"
-                            for e in pool_events), pool_events)
+        self.assertEqual(pool_events, [])
+        bubbles = [e for e in est.docs.values()
+                   if "error" in str(e.eid)]
+        self.assertTrue(bubbles, "the overrun must bubble as an entity")
 
 
 class TestScriptErrorsNotify(unittest.TestCase):
-    def test_exception_notifies_the_pool(self):
-        """ERRORS ARE EVENTS: a script that raises notifies the model's
-        event pool (the watch-events lane), not just the banner/stderr."""
+    def test_exception_bubbles_as_entity(self):
+        """THE COVENANT (the entity-scripts reshape): a raising script's
+        error surfaces as a BUBBLE ENTITY dropped near the errored one
+        -- the pool hears NOTHING (the engine's lanes never leak), the
+        model learns through the entity graph."""
         est = _est()
         srv = _Srv(est)
         bad = "raise RuntimeError('boom')"
@@ -165,10 +171,12 @@ class TestScriptErrorsNotify(unittest.TestCase):
                             properties={"name": "bad", "tick_script": bad})
         est.docs[ent.eid] = ent
         N.run_entity_update_script(srv, ent, "tick")
-        pool_events = srv.events_pool.take()
-        self.assertTrue(any(e.get("kind") == "script-error" and
-                            e.get("entity") == ent.eid for e in pool_events),
-                        pool_events)
+        self.assertEqual(srv.events_pool.take(), [])
+        bubbles = [e for e in est.docs.values()
+                   if str(e.eid).startswith("membrane::error:")]
+        self.assertTrue(len(bubbles) == 1, [e.eid for e in bubbles])
+        self.assertEqual((bubbles[0].properties or {}).get("errored"),
+                         ent.eid)
 
 
 class TestWatchAgentsCore(unittest.TestCase):
