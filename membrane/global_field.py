@@ -69,6 +69,14 @@ class Peers:
         self.fid = fid
         self.path = path or _peers_path()
         self.info: dict = {}
+        # THE ROUTE HEALTH (the ':11502 unreachable' exhibit): a peer
+        # whose ask failed recently cooldowns off livelist (the seat
+        # MOVED ports; the stale heartbeat row keeps its old port
+        # until the file's GC -- a dead route must not be retried on
+        # every turn in the meantime). Success clears; expiry
+        # re-admits.
+        self._route_bad: dict[str, float] = {}
+        self._route_bad_s: float = 300.0
 
     def register(self, port: int, field: str, peers_path: Path | None = None
                  ) -> Path:
@@ -114,6 +122,14 @@ class Peers:
         if exclude_self:
             by_fid.pop(self.fid, None)
         live = list(by_fid.values())
+        # THE ROUTE HEALTH: the cooldown's dead routes drop here (the
+        # compact above is the file's GC; this is the memory's). An
+        # UNRECORDED port passes; a recorded one within its window is
+        # presumed still-dead (the expiry is the re-admit).
+        t_now = time.time()
+        live = [r for r in live
+                if (rk := str(int(r.get("port") or 0))) not in self._route_bad
+                or t_now - self._route_bad[rk] > self._route_bad_s]
         # lazy compaction: rewrite only when garbage piled up
         if len(raw) > PEERS_MAX and len(live) < len(raw) // 2:
             try:
@@ -125,6 +141,20 @@ class Peers:
             except OSError:
                 pass
         return live
+
+    def ask_peer(self, peer: dict, situation: str,
+                 sim_min: float = PEER_ASK_SIM_MIN,
+                 timeout: float = PEER_ASK_TIMEOUT) -> dict | None:
+        """THE ROUTE-HEALTH-AWARE ask: the static ask() with the outcome
+        recorded -- a dead route cooldowns off livelist; an answered
+        one clears its record."""
+        out = self.ask(peer, situation, sim_min=sim_min, timeout=timeout)
+        key = str(int(peer.get("port", 0)))
+        if out is None:
+            self._route_bad[key] = time.time()
+        else:
+            self._route_bad.pop(key, None)
+        return out
 
     @staticmethod
     def ask(peer: dict, situation: str, sim_min: float = PEER_ASK_SIM_MIN,
