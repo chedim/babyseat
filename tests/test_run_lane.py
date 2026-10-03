@@ -140,19 +140,20 @@ class TestToolsOff(unittest.TestCase):
 
 
 class TestMcpRunTool(unittest.TestCase):
-    def test_membrane_run_listed_and_relayed(self):
-        """run in the MCP surface, its schema names the
-        arguments, its relay is wired (the full request loop against a
-        stub proxy lives in test_mcp.py's suite)."""
+    def test_membrane_run_demolished(self):
+        """THE DEMOLITION (the operator's ruling 2026-10-02): 'run' is
+        GONE from the MCP surface; the tool-by-name routes 410 with
+        the honest pointer; the ENGINE (run_command_entity) SURVIVES
+        entity-side (a command entity's script returning {run: true}
+        is the only exec)."""
         import json as _json
         from membrane import mcp_server as M
-        self.assertIn("run", [t["name"] for t in M.TOOLS])
-        self.assertIn("run", M.TOOL_IMPLS)
-        tool = next(t for t in M.TOOLS if t["name"] == "run")
-        schema = _json.dumps(tool["inputSchema"]).lower()
-        self.assertIn("command", schema)
-        self.assertIn("timeout_s", schema)
-        self.assertTrue(callable(M.TOOL_IMPLS["run"]))
+        self.assertNotIn("run", [t["name"] for t in M.TOOLS])
+        self.assertNotIn("entity_run", M.TOOL_IMPLS)
+        self.assertNotIn("run", M.TOOL_IMPLS)
+        # THE ENGINE LIVES (the script verdict path's executor):
+        from membrane.night import run_command_entity
+        self.assertTrue(callable(run_command_entity))
 
 
 class TestRunToolSelfEntity(unittest.TestCase):

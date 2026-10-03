@@ -14,7 +14,7 @@ from unittest import mock
 
 from membrane import mcp_server as M
 
-ADVERTISED = {"run", "query", "state", "learn", "forget", "entity_watch",
+ADVERTISED = {"query", "state", "learn", "forget", "entity_watch",
               "entity_unwatch", "entity_tracks", "entities_related",
               "entity_add", "entity_edit", "entity_remove", "junk_cut",
               "peer_post", "graph", "entity_inherit"}

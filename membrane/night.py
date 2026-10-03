@@ -943,7 +943,11 @@ _SCRIPT_TIMEOUTS = {"consolidation": SCRIPT_TIMEOUT_S,
                     # BOUNDED POOL (4 threads) is the real limit -- this
                     # budget only strikes the 3-strikes lane on overrun,
                     # the thread cannot be killed
-                    "watch": 10.0}
+                    "watch": 10.0,
+                    # the READ-BACK trigger (the operator's 2026-10-02
+                    # ask): a dynamic entity's getter runs on read; the
+                    # LRU (watch_agents 5s) paces, this budget bounds
+                    "getter": 1.0}
 _SCRIPT_COOLDOWN_DEFAULT_S = 60.0
 # The watch trigger's own, gentler default: a 60s cooldown would make a
 # watcher a per-minute organ -- dead for the thing it exists for. 5s
@@ -1051,6 +1055,8 @@ def run_entity_update_script(srv, ent, trigger: str,
         code = props.get("tick_script")
     elif trigger == "watch":
         code = props.get("watch_script")
+    elif trigger == "getter":
+        code = props.get("getter_script")
     if not code:
         return {"error": "no script"}
     now = time.time()
@@ -1336,6 +1342,45 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
         ent.properties["retired"] = True
         ent.properties["retired_ts"] = time.time()
         changed += 1
+    # THE RUN VERDICT (the exec's only lane, the operator's ruling
+    # 2026-10-02): a script returning {run: true} makes the ENGINE
+    # exec the entity's OWN 'command' prop (run_command_entity -- the
+    # observation event, the result props, the error lanes, the
+    # audit); the script's OWN verdict runs first, then the engine
+    # runs. The command entity decides THROUGH its script; no tool,
+    # no route.
+    if out.get("run"):
+        cmd = str(props.get("command") or "").strip()
+        if cmd:
+            run_out = run_command_entity(getattr(srv, "efield", None),
+                                         est,
+                                         getattr(srv, "membrane", None),
+                                         cmd)
+            run_out.pop("doc", None)
+            out["run_result"] = run_out
+            changed += 1
+            # THE ENTITY KEEPS ITS OWN RUN'S RESIDUE (the asking
+            # entity's props, not the shell-minted doc's): the result
+            # (rc/outcome/head/tail) rides the entity that decided
+            for k, v in (("run_rc", run_out.get("rc")),
+                         ("run_outcome", run_out.get("outcome")),
+                         ("run_head", run_out.get("head")),
+                         ("run_tail", run_out.get("tail")),
+                         ("run_ms", run_out.get("ms"))):
+                if v is not None:
+                    props[k] = v
+            # THE POOL NOTIFY (the exec is an event the loops see)
+            pool = getattr(srv, "events_pool", None)
+            if pool is not None:
+                pool.put({"kind": "entity-run", "entity": ent.eid,
+                          "command": cmd[:120],
+                          "ok": bool(run_out.get("ok")),
+                          "rc": run_out.get("rc"), "ts": time.time()})
+        else:
+            out["run_result"] = {"ok": False,
+                                 "error": "run: true but the entity "
+                                          "carries no 'command' prop"}
+            changed += 1
     if changed:
         # THE TICK-PERSIST GATE: a silent apply is a per-second RAM
         # perspective -- its properties land on the doc (in place, above)

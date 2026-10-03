@@ -3530,8 +3530,16 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._entity_remove(); return
         if path == "/membrane/filetool":
             self._filetool(); return
-        if path == "/membrane/run":
-            self._membrane_run(); return
+        # THE RUN ROUTES ARE GONE (the operator's ruling 2026-10-02):
+        # no tool, no route for the model -- the exec lives in the
+        # ENGINE'S script paths only (a c: entity's tick/getter script
+        # returns {run: true} and the ENGINE runs its command; the
+        # observation + result lanes fire there, never a direct call)
+        if path == "/membrane/run" or path == "/membrane/entity-run":
+            self._json_err_raw(410, "the run route was demolished: the "
+                               "only exec is a command entity's OWN "
+                               "script (getter/tick) returning "
+                               "{run: true} -- the engine applies"); return
         if path == "/membrane/intend":
             self._membrane_intend(); return
         if path.startswith("/membrane/"):
@@ -5380,7 +5388,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                        dreamed_script=body.get("dreamed_script"),
                        tick_script=body.get("tick_script"),
                        watch_script=body.get("watch_script"),
+                       getter_script=body.get("getter_script"),
                        watch=body.get("watch"),
+                       watch_ops=body.get("watch_ops"),
                        properties=body.get("properties"),
                        publish=bool(body.get("publish")),
                        unpublish=bool(body.get("unpublish")))
@@ -5574,35 +5584,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._json_err_raw(503, "entity layer unavailable"); return
         self._json_out({"tracks": est.list_tracks()})
 
-    def _membrane_run(self) -> None:
-        """POST /membrane/run {command, timeout_s?}: the run lane -- the
-        model's exec goes THROUGH its entities (one command -> one c:
-        entity, engine-executed, the result on the doc, an observation in
-        the field, errors in the script-error lanes). The kill switch:
-        MEMBRANE_RUN=0 refuses (the seat runs zero-built-ins by default;
-        this is the operator's ablation)."""
-        srv = self.server
-        if os.environ.get("MEMBRANE_RUN") == "0":
-            self._json_out({"ok": False, "reason": "the run lane is off "
-                            "(MEMBRANE_RUN=0)"}); return
-        est = getattr(srv, "entity_store", None)
-        if est is None:
-            self._json_err_raw(503, "entity layer unavailable"); return
-        b = self._json_body()
-        command = str(b.get("command") or "").strip()
-        timeout_s = b.get("timeout_s")
-        if not command:
-            self._json_err_raw(400, "command required"); return
-        try:
-            from .night import run_command_entity
-            out = run_command_entity(_efield_of(srv), est, srv.membrane,
-                                     command, timeout_s=timeout_s)
-        except Exception as e:
-            self._json_out({"ok": False, "error": f"{type(e).__name__}: {e}"[:200]})
-            return
-        out.pop("doc", None)          # the doc summary is the reply's core
-        out["command"] = command
-        self._json_out(out)
+    # THE RUN LANE'S HANDLER IS GONE (the operator's ruling 2026-10-02):
+    # the exec lives in night.run_command_entity, reachable ONLY via a
+    # command entity's OWN script returning {run: true} (the engine
+    # applies -- the same authorship covenant as patch/render/delete).
 
     def _membrane_state(self) -> None:
         srv = self.server

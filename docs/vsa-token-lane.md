@@ -96,3 +96,124 @@ semantic codebook ones — is exactly why the relations composites hold
 order. The whole-message "one vector per turn" shape itself was abandoned
 (e18: tracking entities by their mentioning sentences distinguishes 68%
 vs 59%).
+---
+
+# The reactive watch layer (membrane as the model's only I/O)
+
+*Built 2026-10-02: `membrane/watch_agents.py`, TDD-pinned in
+`tests/test_watch_agents.py` + `tests/test_script_kinds.py`.*
+
+## The covenant
+
+The model perceives the world through ENTITY STATE, WATCH EVENTS, and
+RECALL -- and acts through the MCP lane. No other I/O. The concrete
+organs:
+
+## 1. The `operator` entity (always watched)
+
+Planted at boot (idempotent, the `tool:clock` pattern): one entity,
+`membrane::operator`, kind operator -- the seat's OWNER. Fires on
+EVERY inbound message: the facts stamp (messages counter, last_text
+head, last_text_ts) + a position EMA drift toward the message's
+sentence vector (the vec arrives free -- the field's apply computed;
+zero embed calls). Its "loop" IS the main chat: the operator's
+reactions land in YOUR conversation, not a side session. Kill switch
+`MEMBRANE_OPERATOR=0`.
+
+## 2. The watch ops (per-entity `watch_ops`)
+
+Configured on any entity doc; the sweep evaluates on message
+arrivals + the night/consolidation ticks (`sweep_watch_ops`):
+
+- `{'op': 'away', 'rel': '<eid>'|'operator'|'self', 'y': <dist>}` --
+  fire when the entity's chord distance to rel GREW by >= y between
+  sweeps (the moved-out event);
+- `{'op': 'near', ..., 'z': <dist>}` -- fire on the CROSSING to
+  within z (the approach event; staying inside is silent -- re-arm
+  on leave);
+- `{'op': 'around', 'rel': '*', 'z': <dist>}` -- the sensor form:
+  fire when ANY live entity's position is within z; a burst GROUPS
+  into ONE event {entered: [eids], left: [eids], entered_n, left_n,
+  within_n} -- the 3000-neighbors flood is one event (the grouped
+  lists entered/left covenant).
+
+Every op holds a HYSTERESIS cool-down (30s + a changed-geometry
+requirement): a hovering entity never spams; sweeps in tests inject
+`cooldown_s=0`. State rides the doc (`watch_state`, `watch_last_fire`)
+-- persistence is the entity's own save.
+
+## 3. The event queue + the loops (3 + 1)
+
+`WatchEvents`: drop-oldest, cap 64 (a flood keeps the NEWEST -- stale
+geometry is not worth reacting to). `LoopRunner`: **3 concurrent
+non-operator thinking loops + 1 dedicated operator lane** (the
+operator's admit NEVER fails: the main chat's reactive lane cannot
+starve behind batch work).
+
+Each fire = ONE thinking loop = a REAL turn against the seat's own
+`/v1` (loopback, in-process): the gate, recall, injection, MCP tools,
+capture all run -- nothing special-cased except the session/agent and
+the task text. The model REACTS (tool calls through the MCP lane:
+entity_edit / learn / speak / run) OR IGNORES (a plain verdict text)
+-- the turn IS the choice. The verdict stamps the entity
+(`watch_last_decision`) and the loop's exchange learns into the field
+like any turn. The COMMON CONTEXT is the membrane memory itself (the
+recall + the entity reads + the session:now) -- each loop starts
+fresh by session, continuity lives in the field.
+
+Kill switch `MEMBRANE_WATCH_LOOPS=0`: the loops never spawn; the
+fires still land (the queue + the banner report them).
+
+## 4. The frontend (the loops as agents)
+
+- The loop session titles CARRY THE ENTITY ID: `watch:
+  f:membrane/server.py` (the `loop_agent_name` contract) -- the
+  operator's ask ("show in its name the id of the entity whose event
+  it processes").
+- `/agent` advertises the `watch` agent (mode: subagent) --
+  `_agent_shapes()` (server.py).
+- `/experimental/capabilities`: `backgroundSubagents: true` -- the
+  TUI's background-task view arms.
+- The loops' tool rounds + reasoning STREAM through the existing
+  `message.part.updated` SSE events (the runner publishes every
+  part) -- watching a loop = watching any session.
+- The BANNER gains the `loops:` line: `2 running (watch:
+  f:membrane/router.py, watch: w:gateway), 1 queued` -- the
+  ambient mind's load visible on every seat.
+
+## 5. The script engine's kinds + locks (the same-day ask)
+
+Entity scripts split into TWO FAMILIES (night.py
+`run_entity_update_script`):
+
+- **CRON** (tick / consolidation -- periodic): *blocking per-entity*
+  (one run at a time per entity, a WAIT never a skip) + the OVERRUN
+  covenant: a run whose duration exceeded `tick_every_s` BLOCKS the
+  next run and NOTIFIES the model's event pool (kind
+  `script-cron-overrun`) -- a stuck cron is a decision, not a silent
+  drip.
+- **WATCHER** (watch / mention / thought / dreamed -- event
+  triggered): may block until the event's work is done (the arrival
+  is the cadence; no overrun notify); the same per-entity lock (one
+  script per entity at a time across kinds).
+
+ALWAYS: any script error notifies the model's event pool (kind
+`script-error`) -- errors are events, never stderr dust (the pool:
+`srv.events_pool.put`).
+
+## 6. The prerequisite fixes this layer's sweep depends on
+
+- **The deltas index** (`rebuild_delta_index` + the flush
+  invalidator): O(1) `deltas_of` -- the night's per-entity drift scan
+  was 63M row-checks per 15-min tick (the CPU bomb that froze the
+  seats).
+- **The dust cap** (`WORD_MIN_LEN=4`): 1-3-letter words get NO state
+  (the 'w:showing/w:stay' birth flood); rare short terms ('peers')
+  live; common 4+ words die by the boilerplate gate. `get() ->
+  None` for dust; the applier skips.
+- **No word overlay births**: the night's materialization skips
+  `w:`/`p:`/`e:` kinds (words are field entities, not overlay
+  subjects; the `[night] born: w:showing` flood stops).
+- **The word-delta skip** (from the 472d8c9 fix): words carry no
+  per-event deltas; the event-index delta (one row per event under
+  `e:<event-key>`) carries the sentence-to-event route.

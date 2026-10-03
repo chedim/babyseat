@@ -1916,6 +1916,7 @@ class EntityStore(MultiParentOps, TimelineOps):
              thought_script=None, dreamed_script=None,
              tick_script=None,
              watch_script=None, watch: dict | None = None,
+             getter_script=None, watch_ops=None,
              properties: dict | None = None,
              publish: bool = False, unpublish: bool = False) -> dict:
         """Model-side entity EDIT: patch summary/links/class on the
@@ -1988,6 +1989,11 @@ class EntityStore(MultiParentOps, TimelineOps):
                                 # events (file/mqtt/signal) through the
                                 # bounded pool
                                 ("watch_script", watch_script,
+                                 SCRIPT_MAX_NUDGE),
+                                # the READ-BACK trigger (2026-10-02): a
+                                # dynamic entity's getter runs ON A READ
+                                # (the dict return = the state facts)
+                                ("getter_script", getter_script,
                                  SCRIPT_MAX_NUDGE)):
             if val is None:
                 continue
@@ -2007,6 +2013,24 @@ class EntityStore(MultiParentOps, TimelineOps):
                 ent.properties.pop("script_failures", None)
                 if field == "nudge_script":
                     ent.properties.pop("script_render", None)
+        # THE SPATIAL OPS (the reactive layer's CRUD; the same lane's
+        # events fire -- the covenants live in watch_agents)
+        if watch_ops is not None:
+            try:
+                from . import watch_agents as _wa
+                srv = type("S", (), {"entity_store": self,
+                                     "events_pool":
+                                     getattr(self, "_events_pool",
+                                             None)})()
+                target = self.docs.get(ent.eid) or ent
+                _wa.edit_watch_ops(srv, target,
+                                   watch_ops if isinstance(watch_ops,
+                                                           list) else [],
+                                   replace=watch_ops is not None and
+                                   isinstance(watch_ops, list) and
+                                   not watch_ops)
+            except Exception as e:
+                return {"ok": False, "error": f"watch_ops: {e}"[:120]}
         # THE WATCH SELECTOR (the autonode): what external events fire
         # this entity's watch_script -- {kind: file|mqtt|signal, plus
         # the optional glob/topic/name narrowing}. This is the CHEAP

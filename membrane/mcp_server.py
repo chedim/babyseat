@@ -49,32 +49,6 @@ HTTP_TIMEOUT_S = 120.0   # the relay headroom: a live turn's tool call may
 
 TOOLS: list[dict] = [
     {
-        "name": "run",
-        "description": (
-            "Run ONE shell command; the run goes THROUGH a membrane "
-            "entity -- one command head -> one `c:<head>` entity created "
-            "or reused for throwaway repeats, its result (rc, outcome, "
-            "head/tail) on the doc and the run spoken into the field, so "
-            "commands are findable later by similarity and their errors "
-            "reach the banner. The tool itself is one entity too: every "
-            "run auto-updates `tool:run` (run/fail counts, last "
-            "command + rc/outcome, cumulative ms). Prefer over 0-arg "
-            "probes: reads (cat, ls, head, grep), builds, tests. Errors "
-            "are announced next-banner; script_last_error persists on "
-            "the entity."),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "command": {"type": "string",
-                            "description": "One shell command line."},
-                "timeout_s": {"type": "number",
-                              "description": "Kill after N seconds "
-                                             "(default 20, max 600)."},
-            },
-            "required": ["command"],
-        },
-    },
-    {
         "name": "query",
         "description": (
             "Read membrane's long-term memory: the nearest past exchanges for "
@@ -378,6 +352,33 @@ TOOLS: list[dict] = [
                                          "the real filtering}. "
                                          "kind 'file' is the default "
                                          "for any watcher without one."},
+                "getter_script": {"type": "string",
+                                  "description": "python; the READ-BACK "
+                                                 "trigger -- runs when "
+                                                 "the entity is READ "
+                                                 "(the model's read of a "
+                                                 "dynamic diagnostic "
+                                                 "entity); sets 'result'"
+                                                 "= {state: dict of the "
+                                                 "entity's CURRENT facts}"
+                                                 " -- applied as "
+                                                 "script_data; the 5s "
+                                                 "LRU paces. Empty "
+                                                 "string clears."},
+                "watch_ops": {"type": "array",
+                              "description": "the SPATIAL watch ops "
+                                             "(the always-watched lane): "
+                                             "op 'away' {rel, y} (the "
+                                             "entity moved from rel > "
+                                             "y), op 'near' {rel, z} "
+                                             "(closed to within z), op "
+                                             "'around' {rel: '*', z} "
+                                             "(anything within z -- the "
+                                             "sensor; bursts GROUP into "
+                                             "one event). '[]' clears; "
+                                             "cap 8. Each change fires "
+                                             "a watch-attached/detached "
+                                             "event to the pool."},
                 "properties": {"type": "object",
                                "description": "bounded property patch "
                                               "(the model's write path "
@@ -841,7 +842,8 @@ def tool_entity_edit(args: dict, port: int) -> str:
     for f in ("summary", "links", "class", "merged_into",
               "nudge_script", "delete_script",
               "mention_script", "thought_script", "dreamed_script",
-              "tick_script", "watch_script", "watch", "properties"):
+              "tick_script", "watch_script", "getter_script",
+              "watch_ops", "watch", "properties"):
         if args.get(f) is not None:
             body[f] = args[f]
     for f in ("publish", "unpublish"):        # the tier-2 gestures
@@ -999,32 +1001,6 @@ def tool_entity_inherit(args: dict, port: int) -> str:
     return f"Entity {out['child']} parents refreshed (no new links)."
 
 
-def tool_run(args: dict, port: int) -> str:
-    command = str(args.get("command") or "").strip()
-    if not command:
-        raise ProxyError(400, "command required")
-    timeout_s = args.get("timeout_s")
-    body = {"command": command}
-    if timeout_s is not None:
-        body["timeout_s"] = timeout_s
-    out = _http(port, "POST", "/membrane/run", body)
-    if not out.get("ok"):
-        err = out.get("error") or out.get("reason") or "unknown"
-        return (f"Run refused by membrane: {err}. (The lane may be off "
-                f"with MEMBRANE_RUN=0; check /membrane/state.)")
-    lines = [f"{command} -> rc {out.get('rc')} ({out.get('outcome')}, "
-             f"{out.get('ms', 0)} ms)"
-             + (f", entity {out.get('eid')} {'created' if out.get('created')
-                else 'reused'}" if out.get("eid") else "")]
-    head = str(out.get("head") or "")
-    if head:
-        lines.append(f"out[:600]: {head}")
-    tail = str(out.get("tail") or "")
-    if tail:
-        lines.append(f"tail: {tail}")
-    return "\n".join(lines)
-
-
 def tool_peer_seats(args: dict, port: int) -> str:
     out = _http(port, "GET", "/membrane/peer/seats")
     seats = out.get("seats") or []
@@ -1170,7 +1146,6 @@ TOOL_IMPLS = {
     "graph": tool_graph,
     "entity_query": tool_entity_query,
     "entity_inherit": tool_entity_inherit,
-    "run": tool_run,
     "read": tool_read,
     "write": tool_write,
     "edit": tool_edit,

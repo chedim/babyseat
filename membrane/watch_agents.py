@@ -732,3 +732,51 @@ def actor_on_event(est, role: str, text: str, vec=None,
                    "kind": "operator-message", "entity": OPERATOR_EID,
                    "text_head": props["last_text"], "ts": ts})
     return {"fired": True, "ts": ts, "msg_eid": mid}
+
+
+# ---- the ONE-EXEC lane (the run demolition's replacement) -------------------
+_GETTER_LRU_S = 5.0
+_getter_last_ts: dict = {}
+
+
+def entity_read_back(srv, ent) -> dict:
+    """THE READ-BACK TRIGGER: a READ of a dynamic entity fires its
+    getter_script (the dict return patches script_data + the entity's
+    state facts); the LRU (5s per entity) dedups a hammering loop;
+    the getter's kind rides the engine's dispatch."""
+    props = ent.properties or {}
+    code = props.get("getter_script")
+    if not code:
+        return {"fired": False, "reason": "no getter_script"}
+    est = getattr(srv, "entity_store", None)
+    if est is None:
+        return {"fired": False, "reason": "the entity layer is off"}
+    last = _getter_last_ts.get(ent.eid, 0.0)
+    now = time.time()
+    if now - last < _GETTER_LRU_S:
+        return {"fired": False, "reason": "lru"}
+    _getter_last_ts[ent.eid] = now
+    from .night import run_entity_update_script, apply_entity_update
+    out = run_entity_update_script(srv, ent, "getter")
+    if out.get("error"):
+        return {"fired": True, "error": out.get("error")}
+    # THE FULL VERDICT through the engine (the authorship covenant):
+    # {run: true} execs the command, {patch} moves the entity, {render}
+    # rides the banner -- ONE apply, every lane speaks
+    applied = apply_entity_update(srv, ent, out, trigger="getter")
+    state = out.get("state")
+    if isinstance(state, dict):
+        merged = dict((ent.properties or {}).get("script_data") or {})
+        merged.update(state)
+        props = ent.properties or {}
+        props["script_data"] = merged
+        ent.properties = props
+        est.upsert(ent, embedder=None)
+        pool = getattr(srv, "events_pool", None)
+        if pool is not None:
+            pool.put({"kind": "getter-applied", "entity": ent.eid,
+                      "state": dict(list(state.items())[:8]),
+                      "ts": now})
+    out["applied"] = applied
+    return {"fired": True, "state": state,
+            "run_result": out.get("run_result")}
