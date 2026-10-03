@@ -451,6 +451,17 @@ def _agent_shapes() -> list:
         {"name": "explore", "native": True, "mode": "subagent",
          "description": "Exploration subagent.",
          "permission": allow, "options": {}},
+        # THE WATCH-LOOP AGENTS (the operator's 2026-10-02 design):
+        # non-operator thinking loops run as background subagents --
+        # one per watch fire; the SESSION TITLE (not the static list)
+        # carries the processed entity's id, so the frontend shows
+        # 'watch: f:membrane/server.py' style rows per loop.
+        {"name": "watch", "native": True, "mode": "subagent",
+         "description": "A watch-trigger thinking loop: reacts or "
+                        "ignores one fired watch event through the "
+                        "membrane tools (the event's entity id rides "
+                        "the session title).",
+         "permission": allow, "options": {}},
     ]
 
 
@@ -1274,7 +1285,12 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                                 [p["id"] for p in
                                  _provider_shapes(config)]})
             elif path == "/experimental/capabilities":
-                self._json_out({"backgroundSubagents": False})
+                # THE WATCH LOOPS (the reactive layer): the loops are
+                # real child sessions (agent 'watch', title = the
+                # event's entity) the TUI renders as background
+                # subagents (their tool rounds stream via the parts
+                # events like any session).
+                self._json_out({"backgroundSubagents": True})
             elif path == "/experimental/console":
                 self._json_out({"consoleManagedProviders": [],
                                 "switchableOrgCount": 0})

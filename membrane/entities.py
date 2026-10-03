@@ -1119,6 +1119,43 @@ class TimelineOps:
         return {"confirmed": confirmed, "refuted": refuted,
                 "confirmed_eids": confirmed_eids}
 
+    def fire_watch(self, eid: str, event: dict) -> None:
+        """THE WATCH-FIRE STAMP: the fired event lands on the entity doc
+        (watch_last_fire: kind, entity, ts + the event head). The loop
+        layer reads the queue; the ENTITY keeps its last fire's
+        provenance (the react/ignore verdict lands on the doc later)."""
+        ent = self.docs.get(eid)
+        if ent is None:
+            for k in list(self.docs):
+                if k.endswith(eid):
+                    ent = self.docs[k]
+                    break
+        if ent is None:
+            return
+        props = ent.properties or {}
+        props["watch_last_fire"] = {"kind": event.get("kind"),
+                                    "ts": event.get("ts"),
+                                    "distance": event.get("distance"),
+                                    "event_id": event.get("event_id")}
+        self.upsert(ent, embedder=None)
+
+    def stamp_watch_decision(self, eid: str, verdict: dict) -> None:
+        """THE LOOP'S RETURN PATH: the thinking loop's decision
+        (reacted/ignored + what it did) stamps the entity
+        (watch_last_decision) -- the loop's verdict lives beside the
+        entity's watch provenance."""
+        ent = self.docs.get(eid)
+        if ent is None:
+            for k in list(self.docs):
+                if k.endswith(eid):
+                    ent = self.docs[k]
+                    break
+        if ent is None:
+            return
+        props = ent.properties or {}
+        props["watch_last_decision"] = dict(verdict or {})
+        self.upsert(ent, embedder=None)
+
     def open_timelines(store, parent: str = "membrane::session:now",
                        limit: int = 8) -> list:
         """The render surface: quarantined + confirmed branches under the

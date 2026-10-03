@@ -42,7 +42,28 @@ from . import eids as E
 from . import streams as ST
 from .efstore import h16, o8, pack_f16, pack_f32, unpack_f16
 
+# THE DUST CAP (the 'w:showing/w:stay' birth flood, the CPU-bomb's
+# second half): a word/phrase entity's STATE is only born when the
+# surface carries >= WORD_MIN_LEN letters. The intent: STOPWORD DUST
+# ('the', 'was', 'showing', 'stay') never gets a state; RARE SHORT
+# TERMS ('peers', 5 letters, a membrane noun) survive -- the common
+# words are already caught by the BOILERPLATE frequency gate
+# (per-origin frequency >= BOILER_MIN moves nothing). Words of 1-3
+# letters are never subjects; 4+ letters live if uncommon.
+WORD_MIN_LEN = int(os.environ.get("MEMBRANE_WORD_MIN_LEN", 4))
 EF_SCHEMA = 1
+
+
+def _dust_word(eid: str, surface: str) -> bool:
+    """True = the word/phrase entity is DUST (never gets a state):
+    too short to be a term."""
+    if eid.split(":", 1)[0] not in ("w", "p"):
+        return False
+    if " " in (surface or ""):          # a phrase: real
+        return False
+    return len(surface or "") < WORD_MIN_LEN
+
+
 GAIN = 0.5
 K_MAT = 3
 # THE WRITE-AMPLIFICATION FIX (the 'membranes are stuck again'
@@ -204,6 +225,7 @@ class EntityField:
         self._states: dict[str, EntityState] = {}
         self._dirty: set[str] = set()
         self._deltas: dict[str, dict] = {}
+        self._deltas_index: dict | None = None
         self._now: dict[str, np.ndarray] = {}      # session -> context (RAM only)
         self._ostats = self.b.get("origin_stats", self._okey) or self._fresh_ostats()
 
@@ -464,7 +486,12 @@ class EntityField:
         _update's word-delta skip.)"""
         return 1 if E.is_specific(eid) else K_MAT
 
-    def _get_or_new(self, eid: str, surface: str) -> EntityState:
+    def _get_or_new(self, eid: str, surface: str) -> EntityState | None:
+        """THE DUST CAP: a too-short word/phrase entity gets NO state
+        (None returned; the caller skips it entirely) -- the 'w:showing'
+        dust never enters entity_states (the CPU bomb's birth lane)."""
+        if _dust_word(eid, surface):
+            return None
         st = self.get(eid)
         if st is None:
             st = EntityState(eid=eid, kind=eid.split(":", 1)[0], surface=surface)
@@ -565,6 +592,8 @@ class EntityField:
             if sidx in skip or sidx >= len(sids):
                 continue
             st = self._get_or_new(eid, surf)
+            if st is None:
+                continue                  # the dust cap: no state born
             if st.tier == "nursery":
                 st.pending.append([sids[sidx], seq, sidx, stream, key, ts])
                 if sids[sidx] not in st.distinct:
@@ -660,6 +689,7 @@ class EntityField:
         if self._deltas:
             self.b.upsert_multi("entity_deltas", self._deltas)
             self._deltas = {}
+        self._invalidate_delta_index()
         self.b.upsert("origin_stats", self._okey, self._ostats)
 
     @_locked
@@ -714,9 +744,43 @@ class EntityField:
         self.b.upsert("origin_stats", self._okey, self._ostats)
         return tuple(self._ostats["null_coh"])
 
+    def _deltas_index_name(self):
+        return "deltas_by_eid"
+
+    def _invalidate_delta_index(self) -> None:
+        """The index stales on every flush (the deltas changed); the
+        next deltas_of() rebuilds once (one pass over the collection,
+        amortized across ALL lookups)."""
+        self._deltas_index = None
+
+    def rebuild_delta_index(self) -> int:
+        """Force the index rebuild NOW (tests + the caller after a
+        bulk out-of-band delta write). Returns the indexed count."""
+        with self._lock:
+            idx: dict[str, list[dict]] = {}
+            for k, d in self.b.scan("entity_deltas",
+                                    {"origin": self.origin},
+                                    order=("seq", "sidx")):
+                idx.setdefault(d.get("eid") or "", []).append(d)
+            self._deltas_index = idx
+            return sum(len(v) for v in idx.values())
+
     def deltas_of(self, eid: str) -> list[dict]:
-        return [d for _, d in self.b.scan(
-            "entity_deltas", {"origin": self.origin, "eid": eid}, order=("seq", "sidx"))]
+        """THE DELTAS INDEX (the CPU-bomb's load-bearing fix):
+        deltas_by_eid is rebuilt on access when staled (the invalidator
+        bumps on flush); O(1) per-entity lookups replace per-entity
+        full scans (the night's 63M row-checks per tick)."""
+        with self._lock:
+            if self._deltas_index is None:
+                idx: dict[str, list[dict]] = {}
+                for k, d in self.b.scan("entity_deltas",
+                                        {"origin": self.origin},
+                                        order=("seq", "sidx")):
+                    idx.setdefault(d.get("eid") or "", []).append(d)
+                self._deltas_index = idx
+            return list(self._deltas_index.get(eid) or [])
+
+    _deltas_index: dict | None = None
 
     @_locked
     def number_events(self) -> int:

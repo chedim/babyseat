@@ -26,6 +26,7 @@ import hashlib
 import os
 import subprocess
 import sys
+import threading
 import time
 
 import numpy as np
@@ -156,6 +157,12 @@ def consolidate_entities(fld, est, mem=None, materialize: int = 8,
         for _, d in fld.b.scan("entity_states",
                                {"origin": fld.origin, "tier": "live"}):
             eid = d["eid"]
+            # THE WORD SKIP (the overlay-birth covenant): words and
+            # phrases are FIELD entities, never overlay subjects (the
+            # 'night born: w:showing' flood; the overlay exists for
+            # the subjects a cell is ABOUT)
+            if eid.split(":", 1)[0] in ("w", "p", "e"):
+                continue
             if int(d.get("n") or 0) < 3:
                 continue
             key = overlay_key(eid)
@@ -1016,7 +1023,20 @@ def run_entity_update_script(srv, ent, trigger: str,
     THE AUTHORSHIP COVENANT: the script NEVER mutates directly -- it
     returns {patch, veto, render, delete} and the CALLER applies them
     inside the store's mut_lock (the engine applies, the entity
-    decides)."""
+    decides).
+
+    THE TWO KINDS (the operator's 2026-10-02 ask):
+    - CRON (tick / nudge / consolidation -- periodic): BLOCKING PER-
+      ENTITY (one run at a time per entity, a wait, never a skip) and
+      the OVERRUN covenant: a run whose duration exceeded the entity's
+      tick_every_s (or the cooldown) BLOCKS the next run -- the engine
+      notifies the model's event pool (kind 'script-cron-overrun'):
+      a stuck cron is a decision, not a silent drip.
+    - WATCHER (watch / mention / thought / dreamed -- event-triggered):
+      the event's arrival is the cadence; no overrun notify; the same
+      per-entity lock (one script per entity at a time across kinds).
+    ALWAYS: any script error notifies the model's event pool (kind
+    'script-error') -- errors are events, never stderr dust."""
     props = ent.properties or {}
     code = None
     if trigger == "mention":
@@ -1036,11 +1056,70 @@ def run_entity_update_script(srv, ent, trigger: str,
     now = time.time()
     if props.get("script_disabled"):
         return {"error": "disabled (3 strikes)"}
+    # THE TWO KINDS (the operator's 2026-10-02 ask): cron = periodic
+    # (blocking per-entity + the overrun covenant); watcher =
+    # event-triggered (the arrival is the cadence; the same lock).
+    is_cron = trigger in ("tick", "consolidation")
+    pool = getattr(srv, "events_pool", None)
+    # THE PER-ENTITY LOCK (blocking per-entity): one script per entity
+    # at a time ACROSS kinds; the per-entity key = the eid.
+    with _entity_script_lock(ent.eid):
+        return _run_script_locked(srv, ent, trigger, code, props, now, is_cron,
+                                  pool, extra_state)
+
+
+def _entity_script_lock(eid: str):
+    """One lock per entity (a dict of locks under the module lock --
+    created on first use; blocking per-entity, concurrent across
+    entities)."""
+    with _script_locks_guard:
+        return _script_locks.setdefault(eid, threading.RLock())
+
+
+_script_locks: dict = {}
+_script_locks_guard = threading.Lock()
+
+
+def _run_script_locked(srv, ent, trigger, code, props, now, is_cron,
+                       pool, extra_state) -> dict:
+    if is_cron:
+        # THE OVERRUN CHECK (cron only): the LAST run outlasted the
+        # interval -> the next run is BLOCKED + the pool notified (a
+        # stuck cron is a decision, not a silent drip). Watchers have
+        # no interval -- the event's arrival is the cadence.
+        last_started = float(props.get("script_last_started") or 0.0)
+        last_ms = float(props.get("script_last_ms") or 0.0) / 1000.0
+        try:
+            interval = max(1.0, float(props.get("tick_every_s") or DEFAULT_TICK_EVERY_S))
+        except (TypeError, ValueError):
+            interval = DEFAULT_TICK_EVERY_S
+        if last_started and last_ms >= interval:
+            ev = {"kind": "script-cron-overrun", "entity": ent.eid,
+                  "trigger": trigger,
+                  "ran_s": round(last_ms, 2),
+                  "interval_s": round(interval, 2), "ts": now}
+            if pool is not None:
+                pool.put(ev)
+            try:
+                est = getattr(srv, "entity_store", None)
+                if est is not None:
+                    _script_error_announce(est, ent.eid, "cron-overrun",
+                                           f"{trigger} script ran "
+                                           f"{last_ms:.0f}s > interval "
+                                           f"{interval:.0f}s; next run "
+                                           "blocked")
+            except Exception:
+                pass
+            return {"error": "cron-overrun: next run blocked",
+                    "blocked": True}
     if trigger != "tick" and not _cooldown_ok(props, trigger, now):
         return {"error": "cooldown"}   # the tick is paced by tick_every
     timeout = _SCRIPT_TIMEOUTS.get(trigger, SCRIPT_TIMEOUT_S)
     if trigger != "tick":              # tick needs no stamp (never gated)
         _stamp_cooldown(props, trigger, now)
+    props["script_last_started"] = now
+    est0 = getattr(srv, "entity_store", None)
+    _t0 = time.time()
     extra = dict(extra_state or {})
     extra["trigger"] = trigger
     extra["timeout_s"] = timeout
@@ -1050,6 +1129,8 @@ def run_entity_update_script(srv, ent, trigger: str,
     state = _script_state(ent, now, extra=extra,
                           trigger=trigger, timeout=timeout)
     out = run_entity_script(code, state, membrane=api)
+    ms = (time.time() - _t0) * 1000.0
+    props["script_last_ms"] = ms
     est = getattr(srv, "entity_store", None)
     if out.get("error"):
         if est is not None:
@@ -1057,12 +1138,21 @@ def run_entity_update_script(srv, ent, trigger: str,
             _script_record_fail(fld, est, ent, ent.eid, trigger,
                                 out["error"],
                                 mem=getattr(srv, "membrane", None))
+        # THE POOL NOTIFY (errors are events, never stderr dust)
+        if pool is not None:
+            pool.put({"kind": "script-error", "entity": ent.eid,
+                      "trigger": trigger,
+                      "error": str(out.get("error"))[:200],
+                      "ts": time.time()})
     else:
         if ent.properties.get("script_failures"):
             ent.properties.pop("script_failures", None)
         if ent.properties.get("script_last_error"):
             ent.properties.pop("script_last_error", None)
     return out
+
+
+DEFAULT_TICK_EVERY_S = 5.0
 
 
 def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
