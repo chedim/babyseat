@@ -416,11 +416,30 @@ class _LoopDrainer:
         self.alive = False
 
     def _run(self):
+        # THE POLL'S SLEEP (the 100%-idle-CPU exhibit, named at LAST):
+        # take() returns instantly and the loop had NO sleep anywhere
+        # -- the drainer spun 100% of a core on an empty pool since
+        # the day it was born (every seat, the whole arc). The poll's
+        # cadence rides the ambient pulse: day 0.5s, night x4 (the
+        # watcher's ear is slightly slower in sleep, that's the point).
+        _night_x = 4.0
+        try:
+            from .thinker import NIGHT_SWEEP_X
+            _night_x = float(NIGHT_SWEEP_X)
+        except Exception:
+            pass
         while self.alive:
             evs = []
             pool = getattr(self.srv, "events_pool", None)
             if pool is not None:
                 evs = pool.take()
+            _poll_s = self.poll_s
+            try:
+                if getattr(self.srv, "ambient_mode", "day") == "night":
+                    _poll_s = self.poll_s * _night_x
+            except Exception:
+                pass
+            time.sleep(_poll_s)
             for ev in evs:
                 # THE WAKE CALL: a watch fire is a real sound -- the
                 # night mind opens its eyes before its next beat.
