@@ -502,6 +502,7 @@ def _mind_rows(srv, allow) -> list:
             claim = "idle"
         rows.append({
             "name": f"loop-{i}", "native": True, "mode": "subagent",
+            "hidden": True,
             "description": f"A thinking-loop worker ({claim}); "
                            f"{queued} event(s) queued.",
             "permission": allow, "options": {}})
@@ -519,6 +520,7 @@ def _mind_rows(srv, allow) -> list:
         st = getattr(th, "stats", {}) or {}
         rows.append({
             "name": "thinker", "native": True, "mode": "subagent",
+            "hidden": True,
             "description": f"The seat's inner speech ({_mode}: the "
                            f"{_mode == 'night' and '30s night pulse' or '1s pulse'})"
                            f"{_wakes}: {st.get('processed', 0)} beats "
@@ -530,6 +532,7 @@ def _mind_rows(srv, allow) -> list:
         st = getattr(dr, "stats", {}) or {}
         rows.append({
             "name": "dreamer", "native": True, "mode": "subagent",
+            "hidden": True,
             "description": f"The field's idle cognition: {st.get('waves', 0)} "
                            f"dream waves, {st.get('committed', 0)} branches "
                            f"committed, {st.get('gc', 0)} gc sweeps.",
@@ -736,7 +739,32 @@ class TurnRunner:
         a QUEUED ack (its turn still runs -- results ride result_of).
         A heartbeat thread publishes elapsed_ms while a turn runs. The
         finally-block guaranties the guard frees and _busy cleans even
-        if the turn body raises (no stuck-busy after a crash)."""
+        if the turn body raises (no stuck-busy after a crash).
+        THE MESSAGE AT THE DOOR (the disappear-then-appear-sent
+        exhibit): the user message is ANNOUNCED here, at acceptance —
+        both lanes (direct and queued) — so the TUI's message row
+        exists the moment the seat has it, not when the turn's inner
+        machinery reaches its own announce N seconds (or turns) later.
+        _run_inner's announce is idempotent against this one."""
+        # THE DOOR (both lanes): the stored row announces BEFORE any
+        # guard/gate work. When user_info is None the row is minted
+        # here (the old path minted inside _run_inner); otherwise the
+        # caller's row is used as-is.
+        if user_info is None:
+            now = int(time.time() * 1000)
+            user_info = {"id": _gen_id("msg"), "sessionID": sid,
+                         "role": "user", "agent": "build",
+                         "model": {"providerID": "membrane",
+                                   "modelID": self.model},
+                         "time": {"created": now},
+                         "summary": {"diffs": []}}
+            user_parts = [{"id": _gen_id("prt"), "sessionID": sid,
+                           "messageID": user_info["id"],
+                           "type": "text", "text": text,
+                           "time": {"start": now}}]
+            self.messages.append(sid, user_info, user_parts)
+        self._announce_user(sid, user_info, user_parts)
+        user_info["_announced"] = True      # the inner's announce skips
         guard = self._guard(sid)
         if not guard.acquire(blocking=False):
             depth = self._queued_depth(sid)
@@ -935,7 +963,11 @@ class TurnRunner:
                            "messageID": user_info["id"], "type": "text",
                            "text": text, "time": {"start": now}}]
             self.messages.append(sid, user_info, user_parts)
-        self._announce_user(sid, user_info, user_parts)
+        # THE DOOR'S DEDUPE (both lanes announce once): the accepting
+        # lane's run() already announced this row — a re-announce
+        # would render the row twice in the TUI.
+        if not user_info.get("_announced"):
+            self._announce_user(sid, user_info, user_parts)
         self.hub.publish({"type": "session.status",
                           "status": {"type": "busy"}, "sessionID": sid})
         # THE MINDS' BRANCH: a turn on a session whose agent is one of
