@@ -431,7 +431,10 @@ def run_scripted_entities(fld, est, mem=None, now: float | None = None,
                 changed = True
             if out.get("data") is not None and \
                     isinstance(out.get("data"), dict):
-                ent.properties["script_data"] = out["data"]
+                # THE SCREEN (the poison exhibit): script data rides
+                # the same json-safe gate as the patch lane's values.
+                from .entities import sanitize_properties as _san
+                ent.properties["script_data"] = _san(out["data"])
                 changed = True
             if changed:
                 est.upsert(ent, embedder=getattr(fld, "emb", None))
@@ -1358,11 +1361,17 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
         props["script_render"] = str(out["render"])[:300]
         changed += 1
     if isinstance(out.get("patch"), dict):
+        # THE SCREEN AT THE WRITE (the 251-save-failures exhibit): a
+        # script's patch value is whatever the script returned -- a
+        # function/module/handle in properties poisons its doc and
+        # the side-index save died 251 times on it. Values pass the
+        # json-safe screen (anything stranger wraps to a readable
+        # str); the entity survives json.dumps -- ALWAYS.
+        from .entities import json_safe as _json_safe
         for k, v in list(out["patch"].items())[:16]:
             if str(k).startswith("script_"):
                 continue               # the script cannot forge engine keys
-            props[str(k)[:80]] = (v if not isinstance(v, str)
-                                  else v[:2000])
+            props[str(k)[:80]] = _json_safe(v)
             changed += 1
     if out.get("delete"):
         ent.properties["retired"] = True

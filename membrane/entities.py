@@ -84,6 +84,49 @@ _PRONOUN_HEADS = ("it", "we", "i", "they", "he", "she", "you", "this",
 # URL-encoded "<start_of_turn"; "u003c" prefix = the encoded "<")
 _CAPTURE_TOKEN_JUNK = re.compile(r"u003[cde][\w]*", re.I)
 
+# ---- THE JSON-SAFE SCREEN (the 251-save-failures exhibit) -------------
+# A script's patch/script_data value can be ANYTHING (a function, a
+# module, a filehandle); one bad value poisons its doc and the
+# side-index's whole-file json.dumps dies -- every save failing (251
+# in one boot), the mirror starving in RAM forever. The screen:
+# json-safe scalars pass; bounded str for keys; lists/dicts recurse
+# (bounded depth); EVERYTHING ELSE wraps to a str -- the value stays
+# inspectable, the file keeps writing.
+_JSON_SAFE = (str, int, float, bool, type(None))
+
+
+def json_safe(value, depth: int = 0, max_depth: int = 6):
+    """One value's json-safe form: pass scalars, recurse containers,
+    str() anything stranger (the poison becomes a readable string)."""
+    if isinstance(value, _JSON_SAFE):
+        return value
+    if depth > max_depth:
+        return str(value)[:400]
+    if isinstance(value, dict):
+        out = {}
+        for k, v in list(value.items())[:64]:
+            out[str(k)[:120]] = json_safe(v, depth + 1)
+        return out
+    if isinstance(value, (list, tuple)):
+        return [json_safe(v, depth + 1) for v in value[:128]]
+    try:
+        return str(value)[:400]
+    except Exception:
+        return "<unprintable>"  # type: ignore[return-value]
+
+
+def sanitize_properties(props: dict) -> dict:
+    """A properties dict's json-safe copy (the patch lane's contract:
+    entity properties survive json.dumps -- ALWAYS)."""
+    return {str(k)[:120]: json_safe(v)
+            for k, v in list((props or {}).items())[:64]}
+
+
+# THE LOCK'S CONTRACT (the timing fence): the store lock's hold is the
+# FLAT snapshot -- for 10k plain docs, well under this bound (the old
+# form's to_doc-under-lock took 20-45s; this is the regression tripwire).
+_STORE_LOCK_HOLD_MAX_S = 1.0
+
 def extract_entities(situation: str, action: str = "") -> dict:
     """Deterministic entity harvest from one cell's text. $0, no model.
 
@@ -1341,28 +1384,59 @@ class EntityStore(MultiParentOps, TimelineOps):
             for k, rec in (d.get("docs") or {}).items():
                 q = QuantumEntity.from_doc(k, rec)
                 if q is not None:
+                    # THE LOAD-AFTER SCREEN (the poison cures here): a
+                    # doc that survived into the file wrapped its
+                    # foreign values at save; anything that still
+                    # reads non-json-safe (an older file) is screened
+                    # once more at load.
+                    q.properties = sanitize_properties(q.properties)
                     self.docs[k] = q
         except Exception as e:
             print(f"[entities] side-index load failed ({e})",
                   file=sys.stderr)
 
     def save(self) -> None:
+        """THE SIDE-INDEX SAVE, rebuilt (the 45s-PENDING exhibit):
+        the old form built EVERY entity's full to_doc() dict (~10KB of
+        embedding copy per doc, 9.5k docs = ~95MB of dict-building)
+        UNDER _store_lock -- every reader (entity_edit/related/state)
+        queued behind a 20-45s save, debounced to repeat every 10s.
+        NOW: the lock holds one FLAT snapshot (shallow-copied property
+        dicts, milliseconds); to_doc + json.dumps run OUTSIDE it. A
+        doc that still can't serialize is skipped AND NAMED (the eid
+        prints -- the poison is visble, not silent); the file always
+        writes."""
         if not self.path:
             return
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".tmp")
-            # THE TORN-SAVE GUARD (the 37MB corrupt exhibit): the docs
-            # snapshot is taken UNDER the store lock (a stable copy of
-            # eid -> serializable doc) -- the json.dumps reads the copy,
-            # so a chat/night thread's mid-walk mutation can never tear
-            # the file (the old code serialized the LIVE dict).
+            # THE FLAT SNAPSHOT (the lock's ms contract): shallow-copy
+            # each entity's scalar state + properties dict -- no
+            # to_doc, no embedding copies, under the lock.
             with self._store_lock:
-                snapshot = {k: q.to_doc() for k, q in
-                            list(self.docs.items())
-                             if not ((q.properties or {})
-                                     .get("ephemeral"))}
+                flat = [(eid, dict(ent.properties or {}), ent.cls,
+                         list(ent.links), list(ent.derived_by))
+                        for eid, ent in self.docs.items()
+                        if not ((ent.properties or {}).get("ephemeral"))]
                 tracks = dict(self.tracks) if self.tracks else None
+            snapshot: dict = {}
+            for eid, props, cls, links, derived_by in flat:
+                try:
+                    # THE SCREEN at the save's other end: any poison
+                    # that made it into properties BEFORE the screen
+                    # existed wraps to str here -- the file always
+                    # writes, the value stays inspectable.
+                    props = sanitize_properties(props)
+                    ent = self._snap_to_entity(eid, props, cls, links,
+                                               derived_by)
+                    snapshot[eid] = ent.to_doc()   # the heavy build HERE
+                except Exception as e:
+                    # THE POISON IS NAMED: a doc that can't serialize
+                    # skips (never kills the file) and prints its eid
+                    # -- the operator sees WHO, the queue keeps flowing
+                    print(f"[entities] side-index: doc {eid} skipped "
+                          f"({str(e)[:80]})", file=sys.stderr)
             # preserve tracks: docs-save must not clobber the track lane
             # (the old shape wrote {"docs": ...} bare -- every save wiped
             # the planted tracks; the silent tracking-death bug)
@@ -1379,9 +1453,27 @@ class EntityStore(MultiParentOps, TimelineOps):
                 d.pop("tracks", None)     # tracks dropped while down
             tmp.write_text(json.dumps(d))
             os.replace(tmp, self.path)
+            self._side_saved = True       # the retry flag: clean
         except Exception as e:
+            self._side_saved = False
             print(f"[entities] side-index save failed ({e})",
                   file=sys.stderr)
+
+    def _snap_to_entity(self, eid: str, props: dict, cls: str,
+                        links: list, derived_by: list):
+        """The flat snapshot's doc builder: a QuantumEntity from the
+        copied scalars (the embedding/position references ride -- they
+        are read-only at save time)."""
+        ent = QuantumEntity.__new__(QuantumEntity)
+        ent.eid = eid
+        ent.cls = cls
+        ent.properties = props
+        ent.links = links
+        ent.derived_by = derived_by
+        ent.embedding = None              # re-embedded on load (cheap)
+        ent.position = None
+        ent.position_history = []
+        return ent
 
     SAVE_DEBOUNCE_S = 10.0
 
@@ -1401,11 +1493,17 @@ class EntityStore(MultiParentOps, TimelineOps):
         self._save_timer = None
         if not self._dirty:
             return
-        self._dirty = False
         try:
+            self._dirty = getattr(self, "_side_saved", True) is False
             self.save()
-        except Exception as e:
-            print(f"[entities] debounced save failed ({e})", file=sys.stderr)
+        finally:
+            # THE RETRY (the silent-starve exhibit): _dirty stays up
+            # when the save failed -- the next debounce tries again
+            # (the file never starves because poison exists)
+            if not getattr(self, "_side_saved", True):
+                self._dirty = True
+            else:
+                self._dirty = False
 
     def flush(self) -> None:
         """Make pending store writes durable NOW (tests, shutdown)."""
