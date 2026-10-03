@@ -942,6 +942,13 @@ _SCRIPT_TIMEOUTS = {"consolidation": SCRIPT_TIMEOUT_S,
                     "mention": 0.25,
                     # the clock organ's pace: the hum's 1s heartbeat is
                     # the trigger, the budget stays sub-perception
+                    # THE TICK'S HARD BUDGET (the 146s-poke exhibit):
+                    # the tick is the HUM's beat -- a script over
+                    # budget is ABANDONED (its result thread lands
+                    # out-of-band; the per-entity lock blocks the next
+                    # fire until then), and the overrun STRIKES (3
+                    # slow runs -> disabled) -- a slow-success is a
+                    # strike too.
                     "tick": 0.25,
                     # the autonode's trigger (membrane/autonode.py): the
                     # BOUNDED POOL (4 threads) is the real limit -- this
@@ -1155,10 +1162,38 @@ def _run_script_locked(srv, ent, trigger, code, props, now, is_cron,
                                trigger, timeout, extra)
     state = _script_state(ent, now, extra=extra,
                           trigger=trigger, timeout=timeout)
-    out = run_entity_script(code, state, membrane=api)
+    # THE HARD BUDGET (the 146s-poke exhibit's kill switch): the exec
+    # runs in a WORKER thread; over timeout the fire ABANDONS it (the
+    # abandoned thread's result lands out-of-band -- the per-entity
+    # lock held by the worker blocks the next fire until it lands)
+    # and the overrun STRIKES: a slow-success counts (the tick's 0.25s
+    # budget is the hum's heartbeat contract, not advice).
+    box: dict = {}
+    _done = threading.Event()
+
+    def _runner():
+        try:
+            box["out"] = run_entity_script(code, state, membrane=api)
+        except Exception as e:            # pragma: no cover - belt
+            box["out"] = {"error": f"{type(e).__name__}: {e}"[:200]}
+        finally:
+            _done.set()
+
+    _worker = threading.Thread(target=_runner,
+                               name=f"script-{ent.eid[:24]}",
+                               daemon=True)
+    _worker.start()
+    if not _done.wait(timeout=max(0.05, timeout)):
+        out = {"error": f"over-budget: abandoned after {timeout:g}s"}
+    else:
+        out = box.get("out") or {}
     ms = (time.time() - _t0) * 1000.0
     props["script_last_ms"] = ms
     est = getattr(srv, "entity_store", None)
+    # THE SLOW-SUCCESS STRIKE: no error but WAY over budget (x4) = a
+    # strike (the same 3-strikes lane; a wedging success is a wedge).
+    if not out.get("error") and ms > timeout * 4000.0:
+        _script_fail(est, ent, fld=getattr(srv, "efield", None))
     if out.get("error"):
         if est is not None:
             fld = getattr(srv, "efield", None)
