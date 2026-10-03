@@ -127,6 +127,16 @@ def sanitize_properties(props: dict) -> dict:
 # form's to_doc-under-lock took 20-45s; this is the regression tripwire).
 _STORE_LOCK_HOLD_MAX_S = 1.0
 
+
+def _stamp_guest_flavor(eid: str, props: dict) -> None:
+    """THE GUEST FLAVOR (the two-universes datum, stamped at both
+    ends): an eid in a FOREIGN namespace (entity::<x>::, episodic::)
+    is a guest of this seat's store -- the flag lands whatever door
+    the doc came through (load, upsert); the pull lane's imports
+    carry it explicitly already."""
+    if eid.startswith("entity::") or eid.startswith("episodic::"):
+        props["guest"] = True
+
 def extract_entities(situation: str, action: str = "") -> dict:
     """Deterministic entity harvest from one cell's text. $0, no model.
 
@@ -1296,6 +1306,11 @@ class EntityStore(MultiParentOps, TimelineOps):
         # published entities. The origin is the pub-namespace identity
         # (the persisted <data-dir>/origin tag, same as the field's).
         self.origin = origin or "seat@local"
+        # THE SEAT'S ROOT (the stale-route retire's reference): the
+        # start folder (the field path's parent's parent for the
+        # .membrane home; the cwd for the bare boot) — the boot sets
+        # it explicitly; the derived-from-origin tag is the fallback.
+        self.root = os.getcwd()
         self.docs: dict[str, QuantumEntity] = {}
         # entity TRACKS: key -> {key, label, op, n, alerted}. The banner
         # lane: live cell counts in WHERE WE ARE, optional boundary alerts.
@@ -1383,14 +1398,11 @@ class EntityStore(MultiParentOps, TimelineOps):
             self._mirror = d
             for k, rec in (d.get("docs") or {}).items():
                 q = QuantumEntity.from_doc(k, rec)
-                if q is not None:
-                    # THE LOAD-AFTER SCREEN (the poison cures here): a
-                    # doc that survived into the file wrapped its
-                    # foreign values at save; anything that still
-                    # reads non-json-safe (an older file) is screened
-                    # once more at load.
-                    q.properties = sanitize_properties(q.properties)
-                    self.docs[k] = q
+                if q is None:
+                    continue
+                q.properties = sanitize_properties(q.properties)
+                _stamp_guest_flavor(k, q.properties)
+                self.docs[k] = q
         except Exception as e:
             print(f"[entities] side-index load failed ({e})",
                   file=sys.stderr)
@@ -1608,6 +1620,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         merge itself announces via entity_edit's merged_into)."""
         if not ent.eid:
             return False
+        _stamp_guest_flavor(ent.eid, ent.properties or {})
         existing = self.docs.get(ent.eid)
         is_new = existing is None
         if existing is not None:
@@ -1758,6 +1771,32 @@ class EntityStore(MultiParentOps, TimelineOps):
             props = q.properties or {}
             props.update(self._strip_code(props))
             props["imported_by"] = owner
+            # THE GUEST GATE (the two-universes datum): an imported eid
+            # is a GUEST -- flagged explicitly so every query surface
+            # can partition the universes (the default scan hides
+            # guests; guest:true asks for them). The eid's own
+            # namespace (entity::<x>::, episodic::) flavors it too --
+            # the pull stamps ALL imports.
+            props["guest"] = True
+            # THE STALE-ROUTE RETIRE (the seat-root-move datum): an
+            # eid whose body names an absolute path OUTSIDE this
+            # seat's root is a dead route -- retired, not a ghost.
+            # The body's LEGACY HEAD strips first ('files:/abs' is an
+            # absolute body under its family's head, not a relative one).
+            try:
+                body = eid[len(MEMBRANE_NS):] \
+                    if eid.startswith(MEMBRANE_NS) else eid
+                _head, _sep, _rest = body.partition(":")
+                if _head in ("files", "symbols", "models", "shell",
+                             "urls") and _sep:
+                    body = _rest
+                _root = getattr(self, "root", "") or ""
+                if body.startswith("/") and _root \
+                        and not body.startswith(_root):
+                    props["retired"] = True
+                    props["retired_ts"] = _t.time()
+            except Exception:
+                pass
             if meta.get("at"):
                 props["imported_at"] = meta["at"]
             self.docs[eid] = q

@@ -19,6 +19,53 @@ from __future__ import annotations
 
 from membrane.entities import MEMBRANE_NS
 
+# ---- THE KIND ALIAS FAMILY (the 'kind:file:* is empty' exhibit) ----
+# The graph's kind spellings come in three shapes per family: the eid's
+# legacy head ('files:', 'symbols:'), the canonical one-letter kind
+# ('f:', 's:'), and the operator's word ('file', 'symbol'). A kind
+# query matches THE FAMILY -- both directions collapse at the read.
+_KIND_FAMILY = {
+    "file": ("file", "files", "f"),
+    "symbol": ("symbol", "symbols", "s"),
+    "model": ("model", "models", "m"),
+    "command": ("command", "commands", "shell", "c"),
+    "url": ("url", "urls", "u"),
+    "port": ("port",),
+    "tool": ("tool",),
+    "word": ("word", "words", "w"),
+    "phrase": ("phrase", "phrases", "p"),
+    "session": ("session", "sessions", "s2"),
+    "claim": ("claim", "claims", "s3"),
+    "ctx": ("ctx",),
+    "ha": ("ha",),
+    "component": ("component",),
+    "cron": ("cron",),
+}
+_KIND_ALIASES: dict[str, frozenset[str]] = {}
+for _canon, _fam in _KIND_FAMILY.items():
+    for _w in _fam:
+        _KIND_ALIASES.setdefault(_w, frozenset(_fam))
+
+
+def _kind_family(want: str) -> frozenset[str]:
+    """The want-word's family (the whole set when the word is unknown:
+    the honest miss = only itself)."""
+    return _KIND_ALIASES.get(want.lower().strip(), frozenset({want.lower()}))
+
+
+def _is_guest(eid: str, props: dict | None = None) -> bool:
+    """THE GUEST FLAVOR (the two-universes datum): an eid that names a
+    FOREIGN namespace (entity::<x>::, episodic::) is a guest -- the
+    pull lane's imported items; the seat's locals are membrane::-*.
+    The props' explicit flags (guest/imported_by) second it."""
+    if eid.startswith(MEMBRANE_NS):
+        if props and (props.get("guest") or props.get("imported_by")):
+            return True
+        return False
+    if eid.startswith("entity::") or eid.startswith("episodic::"):
+        return True
+    return bool(props and (props.get("guest") or props.get("imported_by")))
+
 
 # ---- the grammar ------------------------------------------------------------
 def parse(q: str) -> list[list[tuple[str, str]]]:
@@ -80,9 +127,13 @@ def _matches(est, ent, verb: str, val: str, near_fn=None) -> bool:
         want = val.strip().removesuffix("/*").removesuffix(":*").removesuffix("*").rstrip(":")
         if not want:
             return True
-        k = _kind_of(eid)
+        fam = _kind_family(want)
+        k = _kind_of(eid).lower()
         cls = str(ent.cls or "").lower()
-        return k == want.lower() or cls == want.lower()
+        return k in fam or cls in fam
+    if verb == "guest":
+        want = val.strip().lower() in ("true", "yes", "1", "only")
+        return _is_guest(eid, props) == want
     if verb in ("name~", "name_prefix"):
         pref = val.strip().lower()
         return pref in eid.lower() or pref in str(
@@ -104,12 +155,19 @@ def _matches(est, ent, verb: str, val: str, near_fn=None) -> bool:
 # ---- the engine ---------------------------------------------------------------
 def run(est, q: str, k: int = 20, count: bool = False,
         near_fn=None) -> list[dict] | str:
-    """Compile + run; rows (the render) or the bare count string."""
+    """Compile + run; rows (the render) or the bare count string.
+    THE UNIVERSE PARTITION (the two-universes datum): a guest (the
+    pull lane's foreign-namespace eids) is INVISIBLE unless the query
+    asks for it (-- guest:true / any explicit guest term) -- the
+    surfaces stop disagreeing because each query's universe is named."""
     blocks = parse(q)
+    asks_guests = any(v == "guest" for terms in blocks for v, _ in terms)
     rows: list[dict] = []
     total = 0
     for ent in list(est.docs.values()):
         props = ent.properties or {}
+        if not asks_guests and _is_guest(ent.eid, props):
+            continue
         hit = False
         for terms in blocks:
             if all(_matches(est, ent, v, val, near_fn) for v, val in terms):

@@ -6198,6 +6198,11 @@ def main() -> None:
         from .substrate import _origin_tag
         srv.entity_store = EntityStore(path=str(_wdir / "entities.json"),
                                        origin=_origin_tag(args.field))
+        # THE SEAT'S ROOT (the stale-route retire's reference): the
+        # start folder = the field path's resolved parent, or its
+        # parent when the parent IS .membrane
+        srv.entity_store.root = str(_wdir.parent) \
+            if _wdir.parent.name == ".membrane" else str(_wdir)
         # THE MODEL'S EVENT POOL (the reactive layer's lane): the watch
         # fires, the script errors/overruns, the peer misses -- the
         # loops' reads land here; the store's watch lanes put through
