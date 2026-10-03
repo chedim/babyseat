@@ -693,6 +693,21 @@ class EntityField:
             self.b.upsert_multi("entity_states", {
                 self._state_key(e): self._states[e].to_doc(self.origin)
                 for e in self._dirty if e in self._states})
+            # THE FIELD-WATCH INTAKE (the model's filters over the
+            # field): the dirty pass IS the event source -- each
+            # changed entity's watch_fields check + the gravity/
+            # freeze gate live here ($0: reads the stamps).
+            try:
+                from .night import note_field_change
+                _store = getattr(self, "_est_sink", None)
+                if _store is not None:
+                    for e in list(self._dirty):
+                        _ent = _store.docs.get(e)
+                        if _ent is not None:
+                            note_field_change(getattr(_store, "_srv",
+                                                      None), _store, _ent)
+            except Exception:
+                pass
             self._dirty.clear()
         if self._deltas:
             self.b.upsert_multi("entity_deltas", self._deltas)

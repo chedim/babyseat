@@ -1129,6 +1129,171 @@ def entity_melted(props) -> bool:
         return True
     return time.time() - ts >= HEAT_MELT_S and \
         not entity_frozen(props)
+
+
+# ---- THE FIELD-WATCH LANE (the model's filters over the field) --------
+# The model plants up to WATCH_FIELDS_CAP filters per entity
+# (entity_edit watch_fields=[{verb, arg}]); the field's flush sweeps
+# them as state changes land; a crossing delivers ONE 'field:changed'
+# event to the ordinary pool (the drainer admits it like any fire).
+# THE GRAVITY'S GROUPING: a hot entity's suppressed changes accumulate
+# into one burst event (n_changes, span) -- delivered on the heat's
+# subsidence or WF_MAX_LATENCY_S; frozen filters pause entirely.
+# VERBS (fixed; the entity's OWN field geometry only):
+#   pos(s)  -- chord distance from the LAST STAMPED position > arg
+#   align(f)-- coherence/net-align BELOW arg (crossing down)
+#   vel(v)  -- ring_velocity OVER arg (crossing up)
+WATCH_FIELDS_CAP = 3
+WATCH_FIELDS_VERBS = frozenset(("pos", "align", "vel"))
+WF_MAX_LATENCY_S = 120.0
+WF_BURST_KEY = "wf_burst"          # props[WF_BURST_KEY] = {n, since}
+
+
+def edit_watch_fields(est, eid: str, filters) -> dict:
+    """THE MODEL'S PLANT (entity_edit watch_fields=): a list of
+    {verb, arg} filters (cap 3, verbs fixed). Empty list CLEARS."""
+    ent = (est.docs or {}).get(eid)
+    if ent is None:
+        return {"ok": False, "error": f"no entity: {eid}"}
+    if filters is None:
+        return {"ok": False, "error": "watch_fields required"}
+    if not isinstance(filters, list):
+        return {"ok": False, "error": "watch_fields must be a list"}
+    if len(filters) > WATCH_FIELDS_CAP:
+        return {"ok": False,
+                "error": f"cap {WATCH_FIELDS_CAP} filters per entity "
+                         f"(got {len(filters)}); drop one first"}
+    clean = []
+    for f in filters[:WATCH_FIELDS_CAP]:
+        if not isinstance(f, dict):
+            return {"ok": False, "error": "each filter is {verb, arg}"}
+        verb = str(f.get("verb") or "").strip().lower()
+        if verb not in WATCH_FIELDS_VERBS:
+            return {"ok": False,
+                    "error": f"unknown verb {verb!r} (the field's "
+                             f"verbs: pos, align, vel)"}
+        try:
+            arg = float(f.get("arg"))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": f"{verb}'s arg must be a number"}
+        clean.append({"verb": verb, "arg": arg})
+    props = ent.properties or {}
+    props["watch_fields"] = clean
+    props.pop("wf_stamp_pos", None)       # fresh stamps (re-arm)
+    props.pop("wf_stamp_align", None)
+    props.pop("wf_stamp_vel", None)
+    props.pop(WF_BURST_KEY, None)
+    ent.properties = props
+    est.upsert(ent, embedder=None)
+    return {"ok": True, "watch_fields": clean}
+
+
+def _field_filter_hits(ent, props) -> list[dict]:
+    """The filters that CROSS on this change (crossing semantics: fire
+    on the transition, re-arm on return). Stamps live in the props
+    (wf_stamp_<verb>); each verb's hit RE-STAMPS (the re-arm is the
+    return crossing)."""
+    hits = []
+    for f in (props.get("watch_fields") or [])[:WATCH_FIELDS_CAP]:
+        verb, arg = f["verb"], float(f["arg"])
+        stamp_k = f"wf_stamp_{verb}"
+        if verb == "pos":
+            import numpy as _np
+            pos = getattr(ent, "position", None)
+            stamp = props.get("wf_stamp_pos")
+            if pos is None or not stamp:
+                if pos is not None:
+                    props[stamp_k] = list(pos)
+                continue
+            d = float(_np.linalg.norm(
+                _np.asarray(pos, dtype=float) -
+                _np.asarray(stamp, dtype=float)))
+            if d > arg:
+                hits.append({"verb": "pos", "arg": arg, "dist": round(d, 4)})
+                props[stamp_k] = list(pos)
+        elif verb == "align":
+            v = float(props.get("coherence")
+                      or props.get("net_align") or 0.0)
+            stamp = props.get("wf_stamp_align")
+            if stamp is None:
+                props[stamp_k] = v
+                continue
+            if float(stamp) >= arg > v:     # crossed DOWN through the bar
+                hits.append({"verb": "align", "arg": arg, "now": v})
+            props[stamp_k] = v
+        elif verb == "vel":
+            v = float(props.get("ring_velocity") or 0.0)
+            stamp = props.get("wf_stamp_vel")
+            if stamp is None:
+                props[stamp_k] = v
+                continue
+            if float(stamp) <= arg < v:     # crossed UP through the bar
+                hits.append({"verb": "vel", "arg": arg, "now": v})
+            props[stamp_k] = v
+    return hits
+
+
+def note_field_change(srv, est, ent, change_ts: float | None = None) -> None:
+    """THE FLUSH'S INTAKE (called by the field's flush per dirty
+    entity): the filters check, the gravity/freeze gate decides, the
+    delivery is ONE 'field:changed' event (crossed filters riding it)
+    to the ordinary pool. Hot: accumulate the burst; frozen: pause;
+    the burst delivers on subsidence/melt/max-latency."""
+    if est is None or ent is None:
+        return
+    props = ent.properties or {}
+    if not props.get("watch_fields"):
+        return
+    now = change_ts if change_ts is not None else time.time()
+    heat = entity_heat(props)
+    frozen_ts = float(props.get("frozen_ts") or 0.0)
+    try:
+        _bar = float(os.environ.get("MEMBRANE_HEAT_FREEZE") or HEAT_FREEZE)
+    except (TypeError, ValueError):
+        _bar = HEAT_FREEZE
+    is_frozen = heat > _bar
+    if is_frozen:
+        if not frozen_ts:
+            props["frozen_ts"] = now        # the freeze stamps (visible)
+    elif frozen_ts:
+        props.pop("frozen_ts", None)        # the melt clears
+    # THE FILTERS RUN unless frozen (the stamps stay FRESH through a
+    # freeze -- the melt re-arms against its last pre-freeze stamp)
+    hits = [] if is_frozen else _field_filter_hits(ent, props)
+    burst = dict(props.get(WF_BURST_KEY) or {"n": 0, "since": now})
+    if not is_frozen:
+        burst["n"] = int(burst.get("n") or 0) + 1
+        burst["since"] = burst.get("since") or now
+    hot = heat > HEAT_COLD
+    latency_ok = (now - float(burst.get("since") or now)) >= WF_MAX_LATENCY_S
+    deliver = bool(hits or int(burst["n"]) > 1) and (
+        (not hot and not is_frozen)      # cold: deliver immediately
+        or latency_ok                    # the forever-hot covenant: the
+                                         # burst delivers at max latency
+    )
+    if is_frozen and not latency_ok:
+        props[WF_BURST_KEY] = burst
+        ent.properties = props
+        return
+    if not deliver:
+        props[WF_BURST_KEY] = burst
+        ent.properties = props
+        return
+    # THE DELIVERY: one event, the burst's grouping honest
+    n = int(burst.get("n") or 1)
+    span = round(now - float(burst.get("since") or now), 2)
+    pool = getattr(srv, "_events_pool", None)
+    ev = {"kind": "field:changed",
+          "entity": ent.eid,
+          "verb": (hits[0]["verb"] if hits else "pos"),
+          "n_changes": max(n, len(hits) or 1),
+          "span_s": span,
+          "frozen": bool(is_frozen),
+          "ts": now}
+    if pool is not None:
+        pool.put(ev)
+    props.pop(WF_BURST_KEY, None)         # the burst resets
+    ent.properties = props
 # The watch trigger's own, gentler default: a 60s cooldown would make a
 # watcher a per-minute organ -- dead for the thing it exists for. 5s
 # coalesces file churn while staying responsive; the real flood guards

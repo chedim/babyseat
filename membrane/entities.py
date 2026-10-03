@@ -2294,6 +2294,16 @@ class EntityStore(MultiParentOps, TimelineOps):
             return f"the sensor {val}"
         return val or key
 
+    def edit_watch_fields(self, eid: str, filters) -> dict:
+        """THE FIELD-WATCH PLANT (the model's cap-3 filters over the
+        entity's own field state -- the grammar lives in night.py;
+        the verbs are pos/align/vel, crossing semantics)."""
+        from .night import edit_watch_fields as _ewf
+        try:
+            return _ewf(self, eid, filters)
+        except Exception as e:
+            return {"ok": False, "error": str(e)[:120]}
+
     def watch_track(self, key: str, boundary: str = "",
                     label: str = "") -> dict:
         """Plant a banner track: the entity's live safe-cell count renders

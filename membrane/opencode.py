@@ -6203,6 +6203,12 @@ def main() -> None:
         # parent when the parent IS .membrane
         srv.entity_store.root = str(_wdir.parent) \
             if _wdir.parent.name == ".membrane" else str(_wdir)
+        # THE FIELD-WATCH WIRING (the change lane's intake): the
+        # field's flush reads the store as its sink (--est-sink) and
+        # the store carries the seat back (the pool lives on the seat)
+        srv.entity_store._srv = srv
+        if getattr(srv, "efield", None) is not None:
+            srv.efield._est_sink = srv.entity_store
         # THE MODEL'S EVENT POOL (the reactive layer's lane): the watch
         # fires, the script errors/overruns, the peer misses -- the
         # loops' reads land here; the store's watch lanes put through

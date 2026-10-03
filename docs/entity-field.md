@@ -273,3 +273,42 @@ sleeping script never reads hot). Effects, continuous:
 
 Knobs: `MEMBRANE_HEAT_COLD` (0.3), `MEMBRANE_HEAT_FREEZE` (1.5),
 `MEMBRANE_HEAT_MELT_S` (60), gravity ceiling ×8, churn half-life 20s.
+
+
+## The field-watch lane (2026-10-03): the entity watches itself
+
+The model plants up to **3 field-filters per entity** (`entity_edit` with
+`watch_fields=[...]`): the filters read the entity's OWN field state —
+never the incoming streams. Fixed verbs, model-defined args:
+
+| verb | arg | fires when |
+|---|---|---|
+| `pos` | sim distance | the position moved further than arg (chord distance from the last stamped position) |
+| `align` | floor | coherence/net-align crossed DOWN through the floor |
+| `vel` | speed | ring-velocity crossed UP past arg |
+
+**Crossing semantics**: one fire per transition; return re-arms (the
+stamps live in the entity's props — `wf_stamp_pos/align/vel`).
+
+The field's flush IS the event source: every dirty pass checks the
+filters and delivers ONE `field:changed` event (kind/entity/verb/
+n_changes/span) to the ordinary event pool — the drainer admits it like
+any watch fire (3 slots, the loops' turns, the verdict stamps
+`watch_last_decision`). The entity carries `change_script` — the reaction
+runs under the same engine covenants (0.25s budget, gravity, freeze,
+3-strikes); its verdict obeys the whitelist (position move, links for
+this lane, render).
+
+**Gravity's grouping**: a hot entity's changes do not each fire — they
+accumulate into a burst; when the heat subsides (or `WF_MAX_LATENCY_S`
+= 120s passes — a forever-hot entity delivers a grouped event every 2
+minutes, never silence), ONE event delivers (n_changes, span_s). Heat
+over the freeze bar (`MEMBRANE_HEAT_FREEZE`, default 1.5) freezes the
+filters entirely (`frozen_ts` stamped — visible in the entity's props);
+melt happens after `MEMBRANE_HEAT_MELT_S` (60s) under the bar, and the
+held burst delivers. Watching is the model's choice; the meter is the
+field's law: hot means slower, frozen means quiet, both visible.
+
+**Planting**: `entity_edit(eid, watch_fields=[{verb, arg}, ...])` —
+refuses a 4th filter, unknown verbs, non-numeric args; empty list
+clears. Attach/detach announce to the pool like every sensor's arming.
