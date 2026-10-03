@@ -84,11 +84,13 @@ class TestFileBackend(unittest.TestCase):
         be = self._be()
         be._last_flush = time.time()
         be.upsert("entity_states", "w:a", {"eid": "w:a"})
-        self.assertIn("entity_states", be._dirty)     # dirty, not written
-        self.assertFalse((be.dir / "entity_states.json").exists())
+        self.assertIn("entity_states", be._dirty)     # dirty (compaction debt)
+        # THE JOURNAL: the row is ALREADY durable (the upsert rode the
+        # jsonl immediately -- the snapshot era is over)
+        self.assertTrue((be.dir / "entity_states.jsonl").exists())
         be._last_flush = time.time() - 10.0           # the window passed
         be.upsert("entity_deltas", "d1", {"eid": "w:a", "seq": 2})
-        self.assertTrue((be.dir / "entity_deltas.json").exists())
+        self.assertTrue((be.dir / "entity_deltas.jsonl").exists())
         self.assertNotIn("entity_states", be._dirty)  # the flush took both
 
     def test_delete_is_persisted(self):

@@ -539,14 +539,29 @@ class FileBackend(MemBackend):
         # Same lesson MemBackend's scans learned: a shared set is only
         # safe under a lock.
         self._flush_lock = threading.RLock()
+        self._journal_count: dict[str, int] = {}
         self._flushing = False
-        self._last_bytes: dict = {}
         self._last_flush = time.time()
         self._load()
 
     def _load(self) -> None:
-        """Replay the log (torn finals skipped -- a kill mid-append) and
-        load the snapshots."""
+        """THE MIGRATION + REPLAY: a collection's .jsonl journal
+        replays (last-line-wins); a legacy .json snapshot (no journal)
+        loads AND MIGRATES on the first flush (the snapshot renamed
+        .migrated -- its bytes survive). The events lane keeps its own
+        log shape."""
+        # 1. the events log (the original pattern) + its snapshot migration
+        self._events_log = self.dir / "events.jsonl"
+        events_snap = self.dir / "events.json"
+        if events_snap.exists() and not self._events_log.exists():
+            try:
+                d = self._json.loads(events_snap.read_text())
+                with self._events_log.open("a") as fh:
+                    for k, doc in d.items():
+                        fh.write(self._json.dumps({"k": k, "d": doc}) + "\n")
+                events_snap.rename(events_snap.with_suffix(".json.migrated"))
+            except Exception:
+                pass
         if self._events_log.exists():
             with self._events_log.open() as fh:
                 for line in fh:
@@ -555,26 +570,76 @@ class FileBackend(MemBackend):
                     except Exception:
                         continue
                     k, d = row.get("k"), row.get("d")
-                    if k and isinstance(d, dict):
+                    if not k:
+                        continue
+                    if isinstance(d, dict):
                         self.colls["events"][k] = d
+                    else:
+                        self.colls["events"].pop(k, None)
+        # 2. EVERY OTHER collection: the journal replay + the legacy
+        #    snapshot as the seed
         colls = self.colls
         for coll in COLLECTIONS:
             if coll == "events":
                 continue
-            f = self.dir / f"{coll}.json"
-            if f.exists():
+            jf = self.dir / f"{coll}.jsonl"
+            sf = self.dir / f"{coll}.json"
+            if jf.exists():
+                with jf.open() as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            row = self._json.loads(line)
+                        except Exception:
+                            continue
+                        k, d = row.get("k"), row.get("d")
+                        if not k:
+                            continue
+                        if isinstance(d, dict):
+                            colls[coll][k] = d
+                        else:
+                            colls[coll].pop(k, None)
+            elif sf.exists():
                 try:
-                    colls[coll] = self._json.loads(f.read_text())
+                    colls[coll] = self._json.loads(sf.read_text())
+                    # THE MIGRATION: the snapshot is the seed -> the
+                    # journal REPLAYS from it (one line per row, right
+                    # now) so the journal is the only truth; the
+                    # snapshot retires on the first flush (renamed
+                    # .migrated)
+                    with self._journal_path(coll).open("a") as fh:
+                        for k, d in colls[coll].items():
+                            fh.write(self._json.dumps(
+                                {"k": k, "d": d}) + "\n")
+                        self._journal_count[coll] = len(colls[coll])
                 except Exception:
                     pass
 
+    def _journal_path(self, coll: str) -> Path:
+        return self.dir / f"{coll}.jsonl"
+
     def _append(self, key, doc) -> None:
+        """The events lane's original append (the jsonl journal)."""
         try:
             with self._events_log.open("a") as fh:
                 fh.write(self._json.dumps({"k": key, "d": doc}) + "\n")
         except Exception as e:
             print(f"[efield] event append failed ({e}); RAM carries",
                   file=sys.stderr)
+
+    def _journal_append(self, coll: str, key: str, doc: dict,
+                        tombstone: bool = False) -> None:
+        """ONE jsonl line per write (last-line-wins; a tombstone when
+        the doc is None). The write of a changed row only."""
+        try:
+            row = {"k": key, "d": None if tombstone else doc}
+            with self._journal_path(coll).open("a") as fh:
+                fh.write(self._json.dumps(row) + "\n")
+        except Exception as e:
+            print(f"[efield] {coll} journal append failed ({e}); RAM "
+                  "carries", file=sys.stderr)
 
     def _touch(self, coll: str) -> None:
         with self._flush_lock:
@@ -586,46 +651,67 @@ class FileBackend(MemBackend):
 
     def upsert(self, coll: str, key: str, doc: dict) -> None:
         super().upsert(coll, key, doc)
-        if coll == "events":
-            self._append(key, doc)
+        with self._ram_lock:
+            if coll == "events":
+                self._append(key, doc)
+            else:
+                self._journal_append(coll, key, doc)
+                self._journal_count[coll] = \
+                    self._journal_count.get(coll, 0) + 1
         self._touch(coll)
 
     def upsert_multi(self, coll: str, docs: dict) -> None:
         super().upsert_multi(coll, docs)
-        if coll == "events":
-            for k, d in docs.items():
-                self._append(k, d)
+        with self._ram_lock:
+            if coll == "events":
+                for k, d in docs.items():
+                    self._append(k, d)
+            else:
+                for k, d in docs.items():
+                    self._journal_append(coll, k, d)
+                self._journal_count[coll] = \
+                    self._journal_count.get(coll, 0) + len(docs)
         self._touch(coll)
 
     def insert_if_absent(self, coll: str, key: str, doc: dict) -> bool:
         added = super().insert_if_absent(coll, key, doc)
         if added:
-            if coll == "events":
-                self._append(key, doc)
+            with self._ram_lock:
+                if coll == "events":
+                    self._append(key, doc)
+                else:
+                    self._journal_append(coll, key, doc)
+                    self._journal_count[coll] = \
+                        self._journal_count.get(coll, 0) + 1
             self._touch(coll)
         return added
 
     def cas_update(self, coll: str, key, fn):
         new = super().cas_update(coll, key, fn)
-        self._touch(coll)
+        with self._ram_lock:
+            if new is not None and coll != "events":
+                self._journal_append(coll, key, new)
+                self._journal_count[coll] = \
+                    self._journal_count.get(coll, 0) + 1
+            self._touch(coll)
         return new
 
     def delete(self, coll: str, key: str) -> None:
         super().delete(coll, key)
+        with self._ram_lock:
+            self._journal_append(coll, key, None, tombstone=True)
+            self._journal_count[coll] = \
+                self._journal_count.get(coll, 0) + 1
         self._touch(coll)
 
     def flush(self) -> None:
-        """Write the dirty collections atomically; the events log is
-        compacted (not snapshotted -- it IS the event store).
-        THE WRITE BUDGET (the disk-full swirl): the seat's snapshots
-        were re-serialized on EVERY flush (sentences.json alone is
-        285MB -- a 6.9k field rewrites ~1GB per 2s-debounced flush,
-        GIL-held json.dumps, blocking every other thread; on a full
-        disk the write STALLS and the stall wedges the turn's tools).
-        Now: one flush in flight (_flushing), and each collection is
-        re-written only when its DATA changed (a content hash per
-        collection -- the identical snapshot never hits the disk
-        twice)."""
+        """THE JOURNAL flush: nothing re-serializes wholesale — every
+        collection is an append-only jsonl (the write rode the upsert);
+        the flush = the COMPACTOR: a collection whose journal lines
+        out-carry its live rows (>=2x) rewrites one line per live row
+        (atomic tmp + replace), and the LEGACY .json snapshot (a
+        migrated seed) is retired on the first flush (renamed
+        .migrated, its bytes safe). One flush in flight."""
         with self._flush_lock:
             if self._flushing:
                 return
@@ -636,43 +722,49 @@ class FileBackend(MemBackend):
         try:
             self.dir.mkdir(parents=True, exist_ok=True)
             for coll in todo:
-                if coll == "events":
-                    self._compact_events()
-                    continue
-                f = self.dir / f"{coll}.json"
-                tmp = f.with_suffix(".json.tmp")
-                try:
-                    with self._ram_lock:
-                        data = self._json.dumps(self.colls.get(coll, {}))
-                    if self._same_bytes(coll, data):
-                        continue        # unchanged: the disk keeps its copy
-                    tmp.write_text(data)
-                    tmp.replace(f)
-                except Exception as e:
-                    print(f"[efield] {coll} snapshot failed ({e}); RAM "
-                          "carries", file=sys.stderr)
+                self._compact_journal(coll)
+                # THE LEGACY SNAPSHOT RETIRE (the one-time migration):
+                sf = self.dir / f"{coll}.json"
+                jf = self._journal_path(coll)
+                if sf.exists() and jf.exists():
+                    sf.rename(sf.with_suffix(".json.migrated"))
         finally:
             with self._flush_lock:
                 self._flushing = False
 
-    def _same_bytes(self, coll: str, data: str) -> bool:
-        """The content hash (the no-change skip): True when the last
-        WRITTEN snapshot's bytes hash equals this one's.
-        BOOT NOTE: the first flush after boot re-writes (no cached
-        hash) -- honest, one disk pass per collection per boot."""
-        import hashlib as _hl
-        h = _hl.sha256(data.encode()).digest()[:16]
-        if self._last_bytes.get(coll) == h:
-            return True
-        self._last_bytes[coll] = h
-        return False
-        import hashlib as _hl
-        h = _hl.sha256(data.encode()).digest()[:16]
-        self._last_bytes.setdefault(coll, None)
-        if self._last_bytes.get(coll) == h:
-            return True
-        self._last_bytes[coll] = h
-        return False
+    def _compact_journal(self, coll: str) -> None:
+        """THE GC (per collection): journal lines > 2x live rows -> one
+        line per live row (atomic tmp + replace). Deletes tombstone
+        (the replay pops); compaction is the replay's friend. $0 when
+        the journal is young."""
+        with self._ram_lock:
+            live = self.colls.get(coll, {})
+            n_live = len(live)
+            n_lines = int(self._journal_count.get(coll, 0))
+            if not n_lines:
+                # unknown count (e.g. the events lane never bumps): read
+                # the journal's own size (the honest count)
+                try:
+                    with self._journal_path(coll).open() as fh:
+                        n_lines = sum(1 for _ in fh)
+                except FileNotFoundError:
+                    return
+                except Exception:
+                    n_lines = n_live + 1    # compact (safe direction)
+            if n_lines <= 2 * n_live:
+                return
+            rows = [(k, dict(d)) for k, d in live.items()]
+            jpath = self._journal_path(coll)
+        tmp = jpath.with_suffix(".jsonl.tmp")
+        try:
+            with tmp.open("w") as fh:
+                for k, d in rows:
+                    fh.write(self._json.dumps({"k": k, "d": d}) + "\n")
+            tmp.replace(jpath)
+            self._journal_count[coll] = len(rows)
+        except Exception as e:
+            print(f"[efield] {coll} journal compaction failed ({e}); the "
+                  "journal carries", file=sys.stderr)
 
     def _compact_events(self) -> None:
         """The log's GC: when the appended writes out-carry the live
