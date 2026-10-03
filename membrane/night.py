@@ -382,6 +382,12 @@ def run_scripted_entities(fld, est, mem=None, now: float | None = None,
             every = max(1, int(every))
         except (TypeError, ValueError):
             every = SCRIPT_DEFAULT_EVERY_N
+        # THE GRAVITY READ (the heat meter's third consumer): hot
+        # entities' nudges defer more passes (the effective every_n).
+        try:
+            every = effective_tick_every(props, every)
+        except Exception:
+            pass
         if not force:
             slot = (hash(eid) % max(every, 1))
             if pass_no % max(every, 1) != slot % max(every, 1):
@@ -1004,6 +1010,125 @@ _SCRIPT_TIMEOUTS = {"consolidation": SCRIPT_TIMEOUT_S,
                     # LRU (watch_agents 5s) paces, this budget bounds
                     "getter": 1.0}
 _SCRIPT_COOLDOWN_DEFAULT_S = 60.0
+
+# ---- THE HEAT METER (the gravity limiter's one measure) ---------------
+# Two signals, both $0, both already collected:
+# - FIELD CHURN: the entity's state-update rate (the field's flush
+#   stamps last_ts per change) -- EMA'd, half-life HEAT_HALF_LIFE_S.
+# - SCRIPT CPU: the entity's OWN scripts' process_time per run -- the
+#   wall lie (a sleeper) never counts (the operator's parenthetical).
+# entity_heat = max of the two, each normalized against its own cap
+# (churn vs 1 update/s, cpu vs the kind's budget) -- 0..inf with both
+# floors comparable. Gravity (1 -> x8) stretches the entity's OWN
+# cadences; freeze pauses the field-watches (the lane's covenant).
+HEAT_CHURN_CAP_S = 1.0        # 1 change/s = heat churn 1.0
+HEAT_CPU_CAP_S = 0.25         # the tick budget = the CPU cap's floor
+HEAT_HALF_LIFE_S = 20.0
+HEAT_GRAVITY_MAX = 8.0        # the stretch ceiling
+HEAT_COLD = float(os.environ.get("MEMBRANE_HEAT_COLD") or 0.3)
+HEAT_FREEZE = float(os.environ.get("MEMBRANE_HEAT_FREEZE") or 1.5)
+HEAT_MELT_S = float(os.environ.get("MEMBRANE_HEAT_MELT_S") or 60.0)
+
+
+def _heat_ema(old: float, new: float, dt: float, half_life: float
+              = HEAT_HALF_LIFE_S) -> float:
+    """The decayed EMA: the new sample lands, the old decays by
+    half-life (a fast entity's history fades in ~a minute)."""
+    import math as _m
+    decay = 0.5 ** (max(0.0, dt) / max(0.001, half_life))
+    return old * decay + new * (1.0 - decay)
+
+
+def note_script_cpu(est, eid: str, cpu_ms: float, wall_ms: float = 0.0,
+                    ts: float | None = None) -> None:
+    """The CPU sample lands (from _run_script_locked's exec wrap): the
+    entity's script_cpu_ema_ms EMA's the honest CPU (a sleeper's wall
+    never counts). The store's RAM doc only -- the heat is seat-local
+    (never a couchbase write)."""
+    if est is None or eid is None:
+        return
+    ent = (est.docs or {}).get(eid)
+    if ent is None:
+        return
+    ts = ts if ts is not None else time.time()
+    props = ent.properties or {}
+    old = float(props.get("script_cpu_ema_ms") or 0.0)
+    had_prior = "script_cpu_last" in props
+    old_ts = float(props.get("script_cpu_last") or ts)
+    dt = max(0.0, ts - old_ts)
+    # normalize to per-second cpu (the sample's rate, half-life decayed);
+    # a FIRST sample (no prior) lands directly (there's no history to
+    # decay against -- the meter can't read 0 forever)
+    rate = (cpu_ms / 1000.0) / max(0.05, min(dt, 30.0))
+    ema = (_heat_ema(old / 1000.0, rate, dt) if had_prior and dt > 0
+           else rate) * 1000.0
+    props["script_cpu_ema_ms"] = ema
+    props["script_cpu_last"] = ts
+    props["script_wall_last_ms"] = wall_ms   # the visible wall (the lie)
+    ent.properties = props
+
+
+def entity_heat(ent_or_props) -> float:
+    """The entity's heat (0..inf): the max of the chilled churn lane
+    and the script-CPU lane (each against its cap).
+    THE DECAY ON READ: the ema decays by the time since its last
+    sample's STAMP (silence cools the entity without a new sample --
+    the read is where the half-life lives)."""
+    props = (ent_or_props.properties or {}
+             if hasattr(ent_or_props, "properties") else ent_or_props or {})
+    import math as _m
+    # THE OVERRIDE PROP (the field's own meter may stamp entity_heat:
+    # an explicit value wins over the computed one -- the meter's
+    # write is the truth when it exists); the override decays too
+    # (by its own stamp's age -- the half-life's read).
+    ov = props.get("entity_heat")
+    last = float(props.get("heat_stamp_ts")
+                 or props.get("script_cpu_last") or 0.0)
+    dt = max(0.0, time.time() - last) if last else 0.0
+    decay = 0.5 ** (dt / max(0.001, HEAT_HALF_LIFE_S))
+    cpu = (float(props.get("script_cpu_ema_ms") or 0.0) / 1000.0) * decay
+    cpu_h = cpu / max(0.05, HEAT_CPU_CAP_S)
+    churn = float(props.get("churn_ema") or 0.0) / max(0.05, HEAT_CHURN_CAP_S)
+    computed = max(cpu_h, churn)
+    return float(ov) * decay if ov is not None else computed
+
+
+def tick_gravity(props) -> float:
+    """The stretch multiplier (1..HEAT_GRAVITY_MAX): continuous, the
+    cold bar floors it at 1."""
+    h = entity_heat(props)
+    if h <= HEAT_COLD:
+        return 1.0
+    g = 1.0 + (h - HEAT_COLD) * 3.0
+    return float(min(HEAT_GRAVITY_MAX, g))
+
+
+def effective_tick_every(props, authored: int) -> int:
+    """The cadence the tick pass uses: authored x gravity, never below
+    the authored (gravity only stretches)."""
+    return max(int(authored or 1),
+               int(round(int(authored or 1) * tick_gravity(props))))
+
+
+def entity_frozen(props) -> bool:
+    """The freeze bar: over HEAT_FREEZE => the field-watches pause.
+    The bar reads the env LIVE (the operator's knob turns mid-flight;
+    a module constant would need a restart)."""
+    try:
+        bar = float(os.environ.get("MEMBRANE_HEAT_FREEZE") or HEAT_FREEZE)
+    except (TypeError, ValueError):
+        bar = HEAT_FREEZE
+    return entity_heat(props) > bar
+
+
+def entity_melted(props) -> bool:
+    """The melt gate: the frozen_ts sat longer than HEAT_MELT_S (the
+    cool window) AND the heat reads under the bar now."""
+    ts = float(props.get("frozen_ts") or 0.0)
+    if not ts:
+        return True
+    return time.time() - ts >= HEAT_MELT_S and \
+        not entity_frozen(props)
 # The watch trigger's own, gentler default: a 60s cooldown would make a
 # watcher a per-minute organ -- dead for the thing it exists for. 5s
 # coalesces file churn while staying responsive; the real flood guards
@@ -1169,6 +1294,16 @@ def _run_script_locked(srv, ent, trigger, code, props, now, is_cron,
         interval = max(_te_s, _te_hb if _te_hb > 1.0 else 0.0)
         if interval < 1.0:
             interval = DEFAULT_TICK_EVERY_S   # no authored cadence
+        # THE GRAVITY READ (the heat meter's consumer): the EFFECTIVE
+        # interval = authored x the entity's gravity -- the gate and
+        # the thinker's pacing agree on this one value (a stretched
+        # cron cannot wedge: the comparison uses the stretched bar).
+        est_for_heat = getattr(srv, "entity_store", None)
+        if est_for_heat is not None:
+            _live = est_for_heat.docs.get(ent.eid)
+            interval = effective_tick_every(
+                (_live.properties if _live is not None else props),  # noqa
+                authored=max(1, int(round(interval))))
         if not _te_s:
             props["tick_every_s"] = interval
         if last_started and last_ms >= interval:
@@ -1212,7 +1347,12 @@ def _run_script_locked(srv, ent, trigger, code, props, now, is_cron,
 
     def _runner():
         try:
+            # THE CPU METER (the heat lane's honest sample):
+            # process_time around the exec -- a sleeper's wall never
+            # counts; the churn does.
+            _c0 = time.process_time()
             box["out"] = run_entity_script(code, state, membrane=api)
+            box["cpu_s"] = time.process_time() - _c0
         except Exception as e:            # pragma: no cover - belt
             box["out"] = {"error": f"{type(e).__name__}: {e}"[:200]}
         finally:
@@ -1224,10 +1364,17 @@ def _run_script_locked(srv, ent, trigger, code, props, now, is_cron,
     _worker.start()
     if not _done.wait(timeout=max(0.05, timeout)):
         out = {"error": f"over-budget: abandoned after {timeout:g}s"}
+        box["cpu_s"] = timeout            # the abandoned slice counts
     else:
         out = box.get("out") or {}
     ms = (time.time() - _t0) * 1000.0
+    cpu_ms = max(box.get("cpu_s") or 0.0, 0.0) * 1000.0
     props["script_last_ms"] = ms
+    # THE HEAT SAMPLE LANDS (the meter's intake): the entity's CPU EMA
+    try:
+        note_script_cpu(est0, ent.eid, cpu_ms=cpu_ms, wall_ms=ms, ts=now)
+    except Exception:
+        pass
     est = getattr(srv, "entity_store", None)
     # THE SLOW-SUCCESS STRIKE: no error but WAY over budget (x4) = a
     # strike (the same 3-strikes lane; a wedging success is a wedge).

@@ -398,6 +398,15 @@ class Thinker:
                 every = max(1, int(props.get("tick_every") or 1))
             except (TypeError, ValueError):
                 every = 1
+            # THE GRAVITY READ (the heat meter's consumer): the pass
+            # paces by the EFFECTIVE interval (authored x gravity) --
+            # a hot entity's ticks space out; the authored cadence is
+            # the floor.
+            try:
+                from .night import effective_tick_every
+                every = effective_tick_every(props, every)
+            except Exception:
+                pass
             if beat % every:
                 continue
             from .night import run_entity_update_script, apply_entity_update
