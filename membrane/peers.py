@@ -19,6 +19,14 @@ connected seat; the model reads/posts via MCP.
 
 from __future__ import annotations
 
+import urllib.request as _urllib_request_ur
+
+
+def _urlopen(req, timeout):
+    """The ask's transport seam (the tests swap it; production runs
+    urllib)."""
+    return _urllib_request_ur.urlopen(req, timeout=timeout)
+
 import json
 import os
 import sys
@@ -294,7 +302,22 @@ class PeerSubstrate:
                 return []
         if out:
             return out
-        return self._presence_seats()
+        # THE LAN LANE (the zeroconf peers): the roster union's newest
+        # member -- mDNS finds the LAN's seats without couchbase.
+        try:
+            mdns = mdns_peers(getattr(self, "_zc", None))
+            presence = self._presence_seats()
+            by_seat: dict[str, dict] = {}
+            # mdns rows WIN the dedupe (the live browse is the
+            # freshest read of who is actually THERE now; presence is
+            # TTL-presumed life) -- dedupe by seat, one lane per seat
+            for m in mdns:
+                by_seat[str(m.get("seat") or "")] = m
+            for s in presence:
+                by_seat.setdefault(str(s.get("seat") or ""), s)
+            return list(by_seat.values())
+        except Exception:
+            return self._presence_seats()
 
     _PRESENCE_STALE_S = 600.0        # a quiet seat older than 10min is
                                      # presumed dead (TTL without TTLs)
@@ -337,15 +360,18 @@ class PeerSubstrate:
     @staticmethod
     def ask(peer: dict, situation: str, sim_min: float = 0.60,
             timeout: float = 20.0) -> dict | None:
-        """One live ask: GET http://127.0.0.1:<port>/membrane/ask?q=...
-        The slice-4 Peers.ask contract, verbatim (peer dicts from
-        livelist() carry 'port'; all failures degrade to None)."""
+        """One live ask: GET http://<host>:<port>/membrane/ask?q=...
+        The slice-4 Peers.ask contract; THE LAN REMOVAL (the '127.0.0.1
+        assumption' wall): host arrives via the peer dict
+        (mdns_peers/registry rows; default 127.0.0.1 -- the legacy
+        same-host calls byte-identical); all failures degrade None."""
         import urllib.parse
         import urllib.request
         q = urllib.parse.quote(situation[:400])
-        url = f"http://127.0.0.1:{int(peer.get('port', 0))}/membrane/ask?q={q}"
+        host = str(peer.get("host") or "127.0.0.1")
+        url = f"http://{host}:{int(peer.get('port', 0))}/membrane/ask?q={q}"
         try:
-            with urllib.request.urlopen(url, timeout=timeout) as r:
+            with _urlopen(req := urllib.request.Request(url), timeout) as r:
                 data = json.loads(r.read())
         except Exception:
             return None
@@ -428,3 +454,156 @@ class PeerSubstrate:
 def _timedelta(s: float):
     from datetime import timedelta
     return timedelta(seconds=s)
+
+# ---- the LAN lane (zeroconf/mDNS, the operator's 2026-10-02 ask) ----
+SERVICE_TYPE = "_membrane-proxy._tcp.local."
+MDNS_PEER_TTL_S = 60.0      # a browse entry's staleness cap
+
+try:
+    import zeroconf as _zc
+except Exception:
+    _zc = None              # import fails -> the lane is off (degrade)
+
+
+def lan_enabled() -> bool:
+    return os.environ.get("MEMBRANE_LAN", "1") not in ("0", "false", "off")
+
+
+def presence_txt(model: str, seat: str, port: int, docs: int = 0,
+                 branch: str = "", head: str = "",
+                 extra: dict | None = None) -> dict:
+    """THE TXT RECORD: the presence entity's PUBLIC fields only. THE
+    AUDIT: no absolute paths, no usernames, no message text -- only
+    what the presence entity publishes to the GLOBAL tier (a LAN seat
+    could have read them there anyway)."""
+    txt = {"model": (model or "")[:40],
+           "seat": (seat or "")[:64],
+           "port": str(int(port or 0)),
+           "docs": str(int(docs or 0)),
+           "branch": (branch or "")[:40],
+           "head": (head or "")[:12],
+           "proto": "membrane/1"}
+    if extra:
+        for k in ("ephemeral", "free_vram_gib"):
+            if k in extra:
+                txt[k] = str(extra[k])
+    return txt
+
+
+class MdnsAnnouncer:
+    """The seat's mDNS face: announceServiceInfo (SERVICE_TYPE, port,
+    the TXT props) on the boot + a re-announce beside the heartbeat.
+    A None/injected zc impl (the tests) or a missing zeroconf module
+    degrades the whole lane silently."""
+
+    def __init__(self, model: str, seat: str, port: int, docs: int = 0,
+                 branch: str = "", head: str = "", zc_impl=None,
+                 extra: dict | None = None):
+        self.port = int(port or 0)
+        self.model = model
+        self.seat = seat
+        self.zc = zc_impl if zc_impl is not None else (
+            _zc.Zeroconf() if _zc is not None and lan_enabled() else None)
+        self._info = None
+        self._txt = presence_txt(model, seat, port, docs, branch, head,
+                                 extra)
+
+    def _make_info(self):
+        props = dict(self._txt)
+        props["seen_ts"] = time.time()
+        if _zc is None or not hasattr(_zc, "ServiceInfo"):
+            # the injected/fake impl: a plain dict carries the
+            # properties (the fake's browse reads them)
+            return {"name": f"{self.seat}.{SERVICE_TYPE}",
+                    "port": self.port, "properties": props,
+                    "seen_ts": time.time()}
+        return _zc.ServiceInfo(SERVICE_TYPE,
+                               f"{self.seat}.{SERVICE_TYPE}",
+                               port=self.port,
+                               properties={k.encode(): v.encode()
+                                           for k, v in props.items()})
+
+    def announce(self) -> bool:
+        if self.zc is None:
+            return False
+        try:
+            info = self._make_info()
+            if info is None:
+                return False
+            self.zc.register_service(info)
+            self._info = info
+            return True
+        except Exception:
+            self.zc = None      # a raise mid-announce kills the lane
+            return False
+
+    def close(self) -> None:
+        try:
+            if self.zc is not None and self._info is not None:
+                self.zc.unregister_service(self._info)
+        except Exception:
+            pass
+
+
+def _int_ttl() -> int:
+    return 120
+
+
+def mdns_peers(zc_impl=None, now: float | None = None) -> list[dict]:
+    """The LAN's seats: browse the service type -> the roster rows
+    ({seat, port, model, docs, via: 'mdns'}); entries older than
+    MDNS_PEER_TTL_S (the caller's clock) drop (the GC is the clock's)."""
+    now = float(now if now is not None else time.time())
+    impl = zc_impl
+    if impl is None and _zc is not None and lan_enabled():
+        try:
+            impl = _zc.Zeroconf()
+        except Exception:
+            impl = None
+    if impl is None:
+        return []
+    out = []
+    try:
+        # BOTH shapes: a fake's browse() dict or a real ZC's get_service_info
+        found = {}
+        if hasattr(impl, "browse"):
+            found = impl.browse() or {}
+        out = []
+        for name, info in (found or {}).items():
+            txt = getattr(info, "properties", None) or \
+                (info.get("properties") if isinstance(info, dict) else None) \
+                or {}
+            def _s(k):
+                v = txt.get(k, b"")
+                return (v.decode() if isinstance(v, bytes) else str(v))
+            seat = _s("seat")
+            try:
+                port = int(_s("port") or 0)
+            except ValueError:
+                port = 0
+            seen_ts = getattr(info, "seen_ts", None)
+            if seen_ts is None and isinstance(info, dict):
+                seen_ts = info.get("seen_ts")
+            if seen_ts is not None and now - float(seen_ts) > MDNS_PEER_TTL_S:
+                continue            # stale: the clock GC'd it
+            out.append({"seat": seat, "port": port, "model": _s("model"),
+                        "docs": int(_s("docs") or 0), "via": "mdns"})
+        return out
+    except Exception:
+        return []
+
+
+def note_peer_miss(pool, peer: dict, situation: str,
+                   why: str | None) -> None:
+    """THE ESCALATION EVENT (the operator's 2026-10-02 ask): a peer ask
+    that found NOTHING is an event in the watch-events lane (the loops'
+    pool sees failed escalations); an ANSWERED ask is quiet (the answer
+    rode as context)."""
+    if pool is None or why is None:
+        return
+    pool.put({"kind": "peer-miss",
+              "peer": str((peer or {}).get("seat")
+                          or (peer or {}).get("port") or "?"),
+              "situation": str(situation or "")[:160],
+              "why": str(why)[:80],
+              "ts": time.time()})
