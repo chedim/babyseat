@@ -480,6 +480,23 @@ class _LoopDrainer:
                                       "session": sid, "ts": time.time()})
                         except Exception:
                             pass
+                    # THE INJECT (the operator's cosmetic-busy design):
+                    # a REACTED loop's line speaks into the OPERATOR'S
+                    # own session (the main chat): one message, as part
+                    # of the ongoing 'thinking loop' stream — the
+                    # client sees it without a new turn.
+                    if verdict == "reacted" and verdict_text:
+                        try:
+                            runner = getattr(self.srv, "_loop_runner",
+                                             None)
+                            _inj = getattr(self.srv, "_inject_to_primary",
+                                           None)
+                            if runner is not None and _inj is not None:
+                                _inj(runner, "[event-thinker] "
+                                             f"{ent or 'field'}: "
+                                             f"{verdict_text}")
+                        except Exception:
+                            pass
                 except Exception:
                     pass
                 finally:

@@ -5787,6 +5787,56 @@ def boot_entity(est, root: str, field: str, pid: int, argv: list,
     return ent
 
 
+def _inject_to_primary_impl(srv, runner, text):
+    """THE EVENT-THINKER INJECT (the operator's cosmetic-
+    busy design): a reacted loop's line lands in the
+    OPERATOR'S PRIMARY session (the newest user session on
+    the runner) as an ASSISTANT text part riding the
+    cosmetically-busy stream — the client sees it as part
+    of the ongoing 'thinking loop'. Never a new turn, never
+    a model call: a message-in-the-room, part-streamed."""
+    from .server import _gen_id
+    try:
+        sessions = runner.sessions.sessions
+        if not sessions:
+            return
+        # the primary session = the newest whose agent is
+        # build/plan (the operator's own chat), NOT a loop's
+        sids = [(ses.get("time", {}).get("updated") or 0,
+                 ses["id"])
+                for ses in sessions.values()
+                if str(ses.get("agent") or "build")
+                in ("build", "plan")]
+        if not sids:
+            return
+        _updated, sid = max(sids)
+        info = runner.sessions.get(sid)
+        if info is None:
+            return
+        now = int(time.time() * 1000)
+        pid = _gen_id("prt")
+        part = {"id": pid, "sessionID": sid, "type": "text",
+                "text": str(text)[:2000],
+                "time": {"start": now, "end": now}}
+        part["messageID"] = info.get("id", "") or sid
+        runner.messages.append_part(sid, part)
+        runner.hub.publish({"type": "message.part.updated",
+                            "part": part, "sessionID": sid})
+    except Exception:
+        pass
+
+
+def _install_inject(runner) -> None:
+    """THE INJECT'S BOOT WIRE: the drainer calls srv._inject_to_
+    primary(runner, line); the seam binds the boot's srv."""
+    srv = getattr(runner, "srv", None)
+    if srv is not None:
+        srv._inject_to_primary = (
+            lambda runner_arg, text: _inject_to_primary_impl(srv,
+                                                             runner_arg,
+                                                             text))
+
+
 def main() -> None:
     import argparse
     ap = argparse.ArgumentParser(
@@ -6950,6 +7000,12 @@ def main() -> None:
             # are real serve turns on their child sessions
             srv._loop_runner = runner
             runner.srv = srv               # /agent reads the live minds
+            # THE COSMETIC BUSY (the operator's design, armed): the
+            # event-thinkers' pool is live -- the operator's session's
+            # stream stays busy (their loop's end is internal; the
+            # thinkers' injects ride the stream).
+            runner.cosmetic_busy = True
+
             start(serve_port or 4096, surf_host, serve_su,
                   serve_sp, cfg, runner, sess_store, msg_store)
             native_up = True

@@ -261,6 +261,32 @@ class MessageStore:
                 self._flush_maybe()
         return row
 
+    def append_part(self, sid: str, part: dict) -> dict:
+        """THE INJECT'S STORE LANE (the event-thinkers' lines): ONE
+        part onto the session's LAST message (an assistant message
+        when present, else minted) — the row persists + the flush
+        follows the same cadence rules as the append's."""
+        with self._lock:
+            rows = self.msgs.get(sid) or []
+            row = rows[-1] if rows else None
+            if row is None or row["info"].get("role") != "assistant":
+                aid = _gen_id("msg")
+                info = {"id": aid, "sessionID": sid, "role": "assistant",
+                        "parentID": part.get("messageID") or "",
+                        "modelID": "membrane", "providerID": "membrane",
+                        "agent": "memory",
+                        "time": {"created": int(time.time() * 1000)}}
+                part = dict(part)
+                part["messageID"] = aid
+                row = {"info": info, "parts": [part]}
+                self.msgs.setdefault(sid, []).append(row)
+            else:
+                row["parts"] = list(row.get("parts") or []) + [part]
+            self._dirty_sessions = (self._dirty_sessions or set())
+            self._dirty_sessions.add(sid)
+            self._flush_maybe()
+        return row
+
     FLUSH_MIN_S = 5.0        # the disk is not the RAM: tool-state
                              # snapshots land per turn-end + cadence;
                              # a 24-round turn rewrote the 10MB file per
@@ -641,6 +667,9 @@ class TurnRunner:
         # the newest DRAIN_RESULT_MAX (read-after-256-turns is dead).
         self.DRAIN_MAX = 128
         self.DRAIN_RESULT_MAX = 256
+        self._agents: dict[str, str] = {}
+        self.cosmetic_busy = False
+        self._agents: dict[str, str] = {}
         self._drain_order: dict[str, float] = {}
     # the per-session FIFO: queued turns that WILL run (the drain),
     # their results keyed by queue id, and the drain threads
@@ -948,11 +977,37 @@ class TurnRunner:
                   f"{self.TOOL_DUMP_S}s; stack dump failed ({dump_e})",
                   file=sys.stderr)
 
+    def _cosmetic_busy(self, sid: str) -> bool:
+        """THE COSMETIC-BUSY DECIDER (the operator's design): the
+        operator's PRIMARY session (the main chat: agent build/plan)
+        never reports idle to the client — the thinking loop's end is
+        internal, the stream stays busy so a new message queues or
+        reopens a loop and the EVENT-THINKERS (the 3-loop pool) may
+        inject into this session at any moment, rendering as part of
+        the ongoing 'thinking loop'. The loop sessions' (watch:/_)
+        idle stays real (they're visible background work).
+        ``self.cosmetic_busy`` (the boot's flag) arms it — off by
+        default (the wire stays real for plain turns; the launch boot
+        arms it when the event-thinkers pool is live)."""
+        if not getattr(self, "cosmetic_busy", False):
+            return False
+        agent = (self._agents or {}).get(sid)
+        return agent in (None, "build", "plan")
+
     def _run_inner(self, sid: str, text: str, user_info: dict | None = None,
             user_parts: list | None = None) -> dict:
         self._aborting = getattr(self, "_aborting", None) or set()
         now = int(time.time() * 1000)
         self._busy[sid] = {"type": "busy"}
+        # THE AGENT REGISTRY (the cosmetic-busy decider's input): the
+        # session's agent read at the turn's start (the loops' child
+        # sessions carry agent=watch:/loop-N; the operator's chat
+        # carries build/plan)
+        try:
+            _sess = self.sessions.sessions.get(sid) or {}
+            self._agents[sid] = str(_sess.get("agent") or "build")
+        except Exception:
+            pass
         if user_info is None:
             user_info = {"id": _gen_id("msg"), "sessionID": sid,
                          "role": "user", "agent": "build",
@@ -1176,9 +1231,24 @@ class TurnRunner:
         self._busy.pop(sid, None)
         self._aborting.discard(sid)
         self.sessions.touch(sid)
-        self.hub.publish({"type": "session.status",
-                          "status": {"type": "idle"}, "sessionID": sid})
-        self.hub.publish({"type": "session.idle", "sessionID": sid})
+        # THE COSMETIC-BUSY COVENANT (the operator's design, 2026-10-03):
+        # the operator's MAIN session never shows 'idle' to the client —
+        # the thinking loop's END is membrane's internal fact, not a
+        # reported one. The machinery IS free (the guard released, the
+        # turn closed); the STREAM stays cosmetically busy so:
+        # (1) a new operator message either queues (loop running) or
+        # opens a fresh thinking loop (free) — the client sees one
+        # continuous session either way;
+        # (2) the EVENT-THINKERS (the 3-loop pool) may inject their
+        # lines INTO THIS SESSION at any moment — riding the same
+        # stream, rendering to the client as part of the 'thinking
+        # loop' regardless of whether the operator's own turn is live.
+        # The client's 'busy' is cosmetic; the seat's mind is real.
+        if not self._cosmetic_busy(sid):
+            self.hub.publish({"type": "session.status",
+                              "status": {"type": "idle"},
+                              "sessionID": sid})
+            self.hub.publish({"type": "session.idle", "sessionID": sid})
         self._touch_session(sid)
         return {"info": a_info, "parts": parts}
 
@@ -1187,7 +1257,8 @@ class _NL:
     def __enter__(self):
         return None
 
-    def __exit__(self, *a):
+
+def __exit__(self, *a):
         return False
 
 
