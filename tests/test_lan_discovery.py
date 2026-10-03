@@ -150,7 +150,9 @@ class TestRosterUnion(unittest.TestCase):
                             port=11500, model="local")
         # force the mdns lane into the substrate (the test's seam)
         r._zc = zc
-        r._reg = None                     # the registry is down
+        r._reg = object()                 # the registry is DOWN (a stub
+        r._reg_bucket = None              # whose query raises: never the
+        r._cluster = None                 # live couch, env-independent)
         r._presence_seats = lambda: [{"seat": "boat@agdroid",
                                       "port": 11503, "model": "old",
                                       "via": "presence"}]

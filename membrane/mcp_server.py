@@ -707,11 +707,14 @@ def tool_learn(args: dict, port: int) -> str:
         return ("Agent learn skipped by the field's own guards (dedup or "
                 "variety gate): nothing new written. "
                 + str(out.get("reason") or ""))
-    ex = out.get("exemplar") or {}
-    return (f"Learned as exemplar #{out.get('ex_idx')} "
-            f"(no model call). Field now {out.get('field_size')}.\n"
-            f"    situation: {ex.get('situation', '')[:280]}\n"
-            f"    response: {(ex.get('action') or '')[:280]}")
+    # THE RECEIPT (the '#None' defect): the route ships the note's
+    # EVENT number ('#N' -- the forget-path's handle) in ex_idx.
+    n = out.get("ex_idx")
+    head = (f"Learned as note #{n}" if n is not None
+            else "Learned as a note (number unavailable)")
+    return (f"{head} (no model call). Field now "
+            f"{out.get('field_size')} events.\n"
+            f"    note: {out.get('note', '')[:400]}")
 
 
 def tool_forget(args: dict, port: int) -> str:

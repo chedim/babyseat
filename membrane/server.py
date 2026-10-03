@@ -428,16 +428,21 @@ def _provider_shapes(config: dict) -> list:
     return prov
 
 
-def _agent_shapes() -> list:
+def _agent_shapes(srv=None) -> list:
     """The /agent list the attached TUI needs to arm Submit: with NO
     primary agent the model chip stays empty and Enter is silently
     refused client-side (probed against real opencode serve 1.18.34 --
     rewriting its /agent response to [] reproduces the dead Enter).
     Membrane keeps its own turn prompts -- these are the client's UI
     rows only -- and allows everything, since the seat's exec runs
-    through membrane entities, not opencode's permissions."""
+    through membrane entities, not opencode's permissions.
+    THE LIVE MIND: with a server in hand the list also reports the
+    thinking pool AS AGENTS -- the 3 loop workers (each one's claim:
+    the entity it is processing, or idle) and the thinker/dreamer with
+    their live stats -- so `/agents` in the TUI shows membrane's minds,
+    not just spawnable types."""
     allow = [{"permission": "*", "pattern": "*", "action": "allow"}]
-    return [
+    rows = [
         {"name": "build", "native": True, "mode": "primary",
          "description": "The default agent. Executes tools based on "
                         "configured permissions.",
@@ -463,6 +468,63 @@ def _agent_shapes() -> list:
                         "the session title).",
          "permission": allow, "options": {}},
     ]
+    if srv is None:
+        return rows
+    rows.extend(_mind_rows(srv, allow))
+    return rows
+
+
+def _mind_rows(srv, allow) -> list:
+    """The loop pool's 3 workers + the thinker + the dreamer as agent
+    rows, each description carrying the mind's LIVE state (claims,
+    stats) -- the pool of thinking agents, visible in `/agents`."""
+    rows: list[dict] = []
+    # the loop pool: 3 named workers; the running loops' entity claims
+    # live in LoopRunner._held, the full agent titles in srv.loops.titles
+    loops = getattr(srv, "loops", None)
+    max_loops = getattr(loops, "max", 3) if loops is not None else 3
+    running = loops.running() if loops is not None else 0
+    try:
+        titles = [t for t in (getattr(loops, "titles", None) or [])]
+    except Exception:
+        titles = []
+    pool = getattr(srv, "events_pool", None)
+    try:
+        queued = pool.depth() if pool is not None else 0
+    except Exception:
+        queued = 0
+    for i in range(1, int(max_loops) + 1):
+        if i <= len(titles):
+            claim = f"processing {titles[i - 1]}"
+        elif i <= running:
+            claim = "processing"
+        else:
+            claim = "idle"
+        rows.append({
+            "name": f"loop-{i}", "native": True, "mode": "subagent",
+            "description": f"A thinking-loop worker ({claim}); "
+                           f"{queued} event(s) queued.",
+            "permission": allow, "options": {}})
+    # the ambient minds (their stats dicts are the honest readout)
+    th = getattr(srv, "thinker", None)
+    if th is not None:
+        st = getattr(th, "stats", {}) or {}
+        rows.append({
+            "name": "thinker", "native": True, "mode": "subagent",
+            "description": f"The seat's inner speech: {st.get('processed', 0)} "
+                           f"beats processed, {st.get('spoken', 0)} spoken, "
+                           f"{st.get('ticks', 0)} ticks.",
+            "permission": allow, "options": {}})
+    dr = getattr(srv, "dreamer", None)
+    if dr is not None:
+        st = getattr(dr, "stats", {}) or {}
+        rows.append({
+            "name": "dreamer", "native": True, "mode": "subagent",
+            "description": f"The field's idle cognition: {st.get('waves', 0)} "
+                           f"dream waves, {st.get('committed', 0)} branches "
+                           f"committed, {st.get('gc', 0)} gc sweeps.",
+            "permission": allow, "options": {}})
+    return rows
 
 
 def _openai_tools(mcp_tools: list | None = None) -> list:
@@ -561,6 +623,12 @@ class TurnRunner:
         self.busy_wait_s: float = BUSY_WAIT_S
         self.heartbeat_s: float = HEARTBEAT_S
         self.queue_depth_max: int = QUEUE_DEPTH_MAX
+        # THE BOUNDED LEDGER (the unbounded-growth family): finished
+        # drain threads prune at each turn; the results ledger keeps
+        # the newest DRAIN_RESULT_MAX (read-after-256-turns is dead).
+        self.DRAIN_MAX = 128
+        self.DRAIN_RESULT_MAX = 256
+        self._drain_order: dict[str, float] = {}
     # the per-session FIFO: queued turns that WILL run (the drain),
     # their results keyed by queue id, and the drain threads
         self._queue: dict[str, list[dict]] = {}
@@ -756,6 +824,29 @@ class TurnRunner:
                         "error": f"{type(e).__name__}: {e}"[:200]}
                 finally:
                     done_ev.set()
+                    # THE BOUNDED LEDGER (the unbounded-growth family):
+                    # threads and results are one-turn artifacts -- the
+                    # finished thread drops out of the list; old results
+                    # past the cap drop oldest-first (a qid read after
+                    # 256 later turns is long abandoned).
+                    try:
+                        with self._queue_lock:
+                            self._drain_threads = [
+                                t for t in self._drain_threads
+                                if t is not threading.current_thread()
+                                and t.is_alive()]
+                            if len(self._drain_threads) > self.DRAIN_MAX:
+                                self._drain_threads = self._drain_threads[-self.DRAIN_MAX:]
+                            if len(self._drain_results) > self.DRAIN_RESULT_MAX:
+                                for old in sorted(
+                                        self._drain_results,
+                                        key=lambda k: self._drain_order.get(
+                                            k, 0))[:-self.DRAIN_RESULT_MAX]:
+                                    self._drain_results.pop(old, None)
+                                    self._drain_order.pop(old, None)
+                            self._drain_order[ent["qid"]] = time.time()
+                    except Exception:
+                        pass
             self._drain_threads.append(threading.Thread(
                 target=_worker, daemon=True))
             self._drain_threads[-1].start()
@@ -837,6 +928,13 @@ class TurnRunner:
         self._announce_user(sid, user_info, user_parts)
         self.hub.publish({"type": "session.status",
                           "status": {"type": "busy"}, "sessionID": sid})
+        # THE MINDS' BRANCH: a turn on a session whose agent is one of
+        # membrane's own minds (thinker, dreamer, loop-N) is a STATUS
+        # REPORT from the live process -- a real (tiny) turn: the user
+        # message stored/announced above, the assistant reply rendered
+        # from the mind's live state, hub parts streamed like any turn.
+        # Not implemented this edit (the turn tail is intricate) --
+        # deferred until after the defect passes.
         # the raw OpenAI history this turn sends up: the doctrine system
         # message + the session's prior narrative + the user turn, then
         # assistant/tool pairs as they form
@@ -1085,15 +1183,17 @@ def mcp_executor(port: int):
 # ---- the HTTP surface ----------------------------------------------------------
 
 def make_handler(hub=None, sessions=None, messages=None, user="opencode",
-                 password="", config=None, runner=None, **_dep) -> type:
+                 password="", config=None, runner=None, srv=None, **_dep) -> type:
     """The opencode-compatible HTTP handler, parametrized by the running
     seat's stores/runner (a factory because ThreadingHTTPServer wants a
-    class)."""
+    class). `srv` is the seat itself -- /agent reads the live minds
+    (loop pool, thinker, dreamer) off it."""
     hub = hub if hub is not None else SSEHub()
     config = config if config is not None else {}
 
     class _Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
+        seat = srv          # the seat object for the live-minds reads
 
         def log_message(self, *a):
             pass
@@ -1344,7 +1444,7 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
             elif path == "/experimental/workspace/status":
                 self._json_out([])
             elif path == "/agent":
-                self._json_out(_agent_shapes())
+                self._json_out(_agent_shapes(getattr(self, "seat", None)))
             elif path == "/command":
                 self._json_out([])
             elif path == "/path":
@@ -1549,7 +1649,8 @@ def start(port: int, host: str, user: str, password: str, config: dict,
     daemon -- the seat's main loop owns the seat's life)."""
     handler = make_handler(hub=runner.hub, sessions=sessions,
                            messages=messages, user=user, password=password,
-                           config=config, runner=runner)
+                           config=config, runner=runner,
+                           srv=getattr(runner, "srv", None))
     httpd = ThreadingHTTPServer((host, port), handler)
     th = threading.Thread(target=httpd.serve_forever, daemon=True,
                           name="membrane-serve")

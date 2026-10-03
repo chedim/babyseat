@@ -176,7 +176,14 @@ class MemBackend:
         q = np.asarray(vec, dtype=float)
         q = q / (np.linalg.norm(q) + 1e-12)
         keys, rows = [], []
-        for key, d in self._c(coll).items():
+        # THE SAME SNAPSHOT CONTRACT scan() carries: the iteration runs
+        # on a COPY taken under the RAM lock -- a concurrent upsert in
+        # the capture/loop lanes can't tear 'dictionary changed size
+        # during iteration' into a reader here (the related/graph path
+        # hit this live: recall() lands on this method every turn).
+        with self._ram_lock:
+            items = [(k_, dict(d)) for k_, d in self._c(coll).items()]
+        for key, d in items:
             v = d.get(field)
             if v is None or not matches(d, eq):
                 continue

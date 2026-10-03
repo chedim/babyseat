@@ -117,10 +117,14 @@ project:
   [Sharing a team field](#sharing-a-team-field-couchbase)).
 
 It then starts the OpenAI-compatible proxy on `:11500` (backend Ollama at
-`http://localhost:11434`, override `--backend`/`--model`) and opens opencode
-pointed at it. Every turn is captured into the field (discourse and
-observations as events), entities move as the conversation names them, and
-the model is grounded by what those entities hold —
+`http://localhost:11434`, override `--backend`/`--model`) and opens the
+opencode TUI **attached to membrane's own serve surface** (stage 3.5:
+membrane IS the server — sessions, turns, tool parts and their history live
+in membrane's stores beside the field; the TUI is a thin client). The
+surface's REST/SSE triple is printed at boot and the basic-auth pair lives
+in `.membrane/serve-auth.json`. Every turn is captured into the field
+(discourse and observations as events), entities move as the conversation
+names them, and the model is grounded by what those entities hold —
 [docs/entity-field.md](docs/entity-field.md) is the design doc.
 
 ### Daily workflow
@@ -230,6 +234,19 @@ The connection triple is printed at boot:
   there.
 - `--serve-port` (default 4096, walks up if busy) and `--listen` (the
   proxy, still never leaves 127.0.0.1) are independent.
+- **The minds are visible.** `/agents` (or `GET /agent`) lists the
+  ambient minds as agents: the three thinking-loop workers (`loop-1..3`,
+  each one's description carrying its live claim — the entity it is
+  processing — and the event queue's depth) plus `thinker` and `dreamer`
+  with their real counters (beats/spoken/ticks, waves/committed/gc).
+  The list is served fresh every call from the running process — nothing
+  cached, nothing faked.
+- **The loop queue is RAM-only and dies with the seat.** Watch events
+  waiting for a thinking loop live in memory (no persistence): a seat
+  restart drops the pending queue on purpose — stale reactive work
+  outliving its justification is a failure mode, and a clean restart is
+  the correct response. If you need an event to survive a restart, it
+  belongs in the field (`membrane: learn that ...`), not in the queue.
 - The old lane survives as an ablation: `MEMBRANE_LEGACY_SERVE=1` restores
   the previous design (launch an `opencode serve` child). A failed serve
   bind prints loudly and the seat keeps running without the room-facing

@@ -75,3 +75,21 @@ the opencode logs (the SLOW/PENDING tool warnings -- 37 in one boot).
   materializations` fails on the uncommitted planner WIP another
   seat left in the tree -- red with and without any of today's
   changes. Leave it to that workstream.
+## Guard audit (2026-10-03, the update session)
+
+The claim "all guards stay in the proxy" (server.py `mcp_executor`'s
+docstring) audited against the in-process dispatch path:
+
+- **Memory writes (learn/forget/entity_add/entity_edit/entity_remove/
+  intend/peer_post/...)**: every tool impl relays by HTTP to the proxy's
+  own routes (`_http(port, ...)`) — the guards (`agent_writes` master
+  switch, `_learn_refusal`, the dedup/variety gates) and the `_write_audit`
+  trail live at the routes. **Holds.**
+- **File tools (read/write/edit)**: deliberately NOT relayed — the FS
+  effect is primary and in-process; the entity capture (`_file_mint`
+  → POST /membrane/filetool) degrades to a warning when the proxy is
+  down (docstring contract). `_fpath` does not confine to the repo —
+  consistent with the seat's exec doctrine (entity scripts run
+  unsandboxed; engine budgets are the only bounds), not an oversight.
+- **Entity-query reads**: read-only relays; the field's own guards
+  (dust cap, dedup) sit below them.

@@ -1433,8 +1433,8 @@ def _codegraph_refresh(srv, g) -> None:
     rels = list(getattr(srv, "_cg_dirty", ()))
     if now - getattr(srv, "_cg_swept", 0.0) >= _CG_SWEEP_INTERVAL:
         try:
-            from .codegraph import stale_paths
-            rels += stale_paths(g)
+            from .codegraph_lane import locked_stale_paths
+            rels += locked_stale_paths(g)
         except Exception:
             pass
         srv._cg_swept = now
@@ -1443,7 +1443,8 @@ def _codegraph_refresh(srv, g) -> None:
         return
     try:
         from .codegraph import rebuild_paths
-        r = rebuild_paths(g, rels)
+        from .codegraph_lane import locked_rebuild
+        r = locked_rebuild(g, rels)
     except Exception as e:
         print(f"[opencode] codegraph rebuild failed: {_one_line(e)}",
               file=sys.stderr)
@@ -1517,7 +1518,7 @@ def _is_codegraph_query(q: str) -> bool:
 
 
 def _codegraph_answer(srv, q: str) -> str:
-    from .codegraph import query as cg_query
+    from .codegraph_lane import locked_query as cg_lquery
     g = _codegraph_graph(srv)
     if g is None:
         return ("[membrane-intercept] codegraph unavailable (graph failed "
@@ -1525,7 +1526,7 @@ def _codegraph_answer(srv, q: str) -> str:
     spec = _codegraph_wants(q) or "stats"
     return ("[membrane-intercept] codegraph (auto-refreshes: tool edits "
             "re-scan instantly, other changes within a 30s sweep):\n"
-            + cg_query(g, spec) + "\n\n" + _CODEGRAPH_MARKER)
+            + cg_lquery(g, spec) + "\n\n" + _CODEGRAPH_MARKER)
 
 
 def _watch_report_cmd(srv, q: str) -> str:
@@ -4437,7 +4438,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 and str(verdict.get("verdict", "")).startswith("escalate")):
             try:
                 for peer in srv.gpeers.livelist()[:4]:
-                    phit = srv.gpeers.ask(peer, query, timeout=5.0)
+                    phit = srv.gpeers.ask_peer(peer, query, timeout=5.0)
                     if phit and phit.get("block"):
                         verdict["peer_hit"] = {k: phit.get(k) for k in ("fid", "entities")}
                         up["messages"] = _inject(
@@ -5111,7 +5112,25 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         _write_audit(srv.membrane, {"event": "agent-learn", "origin": "mcp",
                                     "tag": "agent-note", "payload": _clip(payload, 400),
                                     "note": note.strip()})
-        self._json_out({"written": True, "note": note.strip()})
+        # THE RECEIPT (the '#None' defect): the note's event number (the
+        # forget-path's '#N' handle) + the field's live size -- the MCP
+        # tool renders from THESE keys, not the old exemplar shape.
+        import re as _re
+        _m = _re.search(r"#(\d+)", note)
+        fld = _efield_of(srv)
+        _live = 0
+        if fld is not None:
+            try:
+                _live = int(fld.b.count("events") or 0)
+            except Exception:
+                try:
+                    _live = sum(1 for _ in
+                                iter(fld.b.scan("events", None)))
+                except Exception:
+                    _live = 0
+        self._json_out({"written": True, "note": note.strip(),
+                        "ex_idx": int(_m.group(1)) if _m else None,
+                        "field_size": _live})
 
     def _membrane_forget(self) -> None:
         """POST /membrane/forget {spec}: '#N' / '3-7' forget those events
@@ -5517,15 +5536,17 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._json_err_raw(503, "codegraph unavailable (graph failed "
                                 "to build)"); return
         from .codegraph import query as cg_query, stats as cg_stats
-        text = cg_query(g, spec)
+        from .codegraph_lane import (locked_query as cg_lq,
+                                     locked_stats as cg_ls,
+                                     locked_symbol_keys as cg_keys)
+        text = cg_lq(g, spec)
         # the machine-readable half: the symbols the spec resolved to
         # (the entity-id chain: symbols:<qualname> is a plantable track)
         try:
-            s = cg_stats(g)
+            s = cg_ls(g)
         except Exception:
             s = {}
-        self._json_out({"text": text, "symbols": sorted(
-            (g.get("symbols") or {}).keys())[:400],
+        self._json_out({"text": text, "symbols": cg_keys(g)[:400],
             "n_symbols": s.get("n_symbols"),
             "n_files": s.get("n_files"),
             "shape": "symbols:<qualname> -- the entity key space "
@@ -6788,6 +6809,7 @@ def main() -> None:
             # THE LOOPS' RUNNER (the reactive layer): the loops' turns
             # are real serve turns on their child sessions
             srv._loop_runner = runner
+            runner.srv = srv               # /agent reads the live minds
             start(serve_port or 4096, surf_host, serve_su,
                   serve_sp, cfg, runner, sess_store, msg_store)
             native_up = True

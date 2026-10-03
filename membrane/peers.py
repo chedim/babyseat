@@ -56,6 +56,12 @@ class PeerSubstrate:
         self.port = port
         self.model = model
         self.heartbeat_s = heartbeat_s
+        # THE ROUTE HEALTH (P1, the stale-route defect): a peer whose
+        # ask failed recently (seat moved ports, seat down) drops from
+        # livelist for a cooldown window instead of being retried
+        # against the grave every turn; a successful ask clears it.
+        self._route_bad: dict[str, float] = {}
+        self._route_bad_s: float = 300.0
         # THE SEAT-FIRST FALLBACK (stage 5): when the ephemeral registry
         # is down or empty, the PRESENCE entities answer who's-alive.
         self._roster_fn = roster_fn
@@ -298,14 +304,21 @@ class PeerSubstrate:
                     out.append(dict(row))
                 self._op_ok()
             except BaseException:
+                # THE FALLBACK'S LIFE: a dead registry used to kill the
+                # read here ('return []') -- the LAN lanes below (mdns +
+                # presence) never ran. A registry failure is a lane
+                # failure, not a seat-read failure: fall through.
                 self._op_failed()
-                return []
+                out = []
         if out:
             return out
         # THE LAN LANE (the zeroconf peers): the roster union's newest
         # member -- mDNS finds the LAN's seats without couchbase.
         try:
-            mdns = mdns_peers(getattr(self, "_zc", None))
+            # the instance seam (a fake/_zc override wins; None falls
+            # through to the module's real lane)
+            mdns = mdns_peers(getattr(self, "_zc_impl", None)
+                              or getattr(self, "_zc", None))
             presence = self._presence_seats()
             by_seat: dict[str, dict] = {}
             # mdns rows WIN the dedupe (the live browse is the
@@ -321,6 +334,36 @@ class PeerSubstrate:
 
     _PRESENCE_STALE_S = 600.0        # a quiet seat older than 10min is
                                      # presumed dead (TTL without TTLs)
+
+    @staticmethod
+    def _route_key(peer: dict) -> str:
+        return f"{peer.get('host') or '127.0.0.1'}:{int(peer.get('port') or 0)}"
+
+    def note_route_bad(self, peer: dict) -> None:
+        """THE DEAD ROUTE: an ask (or reachability probe) that failed --
+        this route isn't retried for _route_bad_s (the stale-route
+        cooldown; a seat that RE-announces at a new port re-enters as a
+        fresh key)."""
+        self._route_bad[self._route_key(peer)] = time.time()
+
+    def note_route_good(self, peer: dict) -> None:
+        self._route_bad.pop(self._route_key(peer), None)
+
+    def _route_alive(self, peer: dict) -> bool:
+        ts = self._route_bad.get(self._route_key(peer))
+        return ts is None or time.time() - ts > self._route_bad_s
+
+    def livelist(self, exclude_self: bool = True) -> list[dict]:
+        """The slice-4 name for the live registry: every seat doc except
+        (optionally) this one, minus peers whose routes recently failed
+        (the stale-route cooldown). Empty on any failure (the
+        covenant)."""
+        seats = self.list_seats()
+        if exclude_self:
+            seats = [s for s in seats
+                     if str(s.get("port") or "") != str(self.port)]
+        seats = [s for s in seats if self._route_alive(s)]
+        return seats
 
     def _presence_seats(self) -> list[dict]:
         """The roster fallback: map the foreign presence entities into
@@ -348,14 +391,17 @@ class PeerSubstrate:
 
     # ---- the slice-4 Peers compat surface (opencode call sites written
     # against the JSONL substrate: livelist/ask/register(port, field)) ----
-    def livelist(self, exclude_self: bool = True) -> list[dict]:
-        """The slice-4 name for the live registry: every seat doc except
-        (optionally) this one. Empty on any failure (the covenant)."""
-        seats = self.list_seats()
-        if exclude_self:
-            seats = [s for s in seats
-                     if str(s.get("port") or "") != str(self.port)]
-        return seats
+    def ask_peer(self, peer: dict, situation: str, sim_min: float = 0.60,
+                 timeout: float = 20.0) -> dict | None:
+        """THE ROUTE-HEALTH AWARE ask: the static ask() with the outcome
+        recorded -- a dead route (the seat moved ports, seat down)
+        cooldowns off livelist; a hit clears the record."""
+        out = self.ask(peer, situation, sim_min=sim_min, timeout=timeout)
+        if out is None:
+            self.note_route_bad(peer)
+        else:
+            self.note_route_good(peer)
+        return out
 
     @staticmethod
     def ask(peer: dict, situation: str, sim_min: float = 0.60,

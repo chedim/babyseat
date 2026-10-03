@@ -67,7 +67,10 @@ def _resolve_file(path: str, graph: dict | None) -> str:
         p = p.lstrip("/")[len(root):]            # an absolute path into this repo
     low = p.lower()
     if graph:
-        files = graph.get("files") or {}
+        # THE SNAPSHOT (the 'dictionary changed size during iteration'
+        # crash): a copy — the codegraph lane mutates files in place
+        # from refresh threads while THIS resolve iterates it.
+        files = dict(graph.get("files") or {})
         if p in files:
             return "f:" + p
         hits = [f for f in files if f.lower() == low or f.lower().endswith("/" + low)]
@@ -84,7 +87,9 @@ def _resolve_file(path: str, graph: dict | None) -> str:
 def _resolve_symbol(sym: str, graph: dict | None) -> str:
     s = (sym or "").strip().strip("`'\"()")
     if graph:
-        defs = graph.get("defs") or {}
+        # THE SNAPSHOT: same contract as _resolve_file's copy above --
+        # defs mutates under rebuild_paths while this iterates.
+        defs = dict(graph.get("defs") or {})
         if s in defs:
             return "s:" + s
         by_qual = [d for d, info in defs.items() if info.get("qual") == s]
