@@ -1096,9 +1096,26 @@ def _run_script_locked(srv, ent, trigger, code, props, now, is_cron,
         last_started = float(props.get("script_last_started") or 0.0)
         last_ms = float(props.get("script_last_ms") or 0.0) / 1000.0
         try:
-            interval = max(1.0, float(props.get("tick_every_s") or DEFAULT_TICK_EVERY_S))
+            _te_s = float(props.get("tick_every_s") or 0.0)
         except (TypeError, ValueError):
-            interval = DEFAULT_TICK_EVERY_S
+            _te_s = 0.0
+        try:
+            _te_hb = float(props.get("tick_every") or 0.0)
+        except (TypeError, ValueError):
+            _te_hb = 0.0
+        # THE WIPE-PROOF READ (the boredom-poke wedge, earned 2026-10):
+        # a proxy re-seed wipes runtime props, so tick_every_s falls
+        # back to the 5.0s built-in and a ~7s cron not only overruns,
+        # it WEDGES: script_last_ms stays >= the interval until a run
+        # succeeds and no run ever succeeds (every fire stays blocked).
+        # tick_every (beats, ~1s each) survives the re-seed -- cross-read
+        # it as the seconds floor and write the normalized seconds back
+        # so this gate and every later reader converge on one value.
+        interval = max(_te_s, _te_hb if _te_hb > 1.0 else 0.0)
+        if interval < 1.0:
+            interval = DEFAULT_TICK_EVERY_S   # no authored cadence
+        if not _te_s:
+            props["tick_every_s"] = interval
         if last_started and last_ms >= interval:
             ev = {"kind": "script-cron-overrun", "entity": ent.eid,
                   "trigger": trigger,
