@@ -819,7 +819,9 @@ class TestHttpSurface(unittest.TestCase):
         # boot probes (captured via curl); a 404 leaves the TUI with
         # missing client-side state
         caps = {"experimental/capabilities":
-                {"backgroundSubagents": False},
+                # THE WATCH LOOPS: background subagents ON (the
+                # reactive layer's loop sessions render as agents)
+                {"backgroundSubagents": True},
                 "provider/auth": {},
                 "mcp": {},
                 "formatter": [],

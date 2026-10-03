@@ -358,7 +358,87 @@ class LoopRunner:
         with self._lk:
             return len(self._held)
 
-# ---- the ACTOR layer (the operator's 2026-10-02 design) --------------------
+# ---- the attach/detach events + the watch_ops CRUD -------------------------
+def notify_watch_attached(est, pool, entity_key: str, lane: str,
+                          detail=None) -> dict:
+    """THE ATTACH EVENT: a watch planted (any lane) = an event to the
+    model's pool (a sensor armed is a decision; the loops see it)."""
+    ev = {"kind": "watch-attached", "entity": entity_key, "lane": lane,
+          "detail": detail, "ts": time.time()}
+    if pool is not None:
+        pool.put(ev)
+    try:
+        ent = est.docs.get(entity_key) if hasattr(est, "docs") else None
+        if ent is None and hasattr(est, "find"):
+            ent = est.find(entity_key)
+        if ent is not None:
+            props = ent.properties or {}
+            props["watch_attached"] = {"lane": lane, "ts": ev["ts"]}
+            est.upsert(ent, embedder=None)
+    except Exception:
+        pass
+    return ev
+
+
+def notify_watch_detached(est, pool, keys, lane: str,
+                          detail=None) -> int:
+    """THE DETACH EVENT(s): one event per dropped watch key."""
+    n = 0
+    for key in list(keys or []):
+        ev = {"kind": "watch-detached", "entity": key, "lane": lane,
+              "detail": detail, "ts": time.time()}
+        if pool is not None:
+            pool.put(ev)
+        n += 1
+    return n
+
+
+WATCH_OPS_CAP = 8
+
+
+def edit_watch_ops(srv, ent, ops: list, replace: bool = False) -> dict:
+    """THE CRUD (entity_edit's watch_ops param lands here): append
+    (default) / replace (replace=True) / clear ([]); the CAP: an
+    entity carries <= 8 ops (the flood covenant -- the overflow is an
+    honest refusal). Fires the attach/detach events per op change."""
+    props = ent.properties or {}
+    pool = getattr(srv, "events_pool", None)
+    est = getattr(srv, "entity_store", None)
+    if not isinstance(ops, list):
+        return {"ok": False, "error": "watch_ops must be a list"}
+    ops = [o for o in ops if isinstance(o, dict)
+           and str(o.get("op") or "") in ("away", "near", "around")]
+    # THE EMPTY-LIST FORM IS THE CLEAR (an append of nothing is a
+    # user error anyway; an explicit [] means 'drop every op')
+    if not ops:
+        stored = est.docs.get(ent.eid)
+        if stored is not None:
+            (stored.properties or {}).pop("watch_ops", None)
+        props.pop("watch_ops", None)
+        ent.properties = props
+        if pool is not None:
+            notify_watch_detached(est, pool, [ent.eid], lane="watch_ops")
+        est.upsert(ent, embedder=None)
+        return {"ok": True, "watch_ops": None, "cleared": True}
+    cur: list[dict] = []
+    if not replace:
+        cur = [dict(o) for o in (props.get("watch_ops") or [])]
+    for o in ops:
+        if len(cur) >= WATCH_OPS_CAP:
+            return {"ok": False,
+                    "error": f"watch_ops cap ({WATCH_OPS_CAP}) reached; "
+                             "drop one (entity_edit watch_ops=[] clears)"}
+        cur.append(o)
+        if pool is not None:
+            notify_watch_attached(est, pool, ent.eid, lane="watch_ops",
+                                  detail=o)
+    props["watch_ops"] = cur
+    ent.properties = props
+    est.upsert(ent, embedder=None)
+    return {"ok": True, "watch_ops": cur}
+
+
+# ---- the actor layer (the operator's 2026-10-02 design) --------------------
 def plant_actor(est, endpoint: str, url: str = "") -> bool:
     """The endpoint actor: one entity per LLM endpoint (kind endpoint;
     the model's responses attach to the one that spoke)."""

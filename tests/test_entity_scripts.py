@@ -287,10 +287,11 @@ class TestTickScripts(unittest.TestCase):
 
 class TestScriptSpeak(unittest.TestCase):
     """THE VOICE (the operator's 'the word'): an entity script CAN speak
-    -- membrane.speak(text) -- but only through the SAME planner gate as
-    every other voice (the ActTable consults, stay-silent holds) and ONE
-    line per fire (the quota: a chatty script never spams the room).
-    No direct channel write exists on the script's side."""
+    -- membrane.speak(text) -- through the SAME planner queue as every
+    other voice. ONE line per fire (the quota: a chatty script never
+    spams the room). The planner gate is RETIRED (the operator's veto
+    ruling): a learned stay-silent loses the realization vote, it never
+    drops. No direct channel write exists on the script's side."""
 
     def _speakable_ent(self):
         srv = _Srv()
@@ -302,7 +303,7 @@ class TestScriptSpeak(unittest.TestCase):
         ent = est._resolve_spec("session:now")
         return srv, ent
 
-    def test_speak_enters_the_gated_queue_once_per_fire(self):
+    def test_speak_enters_the_gate_free_queue_once_per_fire(self):
         srv, ent = self._speakable_ent()
         ent.properties["mention_script"] = (
             "a = membrane.speak('the ladder moved')\n"
@@ -319,10 +320,10 @@ class TestScriptSpeak(unittest.TestCase):
         self.assertEqual(q[0]["text"], "the ladder moved")
         self.assertEqual(q[0]["kind"], "report-state")
 
-    def test_speak_stay_silent_still_governs(self):
-        """THE COVENANT HOLDS: the planner's stay-silent drops the
-        script's voice too (an unlearned/silent context says nothing;
-        the observe records the silence)."""
+    def test_silent_learning_loses_the_vote(self):
+        """THE COVENANT REWRITTEN: stay-silent no longer governs -- it
+        loses the vote and the script's voice LANDS (the observe
+        records the delivered act, not a silence)."""
         srv, ent = self._speakable_ent()
         ent.properties["mention_script"] = (
             "a = membrane.speak('loud')\nresult = {'render': f'gate {a}'}")
@@ -339,9 +340,10 @@ class TestScriptSpeak(unittest.TestCase):
         tbl = _SilentTable()
         srv._act_table = tbl
         out = run_entity_update_script(srv, ent, "mention")
-        self.assertEqual(out["render"], "gate False")
-        self.assertEqual(getattr(srv, "_speak_queue", []), [])
-        self.assertEqual(tbl.seen, ("boot|0.5", "stay-silent"))
+        self.assertEqual(out["render"], "gate True")
+        self.assertEqual(len(srv._speak_queue), 1)
+        self.assertEqual(srv._speak_queue[0]["text"], "loud")
+        self.assertEqual(tbl.seen, ("boot|0.5", "report-state"))
 
 
 if __name__ == "__main__":

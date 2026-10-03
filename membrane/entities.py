@@ -2017,8 +2017,28 @@ class EntityStore(MultiParentOps, TimelineOps):
                 ent.properties["watch"] = {
                     str(k)[:40]: (v if k == "glob" else str(v)[:120])
                     for k, v in list(watch.items())[:8]}
+                # THE SELECTOR ATTACH EVENT (the watch lane's covenant:
+                # the autonode's sensor armed = the loops see it)
+                try:
+                    from . import watch_agents as _wa
+                    pool = getattr(self, "_events_pool", None)
+                    if pool is not None:
+                        _wa.notify_watch_attached(self, pool, eid,
+                                                  lane="selector",
+                                                  detail=dict(ent
+                                                              .properties["watch"]))
+                except Exception:
+                    pass
             else:
                 ent.properties.pop("watch", None)
+                try:
+                    from . import watch_agents as _wa
+                    pool = getattr(self, "_events_pool", None)
+                    if pool is not None:
+                        _wa.notify_watch_detached(self, pool, [eid],
+                                                  lane="selector")
+                except Exception:
+                    pass
         # THE PROPERTY PATCH (the model's write path for goal state):
         # bounded like the script-patch contract -- <=16 keys, 2000-char
         # values, the engine's script_* keys and another entity's keys
@@ -2155,6 +2175,17 @@ class EntityStore(MultiParentOps, TimelineOps):
             rec.pop("exit", None)
             rec.pop("inside", None)
         self.tracks[key] = rec
+        # THE ATTACH EVENT (the watch covenant: a sensor armed is a
+        # decision the loops see) -- the pool rides the store when the
+        # proxy wires it
+        try:
+            from . import watch_agents as _wa
+            pool = getattr(self, "_events_pool", None)
+            if pool is not None:
+                _wa.notify_watch_attached(self, pool, key, lane="track",
+                                          detail={"boundary": boundary})
+        except Exception:
+            pass
         self._save_tracks()
         out = {"ok": True, "key": key, "label": rec["label"]}
         for k in ("enter", "exit", "inside"):
@@ -2244,12 +2275,20 @@ class EntityStore(MultiParentOps, TimelineOps):
 
     def unwatch_track(self, spec: str) -> int:
         """Remove tracks by key or kind prefix (e.g. 'files:router.py' or
-        'files:' for the whole kind)."""
+        'files:' removes all file tracks)."""
         spec = spec.strip().lower()
         hits = [k for k in list(self.tracks) if k == spec or k.startswith(spec)]
         for k in hits:
             del self.tracks[k]
         if hits:
+            # THE DETACH EVENT (the watch covenant)
+            try:
+                from . import watch_agents as _wa
+                pool = getattr(self, "_events_pool", None)
+                if pool is not None:
+                    _wa.notify_watch_detached(self, pool, hits, lane="track")
+            except Exception:
+                pass
             self._save_tracks()
         return len(hits)
 

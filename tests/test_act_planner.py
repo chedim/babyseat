@@ -1,13 +1,10 @@
-"""THE ACT PLANNER (the closed speech loop): speak() now CONSULTS the
-ActTable before queueing (the transition table's argmax selects the
-act; stay-silent vetoes), and the delivered batch's (sig, act) rides
-the next turn as the reinforcement label (the operator's reaction =
-the grade). The loop: observe -> consult -> reinforce."""
-
-import json
-import time
-import urllib.request
-from http.server import BaseHTTPRequestHandler, HTTPServer
+"""THE ACT PLANNER (the consult WITHOUT the veto -- the operator's
+ruling): speak() still consults the ActTable for the realization (the
+transition table's argmax selects the act), but a learned stay-silent
+no longer drops -- NOTHING is ever vetoed. The delivered batch's
+(sig, act) rides the next turn as the reinforcement label (the
+operator's reaction = the grade) -- the only label that ever accrues,
+because only delivered speech is graded."""
 
 from membrane.acts import ActTable
 from membrane.opencode import speak, drain_speech, _speak_block
@@ -20,13 +17,19 @@ class _Srv:
         self.peers = None
 
 
-def test_unlearned_context_stays_silent():
-    """The honest default: a never-seen context cluster says nothing."""
+def test_unlearned_context_still_speaks():
+    """THE RULING: an unlearned cluster's stay-silent select loses the
+    vote -- the message queues with the caller's kind and delivers."""
     srv = _Srv()
-    assert speak(srv, "hello") is False
-    assert drain_speech(srv) == []
-    # but the veto itself was observed (silence IS the label)
+    # untouched consult default (the unlearned cluster's argmax):
     assert srv._act_table.select("unknown") == "stay-silent"
+    assert speak(srv, "hello", kind="note") is True
+    msgs = drain_speech(srv)
+    assert len(msgs) == 1
+    assert msgs[0]["act"] == "note"
+    # and what the consult OBSERVES is the delivered act, never a
+    # silence: the row is fed by what actually went out.
+    assert srv._act_table.select("unknown") == "note"
 
 
 def test_learned_act_speaks_with_table_pick():
@@ -43,8 +46,8 @@ def test_learned_act_speaks_with_table_pick():
 
 
 def test_alert_kind_kept_when_table_agrees():
-    """Alerts propose their kind; an unlearned table vetoes, a matching
-    table keeps the alert act."""
+    """Alerts propose their kind; a table that lived this cluster
+    speaking keeps the alert act (the pick equals the kind)."""
     srv = _Srv()
     sig = "replay|0.9"
     srv._act_table.observe(sig, "serve-receipt")
@@ -54,16 +57,19 @@ def test_alert_kind_kept_when_table_agrees():
     assert drain_speech(srv)[0]["act"] == "serve-receipt"
 
 
-def test_vetoed_by_silent_learning():
-    """A cluster that LEARNED stay-silent keeps holding its tongue even
-    against the caller's proposed act."""
+def test_silent_learning_loses_the_vote():
+    """A cluster that LEARNED stay-silent still speaks (the veto is
+    retired): the learned silence just loses the realization vote, so
+    the message delivers with the CALLER'S kind."""
     srv = _Srv()
     sig = "field-only|0.7"
     srv._act_table.observe(sig, "stay-silent")
     srv._act_table.observe(sig, "stay-silent")
     srv._last_context_sig = sig
-    assert speak(srv, "chatter", kind="note") is False
-    assert drain_speech(srv) == []
+    assert speak(srv, "chatter", kind="note") is True
+    msgs = drain_speech(srv)
+    assert len(msgs) == 1
+    assert msgs[0]["act"] == "note"
 
 
 def test_reinforcement_label_rides_next_turn():

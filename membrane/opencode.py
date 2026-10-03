@@ -57,6 +57,7 @@ from .router import (EXPLORE_LANE, AUTO_CLOUD, AUTO_LOCAL, AUTO_LANES,
                      AUTO_ALIASES, LANE_TOKENS, normalize_lane,
                      Registry)
 from .watch import MAX_WATCHES, WatchBoard
+from .watch_agents import WatchEvents
 from .intent import IntentBoard, MAX_INTENTS
 
 from .seat import Seat
@@ -6091,6 +6092,10 @@ def main() -> None:
                 # that belongs to the chat thread
                 graph_fn=lambda: getattr(srv, "_codegraph", None))
             srv.capturer = Capturer(srv.efield)
+            # THE MODEL'S EVENT POOL (the reactive lane, live now):
+            srv.events_pool = srv._events_pool = WatchEvents()
+            # the store's watch lanes put through it
+            srv.entity_store._events_pool = srv.events_pool
             # the session's first event number: the 'now' line counts what
             # moved since the seat booted
             srv._efield_boot_seq = int(srv.efield._ostats.get("seq_last") or 0)
@@ -6117,6 +6122,11 @@ def main() -> None:
         from .substrate import _origin_tag
         srv.entity_store = EntityStore(path=str(_wdir / "entities.json"),
                                        origin=_origin_tag(args.field))
+        # THE MODEL'S EVENT POOL (the reactive layer's lane): the watch
+        # fires, the script errors/overruns, the peer misses -- the
+        # loops' reads land here; the store's watch lanes put through
+        # it (attach/detach events).
+        srv._events_pool = None       # wired after the field's boot below
         # THE CLOCK (the operator's 2026-10-01 ask): plant `tool:clock`
         # once at boot -- idempotent (an already-living, model- or
         # operator-Rewritten clock survives every restart). Degrades
@@ -6327,14 +6337,19 @@ def main() -> None:
         def _night_loop():
             while True:
                 time.sleep(900)          # a 15-minute tick
-                # THE IDLE SPEECH DRAIN (the operator's requirement: shown
-                # in opencode even without a turn): held messages push
-                # through the peer channel -- every connected seat's UI
-                # shows them immediately, no model turn needed.
-                try:
-                    drain_speech(srv)
-                except Exception:
-                    pass
+                # THE IDLE SPEECH DRAIN IS RETIRED (the fourth lock, the
+                # operator's post-mortem): this tick called drain_speech()
+                # and DISCARDED the return -- popping every held message
+                # every 15 minutes and showing none (the peer-push comment
+                # above was stale: the push was retired, the drain had
+                # become a silent eater that also graded speech the
+                # operator never saw). Off-turn the opencode TUI cannot be
+                # written (no open stream; membrane never fabricates a
+                # client request) -- so held speech now simply SURVIVES
+                # the idle gap: _SPEAK_TTL_S bounds staleness, _SPEAK_CAP
+                # bounds volume, and the next model-bound request relays
+                # it (the [membrane-says] footer). The pending label is
+                # set by that drain only.
                 fld = _efield_on(srv)
                 if fld is None:
                     continue
@@ -6977,15 +6992,17 @@ def speak(srv, text: str, kind: str = "note") -> bool:
     block into THIS conversation, where it enters THIS timeline and
     learns from THIS operator's reaction.
 
-    THE PLANNER (the closed loop, observe -> consult -> reinforce): the
-    ActTable is CONSULTED before the queue -- the context cluster selects
-    the act (the transition table's argmax over what was lived here).
-    The caller's proposed act stays when it's what the table wants; the
-    table's own pick (or stay-silent) otherwise governs: stay-silent
-    drops the message (the honest default -- an unlearned context says
-    nothing), any other learned act speaks with that act as the kind.
-    Alerts keep their kind (the planner chooses the realization, not
-    the content)."""
+    THE PLANNER (the consult WITHOUT the veto -- the operator's ruling):
+    the ActTable is consulted for the act (the transition table's argmax
+    over what was lived here); its pick wins the realization when it
+    learned a real act for this context, but a learned stay-silent just
+    loses the vote -- NOTHING is ever dropped for it. The retired gate
+    observed its own vetoes while delivery was the only graded channel,
+    so the loop could only accumulate its own silence (hundreds of idle
+    pokes composed and vetoed, zero delivered -- the operator's boops
+    could not reach speech the gate never delivered). Speech queues
+    unconditionally now; the table still learns, from DELIVERED speech +
+    the operator's reaction (the drain's pending label)."""
     q = getattr(srv, "_speak_queue", None)
     if q is None:
         srv._speak_queue = q = []
@@ -6994,13 +7011,8 @@ def speak(srv, text: str, kind: str = "note") -> bool:
     act = kind
     if srv_act is not None:
         planned = srv_act.select(ctx_sig)
-        act = kind if planned == kind else planned
-        if act == "stay-silent":
-            # the planner vetoes: an unlearned (or silent-learned) context
-            # holds its tongue. The observation still lands -- silence in
-            # this context IS the label the reinforcement learns from.
-            srv_act.observe(ctx_sig, "stay-silent")
-            return False
+        if planned != "stay-silent" and planned != kind:
+            act = planned
         srv_act.observe(ctx_sig, act)
     msg = {"text": str(text)[:2000], "kind": kind, "act": act,
            "sig": ctx_sig, "ts": time.time()}
@@ -7041,12 +7053,15 @@ def _init_speak(srv) -> None:
 
 
 def drain_speech(srv) -> list[dict]:
-    """The drain: pop every held message (oldest first), push each through
-    the peer channel (the operator's requirement: shown in opencode), and
-    return them for the model-turn relay (the marked block). Expired
-    messages are dropped silently (stale observations are noise).
-    The delivered batch's (planning-sig, act) is stashed as the pending
-    reinforcement label -- the NEXT turn's flow grades it."""
+    """The drain: pop every held message (oldest first) for the model-turn
+    relay -- the marked block rides the next model-bound request in THE
+    SPEAKING SEAT's own conversation (the peer push is retired; this is
+    the only delivery, so off-turn speech SURVIVES the idle gap and waits
+    for the seat's next turn). Expiry (_SPEAK_TTL_S) is the freshness
+    bound, the queue cap the volume bound. The delivered batch's
+    (planning-sig, act) is stashed as the pending reinforcement label --
+    the NEXT turn's flow grades it; nothing may drain that the operator
+    did not see."""
     q = getattr(srv, "_speak_queue", None) or []
     now = time.time()
     out = []
@@ -7062,11 +7077,9 @@ def drain_speech(srv) -> list[dict]:
         # lines). The MODEL RELAY is the only delivery: the marked block
         # rides the next model-bound request IN THE SPEAKING SEAT, where
         # the conversation carries it and the operator's reaction grades
-        # it. Idle delivery rides the night tick (the drain call).
+        # it. (The night-tick caller that popped-and-discarded is retired
+        # too -- held speech waits here for a real turn.)
         out.append(m)
-    if out:
-        srv._pending_speech_label = (out[-1].get("sig"), out[-1].get("act"))
-    return out
     if out:
         srv._pending_speech_label = (out[-1].get("sig"), out[-1].get("act"))
     return out
