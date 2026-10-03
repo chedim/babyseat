@@ -1028,7 +1028,13 @@ class EntityField:
         return None
 
     def recall(self, vec, k: int = 8, kinds=None, tier: str = "live",
-               by: str = "state") -> list[tuple[str, float]]:
+               by: str = "state", exclude_session: str | None = None
+               ) -> list[tuple[str, float]]:
+        """THE SELF-FEEDING GUARD (the seat's #4 datum: a query's own
+        topic words topped its hits -- the read fed itself): pass
+        ``exclude_session`` (the CURRENT turn's session id) and
+        entities whose ONLY deltas ride that session drop out -- an
+        entity with evidence from an EARLIER session still hits."""
         field_name = "state"
         hits = self.b.vector_top_k(
             "entity_states", field_name, vec, k * 4,
@@ -1041,6 +1047,14 @@ class EntityField:
                 continue
             if by == "mean" and d.get("mean"):
                 s = float(unit(unpack_f16(d["mean"])) @ unit(vec))
+            if exclude_session:
+                deltas = self.deltas_of(d["eid"])
+                if deltas and all(
+                        str(d2.get("sid") or "").startswith(
+                            str(exclude_session)) or
+                        d2.get("sid") == exclude_session
+                        for d2 in deltas):
+                    continue      # THIS turn's capture only: no hit
             out.append((d["eid"], s))
         out.sort(key=lambda t: -t[1])
         return out[:k]
