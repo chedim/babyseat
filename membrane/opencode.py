@@ -6109,11 +6109,13 @@ def main() -> None:
     srv.field_seeds = bool(args.field_seeds)
     srv.thought_intercept = bool(args.thought_intercept)
     srv.receipts = bool(getattr(args, "receipts", True))   # the receipt lane
-    # THE EVENT BUS (MQTT, cb's push transport): boot at startup, degrades
-    # to silent when the broker is unreachable (the covenant)
-    from .events import EventBus
+    # THE EVENT BUS: RETIRED (the operator's 2026-10-03 call: MQTT is
+    # gone entirely -- the lane carried one rarely-used watch kind and
+    # cost the flapping reconnect storm per boot; cross-seat transport
+    # is the peer_chat couch lane; file/signal triggers still ride the
+    # autonode). No bus, no paho thread, no reconnect loops.
     srv.seat_id = f"proxy-{listen}"
-    srv._event_bus = EventBus(srv.seat_id)
+    srv._event_bus = None
     # THE SPEECH-ACT TABLE (Phase W): the quantized act vocabulary and
     # the transition table for membrane's closed-loop participation
     from .acts import ActTable

@@ -1,3 +1,2 @@
 numpy>=1.26
 couchbase>=4.6
-paho-mqtt>=2.0

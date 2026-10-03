@@ -99,11 +99,15 @@ class TestFileScanner(unittest.TestCase):
 
 class TestWatcher(unittest.TestCase):
     def test_kind_is_always_required(self):
-        t = AN.Trigger("mqtt", {"topic": "boat/engines"})
+        t = AN.Trigger("signal", {"name": "SIGUSR1"})
         self.assertFalse(AN.watcher_matches({}, t))   # no watch -> default
         t2 = AN.Trigger("file", {"path": "a.py", "event": "created"})
         self.assertTrue(AN.watcher_matches({}, t2))   # file is the default
+        # kind mismatch: the file-defaulted watcher ignores a signal:
         self.assertFalse(AN.watcher_matches(
+            {"watch": {"kind": "file"}}, t))
+        # the named-match form works:
+        self.assertTrue(AN.watcher_matches(
             {"watch": {"kind": "signal", "name": "SIGUSR1"}}, t))
 
     def test_glob_filters_paths(self):
@@ -114,12 +118,18 @@ class TestWatcher(unittest.TestCase):
             {"watch": {"kind": "file", "glob": "*.md"}}, t))
         self.assertTrue(AN.watcher_matches({"watch": {"kind": "file"}}, t))
 
-    def test_topic_prefix_filters_mqtt(self):
-        t = AN.Trigger("mqtt", {"topic": "boat/engines/rpm", "payload": 900})
-        self.assertTrue(AN.watcher_matches(
-            {"watch": {"kind": "mqtt", "topic": "boat/engines"}}, t))
-        self.assertFalse(AN.watcher_matches(
-            {"watch": {"kind": "mqtt", "topic": "boat/anchors"}}, t))
+    def test_mqtt_kind_is_honestly_retired(self):
+        """THE COVENANT (2026-10-03): mqtt is GONE — a watcher declaring
+        the kind gets an HONEST refusal stamped (script_disabled + the
+        reason on the doc), no subscription ever happens."""
+        srv = _Srv()
+        est = srv.entity_store
+        _watcher(est, "tool:w1", watch={"kind": "mqtt", "topic": "boat/"})
+        an = AN.Autonode(srv, est, root=None, bus=None)
+        an.sync_subscriptions()
+        p = est.docs[f"{MEMBRANE_NS}tool:w1"].properties or {}
+        self.assertTrue(p.get("script_disabled"))
+        self.assertIn("retired", str(p.get("script_last_error")))
 
     def test_signal_name_filter(self):
         self.assertTrue(AN.watcher_matches(
@@ -428,75 +438,10 @@ class TestFieldVoice(unittest.TestCase):
             "saw it")
 
 
-# ---- 7. the mqtt lane ------------------------------------------------
+# ---- 7. the mqtt lane: RETIRED (2026-10-03) ------------
 
-class _FakeBus:
-    """Mimics EventBus.subscribe: the membrane/ prefix rides the wire,
-    the callback answers the FULL topic."""
+# ---- 8. the night dispatch ---------------------------------------------
 
-    def __init__(self):
-        self.subs = {}
-
-    def subscribe(self, topic_pattern, cb):
-        self.subs["membrane/" + topic_pattern] = cb
-        return True
-
-
-class TestMqttLane(unittest.TestCase):
-    def test_distinct_topics_subscribed_once_and_callbacks_fire(self):
-        srv = _Srv()
-        est = srv.entity_store
-        _watcher(est, "tool:w1",
-                 watch={"kind": "mqtt", "topic": "boat/engines"})
-        _watcher(est, "tool:w2",
-                 watch={"kind": "mqtt", "topic": "boat/engines"})
-        _watcher(est, "tool:w3",
-                 watch={"kind": "mqtt", "topic": "boat/anchors"})
-        _watcher(est, "tool:w4", watch={"kind": "file"})
-        bus = _FakeBus()
-        an = AN.Autonode(srv, est, root=None, bus=bus)
-        an.sync_subscriptions()
-        self.assertEqual(sorted(bus.subs),
-                         ["membrane/boat/anchors", "membrane/boat/engines"])
-        bus.subs["membrane/boat/engines"]("membrane/boat/engines/rpm",
-                                          {"rpm": 900})
-        got = an.q.drain()
-        self.assertEqual(len(got), 1)
-        self.assertEqual(got[0].kind, "mqtt")
-        self.assertEqual(got[0].payload["topic"], "boat/engines/rpm")
-        self.assertEqual(got[0].payload["payload"], {"rpm": 900})
-
-    def test_a_dead_payload_degrades_to_empty(self):
-        srv = _Srv()
-        est = srv.entity_store
-        _watcher(est, "tool:w1", watch={"kind": "mqtt", "topic": "boat/"})
-        bus = _FakeBus()
-        an = AN.Autonode(srv, est, root=None, bus=bus)
-        an.sync_subscriptions()
-        bus.subs["membrane/boat/"]("membrane/boat/note", None)
-        got = an.q.drain()
-        self.assertEqual(got[0].payload["payload"], "")
-
-    def test_the_mqtt_trigger_reaches_the_watcher(self):
-        srv = _Srv()
-        est = srv.entity_store
-        _watcher(est, "tool:w1",
-                 script="result = {'render': 'rpm ' + "
-                        "str(state['extra']['payload'].get('rpm'))}",
-                 watch={"kind": "mqtt", "topic": "boat/engines"})
-        bus = _FakeBus()
-        an = AN.Autonode(srv, est, root=None, bus=bus)
-        an.sync_subscriptions()
-        bus.subs["membrane/boat/engines"]("membrane/boat/engines/rpm",
-                                          {"rpm": 900})
-        an.pump()
-        self.assertTrue(an.join_fires(timeout=5))
-        self.assertEqual(
-            est.docs[f"{MEMBRANE_NS}tool:w1"].properties.get("script_render"),
-            "rpm 900")
-
-
-# ---- 8. the night dispatch ------------------------------------------------
 
 class TestNightDispatch(unittest.TestCase):
     def test_watch_trigger_picks_the_watch_script(self):

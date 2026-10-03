@@ -52,7 +52,7 @@ _OWN_NAMES = {"entities.json", "field.json"}
 
 @dataclass
 class Trigger:
-    kind: str                      # file | mqtt | signal
+    kind: str                      # file | signal
     payload: dict = field(default_factory=dict)
     ts: float = field(default_factory=time.time)
 
@@ -179,14 +179,11 @@ def watcher_matches(props: dict, trig: Trigger) -> bool:
             pats = [globs] if isinstance(globs, str) else list(globs)
             if not any(fnmatch.fnmatch(path, str(g)) for g in pats):
                 return False
-    elif trig.kind == "mqtt":
-        topic = str(w.get("topic") or "")
-        if topic and not str(p.get("topic") or "").startswith(topic):
-            return False
     elif trig.kind == "signal":
         name = str(w.get("name") or "")
-        if name and str(p.get("name") or "") != name:
-            return False
+        if name and str(p.get("name") or "!none") != name:
+            return False   # the watcher wants a SPECIFIC signal; a
+                           # nameless trigger never matches it
     return True
 
 
@@ -322,38 +319,26 @@ class Autonode:
         self.q.put(trig)
 
     def sync_subscriptions(self) -> None:
-        """The MQTT lane: one subscription per DISTINCT topic pattern any
-        active mqtt-watcher declares. Never raises into the caller's
-        thread (paho drives its own network thread)."""
-        if self.bus is None:
-            return
-        want = set()
+        """RETIRED with mqtt (the operator's 2026-10-03 call: the bus
+        is gone): an mqtt-kind watcher now degrades with an HONEST
+        refusal stamped on its doc (script_disabled + the reason --
+        the model sees WHY the lane died), and this sync is a no-op."""
         try:
             for e in self._watchers():
                 w = (e.properties or {}).get("watch")
                 w = w if isinstance(w, dict) else {}
-                if str(w.get("kind") or "file") == "mqtt" and w.get("topic"):
-                    want.add(str(w["topic"]))
-        except Exception:
-            return
-        for topic in sorted(want - self._subs):
-            try:
-                self.bus.subscribe(topic, self._on_msg)
-                self._subs.add(topic)
-            except Exception as e:
-                print(f"[autonode] subscribe {topic} failed "
-                      f"({str(e)[:60]})", file=sys.stderr)
-
-    def _on_msg(self, topic: str, payload) -> None:
-        """The paho-callback lane -- drop a Trigger; NEVER raise."""
-        try:
-            pure = topic[len("membrane/"):] if topic.startswith(
-                "membrane/") else topic
-            if not isinstance(payload, (dict, str, int, float, bool)):
-                payload = ""
-            self.q.put(Trigger("mqtt", {"topic": pure, "payload": payload}))
+                if str(w.get("kind") or "file") == "mqtt" and \
+                        not (e.properties or {}).get("script_disabled"):
+                    (e.properties or {}).update({
+                        "script_disabled": True})
+                    (e.properties or {}).update({
+                        "script_last_error": "watch lane 'mqtt' retired "
+                        "(2026-10-03) -- the event bus is gone; re-author "
+                        "as a file/signal watcher"})
+                    self.est.upsert(e, embedder=None)
         except Exception:
             pass
+        return
 
     def install_signals(self) -> None:
         """The signal lane: SIGUSR1 nudges the watchers (SIGINT/SIGTERM

@@ -20,6 +20,7 @@ connected seat; the model reads/posts via MCP.
 from __future__ import annotations
 
 import urllib.request as _urllib_request_ur
+from pathlib import Path
 
 
 def _urlopen(req, timeout):
@@ -73,6 +74,19 @@ class PeerSubstrate:
         self._reg_bucket = None
         self._chan = None          # peer_chat collection (permanent)
         self._cursor_ts = 0.0
+        # THE CURSOR'S LOCAL HOME (the ephemeral-registry-death fix):
+        # the cursor ALSO persists beside the field (mode 600) — the
+        # ephemeral doc's copy is a fast-start hint, never the
+        # authority (the TTL'd doc GC'd = the seat re-fetching the
+        # whole channel from epoch = the spiral's repeat engine).
+        self._cursor_file: Path | None = (
+            Path(field_path).resolve().parent / "chan-cursor.json"
+            if field_path else None)
+        # the seen-echoes ledger: (from, text) heads the window keeps;
+        # a message-id ring for the retry-safe dedupe
+        self._seen_window: dict[tuple, float] = {}
+        self._ECHO_WINDOW_S = 600.0
+        self.restore_cursor()               # the local file governs
         self._last_beat = 0.0
         self._connect()
 
@@ -447,17 +461,26 @@ class PeerSubstrate:
             pass
 
     # ---- the chat channel ----
-    def post(self, text: str, reply_to: str = "") -> bool:
-        """One channel message: {from, ts, text, reply_to?}. Permanent
-        (no TTL) -- the chat is the commons' memory of its own talk."""
+    def post(self, text: str, reply_to: str = "", mid: str = "") -> bool:
+        """One channel message: {from, ts, text, reply_to?, mid?}.
+        Permanent (no TTL) -- the chat is the commons' memory of its own
+        talk. THE MESSAGE-ID (the retry-safe id: a repost of the same
+        text carries the same mid -- the readers' echo filter collapses
+        the retry): mid defaults to from+text-head+ts-ms."""
         if self._chan is None:
             return False
-        msg = {"from": self.seat_id, "ts": time.time(),
-               "text": str(text)[:2000]}
+        ts = time.time()
+        if not mid:
+            import hashlib as _h
+            mid = _h.sha1(
+                f"{self.seat_id}|{text[:160]}|{int(ts*1000)%100000}".encode()
+            ).hexdigest()[:10]
+        msg = {"from": self.seat_id, "ts": ts, "text": str(text)[:2000],
+               "mid": mid}
         if reply_to:
             msg["reply_to"] = reply_to
         try:
-            key = f"msg::{int(time.time() * 1000)}::{self.seat_id}"
+            key = f"msg::{int(ts * 1000)}::{self.seat_id}"
             self._chan.upsert(key, msg)
             self._op_ok()
             return True
@@ -469,9 +492,17 @@ class PeerSubstrate:
         """Every channel message past this seat's cursor (stored in the
         registry doc, rides the heartbeat), oldest first, capped. Marks
         the cursor. Read-once per seat: the operator sees each line on
-        their seat until read."""
+        their seat until read.
+        THE CURSOR'S AUTHORITY (the spiral's repeat engine): the LOCAL
+        file cursor rules (restore first); the ephemeral doc's copy is
+        never read as authority (a TTL'd registry GC'd resets it to
+        0.0, and a 0.0 fetch = the whole channel re-rendered + the
+        models replying to repeats). The echo filter drops a REPEATED
+        (from, mid/text) inside the window even when a cursor loss
+        slips one through."""
         if self._chan is None or self._reg is None:
             return []
+        self.restore_cursor()
         try:
             from couchbase.options import QueryOptions
             import datetime as _dt
@@ -485,16 +516,67 @@ class PeerSubstrate:
                                  "me": self.seat_id,
                                  "lim": CHANNEL_MAX_FETCH}))
             rows = [dict(r) for r in q]
+            # THE ECHO FILTER: a repeated (from, mid/text-head) drops
+            # (a re-fetch or a retry's echo never re-renders)
+            rows = [m for m in rows if not self._echo_seen(m)]
             if rows:
-                last = rows[-1].get("ts")
-                if last:
-                    self._cursor_ts = float(last)
-                    self.register()   # the cursor rides the heartbeat doc
+                self.note_cursor(float(rows[-1].get("ts") or 0.0))
             self._op_ok()
             return rows
         except BaseException:
             self._op_failed()
             return []
+
+
+    def note_cursor(self, ts: float) -> None:
+        """The cursor's authority: the LOCAL file write (mode 600)
+        first, on-disk always; the RAM state follows; the ephemeral
+        doc's copy rides the next heartbeat (the hint)."""
+        self._cursor_ts = float(ts)
+        try:
+            if self._cursor_file is not None:
+                self._cursor_file.parent.mkdir(parents=True, exist_ok=True)
+                tmp = self._cursor_file.with_suffix(".tmp")
+                tmp.write_text(json.dumps({"chan_cursor": self._cursor_ts,
+                                           "saved_ts": time.time()}))
+                import os as _os
+                _os.chmod(tmp, 0o600)
+                _os.replace(tmp, self._cursor_file)
+        except OSError:
+            pass                 # RAM carries on an unwritable seat
+
+    def restore_cursor(self) -> None:
+        """Boot/read-start: the LOCAL file is the authority; the RAM
+        default (0.0) only when no file exists. The ephemeral doc's
+        copy (the registry's chan_cursor) is NEVER read as authority
+        (the TTL can have expired between save and restore)."""
+        try:
+            if self._cursor_file is not None and \
+                    self._cursor_file.exists():
+                d = json.loads(self._cursor_file.read_text())
+                self._cursor_ts = float(d.get("chan_cursor") or 0.0)
+        except Exception:
+            pass                 # the file lost: start at 0 (honest)
+
+    def _echo_seen(self, msg: dict, now: float | None = None,
+                   window_s: float | None = None) -> bool:
+        """THE ECHO FILTER (the belt to the cursor's braces): a
+        message's (from, text-head) seen inside the window marks it
+        (returns True -- the caller drops), a NEW one records
+        (returns False -- the caller renders). The window prunes."""
+        now = now if now is not None else time.time()
+        window_s = window_s if window_s is not None else self._ECHO_WINDOW_S
+        key = (str(msg.get("from") or "?"),
+               str(msg.get("text") or "")[:160],
+               str(msg.get("mid") or ""))
+        # prune older sightings
+        for k in [k for k, t in self._seen_window.items()
+                  if now - t > window_s]:
+            self._seen_window.pop(k, None)
+        if key in self._seen_window:
+            return True
+        self._seen_window[key] = now
+        return False
 
 
 def _timedelta(s: float):
