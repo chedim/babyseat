@@ -6897,6 +6897,22 @@ def main() -> None:
     def _term(signum, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, _term)
+
+    # THE DIAGNOSTIC EAR (the 100%-idle-CPU hunts keep lacking the
+    # python-level truth): SIGUSR1 dumps EVERY thread's stack to
+    # stderr -- the operator's `kill -USR1 <pid>` names a burner in
+    # one shot (the watchdog's faulthandler lane, on demand).
+    def _dump(signum, frame):
+        try:
+            import faulthandler
+            import sys as _s
+            faulthandler.dump_traceback(file=_s.stderr, all_threads=True)
+        except Exception:
+            pass
+    try:
+        signal.signal(signal.SIGUSR1, _dump)
+    except (ValueError, OSError):
+        pass
     if args.launch:
         signal.signal(signal.SIGINT, signal.SIG_IGN)
 

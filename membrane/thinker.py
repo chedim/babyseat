@@ -234,11 +234,18 @@ class Thinker:
         wakeup signals flip it even BEFORE their beat)."""
         t0 = time.time()
         did_work = False
+        # THE COST LEDGER (the 100%-idle-CPU hunt, the autonode's
+        # ledger pattern): the beat's phases timed; a slow phase
+        # prints (rate-limited 1/60s) -- the slowest lane names
+        # itself.
+        _marks: dict = {}
         # THE MODE: enter night when the room's been quiet past the bar
         # and nothing is pending; wake to day when a turn arrived
         # recently (inside the bar), on a queued item (any kind -- a
         # chat/capture beat IS the day's work), or on a wakeup signal.
         srv = self.srv
+        _tm = time.perf_counter
+        _t_mode = _tm()
         if getattr(srv, "ambient_night", True):
             idle_for = time.time() - getattr(srv, "last_turn_ts", t0)
             _pool_depth = 0
@@ -253,6 +260,7 @@ class Thinker:
             elif srv.ambient_mode == "night" and (idle_for <= 2.0
                                                   or _pool_depth):
                 srv.ambient_mode = "day"    # the room moved -- wake
+        _marks["mode"] = _tm() - _t_mode
         if self.queue:
             srv.ambient_mode = "day"
         # THE TICK PASS (the clock organ): every heartbeat, before the
@@ -264,15 +272,19 @@ class Thinker:
         # night's work; a whisker's night fire never wakes the room).
         try:
             self._beat += 1
+            _tt = _tm()
             self._tick_scripts(night=(getattr(srv, "ambient_mode", "day")
                                       == "night"))
+            _marks["ticks"] = _tm() - _tt
         except Exception:
             traceback.print_exc()
         # THE PRESENCE PULSE (the roster anchor): on the SLOW cadence the
         # seat re-announces itself + reads who else is alive. Never raises.
         if self._beat % PRESENCE_EVERY == 0:
             try:
+                _tp = _tm()
                 self._presence_pulse()
+                _marks["presence"] = _tm() - _tp
             except Exception:
                 traceback.print_exc()
         if self.queue:
@@ -320,6 +332,19 @@ class Thinker:
                         did_work = True
                     except Exception:
                         pass
+        # THE LEDGER'S REPORT: a slow phase names itself (1/60s cap --
+        # the hunt's evidence, never a spam lane)
+        try:
+            _slow = {k: v for k, v in _marks.items() if v > 0.05}
+            if _slow and time.time() - getattr(self, "_ledger_ts",
+                                               0.0) > 60.0:
+                self._ledger_ts = time.time()
+                print(f"[thinker] slow beat "
+                      f"{(time.time()-t0)*1000:.0f}ms: "
+                      + ", ".join(f"{k} {v*1000:.0f}ms" for k, v
+                                  in _slow.items()), file=sys.stderr)
+        except Exception:
+            pass
         work = time.time() - t0
         self._ema_work = 0.7 * self._ema_work + 0.3 * work
         # the duty controller: work / (work + window) vs the target -- a

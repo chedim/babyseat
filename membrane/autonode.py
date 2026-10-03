@@ -33,8 +33,11 @@ from pathlib import Path
 
 from .codegraph import _SKIP_DIRS as SKIP_DIRS, _MAX_FILES
 
+MEMBRANE_AUTONODE_SCAN_S = 10.0   # the day cadence (the 2s scan was the
+                                  # 100%-idle-CPU exhibit's burner; the
+                                  # night's x4 lives in run())
 MEMBRANE_AUTONODE_SCAN_S = float(
-    os.environ.get("MEMBRANE_AUTONODE_SCAN_S") or 2.0)
+    os.environ.get("MEMBRANE_AUTONODE_SCAN_S") or MEMBRANE_AUTONODE_SCAN_S)
 TRIGGER_WORKERS = 4            # how many (possibly blocking) scripts at once
 TRIGGER_BACKLOG = 64           # queued triggers before drop-oldest bites
 WATCH_TIMEOUT_S = 10.0         # a fire's budget; overrun strikes, not kills
@@ -257,7 +260,7 @@ class Autonode:
     All decisions stay test-steppable through pump()."""
 
     def __init__(self, srv, est, root: Path | None = None,
-                 bus=None, scan_s: float = MEMBRANE_AUTONODE_SCAN_S,
+                 bus=None, scan_s: float = 10.0,
                  backlog: int = TRIGGER_BACKLOG,
                  workers: int = TRIGGER_WORKERS,
                  fire_timeout: float = WATCH_TIMEOUT_S):
@@ -421,10 +424,13 @@ class Autonode:
         except Exception as e:
             return {"error": f"fire failed: {type(e).__name__}: {e}"[:200]}
 
-    def pump(self) -> None:
+    def pump(self, marks: dict | None = None) -> None:
         """One duty pass: scan (gated), reap the strays, dispatch what
         the slots allow. The runner thread calls this; tests call it
-        directly."""
+        directly. `marks`: an optional cost ledger (the run loop's
+        slow-pump report fills it per phase)."""
+        _m = marks if marks is not None else {}
+        _t0 = time.perf_counter()
         now = time.time()
         if self.scanner is not None and self._file_watch() and \
                 now - self._last_scan >= self.scan_s:
@@ -435,11 +441,19 @@ class Autonode:
             except Exception as e:
                 print(f"[autonode] scanner tick failed ({e})",
                       file=sys.stderr)
+        _m["scan"] = time.perf_counter() - _t0
+        _t1 = time.perf_counter()
         self._reap(now)
+        _m["reap"] = time.perf_counter() - _t1
+        _t2 = time.perf_counter()
         self.sync_subscriptions()
+        _m["sync"] = time.perf_counter() - _t2
         # the submit lane: while a slot is free, take one trigger and
         # fire every watcher it matches (up to the free slots)
+        _t3 = time.perf_counter()
         watchers = self._watchers()
+        _m["census"] = time.perf_counter() - _t3
+        _t4 = time.perf_counter()
         while self._active < self.workers:
             trig = self.q.get_nowait()
             if trig is None:
@@ -454,6 +468,7 @@ class Autonode:
                 fut = self.pool.submit(self._fire, e.eid, trig)
                 self._pending[fut] = {"eid": e.eid,
                                       "start": now, "struck": False}
+        _m["dispatch"] = time.perf_counter() - _t4
 
     def _reap(self, now: float) -> None:
         """Strays: a fire past its budget strikes ONCE (the thread can't
@@ -510,14 +525,45 @@ class Autonode:
         return not self._pending
 
     def run(self) -> None:
-        """The daemon loop (the clock's heartbeat pattern, own thread)."""
+        """The daemon loop (the clock's heartbeat pattern, own thread).
+        THE COST LEDGER (the 100%-idle-CPU exhibit): pump's phases are
+        timed -- a pass over its per-phase budget prints the phase and
+        the cost (the slowest seat's lane names itself; the print is
+        rate-limited to once per 60s)."""
+        import time as _t
+        _last_report = {"t": 0.0}
         while self.alive:
+            _a = _t.perf_counter()
+            _marks = {}
             try:
-                self.pump()
+                self.pump(_marks)
             except Exception as e:
                 print(f"[autonode] loop skipped ({str(e)[:80]})",
                       file=sys.stderr)
-            time.sleep(min(1.0, self.scan_s))
+            _pass = _t.perf_counter() - _a
+            slow = {k: round(v, 4) for k, v in _marks.items()
+                    if v > 0.05}
+            if slow and _t.time() - _last_report["t"] > 60.0:
+                _last_report["t"] = _t.time()
+                print(f"[autonode] slow pump {_pass*1000:.0f}ms: "
+                      + ", ".join(f"{k} {v*1000:.0f}ms"
+                                  for k, v in slow.items()),
+                      file=sys.stderr)
+            # THE PUMP'S DUTY CYCLE (the 7:42-utime exhibit): the
+            # pass's scan+reap+census is ~700ms of python; a 1s sleep
+            # meant ~70% duty forever. The pass sleeps its SCAN
+            # CADENCE when the queue is empty (the strays' reap is a
+            # per-pass need, not a per-second one); the 1s cadence
+            # returns only while work is queued (the watcher's
+            # triggers stay immediate).
+            _idle = self.q.empty() if hasattr(self.q, "empty") else True
+            _scan_s = self.scan_s
+            try:
+                if getattr(self.srv, "ambient_mode", "day") == "night":
+                    _scan_s = self.scan_s * _night_x
+            except Exception:
+                pass
+            time.sleep(_scan_s if _idle else 1.0)
 
     def start(self) -> threading.Thread:
         t = threading.Thread(target=self.run, name="membrane-autonode",
