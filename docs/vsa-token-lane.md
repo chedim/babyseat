@@ -217,3 +217,31 @@ ALWAYS: any script error notifies the model's event pool (kind
 - **The word-delta skip** (from the 472d8c9 fix): words carry no
   per-event deltas; the event-index delta (one row per event under
   `e:<event-key>`) carries the sentence-to-event route.
+
+---
+
+# The demolition of `run` — the correct shape (2026-10-02, the final ruling)
+
+The first cut (an `entity_run` tool replacing `run`) was WRONG — the
+operator's correction: **the model has NO exec verb at all.** The
+model's hands:
+
+- `entity_add` / `entity_edit` — the deploy verbs: a command entity
+  (class Tool, the `command` prop, parent, summary, `ttl_ts`) with
+  its scripts;
+- **`getter_script`** — the READ-BACK trigger: a READ of the entity
+  fires its script (dict-in/dict-out); the return = the entity's
+  current facts (a dynamic diagnostic entity's "one-shot" is just a
+  read); the 5s LRU paces;
+- **`{run: true}`** — the ONLY exec lane: a getter/tick script's
+  verdict routes through `apply_entity_update` into the ENGINE's
+  `run_command_entity` (the observation event, the script-error
+  lanes, the audit); the entity keeps its own run's residue
+  (`run_rc/outcome/head/tail/ms` on the ASKING entity's props).
+
+So: **scripts are the only code; `entity_add`+`entity_edit` are the
+only deploy verbs; reads trigger getters; ticks trigger crons;
+`{run: true}` is the only imperative — and it lives INSIDE a script's
+verdict, where the entity decides through its own policy.**
+
+The routes 410 with the pointer; the tool list carries no `run`/`entity_run`.
