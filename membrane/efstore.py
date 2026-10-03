@@ -92,6 +92,38 @@ class MemBackend:
         # backend inherits nothing here: its scans run server-side
         # (N1QL), the RAM race does not exist there.
         self._ram_lock = threading.RLock()
+        # THE VECTOR CACHE (the 80s-turn exhibit): MemBackend.
+        # vector_top_k rebuilt a live-by-1024 f64 matrix (27k rows ->
+        # 218MB) from the packed rows PER READ; with the loop/capture
+        # lanes reading concurrently the allocator+GIL churn starved
+        # every lane (the model call's 26s->80s crawl). The matrix is
+        # CACHED as float16 and rebuilt only after a coll/field write;
+        # normed rows make the cosine the matmul's dot.
+        self._vec_cache: dict[tuple[str, str], tuple[np.ndarray,
+                                                    np.ndarray]] = {}
+
+    def _vec_matrix(self, coll: str, field: str, eq: dict | None):
+        """(keys, normed f16 matrix) for the coll/field -- cached,
+        invalidation = any upsert on the coll drops the entry. None
+        when the field is absent or no rows carry it."""
+        ek = (coll, field)
+        hit = self._vec_cache.get(ek)
+        if hit is not None:
+            return hit
+        keys, rows = [], []
+        for k, d in list(self.colls.get(coll, {}).items()):
+            v = d.get(field)
+            if v is None:
+                continue
+            keys.append(k)
+            rows.append(unpack_f16(v))
+        if not rows:
+            return None
+        M = np.array(rows, dtype=np.float32)
+        M = M / (np.linalg.norm(M, axis=1, keepdims=True) + 1e-12)
+        pair = (np.array(keys), M)
+        self._vec_cache[ek] = pair
+        return pair
 
     def _c(self, coll: str) -> dict:
         with self._ram_lock:
@@ -182,20 +214,30 @@ class MemBackend:
         # during iteration' into a reader here (the related/graph path
         # hit this live: recall() lands on this method every turn).
         with self._ram_lock:
-            items = [(k_, dict(d)) for k_, d in self._c(coll).items()]
-        for key, d in items:
-            v = d.get(field)
-            if v is None or not matches(d, eq):
-                continue
-            keys.append(key)
-            rows.append(unpack_f16(v))
-        if not rows:
+            # THE VECTOR CACHE (the 80s-turn exhibit): the f32 normed
+            # matrix for coll/field builds ONCE per write-generation,
+            # not per read (a rebuild was 27k rows x 1024 = 218MB of
+            # numpy churn per call; with eq-filters the cache's key
+            # includes ONLY the coll/field -- filters below prune, the
+            # cache stays shared).
+            cached = self._vec_matrix(coll, field, eq)
+            if cached is None:
+                return []
+            cache_keys, M = cached
+            if eq:
+                colls_items = self._c(coll)
+                keep = np.array([
+                    matches(colls_items.get(str(kk), {}), eq)
+                    for kk in cache_keys])
+                if not keep.any():
+                    return []
+                cache_keys = cache_keys[keep]
+                M = M[keep]
+        if M.shape[0] == 0:
             return []
-        M = np.array(rows)
-        M = M / (np.linalg.norm(M, axis=1, keepdims=True) + 1e-12)
-        s = M @ q
+        s = M.astype(np.float32) @ q.astype(np.float32)
         idx = np.argsort(-s)[:k]
-        return [(keys[i], float(s[i])) for i in idx]
+        return [(str(cache_keys[i]), float(s[i])) for i in idx]
 
     def lease(self, name: str, holder: str, ttl_s: float) -> bool:
         now = time.time()
@@ -570,8 +612,10 @@ class FileBackend(MemBackend):
             except Exception:
                 pass
         if self._events_log.exists():
+            n_ev = 0
             with self._events_log.open() as fh:
                 for line in fh:
+                    n_ev += 1                  # the count rides the read
                     try:
                         row = self._json.loads(line)
                     except Exception:
@@ -583,6 +627,7 @@ class FileBackend(MemBackend):
                         self.colls["events"][k] = d
                     else:
                         self.colls["events"].pop(k, None)
+            self._journal_count["events"] = n_ev
         # 2. EVERY OTHER collection: the journal replay + the legacy
         #    snapshot as the seed
         colls = self.colls
@@ -592,11 +637,19 @@ class FileBackend(MemBackend):
             jf = self.dir / f"{coll}.jsonl"
             sf = self.dir / f"{coll}.json"
             if jf.exists():
+                # THE COUNT IS FREE (the 99%-CPU boot exhibit): the
+                # replay reads every line anyway -- count them right
+                # here (tombstones included) instead of leaving the
+                # count 0, which made every later flush fall into the
+                # falsy-zero fallback: a full 450MB journal re-read
+                # per flush.
+                n_read = 0
                 with jf.open() as fh:
                     for line in fh:
                         line = line.strip()
                         if not line:
                             continue
+                        n_read += 1
                         try:
                             row = self._json.loads(line)
                         except Exception:
@@ -608,6 +661,7 @@ class FileBackend(MemBackend):
                             colls[coll][k] = d
                         else:
                             colls[coll].pop(k, None)
+                self._journal_count[coll] = n_read
             elif sf.exists():
                 try:
                     colls[coll] = self._json.loads(sf.read_text())
@@ -632,6 +686,8 @@ class FileBackend(MemBackend):
         try:
             with self._events_log.open("a") as fh:
                 fh.write(self._json.dumps({"k": key, "d": doc}) + "\n")
+            self._journal_count["events"] = \
+                self._journal_count.get("events", 0) + 1
         except Exception as e:
             print(f"[efield] event append failed ({e}); RAM carries",
                   file=sys.stderr)
@@ -649,6 +705,11 @@ class FileBackend(MemBackend):
                   "carries", file=sys.stderr)
 
     def _touch(self, coll: str) -> None:
+        # THE VECTOR CACHE'S INVALIDATION: any write to the coll drops
+        # every cached matrix for it (the cache keys are (coll, field),
+        # field-agnostic drop is cheap and always correct).
+        self._vec_cache = {ek: v for ek, v in self._vec_cache.items()
+                           if ek[0] != coll}
         with self._flush_lock:
             self._dirty.add(coll)
             due = (time.time() - self._last_flush >= self.DEBOUNCE_S
@@ -749,15 +810,16 @@ class FileBackend(MemBackend):
             n_live = len(live)
             n_lines = int(self._journal_count.get(coll, 0))
             if not n_lines:
-                # unknown count (e.g. the events lane never bumps): read
-                # the journal's own size (the honest count)
-                try:
-                    with self._journal_path(coll).open() as fh:
-                        n_lines = sum(1 for _ in fh)
-                except FileNotFoundError:
+                # unknown count: THE FILE SIZE, not a full read (the
+                # old fallback re-read the 450MB journal line-by-line
+                # on every flush -- a 99%-CPU exhibit). A journal with
+                # bytes has lines; treat 1 char < line so the ratio
+                # forces a compact (the safe direction) only when the
+                # size is truly out of scale.
+                st = self._journal_path(coll).stat()
+                if st.st_size <= 2 * max(n_live, 1):
                     return
-                except Exception:
-                    n_lines = n_live + 1    # compact (safe direction)
+                n_lines = max(n_live + 1, st.st_size // 32)
             if n_lines <= 2 * n_live:
                 return
             rows = [(k, dict(d)) for k, d in live.items()]
@@ -778,11 +840,21 @@ class FileBackend(MemBackend):
         events (statuses churn ~2-3 lines per event), rewrite one row
         per live key -- atomic tmp + replace, same replay format.
         THE ITERATION GUARD: the events dict is snapshot under the RAM
-        lock (an upsert mid-compaction used to tear the walk too)."""
+        lock (an upsert mid-compaction used to tear the walk too).
+        THE COUNT IS FREE: the log's LINE count lives in
+        _journal_count (bumped at every _append); the size-based
+        estimate replaces the per-flush full-text re-read (a 45MB
+        linear read per flush was the boot-grind exhibit)."""
         try:
-            n_lines = sum(1 for _ in self._events_log.open())
             with self._ram_lock:
                 n_live = len(self.colls["events"])
+                n_lines = self._journal_count.get("events", 0)
+                if not n_lines:
+                    st = self._events_log.stat() \
+                        if self._events_log.exists() else None
+                    if st is None or st.st_size <= 2 * max(n_live, 1) + 256:
+                        return
+                    n_lines = max(n_live + 1, st.st_size // 32)
                 if n_lines <= 2 * n_live + 256:
                     return
                 rows = [(k, dict(d)) for k, d in
@@ -792,6 +864,7 @@ class FileBackend(MemBackend):
                 for k, d in rows:
                     fh.write(self._json.dumps({"k": k, "d": d}) + "\n")
             tmp.replace(self._events_log)
+            self._journal_count["events"] = len(rows)
         except Exception as e:
             print(f"[efield] events compaction failed ({e}); log carries",
                   file=sys.stderr)

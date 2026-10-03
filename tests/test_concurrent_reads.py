@@ -100,3 +100,34 @@ def test_entities_store_iteration_vs_upsert():
     t_read.start(); t_write.start()
     t_read.join(); t_write.join()
     assert not errs, f"store snapshot contract broke: {errs}"
+
+def test_vector_cache_no_rebuild_per_read(tmp_path):
+    """THE 80s-TURN EXHIBIT: vector_top_k rebuilt a 27k-row f64 matrix
+    PER READ. The cache: the matrix builds once per write-generation;
+    a read after reads (no writes) does not re-walk the coll."""
+    from membrane.efstore import FileBackend, pack_f16
+    import numpy as np
+
+    be = FileBackend(str(tmp_path / "f"))
+    walks = {"n": 0}
+    real_items = be.colls.items
+
+    def spy_items(*a, **k):
+        walks["n"] += 1
+        return real_items(*a, **k)
+    for i in range(300):
+        be.upsert("entity_states", f"e{i}", {"eid": f"e{i}",
+                                             "state": pack_f16(np.ones(4) * i),
+                                             "tier": "live"})
+    q = np.ones(4)
+    be.vector_top_k("entity_states", "state", q, 5)
+    n_first = walks["n"]
+    be.vector_top_k("entity_states", "state", q, 5)
+    be.vector_top_k("entity_states", "state", q, 5)
+    assert walks["n"] == n_first, "the cache re-walked per read"
+    # a write invalidates:
+    be.upsert("entity_states", "e0", {"eid": "e0",
+                                      "state": pack_f16(np.ones(4) * 99),
+                                      "tier": "live"})
+    r = be.vector_top_k("entity_states", "state", q, 5)
+    assert str(r[0][0]) == "e0"              # the new value wins
