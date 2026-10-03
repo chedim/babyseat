@@ -103,7 +103,8 @@ class TestParity(unittest.TestCase):
             f.write_events([ST.Event(stream="discourse", role="user", text=t, ts=10.0 + i)
                             for i, t in enumerate(texts)], session="s")
             f.process()
-            st = {d["eid"]: np.asarray(d["state"]) for _, d in be.scan("entity_states", {"tier": "live"})}
+            st = {d["eid"]: EF.at_stored(d["state"])
+                  for _, d in be.scan("entity_states", {"tier": "live"})}
             out.append(st)
             q = EF.unit(FakeEmbedder().embed(["gateway errors"])[0])
             with mock.patch.dict(os.environ, {"MEMBRANE_EF_ANN": "0"}):

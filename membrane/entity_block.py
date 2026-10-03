@@ -233,7 +233,7 @@ def past_answers(field, text: str, qvec=None, k: int = 3, sim_min: float = PAST_
             d = got.get(field.sentence_id(x))
             if d is None or len(x.split()) < 5:
                 continue
-            xv = unit(np.asarray(d["vec"]))
+            xv = unit(d["vec"])              # packed or list -- unit() unpacks
             s = float(xv @ qv)
             if s >= 0.88 or (pv is not None and float(xv @ pv) >= 0.80) or _RESTATE.match(x):
                 continue                        # the ask restated, not answered

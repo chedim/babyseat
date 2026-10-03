@@ -31,7 +31,7 @@ def states(f):
     out = {}
     for _, d in f.b.scan("entity_states"):
         if d.get("tier") == "live":
-            out[d["eid"]] = (np.asarray(d["state"]), d["n"], round(d["coherence"], 9))
+            out[d["eid"]] = (EF.at_stored(d["state"]), d["n"], round(d["coherence"], 9))
     return out
 
 
@@ -86,8 +86,8 @@ class TestApplication(unittest.TestCase):
         # seeds are stored float16 (the terms cache): expect the rounded seed
         from membrane.efstore import pack_f16, unpack_f16
         s = EF.at_stored(unpack_f16(pack_f16(EF.unit(emb.embed(["gateway"])[0]))))
-        for t in texts:                           # sentences stored at 6 decimals
-            x = EF.unit(np.asarray(EF.vec_list(EF.unit(emb.embed([t])[0]))))
+        for t in texts:                           # sentences stored PACKED f16 now
+            x = EF.unit(unpack_f16(pack_f16(EF.unit(emb.embed([t])[0]))))
             s = EF.at_stored(EF.unit(s + EF.GAIN * (x - s)))   # stored precision
         np.testing.assert_allclose(f.get("w:gateway").state, s, atol=1e-12)
 

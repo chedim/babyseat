@@ -63,7 +63,8 @@ def run(audit, root, **kw):
 
 
 def live(f):
-    return {d["eid"]: np.asarray(d["state"]) for _, d in f.b.scan("entity_states", {"tier": "live"})}
+    from membrane.efstore import unpack_f16 as _u16
+    return {d["eid"]: _u16(d["state"]) for _, d in f.b.scan("entity_states", {"tier": "live"})}
 
 
 class TestBackfill(unittest.TestCase):
@@ -85,7 +86,7 @@ class TestBackfill(unittest.TestCase):
         la, lb = live(a), live(b2)
         self.assertEqual(la.keys(), lb.keys())
         for k in la:
-            np.testing.assert_allclose(la[k], lb[k], atol=1e-9)
+            np.testing.assert_allclose(la[k], lb[k], atol=2e-3)   # f16 storage precision
 
     def test_a_second_run_writes_nothing(self):
         f, _ = run(self.audit, self.root)

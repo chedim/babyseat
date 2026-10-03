@@ -3406,10 +3406,16 @@ def _audit_tail(path, k: int = 24):
 
 def _efield_state_rows(srv, fld, m: int = 400) -> list[dict]:
     """The m brightest live states by mass (the cloud's rows)."""
+    from .efstore import unpack_f16
     rows = [d for _, d in fld.b.scan("entity_states", {"origin": fld.origin, "tier": "live"})
             if d.get("state")]
     rows.sort(key=lambda d: -int(d.get("accr") or 0))
-    return rows[:m]
+    out = []
+    for d in rows[:m]:
+        d = dict(d)
+        d["state"] = unpack_f16(d["state"])   # packed or decimal list
+        out.append(d)
+    return out
 
 
 def _entity_points(srv, fld, m: int = 400) -> list[dict]:
@@ -3419,10 +3425,11 @@ def _entity_points(srv, fld, m: int = 400) -> list[dict]:
     its eid, kind (the color), mass (the brightness) and whether it holds a
     conflict."""
     from .universe import UniverseProjection
+    from .efstore import unpack_f16
     rows = _efield_state_rows(srv, fld, m)
     if not rows:
         return []
-    V = np.asarray([d["state"] for d in rows], dtype=float)
+    V = np.asarray([d["state"] for d in rows], dtype=float)  # pre-unpacked
     proj = getattr(srv, "_universe_proj", None)
     coords = None
     if proj is not None and proj.ready():

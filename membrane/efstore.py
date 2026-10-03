@@ -103,16 +103,23 @@ class MemBackend:
                                                     np.ndarray]] = {}
 
     def _vec_matrix(self, coll: str, field: str, eq: dict | None):
-        """(keys, normed f16 matrix) for the coll/field -- cached,
+        """(keys, normed f32 matrix) for the coll/field -- cached,
         invalidation = any upsert on the coll drops the entry. None
-        when the field is absent or no rows carry it."""
+        when the field is absent or no rows carry it.
+        THE GC-CHURN EXHIBIT (the sampler's visit_reachable stacks):
+        the matrix build ran UNDER the RAM lock with the GIL held --
+        27k float unpacks = a 110MB array + millions of temp objects,
+        the GC pauses stacking onto every reader. The BUILD runs
+        OUTSIDE the lock now (snapshot under it, numpy outside)."""
         ek = (coll, field)
         hit = self._vec_cache.get(ek)
         if hit is not None:
             return hit
+        with self._ram_lock:
+            snap = [(k, d.get(field))
+                    for k, d in list(self.colls.get(coll, {}).items())]
         keys, rows = [], []
-        for k, d in list(self.colls.get(coll, {}).items()):
-            v = d.get(field)
+        for k, v in snap:
             if v is None:
                 continue
             keys.append(k)
@@ -820,9 +827,38 @@ class FileBackend(MemBackend):
                 if st.st_size <= 2 * max(n_live, 1):
                     return
                 n_lines = max(n_live + 1, st.st_size // 32)
-            if n_lines <= 2 * n_live:
-                return
-            rows = [(k, dict(d)) for k, d in live.items()]
+            # THE VEC-PACK TRIGGER: line-count is the journal's
+            # churn measure, but the BYTES can scream (legacy 11KB
+            # vec rows behind a healthy count). Both roads compact.
+            # avg serialized row bytes (a 20-row sample; $0 at scale)
+            # THE VEC-PACK SCAN (the 11KB-ROW exhibit): a legacy
+            # decimal-list vector rides rows at 10.6KB of text; the
+            # packed f16 shape is ~1.4KB. Any long list-vec in the
+            # sample compacts + packs ONCE (the live count may be
+            # perfectly healthy -- the bytes say compact).
+            pack_found = {"n": 0}
+            rows = []
+            for k, d in live.items():
+                d = dict(d)
+                for vk in ("vec", "state", "seed", "mean", "rsum"):
+                    v = d.get(vk)
+                    if isinstance(v, list) and len(v) > 16:
+                        d[vk] = pack_f16(v)
+                        pack_found["n"] += 1
+                rows.append((k, d))
+            if pack_found["n"] >= 1:
+                pass                     # the rewrite below packs it
+            else:
+                # bytes sanity: the journal out-carries the live rows
+                sample = rows[:20]
+                avg_row = (sum(len(self._json.dumps({"k": k, "d": d}))
+                               for k, d in sample)
+                           // max(len(sample), 1)) if sample else 0
+                avg_row += 1             # the journal's newline byte
+                st_size = self._journal_path(coll).stat().st_size
+                if (n_lines <= 2 * n_live
+                        and st_size <= 2 * avg_row * n_live):
+                    return
             jpath = self._journal_path(coll)
         tmp = jpath.with_suffix(".jsonl.tmp")
         try:

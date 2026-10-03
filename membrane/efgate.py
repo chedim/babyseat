@@ -33,7 +33,7 @@ import numpy as np
 from . import eids as E
 from . import streams as ST
 from .efield import unit, vec_list
-from .efstore import h16, o8
+from .efstore import h16, o8, pack_f16, unpack_f16
 
 SIM_MIN = 0.92
 AGREE_MIN = 0.8
@@ -53,11 +53,13 @@ def message_vec(field, text: str, embed_missing: bool = True):
     if miss and embed_missing:
         vecs = field.emb.embed([s for _, s in miss])
         for (sid, s), v in zip(miss, vecs):
+            # packed f16 (the sentences lane's shape; decimal lists
+            # were the 11KB-row exhibit)
             doc = {"_k": "sent", "text": s[:400], "model": field.model,
-                   "vec": vec_list(unit(v)), "first_ts": time.time()}
+                   "vec": pack_f16(unit(v)), "first_ts": time.time()}
             field.b.insert_if_absent("sentences", sid, doc)
             got[sid] = doc
-    vs = [np.asarray(got[s]["vec"], dtype=float) for s in sids if s in got]
+    vs = [unpack_f16(got[s]["vec"]) for s in sids if s in got]
     return unit(np.sum(vs, axis=0)) if vs else None
 
 

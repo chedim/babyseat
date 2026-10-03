@@ -86,7 +86,11 @@ DISCOURSE_ROLES = ("user", "model", "reasoning", "note")
 
 
 def unit(v) -> np.ndarray:
-    v = np.asarray(v, dtype=float)
+    # a packed vector (f16:/f32: base64) or a decimal list -- same
+    # shape-family as the store's rows (the sentence vecs are packed
+    # now; a unit() on the raw string is the read-path's miss).
+    from .efstore import unpack_f16
+    v = unpack_f16(v)
     return v / (np.linalg.norm(v) + 1e-12)
 
 
@@ -97,7 +101,8 @@ def vec_list(v) -> list[float]:
 
 
 def at_stored(v) -> np.ndarray:
-    return np.asarray(vec_list(v), dtype=float)
+    from .efstore import unpack_f16
+    return np.asarray(unpack_f16(v), dtype=float)
 
 
 def f32(v) -> np.ndarray:
@@ -170,7 +175,7 @@ class EntityState:
             d["pending"] = [list(p) for p in self.pending]
             d["distinct"] = list(self.distinct)
         else:
-            d["state"] = vec_list(self.state)
+            d["state"] = pack_f16(self.state)   # packed: the 25KB-row exhibit
             d["seed"] = pack_f16(self.seed)
             d["mean"] = pack_f32(self.mean) if self.mean is not None else None
             d["rsum"] = pack_f32(self.rsum)
@@ -189,7 +194,7 @@ class EntityState:
                  distinct=list(d.get("distinct") or []),
                  conflicts=list(d.get("conflicts") or []), activity=d.get("activity"))
         if st.tier != "nursery":
-            st.state = np.asarray(d["state"], dtype=float)
+            st.state = unpack_f16(d["state"])
             st.seed = unpack_f16(d["seed"])
             st.mean = unpack_f16(d["mean"]) if d.get("mean") else None
             st.rsum = unpack_f16(d["rsum"])
@@ -381,9 +386,12 @@ class EntityField:
             chunk = miss[lo:lo + batch]
             vecs = self.emb.embed([texts[s] for s in chunk])
             for sid, v in zip(chunk, vecs):
+                # THE 11KB-ROW EXHIBIT: sentence vecs rode as decimal
+                # text (vec_list, 10.6KB/row) -> the 450MB journal;
+                # packed here (the terms lane already is) -- ~1.4KB.
                 self.b.insert_if_absent("sentences", sid, {
                     "_k": "sent", "text": texts[sid][:400], "model": self.model,
-                    "vec": vec_list(unit(v)), "first_ts": time.time()})
+                    "vec": pack_f16(unit(v)), "first_ts": time.time()})
         surfaces: set = set()
         for key, ev, sents, sids in plan:
             mentions = []
@@ -1093,7 +1101,7 @@ class EntityField:
             return None
         disp, w, per = [], [], []
         for d in docs:
-            x = np.asarray(d["state"], dtype=float) - seed
+            x = unpack_f16(d["state"]) - seed
             disp.append(x)
             w.append(max(int(d.get("accr") or 0), 1))
             per.append({"origin": d["origin"], "n": int(d.get("n") or 0),
@@ -1162,7 +1170,7 @@ class EntityField:
             out = {"entities": len(rows), "eff_rank": None, "rank_ratio": None,
                    "free_energy": None, "conflict_frac": None}
         else:
-            X = np.asarray([d["state"] for d in rows], dtype=float)
+            X = np.asarray([unpack_f16(d["state"]) for d in rows], dtype=float)
             sv = np.linalg.svd(X - X.mean(axis=0), compute_uv=False)
             p = sv ** 2 / max(float(np.sum(sv ** 2)), 1e-12)
             p = p[p > 1e-12]

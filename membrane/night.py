@@ -33,6 +33,7 @@ import numpy as np
 
 from . import eids as E
 from . import streams as ST
+from .efstore import unpack_f16
 from .entities import (MEMBRANE_NS, CLASS_COMPONENT, CLASS_SESSION,
                        CLASS_TOOL, QuantumEntity, _KIND_CLASS,
                        MultiParentOps)
@@ -121,7 +122,7 @@ def _cell_points(fld, eid: str, limit: int = 64) -> list:
         sid = d.get("sid")
         sv = fld.b.get("sentences", sid) if sid else None
         if sv and sv.get("vec"):
-            out.append((np.asarray(sv["vec"], dtype=float),
+            out.append((unpack_f16(sv["vec"]),
                         float(d.get("ts") or 0.0)))
     return out
 
@@ -281,7 +282,7 @@ def consolidate_now(fld, est, mem=None, momentum_vec=None) -> dict:
                                order=("seq",), limit=12):
             sv = fld.b.get("sentences", d.get("sid"))
             if sv and sv.get("vec"):
-                pts.append((np.asarray(sv["vec"], dtype=float),
+                pts.append((unpack_f16(sv["vec"]),
                             float(d.get("ts") or now)))
     except Exception:
         pass
@@ -306,7 +307,7 @@ def consolidate_now(fld, est, mem=None, momentum_vec=None) -> dict:
                            order=("seq",), limit=64):
         sv = fld.b.get("sentences", d.get("sid"))
         if sv and sv.get("vec") and (d.get("ts") or 0):
-            gpts.append((np.asarray(sv["vec"], dtype=float),
+            gpts.append((unpack_f16(sv["vec"]),
                          float(d.get("ts") or 0)))
     if gpts:
         gres = gent.consolidate_position(gpts, now)
