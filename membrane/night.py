@@ -36,7 +36,7 @@ from . import streams as ST
 from .efstore import unpack_f16
 from .entities import (MEMBRANE_NS, CLASS_COMPONENT, CLASS_SESSION,
                        CLASS_TOOL, QuantumEntity, _KIND_CLASS,
-                       MultiParentOps)
+                       MultiParentOps, kind_class)
 
 
 # ---- programmable entities (the script constants live in entities.py --
@@ -86,31 +86,94 @@ FILE_SKIP_DIRS = frozenset({
 def overlay_key(eid: str) -> str:
     """The canonical entity-field id -> the overlay doc's legacy key
     ('f:router.py' -> 'files:router.py'; words/phrases/ctx never have
-    overlay docs)."""
+    overlay docs). IDEMPOTENT (the mirror re-mint exhibit): applying
+    it to its own output returns the same key (a doubled legacy head
+    collapses first, never doubles again)."""
     kind, _, val = eid.partition(":")
+    if not val:
+        return eid
     back = {v: k for k, v in E._LEGACY_KIND.items()}
-    return back.get(kind, kind) + ":" + val if val else eid
+    key = back.get(kind, kind) + ":" + val
+    # idempotency guard: a doubled head collapses instead of doubling
+    if key.count(":") and key.partition(":")[2].partition(":")[2] and \
+            key.partition(":")[0] in E._LEGACY_KIND.values():
+        k2 = _collapse_mirror(key)
+        key = back.get(k2.partition(":")[0],
+                       k2.partition(":")[0]) + ":" + k2.partition(":")[2]
+    return key
 
 
 def canon_eid(key: str, fld=None) -> str | None:
-    """The overlay key -> the field's canonical eid (or None when the
-    key is not a field entity: 'session:now', 'global:now', junk
-    anchors)."""
+    """The overlay key (long form) OR a canonical eid (short form) ->
+    the field's canonical eid; None when the key is not a field
+    entity ('session:now', 'global:now', junk anchors).
+    THE MIRROR COLLAPSE (the seven-boot re-mint exhibit): a DOUBLED
+    legacy prefix ('m:m:tool:x', 'files:files:x') collapses to the
+    canonical single form -- the read always names the one true
+    entity, never its shadows."""
     k = key.strip()
     if k.startswith(MEMBRANE_NS):
         k = k[len(MEMBRANE_NS):]
+    k = _collapse_mirror(k)
     head, _, rest = k.partition(":")
     if not rest:
         return None
     if head in E._LEGACY_KIND:
-        # the overlay key IS an entity-field eid through overlay_key:
-        # the round-trip is verbatim -- ''~' bare-file prefixes and
-        # paths survive as written (a graph re-resolve would mangle
-        # the '~' form into '~~').
+        # the long overlay form -> the canonical short form
         return E._LEGACY_KIND[head] + ":" + rest
+    # the SHORT canonical forms pass through verbatim (a canonical
+    # eid is its own canon -- 'm:tool:sysmon', 'f:membrane/x.py',
+    # 'tool:sysmon' -- canon()'s kind set: letters + port/tool/ctx)
+    _short = set(E._LEGACY_KIND.values()) | {"port", "tool", "ctx", "w",
+                                             "p", "files", "models",
+                                             "symbols", "shell", "urls"}
+    if head in _short:
+        return k
     # 'session:now' / 'global:now' / 'synth:x' forms: the now-trackers
     # and junk anchors are overlay-only
     return None
+
+
+def _collapse_mirror(k: str) -> str:
+    """The doubled-head stripping: while the head AND the rest's head
+    are BOTH kind heads (long or short), peel one -- the canonical
+    head wins ('m:m:tool:x' -> 'm:tool:x'; 'files:files:x' -> 'f:x';
+    'tool:tool:x' -> 'tool:x')."""
+    _canonical = set(E._LEGACY_KIND.values()) | {"port", "tool", "ctx",
+                                                 "w", "p", "files",
+                                                 "models", "symbols",
+                                                 "shell", "urls"}
+
+    def _is_head(h: str) -> bool:
+        return h in E._LEGACY_KIND or h in _canonical
+
+    for _ in range(16):                    # the family's nesting cap
+        head, sep, rest = k.partition(":")
+        if not sep or not rest:
+            return k
+        head_c = E._LEGACY_KIND.get(head, head)
+        rest_head, rest_sep, rest_rest = rest.partition(":")
+        if not rest_sep:
+            return head_c + ":" + rest
+        if _is_head(rest_head):
+            # THE PEEL, two shapes:
+            # same family doubles -> one head ('m:m:x' -> 'm:x');
+            # a CHAIN ('m:c:git': models-outer over command-inner --
+            # the minter's stale wrapper) -> the INNER kind's doc
+            # is the real one: peel the OUTER head, keep the inner
+            # kind's canonical form ('m:c:git' -> 'c:git').
+            if head_c == E._LEGACY_KIND.get(rest_head, rest_head):
+                k = head_c + ":" + rest_rest
+                continue
+            # THE CHAIN PEEL only for a LONG outer head (the stale
+            # wrapper's shape: 'm' SHORT-outer is an honest pair in
+            # the field's spelling -- 'm:tool:sysmon' stays)
+            if head in E._LEGACY_KIND and rest_head in _canonical:
+                k = E._LEGACY_KIND.get(rest_head, rest_head) + ":" + rest_rest
+                continue
+            return head_c + ":" + rest
+        return head_c + ":" + rest
+    return k
 
 
 def _cell_points(fld, eid: str, limit: int = 64) -> list:
@@ -133,6 +196,68 @@ def _audit(mem, rec: dict) -> None:
         _write_audit(mem, rec)
     except Exception:
         pass
+
+
+def materialized_class_for(eid: str) -> str:
+    """The materialized doc's class: the SOURCE kind's class carries
+    (a shell command is a Tool, never a Model -- the chain-mint
+    exhibit); the overlay key's kind names it."""
+    kind, _, _ = overlay_key(canon_eid(eid) or eid).partition(":")
+    return _KIND_CLASS.get(kind, kind_class(kind))
+
+
+def materialized_eid(eid: str) -> str:
+    """The materialized doc's eid: the collapsed canonical -> its
+    overlay key under the membrane namespace (one TRUE id, never a
+    chain, never a mirror). A CHAIN's outer head is a stale wrapper
+    when it's a LONG legacy spelling over a DIFFERENT inner kind
+    ('models:c:git': a command minted under models) -- the INNER
+    kind's doc is the true one; peel to it."""
+    cid = canon_eid(eid) or eid
+    if cid.startswith(MEMBRANE_NS):
+        cid = cid[len(MEMBRANE_NS):]
+    # THE CHAIN PEEL (the mint surface's honest id): ANY kind-head
+    # chain whose heads live in DIFFERENT families is a stale
+    # wrapper -- the INNER kind names the true doc ('m:c:git' ->
+    # 'c:git'; 'm:tool:sysmon' -> 'tool:sysmon'). The same-family
+    # doubles canon_eid already peeled.
+    for _ in range(8):
+        head, _, rest = cid.partition(":")
+        rest_head = rest.partition(":")[0]
+        if not rest.partition(":")[1] or not (head or rest_head):
+            break
+        fam_head = _kind_family_head(head)
+        fam_rest = _kind_family_head(rest_head)
+        if fam_head and fam_rest and fam_head != fam_rest:
+            cid = E._LEGACY_KIND.get(rest_head, rest_head) + ":" + \
+                rest.partition(":")[2]
+        else:
+            break
+    return MEMBRANE_NS + overlay_key(cid)
+
+
+def _kind_family_head(head: str) -> str | None:
+    """A kind head's FAMILY name (both spellings) or None when the
+    head is not a kind."""
+    canon_head = E._LEGACY_KIND.get(head, head)
+    for fam, members in _KIND_HEAD_FAMILIES.items():
+        if canon_head in members:
+            return fam
+    return None
+
+_KIND_HEAD_FAMILIES = {
+    "file": {"f", "files"},
+    "symbol": {"s", "symbols"},
+    "model": {"m", "models"},
+    "command": {"c", "shell"},
+    "url": {"u", "urls"},
+    "ha": {"ha"},
+    "tool": {"tool"},
+    "port": {"port"},
+    "ctx": {"ctx"},
+    "word": {"w"},
+    "phrase": {"p"},
+}
 
 
 def consolidate_entities(fld, est, mem=None, materialize: int = 8,
@@ -166,16 +291,24 @@ def consolidate_entities(fld, est, mem=None, materialize: int = 8,
                 continue
             if int(d.get("n") or 0) < 3:
                 continue
-            key = overlay_key(eid)
+            # THE EXISTENCE CHECK + THE COLLAPSE (the minter's defects:
+            # 'no existence check' + 'the chain mint' -- an eid like
+            # 'm:c:git' must collapse BEFORE the overlay: overlaying a
+            # CHAIN minted 'models:c:git' -> kind 'models' -> AIModels
+            # -- a shell command is not a model):
+            cid = canon_eid(eid) or eid
+            if cid.startswith(MEMBRANE_NS):
+                cid = cid[len(MEMBRANE_NS):]
+            key = overlay_key(cid)
             if f"{MEMBRANE_NS}{key}" in est.docs or est.find(key) is not None:
                 continue
-            hot.append((int(d.get("n") or 0), eid, key))
+            hot.append((int(d.get("n") or 0), cid, key))
         hot.sort(key=lambda t: -t[0])
         for n, eid, key in hot[:materialize]:
             kind, _, val = key.partition(":")
             ent = QuantumEntity(
                 eid=f"{MEMBRANE_NS}{key}",
-                cls=_KIND_CLASS.get(kind, CLASS_COMPONENT),
+                cls=_KIND_CLASS.get(kind, kind_class(kind)),
                 properties={"name": val, "materialized_by": "night",
                             **({} if kind in _ANNOUNCE_KINDS
                                else {"silent_birth": True})},
@@ -689,7 +822,11 @@ def _file_resolve(path) -> str:
 def _file_land(fld, est, mem, fp, action, ok, head, detail, err_msg=""):
     """One file call -> its entity: born or reused, counters + detail
     props on the doc, an observation event, errors in the script-error
-    lanes, the audit. Returns (eid, key, created)."""
+    lanes, the audit. Returns (eid, key, created).
+    THE MIRROR COLLAPSE (the seven-boot re-mint exhibit): any existing
+    MIRROR doc under a doubled key (the stale boots' residue) retires
+    into the landing doc (merged_into -- mark-don't-delete): the data
+    merges, the shadow dies, the canonical grows."""
     eid = E.canon("f", fp)
     key = MEMBRANE_NS + overlay_key(eid)
     created = False
@@ -700,6 +837,14 @@ def _file_land(fld, est, mem, fp, action, ok, head, detail, err_msg=""):
                                 properties={"name": os.path.basename(fp) or fp,
                                             "silent_birth": True})
             created = True
+        # THE MIRRORS RETIRE (all the doubled-key shadows of THIS file):
+        body = eid.partition(":")[2]
+        for bad_k in list((est.docs or {}).keys()):
+            if bad_k == key or MEMBRANE_NS not in bad_k:
+                continue
+            bad_body = bad_k[len(MEMBRANE_NS):]
+            if canon_eid(bad_k) == eid and bad_body != body:
+                _merge_mirror_into_doc(est, bad_k, doc)
         props = doc.properties
         props[f"{action}_count"] = int(props.get(f"{action}_count") or 0) + 1
         props[f"last_{action}_ts"] = props["last_ts"] = time.time()
@@ -725,6 +870,31 @@ def _file_land(fld, est, mem, fp, action, ok, head, detail, err_msg=""):
         _audit(mem, {"event": "agent-file-op", "origin": action,
                      "eid": eid, "ok": ok, "path": fp[:200]})
     return eid, key, created
+
+
+def _merge_mirror_into_doc(est, bad_key: str, doc) -> None:
+    """THE MIRROR'S RETIRE: mark-don't-delete (the operator's covenant)
+    -- the shadow's props merge into the canonical doc (counters max'd,
+    script_render kept when the canon has none), the shadow stamped
+    merged_into (the graph reader follows the pointer) and retired."""
+    bad = (est.docs or {}).get(bad_key)
+    if bad is None or doc is None:
+        return
+    badp = bad.properties or {}
+    docp = doc.properties or {}
+    for k, v in badp.items():
+        if k.startswith("script_") or k in ("merged_into", "retired_ts"):
+            continue
+        if str(k).endswith("_count") or k == "n":
+            docp[k] = max(int(docp.get(k) or 0), int(v or 0))
+        elif k not in docp:
+            docp[k] = v
+    badp["merged_into"] = doc.eid
+    badp["retired_ts"] = time.time()
+    doc.properties = docp
+    bad.properties = badp
+    est.upsert(doc, embedder=None)
+    est.upsert(bad, embedder=None)
 
 
 def file_read_entity(fld, est, mem, path, offset=None, limit=None) -> dict:

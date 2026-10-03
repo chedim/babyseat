@@ -1886,8 +1886,21 @@ class EntityStore(MultiParentOps, TimelineOps):
         """An eid, an exact eid-suffix, or a name fragment -> the entity.
         MERGE POINTER-FOLLOWING: a merged id resolves to its survivor
         (the mark-don't-delete covenant -- the merged doc stays, the
-        graph stays connected)."""
+        graph stays connected).
+        THE MIRROR COLLAPSE (the seven-boot re-mint exhibit): a DOUBLED
+        legacy key resolves to its canonical first (canon_eid's peel) --
+        the mirror doc only answers when the canonical is ABSENT."""
+        from .night import canon_eid as _canon
+        canon = _canon(spec)
+        if canon and canon != (spec or "").strip().removeprefix(MEMBRANE_NS):
+            _canon_ent = self.docs.get(canon if canon.startswith(MEMBRANE_NS)
+                                       else MEMBRANE_NS + canon)
+            if _canon_ent is not None:
+                return self._follow_merges(_canon_ent)
         ent = self._resolve_spec_raw(spec)
+        return self._follow_merges(ent) if ent is not None else None
+
+    def _follow_merges(self, ent):
         seen: set[str] = set()
         while ent is not None and (ent.properties or {}).get("merged_into"):
             dst = str(ent.properties["merged_into"])
