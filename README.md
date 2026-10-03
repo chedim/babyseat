@@ -72,7 +72,9 @@ Requires Python ≥ 3.10 (numpy is the only import-time dep); embeddings/chat co
 **Dependencies, honestly:**
 
 - **Python ≥ 3.10** + **numpy** — the only import-time dep. `couchbase` (the
-  shared field) and `paho-mqtt` (the event bus) are installed by default
+  shared field) are installed by default (paho-mqtt was removed
+  2026-10-03 — the mqtt event bus is retired; cross-seat transport is
+  couch's peer_chat lane)
   (`pip install -r requirements.txt` / the pyproject) but imported lazily;
   either missing degrades that feature, never the boot.
 - **Ollama** (`brew install ollama` / <https://ollama.com>) — NOT auto-installed; embeddings
