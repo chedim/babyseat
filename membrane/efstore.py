@@ -848,16 +848,22 @@ class FileBackend(MemBackend):
                 rows.append((k, d))
             if pack_found["n"] >= 1:
                 pass                     # the rewrite below packs it
+            elif n_lines > 2 * n_live:
+                pass                     # THE LINE GC: chattered rows
             else:
-                # bytes sanity: the journal out-carries the live rows
+                # the LINE gate said no: the bytes still can. The
+                # giant-home rule: a journal tenfold its live bytes
+                # is ALWAYS worth a rewrite (ratios can hide huge
+                # churny journals forever -- 355MB of tombstoned
+                # rows behind a 1.5x count); $0 at normal homes
+                # (st_size ~= live bytes there).
                 sample = rows[:20]
                 avg_row = (sum(len(self._json.dumps({"k": k, "d": d}))
                                for k, d in sample)
                            // max(len(sample), 1)) if sample else 0
                 avg_row += 1             # the journal's newline byte
                 st_size = self._journal_path(coll).stat().st_size
-                if (n_lines <= 2 * n_live
-                        and st_size <= 2 * avg_row * n_live):
+                if st_size <= 10 * max(avg_row * n_live, 4096):
                     return
             jpath = self._journal_path(coll)
         tmp = jpath.with_suffix(".jsonl.tmp")
