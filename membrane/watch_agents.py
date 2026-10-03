@@ -330,6 +330,177 @@ def loop_agent_name(kind: str, eid: str = "") -> str:
     return f"{kind}{(': ' + eid) if eid else ''}"
 
 
+# ---- the boot drainer + the loop turns -------------------------------------
+def loop_agent_name(kind: str, eid: str = "") -> str:
+    """THE AGENT-NAME CONTRACT: the frontend shows the processed
+    entity's id IN the agent name ('watch: f:membrane/router.py').
+    The title's tail IS the eid (no invented short-name)."""
+    return f"{kind}{(': ' + eid) if eid else ''}"
+
+
+def loop_task_text(ev: dict) -> str:
+    """THE LOOP'S TASK: the event described + the react-or-ignore
+    covenant (the model's choice IS the turn; tools via the membrane
+    lane; a plain text verdict = ignore)."""
+    kind = str(ev.get("kind") or "event")
+    ent = str(ev.get("entity") or "?")
+    if kind == "around":
+        g = ev.get("group") or {}
+        head = (f"watch event: '{ent}' sensed {g.get('entered_n', 0)} "
+                f"entering and {g.get('left_n', 0)} leaving its "
+                f"z-radius")
+        detail = (f"entered: {g.get('entered', [])[:8]}"
+                  f"{'' if len(g.get('entered') or []) <= 8 else ' ...'}"
+                  f" left: {g.get('left', [])[:8]}")
+    elif kind == "away":
+        head = (f"watch event: '{ent}' moved {ev.get('distance', '?')} "
+                f"away from {ev.get('rel', '?')} (was "
+                f"{ev.get('prev', '?')})")
+        detail = ""
+    elif kind == "near":
+        head = (f"watch event: '{ent}' closed in to "
+                f"{ev.get('distance', '?')} of {ev.get('rel', '?')}")
+        detail = ""
+    elif kind == "peer-miss":
+        head = (f"peer escalation missed: '{ev.get('peer', '?')}' had "
+                f"nothing on {ev.get('situation', '')[:80]!r}")
+        detail = ""
+    elif kind == "script-error":
+        head = (f"script error on '{ent}' ({ev.get('trigger', '?')}): "
+                f"{ev.get('error', '')[:80]}")
+        detail = ""
+    elif kind == "script-cron-overrun":
+        head = (f"cron overrun on '{ent}': ran {ev.get('ran_s', '?')}s "
+                f"(interval {ev.get('interval_s', '?')}s); the next "
+                "run was blocked")
+        detail = ""
+    elif kind == "watch-attached":
+        head = f"watch attached: '{ent}' ({ev.get('lane', '?')})"
+        detail = str(ev.get("detail") or "")
+    elif kind == "watch-detached":
+        head = f"watch detached: '{ent}' ({ev.get('lane', '?')})"
+        detail = str(ev.get("detail") or "")
+    elif kind == "operator-message":
+        head = f"operator messaged: {ev.get('text_head', '')[:80]}"
+        detail = ""
+    else:
+        head = f"watch event ({kind}) on '{ent}'"
+        detail = ""
+    return (f"{head}\n{detail}\n"
+            "Decide: REACT (act through the membrane tools -- entity_"
+            "add/edit/run, read/write/edit, learn, speak) or IGNORE "
+            "(reply with a plain 'ignored: <reason>' text -- the "
+            "verdict stamps the entity either way). The field is your "
+            "memory; this event is its push.")
+
+
+class _LoopDrainer:
+    """The queue's consumer: takes events (skipping the operator's --
+    the main chat IS that lane's reaction), admits a loop worker, runs
+    the loop turn, stamps the verdict. The runs are REAL turns against
+    the seat's /v1 (run_loop_turn the boot wires)."""
+
+    def __init__(self, srv, poll_s: float = 0.5):
+        self.srv = srv
+        self.poll_s = poll_s
+        self.alive = True
+        self._t: threading.Thread | None = None
+
+    def start(self):
+        self._t = threading.Thread(target=self._run, daemon=True,
+                                   name="membrane-loops")
+        self._t.start()
+        return self
+
+    def stop(self):
+        self.alive = False
+
+    def _run(self):
+        while self.alive:
+            evs = []
+            pool = getattr(self.srv, "events_pool", None)
+            if pool is not None:
+                evs = pool.take()
+            for ev in evs:
+                if is_operator_event(ev):
+                    continue        # the operator lane: the chat is it
+                loops = getattr(self.srv, "loops", None)
+                if loops is None:
+                    break           # no pool wired: nothing to admit
+                ent = str(ev.get("entity") or "")
+                agent = loop_agent_name("watch", ent or ev.get("kind"))
+                desc = LoopDesc("watch", eid=ent or ev.get("event_id", ""))
+                if not loops.admit(desc):
+                    pool.put(ev)    # the pool is full: re-queue (newest
+                    break           # survives past the cap; try again)
+                try:
+                    sid = self.srv.create_loop_session(agent, agent)
+                    out = self.srv.run_loop_turn(sid, loop_task_text(ev),
+                                                 agent)
+                    # THE VERDICT: the loop's turn's text
+                    verdict_text = str((out or {}).get("verdict_text")
+                                       or "")[:200]
+                    verdict = "ignored" if verdict_text.lower().startswith(
+                        "ignored") else "reacted"
+                    est = getattr(self.srv, "entity_store", None)
+                    if est is not None and ent:
+                        from .entities import QuantumEntity
+                        try:
+                            est.stamp_watch_decision(
+                                ent, {"verdict": verdict,
+                                      "decision": verdict_text,
+                                      "event_id": ev.get("event_id"),
+                                      "session": sid, "ts": time.time()})
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+                finally:
+                    loops.release(desc)
+
+
+def start_loop_drainer(srv, poll_s: float = 0.5) -> _LoopDrainer:
+    """The boot seam: the drainer thread consumes the events queue."""
+    return _LoopDrainer(srv, poll_s=poll_s).start()
+
+
+def is_operator_event(ev: dict) -> bool:
+    """THE OPERATOR LANE TEST: the operator's fires never occupy a
+    loop worker (the main chat's turn IS the reaction)."""
+    return str((ev or {}).get("kind") or "") == "operator-message"
+
+
+def loops_banner_line(srv) -> str | None:
+    """THE BANNER'S LINE: 'loops: N running (titles), M queued' -- the
+    ambient mind's load on every seat; None when nothing runs."""
+    loops = getattr(srv, "loops", None)
+    pool = getattr(srv, "events_pool", None)
+    run = loops.running() if loops is not None else 0
+    queued = pool.depth() if pool is not None else 0
+    if not run and not queued:
+        return None
+    titles = []
+    try:
+        titles = (_loop_titles(srv) or [])[:3]
+    except Exception:
+        pass
+    bits = [f"{run} running"]
+    if titles:
+        bits.append("(" + ", ".join(titles) + ")")
+    if queued:
+        bits.append(f"{queued} queued")
+    return "loops: " + ", ".join(bits)
+
+
+def _loop_titles(srv) -> list[str]:
+    """The running loops' agent titles (the store keeps them when the
+    boot records them)."""
+    store = getattr(getattr(srv, "loops", None), "titles", None)
+    if store is None:
+        return []
+    return [str(t) for t in store]
+
+
 class LoopRunner:
     """The loop pool: 3 concurrent non-operator loops + 1 dedicated
     operator lane (operator admit NEVER fails -- the main chat's

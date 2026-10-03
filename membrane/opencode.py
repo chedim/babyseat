@@ -57,7 +57,9 @@ from .router import (EXPLORE_LANE, AUTO_CLOUD, AUTO_LOCAL, AUTO_LANES,
                      AUTO_ALIASES, LANE_TOKENS, normalize_lane,
                      Registry)
 from .watch import MAX_WATCHES, WatchBoard
-from .watch_agents import WatchEvents
+from .watch_agents import WatchEvents, LoopRunner, \
+    start_loop_drainer as WA_start_loop_drainer, \
+    loops_banner_line
 from .intent import IntentBoard, MAX_INTENTS
 
 from .seat import Seat
@@ -1027,6 +1029,14 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
                                  f"{term}")
         except Exception as e:
             print(f"[opencode] timeline render error: {e}", file=sys.stderr)
+    # 4.5. THE LOOPS LINE (the reactive layer's ambient load): the
+    # thinking loops' running + queued counts + their agent titles.
+    try:
+        _loops_line = loops_banner_line(srv)
+        if _loops_line:
+            lines.append(_loops_line)
+    except Exception:
+        pass
     # 5. THE PEER SUBSTRATES (the operator's multi-seat design): the
     #    REGISTRY heartbeat + the seats line (who else is connected) +
     #    unread PEER-CHANNEL messages (cross-seat chatter, read-once per
@@ -6371,6 +6381,64 @@ def main() -> None:
                    name="membrane-night").start()
         print("[opencode] night: standalone NightClock on (15-min tick)",
               file=sys.stderr)
+    # THE LOOP POOL (the reactive layer, the operator's 2026-10-02
+    # design): 3 concurrent non-operator thinking loops + 1 dedicated
+    # operator lane; the watch-events queue DRAINS into real turns --
+    # a loop = a child session whose AGENT NAME carries the processed
+    # entity's id; the model reacts or ignores; the verdict stamps the
+    # entity. Serve mode: the loops ride the TurnRunner (a loop's turn
+    # IS a serve turn); proxy-only: the loop turns ride _model_chat
+    # (one deliberation per loop, no tools -- the honest degrade).
+    srv.loops = None
+    if getattr(srv, "events_pool", None) is not None:
+        srv.loops = LoopRunner(max_loops=3)
+        srv.loops.titles = []          # the running agents' names (the banner)
+
+        def _loop_session(srv, agent):
+            est = getattr(srv, "entity_store", None)
+            runner = getattr(srv, "__loop_runner__", None)
+            if runner is not None:
+                try:
+                    s = runner.sessions.create(title=agent)
+                    s["agent"] = agent
+                    runner.sessions.sessions[s["id"]] = s
+                    return s["id"]
+                except Exception:
+                    pass
+            key = f"loop::{agent}"
+            est.docs.get(key)
+            return key                 # the proxy-only degenerate form
+
+        srv.create_loop_session = (lambda srv=srv, _f=_loop_session:
+                                   (lambda agent, title=None: _f(srv, agent)))
+        srv._loop_runner = None        # wired by the serve boot below
+
+        def _run_loop_turn(srv=srv):
+            def go(session_id, text, agent):
+                runner = getattr(srv, "_loop_runner", None)
+                if runner is not None:
+                    out = runner.run(session_id, text)
+                    parts = (out or {}).get("parts") or []
+                    txt = " ".join(str(p.get("text") or "")
+                                   for p in parts if p.get("type") == "text")
+                    return {"verdict_text": txt[:200]}
+                # the proxy-only degrade: ONE model call, no tools
+                from .rag import _model_chat
+                model = (getattr(srv, "idle_cortex_model", "") or "")
+                out = _model_chat(srv)(getattr(srv, "backend", ""),
+                                       model,
+                                       [{"role": "system", "content":
+                                         "You are a membrane watch loop: "
+                                         "decide, briefly."},
+                                        {"role": "user",
+                                         "content": text}], timeout=45)
+                return {"verdict_text": (out or "")[:200]}
+            return go
+        srv.run_loop_turn = _run_loop_turn()
+        WA_start_loop_drainer(srv)
+        print("[opencode] the loop pool is live (3 loops + the "
+              "operator's lane; the drainer consumes the watch events)",
+              file=sys.stderr)
     # the orchestration router (model-vs-model): discovered from the live
     # Ollama (locals AND remote-backed cloud entries), imprints seeded in the
     # background, records persisted beside the field. OFF with --no-router.
@@ -6705,6 +6773,9 @@ def main() -> None:
                                 loopback_ladder(listen),
                                 mcp_executor(listen),
                                 system=system, model=_srv_model)
+            # THE LOOPS' RUNNER (the reactive layer): the loops' turns
+            # are real serve turns on their child sessions
+            srv._loop_runner = runner
             start(serve_port or 4096, surf_host, serve_su,
                   serve_sp, cfg, runner, sess_store, msg_store)
             native_up = True
