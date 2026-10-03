@@ -131,3 +131,27 @@ def test_vector_cache_no_rebuild_per_read(tmp_path):
                                       "tier": "live"})
     r = be.vector_top_k("entity_states", "state", q, 5)
     assert str(r[0][0]) == "e0"              # the new value wins
+
+
+def test_vector_cache_survives_a_write_burst(tmp_path):
+    """The storm lesson: a capture turn writes DOZENS of rows; the
+    cache must rebuild ONCE at the next read, not once per write."""
+    from membrane.efstore import FileBackend, pack_f16
+    import numpy as np
+
+    be = FileBackend(str(tmp_path / "f"))
+    q = np.ones(4)
+    for i in range(20):
+        be.upsert("entity_states", f"e{i}", {"eid": f"e{i}",
+                                             "state": pack_f16(np.ones(4) * i),
+                                             "tier": "live"})
+    be.vector_top_k("entity_states", "state", q, 5)     # build gen 0
+    M0 = be._vec_cache[("entity_states", "state")][1]   # (identity, no copy)
+    for i in range(50):                                 # the burst
+        be.upsert("entity_states", f"e{i}", {"eid": f"e{i}",
+                                             "state": pack_f16(np.ones(4) * i),
+                                             "tier": "live"})
+    assert be._vec_cache[("entity_states", "state")][1] is M0  # untouched
+    r1 = be.vector_top_k("entity_states", "state", q, 5)       # ONE rebuild
+    M1 = be._vec_cache[("entity_states", "state")][1]
+    assert M1.shape[0] == 50  # e0..e49 (the re-upserts are the same keys)          # the burst's rows are IN (one rebuild)

@@ -101,19 +101,23 @@ class MemBackend:
         # normed rows make the cosine the matmul's dot.
         self._vec_cache: dict[tuple[str, str], tuple[np.ndarray,
                                                     np.ndarray]] = {}
+        self._vec_dirty: set[str] = set()   # the gen-bump set (writes)
 
     def _vec_matrix(self, coll: str, field: str, eq: dict | None):
         """(keys, normed f32 matrix) for the coll/field -- cached,
-        invalidation = any upsert on the coll drops the entry. None
+        invalidation = the write generation (see _touch). None
         when the field is absent or no rows carry it.
         THE GC-CHURN EXHIBIT (the sampler's visit_reachable stacks):
         the matrix build ran UNDER the RAM lock with the GIL held --
         27k float unpacks = a 110MB array + millions of temp objects,
         the GC pauses stacking onto every reader. The BUILD runs
-        OUTSIDE the lock now (snapshot under it, numpy outside)."""
+        OUTSIDE the lock now (snapshot under it, numpy outside), and
+        by GENERATION: a write burst (a capture turn's dozens of
+        rows) bumps the dirty set -- the rebuild happens at the next
+        READ, exactly once, not once per write."""
         ek = (coll, field)
         hit = self._vec_cache.get(ek)
-        if hit is not None:
+        if hit is not None and coll not in self._vec_dirty:
             return hit
         with self._ram_lock:
             snap = [(k, d.get(field))
@@ -130,6 +134,7 @@ class MemBackend:
         M = M / (np.linalg.norm(M, axis=1, keepdims=True) + 1e-12)
         pair = (np.array(keys), M)
         self._vec_cache[ek] = pair
+        self._vec_dirty.discard(coll)
         return pair
 
     def _c(self, coll: str) -> dict:
@@ -712,11 +717,14 @@ class FileBackend(MemBackend):
                   "carries", file=sys.stderr)
 
     def _touch(self, coll: str) -> None:
-        # THE VECTOR CACHE'S INVALIDATION: any write to the coll drops
-        # every cached matrix for it (the cache keys are (coll, field),
-        # field-agnostic drop is cheap and always correct).
-        self._vec_cache = {ek: v for ek, v in self._vec_cache.items()
-                           if ek[0] != coll}
+        # THE VECTOR CACHE'S INVALIDATION, by GENERATION (the storm
+        # lesson): a capture turn writes dozens of rows -- dropping
+        # the matrix each time rebuilt a 168MB numpy per row (the
+        # turn's 90s crawl). Writes bump a generation counter; the
+        # CACHE builds lazily and keys on the generation, so a burst
+        # of writes costs NOTHING and the next READ after the burst
+        # rebuilds exactly once.
+        self._vec_dirty.add(coll)
         with self._flush_lock:
             self._dirty.add(coll)
             due = (time.time() - self._last_flush >= self.DEBOUNCE_S
