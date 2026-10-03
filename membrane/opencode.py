@@ -5723,6 +5723,69 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         self._json_out(out)
 
 
+def boot_entity(est, root: str, field: str, pid: int, argv: list,
+                boot_ts: float | None = None):
+    """THE BOOT ENTITY (the operator's ask): every boot lands ONE
+    immutable record -- how and when this boot happened (host, the
+    seat's root, the field path, pid, the argv tail, boot_ts) -- and
+    links the PREVIOUS boot (prev_boot: the graph's lineage). The
+    seat's PRESENCE entity stays the LIVING now (refreshed each
+    minute) and carries the CURRENT boot's facts (boot + boot_ts);
+    the boot entities themselves never update (they age into the
+    timeline honestly). The presence entity is minted on demand --
+    the boot is its first writer (an empty store's first doc)."""
+    from .entities import MEMBRANE_NS, CLASS_SEAT, QuantumEntity
+
+    boot_ts = boot_ts if boot_ts is not None else (
+        getattr(est, "_pending_boot_ts", None) or time.time())
+    # the eid: the boot ts is the identity (immutable, unique per boot)
+    eid = f"{MEMBRANE_NS}boot:{int(boot_ts * 1000)}"
+    old = (est.docs or {}).get(eid)
+    if old is not None:
+        return old               # idempotent (a double-call never mints)
+    import socket as _sock
+    props = {
+        "name": f"boot {time.strftime('%H:%M:%S', time.localtime(boot_ts))}",
+        "host": _sock.gethostname(),
+        "root": str(root),
+        "field": str(field),
+        "pid": int(pid or 0),
+        "argv_tail": [str(a) for a in (argv or [])][-8:],
+        "boot_ts": boot_ts,
+        "guest": False,
+    }
+    # THE LINEAGE: the PREVIOUS boot's eid rides (the chain the graph
+    # reader can walk: boot -> prev_boot -> ...)
+    _boots = [((e.properties or {}).get("boot_ts") or 0, e.eid)
+              for e in (est.docs or {}).values()
+              if str(e.eid).startswith(MEMBRANE_NS + "boot:")
+              and (e.properties or {})
+              and (e.properties or {}).get("boot_ts", 0) < boot_ts]
+    prev = max(_boots) if _boots else None
+    if prev and prev[0]:
+        props["prev_boot"] = prev[1]
+    ent = QuantumEntity(eid=eid, cls=CLASS_SEAT,
+                        properties=props)
+    # the upsert's birth lane announces (the doc must NOT pre-seed --
+    # an is_new check reads self.docs before inserting)
+    est.upsert(ent, embedder=None)
+    # THE PRESENCE CARRIES THE CURRENT BOOT (the operator's 'the last
+    # boot could be the presence entity' -- as the living fields, the
+    # boot's own record stays immutable):
+    pres = est.docs.get(MEMBRANE_NS + "presence")
+    if pres is None:
+        pres = QuantumEntity(eid=MEMBRANE_NS + "presence",
+                             cls=CLASS_SEAT, properties={})
+        est.docs[pres.eid] = pres
+    pp = pres.properties or {}
+    pp["seat"] = est.origin
+    pp["boot"] = eid
+    pp["boot_ts"] = boot_ts
+    pres.properties = pp
+    est.upsert(pres, embedder=None)
+    return ent
+
+
 def main() -> None:
     import argparse
     ap = argparse.ArgumentParser(
@@ -6209,6 +6272,18 @@ def main() -> None:
         srv.entity_store._srv = srv
         if getattr(srv, "efield", None) is not None:
             srv.efield._est_sink = srv.entity_store
+        # THE BOOT ENTITY (the operator's ask): one immutable record
+        # per boot (host/root/field/pid/argv/boot_ts) + the lineage
+        # link + the presence's current-boot facts:
+        try:
+            boot_entity(srv.entity_store, root=srv.entity_store.root,
+                        field=str(args.field),
+                        pid=os.getpid(),
+                        argv=sys.argv[-6:],
+                        boot_ts=srv._boot_ts)
+        except Exception as _be:
+            print(f"[opencode] boot entity skipped ({_be})",
+                  file=sys.stderr)
         # THE MODEL'S EVENT POOL (the reactive layer's lane): the watch
         # fires, the script errors/overruns, the peer misses -- the
         # loops' reads land here; the store's watch lanes put through

@@ -1823,6 +1823,44 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
                                  "error": "run: true but the entity "
                                           "carries no 'command' prop"}
             changed += 1
+    # THE FILE VERDICTS (the entity-scripts covenant, the reads/writes
+    # lane): a script's result carries {read: path} / {write: [path,
+    # content]} / {edit_file: [path, old, new]}, and the ENGINE's file
+    # hands exec it (file_read_entity/file_write_entity -- the
+    # observation event + the f:<path> entity as always). The script
+    # ASKS; the engine does; the result rides the asking entity's
+    # file_read/file_write props (the run-lane's residue shape).
+    if out.get("read"):
+        from . import file_lane
+        out["read_result"] = file_lane.read(srv, ent,
+                                            str(out["read"]))
+        changed += 1
+    if out.get("write"):
+        w = out.get("write") or []
+        if isinstance(w, (list, tuple)) and len(w) >= 2:
+            from . import file_lane
+            out["write_result"] = file_lane.write(srv, ent,
+                                                  str(w[0]), str(w[1]),
+                                                  create_dirs=True)
+            changed += 1
+        else:
+            out["write_result"] = {"ok": False,
+                                   "error": "write: [path, content]"
+                                            " required"}
+            changed += 1
+    if out.get("edit_file"):
+        e = out.get("edit_file") or []
+        if isinstance(e, (list, tuple)) and len(e) >= 3:
+            from . import file_lane
+            out["edit_result"] = file_lane.edit(srv, ent,
+                                                str(e[0]), str(e[1]),
+                                                str(e[2]))
+            changed += 1
+        else:
+            out["edit_result"] = {"ok": False,
+                                  "error": "edit_file: [path, old, new]"
+                                           " required"}
+            changed += 1
     if changed:
         # THE TICK-PERSIST GATE: a silent apply is a per-second RAM
         # perspective -- its properties land on the doc (in place, above)

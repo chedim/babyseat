@@ -163,10 +163,7 @@ class TestMcpProtocol(unittest.TestCase):
                                  "peer_post",
 
                                  "graph",
-                                 "entity_inherit",
-                                 "read",
-                                 "write",
-                                 "edit"])
+                                 "entity_inherit"])
         for t in resp["result"]["tools"]:
             self.assertIn("inputSchema", t)
             self.assertTrue(t["description"].strip())

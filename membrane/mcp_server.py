@@ -494,70 +494,6 @@ TOOLS: list[dict] = [
             "required": ["spec", "parents"],
         },
     },
-    {
-        "name": "read",
-        "description": (
-            "Read a local file with line numbers (opencode-shaped): path "
-            "(absolute or cwd-relative), optional 1-based offset and limit "
-            "(default 2000 lines; page instead of one giant read). The "
-            "observation is relayed to the running proxy, which files an "
-            "event and keeps the f:<path> entity -- the field sees what "
-            "you read."),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string",
-                         "description": "absolute or cwd-relative path."},
-                "offset": {"type": "integer",
-                           "description": "1-based first line (default 1)."},
-                "limit": {"type": "integer",
-                          "description": "lines to show (default 2000)."},
-            },
-            "required": ["path"],
-        },
-    },
-    {
-        "name": "write",
-        "description": (
-            "Write/overwrite a local file (parents auto-created) -- "
-            "prefer edit for in-place changes. The effect is relayed to "
-            "the running proxy: an event is filed and the f:<path> entity "
-            "is minted, so the field sees what you wrote."),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string",
-                         "description": "absolute or cwd-relative path."},
-                "content": {"type": "string",
-                            "description": "the full new file content."},
-            },
-            "required": ["path", "content"],
-        },
-    },
-    {
-        "name": "edit",
-        "description": (
-            "In-place exact-string replacement in a local file (the "
-            "opencode-shaped edit): old must match exactly once, or pass "
-            "replace_all=True; a not-found or ambiguous match errors "
-            "instead of guessing -- read first. The effect is relayed as "
-            "an event + the f:<path> entity in the field."),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "path": {"type": "string",
-                         "description": "absolute or cwd-relative path."},
-                "old": {"type": "string",
-                        "description": "the exact string to replace."},
-                "new": {"type": "string",
-                        "description": "the replacement string."},
-                "replace_all": {"type": "boolean",
-                                "description": "replace every occurrence "
-                                               "(default false)."},
-            },
-            "required": ["path", "old", "new"],
-        },
-    },
 ]
 
 
@@ -1021,103 +957,6 @@ def tool_peer_seats(args: dict, port: int) -> str:
 
 # ---- the file tools (opencode-shaped; every effect mints into the field) ----
 
-def _fpath(args: dict) -> str:
-    p = str(args.get("path") or "").strip()
-    if not p:
-        raise ProxyError(400, "path required")
-    return os.path.abspath(os.path.expanduser(p))
-
-
-def _file_mint(port: int, op: str, abspath: str, detail: str) -> str:
-    """Relay the file effect to the running proxy: POST /membrane/filetool
-    files an event and upserts the f:<path> entity (run-lane style). The
-    FS effect is primary: if the proxy is down the file change STANDS and
-    the note degrades to a plain warning text."""
-    try:
-        rel = os.path.relpath(abspath, os.getcwd())
-    except ValueError:
-        rel = abspath
-    ent = f"f:{rel}"
-    try:
-        out = _http(port, "POST", "/membrane/filetool",
-                    {"op": op, "path": rel, "ent": ent, "detail": detail})
-        if not out.get("ok"):
-            return f"field note failed: {out.get('error', 'unknown')}"
-        how = out.get("how") or "updated"
-        return (f"field: {ent} {how} (event #{out.get('event', '?')}, "
-                f"eid {out.get('eid', '?')})")
-    except Exception as e:
-        return f"field note failed ({e}); the file change stands"
-
-
-def tool_read(args: dict, port: int) -> str:
-    abspath = _fpath(args)
-    try:
-        with open(abspath, encoding="utf-8", errors="replace") as fh:
-            lines = fh.readlines()
-    except FileNotFoundError:
-        raise ProxyError(404, f"no such file: {abspath}") from None
-    except IsADirectoryError:
-        raise ProxyError(400, f"is a directory: {abspath}") from None
-    off = max(int(args.get("offset") or 1), 1)
-    limit = max(int(args.get("limit") or 2000), 1)
-    total = len(lines)
-    sl = lines[off - 1: off - 1 + limit]
-    block = "".join(f"{n}: {lines[n - 1]}" for n in range(off, off + len(sl)))
-    note = _file_mint(port, "read", abspath,
-                      f"read {len(sl)}/{total} lines (offset {off})")
-    return (f"{abspath} -- {total} lines (showing {off}.."
-            f"{max(off - 1 + len(sl), 0)})\n{note}\n{block}")
-
-
-def tool_write(args: dict, port: int) -> str:
-    abspath = _fpath(args)
-    content = args.get("content")
-    if not isinstance(content, str):
-        raise ProxyError(400, "content required (string)")
-    d = os.path.dirname(abspath)
-    if d:
-        os.makedirs(d, exist_ok=True)
-    existed = os.path.exists(abspath)
-    with open(abspath, "w", encoding="utf-8") as fh:
-        fh.write(content)
-    n = len(content.encode("utf-8"))
-    note = _file_mint(port, "write", abspath,
-                      f"{'overwrote' if existed else 'created'}, {n} bytes")
-    tag = "overwrote" if existed else "created"
-    return f"wrote {abspath} ({n} bytes, {tag})\n{note}"
-
-
-def tool_edit(args: dict, port: int) -> str:
-    abspath = _fpath(args)
-    old = args.get("old")
-    new = args.get("new")
-    if not isinstance(old, str) or not old:
-        raise ProxyError(400, "old required (the exact string to replace)")
-    if not isinstance(new, str):
-        raise ProxyError(400, "new required (the replacement string)")
-    try:
-        content = open(abspath, encoding="utf-8", errors="replace").read()
-    except FileNotFoundError:
-        raise ProxyError(404, f"no such file: {abspath}") from None
-    except IsADirectoryError:
-        raise ProxyError(400, f"is a directory: {abspath}") from None
-    occurrences = content.count(old)
-    if occurrences == 0:
-        raise ProxyError(404,
-                         f"old string not found in {abspath} -- read first")
-    replace_all = bool(args.get("replace_all"))
-    if occurrences > 1 and not replace_all:
-        raise ProxyError(409, f"old string matches {occurrences} times in "
-                              f"{abspath}; pass replace_all or narrow old")
-    out = content.replace(old, new, -1 if replace_all else 1)
-    with open(abspath, "w", encoding="utf-8") as fh:
-        fh.write(out)
-    note = _file_mint(port, "edit", abspath,
-                      f"replaced {occurrences} occurrence(s)")
-    return (f"edited {abspath}: {old[:80]!r} -> {new[:80]!r} "
-            f"({occurrences} place(s))\n{note}")
-
 def tool_entity_query(args: dict, port: int) -> str:
     """The entity graph's enumerate/list/count (the query language)."""
     q = str(args.get("q") or "").strip()
@@ -1149,9 +988,6 @@ TOOL_IMPLS = {
     "graph": tool_graph,
     "entity_query": tool_entity_query,
     "entity_inherit": tool_entity_inherit,
-    "read": tool_read,
-    "write": tool_write,
-    "edit": tool_edit,
 }
 
 
