@@ -95,6 +95,16 @@ def births(fld, est, limit: int = 3) -> list[dict]:
     for _, d in fld.b.scan("entity_states", {"origin": fld.origin, "tier": "live"}):
         if d["eid"] in born or int(d.get("accr") or 0) < BIRTH_MASS:
             continue
+        # THE CHAIN GUARD (the 'm:w:poke born' exhibit): the field's
+        # TRACKER chains (a kind head over another kind: m+w, m+f...)
+        # are its own accounting rows -- they never birth (the birth
+        # lane is for SUBJECTS a cell is ABOUT: a bare kind head).
+        heads = [h for h in d["eid"].replace(":", " ").split()
+                 if h in ("m", "models", "f", "files", "s", "symbols",
+                          "c", "shell", "tool", "port", "ha", "u",
+                          "urls", "w", "p", "e")]
+        if len(heads) > 1:
+            continue
         st = fld.get(d["eid"])
         if st is None or (not E.is_specific(st.eid) and not fld.is_coherent(st)):
             continue

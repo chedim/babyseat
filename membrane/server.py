@@ -988,9 +988,15 @@ class TurnRunner:
                                    "socket's hang, not your message)")
 
     def _stop_wait(self, sid: str, t: float) -> bool:
-        """The abort-stop event's waiter (the watchdog's clock)."""
-        ev = getattr(self, "_turn_stops", {}).get(sid)
-        return bool(ev and ev.is_set())
+        """The abort-stop event's WAITER (the watchdog's clock): a
+        REAL Event.wait(timeout) — the watchdog PARKS between checks
+        (the drainer's busy-wait sin atoned: the watchdog was born
+        spinning, burning a core per armed turn)."""
+        ev = (getattr(self, "_turn_stops", {}) or {}).get(sid)
+        if ev is None:
+            time.sleep(t)                      # the event's lost: park raw
+            return False
+        return ev.wait(t)                      # the honest park
 
     def _stream_error_part(self, sid: str, msg: str) -> None:
         """One assistant-facing error part: a text part appended to the
