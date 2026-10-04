@@ -3993,7 +3993,15 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             body = json.loads(raw) if raw else {}
         except json.JSONDecodeError:
             self._forward_raw(raw); return
-        model = str(body.get("model", "membrane"))
+        # THE TUI'S DICT SHAPE (the model selection: {"id": ...,
+        # "providerID": ...}) vs the bare string: both resolve -- the
+        # dict's modelID is the pick (the operator's selection must
+        # HOLD, a dict-stringified was the 'my model ignored' bug)
+        _mraw = body.get("model", "membrane")
+        if isinstance(_mraw, dict):
+            _mraw = (_mraw.get("modelID") or _mraw.get("id")
+                     or "membrane")
+        model = str(_mraw or "membrane")
         # the opencode-selected model is the seat's AND the judge's model
         # (unless pinned): the follow-chat judge reads srv.seat_model live
         if srv.model_follows_chat:
