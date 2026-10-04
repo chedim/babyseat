@@ -63,6 +63,19 @@ from .watch_agents import WatchEvents, LoopRunner, \
 from .intent import IntentBoard, MAX_INTENTS
 
 from .seat import Seat
+# THE IMPORT-HOIST (the GIL/import-war covenant, 2026-10-03): the
+# REQUEST path's lazy imports (21 sites ran perTurn/beat) fought the
+# interpreter's import lock with the worker threads -- a request
+# thread's builtin_exec wedged the whole surface (the seat's HTTP
+# lane starved behind a half-initialized module). The hot modules
+# import ONCE here; the per-turn sites read the aliases.
+from . import entity_block as _eb
+from . import efgate as _efg
+from . import entities as _ents
+from . import streams as _streams
+from . import efield as _efield_mod
+from .entities import (EntityStore, QuantumEntity, MEMBRANE_NS,
+                       CLASS_COMPONENT, CLASS_TOOL)
 
 CLOUD_DEFAULT_PRICE = 3.0   # an unknown cloud model's relative money/turn
 
