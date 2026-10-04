@@ -48,6 +48,7 @@ def quiet_seat():
         [".venv/bin/python", "-m", "membrane.opencode",
          "--serve", "--serve-port", str(port), "--serve-host", "127.0.0.1",
          "--no-launch", "--no-thinker", "--no-dreamer", "--no-autonode",
+         "--no-router", "--model", "granite4:latest",
          "--field", f"{SEAT_DIR}/f.json", "--audit", f"{SEAT_DIR}/a.jsonl"],
         env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     cred = None
@@ -72,6 +73,29 @@ def quiet_seat():
         f"{cred['user']}:{cred['password']}".encode()).decode()
     hdr = {"Authorization": "Basic " + tok,
            "Content-Type": "application/json"}
+    _mk = {"url": f"http://127.0.0.1:{port}"}
+    # THE MODEL WARMUP (the cold 14B's 30-115s first turn vs the
+    # test's own timeouts — prewarm the seat's default chat model
+    # DIRECTLY at ollama (the honest cost paid once, off-lane):
+    import urllib.request as _ur, json as _js
+    try:
+        _models = _js.loads(_ur.urlopen(f"{_mk_proxy}"
+                                        if False else
+                                        "http://127.0.0.1:11434/api/tags",
+                                        timeout=4).read())["models"]
+        _boot_model = next((m["name"] for m in _models
+                            if "granite" in m["name"]), None)
+        if _boot_model:
+            _ur.urlopen(_ur.Request(
+                "http://127.0.0.1:11434/api/chat",
+                data=_js.dumps({"model": _boot_model,
+                                "messages": [{"role": "user",
+                                              "content": "hi"}],
+                                "stream": False}).encode(),
+                headers={"Content-Type": "application/json"}),
+                timeout=90)
+    except Exception:
+        pass  # the prewarm's failure = the honest slower turn
 
     def _get(url):
         return json.loads(urllib.request.urlopen(
