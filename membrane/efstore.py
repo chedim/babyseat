@@ -119,6 +119,31 @@ class MemBackend:
         hit = self._vec_cache.get(ek)
         if hit is not None and coll not in self._vec_dirty:
             return hit
+        dirty = coll in self._vec_dirty
+        # STALE-OK (the graveyard's last lesson: a boot's thread storm
+        # makes an inline 80ms build a 120s GIL-starved crawl -- a
+        # REQUEST THREAD must never build): a DIRTY cache serves the
+        # STALE matrix + schedules ONE background rebuild; an EMPTY
+        # cache schedules the rebuild AND answers honestly empty (the
+        # first read misses, the next read hits -- the boot's first
+        # turn never blocks behind the build).
+        if hit is not None and dirty:
+            if not self._vec_rebuilding:
+                self._vec_rebuild_async()
+            return hit
+        if hit is not None:
+            return hit
+        # the SIZE GATE: a small world builds inline (instant, the
+        # tests' world too); a big one answers empty + rebuilds async
+        # (the boot's first read never blocks behind the build)
+        try:
+            n_docs = len(self.colls.get(coll, {}))
+        except Exception:
+            n_docs = 0
+        if n_docs > 2000:
+            if not self._vec_rebuilding:
+                self._vec_rebuild_async()
+            return None
         with self._ram_lock:
             snap = [(k, d.get(field))
                     for k, d in list(self.colls.get(coll, {}).items())]
@@ -136,6 +161,47 @@ class MemBackend:
         self._vec_cache[ek] = pair
         self._vec_dirty.discard(coll)
         return pair
+
+    _vec_rebuilding = False
+
+    def _vec_rebuild_async(self) -> None:
+        """ONE background rebuild at a time (the request threads never
+        build); the flags reset when the rebuild lands."""
+        if self._vec_rebuilding:
+            return
+        self._vec_rebuilding = True
+
+        def _rebuild():
+            try:
+                for ek in list(self._vec_cache.keys()
+                               if hasattr(self, "_vec_cache") else []):
+                    coll, field = ek
+                    if coll not in self._vec_dirty:
+                        continue
+                    with self._ram_lock:
+                        snap = [(k, d.get(field))
+                                for k, d in
+                                list(self.colls.get(coll, {}).items())]
+                    keys, rows = [], []
+                    for k, v in snap:
+                        if v is None:
+                            continue
+                        keys.append(k)
+                        rows.append(unpack_f16(v))
+                    if not rows:
+                        continue
+                    M = np.array(rows, dtype=np.float32)
+                    M = M / (np.linalg.norm(M, axis=1, keepdims=True)
+                             + 1e-12)
+                    self._vec_cache[ek] = (np.array(keys), M)
+                self._vec_dirty.clear()
+            except Exception:
+                pass
+            finally:
+                self._vec_rebuilding = False
+
+        threading.Thread(target=_rebuild, daemon=True,
+                         name="vec-matrix-rebuild").start()
 
     def _c(self, coll: str) -> dict:
         with self._ram_lock:

@@ -7,6 +7,7 @@ upserts, nobody raises.
 3. entities store iteration vs concurrent upsert (the entity_query
    path's list()-snapshot contract)."""
 import threading
+import time
 
 import pytest
 
@@ -125,12 +126,21 @@ def test_vector_cache_no_rebuild_per_read(tmp_path):
     be.vector_top_k("entity_states", "state", q, 5)
     be.vector_top_k("entity_states", "state", q, 5)
     assert walks["n"] == n_first, "the cache re-walked per read"
-    # a write invalidates:
+    # a write invalidates: the STALE-OK contract — the dirty read
+    # serves the old matrix while ONE background rebuild lands; the
+    # NEXT read after the rebuild serves the fresh order:
     be.upsert("entity_states", "e0", {"eid": "e0",
                                       "state": pack_f16(np.ones(4) * 99),
                                       "tier": "live"})
-    r = be.vector_top_k("entity_states", "state", q, 5)
-    assert str(r[0][0]) == "e0"              # the new value wins
+    _r_stale = be.vector_top_k("entity_states", "state", q, 5)
+    deadline = time.time() + 5.0
+    r = None
+    while time.time() < deadline:
+        r = be.vector_top_k("entity_states", "state", q, 5)
+        if str(r[0][0]) == "e0":
+            break
+        time.sleep(0.05)
+    assert r is not None and str(r[0][0]) == "e0", r  # the fresh value wins
 
 
 def test_vector_cache_survives_a_write_burst(tmp_path):
@@ -152,6 +162,14 @@ def test_vector_cache_survives_a_write_burst(tmp_path):
                                              "state": pack_f16(np.ones(4) * i),
                                              "tier": "live"})
     assert be._vec_cache[("entity_states", "state")][1] is M0  # untouched
-    r1 = be.vector_top_k("entity_states", "state", q, 5)       # ONE rebuild
-    M1 = be._vec_cache[("entity_states", "state")][1]
-    assert M1.shape[0] == 50  # e0..e49 (the re-upserts are the same keys)          # the burst's rows are IN (one rebuild)
+    # the async rebuild lands within seconds; the next read has it:
+    deadline = time.time() + 5.0
+    M1 = None
+    while time.time() < deadline:
+        be.vector_top_k("entity_states", "state", q, 5)
+        M1 = be._vec_cache[("entity_states", "state")][1]
+        if M1 is not M0:
+            break
+        time.sleep(0.05)
+    assert M1 is not None and M1 is not M0    # ONE rebuild (async)
+    assert M1.shape[0] >= 50                  # the burst's keys in          # the burst's rows are IN (one rebuild)

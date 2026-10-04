@@ -1,0 +1,73 @@
+"""THE TURN WATCHDOG (the 26-message graveyard covenant): a turn whose
+loop outlives TURN_MAX_S aborts itself -- the honest error part
+streams, the guard frees, the queue drains; one dead backend socket
+can never hold the room for 5 minutes. Plus: 410 GONE is a rung-down
+code (a retired model descends, never wedges)."""
+import threading
+import time
+
+import pytest
+
+from membrane.server import TurnRunner, SSEHub, SessionStore, MessageStore
+
+
+def _runner(tmp):
+    return TurnRunner(SSEHub(), SessionStore(f"{tmp}/s.json"),
+                      MessageStore(f"{tmp}/m.json"),
+                      call_ladder=None, executor=None, system="", model="m")
+
+
+def test_turn_max_constant():
+    assert 60 <= TurnRunner.TURN_MAX_S <= 240
+
+
+def test_turn_watchdog_aborts_a_wedged_turn(tmp_path):
+    """A turn whose _busy sits past TURN_MAX_S: the watchdog marks the
+    abort flag and streams the error part."""
+    r = _runner(str(tmp_path))
+    r.TURN_MAX_S = 0.2                    # the test's fast clock
+    r.TURN_MAX_S = 0.2
+    s = r.sessions.create(title="x")
+    sid = s["id"]
+    r._busy[sid] = {"type": "busy"}
+    stop = threading.Event()
+    r._turn_stops[sid] = stop
+    seen_err = {}
+    r._stream_error_part = (lambda sid, msg:
+                            seen_err.setdefault("msg", msg))
+    r._turn_watchdog(sid, time.time())
+    assert sid in r._aborting
+    assert "watchdog" in seen_err["msg"], seen_err
+
+
+def test_turn_watchdog_stands_down_when_turn_ended(tmp_path):
+    """The turn ENDED (the normal way): the watchdog's timer finds no
+    busy and stands down -- no abort, no error part."""
+    r = _runner(str(tmp_path))
+    r.TURN_MAX_S = 0.1
+    s = r.sessions.create(title="x")
+    sid = s["id"]
+    seen_err = {}
+    r._stream_error_part = (lambda sid, msg:
+                            seen_err.setdefault("msg", msg))
+    time.sleep(0.15)
+    r._turn_watchdog(sid, time.time())
+    assert "msg" not in seen_err          # stood down
+
+
+def test_stream_error_part_appends_to_the_session(tmp_path):
+    r = _runner(str(tmp_path))
+    s = r.sessions.create(title="x")
+    sid = s["id"]
+    r._stream_error_part(sid, "the turn outlived 120s")
+    rows = r.messages.msgs.get(sid) or []
+    texts = [p.get("text") for row in rows for p in row.get("parts", [])
+             if p.get("type") == "text"]
+    assert any("outlived" in t for t in texts), texts
+
+
+def test_rung_down_includes_410():
+    """The retired-model belt: the ladder's down-codes name 410."""
+    import pathlib as _pl
+    src = _pl.Path("membrane/opencode.py").read_text()
+    assert "410" in src.split("down = he.code in")[1].split(")")[0]
