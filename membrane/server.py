@@ -969,7 +969,19 @@ class TurnRunner:
         print(f"[serve] turn {sid} STILL RUNNING after {self.TURN_MAX_S}s "
               "-- the turn watchdog aborts (the graveyard covenant)",
               file=sys.stderr)
-        faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+        # THE EVIDENCE'S OWN FILE (the GIL-free lane): the dump writes
+        # to the log file -- the stderr's file handle competes with
+        # the wedged threads' prints; a dedicated dump file never
+        # interleaves (the corpse's own readable evidence).
+        try:
+            dp = Path(getattr(self.messages, "path", "") or "/tmp")
+            dp = dp.parent / "turn-dump.txt" if hasattr(dp, "parent") \
+                else Path("/tmp/turn-dump.txt")
+            with open(str(dp), "w") as df:
+                faulthandler.dump_traceback(file=df, all_threads=True)
+            print(f"[serve] the dump: {dp}", file=sys.stderr)
+        except Exception as e:
+            faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
         self._stream_error_part(sid, "the turn outlived "
                                    f"{self.TURN_MAX_S}s -- aborted by "
                                    "the turn watchdog (a backend "
