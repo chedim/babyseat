@@ -1138,7 +1138,20 @@ class TurnRunner:
             sid_flag = sid in self._aborting
             if sid in self._aborting or sid_flag:
                 break
-            body = {"model": self.model,
+            # THE SESSION'S MODEL IS THE TURN'S (the operator's pick
+            # on the session holds over the boot default -- the TUI
+            # pins its session's model; the dict shape's id carries)
+            turn_model = self.model
+            try:
+                _sess = self.sessions.sessions.get(sid) or {}
+                _sm = _sess.get("model") or {}
+                _pick = (_sm.get("id") if isinstance(_sm, dict)
+                         else str(_sm or "")).strip()
+                if _pick and _pick not in ("", "membrane"):
+                    turn_model = _pick
+            except Exception:
+                pass
+            body = {"model": turn_model,
                     "messages": ([{"role": "system", "content": self.system}]
                                  if self.system else []) + history}
             tools = _openai_tools(self.tools) if self.tools is not None \
