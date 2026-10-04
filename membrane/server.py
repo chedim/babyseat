@@ -951,7 +951,7 @@ class TurnRunner:
     # turn whose loop outlives TURN_MAX_S aborts ITSELF (publishes an
     # honest error part + marks the turn dead) -- one dead backend
     # socket can't hold the guard + queue the room for 5 minutes.
-    TURN_MAX_S = 120.0
+    TURN_MAX_S = 300.0       # a cold 14B load + the transcript prefill's honest scale (the watchdog's 120s fired ON a normal qwen cold turn — the honest budget is the ladder's own 300)
 
     def _turn_watchdog(self, sid: str, t0: float) -> None:
         """The turn's timer thread: past TURN_MAX_S marks the abort
@@ -1782,19 +1782,21 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                     # surface): the session's model = the body's dict
                     # (the TUI's pick: {modelID, providerID}) — the
                     # turn's lane reads it (the session's model
-                    # governs its turns).
+                    # governs its turns). The store's _lock is ALREADY
+                    # held here: call _flush (the inner form) — a
+                    # flush() = a double-lock deadlock (the PATCH
+                    # never returned!).
                     m = b.get("model")
                     if isinstance(m, dict) and (m.get("modelID")
                                                 or m.get("id")):
-                        with sessions._lock:
-                            row = sessions.sessions.get(segs[0])
-                            if row is not None:
-                                row["model"] = {
-                                    "id": m.get("modelID") or m.get("id"),
-                                    "providerID": m.get("providerID")
-                                                  or "membrane",
-                                    "variant": "default"}
-                                sessions.flush()
+                        row = sessions.sessions.get(segs[0])
+                        if row is not None:
+                            row["model"] = {
+                                "id": m.get("modelID") or m.get("id"),
+                                "providerID": m.get("providerID")
+                                              or "membrane",
+                                "variant": "default"}
+                            sessions._flush()
                     return self._json_out(s)
             if path == "/config":
                 return self._json_out(config)
