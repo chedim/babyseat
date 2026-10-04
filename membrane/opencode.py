@@ -7194,6 +7194,16 @@ def main() -> None:
             srv.timeout = 1.0
             pid_path = (Path(getattr(srv.membrane, "field_path", ""))
                         .parent / "opencode.pid")
+            # --no-launch: THE FOLLOW IS NOT MINE — a headless boot
+            # ignores (and clears) a stale pid file: the operator's
+            # rule binds a LAUNCHING proxy to its child, never a
+            # headless one to a dead launcher's ghost.
+            if not args.launch:
+                try:
+                    if pid_path.exists():
+                        pid_path.unlink()
+                except OSError:
+                    pass
             watched_pid = None
             try:
                 if pid_path.exists():
