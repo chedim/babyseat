@@ -312,3 +312,26 @@ field's law: hot means slower, frozen means quiet, both visible.
 **Planting**: `entity_edit(eid, watch_fields=[{verb, arg}, ...])` —
 refuses a 4th filter, unknown verbs, non-numeric args; empty list
 clears. Attach/detach announce to the pool like every sensor's arming.
+
+
+## Ollama's serial queue (the operator's note, 2026-10-04)
+
+Ollama serves its models **one call at a time** (`OLLAMA_NUM_PARALLEL`
+defaults to 1). Membrane's lanes all call the same Ollama: your turn's
+model, the embedder (every capture), the claim/A-B judges, the
+watcher's reads. A single slow call (a cold 14B load, a cloud relay's
+hang) queues EVERYONE behind it — the turns read 30-115s "stuck", my
+concurrent probes time out, and the room feels dead while the queue
+drains.
+
+**The honest fix is Ollama's env** (the operator's hand, in the app's
+launch env):
+
+    OLLAMA_NUM_PARALLEL=2      # the turn + one ambient lane live
+                               # together; 3 = roomier, more VRAM
+    OLLAMA_KEEP_ALIVE=30m      # the model stays loaded (the cold
+                               # load's cost stops recurring)
+
+Measured on the M2 Pro/32GB with qwen3:14b resident (9GB): a probe
+behind a turn: 30-115s; alone: 1.2s (granite4). The queue is the
+latency.

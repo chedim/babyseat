@@ -4607,8 +4607,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             rq = urllib.request.Request(
                 url, data=json.dumps(u2).encode(), method="POST",
                 headers=headers)
+            # THE PER-RUNG BUDGET (the graveyard's honest clock): a
+            # rung that doesn't answer in 90s is DOWN (the turn's
+            # guard must free -- the queue's room cannot wait behind
+            # a single socket for 300s); the ladder descends.
             try:
-                return urllib.request.urlopen(rq, timeout=300)
+                return urllib.request.urlopen(rq, timeout=90)
             except urllib.error.HTTPError as he:
                 # rung-down codes: bad/absent model (400/404), auth or
                 # payment (401/402/403), rate limit / quota (429), 5xx.
