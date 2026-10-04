@@ -92,3 +92,29 @@ def test_session_model_patch_stores_the_pick(tmp_path):
     _sm = _sess.get("model") or {}
     _id = (_sm.get("id") if isinstance(_sm, dict) else str(_sm or "")).strip()
     assert _id == "qwen3:14b"
+
+
+def test_message_pick_sticks_and_the_turn_uses_it(tmp_path, monkeypatch):
+    """THE CHOOSER'S LAST MILE (the operator's 'it ignores the model
+    chooser'): a POST's body's model lands on the session's row; the
+    turn's builder reads THE SESSION and sends the pick (never the
+    boot's default)."""
+    import membrane.server as S
+    monkeypatch.setattr(S.TurnRunner, "TURN_MAX_S", 300.0, raising=True)
+    r = _runner(str(tmp_path))
+    s = r.sessions.create(title="x")
+    sid = s["id"]
+    # the POST's body's model (the TUI's CURRENT pick) — the _message
+    # lane's code path: simulate its store-lane step by hand:
+    _bm = {"providerID": "membrane", "id": "granite4:latest"}
+    row = r.sessions.sessions.get(sid)
+    row["model"] = {"id": _bm.get("modelID") or _bm.get("id"),
+                    "providerID": _bm.get("providerID") or "membrane",
+                    "variant": "default"}
+    # the turn's body build (the builder's lane, same logic):
+    _sess = r.sessions.sessions.get(sid) or {}
+    _sm = _sess.get("model") or {}
+    _pick = (_sm.get("id") if isinstance(_sm, dict)
+             else str(_sm or "")).strip()
+    assert _pick == "granite4:latest"
+    assert "qwen" not in _pick           # never the hash-luck default

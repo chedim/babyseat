@@ -1780,6 +1780,23 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
             if not text.strip():
                 return self._json_err(400, "message needs a text part")
             user_info, row = self._record_user(sid, text, b)
+            # THE MESSAGE'S PICK STICKS (the chooser's last mile, the
+            # operator's 'the chooser is ignored' exhibit): the POST's
+            # body carries the TUI's CURRENT model; the message lane
+            # drops it today. It lands on the SESSION ROW (the turn
+            # builder's read) — the same store the PATCH lane writes;
+            # the pick lives past this turn (a per-message pick = the
+            # session's new state).
+            _bm = b.get("model")
+            if isinstance(_bm, dict) and (_bm.get("modelID")
+                                          or _bm.get("id")):
+                _pick = {"id": _bm.get("modelID") or _bm.get("id"),
+                         "providerID": _bm.get("providerID") or "membrane",
+                         "variant": "default"}
+                _row = sessions.sessions.get(sid)
+                if _row is not None:
+                    _row["model"] = _pick
+                    sessions._flush()
             if async_:
                 threading.Thread(target=runner.run,
                                  args=(sid, text, user_info),
