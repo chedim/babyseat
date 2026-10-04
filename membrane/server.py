@@ -669,6 +669,8 @@ class TurnRunner:
         self.DRAIN_RESULT_MAX = 256
         self._agents: dict[str, str] = {}
         self.cosmetic_busy = False
+        self._turn_stops: dict[str, threading.Event] = {}
+        self._aborting: set[str] = set()
         self._agents: dict[str, str] = {}
         self._drain_order: dict[str, float] = {}
     # the per-session FIFO: queued turns that WILL run (the drain),
@@ -824,13 +826,23 @@ class TurnRunner:
                 return {"status": "queued", "queued_id": mine,
                         "sessionID": sid}
         stop = threading.Event()
+        if not hasattr(self, "_turn_stops"):
+            self._turn_stops = {}
+        self._turn_stops[sid] = stop
         hb = threading.Thread(target=self._heartbeat, args=(sid, stop),
                               daemon=True)
         hb.start()
+        # THE TURN WATCHDOG (the graveyard covenant): a timer at 120s
+        # aborts the turn + streams the honest error — one dead
+        # backend socket can't hold the guard for 5 minutes.
+        wd = threading.Thread(target=self._turn_watchdog,
+                              args=(sid, time.time()), daemon=True)
+        wd.start()
         try:
             return self._run_inner(sid, text, user_info, user_parts)
         finally:
             stop.set()
+            self._turn_stops.pop(sid, None)
             guard.release()
             self._busy.pop(sid, None)
             (getattr(self, "_aborting", None) or set()).discard(sid)
@@ -935,6 +947,51 @@ class TurnRunner:
     # a corpse.
     TOOL_SLOW_S = 5.0
     TOOL_DUMP_S = 45.0
+    # THE TURN'S OWN WATCHDOG (the 26-message graveyard exhibit): a
+    # turn whose loop outlives TURN_MAX_S aborts ITSELF (publishes an
+    # honest error part + marks the turn dead) -- one dead backend
+    # socket can't hold the guard + queue the room for 5 minutes.
+    TURN_MAX_S = 120.0
+
+    def _turn_watchdog(self, sid: str, t0: float) -> None:
+        """The turn's timer thread: past TURN_MAX_S marks the abort
+        flag (the loop's own checks break) + streams the honest error
+        part -- the queue's graveyard can never form again."""
+        while time.time() - t0 < self.TURN_MAX_S:
+            if self._stop_wait(sid, 1.0):
+                return
+        if sid not in self._busy:
+            return                      # the turn ended (the normal way)
+        self._aborting.add(sid)
+        # THE EVIDENCE: the error part + the stack dump (the corpse's
+        # own name)
+        import faulthandler
+        print(f"[serve] turn {sid} STILL RUNNING after {self.TURN_MAX_S}s "
+              "-- the turn watchdog aborts (the graveyard covenant)",
+              file=sys.stderr)
+        faulthandler.dump_traceback(file=sys.stderr, all_threads=True)
+        self._stream_error_part(sid, "the turn outlived "
+                                   f"{self.TURN_MAX_S}s -- aborted by "
+                                   "the turn watchdog (a backend "
+                                   "socket's hang, not your message)")
+
+    def _stop_wait(self, sid: str, t: float) -> bool:
+        """The abort-stop event's waiter (the watchdog's clock)."""
+        ev = getattr(self, "_turn_stops", {}).get(sid)
+        return bool(ev and ev.is_set())
+
+    def _stream_error_part(self, sid: str, msg: str) -> None:
+        """One assistant-facing error part: a text part appended to the
+        session's row + the hub streams it (the client sees WHY)."""
+        try:
+            now_ms = int(time.time() * 1000)
+            part = {"id": _gen_id("prt"), "sessionID": sid, "type": "text",
+                    "text": msg, "time": {"start": now_ms, "end": now_ms}}
+            self.messages.append_part(sid, part)
+            self.hub.publish({"type": "message.part.updated",
+                              "part": part, "sessionID": sid})
+        except Exception:
+            pass
 
     def _tool_watchdog_start(self, sid: str, name: str, call_id: str,
                              args: dict) -> None:

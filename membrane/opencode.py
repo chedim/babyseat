@@ -4592,7 +4592,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 # rung-down codes: bad/absent model (400/404), auth or
                 # payment (401/402/403), rate limit / quota (429), 5xx.
                 # 400 on the FINAL rung surfaces (client-side error).
-                down = he.code in (400, 401, 402, 403, 404, 408, 429,
+                # 410 GONE rides the ladder (the retired-model belt:
+                # glm-4.7:cloud retired server-side; 'the model is
+                # gone' is the definition of a dead rung)
+                down = he.code in (400, 401, 402, 403, 404, 408, 410, 429,
                                    500, 502, 503, 504)
                 nxt = _next_rung(model_name)
                 if not down or nxt is None:
@@ -7128,7 +7131,8 @@ def main() -> None:
                     print(f"[opencode] launching TUI as a client "
                           f"(attach): {' '.join(cmd)}", file=sys.stderr)
                     child = subprocess.Popen(
-                        cmd, env=_attach_env(env, serve_su, serve_sp))
+                        cmd, env=_attach_env(env, serve_su, serve_sp),
+                        stderr=subprocess.DEVNULL)
                     try:
                         pid_path = (Path(args.field).parent
                                     / "opencode.pid")
