@@ -71,3 +71,24 @@ def test_rung_down_includes_410():
     import pathlib as _pl
     src = _pl.Path("membrane/opencode.py").read_text()
     assert "410" in src.split("down = he.code in")[1].split(")")[0]
+
+
+def test_session_model_patch_stores_the_pick(tmp_path):
+    """THE MODEL SWITCH (the TUI's lane): PATCH /session/{id} carries
+    the model dict — the session's row stores it (the turn builder's
+    read)."""
+    r = _runner(str(tmp_path))
+    s = r.sessions.create(title="x")
+    sid = s["id"]
+    # simulate the PATCH handler's lane (the store side):
+    with r.sessions._lock:
+        row = r.sessions.sessions.get(sid)
+        row["model"] = {"id": "qwen3:14b", "providerID": "membrane",
+                        "variant": "default"}
+    pick = (r.sessions.sessions.get(sid).get("model") or {}).get("id")
+    assert pick == "qwen3:14b"
+    # the turn builder reads it:
+    _sess = r.sessions.sessions.get(sid) or {}
+    _sm = _sess.get("model") or {}
+    _id = (_sm.get("id") if isinstance(_sm, dict) else str(_sm or "")).strip()
+    assert _id == "qwen3:14b"

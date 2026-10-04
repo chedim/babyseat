@@ -1774,10 +1774,27 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
             if path.startswith("/session/"):
                 segs = path[len("/session/"):].split("/")
                 if segments_len(segs) == 1:
-                    s = sessions.patch(segs[0],
-                                       self._read_body().get("title"))
+                    b = self._read_body()
+                    s = sessions.patch(segs[0], b.get("title"))
                     if s is None:
                         return self._notfound()
+                    # THE MODEL'S PATCH (the model switch through this
+                    # surface): the session's model = the body's dict
+                    # (the TUI's pick: {modelID, providerID}) — the
+                    # turn's lane reads it (the session's model
+                    # governs its turns).
+                    m = b.get("model")
+                    if isinstance(m, dict) and (m.get("modelID")
+                                                or m.get("id")):
+                        with sessions._lock:
+                            row = sessions.sessions.get(segs[0])
+                            if row is not None:
+                                row["model"] = {
+                                    "id": m.get("modelID") or m.get("id"),
+                                    "providerID": m.get("providerID")
+                                                  or "membrane",
+                                    "variant": "default"}
+                                sessions.flush()
                     return self._json_out(s)
             if path == "/config":
                 return self._json_out(config)
