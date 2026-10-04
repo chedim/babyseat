@@ -1073,6 +1073,7 @@ class TurnRunner:
             user_parts: list | None = None) -> dict:
         self._aborting = getattr(self, "_aborting", None) or set()
         now = int(time.time() * 1000)
+        _t_turn = time.time()
         self._busy[sid] = {"type": "busy"}
         # THE AGENT REGISTRY (the cosmetic-busy decider's input): the
         # session's agent read at the turn's start (the loops' child
@@ -1333,6 +1334,15 @@ class TurnRunner:
         self._busy.pop(sid, None)
         self._aborting.discard(sid)
         self.sessions.touch(sid)
+        # THE TURN'S HONEST CLOCK (the latency's own ledger): the
+        # phases' cost prints at the turn's end -- the 25s-turn
+        # mystery's own evidence (the model's time vs the lanes')
+        try:
+            _el = time.time() - _t_turn
+            print(f"[serve] turn {sid[:16]} done: {_el:.1f}s "
+                  f"(model {turn_model[:24]})", file=sys.stderr)
+        except Exception:
+            pass
         # THE COSMETIC-BUSY COVENANT (the operator's design, 2026-10-03):
         # the operator's MAIN session never shows 'idle' to the client —
         # the thinking loop's END is membrane's internal fact, not a
@@ -1700,12 +1710,27 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 b = self._read_body()
                 s = sessions.create(title=b.get("title"),
                                     parent_id=b.get("parentID"))
-                # the seat's turn model rides the session shape (the TUI
-                # shows it; the runner keeps its own routing anyway)
-                dm = _provider_default(config)
-                if dm:
-                    pid = next(iter(dm))
-                    s["model"] = {"id": dm[pid], "providerID": pid,
+                # THE REQUESTER'S PICK WINS (the 'qwen3:8b by hash
+                # order' exhibit): the POST body's model (the TUI's
+                # {providerID, modelID}) IS the session's model — the
+                # config's default lands only when the body omits it
+                # (and the default = the BOOT's model, never the
+                # providers' dict's arbitrary first key).
+                _bm = b.get("model") if isinstance(b.get("model"),
+                                                   dict) else None
+                if _bm and (_bm.get("modelID") or _bm.get("id")):
+                    s["model"] = {"id": _bm.get("modelID") or _bm.get("id"),
+                                  "providerID": _bm.get("providerID")
+                                                or "membrane",
+                                  "variant": "default"}
+                else:
+                    # THE BOOT'S MODEL IS THE DEFAULT (never the
+                    # providers' dict's arbitrary first key — a dict
+                    # without insertion-order intent made 'qwen3:8b'
+                    # the default by hash luck)
+                    boot_model = str(getattr(runner, "model", "") or "")
+                    s["model"] = {"id": boot_model or "membrane",
+                                  "providerID": "membrane",
                                   "variant": "default"}
                 self._json_out(s)
                 return
