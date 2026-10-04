@@ -283,11 +283,25 @@ def consolidate_entities(fld, est, mem=None, materialize: int = 8,
         for _, d in fld.b.scan("entity_states",
                                {"origin": fld.origin, "tier": "live"}):
             eid = d["eid"]
-            # THE WORD SKIP (the overlay-birth covenant): words and
-            # phrases are FIELD entities, never overlay subjects (the
-            # 'night born: w:showing' flood; the overlay exists for
-            # the subjects a cell is ABOUT)
-            if eid.split(":", 1)[0] in ("w", "p", "e"):
+            # THE WORD SKIP (the overlay-birth covenant), CHAIN-TRUE
+            # (the 'kind:message as an AIModel' exhibit): words and
+            # phrases are FIELD entities, never overlay subjects --
+            # AND a chain carrying them inside ('m:w:watcher': the
+            # model-tracker of a word) is FIELD-INTERNAL TOO: any
+            # head of the eid in (w, p, e) skips the overlay's mint
+            # (the overlay exists for the subjects a cell is ABOUT)
+            if set(eid.replace(":", " ").split()) & {"w", "p", "e"}:
+                continue
+            # THE TRACKER-CHAIN SKIP (the m:w:watcher shredding): the
+            # field's TRACKER chains (an outer 'm'/'models' head over
+            # ANOTHER kind: 'm:f:x', 'm:s:y') are the field's own
+            # internal accounting -- never overlay subjects (only
+            # BARE subjects mint: f:/s:/c:/m:/tool:/port:/ha:/u:)
+            heads = [h for h in eid.replace(":", " ").split()
+                     if h in ("m", "models", "f", "files", "s", "symbols",
+                              "c", "shell", "tool", "port", "ha", "u",
+                              "urls", "w", "p", "e")]
+            if len(heads) > 1:
                 continue
             if int(d.get("n") or 0) < 3:
                 continue
