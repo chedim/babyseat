@@ -18,7 +18,7 @@ def _runner(tmp):
 
 
 def test_turn_max_constant():
-    assert 60 <= TurnRunner.TURN_MAX_S <= 240
+    assert 60 <= TurnRunner.TURN_MAX_S <= 300   # the 14B's cold load = ~2min; the honest fence
 
 
 def test_turn_watchdog_aborts_a_wedged_turn(tmp_path):
