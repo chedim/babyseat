@@ -1096,8 +1096,22 @@ class TurnRunner:
             if user_info else []
         history.append({"role": "user", "content": text})
         aid = _gen_id("msg")
+        # THE STAMP'S TRUTH (the TUI's chip reads the session's
+        # model): the assistant row's modelID = the TURN'S pick (the
+        # session's model -- the operator's switch holds in the
+        # provenance), not the boot's
+        _turn_pick = "glm-5.3-flash:cloud"
+        try:
+            _sess = self.sessions.sessions.get(sid) or {}
+            _sm = _sess.get("model") or {}
+            _pick = (_sm.get("id") if isinstance(_sm, dict)
+                     else str(_sm or "")).strip()
+            if _pick and _pick not in ("", "membrane"):
+                _turn_pick = _pick
+        except Exception:
+            _turn_pick = self.model
         a_info = {"id": aid, "sessionID": sid, "role": "assistant",
-                  "parentID": user_info["id"], "modelID": self.model,
+                  "parentID": user_info["id"], "modelID": _turn_pick,
                   "providerID": "membrane", "mode": "build",
                   "agent": "build",
                   "path": {"cwd": os.getcwd(), "root": os.getcwd()},
