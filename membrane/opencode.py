@@ -4652,6 +4652,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                                       "why": str(first_err)[:120]}
                 raise
 
+        streaming = bool(up.get("stream", False))
         parts: list[str] = []
         think: list[str] = []
         calls: dict = {}          # index -> accumulated tool-call delta
@@ -4760,41 +4761,42 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             # like any rung-down: outage-note it and walk the ladder; when
             # nothing is left, the honest field-only banner serves instead of
             # silence. Non-routed turns keep the verbatim passthrough.
+            # THE BUFFERED DELIVERY, rebuilt (the ladder-retired
+            # covenant): ONE call to the picked rung. A down (any
+            # error / an empty 200) = the field-only serve (the
+            # honest lived-memory answer) — never a descent; the
+            # non-routed turns take the same single call (their
+            # pick IS the model too).
             resp_bytes: bytes | None = None
             model_name = up.get("model", "membrane")
-            if routed_model:
-                for _attempt in range(6):        # bounded: ladder + retries
-                    try:
-                        resp_bytes = _open_backend(model_name).read()
-                    except Exception as e:
-                        if route.get("ladder_exhausted"):
-                            self._serve_field_only(
-                                up.get("model", "membrane"), vec,
-                                route, mid_stream=False, err=e)
-                            return
-                        raise
-                    if _resp_has_content(resp_bytes):
-                        break
-                        # THE LADDER RETIRED: an empty answer = a DOWN rung
-                        # (the honest outage note; the field-only serves).
-                        router = getattr(srv, "router", None)
-                        if router is not None:
-                            router.note_outage(model_name,
-                                               "empty answer (200, no content)")
-                        self._serve_field_only(
-                            up.get("model", "membrane"), vec,
-                            route, mid_stream=False,
-                            err=RuntimeError(f"{model_name}: empty answer"))
-                        return
-                try:
-                    resp_bytes = _open_backend(model_name).read()
-                except Exception as e:
-                    if route.get("ladder_exhausted"):
-                        self._serve_field_only(
-                            up.get("model", "membrane"), vec,
-                            route, mid_stream=False, err=e)
-                        return
-                    raise
+            try:
+                resp_bytes = _open_backend(model_name).read()
+            except Exception as e:
+                if isinstance(e, RuntimeError) and \
+                        "empty answer" in str(e):
+                    self._serve_field_only(
+                        up.get("model", "membrane"), vec, route,
+                        mid_stream=False, err=e)
+                    return
+                if route.get("ladder_exhausted") or getattr(
+                        e, "code", None) == 410:
+                    self._serve_field_only(
+                        up.get("model", "membrane"), vec, route,
+                        mid_stream=False, err=e)
+                    return
+                raise
+            if resp_bytes and not _resp_has_content(resp_bytes):
+                # the 200-with-empty-body = DOWN in disguise (the
+                # honest outage note; the field-only serves)
+                router = getattr(srv, "router", None)
+                if router is not None:
+                    router.note_outage(model_name,
+                                       "empty answer (200, no content)")
+                self._serve_field_only(
+                    up.get("model", "membrane"), vec, route,
+                    mid_stream=False,
+                    err=RuntimeError(f"{model_name}: empty answer"))
+                return
             try:
                 resp_obj = json.loads(resp_bytes or b"{}")
             except json.JSONDecodeError:
