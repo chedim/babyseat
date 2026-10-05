@@ -23,6 +23,12 @@ import pytest
 PORT = 11671
 SEAT_DIR = "/tmp/door-seat"
 
+# THE LIVE-LANE TESTS (the ollama-dependent): they boot real seats and
+# run REAL model turns -- the serial queue's tail (every concurrent
+# test module's boot + the seat's own lanes compete for ollama's one
+# call lane) makes the timing flaky under a full-suite run; solo
+# they're green. Marked: the operator's full-suite runs these last.
+pytestmark = pytest.mark.live_lane
 
 @pytest.fixture()
 def quiet_seat():
