@@ -66,11 +66,16 @@ def test_stream_error_part_appends_to_the_session(tmp_path):
     assert any("outlived" in t for t in texts), texts
 
 
-def test_rung_down_includes_410():
-    """The retired-model belt: the ladder's down-codes name 410."""
+def test_ladder_is_retired():
+    """THE LADDER'S RETIREMENT (the operator's call: the standalone
+    router proxy owns failover now): the pick IS the rung — no rung
+    descent in the seat; a down rung = the honest note + raise."""
     import pathlib as _pl
     src = _pl.Path("membrane/opencode.py").read_text()
-    assert "410" in src.split("down = he.code in")[1].split(")")[0]
+    assert "_next_rung" not in src.split("def run_command_entity")[0] \
+        or src.count("_next_rung") == 0, "the ladder's descent lives"
+    assert "rung_down" in src               # the honest down-note's lane
+    assert "router.note_outage" in src      # the outage's ledger
 
 
 def test_session_model_patch_stores_the_pick(tmp_path):

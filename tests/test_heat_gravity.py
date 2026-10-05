@@ -161,12 +161,18 @@ def test_consolidation_every_stretches(tmp_path):
                                     "script_every_n": 2,
                                     "entity_heat": 1.5})
     est.docs[ent.eid] = ent
-    fired = night.run_scripted_entities(None, est, mem=None,
-                                        now=900 * 4.0, force=False)
-    # hot: every_n=2 x gravity(~5) => deferred at pass 4; the honest
-    # assertion: NOT fired on this pass
+    # pass_no = int(now // 900) — the slot check is per-pass: the hot
+    # entity's effective every_n = 2 x gravity(>=4) = >=8: over EIGHT
+    # consecutive passes, at most ONE fire (the slot); the cold twin
+    # (every_n=2) fires at >=4 of them. The honest assertion = the
+    # RATE over a window, not a single pass's flap:
+    fired_defer = 0
+    for pass_ix in range(9):
+        fired = night.run_scripted_entities(
+            None, est, mem=None, now=900.0 * pass_ix, force=False)
+        fired_defer += int(fired.get("deferred") or 0)
     assert fired["errors"] == 0
-    assert fired.get("deferred", 0) >= 1
+    assert fired_defer >= 7, fired_defer   # >=7 of 9 passes deferred
 
 
 def test_heat_knobs_env(tmp_path, monkeypatch):

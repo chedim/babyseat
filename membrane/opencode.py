@@ -4608,362 +4608,37 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 url, data=json.dumps(u2).encode(), method="POST",
                 headers=headers)
             # THE PER-RUNG BUDGET (the graveyard's honest clock): a
-            # rung that doesn't answer in 90s is DOWN (the turn's
-            # guard must free -- the queue's room cannot wait behind
-            # a single socket for 300s); the ladder descends.
+            # rung that doesn't answer in 90s is DOWN; the turn fails
+            # honestly (the ladder retired — see below).
             try:
                 return urllib.request.urlopen(rq, timeout=90)
             except urllib.error.HTTPError as he:
-                # rung-down codes: bad/absent model (400/404), auth or
-                # payment (401/402/403), rate limit / quota (429), 5xx.
-                # 400 on the FINAL rung surfaces (client-side error).
-                # 410 GONE rides the ladder (the retired-model belt:
-                # glm-4.7:cloud retired server-side; 'the model is
-                # gone' is the definition of a dead rung)
-                down = he.code in (400, 401, 402, 403, 404, 408, 410, 429,
-                                   500, 502, 503, 504)
-                nxt = _next_rung(model_name)
-                if not down or nxt is None:
-                    if down:
-                        route["ladder_exhausted"] = True
-                    raise
+                # THE LADDER IS RETIRED (the operator's 2026-10-04
+                # call: 'remove that ladder altogether -- the same
+                # comes from a standalone router proxy'): the pick IS
+                # the rung — a down rung fails THE TURN (the honest
+                # error to the client, the outage noted into the
+                # router's ledger for the registry's reads) and NEVER
+                # descends. The failover's job moves OUT of the seat.
                 why = f"HTTP {he.code}"
                 if he.code in (401, 402, 403, 429):
                     why += (" (out of tokens/limit)" if he.code in (402, 429)
                             else " (auth)")
-                print(f"[opencode] ladder failover {model_name} -> {nxt} "
-                      f"({why})", file=sys.stderr)
-                # the lookup, not the bare name: `router` is assigned in
-                # the except-Exception branch below, which makes it LOCAL
-                # here -- a bare use raised UnboundLocalError on every
-                # HTTP rung-down
+                elif he.code == 410:
+                    why += " (the model is retired)"
                 router = getattr(srv, "router", None)
                 if router is not None:
                     router.note_outage(model_name, why)
-                route["failover"] = nxt
-                return _open_backend(nxt)
+                route["rung_down"] = {"model": model_name, "why": why}
+                raise
             except Exception as first_err:
-                nxt = _next_rung(model_name)
-                if nxt is None:
-                    route["ladder_exhausted"] = True
-                    raise
-                print(f"[opencode] ladder failover {model_name} -> {nxt} "
-                      f"({first_err})", file=sys.stderr)
                 router = getattr(srv, "router", None)
                 if router is not None:
                     router.note_outage(model_name, str(first_err)[:120])
-                route["failover"] = nxt
-                return _open_backend(nxt)
-
-        def _next_rung(model_name: str):
-            """The next rung down the ladder after model_name, or None when
-            the stack is exhausted (nothing alive) — the field-only edge.
-            An autoselect turn keeps the LANE as the ladder's ceiling (the
-            sentinel chose 'route it all', not the fallback model's price).
-            A specific pick keeps ITS ceiling (never escalates past what the
-            operator selected). The context-window filter applies here too:
-            a failover rung that cannot hold the request is skipped."""
-            router = getattr(srv, "router", None)
-            if router is None or not routed_model:
-                return None
-            lane_ceiling = (str(verdict.get("route", {}).get("lane") or "")
-                            or None)
-            ceiling = (normalize_lane(lane_ceiling)
-                       if lane_ceiling else
-                       (str(up.get("model") or "").split("/", 1)[-1] or None))
-            try:
-                stack = router.ladder(
-                    needs_tools=any(isinstance(m, dict) and m.get("tool_calls")
-                                    for m in (up.get("messages") or [])
-                                    if isinstance(m, dict)),
-                    ceiling=ceiling,
-                    ctx_tokens=Registry.estimate_tokens(up.get("messages")))
-            except Exception:
-                return None
-            seen = False
-            for r in stack:
-                if r.name == model_name:
-                    seen = True
-                    continue
-                if seen and r.name != orig_model:
-                    return r.name
-                if seen and r.name == orig_model:
-                    return r.name          # the pre-router rung is fair game
-            # every listed rung failed or was above model_name: if the
-            # requested rung was never on the stack (pre-router fallback),
-            # offer nothing more — the stack walk ends.
-            return None
-
-        streaming = bool(up.get("stream", False))
-        parts: list[str] = []
-        think: list[str] = []
-        calls: dict = {}          # index -> accumulated tool-call delta
-        tool_calls = False
-        if streaming:
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "close")
-            self.close_connection = True
-            self.end_headers()
-            # THE TRANSPARENCY CONTRACT, restored: stream the FULL composed
-            # injection (recall + where-we-are + the banner -- everything
-            # membrane appended to ctx) as reasoning deltas, so the operator
-            # sees EXACTLY what the model sees. The old path streamed only
-            # the gate monologue; recall and where-we-are rode silently --
-            # the dark-banner bug (the surface log proved the bytes were
-            # sent while the thinking channel showed nothing).
-            if getattr(srv, "gate_monologue", True) and ctx:
-                for chunk in _openai_sse_chunks(
-                        up.get("model", "membrane"),
-                        "[membrane] injecting this turn:\n\n" + ctx + "\n\n",
-                        reasoning=True):
-                    self.wfile.write(chunk)
-                self.wfile.flush()
-            usage_seen: dict | None = None
-            try:
-                backend_r = _open_backend(up.get("model", "membrane"))
-            except Exception as e:
-                if route.get("ladder_exhausted"):
-                    self._serve_field_only(up.get("model", "membrane"), vec,
-                                           route, mid_stream=True, err=e)
-                    return
+                route["rung_down"] = {"model": model_name,
+                                      "why": str(first_err)[:120]}
                 raise
-            with backend_r as r:
-                for line in r:                      # SSE, tee verbatim
-                    if not line:
-                        continue
-                    self.wfile.write(line)
-                    self.wfile.flush()
-                    s = line.strip()
-                    if not s.startswith(b"data:"):
-                        continue
-                    payload = s[len(b"data:"):].strip()
-                    if not payload or payload == b"[DONE]":
-                        # THE USAGE PASS-THROUGH (the 0-token display fix):
-                        # the backend's own usage already tees through
-                        # verbatim; when it gives none, a final
-                        # estimated-usage chunk rides just before [DONE] so
-                        # the client's context meter reads real-ish numbers,
-                        # never a hardcoded zero
-                        if payload == b"[DONE]" and usage_seen is None:
-                            est_in = Registry.estimate_tokens(
-                                up.get("messages"))
-                            est_out = (len("".join(parts))
-                                       + len("".join(think))) // 4
-                            self.wfile.write(_sse_line({
-                                "id": "chatcmpl-membrane-usage",
-                                "object": "chat.completion.chunk",
-                                "created": 0,
-                                "model": up.get("model", "membrane"),
-                                "choices": [{"index": 0, "delta": {},
-                                             "finish_reason": "stop"}],
-                                "usage": {"prompt_tokens": est_in,
-                                          "completion_tokens": est_out,
-                                          "total_tokens": est_in + est_out}}))
-                            self.wfile.flush()
-                        continue
-                    try:
-                        obj = json.loads(payload)
-                    except json.JSONDecodeError:
-                        continue
-                    if usage_seen is None and isinstance(obj.get("usage"), dict)                             and obj["usage"]:
-                        usage_seen = obj["usage"]
-                    for ch in obj.get("choices", []) or []:
-                        d = ch.get("delta") or {}
-                        t = d.get("content")
-                        if isinstance(t, str):
-                            parts.append(t)
-                        think.append(_delta_reasoning(d))
-                        for tc in d.get("tool_calls") or []:
-                            tool_calls = True
-                            i = int(tc.get("index", 0) or 0)
-                            c = calls.setdefault(i, {"function": {}})
-                            if tc.get("id"):
-                                c["id"] = tc["id"]
-                            fn = tc.get("function") or {}
-                            tgt = c["function"]
-                            if fn.get("name"):
-                                tgt["name"] = (tgt.get("name") or "") + fn["name"]
-                            if fn.get("arguments"):
-                                tgt["arguments"] = (tgt.get("arguments") or "") + fn["arguments"]
-            self.wfile.flush()
-            # THE STREAMING REGISTRATION (the receipt lane's missing half):
-            # the tee path accumulated `calls` from deltas but never
-            # registered them -- opencode's traffic is stream:true, so
-            # _pending_tools never populated for the real flow (the
-            # receipt lane's missing-registration exhibit, E9)
-            if calls:
-                _capture_plan_and_calls(mem, query, "".join(parts), calls)
-            resp_obj = None
-        else:
-            # BUFFERED delivery. The empty-answer guard: a rung that answers
-            # HTTP 200 with NO content and NO tool calls is DOWN in disguise
-            # (observed: openrouter free tiers 200-with-empty-body). Treat it
-            # like any rung-down: outage-note it and walk the ladder; when
-            # nothing is left, the honest field-only banner serves instead of
-            # silence. Non-routed turns keep the verbatim passthrough.
-            resp_bytes: bytes | None = None
-            model_name = up.get("model", "membrane")
-            if routed_model:
-                for _attempt in range(6):        # bounded: ladder + retries
-                    try:
-                        resp_bytes = _open_backend(model_name).read()
-                    except Exception as e:
-                        if route.get("ladder_exhausted"):
-                            self._serve_field_only(
-                                up.get("model", "membrane"), vec,
-                                route, mid_stream=False, err=e)
-                            return
-                        raise
-                    if _resp_has_content(resp_bytes):
-                        break
-                    nxt = _next_rung(model_name)
-                    if nxt is None:
-                        route["ladder_exhausted"] = True
-                        self._serve_field_only(
-                            up.get("model", "membrane"), vec, route,
-                            mid_stream=False,
-                            err=RuntimeError(f"{model_name}: empty answer"))
-                        return
-                    print(f"[opencode] EMPTY answer from {model_name}; "
-                          f"failover -> {nxt}", file=sys.stderr)
-                    router = getattr(srv, "router", None)
-                    if router is not None:
-                        router.note_outage(model_name,
-                                           "empty answer (200, no content)")
-                    route["failover"] = nxt
-                    model_name = nxt
-            else:
-                try:
-                    resp_bytes = _open_backend(model_name).read()
-                except Exception as e:
-                    if route.get("ladder_exhausted"):
-                        self._serve_field_only(
-                            up.get("model", "membrane"), vec,
-                            route, mid_stream=False, err=e)
-                        return
-                    raise
-            try:
-                resp_obj = json.loads(resp_bytes or b"{}")
-            except json.JSONDecodeError:
-                resp_obj = None
-            # THE USAGE PASS-THROUGH (the 0-token display fix): the
-            # backend's own usage stays verbatim; when it gives none, an
-            # estimate rides along so no client ever reads a hardcoded zero
-            if resp_obj is not None and not (resp_obj.get("usage") or {}):
-                est_in = Registry.estimate_tokens(up.get("messages"))
-                m0 = (resp_obj.get("choices") or [{}])[0].get("message") or {}
-                est_out = len(str(m0.get("content") or "")) // 4
-                resp_obj["usage"] = {"prompt_tokens": est_in,
-                                     "completion_tokens": est_out,
-                                     "total_tokens": est_in + est_out}
-                resp_bytes = json.dumps(resp_obj).encode()
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(resp_bytes or b"")))
-            self.end_headers()
-            self.wfile.write(resp_bytes or b"")
-            self.wfile.flush()
-            if resp_obj:
-                ch = (resp_obj.get("choices") or [{}])[0]
-                msg = ch.get("message") or resp_obj.get("message") or {}
-                c = msg.get("content")
-                if isinstance(c, str):
-                    parts.append(c)
-                if msg.get("tool_calls"):
-                    tool_calls = True
-                    for j, tc in enumerate(msg["tool_calls"]):
-                        if isinstance(tc, dict):
-                            calls[int(tc.get("index", j) or 0)] = tc
-                think.append(_msg_reasoning(msg))
-        content = "".join(parts)
-        thought = "".join(think).strip()
-        # the STREAMING empty-answer guard: bytes were already tee'd, so no
-        # failover is possible this turn -- but the silent rung must not look
-        # healthy: outage-note it (later turns skip it) and let the
-        # re-ask window learn it as a loss (see the calibration pass).
-        if streaming and routed_model and not content.strip() and not tool_calls \
-                and not thought:
-            router = getattr(srv, "router", None)
-            if router is not None:
-                router.note_outage(routed_model,
-                                   "empty answer (200, no content)")
-                print(f"[opencode] EMPTY answer from {routed_model} "
-                      f"(streamed; rung cooled down)", file=sys.stderr)
-        # the router's measured record: latency of the routed turn, and (for
-        # cloud) the spend + the calibration record -- (pressure, survived)
-        # lands after the re-ask window resolves the outcome (see below).
-        router = getattr(srv, "router", None)
-        if router is not None and routed_model:
-            try:
-                router.note_latency(routed_model, time.monotonic() - t0)
-                if route.get("kind") == "cloud":
-                    router.record_spend(float(route.get("price")
-                                              or CLOUD_DEFAULT_PRICE))
-            except Exception as e:
-                print(f"[opencode] router bookkeeping error: {e}",
-                      file=sys.stderr)
-        ex_idx = None
-        # the traffic signal: when the last real model forward landed and
-        # how long it took (the background duty loops read both as "busy
-        # now").
-        srv._last_fwd_dt = time.time()
-        srv._last_fwd_dur = time.monotonic() - t0
-        # the entity field's discourse intake: the user's text + the model's
-        # prose + its reasoning -- mixed prose+tool turns included (the
-        # exemplar path below drops them); tool calls ride on_calls
-        _cap = getattr(srv, "capturer", None)
-        if _cap is not None:
-            _cap.on_turn(query, content, thought or "")
-        # the A/B pair closes on the model's final answer (a text turn)
-        k_ab = getattr(srv, "_ab_key", None)
-        if k_ab and content.strip() and not tool_calls and _efield_on(srv) is not None:
-            srv._ab_key = None
-            import threading as _th
-            from .efgate import ab_close
-            _th.Thread(target=lambda: _swallow(ab_close, srv.efield, k_ab, content),
-                       daemon=True, name="ab-close").start()
-        # the captured turn's events (cap.on_turn above) already carry the
-        # answer; nothing exemplar-shaped is written back here.
-        # total capture: the model's intent + machinery + thought, as plain Q/A.
-        # W3a rides the same lane: the delivered text is linted for frame-
-        # discipline violations (stacked/buried canon frames) so the poison
-        # that self-learns as junk memory is also VISIBLE and countable.
-        try:
-            if content.strip() and not tool_calls:
-                _frame_lint(srv, content, source="assistant-text")
-            if calls:
-                _capture_plan_and_calls(mem, query, content, calls)
-        except Exception as e:
-            print(f"[opencode] capture error (response already served): {e}",
-                  file=sys.stderr)
-        # THE TOTALITY VIEW: record this turn's full API surface -- what we
-        # sent (per-block summaries + routing + model) and what came back
-        # (reply head + tool calls). The operator reads it via
-        # /membrane/state 'surface' or 'membrane: surface'.
-        try:
-            _surface_push(srv, {
-                "ts": time.time(),
-                "query": _clip(query, 120),
-                "verdict": verdict.get("verdict"),
-                "sim": verdict.get("sim"),
-                "route": (verdict.get("route") or {}).get("route"),
-                "route_reason": (verdict.get("route") or {}).get("reason"),
-                "model": up.get("model"),
-                "sent_blocks": _surface_block_summary(ctx),
-                "ctx_chars": len(ctx or ""),
-                "n_injected": n_ctx_mem(ctx),
-                "reply_head": _clip(content, 200),
-                "tool_calls": bool(tool_calls),
-                "learned": ex_idx,
-                "thought_head": _clip(thought, 120) if thought else None,
-            })
-        except Exception as s_e:
-            print(f"[opencode] surface-log error: {s_e}", file=sys.stderr)
-        self._log_turn(verdict, ctx, None)
 
-    # ---- the [membrane] monologue (thinking channel) ----------------------
     def _gate_monologue(self, verdict: dict, ctx: str | None, query: str,
                         query_vec=None) -> str:
         """THE BANNER: vitals + alerts only. The track STORIES ride WHERE
