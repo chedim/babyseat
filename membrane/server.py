@@ -986,6 +986,11 @@ class TurnRunner:
         wd = threading.Thread(target=self._turn_watchdog,
                               args=(sid, time.time()), daemon=True)
         wd.start()
+        # THE ACTIVITY CLOCK'S SEED (the activity-aware watchdog): the
+        # turn's last-movement stamp = now (the rounds + tool completions
+        # touch it; the watchdog aborts only on the SILENT stretch)
+        self._turn_activity = getattr(self, "_turn_activity", {}) or {}
+        self._turn_activity[sid] = time.time()
         try:
             return self._run_inner(sid, text, user_info, user_parts)
         finally:
@@ -1104,8 +1109,29 @@ class TurnRunner:
     def _turn_watchdog(self, sid: str, t0: float) -> None:
         """The turn's timer thread: past TURN_MAX_S marks the abort
         flag (the loop's own checks break) + streams the honest error
-        part -- the queue's graveyard can never form again."""
-        while time.time() - t0 < self.TURN_MAX_S:
+        part -- the queue's graveyard can never form again.
+
+        THE ACTIVITY-AWARE CLOCK (the 'turn outlived 300s' on a HEALTHY
+        multi-round tool turn, 2026-10-07: the brain's turn had six
+        FAST tool rounds; three cloud deliveries hung 90s apiece and
+        the TOTAL crossed the watchdog while the turn was still
+        PROGRESSING -- each round's delivery DID advance it). The
+        clock now reads ACTIVITY: `_turn_activity[sid]` (touched per
+        round by the runner + per tool completion) -- the watchdog
+        aborts only when NO ACTIVITY for TURN_MAX_S (a dead hang), not
+        on a long-but-alive turn. The legacy t0 remains the FINAL cap
+        (the turn's total lifetime never exceeds 3x -- a forever-turn
+        is still impossible)."""
+        last = getattr(self, "_turn_activity", {}).get(sid, t0) or t0
+        cap = t0 + self.TURN_MAX_S * 3         # the absolute lifetime
+        while True:
+            now = time.time()
+            last = max(last,
+                       getattr(self, "_turn_activity", {}).get(sid, 0) or 0)
+            if now - last >= self.TURN_MAX_S:
+                break                          # A REAL hang: 300s of silence
+            if now >= cap:
+                break                          # the forever-turn's absolute cap
             if self._stop_wait(sid, 1.0):
                 return
         if sid not in self._busy:
@@ -1331,6 +1357,7 @@ class TurnRunner:
         rounds = 0
         while not err_done and rounds < MAX_ROUNDS:
             rounds += 1
+            self._turn_activity[sid] = time.time()   # THE ROUND'S TOUCH
             sid_flag = sid in self._aborting
             if sid in self._aborting or sid_flag:
                 break
@@ -1465,6 +1492,9 @@ class TurnRunner:
                                 pass
                         else:
                             output = self.executor(name, args, call_id)
+                        # THE TOOL'S TOUCH (the activity clock): a
+                        # completed tool = the turn moved
+                        self._turn_activity[sid] = time.time()
                         self._tool_watchdog_end(call_id, name)
                         part["state"] = {"status": "completed",
                                          "input": args,
@@ -1520,6 +1550,23 @@ class TurnRunner:
         if not (a_info.get("tokens") or {}).get("total"):
             a_info["tokens"] = _tokens_estimate(history, parts)
         a_info["time"]["completed"] = int(time.time() * 1000)
+        # THE MID-TURN INJECTS SURVIVE THE FINAL SNAPSHOT (the 'the error
+        # disappears' exhibit, 2026-10-07: the watchdog's abort part rode
+        # append_part MID-TURN; the turn's final append (an UPSERT by id)
+        # replaced the row's parts with THIS thread's list -- the error
+        # VANISHED on the next render). The merge: the stored row's parts
+        # that this thread never made (ids missing) ride the final
+        # snapshot after ours -- the watchdog's message STAYS.
+        try:
+            _stored = self.messages.get_msg(sid, aid)
+            if _stored is not None:
+                _have = {p.get("id") for p in parts if isinstance(p, dict)}
+                _extra = [p for p in (_stored.get("parts") or [])
+                          if isinstance(p, dict)
+                          and p.get("id") not in _have]
+                parts.extend(_extra)
+        except Exception:
+            pass
         self.messages.append(sid, a_info, parts)
         self.hub.publish({"type": "message.updated", "sessionID": sid,
                           "info": dict(a_info)})

@@ -34,6 +34,7 @@ MEMBRANE_LANE_GATE=0 (the ablations).
 import json
 import os
 import sys
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -837,6 +838,62 @@ class TestServePortReservation(unittest.TestCase):
         finally:
             httpd.shutdown()
             httpd.server_close()
+
+
+
+
+class TestActivityWatchdog(unittest.TestCase):
+    """THE ACTIVITY-AWARE WATCHDOG (the brain's 'turn outlived 300s'
+    exhibit -- a HEALTHY six-round tool turn died of WALL-CLOCK while
+    its cloud deliveries were hanging; the clock counts SILENCE now,
+    not total time; the absolute lifetime cap (3x) stays."""
+
+    def _runner(self):
+        import membrane.server as MS
+        hub = MS.SSEHub()
+        msgs = MS.MessageStore()
+        sessions = MS.SessionStore()
+        runner = MS.TurnRunner(hub, sessions, msgs, lambda b: {}, None,
+                               system="", model="m")
+        runner.srv = None
+        return runner
+
+    def test_silent_turn_is_aborted_at_the_budget(self):
+        """No activity touches: the watchdog aborts at TURN_MAX_S."""
+        runner = self._runner()
+        sid = "ses_w"
+        runner._busy[sid] = {"type": "busy"}
+        runner._turn_stops[sid] = threading.Event()
+        runner._turn_activity = {sid: time.time()}
+        t0 = time.time()
+        runner.TURN_MAX_S = 2.0        # the test's scale
+        runner._turn_watchdog(sid, t0)
+        self.assertIn(sid, runner._aborting)
+
+    def test_active_turn_survives_past_the_budget(self):
+        """Activity touches keep arriving (a fast tool loop): NO abort
+        at t0+TURN_MAX_S (the healthy-turn fix); the abort lands only
+        at the ABSOLUTE cap (3x)."""
+        runner = self._runner()
+        sid = "ses_w2"
+        runner._busy[sid] = {"type": "busy"}
+        runner._turn_stops[sid] = threading.Event()
+        t0 = time.time()
+        runner.TURN_MAX_S = 0.5        # the test's scale
+        runner._turn_activity = {sid: t0}
+
+        heart = threading.Thread(
+            target=lambda: [time.sleep(0.1) or
+                            runner._turn_activity.__setitem__(
+                                sid, time.time())
+                            for _ in range(40)], daemon=True)
+        heart.start()
+        runner._turn_watchdog(sid, t0)   # would return at 1.5s (3x cap)
+        self.assertGreaterEqual(time.time() - t0, 1.4,
+                                "the watchdog fired EARLY: a healthy "
+                                "multi-round turn was wall-clock-killed")
+        self.assertIn(sid, runner._aborting)   # only at the ABSOLUTE cap
+        heart.join(timeout=1)
 
 
 if __name__ == "__main__":
