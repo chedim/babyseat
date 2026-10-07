@@ -74,8 +74,8 @@ class TestRunDemolished(unittest.TestCase):
         a command entity's script returning {run: true} is the only
         exec."""
         import membrane.opencode as OC
-        import inspect
-        src = inspect.getsource(OC)
+        src = (open(OC.__file__).read()
+               + open(__import__("membrane.lanes", fromlist=["x"]).__file__).read())
         self.assertIn("the run route was demolished", src)
 
 

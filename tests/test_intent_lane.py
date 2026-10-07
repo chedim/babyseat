@@ -168,7 +168,9 @@ class TestContextBlock(unittest.TestCase):
         exhibit -- defined, summarized by the surface's block map, never
         injected). Pinned at the source level."""
         import inspect
-        src = inspect.getsource(OC)
+        src = (inspect.getsource(OC)
+               + inspect.getsource(__import__("membrane.lanes",
+                                              fromlist=["x"])))
         self.assertIn("THE INTENTIONS BLOCK", src)
         # the call follows the block's comment (the turn path's assembly)
         i = src.find("THE INTENTIONS BLOCK")

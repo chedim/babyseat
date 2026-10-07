@@ -47,17 +47,17 @@ class TestAgentLearn(unittest.TestCase):
         self.srv, self.f = _world()
 
     def _learn(self, payload):
-        with unittest.mock.patch.object(OC, "_write_audit"):
+        with unittest.mock.patch('membrane.lanes._write_audit'):
             return OC._agent_learn(self.srv, payload)
 
     def test_executes_and_audits(self):
-        with unittest.mock.patch.object(OC, "_write_audit") as w:
+        with unittest.mock.patch('membrane.lanes._write_audit') as w:
             out = OC._thought_answer(self.srv, "learn",
                                      _learn_text("the flaky test needs a retry"))
         self.assertIn("agent learn", out)
         self.assertIn("note #", out)
         self.assertEqual(len(_live(self.f)), 1)
-        with unittest.mock.patch.object(OC, "_write_audit") as w:
+        with unittest.mock.patch('membrane.lanes._write_audit') as w:
             srv, _ = _world()
             OC._agent_learn(srv, "another lesson")
             rec = w.call_args[0][1]
@@ -83,13 +83,13 @@ class TestAgentLearn(unittest.TestCase):
     def test_dedup_merges_not_appends(self):
         # write_events is content-keyed: the same lesson re-sent keeps its
         # key and is not re-applied (one note, never two).
-        with unittest.mock.patch.object(OC, "_write_audit"):
+        with unittest.mock.patch('membrane.lanes._write_audit'):
             OC._thought_answer(self.srv, "learn", _learn_text("same lesson"))
             OC._thought_answer(self.srv, "learn", _learn_text("same lesson"))
         self.assertEqual(len(_live(self.f)), 1)
 
     def test_executed_marks_ledger(self):
-        with unittest.mock.patch.object(OC, "_write_audit"):
+        with unittest.mock.patch('membrane.lanes._write_audit'):
             OC._thought_answer(self.srv, "learn", _learn_text("a lesson"))
         key = hash(("learn",
                     " ".join(_learn_text("a lesson").split()).lower()))
@@ -102,7 +102,7 @@ class TestAgentLearn(unittest.TestCase):
         srv._efield_boot_seq = 0
         srv._served_thought_asks = {}
         srv.agent_writes = False
-        with unittest.mock.patch.object(OC, "_write_audit"):
+        with unittest.mock.patch('membrane.lanes._write_audit'):
             out = OC._thought_answer(srv, "learn", _learn_text("a lesson"))
         self.assertIn("report-only", out)
         self.assertIn("PROPOSED: a lesson", out)

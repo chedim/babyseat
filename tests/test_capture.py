@@ -122,7 +122,7 @@ class TestSeatHooks(unittest.TestCase):
         from membrane import opencode as oc
         srv = mock.Mock()
         mem = mock.Mock(server_ref=srv, _pending_tools={})
-        with mock.patch.object(oc, "_codegraph_note_dirty"):
+        with mock.patch("membrane.lanes._codegraph_note_dirty"):
             oc._capture_plan_and_calls(mem, "q", "", CALLS)
         srv.capturer.on_calls.assert_called_once_with("q", CALLS)
 

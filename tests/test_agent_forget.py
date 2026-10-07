@@ -73,7 +73,7 @@ class TestAgentForget(unittest.TestCase):
             pass
 
     def _forget(self, spec):
-        with unittest.mock.patch.object(OC, "_write_audit"):
+        with unittest.mock.patch('membrane.lanes._write_audit'):
             return OC._agent_forget(self.srv, spec)
 
     def _live(self):
@@ -119,7 +119,7 @@ class TestAgentForget(unittest.TestCase):
         self.assertEqual(len(self._live()), 10)
 
     def test_audit_written_on_execute(self):
-        with unittest.mock.patch.object(OC, "_write_audit") as w:
+        with unittest.mock.patch('membrane.lanes._write_audit') as w:
             OC._agent_forget(self.srv, "#1")
             self.assertEqual(w.call_args[0][1].get("origin"), "agent")
 

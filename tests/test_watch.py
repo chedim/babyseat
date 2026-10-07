@@ -232,7 +232,7 @@ class TestOpencodeGlue(unittest.TestCase):
 
     def test_dispatch_plants(self):
         srv = self._srv()
-        with patch.object(OC, "_write_audit"):
+        with patch('membrane.lanes._write_audit'):
             out = OC._watch_report_cmd(srv, "membrane: watch flaky tests")
         self.assertIn("planted", out)
         board = srv._watch_board
@@ -240,7 +240,7 @@ class TestOpencodeGlue(unittest.TestCase):
 
     def test_thought_watch_plants(self):
         srv = self._srv()
-        with patch.object(OC, "_write_audit"):
+        with patch('membrane.lanes._write_audit'):
             OC._watch_report_cmd(srv, "membrane: watch flaky tests")
             out = OC._watch_set_from_thought(srv, "new topic here")
         self.assertIn("agent watch planted", out)
@@ -248,7 +248,7 @@ class TestOpencodeGlue(unittest.TestCase):
 
     def test_thought_watch_drop_executes(self):
         srv = self._srv()
-        with patch.object(OC, "_write_audit"):
+        with patch('membrane.lanes._write_audit'):
             OC._watch_report_cmd(srv, "membrane: watch flaky tests")
             out = OC._watch_set_from_thought(srv, "drop all")
         self.assertIn("dropped 1", out)

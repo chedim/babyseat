@@ -71,7 +71,9 @@ def test_ladder_is_retired():
     router proxy owns failover now): the pick IS the rung — no rung
     descent in the seat; a down rung = the honest note + raise."""
     import pathlib as _pl
-    src = _pl.Path("membrane/opencode.py").read_text()
+    import membrane.lanes
+    src = (_pl.Path("membrane/opencode.py").read_text()
+           + _pl.Path(membrane.lanes.__file__).read_text())
     assert "_next_rung" not in src.split("def run_command_entity")[0] \
         or src.count("_next_rung") == 0, "the ladder's descent lives"
     assert "rung_down" in src               # the honest down-note's lane

@@ -22,7 +22,9 @@ def test_footer_appends_after_the_last_turn():
 
 
 def test_the_old_ctx_tail_path_is_gone():
-    src = open("membrane/opencode.py").read()
+    import membrane.lanes
+    src = (open("membrane/opencode.py").read()
+           + open(membrane.lanes.__file__).read())
     assert "ctx + " + repr("\n\n") + " + speak_block" not in src
     assert src.count("_inject_after(_msgs, speak_block)") == 1
 
