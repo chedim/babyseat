@@ -79,6 +79,8 @@ WAKEUP_SIGNALS = frozenset((
     "watch-attached",          # a sensor armed/unarmed
     "watch-detached",
     "watch",                   # a watch fire -- the loop lane's raw kind
+    "boundary",                # a listener-owned track's crossing
+    "intent-planted",          # a commitment landed -- the loops receive it
     "operator-message",        # the operator talks
 ))
 
@@ -263,6 +265,12 @@ class Thinker:
         _marks["mode"] = _tm() - _t_mode
         if self.queue:
             srv.ambient_mode = "day"
+        # THE PAUSE (the operator's stable point): the tick pass, the
+        # digest queue and the idle half HOLD (their work accumulates --
+        # the queue's drop-oldest cap is the bound) while PRESENCE keeps
+        # (a paused seat is alive to the roster, identity metadata).
+        from .opencode import nerve_paused as _np_pause
+        paused = _np_pause(srv)
         # THE TICK PASS (the clock organ): every heartbeat, before the
         # queue unit, the seat's tick-scripted entities fire (the clock
         # is one of them -- its render + last_tick prop advance; every
@@ -270,12 +278,14 @@ class Thinker:
         # NIGHT: the body pauses EXCEPT the whiskers (scripts flagged
         # 'wakes: true' -- the animal's ear-lane: their fires ARE the
         # night's work; a whisker's night fire never wakes the room).
+        # PAUSED: the whole pass holds (scripts act).
         try:
             self._beat += 1
-            _tt = _tm()
-            self._tick_scripts(night=(getattr(srv, "ambient_mode", "day")
-                                      == "night"))
-            _marks["ticks"] = _tm() - _tt
+            if not paused:
+                _tt = _tm()
+                self._tick_scripts(night=(getattr(srv, "ambient_mode", "day")
+                                          == "night"))
+                _marks["ticks"] = _tm() - _tt
         except Exception:
             traceback.print_exc()
         # THE PRESENCE PULSE (the roster anchor): on the SLOW cadence the
@@ -287,7 +297,31 @@ class Thinker:
                 _marks["presence"] = _tm() - _tp
             except Exception:
                 traceback.print_exc()
-        if self.queue:
+        # THE EXECUTOR'S REAPER (the queue's continuation beat, the same
+        # slow cadence): the owed/continued nodes land here -- a link
+        # turn whose walk outran the node budget, a pending-degrade, a
+        # chain's later steps -- one batch per minute, each landing
+        # superseding its edge (the queue closes itself). Never raises.
+        if self._beat % PRESENCE_EVERY == 0 and not paused:
+            try:
+                _tr = _tm()
+                from .night import run_pending_links, EXECUTOR_EID
+                from .entities import MEMBRANE_NS
+                from .opencode import _efield_on as _ef_on
+                _est = getattr(srv, "entity_store", None)
+                if _est is not None:
+                    landed = run_pending_links(
+                        srv, _est, _ef_on(srv),
+                        getattr(srv, "membrane", None),
+                        MEMBRANE_NS + EXECUTOR_EID)
+                    if landed:
+                        self.stats["exec_landed"] = \
+                            int(self.stats.get("exec_landed") or 0) \
+                            + len(landed)
+                _marks["reaper"] = _tm() - _tr
+            except Exception:
+                traceback.print_exc()
+        if self.queue and not paused:
             item = self.queue.popleft()
             try:
                 self._process_one(item)
@@ -295,7 +329,7 @@ class Thinker:
                 traceback.print_exc()
             self.stats["processed"] += 1
             did_work = True
-        else:
+        elif not paused:
             # the idle half, throttled by the SAME duty controller: a
             # think-ahead probe only when the recent duty allows it
             if self._duty() < THINK_CPU_TARGET:

@@ -383,6 +383,17 @@ def loop_task_text(ev: dict) -> str:
     elif kind == "operator-message":
         head = f"operator messaged: {ev.get('text_head', '')[:80]}"
         detail = ""
+    elif kind == "intent-planted":
+        head = (f"goal planted ({'new' if ev.get('created') else 'pinned'}): "
+                f"{str(ev.get('text') or '')[:120]}")
+        detail = (f"the board's open commitments steer your dreams and "
+                  f"think-ahead; this one landed on {ev.get('entity', '?')}")
+    elif kind == "boundary":
+        head = (f"boundary crossed: '{ev.get('entity', '?')}' "
+                f"{'entered' if ev.get('entered') else 'exited'} "
+                f"its {ev.get('boundary', '?')} "
+                f"(count {ev.get('count', '?')})")
+        detail = str(ev.get("detail") or "")
     else:
         head = f"watch event ({kind}) on '{ent}'"
         detail = ""
@@ -480,6 +491,25 @@ class _LoopDrainer:
                                       "session": sid, "ts": time.time()})
                         except Exception:
                             pass
+                        # THE GOAL'S CLAIM RECEIPT (the durability plan:
+                        # a landing for an intent-planted event stamps
+                        # the GOAL's landings[] ledger -- the fulfill-by
+                        # evidence; the receipt IS the loop's verdict)
+                        if str(ev.get("kind")) == "intent-planted":
+                            try:
+                                from .opencode import nerve_paused
+                                _geid = str(ev.get("entity") or "")
+                                if _geid and not nerve_paused(self.srv):
+                                    notify_intent_landed(
+                                        est, getattr(self.srv,
+                                                     "events_pool", None),
+                                        _geid,
+                                        {"op": verdict, "step":
+                                         "loop-reaction",
+                                         "decision": verdict_text,
+                                         "session": sid})
+                            except Exception:
+                                pass
                     # THE INJECT (the operator's cosmetic-busy design):
                     # a REACTED loop's line speaks into the OPERATOR'S
                     # own session (the main chat): one message, as part
@@ -548,7 +578,13 @@ def _loop_titles(srv) -> list[str]:
 class LoopRunner:
     """The loop pool: 3 concurrent non-operator loops + 1 dedicated
     operator lane (operator admit NEVER fails -- the main chat's
-    reactive lane cannot starve behind batch work)."""
+    reactive lane cannot starve behind batch work).
+
+    THE PAUSE (the operator's stable point, 2026-10-06): while
+    srv.paused the LISTENER admits are refused (the events hold in the
+    pool -- the drop-oldest cap is the flood covenant as always) and
+    drain on resume; the operator lane is unaffected (the pause itself
+    is the operator's channel)."""
 
     def __init__(self, max_loops: int = 3):
         self.max = max(1, int(max_loops))
@@ -558,6 +594,11 @@ class LoopRunner:
     def admit(self, loop: LoopDesc) -> bool:
         if loop.is_operator:
             return True                    # dedicated: always available
+        srv = getattr(self, "_srv", None)  # bare pools (tests) never pause
+        if srv is not None:
+            from .opencode import nerve_paused
+            if nerve_paused(srv):
+                return False               # the stable point: hold
         with self._lk:
             if len(self._held) >= self.max:
                 return False
@@ -574,6 +615,70 @@ class LoopRunner:
             return len(self._held)
 
 # ---- the attach/detach events + the watch_ops CRUD -------------------------
+def notify_intent_planted(est, pool, goal_eid: str, text: str,
+                          created: bool = True) -> dict:
+    """THE INTENT-PLANTED EVENT (the receive-lane's wire, 2026-10-06):
+    a commitment landed on the board -- the listener pool gets it as an
+    event and a thinking loop RECEIVES it (its next turn's message:
+    'goal planted: ... -- PLAN or IGNORE'). Every planter feeds this:
+    the `intend` tool, the `membrane: intend that` frame, an entity
+    script's {intent} verdict, AND THE BOOT'S re-derivation (a wake
+    rides created=False -- the goal predates the boot; the board is
+    the durable steering). The goal entity stamps the event's
+    provenance (intent_planted_ts rides the goal's doc -- the boot's
+    wakes never double-fire)."""
+    ev = {"kind": "intent-planted", "entity": str(goal_eid or ""),
+          "text": str(text or "")[:200], "created": bool(created),
+          "ts": time.time()}
+    if pool is not None:
+        pool.put(ev)
+    try:
+        ent = est.docs.get(goal_eid) if hasattr(est, "docs") else None
+        if ent is None and est is not None and hasattr(est, "find"):
+            ent = est.find(goal_eid)
+        if ent is not None:
+            props = ent.properties or {}
+            props["intent_planted_ts"] = ev["ts"]
+            est.upsert(ent, embedder=None)
+    except Exception:
+        pass
+    return ev
+
+
+def notify_intent_landed(est, pool, goal_eid: str, receipt: dict) -> dict:
+    """THE LANDING'S CLAIM RECEIPT (the seat's plan: 'claim receipts on
+    the goal'): a listener's landing for a goal (the loop's verdict
+    carries the goal's eid) stamps the GOAL's doc
+    (landings: [{ts, receipt}] capped 8) -- the goal's own ledger of
+    what its steering produced. The receipts are the fulfill-by's
+    evidence (the operator fulfills on receipts, never on vibes).
+
+    THE STORM GUARD (the repeat-loop exhibit, 2026-10-06: the seat
+    'keeps sending messages' -- five self-spoken turns in two minutes):
+    this stamp deliberately does NOT put an event into the pool -- a
+    LANDING IS BOOKKEEPING, NOT A STIMULUS; its event fed the drainer
+    and every receipt spawned a fresh reacting loop turn (a reaction
+    producing receipts producing the same reaction). The goal's ledger
+    + the verdict-stamped entities are the readers' evidence; the
+    pool hears only the PLANT."""
+    try:
+        ent = (est.docs or {}).get(goal_eid) if est is not None else None
+        if ent is not None:
+            props = ent.properties or {}
+            lands = list(props.get("landings") or [])
+            lands.append({"ts": time.time(),
+                          **{k: v for k, v in (receipt or {}).items()
+                             if not isinstance(v, (dict, list))
+                             and len(str(v or "")) < 200}})
+            del lands[:-8]                     # bounded ledger
+            props["landings"] = lands
+            ent.properties = props
+            est.upsert(ent, embedder=None)
+    except Exception:
+        pass
+    return {"kind": "intent-landed", "entity": str(goal_eid or "")}
+
+
 def notify_watch_attached(est, pool, entity_key: str, lane: str,
                           detail=None) -> dict:
     """THE ATTACH EVENT: a watch planted (any lane) = an event to the
@@ -783,11 +888,12 @@ _GETTER_LRU_S = 5.0
 _getter_last_ts: dict = {}
 
 
-def entity_read_back(srv, ent) -> dict:
+def entity_read_back(srv, ent, force: bool = False) -> dict:
     """THE READ-BACK TRIGGER: a READ of a dynamic entity fires its
     getter_script (the dict return patches script_data + the entity's
-    state facts); the LRU (5s per entity) dedups a hammering loop;
-    the getter's kind rides the engine's dispatch."""
+    state facts); the LRU (5s per entity) dedups a hammering loop --
+    `force=True` (the explicit read tool) bypasses it (a re-run is the
+    caller's call); the getter's kind rides the engine's dispatch."""
     props = ent.properties or {}
     code = props.get("getter_script")
     if not code:
@@ -795,11 +901,14 @@ def entity_read_back(srv, ent) -> dict:
     est = getattr(srv, "entity_store", None)
     if est is None:
         return {"fired": False, "reason": "the entity layer is off"}
-    last = _getter_last_ts.get(ent.eid, 0.0)
-    now = time.time()
-    if now - last < _GETTER_LRU_S:
-        return {"fired": False, "reason": "lru"}
-    _getter_last_ts[ent.eid] = now
+    if not force:
+        last = _getter_last_ts.get(ent.eid, 0.0)
+        now = time.time()
+        if now - last < _GETTER_LRU_S:
+            return {"fired": False, "reason": "lru"}
+        _getter_last_ts[ent.eid] = now
+    else:
+        _getter_last_ts[ent.eid] = time.time()
     from .night import run_entity_update_script, apply_entity_update
     out = run_entity_update_script(srv, ent, "getter")
     if out.get("error"):

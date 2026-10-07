@@ -101,6 +101,12 @@ class Dreamer:
         """One dream wave. Returns the seconds to sleep before the next."""
         srv = self.srv
         mem = srv.membrane
+        # THE PAUSE (the stable point): the dreamer sleeps whole -- a
+        # dream is the mind ACTING; on resume the idle cadence rules
+        # again (a real wave needs the 60s idle anyway).
+        from .opencode import nerve_paused
+        if nerve_paused(srv):
+            return self._idle
         ib = getattr(srv, "_intent_board", None)
         now = time.time()
         idle_for = now - getattr(srv, "last_turn_ts", now)

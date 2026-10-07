@@ -413,7 +413,23 @@ class Autonode:
         """One duty pass: scan (gated), reap the strays, dispatch what
         the slots allow. The runner thread calls this; tests call it
         directly. `marks`: an optional cost ledger (the run loop's
-        slow-pump report fills it per phase)."""
+        slow-pump report fills it per phase).
+
+        THE PAUSE (the stable point): the scanner GATES (the tree's
+        diff accumulates silently) and no dispatch goes out -- on
+        resume the accumulated mtime diff fires as a bounded burst
+        (the 64 backlog is the covenant); the strays' reap keeps (the
+        pending fires' strikes are bookkeeping, not acting)."""
+        try:
+            from .opencode import nerve_paused
+            if nerve_paused(self.srv):
+                _m0 = marks if marks is not None else {}
+                _t1 = time.perf_counter()
+                self._reap(time.time())
+                _m0["reap"] = time.perf_counter() - _t1
+                return
+        except Exception:
+            pass
         _m = marks if marks is not None else {}
         _t0 = time.perf_counter()
         now = time.time()

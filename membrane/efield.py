@@ -680,9 +680,14 @@ class EntityField:
         t = time.time()
         if t - getattr(self, "_last_claim_eval", 0.0) >= self.CLAIM_EVAL_EVERY_S:
             self._last_claim_eval = t
+            # THE PAUSE (the stable point): the claim judge is the idle
+            # cortex acting -- gated through the seat's pause_fn (wired
+            # at boot; None keeps the judge live, the bare-library form).
+            pause_fn = getattr(self, "pause_fn", None)
             try:
-                from . import claims as CL
-                CL.evaluate(self, now=now)
+                if pause_fn is None or not pause_fn():
+                    from . import claims as CL
+                    CL.evaluate(self, now=now)
             except Exception:
                 pass
         return n
