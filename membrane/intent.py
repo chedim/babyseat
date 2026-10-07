@@ -60,6 +60,7 @@ class Intention:
     status: str = "open"     # open | fulfilled | expired
     fulfilled: float = 0.0   # when reality signed
     hits: int = 0            # near turns seen (context, not auto-close)
+    eid: str = ""            # the goal-backed view's goal eid ('' = json)
     last_hit: float = 0.0
 
     def to_json(self) -> dict:
@@ -298,6 +299,28 @@ class IntentBoard:
     def report(self, now: float | None = None) -> str:
         now = time.time() if now is None else now
         open_ = self.open_intents(now)
+        # THE GOAL-BACKED VIEW'S REPORT (the 'board silently cleared'
+        # exhibit's root, 2026-10-06): the report read ONLY the legacy
+        # json intents -- the goal tier (the real active set) rendered
+        # 'none held' THROUGH every plant. The goal-backed board owns
+        # the render now: its open set + the goal entities' landings.
+        if self.selection is not None:
+            goals = self.selection.refresh(now or time.time())
+            if not goals:
+                return ("Membrane intentions: none held. Plant one with "
+                        "`membrane: intend that <goal>` (optionally "
+                        "'... for 2w'); fulfill with `membrane: fulfill #N`.")
+            lines = [f"Membrane intentions ({len(goals)} active on this "
+                     "seat's set):"]
+            for g in goals:
+                props = g.properties or {}
+                lands = props.get("landings") or []
+                near = (f", {len(lands)} landing(s)"
+                        if lands else "")
+                lines.append(f"- {g.eid.rsplit(':', 1)[-1]} "
+                             f"{(props.get('name') or '')[:100]!r}"
+                             f"{near}")
+            return "\n".join(lines)
         closed = [i for i in self.intents.values() if i.status != "open"]
         if not self.intents:
             return ("Membrane intentions: none held. Plant one with "
@@ -446,6 +469,8 @@ class GoalSelection:
                 expires=0.0,                    # no TTL: goals do not expire
                 status="open",
                 hits=int(props.get("hits") or 0),
+                eid=g.eid,                      # the goal's real id (the
+                                                # wake derivation's address)
             ))
         return out
 

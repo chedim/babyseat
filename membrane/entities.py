@@ -1928,6 +1928,35 @@ class EntityStore(MultiParentOps, TimelineOps):
                 == spec.lower()]
         return hits[0] if len(hits) == 1 else (hits[0] if hits else None)
 
+    def near_specs(self, spec: str, k: int = 3) -> list[str]:
+        """The MIS'S nearest candidates (the self-correct-in-one-call
+        aid, 2026-10-06): the store's existing eids that share the
+        spec's head/tail or name-substring -- the model's next call
+        carries them in the refusal instead of a dead end. ''-ish specs
+        return []."""
+        s = (spec or "").strip().lower().removeprefix(MEMBRANE_NS)
+        if len(s) < 3:
+            return []
+        frag = s.rsplit(":", 1)[-1]
+        scored: list[tuple[int, str]] = []
+        for eid in list(self.docs.keys())[:4000]:
+            low = eid.lower().removeprefix(MEMBRANE_NS)
+            tail = low.rsplit(":", 1)[-1]
+            score = 0
+            if frag and frag in tail:
+                score = 3 if tail.startswith(frag) else 2
+            elif frag and tail and (tail.startswith(frag)
+                                    or frag.startswith(tail)
+                                    or frag in low):
+                # BOTH directions: the spec may carry MORE letters than
+                # the doc's tail (the model's invented suffix) or fewer
+                # ('gitx' vs 'git' shares the stem)
+                score = 1
+            if score:
+                scored.append((-score, low))
+        scored.sort()
+        return [e for _, e in scored[:max(1, k)]]
+
     def add(self, cls: str, name: str, summary: str = "",
             links=None) -> dict:
         """Model-side entity ADD: merge-on-collision with any existing doc
@@ -2094,9 +2123,12 @@ class EntityStore(MultiParentOps, TimelineOps):
         3-strike auto-disable on failures. Empty string clears."""
         ent = self._resolve_spec(spec)
         if ent is None:
+            near = self.near_specs(spec)
+            hint = (f"; nearest: {', '.join(near)} -- resolve by eid or "
+                    f"the exact name" if near else
+                    " (list via related)")
             return {"ok": False,
-                    "error": f"no entity matches {spec!r} "
-                             f"(list via related)"}
+                    "error": f"no entity matches {spec!r}{hint}"}
         if summary is not None:
             ent.properties["summary"] = str(summary).strip()
         if links is not None:
@@ -2150,7 +2182,12 @@ class EntityStore(MultiParentOps, TimelineOps):
             sval = str(val)
             if len(sval) > cap:
                 return {"ok": False,
-                        "error": f"{field} too long ({len(sval)} > {cap})"}
+                        "error": f"{field} too long ({len(sval)} > {cap}) "
+                                 f"-- split: keep the entity's script under "
+                                 f"{cap} (drop comments, fold helpers into "
+                                 f"the body's own functions) or move the "
+                                 f"extra logic into a second entity + a "
+                                 f"watch/field lane"}
             if not sval.strip():
                 ent.properties.pop(field, None)
                 ent.properties.pop("script_disabled", None)
@@ -2318,13 +2355,20 @@ class EntityStore(MultiParentOps, TimelineOps):
             return {"ok": False, "error": str(e)[:120]}
 
     def watch_track(self, key: str, boundary: str = "",
-                    label: str = "") -> dict:
+                    label: str = "", owner: str = "") -> dict:
         """Plant a banner track: the entity's live safe-cell count renders
         in WHERE WE ARE every turn (constant tracking). An optional boundary
         ('enter N' / 'exit N' / bare 'N') turns it into an EVENT trigger --
         a state machine that alerts once per region transition (re-entry
         re-arms by construction). Re-planting the same boundary keeps the
-        state; a changed boundary restarts it."""
+        state; a changed boundary restarts it.
+
+        THE OWNER (the lane gate's stamp, 2026-10-06): 'operator' (the
+        agent-less/banner lanes) delivers the crossing as the banner's
+        ALERT line (as always); a LISTENER's name ('watch:<eid>') routes
+        the firing into the EVENTS POOL -- the listener receives its own
+        watch's crossing as its next turn's message (the thinker's
+        event-input flow), never the banner."""
         key = key.strip().lower()
         if not key or ":" not in key:
             return {"ok": False, "error": "key must be 'kind:value' "
@@ -2348,6 +2392,10 @@ class EntityStore(MultiParentOps, TimelineOps):
             rec["planted_ts"] = _t.time()
         rec["key"] = key
         rec["label"] = label or self.default_label(key)
+        # THE OWNER's stamp: set on plant; an ownerless RE-PLANT keeps
+        # the lane (a re-arm never jumps the delivery lane; an explicit
+        # owner='' claim moves it back deliberately).
+        rec["owner"] = (owner or rec.get("owner") or "operator").strip()
         old = (rec.get("enter"), rec.get("exit"))
         new = (b.get("enter"), b.get("exit"))
         if new != old:
@@ -2396,8 +2444,17 @@ class EntityStore(MultiParentOps, TimelineOps):
     def evaluate_tracks(self, count_fn=None) -> list[dict]:
         """The per-turn state machine step: for every bounded track, compute
         the live safe-cell count and transition the inside/outside state.
-        Returns the ALERTS fired this turn (one per transition; re-entry
-        re-arms by construction). ``count_fn(key)`` = the entity's live
+        Returns the ALERTS fired this turn for OPERATOR-owned tracks (one
+        per transition; re-entry re-arms by construction).
+
+        THE OWNER SPLIT (the lane gate's delivery, 2026-10-06): a
+        LISTENER-owned track's firing goes into the EVENTS POOL instead --
+        the listener receives its own watch's crossing as its next turn's
+        message (the thinker's event-input flow); the pool's drop-oldest
+        cap is the bound. The banner ALERTs never carry a listener's
+        firing.
+
+        ``count_fn(key)`` = the entity's live
         mention count (the entity field passes its own; None counts 0 --
         which un-arms every bounded track until a count source is wired).
         Count-only tracks never alert. Persistence only when something
@@ -2408,6 +2465,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         if not bounded:
             return alerts
         changed = False
+        pool = getattr(self, "_events_pool", None)
         for key, t in bounded.items():
             n = count_fn(key) if count_fn is not None else 0
             enter, exit_ = t.get("enter"), t.get("exit")
@@ -2434,10 +2492,19 @@ class EntityStore(MultiParentOps, TimelineOps):
                      "boundary": (f"enter {enter}" if enter is not None
                                   else f"exit {exit_}"),
                      "detail": reason}
-                alerts.append(a)
-                pend = t.setdefault("pending", [])
-                pend.append(a)
-                del pend[:-8]                 # bounded queue
+                if str(t.get("owner") or "operator") != "operator" \
+                        and pool is not None:
+                    # THE LISTENER'S MESSAGE: the crossing IS the event
+                    pool.put({"kind": "boundary", "entity": key,
+                              "owner": str(t.get("owner")),
+                              "entered": inside, "count": n,
+                              "boundary": a["boundary"],
+                              "detail": reason, "ts": _t.time()})
+                else:
+                    alerts.append(a)
+                    pend = t.setdefault("pending", [])
+                    pend.append(a)
+                    del pend[:-8]             # bounded queue
         if changed:
             self._save_tracks()
         return alerts
@@ -2476,13 +2543,20 @@ class EntityStore(MultiParentOps, TimelineOps):
             self._save_tracks()
         return len(hits)
 
-    def list_tracks(self) -> list[dict]:
+    def list_tracks(self, owner: str = "") -> list[dict]:
         """The management listing (the LLM's view of its own banner): key,
-        label, boundary, current inside/outside state, alert count."""
+        label, boundary, current inside/outside state, alert count.
+        LANE-AWARE (2026-10-06): `owner='watch:<eid>'` returns that
+        listener's own tracks; '' = all (the operator's view, now with
+        each track's owner)."""
         out = []
         for key, t in self.tracks.items():
+            t_owner = str(t.get("owner") or "operator")
+            if owner and t_owner != owner:
+                continue
             rec = {"key": key,
-                   "label": t.get("label") or key}
+                   "label": t.get("label") or key,
+                   "owner": t_owner}
             for k in ("enter", "exit", "inside"):
                 if t.get(k) is not None:
                     rec[k] = t[k]
