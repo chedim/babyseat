@@ -153,13 +153,17 @@ class SessionStore:
         with self._lock:
             return self.sessions.get(sid)
 
-    def patch(self, sid: str, title: str | None = None) -> dict | None:
+    def patch(self, sid: str, title: str | None = None,
+              agent: str | None = None) -> dict | None:
         with self._lock:
             s = self.sessions.get(sid)
             if s is None:
                 return None
             if title is not None:
                 s["title"] = title
+            if agent is not None and str(agent).strip() in \
+                    ("build", "plan", "general", "explore", "watch"):
+                s["agent"] = str(agent).strip()
             s["time"]["updated"] = int(time.time() * 1000)
             self._flush()
             return s
@@ -218,11 +222,31 @@ class MessageStore:
                     # message saved once per tool-part state change):
                     # dedupe ON LOAD -- last parts win, first position
                     # stays, or resumed history still duplicates
+                    # THE TOKEN MEND (the `K.tokens.output undefined`
+                    # TUI-crash exhibit, 2026-10-06, THE DATA-HALF): a
+                    # stored assistant row predating the tokens covenant
+                    # (the old watchdog-error mints carried NO tokens)
+                    # POISONED EVERY SESSION LOAD -- the attached TUI's
+                    # reducer findLast lands on it and reads
+                    # K.tokens.output -> the crash ON STARTUP, every
+                    # boot, forever. The load MENDS: every assistant
+                    # row gets a full tokens dict (zeros when unknown)
+                    # -- the persisted poison dies with this store's
+                    # next flush.
                     for sid, rows in d.items():
                         merged: dict[str, dict] = {}
                         ordered: list[str] = []
                         for r in rows:
-                            mid = str(r.get("info", {}).get("id") or "")
+                            info = r.get("info") or {}
+                            mid = str(info.get("id") or "")
+                            if info.get("role") == "assistant" and \
+                                    not isinstance(info.get("tokens"),
+                                                   dict):
+                                info["tokens"] = {"total": 0, "input": 0,
+                                                  "output": 0, "reasoning": 0,
+                                                  "cache": {"read": 0,
+                                                            "write": 0}}
+                                r["info"] = info
                             if mid not in merged:
                                 ordered.append(mid)
                             merged[mid] = r
@@ -265,7 +289,20 @@ class MessageStore:
         """THE INJECT'S STORE LANE (the event-thinkers' lines): ONE
         part onto the session's LAST message (an assistant message
         when present, else minted) — the row persists + the flush
-        follows the same cadence rules as the append's."""
+        follows the same cadence rules as the append's.
+
+        THE WIRE'S ROW-BEFORE-PART COVENANT (the `K.tokens.output
+        undefined` TUI crash, 2026-10-06, at its ROOT): when this lane
+        MINTS an assistant row, the part's messageID names a row the
+        CLIENT has never seen -- its findLast lands undefined and the
+        reducer crashes reading tokens. So the mint publishes the FULL
+        row on the hub FIRST (message.updated with id/tokens/time --
+        the real reducer's demanded shape) and the caller's part
+        publishes second. The minted row's announce carries a
+        `_synthetic: True` flag (the reducer treats it like any
+        assistant row; the render shows the part's text)."""
+        hub = getattr(self, "hub", None)
+        minted_info: dict | None = None
         with self._lock:
             rows = self.msgs.get(sid) or []
             row = rows[-1] if rows else None
@@ -275,16 +312,27 @@ class MessageStore:
                         "parentID": part.get("messageID") or "",
                         "modelID": "membrane", "providerID": "membrane",
                         "agent": "memory",
+                        "cost": 0.0,
+                        "tokens": {"total": 0, "input": 0, "output": 0,
+                                   "reasoning": 0,
+                                   "cache": {"read": 0, "write": 0}},
                         "time": {"created": int(time.time() * 1000)}}
                 part = dict(part)
                 part["messageID"] = aid
                 row = {"info": info, "parts": [part]}
                 self.msgs.setdefault(sid, []).append(row)
+                minted_info = info      # the wire's row-before-part
             else:
                 row["parts"] = list(row.get("parts") or []) + [part]
             self._dirty_sessions = (self._dirty_sessions or set())
             self._dirty_sessions.add(sid)
             self._flush_maybe()
+        if hub is not None and minted_info is not None:
+            # THE ROW BEFORE ITS PART: the reducer must HOLD the row
+            # (id + tokens) before any part names it -- findLast never
+            # lands undefined
+            hub.publish({"type": "message.updated", "info":
+                         dict(minted_info), "sessionID": sid})
         return row
 
     FLUSH_MIN_S = 5.0        # the disk is not the RAM: tool-state
@@ -576,6 +624,106 @@ def _openai_tools(mcp_tools: list | None = None) -> list:
                           "parameters": t.get("inputSchema") or
                           {"type": "object", "properties": {}}}}
             for t in tools]
+
+
+# ---- THE LANE GATE (the division of hands, 2026-10-06) ----------------------
+# The seat's two minds have different hands: the OPERATOR (build/plan
+# sessions -- the main chat) plants INTENTS and commits; the LISTENERS
+# (the watch loops -- agent 'watch:<eid>') hold the ENTITY HANDS --
+# add/edit/remove/link/unlink -- the events they process are their
+# material. Reads and memory are both lanes'. Plan mode (the agent
+# 'plan') is the operator minus `intend` (planning sessions don't plant
+# commitments -- the direction needs the user's build-mode voice).
+# Kill switch: MEMBRANE_LANE_GATE=0 restores the flat surface (the
+# ablation/debug). The LAUNCH-MODE stdio MCP child (an external
+# opencode's config) keeps the full surface -- membrane cannot identify
+# the per-call agent there; the native serve is the enforcement point.
+
+OPERATOR_TOOLS = frozenset((
+    # reads
+    "query", "state", "graph", "entities_related", "entity_query",
+    "entity_read", "entity_tracks",
+    # memory
+    "learn", "forget",
+    # steering (intentions -- THE OPERATOR'S PEN)
+    "intend", "intents",
+    # room
+    "peer_post", "peer_seats", "junk_cut",
+    # the banner tracks (the operator's header)
+    "entity_watch", "entity_unwatch",
+))
+LISTENER_TOOLS = (OPERATOR_TOOLS | {
+    # the entity hands (the listeners' material)
+    "entity_add", "entity_edit", "entity_remove",
+    "entity_link", "entity_unlink",
+}) - {"intend"}
+PLAN_TOOLS = OPERATOR_TOOLS - {"intend"}   # plan reads/communicates, never plants
+
+_LANE_REFUSALS = {
+    "entity_add": ("the entity hands belong to the EVENT LISTENERS -- "
+                   "announce the work through `intend` (the tool or the "
+                   "'membrane: intend that' frame) and a thinking loop "
+                   "picks it up, or through `learn` for the memory"),
+    "entity_edit": ("the entity hands belong to the EVENT LISTENERS -- "
+                    "announce the work through `intend` (the tool or the "
+                    "'membrane: intend that' frame) and a thinking loop "
+                    "picks it up, or through `learn` for the memory"),
+    "entity_remove": ("the entity hands belong to the EVENT LISTENERS -- "
+                      "announce the cleanup through `intend` or `learn`;"
+                      " a thinking loop does it"),
+    "entity_link": ("the exec link is the LISTENERS' hand -- announce the "
+                    "command through `intend`/`learn` and a thinking "
+                    "loop links and runs it"),
+    "entity_unlink": ("the exec link is the LISTENERS' hand -- announce "
+                      "the unlink through `intend`/`learn`"),
+    "intend": ("plan mode: commitments aren't planted from a planning "
+               "session -- the direction needs the user's build-mode "
+               "word; the board reads via `intents`"),
+}
+def _lane_gate_off() -> bool:
+    # runtime-read: a kill switch set mid-session acts immediately
+    return os.environ.get("MEMBRANE_LANE_GATE") == "0"
+
+
+def _lane_of(agent: str | None) -> str:
+    """The session agent -> the hand-lane: 'operator' (build/plan/None),
+    'plan' (the read-only planning agent on a plan-BODY turn), or
+    'listener' (the watch loops + anything else)."""
+    a = str(agent or "").strip().lower()
+    if not a or a in ("build", "plan"):
+        return "plan" if a == "plan" else "operator"
+    return "listener"
+
+
+def _lane_tools(lane: str) -> frozenset:
+    if _lane_gate_off():
+        return _mcp_names()
+    return {"operator": OPERATOR_TOOLS, "plan": PLAN_TOOLS,
+            "listener": LISTENER_TOOLS}.get(lane, OPERATOR_TOOLS)
+
+
+def _mcp_names() -> frozenset:
+    return frozenset(t["name"] for t in _mcp.TOOLS)
+
+
+def _lane_refusal(name: str, lane: str) -> str | None:
+    """The honest refusal for a cross-lane tool call (None = allowed or
+    nothing to say)."""
+    if _lane_gate_off():
+        return None
+    if name in _lane_tools(lane):
+        return None
+    r = _LANE_REFUSALS.get(name)
+    if r is not None:
+        return r
+    return (f"the {name} tool is not your lane's hand (lane: {lane}); "
+            "reads, memory and the steering surface are.")
+
+
+def _openai_tools_for(agent: str | None) -> list:
+    """The ADVERTISED tools for the lane (the same registry, filtered)."""
+    names = _lane_tools(_lane_of(agent))
+    return [t for t in _mcp.TOOLS if t["name"] in names]
 
 
 def _tool_title(name: str, args: dict) -> str:
@@ -1075,18 +1223,27 @@ class TurnRunner:
         now = int(time.time() * 1000)
         _t_turn = time.time()
         self._busy[sid] = {"type": "busy"}
-        # THE AGENT REGISTRY (the cosmetic-busy decider's input): the
-        # session's agent read at the turn's start (the loops' child
-        # sessions carry agent=watch:/loop-N; the operator's chat
-        # carries build/plan)
+        # THE AGENT REGISTRY (the cosmetic-busy decider's + the lane
+        # gate's input): THE TURN'S OWN AGENT WINS (the attached TUI
+        # sends the mode per message -- 'plan' rows stored build-era
+        # sessions and every turn laned build: the 'everything is build
+        # despite plan selected' exhibit); the session doc is the
+        # fallback (the loops' child sessions carry agent=watch:/loop-N;
+        # a plain message POST carries build).
         try:
             _sess = self.sessions.sessions.get(sid) or {}
-            self._agents[sid] = str(_sess.get("agent") or "build")
+            self._agents[sid] = str((user_info or {}).get("agent")
+                                    or _sess.get("agent") or "build")
         except Exception:
             pass
         if user_info is None:
+            # THE FALLBACK ROW echoes the session's agent (a loop turn's
+            # message row carries the loop's agent, never a fake build)
+            _sa = str((self.sessions.sessions.get(sid) or {}).get("agent")
+                      or "build")
             user_info = {"id": _gen_id("msg"), "sessionID": sid,
-                         "role": "user", "agent": "build",
+                         "role": "user",
+                         "agent": _sa,
                          "model": {"providerID": "membrane",
                                    "modelID": self.model},
                          "time": {"created": now}}
@@ -1124,15 +1281,21 @@ class TurnRunner:
             _sess = self.sessions.sessions.get(sid) or {}
             _sm = _sess.get("model") or {}
             _pick = (_sm.get("id") if isinstance(_sm, dict)
-                     else str(_sm or "")).strip()
+                     else str(_sm or "")) or ""
+            _pick = _pick.strip()
             if _pick and _pick not in ("", "membrane"):
                 _turn_pick = _pick
         except Exception:
             _turn_pick = self.model
         a_info = {"id": aid, "sessionID": sid, "role": "assistant",
                   "parentID": user_info["id"], "modelID": _turn_pick,
-                  "providerID": "membrane", "mode": "build",
-                  "agent": "build",
+                  "providerID": "membrane",
+                  # THE LANE'S ECHO (the TUI's chip reads the reply's
+                  # agent): the turn's lane, not a hardcoded build.
+                  "mode": ("plan" if str((user_info or {}).get("agent") or "")
+                           == "plan" else "build"),
+                  "agent": str((user_info or {}).get("agent")
+                               or (self._agents or {}).get(sid) or "build"),
                   "path": {"cwd": os.getcwd(), "root": os.getcwd()},
                   "cost": 0.0, "tokens": {"total": 0, "input": 0,
                                           "output": 0, "reasoning": 0,
@@ -1187,8 +1350,16 @@ class TurnRunner:
             body = {"model": turn_model,
                     "messages": ([{"role": "system", "content": self.system}]
                                  if self.system else []) + history}
-            tools = _openai_tools(self.tools) if self.tools is not None \
-                else _openai_tools()
+            # THE LANE'S TOOLS (the division of hands): the registry
+            # filtered to the session's agent lane (operator/plan/
+            # listener). An EXPLICIT tools param = the constructor's own
+            # surface (a custom caller's set -- the gate belongs to it;
+            # tests + the boot's explicit tool lists keep passthrough).
+            if self.tools is not None:
+                tools = _openai_tools(self.tools)
+            else:
+                tools = _openai_tools_for((self._agents or {}).get(sid))
+            lane = _lane_of((self._agents or {}).get(sid))
             if tools:
                 body["tools"] = tools
             mkpart({"type": "step-start"})
@@ -1272,7 +1443,28 @@ class TurnRunner:
                             target=self._tool_watchdog_dump,
                             args=(call_id,), daemon=True)
                         _wd.start()
-                        output = self.executor(name, args, call_id)
+                        # THE LANE GATE ON THE CALL (the division of
+                        # hands): a cross-lane call never reaches the
+                        # impls -- the honest refusal text IS the tool
+                        # result, audited. An explicit tools param =
+                        # the constructor's own surface (passthrough).
+                        _refusal = (None if self.tools is not None
+                                    else _lane_refusal(name, lane))
+                        if _refusal is not None:
+                            output = f"Refused: {_refusal}"
+                            try:
+                                mem = getattr(self, "_audit_mem", None)
+                                if mem is not None:
+                                    from .opencode import _write_audit
+                                    _write_audit(mem, {
+                                        "event": "lane-refused",
+                                        "origin": "serve",
+                                        "lane": lane, "tool": name,
+                                        "sid": sid})
+                            except Exception:
+                                pass
+                        else:
+                            output = self.executor(name, args, call_id)
                         self._tool_watchdog_end(call_id, name)
                         part["state"] = {"status": "completed",
                                          "input": args,
@@ -1540,7 +1732,19 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 sid = path[len("/session/"):-len("/message")]
                 if sessions.get(sid) is None:
                     return self._notfound()
-                self._json_out(messages.list(sid))
+                # THE LIVE SHIELD (the TUI's actual replay route -- the
+                # crash's data-half at the reader): an assistant row
+                # without tokens is mended ON THE WIRE (the reducer's
+                # findLast never lands on undefined)
+                _rows = _chronological(messages.list(sid))
+                for _r in _rows:
+                    _i = _r.get("info") or {}
+                    if _i.get("role") == "assistant" and \
+                            not isinstance(_i.get("tokens"), dict):
+                        _i["tokens"] = {"total": 0, "input": 0,
+                                        "output": 0, "reasoning": 0,
+                                        "cache": {"read": 0, "write": 0}}
+                self._json_out(_rows)
             elif path == "/session/status":
                 # the truth per session: the runner's live busy state +
                 # the QUEUE's depth (a queued message is not invisible:
@@ -1581,8 +1785,20 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                         # rows ride created-ts order (chronological), so the
                         # user's turn sits above the reply it prompted even
                         # if a multi-writer race scrambled the rows
-                        return self._json_out(
-                            _chronological(messages.list(sid)))
+                        _rows = _chronological(messages.list(sid))
+                        # THE LIVE SHIELD (the crash's data-half, also at
+                        # the reader): any assistant row without tokens
+                        # gets the mend ON THE WIRE (a persisting flaw
+                        # never re-poisons the reducer)
+                        for _r in _rows:
+                            _i = _r.get("info") or {}
+                            if _i.get("role") == "assistant" and \
+                                    not isinstance(_i.get("tokens"), dict):
+                                _i["tokens"] = {"total": 0, "input": 0,
+                                                "output": 0, "reasoning": 0,
+                                                "cache": {"read": 0,
+                                                          "write": 0}}
+                        return self._json_out(_rows)
                 s = sessions.get(sid)
                 if s is None:
                     return self._notfound()
@@ -1797,6 +2013,16 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 if _row is not None:
                     _row["model"] = _pick
                     sessions._flush()
+            # THE AGENT'S PICK STICKS (the mode toggle's last mile): the
+            # message body's agent (the TUI's build/plan selection) lands
+            # on the SESSION ROW -- the same store the PATCH lane writes;
+            # the lane reads it even on turns that carry no agent row.
+            _ma = str(b.get("agent") or "").strip()
+            if _ma in ("build", "plan"):
+                _row = (sessions.sessions or {}).get(sid)
+                if _row is not None and _row.get("agent") != _ma:
+                    _row["agent"] = _ma
+                    sessions.flush()   # the public form (the lock's owned)
             if async_:
                 threading.Thread(target=runner.run,
                                  args=(sid, text, user_info),
@@ -1849,7 +2075,8 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 segs = path[len("/session/"):].split("/")
                 if segments_len(segs) == 1:
                     b = self._read_body()
-                    s = sessions.patch(segs[0], b.get("title"))
+                    s = sessions.patch(segs[0], b.get("title"),
+                                       agent=b.get("agent"))
                     if s is None:
                         return self._notfound()
                     # THE MODEL'S PATCH (the model switch through this
@@ -1922,12 +2149,37 @@ def _free_port(preferred: int) -> int:
 def start(port: int, host: str, user: str, password: str, config: dict,
           runner, sessions: SessionStore, messages: MessageStore):
     """Bind the native surface (returns (httpd, thread); the thread is a
-    daemon -- the seat's main loop owns the seat's life)."""
+    daemon -- the seat's main loop owns the seat's life).
+
+    THE PORT RACE'S TOCTOU (the two seats' simultaneous boots, 2026-10-06:
+    the pick found the port free, the sibling's bind landed first, the
+    serve FAILED Errno 48 => proxy-only => NO TUI -- 'membrane seat not
+    starting'). The boot's prebound socket (runner._serve_socket -- the
+    pick reserved it) is BOUND here instead of rebinding: a pick-era race
+    resolves at PICK (the walk retries), never post-pick."""
     handler = make_handler(hub=runner.hub, sessions=sessions,
                            messages=messages, user=user, password=password,
                            config=config, runner=runner,
                            srv=getattr(runner, "srv", None))
-    httpd = ThreadingHTTPServer((host, port), handler)
+    held = getattr(runner, "_serve_socket", None)
+    httpd = ThreadingHTTPServer((host, port), handler,
+                                bind_and_activate=False)
+    if held is not None and held.getsockname()[1] == port:
+        httpd.socket = held             # the pick's reservation becomes
+        httpd.server_activate()         # the server's listening socket
+    else:                                # no reservation: bind as before
+        httpd.server_bind()
+        httpd.server_activate()
+    if held is not None and getattr(httpd, "socket") is not held:
+        try:
+            held.close()                # an unused reservation: release
+        except Exception:
+            pass
+    runner._serve_socket = None
+    th = threading.Thread(target=httpd.serve_forever, daemon=True,
+                          name="membrane-serve")
+    th.start()
+    return httpd, th
     th = threading.Thread(target=httpd.serve_forever, daemon=True,
                           name="membrane-serve")
     th.start()
