@@ -4896,6 +4896,18 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                                            route, mid_stream=True, err=e)
                     return
                 raise
+            # THE ABORT'S REGISTER (the wedged round's fast kill): the
+            # turn's sid rode the loopback body (`_turn_sid`) -- the
+            # open backend response is registered under it; the
+            # watchdog's abort CLOSES this socket => the wedged read
+            # raises NOW (the rung's full budget never had to elapse).
+            _turn_sid = str((up.get("_turn_sid") or ""))[:64]
+            if _turn_sid:
+                _runner = getattr(srv, "_loop_runner", None)
+                if _runner is not None:
+                    _socks = getattr(_runner, "_turn_sockets", None)
+                    if _socks is not None:
+                        _socks[_turn_sid] = backend_r
             with backend_r as r:
                 for line in r:                      # SSE, tee verbatim
                     if not line:
@@ -4979,7 +4991,21 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             resp_bytes: bytes | None = None
             model_name = up.get("model", "membrane")
             try:
-                resp_bytes = _open_backend(model_name).read()
+                backend_r = _open_backend(model_name)
+                # THE ABORT'S REGISTER (the buffered lane): the same
+                # socket registration -- the watchdog's abort CLOSES it
+                # (the wedged read raises now)
+                _turn_sid = str((up.get("_turn_sid") or ""))[:64]
+                if _turn_sid:
+                    _runner = getattr(srv, "_loop_runner", None)
+                    if _runner is not None:
+                        _socks = getattr(_runner, "_turn_sockets", None)
+                        if _socks is not None:
+                            _socks[_turn_sid] = backend_r
+                resp_bytes = backend_r.read()
+                if _turn_sid and _socks is not None and \
+                        _socks.get(_turn_sid) is backend_r:
+                    _socks.pop(_turn_sid, None)
             except Exception as e:
                 if isinstance(e, RuntimeError) and \
                         "empty answer" in str(e):
@@ -6451,55 +6477,48 @@ def main() -> None:
         model = args.model          # respect an explicit choice even if unlisted
 
     mem = Seat(args.field, args.audit)   # the seat: audit, embedder ladder, locks
-    try:
-        pid_path.write_text(str(os.getpid()))
-    except Exception:
-        pass                       # the lock's write degrades (the seats
-                                   # keep their no-lock behavior)
-
-    # THE SINGLE-INSTANCE COVENANT (the orphan root, 2026-10-06: 'why
-    # are we getting orphans?!'): membrane happily ran N concurrent
-    # seats on one field -- a closed TUI's 'restart' relaunched a NEW
-    # seat on a NEW port while the old one lived on detached (nohup/ssh
-    # drops/crash-restarts): the seat table grew a family of invisible
-    # proxies answering different ports of the same field. THE LOCK
-    # FILE: <field>.opencode.pid now MINTS every seat (the launcher's
-    # child AND the seat's own pid when the child is the TUI) and the
-    # boot HONORS it:
-    #   - a LIVE pid in the lock + this boot is a REAL boot (not the
-    #     relaunch of the same pid) = refuse with the honest pointer
-    #     (kill the old seat; --force overrides);
-    #   - a DEAD pid in the lock = a stale ghost: claimed (the boot
-    #     OVERWRITES it).
-    # MEMBRANE_MULTI_SEAT=1 opts out (multi-seat rigs keep working).
-    _force_seat = bool(getattr(args, "force_seat", False)) or \
-        os.environ.get("MEMBRANE_MULTI_SEAT") == "1"
     pid_path = Path(getattr(args, "field", ".membrane/field.json")).parent \
         / "membrane.pid"
-    if not _force_seat:
+    # THE SINGLE-INSTANCE COVENANT (the orphan root, 2026-10-06: 'why
+    # are we getting orphans?!'): a closed TUI's 'restart' relaunched a
+    # NEW seat on a NEW port while the old one lived on detached: a
+    # family of invisible proxies on one field. THE CHECK RUNS BEFORE
+    # THE WRITE (the check reads the OLD lock -- writing first poisons
+    # the read with our own pid = the check forever passes):
+    #   - a LIVE pid that IS a membrane process = refuse with the
+    #     pointer (kill it or 'membrane reset'; --force overrides)
+    #   - a DEAD pid / a non-membrane pid (recycled) = a ghost: claimed
+    # MEMBRANE_MULTI_SEAT=1 opts out (multi-seat rigs keep working).
+    if not (getattr(args, "force_seat", False)
+            or os.environ.get("MEMBRANE_MULTI_SEAT") == "1"):
         try:
             _running = int(pid_path.read_text().strip()) \
                 if pid_path.exists() else None
         except Exception:
             _running = None
         if _running and _running != os.getpid():
+            _is_ours = False
             try:
                 os.kill(_running, 0)   # alive?
-                _cwd_note = ""
-                try:
-                    _cwd_note = (os.readlink(f"/proc/{_running}/cwd")
-                                 if os.path.exists(f"/proc/{_running}/cwd")
-                                 else "")
-                except Exception:
-                    pass
+                # THE RECYCLE GUARD: a pid file's dead-seat pid gets
+                # recycled by any process -- the lock only bites when
+                # the pid IS a membrane process:
+                _cmdline = subprocess.run(
+                    ["ps", "-p", str(_running), "-o", "command="],
+                    capture_output=True, text=True, timeout=4).stdout
+                _is_ours = "membrane" in _cmdline
+            except Exception:
+                _is_ours = False
+            if _is_ours:
                 print(f"[opencode] the seat on this field is ALIVE "
-                      f"(pid {_running}{' ' + _cwd_note if _cwd_note
-                                      else ''}) -- kill it or 'membrane "
-                      f"reset' first; --force overrides",
-                      file=sys.stderr)
+                      f"(pid {_running}) -- kill it or 'membrane reset' "
+                      f"first; --force overrides", file=sys.stderr)
                 raise SystemExit(2)
-            except OSError:
-                pass                    # the ghost's lock: claimed below
+    try:
+        pid_path.write_text(str(os.getpid()))
+    except Exception:
+        pass                       # the lock's write degrades (the seats
+                                 # keep their no-lock behavior)
 
     listen = _pick_listen_port(args.listen)
     if listen != args.listen:
@@ -7502,8 +7521,10 @@ def main() -> None:
                 system = ""
             _srv_model = (srv.seat_model if not srv.model_follows_chat
                           else model or srv.seat_model or "membrane")
+            _ladder_cell = {"runner": None}   # the runner's late binding
+            _ladder = loopback_ladder(listen, cell=_ladder_cell)
             runner = TurnRunner(_serve_hub, sess_store, msg_store,
-                                loopback_ladder(listen),
+                                _ladder,
                                 mcp_executor(listen),
                                 system=system, model=_srv_model)
             runner._serve_socket = _serve_socket   # THE PICK'S RESERVATION
@@ -7512,6 +7533,7 @@ def main() -> None:
             srv._loop_runner = runner
             runner.srv = srv               # /agent reads the live minds
             runner._audit_mem = srv.membrane   # the lane-refusal audits
+            _ladder_cell["runner"] = runner   # the runner's late binding
             # THE COSMETIC BUSY (the operator's design, armed): the
             # event-thinkers' pool is live -- the operator's session's
             # stream stays busy (their loop's end is internal; the

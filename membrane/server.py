@@ -840,6 +840,25 @@ class TurnRunner:
     def abort(self, sid: str) -> None:
         self._aborting = getattr(self, "_aborting", None) or set()
         self._aborting.add(sid)
+        self._turn_activity = getattr(self, "_turn_activity", {}) or {}
+
+    def _kill_turn_socket(self, sid: str) -> None:
+        """THE ABORT'S TEETH (the wedged round's fast kill, 2026-10-07):
+        the abort flag is only checked BETWEEN rounds -- a turn wedged
+        INSIDE a delivery's socket read sat its full 90s rung budget
+        (or 300s of watchdog silence) before anything freed. The
+        watchdog closes the turn's open backend socket: the blocked
+        `read()` RAISES immediately, the round fails fast, the turn's
+        own finally frees the guard. Tracked: `_turn_sockets[sid]` =
+        the response object the delivery is reading (wired by
+        `_v1_chat`'s ladder)."""
+        resp = (getattr(self, "_turn_sockets", {}) or {}).get(sid)
+        if resp is None:
+            return
+        try:
+            resp.close()
+        except Exception:
+            pass
 
     def _touch_session(self, sid: str) -> None:
         info = self.sessions.get(sid)
@@ -991,9 +1010,15 @@ class TurnRunner:
         # touch it; the watchdog aborts only on the SILENT stretch)
         self._turn_activity = getattr(self, "_turn_activity", {}) or {}
         self._turn_activity[sid] = time.time()
+        self._current_turn_sid = sid    # THE ABORT'S ADDRESS (the loopback's
+                                        # registration key: _turn_sockets)
+        self._turn_sockets = getattr(self, "_turn_sockets", {}) or {}
         try:
             return self._run_inner(sid, text, user_info, user_parts)
         finally:
+            self._turn_sockets.pop(sid, None)
+            self._turn_activity.pop(sid, None)
+            self._current_turn_sid = None
             stop.set()
             self._turn_stops.pop(sid, None)
             guard.release()
@@ -1137,6 +1162,14 @@ class TurnRunner:
         if sid not in self._busy:
             return                      # the turn ended (the normal way)
         self._aborting.add(sid)
+        # THE ABORT'S TEETH (the wedged round's fast kill): the flag is
+        # only read BETWEEN rounds -- close the turn's in-flight backend
+        # socket; the delivery's read raises NOW (not after the rung's
+        # full budget)
+        try:
+            self._kill_turn_socket(sid)
+        except Exception:
+            pass
         # THE EVIDENCE: the error part + the stack dump (the corpse's
         # own name)
         import faulthandler
@@ -1615,13 +1648,28 @@ def __exit__(self, *a):
 
 # ---- the loopback ladder + the in-process executor -----------------------------
 
-def loopback_ladder(port: int):
+def loopback_ladder(port: int, runner=None, cell=None):
     """The turn loop's model call: a buffered POST to THIS seat's /v1 --
     the gate, injection, routing and capture machinery runs once, in
-    process, exactly where every other client's turn runs."""
+    process, exactly where every other client's turn runs.
+
+    THE ABORT'S TEETH (the wedged round's fast kill): the loopback
+    turn's runner hands its sid through the body (`_turn_sid`) -- the
+    proxy's `_v1_chat` registers its in-flight backend response under
+    it (runner._turn_sockets[sid]); the watchdog's abort CLOSES that
+    socket => the wedged read raises NOW, not after the rung's budget.
+    `cell` = the late-bound runner (the boot wires it after TurnRunner
+    exists -- the ladder's construction precedes the runner)."""
     import json as _json
 
     def call(body: dict) -> dict:
+        sid = None
+        _r = runner if runner is not None else (
+            (cell or {}).get("runner") if cell else None)
+        if _r is not None:
+            sid = getattr(_r, "_current_turn_sid", None)
+            if sid:
+                body = dict(body, _turn_sid=sid)
         url = f"http://127.0.0.1:{port}/v1/chat/completions"
         data = _json.dumps(body).encode()
         req = urllib.request.Request(
