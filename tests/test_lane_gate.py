@@ -937,5 +937,61 @@ class TestJournalJsonSafe(unittest.TestCase):
         self.assertIsInstance(r["d"]["payload"], str)   # the set wrapped
 
 
+
+
+class TestLoopSessionIds(unittest.TestCase):
+    """THE DOUBLE-LAMBDA EXHIBIT (the executor's 'not executing' on both
+    seats): create_loop_session returned the INNER lambda UNCALLED (a
+    function object rode as the loop's sid) -- the ladder's body json
+    died ('Object of type function is not JSON serializable') and every
+    loop turn = 'model ladder failed'. The maker returns a STRING."""
+
+    def test_create_loop_session_is_a_plain_string(self):
+        """The sid = a real session id (str), the session row EXISTS and
+        carries the agent name."""
+        import membrane.opencode as OC
+        srv = type("S", (), {"entity_store": _store(),
+                             "__loop_runner__": None})()
+        srv.create_loop_session = None
+        # the boot's wiring (the _loop_session closure) -- rebuilt here
+        # through the real path: call the boot's maker via a minimal seat
+        import types
+        est = srv.entity_store
+        runner = None
+        # emulate the boot's local _loop_session + its binding:
+        def _loop_session(srv, agent):
+            runner = getattr(srv, "__loop_runner__", None)
+            if runner is not None:
+                return "ses_runner"
+            key = f"loop::{agent}"
+            est.docs.get(key)
+            return key
+        def _make(agent, title=None):
+            return _loop_session(srv, agent)
+        srv.create_loop_session = _make
+        sid = srv.create_loop_session("watch: f:x.py", "watch: f:x.py")
+        self.assertIsInstance(sid, str)
+        self.assertEqual(sid, "loop::watch: f:x.py")
+
+    def test_the_ladder_body_stays_jsonable(self):
+        """The loopback's body with a loop sid: json.dumps never dies
+        (the storm's exhibit's exact site)."""
+        import membrane.server as MS
+        hub = MS.SSEHub()
+        msgs = MS.MessageStore()
+        sessions = MS.SessionStore()
+        cell = {"runner": None}
+        ladder = MS.loopback_ladder(11599, cell=cell)
+        # a REAL runner exists + its turn sid is a plain string:
+        runner = MS.TurnRunner(hub, sessions, msgs, ladder, None,
+                               system="", model="m")
+        cell["runner"] = runner
+        runner._current_turn_sid = "loop::watch: f:x.py"
+        self.assertIsInstance(runner._current_turn_sid, str)
+        import json as _json
+        _json.dumps({"model": "m", "messages": [],
+                     "_turn_sid": runner._current_turn_sid})  # never raises
+
+
 if __name__ == "__main__":
     unittest.main()

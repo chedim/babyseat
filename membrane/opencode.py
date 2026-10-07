@@ -1272,8 +1272,15 @@ def main() -> None:
             est.docs.get(key)
             return key                 # the proxy-only degenerate form
 
-        srv.create_loop_session = (lambda srv=srv, _f=_loop_session:
-                                   (lambda agent, title=None: _f(srv, agent)))
+        # THE SESSION-MAKER (the storm's last exhibit, 2026-10-07: the
+        # DOUBLE LAMBDA -- the outer lambda's call returned the INNER
+        # lambda uncalled, so every loop 'sid' was a FUNCTION OBJECT:
+        # the ladder's body json died with 'Object of type function is
+        # not JSON serializable' => every loop turn = 'model ladder
+        # failed' = the executor 'not executing'). One plain function.
+        def _make_loop_session(agent, title=None):
+            return _loop_session(srv, agent)
+        srv.create_loop_session = _make_loop_session
         srv._loop_runner = None        # wired by the serve boot below
 
         def _run_loop_turn(srv=srv):
