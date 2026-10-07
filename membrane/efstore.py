@@ -27,6 +27,21 @@ import numpy as np
 COLLECTIONS = ("events", "sentences", "terms", "entity_states", "entity_deltas",
                "relations", "claims", "annotations", "origin_stats")
 
+def _json_line(coll: str, key: str, doc) -> str:
+    """One journal line, json-safe ALWAYS (the 'when serializing dict
+    item' crash's root fix: one poison row (a Mock/lambda/handle in a
+    richer prop) killed the whole compaction/flush -- the trail lost
+    every row in flight). Strangers wrap to strings; the line writes."""
+    import json as _json
+    try:
+        return _json.dumps({"k": key, "d": doc})
+    except (TypeError, ValueError):
+        from .entities import json_safe
+        d = json_safe(doc) if doc is not None else None
+        return _json.dumps({"k": key, "d": d})
+
+
+
 
 def o8(origin: str) -> str:
     """The origin's key segment (no '@'/'%' in keys)."""
@@ -763,7 +778,7 @@ class FileBackend(MemBackend):
         """The events lane's original append (the jsonl journal)."""
         try:
             with self._events_log.open("a") as fh:
-                fh.write(self._json.dumps({"k": key, "d": doc}) + "\n")
+                fh.write(_json_line("events", key, doc) + "\n")
             self._journal_count["events"] = \
                 self._journal_count.get("events", 0) + 1
         except Exception as e:
@@ -773,11 +788,29 @@ class FileBackend(MemBackend):
     def _journal_append(self, coll: str, key: str, doc: dict,
                         tombstone: bool = False) -> None:
         """ONE jsonl line per write (last-line-wins; a tombstone when
-        the doc is None). The write of a changed row only."""
+        the doc is None). The write of a changed row only.
+
+        THE JSON-SAFE PASS (the 'when serializing dict item' crash,
+        2026-10-07): a doc carrying non-serializable residue (a Mock, a
+        lambda, an open handle -- today's richer props: a
+        watch_last_decision's lambda-`session`, the verdict stamps)
+        DIED the journal append: the try swallowed it, 'RAM carries' --
+        the field's own file trail lost EVERY changed row for that
+        collection (the flush's whole-file snapshot died the same way:
+        the poison row killed the whole flush). The row now dumps with
+        the entities layer's json_safe screen: every value survives
+        (strangers wrap to strings), the file always writes."""
         try:
             row = {"k": key, "d": None if tombstone else doc}
             with self._journal_path(coll).open("a") as fh:
-                fh.write(self._json.dumps(row) + "\n")
+                try:
+                    line = self._json.dumps(row)
+                except (TypeError, ValueError):
+                    from .entities import json_safe
+                    row["d"] = json_safe(row["d"]) if row["d"] is not None \
+                        else None
+                    line = self._json.dumps(row)
+                fh.write(line + "\n")
         except Exception as e:
             print(f"[efield] {coll} journal append failed ({e}); RAM "
                   "carries", file=sys.stderr)
@@ -932,7 +965,7 @@ class FileBackend(MemBackend):
                 # rows behind a 1.5x count); $0 at normal homes
                 # (st_size ~= live bytes there).
                 sample = rows[:20]
-                avg_row = (sum(len(self._json.dumps({"k": k, "d": d}))
+                avg_row = (sum(len(_json_line(coll, k, d))
                                for k, d in sample)
                            // max(len(sample), 1)) if sample else 0
                 avg_row += 1             # the journal's newline byte
@@ -944,7 +977,7 @@ class FileBackend(MemBackend):
         try:
             with tmp.open("w") as fh:
                 for k, d in rows:
-                    fh.write(self._json.dumps({"k": k, "d": d}) + "\n")
+                    fh.write(_json_line(coll, k, d) + "\n")
             tmp.replace(jpath)
             self._journal_count[coll] = len(rows)
         except Exception as e:
@@ -978,7 +1011,7 @@ class FileBackend(MemBackend):
             tmp = self._events_log.with_suffix(".jsonl.tmp")
             with tmp.open("w") as fh:
                 for k, d in rows:
-                    fh.write(self._json.dumps({"k": k, "d": d}) + "\n")
+                    fh.write(_json_line("events", k, d) + "\n")
             tmp.replace(self._events_log)
             self._journal_count["events"] = len(rows)
         except Exception as e:

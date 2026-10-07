@@ -896,5 +896,46 @@ class TestActivityWatchdog(unittest.TestCase):
         heart.join(timeout=1)
 
 
+
+
+class TestJournalJsonSafe(unittest.TestCase):
+    """THE STORE'S JSON-SAFE WRITER (the 'when serializing dict item
+    session/watch_last_decision/properties' crash -- a richer prop's
+    non-serializable residue (a lambda, a Mock, a session object)
+    KILLED the journal append: the file trail lost every changed row
+    in flight, the compaction died, 'RAM carries' = the field's
+    persistence silently hollow). The write now dumps through the
+    entities layer's json_safe screen: strangers wrap to strings, the
+    line ALWAYS writes."""
+
+    def test_poison_doc_writes_and_reloads(self):
+        import tempfile
+        from membrane.efstore import FileBackend
+
+        class Fake:
+            def __repr__(self):
+                return "<fake-session>"
+        d = tempfile.mkdtemp()
+        fb = FileBackend(d)
+        doc = {"eid": "x", "props": {"session": Fake(), "ok": 1}}
+        fb._journal_append("entity_states", "k1", doc)
+        line = Path(d, "entity_states.jsonl").read_text().strip()
+        self.assertTrue(line, "the trail never lost the row")
+        r = json.loads(line)
+        self.assertEqual(r["d"]["props"]["ok"], 1)
+        self.assertIsInstance(r["d"]["props"]["session"], str)
+
+    def test_event_append_json_safe_too(self):
+        import tempfile
+        from membrane.efstore import FileBackend
+        d = tempfile.mkdtemp()
+        fb = FileBackend(d)
+        fb._append("evt-1", {"stream": "discourse", "payload": {1, 2, 3}})
+        line = Path(d, "events.jsonl").read_text().strip()
+        self.assertTrue(line, "the events trail never lost the row")
+        r = json.loads(line)
+        self.assertIsInstance(r["d"]["payload"], str)   # the set wrapped
+
+
 if __name__ == "__main__":
     unittest.main()
