@@ -61,3 +61,14 @@ mcp-test.log
 # machine-specific HA/brain setup notes (local only)
 HASS-SETUP.md
 presentation/
+
+# the tools' scratch (the root's recurring runtime litter)
+.membrane_ls_dump.json
+.rd.lock
+.recon.seen
+code_index.json
+pulse.txt
+recon.txt
+:memory:
+:memory:.*
+*.migrated
