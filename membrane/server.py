@@ -1402,7 +1402,8 @@ class TurnRunner:
                 _sess = self.sessions.sessions.get(sid) or {}
                 _sm = _sess.get("model") or {}
                 _pick = (_sm.get("id") if isinstance(_sm, dict)
-                         else str(_sm or "")).strip()
+                         else str(_sm or "")) or ""
+                _pick = _pick.strip()
                 if _pick and _pick not in ("", "membrane"):
                     turn_model = _pick
             except Exception:
