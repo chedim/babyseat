@@ -1010,14 +1010,21 @@ def main() -> None:
         try:
             _ib2 = _intents_board(srv)
             _pool2 = getattr(srv, "events_pool", None)
-            if _ib2 is not None and _pool2 is not None \
-                    and _ib2.selection is not None:
+            if _ib2 is not None and _pool2 is not None:
                 from .watch_agents import notify_intent_planted
-                _n_wakes = 0
-                for _intent in _ib2.open_intents():
-                    _geid = (getattr(_intent, "eid", None) or "")
-                    if not _geid:
+                from .entities import CLASS_GOAL
+                # ALL OPEN GOALS (the board's ranking requires geometry;
+                # an older plant's position-less goal would sit unseen
+                # forever: the wake reads the STORE's goal docs -- every
+                # open commitment re-derives its wake, whatever its age)
+                for _geid, _gdoc in list((srv.entity_store.docs
+                                          or {}).items()):
+                    _gp = (_gdoc.properties or {}) \
+                        if _gdoc is not None else {}
+                    if _gdoc is None or _gdoc.cls != CLASS_GOAL \
+                            or (_gp.get("status") or "open") != "open":
                         continue
+                    _geid = _gdoc.eid
                     _gprops = ((srv.entity_store.docs.get(_geid)
                                 .properties) if _geid in
                                (srv.entity_store.docs or {}) else {}) or {}
@@ -1030,8 +1037,7 @@ def main() -> None:
                             srv._boot_ts):
                         continue          # THIS boot already re-queued it
                     notify_intent_planted(srv.entity_store, _pool2,
-                                          _geid, str(getattr(_intent,
-                                                             "text", "")),
+                                          _geid, str(_gp.get("name") or ""),
                                           created=False)
                     _n_wakes += 1
                 if _n_wakes:
