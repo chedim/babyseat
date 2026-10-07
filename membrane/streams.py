@@ -154,9 +154,20 @@ def is_full_suite(cmd: str) -> bool:
             and not re.search(r"pytest\s+\S+\.py", c))
 
 
-def outcome(tool: str, head: str, tail: str = "") -> str:
+def outcome(tool: str, head: str, tail: str = "",
+            rc: int | None = None) -> str:
     """The observation's fact class, read from the result head AND tail
-    (unittest prints 'Ran N tests' / 'FAILED' at the END)."""
+    (unittest prints 'Ran N tests' / 'FAILED' at the END).
+
+    THE RC TRUMPS THE TEXT (the 'rc=0 error' residue exhibit,
+    2026-10-06): a non-None rc is the GROUND truth of a shell run -- the
+    text heuristic (an 'error' MENTION in a successful command's
+    output: grep hits, log excerpts, a test's own error-path prints)
+    no longer overrides it: rc==0 + text-error-words => the honest
+    'ok (mentions error)' still reads as OK's fact class; rc!=0 => an
+    error class carries it even when the text was silent. Callers
+    without an rc (capture-side events, pre-rc eras) keep the text
+    heuristic as exactly before."""
     r = ((head or "") + "\n" + (tail or "")).lower()
     if tool in ("edit", "write"):
         return "applied" if "successfully" in r else ("failed" if r.strip() else "unknown")
@@ -164,6 +175,15 @@ def outcome(tool: str, head: str, tail: str = "") -> str:
         return "tests-failed" if re.search(r"failed|failures=|errors=|\bfail\b", r) else "tests-ok"
     if "not found" in r or "no files found" in r or "no such file" in r:
         return "not-found"
+    if rc is not None:
+        if rc == 0:
+            # the text-error heuristic yields: a MENTION in a
+            # zero-exit run is the output's content, not the run's
+            # fact (the residue line honest both ways: 'ok' carries)
+            if "traceback" in r or "error" in r[:400] or "failed" in r[:400]:
+                return "ok"
+            return "ok" if r.strip() else "empty"
+        return "error"
     if "traceback" in r or "error" in r[:400] or "failed" in r[:400]:
         return "error"
     return "ok" if r.strip() else "empty"

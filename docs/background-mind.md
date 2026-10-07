@@ -63,7 +63,48 @@ membrane: fulfill #N       # explicit close
 
 An intention is never auto-closed by similarity — only `fulfill` or expiry
 closes it. Without an open intention the dreamer skips (unsteered dreams
-confirm near-randomly — a measured lesson).
+confirm near-randomly — a measured lesson). The MCP tools `intend` /
+`intents` (and an entity script's `{intent: …}` verdict) plant through the
+same lane; every plant is an `intent-planted` event the thinking loops
+RECEIVE as their next turn's message — the operator creates, the thinker
+receives and executes. The model-facing teaching lives in the doctrine +
+the `membrane-intents` skill.
+
+## The pause (the operator's stable point, 2026-10-06)
+
+`membrane: pause` stands the seat's ACTING lanes down — the stable point
+from which the operator (and the model, read-only) can look around and
+plan:
+
+- **Stops**: the thinking loops (listener admits hold — the events pool
+  keeps, bounded by its drop-oldest cap), the dreamer, the thinker's
+  ticks + digest + idle-think (the queue accumulates under its cap), the
+  NightClock's bodies (scripts/births/consolidation defer; the cadence
+  continues so resume is automatic), the autonode (the file-tree diff
+  accumulates silently; resume fires it as a bounded 64-burst), the claim
+  + A/B idle judges, all composed speech (held; delivers on resume).
+- **Keeps**: presence (a paused seat is ALIVE to the roster — identity
+  metadata, not acting), capture (the operator talking is memory), the
+  gate/recall reads, and `membrane: pause`/`resume` themselves.
+- **The entity hands are down**: mutating MCP tools (`entity_add/edit/
+  remove/link/unlink`, the filetool lane) refuse with 423 + the pointer,
+  from every session. Reads, memory (`learn`/`forget`) and `intend` stay
+  live — and a plant mid-pause is **inert by construction**: every lane
+  that would react to the goal is down too. The intent board is the
+  plan's artifact: the operator looks around, plans into the board, then
+  `membrane: resume` — and the accumulated world pours in honestly
+  (loop drains, speech delivers, the scanner's diff bursts bounded). The
+  executor's queue is part of the pause: owed work keeps its pending
+  edges and runs on resume (the executor mechanics:
+  [entity-field.md](entity-field.md) — the queue + the ISA pipeline).
+- **RAM-only**: a restart unpauses (a persisted pause is a stuck seat —
+  a paused-looking seat the roster can't wake is the failure mode this
+  avoids). `membrane: pause` is honored only from the operator's chat
+  (a listener loop can never pause the seat). Kill switch:
+  `MEMBRANE_NERVE_PAUSE=0` (pause becomes a no-op).
+
+The banner carries one `PAUSED:` line while paused — the model sees why
+the field's voices are quiet and that its writes are refused.
 
 ## Programmatic entities (the scripts — model-authored)
 
@@ -121,4 +162,6 @@ re-embedding. The night reads statistics, not the raw field.
 --no-thinker       # no background deliberation
 --no-dreamer       # no timeline generation
 MEMBRANE_EFIELD=shadow | off   # events-only capture / the field off
+MEMBRANE_LANE_GATE=0           # the flat tool surface (no operator/listener split)
+MEMBRANE_NERVE_PAUSE=0         # pause becomes a no-op
 ```

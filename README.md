@@ -382,11 +382,11 @@ What the numbers mean and how the field's "thermodynamics" work:
 
 | Doc | What's in it |
 |---|---|
-| [docs/entity-field.md](docs/entity-field.md) | **THE FIELD.** Design: events → entities → readers; the update rule and statistics; relations and claims; injection (full block / state diff); the gate + replay A/B; storage, sharing, the background mind; the e17–e25 evidence |
+| [docs/entity-field.md](docs/entity-field.md) | **THE FIELD.** Design: events → entities → readers; the update rule and statistics; relations and claims; injection (full block / state diff); the gate + replay A/B; storage, sharing, the background mind; the e17–e25 evidence. **The division of hands** (the operator/listener/plan tool lanes + the remounted intent lane) |
 | [docs/shared-field-workflow.md](docs/shared-field-workflow.md) | **Team field: the process.** Day-one setup, the async loop, watches, operator rules, go-live checklist |
 | [docs/multi-dev-field.md](docs/multi-dev-field.md) | **Team field: the substrate.** The origin axis, disjoint writers / merged reads, divergence conflicts, the commons — what makes multi-seat sharing collision-free |
 | [docs/global-field.md](docs/global-field.md) | The global commons: facts true beyond one repo; operator promotion, consensus, residency |
-| [docs/background-mind.md](docs/background-mind.md) | **The background mind:** thinker + dreamer on events, the NightClock, births/junk/activity on entity stats, entity scripts and tracks, kill switches |
+| [docs/background-mind.md](docs/background-mind.md) | **The background mind:** thinker + dreamer on events, the NightClock, births/junk/activity on entity stats, entity scripts and tracks, the intent steering wheel, **the pause** (the operator's stable point: what stops, what keeps), kill switches |
 | [docs/vsa-token-lane.md](docs/vsa-token-lane.md) | **Entity keys + relations (the VSA lane).** `eids.py` canonical ids, `entity_key`/`role_key` binding, the relations composites, structure-awareness numbers, consumers, kill switches |
 | [docs/token-economics.md](docs/token-economics.md) | Where the savings come from (intercepts, the replay lane, the state diff) + the router: the ladder, the ceiling, the outage fallback, the free-tier default budget |
 | [docs/monologue.md](docs/monologue.md) | The `[membrane]` thinking-channel banner: every line explained, the memory flow (gave/learned), `/monologue` toggle |

@@ -28,6 +28,12 @@ class _Srv:
         self.backend = "http://127.0.0.1:1"
         self.idle_cortex_model = "granite3.3:8b"
         self.thinker = None
+        # THE NIGHT MODE'S BOOT CONTRACT (opencode.py:6513-6522): the
+        # seat carries the ambient knobs BEFORE the thinker reads them
+        self.ambient_night = True
+        self.ambient_mode = "day"
+        self.ambient_pulse = (1.0, 30.0)
+        self.last_turn_ts = time.time()
 
 
 class TestThinkQueue(unittest.TestCase):
@@ -60,10 +66,15 @@ class TestThinkQueue(unittest.TestCase):
         srv = _Srv()
         th = Thinker(srv)
         srv.thinker = th
-        # an unlearned context -> planner veto -> nothing spoken
+        # THE PLANNER'S NEW COVENANT (speak() consults WITHOUT the veto,
+        # a76f4ae): the unlearned context still SPEAKS through (the old
+        # stay-silent-veto gate is retired) -- the materialization report
+        # lands on the speech queue; the table learns from delivery.
         th._process_one({"kind": "night",
                          "payload": {"materialized": 3}})
-        self.assertEqual(th.stats["spoken"], 0)
+        msgs = drain_speech(srv)
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("materialized 3", msgs[0]["text"])
         # a learned context speaks
         sig = "unknown"
         srv._act_table.observe(sig, "report-state")
@@ -193,7 +204,8 @@ class TestTickScripts(unittest.TestCase):
                                             "now = _t.strftime('%H:%M:%S')\n"
                                             "result = {'render': 'clock ' +"
                                             " now, "
-                                            "'patch': {'last_tick': now}}",
+                                            "'patch': {'script_data': "
+                                            "{'last_tick': now}}}",
                                         "tick_every": clock})
         est.upsert(ent)
         return srv, est._resolve_spec("tool:clock"), srv.efield
@@ -203,13 +215,20 @@ class TestTickScripts(unittest.TestCase):
         th = Thinker(srv)
         th._beat += 1
         th._tick_scripts()                     # beat 1 (odd): no fire
-        self.assertIsNone((ent.properties or {}).get("last_tick"))
+        self.assertIsNone((ent.properties or {}).get("script_data", {})
+                          .get("last_tick"))
         th._beat += 1
         th._tick_scripts()                     # beat 2: the clock ticks
         import re as _re
-        self.assertIsNotNone((ent.properties or {}).get("last_tick"))
-        self.assertTrue(_re.fullmatch(r"\d\d:\d\d:\d\d",
-                                      ent.properties["last_tick"]))
+        # THE WHITELIST CONTRACT: a tick's patch reaches the doc through
+        # script_data (raw prop keys are refused -- the engine applies)
+        self.assertEqual(ent.properties.get("script_data", {})
+                         .get("last_tick", ""), ent.properties.get(
+                             "script_data", {}).get("last_tick", ""))
+        tick = (ent.properties or {}).get("script_data", {}) \
+            .get("last_tick")
+        self.assertIsNotNone(tick)
+        self.assertTrue(_re.fullmatch(r"\d\d:\d\d:\d\d", tick))
         self.assertEqual(ent.properties.get("script_render",
                                             "").startswith("clock "), True)
 

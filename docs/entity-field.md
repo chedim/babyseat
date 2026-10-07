@@ -123,6 +123,129 @@ last 2h ago; latest: <the newest sentence that moved it>`, with boundary
 alerts on the mention count, and the now-line listing the entities moved
 most this session.
 
+## The division of hands (2026-10-06)
+
+The native serve's turn lane carries the session's **agent**, and the
+agent decides which MCP tools the turn's surface carries and which
+calls the executor admits. Two minds, one registry (`_lane_tools`,
+membrane/server.py):
+
+- **Operator** (agent `build` — the main chat): reads (`query`, `state`,
+  `graph`, `entities_related`, `entity_query`, `entity_read`,
+  `entity_tracks`), memory (`learn`, `forget`), **steering** (`intend`,
+  `intents` — the operator's pen), room (`peer_post`, `peer_seats`,
+  `junk_cut`), banner tracks (`entity_watch`, `entity_unwatch`).
+- **Event listener** (agent `watch:<eid>` — the thinking loops): the
+  operator's set **minus** `intend`, **plus the entity hands**
+  (`entity_add`, `entity_edit`, `entity_remove`, `entity_link`,
+  `entity_unlink`) — the field events they process are their material.
+- **Plan** (agent `plan`): the operator minus `intend` — a planning
+  session reads and communicates, never plants (the direction needs
+  the user's build-mode word).
+
+A cross-lane call never reaches the impls: the tool result IS the
+honest refusal (a pointer to the right lane), audited
+`lane-refused`. The agent rides each message (the attached TUI sends
+`agent` per message POST); the turn's agent wins over the session
+row's, and the pick **sticks** (the session row updates — the mode
+toggle survives restarts of the conversation). Kill switch:
+`MEMBRANE_LANE_GATE=0` (runtime-read) restores the flat surface. The
+launch-mode stdio MCP child (an external opencode's config) keeps the
+full surface — the per-call agent is unknowable there; the native
+serve is the enforcement point.
+
+Listener-owned watches deliver differently: `entity_watch(owner=
+"watch:<eid>")` routes the boundary crossings into the events pool —
+the listener receives its own watch's firing as its next turn's
+message (the same event-input flow every loop turn rides). Operator
+tracks keep the banner ALERT delivery; `entity_tracks` is owner-aware.
+
+## Intent lane (2026-10-06)
+
+Intentions steer the idle mind and are planted by the model: the
+`intend` tool / `membrane: intend that …` frame create-or-pin a shared
+Goal entity and pin it on the seat's active set; `intents` reads the
+board; fulfillment is explicit (`membrane: fulfill #N`). An entity
+script may plant too — its result carries `{intent: …}` and the engine
+plants through the same lane (night.py's apply). The plant is an
+EVENT (`intent-planted`) a thinking loop receives as its next turn
+(plan or ignore) — the operator creates, the thinker receives and
+executes. While the seat is paused, planting still works and is inert
+by construction: every lane that would react is down too.
+
+## The executor (2026-10-06): the queue + the ISA pipeline
+
+`tool:executor` (seeded at boot) is the seat's exec organ. The model's
+exec door:
+
+- **`entity_link(executor, commands)`** — link command entities to the
+  executor and run them; a spec that resolves to nothing is created on
+  the fly (the spec IS the command line; `create=False` refuses). The
+  **`executes` edge (a relations triple) IS THE QUEUE**: live = owed
+  work, **superseded = processed** (the unlink-on-done: success AND
+  failure stamp done after the residue lands — processed ≠ succeeded;
+  re-linking = the deliberate re-queue, **no auto-retry**). The queue
+  caps at 32 owed edges (a landed run never counts).
+- **Residue** (`run_rc/outcome/head/tail/ms`) always lands on the
+  COMMAND's own doc — every later reuse reads the freshest truth. The
+  link response carries every command's post-run state (the sync
+  rule).
+- **Composition IS inheritance**: a command entity's ISA parents
+  (`entity_inherit`) are its pipeline. `entity_link` runs the node's
+  whole ancestry **post-order** (parents first), MEMOIZED per eid (a
+  diamond's shared ancestor runs once), then the node itself — fed
+  the parents' outputs through substitution: `{{parent.head}}` /
+  `{{parent.tail}}` (nearest parent), `{{parent:<eid>.head}}` (named
+  fan-in — multiple parents are wait-all, the child's command names
+  what feeds where). A Tool **without** a command but **with** parents
+  is a composition node: it runs its subtree and carries the last
+  parent's residue as its exit (a pipeline header). ISA edges on
+  non-command entities (Components/Goals) stay classification — never
+  execution. Stop-on-failure: a failed step halts the walk (`&&`
+  semantics); the child marks `failed_step`/`failed_reason`.
+- **The caps**: 12 nodes per pass (a deeper ancestry reports
+  `continued: True` and the background reaper finishes it next beat);
+  depth 16 (the ISA walk's own MAX_CHAIN).
+- **Reading the queue**: `entity_read` on the executor (or any node)
+  returns the value **after** processing + the queue split:
+  `pending` (owed, live edges) / `done` (processed, with residues and
+  the re-link count `n_times`). `entity_unlink` supersedes live edges
+  manually (withdraw owed work).
+
+The composition loop: author small command entities once (build,
+test, scan), wire ISA parents into pipelines REUSING them, link, and
+every step's residue stays readable for the next composition. The
+model-facing teaching: doctrine.md + the `entity_add`/`entity_watch`
+tool descriptions.
+
+### The durability plan (the seat's own design, delivered)
+
+Three homes, one rule — **facts durable, states volatile, wakes
+derived**:
+
+- **The receipts** (the symmetry rule): every supersession carries a
+  RECEIPT written on the edge row — `{op: done|expired|withdrawn, ts,
+  rc, outcome, why}` — the relations journal persists it (a reload
+  replays the receipts). A cancellation is as durable as the debt;
+  the phantom-debt exhibit (46 live no-receipt edges surviving boot
+  after boot) dies here.
+- **Expiry-with-residue**: an owed edge past its TTL (24h,
+  `EXEC_EDGE_TTL_S`; a re-link bumps the clock honestly) expires —
+  stamped + received — never re-run; the boot's book-balance runs it,
+  so does every NightClock pass. Re-link = the deliberate re-queue.
+- **Boot-derived wakes**: the boot reads the open intents and
+  re-queues an `intent-planted` event per unclaimed goal (a
+  `intent_planted_ts` stamp guards the double-fire). The volatile —
+  lanes, pools, loops — stays RAM; the DURABLE board re-derives them:
+  plant a goal, restart, come back tomorrow — the listeners wake on
+  the board's authority.
+- **The claim receipts**: a listener's landing for a goal stamps the
+  GOAL's doc (`landings[]`, capped 8) — the fulfill-by evidence; the
+  operator fulfills on receipts, never on vibes.
+- **The residue honesty**: a shell run's outcome reads the RC as the
+  ground truth (a zero-exit run that *mentions* 'error' in its output
+  keeps its `ok` class — the `rc=0 error` residue bug is dead).
+
 ## The gate and the replay A/B
 
 `membrane/efgate.py` runs on every real turn. It finds the earlier user

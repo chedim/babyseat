@@ -287,14 +287,18 @@ class TestTickScripts(unittest.TestCase):
 
     def test_default_clock_script_prints_the_time(self):
         """The default script: render 'clock <HH:MM:SS>' + the patch that
-        stores the tick as last_tick (the operator's ask -- the last
-        output survives on the doc)."""
+        stores the tick as script_data.last_tick (the operator's ask --
+        the last output survives on the doc; the WHITELIST contract: a
+        raw prop key is refused by the engine's apply, script_data is
+        the tick's lane)."""
         from membrane.night import DEFAULT_CLOCK_TICK_SCRIPT
         out = run_entity_script(DEFAULT_CLOCK_TICK_SCRIPT, {}, membrane={})
         m = re.fullmatch(r"clock (\d\d:\d\d:\d\d)", str(out.get("render")))
         self.assertIsNotNone(m)
-        self.assertEqual(out["patch"], {"last_tick": m.group(1)})
-        self.assertEqual(out["patch"]["last_tick"], out["render"][6:])
+        self.assertEqual(out["patch"], {"script_data":
+                                        {"last_tick": m.group(1)}})
+        self.assertEqual(out["patch"]["script_data"]["last_tick"],
+                         out["render"][6:])
 
 
 class TestScriptSpeak(unittest.TestCase):
