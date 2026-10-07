@@ -1013,6 +1013,8 @@ def main() -> None:
             if _ib2 is not None and _pool2 is not None:
                 from .watch_agents import notify_intent_planted
                 from .entities import CLASS_GOAL
+                _n_wakes = 0
+                _n_goals = 0
                 # ALL OPEN GOALS (the board's ranking requires geometry;
                 # an older plant's position-less goal would sit unseen
                 # forever: the wake reads the STORE's goal docs -- every
@@ -1024,6 +1026,7 @@ def main() -> None:
                     if _gdoc is None or _gdoc.cls != CLASS_GOAL \
                             or (_gp.get("status") or "open") != "open":
                         continue
+                    _n_goals += 1
                     _geid = _gdoc.eid
                     _gprops = ((srv.entity_store.docs.get(_geid)
                                 .properties) if _geid in
@@ -1040,10 +1043,9 @@ def main() -> None:
                                           _geid, str(_gp.get("name") or ""),
                                           created=False)
                     _n_wakes += 1
-                if _n_wakes:
-                    print(f"[seat] the board re-derives the wakes: "
-                          f"{_n_wakes} open intent(s) re-queued to the "
-                          "listeners", file=sys.stderr)
+                print(f"[seat] the board re-derives the wakes: "
+                      f"{_n_wakes}/{_n_goals} open goal(s) re-queued to "
+                      "the listeners", file=sys.stderr)
         except Exception as e:
             print(f"[seat] boot wakes skipped ({e})", file=sys.stderr)
         # THE PEER SUBSTRATES (the operator's design): the proxy REGISTRY
