@@ -1021,8 +1021,14 @@ def main() -> None:
                     _gprops = ((srv.entity_store.docs.get(_geid)
                                 .properties) if _geid in
                                (srv.entity_store.docs or {}) else {}) or {}
-                    if _gprops.get("intent_planted_ts"):
-                        continue          # already received this boot
+                    # THE PER-BOOT WAKE (the one-time ts was permanent:
+                    # a goal claimed by a DEAD boot's loop never re-woke
+                    # -- 'the executor is not executing' again): the
+                    # stamp records THE BOOT that received it; a NEW
+                    # boot re-derives every goal's wake fresh.
+                    if _gprops.get("intent_planted_boot") == str(
+                            srv._boot_ts):
+                        continue          # THIS boot already re-queued it
                     notify_intent_planted(srv.entity_store, _pool2,
                                           _geid, str(getattr(_intent,
                                                              "text", "")),

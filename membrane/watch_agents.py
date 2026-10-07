@@ -639,6 +639,8 @@ def notify_intent_planted(est, pool, goal_eid: str, text: str,
         if ent is not None:
             props = ent.properties or {}
             props["intent_planted_ts"] = ev["ts"]
+            props["intent_planted_boot"] = str(
+                getattr(getattr(est, "_srv", None), "_boot_ts", "") or "")
             est.upsert(ent, embedder=None)
     except Exception:
         pass
