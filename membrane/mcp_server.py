@@ -78,6 +78,40 @@ TOOLS: list[dict] = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "intend",
+        "description": (
+            "Plant YOUR commitment (the steering wheel of membrane's idle "
+            "mind): create-or-pin a shared Goal + pin it on this seat's "
+            "active set. Open intentions STEER the dream loop "
+            "(quarantined timeline branches grow toward them, think-ahead "
+            "extends them) and ride recall. An intention is never "
+            "auto-closed: fulfillment is explicit (`membrane: fulfill #N` "
+            "-- reality's signature; a similarity flag is only a "
+            "'maybe-done?' hint). Use when working toward a multi-session "
+            "goal or when the field's work has a direction worth keeping."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "text": {"type": "string",
+                         "description": "The commitment, one sentence."},
+                "ttl": {"type": "string",
+                        "description": "Optional priority-pin decay window "
+                                       "('2w'/'10d'); the goal itself never "
+                                       "expires."},
+            },
+            "required": ["text"],
+        },
+    },
+    {
+        "name": "intents",
+        "description": (
+            "Read YOUR intent board: the seat's active set steered goals "
+            "(the dream loop's steering coordinates), open + closed. Use "
+            "before planting a duplicate or to review what commitments "
+            "are alive."),
+        "inputSchema": {"type": "object", "properties": {}},
+    },
+    {
         "name": "learn",
         "description": (
             "Write ONE durable earned lesson into membrane's field. A lesson "
@@ -115,18 +149,18 @@ TOOLS: list[dict] = [
     {
         "name": "entity_watch",
         "description": (
-            "Manage your banner ENTITY TRACKS. A track shows the entity's "
+            "Plant an ENTITY WATCH (a track). A track shows the entity's "
             "live state in the WHERE WE ARE header every turn "
             "(constant tracking), and an optional boundary turns it into an "
-            "EVENT trigger: 'enter N' alerts when the count rises to N+, "
-            "'exit N' alerts when it falls below N. Alerts fire ONCE per "
-            "transition (re-entry re-arms) and ride the banner as ALERT "
-            "lines. Key forms: 'files:router.py', "
+            "EVENT trigger: 'enter N' fires when the count rises to N+, "
+            "'exit N' when it falls below N. Fires land ONCE per "
+            "transition (re-entry re-arms). DELIVERY RIDES THE OWNER: "
+            "''/'operator' fires ride the banner as ALERT lines; a "
+            "listener's name ('watch:<eid>') delivers the crossing INTO "
+            "THE LISTENER'S NEXT TURN (its event message, the "
+            "event-input flow). Key forms: 'files:router.py', "
             "'models:glm-5.3-flash:cloud', 'symbols:<qualname>', "
-            "'shell:git', 'ha:sensor.x'. No boundary = count-only track. "
-            "Use to notice field drift around a component you are working "
-            "on (e.g. 'enter 5' on a module you are refactoring, 'exit 2' "
-            "on a model rung you depend on)."),
+            "'shell:git', 'ha:sensor.x'. No boundary = count-only track."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -137,6 +171,12 @@ TOOLS: list[dict] = [
                                             "(bare N = enter N)."},
                 "label": {"type": "string",
                           "description": "Optional display label."},
+                "owner": {"type": "string",
+                          "description": "Whose watch: '' (banner ALERTs) "
+                                         "or a listener's agent name "
+                                         "('watch:<eid>' -- the crossing "
+                                         "rides that listener's next "
+                                         "turn)."},
             },
             "required": ["key"],
         },
@@ -157,10 +197,19 @@ TOOLS: list[dict] = [
     {
         "name": "entity_tracks",
         "description": (
-            "List your planted entity tracks: key, label, boundary, current "
-            "inside/outside state, and pending alert count. Use before "
-            "planting a duplicate track or to review your banner."),
-        "inputSchema": {"type": "object", "properties": {}},
+            "List entity tracks: key, label, owner, boundary, current "
+            "inside/outside state, and pending alert count. LANE-AWARE: "
+            "a listener passes its own agent name to see ITS tracks; "
+            "the operator sees all (with owners). Use before planting "
+            "a duplicate track or to review your watches."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "owner": {"type": "string",
+                          "description": "Optional: filter to one owner "
+                                         "('watch:<eid>'); '' = all."},
+            },
+        },
     },
     {
         "name": "entities_related",
@@ -209,7 +258,14 @@ TOOLS: list[dict] = [
             "Add an abstract entity to the symbolic layer: a decision, "
             "failure mode, component, or goal with a one-line summary. "
             "Merge-on-collision: the same name updates the existing "
-            "entity instead of duplicating. Audited to the operator."),
+            "entity instead of duplicating. For COMMAND entities (class "
+            "Tool + a `command` prop): the entity's ISA PARENTS (set via "
+            "entity_inherit) compose it into a PIPELINE -- the executor "
+            "(entity_link) runs the parents first and feeds their outputs "
+            "into the child's command via {{parent.head}}/{{parent.tail}} "
+            "(the fan-in names a parent: {{parent:<eid>.head}}). Small "
+            "reusable steps + composed pipelines = the composition loop. "
+            "Audited to the operator."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -259,7 +315,11 @@ TOOLS: list[dict] = [
             "voice: ONE line per fire, stay-silent holds). 'result' = {render, patch: dict "
             "of this entity's own properties (the monitoring organ: a "
             "getter may MOVE the entity, e.g. toward 'done' "
-            "coordinates), delete}. The engine applies; scripts never "
+            "coordinates), delete, intent: a goal text YOUR script plants "
+            "when it sees the shape of ongoing work (the engine create-or-"
+            "pins a shared Goal + pins the seat's active set -- the dream "
+            "loop's steering; plant sparingly)}. The engine applies; "
+            "scripts never "
             "mutate directly. The SEAT-FIRST FIELD: your entity store "
             "is LOCAL (authoritative, never auto-synced) and the "
             "global tier holds only PUBLISHED entities. "
@@ -494,6 +554,81 @@ TOOLS: list[dict] = [
             "required": ["spec", "parents"],
         },
     },
+    {
+        "name": "entity_link",
+        "description": (
+            "THE EXEC LINK: link command entities to the executor and run "
+            "them inline -- command entities are created on the fly when a "
+            "spec does not resolve yet (the spec itself becomes the command "
+            "line). Each command's post-run state (rc/outcome/head, the "
+            "result props on ITS OWN entity) rides the SAME tool response: "
+            "no one-turn wait. The edge (rel 'executes') is the ledger -- "
+            "the link action's marker; a re-link re-runs (n bumps). "
+            "Caps: 3 commands per call, 32 live edges per executor -- over "
+            "the cap the tool ERRORS ('failed to link'), never partially "
+            "links. Long-running commands time out at 15s: the tool says "
+            "'timeout' and the thinker's tick lane picks the run up later "
+            "(the result lands on the command entity when it finishes)."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "executor": {"type": "string",
+                             "description": "The executor entity (default "
+                                            "'tool:executor')."},
+                "commands": {"type": "array",
+                             "items": {"type": "string"},
+                             "description": "Command entity specs -- or "
+                                            "raw command lines (created "
+                                            "on the fly)."},
+                "create": {"type": "boolean",
+                           "description": "Create unresolved specs as new "
+                                          "command entities (default true)."},
+            },
+            "required": ["commands"],
+        },
+    },
+    {
+        "name": "entity_unlink",
+        "description": (
+            "THE EXEC UNLINK: supersede the executor's 'executes' edges to "
+            "the named commands -- the edge is the only thing removed; the "
+            "command entity and its run residue stay. Unlinking a "
+            "not-linked spec is an honest no-op (reported in 'misses')."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "executor": {"type": "string",
+                             "description": "The executor entity (default "
+                                            "'tool:executor')."},
+                "commands": {"type": "array",
+                             "items": {"type": "string"},
+                             "description": "Command entity specs to unlink."},
+            },
+            "required": ["commands"],
+        },
+    },
+    {
+        "name": "entity_read",
+        "description": (
+            "READ an entity and get its value AFTER processing: a dynamic "
+            "entity's getter_script fires (the 5s LRU is bypassed with "
+            "run=true) and the return carries the entity's current "
+            "properties + script_data + any {run: true} result the getter "
+            "triggered. The general rule: entity tools answer with the "
+            "entity's post-processing value."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "spec": {"type": "string",
+                         "description": "eid or name fragment."},
+                "run": {"type": "boolean",
+                        "description": "Bypass the 5s getter LRU (force a "
+                                       "fresh read-through; a getter's "
+                                       "{run: true} re-executes)."},
+            },
+            "required": ["spec"],
+        },
+    },
 ]
 
 
@@ -689,7 +824,12 @@ def tool_forget(args: dict, port: int) -> str:
 
 def tool_watch_entity(args: dict, port: int) -> str:
     """Plant an entity track via the proxy's /membrane/entity-track
-    endpoint (the proxy holds the EntityStore; guards live there)."""
+    endpoint (the proxy holds the EntityStore; guards live there).
+    THE OWNER (the lane's delivery, 2026-10-06): `owner` = whose watch
+    this is -- ''/'operator' delivers the boundary crossing as the
+    banner's ALERT; a listener's name ('watch:<eid>') routes the
+    crossing into the EVENTS POOL (the listener receives it as its
+    next turn's message)."""
     key = str(args.get("key") or "").strip()
     if not key:
         raise ProxyError(400, "key required (e.g. 'files:router.py')")
@@ -697,6 +837,7 @@ def tool_watch_entity(args: dict, port: int) -> str:
         "key": key,
         "boundary": str(args.get("boundary") or ""),
         "label": str(args.get("label") or ""),
+        "owner": str(args.get("owner") or ""),
     })
     if not out.get("ok"):
         return f"Track not planted: {out.get('error', 'unknown error')}"
@@ -719,7 +860,11 @@ def tool_unwatch_entity(args: dict, port: int) -> str:
 
 
 def tool_list_tracks(args: dict, port: int) -> str:
-    out = _http(port, "GET", "/membrane/entity-track")
+    import urllib.parse as _up
+    owner = str(args.get("owner") or "").strip()
+    qs = "/membrane/entity-track" + (f"?owner={_up.quote(owner)}"
+                                     if owner else "")
+    out = _http(port, "GET", qs)
     tracks = out.get("tracks") or []
     if not tracks:
         return ("No entity tracks planted. Plant one with "
@@ -893,6 +1038,14 @@ def tool_intend(args: dict, port: int) -> str:
             f"it shared.")
 
 
+def tool_intents(args: dict, port: int) -> str:
+    """The board's read: the seat's active set + the closed record. The
+    GET /membrane/intents relay answers the rendered listing."""
+    out = _http(port, "GET", "/membrane/intents")
+    text = str(out.get("text") or "")
+    return text or "the intent board is unavailable"
+
+
 def tool_graph(args: dict, port: int) -> str:
     """The model's graph read: the entity graph's subgraph as nodes +
     edges -- the same contract the universe viewer renders."""
@@ -969,10 +1122,98 @@ def tool_entity_query(args: dict, port: int) -> str:
     return "no entities match"
 
 
+def tool_entity_link(args: dict, port: int) -> str:
+    """The executor's link hand: link + inline run, post-run state back."""
+    body = {"commands": args.get("commands") or [],
+            "executor": str(args.get("executor") or "")}
+    if args.get("create") is not None:
+        body["create"] = bool(args.get("create"))
+    out = _http(port, "POST", "/membrane/entity/link", body)
+    if not out.get("ok"):
+        return f"failed to link: {out.get('error', 'unknown error')}"
+    lines = [f"executor {out.get('executor')}: linked "
+             f"{len(out.get('linked') or [])} command(s), ran inline:"]
+    for r in out.get("runs") or []:
+        eid = str(r.get("eid") or "?")
+        if r.get("ok"):
+            lines.append(f"- {eid}: rc={r.get('rc')} {r.get('outcome')} "
+                         f"({r.get('ms', 0)}ms) "
+                         f"head: {str(r.get('head'))[:80]}")
+        else:
+            lines.append(f"- {eid}: FAILED -- "
+                         f"{str(r.get('error') or r.get('outcome'))[:120]}")
+    return "\n".join(lines)
+
+
+def tool_entity_unlink(args: dict, port: int) -> str:
+    """The executor's unlink hand: supersede the edges."""
+    out = _http(port, "POST", "/membrane/entity/unlink", {
+        "executor": str(args.get("executor") or ""),
+        "commands": args.get("commands") or []})
+    if not out.get("ok"):
+        return f"failed to unlink: {out.get('error', 'unknown error')}"
+    n = len(out.get("removed") or [])
+    misses = out.get("misses") or []
+    msg = f"executor {out.get('executor')}: unlinked {n} command(s)."
+    if misses:
+        msg += f" No matching edge for: {', '.join(map(str, misses))}."
+    return msg
+
+
+def tool_entity_read(args: dict, port: int) -> str:
+    """The read-back tool: the entity's value AFTER processing."""
+    import urllib.parse
+    spec = urllib.parse.quote(str(args.get("spec") or "").strip())
+    qs = f"/membrane/entity/read?spec={spec}"
+    if args.get("run"):
+        qs += "&run=1"
+    out = _http(port, "GET", qs)
+    if not out.get("ok"):
+        return f"read failed: {out.get('error', 'unknown error')}"
+    props = out.get("properties") or {}
+    g = out.get("getter") or {}
+    lines = [f"entity {out.get('eid')} [{out.get('cls')}] "
+             f"(post-processing value):"]
+    if props:
+        lines.append("properties: " + json.dumps(props, default=str)[:800])
+    runs = (out.get("pending") or []) + [dict(d, queued="done")
+                                         for d in (out.get("done") or [])]
+    if runs:
+        lines.append(f"the queue: {len(out.get('pending') or [])} pending "
+                     f"(owed), {len(out.get('done') or [])} done "
+                     f"(processed -- residue lives on each command's doc)")
+        for e in runs[:6]:
+            lines.append(f"- [{e.get('queued', 'pending')}] "
+                         f"{e.get('eid')}: rc={e.get('run_rc')} "
+                         f"{e.get('run_outcome')} "
+                         f"({e.get('run_ms', 0)}ms) "
+                         f"cmd: {str(e.get('command'))[:80]}")
+    if g.get("fired"):
+        if g.get("error"):
+            lines.append(f"getter fired: ERROR {str(g.get('error'))[:120]}")
+        elif g.get("run_result"):
+            rr = g["run_result"]
+            lines.append(f"getter exec: rc={rr.get('rc')} "
+                         f"{rr.get('outcome')} head: "
+                         f"{str(rr.get('head'))[:160]}")
+        else:
+            lines.append(f"getter fired: {json.dumps(g.get('state') or {}, default=str)[:300]}")
+    elif g.get("reason"):
+        lines.append(f"getter not fired ({g.get('reason')}).")
+    for e in runs[:6]:
+        lines.append(f"- {e.get('eid')}: rc={e.get('run_rc')} "
+                     f"{e.get('run_outcome')} "
+                     f"({e.get('run_ms', 0)}ms) "
+                     f"cmd: {str(e.get('command'))[:80]}")
+    return "\n".join(lines)
+
+
 
 TOOL_IMPLS = {
     "query": tool_query,
     "state": tool_state,
+    "intend": tool_intend,
+    "intents": tool_intents,
     "learn": tool_learn,
     "forget": tool_forget,
     "entity_watch": tool_watch_entity,
@@ -988,6 +1229,9 @@ TOOL_IMPLS = {
     "graph": tool_graph,
     "entity_query": tool_entity_query,
     "entity_inherit": tool_entity_inherit,
+    "entity_link": tool_entity_link,
+    "entity_unlink": tool_entity_unlink,
+    "entity_read": tool_entity_read,
 }
 
 

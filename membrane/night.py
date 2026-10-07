@@ -749,7 +749,7 @@ def run_command_entity(fld, est, mem, command: str,
                          else (x or "") for x in (e.stdout, e.stderr))
     ms = int((time.time() - t0) * 1000)
     head, tail = text[:ST.RESULT_HEAD], text[-ST.RESULT_TAIL:]
-    oc = "timeout" if err else ST.outcome(canon_e, head, tail)
+    oc = "timeout" if err else ST.outcome(canon_e, head, tail, rc=rc)
     ok = rc == 0 and not err
     if est is None:
         # no entity store mounted: exec, report, degrade (never wedge)
@@ -1048,6 +1048,581 @@ def file_edit_entity(fld, est, mem, path, old_string, new_string,
          "last_sha1": hashlib.sha1(new_text.encode()).hexdigest()[:10]})
     return {"ok": True, "eid": eid, "key": key, "path": fp, "subs": subs,
             "created": ent_created, "ms": ms}
+
+
+# ---- THE EXECUTOR (the edge-backed exec organ, 2026-10-06) ------------------
+# The model LINKS command entities to the seeded `tool:executor`; the edge
+# (a relations triple: subj=executor, rel='executes', obj=command entity)
+# IS the ledger: its existence marks the link action; the run's residue
+# (run_rc/outcome/head/tail/ms) always lands on the COMMAND entity --
+# the run-lane covenant, reached through a different door.
+
+EXECUTOR_EID = "tool:executor"
+EXEC_REL = "executes"
+EXEC_LINK_BATCH_CAP = 3      # commands run inline per link turn
+EXEC_TIMEOUT_S = 15.0        # an inline run's budget (MCP headroom 60s)
+EXEC_EDGES_CAP = 32          # live edges per executor (the cap IS the error)
+
+
+def _relations_backend(srv):
+    """The relations store's backend + origin: the seat's field when the
+    capture runs it; None when it does not (RAM seats keep working --
+    the executor's ledger degrades to the run, edges stay unwritten)."""
+    fld = getattr(srv, "efield", None)
+    if fld is None or getattr(getattr(srv, "capturer", None), "mode", "off") \
+            != "on":
+        return None, None
+    return fld.b, fld.origin
+
+
+def _edge_runs_pending(est, be, origin, exec_key: str) -> list[str]:
+    """The executor's OWED commands (the queue's live edges): linked but
+    not yet processed -- `run_rc is None` means never landed; a
+    `continued` walk (the node cap) also stays owed (its residue lands
+    on a later reaper beat; the edge supersedes only then)."""
+    out = []
+    if be is not None:
+        obj_keys = [str(e.get("obj") or "") for e in
+                    _live_edges(be, origin, exec_key)]
+    else:
+        obj_keys = [k[len(MEMBRANE_NS):] for k in (est.docs or {})
+                    if k.startswith(MEMBRANE_NS)
+                    and (est.docs[k].properties or {}).get("pending_run_by")
+                    == exec_key]
+    for obj in obj_keys:
+        key = obj if obj.startswith(MEMBRANE_NS) else MEMBRANE_NS + obj
+        doc = (est.docs or {}).get(key)
+        props = (doc.properties or {}) if doc is not None else {}
+        if props.get("command") or props.get("parents"):
+            out.append(key)
+    return out
+
+
+def run_pending_links(srv, est, fld, mem, exec_key: str,
+                      cap: int = EXEC_LINK_BATCH_CAP) -> list[dict]:
+    """The queue's reaper (the thinker tick / a later link's turn): run
+    the executor's OWED nodes (never-run + cap-continued), oldest edge
+    first, up to cap; each landing supersedes its edge (the same
+    unlink-on-done covenant as the link turn). Returns the run
+    summaries."""
+    be, origin = _relations_backend_of(srv, fld)
+    if est is None:
+        return []
+    results = []
+    for key in _edge_runs_pending(est, be, origin, exec_key)[:max(1, cap)]:
+        doc = (est.docs or {}).get(key)
+        if doc is None:
+            continue
+        run = _exec_command_doc(srv, est, fld, mem, doc)
+        if not run.get("continued"):
+            _supersede_edge(be, origin, exec_key, doc.eid,
+                            receipt={"op": "done", "rc": run.get("rc"),
+                                     "outcome": run.get("outcome"),
+                                     "head": str(run.get("head") or "")[:80],
+                                     "ms": run.get("ms")})
+        results.append(run)
+    return results
+
+
+def _relations_backend_of(srv, fld=None) -> tuple:
+    """The backend+origin pair (fld wins when handed; else the seat's)."""
+    if fld is not None:
+        return getattr(fld, "b", None), getattr(fld, "origin", "")
+    be, origin = _relations_backend(srv)
+    return be, origin or ""
+
+
+def _supersede_edge(be, origin: str, subj: str, obj: str,
+                    rel: str = EXEC_REL, receipt: dict | None = None) -> bool:
+    """THE QUEUE'S DONE-STAMP (mark-don't-delete): live = owed,
+    superseded = PROCESSED (the run's residue lives on the command doc;
+    the edge keeps its n + evidence for the re-link-requeues). True when
+    a live edge was found and stamped.
+
+    THE RECEIPT (the seat's durability plan, 2026-10-06: 'a cancellation
+    as durable as the debt'): the stamp carries a RECEIPT -- {op: done|
+    expired, ts, rc, outcome, why} written ON the edge row (the
+    relations journal persists it); a supersession WITHOUT a receipt is
+    the accounting bug the phantom-debt exhibit named."""
+    if be is None:
+        return False
+    from . import relations as R
+    key = R.relation_key(origin, subj, rel, obj)
+    doc = be.get("relations", key)
+    if doc is None or doc.get("superseded"):
+        return False
+    now = time.time()
+    _r = dict(receipt or {})
+    _r.setdefault("op", "done")
+    _r.setdefault("ts", now)
+
+    def _done(cur):
+        if cur is not None:
+            cur["superseded"] = True
+            cur["last_ts"] = now
+            cur["receipt"] = _r
+        return cur
+    be.cas_update("relations", key, _done)
+    return True
+
+
+EXEC_EDGE_TTL_S = 24 * 3600.0   # an owed edge older than this expires
+
+
+def expire_stale_edges(srv, est, fld, mem, exec_key: str = EXECUTOR_EID,
+                       ttl_s: float | None = None) -> list[dict]:
+    """THE EXPIRY-WITH-RESIDUE (the seat's plan's metabolism, delivered):
+    an OWED edge older than EXEC_EDGE_TTL_S (the debt's born_ts is the
+    edge's first_ts; a re-link bumps n + last_ts -- the clock is honest)
+    EXPIRES: superseded + a receipt {op: 'expired', age_s, never-run
+    proof: run_rc still None on its command doc}. Never re-run (the
+    covenant: expired debt dies with its receipt, never resurrects).
+    The boot runs this + the NightClock's pass carries it. Returns the
+    receipts."""
+    be, origin = _relations_backend_of(srv, fld)
+    if est is None or be is None:
+        return []
+    exec_key = exec_key if exec_key.startswith(MEMBRANE_NS)         else MEMBRANE_NS + exec_key
+    from . import relations as R
+    ttl = float(ttl_s if ttl_s is not None else EXEC_EDGE_TTL_S)
+    now = time.time()
+    out = []
+    for e in R.history_of(be, origin, exec_key, EXEC_REL):
+        if e.get("subj") != exec_key or e.get("superseded"):
+            continue          # live edges only
+        born = float(e.get("first_ts") or 0.0)
+        if not born or now - born < ttl:
+            continue
+        obj = str(e.get("obj") or "")
+        cdoc = (est.docs or {}).get(obj if obj.startswith(MEMBRANE_NS)
+                                    else MEMBRANE_NS + obj)
+        cprops = (cdoc.properties or {}) if cdoc is not None else {}
+        why = (f"expired at boot/night: the edge was owed {now - born:.0f}s "
+               f"(past the {ttl:.0f}s TTL) and never landed "
+               f"(run_rc {'is None' if cprops.get('run_rc') is None else 'on '
+                         + obj}) -- the debt dies WITH its receipt; "
+               f"re-link to re-queue deliberately")
+        ok = _supersede_edge(be, origin, exec_key, obj,
+                             receipt={"op": "expired", "age_s":
+                                      round(now - born), "why": why[:180]})
+        if ok:
+            out.append({"eid": obj, "receipt": why})
+            _audit(mem, {"event": "agent-exec-expired", "origin": "expiry",
+                         "eid": obj, "age_s": round(now - born)})
+    return out
+
+
+def _live_edges(be, origin: str, exec_key: str) -> list[dict]:
+    """The executor's live (owed) executes-edges, oldest delivery first."""
+    if be is None:
+        return []
+    from . import relations as R
+    return sorted((e for e in R.of(be, origin, exec_key, EXEC_REL)
+                   if e.get("subj") == exec_key and not e.get("superseded")),
+                  key=lambda e: (float(e.get("last_ts") or 0.0),
+                                 str(e.get("obj"))))
+
+
+EXEC_WALK_NODES_CAP = 12   # nodes run per pass (the reaper continues)
+EXEC_WALK_DEPTH = MultiParentOps.MAX_CHAIN   # the ancestry's depth (16)
+
+
+def _exec_command_doc(srv, est, fld, mem, doc) -> dict:
+    """THE PIPELINE ENTRY (the composition covenant, 2026-10-06: 'parent
+    executes first, the child is fed its parent's output' -- the entity
+    inheritance IS the pipeline): run ONE linked node's whole ancestry
+    _exec_node's post-order walk (parents topologically, memoized per
+    eid -- a diamond's shared ancestor runs once; MAX_CHAIN deep), then
+    the node itself fed the parents' residues. A composition node (a
+    Tool withOUT a command but with parents) inherits the last parent's
+    residue as its exit; classification edges (Components/Goals) never
+    execute. The run lane mints its canon doc (`c:<head>`/`shell:<verb>`)
+    for the throwaway-reuse; when the ASKING doc differs from that canon
+    doc, the residue is copied onto the asking doc too (the named
+    command carries its own truth). NO EDGES HERE: supersede-after-
+    landing lives at the link handlers (the edge is the queue;
+    supersede = processed)."""
+    props = doc.properties or {}
+    if not str(props.get("command") or "").strip() \
+            and not MultiParentOps._parents_of(props):
+        return {"ok": False, "eid": doc.eid,
+                "error": "the linked entity carries no 'command' prop "
+                         "(and no parents to compose) -- give it a "
+                         "command, an ISA parent, or both"}
+    budget = [0]
+    out = _exec_node(srv, est, fld, mem, doc, {}, budget)
+    out["nodes_run"] = budget[0]
+    out["eid"] = doc.eid
+    return out
+
+
+def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
+               depth: int = 0) -> dict:
+    """One node of the ancestry walk (post-order: parents, then self).
+    Returns the node's run/residue dict; memo[eid] holds it (a diamond's
+    shared ancestor runs once). `budget` = [n] -- the pass's node count
+    (the walk STOPS -- and reports `continued: True` -- past the cap;
+    the reaper's next beat continues the queue)."""
+    eid = doc.eid
+    if eid in memo:
+        return memo[eid]
+    if depth > EXEC_WALK_DEPTH:
+        res = {"ok": False, "eid": eid,
+               "error": f"the ancestry walks past {EXEC_WALK_DEPTH} deep"}
+        memo[eid] = res
+        return res
+    props = doc.properties or {}
+    cmd = str(props.get("command") or "").strip()
+    parents = MultiParentOps._parents_of(props)
+    res: dict = {"eid": eid}
+    parent_residues: dict[str, dict] = {}
+    order: list[str] = []
+    if parents and (cmd or not props.get("command")):
+        for pp in parents:
+            if budget[0] >= EXEC_WALK_NODES_CAP:
+                res["continued"] = True
+                break
+            pdoc = (est.docs or {}).get(pp)
+            if pdoc is None:
+                res["failed_step"] = pp
+                res["failed_reason"] = "parent not found"
+                break
+            # ISA EXECUTES ONLY COMMAND TOOLS: a parent without a
+            # `command` prop that is NOT itself a composition node is
+            # classification, never a step (the Goal/Component edges
+            # stay classification)
+            pprops = pdoc.properties or {}
+            if not str(pprops.get("command") or "").strip() \
+                    and not MultiParentOps._parents_of(pprops):
+                continue
+            sub = _exec_node(srv, est, fld, mem, pdoc, memo, budget,
+                             depth + 1)
+            memo[pp] = sub
+            parent_residues[pp] = sub
+            order.append(pp)
+            # THE STOP-ON-FAILURE: a failed step (non-zero rc OR an
+            # error) halts the walk -- `&&`-semantics for the pipeline.
+            # ok=None = the step's own ancestry was cap-CONTINUED (not a
+            # failure): the walk also continues (the reaper finishes it)
+            if sub.get("continued"):
+                res["continued"] = True
+                break
+            if not sub.get("ok"):
+                res["failed_step"] = pp
+                res["failed_reason"] = (f"rc={sub.get('rc')} "
+                                        f"{sub.get('outcome')}"
+                                        if sub.get("error") is None
+                                        else str(sub.get("error")))[:160]
+                break
+        if res.get("failed_step"):
+            res["ok"] = False
+            res["error"] = (f"step failed: {res['failed_step']} -- "
+                            f"{res['failed_reason']}")
+            memo[eid] = res
+            return res
+    if cmd:
+        if budget[0] >= EXEC_WALK_NODES_CAP:
+            res["continued"] = True
+            res["ok"] = None               # neither ran nor failed
+            memo[eid] = res
+            return res
+        budget[0] += 1
+        fed = _substitute_parents(cmd, parent_residues, order)
+        if fed != cmd:
+            doc.properties["command"] = fed
+        out = run_command_entity(fld, est, mem, fed, timeout_s=EXEC_TIMEOUT_S)
+        out.pop("doc", None)
+        # THE RESIDUE lands on the asking doc (the canon doc carries its
+        # own; the copy covers a differing key)
+        key = str(out.get("key") or "")
+        if key and key != doc.eid and est is not None:
+            canon_doc = (est.docs or {}).get(key)
+            if canon_doc is not None:
+                cp, dp = canon_doc.properties or {}, (doc.properties or {})
+                for k in ("run_rc", "run_outcome", "run_head", "run_tail",
+                          "run_ms"):
+                    if cp.get(k) is not None:
+                        dp[k] = cp[k]
+                doc.properties = dp
+                est.upsert(doc, embedder=None)
+        res.update({k: out.get(k) for k in ("ok", "rc", "outcome", "head",
+                                            "tail", "ms", "error")})
+        res["fed"] = fed if fed != cmd else None
+    elif parent_residues:
+        # THE COMPOSITION NODE'S EXIT: the last parent's residue
+        last = order[-1] if order else ""
+        r = parent_residues.get(last) or {}
+        res.update({"ok": bool(r.get("rc") == 0),
+                    "rc": r.get("rc"),
+                    "outcome": r.get("outcome"),
+                    "head": r.get("head"),
+                    "tail": r.get("tail"),
+                    "composition": {"ran": order, "own_command": False}})
+    elif parents:
+        res.update({"ok": True, "composition": {"ran": [],
+                                                "own_command": False}})
+    memo[eid] = res
+    return res
+
+
+def _parent_residue_maps(est, doc) -> dict:
+    """The per-parent residue view for the substitution: eid -> {head,
+    tail, rc, outcome} from each DIRECT parent's doc (+ the ordered
+    list for the nearest-parent form)."""
+    out: dict[str, dict] = {}
+    props = doc.properties or {}
+    for pp in MultiParentOps._parents_of(props):
+        p = (est.docs or {}).get(pp)
+        if p is None:
+            continue
+        pp_props = p.properties or {}
+        if pp_props.get("run_rc") is None and not pp_props.get("command"):
+            continue               # a composition parent: no own residue
+        out[pp] = {"head": str(pp_props.get("run_head") or "")[:400],
+                   "tail": str(pp_props.get("run_tail") or "")[:400],
+                   "rc": pp_props.get("run_rc"),
+                   "outcome": str(pp_props.get("run_outcome") or "")}
+    return out
+
+
+def _substitute_parents(cmd: str, residues: dict, order: list[str]) -> str:
+    """The output feed: {{parent.head}} / {{parent.tail}} / {{parent.rc}}
+    = the NEAREST parent's residue (order[0]); {{parent:<eid>.field}} =
+    the named parent's. Unmatched tokens SUBSTRIP (left verbatim, the
+    command's own text survives -- a visible '' substitution is never a
+    silent shell corruption)."""
+    import re as _re
+    if "{{" not in cmd or not (residues or order):
+        return cmd
+
+    def _field(parents_eid: str, field: str):
+        r = residues.get(parents_eid)
+        if r is None:
+            return None
+        return str(r.get(field) if field in ("head", "tail")
+                   else (f"{r.get('rc')}" if field == "rc"
+                         else r.get(field) or ""))
+
+    def _sub(m):
+        tok = m.group(1).strip()
+        if tok.startswith("parent:"):
+            rest = tok[len("parent:"):]
+            peid, _, field = rest.rpartition(".")
+            for candidate, _r in residues.items():
+                if candidate.endswith(peid) or peid in candidate:
+                    v = _field(candidate, field or "head")
+                    return v if v is not None else m.group(0)
+            return m.group(0)          # no such parent: verbatim
+        field = tok.rpartition(".")[-1] if tok == "parent" else tok \
+            .replace("parent.", "", 1)
+        if not order:
+            return m.group(0)
+        first = order[0]
+        v = _field(first, field if field in ("head", "tail", "rc",
+                                             "outcome")
+                   else "head")
+        return v if v is not None else m.group(0)
+    return _re.sub(r"\{\{([^}]+)\}\}", _sub, cmd)
+
+
+def entity_link(srv, est, fld, mem, executor_spec: str,
+                commands, create: bool = True) -> dict:
+    """THE LINK HAND (the model's exec door, 2026-10-06): link command
+    entities to the executor and RUN them inline -- the edge (a
+    relations triple, rel='executes') IS THE QUEUE: live = owed,
+    SUPERSEDED = processed (the unlink-on-done covenant: every run --
+    success OR error -- stamps its edge done after landing the residue;
+    re-link = the deliberate re-queue; no auto-retry). Residue lands on
+    each command entity; the RETURN carries every command's post-run
+    state (the sync rule: the tool answers AFTER the triggers processed
+    the entities).
+
+    On-the-fly creation: a spec that resolves to nothing becomes a new
+    Tool entity whose `command` prop is the spec itself (one-call
+    authoring; `create=False` refuses instead). The batch cap and the
+    live-edge (queue-depth) cap are hard errors -- never a silent
+    partial link."""
+    if est is None:
+        return {"ok": False, "error": "entity layer unavailable"}
+    specs = [str(c).strip() for c in (commands or []) if str(c or "").strip()]
+    if not specs:
+        return {"ok": False, "error": "commands required"}
+    if len(specs) > EXEC_LINK_BATCH_CAP:
+        return {"ok": False,
+                "error": f"failed to link: batch cap {EXEC_LINK_BATCH_CAP} "
+                         f"(got {len(specs)}) -- link the rest next turn"}
+    ex_ent = est._resolve_spec(executor_spec or EXECUTOR_EID)
+    if ex_ent is None:
+        return {"ok": False, "error": f"no entity matches executor "
+                                      f"{executor_spec!r}"}
+    ex_key = ex_ent.eid
+    be, origin = _relations_backend_of(srv, fld)
+    if be is not None:
+        from . import relations as R
+        live = [e for e in R.of(be, origin, ex_key, EXEC_REL)
+                if e.get("subj") == ex_key and not e.get("superseded")]
+        if len(live) + len(specs) > EXEC_EDGES_CAP:
+            return {"ok": False,
+                    "error": f"failed to link: the executor's edge cap "
+                             f"{EXEC_EDGES_CAP} is reached ({len(live)} "
+                             f"live) -- unlink first"}
+    linked, runs = [], []
+    for spec in specs:
+        ent = est._resolve_spec(spec)
+        created = False
+        if ent is None:
+            if not create:
+                runs.append({"ok": False, "spec": spec,
+                             "error": f"no entity matches {spec!r}"})
+                continue
+            # ON-THE-FLY: the spec itself is the command line.
+            ent = QuantumEntity(eid=MEMBRANE_NS + overlay_key(
+                                    E.canon("c", spec.partition(" ")[0])),
+                                cls=CLASS_TOOL,
+                                properties={"name": spec.partition(" ")[0],
+                                            "command": spec,
+                                            "silent_birth": True})
+            est.docs[ent.eid] = ent
+            created = True
+        if created:
+            # THE FLY-MINTED DOC's command IS its spec (already set).
+            pass
+        # THE EDGE: existence = the link action (re-link bumps n, the
+        # dedupe is the store's own cas merge).
+        if be is not None:
+            from . import relations as R
+            R.upsert(be, origin, ex_key, EXEC_REL, ent.eid, "model-link",
+                     ts=time.time())
+        linked.append({"eid": ent.eid, "created": created})
+        run = _exec_command_doc(srv, est, fld, mem, ent)
+        # THE UNLINK-ON-DONE (the queue's honest close): processed --
+        # success OR failure -- stamps the edge superseded WITH ITS
+        # RECEIPT (the seat's symmetry rule: a cancellation as durable
+        # as the debt). A pending-degrade (run continued by the reaper)
+        # keeps the edge live until the reaper's landing.
+        if not run.get("continued"):
+            _supersede_edge(be, origin, ex_key, ent.eid,
+                            receipt={"op": "done", "rc": run.get("rc"),
+                                     "outcome": run.get("outcome"),
+                                     "head": str(run.get("head") or "")[:80],
+                                     "ms": run.get("ms")})
+        runs.append(run)
+    _audit(mem, {"event": "agent-entity-link", "origin": "mcp",
+                 "eid": ex_ent.eid, "ok": True,
+                 "commands": [l["eid"] for l in linked]})
+    return {"ok": True, "executor": ex_ent.eid,
+            "linked": linked, "runs": runs}
+
+
+def entity_unlink(srv, est, fld, mem, executor_spec: str, commands) -> dict:
+    """THE UNLINK HAND: supersede the executor's `executes` edges to the
+    named commands (mark-don't-delete, the relation store's own idiom).
+    The residue props stay on the command docs; only the edge goes. The
+    unlinked-but-never-run command (a pending degrade) loses also its
+    pending_run_by marker."""
+    if est is None:
+        return {"ok": False, "error": "entity layer unavailable"}
+    specs = [str(c).strip() for c in (commands or []) if str(c or "").strip()]
+    ex_ent = est._resolve_spec(executor_spec or EXECUTOR_EID)
+    if ex_ent is None:
+        return {"ok": False, "error": f"no entity matches executor "
+                                      f"{executor_spec!r}"}
+    ex_key = ex_ent.eid
+    be, origin = _relations_backend_of(srv, fld)
+    removed, misses = [], []
+    for spec in specs:
+        ent = est._resolve_spec(spec)
+        if ent is None:
+            misses.append(spec)
+            continue
+        hit = False
+        if be is not None:
+            from . import relations as R
+            for e in R.of(be, origin, ex_key, EXEC_REL):
+                if e.get("subj") == ex_key and e.get("obj") == ent.eid \
+                        and not e.get("superseded"):
+                    key = R.relation_key(origin, ex_key, EXEC_REL, ent.eid)
+                    doc = be.get("relations", key)
+
+                    def _super(cur, k=key):
+                        if cur is not None:
+                            cur["superseded"] = True
+                            cur["last_ts"] = time.time()
+                            # THE WITHDRAW'S RECEIPT (the symmetry rule):
+                            cur["receipt"] = {"op": "withdrawn",
+                                              "ts": cur["last_ts"],
+                                              "why": "entity_unlink"}
+                        return cur
+                    be.cas_update("relations", key, _super)
+                    hit = True
+        elif (ent.properties or {}).get("pending_run_by") == ex_key:
+            props = ent.properties or {}
+            props.pop("pending_run_by", None)
+            ent.properties = props
+            est.upsert(ent, embedder=None)
+            hit = True
+        (removed if hit else misses).append(ent.eid if hit else spec)
+    if removed or specs:
+        _audit(mem, {"event": "agent-entity-unlink", "origin": "mcp",
+                     "eid": ex_ent.eid, "ok": True,
+                     "removed": removed, "misses": misses})
+    return {"ok": True, "executor": ex_ent.eid,
+            "removed": removed, "misses": misses}
+
+
+def executor_value(est, exec_spec: str = EXECUTOR_EID, be=None,
+                   origin: str = "") -> dict:
+    """The executor's (or any entity's) VALUE -- the model-facing post-
+    processing shape: eid/class/properties (script_ internals hidden)
+    + THE QUEUE: pending (the live executes-edges = owed work, oldest
+    first) and done (the superseded edges' commands with their
+    residues). The edge IS the state -- the drop-oldest cap bounds the
+    pending depth."""
+    if est is None:
+        return {"ok": False, "error": "entity layer unavailable"}
+    ent = est._resolve_spec(exec_spec)
+    if ent is None:
+        return {"ok": False, "error": f"no entity matches {exec_spec!r}"}
+
+    def _node(key: str) -> dict | None:
+        key = key if key.startswith(MEMBRANE_NS) else MEMBRANE_NS + key
+        doc = (est.docs or {}).get(key)
+        if doc is None:
+            return None
+        props = doc.properties or {}
+        return {"eid": key,
+                "command": str(props.get("command"))[:160] or None,
+                "run_rc": props.get("run_rc"),
+                "run_outcome": props.get("run_outcome"),
+                "run_head": props.get("run_head"),
+                "run_ms": props.get("run_ms")}
+    pending, done = [], []
+    be, origin = (be, origin) if be is not None else _relations_backend_of(
+        getattr(est, "_srv", None) or type("S", (), {})())
+    if be is not None:
+        from . import relations as R
+        for e in R.history_of(be, origin, ent.eid, EXEC_REL):
+            if e.get("subj") != ent.eid:
+                continue
+            n = _node(str(e.get("obj") or ""))
+            if n is None:
+                continue
+            (done if e.get("superseded") else pending).append({**n,
+                "n_times": int(e.get("n") or 1)})
+    else:
+        for key, doc in (est.docs or {}).items():
+            props = doc.properties or {}
+            if props.get("pending_run_by") == ent.eid:
+                n = _node(key)
+                if n is not None:
+                    pending.append(n)
+    pending.sort(key=lambda e: str(e.get("eid")))
+    done.sort(key=lambda e: str(e.get("eid")))
+    return {"ok": True, "eid": ent.eid, "cls": ent.cls,
+            "properties": {k: v for k, v in (ent.properties or {}).items()
+                           if not str(k).startswith("script_")},
+            "pending": pending[:EXEC_EDGES_CAP],
+            "done": done[-EXEC_EDGES_CAP:]}
 
 
 def _walk_files(root: str, cap: int = FILE_GREP_MAX_FILES):
@@ -1492,7 +2067,8 @@ _SCRIPT_COOLDOWN_WATCH_S = 5.0
 DEFAULT_CLOCK_TICK_SCRIPT = (
     "import time as _t\n"
     "now = _t.strftime('%H:%M:%S')\n"
-    "result = {'render': 'clock ' + now, 'patch': {'last_tick': now}}"
+    "result = {'render': 'clock ' + now, "
+    "'patch': {'script_data': {'last_tick': now}}}"
 )
 
 
@@ -1517,6 +2093,30 @@ def seed_clock_entity(est) -> bool:
         "silent_birth": True}))
     # THE DURABILITY FIX: flush NOW -- the debounce window (10s) used to
     # outlive a quick restart and re-plant the clock every boot.
+    try:
+        est.flush()
+    except Exception:
+        pass
+    return True
+
+
+def seed_executor_entity(est) -> bool:
+    """The boot seeding: plant `tool:executor` ONCE (idempotent -- the
+    model's edits survive every restart). The exec organ: commands link
+    to it (`entity_link` / the 'executes' edges) and the engine runs
+    them inline; FALSE when there is no store or it already lives."""
+    if est is None:
+        return False
+    eid = MEMBRANE_NS + EXECUTOR_EID
+    if eid in (est.docs or {}):
+        return False
+    from .entities import CLASS_TOOL, QuantumEntity
+    est.upsert(QuantumEntity(eid=eid, cls=CLASS_TOOL, properties={
+        "name": "executor",
+        "summary": "the exec organ: link command entities to it "
+                   "(entity_link) -- the edge runs them, the result "
+                   "lands on the command",
+        "silent_birth": True}))
     try:
         est.flush()
     except Exception:
@@ -2045,6 +2645,33 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
                                   "error": "edit_file: [path, old, new]"
                                            " required"}
             changed += 1
+    # THE INTENT VERDICT (C2, 2026-10-06): a script planting ITS OWN
+    # commitment -- {intent: "<goal text>"} routes through the SAME
+    # create-or-pin lane the model's tools use (a shared Goal entity +
+    # the seat's active-set pin + the announcement). The steering wheel
+    # belongs to the model's scripts too: a watch/tick script that saw
+    # the shape of ongoing work may propose the direction, the ENGINE
+    # plants. Honest refusal when the goal layer is unmounted.
+    if out.get("intent"):
+        intent_text = str(out["intent"])[:400].strip()
+        board = getattr(srv, "_intent_board", None)
+        if not intent_text or board is None:
+            out["intent_result"] = {"ok": False,
+                                    "error": ("empty intent" if not intent_text
+                                              else "the goal layer is "
+                                                   "unavailable")}
+        else:
+            from .opencode import _membrane_intent_create_or_pin
+            ires = _membrane_intent_create_or_pin(srv, intent_text)
+            out["intent_result"] = ires
+            if ires.get("ok"):
+                try:
+                    from .opencode import speak
+                    speak(srv, f"goal active: {intent_text[:120]}",
+                          kind="note-pattern")
+                except Exception:
+                    pass
+        changed += 1
     if changed:
         # THE TICK-PERSIST GATE: a silent apply is a per-second RAM
         # perspective -- its properties land on the doc (in place, above)

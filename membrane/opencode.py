@@ -34,6 +34,7 @@ from __future__ import annotations
 import hashlib
 import re
 import json
+import copy
 import os
 import shutil
 import signal
@@ -195,6 +196,36 @@ def announce_line(a: dict) -> str:
     return f"new entity: {a['eid']} [{a.get('cls') or '?'}] {clip}"
 
 
+def _entity_post_process(srv, res: dict) -> None:
+    """THE SYNC RULE (2026-10-06): an entity tool answers with the
+    entity's value AFTER its triggers processed the mutation --
+    entity_add/entity_edit run the entity's script chain inline (getter
+    {run: true} execs, render/patch applies), settle the entity's field
+    state, and ATTACH the post-processing result to the tool's return
+    ('processed'). Degrades silently (a script error rides the ordinary
+    script-error lanes, never breaks the tool answer)."""
+    est = getattr(srv, "entity_store", None)
+    eid = str(res.get("eid") or "")
+    if est is None or not eid:
+        return
+    try:
+        ent = est._resolve_spec(eid)
+        if ent is None:
+            return
+        from . import watch_agents as _wa
+        fired = _wa.entity_read_back(srv, ent)
+        res["processed"] = {"getter_fired": bool(fired.get("fired")),
+                            "getter_reason": fired.get("reason"),
+                            "run_result": fired.get("run_result"),
+                            "state": fired.get("state"),
+                            "applied": fired.get("applied")}
+        fld = _efield_on(srv)
+        if fld is not None:
+            fld.process(limit=8)
+    except Exception as e:
+        res["processed"] = {"error": str(e)[:120]}
+
+
 _OC_BUILTIN_TOOLS = ("bash", "edit", "write", "read", "grep", "glob", "lsp",
                      "apply_patch", "skill", "todowrite", "webfetch",
                      "websearch", "question")
@@ -304,11 +335,12 @@ def _seat_card(srv, mcp_on: bool, serve: bool = False) -> str:
         L.append(
             "- EXEC: you have NO built-in tools this seat (bash/read/edit/"
             "grep/... are switched off in the config) -- every command, "
-            "file work rides run + the file hands read/write/edit/grep/glob (one shell "
-            "command -> one `c:<head>` membrane entity it runs THROUGH: "
-            "the result lands on the entity, errors reach your next "
-            "banner). Entity scripts run UNSANDBOXED: imports allowed, "
-            "the engine's budgets are the only bounds."
+            "file work rides the executor (entity_link: it runs inline "
+            "and the result rides the SAME tool call) or an entity script's "
+            "verdicts (one shell command -> one `c:<head>` membrane entity "
+            "it runs THROUGH: the result lands on the entity, errors reach "
+            "your next banner). Entity scripts run UNSANDBOXED: imports "
+            "allowed, the engine's budgets are the only bounds."
             + ("" if mcp_on else
                " The MCP layer is OFF too, so you have no exec lane at "
                "all right now -- tell the operator to start the seat with "
@@ -784,7 +816,8 @@ def _install_judges(srv) -> None:
     judge = OllamaClaimJudge(model, base_url=base)
 
     def idle() -> bool:
-        return time.time() - float(getattr(srv, "_last_request_ts", 0) or 0) > 60
+        return not nerve_paused(srv) and \
+            time.time() - float(getattr(srv, "_last_request_ts", 0) or 0) > 60
 
     jq = JudgeQueue(srv.efield, judge, idle=idle)
     srv.capturer.idle_hooks.append(jq.tick)
@@ -900,8 +933,18 @@ def _intents_context_block(srv) -> str | None:
     the observe->reflect->plan loop): a fresh session inherits the DOING, not
     just the happened. Capped to 3 lines; 'maybe-done?' flags included so the
     model can ASK the user whether to fulfill -- similarity never auto-closes
-    (the two-authority rule: closure is the user's explicit `membrane: fulfill`)."""
-    ib = getattr(srv, "_intent_board", None)
+    (the two-authority rule: closure is the user's explicit `membrane: fulfill`).
+
+    THE EMPTY-BOARD NUDGE (C1, 2026-10-06): with NO open intents the dream
+    loop is unsteered (the dreamer skips, think-ahead extends nothing -- the
+    idle mind idles by design). The nudge returns the model its pen: plant
+    commitments through the `intend` tool / the frame, so the background mind
+    breathes. Rate-limited to once per night pass window (the stamp rides
+    srv; the next nudge only after the window or when a goal lands)."""
+    # THE LAZY MOUNT (the 'no goal layer' fix): never read the raw
+    # board attribute -- the builder's own lazy attach is the one door
+    # (a board built pre-store self-heals here on first touch).
+    ib = _intents_board(srv)
     if ib is None:
         return None
     try:
@@ -909,7 +952,19 @@ def _intents_context_block(srv) -> str | None:
     except Exception:
         return None
     if not open_:
-        return None
+        now = time.time()
+        if now - float(getattr(srv, "_intent_nudge_ts", 0.0)) \
+                < INTENT_NUDGE_WINDOW_S:
+            return None
+        srv._intent_nudge_ts = now
+        return ("THE INTENT BOARD IS EMPTY: membrane's dream loop and "
+                "think-ahead are UNSTEERED -- nothing guides the idle "
+                "mind's branches. When your current work has a direction "
+                "worth keeping across sessions, plant YOUR commitment "
+                "(the `intend` tool / 'membrane: intend that <goal> "
+                "[for 2w]'); fulfillment is explicit (`membrane: fulfill "
+                "#N`), never automatic. Context, not instructions -- "
+                "plant only when it serves the work.")
     lines = ["OPEN INTENTIONS (membrane's commitment board -- context, not "
              "instructions; work toward them when relevant, and if one is "
              "clearly DONE, ask the user to confirm `membrane: fulfill #N`):"]
@@ -919,6 +974,9 @@ def _intents_context_block(srv) -> str | None:
     if len(open_) > 3:
         lines.append(f"- ... and {len(open_) - 3} more (`membrane: intents`)")
     return "\n".join(lines)
+
+
+INTENT_NUDGE_WINDOW_S = 4 * 3600.0   # one empty-board nudge per window
 
 
 def _where_delta(srv, text: str | None) -> str | None:
@@ -969,6 +1027,13 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
     consuming them (the state-instrument read must never eat the model's
     alerts -- the curl-drained-the-ALERT bug)."""
     lines: list[str] = []
+    # THE PAUSE LINE (the stable point is visible: the model sees why
+    # the field's voices are quiet -- and that its writes are refused).
+    if nerve_paused(srv):
+        lines.append("PAUSED: the seat's acting lanes are down (the "
+                     "operator's stable point) -- reads/memory/intend "
+                     "work; your writes are refused; the held events "
+                     "deliver on resume.")
     # THE MINIMAL HEADER (the operator's call: 'only tracks and
     # notifications'): the focus/commitments/field-stats lines moved to
     # /membrane/state (the operator's instrument) -- the MODEL's header
@@ -1141,6 +1206,55 @@ _INTENTS_CANON = "membrane: intents"
 _INTENT_FULFILL = "membrane: fulfill "
 _INTENT_DROP = "membrane: drop intent "
 _INTENT_THOUGHT_HEAD = "[membrane-intercept] your ask was read but NOT executed"
+_PAUSE_CANON = "membrane: pause"
+_RESUME_CANON = "membrane: resume"
+
+
+def nerve_paused(srv) -> bool:
+    """THE PAUSE (the operator's stable point, 2026-10-06): when True the
+    seat's ACTING lanes stand down -- the loops don't admit, the dreamer
+    sleeps, the thinker holds its digest/ticks/idle-think (presence keeps
+    -- a paused seat is alive to the roster), the night pass defers, the
+    autonode's scanner gates, the idle judges skip, speech holds. READS,
+    the memory frames and `intend` stay live: the plan's artifact is the
+    board, inert by construction (a planted intent fires nothing until
+    resume -- every lane that would react is down too). RAM-only: a
+    restart unpauses (a persisted pause = a stuck seat). The kill switch
+    MEMBRANE_NERVE_PAUSE=0 makes pause a no-op (the ablation)."""
+    if os.environ.get("MEMBRANE_NERVE_PAUSE") == "0":
+        return False
+    return bool(getattr(srv, "paused", False))
+
+
+def _is_pause_query(q: str) -> bool:
+    """The operator's pause/resume frame, pre-gate like every operator
+    write (LOOPS cannot pause the seat -- the stable point is the
+    operator's call alone)."""
+    low = " ".join((q or "").split()).lower().rstrip("?.!")
+    return low in (_PAUSE_CANON, _RESUME_CANON,
+                   "pause", "resume", "unpause")
+
+
+def _pause_cmd(srv, q: str) -> str:
+    low = " ".join(q.split()).lower().rstrip("?.!")
+    if low in (_RESUME_CANON, "resume", "unpause"):
+        srv.paused = False
+        _write_audit(srv.membrane, {"event": "nerve", "op": "resume",
+                                    "ts": time.time()})
+        return ("[membrane-intercept] resumed: the loops' pool drains, "
+                "the dreamer wakes on its idle cadence, the thinker's "
+                "digest + ticks + the night's deferred bodies run, the "
+                "autonode scans and fires the accumulated diff as a "
+                "bounded burst.\n\n" + _INTERCEPT_MARKER)
+    srv.paused = True
+    _write_audit(srv.membrane, {"event": "nerve", "op": "pause",
+                                "ts": time.time()})
+    return ("[membrane-intercept] paused: the acting lanes are down "
+            "(loops, dreamer, thinker's ticks/digest/idle-think, the "
+            "night's bodies, the autonode, the idle judges, speech "
+            "holds). Reads, memory and `intend` stay live -- your plan "
+            "lands on the intent board, inert until resume.\n\n"
+            + _INTERCEPT_MARKER)
 
 
 def _intents_board(srv) -> IntentBoard | None:
@@ -1154,8 +1268,10 @@ def _intents_board(srv) -> IntentBoard | None:
             print(f"[opencode] intent board unavailable: {_one_line(e)}",
                   file=sys.stderr)
             b = srv._intent_board = None
-    if b is not None and b.embedder is None and srv.membrane.embedder is not None:
-        b.embedder = srv.membrane.embedder
+    if b is not None and getattr(b, "embedder", "x") is None:
+        _mbed = getattr(getattr(srv, "membrane", None), "embedder", None)
+        if _mbed is not None:
+            b.embedder = _mbed
     # THE GOAL-BACKED BOARD (the operator's design: 'the fact that a goal
     # became active makes it an intent'): attach the entity store -- the
     # board's steering becomes the seat's ACTIVE SET over the shared Goal
@@ -1214,9 +1330,12 @@ def _membrane_intent_create_or_pin(srv, text: str, ttl: str = ""
     (SHARED: goals are knowledge, not speech) + pin. The pin is a priority
     bonus on the urgency ranking (the operator's hand beats the score) --
     never a TTL (goals do not expire). Speech announces the activation.
-    Returns {eid, created, pinned}."""
+    Returns {eid, created, pinned}.
+    THE LAZY MOUNT (2026-10-06): the board resolves through
+    _intents_board (the boot attaches; the lazy attach HEALS a mount
+    missed at boot -- the tool lane never sees 'no goal layer' again)."""
     est = getattr(srv, "entity_store", None)
-    board = getattr(srv, "_intent_board", None)
+    board = _intents_board(srv)
     if est is None or board is None or board.selection is None:
         return {"ok": False, "error": "no goal layer"}
     from .entities import (QuantumEntity, CLASS_GOAL, MEMBRANE_NS,
@@ -1246,7 +1365,24 @@ def _membrane_intent_create_or_pin(srv, text: str, ttl: str = ""
                         "status": "open", "born": time.time()},
         )
         try:
-            est.upsert(goal, embedder=getattr(srv.membrane, "embedder", None))
+            # THE STEERING COORDINATE (the pin half's fix, the loop's
+            # own finding): the goal's position = its text's embedding
+            # AT PLANT TIME -- a position-less goal never ranks in the
+            # active set (_open_goals requires geometry) and the pin
+            # ranks nothing. The embedder may still be unresolved on a
+            # young seat: the pin lands, the position arrives on the
+            # field's first touch of this goal.
+            _emb = getattr(srv.membrane, "embedder", None)
+            if _emb is not None:
+                try:
+                    import numpy as _np
+                    v = _np.asarray(_emb.embed([text[:400]])[0], float)
+                    _n = float(_np.linalg.norm(v))
+                    if _n > 1e-12:
+                        goal.position = [float(x) for x in v / _n]
+                except Exception:
+                    pass
+            est.upsert(goal, embedder=_emb)
             created = True
         except Exception as e:
             return {"ok": False, "error": f"goal upsert failed: {e}"}
@@ -1266,6 +1402,15 @@ def _membrane_intent_create_or_pin(srv, text: str, ttl: str = ""
     sel = board.selection
     sel.pinned[goal.eid] = max(sel.pinned.get(goal.eid, 0.0), bonus)
     sel.suppressed.discard(goal.eid)
+    # THE RECEIVE-LANE WIRE (2026-10-06: the operator creates, the
+    # 3-thinker loop receives): the planted goal is an event -- a
+    # thinking loop plans/executes it on its own turn.
+    try:
+        from .watch_agents import notify_intent_planted
+        notify_intent_planted(est, getattr(srv, "events_pool", None),
+                              goal.eid, text, created=created)
+    except Exception:
+        pass
     return {"ok": True, "eid": goal.eid, "created": created, "pinned": True}
 
 
@@ -3349,6 +3494,10 @@ def _pick_default_model(models: list, preferred: str | None) -> str | None:
         for m in models:
             if m == preferred or m.split(":")[0] == preferred:
                 return m
+        # an explicit pick that ollama's tags don't list (a cloud model
+        # answers unpulled: glm-5.3:cloud) is the caller's to honor -- the
+        # family heuristic below silently swapped it for glm-5.3-flash
+        return None
     for want in ("glm", "qwen3", "qwen2.5-coder", "llama3.1", "mistral", "gemma"):
         for m in models:
             if m.startswith(want):
@@ -3496,6 +3645,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._membrane_state(); return
         if path == "/membrane/entity-track":
             self._entity_track_list(); return
+        if path == "/membrane/intents":
+            self._membrane_intents(); return
+        if path == "/membrane/entity/read":
+            self._entity_read(); return
         if path == "/membrane/intend":
             self._membrane_intend(); return
         if path == "/membrane/entity-related":
@@ -3564,6 +3717,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._entity_edit(); return
         if path == "/membrane/entity/inherit":
             self._entity_inherit(); return
+        if path == "/membrane/entity/link":
+            self._entity_link_unlink(link=True); return
+        if path == "/membrane/entity/unlink":
+            self._entity_link_unlink(link=False); return
         if path == "/membrane/entity/remove":
             self._entity_remove(); return
         if path == "/membrane/filetool":
@@ -3573,11 +3730,16 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # ENGINE'S script paths only (a c: entity's tick/getter script
         # returns {run: true} and the ENGINE runs its command; the
         # observation + result lanes fire there, never a direct call)
+        # ... now with the executor's door beside them (2026-10-06):
+        # entity_link links command entities to tool:executor and the
+        # ENGINE runs them inline.
         if path == "/membrane/run" or path == "/membrane/entity-run":
             self._json_err_raw(410, "the run route was demolished: the "
                                "only exec is a command entity's OWN "
                                "script (getter/tick) returning "
-                               "{run: true} -- the engine applies"); return
+                               "{run: true} -- the engine applies; "
+                               "or link it to the executor "
+                               "(entity_link)"); return
         if path == "/membrane/intend":
             self._membrane_intend(); return
         if path.startswith("/membrane/"):
@@ -4016,6 +4178,18 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             _mraw = (_mraw.get("modelID") or _mraw.get("id")
                      or "membrane")
         model = str(_mraw or "membrane")
+        # THE PROVIDER PREFIX STRIPS (the 'the tools are ignored'
+        # exhibit's root): the TUI's model = 'membrane/<rung>' (the
+        # provider-namespaced shape) — the registry's records' names
+        # = the BARE rung. The prefix = the CLIENT's namespacing,
+        # never the rung's name: strip it (the LADDER-RETIRE's honest
+        # 404 hit this: 'membrane/glm-5.3-flash:cloud' found NO rung —
+        # the TUI's turns died at 404 with the tools attached, the
+        # seat never ran a turn at all).
+        if "/" in model:
+            head, _, tail = model.partition("/")
+            if head in ("membrane", "proxy", "local", "ollama") and tail:
+                model = tail
         # the opencode-selected model is the seat's AND the judge's model
         # (unless pinned): the follow-chat judge reads srv.seat_model live
         if srv.model_follows_chat:
@@ -4149,6 +4323,15 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if not model_escaped and _is_intent_query(q_early):
             text = _intent_cmd(srv, q_early)
             _print_intercept("intent", q_early)
+            self._serve_intercept_answer(model, text,
+                                         bool(body.get("stream", False)))
+            return
+        # ---- the nerve (the operator's stable point): pause/resume --
+        # pre-gate, operator-only (a listener loop can never pause the
+        # seat; the stable point is the operator's call alone).
+        if not model_escaped and _is_pause_query(q_early):
+            text = _pause_cmd(srv, q_early)
+            _print_intercept("nerve", q_early)
             self._serve_intercept_answer(model, text,
                                          bool(body.get("stream", False)))
             return
@@ -4382,6 +4565,17 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                         ctx = (ctx + "\n\n" + diff) if ctx else diff
             except Exception as e:
                 print(f"[efield] diff error: {e}", file=sys.stderr)
+        # THE INTENTIONS BLOCK (the plan channel rewired, 2026-10-06: the
+        # builder existed and was never called -- the OPEN INTENTIONS view
+        # and the empty-board nudge ride turns only from now; the nudge
+        # is rate-limited inside the builder).
+        if not _is_tool_round:
+            try:
+                i_block = _intents_context_block(srv)
+                if i_block:
+                    ctx = (ctx + "\n\n" + i_block) if ctx else i_block
+            except Exception as e:
+                print(f"[opencode] intent block error: {e}", file=sys.stderr)
         # THE SPEECH RELAY: membrane's held messages ride the next
         # model-bound request as a marked block -- the model relays them
         # into the conversation verbatim (the mouth), where they enter the
@@ -4417,6 +4611,21 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # unchanged.
         speak_block = _speak_block(srv)
         up = dict(body)
+        # THE REQUEST'S MODEL SPEAKS BARE (the 'membrane/<rung>' =
+        # the client's namespacing): strip at the request's entry
+        # (the dict/string/dict-id shapes) — the rung-lookup sees
+        # BARE names only.
+        _um = up.get("model")
+        if isinstance(_um, dict):
+            _mid = _um.get("modelID") or _um.get("id") or ""
+            if isinstance(_mid, str) and "/" in _mid:
+                _h, _, _t = _mid.partition("/")
+                if _h in ("membrane", "proxy", "local", "ollama") and _t:
+                    _um[_k := ("modelID" if "modelID" in _um else "id")] = _t
+        elif isinstance(_um, str) and "/" in _um:
+            _h, _, _t = _um.partition("/")
+            if _h in ("membrane", "proxy", "local", "ollama") and _t:
+                up["model"] = _t
         if getattr(srv, "no_context", False):
             # THE STATELESS LLM (the field is the only memory): strip the
             # transcript history (the turn boundary), then REBUILD the
@@ -5294,7 +5503,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if not key:
             self._json_err_raw(400, "key required"); return
         res = est.watch_track(key, boundary=str(body.get("boundary") or ""),
-                              label=str(body.get("label") or ""))
+                              label=str(body.get("label") or ""),
+                              owner=str(body.get("owner") or ""))
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
         # THE GEOMETRY PREREQUISITE: a fresh track needs its entity doc +
@@ -5350,7 +5560,23 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 self._json_err_raw(500, f"related lookup failed: {e}"); return
         self._json_err_raw(503, "the entity field is off"); return
 
+    def _paused_write_refused(self) -> bool:
+        """THE PAUSE'S WRITE GATE (the entity hands are down): True +
+        the 423 refusal emitted when the seat is paused -- mutations,
+        file tools and exec verdicts would break the stable point the
+        operator asked for. Reads, memory and `intend` stay live."""
+        if not nerve_paused(self.server):
+            return False
+        self._json_err_raw(
+            423, "the seat is paused: the entity hands are down -- reads, "
+                 "memory (`learn`/`forget`) and `intend` work; the plan "
+                 "lands on the intent board, inert until resume "
+                 "(`membrane: resume`)")
+        return True
+
     def _entity_add(self) -> None:
+        if self._paused_write_refused():
+            return
         srv = self.server
         est = getattr(srv, "entity_store", None)
         if est is None:
@@ -5363,6 +5589,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         self._entity_audit("add", res)
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
+        _entity_post_process(srv, res)
         self._json_out(res)
 
     def _filetool(self) -> None:
@@ -5370,6 +5597,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         mint lane -- files the effect into the entity field (the f:<path>
         entity + audit), run-lane style: the field sees every MCP-side
         file effect."""
+        if self._paused_write_refused():
+            return
         srv = self.server
         est = getattr(srv, "entity_store", None)
         if est is None:
@@ -5393,6 +5622,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         self._json_out(res)
 
     def _entity_edit(self) -> None:
+        if self._paused_write_refused():
+            return
         srv = self.server
         est = getattr(srv, "entity_store", None)
         if est is None:
@@ -5421,9 +5652,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         self._entity_audit("edit", res)
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
+        _entity_post_process(srv, res)
         self._json_out(res)
 
     def _entity_remove(self) -> None:
+        if self._paused_write_refused():
+            return
         srv = self.server
         est = getattr(srv, "entity_store", None)
         if est is None:
@@ -5437,6 +5671,80 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         self._entity_audit("remove", {"ok": n > 0, "eid": spec, "count": n})
         self._json_out({"removed": n})
 
+    def _entity_link_unlink(self, link: bool) -> None:
+        """POST /membrane/entity/link | /membrane/entity/unlink: the
+        EXECUTOR'S hands (2026-10-06) -- link command entities to the
+        executor and run them inline (the edge IS the ledger), or
+        supersede the edges away. The return carries every command's
+        post-run state (the sync rule: the tool answers AFTER the
+        triggers processed the entities)."""
+        if self._paused_write_refused():
+            return
+        srv = self.server
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
+        body = self._json_body()
+        from .night import entity_link, entity_unlink
+        if link:
+            res = entity_link(srv, est, _efield_on(srv), srv.membrane,
+                              str(body.get("executor") or ""),
+                              body.get("commands"),
+                              create=bool(body.get("create", True)))
+        else:
+            res = entity_unlink(srv, est, _efield_on(srv), srv.membrane,
+                                str(body.get("executor") or ""),
+                                body.get("commands"))
+        if not res.get("ok"):
+            self._json_err_raw(400, str(res.get("error"))); return
+        self._json_out(res)
+
+    def _entity_read(self) -> None:
+        """GET /membrane/entity/read?spec=... : the READ-BACK's HTTP door
+        -- resolve the spec, fire the getter, return the entity's value
+        POST-processing (the {run: true} getter's run_result included).
+        `run=1` forces a fresh read-through past the 5s LRU.
+
+        THE REFUSAL'S SELF-CORRECTION (2026-10-06): a missing spec ECHOES
+        what actually arrived (the model's wrong-arg-name exhibit:
+        {'name': 'Executor'} -- the tool wanted `spec`); an unresolvable
+        spec carries its NEAREST existing entities (the 's:?tick_every'
+        exhibit: the field-only id vs the store's symbols:?tick_every --
+        one call self-corrects instead of a dead end)."""
+        srv = self.server
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
+        import urllib.parse as _up
+        qs = _up.parse_qs(self.path.split("?", 1)[-1])
+        spec = (qs.get("spec") or [""])[0].strip()
+        if not spec:
+            got = {k: v[0] for k, v in qs.items() if v}
+            hint = ("spec required (you sent "
+                    f"{json.dumps(got)[:160] if got else 'no args'})")
+            if "name" in got:
+                hint += (" -- `name` is not a parameter: pass the entity's "
+                         "SPEC (an eid like 'tool:executor' or a name "
+                         "fragment)")
+            self._json_err_raw(400, hint); return
+        ent = est._resolve_spec(spec)
+        if ent is None:
+            near = est.near_specs(spec)
+            msg = "no entity matches spec" + (f" {spec!r}" if spec else "")
+            if near:
+                msg += (f"; nearest: {', '.join(near)} -- re-read with "
+                        f"one of these specs")
+            self._json_err_raw(404, msg); return
+        from . import watch_agents as _wa
+        from .night import executor_value
+        fired = _wa.entity_read_back(srv, ent, force=bool(
+            (qs.get("run") or ["0"])[0] in ("1", "true")))
+        # executor_value resolves the relations backend itself (the
+        # est's _srv wiring) -- the queue split rides with no args here
+        val = executor_value(est, ent.eid)
+        val["getter"] = fired
+        self._json_out(val)
+
     def _entity_audit(self, op: str, res: dict) -> None:
         """Every model-side entity mutation hits the operator's ledger."""
         try:
@@ -5447,6 +5755,18 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                                "ok": bool(res.get("ok"))})
         except Exception:
             pass
+
+    def _membrane_intents(self) -> None:
+        """GET /membrane/intents: the intent board's listing (the render
+        the 'membrane: intents' frame serves) -- the seat's active set
+        over the shared Goals (or the json fallback). THE LAZY MOUNT:
+        through _intents_board (self-heals a missed boot attach)."""
+        srv = self.server
+        board = _intents_board(srv)
+        if board is None:
+            self._json_err_raw(503, "the intent layer is unavailable")
+            return
+        self._json_out({"text": board.report()})
 
     def _membrane_intend(self) -> None:
         """POST /membrane/intend: the MCP membrane_intend relay -- the
@@ -5608,7 +5928,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         est = getattr(srv, "entity_store", None)
         if est is None:
             self._json_err_raw(503, "entity layer unavailable"); return
-        self._json_out({"tracks": est.list_tracks()})
+        import urllib.parse as _up
+        qs = _up.parse_qs(self.path.split("?", 1)[-1])
+        # LANE-AWARE: ?owner=watch:<eid> = that listener's own tracks
+        owner = (qs.get("owner") or [""])[0].strip()
+        self._json_out({"tracks": est.list_tracks(owner=owner)})
 
     # THE RUN LANE'S HANDLER IS GONE (the operator's ruling 2026-10-02):
     # the exec lives in night.run_command_entity, reachable ONLY via a
@@ -5635,6 +5959,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             "mode": "DEV",
             "backend": srv.backend,
             "embed_model": getattr(mem.embedder, "model", None),
+            # the operator's stable point (RAM-only; the acting lanes hold)
+            "paused": nerve_paused(srv),
             # the viewer's counters and cloud: live entities, their states
             "field_size": int((vit.get("entities") or {}).get("live", 0)),
             "efield": vit or None,
@@ -5655,8 +5981,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             "surface": _surface_tail(srv),
             # the same WHERE WE ARE the seat's model gets (a peek: drains nothing)
             "where_we_are": _where_we_are(srv, None, drain=False),
-            "entity_tracks": (getattr(srv, "entity_store", None).list_tracks()
-                              if getattr(srv, "entity_store", None) else []),
+            "entity_tracks": (_est_tracks.list_tracks()
+                              if (_est_tracks :=
+                                  getattr(srv, "entity_store", None))
+                              is not None else []),
         }
         _est = getattr(srv, "entity_store", None)
         if _est is not None:
@@ -5775,7 +6103,18 @@ def _inject_to_primary_impl(srv, runner, text):
     the runner) as an ASSISTANT text part riding the
     cosmetically-busy stream — the client sees it as part
     of the ongoing 'thinking loop'. Never a new turn, never
-    a model call: a message-in-the-room, part-streamed."""
+    a model call: a message-in-the-room, part-streamed.
+
+    THE CRASH FIX (2026-10-06, the 'K.tokens.output undefined' TUI
+    exhibit): the part's messageID must name a message ROW the
+    client's reducer HOLDS -- it used to ride the SESSION id (a
+    phantom id: findLast lands on undefined -> the reducer reading
+    K.tokens.output crashed the TUI). Now the inject rides the primary
+    session's LAST REAL assistant row (its id + tokens are real); a
+    session with NO assistant row yet gets a FULL synthetic assistant
+    message row published first (with tokens), then the part -- the
+    reducer's chain (message.updated -> part) never touches an
+    unknown id."""
     from .server import _gen_id
     try:
         sessions = runner.sessions.sessions
@@ -5791,18 +6130,29 @@ def _inject_to_primary_impl(srv, runner, text):
         if not sids:
             return
         _updated, sid = max(sids)
-        info = runner.sessions.get(sid)
-        if info is None:
-            return
+        rows = [r for r in runner.messages.list(sid) if r]
+        last_asst = next((r["info"] for r in reversed(rows)
+                          if (r.get("info") or {}).get("role")
+                          == "assistant"), None)
         now = int(time.time() * 1000)
         pid = _gen_id("prt")
         part = {"id": pid, "sessionID": sid, "type": "text",
                 "text": str(text)[:2000],
                 "time": {"start": now, "end": now}}
-        part["messageID"] = info.get("id", "") or sid
+            # THE ROW'S TWO LIVES (the crash covenant): existing assistant
+        # row -> the part rides ITS id (held by the reducer already);
+        # no row -> append_part MINTS the row + publishes the FULL
+        # message.updated itself (the row-before-part covenant) -- and
+        # the wire publishes the STORED part (it carries the minted
+        # row's id -- a part whose id the client never saw was the
+        # TUI-crash's findLast->undefined).
+        if last_asst is not None and last_asst.get("id"):
+            part["messageID"] = last_asst["id"]
         runner.messages.append_part(sid, part)
+        rows2 = runner.messages.list(sid)
+        stored = ((rows2[-1].get("parts") or [])[-1]) if rows2 else part
         runner.hub.publish({"type": "message.part.updated",
-                            "part": part, "sessionID": sid})
+                            "part": dict(stored), "sessionID": sid})
     except Exception:
         pass
 
@@ -6030,6 +6380,10 @@ def main() -> None:
                     help="cosine floor for commons top-up in recall")
     ap.add_argument("--no-launch", dest="launch", action="store_false",
                     help="run only the proxy (don't start opencode)")
+    ap.add_argument("--force-seat", action="store_true",
+                    help="boot past the single-instance lock (kill the "
+                         "old seat yourself; multiple-seat rigs ride "
+                         "MEMBRANE_MULTI_SEAT=1)")
     ap.add_argument("--serve", action="store_true",
                     help="THE NATIVE SERVE (opencode replaced): serve "
                          "membrane's own opencode-compatible REST/SSE "
@@ -6097,6 +6451,55 @@ def main() -> None:
         model = args.model          # respect an explicit choice even if unlisted
 
     mem = Seat(args.field, args.audit)   # the seat: audit, embedder ladder, locks
+    try:
+        pid_path.write_text(str(os.getpid()))
+    except Exception:
+        pass                       # the lock's write degrades (the seats
+                                   # keep their no-lock behavior)
+
+    # THE SINGLE-INSTANCE COVENANT (the orphan root, 2026-10-06: 'why
+    # are we getting orphans?!'): membrane happily ran N concurrent
+    # seats on one field -- a closed TUI's 'restart' relaunched a NEW
+    # seat on a NEW port while the old one lived on detached (nohup/ssh
+    # drops/crash-restarts): the seat table grew a family of invisible
+    # proxies answering different ports of the same field. THE LOCK
+    # FILE: <field>.opencode.pid now MINTS every seat (the launcher's
+    # child AND the seat's own pid when the child is the TUI) and the
+    # boot HONORS it:
+    #   - a LIVE pid in the lock + this boot is a REAL boot (not the
+    #     relaunch of the same pid) = refuse with the honest pointer
+    #     (kill the old seat; --force overrides);
+    #   - a DEAD pid in the lock = a stale ghost: claimed (the boot
+    #     OVERWRITES it).
+    # MEMBRANE_MULTI_SEAT=1 opts out (multi-seat rigs keep working).
+    _force_seat = bool(getattr(args, "force_seat", False)) or \
+        os.environ.get("MEMBRANE_MULTI_SEAT") == "1"
+    pid_path = Path(getattr(args, "field", ".membrane/field.json")).parent \
+        / "membrane.pid"
+    if not _force_seat:
+        try:
+            _running = int(pid_path.read_text().strip()) \
+                if pid_path.exists() else None
+        except Exception:
+            _running = None
+        if _running and _running != os.getpid():
+            try:
+                os.kill(_running, 0)   # alive?
+                _cwd_note = ""
+                try:
+                    _cwd_note = (os.readlink(f"/proc/{_running}/cwd")
+                                 if os.path.exists(f"/proc/{_running}/cwd")
+                                 else "")
+                except Exception:
+                    pass
+                print(f"[opencode] the seat on this field is ALIVE "
+                      f"(pid {_running}{' ' + _cwd_note if _cwd_note
+                                      else ''}) -- kill it or 'membrane "
+                      f"reset' first; --force overrides",
+                      file=sys.stderr)
+                raise SystemExit(2)
+            except OSError:
+                pass                    # the ghost's lock: claimed below
 
     listen = _pick_listen_port(args.listen)
     if listen != args.listen:
@@ -6107,6 +6510,33 @@ def main() -> None:
     if serve_port is not None and serve_port != args.serve_port:
         print(f"[opencode] serve port {args.serve_port} busy -> using "
               f"{serve_port} (pass --serve-port to pin)", file=sys.stderr)
+    # THE PICK'S RESERVATION (the port race's fix, 2026-10-06): the
+    # picked port is BOUND NOW (a listening socket, one pass in length)
+    # -- the bind race's window closes: two seats booting together can
+    # no longer both 'pick' 4096; the loser re-picks honestly. The
+    # reservation rides srv and the native serve adopts it (never a
+    # rebind); an unused reservation closes at teardown.
+    _serve_socket = None
+    # the reservation binds the SERVE's own host (the adopted socket IS the
+    # listener: a loopback reservation silently ignored --serve-host)
+    _serve_bind = args.serve_host if args.serve else "127.0.0.1"
+    if serve_port is not None:
+        import socket as _sk
+        _serve_socket = _sk.socket(_sk.AF_INET, _sk.SOCK_STREAM)
+        _serve_socket.setsockopt(_sk.SOL_SOCKET, _sk.SO_REUSEADDR, 1)
+        try:
+            _serve_socket.bind((_serve_bind, serve_port))
+            _serve_socket.listen(128)
+        except OSError as e:
+            _serve_socket.close()
+            _serve_socket = None
+            serve_port = _pick_serve_port(serve_port + 1)
+            print(f"[opencode] the serve port was taken mid-boot -> "
+                  f"re-picked {serve_port} ({e})", file=sys.stderr)
+            _serve_socket = _sk.socket(_sk.AF_INET, _sk.SOCK_STREAM)
+            _serve_socket.setsockopt(_sk.SOL_SOCKET, _sk.SO_REUSEADDR, 1)
+            _serve_socket.bind((_serve_bind, serve_port))
+            _serve_socket.listen(128)
     srv = ThreadingHTTPServer(("127.0.0.1", listen), MembraneOpenAIHandler)
     srv.membrane = mem
     srv.viewer = bool(args.viewer)   # dev field viewer at /viewer (OFF default)
@@ -6282,6 +6712,8 @@ def main() -> None:
                 from .efmind import DreamSource, on_applied_fn
                 srv.efield.listeners.append(on_applied_fn(srv, lambda: _own_session_prefix(srv)))
                 srv.dream_source = DreamSource(srv.efield)
+                # THE PAUSE'S CLAIM GATE (the idle judge is acting):
+                srv.efield.pause_fn = lambda: nerve_paused(srv)
                 _install_judges(srv)
             print(f"[efield] capture {srv.capturer.mode} "
                   f"({type(be).__name__})", file=sys.stderr)
@@ -6360,6 +6792,15 @@ def main() -> None:
                       "the thinker's pulse carries it up)", file=sys.stderr)
         except Exception as e:
             print(f"[seat] presence seeding skipped ({e})", file=sys.stderr)
+        # THE STEERING WHEEL'S MOUNT (the boot-half of the intent lane,
+        # 2026-10-06): the board was built BEFORE the entity store existed
+        # and no boot attached them -- every tool lane read the raw board
+        # and hit 'no goal layer' (`_intents_board()`'s lazy attach was
+        # reachable only from the frame lane). The attach is idempotent
+        # (attach_entity_store guards) -- one call here mounts the wheel;
+        # the boot also RE-DERIVES the wakes from the board (the durable
+        # steering: open intents re-queue their lanes -- boot_wakes below,
+        # after the pool lives).
         # THE AUTONODE (the operator's 2026-10-01 design): seed the
         # filetree template, then run the trigger layer -- file metadata
         # under the starting dir, MQTT topics, signals -- firing every
@@ -6373,6 +6814,16 @@ def main() -> None:
                       "to watch like it)", file=sys.stderr)
         except Exception as e:
             print(f"[seat] filetree seeding skipped ({e})", file=sys.stderr)
+        # THE EXECUTOR (2026-10-06): the exec organ -- commands link to
+        # it and the engine runs them inline (the 'executes' edge is the
+        # ledger); idempotent like every seeding.
+        try:
+            from .night import seed_executor_entity
+            if seed_executor_entity(srv.entity_store):
+                print("[seat] the executor is planted (tool:executor -- "
+                      "entity_link runs commands through it)", file=sys.stderr)
+        except Exception as e:
+            print(f"[seat] executor seeding skipped ({e})", file=sys.stderr)
         srv.autonode = None
         if not args.no_autonode:
             try:
@@ -6389,6 +6840,68 @@ def main() -> None:
             except Exception as e:
                 srv.autonode = None
                 print(f"[seat] autonode off ({e})", file=sys.stderr)
+        # THE STEERING WHEEL'S MOUNT + THE BOOT'S BOOK-BALANCE (the
+        # durability plan, 2026-10-06): three boot-time acts on the
+        # intent lane -- all before the wake derivation:
+        #   1. ATTACH the board to the entity store (the wheel was
+        #      built pre-store; the lazy attach was only reachable from
+        #      the frame lane -- every tool route hit 'no goal layer').
+        #   2. EXPIRE the executor's stale debts WITH their receipts
+        #      (the phantom-debt fix: an owed edge past its TTL dies
+        #      WITH its receipt -- cancellation as durable as the debt;
+        #      never re-run).
+        #   3. RE-DERIVE the wakes from the board (the durable
+        #      steering): the boot reads the OPEN UNCLAIMED intents and
+        #      re-queues their lanes (an 'intent-planted' event per
+        #      goal) -- the listeners wake on the board's authority, not
+        #      on runtime state. The pool is live by now (the field's
+        #      boot wired it); the loops drain it when the day starts.
+        try:
+            _ib = _intents_board(srv)
+            if _ib is not None and _ib.selection is not None:
+                print(f"[seat] the intent board is mounted (goals: "
+                      f"{len(_ib.open_intents())} open)", file=sys.stderr)
+        except Exception as e:
+            print(f"[seat] intent board mount skipped ({e})", file=sys.stderr)
+        try:
+            if getattr(srv, "entity_store", None) is not None \
+                    and getattr(srv, "membrane", None) is not None:
+                from .night import expire_stale_edges
+                receipts = expire_stale_edges(srv, srv.entity_store,
+                                              _efield_on(srv), srv.membrane)
+                if receipts:
+                    print(f"[seat] the executor's ledger: {len(receipts)} "
+                          "stale edge(s) expired-with-receipt at boot",
+                          file=sys.stderr)
+        except Exception as e:
+            print(f"[seat] executor expiry skipped ({e})", file=sys.stderr)
+        try:
+            _ib2 = _intents_board(srv)
+            _pool2 = getattr(srv, "events_pool", None)
+            if _ib2 is not None and _pool2 is not None \
+                    and _ib2.selection is not None:
+                from .watch_agents import notify_intent_planted
+                _n_wakes = 0
+                for _intent in _ib2.open_intents():
+                    _geid = (getattr(_intent, "eid", None) or "")
+                    if not _geid:
+                        continue
+                    _gprops = ((srv.entity_store.docs.get(_geid)
+                                .properties) if _geid in
+                               (srv.entity_store.docs or {}) else {}) or {}
+                    if _gprops.get("intent_planted_ts"):
+                        continue          # already received this boot
+                    notify_intent_planted(srv.entity_store, _pool2,
+                                          _geid, str(getattr(_intent,
+                                                             "text", "")),
+                                          created=False)
+                    _n_wakes += 1
+                if _n_wakes:
+                    print(f"[seat] the board re-derives the wakes: "
+                          f"{_n_wakes} open intent(s) re-queued to the "
+                          "listeners", file=sys.stderr)
+        except Exception as e:
+            print(f"[seat] boot wakes skipped ({e})", file=sys.stderr)
         # THE PEER SUBSTRATES (the operator's design): the proxy REGISTRY
         # (ephemeral bucket, TTL docs, heartbeats -- who else is connected)
         # + the PEER CHANNEL (permanent, a chat lane between the LLMs,
@@ -6564,6 +7077,12 @@ def main() -> None:
                 # bounds volume, and the next model-bound request relays
                 # it (the [membrane-says] footer). The pending label is
                 # set by that drain only.
+                # THE PAUSE (the stable point): the night's bodies defer
+                # -- overlay scripts, consolidation, materialization are
+                # the machine ACTING; the cadence continues so the resume
+                # is automatic (the next tick after unpause runs).
+                if nerve_paused(srv):
+                    continue
                 fld = _efield_on(srv)
                 if fld is None:
                     continue
@@ -6571,6 +7090,13 @@ def main() -> None:
                     from .efmind import night as _ef_night
                     srv.night_stats = _ef_night(srv, fld,
                                                 getattr(srv, "entity_store", None))
+                    # THE METABOLISM'S NIGHT HALF (the durability plan):
+                    # every 15-min pass expires the executor's stale
+                    # debts WITH their receipts (a boot can't miss what
+                    # grows between boots)
+                    from .night import expire_stale_edges as _exp
+                    _exp(srv, getattr(srv, "entity_store", None), fld,
+                         getattr(srv, "membrane", None))
                     b = srv.night_stats.get("births")
                     if b:
                         print(f"[night] born: {', '.join(b)}", file=sys.stderr)
@@ -6596,6 +7122,7 @@ def main() -> None:
     srv.loops = None
     if getattr(srv, "events_pool", None) is not None:
         srv.loops = LoopRunner(max_loops=3)
+        srv.loops._srv = srv
         srv.loops.titles = []          # the running agents' names (the banner)
 
         def _loop_session(srv, agent):
@@ -6965,6 +7492,8 @@ def main() -> None:
             d = Path(args.field).resolve().parent
             sess_store = SessionStore(str(d / "serve-sessions.json"))
             msg_store = MessageStore(str(d / "serve-msgs.json"))
+            _serve_hub = SSEHub()             # the ONE room's event bus
+            msg_store.hub = _serve_hub        # the row-before-part covenant
             system = ""
             try:
                 if instr_path and os.path.isfile(instr_path):
@@ -6973,14 +7502,16 @@ def main() -> None:
                 system = ""
             _srv_model = (srv.seat_model if not srv.model_follows_chat
                           else model or srv.seat_model or "membrane")
-            runner = TurnRunner(SSEHub(), sess_store, msg_store,
+            runner = TurnRunner(_serve_hub, sess_store, msg_store,
                                 loopback_ladder(listen),
                                 mcp_executor(listen),
                                 system=system, model=_srv_model)
+            runner._serve_socket = _serve_socket   # THE PICK'S RESERVATION
             # THE LOOPS' RUNNER (the reactive layer): the loops' turns
             # are real serve turns on their child sessions
             srv._loop_runner = runner
             runner.srv = srv               # /agent reads the live minds
+            runner._audit_mem = srv.membrane   # the lane-refusal audits
             # THE COSMETIC BUSY (the operator's design, armed): the
             # event-thinkers' pool is live -- the operator's session's
             # stream stays busy (their loop's end is internal; the
@@ -7157,7 +7688,10 @@ def main() -> None:
             srv.timeout = 1.0
             pid_path = (Path(getattr(srv.membrane, "field_path", ""))
                         .parent / "opencode.pid")
-            # --no-launch: THE FOLLOW IS NOT MINE — a headless boot
+            # THE SECOND WATCHDOG -- retired: the SIGUSR1 diagnostic's
+            # cost (a faulthandler dump on the accept thread) wedged the
+            # seat's whole lane behind it (2026-10-04).
+            # --no-launch: THE FOLLOW IS NOT MINE -- a headless boot
             # ignores (and clears) a stale pid file: the operator's
             # rule binds a LAUNCHING proxy to its child, never a
             # headless one to a dead launcher's ghost.
@@ -7173,8 +7707,25 @@ def main() -> None:
                     watched_pid = int(pid_path.read_text().strip())
             except Exception:
                 watched_pid = None
+            # THE THREADED PROXY (the wedge's root, 2026-10-06): the
+            # seat served ONE request at a time ON THE MAIN THREAD
+            # (handle_request per loop) -- a turn's OWN model call held
+            # the proxy for its whole ladder; the turn's tool relays
+            # queued BEHIND it (the tool watchdog's 300+ 'STILL PENDING
+            # 45s' fires per seat = the lanes' serial queue), the TUI's
+            # long-lived SSE event streams held the main thread
+            # (everything queued behind an open stream), the watcher
+            # scripts' probes waited behind turns. THE PROXY NOW SERVES
+            # THREADED (its own daemon thread -- a ThreadingHTTPServer
+            # handles each connection on its own thread; a slow turn
+            # never blocks a tool relay, an SSE stream, or an embed).
+            # The main thread's job: the pid-follow + the lifetime.
+            srv._th = threading.Thread(target=srv.serve_forever,
+                                       daemon=True,
+                                       name="membrane-proxy")
+            srv._th.start()
             while True:
-                srv.handle_request()
+                time.sleep(0.5)
                 if watched_pid:
                     try:
                         os.kill(watched_pid, 0)
@@ -7187,12 +7738,31 @@ def main() -> None:
         else:
             # launch mode: serve until the opencode child exits (or a signal).
             # serve_forever() blocks, so poll the child on a short timeout loop.
-            srv.timeout = 0.25
+            srv.timeout = 1.0
             while child.poll() is None:
                 srv.handle_request()
     except KeyboardInterrupt:
         print("\n[membrane-opencode] bye", file=sys.stderr)
     finally:
+        # THE PICK'S RESERVATION (teardown): an unused bind closes -- a
+        # failing boot never holds the serve port against its own retry
+        try:
+            if _serve_socket is not None and \
+                    runner is not None and \
+                    getattr(runner, "_serve_socket", None) is None:
+                _serve_socket.close()
+                _serve_socket = None
+        except Exception:
+            pass
+        # THE LOCK'S RELEASE (the single-instance covenant's other half):
+        # the lock is removed ONLY when it still names THIS pid (a
+        # foreign boot's lock survives our exit)
+        try:
+            if pid_path.exists() and \
+                    pid_path.read_text().strip() == str(os.getpid()):
+                pid_path.unlink()
+        except Exception:
+            pass
         # THE AUTONODE'S TEARDOWN: stop the trigger layer before the field
         # flushes below (a half-landed fire then never writes into a
         # closing backend).
@@ -7322,7 +7892,12 @@ def speak(srv, text: str, kind: str = "note") -> bool:
     # compose site's intent is preserved -- night just holds the
     # queue's INPUT, never its already-stored lines (they deliver on
     # the next turn as always).
+    # THE PAUSE'S HOLD (the stable point speaks nothing): a paused seat
+    # holds ALL composed speech (the operator asked for quiet) -- the
+    # held lines deliver on resume like night's holds.
     try:
+        if nerve_paused(srv):
+            return True          # held (the plan's silence)
         if getattr(srv, "ambient_mode", "day") == "night" \
                 and kind not in ("alert", "operator-message") \
                 and not getattr(srv, "_boot_greeting_pending", False):

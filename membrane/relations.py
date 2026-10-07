@@ -82,13 +82,37 @@ def upsert(backend, origin: str, subj: str, rel: str, obj: str, source: str,
 
 
 def of(backend, origin: str, eid: str, rel: str | None = None) -> list[dict]:
-    """Relations where the entity is subject or object."""
+    """Relations where the entity is subject or object (LIVE only --
+    superseded rows are history)."""
     out = []
     for side in ("subj", "obj"):
         eq = {"origin": origin, side: eid, "superseded": False}
         if rel:
             eq["rel"] = rel
         out += [d for _, d in backend.scan("relations", eq)]
+    return out
+
+
+def history_of(backend, origin: str, eid: str, rel: str | None = None
+               ) -> list[dict]:
+    """ALL the entity's relations -- live AND superseded (the queue's
+    done side reads the processed rows here)."""
+    out = []
+    seen: set[str] = set()
+    for side in ("subj", "obj"):
+        eq = {"origin": origin, side: eid}
+        if rel:
+            eq["rel"] = rel
+        for _k, d in backend.scan("relations", eq):
+            if side == "subj" and d.get("subj") != eid:
+                continue
+            if side == "obj" and d.get("obj") != eid:
+                continue
+            k = str(d.get("subj")) + "|" + str(d.get("rel", "")) + "|" \
+                + str(d.get("obj"))
+            if k not in seen:
+                seen.add(k)
+                out.append(d)
     return out
 
 
