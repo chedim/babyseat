@@ -1,0 +1,12 @@
+"""membrane_ai constants."""
+DOMAIN = "membrane_ai"
+CONF_NAME = "name"
+CONF_SERVE_URL = "serve_url"
+CONF_SERVE_USER = "serve_user"
+CONF_SERVE_PASS = "serve_pass"
+DEFAULT_NAME = "Membrane (brain)"
+DEFAULT_SERVE_URL = "http://192.168.1.112:4096"
+DEFAULT_SERVE_USER = "opencode"
+DEFAULT_SERVE_PASS = ""
+REQUEST_TIMEOUT_S = 600.0          # the serve turn loop may run minutes
+SESSION_TITLE_PREFIX = "hass-"

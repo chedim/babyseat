@@ -57,3 +57,6 @@ pytest-beta.log
 
 pytest-*.log
 mcp-test.log
+
+# machine-specific HA/brain setup notes (local only)
+HASS-SETUP.md

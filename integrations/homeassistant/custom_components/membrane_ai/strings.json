@@ -1,0 +1,22 @@
+{
+  "title": "Membrane AI (brain serve)",
+  "config": {
+    "step": {
+      "user": {
+        "description": "The brain's native serve surface (membrane serve on the ThinkPhone). Basic-auth pair lives in its serve-auth.json.",
+        "data": {
+          "name": "Display name",
+          "serve_url": "Serve URL",
+          "serve_user": "Basic auth user",
+          "serve_pass": "Basic auth password"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "The brain's serve is unreachable (check URL, user, password)."
+    },
+    "abort": {
+      "already_configured": "This serve URL is already configured."
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "domain": "membrane_ai",
+  "name": "Membrane AI (brain serve)",
+  "version": "1.0.0",
+  "documentation": "https://github.com/operator/agatha",
+  "codeowners": ["@operator"],
+  "config_flow": true,
+  "integration_type": "service",
+  "iot_class": "local_polling",
+  "dependencies": ["conversation"]
+}
