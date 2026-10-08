@@ -5,4 +5,4 @@
 termux-wake-lock
 sleep 12
 pgrep -x sshd >/dev/null || sshd
-nohup sh ~/membrane/membrane-supervise.sh >/dev/null 2>&1 &
+setsid nohup sh ~/membrane/membrane-supervise.sh >/dev/null 2>&1 </dev/null &

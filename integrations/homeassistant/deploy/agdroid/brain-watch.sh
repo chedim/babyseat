@@ -18,7 +18,7 @@
 # the kick fires ONLY while the ThinkPhone is unlocked; while locked the
 # watch just reports (killing Termux then would turn "membrane down" into
 # "Termux down"). State: retained MQTT `agdroid/brain/health` JSON
-# (up | down | needs_unlock | backend_down | usb_missing) via the
+# (up | down | restarting | needs_unlock | backend_down | usb_missing) via the
 # loopback-anon broker (127.0.0.1:2883), best-effort.
 #
 # Disarm: `su -c 'pkill -f brain-watc[h]'` then delete this service file.
@@ -56,6 +56,16 @@ unlocked() {
     $ADB shell 'dumpsys window | grep -q "isKeyguardShowing=true" && exit 1; dumpsys power | grep -q "mWakefulness=Awake"' >/dev/null 2>&1
 }
 code() { "$T/curl" -s -m 10 -o /dev/null -w '%{http_code}' "$1" 2>/dev/null; }
+# THE INNER LAYER'S RIGHT OF WAY (2026-10-08): a force-stop during the
+# supervisor's own restart (old seat's exit + a ~60-120 s boot) killed the
+# supervisor, sshd and the half-booted seat at once -- every deliberate
+# restart on the ThinkPhone ended in a Termux wipe ~2 min later. While the
+# supervisor process lives, the kick waits SUP_PATIENCE checks (10 min).
+SUP_PATIENCE=10
+supervisor_alive() {
+    $ADB shell 'ps -A -o ARGS= | grep -q "membrane-supervis[e]"' \
+        >/dev/null 2>&1
+}
 
 # one instance only
 for p in $(pgrep -f "brain-watc[h].sh --bg"); do
@@ -84,6 +94,8 @@ while true; do
             $T/adb start-server >/dev/null 2>&1
         elif ! unlocked; then
             publish needs_unlock
+        elif supervisor_alive && [ $fails -lt $SUP_PATIENCE ]; then
+            publish restarting            # the inner layer is on it
         elif [ $((now - last_kick)) -ge $COOLDOWN ]; then
             say "kicking Termux on the ThinkPhone (unlocked)"
             $ADB shell 'am force-stop com.termux; sleep 2; am start -n com.termux/.app.TermuxActivity' 2>&1

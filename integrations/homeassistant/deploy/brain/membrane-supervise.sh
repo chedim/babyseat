@@ -29,8 +29,31 @@ backend_up() {
   python -c "import urllib.request;urllib.request.urlopen('$BACKEND/api/version',timeout=5)" 2>/dev/null
 }
 log() { echo "$(date '+%F %T') $*" >> "$LOG"; }
+# the old seat must be GONE before the new one boots: a SIGTERM'd seat
+# shuts down gracefully and still holds :4096/:11500 for a while -- a
+# relaunch 3s later booted on :4097/:11501, the health probe (:4096) never
+# saw it, and 120s on the healthy seat was killed again (2026-10-08). The
+# [.] keeps pkill off any shell whose command line merely quotes the name.
+SEAT_RE='membrane[.](cli serve|opencode)'
+stop_serve() {
+  pkill -f "$SEAT_RE"
+  i=0
+  while [ $i -lt 30 ] && pgrep -f "$SEAT_RE" >/dev/null; do
+    sleep 1; i=$((i+1))
+  done
+  if pgrep -f "$SEAT_RE" >/dev/null; then
+    log "old seat still alive after 30s: SIGKILL"
+    pkill -9 -f "$SEAT_RE"; sleep 2
+  fi
+}
 
-log "supervisor up (pid $$)"
+log "supervisor up (pid $$, ppid $PPID)"
+# the death's fingerprint: a catchable signal or a plain exit logs here;
+# NO line before the next 'supervisor up' = SIGKILL from outside
+trap 'log "supervisor exit (rc $?)"' EXIT
+for s in INT TERM QUIT PIPE USR1 USR2 ALRM; do
+  trap "log 'supervisor got SIG$s'; exit 1" $s
+done
 while true; do
   if ! serve_up; then
     if ! backend_up; then
@@ -38,7 +61,7 @@ while true; do
       sleep 30; continue
     fi
     log "serve down: (re)starting membrane"
-    pkill -f "membrane.cli serve"; pkill -f "membrane.opencode"; sleep 3
+    stop_serve
     cd "$HOME/membrane" && nohup python -m membrane.cli serve \
       --backend "$BACKEND" --embed-model mxbai-embed-large --model "$MODEL" \
       --serve-host 0.0.0.0 \

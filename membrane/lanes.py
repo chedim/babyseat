@@ -3111,8 +3111,13 @@ def _one_line(e: Exception) -> str:
 
 
 def _port_free(port: int) -> bool:
+    # probe the way the servers bind (allow_reuse_address): a bare bind
+    # also fails on the port's TIME_WAIT leftovers -- every restart of a
+    # seat whose loops talk to its own :11500 walked to :11501 for a
+    # minute (2026-10-08). A LIVE listener still refuses the bind.
     s = socket.socket()
     s.settimeout(0.5)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
         s.bind(("127.0.0.1", port))
         return True
