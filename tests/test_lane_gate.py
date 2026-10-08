@@ -91,12 +91,19 @@ class TestLaneGate(unittest.TestCase):
         self.assertEqual(SRV._lane_of("watch"), "listener")
 
     def test_operator_loses_the_mutations(self):
-        """The operator's hands: intents + reads + memory; the entity
-        mutations belong to the listeners."""
-        for t in ("entity_add", "entity_edit", "entity_remove",
-                  "entity_link", "entity_unlink"):
+        """The operator's hands: intents + reads + memory + the executor's
+        door; the other entity mutations belong to the listeners."""
+        for t in ("entity_add", "entity_edit", "entity_remove"):
             self.assertNotIn(t, SRV._lane_tools("operator"))
             self.assertIn(t, SRV._lane_tools("listener"))
+        for t in ("entity_link", "entity_unlink"):
+            self.assertIn(t, SRV._lane_tools("operator"))
+            self.assertIn(t, SRV._lane_tools("listener"))
+            self.assertNotIn(t, SRV._lane_tools("plan"))
+        self.assertIsNone(SRV._lane_refusal("entity_link", "operator"))
+        self.assertIn("plan mode", SRV._lane_refusal("entity_link", "plan"))
+        names = {t["name"] for t in SRV._openai_tools_for("build")}
+        self.assertIn("entity_link", names)
         self.assertIn("intend", SRV._lane_tools("operator"))
         self.assertNotIn("intend", SRV._lane_tools("listener"))
 

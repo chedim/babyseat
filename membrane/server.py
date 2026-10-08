@@ -628,7 +628,8 @@ def _openai_tools(mcp_tools: list | None = None) -> list:
 
 # ---- THE LANE GATE (the division of hands, 2026-10-06) ----------------------
 # The seat's two minds have different hands: the OPERATOR (build/plan
-# sessions -- the main chat) plants INTENTS and commits; the LISTENERS
+# sessions -- the main chat) plants INTENTS, commits and runs commands
+# through the executor (entity_link/unlink); the LISTENERS
 # (the watch loops -- agent 'watch:<eid>') hold the ENTITY HANDS --
 # add/edit/remove/link/unlink -- the events they process are their
 # material. Reads and memory are both lanes'. Plan mode (the agent
@@ -652,13 +653,21 @@ OPERATOR_TOOLS = frozenset((
     "peer_post", "peer_seats", "junk_cut",
     # the banner tracks (the operator's header)
     "entity_watch", "entity_unwatch",
+    # THE EXECUTOR'S DOOR (2026-10-08, the operator's call): the operator
+    # runs commands itself -- link to tool:executor runs inline, the
+    # receipt comes back in the same turn. The HA seat's main chat kept
+    # planting 'run X' goals and waiting a whole loop pass for a listener
+    # to do a one-line command. The other entity hands stay the listeners'.
+    "entity_link", "entity_unlink",
 ))
 LISTENER_TOOLS = (OPERATOR_TOOLS | {
     # the entity hands (the listeners' material)
     "entity_add", "entity_edit", "entity_remove",
     "entity_link", "entity_unlink",
 }) - {"intend"}
-PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill"}   # plan reads/communicates, never plants or closes
+# plan reads/communicates: never plants, closes or executes
+PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill", "entity_link",
+                               "entity_unlink"}
 
 _LANE_REFUSALS = {
     "entity_add": ("the entity hands belong to the EVENT LISTENERS -- "
@@ -672,11 +681,11 @@ _LANE_REFUSALS = {
     "entity_remove": ("the entity hands belong to the EVENT LISTENERS -- "
                       "announce the cleanup through `intend` or `learn`;"
                       " a thinking loop does it"),
-    "entity_link": ("the exec link is the LISTENERS' hand -- announce the "
-                    "command through `intend`/`learn` and a thinking "
-                    "loop links and runs it"),
-    "entity_unlink": ("the exec link is the LISTENERS' hand -- announce "
-                      "the unlink through `intend`/`learn`"),
+    "entity_link": ("plan mode: commands don't run from a planning "
+                    "session -- the build-mode turn links them to the "
+                    "executor"),
+    "entity_unlink": ("plan mode: the executor's links change from a "
+                      "build-mode turn"),
     "fulfill": ("plan mode: goals aren't closed from a planning "
                 "session -- the build-mode turn (or a listener with the "
                 "receipt) closes them"),
