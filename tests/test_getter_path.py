@@ -72,5 +72,35 @@ class TestGetterPath(unittest.TestCase):
         self.assertIn("retry in", N.cooldown_message(props, "nudge", 1010.0))
 
 
+
+class TestTheContractSaysItself(unittest.TestCase):
+    """The 9-minute exhibit (2026-10-08, 23:xx): six getter rewrites --
+    result = {'value': ...}, {'soc': ...}, get(), main(), stdout -- each
+    'fired {}' with no word of why: only result['state'] is read back."""
+
+    def test_wrong_keys_are_named_with_the_shape(self):
+        srv, est, ent = _world("result = {'value': 81, 'soc': 81}")
+        out = WA.entity_read_back(srv, ent, force=True)
+        note = out.get("note") or ""
+        self.assertIn("value", note)
+        self.assertIn("result['state']", note)
+
+    def test_no_result_at_all_says_so(self):
+        srv, est, ent = _world("def get():\n    return {'soc': 81}\nprint('soc 81')")
+        note = WA.entity_read_back(srv, ent, force=True).get("note") or ""
+        self.assertIn("no `result`", note)
+        self.assertIn("result['state']", note)
+
+    def test_the_right_shape_has_no_note(self):
+        srv, est, ent = _world()
+        self.assertNotIn("note", WA.entity_read_back(srv, ent, force=True))
+
+    def test_the_tool_text_gives_the_shape(self):
+        from membrane import mcp_server as M
+        add = next(t for t in M.TOOLS if t["name"] == "entity_edit")
+        desc = add["inputSchema"]["properties"]["getter_script"]["description"]
+        self.assertIn("result = {'state':", desc)
+
+
 if __name__ == "__main__":
     unittest.main()

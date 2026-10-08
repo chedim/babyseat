@@ -41,6 +41,7 @@ later); MEMBRANE_OPERATOR=0 -- the operator entity never fires.
 
 from __future__ import annotations
 
+import json
 import os
 import threading
 import re
@@ -1279,6 +1280,10 @@ _GETTER_LRU_S = 5.0
 _getter_last_ts: dict = {}
 
 
+_GETTER_KEYS = {"state", "render", "patch", "run", "veto", "delete", "data",
+                "intent", "error", "patch_refused", "run_result", "applied"}
+
+
 def entity_read_back(srv, ent, force: bool = False) -> dict:
     """THE READ-BACK TRIGGER: a READ of a dynamic entity fires its
     getter_script (the dict return patches script_data + the entity's
@@ -1302,6 +1307,19 @@ def entity_read_back(srv, ent, force: bool = False) -> dict:
     out = run_entity_update_script(srv, ent, "getter")
     if out.get("error"):
         return {"fired": True, "error": out.get("error")}
+    # THE CONTRACT SAYS ITSELF (2026-10-08: six rewrites 'fired {}' for nine
+    # minutes -- only result['state'] reads back, and nothing said so)
+    note = ""
+    if not out:
+        note = ("the getter set no `result` dict (a top-level variable; a "
+                "function's return and stdout are not read) -- set "
+                "result['state'] = {...} with the live values")
+    else:
+        stray = sorted(k for k in out if k not in _GETTER_KEYS)
+        if stray and not isinstance(out.get("state"), dict):
+            note = (f"the getter's result had keys {stray} -- none is read "
+                    "back: put the live values in result['state'] = {...} "
+                    f"(raw: {json.dumps(out, default=str)[:160]})")
     # THE FULL VERDICT through the engine (the authorship covenant):
     # {run: true} execs the command, {patch} moves the entity, {render}
     # rides the banner -- ONE apply, every lane speaks
@@ -1320,5 +1338,7 @@ def entity_read_back(srv, ent, force: bool = False) -> dict:
                       "state": dict(list(state.items())[:8]),
                       "ts": now})
     out["applied"] = applied
-    return {"fired": True, "state": state,
-            "run_result": out.get("run_result")}
+    res = {"fired": True, "state": state, "run_result": out.get("run_result")}
+    if note:
+        res["note"] = note
+    return res

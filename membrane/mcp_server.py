@@ -485,18 +485,17 @@ TOOLS: list[dict] = [
                                          "kind 'file' is the default "
                                          "for any watcher without one."},
                 "getter_script": {"type": "string",
-                                  "description": "python; the READ-BACK "
-                                                 "trigger -- runs when "
-                                                 "the entity is READ "
-                                                 "(the model's read of a "
-                                                 "dynamic diagnostic "
-                                                 "entity); sets 'result'"
-                                                 "= {state: dict of the "
-                                                 "entity's CURRENT facts}"
-                                                 " -- applied as "
-                                                 "script_data; the 5s "
-                                                 "LRU paces. Empty "
-                                                 "string clears."},
+                                  "description": (
+                                      "python; the READ-BACK trigger -- runs "
+                                      "when the entity is READ. Set a TOP-LEVEL "
+                                      "`result` dict; the live values go under "
+                                      "'state', e.g. result = {'state': "
+                                      "{'soc': 81.2, 'amps': -14}} (also "
+                                      "'render' for the banner, 'patch' to "
+                                      "edit properties). A function's return, "
+                                      "stdout or other keys are NOT read. The "
+                                      "5s LRU paces; run=true forces. Empty "
+                                      "string clears.")},
                 "watch_ops": {"type": "array",
                               "description": "the SPATIAL watch ops "
                                              "(the always-watched lane): "
@@ -1397,6 +1396,8 @@ def tool_entity_read(args: dict, port: int) -> str:
                          f"{str(rr.get('head'))[:160]}")
         else:
             lines.append(f"getter fired: {json.dumps(g.get('state') or {}, default=str)[:300]}")
+        if g.get("note"):
+            lines.append(f"getter note: {g['note']}")
     elif g.get("reason"):
         lines.append(f"getter not fired ({g.get('reason')}).")
     for e in runs[:6]:
