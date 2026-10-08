@@ -429,7 +429,8 @@ def loop_task_text(ev: dict) -> str:
             "essay) and END with exactly one verdict line:\n"
             "  DONE <the receipt>        -- finished (and fulfilled)\n"
             "  STEP <what moved>         -- progress, more to do\n"
-            "  BLOCKED <on whom / what>  -- waiting on a person\n"
+            "  BLOCKED <on whom / what>  -- waiting: on the operator (default), "
+            "'on <entity-id>' (wakes when it moves) or 'retry after 2h'\n"
             "  ignored: <reason>         -- nothing to do\n"
             "The field is your memory; this event is its push.")
 
@@ -601,9 +602,12 @@ class _LoopDrainer:
             if verdict == "blocked":
                 props["blocked_ts"] = time.time()
                 props["blocked_on"] = decision
+                props.pop("blocked_until", None)
+                props.pop("blocked_entity", None)
+                props.update(blocked_condition(decision))
             elif verdict in ("step", "done"):
-                props.pop("blocked_ts", None)
-                props.pop("blocked_on", None)
+                for k in ("blocked_ts", "blocked_on", "blocked_until", "blocked_entity"):
+                    props.pop(k, None)
             goal.properties = props
             # THE GOAL'S CLAIM RECEIPT (the landing ledger the backoff
             # and the next pass read)
@@ -790,13 +794,132 @@ def _ignored_streak(props: dict) -> int:
     return n
 
 
-def _parked(srv, props: dict) -> bool:
-    """A BLOCKED goal waits for its human: it wakes again only after the
-    operator speaks (any operator turn after the block)."""
+_RETRY_RE = re.compile(r"\bretry\s+(?:after|in)\s+(\d+(?:\.\d+)?)\s*"
+                       r"(s|sec|secs|seconds?|m|min|mins|minutes?|h|hr|hrs|hours?|d|days?)\b",
+                       re.IGNORECASE)
+_ON_ENTITY_RE = re.compile(r"\bon\s+((?:membrane::)?[A-Za-z][\w.-]*:[^\s,;()]+)")
+_UNIT_S = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+
+
+def blocked_condition(detail: str, now: float | None = None) -> dict:
+    """A BLOCKED verdict's wake condition (Argus's ask, 2026-10-08):
+    'retry after 2h' -> a timer; 'on <entity-id>' -> wake when it moves;
+    neither -> {} (waits for the operator)."""
+    now = time.time() if now is None else now
+    out: dict = {}
+    m = _RETRY_RE.search(detail or "")
+    if m:
+        unit = m.group(2).lower()
+        out["blocked_until"] = now + float(m.group(1)) * _UNIT_S[unit[0]]
+    m = _ON_ENTITY_RE.search(detail or "")
+    if m:
+        out["blocked_entity"] = m.group(1).rstrip(".")
+    return out
+
+
+def _entity_moved_since(srv, spec: str, ts: float) -> bool:
+    """Has the entity moved after ts -- in the field (its last-seen) or in
+    the store (a stamp on its doc)?"""
+    try:
+        from .efield import last_seen
+        from .night import canon_eid
+        fld = getattr(srv, "efield", None)
+        if fld is not None:
+            for key in {spec, canon_eid(spec) or spec}:
+                st = fld.get(key)
+                if st is not None and (last_seen(st) or 0) > ts:
+                    return True
+    except Exception:
+        pass
+    est = getattr(srv, "entity_store", None)
+    try:
+        doc = est._resolve_spec(spec) if est is not None else None
+    except Exception:
+        doc = None
+    if doc is not None:
+        props = doc.properties or {}
+        for k in ("run_ts", "updated_ts", "value_ts", "last_ts", "ts",
+                  "intent_planted_ts", "fulfilled_ts"):
+            try:
+                if float(props.get(k) or 0) > ts:
+                    return True
+            except (TypeError, ValueError):
+                continue
+    return False
+
+
+def _parked(srv, props: dict, now: float | None = None) -> bool:
+    """A BLOCKED goal waits for its condition: a timer, an entity moving,
+    or (plain BLOCKED) the operator. The operator speaking unparks every
+    kind."""
     bts = float(props.get("blocked_ts") or 0)
     if not bts:
         return False
-    return float(getattr(srv, "_operator_last_ts", 0) or 0) <= bts
+    if float(getattr(srv, "_operator_last_ts", 0) or 0) > bts:
+        return False
+    now = time.time() if now is None else now
+    until = float(props.get("blocked_until") or 0)
+    ent = str(props.get("blocked_entity") or "")
+    if until and now >= until:
+        return False
+    if ent and _entity_moved_since(srv, ent, bts):
+        return False
+    return True
+
+
+def _park_kind(props: dict) -> str:
+    if props.get("blocked_until"):
+        return "timer"
+    if props.get("blocked_entity"):
+        return "entity"
+    return "operator"
+
+
+def dormant_line(srv, now: float | None = None,
+                 min_age_s: float | None = None) -> str:
+    """One line: the open goals that are asleep and why (backoff, parked),
+    without waking any (Argus's ask: show the dormant set at a boot)."""
+    est = getattr(srv, "entity_store", None)
+    if est is None:
+        return ""
+    from .entities import CLASS_GOAL
+    now = time.time() if now is None else now
+    min_age_s = GOAL_REWAKE_S if min_age_s is None else min_age_s
+    backoff: list[int] = []
+    parked = {"operator": 0, "entity": 0, "timer": 0}
+    soonest = None
+    for doc in list((getattr(est, "docs", None) or {}).values()):
+        if doc is None or doc.cls != CLASS_GOAL:
+            continue
+        props = doc.properties or {}
+        if (props.get("status") or "open") != "open":
+            continue
+        if _parked(srv, props, now):
+            k = _park_kind(props)
+            parked[k] += 1
+            if k == "timer":
+                u = float(props.get("blocked_until") or 0)
+                soonest = u if soonest is None else min(soonest, u)
+            continue
+        streak = _ignored_streak(props)
+        last = float(props.get("intent_planted_ts") or 0)
+        if streak and now - last < min_age_s * (2 ** min(streak, 4)):
+            backoff.append(2 ** min(streak, 4))
+    total = len(backoff) + sum(parked.values())
+    if not total:
+        return ""
+    bits = []
+    if backoff:
+        lo, hi = min(backoff), max(backoff)
+        bits.append(f"{len(backoff)} in backoff (x{lo}" + (f"-x{hi})" if hi != lo else ")"))
+    if parked["operator"]:
+        bits.append(f"{parked['operator']} blocked on the operator")
+    if parked["entity"]:
+        bits.append(f"{parked['entity']} waiting on an entity")
+    if parked["timer"]:
+        when = time.strftime("%H:%M", time.localtime(soonest)) if soonest else "?"
+        bits.append(f"{parked['timer']} on a timer (next {when})")
+    return f"asleep: {total} goal(s) -- " + ", ".join(bits)
 
 
 def _due_goals(srv, est, now: float, min_age_s: float) -> list:
@@ -810,7 +933,7 @@ def _due_goals(srv, est, now: float, min_age_s: float) -> list:
         props = doc.properties or {}
         if (props.get("status") or "open") != "open" or doc.eid in held:
             continue
-        if _parked(srv, props):
+        if _parked(srv, props, now):
             continue
         last = float(props.get("intent_planted_ts") or 0)
         wait = min_age_s * (2 ** min(_ignored_streak(props), 4))
@@ -1169,14 +1292,12 @@ def entity_read_back(srv, ent, force: bool = False) -> dict:
     est = getattr(srv, "entity_store", None)
     if est is None:
         return {"fired": False, "reason": "the entity layer is off"}
+    now = time.time()
     if not force:
         last = _getter_last_ts.get(ent.eid, 0.0)
-        now = time.time()
         if now - last < _GETTER_LRU_S:
             return {"fired": False, "reason": "lru"}
-        _getter_last_ts[ent.eid] = now
-    else:
-        _getter_last_ts[ent.eid] = time.time()
+    _getter_last_ts[ent.eid] = now
     from .night import run_entity_update_script, apply_entity_update
     out = run_entity_update_script(srv, ent, "getter")
     if out.get("error"):

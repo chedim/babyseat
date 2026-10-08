@@ -527,7 +527,7 @@ class TestWatchCooldown(unittest.TestCase):
         self.assertNotIn("error", first)
         second = run_entity_update_script(srv, ent, "watch",
                                           extra_state={"payload": {}})
-        self.assertEqual(second.get("error"), "cooldown")
+        self.assertTrue(str(second.get("error")).startswith("cooldown"), second)
         # past 5s the gate opens again
         ent.properties["script_cooldowns"]["watch"] = time.time() - 5.1
         third = run_entity_update_script(srv, ent, "watch",

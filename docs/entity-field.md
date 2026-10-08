@@ -132,8 +132,8 @@ membrane/server.py):
 
 - **Operator** (agent `build` — the main chat): every hand since the
   flood gates (2026-10-08): reads (`query`, `state`, `graph`,
-  `entities_related`, `entity_query`, `entity_read`, `entity_tracks`,
-  `ha_state`), memory (`learn`, `forget`), steering (`intend`, `intents`,
+  `entities_related`, `entity_query`, `entity_read`, `entity_tracks`),
+  memory (`learn`, `forget`), steering (`intend`, `intents`,
   `fulfill`), room (`peer_post`, `peer_seats`, `junk_cut`), the watches
   (`entity_watch`, `entity_unwatch`, `field_watch`, `attention`) and the
   entity hands (`entity_add`, `entity_edit`, `entity_remove`,
@@ -143,7 +143,7 @@ membrane/server.py):
   operator's set **minus** `intend` (a loop takes the next step, closes
   with `fulfill`, or ends BLOCKED; it never plants new goals).
 - **Phone** (agent `phone` — a call through agdroid's calld): reads,
-  `ha_state`, `learn`, `intend`, `intents`. Never the executor or entity
+  `learn`, `intend`, `intents`. Never the executor or entity
   writes: a misheard sentence must not change the boat; a caller's
   request becomes a visible goal.
 - **Plan** (agent `plan`): the operator minus every write and close — a

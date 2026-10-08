@@ -78,22 +78,6 @@ TOOLS: list[dict] = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
-        "name": "ha_state",
-        "description": (
-            "LIVE Home Assistant state (the boat's real values right now: "
-            "battery SOC, currents, lights, sensors). The entity field is "
-            "memory, not telemetry -- read live values HERE, not by shell. "
-            "Give entity_id for one entity, or search with a few words "
-            "(e.g. 'bms battery') to find it. Read-only; the token stays "
-            "server-side."),
-        "inputSchema": {"type": "object", "properties": {
-            "entity_id": {"type": "string",
-                          "description": "e.g. sensor.agatha_bms_battery"},
-            "search": {"type": "string",
-                       "description": "words matched against entity ids and names"},
-            "k": {"type": "integer", "description": "max rows (default 8)"}}},
-    },
-    {
         "name": "intend",
         "description": (
             "Plant YOUR commitment (the steering wheel of membrane's idle "
@@ -1207,18 +1191,6 @@ def tool_peer_post(args: dict, port: int) -> str:
             f"every connected seat; unread messages ride their banners).")
 
 
-def tool_ha_state(args: dict, port: int) -> str:
-    eid = _arg(args, "entity_id", "entity", "eid", "id")
-    q = _arg(args, "search", "query", "q", "text", "name")
-    if not eid and not q:
-        raise ProxyError(400, "entity_id or search required (e.g. search='bms battery')")
-    params = {"entity_id": eid} if eid else {"search": q, "k": str(args.get("k") or 8)}
-    out = _http(port, "GET", "/membrane/ha/state?" + urllib.parse.urlencode(params))
-    if not out.get("ok"):
-        raise ProxyError(502, str(out.get("error") or "Home Assistant read failed"))
-    return str(out.get("text") or "")
-
-
 def tool_intend(args: dict, port: int) -> str:
     """The model's pen on the steering wheel: create-or-pin a shared Goal
     + give it a priority pin on THIS seat's active set. Speech announces
@@ -1445,7 +1417,6 @@ TOOL_IMPLS = {
     "learn": tool_learn,
     "forget": tool_forget,
     "entity_watch": tool_watch_entity,
-    "ha_state": tool_ha_state,
     "field_watch": tool_field_watch,
     "attention": tool_attention,
     "entity_unwatch": tool_unwatch_entity,

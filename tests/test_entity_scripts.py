@@ -114,7 +114,7 @@ class TestModelScripts(unittest.TestCase):
         first = run_entity_update_script(srv, ent, "mention", {})
         second = run_entity_update_script(srv, ent, "mention", {})
         self.assertNotIn("error", first)
-        self.assertEqual(second.get("error"), "cooldown")
+        self.assertTrue(str(second.get("error")).startswith("cooldown"), second)
 
 
 class _Fld:

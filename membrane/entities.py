@@ -2250,10 +2250,12 @@ class EntityStore(MultiParentOps, TimelineOps):
                 ent.properties.pop("script_failures", None)
             else:
                 ent.properties[field] = sval
-                # a rewrite is a fresh start (clear the disable state
+                # a rewrite is a fresh start (clear the disable state,
+                # the cooldowns -- the new script runs on the next try --
                 # AND the stale render from the previous script)
                 ent.properties.pop("script_disabled", None)
                 ent.properties.pop("script_failures", None)
+                ent.properties.pop("script_cooldowns", None)
                 if field == "nudge_script":
                     ent.properties.pop("script_render", None)
         # THE SPATIAL OPS (the reactive layer's CRUD; the same lane's

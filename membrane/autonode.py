@@ -479,7 +479,7 @@ class Autonode:
                 try:
                     res = fut.result()
                     if isinstance(res, dict) and res.get("error") and \
-                            res["error"] != "cooldown":
+                            not str(res["error"]).startswith("cooldown"):
                         # cooldown is a NORMAL gate refusal -- never a
                         # failure print (the smoke showed it spamming)
                         print(f"[autonode] fire {info['eid']}: "

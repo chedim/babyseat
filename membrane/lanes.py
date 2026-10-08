@@ -3705,8 +3705,6 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._membrane_ask(); return
         if path == "/membrane/peer/seats":
             self._peer_seats(); return
-        if path == "/membrane/ha/state":
-            self._ha_state(); return
         if getattr(self.server, "viewer", False):
             if path in ("/viewer", "/viewer/", "/universe", "/universe/"):
                 # THE VIEWER RETIRED (the operator's ruling): the old dev
@@ -5694,40 +5692,6 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._json_out({"ok": False, "error": post_failure_reason(peers)})
             return
         self._json_out({"ok": ok})
-
-    def _ha_state(self) -> None:
-        """GET /membrane/ha/state?entity_id=...|search=...&k=N: live Home
-        Assistant state through the seat's own hass.env token (never
-        shown). Read-only."""
-        from . import ha_state as _ha
-        import urllib.parse as _up
-        qs = _up.parse_qs(self.path.split("?", 1)[-1])
-        eid = (qs.get("entity_id") or [""])[0].strip()
-        q = (qs.get("search") or [""])[0].strip()
-        try:
-            k = max(1, min(25, int((qs.get("k") or ["8"])[0])))
-        except ValueError:
-            k = 8
-        env = _ha.load_env()
-        if not env:
-            self._json_err_raw(503, "no Home Assistant credentials on this "
-                               f"seat ({_ha.DEFAULT_ENV} missing HASS_URL/"
-                               "HASS_TOKEN)"); return
-        if not eid and not q:
-            self._json_err_raw(400, "entity_id or search required "
-                               "(e.g. search='bms battery')"); return
-        try:
-            if eid:
-                rows = [_ha.fetch_one(env, eid)]
-            else:
-                rows = _ha.search(_ha.fetch_all(env), q, k)
-        except Exception as e:
-            msg = str(e)
-            if eid and "404" in msg:
-                self._json_err_raw(404, f"no Home Assistant entity {eid!r}: try "
-                                   "search with a few words"); return
-            self._json_err_raw(502, f"Home Assistant read failed: {msg[:160]}"); return
-        self._json_out({"ok": True, "rows": rows, "text": _ha.render_rows(rows)})
 
     def _peer_seats(self) -> None:
         """GET /membrane/peer/seats: the registry read (who else is

@@ -667,8 +667,6 @@ OPERATOR_TOOLS = frozenset((
     # reads
     "query", "state", "graph", "entities_related", "entity_query",
     "entity_read", "entity_tracks",
-    # live Home Assistant (the field is memory, not telemetry; 2026-10-08)
-    "ha_state",
     # memory
     "learn", "forget",
     # steering (intentions -- THE OPERATOR'S PEN; fulfill = the close
@@ -714,7 +712,7 @@ PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill", "entity_link",
 # becomes a visible goal (intend) the loops carry out.
 PHONE_TOOLS = frozenset(("query", "state", "graph", "entities_related",
                          "entity_query", "entity_read", "entity_tracks",
-                         "ha_state", "learn", "intend", "intents"))
+                         "learn", "intend", "intents"))
 
 _LANE_REFUSALS = {
     "field_watch": ("plan mode: watches aren't planted from a planning "

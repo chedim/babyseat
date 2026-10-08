@@ -1854,7 +1854,9 @@ _SCRIPT_TIMEOUTS = {"consolidation": SCRIPT_TIMEOUT_S,
                     # the READ-BACK trigger (the operator's 2026-10-02
                     # ask): a dynamic entity's getter runs on read; the
                     # LRU (watch_agents 5s) paces, this budget bounds
-                    "getter": 1.0}
+                    # a getter reads a REAL source (an HTTP API, a
+                    # sensor file): 1.0s couldn't fit one curl
+                    "getter": 10.0}
 _SCRIPT_COOLDOWN_DEFAULT_S = 60.0
 
 # ---- THE HEAT METER (the gravity limiter's one measure) ---------------
@@ -2225,6 +2227,8 @@ def _cooldown_ok(props: dict, trigger: str, now: float) -> bool:
     """Per-entity per-trigger cooldown: a hot entity (session:now gets
     mentioned constantly) cannot exec every tick. properties
     ['script_cooldown_s'] overrides downward-only (the operator's knob)."""
+    if trigger == "getter":
+        return True       # a getter is paced by the read LRU (5s), never 60s
     last = ((props.get("script_cooldowns") or {}).get(trigger) or 0.0)
     cd = (_SCRIPT_COOLDOWN_WATCH_S if trigger == "watch"
           else _SCRIPT_COOLDOWN_DEFAULT_S)
@@ -2233,6 +2237,20 @@ def _cooldown_ok(props: dict, trigger: str, now: float) -> bool:
     except (TypeError, ValueError):
         pass
     return (now - float(last or 0.0)) >= cd
+
+
+def cooldown_message(props: dict, trigger: str, now: float) -> str:
+    """The cooldown refusal that says when (the seat guessed for minutes)."""
+    last = float(((props.get("script_cooldowns") or {}).get(trigger)) or 0.0)
+    cd = (_SCRIPT_COOLDOWN_WATCH_S if trigger == "watch"
+          else _SCRIPT_COOLDOWN_DEFAULT_S)
+    try:
+        cd = min(cd, float((props.get("script_cooldown_s") or cd)))
+    except (TypeError, ValueError):
+        pass
+    wait = max(1, int(round(cd - (now - last))))
+    return (f"cooldown: the {trigger} script ran {int(now - last)}s ago; "
+            f"retry in {wait}s")
 
 
 def _stamp_cooldown(props: dict, trigger: str, now: float) -> None:
@@ -2367,7 +2385,8 @@ def _run_script_locked(srv, ent, trigger, code, props, now, is_cron,
             return {"error": "cron-overrun: next run blocked",
                     "blocked": True}
     if trigger != "tick" and not _cooldown_ok(props, trigger, now):
-        return {"error": "cooldown"}   # the tick is paced by tick_every
+        # the tick is paced by tick_every
+        return {"error": cooldown_message(props, trigger, now)}
     timeout = _SCRIPT_TIMEOUTS.get(trigger, SCRIPT_TIMEOUT_S)
     if trigger != "tick":              # tick needs no stamp (never gated)
         _stamp_cooldown(props, trigger, now)
