@@ -339,6 +339,15 @@ def loop_session(srv, agent: str) -> str:
     return f"loop::{agent}"
 
 
+def proxy_bind_host(args) -> str:
+    """THE /v1 PORT ON THE LAN (2026-10-08, the operator's call): all
+    interfaces by default (a wifi-only device: the LAN is the reach);
+    --listen-host / MEMBRANE_LISTEN_HOST bind it back to 127.0.0.1. The
+    proxy's write/exec routes carry no auth -- open is a deliberate choice."""
+    return (getattr(args, "listen_host", None)
+            or os.environ.get("MEMBRANE_LISTEN_HOST") or "0.0.0.0")
+
+
 def main() -> None:
     import argparse
     ap = argparse.ArgumentParser(
@@ -347,6 +356,11 @@ def main() -> None:
                     "to Ollama).")
     ap.add_argument("--listen", type=int, default=11500,
                     help="port for the membrane OpenAI-compatible proxy")
+    ap.add_argument("--listen-host", dest="listen_host", default=None,
+                    help="the /v1 proxy's bind address (default 0.0.0.0 -- "
+                         "the LAN; its write/exec routes carry NO auth; "
+                         "127.0.0.1 = this device only; env "
+                         "MEMBRANE_LISTEN_HOST)")
     ap.add_argument("--no-viewer", dest="viewer", action="store_false",
                     default=True,
                     help="don't serve the universe map at /viewer (ON by "
@@ -701,7 +715,7 @@ def main() -> None:
             _serve_socket.setsockopt(_sk.SOL_SOCKET, _sk.SO_REUSEADDR, 1)
             _serve_socket.bind((_serve_bind, serve_port))
             _serve_socket.listen(128)
-    srv = ThreadingHTTPServer(("127.0.0.1", listen), MembraneOpenAIHandler)
+    srv = ThreadingHTTPServer((proxy_bind_host(args), listen), MembraneOpenAIHandler)
     srv.membrane = mem
     srv.viewer = bool(args.viewer)   # dev field viewer at /viewer (OFF default)
     # THE STATELESS LLM (the field is the only memory): --no-context
@@ -821,6 +835,23 @@ def main() -> None:
     except Exception as e:
         print(f"[opencode] watch layer disabled ({_one_line(e)})",
               file=sys.stderr)
+    # THE ALERT DIAL (2026-10-08, the seat's review): watch events past the
+    # budget fold into the WHERE WE ARE digest instead of interrupt turns;
+    # the seat sets it with the attention tool (persisted next to the field)
+    try:
+        import json as _json
+        from .attention import AlertGate
+        srv._attention_path = str(_wdir / "attention.json")
+        _saved = None
+        if os.path.exists(srv._attention_path):
+            _saved = _json.loads(open(srv._attention_path).read() or "{}")
+        srv._alert_gate = AlertGate.from_settings(_saved)
+        _g = srv._alert_gate.settings()
+        print(f"[opencode] alert dial: {_g['budget']} interrupt turns per "
+              f"{_g['window_min']:g} min, mode {_g['mode']}", file=sys.stderr)
+    except Exception as e:
+        srv._alert_gate = None
+        print(f"[opencode] alert dial off ({_one_line(e)})", file=sys.stderr)
     srv._intent_board = None
     try:
         srv._intent_board = IntentBoard(_wdir / "intents.json",
@@ -881,6 +912,9 @@ def main() -> None:
                 _install_judges(srv)
             print(f"[efield] capture {srv.capturer.mode} "
                   f"({type(be).__name__})", file=sys.stderr)
+            # (THE PRE-SPLIT COUNTS: no boot relabel -- a full pass rewrote
+            # every state row into the append-only journal, ~250MB; pre-split
+            # states convert on their next mention: efield.adopt_legacy)
     except Exception as e:
         print(f"[efield] capture off ({e})", file=sys.stderr)
     # (srv.receipts is set above from --no-receipts; a re-assignment here
@@ -1043,38 +1077,17 @@ def main() -> None:
             _ib2 = _intents_board(srv)
             _pool2 = getattr(srv, "events_pool", None)
             if _ib2 is not None and _pool2 is not None:
-                from .watch_agents import notify_intent_planted
+                from .watch_agents import boot_wake_goals
                 from .entities import CLASS_GOAL
-                _n_wakes = 0
-                _n_goals = 0
-                # ALL OPEN GOALS (the board's ranking requires geometry;
-                # an older plant's position-less goal would sit unseen
-                # forever: the wake reads the STORE's goal docs -- every
-                # open commitment re-derives its wake, whatever its age)
-                for _geid, _gdoc in list((srv.entity_store.docs
-                                          or {}).items()):
-                    _gp = (_gdoc.properties or {}) \
-                        if _gdoc is not None else {}
-                    if _gdoc is None or _gdoc.cls != CLASS_GOAL \
-                            or (_gp.get("status") or "open") != "open":
-                        continue
-                    _n_goals += 1
-                    _geid = _gdoc.eid
-                    _gprops = ((srv.entity_store.docs.get(_geid)
-                                .properties) if _geid in
-                               (srv.entity_store.docs or {}) else {}) or {}
-                    # THE PER-BOOT WAKE (the one-time ts was permanent:
-                    # a goal claimed by a DEAD boot's loop never re-woke
-                    # -- 'the executor is not executing' again): the
-                    # stamp records THE BOOT that received it; a NEW
-                    # boot re-derives every goal's wake fresh.
-                    if _gprops.get("intent_planted_boot") == str(
-                            srv._boot_ts):
-                        continue          # THIS boot already re-queued it
-                    notify_intent_planted(srv.entity_store, _pool2,
-                                          _geid, str(_gp.get("name") or ""),
-                                          created=False)
-                    _n_wakes += 1
+                # THE BOOT'S WAKE rides the pulse's rules (2026-10-08:
+                # re-firing every open goal on every boot was 37% of the
+                # loops' tool calls): stale goals only, with the backoff,
+                # parked goals wait for the operator
+                _n_goals = sum(
+                    1 for _d in list((srv.entity_store.docs or {}).values())
+                    if _d is not None and _d.cls == CLASS_GOAL
+                    and ((_d.properties or {}).get("status") or "open") == "open")
+                _n_wakes = boot_wake_goals(srv)
                 print(f"[seat] the board re-derives the wakes: "
                       f"{_n_wakes}/{_n_goals} open goal(s) re-queued to "
                       "the listeners", file=sys.stderr)
@@ -1320,9 +1333,19 @@ def main() -> None:
                 if runner is not None:
                     out = runner.run(session_id, text)
                     parts = (out or {}).get("parts") or []
-                    txt = " ".join(str(p.get("text") or "")
-                                   for p in parts if p.get("type") == "text")
-                    return {"verdict_text": txt[:200]}
+                    txt = "\n".join(str(p.get("text") or "")
+                                    for p in parts if p.get("type") == "text")
+                    trail = []
+                    for p in parts:
+                        if p.get("type") != "tool":
+                            continue
+                        st = p.get("state") or {}
+                        res = str(st.get("output") or st.get("error") or "")
+                        trail.append(f"{p.get('tool')} {st.get('status', '')}: "
+                                     f"{' '.join(res.split())[:60]}")
+                    # the WHOLE text: the verdict is its last line
+                    return {"text": txt[-4000:], "verdict_text": txt[:200],
+                            "trail": trail[-6:]}
                 # the proxy-only degrade: ONE model call, no tools
                 from .rag import _model_chat
                 model = (getattr(srv, "idle_cortex_model", "") or "")

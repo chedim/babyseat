@@ -61,8 +61,9 @@ membrane: intents          # the board
 membrane: fulfill #N       # explicit close
 ```
 
-An intention is never auto-closed by similarity — only `fulfill` or expiry
-closes it. Without an open intention the dreamer skips (unsteered dreams
+An intention is never auto-closed by similarity — only `fulfill` closes it
+(goals carry no TTL; a loop that landed the work closes it with the
+receipt). Without an open intention the dreamer skips (unsteered dreams
 confirm near-randomly — a measured lesson). The MCP tools `intend` /
 `intents` (and an entity script's `{intent: …}` verdict) plant through the
 same lane; every plant is an `intent-planted` event the thinking loops
@@ -165,3 +166,29 @@ MEMBRANE_EFIELD=shadow | off   # events-only capture / the field off
 MEMBRANE_LANE_GATE=0           # the flat tool surface (no operator/listener split)
 MEMBRANE_NERVE_PAUSE=0         # pause becomes a no-op
 ```
+
+## The goal loops' rhythm (2026-10-08)
+
+The cost review (116 loop runs, 2056 tool calls in 8 h, all cloud) set
+these rules (`membrane/watch_agents.py`, pinned in
+`tests/test_watch_cost.py`):
+
+- **Waking.** A goal wakes when it is new, or when the board's pulse
+  (every 5 min, idle-only, 3 per beat) finds it stale: 30 min since its
+  last wake, doubled for each trailing pass that wasn't a STEP (capped
+  ×16). A boot wakes only what the pulse would; it no longer re-fires
+  every open goal.
+- **The verdict.** Every pass ends with one line: `DONE <receipt>`,
+  `STEP <what moved>`, `BLOCKED <on whom>` or `ignored: <reason>`. A pass
+  that ends with no text is `aborted`, and its last tool calls ride into
+  the next wake. `DONE` with the goal still open gets one "call fulfill
+  now" nudge. `BLOCKED` parks the goal until the operator next speaks.
+- **The budget.** About 8 tool calls per pass. The next wake carries the
+  whole goal text and the last three landings.
+- **The gate.** Only a NEW plant (and its landing) skips the alert budget.
+  Rewakes and boot wakes pay like any watch event.
+- **The close.** `fulfill` takes any spelling of the goal's id
+  (`membrane::goal:<id>`, `m:goal:<id>`, `goal:<id>`, `#<id>`). An
+  id-shaped spec never name-matches another goal, and a closed goal
+  answers "already fulfilled".
+

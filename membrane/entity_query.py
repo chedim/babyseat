@@ -17,6 +17,8 @@ $0 (the RAM graph scan; no embedder without 'near:'). Rows carry
 """
 from __future__ import annotations
 
+import re
+
 from membrane.entities import MEMBRANE_NS
 
 # ---- THE KIND ALIAS FAMILY (the 'kind:file:* is empty' exhibit) ----
@@ -68,12 +70,45 @@ def _is_guest(eid: str, props: dict | None = None) -> bool:
 
 
 # ---- the grammar ------------------------------------------------------------
+GRAMMAR = ("kind:<kind> | name~:<text> | parent:<spec> | children:<spec> | "
+           "near:<free text> | status:<s> | guest:true, joined with & (and) "
+           "or | (or); e.g. 'kind:component & name~:battery'")
+_VERBS = {"kind", "name~", "name_prefix", "parent", "children", "near",
+          "status", "guest", "match-all"}
+_VERB_ALIAS = {"class": "kind", "cls": "kind", "type": "kind",
+               "name": "name~", "eid": "name~", "id": "name~"}
+_TERM = re.compile(r"^\s*([a-z_]+)\s*(~:|~=|~|:|=)\s*(.*)$", re.IGNORECASE | re.DOTALL)
+
+
+def _term(t: str) -> tuple[str, str]:
+    if t.strip().lower() in _VERBS:
+        return t.strip().lower(), ""        # a bare verb ('match-all')
+    if t.strip() == "*":
+        return "match-all", ""
+    m = _TERM.match(t)
+    if not m:
+        raise ValueError(f"cannot read the query term {t!r}; the grammar: {GRAMMAR}")
+    verb, op, val = m.group(1).lower(), m.group(2), m.group(3).strip()
+    if op.startswith("~"):
+        verb = "name~" if verb in ("name", "eid", "id") else verb + "~"
+        if verb.endswith("~") and verb != "name~":
+            verb = "name~"
+    verb = _VERB_ALIAS.get(verb, verb)
+    if verb not in _VERBS:
+        raise ValueError(f"unknown query verb: {verb!r}; the grammar: {GRAMMAR}")
+    return verb, val
+
+
 def parse(q: str) -> list[list[tuple[str, str]]]:
     """'a & b | c' -> [[('a','a'),('b','b')], [('c','c')]]: an OR of
-    AND-blocks (the disjunctive normal form, one line, no nesting)."""
+    AND-blocks (the disjunctive normal form, one line, no nesting). The
+    loose forms parse too ('name~x', 'name=x', 'kind=c', 'class:x', AND/OR
+    words); prose answers with the grammar."""
     q = (q or "").strip()
     if not q:
         return [[("match-all", "")]]
+    q = re.sub(r"\s+(?:AND|and)\s+", " & ", q)
+    q = re.sub(r"\s+(?:OR|or)\s+", " | ", q)
     out: list[list[tuple[str, str]]] = []
     for block in q.split("|"):
         terms = []
@@ -81,13 +116,7 @@ def parse(q: str) -> list[list[tuple[str, str]]]:
             t = t.strip()
             if not t:
                 continue
-            verb, _, val = t.partition(":")
-            verb = verb.strip()
-            if verb.endswith("~"):
-                verb = "name~"            # the prefix-match verb's name
-            if not verb:
-                continue
-            terms.append((verb, val.strip()))
+            terms.append(_term(t))
         if not terms:
             raise ValueError("an empty OR block in the query")
         out.append(terms)
@@ -149,7 +178,7 @@ def _matches(est, ent, verb: str, val: str, near_fn=None) -> bool:
         if near_fn is None:
             return False
         return near_fn(ent)
-    raise ValueError(f"unknown query verb: {verb!r}")
+    raise ValueError(f"unknown query verb: {verb!r}; the grammar: {GRAMMAR}")
 
 
 # ---- the engine ---------------------------------------------------------------

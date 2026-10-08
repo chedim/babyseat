@@ -1,7 +1,7 @@
 """The watch layer: spatial triggers over the field's embedding space.
 
 Under test (membrane/watch.py + the opencode glue):
-- set/drop/list + count cap with weakest-eviction
+- set/drop/list + count cap (a full board refuses; nothing is evicted)
 - on_learn fires an event inside the radius, nothing outside
 - gravity: mass-swallowing watches collapse (radius shrink) then go dormant
 - charge: hits refill, misses erode; a starved watch sleeps
@@ -76,21 +76,21 @@ class TestSetDrop(unittest.TestCase):
         self.assertEqual(len(b.watches), 1)
         self.assertEqual(w2.radius, 0.4)      # radius kept (earned stays)
 
-    def test_cap_evicts_lowest_charge(self):
+    def test_cap_refuses_never_evicts(self):
+        """2026-10-08 (the operator's call): the model manages its own
+        watches -- a full board REFUSES with the inventory; membrane never
+        evicts the lowest-charge watch for it any more."""
+        from membrane.watch import WatchFull
         b = _board()
-        first, _ = b.set_watch("deploy", None)
-        for topic in ("testing", "database", "other one a", "other one b",
-                      "other one c", "other one d", "other one e"):
+        for topic in ("deploy", "testing", "database", "other one a",
+                      "other one b", "other one c", "other one d"):
             b.set_watch(topic, None)
-        # now at the cap (7); drain the first watch's charge via misses
-        for _ in range(30):
-            b.on_learn(_ex(5), 0)
-        _, evicted = b.set_watch("fresh topic", None)
+        before = sorted(w.label for w in b.watches.values())
+        with self.assertRaises(WatchFull) as cm:
+            b.set_watch("fresh topic", None)
         self.assertEqual(len(b.watches), MAX_WATCHES)
-        self.assertEqual(evicted, min(b.watches.values(),
-                                      key=lambda w: w.charge).label
-                         if False else evicted)
-        self.assertNotIn("fresh topic", evicted or "")
+        self.assertEqual(sorted(w.label for w in b.watches.values()), before)
+        self.assertEqual(len(cm.exception.inventory), MAX_WATCHES)
 
     def test_drop_forms(self):
         b = _board()

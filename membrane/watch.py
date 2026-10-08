@@ -13,8 +13,11 @@ intuition, in two honest directions):
         (it grabbed an importance it did not earn).
       > STARVATION: charge (hit-refilled, miss-eroded) hits 0 -> dormant
         (nobody's attention is OWED).
-  * CAP -- at most MAX_WATCHES live; a new watch evicts the lowest-charge
-    one (tie: oldest). Attention is a scarce resource by construction.
+  * CAP -- at most MAX_WATCHES live, inside the shared attention budget
+    (attention.py). At the cap a plant is REFUSED with the inventory --
+    the model drops what it no longer needs (2026-10-08: the old board
+    evicted the lowest-charge watch for it). Attention is a scarce
+    resource by construction.
 
 Events live in memory only (a proxy restart loses undelivered reports --
 the same covenant as the thought-ask ledger). Watch definitions persist in
@@ -74,6 +77,8 @@ class Watch:
     dormant_until: float = 0.0
     last_hit: float = 0.0
     collapse_note: str = ""
+    owner: str = ""          # the planting loop's agent ('' = the operator)
+    created: float = 0.0     # plant time (the inventory's age)
 
     def to_json(self) -> dict:
         d = {"wid": self.wid, "label": self.label, "probe": self.probe,
@@ -82,7 +87,8 @@ class Watch:
              "charge": round(self.charge, 3),
              "hits": self.hits, "seen": self.seen,
              "dormant_until": self.dormant_until,
-             "last_hit": self.last_hit, "collapse_note": self.collapse_note}
+             "last_hit": self.last_hit, "collapse_note": self.collapse_note,
+             "owner": self.owner, "created": self.created}
         if self.junk_sim is not None:
             d["junk_sim"] = round(self.junk_sim, 3)
         return d
@@ -100,7 +106,20 @@ class Watch:
                    hits=int(r.get("hits", 0)), seen=int(r.get("seen", 0)),
                    dormant_until=float(r.get("dormant_until", 0.0)),
                    last_hit=float(r.get("last_hit", 0.0)),
-                   collapse_note=str(r.get("collapse_note", "")))
+                   collapse_note=str(r.get("collapse_note", "")),
+                   owner=str(r.get("owner", "") or ""),
+                   created=float(r.get("created", 0.0) or 0.0))
+
+
+class WatchFull(RuntimeError):
+    """THE LIMIT IS THE TEACHER (2026-10-08, the operator's call): a plant
+    past the board's cap or the attention budget is REFUSED with the
+    inventory of live watches -- the model chooses what to drop; membrane
+    never evicts for it."""
+
+    def __init__(self, msg: str, inventory: list | None = None) -> None:
+        super().__init__(msg)
+        self.inventory = list(inventory or [])
 
 
 class WatchBoard:
@@ -150,8 +169,12 @@ class WatchBoard:
         return b
 
     # ---- set / drop ----
-    def set_watch(self, label: str, vec) -> tuple[Watch, str | None]:
-        """Plant (or re-arm) a watch by topic; returns (watch, evicted_label).
+    def set_watch(self, label: str, vec, owner: str = "",
+                  check=None) -> tuple[Watch, str | None]:
+        """Plant (or re-arm) a watch by topic; returns (watch, None) -- the
+        second slot is kept for callers (nothing is ever evicted any more:
+        a full board/budget raises WatchFull with the inventory). ``check``
+        = the attention budget's over(n) (the cross-sense limit).
         ``vec`` (unit list) optional: None -> embed the label via the board's
         embedder. A re-plant of the same label refreshes radius+charge instead
         of doubling the probes."""
@@ -175,11 +198,17 @@ class WatchBoard:
                 w.window = []
                 return w, None
         if len(self.watches) >= MAX_WATCHES:
-            victim = min(self.watches.values(),
-                         key=lambda w: (w.charge, w.last_hit))
-            evicted = victim.label
-            self.watches.pop(victim.wid)
-        w = Watch(wid=self._next_wid, label=label.strip(), probe=probe)
+            from .attention import inventory as _inv, render as _render
+            inv = _inv(None, self)
+            raise WatchFull(
+                f"the board holds {MAX_WATCHES} watches (its cap) -- drop one "
+                f"you no longer need, then plant again.\n" + _render(inv), inv)
+        if check is not None:
+            refused = check(1)
+            if refused:
+                raise WatchFull(refused["error"], refused.get("inventory"))
+        w = Watch(wid=self._next_wid, label=label.strip(), probe=probe,
+                  owner=str(owner or ""), created=time.time())
         self._next_wid += 1
         self.watches[w.wid] = w
         self.save()

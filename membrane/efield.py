@@ -125,6 +125,90 @@ def coherence_of(rsum, n: int) -> float:
     return float((float(np.dot(rsum, rsum)) - n) / (n * (n - 1)))
 
 
+# THE CITATION CARTEL (2026-10-08, the seat's own review): "if my own
+# echo-mentions increment 'said', you get a feedback loop: I mention it ->
+# it looks hot -> it stays in my tracks -> I mention it again". The model's
+# echoes count apart and fade; the ranking and the banner read evidence.
+ECHO_ROLES = ("model", "reasoning")
+ECHO_HALF_LIFE_S = 6 * 3600.0
+
+
+def echo_now(st, now: float) -> float:
+    """The model-echo count at `now` (half-life ECHO_HALF_LIFE_S)."""
+    e = float(getattr(st, "echo", 0.0) or 0.0)
+    ts = getattr(st, "echo_ts", None)
+    if not e or ts is None:
+        return e
+    dt = max(0.0, float(now) - float(ts))
+    return e * 0.5 ** (dt / ECHO_HALF_LIFE_S)
+
+
+def adopt_legacy(st, ts=None) -> None:
+    """A PRE-SPLIT state (stream counts, no role counts) converts on its
+    next mention: its old discourse -- possibly the model's own storm --
+    becomes echo fading from its last-seen time; observation/code stay
+    evidence. Free: the state is being rewritten for that mention anyway
+    (a full relabel pass rewrote ~250MB of state rows into the journal)."""
+    if st.n_by_role or not st.n_by_stream:
+        return
+    c = st.n_by_stream
+    st.n_by_role = {k: v for k, v in c.items() if k in ("observation", "code")}
+    st.n_by_role["unsplit"] = 0
+    disc = int(c.get("discourse") or 0)
+    if disc:
+        st.echo = float(disc)
+        st.echo_ts = last_seen(st) or ts
+
+
+def note_mention(st, stream: str, role: str, ts, adopt: bool = True) -> None:
+    """One mention, counted per role (discourse) or per stream (the rest);
+    a model echo also feeds the decaying echo count. ``adopt=False``: the
+    caller already converted a pre-split state BEFORE counting this mention
+    in n_by_stream (_update) -- a brand-new state is never 'pre-split'."""
+    if adopt:
+        adopt_legacy(st, ts)
+    key = role if (stream == "discourse" and role) else (stream or "?")
+    st.n_by_role[key] = st.n_by_role.get(key, 0) + 1
+    if stream == "discourse" and role in ECHO_ROLES:
+        t = float(ts if ts is not None else time.time())
+        st.echo = echo_now(st, t) + 1.0
+        st.echo_ts = t
+
+
+def event_ts(ts, seq):
+    """THE FRESHNESS HOLES (2026-10-08): an event's time -- its own ts, else
+    its seq (the per-origin MICROSECOND clock: the same value on every
+    replay), else None."""
+    if ts is not None:
+        return ts
+    try:
+        # only a real microsecond clock (after 2001); a backfill's
+        # synthetic seq (audit line * 16) carries no time
+        return int(seq) / 1e6 if seq and int(seq) > 10 ** 15 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def last_seen(st):
+    """A state's last-moved time (last_ts, else its last_pos seq)."""
+    if getattr(st, "last_ts", None) is not None:
+        return st.last_ts
+    pos = getattr(st, "last_pos", None) or (-1, -1)
+    return event_ts(None, pos[0] if pos else None)
+
+
+def evidence_n(st) -> int:
+    """The mentions that are NOT the model's own echo (legacy states with
+    no per-role counts fall back to n: their split is unknown)."""
+    roles = getattr(st, "n_by_role", None)
+    if not roles:
+        # pre-split: the old discourse may be the model's own storm -- it
+        # is not evidence; observed + code are
+        c = getattr(st, "n_by_stream", None) or {}
+        return int((c.get("observation") or 0) + (c.get("code") or 0))
+    return int(sum(v for k, v in roles.items() if k not in ECHO_ROLES))
+
+
 @dataclass
 class EntityState:
     eid: str
@@ -143,10 +227,15 @@ class EntityState:
     last_ts: float | None = None
     last_pos: tuple = (-1, -1)                 # (seq, sentence index) applied
     recent: list = field(default_factory=list)
-    pending: list = field(default_factory=list)  # nursery: [sid, seq, sidx, stream, ev, ts]
+    pending: list = field(default_factory=list)  # nursery: [sid, seq, sidx, stream, ev, ts, role]
     distinct: list = field(default_factory=list)
     conflicts: list = field(default_factory=list)
     activity: float | None = None
+    # THE CITATION CARTEL'S CURE (2026-10-08): mentions per ROLE, and the
+    # model's own echoes as a DECAYING count of their own (note_mention)
+    n_by_role: dict = field(default_factory=dict)
+    echo: float = 0.0
+    echo_ts: float | None = None
 
     @property
     def coherence(self) -> float:
@@ -170,7 +259,8 @@ class EntityState:
              "coherence": self.coherence, "first_ts": self.first_ts,
              "last_ts": self.last_ts, "last_pos": list(self.last_pos),
              "recent": list(self.recent), "conflicts": list(self.conflicts),
-             "activity": self.activity}
+             "activity": self.activity, "n_by_role": dict(self.n_by_role),
+             "echo": self.echo, "echo_ts": self.echo_ts}
         if self.tier == "nursery":
             d["pending"] = [list(p) for p in self.pending]
             d["distinct"] = list(self.distinct)
@@ -192,7 +282,9 @@ class EntityState:
                  recent=list(d.get("recent") or []),
                  pending=[list(p) for p in d.get("pending") or []],
                  distinct=list(d.get("distinct") or []),
-                 conflicts=list(d.get("conflicts") or []), activity=d.get("activity"))
+                 conflicts=list(d.get("conflicts") or []), activity=d.get("activity"),
+                 n_by_role=dict(d.get("n_by_role") or {}),
+                 echo=float(d.get("echo") or 0.0), echo_ts=d.get("echo_ts"))
         if st.tier != "nursery":
             st.state = unpack_f16(d["state"])
             st.seed = unpack_f16(d["seed"])
@@ -324,7 +416,11 @@ class EntityField:
                    "text": ev.text, "tool": ev.tool, "args": ev.args,
                    "result_head": ev.result_head, "result_tail": ev.result_tail,
                    "result_len": ev.result_len, "outcome": ev.outcome,
-                   "call_id": ev.call_id, "served": ev.served_text, "ts": ev.ts,
+                   "call_id": ev.call_id, "served": ev.served_text,
+                   # a LIVE untimed event is stamped at intake (the
+                   # freshness holes); a backfill (explicit seqs) keeps
+                   # its history untimed, never 'just now'
+                   "ts": ev.ts if (ev.ts is not None or seqs is not None) else time.time(),
                    "src": ev.src, "clipped": ev.clipped, "code": ev.code,
                    "seq": seq, "status": "pending", "subject": ev.subject}
             # '#N': the short per-origin number the model and the operator cite
@@ -507,7 +603,8 @@ class EntityField:
         return st
 
     def _update(self, st: EntityState, x, stream: str, sid: str, seq: int,
-                sidx: int, evkey: str, ts) -> None:
+                sidx: int, evkey: str, ts, role: str = "") -> None:
+        ts = event_ts(ts, seq)            # an untimed event: its seq's clock
         pos = (seq, sidx)
         if tuple(pos) <= tuple(st.last_pos):
             return                                    # idempotence
@@ -522,7 +619,9 @@ class EntityField:
         r = unit(x - bg) if bg is not None else x
         st.rsum = f32(r if st.rsum is None else st.rsum + r)
         st.n += 1
+        adopt_legacy(st, ts)              # a pre-split state converts first
         st.n_by_stream[stream] = st.n_by_stream.get(stream, 0) + 1
+        note_mention(st, stream, role, ts, adopt=False)
         st.net_align += align
         st.accr += int(align >= ACCRETE)
         st.first_ts = st.first_ts if st.first_ts is not None else ts
@@ -552,9 +651,11 @@ class EntityField:
         pend = sorted(st.pending, key=lambda p: (p[1], p[2]))
         vecs = self.b.get_multi("sentences", [p[0] for p in pend])
         st.pending, st.distinct = [], []
-        for sid, seq, sidx, stream, evkey, ts in pend:
+        for p in pend:
+            sid, seq, sidx, stream, evkey, ts = p[:6]
+            role = p[6] if len(p) > 6 else ""        # pre-split pendings: no role
             if sid in vecs:
-                self._update(st, unit(vecs[sid]["vec"]), stream, sid, seq, sidx, evkey, ts)
+                self._update(st, unit(vecs[sid]["vec"]), stream, sid, seq, sidx, evkey, ts, role)
         self._dirty.add(st.eid)
 
     def _apply(self, key: str, ev: dict) -> None:
@@ -603,14 +704,16 @@ class EntityField:
             if st is None:
                 continue                  # the dust cap: no state born
             if st.tier == "nursery":
-                st.pending.append([sids[sidx], seq, sidx, stream, key, ts])
+                st.pending.append([sids[sidx], seq, sidx, stream, key, ts,
+                                   ev.get("role") or ""])
                 if sids[sidx] not in st.distinct:
                     st.distinct.append(sids[sidx])
                 self._dirty.add(eid)
                 if self._mat_bar(eid) <= len(st.distinct):
                     self._materialize(st)
                 continue
-            self._update(st, X[sidx], stream, sids[sidx], seq, sidx, key, ts)
+            self._update(st, X[sidx], stream, sids[sidx], seq, sidx, key, ts,
+                         ev.get("role") or "")
         for i in live_idx:
             self._bg_update(stream, X[i])
         # THE EVENT-INDEX DELTA (the word-bar's companion): EVERY
@@ -793,6 +896,61 @@ class EntityField:
             self._deltas_index = idx
             return sum(len(v) for v in idx.values())
 
+    def relabel_roles(self, now: float | None = None, batch: int = 200) -> dict:
+        """THE PRE-SPLIT COUNTS (2026-10-08, the seat's follow-up): every
+        live state without per-role counts is relabelled ONCE -- from its
+        deltas (each names its event, the event its role: the true split,
+        echoes decayed from their own times), or, for word/phrase states
+        (no deltas), its old discourse count becomes echo fading from the
+        state's last-seen time. Idempotent (a relabelled state has roles)."""
+        now = time.time() if now is None else float(now)
+        out = {"relabelled": 0, "from_deltas": 0, "as_echo": 0}
+        eids = [d.get("eid") for _, d in self.b.scan(
+            "entity_states", {"origin": self.origin, "tier": "live"}) if d.get("eid")]
+        todo = []
+        for eid in eids:
+            st = self.get(eid)
+            if st is not None and not st.n_by_role and st.n:
+                todo.append(st)
+        if not todo:
+            return out
+        # ONE pass over the deltas, OUTSIDE the lock (deltas_of's index is
+        # invalidated by every flush: per-batch use rebuilt it from the whole
+        # collection each time, under the lock -- the live turns waited)
+        want = {st.eid for st in todo}
+        rows_by: dict = {}
+        for _, d in self.b.scan("entity_deltas", {"origin": self.origin}):
+            e = d.get("eid")
+            if e in want:
+                rows_by.setdefault(e, []).append(d)
+        keys = list({d.get("event") for rows in rows_by.values() for d in rows if d.get("event")})
+        roles: dict = {}
+        for lo in range(0, len(keys), 500):
+            for k, ev in self.b.get_multi("events", keys[lo:lo + 500]).items():
+                roles[k] = (ev or {}).get("role") or ""
+        for lo in range(0, len(todo), batch):
+            with self._lock:
+                for st in todo[lo:lo + batch]:
+                    ds = rows_by.get(st.eid)
+                    if ds:
+                        st.n_by_role, st.echo, st.echo_ts = {}, 0.0, None
+                        for d in sorted(ds, key=lambda r: (r.get("seq") or 0, r.get("sidx") or 0)):
+                            note_mention(st, d.get("stream") or "", roles.get(d.get("event"), ""),
+                                         event_ts(d.get("ts"), d.get("seq")), adopt=False)
+                        out["from_deltas"] += 1
+                    else:
+                        c = st.n_by_stream or {}
+                        st.n_by_role = {k: v for k, v in c.items() if k in ("observation", "code")}
+                        st.n_by_role["unsplit"] = 0        # the marker: relabelled, split unknown
+                        st.echo = float(int(c.get("discourse") or 0))
+                        st.echo_ts = last_seen(st) or now
+                        out["as_echo"] += 1
+                    self._dirty.add(st.eid)
+                    out["relabelled"] += 1
+            self.flush()
+            time.sleep(0.05)                               # let the live turns in
+        return out
+
     def deltas_of(self, eid: str) -> list[dict]:
         """THE DELTAS INDEX (the CPU-bomb's load-bearing fix):
         deltas_by_eid is rebuilt on access when staled (the invalidator
@@ -969,7 +1127,16 @@ class EntityField:
         st = EntityState(eid=eid, kind=old.kind, surface=old.surface,
                          conflicts=list(old.conflicts), activity=old.activity)
         self._states[eid] = st
-        st.pending = [[d["sid"], d["seq"], d["sidx"], d["stream"], d["event"], d["ts"]] for d in ds]
+        # the replay keeps each mention's ROLE (the echo split): the role
+        # lives on the event doc the delta names
+        _roles = {}
+        for _k in {d["event"] for d in ds}:
+            try:
+                _roles[_k] = (self.b.get("events", _k) or {}).get("role") or ""
+            except Exception:
+                _roles[_k] = ""
+        st.pending = [[d["sid"], d["seq"], d["sidx"], d["stream"], d["event"], d["ts"],
+                       _roles.get(d["event"], "")] for d in ds]
         st.distinct = list(dict.fromkeys(d["sid"] for d in ds))
         if st.pending and len(st.distinct) >= self._mat_bar(eid):
             self._materialize(st)

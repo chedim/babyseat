@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -1425,6 +1426,16 @@ def _substitute_parents(cmd: str, residues: dict, order: list[str]) -> str:
     return _re.sub(r"\{\{([^}]+)\}\}", _sub, cmd)
 
 
+def lint_command(spec: str) -> str | None:
+    """THE NAME LINT's command side (2026-10-08): a dict literal is not a
+    command (the c:{'cmd': exhibit -- the head became an entity name)."""
+    t = str(spec or "").strip()
+    if t.startswith("{") and t.endswith("}"):
+        return ("a dict literal is not a command -- pass the command line "
+                "itself (e.g. 'uname -a')")
+    return None
+
+
 def command_specs(commands) -> list:
     """The link/unlink `commands` arg -> a list of command specs. ONE
     string is ONE command: the comprehension used to iterate it letter by
@@ -1449,7 +1460,43 @@ def command_specs(commands) -> list:
                 pass
     elif not isinstance(commands, (list, tuple, set)):
         commands = [commands]
-    return [str(c).strip() for c in commands if str(c or "").strip()]
+    out = []
+    for c in commands:
+        if isinstance(c, dict):
+            # {name, command}: a labelled command (never its str() repr)
+            cmd = str(c.get("command") or c.get("cmd") or "").strip()
+            name = str(c.get("name") or c.get("label") or "").strip()
+            c = f"{name} :: {cmd}" if (name and cmd) else cmd
+        c = str(c or "").strip()
+        if c:
+            out.append(c)
+    return out
+
+
+_LABEL_RE = re.compile(r"^\s*(?:shell:|c:)?([A-Za-z][\w.-]{0,40})\s*::\s*(\S.*)$", re.DOTALL)
+
+
+def split_label(spec: str) -> tuple[str, str]:
+    """'<label> :: <command>' -> (label, command); no label -> ('', spec).
+    A model's 'shell:x:: cmd' label fused into the eid once."""
+    m = _LABEL_RE.match(spec or "")
+    if not m:
+        return "", (spec or "").strip()
+    return m.group(1).lower(), m.group(2).strip()
+
+
+def command_name(cmd: str) -> str:
+    """An ad-hoc command line's entity name: one plain word keeps its name;
+    anything longer is '<head>-<hash6>' -- distinct per command line,
+    STABLE for the same line (a re-link is the same entity). Every
+    `set -a; ...; curl` was ONE entity, shell:set, each run overwriting
+    the last (158 mentions, 2026-10-08)."""
+    cmd = " ".join((cmd or "").split())
+    head = re.match(r"[A-Za-z0-9._-]+", cmd)
+    head_s = (head.group(0).lower() if head else "cmd")[:32] or "cmd"
+    if re.fullmatch(r"[A-Za-z0-9._-]+", cmd):
+        return head_s
+    return f"{head_s}-{hashlib.sha1(cmd.encode()).hexdigest()[:6]}"
 
 
 def entity_link(srv, est, fld, mem, executor_spec: str,
@@ -1474,6 +1521,10 @@ def entity_link(srv, est, fld, mem, executor_spec: str,
     specs = command_specs(commands)
     if not specs:
         return {"ok": False, "error": "commands required"}
+    for _sp in specs:
+        _bad = lint_command(_sp)
+        if _bad:
+            return {"ok": False, "error": f"refused {_sp[:60]!r}: {_bad}"}
     if len(specs) > EXEC_LINK_BATCH_CAP:
         return {"ok": False,
                 "error": f"failed to link: batch cap {EXEC_LINK_BATCH_CAP} "
@@ -1495,7 +1546,15 @@ def entity_link(srv, est, fld, mem, executor_spec: str,
                              f"live) -- unlink first"}
     linked, runs = [], []
     for spec in specs:
-        ent = est._resolve_spec(spec)
+        label, cmdline = split_label(spec)
+        if label:
+            # a LABELLED command: the label names it, the line is its
+            # command (re-linking the label with a new line updates it)
+            ent = est._resolve_spec(MEMBRANE_NS + overlay_key(E.canon("c", label)))
+            if ent is not None:
+                (ent.properties or {})["command"] = cmdline
+        else:
+            ent = est._resolve_spec(spec)
         created = False
         if ent is None:
             if not create:
@@ -1503,11 +1562,12 @@ def entity_link(srv, est, fld, mem, executor_spec: str,
                              "error": f"no entity matches {spec!r}"})
                 continue
             # ON-THE-FLY: the spec itself is the command line.
+            name = label or command_name(cmdline)
             ent = QuantumEntity(eid=MEMBRANE_NS + overlay_key(
-                                    E.canon("c", spec.partition(" ")[0])),
+                                    E.canon("c", name)),
                                 cls=CLASS_TOOL,
-                                properties={"name": spec.partition(" ")[0],
-                                            "command": spec,
+                                properties={"name": name,
+                                            "command": cmdline,
                                             "silent_birth": True})
             est.docs[ent.eid] = ent
             created = True
@@ -1962,8 +2022,18 @@ def edit_watch_fields(est, eid: str, filters) -> dict:
             arg = float(f.get("arg"))
         except (TypeError, ValueError):
             return {"ok": False, "error": f"{verb}'s arg must be a number"}
-        clean.append({"verb": verb, "arg": arg})
+        row = {"verb": verb, "arg": arg, "ts": float(f.get("ts") or time.time())}
+        if f.get("owner"):
+            row["owner"] = str(f.get("owner"))[:80]
+        clean.append(row)
     props = ent.properties or {}
+    # THE ATTENTION BUDGET (2026-10-08): the filters count against the one
+    # limit across the watch senses; a replace costs only its difference
+    from .attention import over as _over
+    refused = _over(est, getattr(getattr(est, "_srv", None), "_watch_board", None),
+                    len(clean) - len(props.get("watch_fields") or []))
+    if refused:
+        return refused
     props["watch_fields"] = clean
     props.pop("wf_stamp_pos", None)       # fresh stamps (re-arm)
     props.pop("wf_stamp_align", None)

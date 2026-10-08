@@ -1910,37 +1910,87 @@ class EntityStore(MultiParentOps, TimelineOps):
             ent = self.docs.get(dst)
         return ent
 
+    # the field's short kinds -> the store's long heads (eids._LEGACY_KIND
+    # inverted; 'm' is the field's MIRROR of membrane:: first, models second)
+    _SHORT_TO_LONG = {"s": "symbols", "f": "files", "c": "shell", "u": "urls"}
+    _FIELD_ONLY = ("w", "p")
+
+    def _spec_candidates(self, spec: str) -> list[str]:
+        s = spec.strip()
+        bare = s[len(MEMBRANE_NS):] if s.lower().startswith(MEMBRANE_NS) else s
+        out = [s, MEMBRANE_NS + bare]
+        head, _, rest = bare.partition(":")
+        h = head.lower()
+        if rest and h == "m":
+            out += [MEMBRANE_NS + rest, MEMBRANE_NS + "models:" + rest]
+            rh, _, rrest = rest.partition(":")
+            if rrest and rh.lower() in self._SHORT_TO_LONG:
+                out.append(MEMBRANE_NS + self._SHORT_TO_LONG[rh.lower()] + ":" + rrest)
+        elif rest and h in self._SHORT_TO_LONG:
+            out.append(MEMBRANE_NS + self._SHORT_TO_LONG[h] + ":" + rest)
+        return out
+
+    def _lower_index(self) -> dict:
+        """lower(eid) -> eid, rebuilt when the store's size moves (the
+        resolver's case-blind lookup; the review's circular 'nearest')."""
+        n = len(self.docs)
+        idx = getattr(self, "_lc_idx", None)
+        if idx is None or getattr(self, "_lc_n", -1) != n:
+            idx = {}
+            for eid in list(self.docs.keys()):
+                idx.setdefault(eid.lower(), eid)
+            self._lc_idx, self._lc_n = idx, n
+        return idx
+
     def _resolve_spec_raw(self, spec: str) -> QuantumEntity | None:
-        """The direct resolution (no merge-pointer following)."""
+        """The direct resolution (no merge-pointer following): exact, then
+        the spec's spellings (membrane:: added, the m: mirror peeled, the
+        field's short kinds mapped), each case-blind; then an eid-suffix
+        or name match."""
         spec = (spec or "").strip()
         if not spec:
             return None
         if spec in self.docs:
             return self.docs[spec]
+        idx = self._lower_index()
+        for c in self._spec_candidates(spec):
+            if c in self.docs:
+                return self.docs[c]
+            hit = idx.get(c.lower())
+            if hit is not None and hit in self.docs:
+                return self.docs[hit]
         low = spec.lower()
-        if not low.startswith(MEMBRANE_NS):
-            low = MEMBRANE_NS + low
-        if low in self.docs:
-            return self.docs[low]
         hits = [q for q in list(self.docs.values())
-                if q.eid.endswith(":" + spec.lower())
-                or str((q.properties or {}).get("name", "")).lower()
-                == spec.lower()]
-        return hits[0] if len(hits) == 1 else (hits[0] if hits else None)
+                if q.eid.lower().endswith(":" + low)
+                or str((q.properties or {}).get("name", "")).lower() == low]
+        return hits[0] if hits else None
+
+    def miss_hint(self, spec: str) -> str:
+        """A miss that is not a typo: field-only keys explain themselves."""
+        head = (spec or "").strip().removeprefix(MEMBRANE_NS).partition(":")[0].lower()
+        if head in self._FIELD_ONLY:
+            return (f"'{spec}' is a field-only {'word' if head == 'w' else 'phrase'} "
+                    "(no stored entity to read): look at it with "
+                    "entities_related or query, not entity_read")
+        return ""
 
     def near_specs(self, spec: str, k: int = 3) -> list[str]:
         """The MIS'S nearest candidates (the self-correct-in-one-call
         aid, 2026-10-06): the store's existing eids that share the
         spec's head/tail or name-substring -- the model's next call
         carries them in the refusal instead of a dead end. ''-ish specs
-        return []."""
+        return []. Each is a REAL eid (its own case, namespace peeled) --
+        it resolves as written and is never the failed spec itself."""
         s = (spec or "").strip().lower().removeprefix(MEMBRANE_NS)
         if len(s) < 3:
             return []
         frag = s.rsplit(":", 1)[-1]
         scored: list[tuple[int, str]] = []
         for eid in list(self.docs.keys())[:4000]:
-            low = eid.lower().removeprefix(MEMBRANE_NS)
+            bare = eid[len(MEMBRANE_NS):] if eid.startswith(MEMBRANE_NS) else eid
+            low = bare.lower()
+            if low == s:
+                continue
             tail = low.rsplit(":", 1)[-1]
             score = 0
             if frag and frag in tail:
@@ -1953,7 +2003,7 @@ class EntityStore(MultiParentOps, TimelineOps):
                 # ('gitx' vs 'git' shares the stem)
                 score = 1
             if score:
-                scored.append((-score, low))
+                scored.append((-score, bare))
         scored.sort()
         return [e for _, e in scored[:max(1, k)]]
 
@@ -1964,6 +2014,12 @@ class EntityStore(MultiParentOps, TimelineOps):
         name = (name or "").strip()
         if not name:
             return {"ok": False, "error": "name required"}
+        # THE NAME LINT (2026-10-08): a created name never carries the
+        # field's mirror prefix, the class, stacked kinds or a literal
+        from .eids import lint_name as _lint_name
+        _bad = _lint_name(name)
+        if _bad:
+            return {"ok": False, "error": f"name {name[:60]!r} refused: {_bad}"}
         c = cls if cls in CLASSES else CLASS_COMPONENT   # safest default
         eid = entity_id(c, name)
         ent = QuantumEntity(eid=eid, cls=c,
@@ -2095,7 +2151,7 @@ class EntityStore(MultiParentOps, TimelineOps):
              thought_script=None, dreamed_script=None,
              tick_script=None,
              watch_script=None, watch: dict | None = None,
-             getter_script=None, watch_ops=None,
+             getter_script=None, watch_ops=None, watch_fields=None,
              properties: dict | None = None,
              publish: bool = False, unpublish: bool = False) -> dict:
         """Model-side entity EDIT: patch summary/links/class on the
@@ -2205,21 +2261,30 @@ class EntityStore(MultiParentOps, TimelineOps):
         if watch_ops is not None:
             try:
                 from . import watch_agents as _wa
-                srv = type("S", (), {"entity_store": self,
-                                     "events_pool":
-                                     getattr(self, "_events_pool",
-                                             None)})()
+                # the REAL seat when wired (the attention budget counts
+                # the board's watches too); the bare store otherwise
+                srv = getattr(self, "_srv", None) or type("S", (), {
+                    "entity_store": self,
+                    "events_pool": getattr(self, "_events_pool", None)})()
                 target = self.docs.get(ent.eid) or ent
-                _wa.edit_watch_ops(srv, target,
-                                   watch_ops if isinstance(watch_ops,
-                                                           list) else [],
-                                   replace=watch_ops is not None and
-                                   isinstance(watch_ops, list) and
-                                   not watch_ops)
+                res_ops = _wa.edit_watch_ops(
+                    srv, target,
+                    watch_ops if isinstance(watch_ops, list) else [],
+                    replace=watch_ops is not None and
+                    isinstance(watch_ops, list) and not watch_ops)
             except Exception as e:
                 return {"ok": False, "error": f"watch_ops: {e}"[:120]}
+            # THE REFUSAL REACHES THE MODEL (2026-10-08): the cap/budget
+            # answer was dropped here -- the edit 'succeeded', nothing
+            # was planted, the model never learned it was full
+            if isinstance(res_ops, dict) and not res_ops.get("ok"):
+                return res_ops
+        if watch_fields is not None:
+            res_wf = self.edit_watch_fields(ent.eid, watch_fields)
+            if isinstance(res_wf, dict) and not res_wf.get("ok"):
+                return res_wf
         # THE WATCH SELECTOR (the autonode): what external events fire
-        # this entity's watch_script -- {kind: file|mqtt|signal, plus
+        # this entity's watch_script -- {kind: file|signal, plus
         # the optional glob/topic/name narrowing}. This is the CHEAP
         # pre-filter; the script does the real filtering. Empty dict
         # clears it.
@@ -2370,6 +2435,10 @@ class EntityStore(MultiParentOps, TimelineOps):
         watch's crossing as its next turn's message (the thinker's
         event-input flow), never the banner."""
         key = key.strip().lower()
+        from .eids import lint_key as _lint_key
+        _bad = _lint_key(key)
+        if _bad and key:
+            return {"ok": False, "error": f"track key refused: {_bad}"}
         if not key or ":" not in key:
             return {"ok": False, "error": "key must be 'kind:value' "
                     "(e.g. 'files:router.py')"}
@@ -2434,11 +2503,17 @@ class EntityStore(MultiParentOps, TimelineOps):
         s = (boundary or "").strip().lower()
         if not s:
             return {}
-        m = re.fullmatch(r"(enter|exit)?\s*(\d{1,6})", s)
+        # the forms the models write: 'enter: 3', '>= 5', 'above 5 cells',
+        # '< 2', 'exit below 2' (25 refusals, 2026-10-08)
+        s = re.sub(r"\b(cells?|count|safe)\b", " ", s)
+        m = re.fullmatch(r"(enter|exit)?\s*[:=]?\s*(>=|<=|>|<|above|below|over|under)?"
+                         r"\s*(\d{1,6})\s*", s)
         if not m:
             raise ValueError("boundary must be 'enter N' or 'exit N' "
-                             "(bare N = enter N)")
-        op, n = m.group(1) or "enter", int(m.group(2))
+                             "(bare N or '>= N' = enter N, '< N' = exit N)")
+        op, cmp_, n = m.group(1), m.group(2), int(m.group(3))
+        if op is None:
+            op = "exit" if cmp_ in ("<", "<=", "below", "under") else "enter"
         return {"enter": n} if op == "enter" else {"exit": n}
 
     def evaluate_tracks(self, count_fn=None) -> list[dict]:

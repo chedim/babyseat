@@ -66,7 +66,8 @@ def question_entities(field, text: str, qvec=None, k: int = 5) -> list[str]:
         if st is None:
             return (0, 0)
         return (0 if E.is_specific(eid) else 1,
-                -(st.coherence * math.log1p(max(st.mass, 0)) if not E.is_specific(eid) else st.n))
+                -(st.coherence * math.log1p(max(st.mass, 0)) if not E.is_specific(eid)
+                  else rank_weight(st)))
     named = sorted(dict.fromkeys(named), key=rank)[:k]
     if qvec is not None:
         # the code and files nearest the ask, even when it names none of
@@ -136,7 +137,8 @@ def entity_view(field, eid: str, qvec=None, n_evidence: int = 2) -> dict:
                              for e in c.get("evidence") or []))
             conflicts.append({"claim": c["text"][:200], "status": c["status"], "why": why[:160]})
     return {"eid": eid, "kind": st.kind, "counts": dict(st.n_by_stream), "n": st.n,
-            "last_ts": st.last_ts, "evidence": [e["text"] for e in said],
+            "stats": counts_text(st),
+            "last_ts": _last_seen_of(st), "evidence": [e["text"] for e in said],
             "observed": observed[0]["text"] if observed else None,
             "relations": rels[:3], "conflicts": conflicts, **shared}
 
@@ -178,9 +180,9 @@ def render(views: list[dict], budget: int = 2400, now: float | None = None) -> s
     lines = [HEADER]
     for v in views:
         c = v["counts"]
-        stats = " · ".join(f"{label} {c[s]}" for s, label in
-                           (("discourse", "said"), ("observation", "observed"), ("code", "code"))
-                           if c.get(s))
+        stats = v.get("stats") or " · ".join(f"{label} {c[s]}" for s, label in
+                                             (("discourse", "said"), ("observation", "observed"), ("code", "code"))
+                                             if c.get(s))
         block = [f"▸ {v['eid']} [{KIND_NAMES.get(v['kind'], v['kind'])} · {stats} · "
                  f"{_age(v['last_ts'], now)}]"]
         block += [f"  {t}" for t in v["evidence"]]
@@ -332,6 +334,43 @@ def track_eid(field, key: str) -> str | None:
     return field.resolve(val or key)
 
 
+def _last_seen_of(st):
+    from . import efield as _EF
+    return _EF.last_seen(st)
+
+
+def counts_text(st, now: float | None = None) -> str:
+    """'said N · echo ~M · observed K · code J' -- 'said' is EVIDENCE (the
+    user, notes, unattributed discourse), the model's own echoes show apart
+    and fade (efield.note_mention); a state from before the split says so."""
+    import time as _t
+    from . import efield as _EF
+    c = st.n_by_stream or {}
+    roles = getattr(st, "n_by_role", None) or {}
+    parts = []
+    if roles:
+        said = sum(v for k, v in roles.items()
+                   if k not in _EF.ECHO_ROLES and k not in ("observation", "code"))
+        if said:
+            parts.append(f"said {said}")
+        echo = _EF.echo_now(st, now if now is not None else _t.time())
+        if echo >= 0.5:
+            parts.append(f"echo ~{round(echo)}")
+    elif c.get("discourse"):
+        parts.append(f"said {c['discourse']} (unsplit)")
+    for s_, name in (("observation", "observed"), ("code", "code")):
+        if c.get(s_):
+            parts.append(f"{name} {c[s_]}")
+    return " · ".join(parts)
+
+
+def rank_weight(st) -> int:
+    """A specific entity's rank in the model's context: its EVIDENCE, never
+    its echoes (the feedback loop: mentioned -> hot -> shown -> mentioned)."""
+    from . import efield as _EF
+    return _EF.evidence_n(st)
+
+
 def track_count(field, key: str) -> int:
     eid = track_eid(field, key)
     st = field.get(eid) if eid else None
@@ -346,13 +385,11 @@ def track_line(field, key: str, label: str = "", now: float | None = None) -> st
     lab = f" ({label})" if label and label != key else ""
     if st is None:
         return f"track: {key}{lab} — nothing in the field yet"
-    c = st.n_by_stream
-    counts = " · ".join(f"{name} {c[s]}" for s, name in
-                        (("discourse", "said"), ("observation", "observed"), ("code", "code"))
-                        if c.get(s))
+    counts = counts_text(st, now)
     latest = field.evidence(eid, k=1)
     tail = f"; latest: {latest[0]['text'][:160]}" if latest else ""
-    return f"track: {eid}{lab} — {counts or 'waiting'}, last {_age(st.last_ts, now)}{tail}"
+    from . import efield as _EF
+    return f"track: {eid}{lab} — {counts or 'waiting'}, last {_age(_EF.last_seen(st), now)}{tail}"
 
 
 def now_line(field, since_seq: int, k: int = 5) -> str | None:

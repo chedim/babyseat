@@ -229,14 +229,17 @@ class TestUnlink(unittest.TestCase):
         f, est = _world()
         srv = _Srv(f, est)
         entity_link(srv, est, f, None, "tool:executor", ["echo gone-soon"])
-        # the fly-minted doc lives under its canon key (the head verb)
-        doc = _doc(est, "shell:echo")
+        # the fly-minted doc lives under its command name (head + a stable
+        # hash of the line, 2026-10-08 -- no longer the bare head verb)
+        from membrane.night import command_name
+        key = "shell:" + command_name("echo gone-soon")
+        doc = _doc(est, key)
         self.assertEqual((doc.properties or {}).get("run_rc"), 0)
         # THE UNLINK-ON-DONE: the RUN already superseded the edge
         # (processed -- success OR error); a manual unlink of a done
         # edge is an honest miss now
         u = entity_unlink(srv, est, f, None, "tool:executor",
-                          ["shell:echo"])
+                          [key])
         self.assertTrue(u["ok"])
         self.assertEqual(u["removed"], [], "run landed: the edge was "
                          "already superseded by the unlink-on-done")
@@ -246,12 +249,12 @@ class TestUnlink(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertTrue(rows[0]["superseded"])
         # THE RESIDUE stays on the command doc
-        self.assertEqual((_doc(est, "shell:echo")
+        self.assertEqual((_doc(est, key)
                           .properties or {}).get("run_rc"), 0)
         # a re-LINK RE-QUEUES (un-supersedes + n bumps) and re-runs;
         # the run lands + supersedes again
         r2 = entity_link(srv, est, f, None, "tool:executor",
-                         ["shell:echo"])
+                         [key])
         self.assertTrue(r2["ok"])
         self.assertEqual(r2["runs"][0].get("rc"), 0)
         rows = [d for _k, d in f.b.scan("relations")]

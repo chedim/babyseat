@@ -162,7 +162,7 @@ class SessionStore:
             if title is not None:
                 s["title"] = title
             if agent is not None and str(agent).strip() in \
-                    ("build", "plan", "general", "explore", "watch"):
+                    ("build", "plan", "general", "explore", "watch", "phone"):
                 s["agent"] = str(agent).strip()
             s["time"]["updated"] = int(time.time() * 1000)
             self._flush()
@@ -640,10 +640,35 @@ def _openai_tools(mcp_tools: list | None = None) -> list:
 # opencode's config) keeps the full surface -- membrane cannot identify
 # the per-call agent there; the native serve is the enforcement point.
 
+# THE WATCH HANDS' OWNER (2026-10-08): every watch a turn plants carries
+# the planting agent, so the attention inventory can show whose it is and
+# a later loop can retire a fulfilled goal's leftovers
+WATCH_HANDS = ("entity_edit", "field_watch")
+
+
+def stamp_watch_owner(name: str, args, agent) -> dict:
+    """The turn's agent stamped onto the watches a tool call plants (an
+    explicit owner is kept); other tools pass through untouched."""
+    if name not in WATCH_HANDS or not isinstance(args, dict) or not agent:
+        return args
+    out = dict(args)
+    if name == "field_watch":
+        out.setdefault("owner", str(agent))
+        return out
+    for k in ("watch_ops", "watch_fields"):
+        v = out.get(k)
+        if isinstance(v, list):
+            out[k] = [dict(o, owner=o.get("owner") or str(agent))
+                      if isinstance(o, dict) else o for o in v]
+    return out
+
+
 OPERATOR_TOOLS = frozenset((
     # reads
     "query", "state", "graph", "entities_related", "entity_query",
     "entity_read", "entity_tracks",
+    # live Home Assistant (the field is memory, not telemetry; 2026-10-08)
+    "ha_state",
     # memory
     "learn", "forget",
     # steering (intentions -- THE OPERATOR'S PEN; fulfill = the close
@@ -653,34 +678,53 @@ OPERATOR_TOOLS = frozenset((
     "peer_post", "peer_seats", "junk_cut",
     # the banner tracks (the operator's header)
     "entity_watch", "entity_unwatch",
+    # the seat's own alert dial (2026-10-08): how many watch events may
+    # interrupt vs fold into the WHERE WE ARE digest
+    "attention",
     # THE EXECUTOR'S DOOR (2026-10-08, the operator's call): the operator
     # runs commands itself -- link to tool:executor runs inline, the
     # receipt comes back in the same turn. The HA seat's main chat kept
     # planting 'run X' goals and waiting a whole loop pass for a listener
     # to do a one-line command. The other entity hands stay the listeners'.
     "entity_link", "entity_unlink",
+    # THE FLOOD GATES (2026-10-08, the operator's call: "open the flood gates
+    # between the lanes"): the chat lane holds the entity hands and the
+    # watches too -- refused -> intend -> a loop cost more than it protected
+    "entity_add", "entity_edit", "entity_remove", "field_watch",
+    # COMPOSITION IS INHERITANCE (the doctrine's own hand; it sat in no
+    # lane -- 52 refusals, 2026-10-08)
+    "entity_inherit",
 ))
 LISTENER_TOOLS = (OPERATOR_TOOLS | {
     # the entity hands (the listeners' material)
     "entity_add", "entity_edit", "entity_remove",
     "entity_link", "entity_unlink",
+    # the board's spatial watches (2026-10-08): attention is the
+    # listeners' to allocate; the chat lane announces through intend
+    "field_watch",
 }) - {"intend"}
 # plan reads/communicates: never plants, closes or executes
 PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill", "entity_link",
-                               "entity_unlink"}
+                               "entity_unlink", "entity_add", "entity_edit",
+                               "entity_remove", "field_watch",
+                               "entity_inherit"}
+
+# THE PHONE LANE (2026-10-08): a call's turn reads and answers. A misheard
+# sentence must never reach the shell or rewrite entities; a request
+# becomes a visible goal (intend) the loops carry out.
+PHONE_TOOLS = frozenset(("query", "state", "graph", "entities_related",
+                         "entity_query", "entity_read", "entity_tracks",
+                         "ha_state", "learn", "intend", "intents"))
 
 _LANE_REFUSALS = {
-    "entity_add": ("the entity hands belong to the EVENT LISTENERS -- "
-                   "announce the work through `intend` (the tool or the "
-                   "'membrane: intend that' frame) and a thinking loop "
-                   "picks it up, or through `learn` for the memory"),
-    "entity_edit": ("the entity hands belong to the EVENT LISTENERS -- "
-                    "announce the work through `intend` (the tool or the "
-                    "'membrane: intend that' frame) and a thinking loop "
-                    "picks it up, or through `learn` for the memory"),
-    "entity_remove": ("the entity hands belong to the EVENT LISTENERS -- "
-                      "announce the cleanup through `intend` or `learn`;"
-                      " a thinking loop does it"),
+    "field_watch": ("plan mode: watches aren't planted from a planning "
+                    "session -- the build-mode turn plants them"),
+    "entity_add": ("plan mode: entities aren't created from a planning "
+                   "session -- the build-mode turn does it"),
+    "entity_edit": ("plan mode: entities aren't edited from a planning "
+                    "session -- the build-mode turn does it"),
+    "entity_remove": ("plan mode: entities aren't removed from a planning "
+                      "session -- the build-mode turn does it"),
     "entity_link": ("plan mode: commands don't run from a planning "
                     "session -- the build-mode turn links them to the "
                     "executor"),
@@ -693,6 +737,14 @@ _LANE_REFUSALS = {
                "session -- the direction needs the user's build-mode "
                "word; the board reads via `intents`"),
 }
+_LISTENER_REFUSALS = {
+    "intend": ("listener lane: a watch loop does not plant new goals -- "
+               "take this goal's next step yourself, `fulfill` it with the "
+               "receipt, or end with BLOCKED; the operator's chat plants "
+               "commitments"),
+}
+
+
 def _lane_gate_off() -> bool:
     # runtime-read: a kill switch set mid-session acts immediately
     return os.environ.get("MEMBRANE_LANE_GATE") == "0"
@@ -705,6 +757,8 @@ def _lane_of(agent: str | None) -> str:
     a = str(agent or "").strip().lower()
     if not a or a in ("build", "plan"):
         return "plan" if a == "plan" else "operator"
+    if a == "phone":
+        return "phone"
     return "listener"
 
 
@@ -712,7 +766,8 @@ def _lane_tools(lane: str) -> frozenset:
     if _lane_gate_off():
         return _mcp_names()
     return {"operator": OPERATOR_TOOLS, "plan": PLAN_TOOLS,
-            "listener": LISTENER_TOOLS}.get(lane, OPERATOR_TOOLS)
+            "listener": LISTENER_TOOLS,
+            "phone": PHONE_TOOLS}.get(lane, OPERATOR_TOOLS)
 
 
 def _mcp_names() -> frozenset:
@@ -726,7 +781,14 @@ def _lane_refusal(name: str, lane: str) -> str | None:
         return None
     if name in _lane_tools(lane):
         return None
-    r = _LANE_REFUSALS.get(name)
+    # the plan-mode texts are for the PLAN lane only: a listener told
+    # "plan mode: ..." concluded its seat was in plan mode (2026-10-08)
+    if lane == "phone":
+        return (f"phone lane: {name} doesn't run from a call (a misheard "
+                "sentence must not change the boat) -- answer from what you "
+                "can read, or plant the request with `intend` so a loop "
+                "carries it out")
+    r = _LANE_REFUSALS.get(name) if lane == "plan" else _LISTENER_REFUSALS.get(name)
     if r is not None:
         return r
     return (f"the {name} tool is not your lane's hand (lane: {lane}); "
@@ -975,7 +1037,7 @@ class TurnRunner:
         return "build"
 
     def run(self, sid: str, text: str, user_info: dict | None = None,
-            user_parts: list | None = None) -> dict:
+            user_parts: list | None = None, _drained: bool = False) -> dict:
         """THE GUARDED ENTRY, now a REAL QUEUE: a second message on a busy
         session first publishes a visible {session.status busy
         queued:true} event, then WAITS FOR ITS TURN -- when the running
@@ -1002,13 +1064,36 @@ class TurnRunner:
         # guard/gate work. When user_info is None the row is minted
         # here (the old path minted inside _run_inner); otherwise the
         # caller's row is used as-is.
+        # THE OPERATOR'S CLOCK: a BLOCKED goal parks until a person speaks
+        # (watch_agents._parked reads it); loop sessions never stamp it
+        try:
+            _s = self.sessions.get(sid) or {}
+            _psrv = getattr(self, "srv", None)
+            if _psrv is not None and _lane_of(_s.get("agent")) != "listener":
+                _psrv._operator_last_ts = time.time()
+        except Exception:
+            pass
         if user_info is None:
             user_info, user_parts = self._mint_user_row(sid, text)
             self.messages.append(sid, user_info, user_parts)
+        elif user_parts is None:
+            # THE EMPTY BUBBLE (2026-10-08): an info-only caller (the
+            # prompt_async thread did this) would announce a part-less row
+            # and mark it announced -- the text never streamed. The row is
+            # already stored: announce ITS parts.
+            _stored = self.messages.get_msg(sid, user_info.get("id"))
+            user_parts = list((_stored or {}).get("parts") or [])
         self._announce_user(sid, user_info, user_parts)
         user_info["_announced"] = True      # the inner's announce skips
         guard = self._guard(sid)
-        if not guard.acquire(blocking=False):
+        got = guard.acquire(blocking=False)
+        if not got and _drained:
+            # THE DRAIN OWNS A QUEUED TURN (the endless-reply fix,
+            # 2026-10-08): wait for the session, NEVER re-enqueue -- the
+            # re-enqueue re-armed the same turn after every finished one
+            # (two queued messages answered 11x and 7x, alternating)
+            guard.acquire()
+        elif not got:
             depth = self._queued_depth(sid)
             if depth >= self.queue_depth_max:
                 # THE FLOOD GUARD: too many turns already waiting in the
@@ -1021,21 +1106,27 @@ class TurnRunner:
             self.hub.publish({"type": "session.status",
                               "status": {"type": "busy", "queued": True},
                               "sessionID": sid})
-            # THE QUEUE (the queued-forever fix): enqueue and WAIT FOR
-            # THE CHAIN -- the running turn's finally-block starts the
-            # next queued turn as its own thread (the drain), and THIS
-            # thread waits until ITS turn has run (the waker sets the
-            # event when this turn's own run has COMPLETED, so the
-            # synchronous POST /message lane still gets its result).
+            # THE QUEUE: enqueue and WAIT FOR THE RESULT -- the running
+            # turn's finally drains the next queued turn into a worker
+            # (run(_drained=True)); THIS thread never runs it itself (it
+            # used to race the drain for the guard: the loser re-enqueued
+            # the same turn, forever). The sync POST /message lane still
+            # gets its result (the worker files it under the qid).
             done = threading.Event()
             mine = self._enqueue(sid, text, user_info, user_parts, done)
-            if not guard.acquire(timeout=float(self.busy_wait_s)):
-                # the running turn's chain will pick this up even after
-                # this wait gives up: the DRAIN owns execution now
-                # (unbounded patience); this thread returns a queued
-                # ack -- the turn runs when its turn comes.
+            # THE KICK: the running turn may have finished between the
+            # failed acquire above and the enqueue -- its drain then saw
+            # an empty queue and nobody would ever run this one
+            if guard.acquire(blocking=False):
+                guard.release()
+                self._start_next(sid)
+            if not done.wait(timeout=float(self.busy_wait_s)):
+                # the drain still owns it (unbounded patience): a queued
+                # ack now, the turn runs when its turn comes
                 return {"status": "queued", "queued_id": mine,
                         "sessionID": sid}
+            return self._drain_results.get(mine) or {
+                "status": "queued", "queued_id": mine, "sessionID": sid}
         stop = threading.Event()
         if not hasattr(self, "_turn_stops"):
             self._turn_stops = {}
@@ -1118,7 +1209,8 @@ class TurnRunner:
                 try:
                     res = self.run(sid, ent["text"],
                                    user_info=ent["user_info"],
-                                   user_parts=ent["user_parts"])
+                                   user_parts=ent["user_parts"],
+                                   _drained=True)
                     self._drain_results[ent["qid"]] = res
                 except Exception as e:
                     self._drain_results[ent["qid"]] = {
@@ -1513,6 +1605,25 @@ class TurnRunner:
                                   "part": dict(rpart),
                                   "time": int(time.time() * 1000),
                                   "sessionID": sid})
+            if tcs and content:
+                # THE LEAD-IN (2026-10-08): text the model writes beside its
+                # tool calls ("checking the BMS...") is a REAL text part,
+                # streamed before the tools run -- it lived only in the
+                # model's history, so a phone caller heard silence through
+                # the whole tool chain
+                now = int(time.time() * 1000)
+                lpart = mkpart({"type": "text", "text": "",
+                                "time": {"start": now}})
+                lpart["text"] = content
+                self.hub.publish({"type": "message.part.delta",
+                                  "sessionID": sid, "messageID": aid,
+                                  "partID": lpart["id"], "field": "text",
+                                  "delta": content})
+                lpart["time"]["end"] = int(time.time() * 1000)
+                self.hub.publish({"type": "message.part.updated",
+                                  "part": dict(lpart),
+                                  "time": int(time.time() * 1000),
+                                  "sessionID": sid})
             if tcs:
                 a_info["time"].setdefault("start", int(time.time() * 1000))
                 asst_msg = {"role": "assistant", "content": content or "",
@@ -1567,6 +1678,10 @@ class TurnRunner:
                             except Exception:
                                 pass
                         else:
+                            # the watch hands carry their planter: the
+                            # owner the attention inventory shows
+                            args = stamp_watch_owner(
+                                name, args, (self._agents or {}).get(sid))
                             output = self.executor(name, args, call_id)
                         # THE TOOL'S TOUCH (the activity clock): a
                         # completed tool = the turn moved
@@ -1742,6 +1857,32 @@ def mcp_executor(port: int):
 
 # ---- the HTTP surface ----------------------------------------------------------
 
+# THE FIELD'S WINDOW (2026-10-08): the seat's READ surfaces the serve relays
+# onto the /v1 proxy -- that proxy binds 127.0.0.1 with no auth and has
+# write routes; the basic-authed serve passes exactly these, GET only (the
+# HA field dashboard + its sensors: state, the universe map, the drawer).
+SEAT_READ_PATHS = ("/membrane/state", "/membrane/map/cloud",
+                   "/membrane/map/entities", "/membrane/map/axes",
+                   "/membrane/map/axis", "/membrane/map/field",
+                   "/membrane/field/entity", "/membrane/map/distance",
+                   "/membrane/entity/read",
+                   "/membrane/entity-related")
+
+
+def seat_read_url(srv, path_qs: str) -> str | None:
+    """The local proxy URL for one allow-listed read (query kept), or None
+    (not allowed / no seat port known)."""
+    path = str(path_qs or "").split("?", 1)[0]
+    if path not in SEAT_READ_PATHS:
+        return None
+    addr = getattr(srv, "server_address", None)
+    try:
+        port = int(addr[1])
+    except Exception:
+        return None
+    return f"http://127.0.0.1:{port}{path_qs}"
+
+
 def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                  password="", config=None, runner=None, srv=None, **_dep) -> type:
     """The opencode-compatible HTTP handler, parametrized by the running
@@ -1792,6 +1933,27 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
 
         def _notfound(self) -> None:
             self._json_err(404, "not found", close=True)
+
+        def _seat_read(self) -> None:
+            """GET relay of one SEAT_READ_PATHS read onto the local /v1
+            proxy (the field dashboard's window; see seat_read_url)."""
+            url = seat_read_url(srv, self.path)
+            if url is None:
+                return self._notfound()
+            try:
+                with urllib.request.urlopen(url, timeout=45) as up:
+                    body, status = up.read(), up.status
+                    ctype = up.headers.get("Content-Type", "application/json")
+            except urllib.error.HTTPError as e:
+                body, status = e.read() or b"", e.code
+                ctype = e.headers.get("Content-Type", "application/json")
+            except Exception as e:                  # the seat is down/booting
+                return self._json_err(502, f"seat unreachable: {e!r}"[:200])
+            self.send_response(status)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
 
         def _read_body(self) -> dict:
             length = int(self.headers.get("Content-Length", 0))
@@ -1863,6 +2025,8 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 self.end_headers()
                 return
             path = self.path.split("?", 1)[0]
+            if path in SEAT_READ_PATHS:
+                return self._seat_read()
             if path == "/global/health":
                 self._json_out({"healthy": True, "version": VERSION})
             elif path == "/event":
@@ -2167,8 +2331,10 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                     _row["agent"] = _ma
                     sessions.flush()   # the public form (the lock's owned)
             if async_:
+                # the row's parts ride along (the sync lane below does the
+                # same): the door's announcement carries the text
                 threading.Thread(target=runner.run,
-                                 args=(sid, text, user_info),
+                                 args=(sid, text, user_info, row["parts"]),
                                  daemon=True).start()
                 self.send_response(204)
                 self.send_header("Content-Length", "0")

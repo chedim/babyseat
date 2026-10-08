@@ -43,6 +43,7 @@ from __future__ import annotations
 
 import os
 import threading
+import re
 import time
 from collections import namedtuple
 
@@ -384,25 +385,31 @@ def loop_task_text(ev: dict) -> str:
         head = f"operator messaged: {ev.get('text_head', '')[:80]}"
         detail = ""
     elif kind == "intent-planted":
+        goal = str(ev.get("text") or "")
         if ev.get("rewake"):
-            head = (f"goal still open (the board's pulse): "
-                    f"{str(ev.get('text') or '')[:120]}")
-            last = str(ev.get("last_landing") or "")
-            detail = (f"goal {ev.get('entity', '?')} is still open"
-                      + (f"; your last pass on it said: {last[:200]}"
-                         if last else "")
-                      + ". Continue from there -- do not redo landed steps")
+            head = f"goal still open (the board's pulse): {goal}"
+            detail = f"goal {ev.get('entity', '?')} is still open."
         else:
             head = (f"goal planted ({'new' if ev.get('created') else 'pinned'}"
-                    f"): {str(ev.get('text') or '')[:120]}")
+                    f"): {goal}")
             detail = (f"the board's open commitments steer your dreams and "
                       f"think-ahead; this one landed on "
-                      f"{ev.get('entity', '?')}")
+                      f"{ev.get('entity', '?')}.")
+        lands = ev.get("landings") or []
+        if not lands and ev.get("last_landing"):
+            lands = [{"op": "", "decision": ev.get("last_landing")}]
+        if lands:
+            detail += "\nYour last passes on it (oldest first):"
+            for x in lands[-3:]:
+                op = str(x.get("op") or "").upper() or "-"
+                detail += f"\n  - {op}: {str(x.get('decision') or '')[:240]}"
+            detail += "\nContinue from there -- do not redo landed steps."
         detail += ("\nWhen the goal is DONE and you hold the receipt "
                    "(a command's rc=0 output, the entity state read "
-                   "back), close it: `fulfill` with its eid + the "
-                   "evidence. Not done: take its next concrete step; "
-                   "the board's pulse brings it back to you.")
+                   f"back), close it: `fulfill` with spec {ev.get('entity', '?')} "
+                   "+ the evidence. Not done: take its NEXT concrete step. "
+                   "Waiting on a person: say BLOCKED and it parks until "
+                   "the operator speaks.")
     elif kind == "boundary":
         head = (f"boundary crossed: '{ev.get('entity', '?')}' "
                 f"{'entered' if ev.get('entered') else 'exited'} "
@@ -413,11 +420,49 @@ def loop_task_text(ev: dict) -> str:
         head = f"watch event ({kind}) on '{ent}'"
         detail = ""
     return (f"{head}\n{detail}\n"
-            "Decide: REACT (act through the membrane tools -- entity_"
-            "add/edit/run, read/write/edit, learn, speak) or IGNORE "
-            "(reply with a plain 'ignored: <reason>' text -- the "
-            "verdict stamps the entity either way). The field is your "
-            "memory; this event is its push.")
+            "Decide: REACT (one concrete step through the membrane tools "
+            "-- entity_read / entity_query / entities_related to look, "
+            "entity_add / entity_edit / entity_link to act, learn, "
+            "fulfill) or IGNORE. Budget: at most "
+            f"{LOOP_TOOL_BUDGET} tool calls this pass; the pulse brings "
+            "the rest back. Reply briefly (a few plain sentences, no "
+            "essay) and END with exactly one verdict line:\n"
+            "  DONE <the receipt>        -- finished (and fulfilled)\n"
+            "  STEP <what moved>         -- progress, more to do\n"
+            "  BLOCKED <on whom / what>  -- waiting on a person\n"
+            "  ignored: <reason>         -- nothing to do\n"
+            "The field is your memory; this event is its push.")
+
+
+_VERDICT_RE = re.compile(r"^(done|step|blocked|ignored)\b[\s:,.\-–—]*(.*)$",
+                         re.IGNORECASE | re.DOTALL)
+FULFILL_NUDGE = ("You ended with DONE, but goal {eid} is still OPEN on the "
+                 "board, so the pulse would keep bringing it back. Call "
+                 "`fulfill` now with spec {eid} and the receipt as evidence. "
+                 "If it is not really done, end with STEP or BLOCKED instead.")
+
+
+def _plain(line: str) -> str:
+    return re.sub(r"[*_`>#~]+", "", line).strip().lstrip("-").strip()
+
+
+def parse_verdict(text: str) -> tuple[str, str]:
+    """(verdict, detail) from a loop turn's text: the LAST verdict-shaped
+    line wins (markdown stripped), a leading 'ignored' still counts, no
+    text at all is 'aborted' (the run died mid-tool), anything else is an
+    unparsed 'reacted'."""
+    lines = [_plain(x) for x in str(text or "").splitlines()]
+    lines = [x for x in lines if x]
+    if not lines:
+        return "aborted", ""
+    for line in reversed(lines[-3:]):
+        m = _VERDICT_RE.match(line)
+        if m:
+            return m.group(1).lower(), m.group(2).strip()[:240]
+    m = _VERDICT_RE.match(lines[0])
+    if m and m.group(1).lower() == "ignored":
+        return "ignored", m.group(2).strip()[:240]
+    return "reacted", " ".join(lines)[-240:]
 
 
 class _LoopDrainer:
@@ -466,86 +511,128 @@ class _LoopDrainer:
             except Exception:
                 pass
             time.sleep(_poll_s)
-            for ev in evs:
-                # THE WAKE CALL: a watch fire is a real sound -- the
-                # night mind opens its eyes before its next beat.
+            for i, ev in enumerate(evs):
+                if self.handle(ev) == "requeue":
+                    # the pool is full: THIS event and the rest of the
+                    # batch go back (the old break dropped the rest)
+                    for rest in evs[i + 1:]:
+                        pool.put(rest)
+                    break
+
+    def handle(self, ev: dict) -> str:
+        """One event -> at most one loop turn. Returns 'skip', 'requeue'
+        or the verdict."""
+        # THE WAKE CALL: a watch fire is a real sound -- the night mind
+        # opens its eyes before its next beat.
+        try:
+            from .thinker import note_wakeup_signal
+            note_wakeup_signal(self.srv, str(ev.get("kind") or ""), ev)
+        except Exception:
+            pass
+        if is_operator_event(ev):
+            return "skip"           # the operator lane: the chat is it
+        # THE ALERT BUDGET (2026-10-08): past the seat's dial the event
+        # folds into the digest (the next turn's WHERE WE ARE) instead of
+        # spending a whole interrupt turn
+        gate = getattr(self.srv, "_alert_gate", None)
+        if gate is not None and not gate.allow(ev):
+            return "skip"
+        loops = getattr(self.srv, "loops", None)
+        pool = getattr(self.srv, "events_pool", None)
+        if loops is None:
+            return "skip"           # no pool wired: nothing to admit
+        ent = str(ev.get("entity") or "")
+        agent = loop_agent_name("watch", ent or ev.get("kind"))
+        desc = LoopDesc("watch", eid=ent or ev.get("event_id", ""))
+        if not loops.admit(desc):
+            if gate is not None:
+                gate.refund()       # re-queued, not run: no charge
+            if pool is not None:
+                pool.put(ev)
+            return "requeue"
+        try:
+            return self._turn(ev, ent, agent)
+        except Exception:
+            return "error"
+        finally:
+            loops.release(desc)
+
+    def _turn(self, ev: dict, ent: str, agent: str) -> str:
+        srv = self.srv
+        sid = srv.create_loop_session(agent, agent)
+        out = srv.run_loop_turn(sid, loop_task_text(ev), agent) or {}
+        text = str(out.get("text") or out.get("verdict_text") or "")
+        verdict, detail = parse_verdict(text)
+        is_goal = str(ev.get("kind")) == "intent-planted"
+        est = getattr(srv, "entity_store", None)
+        goal = (est.docs or {}).get(ent) if (is_goal and est is not None) else None
+
+        def _open() -> bool:
+            return goal is not None and \
+                ((goal.properties or {}).get("status") or "open") == "open"
+
+        # DONE but the board still holds it: one nudge in the same
+        # session (the review: 'Done -- armed' with no fulfill ran the
+        # goal 6 more times)
+        if verdict == "done" and _open():
+            out2 = srv.run_loop_turn(sid, FULFILL_NUDGE.format(eid=ent),
+                                     agent) or {}
+            t2 = str(out2.get("text") or out2.get("verdict_text") or "")
+            if t2.strip():
+                text = text + "\n" + t2
+                v2, d2 = parse_verdict(t2)
+                if _open():
+                    verdict, detail = (v2, d2) if v2 != "done" else ("done", detail)
+        if verdict == "aborted":
+            trail = [str(x)[:120] for x in (out.get("trail") or [])][-4:]
+            detail = ("the pass ended mid-tool with no verdict"
+                      + (f"; last tools: {' | '.join(trail)}" if trail else ""))
+        decision = (detail or text.strip())[:240]
+        if est is not None and ent:
+            try:
+                est.stamp_watch_decision(
+                    ent, {"verdict": verdict, "decision": decision,
+                          "event_id": ev.get("event_id"),
+                          "session": sid, "ts": time.time()})
+            except Exception:
+                pass
+        if goal is not None:
+            props = goal.properties or {}
+            if verdict == "blocked":
+                props["blocked_ts"] = time.time()
+                props["blocked_on"] = decision
+            elif verdict in ("step", "done"):
+                props.pop("blocked_ts", None)
+                props.pop("blocked_on", None)
+            goal.properties = props
+            # THE GOAL'S CLAIM RECEIPT (the landing ledger the backoff
+            # and the next pass read)
+            try:
+                from .opencode import nerve_paused
+                if not nerve_paused(srv):
+                    notify_intent_landed(
+                        est, getattr(srv, "events_pool", None), ent,
+                        {"op": verdict, "step": "loop-reaction",
+                         "decision": decision, "session": sid})
+            except Exception:
                 try:
-                    from .thinker import note_wakeup_signal
-                    note_wakeup_signal(self.srv, str(ev.get("kind") or ""),
-                                       ev)
+                    notify_intent_landed(est, None, ent,
+                                         {"op": verdict, "step": "loop-reaction",
+                                          "decision": decision, "session": sid})
                 except Exception:
                     pass
-                if is_operator_event(ev):
-                    continue        # the operator lane: the chat is it
-                loops = getattr(self.srv, "loops", None)
-                if loops is None:
-                    break           # no pool wired: nothing to admit
-                ent = str(ev.get("entity") or "")
-                agent = loop_agent_name("watch", ent or ev.get("kind"))
-                desc = LoopDesc("watch", eid=ent or ev.get("event_id", ""))
-                if not loops.admit(desc):
-                    pool.put(ev)    # the pool is full: re-queue (newest
-                    break           # survives past the cap; try again)
-                try:
-                    sid = self.srv.create_loop_session(agent, agent)
-                    out = self.srv.run_loop_turn(sid, loop_task_text(ev),
-                                                 agent)
-                    # THE VERDICT: the loop's turn's text
-                    verdict_text = str((out or {}).get("verdict_text")
-                                       or "")[:200]
-                    verdict = "ignored" if verdict_text.lower().startswith(
-                        "ignored") else "reacted"
-                    est = getattr(self.srv, "entity_store", None)
-                    if est is not None and ent:
-                        from .entities import QuantumEntity
-                        try:
-                            est.stamp_watch_decision(
-                                ent, {"verdict": verdict,
-                                      "decision": verdict_text,
-                                      "event_id": ev.get("event_id"),
-                                      "session": sid, "ts": time.time()})
-                        except Exception:
-                            pass
-                        # THE GOAL'S CLAIM RECEIPT (the durability plan:
-                        # a landing for an intent-planted event stamps
-                        # the GOAL's landings[] ledger -- the fulfill-by
-                        # evidence; the receipt IS the loop's verdict)
-                        if str(ev.get("kind")) == "intent-planted":
-                            try:
-                                from .opencode import nerve_paused
-                                _geid = str(ev.get("entity") or "")
-                                if _geid and not nerve_paused(self.srv):
-                                    notify_intent_landed(
-                                        est, getattr(self.srv,
-                                                     "events_pool", None),
-                                        _geid,
-                                        {"op": verdict, "step":
-                                         "loop-reaction",
-                                         "decision": verdict_text,
-                                         "session": sid})
-                            except Exception:
-                                pass
-                    # THE INJECT (the operator's cosmetic-busy design):
-                    # a REACTED loop's line speaks into the OPERATOR'S
-                    # own session (the main chat): one message, as part
-                    # of the ongoing 'thinking loop' stream — the
-                    # client sees it without a new turn.
-                    if verdict == "reacted" and verdict_text:
-                        try:
-                            runner = getattr(self.srv, "_loop_runner",
-                                             None)
-                            _inj = getattr(self.srv, "_inject_to_primary",
-                                           None)
-                            if runner is not None and _inj is not None:
-                                _inj(runner, "[event-thinker] "
-                                             f"{ent or 'field'}: "
-                                             f"{verdict_text}")
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-                finally:
-                    loops.release(desc)
+        # THE INJECT (the operator's cosmetic-busy design): a pass that
+        # MOVED something speaks one line into the operator's own session
+        if verdict in ("done", "step", "blocked", "reacted") and decision:
+            try:
+                runner = getattr(srv, "_loop_runner", None)
+                _inj = getattr(srv, "_inject_to_primary", None)
+                if runner is not None and _inj is not None:
+                    _inj(runner, "[event-thinker] "
+                                 f"{ent or 'field'}: {verdict.upper()} {decision}")
+            except Exception:
+                pass
+        return verdict
 
 
 def start_loop_drainer(srv, poll_s: float = 0.5) -> _LoopDrainer:
@@ -630,9 +717,14 @@ class LoopRunner:
             return len(self._held)
 
 # ---- the attach/detach events + the watch_ops CRUD -------------------------
+GOAL_TEXT_MAX = 1200            # the goal rides whole (it was cut to 120)
+LOOP_TOOL_BUDGET = 8
+
+
 def notify_intent_planted(est, pool, goal_eid: str, text: str,
                           created: bool = True, rewake: bool = False,
-                          last_landing: str = "") -> dict:
+                          last_landing: str = "",
+                          landings: list | None = None) -> dict:
     """THE INTENT-PLANTED EVENT (the receive-lane's wire, 2026-10-06):
     a commitment landed on the board -- the listener pool gets it as an
     event and a thinking loop RECEIVES it (its next turn's message:
@@ -644,11 +736,16 @@ def notify_intent_planted(est, pool, goal_eid: str, text: str,
     provenance (intent_planted_ts rides the goal's doc -- the boot's
     wakes never double-fire)."""
     ev = {"kind": "intent-planted", "entity": str(goal_eid or ""),
-          "text": str(text or "")[:200], "created": bool(created),
+          "text": str(text or "")[:GOAL_TEXT_MAX], "created": bool(created),
           "ts": time.time()}
     if rewake:
         ev["rewake"] = True
         ev["last_landing"] = str(last_landing or "")[:240]
+    if landings:
+        ev["landings"] = [
+            {"op": str((x or {}).get("op") or ""),
+             "decision": str((x or {}).get("decision") or "")[:240]}
+            for x in list(landings)[-3:]]
     if pool is not None:
         pool.put(ev)
     try:
@@ -681,12 +778,55 @@ GOAL_REWAKE_BATCH = 3
 
 
 def _ignored_streak(props: dict) -> int:
+    """The trailing QUIET passes: everything but a STEP (real progress).
+    'ignored', 'aborted', 'blocked', an unparsed 'reacted', a 'done' that
+    never closed -- each one doubles the next wait (the review: 'reacted'
+    passes that changed nothing never backed off, 2026-10-08)."""
     n = 0
     for land in reversed(list(props.get("landings") or [])):
-        if str((land or {}).get("op") or "") != "ignored":
+        if str((land or {}).get("op") or "") == "step":
             break
         n += 1
     return n
+
+
+def _parked(srv, props: dict) -> bool:
+    """A BLOCKED goal waits for its human: it wakes again only after the
+    operator speaks (any operator turn after the block)."""
+    bts = float(props.get("blocked_ts") or 0)
+    if not bts:
+        return False
+    return float(getattr(srv, "_operator_last_ts", 0) or 0) <= bts
+
+
+def _due_goals(srv, est, now: float, min_age_s: float) -> list:
+    from .entities import CLASS_GOAL
+    loops = getattr(srv, "loops", None)
+    held = set(getattr(loops, "_held", ()) or ())
+    due = []
+    for doc in list((getattr(est, "docs", None) or {}).values()):
+        if doc is None or doc.cls != CLASS_GOAL:
+            continue
+        props = doc.properties or {}
+        if (props.get("status") or "open") != "open" or doc.eid in held:
+            continue
+        if _parked(srv, props):
+            continue
+        last = float(props.get("intent_planted_ts") or 0)
+        wait = min_age_s * (2 ** min(_ignored_streak(props), 4))
+        if now - last >= wait:
+            due.append((last, doc, props))
+    due.sort(key=lambda t: t[0])
+    return due
+
+
+def _wake(est, pool, doc, props) -> None:
+    lands = list(props.get("landings") or [])
+    notify_intent_planted(
+        est, pool, doc.eid, str(props.get("name") or ""),
+        created=False, rewake=True,
+        last_landing=str((lands[-1] or {}).get("decision") or "")
+        if lands else "", landings=lands)
 
 
 def rewake_open_goals(srv, now: float | None = None,
@@ -712,28 +852,30 @@ def rewake_open_goals(srv, now: float | None = None,
     loops = getattr(srv, "loops", None)
     if pool.depth() > 0 or (loops is not None and loops.running() > 0):
         return 0
-    from .entities import CLASS_GOAL
-    held = set(getattr(loops, "_held", ()) or ())
-    due = []
-    for doc in list((getattr(est, "docs", None) or {}).values()):
-        if doc is None or doc.cls != CLASS_GOAL:
-            continue
-        props = doc.properties or {}
-        if (props.get("status") or "open") != "open" or doc.eid in held:
-            continue
-        last = float(props.get("intent_planted_ts") or 0)
-        wait = min_age_s * (2 ** min(_ignored_streak(props), 4))
-        if now - last >= wait:
-            due.append((last, doc, props))
-    due.sort(key=lambda t: t[0])
+    due = _due_goals(srv, est, now, min_age_s)
     for _, doc, props in due[:batch]:
-        lands = list(props.get("landings") or [])
-        notify_intent_planted(
-            est, pool, doc.eid, str(props.get("name") or ""),
-            created=False, rewake=True,
-            last_landing=str((lands[-1] or {}).get("decision") or "")
-            if lands else "")
+        _wake(est, pool, doc, props)
     return min(len(due), batch)
+
+
+def boot_wake_goals(srv, now: float | None = None,
+                    min_age_s: float | None = None) -> int:
+    """THE BOOT'S WAKE (2026-10-08, the review: every restart re-fired
+    every open goal, fresh or parked -- 47 duplicate runs, 37% of the
+    loops' tool calls): the boot picks up only the goals the PULSE would
+    (stale, backoff, parked), as continuations with their ledger. No idle
+    requirement and no batch cap -- a goal whose loop died with the old
+    boot is due by then anyway."""
+    est = getattr(srv, "entity_store", None)
+    pool = getattr(srv, "events_pool", None)
+    if est is None or pool is None:
+        return 0
+    now = time.time() if now is None else now
+    min_age_s = GOAL_REWAKE_S if min_age_s is None else min_age_s
+    due = _due_goals(srv, est, now, min_age_s)
+    for _, doc, props in due:
+        _wake(est, pool, doc, props)
+    return len(due)
 
 
 def start_goal_pulse(srv, every_s: float | None = None):
@@ -857,7 +999,19 @@ def edit_watch_ops(srv, ent, ops: list, replace: bool = False) -> dict:
     cur: list[dict] = []
     if not replace:
         cur = [dict(o) for o in (props.get("watch_ops") or [])]
+    # THE ATTENTION BUDGET (2026-10-08): one limit across the watch senses;
+    # at the limit the refusal carries the inventory -- the model chooses
+    # what to drop (a replace in place costs only its difference)
+    from .attention import over as _over
+    have = len(props.get("watch_ops") or [])
+    _room = min(len(ops), max(0, WATCH_OPS_CAP - len(cur)))
+    refused = _over(est, getattr(srv, "_watch_board", None),
+                    len(cur) + _room - have)
+    if refused:
+        return refused
     for o in ops:
+        o = dict(o)
+        o.setdefault("ts", time.time())
         if len(cur) >= WATCH_OPS_CAP:
             return {"ok": False,
                     "error": f"watch_ops cap ({WATCH_OPS_CAP}) reached; "

@@ -44,6 +44,15 @@ CHANNEL_TAIL = 8               # the cursor memory (last seen ts rides the
                                # own restarts via the doc's residual TTL)
 
 
+def post_failure_reason(peers) -> str:
+    """Why a peer post could not land (the bare 'unknown error' propped up
+    an imagined sister seat, 2026-10-08)."""
+    if getattr(peers, "_chan", None) is None:
+        return ("no peer channel on this seat (no other seats are "
+                "connected; peer_post has nowhere to go)")
+    return "the peer channel refused the write"
+
+
 class PeerSubstrate:
     """The registry + the chat channel, over couchbase's ephemeral and
     permanent collections. Degradation covenant: couchbase down -> both

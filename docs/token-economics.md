@@ -75,8 +75,12 @@ claimed-vs-measured win rates in `field state`. Tests:
 Idle background organs (the thinker, the dreamer, the NightClock's script
 and claim judges, the replay judge) run on a LOCAL cortex by default
 (`--idle-cortex-model`, default = the first local Ollama chat model by
-family preference — granite, glm, qwen3, qwen2.5-coder, …) — a stuck
-background seat burns zero cloud tokens. The router's free-tier covenant:
+family preference — granite, glm, qwen3, qwen2.5-coder, …). **The watch
+loops are the exception:** they are real seat turns on the seat's model,
+which on the ThinkPhone seat is `glm-5.3-flash:cloud`, so every loop pass
+is a cloud call. Their cost rules (wake backoff, BLOCKED parking, the
+verdict line, the per-pass tool budget, the alert gate) are in
+`background-mind.md` → "The goal loops' rhythm". The router's free-tier covenant:
 `--cloud-budget` defaults to $0, which keeps free-tier rungs (price ≤ 0.1)
 reachable and paid rungs unreachable until an explicit budget.
 

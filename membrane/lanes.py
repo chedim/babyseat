@@ -977,6 +977,23 @@ RECALL_NULL_SIM_FLOOR = 0.50
 RECALL_NULL_FRESH_S = 10 * 60.0   # the miss rides the banner this long
 
 
+def _digest_lines(srv, drain: bool = True) -> list[str]:
+    """The alert gate's digest as WHERE WE ARE lines (drained on a real
+    turn, peeked by /membrane/state)."""
+    from .attention import AlertGate
+    gate = getattr(srv, "_alert_gate", None)
+    if not isinstance(gate, AlertGate):
+        return []
+    rows = gate.take_digest() if drain else gate.digest()
+    if not rows:
+        return []
+    s = gate.settings()
+    head = (f"watch digest ({len(rows)} entities past your alert budget "
+            f"{s['budget']}/{s['window_min']:g}min, mode {s['mode']} -- "
+            f"dial it with the attention tool):")
+    return [head] + [f"  {r}" for r in rows]
+
+
 def _where_we_are(srv, vec, drain: bool = True) -> str | None:
     """THE 'I' TRACK -- the model's position, not its persona.
 
@@ -1089,6 +1106,10 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
             lines.append(_loops_line)
     except Exception:
         pass
+    # THE ALERT DIGEST (2026-10-08): the watch events past the seat's
+    # alert budget, folded here instead of N interrupt turns
+    for _dl in _digest_lines(srv, drain=drain):
+        lines.append(_dl)
     # 5. THE PEER SUBSTRATES (the operator's multi-seat design): the
     #    REGISTRY heartbeat + the seats line (who else is connected) +
     #    unread PEER-CHANNEL messages (cross-seat chatter, read-once per
@@ -1266,26 +1287,77 @@ def _is_intent_query(q: str) -> bool:
             or low.rstrip("?!").strip() == "membrane: intents")
 
 
+_GOAL_PREFIXES = ("membrane::", "m:", "goal:")
+
+
+def _goal_spec(spec: str) -> tuple[str, bool]:
+    """(the normalised spec, does it look like an eid). Every spelling the
+    prompts hand out -- membrane::goal:<id>, m:goal:<id>, goal:<id>,
+    #<id>, <id> -- comes down to the bare id (the review: 24 of 74
+    fulfills refused the prompt's own eid, 2026-10-08)."""
+    s = " ".join((spec or "").split()).lower().lstrip("#")
+    eidish = False
+    changed = True
+    while changed:
+        changed = False
+        for p in _GOAL_PREFIXES:
+            if s.startswith(p):
+                s, eidish, changed = s[len(p):], True, True
+    if re.fullmatch(r"[0-9a-f]{6,}", s):
+        eidish = True
+    return s, eidish
+
+
+def _goal_id(e) -> str:
+    from .entities import MEMBRANE_NS
+    eid = e.eid.lower()
+    if eid.startswith(MEMBRANE_NS.lower()):
+        eid = eid[len(MEMBRANE_NS):]
+    return eid[len("goal:"):] if eid.startswith("goal:") else eid
+
+
 def _resolve_goal(est, spec: str):
-    """Resolve an open Goal by eid fragment or text substring (the
-    fulfill/drop spec over the goal layer)."""
+    """Resolve an OPEN Goal: by id first (exact, then prefix); a spec that
+    is not eid-shaped may also match a name substring. An eid-shaped spec
+    NEVER name-matches -- a re-plant's name quoting the old eid closed the
+    wrong goal once."""
     if est is None:
         return None
-    from .entities import CLASS_GOAL, MEMBRANE_NS
-    spec = " ".join((spec or "").split()).lower().lstrip("#")
-    if not spec:
+    from .entities import CLASS_GOAL
+    s, eidish = _goal_spec(spec)
+    if not s:
         return None
-    for e in list(est.docs.values()):
-        if e.cls != CLASS_GOAL:
-            continue
-        if (e.properties or {}).get("status", "open") != "open":
-            continue
-        eid_frag = e.eid.replace(MEMBRANE_NS, "").lower()
+    open_goals = [e for e in list(est.docs.values())
+                  if e.cls == CLASS_GOAL
+                  and (e.properties or {}).get("status", "open") == "open"]
+    for e in open_goals:
+        if _goal_id(e) == s:
+            return e
+    if len(s) >= 6:
+        pre = [e for e in open_goals if _goal_id(e).startswith(s)]
+        if len(pre) == 1:
+            return pre[0]
+    if eidish:
+        return None
+    for e in open_goals:
         name = " ".join(str((e.properties or {}).get("name") or "")
                         .split()).lower()
-        if spec in eid_frag or (len(spec) >= 3 and spec in name):
+        if len(s) >= 3 and s in name:
             return e
     return None
+
+
+def goal_miss_reason(est, spec: str) -> str:
+    """Why _resolve_goal found nothing: an already-closed goal says so
+    (the old 'no OPEN goal matches' read as 'closed' and left goals open)."""
+    from .entities import CLASS_GOAL
+    s, _ = _goal_spec(spec)
+    for e in list((getattr(est, "docs", None) or {}).values()):
+        if e.cls == CLASS_GOAL and s and _goal_id(e) == s:
+            st = (e.properties or {}).get("status", "open")
+            return f"goal {e.eid} is already {st}: nothing to close"
+    return (f"no goal matches {spec!r} (give its eid, e.g. "
+            "membrane::goal:<id>, from the board or your task)")
 
 
 def _membrane_intent_create_or_pin(srv, text: str, ttl: str = ""
@@ -1693,9 +1765,12 @@ def _watch_report_cmd(srv, q: str) -> str:
     if not label:
         return (board.report() + "\n\n" + _INTERCEPT_MARKER)
     try:
-        w, evicted = board.set_watch(label, None)
+        from .attention import over as _over
+        _est = getattr(srv, "entity_store", None)
+        w, evicted = board.set_watch(label, None, owner="operator",
+                                     check=lambda n: _over(_est, board, n))
     except RuntimeError as e:
-        return (f"Membrane watch: cannot plant ({_one_line(e)}).\n\n"
+        return (f"Membrane watch: cannot plant ({e}).\n\n"
                 + _INTERCEPT_MARKER)
     _write_audit(srv.membrane, {"event": "watch", "op": "set",
                                 "label": _clip(label, 120), "wid": w.wid,
@@ -1735,10 +1810,13 @@ def _watch_set_from_thought(srv, label: str) -> str:
                 + board.report())
     if low and low not in ("watch", "watch?"):
         try:
-            w, evicted = board.set_watch(low, None)
+            from .attention import over as _over
+            _est = getattr(srv, "entity_store", None)
+            w, evicted = board.set_watch(low, None, owner="agent",
+                                         check=lambda n: _over(_est, board, n))
         except RuntimeError as e:
             return ("[membrane-intercept] agent watch: cannot plant "
-                    f"({_one_line(e)}).\n" + board.report())
+                    f"({e}).\n" + board.report())
         _write_audit(srv.membrane, {"event": "watch", "op": "set",
                                     "origin": "agent",
                                     "label": _clip(low, 120),
@@ -3627,6 +3705,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._membrane_ask(); return
         if path == "/membrane/peer/seats":
             self._peer_seats(); return
+        if path == "/membrane/ha/state":
+            self._ha_state(); return
         if getattr(self.server, "viewer", False):
             if path in ("/viewer", "/viewer/", "/universe", "/universe/"):
                 # THE VIEWER RETIRED (the operator's ruling): the old dev
@@ -3648,6 +3728,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 self._map_entities(); return
             if path == "/membrane/map/axes":
                 self._map_axes(); return
+            if path == "/membrane/map/field":
+                self._map_field(); return
+            if path == "/membrane/field/entity":
+                self._field_entity(); return
+            if path == "/membrane/map/distance":
+                self._map_distance(); return
             if path == "/membrane/map/axis":
                 # the thin alias: the axis query params ride /cloud (the
                 # contract's shape; the reproject uses cloud+entities)
@@ -3683,6 +3769,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._peer_post(); return
         if path == "/membrane/junk-cut":
             self._junk_cut_set(); return
+        if path == "/membrane/watch":
+            self._membrane_watch(); return
+        if path == "/membrane/attention":
+            self._membrane_attention(); return
         if path == "/membrane/entity/edit":
             self._entity_edit(); return
         if path == "/membrane/entity/inherit":
@@ -3905,6 +3995,126 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                     "contest": len(d.get("conflicts") or []),
                 })
         self._json_out({"stars": out, "radius": 50.0})
+
+    def _map_field(self):
+        """GET /membrane/map/field?m=N: the field map (fieldmap.field_map) --
+        the top-m live entities by mass, their relations, every node's
+        value on every axis. Cached 60s per m (an SVD over m states)."""
+        from urllib.parse import parse_qs
+        from . import fieldmap as _FM
+        fld = _efield_of(self.server)
+        if fld is None:
+            self._json_out({"axes": [], "nodes": [], "edges": []}); return
+        qs = parse_qs(self.path.split("?", 1)[-1] if "?" in self.path else "")
+        try:
+            m = min(max(int((qs.get("m") or ["1200"])[0]), 50), 3000)
+        except ValueError:
+            m = 1200
+        cache = getattr(self.server, "_field_map_cache", None)
+        if cache is None:
+            cache = self.server._field_map_cache = {}
+        hit = cache.get(m)
+        if hit and time.time() - hit[0] < 60:
+            self._json_out(hit[1]); return
+        try:
+            rows = _efield_state_rows(self.server, fld, m=m)
+            rels = [d for _, d in fld.b.scan(
+                "relations", {"origin": fld.origin, "superseded": False})]
+            out = _FM.field_map(rows, rels)
+            out["field"] = {"live": len(rows), "relations": len(rels), "m": m}
+        except Exception as e:                          # noqa: BLE001
+            self._json_err_raw(500, f"field map failed: {e!r}"[:200]); return
+        cache[m] = (time.time(), out)
+        self._json_out(out)
+
+    def _map_distance(self):
+        """GET /membrane/map/distance?eid=X[&mode=toward]: THE ENTITY AXIS --
+        every live entity's cosine distance from X (X = 0), or with
+        mode=toward the SIGNED projection onto (X - the field mean), over
+        the field map's top-3000 (cached 60s, the card's own row cache)."""
+        import numpy as _np
+        from urllib.parse import parse_qs
+        from . import fieldmap as _FM
+        from .efstore import unpack_f16
+        fld = _efield_of(self.server)
+        if fld is None:
+            self._json_err_raw(503, "the field is not loaded"); return
+        qs = parse_qs(self.path.split("?", 1)[-1] if "?" in self.path else "")
+        eid = (qs.get("eid") or [""])[0].strip()
+        if not eid:
+            self._json_err_raw(400, "eid is required"); return
+        hit = getattr(self.server, "_field_rows_cache", None)
+        if not hit or time.time() - hit[0] > 60:
+            hit = (time.time(), _efield_state_rows(self.server, fld, m=3000))
+            self.server._field_rows_cache = hit
+        rows = hit[1]
+        ref = next((r for r in rows if r.get("eid") == eid), None)
+        vec = ref["state"] if ref else None
+        if vec is None:
+            docs = [d for _, d in fld.b.scan("entity_states", {"eid": eid, "tier": "live"})]
+            if docs and docs[0].get("state"):
+                vec = _np.asarray(unpack_f16(docs[0]["state"]), dtype=float)
+        if vec is None:
+            self._json_err_raw(404, f"no live field entity {eid!r}"); return
+        mode = (qs.get("mode") or ["distance"])[0].strip().lower()
+        if mode == "toward":
+            # the signed axis: 0 = the field's typical memory, + = shares
+            # what makes eid distinctive (fieldmap.toward)
+            self._json_out({"eid": eid, "mode": "toward", "dist": _FM.toward(vec, rows)})
+        else:
+            self._json_out({"eid": eid, "mode": "distance", "dist": _FM.distances(vec, rows)})
+
+    def _field_entity(self):
+        """GET /membrane/field/entity?eid=X: one FIELD entity's card
+        (fieldmap.entity_card) -- the map drawer's read. (/membrane/entity/
+        read is the QuantumEntity store: a field eid like 'w:agatha' 404s
+        there with a nearest-name guess.)"""
+        import numpy as _np
+        from urllib.parse import parse_qs
+        from . import fieldmap as _FM
+        from .efstore import unpack_f16
+        fld = _efield_of(self.server)
+        if fld is None:
+            self._json_err_raw(503, "the field is not loaded"); return
+        qs = parse_qs(self.path.split("?", 1)[-1] if "?" in self.path else "")
+        eid = (qs.get("eid") or [""])[0].strip()
+        if not eid:
+            self._json_err_raw(400, "eid is required"); return
+        docs = [d for _, d in fld.b.scan("entity_states", {"eid": eid, "tier": "live"})] \
+            or [d for _, d in fld.b.scan("entity_states", {"eid": eid})]
+        doc = next((d for d in docs if d.get("origin") == fld.origin),
+                   docs[0] if docs else None)
+        if doc is None:
+            self._json_err_raw(404, f"no field entity {eid!r}"); return
+        try:
+            ev = fld.evidence(eid, k=8)
+        except Exception:                               # noqa: BLE001
+            ev = []
+        near = []
+        if doc.get("state"):
+            vec = _np.asarray(unpack_f16(doc["state"]), dtype=float)
+            try:
+                near = fld.recall(vec, k=12)
+            except Exception:                           # noqa: BLE001
+                near = []
+            if not near:
+                # the backend's vector index can answer nothing (the live
+                # seat: [] for w:agatha) -> cosine over the live states
+                # (cached 60s, the field map's own top-3000 by mass)
+                hit = getattr(self.server, "_field_rows_cache", None)
+                if not hit or time.time() - hit[0] > 60:
+                    hit = (time.time(), _efield_state_rows(self.server, fld, m=3000))
+                    self.server._field_rows_cache = hit
+                near = _FM.nearest(vec, hit[1], k=12, exclude=eid)
+        try:
+            rels = fld.relations_of(eid)
+        except Exception:                               # noqa: BLE001
+            rels = []
+        card = _FM.entity_card(doc, ev, near, rels)
+        for x in card["near"]:
+            st = fld.get(x["eid"])
+            x["surface"] = getattr(st, "surface", None) if st is not None else None
+        self._json_out(card)
 
     def _map_entities(self):
         """GET /membrane/map/entities: the graph (nodes + edges), the
@@ -5479,7 +5689,45 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if not text:
             self._json_err_raw(400, "text required"); return
         ok = peers.post(text, reply_to=str(body.get("reply_to") or ""))
+        if not ok:
+            from .peers import post_failure_reason
+            self._json_out({"ok": False, "error": post_failure_reason(peers)})
+            return
         self._json_out({"ok": ok})
+
+    def _ha_state(self) -> None:
+        """GET /membrane/ha/state?entity_id=...|search=...&k=N: live Home
+        Assistant state through the seat's own hass.env token (never
+        shown). Read-only."""
+        from . import ha_state as _ha
+        import urllib.parse as _up
+        qs = _up.parse_qs(self.path.split("?", 1)[-1])
+        eid = (qs.get("entity_id") or [""])[0].strip()
+        q = (qs.get("search") or [""])[0].strip()
+        try:
+            k = max(1, min(25, int((qs.get("k") or ["8"])[0])))
+        except ValueError:
+            k = 8
+        env = _ha.load_env()
+        if not env:
+            self._json_err_raw(503, "no Home Assistant credentials on this "
+                               f"seat ({_ha.DEFAULT_ENV} missing HASS_URL/"
+                               "HASS_TOKEN)"); return
+        if not eid and not q:
+            self._json_err_raw(400, "entity_id or search required "
+                               "(e.g. search='bms battery')"); return
+        try:
+            if eid:
+                rows = [_ha.fetch_one(env, eid)]
+            else:
+                rows = _ha.search(_ha.fetch_all(env), q, k)
+        except Exception as e:
+            msg = str(e)
+            if eid and "404" in msg:
+                self._json_err_raw(404, f"no Home Assistant entity {eid!r}: try "
+                                   "search with a few words"); return
+            self._json_err_raw(502, f"Home Assistant read failed: {msg[:160]}"); return
+        self._json_out({"ok": True, "rows": rows, "text": _ha.render_rows(rows)})
 
     def _peer_seats(self) -> None:
         """GET /membrane/peer/seats: the registry read (who else is
@@ -5557,6 +5805,88 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             except Exception as e:
                 self._json_err_raw(500, f"related lookup failed: {e}"); return
         self._json_err_raw(503, "the entity field is off"); return
+
+    def _membrane_attention(self) -> None:
+        """POST /membrane/attention {action: get|set, budget, window_min,
+        mode}: the seat's own alert dial (attention.AlertGate), persisted
+        next to the field (attention.json)."""
+        from .attention import AlertGate
+        srv = self.server
+        gate = getattr(srv, "_alert_gate", None)
+        if gate is None:
+            gate = srv._alert_gate = AlertGate()
+        body = self._json_body()
+        if str(body.get("action") or "get").lower() == "set":
+            try:
+                gate.set(budget=body.get("budget"), window_min=body.get("window_min"),
+                         mode=body.get("mode"))
+            except (ValueError, TypeError) as e:
+                self._json_err_raw(400, str(e)); return
+            try:
+                import json as _json
+                _p = getattr(srv, "_attention_path", None)
+                if _p:
+                    open(_p, "w").write(_json.dumps(gate.settings()))
+            except Exception:
+                pass
+            _write_audit(srv.membrane, {"event": "attention", "op": "set",
+                                        **gate.settings()})
+        s_ = gate.settings()
+        self._json_out({"ok": True, **s_, "digest_pending": len(gate.digest()),
+                        "text": (f"alert dial: {s_['budget']} interrupt turns per "
+                                 f"{s_['window_min']:g} min, mode {s_['mode']}; "
+                                 f"{len(gate.digest())} entities waiting in the digest")})
+
+    def _membrane_watch(self) -> None:
+        """POST /membrane/watch {action: plant|drop|list, topic, spec,
+        owner}: the board's spatial watches for the field_watch tool,
+        inside the shared attention budget (attention.py). A full budget
+        answers 409 with the live watches -- the model drops, never
+        membrane."""
+        from .attention import (ATTENTION_BUDGET, inventory as _inv,
+                                over as _over, render as _render)
+        from .watch import WatchFull
+        srv = self.server
+        board = _watches_board(srv)
+        est = getattr(srv, "entity_store", None)
+        if board is None:
+            self._json_err_raw(503, "watch board unavailable"); return
+        body = self._json_body()
+        action = str(body.get("action") or "list").strip().lower()
+        owner = str(body.get("owner") or "")[:80]
+        if action in ("plant", "drop") and self._paused_write_refused():
+            return
+        if action == "plant":
+            topic = " ".join(str(body.get("topic") or "").split())[:200]
+            if not topic:
+                self._json_err_raw(400, "plant needs a topic"); return
+            try:
+                w, _ = board.set_watch(topic, None, owner=owner,
+                                       check=lambda n: _over(est, board, n))
+            except WatchFull as e:
+                self._json_err_raw(409, str(e)); return
+            except RuntimeError as e:
+                self._json_err_raw(400, f"cannot plant: {e}"[:200]); return
+            _write_audit(srv.membrane, {"event": "watch", "op": "set",
+                                        "origin": "field_watch", "owner": owner,
+                                        "label": _clip(topic, 120), "wid": w.wid})
+            text = (f"watch #{w.wid} planted: {topic!r}, radius {w.radius:.2f}, "
+                    f"owner {owner or 'operator'}. New memories landing inside "
+                    f"report on your next turn. Attention: "
+                    f"{len(_inv(est, board))}/{ATTENTION_BUDGET}.")
+        elif action == "drop":
+            spec = str(body.get("spec") or "").strip()
+            n, note = board.drop_watch(spec)
+            _write_audit(srv.membrane, {"event": "watch", "op": "drop",
+                                        "origin": "field_watch", "owner": owner,
+                                        "spec": _clip(spec, 120), "result": note})
+            text = (f"dropped {n} watch(es): {note}" if n else f"nothing dropped: {note}") + \
+                f". Attention: {len(_inv(est, board))}/{ATTENTION_BUDGET}."
+        else:
+            inv = _inv(est, board)
+            text = (f"Attention: {len(inv)}/{ATTENTION_BUDGET}.\n" + _render(inv)) if inv \
+                else f"Attention: 0/{ATTENTION_BUDGET} -- nothing watched."
+        self._json_out({"ok": True, "text": text})
 
     def _paused_write_refused(self) -> bool:
         """THE PAUSE'S WRITE GATE (the entity hands are down): True +
@@ -5644,6 +5974,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                        getter_script=body.get("getter_script"),
                        watch=body.get("watch"),
                        watch_ops=body.get("watch_ops"),
+                       watch_fields=body.get("watch_fields"),
                        properties=body.get("properties"),
                        publish=bool(body.get("publish")),
                        unpublish=bool(body.get("unpublish")))
@@ -5727,6 +6058,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._json_err_raw(400, hint); return
         ent = est._resolve_spec(spec)
         if ent is None:
+            hint = est.miss_hint(spec) if hasattr(est, "miss_hint") else ""
+            if hint:
+                self._json_err_raw(404, hint); return
             near = est.near_specs(spec)
             msg = "no entity matches spec" + (f" {spec!r}" if spec else "")
             if near:
@@ -5817,7 +6151,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                                "close"); return
         goal = _resolve_goal(est, spec)
         if goal is None:
-            self._json_err_raw(404, f"no OPEN goal matches {spec!r}"); return
+            self._json_err_raw(404, goal_miss_reason(est, spec)); return
         props = goal.properties or {}
         props["status"] = "fulfilled"
         props["fulfilled_ts"] = time.time()

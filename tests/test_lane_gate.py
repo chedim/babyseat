@@ -90,12 +90,16 @@ class TestLaneGate(unittest.TestCase):
         self.assertEqual(SRV._lane_of("watch: f:membrane/x.py"), "listener")
         self.assertEqual(SRV._lane_of("watch"), "listener")
 
-    def test_operator_loses_the_mutations(self):
-        """The operator's hands: intents + reads + memory + the executor's
-        door; the other entity mutations belong to the listeners."""
-        for t in ("entity_add", "entity_edit", "entity_remove"):
-            self.assertNotIn(t, SRV._lane_tools("operator"))
+    def test_operator_has_every_hand(self):
+        """THE FLOOD GATES (2026-10-08, the operator's call: 'open the
+        flood gates between the lanes'): the chat lane holds the entity
+        hands and the watches too -- the split cost more round trips
+        (refused -> intend -> a loop) than it protected. Plan mode stays
+        read-only."""
+        for t in ("entity_add", "entity_edit", "entity_remove", "field_watch"):
+            self.assertIn(t, SRV._lane_tools("operator"))
             self.assertIn(t, SRV._lane_tools("listener"))
+            self.assertNotIn(t, SRV._lane_tools("plan"))
         for t in ("entity_link", "entity_unlink"):
             self.assertIn(t, SRV._lane_tools("operator"))
             self.assertIn(t, SRV._lane_tools("listener"))
@@ -121,10 +125,10 @@ class TestLaneGate(unittest.TestCase):
         """THE REFUSAL (the user's 'do just refusal for now'): the
         cross-lane call's tool result IS the honest refusal -- no hard
         unknown-tool error."""
-        r = SRV._lane_refusal("entity_add", "operator")
+        self.assertIsNone(SRV._lane_refusal("entity_add", "operator"))
+        r = SRV._lane_refusal("entity_add", "plan")
         assert r is not None
-        self.assertIn("EVENT LISTENERS", r)
-        self.assertIn("intend", r)
+        self.assertIn("plan mode", r)
         r2 = SRV._lane_refusal("intend", "plan")
         assert r2 is not None
         self.assertIn("plan mode", r2)
@@ -142,7 +146,9 @@ class TestLaneGate(unittest.TestCase):
         op = {t["name"] for t in SRV._openai_tools_for("build")}
         li = {t["name"] for t in SRV._openai_tools_for("watch: f:x.py")}
         pl = {t["name"] for t in SRV._openai_tools_for("plan")}
-        self.assertNotIn("entity_add", op)
+        self.assertIn("entity_add", op)
+        self.assertIn("field_watch", op)
+        self.assertNotIn("entity_add", pl)
         self.assertIn("intend", op)
         self.assertNotIn("intend", li)
         self.assertIn("entity_add", li)
@@ -151,7 +157,7 @@ class TestLaneGate(unittest.TestCase):
     def test_kill_switch_restores_the_flat_surface(self):
         os.environ["MEMBRANE_LANE_GATE"] = "0"
         try:
-            self.assertIsNone(SRV._lane_refusal("entity_add", "operator"))
+            self.assertIsNone(SRV._lane_refusal("entity_add", "plan"))
         finally:
             del os.environ["MEMBRANE_LANE_GATE"]
 
@@ -619,10 +625,16 @@ class TestEntityReadHints(unittest.TestCase):
         self.assertIn("Executor", msg)
         self.assertIn("tool:executor", msg)
 
-    def test_field_id_unresolvable_carries_the_nearest(self):
-        """'s:?tick_every' (the FIELD's id) -> 404 + the store's
-        symbols:?tick_every as the nearest -- one call self-corrects."""
+    def test_field_id_resolves_to_the_store(self):
+        """'s:?tick_every' (the FIELD's short id) resolves to the store's
+        symbols:?tick_every directly (2026-10-08: it used to 404 with the
+        right answer as its 'nearest')."""
         code, out = self._get("/membrane/entity/read?spec=s:?tick_every")
+        self.assertEqual(code, 200, out)
+
+    def test_field_id_unresolvable_carries_the_nearest(self):
+        """A typo'd id -> 404 + the store's nearest -- one call self-corrects."""
+        code, out = self._get("/membrane/entity/read?spec=s:?tick_everyx")
         self.assertEqual(code, 404)
         msg = out["error"]["message"]
         self.assertIn("no entity matches", msg)

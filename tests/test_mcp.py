@@ -149,11 +149,14 @@ class TestMcpProtocol(unittest.TestCase):
     def test_tools_list(self):
         (resp,) = _rpc([{"jsonrpc": "2.0", "id": 1, "method": "tools/list"}])
         names = [t["name"] for t in resp["result"]["tools"]]
-        self.assertEqual(names, ["query", "state",
+        self.assertEqual(names, ["query", "state", "ha_state",
                                  "intend", "fulfill", "intents",
                                  "learn", "forget",
                                  "entity_watch",
                                  "entity_unwatch",
+                                 # the board's spatial watches (2026-10-08)
+                                 "field_watch",
+                                 "attention",
                                  "entity_tracks",
                                  "entities_related",
                                  "entity_query",

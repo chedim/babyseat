@@ -130,18 +130,26 @@ agent decides which MCP tools the turn's surface carries and which
 calls the executor admits. Two minds, one registry (`_lane_tools`,
 membrane/server.py):
 
-- **Operator** (agent `build` — the main chat): reads (`query`, `state`,
-  `graph`, `entities_related`, `entity_query`, `entity_read`,
-  `entity_tracks`), memory (`learn`, `forget`), **steering** (`intend`,
-  `intents` — the operator's pen), room (`peer_post`, `peer_seats`,
-  `junk_cut`), banner tracks (`entity_watch`, `entity_unwatch`).
+- **Operator** (agent `build` — the main chat): every hand since the
+  flood gates (2026-10-08): reads (`query`, `state`, `graph`,
+  `entities_related`, `entity_query`, `entity_read`, `entity_tracks`,
+  `ha_state`), memory (`learn`, `forget`), steering (`intend`, `intents`,
+  `fulfill`), room (`peer_post`, `peer_seats`, `junk_cut`), the watches
+  (`entity_watch`, `entity_unwatch`, `field_watch`, `attention`) and the
+  entity hands (`entity_add`, `entity_edit`, `entity_remove`,
+  `entity_inherit`, `entity_link`, `entity_unlink`). The chat runs a
+  one-line command itself instead of planting a goal for it.
 - **Event listener** (agent `watch:<eid>` — the thinking loops): the
-  operator's set **minus** `intend`, **plus the entity hands**
-  (`entity_add`, `entity_edit`, `entity_remove`, `entity_link`,
-  `entity_unlink`) — the field events they process are their material.
-- **Plan** (agent `plan`): the operator minus `intend` — a planning
-  session reads and communicates, never plants (the direction needs
-  the user's build-mode word).
+  operator's set **minus** `intend` (a loop takes the next step, closes
+  with `fulfill`, or ends BLOCKED; it never plants new goals).
+- **Phone** (agent `phone` — a call through agdroid's calld): reads,
+  `ha_state`, `learn`, `intend`, `intents`. Never the executor or entity
+  writes: a misheard sentence must not change the boat; a caller's
+  request becomes a visible goal.
+- **Plan** (agent `plan`): the operator minus every write and close — a
+  planning session reads and communicates, never plants.
+
+Refusal texts are lane-specific: only a plan session hears "plan mode".
 
 A cross-lane call never reaches the impls: the tool result IS the
 honest refusal (a pointer to the right lane), audited

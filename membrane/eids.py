@@ -226,3 +226,67 @@ def role_key(role: str, dim: int = vsa.DEFAULT_DIM):
 
 def is_specific(eid: str) -> bool:
     return eid.split(":", 1)[0] in SPECIFIC
+
+
+# ---- THE NAME LINT (2026-10-08, the seat's own review) -----------------------
+# "m:m:c:agdroid:doorbell (doubled prefix) ... c:{'cmd': -- a dict-literal as a
+# command name ... doorbell under two nodes (m:m:c: and m:component:c:) --
+# split-brain." `m:` / `membrane::` is the field's MIRROR of membrane's own
+# entities -- fine to READ (a track key), a bug inside a NAME a model creates.
+NAME_MAX = 120
+KEY_MAX = 240
+_BAD_CHARS = set("{}[]\"'`<>\\")
+_CLASS_HEADS = {"component", "decision", "failuremode", "aimodel", "endpoint",
+                "config", "goal", "sensor", "actuator", "project", "session",
+                "timeline", "seat"}
+
+
+def _plain(s: str, cap: int) -> str | None:
+    if any(ord(ch) < 32 for ch in s):
+        return "names are plain one-line identifiers (no newlines/tabs)"
+    if _BAD_CHARS & set(s):
+        return ("no brace/bracket/quote characters in a name (a dict or list "
+                "literal is not a name)")
+    if len(s) > cap:
+        return f"too long ({len(s)} > {cap}): a name, not a sentence"
+    return None
+
+
+def lint_name(name: str) -> str | None:
+    """None = a clean name a model may CREATE; else why not (+ the clean
+    suggestion where one exists)."""
+    s = str(name or "").strip()
+    if not s:
+        return "a name is required"
+    bad = _plain(s, NAME_MAX)
+    if bad:
+        return bad
+    if s.startswith("membrane::") or s.split(":", 1)[0] == "m":
+        clean = s
+        while True:
+            if clean.startswith("membrane::"):
+                clean = clean[len("membrane::"):]
+            elif clean.split(":", 1)[0] == "m" and ":" in clean:
+                clean = clean.split(":", 1)[1]
+            else:
+                break
+        return (f"'m:' / 'membrane::' is the field's MIRROR prefix, not part "
+                f"of a name (it would land twice) -- name it '{clean}'")
+    segs = s.split(":")
+    if len(segs) > 1 and segs[0].lower() in _CLASS_HEADS:
+        rest = ":".join(segs[1:])
+        return (f"the class rides cls=, not the name (one referent, one node) "
+                f"-- name it '{rest}'")
+    if len(segs) > 2 and segs[0] in KINDS and segs[1] in KINDS:
+        rest = ":".join(segs[1:])
+        return f"stacked kind prefixes '{segs[0]}:{segs[1]}:' -- name it '{rest}'"
+    return None
+
+
+def lint_key(key: str) -> str | None:
+    """A track / watch KEY: may name the mirror (it reads an existing
+    entity); only the shape is checked."""
+    s = str(key or "").strip()
+    if not s:
+        return "a key is required"
+    return _plain(s, KEY_MAX)

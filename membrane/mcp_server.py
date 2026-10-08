@@ -78,6 +78,22 @@ TOOLS: list[dict] = [
         "inputSchema": {"type": "object", "properties": {}},
     },
     {
+        "name": "ha_state",
+        "description": (
+            "LIVE Home Assistant state (the boat's real values right now: "
+            "battery SOC, currents, lights, sensors). The entity field is "
+            "memory, not telemetry -- read live values HERE, not by shell. "
+            "Give entity_id for one entity, or search with a few words "
+            "(e.g. 'bms battery') to find it. Read-only; the token stays "
+            "server-side."),
+        "inputSchema": {"type": "object", "properties": {
+            "entity_id": {"type": "string",
+                          "description": "e.g. sensor.agatha_bms_battery"},
+            "search": {"type": "string",
+                       "description": "words matched against entity ids and names"},
+            "k": {"type": "integer", "description": "max rows (default 8)"}}},
+    },
+    {
         "name": "intend",
         "description": (
             "Plant YOUR commitment (the steering wheel of membrane's idle "
@@ -172,18 +188,19 @@ TOOLS: list[dict] = [
     {
         "name": "entity_watch",
         "description": (
-            "Plant an ENTITY WATCH (a track). A track shows the entity's "
-            "live state in the WHERE WE ARE header every turn "
-            "(constant tracking), and an optional boundary turns it into an "
-            "EVENT trigger: 'enter N' fires when the count rises to N+, "
-            "'exit N' when it falls below N. Fires land ONCE per "
-            "transition (re-entry re-arms). DELIVERY RIDES THE OWNER: "
+            "Plant a TRACK: an entity's live state shown in the WHERE WE "
+            "ARE header every turn; an optional count boundary ('enter N' / "
+            "'exit N') fires ONCE per transition. DELIVERY RIDES THE OWNER: "
             "''/'operator' fires ride the banner as ALERT lines; a "
             "listener's name ('watch:<eid>') delivers the crossing INTO "
-            "THE LISTENER'S NEXT TURN (its event message, the "
-            "event-input flow). Key forms: 'files:router.py', "
-            "'models:glm-5.3-flash:cloud', 'symbols:<qualname>', "
-            "'shell:git', 'ha:sensor.x'. No boundary = count-only track."),
+            "THE LISTENER'S NEXT TURN. Key forms: 'files:router.py', "
+            "'models:glm-5.3-flash:cloud', 'symbols:<qualname>'. "
+            "A track DISPLAYS; to WATCH the field use the senses: "
+            "field_watch (a topic region: every new memory landing near "
+            "it reports), entity_edit watch_ops (relational: near / away "
+            "/ around another entity) and watch_fields (an entity's own "
+            "motion: pos / align / vel) -- they share one attention "
+            "budget; at the limit drop what you no longer need."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -215,6 +232,54 @@ TOOLS: list[dict] = [
                 "key": {"type": "string"},
             },
             "required": ["key"],
+        },
+    },
+    {
+        "name": "field_watch",
+        "description": (
+            "WATCH THE FIELD (a topic region): plant a probe on a topic; "
+            "every NEW memory landing inside its radius is reported to "
+            "you on your next turn. The radius EARNS its size (a watch "
+            "that swallows too much collapses; one that swallows "
+            "everything or starves goes dormant). The board holds 7, "
+            "inside ONE attention budget shared with watch_ops and "
+            "watch_fields: at the limit the plant is REFUSED with the "
+            "list of live watches (sense, what, owner, age, hits) -- "
+            "drop the ones you no longer need, then plant. Your agent is "
+            "stamped as each watch's owner. action: plant (topic) | drop "
+            "('#N', a label fragment, or 'all') | list."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["plant", "drop", "list"]},
+                "topic": {"type": "string",
+                          "description": "plant: what to watch for (the text is embedded)."},
+                "spec": {"type": "string",
+                         "description": "drop: '#N', a label fragment, or 'all'."},
+                "owner": {"type": "string",
+                          "description": "optional; defaults to your agent."},
+            },
+            "required": ["action"],
+        },
+    },
+    {
+        "name": "attention",
+        "description": (
+            "YOUR ALERT DIAL: how many watch events per window may wake "
+            "you as their own interrupt turn; the rest fold into the "
+            "'watch digest' lines of your next WHERE WE ARE block "
+            "(grouped per entity). mode 'interrupt' (the budget applies) "
+            "| 'digest' (no interrupt turns; everything folds -- goal "
+            "events always come through). Turn it down when alerts eat "
+            "your turns, up when you're missing things. action get | set."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["get", "set"]},
+                "budget": {"type": "integer", "description": "interrupt turns per window (0..50)"},
+                "window_min": {"type": "number", "description": "the rolling window in minutes (1..1440)"},
+                "mode": {"type": "string", "enum": ["interrupt", "digest"]},
+            },
         },
     },
     {
@@ -413,7 +478,7 @@ TOOLS: list[dict] = [
                                                 "an external event this "
                                                 "entity watches arrives "
                                                 "(file changes under the "
-                                                "seat dir, MQTT topics, "
+                                                "seat dir, signals; "
                                                 "signals). May block but "
                                                 "only 4 run at once, a >"
                                                 "10s fire strikes the "
@@ -428,8 +493,8 @@ TOOLS: list[dict] = [
                 "watch": {"type": "object",
                           "description": "what external events fire the "
                                          "watch_script: {kind: "
-                                         "'file'|'mqtt'|'signal', "
-                                         "glob/topic/name optional "
+                                         "'file'|'signal', "
+                                         "glob/name optional "
                                          "narrowing -- the CHEAP "
                                          "pre-filter; the script does "
                                          "the real filtering}. "
@@ -461,7 +526,27 @@ TOOLS: list[dict] = [
                                              "one event). '[]' clears; "
                                              "cap 8. Each change fires "
                                              "a watch-attached/detached "
-                                             "event to the pool."},
+                                             "event to the pool. Counts "
+                                             "against the shared "
+                                             "attention budget (with "
+                                             "field_watch + watch_fields)"
+                                             ": at the limit the edit is "
+                                             "refused with the live "
+                                             "watches -- drop first."},
+                "watch_fields": {"type": "array",
+                                 "description": "the OWN-MOTION watch "
+                                                "filters: [{verb, arg}] "
+                                                "with verb 'pos' (the "
+                                                "entity moved > arg), "
+                                                "'align' (its coherence "
+                                                "fell below arg), 'vel' "
+                                                "(its velocity rose above "
+                                                "arg); fires on the "
+                                                "crossing, re-arms on "
+                                                "return. Cap 3 per "
+                                                "entity, inside the "
+                                                "shared attention budget"
+                                                ". '[]' clears."},
                 "properties": {"type": "object",
                                "description": "bounded property patch "
                                               "(the model's write path "
@@ -686,6 +771,10 @@ def _http(port: int, method: str, path: str, body: dict | None = None,
     except urllib.error.HTTPError as e:
         try:
             detail = json.loads(e.read()).get("error", "")
+            # the seat's {"message", "type"} error: the MESSAGE reaches the
+            # model as text (a refusal's inventory lines stay readable)
+            if isinstance(detail, dict):
+                detail = detail.get("message") or detail
         except Exception:
             detail = e.reason
         raise ProxyError(e.code, str(detail)) from None
@@ -813,7 +902,8 @@ def tool_state(args: dict, port: int) -> str:
 
 
 def tool_learn(args: dict, port: int) -> str:
-    payload = _arg(args, "lesson", "text", "value", "content")
+    payload = _arg(args, "lesson", "text", "value", "content", "data",
+                   "fact", "note")
     if not payload:
         raise ProxyError(400, "lesson required")
     out = _http(port, "POST", "/membrane/learn", {"lesson": payload})
@@ -873,7 +963,7 @@ def tool_watch_entity(args: dict, port: int) -> str:
     banner's ALERT; a listener's name ('watch:<eid>') routes the
     crossing into the EVENTS POOL (the listener receives it as its
     next turn's message)."""
-    key = str(args.get("key") or "").strip()
+    key = _arg(args, "key", "entity", "spec", "eid", "name")
     if not key:
         raise ProxyError(400, "key required (e.g. 'files:router.py')")
     out = _http(port, "POST", "/membrane/entity-track", {
@@ -890,6 +980,40 @@ def tool_watch_entity(args: dict, port: int) -> str:
     return (f"Entity track planted: {out['key']}{bs}. Its live state "
             f"rides the WHERE WE ARE header each turn; a boundary "
             f"transition (enter/exit) alerts once via the banner.")
+
+
+def tool_field_watch(args: dict, port: int) -> str:
+    """The board's spatial watches (POST /membrane/watch): plant / drop /
+    list, inside the shared attention budget (a full budget answers with
+    the live watches -- the model drops what it no longer needs)."""
+    action = str(args.get("action") or "list").strip().lower()
+    if action not in ("plant", "drop", "list"):
+        raise ProxyError(400, "action: plant | drop | list")
+    body = {"action": action, "owner": str(args.get("owner") or "")}
+    if action == "plant":
+        topic = str(args.get("topic") or args.get("label") or "").strip()
+        if not topic:
+            raise ProxyError(400, "plant needs a topic")
+        body["topic"] = topic
+    if action == "drop":
+        spec = str(args.get("spec") or args.get("topic") or "").strip()
+        if not spec:
+            raise ProxyError(400, "drop needs a spec: '#N', a label fragment, or 'all'")
+        body["spec"] = spec
+    out = _http(port, "POST", "/membrane/watch", body)
+    return str(out.get("text") or out)
+
+
+def tool_attention(args: dict, port: int) -> str:
+    """The seat's alert dial (POST /membrane/attention)."""
+    action = str(args.get("action") or ("set" if any(
+        args.get(k) is not None for k in ("budget", "window_min", "mode")) else "get")).lower()
+    body = {"action": action}
+    for k in ("budget", "window_min", "mode"):
+        if args.get(k) is not None:
+            body[k] = args[k]
+    out = _http(port, "POST", "/membrane/attention", body)
+    return str(out.get("text") or out)
 
 
 def tool_unwatch_entity(args: dict, port: int) -> str:
@@ -948,6 +1072,15 @@ def tool_related_entities(args: dict, port: int) -> str:
     return "\n".join(lines)
 
 
+# what entity/add itself takes; the rest of an add's args ride a follow-up
+# edit (the add-hand used to DROP getter_script and friends silently)
+_ADD_FIELDS = ("class", "name", "summary", "links")
+_EDIT_FIELDS = ("nudge_script", "delete_script", "mention_script",
+                "thought_script", "dreamed_script", "tick_script",
+                "watch_script", "getter_script", "watch", "watch_ops",
+                "watch_fields", "properties", "publish")
+
+
 def tool_entity_add(args: dict, port: int) -> str:
     out = _http(port, "POST", "/membrane/entity/add", {
         "class": str(args.get("class") or ""),
@@ -959,9 +1092,20 @@ def tool_entity_add(args: dict, port: int) -> str:
         return f"Entity not written: {out.get('error', 'unknown error')}"
     how = "merged into the existing entity" if out.get("merged") \
         else "created"
-    return (f"Entity {out['name']!r} [{out['class']}] {how}: {out['eid']} "
-            f"(visible to entities_related; audited to the "
-            f"operator).")
+    msg = (f"Entity {out['name']!r} [{out['class']}] {how}: {out['eid']} "
+           f"(visible to entities_related; audited to the operator).")
+    extra = {k: args[k] for k in _EDIT_FIELDS if args.get(k) not in (None, "", [], {})}
+    if extra:
+        ed = _http(port, "POST", "/membrane/entity/edit",
+                   {"spec": out["eid"], **extra})
+        msg += (f" Also set: {', '.join(sorted(extra))}." if ed.get("ok")
+                else f" But setting {', '.join(sorted(extra))} failed: "
+                     f"{ed.get('error', 'unknown error')} (retry with entity_edit).")
+    ignored = sorted(k for k in args if k not in _ADD_FIELDS + _EDIT_FIELDS
+                     and k not in ("args",))
+    if ignored:
+        msg += f" Ignored unknown arg(s): {', '.join(ignored)}."
+    return msg
 
 
 def tool_entity_edit(args: dict, port: int) -> str:
@@ -970,7 +1114,7 @@ def tool_entity_edit(args: dict, port: int) -> str:
               "nudge_script", "delete_script",
               "mention_script", "thought_script", "dreamed_script",
               "tick_script", "watch_script", "getter_script",
-              "watch_ops", "watch", "properties"):
+              "watch_ops", "watch_fields", "watch", "properties"):
         if args.get(f) is not None:
             body[f] = args[f]
     for f in ("publish", "unpublish"):        # the tier-2 gestures
@@ -1012,7 +1156,7 @@ def tool_entity_edit(args: dict, port: int) -> str:
     if args.get("watch_script") is not None:
         return (f"Entity {out['eid']} is a WATCHER now -- its "
                 f"watch_script fires when an external event arrives "
-                f"(file changes under the seat dir, MQTT topics, "
+                f"(file changes under the seat dir, "
                 f"signals; the trigger's payload rides state.extra"
                 f".payload). Watchers may block but only 4 run at "
                 f"once, a >10s fire strikes (3 = auto-disabled). "
@@ -1022,7 +1166,7 @@ def tool_entity_edit(args: dict, port: int) -> str:
 
 
 def tool_entity_remove(args: dict, port: int) -> str:
-    spec = str(args.get("spec") or "").strip()
+    spec = _arg(args, "spec", "eid", "name", "entity", "key", "id")
     if not spec:
         raise ProxyError(400, "spec required (eid or exact name)")
     out = _http(port, "POST", "/membrane/entity/remove", {"spec": spec})
@@ -1058,9 +1202,21 @@ def tool_peer_post(args: dict, port: int) -> str:
     out = _http(port, "POST", "/membrane/peer/post", {
         "text": text, "reply_to": str(args.get("reply_to") or "")})
     if not out.get("ok"):
-        return f"Post failed: {out.get('error', 'unknown error')}"
+        raise ProxyError(503, f"post failed: {out.get('error') or 'unknown error'}")
     return (f"Posted to the peer channel (visible to the operator on "
             f"every connected seat; unread messages ride their banners).")
+
+
+def tool_ha_state(args: dict, port: int) -> str:
+    eid = _arg(args, "entity_id", "entity", "eid", "id")
+    q = _arg(args, "search", "query", "q", "text", "name")
+    if not eid and not q:
+        raise ProxyError(400, "entity_id or search required (e.g. search='bms battery')")
+    params = {"entity_id": eid} if eid else {"search": q, "k": str(args.get("k") or 8)}
+    out = _http(port, "GET", "/membrane/ha/state?" + urllib.parse.urlencode(params))
+    if not out.get("ok"):
+        raise ProxyError(502, str(out.get("error") or "Home Assistant read failed"))
+    return str(out.get("text") or "")
 
 
 def tool_intend(args: dict, port: int) -> str:
@@ -1109,7 +1265,7 @@ def tool_graph(args: dict, port: int) -> str:
     """The model's graph read: the entity graph's subgraph as nodes +
     edges -- the same contract the universe viewer renders."""
     import urllib.parse
-    q = urllib.parse.quote(str(args.get("query") or ""))
+    q = urllib.parse.quote(_arg(args, "query", "q", "text", "spec"))
     k = int(args.get("k") or 8)
     out = _http(port, "GET",
                 f"/membrane/entity-related?q={q}&k={k}")
@@ -1208,7 +1364,7 @@ def tool_entity_link(args: dict, port: int) -> str:
         if r.get("ok"):
             lines.append(f"- {eid}: rc={r.get('rc')} {r.get('outcome')} "
                          f"({r.get('ms', 0)}ms) "
-                         f"head: {str(r.get('head'))[:80]}")
+                         f"head: {str(r.get('head'))[:600]}")
         else:
             lines.append(f"- {eid}: FAILED -- "
                          f"{str(r.get('error') or r.get('outcome'))[:120]}")
@@ -1289,6 +1445,9 @@ TOOL_IMPLS = {
     "learn": tool_learn,
     "forget": tool_forget,
     "entity_watch": tool_watch_entity,
+    "ha_state": tool_ha_state,
+    "field_watch": tool_field_watch,
+    "attention": tool_attention,
     "entity_unwatch": tool_unwatch_entity,
     "entity_tracks": tool_list_tracks,
     "entities_related": tool_related_entities,
