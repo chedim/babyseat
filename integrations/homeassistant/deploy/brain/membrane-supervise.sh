@@ -3,7 +3,7 @@
 # on :11500) alive on the ThinkPhone. Started by ~/.termux/boot/01-tp-serve.sh.
 # Backend = the mac's ollama (glm cloud models ride its `ollama signin`).
 BACKEND=http://192.168.1.107:11434
-MODEL=glm-5.3:cloud
+MODEL=glm-5.3-flash:cloud   # flash: the full glm-5.3 burned the ollama cloud credits (2026-10-07)
 LOCK=$HOME/.membrane-supervise.pid
 LOG=$HOME/membrane/supervise.log
 

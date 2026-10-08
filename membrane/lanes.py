@@ -3707,6 +3707,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                                "(entity_link)"); return
         if path == "/membrane/intend":
             self._membrane_intend(); return
+        if path == "/membrane/fulfill":
+            self._membrane_fulfill(); return
         if path.startswith("/membrane/"):
             self._json_out({"error": "read-only; GET /membrane/state"}); return
         super().do_POST()
@@ -5783,6 +5785,55 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         self._entity_audit("intend", {"ok": True, "eid": res.get("eid"),
                                       "created": res.get("created")})
         self._json_out(res)
+
+    def _membrane_fulfill(self) -> None:
+        """POST /membrane/fulfill {spec, evidence, by?}: the listeners'
+        close (2026-10-08, the ThinkPhone's 'not progressing': the loops
+        landed the work -- pkg repaired rc=0, mosquitto installed -- but
+        only the operator's `membrane: fulfill #N` frame could close a
+        goal, so the board never moved). The receipt rule stays: no
+        evidence, no close; the evidence rides the goal (fulfilled_
+        evidence) and the audit, so the operator can reopen on a bad
+        claim."""
+        srv = self.server
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
+        body = self._json_body()
+        spec = str(body.get("spec") or "").strip()
+        evidence = " ".join(str(body.get("evidence") or "").split())
+        if not spec:
+            self._json_err_raw(400, "spec required (the goal's eid or "
+                               "a name fragment)"); return
+        if len(evidence) < 8:
+            self._json_err_raw(400, "evidence required: the receipt that "
+                               "proves it done (a command's rc=0 output, "
+                               "the entity state) -- no receipt, no "
+                               "close"); return
+        goal = _resolve_goal(est, spec)
+        if goal is None:
+            self._json_err_raw(404, f"no OPEN goal matches {spec!r}"); return
+        props = goal.properties or {}
+        props["status"] = "fulfilled"
+        props["fulfilled_ts"] = time.time()
+        props["fulfilled_by"] = str(body.get("by") or "listener")[:40]
+        props["fulfilled_evidence"] = evidence[:500]
+        goal.properties = props
+        try:
+            est.upsert(goal, embedder=None)
+        except Exception as e:
+            self._json_err_raw(500, f"the close did not persist ({e})")
+            return
+        name = str(props.get("name") or "")
+        _write_audit(srv.membrane, {"event": "intent", "op": "fulfill",
+                                    "origin": "mcp", "eid": goal.eid,
+                                    "spec": _clip(spec, 120),
+                                    "evidence": _clip(evidence, 200)})
+        try:
+            speak(srv, f"goal fulfilled: {name[:120]}", kind="note-pattern")
+        except Exception:
+            pass
+        self._json_out({"ok": True, "eid": goal.eid, "name": name})
 
     def _entity_inherit(self) -> None:
         """POST /membrane/entity/inherit: the multi-parent ISA relation

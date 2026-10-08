@@ -645,8 +645,9 @@ OPERATOR_TOOLS = frozenset((
     "entity_read", "entity_tracks",
     # memory
     "learn", "forget",
-    # steering (intentions -- THE OPERATOR'S PEN)
-    "intend", "intents",
+    # steering (intentions -- THE OPERATOR'S PEN; fulfill = the close
+    # with a receipt, the listeners' too: their landed work moves the board)
+    "intend", "intents", "fulfill",
     # room
     "peer_post", "peer_seats", "junk_cut",
     # the banner tracks (the operator's header)
@@ -657,7 +658,7 @@ LISTENER_TOOLS = (OPERATOR_TOOLS | {
     "entity_add", "entity_edit", "entity_remove",
     "entity_link", "entity_unlink",
 }) - {"intend"}
-PLAN_TOOLS = OPERATOR_TOOLS - {"intend"}   # plan reads/communicates, never plants
+PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill"}   # plan reads/communicates, never plants or closes
 
 _LANE_REFUSALS = {
     "entity_add": ("the entity hands belong to the EVENT LISTENERS -- "
@@ -676,6 +677,9 @@ _LANE_REFUSALS = {
                     "loop links and runs it"),
     "entity_unlink": ("the exec link is the LISTENERS' hand -- announce "
                       "the unlink through `intend`/`learn`"),
+    "fulfill": ("plan mode: goals aren't closed from a planning "
+                "session -- the build-mode turn (or a listener with the "
+                "receipt) closes them"),
     "intend": ("plan mode: commitments aren't planted from a planning "
                "session -- the direction needs the user's build-mode "
                "word; the board reads via `intents`"),
@@ -920,6 +924,47 @@ class TurnRunner:
                                          "elapsed_ms": int((time.time() - start) * 1000)},
                               "sessionID": sid})
 
+    def _mint_user_row(self, sid: str, text: str) -> tuple:
+        """The door's minted user row (a caller with no row: the watch
+        loops, internal turns). Its agent is the SESSION's (via
+        _turn_agent) -- it was hardcoded 'build', and the turn's own agent
+        wins the lane registry, so every loop turn laned OPERATOR and its
+        exec link was refused (2026-10-07)."""
+        now = int(time.time() * 1000)
+        info = {"id": _gen_id("msg"), "sessionID": sid,
+                "role": "user", "agent": self._turn_agent(sid, None),
+                "model": {"providerID": "membrane",
+                          "modelID": self.model},
+                "time": {"created": now},
+                "summary": {"diffs": []}}
+        parts = [{"id": _gen_id("prt"), "sessionID": sid,
+                  "messageID": info["id"],
+                  "type": "text", "text": text,
+                  "time": {"start": now}}]
+        return info, parts
+
+    def _turn_agent(self, sid: str, user_info: dict | None) -> str:
+        """The turn's agent (the lane gate's input): the turn's own agent
+        wins, then the session doc's, then 'build'. A bare loop key
+        ('loop::<agent>' -- the proxy-only loop session, no doc in this
+        store) resolves to ITS agent: a watch loop must never lane as the
+        operator (2026-10-07: every loop turn did, the exec link was
+        refused, the HA seat's commands never ran)."""
+        a = str((user_info or {}).get("agent") or "")
+        if a:
+            return a
+        try:
+            _docs = getattr(getattr(self, "sessions", None), "sessions",
+                            None) or {}
+            a = str((_docs.get(sid) or {}).get("agent") or "")
+        except Exception:
+            a = ""                  # a bare runner (tests, no store)
+        if a:
+            return a
+        if isinstance(sid, str) and sid.startswith("loop::"):
+            return sid[len("loop::"):] or "build"
+        return "build"
+
     def run(self, sid: str, text: str, user_info: dict | None = None,
             user_parts: list | None = None) -> dict:
         """THE GUARDED ENTRY, now a REAL QUEUE: a second message on a busy
@@ -949,17 +994,7 @@ class TurnRunner:
         # here (the old path minted inside _run_inner); otherwise the
         # caller's row is used as-is.
         if user_info is None:
-            now = int(time.time() * 1000)
-            user_info = {"id": _gen_id("msg"), "sessionID": sid,
-                         "role": "user", "agent": "build",
-                         "model": {"providerID": "membrane",
-                                   "modelID": self.model},
-                         "time": {"created": now},
-                         "summary": {"diffs": []}}
-            user_parts = [{"id": _gen_id("prt"), "sessionID": sid,
-                           "messageID": user_info["id"],
-                           "type": "text", "text": text,
-                           "time": {"start": now}}]
+            user_info, user_parts = self._mint_user_row(sid, text)
             self.messages.append(sid, user_info, user_parts)
         self._announce_user(sid, user_info, user_parts)
         user_info["_announced"] = True      # the inner's announce skips
@@ -1290,9 +1325,7 @@ class TurnRunner:
         # fallback (the loops' child sessions carry agent=watch:/loop-N;
         # a plain message POST carries build).
         try:
-            _sess = self.sessions.sessions.get(sid) or {}
-            self._agents[sid] = str((user_info or {}).get("agent")
-                                    or _sess.get("agent") or "build")
+            self._agents[sid] = self._turn_agent(sid, user_info)
         except Exception:
             pass
         if user_info is None:
@@ -1529,7 +1562,6 @@ class TurnRunner:
                         # THE TOOL'S TOUCH (the activity clock): a
                         # completed tool = the turn moved
                         self._turn_activity[sid] = time.time()
-                        self._tool_watchdog_end(call_id, name)
                         part["state"] = {"status": "completed",
                                          "input": args,
                                          "output": str(output or ""),
@@ -1545,6 +1577,12 @@ class TurnRunner:
                                          "time": {"start": tstart,
                                                   "end": int(
                                                       time.time() * 1000)}}
+                    finally:
+                        # disarmed on EVERY exit: an erroring call left its
+                        # timer armed and dumped ALL THREADS 45s later (the
+                        # ThinkPhone's ~370 false 'STILL PENDING' dumps,
+                        # 2026-10-08 -- every one a refused arg, not a stall)
+                        self._tool_watchdog_end(call_id, name)
                     self.hub.publish({"type": "message.part.updated",
                                       "part": dict(part),
                                       "time": int(time.time() * 1000),

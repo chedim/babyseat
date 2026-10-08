@@ -947,29 +947,14 @@ class TestLoopSessionIds(unittest.TestCase):
     loop turn = 'model ladder failed'. The maker returns a STRING."""
 
     def test_create_loop_session_is_a_plain_string(self):
-        """The sid = a real session id (str), the session row EXISTS and
-        carries the agent name."""
+        """The sid = a plain string, never a function object. Drives the
+        REAL maker (OC.loop_session) -- this test used to re-implement the
+        boot's closure, copying its `__loop_runner__` typo along with it
+        (the real runner seat path: tests/test_loop_lane.py)."""
         import membrane.opencode as OC
         srv = type("S", (), {"entity_store": _store(),
-                             "__loop_runner__": None})()
-        srv.create_loop_session = None
-        # the boot's wiring (the _loop_session closure) -- rebuilt here
-        # through the real path: call the boot's maker via a minimal seat
-        import types
-        est = srv.entity_store
-        runner = None
-        # emulate the boot's local _loop_session + its binding:
-        def _loop_session(srv, agent):
-            runner = getattr(srv, "__loop_runner__", None)
-            if runner is not None:
-                return "ses_runner"
-            key = f"loop::{agent}"
-            est.docs.get(key)
-            return key
-        def _make(agent, title=None):
-            return _loop_session(srv, agent)
-        srv.create_loop_session = _make
-        sid = srv.create_loop_session("watch: f:x.py", "watch: f:x.py")
+                             "_loop_runner": None})()
+        sid = OC.loop_session(srv, "watch: f:x.py")
         self.assertIsInstance(sid, str)
         self.assertEqual(sid, "loop::watch: f:x.py")
 

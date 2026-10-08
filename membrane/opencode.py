@@ -307,6 +307,38 @@ from .lanes import (  # noqa: E402,F401
 )
 
 
+def loop_session(srv, agent: str) -> str:
+    """A watch loop's child session (the drainer's create_loop_session).
+
+    With the serve runner wired (srv._loop_runner) the loop gets a REAL
+    session in the runner's store, carrying its agent ('watch: <eid>') --
+    the runner's agent registry reads it and lanes the turn LISTENER, so
+    the loop holds the entity hands (entity_link -> tool:executor).
+    2026-10-07: this read `srv.__loop_runner__` (never set) and ALWAYS fell
+    back to the bare key below -> the turn laned 'build' -> operator ->
+    every exec link refused -> the HA seat's commands never ran.
+    Proxy-only seats (no runner) keep the degenerate 'loop::<agent>' key.
+    """
+    runner = getattr(srv, "_loop_runner", None)
+    if runner is not None:
+        try:
+            store = runner.sessions
+            s = store.create(title=agent)
+            # create() already flushed the doc as 'build': stamp the
+            # agent AND flush, or a restart revives the loop's session
+            # as an operator one (exhibit: ses_c47c... 'watch: ...goal'
+            # came back agent build)
+            with store._lock:
+                s["agent"] = agent
+                store.sessions[s["id"]] = s
+                store._flush()
+            return s["id"]
+        except Exception as e:
+            print(f"[opencode] loop session create failed ({e}); "
+                  "falling back to the bare key", file=sys.stderr)
+    return f"loop::{agent}"
+
+
 def main() -> None:
     import argparse
     ap = argparse.ArgumentParser(
@@ -1271,21 +1303,6 @@ def main() -> None:
         srv.loops._srv = srv
         srv.loops.titles = []          # the running agents' names (the banner)
 
-        def _loop_session(srv, agent):
-            est = getattr(srv, "entity_store", None)
-            runner = getattr(srv, "__loop_runner__", None)
-            if runner is not None:
-                try:
-                    s = runner.sessions.create(title=agent)
-                    s["agent"] = agent
-                    runner.sessions.sessions[s["id"]] = s
-                    return s["id"]
-                except Exception:
-                    pass
-            key = f"loop::{agent}"
-            est.docs.get(key)
-            return key                 # the proxy-only degenerate form
-
         # THE SESSION-MAKER (the storm's last exhibit, 2026-10-07: the
         # DOUBLE LAMBDA -- the outer lambda's call returned the INNER
         # lambda uncalled, so every loop 'sid' was a FUNCTION OBJECT:
@@ -1293,7 +1310,7 @@ def main() -> None:
         # not JSON serializable' => every loop turn = 'model ladder
         # failed' = the executor 'not executing'). One plain function.
         def _make_loop_session(agent, title=None):
-            return _loop_session(srv, agent)
+            return loop_session(srv, agent)
         srv.create_loop_session = _make_loop_session
         srv._loop_runner = None        # wired by the serve boot below
 
@@ -1320,6 +1337,8 @@ def main() -> None:
             return go
         srv.run_loop_turn = _run_loop_turn()
         WA_start_loop_drainer(srv)
+        from .watch_agents import start_goal_pulse
+        start_goal_pulse(srv)
         print("[opencode] the loop pool is live (3 loops + the "
               "operator's lane; the drainer consumes the watch events)",
               file=sys.stderr)

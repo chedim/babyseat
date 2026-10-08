@@ -1425,6 +1425,33 @@ def _substitute_parents(cmd: str, residues: dict, order: list[str]) -> str:
     return _re.sub(r"\{\{([^}]+)\}\}", _sub, cmd)
 
 
+def command_specs(commands) -> list:
+    """The link/unlink `commands` arg -> a list of command specs. ONE
+    string is ONE command: the comprehension used to iterate it letter by
+    letter -- the first restored loop links ran '1', 'a', 'g' (rc 127) from
+    commands='ag1' (2026-10-07)."""
+    if commands is None:
+        return []
+    if isinstance(commands, (str, bytes)):
+        text = commands.decode() if isinstance(commands, bytes) else commands
+        commands = [text]
+        t = text.strip()
+        if t.startswith("[") and t.endswith("]"):
+            # a JSON-encoded list in a string (exhibit: '["uname -a"]' ran
+            # literally, rc 127); a shell test like `[ -f x ] && ...` is
+            # not valid JSON and stays one command
+            try:
+                import json as _json
+                dec = _json.loads(t)
+                if isinstance(dec, list):
+                    commands = dec
+            except ValueError:
+                pass
+    elif not isinstance(commands, (list, tuple, set)):
+        commands = [commands]
+    return [str(c).strip() for c in commands if str(c or "").strip()]
+
+
 def entity_link(srv, est, fld, mem, executor_spec: str,
                 commands, create: bool = True) -> dict:
     """THE LINK HAND (the model's exec door, 2026-10-06): link command
@@ -1444,7 +1471,7 @@ def entity_link(srv, est, fld, mem, executor_spec: str,
     partial link."""
     if est is None:
         return {"ok": False, "error": "entity layer unavailable"}
-    specs = [str(c).strip() for c in (commands or []) if str(c or "").strip()]
+    specs = command_specs(commands)
     if not specs:
         return {"ok": False, "error": "commands required"}
     if len(specs) > EXEC_LINK_BATCH_CAP:
@@ -1522,7 +1549,7 @@ def entity_unlink(srv, est, fld, mem, executor_spec: str, commands) -> dict:
     pending_run_by marker."""
     if est is None:
         return {"ok": False, "error": "entity layer unavailable"}
-    specs = [str(c).strip() for c in (commands or []) if str(c or "").strip()]
+    specs = command_specs(commands)
     ex_ent = est._resolve_spec(executor_spec or EXECUTOR_EID)
     if ex_ent is None:
         return {"ok": False, "error": f"no entity matches executor "

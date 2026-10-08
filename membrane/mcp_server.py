@@ -85,7 +85,8 @@ TOOLS: list[dict] = [
             "active set. Open intentions STEER the dream loop "
             "(quarantined timeline branches grow toward them, think-ahead "
             "extends them) and ride recall. An intention is never "
-            "auto-closed: fulfillment is explicit (`membrane: fulfill #N` "
+            "auto-closed: fulfillment is explicit (the `fulfill` tool "
+            "with its evidence, or the operator's `membrane: fulfill #N` "
             "-- reality's signature; a similarity flag is only a "
             "'maybe-done?' hint). Use when working toward a multi-session "
             "goal or when the field's work has a direction worth keeping."),
@@ -100,6 +101,28 @@ TOOLS: list[dict] = [
                                        "expires."},
             },
             "required": ["text"],
+        },
+    },
+    {
+        "name": "fulfill",
+        "description": (
+            "Close an OPEN goal you have PROVEN done: its status flips to "
+            "fulfilled on the shared board (every seat's active set drops "
+            "it). Requires evidence -- the receipt (a linked command's "
+            "rc=0 output, the entity state you read back). Never close on "
+            "intent or a plan; an unfinished goal stays open and you take "
+            "its next concrete step instead."),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "spec": {"type": "string",
+                         "description": "The goal's eid (or a unique "
+                                        "name fragment)."},
+                "evidence": {"type": "string",
+                             "description": "The receipt that proves it "
+                                            "done, one or two sentences."},
+            },
+            "required": ["spec", "evidence"],
         },
     },
     {
@@ -673,8 +696,28 @@ def _http(port: int, method: str, path: str, body: dict | None = None,
 
 # ---- tool implementations (all guards live proxy-side) ------------------------
 
+def _arg(args: dict, *names: str) -> str:
+    """The primary arg under its schema name OR the names the models keep
+    reaching for (the ThinkPhone seat, 2026-10-08: entity_read got
+    eid/entity/name/key, intend got goal, peer_post got message, learn got
+    text -- ~200 'X required' refusals for a value that WAS sent). A
+    wrapped `args` JSON string ({"args": "{\"eid\": ...}"}) unwraps."""
+    for n in names:
+        v = args.get(n)
+        if v not in (None, "") and not isinstance(v, (dict, list)):
+            return str(v).strip()
+    inner = args.get("args")
+    if isinstance(inner, str):
+        try:
+            inner = json.loads(inner)
+        except ValueError:
+            inner = None
+    if isinstance(inner, dict) and inner is not args:
+        return _arg(inner, *names)
+    return ""
+
 def tool_query(args: dict, port: int) -> str:
-    topic = str(args.get("topic") or "").strip()
+    topic = _arg(args, "topic", "query", "q", "text")
     if not topic:
         raise ProxyError(400, "topic required")
     try:
@@ -770,7 +813,7 @@ def tool_state(args: dict, port: int) -> str:
 
 
 def tool_learn(args: dict, port: int) -> str:
-    payload = str(args.get("lesson") or "").strip()
+    payload = _arg(args, "lesson", "text", "value", "content")
     if not payload:
         raise ProxyError(400, "lesson required")
     out = _http(port, "POST", "/membrane/learn", {"lesson": payload})
@@ -883,7 +926,7 @@ def tool_list_tracks(args: dict, port: int) -> str:
 
 
 def tool_related_entities(args: dict, port: int) -> str:
-    q = str(args.get("query") or "").strip()
+    q = _arg(args, "query", "q", "topic", "text", "spec")
     if not q:
         raise ProxyError(400, "query required")
     k = int(args.get("k") or 8)
@@ -922,7 +965,7 @@ def tool_entity_add(args: dict, port: int) -> str:
 
 
 def tool_entity_edit(args: dict, port: int) -> str:
-    body = {"spec": str(args.get("spec") or "").strip()}
+    body = {"spec": _arg(args, "spec", "eid", "entity", "name", "key", "id")}
     for f in ("summary", "links", "class", "merged_into",
               "nudge_script", "delete_script",
               "mention_script", "thought_script", "dreamed_script",
@@ -1009,7 +1052,7 @@ def tool_set_junk_cut(args: dict, port: int) -> str:
 
 
 def tool_peer_post(args: dict, port: int) -> str:
-    text = str(args.get("text") or "").strip()
+    text = _arg(args, "text", "message", "msg", "content")
     if not text:
         raise ProxyError(400, "text required")
     out = _http(port, "POST", "/membrane/peer/post", {
@@ -1025,7 +1068,7 @@ def tool_intend(args: dict, port: int) -> str:
     + give it a priority pin on THIS seat's active set. Speech announces
     every activation; drop intent suppresses seat-locally; fulfill closes
     the goal shared."""
-    body = {"text": str(args.get("text") or "").strip()}
+    body = {"text": _arg(args, "text", "goal", "intent", "spec")}
     if args.get("ttl"):
         body["ttl"] = str(args["ttl"])
     out = _http(port, "POST", "/membrane/intend", body)
@@ -1036,6 +1079,22 @@ def tool_intend(args: dict, port: int) -> str:
             f"The active set steers the dream loop; the banner shows it. "
             f"Drop intent #N suppresses it on this seat; fulfill #N closes "
             f"it shared.")
+
+
+def tool_fulfill(args: dict, port: int) -> str:
+    """The close with a receipt: an open goal flips to fulfilled (shared)
+    when the caller hands the evidence that proves it done."""
+    out = _http(port, "POST", "/membrane/fulfill", {
+        "spec": _arg(args, "spec", "eid", "goal", "id", "name", "key"),
+        "evidence": _arg(args, "evidence", "receipt", "proof", "summary",
+                         "text"),
+        "by": str(args.get("by") or "")})
+    if not out.get("ok"):
+        return f"Fulfill failed: {out.get('error', 'unknown error')}"
+    return (f"Goal fulfilled (shared): {out.get('eid')} "
+            f"{str(out.get('name') or '')[:100]}\n"
+            f"It leaves every seat's active set; the evidence rides the "
+            f"goal and the audit.")
 
 
 def tool_intents(args: dict, port: int) -> str:
@@ -1112,7 +1171,7 @@ def tool_peer_seats(args: dict, port: int) -> str:
 
 def tool_entity_query(args: dict, port: int) -> str:
     """The entity graph's enumerate/list/count (the query language)."""
-    q = str(args.get("q") or "").strip()
+    q = _arg(args, "q", "query", "spec")
     k = max(1, min(50, int(args.get("k") or 20)))
     count = bool(args.get("count"))
     out = _http(port, "POST", "/membrane/entity-query",
@@ -1122,9 +1181,20 @@ def tool_entity_query(args: dict, port: int) -> str:
     return "no entities match"
 
 
+def _link_commands(args: dict) -> list:
+    """`commands` as the link/unlink hands want it: a LIST. The models pass
+    one string, or reach for `command` / `spec` (the seat's exhibits) --
+    a single command line is one command, never its letters."""
+    from .night import command_specs
+    raw = args.get("commands")
+    if raw in (None, "", []):
+        raw = args.get("command") or args.get("spec")
+    return command_specs(raw)
+
+
 def tool_entity_link(args: dict, port: int) -> str:
     """The executor's link hand: link + inline run, post-run state back."""
-    body = {"commands": args.get("commands") or [],
+    body = {"commands": _link_commands(args),
             "executor": str(args.get("executor") or "")}
     if args.get("create") is not None:
         body["create"] = bool(args.get("create"))
@@ -1149,7 +1219,7 @@ def tool_entity_unlink(args: dict, port: int) -> str:
     """The executor's unlink hand: supersede the edges."""
     out = _http(port, "POST", "/membrane/entity/unlink", {
         "executor": str(args.get("executor") or ""),
-        "commands": args.get("commands") or []})
+        "commands": _link_commands(args)})
     if not out.get("ok"):
         return f"failed to unlink: {out.get('error', 'unknown error')}"
     n = len(out.get("removed") or [])
@@ -1163,7 +1233,8 @@ def tool_entity_unlink(args: dict, port: int) -> str:
 def tool_entity_read(args: dict, port: int) -> str:
     """The read-back tool: the entity's value AFTER processing."""
     import urllib.parse
-    spec = urllib.parse.quote(str(args.get("spec") or "").strip())
+    spec = urllib.parse.quote(_arg(args, "spec", "eid", "entity", "name",
+                                    "key", "id"))
     qs = f"/membrane/entity/read?spec={spec}"
     if args.get("run"):
         qs += "&run=1"
@@ -1214,6 +1285,7 @@ TOOL_IMPLS = {
     "state": tool_state,
     "intend": tool_intend,
     "intents": tool_intents,
+    "fulfill": tool_fulfill,
     "learn": tool_learn,
     "forget": tool_forget,
     "entity_watch": tool_watch_entity,

@@ -384,10 +384,25 @@ def loop_task_text(ev: dict) -> str:
         head = f"operator messaged: {ev.get('text_head', '')[:80]}"
         detail = ""
     elif kind == "intent-planted":
-        head = (f"goal planted ({'new' if ev.get('created') else 'pinned'}): "
-                f"{str(ev.get('text') or '')[:120]}")
-        detail = (f"the board's open commitments steer your dreams and "
-                  f"think-ahead; this one landed on {ev.get('entity', '?')}")
+        if ev.get("rewake"):
+            head = (f"goal still open (the board's pulse): "
+                    f"{str(ev.get('text') or '')[:120]}")
+            last = str(ev.get("last_landing") or "")
+            detail = (f"goal {ev.get('entity', '?')} is still open"
+                      + (f"; your last pass on it said: {last[:200]}"
+                         if last else "")
+                      + ". Continue from there -- do not redo landed steps")
+        else:
+            head = (f"goal planted ({'new' if ev.get('created') else 'pinned'}"
+                    f"): {str(ev.get('text') or '')[:120]}")
+            detail = (f"the board's open commitments steer your dreams and "
+                      f"think-ahead; this one landed on "
+                      f"{ev.get('entity', '?')}")
+        detail += ("\nWhen the goal is DONE and you hold the receipt "
+                   "(a command's rc=0 output, the entity state read "
+                   "back), close it: `fulfill` with its eid + the "
+                   "evidence. Not done: take its next concrete step; "
+                   "the board's pulse brings it back to you.")
     elif kind == "boundary":
         head = (f"boundary crossed: '{ev.get('entity', '?')}' "
                 f"{'entered' if ev.get('entered') else 'exited'} "
@@ -616,7 +631,8 @@ class LoopRunner:
 
 # ---- the attach/detach events + the watch_ops CRUD -------------------------
 def notify_intent_planted(est, pool, goal_eid: str, text: str,
-                          created: bool = True) -> dict:
+                          created: bool = True, rewake: bool = False,
+                          last_landing: str = "") -> dict:
     """THE INTENT-PLANTED EVENT (the receive-lane's wire, 2026-10-06):
     a commitment landed on the board -- the listener pool gets it as an
     event and a thinking loop RECEIVES it (its next turn's message:
@@ -630,6 +646,9 @@ def notify_intent_planted(est, pool, goal_eid: str, text: str,
     ev = {"kind": "intent-planted", "entity": str(goal_eid or ""),
           "text": str(text or "")[:200], "created": bool(created),
           "ts": time.time()}
+    if rewake:
+        ev["rewake"] = True
+        ev["last_landing"] = str(last_landing or "")[:240]
     if pool is not None:
         pool.put(ev)
     try:
@@ -645,6 +664,99 @@ def notify_intent_planted(est, pool, goal_eid: str, text: str,
     except Exception:
         pass
     return ev
+
+
+# ---- the board's pulse (the open goals come back) --------------------------
+# THE ONE-PASS BOARD (2026-10-08, the ThinkPhone's 'not progressing'): the
+# boot queued each open goal ONCE; 34 goals -> 35 loop turns -> the pool
+# drained at 09:01 and the seat sat idle for an hour with the board
+# unchanged. The pulse re-queues the open goals whose last wake is stale:
+# IDLE-ONLY (an empty pool + no running loop -- it never competes with a
+# live event), a few per beat, oldest wake first, and BACKING OFF a goal
+# its loops keep ignoring (each trailing 'ignored' landing doubles its
+# wait, capped x16) so a parked goal does not burn the cloud credits.
+GOAL_REWAKE_S = float(os.environ.get("MEMBRANE_GOAL_REWAKE_S", "1800"))
+GOAL_PULSE_S = float(os.environ.get("MEMBRANE_GOAL_PULSE_S", "300"))
+GOAL_REWAKE_BATCH = 3
+
+
+def _ignored_streak(props: dict) -> int:
+    n = 0
+    for land in reversed(list(props.get("landings") or [])):
+        if str((land or {}).get("op") or "") != "ignored":
+            break
+        n += 1
+    return n
+
+
+def rewake_open_goals(srv, now: float | None = None,
+                      min_age_s: float | None = None,
+                      batch: int | None = None) -> int:
+    """One pulse beat: re-queue up to `batch` stale open goals. Returns
+    how many were queued (0 when busy, paused or nothing is due)."""
+    est = getattr(srv, "entity_store", None)
+    pool = getattr(srv, "events_pool", None)
+    if est is None or pool is None:
+        return 0
+    now = time.time() if now is None else now
+    min_age_s = GOAL_REWAKE_S if min_age_s is None else min_age_s
+    batch = GOAL_REWAKE_BATCH if batch is None else batch
+    if min_age_s <= 0 or batch <= 0:
+        return 0
+    try:
+        from .lanes import nerve_paused
+        if nerve_paused(srv):
+            return 0
+    except Exception:
+        pass
+    loops = getattr(srv, "loops", None)
+    if pool.depth() > 0 or (loops is not None and loops.running() > 0):
+        return 0
+    from .entities import CLASS_GOAL
+    held = set(getattr(loops, "_held", ()) or ())
+    due = []
+    for doc in list((getattr(est, "docs", None) or {}).values()):
+        if doc is None or doc.cls != CLASS_GOAL:
+            continue
+        props = doc.properties or {}
+        if (props.get("status") or "open") != "open" or doc.eid in held:
+            continue
+        last = float(props.get("intent_planted_ts") or 0)
+        wait = min_age_s * (2 ** min(_ignored_streak(props), 4))
+        if now - last >= wait:
+            due.append((last, doc, props))
+    due.sort(key=lambda t: t[0])
+    for _, doc, props in due[:batch]:
+        lands = list(props.get("landings") or [])
+        notify_intent_planted(
+            est, pool, doc.eid, str(props.get("name") or ""),
+            created=False, rewake=True,
+            last_landing=str((lands[-1] or {}).get("decision") or "")
+            if lands else "")
+    return min(len(due), batch)
+
+
+def start_goal_pulse(srv, every_s: float | None = None):
+    """The boot seam: a daemon beat over rewake_open_goals."""
+    every_s = GOAL_PULSE_S if every_s is None else every_s
+    if every_s <= 0 or GOAL_REWAKE_S <= 0:
+        return None
+
+    def _beat():
+        while True:
+            time.sleep(every_s)
+            try:
+                n = rewake_open_goals(srv)
+                if n:
+                    import sys
+                    print(f"[seat] the board's pulse: {n} open goal(s) "
+                          "re-queued to the listeners", file=sys.stderr)
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_beat, daemon=True, name="membrane-goal-pulse")
+    t.start()
+    return t
 
 
 def notify_intent_landed(est, pool, goal_eid: str, receipt: dict) -> dict:
