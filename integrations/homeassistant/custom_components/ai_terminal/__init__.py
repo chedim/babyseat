@@ -52,6 +52,12 @@ async def async_setup(hass: HomeAssistant, config) -> bool:
         sidebar_icon="mdi:brain", frontend_url_path="ai-terminal",
         config=panel_custom_config(DOMAIN),
         require_admin=True, update=True)
+    # THE FIELD MAP (2026-10-08): the brain's field as a 2D map
+    from .panel_config import FIELD_PANEL_URL_PATH, field_panel_config
+    fe.async_register_built_in_panel(
+        hass, "custom", sidebar_title="Membrane Field",
+        sidebar_icon="mdi:graph-outline", frontend_url_path=FIELD_PANEL_URL_PATH,
+        config=field_panel_config(DOMAIN), require_admin=True, update=True)
 
     async def _close_session(_event):
         sess = component.get("http_session")

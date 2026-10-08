@@ -27,8 +27,9 @@ class TestAllowedPath(unittest.TestCase):
         self.assertFalse(allowed_path("../etc/passwd"))
         self.assertFalse(allowed_path("sessions"))
         self.assertFalse(allowed_path("providerx"))
-        # the SSE streams broadcast EVERY session's events: not proxied
-        self.assertFalse(allowed_path("event"))
+        # /global/event broadcasts EVERY session's events unscoped: never
+        # proxied (/event IS, through the per-user filter --
+        # test_event_stream)
         self.assertFalse(allowed_path("global/event"))
 
     def test_trailing_slash_normalizes(self):

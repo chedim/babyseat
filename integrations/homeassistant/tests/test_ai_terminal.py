@@ -59,6 +59,18 @@ class TestPanelContract(unittest.TestCase):
     def test_static_paths_shape(self):
         self.assertEqual(static_paths(), [("/api/ai_terminal/www", "www")])
 
+    def test_field_panel_contract(self):
+        """The field map (2026-10-08): its own element + module, the same
+        nested _panel_custom contract."""
+        from ai_terminal.panel_config import (FIELD_PANEL_URL_PATH,
+                                              field_panel_config)
+        inner = field_panel_config()["_panel_custom"]
+        self.assertEqual(inner["name"], "membrane-field-panel")
+        self.assertEqual(inner["module_url"], "/api/ai_terminal/www/field.js")
+        self.assertTrue(inner["trust_external"])
+        self.assertNotIn("html_url", inner)
+        self.assertEqual(FIELD_PANEL_URL_PATH, "membrane-field")
+
 
 class TestAssetMimeContract(unittest.TestCase):
     """The nosniff lesson: HA's static serving guessed text/plain for
@@ -100,7 +112,7 @@ class TestChatOnlySurface(unittest.TestCase):
         for name in ("terminal.py", "tickets.py", "seat.py"):
             self.assertFalse((self.PKG / name).exists(), name)
         self.assertEqual(sorted(p.name for p in (self.PKG / "www").iterdir()),
-                         ["panel.js"])
+                         ["field.js", "panel.js"])
 
     def test_panel_speaks_serve_only(self):
         js = (self.PKG / "www" / "panel.js").read_text()
@@ -113,6 +125,8 @@ class TestChatOnlySurface(unittest.TestCase):
         self.assertNotIn("localStorage", js)
         # the proxy's speaker line is hidden from the transcript
         self.assertIn('SPEAKER_PREFIX = "[HA user: "', js)
+        # the field map's "ask the brain" hands its question over the URL
+        self.assertIn('get("ask")', js)
 
     def test_conf_view_reads_component(self):
         """The live exhibit: 'HomeAssistantRequest' object has no

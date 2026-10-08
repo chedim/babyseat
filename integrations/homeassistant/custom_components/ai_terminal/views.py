@@ -44,7 +44,10 @@ class AssetView(HomeAssistantView):
             return web.Response(status=404, text="no such asset")
         body = await request.app[KEY_HASS].async_add_executor_job(
             _read_bytes, path)               # no blocking open on the loop
-        return web.Response(body=body, content_type=ctype)
+        # the module URL never changes: revalidate, or a browser keeps
+        # running the previous panel after a deploy
+        return web.Response(body=body, content_type=ctype,
+                            headers={"Cache-Control": "no-cache"})
 
 
 def _read_bytes(path: str) -> bytes:

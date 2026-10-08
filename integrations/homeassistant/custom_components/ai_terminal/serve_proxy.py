@@ -18,8 +18,14 @@ PER-USER SESSIONS: the brain has ONE identity (the serve's basic-auth
 pair), so ownership lives HERE: every session created through the proxy
 is recorded against the HA user who created it (an HA Store,
 `ai_terminal.sessions`). The session list and status are filtered to the
-caller's own; any other session id is a 404. The serve's /event SSE
-broadcasts every session's events, so it is not proxied (the panel polls).
+caller's own; any other session id is a 404.
+
+THE LIVE LANE (2026-10-08): the serve's /event SSE broadcasts every
+session's events; GET serve/event relays it PER USER -- a frame passes
+only when it names one of the caller's sessions (or is the stream's
+`server.connected` hello). Other users' chats, the watch loops' sessions
+and session-less internals never leave HA. The owners map is read live,
+so a chat created after the stream opened streams too.
 
 THE SPEAKER: each message the proxy forwards gets a first line
 `[HA user: <name>]` (SPEAKER_PREFIX) -- membrane's field learns who said
@@ -45,7 +51,16 @@ _LOGGER = logging.getLogger(__name__)
 # keeps the proxy from being an open relay while the surface stays the
 # chat-client subset (+ the health probe the panel uses as its check).
 ALLOWED_PREFIXES = ("session", "config", "provider", "mcp")
-ALLOWED_EXACT = ("global/health",)
+# agent: the primary agents + membrane's live minds (loop workers,
+# thinker, dreamer); event: the per-user SSE relay (never global/event,
+# its unscoped twin)
+ALLOWED_EXACT = ("global/health", "agent", "event")
+# the field dashboard + the drawer: the seat's read surfaces the serve
+# relays (membrane/server.py SEAT_READ_PATHS) -- GET only, exact paths
+READ_ONLY_EXACT = ("membrane/state", "membrane/map/field",
+                   "membrane/field/entity", "membrane/map/distance",
+                   "membrane/entity/read", "membrane/entity-related")
+EVENT_HELLO = "server.connected"
 
 SPEAKER_PREFIX = "[HA user: "
 OWNERS_STORE_KEY = "ai_terminal.sessions"
@@ -57,10 +72,15 @@ def allowed_path(rest: str) -> bool:
     rest = (rest or "").strip("/")
     if not rest:
         return False
-    if rest in ALLOWED_EXACT:
+    if rest in ALLOWED_EXACT or rest in READ_ONLY_EXACT:
         return True
     return any(rest == p or rest.startswith(p + "/")
                for p in ALLOWED_PREFIXES)
+
+
+def read_only_path(rest: str) -> bool:
+    """The field reads: forwarded on GET only (any other method = 405)."""
+    return (rest or "").strip("/") in READ_ONLY_EXACT
 
 
 def message_body(text: str, agent: str = "build") -> dict:
@@ -121,6 +141,60 @@ def owned_status(status: dict, owners: dict, user_id: str) -> dict:
     """/session/status filtered to the caller's sessions."""
     return {sid: st for sid, st in (status or {}).items()
             if owners.get(sid) == user_id}
+
+
+def event_session_id(ev) -> str | None:
+    """The session an SSE frame ({id, type, properties}) belongs to: the
+    serve puts it at properties.sessionID, or under info / part
+    (session.deleted, message.updated, message.part.updated)."""
+    if not isinstance(ev, dict):
+        return None
+    props = ev.get("properties")
+    if not isinstance(props, dict):
+        return None
+    sid = props.get("sessionID")
+    if sid:
+        return str(sid)
+    for k in ("info", "part"):
+        sub = props.get(k)
+        if isinstance(sub, dict) and sub.get("sessionID"):
+            return str(sub["sessionID"])
+    return None
+
+
+def visible_event(ev, owners: dict, user_id: str) -> bool:
+    """May this frame reach the caller: the stream's hello, or an event of
+    a session the caller owns. Session-less frames stay inside HA."""
+    if isinstance(ev, dict) and ev.get("type") == EVENT_HELLO:
+        return True
+    sid = event_session_id(ev)
+    return bool(user_id and sid and owners.get(sid) == user_id)
+
+
+class SSEFrames:
+    """Incremental SSE parser: feed raw bytes, get the complete JSON frames
+    (comments/keepalives skipped, multi-line data joined, chunk splits
+    held until the blank line, undecodable frames dropped)."""
+
+    def __init__(self):
+        self._buf = b""
+
+    def feed(self, chunk: bytes) -> list:
+        self._buf += chunk.replace(b"\r\n", b"\n")
+        out = []
+        while b"\n\n" in self._buf:
+            raw, self._buf = self._buf.split(b"\n\n", 1)
+            data = [line[5:].lstrip(b" ") for line in raw.split(b"\n")
+                    if line.startswith(b"data:")]
+            if not data:
+                continue
+            try:
+                ev = json.loads(b"\n".join(data))
+            except ValueError:
+                continue
+            if isinstance(ev, dict):
+                out.append(ev)
+        return out
 
 
 def basic_header(user: str, password: str) -> str:
@@ -202,6 +276,51 @@ class ServeProxyView(HomeAssistantView):
                               rest)
             return web.Response(status=502, text=f"serve error: {e!r}")
 
+    async def _stream_events(self, request, comp, uid, owners):
+        """GET serve/event: the brain's /event, filtered to the caller's
+        sessions, as a live text/event-stream. Ends when either side
+        hangs up; the panel reconnects (and resyncs over REST)."""
+        resp = web.StreamResponse(status=200, headers={
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            # nginx (agdroid :8123 and chegate) must not buffer the stream
+            "X-Accel-Buffering": "no",
+        })
+        await resp.prepare(request)
+        headers = {"Authorization": basic_header(comp.get("serve_user"),
+                                                 comp.get("serve_pass")),
+                   "Accept": "text/event-stream"}
+        url = comp["serve_url"].rstrip("/") + "/event"
+        sess = await self._session_of(comp)
+        parser = SSEFrames()
+        try:
+            async with sess.request(
+                    "GET", url, headers=headers,
+                    # no total cap; the serve pings every 15s, so a minute
+                    # of silence means the brain is gone
+                    timeout=aiohttp.ClientTimeout(total=None,
+                                                  sock_read=60)) as up:
+                if up.status != 200:
+                    _LOGGER.warning("ai_terminal: event stream upstream %s",
+                                    up.status)
+                    return resp
+                async for chunk in up.content.iter_any():
+                    for ev in parser.feed(chunk):
+                        if visible_event(ev, owners, uid):
+                            await resp.write(b"data: " + json.dumps(
+                                ev).encode() + b"\n\n")
+                    if b": ping" in chunk:
+                        # keepalive for every hop (nginx read timeouts)
+                        await resp.write(b": ping\n\n")
+        except (aiohttp.ClientError, ConnectionResetError, OSError) as e:
+            _LOGGER.debug("ai_terminal: event stream closed: %r", e)
+        except Exception as e:                          # noqa: BLE001
+            if type(e).__name__ not in ("TimeoutError", "CancelledError"):
+                _LOGGER.warning("ai_terminal: event stream failed: %r", e)
+            if type(e).__name__ == "CancelledError":
+                raise
+        return resp
+
     async def _proxy(self, request):
         comp = component_of(request)
         rest = (request.match_info.get("path") or "").strip("/")
@@ -218,6 +337,12 @@ class ServeProxyView(HomeAssistantView):
         owners, store = await _owners_of(request)
         segs = rest.split("/")
         method = request.method
+        if read_only_path(rest) and method != "GET":
+            return web.Response(status=405, text="field reads are GET only")
+        if rest == "event":
+            if method != "GET":
+                return web.Response(status=405, text="event is GET only")
+            return await self._stream_events(request, comp, uid, owners)
 
         body = None
         if method in ("POST", "PATCH"):

@@ -19,7 +19,9 @@ from .const import (CONF_NAME, CONF_SERVE_PASS, CONF_SERVE_URL,
                     DEFAULT_SERVE_URL, DEFAULT_SERVE_USER, DOMAIN)
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = [Platform.CONVERSATION]
+# the field metrics (2026-10-08): sensors + the paused flag, polled by
+# coordinator.FieldCoordinator off the serve's relayed /membrane/state
+PLATFORMS = [Platform.CONVERSATION, Platform.SENSOR, Platform.BINARY_SENSOR]
 
 
 async def async_setup(hass: HomeAssistant, config) -> bool:
@@ -41,6 +43,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "serve_pass": entry.data.get(CONF_SERVE_PASS) or DEFAULT_SERVE_PASS,
         "sessions": {},
     }
+    from .coordinator import FieldCoordinator
+    comp = hass.data[DOMAIN][entry.entry_id]
+    comp["coordinator"] = FieldCoordinator(hass, entry, comp)
+    # never block the Assist agent on the brain: the sensors start
+    # unavailable and fill on the next successful poll
+    await comp["coordinator"].async_refresh()
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_reload))
     return True
@@ -51,7 +59,9 @@ async def _reload(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Tear down the entity + close the per-entry serve session map."""
+    """Tear down the entities + close the per-entry serve session map."""
+    if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        return False
     comp = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     if comp and comp.get("sessions"):
         # the serve sessions stay on the brain (its own store); just forget

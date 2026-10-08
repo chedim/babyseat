@@ -29,6 +29,19 @@ def panel_custom_config(domain: str = "ai_terminal") -> dict:
     }}
 
 
+FIELD_PANEL_URL_PATH = "membrane-field"
+FIELD_PANEL_ELEMENT = "membrane-field-panel"
+
+
+def field_panel_config(domain: str = "ai_terminal") -> dict:
+    """The field map's panel (2026-10-08): same contract, its own module."""
+    return {"_panel_custom": {
+        "name": FIELD_PANEL_ELEMENT,
+        "module_url": f"/api/{domain}/www/field.js",
+        "trust_external": True,
+    }}
+
+
 def static_paths(domain: str = "ai_terminal") -> list[tuple[str, str]]:
     """The (url_path, dir_name) static mounts the integration serves."""
     return [(f"/api/{domain}/www", "www")]
