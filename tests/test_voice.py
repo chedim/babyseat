@@ -211,3 +211,23 @@ class TestRoutes(unittest.TestCase):
                 urllib.request.urlopen(bad)            # another session's line
         finally:
             httpd.shutdown()
+
+
+class TestBoot(unittest.TestCase):
+    def test_the_first_turn_boots_in_the_background_once(self):
+        d = tempfile.mkdtemp()
+        srv = _Srv()
+        srv._models_path = str(Path(d) / "models.json")
+        srv.membrane = type("M", (), {"embedder": FakeEmbedder()})()
+        r = S.TurnRunner(S.SSEHub(), S.SessionStore(), S.MessageStore(), _Ladder(),
+                         lambda n, a, c: "ok", system="", model="m")
+        r.srv = srv
+        sid = r.sessions.create(title="t")["id"]
+        V.on_turn_start(r, sid, "hello", "m1", "operator")
+        V.on_turn_start(r, sid, "hello again", "m2", "operator")   # mid-boot: quiet
+        v = V.of(srv)
+        end = time.time() + 10
+        while time.time() < end and not v._booted:
+            time.sleep(0.05)
+        self.assertTrue(v._booted)
+        self.assertEqual(v.lines, {})

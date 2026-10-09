@@ -522,10 +522,28 @@ def on_turn_start(runner, sid: str, text: str, mid: str, lane: str) -> None:
     if v is None:
         return
 
+    if not v._booted:
+        # the first hearing runs once, in the background; the voice stays
+        # quiet until it has heard (a turn mid-bootstrap gets no line)
+        if getattr(v, "_booting", False):
+            return
+        v._booting = True
+
+        def boot():
+            try:
+                n = v.bootstrap(history_texts(runner))
+                print(f"[voice] heard the chat history: {n} words, {len(v.table.t)} contexts",
+                      file=sys.stderr)
+            except Exception as e:
+                print(f"[voice] bootstrap failed: {e!r}", file=sys.stderr)
+            finally:
+                v._booting = False
+
+        threading.Thread(target=boot, daemon=True, name="voice-boot").start()
+        return
+
     def go():
         try:
-            if not v._booted:
-                v.bootstrap(history_texts(runner))
             from .lanes import _efield_of
             from . import massage
             fld = _efield_of(srv)
