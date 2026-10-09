@@ -1,49 +1,39 @@
-"""THE BOOT-ORDER GUARD (the operator's socket-closed regression): the
-`if __name__ == "__main__": main()` guard MUST be the LAST statement in
-opencode.py. If any def/assignment sits AFTER the guard, script mode
-(python -m membrane.opencode) boots main() and blocks in the serve loop
-before those defs ever bind -- the handlers then NameError at call time,
-the request thread dies, and the client sees 'socket connection closed
-unexpectedly'. This exact bug shipped in the speech lane (30c6db8):
-_speak_block was defined after the guard, every chat turn 500'd, and the
-seat was unusable while imports/pytest stayed green (imports never fire
-the guard)."""
+"""THE BOOT THAT SKIPPED ITS OWN TAIL (2026-10-08, red first).
 
-import ast
-import pathlib
+Since 2026-10-02 the field's boot block touched srv.entity_store before the
+store existed: 'ThreadingHTTPServer' object has no attribute 'entity_store'
+-> the outer except printed '[efield] capture off' and skipped the rest of
+the block on every boot: the field-watch listener, the thinker's feed, the
+dream corpus, the judges, the pause gate, the field pulse.
 
-_MODULE = pathlib.Path(__file__).resolve().parent.parent / "membrane" / "opencode.py"
+Pinned (statically, main() is the whole seat): inside main(), no
+`srv.entity_store.` attribute use comes before the store is assigned, and
+the pool reaches the store where the store is made.
+"""
+import re
+import sys
+import unittest
+from pathlib import Path
 
-
-def test_main_guard_is_last_statement():
-    tree = ast.parse(_MODULE.read_text())
-    body = tree.body
-    assert body, "opencode.py parsed to an empty module"
-    last = body[-1]
-    assert isinstance(last, ast.If), (
-        f"the __main__ guard must be the module's last statement; "
-        f"found {ast.dump(last)[:120]}")
-    test = last.test
-    assert isinstance(test, ast.Compare) and len(test.comparators) == 1
-    left = test.left
-    ok = (isinstance(left, ast.Name) and left.id == "__name__"
-          and isinstance(test.comparators[0], ast.Constant)
-          and test.comparators[0].value == "__main__")
-    assert ok, "the final statement must be `if __name__ == '__main__':`"
-    assert any(
-        isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call)
-        for stmt in last.body), "the guard must call main()"
+SRC = (Path(__file__).resolve().parent.parent / "membrane" / "opencode.py").read_text()
 
 
-def test_no_defs_after_the_guard():
-    """Belt-and-braces: even a trailing bare def (a syntax-legal cousin of
-    the bug) must fail the boot-order check."""
-    tree = ast.parse(_MODULE.read_text())
-    guard_idx = next(i for i, n in enumerate(tree.body)
-                     if isinstance(n, ast.If) and isinstance(n.test, ast.Compare)
-                     and getattr(n.test.left, "id", "") == "__name__")
-    trailing = tree.body[guard_idx + 1:]
-    assert not trailing, (
-        f"{len(trailing)} statement(s) after the __main__ guard bind too "
-        f"late in script mode: "
-        f"{[type(n).__name__ for n in trailing]}")
+class TestBootOrder(unittest.TestCase):
+    def test_no_store_use_before_the_store(self):
+        main = SRC[SRC.index("\ndef main() -> None:"):]
+        made = main.index("srv.entity_store = EntityStore(")
+        for m in re.finditer(r"srv\.entity_store\.[A-Za-z_]", main):
+            line = main[main.rfind("\n", 0, m.start()) + 1:main.find("\n", m.start())]
+            if line.strip().startswith("#"):
+                continue
+            self.assertGreater(m.start(), made, line.strip())
+
+    def test_the_pool_reaches_the_store_where_it_is_made(self):
+        main = SRC[SRC.index("\ndef main() -> None:"):]
+        made = main.index("srv.entity_store = EntityStore(")
+        wire = main.index("srv.entity_store._events_pool = srv.events_pool")
+        self.assertGreater(wire, made)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -897,11 +897,26 @@ def main() -> None:
             srv.efield._current_session_cut = _own_session_prefix(srv)
             # THE MODEL'S EVENT POOL (the reactive lane, live now):
             srv.events_pool = srv._events_pool = WatchEvents()
-            # the store's watch lanes put through it
-            srv.entity_store._events_pool = srv.events_pool
+            # (the store's watch lanes put through it: wired where the store
+            # is created, below -- touching srv.entity_store HERE raised
+            # 'no attribute entity_store' and the outer except skipped the
+            # rest of this block on every boot since 2026-10-02: no field
+            # listeners, no dream corpus, no judges, no pulse)
             # the session's first event number: the 'now' line counts what
             # moved since the seat booted
             srv._efield_boot_seq = int(srv.efield._ostats.get("seq_last") or 0)
+            # THE FIELD'S PULSE (viewer v3): field + mind frames on the
+            # serve's hub (the hub binds once the runner exists)
+            try:
+                from .fieldpulse import FieldPulse, efield_listener
+                # started with the serve's runner (below): a thread born
+                # this early in the boot never beat on the live seat
+                srv._field_pulse = FieldPulse(srv)
+                srv.efield.pulse_moved = srv._field_pulse.moved
+                srv.efield.pulse_born = srv._field_pulse.born
+                srv.efield.listeners.append(efield_listener(srv))
+            except Exception as e:
+                print(f"[seat] field pulse off ({e})", file=sys.stderr)
             if srv.capturer.mode == "on":
                 srv.efield.listeners.append(_efield_watch_listener(srv))
                 from .efmind import DreamSource, on_applied_fn
@@ -939,6 +954,8 @@ def main() -> None:
         # field's flush reads the store as its sink (--est-sink) and
         # the store carries the seat back (the pool lives on the seat)
         srv.entity_store._srv = srv
+        if getattr(srv, "events_pool", None) is not None:
+            srv.entity_store._events_pool = srv.events_pool
         if getattr(srv, "efield", None) is not None:
             srv.efield._est_sink = srv.entity_store
         # THE BOOT ENTITY (the operator's ask): one immutable record
@@ -1707,6 +1724,8 @@ def main() -> None:
             # THE LOOPS' RUNNER (the reactive layer): the loops' turns
             # are real serve turns on their child sessions
             srv._loop_runner = runner
+            if getattr(srv, "_field_pulse", None) is not None:
+                srv._field_pulse.start()
             runner.srv = srv               # /agent reads the live minds
             runner._audit_mem = srv.membrane   # the lane-refusal audits
             _ladder_cell["runner"] = runner   # the runner's late binding
