@@ -363,13 +363,12 @@ class TestTeacher(unittest.TestCase):
 
     def test_it_stops_opening_the_same_way(self):
         v = _voice()
-        q = FakeEmbedder().embed(["battery charge cells"])[0]
-        starts = []
-        for _ in range(4):
-            rec = v.speak(q)
-            ws = [w.lower() for w in V.tokenize(rec["text"]) if w not in V.PUNCT]
-            starts.append(tuple(ws[:2]))
-        self.assertGreater(len(set(starts)), 1, starts)
+        t = v.vecs.project(FakeEmbedder().embed(["battery charge cells"])[0])
+        first = V.compose(v.table, v.vecs, t)
+        ws = [w.lower() for w in V.tokenize(first["text"]) if w not in V.PUNCT]
+        again = V.compose(v.table, v.vecs, t, stale_starts={(ws[0], ws[1])})
+        ws2 = [w.lower() for w in V.tokenize(again["text"]) if w not in V.PUNCT]
+        self.assertNotEqual(tuple(ws2[:2]), (ws[0], ws[1]), (first["text"], again["text"]))
 
     def test_a_voice_turn_teaches_with_the_lesson_and_logs_the_pair(self):
         d = tempfile.mkdtemp()
@@ -473,3 +472,9 @@ class TestStuckTeacher(unittest.TestCase):
         for _ in range(5):
             self.assertEqual(V.fresh_topic(fld)[0], "c:uptime")
         self.assertIn("never repeat", V.frame("x"))
+
+
+class TestTopicNote(unittest.TestCase):
+    def test_the_teacher_is_told_what_it_aimed_at(self):
+        self.assertIn("trying to talk about: c:uptime", V.frame("x", "c:uptime"))
+        self.assertIn("answering your last reply", V.frame("x"))

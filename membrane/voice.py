@@ -79,7 +79,7 @@ CORRECTION_PULL = 0.35
 # no gap); every ROTATE_EVERY rounds -- and right after a repeat -- the
 # voice aims at a fresh live entity of the field instead of the last reply
 REPEAT_LESSON_COS = 0.92
-ROTATE_EVERY = 4
+ROTATE_EVERY = 3
 CORRECTION_DECAY = 0.5
 VOCAB_WARM = 4000
 BOOT_TEXT_CAP = 3_000_000      # characters of history the bootstrap hears (newest first)
@@ -734,11 +734,15 @@ VOICE_PREFIX = "[membrane voice] "
 AUTO_PAUSE_S = 3.0
 
 
-def frame(line: str) -> str:
+def frame(line: str, topic: str = "") -> str:
     """The model as TEACHER, not analyst: a short plain answer, then the one
-    sentence the voice should have said (the lesson it hears, x2)."""
+    sentence the voice should have said (the lesson it hears, x2). The
+    teacher is told what the voice was aiming at -- without it every line
+    read as the voice talking about itself (the speech-theme cycle)."""
+    aim_note = (f"(it was trying to talk about: {topic})" if topic
+                else "(it was answering your last reply)")
     return (VOICE_PREFIX + "membrane's own voice (the field learning to speak -- "
-            "not the operator) said: \u00ab" + line + "\u00bb\n"
+            "not the operator) said: \u00ab" + line + "\u00bb " + aim_note + "\n"
             "You are its teacher. Reply in at most two short plain sentences "
             "(no analysis of where its words came from), then end with one line "
             "exactly: It meant: <the plain sentence it could have said>. "
@@ -841,10 +845,12 @@ def auto_next(runner, sid: str, reply: str) -> None:
             src = clean(reply) or reply or "hello"
             qv = np.asarray(v.embedder.embed([src[:4000]])[0], dtype=float)
             rounds = (runner._auto.get(sid) or {}).get("rounds", 0)
+            topic = ""
             if v.stuck.get(sid) or (rounds and rounds % ROTATE_EVERY == 0):
                 fresh = fresh_topic(fld)
                 if fresh is not None:
                     qv, src = fresh[1], fresh[0]   # a new place in the field to talk about
+                    topic = fresh[0]
                     v.correction.pop(sid, None)
                     v.stuck[sid] = False
             mid = _gen_id("msg")
@@ -857,7 +863,7 @@ def auto_next(runner, sid: str, reply: str) -> None:
             runner.hub.publish({"type": "membrane.voice", "sessionID": sid, "line": dict(rec)})
             now = int(time.time() * 1000)
             agent = str((runner.sessions.get(sid) or {}).get("agent") or "build")
-            text = frame(rec["text"])
+            text = frame(rec["text"], topic)
             info = {"id": mid, "sessionID": sid, "role": "user", "agent": agent,
                     "voiceTurn": True, "time": {"created": now}}
             parts = [{"id": _gen_id("prt"), "sessionID": sid, "messageID": mid,
