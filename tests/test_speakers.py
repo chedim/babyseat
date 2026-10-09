@@ -89,5 +89,26 @@ class TestTheField(unittest.TestCase):
         self.assertTrue(all(d["text"].startswith("[HA user: ") for d in user))   # stored text keeps it
 
 
+class TestSourceTags(unittest.TestCase):
+    def test_a_track_says_where_its_latest_line_came_from(self):
+        from membrane import entity_block as EB
+        f = EntityField(MemBackend(), _fakes.FakeEmbedder(), "seat@host")
+        for i in range(4):
+            f.write_events(ST.split_turn(HEAD + f"situation {i}: the jibberword ladder is stuck near the anchor chain",
+                                         ""), session="s")
+        f.process()
+        ev = f.evidence("w:jibberword", k=1)
+        self.assertEqual(ev[0]["speaker"], "person:dmitrii-chechetkin")
+        line = EB.track_line(f, "w:jibberword")
+        self.assertIn("latest (said by person:dmitrii-chechetkin)", line)
+
+    def test_tags(self):
+        from membrane.entity_block import source_tag
+        self.assertEqual(source_tag({"stream": "observation", "tool": "exec"}), "observed: tool:exec")
+        self.assertEqual(source_tag({"stream": "discourse", "role": "model"}), "said by seat:self")
+        self.assertEqual(source_tag({"stream": "discourse", "role": "user"}), "said (user)")
+        self.assertEqual(source_tag({"stream": "discourse", "role": "note"}), "noted")
+
+
 if __name__ == "__main__":
     unittest.main()

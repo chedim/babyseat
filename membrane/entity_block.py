@@ -378,6 +378,27 @@ def track_count(field, key: str) -> int:
     return st.n if st else 0
 
 
+def source_tag(row: dict) -> str:
+    """Where a line came from (the seat's own ask, 2026-10-09: "tag each
+    line with its source so the count splits into said/observed"): who
+    said it, or which tool's result showed it."""
+    st, role = row.get("stream") or "", row.get("role") or ""
+    if st == "observation":
+        return "observed" + (f": tool:{row['tool']}" if row.get("tool") else "")
+    if st == "code":
+        return "code"
+    if st == "discourse":
+        spk = row.get("speaker") or ""
+        if spk:
+            return f"said by {spk}"
+        if role in ("model", "reasoning"):
+            return "said by seat:self"
+        if role == "note":
+            return "noted"
+        return "said" + (f" ({role})" if role else "")
+    return st or "?"
+
+
 def track_line(field, key: str, label: str = "", now: float | None = None) -> str:
     """'track: f:x (label) — said 41 · observed 17, last 2h ago; latest: <the
     newest sentence that moved it>'."""
@@ -388,7 +409,8 @@ def track_line(field, key: str, label: str = "", now: float | None = None) -> st
         return f"track: {key}{lab} — nothing in the field yet"
     counts = counts_text(st, now)
     latest = field.evidence(eid, k=1)
-    tail = f"; latest: {latest[0]['text'][:160]}" if latest else ""
+    tail = (f"; latest ({source_tag(latest[0])}): {latest[0]['text'][:160]}"
+            if latest else "")
     from . import efield as _EF
     return f"track: {eid}{lab} — {counts or 'waiting'}, last {_age(_EF.last_seen(st), now)}{tail}"
 

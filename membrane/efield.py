@@ -1343,6 +1343,7 @@ class EntityField:
             ev = evs.get(d["event"]) or {}
             rows.append({"sid": d["sid"], "text": s["text"], "stream": d["stream"],
                          "role": ev.get("role") or "", "n": ev.get("n"),
+                         "speaker": (ev.get("speaker") or [""])[0], "tool": ev.get("tool") or "",
                          "event": d["event"], "ts": d["ts"], "seq": d["seq"], "score": score})
         uniq = {}
         for r in sorted(rows, key=lambda r: -r["score"]):

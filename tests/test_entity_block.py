@@ -98,7 +98,7 @@ class TestTracks(unittest.TestCase):
         self.assertEqual(EB.track_count(f, "f:membrane/router.py"), 3)
         ln = EB.track_line(f, "files:membrane/router.py", "router.py", now=T0 + 20)
         self.assertTrue(ln.startswith("track: f:membrane/router.py (router.py) — "
-                                      "said 1 · echo ~1 · observed 1, last just now; latest: "), ln)
+                                      "said 1 · echo ~1 · observed 1, last just now; latest ("), ln)
         self.assertIn("nothing in the field yet", EB.track_line(f, "files:nope.py"))
         self.assertEqual(EB.track_count(f, "files:nope.py"), 0)
 
