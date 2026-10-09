@@ -1178,6 +1178,28 @@ class TurnRunner:
                           "sessionID": sid})
         return qid
 
+    def _take_interjections(self, sid: str, aid: str) -> list:
+        """Pop every queued message of this session for the RUNNING turn:
+        their rows are stored + announced already (the door); their
+        waiters are released with a 'merged' result."""
+        with self._queue_lock:
+            q = self._queue.get(sid) or []
+            taken, self._queue[sid] = list(q), []
+        out = []
+        for ent in taken:
+            out.append(str(ent.get("text") or ""))
+            self._drain_results[ent["qid"]] = {"status": "merged", "into": aid,
+                                               "sessionID": sid}
+            try:
+                ent["done"].set()
+            except Exception:
+                pass
+        if taken:
+            self.hub.publish({"type": "session.status",
+                              "status": {"type": "busy", "depth": 0},
+                              "sessionID": sid})
+        return [t for t in out if t]
+
     def _queued_depth(self, sid: str) -> int:
         with self._queue_lock:
             return len(self._queue.get(sid) or [])
@@ -1523,6 +1545,14 @@ class TurnRunner:
         while not err_done and rounds < MAX_ROUNDS:
             rounds += 1
             self._turn_activity[sid] = time.time()   # THE ROUND'S TOUCH
+            if rounds > 1:
+                # THE OPERATOR SPEAKS INTO THE RUNNING TURN (2026-10-08):
+                # messages queued since the last round join this turn's
+                # history -- the model's next step sees them (a 9-minute
+                # turn kept four of them waiting, the hint it needed among
+                # them); each is consumed, never replayed as its own turn
+                for _said in self._take_interjections(sid, aid):
+                    history.append({"role": "user", "content": _said})
             sid_flag = sid in self._aborting
             if sid in self._aborting or sid_flag:
                 break
