@@ -54,6 +54,15 @@ LM_WEIGHT = 1.0
 STEER_WEIGHT = 100.0
 REPEAT_PENALTY = 1.5
 REWRITE_WEIGHT = 5.0
+# THE TEACHERS' WEIGHTS (2026-10-09, the auto-chat review -- the seat's own
+# warning: "long auto-chat runs fill the table with my idiom"): the
+# operator's words count 1, the model's replies half, the model's one
+# "It meant:" sentence in auto-chat 2 (a short rewrite-shaped lesson),
+# the operator's rewrites 5
+LLM_WEIGHT = 0.5
+MEANT_WEIGHT = 2.0
+RECENT_LINES = 8               # its own recent lines: openings and words not to reuse
+RECENT_START_PENALTY = 12.0
 VOCAB_WARM = 4000
 BOOT_TEXT_CAP = 3_000_000      # characters of history the bootstrap hears (newest first)
 KEY_BUDGET = 250_000           # contexts kept; past it the weakest go (~17 MB per 1 MB heard)
@@ -251,7 +260,8 @@ def _unit(x):
 
 
 def compose(table: WordTable, vecs: WordVecs, target: np.ndarray,
-            avoid: set | None = None) -> dict:
+            avoid: set | None = None, stale: set | None = None,
+            stale_starts: set | None = None) -> dict:
     """The steered beam walk: grammar from the table, meaning from the
     field. Returns {text, tokens, alignment}."""
     tot = sum(table.uni.values()) or 1.0
@@ -260,6 +270,8 @@ def compose(table: WordTable, vecs: WordVecs, target: np.ndarray,
         return math.log(1.0 + tot / (1.0 + table.uni.get(w, 0.0)))
 
     avoid = avoid or set()
+    stale = stale or set()                # words of its own recent lines
+    stale_starts = stale_starts or set()  # their opening word pairs
     bag = np.zeros(PROJ_DIM, dtype=np.float32)
     words: list[str] = []
     for _ in range(MAX_SENTENCES):
@@ -290,7 +302,11 @@ def compose(table: WordTable, vecs: WordVecs, target: np.ndarray,
                         s -= REPEAT_PENALTY
                     if w in avoid and len(w) > 3:
                         s -= 0.5 * REPEAT_PENALTY
+                    if w in stale and len(w) > 3:
+                        s -= 0.5 * REPEAT_PENALTY
                     nseq = seq + [w]
+                    if len(nseq) == 3 and (nseq[1], nseq[2]) in stale_starts:
+                        s -= RECENT_START_PENALTY
                     if w in ENDS:
                         if sum(1 for x in nseq if x not in PUNCT and x != BOS) >= MIN_TOKENS:
                             done.append((s / (len(nseq) ** 0.6), nseq, nb))
@@ -421,8 +437,13 @@ class Voice:
         t = self.vecs.project(target_vec)
         if t is None:
             return None
+        recent = [[w.lower() for w in tokenize(r.get("text") or "") if w not in PUNCT]
+                  for r in sorted(self.lines.values(), key=lambda r: r.get("time", 0))[-RECENT_LINES:]]
+        stale = {w for ws in recent for w in ws}
+        starts = {(ws[0], ws[1]) for ws in recent if len(ws) >= 2}
         with self._lock:
-            out = compose(self.table, self.vecs, t, avoid={w.lower() for w in tokenize(message)})
+            out = compose(self.table, self.vecs, t, avoid={w.lower() for w in tokenize(message)},
+                          stale=stale, stale_starts=starts)
         if not out["text"]:
             return None
         rec = {"id": "vox_" + secrets.token_hex(6), "sid": sid, "mid": mid,
@@ -466,6 +487,22 @@ class Voice:
         self._ledger(upd)
         self.save()
         return self.lines.get(line_id)
+
+    def pair(self, line_id: str | None, meant: str) -> None:
+        """THE DISTILLER'S TRAINING PAIRS: what the voice said, and the
+        teacher's sentence for it (with the line's target alignment) --
+        the data a learned formulator will train on later."""
+        if self.dir is None or not meant:
+            return
+        rec = self.lines.get(line_id or "") or {}
+        try:
+            self.dir.mkdir(parents=True, exist_ok=True)
+            with open(self.dir / "pairs.jsonl", "a") as f:
+                f.write(json.dumps({"line": rec.get("text", ""), "meant": meant,
+                                    "alignment": rec.get("alignment"),
+                                    "sid": rec.get("sid"), "time": int(time.time() * 1000)}) + "\n")
+        except Exception:
+            pass
 
     def of_session(self, sid: str) -> list[dict]:
         return sorted((r for r in self.lines.values() if r.get("sid") == sid),
@@ -602,10 +639,14 @@ def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
                 th.join(60)              # its line first, then the grade
             if not voice_turn:
                 v.hear(user_text)
-            v.hear(reply)
+            meant = it_meant(reply) if voice_turn else ""
+            v.hear(strip_meant(reply), LLM_WEIGHT)
             lid = (getattr(runner, "_voice_last", {}) or {}).pop(sid, None)
+            if meant:
+                v.hear(meant, MEANT_WEIGHT)
+                v.pair(lid, meant)
             if lid:
-                c = v.grade(lid, reply)
+                c = v.grade(lid, meant or reply)
                 if c is not None:
                     runner.hub.publish({"type": "membrane.voice", "sessionID": sid,
                                         "line": dict(v.lines.get(lid) or {})})
@@ -628,9 +669,28 @@ AUTO_PAUSE_S = 3.0
 
 
 def frame(line: str) -> str:
+    """The model as TEACHER, not analyst: a short plain answer, then the one
+    sentence the voice should have said (the lesson it hears, x2)."""
     return (VOICE_PREFIX + "membrane's own voice (the field learning to speak -- "
             "not the operator) said: \u00ab" + line + "\u00bb\n"
-            "Answer it, and say in one sentence what it was trying to say.")
+            "You are its teacher. Reply in at most two short plain sentences "
+            "(no analysis of where its words came from), then end with one line "
+            "exactly: It meant: <the plain sentence it could have said>")
+
+
+_MEANT = re.compile(r"^\W*it meant\W*:\s*(.+?)\s*$", re.I | re.M)
+
+
+def it_meant(reply: str) -> str:
+    """The teacher's one-sentence lesson ('It meant: ...'), or ''."""
+    m = None
+    for m in _MEANT.finditer(reply or ""):
+        pass
+    return m.group(1).strip().strip("*_\"'\u201c\u201d ").strip() if m else ""
+
+
+def strip_meant(reply: str) -> str:
+    return _MEANT.sub("", reply or "").strip()
 
 
 def auto_on(runner, sid: str) -> bool:

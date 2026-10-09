@@ -171,8 +171,9 @@ class TestTheTurn(unittest.TestCase):
         r, srv, sid, out, lines = self._turn("build")
         self.assertTrue(lines)
         heard = V.WordTable()
-        for t in CORPUS * 3 + ["how is the battery?", "The battery is at ninety percent."]:
+        for t in CORPUS * 3 + ["how is the battery?"]:
             heard.observe(t)
+        heard.observe("The battery is at ninety percent.", V.LLM_WEIGHT)   # the model counts half
         self.assertEqual(V.of(srv).table.uni, heard.uni)   # the teachers' words, nothing else
 
 if __name__ == "__main__":
@@ -342,3 +343,45 @@ class TestAutoChat(unittest.TestCase):
         ev = {"stream": "discourse", "role": "user", "text": V.frame("battery charge fine")}
         self.assertEqual(SP.prose_of(ev), "")
         self.assertEqual(SP.speaker_of(ev), SP.VOICE)
+
+
+class TestTeacher(unittest.TestCase):
+    def test_the_lesson_line(self):
+        r = "Close! The battery is fine.\nIt meant: The battery is charging well."
+        self.assertEqual(V.it_meant(r), "The battery is charging well.")
+        self.assertEqual(V.strip_meant(r), "Close! The battery is fine.")
+        self.assertEqual(V.it_meant("**It meant:** the anchor holds."), "the anchor holds.")
+        self.assertEqual(V.it_meant("no lesson here"), "")
+        self.assertIn("It meant:", V.frame("x"))
+
+    def test_it_stops_opening_the_same_way(self):
+        v = _voice()
+        q = FakeEmbedder().embed(["battery charge cells"])[0]
+        starts = []
+        for _ in range(4):
+            rec = v.speak(q)
+            ws = [w.lower() for w in V.tokenize(rec["text"]) if w not in V.PUNCT]
+            starts.append(tuple(ws[:2]))
+        self.assertGreater(len(set(starts)), 1, starts)
+
+    def test_a_voice_turn_teaches_with_the_lesson_and_logs_the_pair(self):
+        d = tempfile.mkdtemp()
+        srv = _Srv()
+        srv._models_path = str(Path(d) / "models.json")
+        srv.membrane = type("M", (), {"embedder": FakeEmbedder()})()
+        r = S.TurnRunner(S.SSEHub(), S.SessionStore(), S.MessageStore(), _Ladder(),
+                         lambda n, a, c: "ok", system="", model="m")
+        r.srv = srv
+        v = V.of(srv)
+        v.bootstrap(CORPUS * 3)
+        rec = v.speak(FakeEmbedder().embed(["battery"])[0], sid="s1")
+        r._voice_last = {"s1": rec["id"]}
+        V.on_turn_end(r, "s1", V.frame(rec["text"]),
+                      "Nice try.\nIt meant: Volts look healthy tonight.", "operator", voice_turn=True)
+        end = time.time() + 5
+        while time.time() < end and "closeness" not in v.lines[rec["id"]]:
+            time.sleep(0.05)
+        self.assertAlmostEqual(v.table.uni.get("volts", 0), V.MEANT_WEIGHT)      # the lesson, x2
+        self.assertNotIn("membrane", v.table.uni)                                # never the frame
+        pairs = (Path(d) / "voice" / "pairs.jsonl").read_text().splitlines()
+        self.assertIn("Volts look healthy tonight.", pairs[-1])
