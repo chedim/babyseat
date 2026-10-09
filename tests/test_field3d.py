@@ -80,6 +80,31 @@ class TestWholeField(unittest.TestCase):
             self.assertEqual(t["more"], finer, (lv, x, y, z))
         self.assertFalse(p.tile(p.max_level, 0, 0, 0)["more"])
 
+    def test_past_the_cap_the_heaviest_keep_their_edges(self):
+        rows = _rows(3000)
+        cap, F.MAX_EDGES = F.MAX_EDGES, 300
+        try:
+            p = _build(rows, k=20)
+        finally:
+            F.MAX_EDGES = cap
+        heavy = sorted(rows, key=lambda r: -r["accr"])[:5]
+        kept = {p.ids[s] for s, t, rel, n in p.edges} | {p.ids[t] for s, t, rel, n in p.edges}
+        self.assertTrue(any(r["eid"] in kept for r in heavy))
+        light = sorted(rows, key=lambda r: r["accr"])[:50]
+        self.assertLess(sum(r["eid"] in kept for r in light), sum(r["eid"] in kept for r in heavy) * 10 + 1)
+
+    def test_a_selection_gets_its_whole_neighbourhood(self):
+        rows = _rows(3000)
+        p = _build(rows, k=20)
+        heavy = max(rows, key=lambda r: r["accr"])["eid"]
+        nb = p.neighbours(heavy)
+        self.assertTrue(nb)
+        self.assertTrue(any(x["lv"] > 0 for x in nb))          # finer than the root: still listed
+        for x in nb:
+            self.assertEqual(len(x["p"]), 3)
+            self.assertIn(x["dir"], ("in", "out"))
+        self.assertEqual(p.neighbours("nope"), [])
+
     def test_tile_edges_reference_loaded_levels_only(self):
         rows = _rows(1200)
         p = _build(rows, k=10)

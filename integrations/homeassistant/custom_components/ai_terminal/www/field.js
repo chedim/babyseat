@@ -454,6 +454,7 @@ function defineFieldPanel() {
           kindColor, isAdmin: !!(hass.user && hass.user.is_admin),
           onStatus: (t) => { this._status3.textContent = t; this._paintAgents(); },
           onSelect: (m) => { if (m) this._select3d(m.id); else { this._sel = null; this._drawer.classList.remove("open"); } },
+          onRelated: (id) => { if (this._sel === id && this._drawer.classList.contains("open")) this._select3d(id); },
           onHover: (m, x, y) => {
             if (!m) { this._tip.style.display = "none"; return; }
             this._tip.textContent = m.label + "  ·  " + m.kind + "  ·  mass " + m.mass;
@@ -530,7 +531,14 @@ function defineFieldPanel() {
         '<button class="btn on ask">Ask the brain about this</button> <button class="btn read">Entity details</button>' +
         '<div style="margin-top:6px">' + ax.map((k, i) => '<button class="btn mk3" data-i="' + i + '" title="Distance from this entity becomes the ' + k +
           ' axis">Make ' + k + "-axis</button>").join(" ") + "</div>" +
-        '<div class="detail"></div>';
+        '<div class="detail"></div>' + (() => {
+          const nb = v.related(id).slice(0, 40);
+          return nb.length ? "<h4 style=\"margin:10px 0 4px\">Related (" + nb.length + ")</h4>" + nb.map((x) =>
+            '<div class="nb" data-id="' + fesc(x.id) + '"><span class="rel">' + (x.dir === "out" ? "→ " : "← ") + fesc(x.rel) +
+            "</span><span>" + fesc(x.label) + (x.loaded === false ? ' <span style="opacity:.45">(zoom in to load)</span>' : "") +
+            '</span><span style="opacity:.5">×' + fesc(x.n) + "</span></div>").join("")
+            : '<div style="opacity:.6;margin-top:10px">no relations</div>';
+        })();
       this._drawer.classList.add("open");
     }
 

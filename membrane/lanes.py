@@ -4124,6 +4124,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         hit = proj.locate(eid)
         if hit is None:
             self._json_err_raw(404, f"{eid!r} is not in this projection"); return
+        if (qs.get("nb") or ["0"])[0] in ("1", "true"):
+            hit["neighbours"] = proj.neighbours(eid)
         self._json_out(hit)
 
     def _map_distance(self):

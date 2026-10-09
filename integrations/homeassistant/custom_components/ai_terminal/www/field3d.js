@@ -248,6 +248,26 @@ class Field3DView {
     eg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), F3_WORLD * 2);
     this.edges = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x8aa0c8, transparent: true, opacity: 0.12, depthWrite: false }));
     this.scene.add(this.edges);
+    // the selected entity's edges, bright (the 2D map's gold highlight)
+    const hg = new THREE.BufferGeometry();
+    this.hiCap = 2000;
+    this.hiA = new Float32Array(this.hiCap * 6);
+    hg.setAttribute("position", new THREE.BufferAttribute(this.hiA, 3));
+    hg.setDrawRange(0, 0);
+    hg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), F3_WORLD * 2);
+    this.hiEdges = new THREE.LineSegments(hg, new THREE.LineBasicMaterial({ color: 0xffd25a, transparent: true, opacity: 0.9, depthWrite: false }));
+    this.hiEdges.renderOrder = 2;
+    this.scene.add(this.hiEdges);
+    // the selection's neighbours that aren't loaded yet: small gold ghosts
+    const gg = new THREE.BufferGeometry();
+    this.ghostA = new Float32Array(this.hiCap * 3);
+    gg.setAttribute("position", new THREE.BufferAttribute(this.ghostA, 3));
+    gg.setDrawRange(0, 0);
+    gg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), F3_WORLD * 2);
+    this.ghosts = new THREE.Points(gg, new THREE.PointsMaterial({ color: 0xffd25a, size: 5, sizeAttenuation: false,
+      transparent: true, opacity: 0.85, depthWrite: false }));
+    this.scene.add(this.ghosts);
+    this.selNb = null;
     this.showEdges = true; this.showLabels = true;
     this._wire();
     this._ro = new ResizeObserver(() => this._resize());
@@ -344,7 +364,37 @@ class Field3DView {
 
   _rebuildEdges() {
     this._edgesDirty = false;
-    let n = 0;
+    let n = 0, h = 0;
+    const sel = this.sel;
+    const posOf = (id, cube) => {
+      const sl = this.slots.get(id);
+      return sl != null ? [this.posA[sl * 3], this.posA[sl * 3 + 1], this.posA[sl * 3 + 2]] : (cube ? cubeToWorld(cube) : null);
+    };
+    let g = 0;
+    if (sel && this.selNb && this.selNb.id === sel) {
+      const from = posOf(sel, this.selNb.p);
+      for (const nb of this.selNb.nb) {
+        if (!from || h >= this.hiCap) break;
+        const to = posOf(nb.id, nb.p);
+        this.hiA.set(from, h * 6); this.hiA.set(to, h * 6 + 3); h++;
+        if (!this.slots.has(nb.id)) { this.ghostA.set(to, g * 3); g++; }
+      }
+    } else if (sel) {
+      for (const t of this.cache.tiles.values()) {
+        for (const e of t.edges || []) {
+          if (e.s !== sel && e.t !== sel) continue;
+          const a = this.slots.get(e.s), b = this.slots.get(e.t);
+          if (a == null || b == null || h >= this.hiCap) continue;
+          this.hiA.set(this.posA.subarray(a * 3, a * 3 + 3), h * 6);
+          this.hiA.set(this.posA.subarray(b * 3, b * 3 + 3), h * 6 + 3);
+          h++;
+        }
+      }
+    }
+    this.hiEdges.geometry.setDrawRange(0, h * 2);
+    this.hiEdges.geometry.attributes.position.needsUpdate = true;
+    this.ghosts.geometry.setDrawRange(0, g);
+    this.ghosts.geometry.attributes.position.needsUpdate = true;
     if (this.showEdges) {
       outer: for (const t of this.cache.tiles.values()) {
         for (const e of t.edges || []) {
@@ -495,6 +545,37 @@ class Field3DView {
     const old = this.sel; this.sel = id;
     for (const k of [old, id]) { const s = this.slots.get(k); if (s != null) this._paintSlot(s); }
     this._dirtyPoints();
+    this._edgesDirty = true;
+    if (!id) { this.selNb = null; return; }
+    if (this.selNb && this.selNb.id === id) return;
+    // the whole neighbourhood (loaded or not): the seat knows every edge
+    const pid = this.pid;
+    this.api.get("/membrane/map/locate?pid=" + pid + "&eid=" + encodeURIComponent(id) + "&nb=1").then((hit) => {
+      if (this.sel !== id || this.pid !== pid || !hit) return;
+      this.selNb = { id, p: hit.p, nb: hit.neighbours || [] };
+      this._edgesDirty = true;
+      if (this.api.onRelated) this.api.onRelated(id);
+    }).catch(() => {});
+  }
+
+  /** The selected entity's relations among the loaded tiles. */
+  related(id) {
+    if (this.selNb && this.selNb.id === id) {
+      return this.selNb.nb.map((x) => ({ id: x.id, label: x.l, rel: x.rel, n: x.n, dir: x.dir,
+        loaded: this.slots.has(x.id) }));
+    }
+    const out = [], seen = new Set();
+    for (const t of this.cache.tiles.values()) {
+      for (const e of t.edges || []) {
+        if (e.s !== id && e.t !== id) continue;
+        const other = e.s === id ? e.t : e.s, key = other + "|" + e.rel + "|" + (e.s === id ? "out" : "in");
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const s = this.slots.get(other), m = s == null ? null : this.meta[s];
+        out.push({ id: other, label: m ? m.label : other, rel: e.rel, n: e.n, dir: e.s === id ? "out" : "in" });
+      }
+    }
+    return out.sort((a, b) => b.n - a.n);
   }
 
   async flyTo(id) {

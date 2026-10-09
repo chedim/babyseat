@@ -40,7 +40,7 @@ SAMPLE_RAND = 1000
 CHUNK = 2048
 TILE_K = 150
 MAX_LEVEL = 8
-MAX_EDGES = 20000
+MAX_EDGES = 40000
 CLIQUE_MAX = 12
 LABEL_MAX = 80
 CO_MENTION = "co-mentioned"
@@ -159,6 +159,22 @@ class Projection:
             return None
         return {"pid": self.pid, **self._node(i),
                 "tile": [int(self.level[i])] + [int(c) for c in self.cell[i]]}
+
+    def neighbours(self, eid: str, k: int = 80) -> list[dict]:
+        """An entity's whole neighbourhood under this fit: every kept edge
+        with the other end's node (loaded on the client or not), strongest
+        first -- the selection's highlight and related list."""
+        i = self.index.get(eid)
+        if i is None:
+            return []
+        out = []
+        for j in self._edges_of.get(i, ()):
+            s, t, rel, n = self.edges[j]
+            other = t if s == i else s
+            out.append({**self._node(other), "rel": rel, "n": n,
+                        "dir": "out" if s == i else "in"})
+        out.sort(key=lambda d: (-d["n"], -d["m"]))
+        return out[:max(1, int(k))]
 
     def place(self, vec) -> list[float]:
         """A (moved) state's cube position under this fit."""
@@ -326,8 +342,12 @@ def build(rows_factory, unpack, axes_spec: str = "", ref_vec=None, rels=(),
             continue
         key = (s, t, str(rr.get("rel") or ""))
         agg[key] = agg.get(key, 0) + int(rr.get("n") or 1)
+    # past the cap the strongest stay, then those of the HEAVIEST endpoints
+    # (the ones on screen first) -- ties used to break by scan order and a
+    # heavy, visible entity could keep none of its edges
     edges = sorted(((s, t, rel, cnt) for (s, t, rel), cnt in agg.items()),
-                   key=lambda e: (-e[3], e[0], e[1]))[:MAX_EDGES]
+                   key=lambda e: (-e[3], -(int(meta[e[0]][3]) + int(meta[e[1]][3])),
+                                  e[0], e[1]))[:MAX_EDGES]
     kind_names = sorted(kcnt, key=lambda kd: (-kcnt[kd], kd))
     kix = {kd: j for j, kd in enumerate(kind_names)}
     return Projection(axes, ids, coords, mass, [kix[m_[1]] for m_ in meta], kind_names,
