@@ -64,6 +64,28 @@ def pack_f32(v) -> str:
     return "f32:" + base64.b64encode(a.tobytes()).decode()
 
 
+def _build_matrix(snap):
+    """(keys, normed f32 matrix) from (key, packed vec) pairs, filled IN
+    PLACE (2026-10-08): the old build kept every row as a 64-bit array in a
+    list and then copied them all -- about 2x the matrix at peak, enough to
+    get the brain phone's Termux killed under memory pressure."""
+    keys = [k for k, v in snap if v is not None]
+    if not keys:
+        return None
+    first = np.asarray(unpack_f16(next(v for _, v in snap if v is not None)), dtype=np.float32)
+    M = np.empty((len(keys), first.shape[0]), dtype=np.float32)
+    i = 0
+    for _, v in snap:
+        if v is None:
+            continue
+        M[i] = unpack_f16(v)
+        i += 1
+    for lo in range(0, M.shape[0], 2048):          # in chunks: no full-size temp
+        blk = M[lo:lo + 2048]
+        blk /= (np.sqrt(np.einsum("ij,ij->i", blk, blk))[:, None] + 1e-12)
+    return np.array(keys), M
+
+
 def unpack_f16(s) -> np.ndarray:
     """Any packed vector ('f16:' / 'f32:') or a plain float list."""
     if isinstance(s, str) and s.startswith("f16:"):
@@ -117,6 +139,11 @@ class MemBackend:
         self._vec_cache: dict[tuple[str, str], tuple[np.ndarray,
                                                     np.ndarray]] = {}
         self._vec_dirty: set[str] = set()   # the gen-bump set (writes)
+        # THE FIRST BUILD (2026-10-08): the (coll, field) matrices a read
+        # asked for that don't exist yet -- the background rebuild builds
+        # them too (it used to refresh EXISTING matrices only, so a big
+        # never-built collection answered empty forever)
+        self._vec_want: set[tuple[str, str]] = set()
 
     def _vec_matrix(self, coll: str, field: str, eq: dict | None):
         """(keys, normed f32 matrix) for the coll/field -- cached,
@@ -156,23 +183,16 @@ class MemBackend:
         except Exception:
             n_docs = 0
         if n_docs > 2000:
+            self._vec_want.add(ek)
             if not self._vec_rebuilding:
                 self._vec_rebuild_async()
             return None
         with self._ram_lock:
             snap = [(k, d.get(field))
                     for k, d in list(self.colls.get(coll, {}).items())]
-        keys, rows = [], []
-        for k, v in snap:
-            if v is None:
-                continue
-            keys.append(k)
-            rows.append(unpack_f16(v))
-        if not rows:
+        pair = _build_matrix(snap)
+        if pair is None:
             return None
-        M = np.array(rows, dtype=np.float32)
-        M = M / (np.linalg.norm(M, axis=1, keepdims=True) + 1e-12)
-        pair = (np.array(keys), M)
         self._vec_cache[ek] = pair
         self._vec_dirty.discard(coll)
         return pair
@@ -188,27 +208,21 @@ class MemBackend:
 
         def _rebuild():
             try:
-                for ek in list(self._vec_cache.keys()
-                               if hasattr(self, "_vec_cache") else []):
+                wanted = set(getattr(self, "_vec_want", ()) or ())
+                for ek in list(set(self._vec_cache.keys()) | wanted):
                     coll, field = ek
-                    if coll not in self._vec_dirty:
+                    if coll not in self._vec_dirty and ek in self._vec_cache:
                         continue
                     with self._ram_lock:
                         snap = [(k, d.get(field))
                                 for k, d in
                                 list(self.colls.get(coll, {}).items())]
-                    keys, rows = [], []
-                    for k, v in snap:
-                        if v is None:
-                            continue
-                        keys.append(k)
-                        rows.append(unpack_f16(v))
-                    if not rows:
+                    pair = _build_matrix(snap)
+                    del snap
+                    if pair is None:
                         continue
-                    M = np.array(rows, dtype=np.float32)
-                    M = M / (np.linalg.norm(M, axis=1, keepdims=True)
-                             + 1e-12)
-                    self._vec_cache[ek] = (np.array(keys), M)
+                    self._vec_cache[ek] = pair
+                    self._vec_want.discard(ek)
                 self._vec_dirty.clear()
             except Exception:
                 pass
