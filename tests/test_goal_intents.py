@@ -151,11 +151,8 @@ class TestMcpIntendRoute(unittest.TestCase):
         from membrane import opencode as OC
         cls.est = _store()
 
-        class _Sel:
-            pinned, suppressed = {}, set()
-
         class _Board:
-            selection = _Sel()
+            selection = GoalSelection(cls.est)      # no path: RAM only
 
         handler = OC.MembraneOpenAIHandler
 

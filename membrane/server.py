@@ -1187,7 +1187,7 @@ class TurnRunner:
             taken, self._queue[sid] = list(q), []
         out = []
         for ent in taken:
-            out.append(str(ent.get("text") or ""))
+            out.append((str(ent.get("text") or ""), ent.get("user_info") or {}))
             self._drain_results[ent["qid"]] = {"status": "merged", "into": aid,
                                                "sessionID": sid}
             try:
@@ -1198,7 +1198,7 @@ class TurnRunner:
             self.hub.publish({"type": "session.status",
                               "status": {"type": "busy", "depth": 0},
                               "sessionID": sid})
-        return [t for t in out if t]
+        return [(t, ui) for t, ui in out if t]
 
     def _queued_depth(self, sid: str) -> int:
         with self._queue_lock:
@@ -1551,8 +1551,35 @@ class TurnRunner:
                 # history -- the model's next step sees them (a 9-minute
                 # turn kept four of them waiting, the hint it needed among
                 # them); each is consumed, never replayed as its own turn
-                for _said in self._take_interjections(sid, aid):
-                    history.append({"role": "user", "content": _said})
+                _said = self._take_interjections(sid, aid)
+                if _said:
+                    # THE REPLY SPLITS AROUND THE OPERATOR'S WORDS: the
+                    # clients order rows by creation -- a merged message
+                    # rendered UNDER a reply still growing above it (it
+                    # looked undelivered). The running reply closes here;
+                    # a new one continues after the operator's rows.
+                    _now = int(time.time() * 1000)
+                    a_info["time"]["completed"] = _now
+                    self.messages.append(sid, a_info, list(parts))
+                    self.hub.publish({"type": "message.updated",
+                                      "sessionID": sid, "info": dict(a_info)})
+                    for _t, _ui in _said:
+                        history.append({"role": "user", "content": _t})
+                    _last = _said[-1][1] or {}
+                    _after = int(((_last.get("time") or {}).get("created"))
+                                 or 0) + 1
+                    aid = _gen_id("msg")
+                    a_info = dict(a_info, id=aid,
+                                  parentID=_last.get("id") or a_info.get("parentID"),
+                                  tokens={"total": 0, "input": 0, "output": 0,
+                                          "reasoning": 0,
+                                          "cache": {"read": 0, "write": 0}},
+                                  time={"created": max(_now, _after)})
+                    a_info.pop("error", None)
+                    a_info.pop("finish", None)
+                    self.hub.publish({"type": "message.updated",
+                                      "sessionID": sid, "info": dict(a_info)})
+                    parts = []
             sid_flag = sid in self._aborting
             if sid in self._aborting or sid_flag:
                 break

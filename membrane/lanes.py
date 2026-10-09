@@ -1438,8 +1438,7 @@ def _membrane_intent_create_or_pin(srv, text: str, ttl: str = ""
         except Exception:
             pass
     sel = board.selection
-    sel.pinned[goal.eid] = max(sel.pinned.get(goal.eid, 0.0), bonus)
-    sel.suppressed.discard(goal.eid)
+    sel.pin(goal.eid, bonus)
     # THE RECEIVE-LANE WIRE (2026-10-06: the operator creates, the
     # 3-thinker loop receives): the planted goal is an event -- a
     # thinking loop plans/executes it on its own turn.
@@ -1468,8 +1467,7 @@ def _intent_cmd(srv, q: str) -> str:
             est = srv.entity_store
             goal = _resolve_goal(est, spec)
             if goal is not None:
-                board.selection.suppressed.add(goal.eid)
-                board.selection.pinned.pop(goal.eid, None)
+                board.selection.suppress(goal.eid)
                 what = (f"suppressed on this seat: "
                         f"{goal.describe()[:100]} (the goal stays open "
                         f"for other seats)")

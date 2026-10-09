@@ -27,6 +27,7 @@ from __future__ import annotations
 from .entities import CLASS_GOAL
 
 import json
+from pathlib import Path
 import re
 import time
 from dataclasses import dataclass, field as dc_field
@@ -103,7 +104,12 @@ class IntentBoard:
         Goal layer through the seat's selection. THE MIGRATION: legacy
         JSON intents import once as Goal entities (shared, long-lived) +
         priority pins (the operator's own plants keep their hand)."""
-        self.selection = GoalSelection(est)
+        sel_path = None
+        try:
+            sel_path = Path(self.path).parent / "goal-selection.json"
+        except Exception:
+            pass
+        self.selection = GoalSelection(est, path=sel_path)
         try:
             self._migrate_json_goals(est)
         except Exception:
@@ -135,7 +141,7 @@ class IntentBoard:
                 ent.position = list(i.probe or [])
                 est.upsert(ent)
             if i.status == "open":
-                self.selection.pinned[eid] = 0.5
+                self.selection.pin(eid, 0.5)
             i.status = "migrated"
             moved += 1
         if moved:
@@ -372,11 +378,57 @@ class GoalSelection:
     attached (the goals ARE the intents; the Intention objects below are
     the view shape the consumers keep)."""
 
-    def __init__(self, est) -> None:
+    def __init__(self, est, path=None) -> None:
         self.est = est
         self.suppressed: set[str] = set()   # seat-local: eids this seat dropped
         self.pinned: dict[str, float] = {}  # eid -> priority bonus (explicit intend)
         self._active: list[str] = []        # the current selection (eids, ranked)
+        # THE CHOICE SURVIVES A RESTART (2026-10-08, the operator: "why are
+        # you resetting its goals with every restart?"): the pins and the
+        # drops ride a file beside the board; closed goals fall out
+        self.path = Path(path) if path else None
+        self._load()
+
+    def _is_open(self, eid: str) -> bool:
+        e = (self.est.docs or {}).get(eid) if self.est is not None else None
+        return e is not None and (e.properties or {}).get("status", "open") == "open"
+
+    def _load(self) -> None:
+        if self.path is None or not self.path.exists():
+            return
+        try:
+            d = json.loads(self.path.read_text() or "{}")
+        except (OSError, ValueError):
+            return
+        for eid, bonus in (d.get("pinned") or {}).items():
+            if self._is_open(eid):
+                try:
+                    self.pinned[eid] = float(bonus)
+                except (TypeError, ValueError):
+                    pass
+        self.suppressed |= {e for e in (d.get("suppressed") or []) if self._is_open(e)}
+
+    def save(self) -> None:
+        if self.path is None:
+            return
+        try:
+            tmp = self.path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps({
+                "pinned": {e: b for e, b in self.pinned.items() if self._is_open(e)},
+                "suppressed": sorted(e for e in self.suppressed if self._is_open(e))}))
+            tmp.replace(self.path)
+        except OSError:
+            pass
+
+    def pin(self, eid: str, bonus: float) -> None:
+        self.pinned[eid] = max(self.pinned.get(eid, 0.0), float(bonus))
+        self.suppressed.discard(eid)
+        self.save()
+
+    def suppress(self, eid: str) -> None:
+        self.suppressed.add(eid)
+        self.pinned.pop(eid, None)
+        self.save()
 
     # ---- the ranking ------------------------------------------------------
     def _open_goals(self) -> list:

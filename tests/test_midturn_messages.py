@@ -72,6 +72,35 @@ class TestMidTurn(unittest.TestCase):
             self.assertEqual((r._drain_results.get(qid) or {}).get("status"), "merged")
         self.assertEqual(len(bodies), 3)                  # no replayed turns
 
+    def test_the_reply_splits_around_the_operators_words(self):
+        """The panel orders rows by creation: the merged messages rendered
+        UNDER a reply still growing above them (looked undelivered). The
+        running reply closes at the merge, a new one continues after."""
+        replies = [_tool_call(1), _final("after your note")]
+        state = {}
+
+        def executor(name, args, call_id):
+            r = state["r"]
+            info, parts = r._mint_user_row(state["sid"], "a note")
+            r.messages.append(state["sid"], info, parts)
+            state["note_id"] = info["id"]
+            r._enqueue(state["sid"], "a note", info, parts, threading.Event())
+            return "ok"
+
+        r = self._runner(lambda body: replies.pop(0), executor)
+        sid = r.sessions.create(title="t")["id"]
+        state.update(r=r, sid=sid)
+        r.run(sid, "start")
+        rows = r.messages.list(sid) if hasattr(r.messages, "list") else r.messages.get(sid)
+        infos = [x["info"] for x in rows]
+        roles = [i["role"] for i in infos]
+        self.assertEqual(roles, ["user", "assistant", "user", "assistant"], roles)
+        self.assertIn("completed", infos[1]["time"])
+        self.assertEqual(infos[3]["parentID"], state["note_id"])
+        self.assertLess(infos[2]["time"]["created"], infos[3]["time"]["created"])
+        texts = [p.get("text") for p in rows[3]["parts"] if p.get("type") == "text"]
+        self.assertIn("after your note", texts)
+
     def test_a_message_after_the_last_round_still_queues(self):
         r = self._runner(lambda body: _final("done"), lambda *a: "ok")
         sid = r.sessions.create(title="t")["id"]
