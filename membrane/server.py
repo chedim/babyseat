@@ -733,11 +733,11 @@ _LANE_REFUSALS = {
                 "receipt) closes them"),
     "intend": ("plan mode: commitments aren't planted from a planning "
                "session -- the direction needs the user's build-mode "
-               "word; the board reads via `intents`"),
+               "word; the board reads via goal(action='list')"),
 }
 _LISTENER_REFUSALS = {
     "intend": ("listener lane: a watch loop does not plant new goals -- "
-               "take this goal's next step yourself, `fulfill` it with the "
+               "take this goal's next step yourself, close it (goal action='close') with the "
                "receipt, or end with BLOCKED; the operator's chat plants "
                "commitments"),
 }
@@ -784,7 +784,7 @@ def _lane_refusal(name: str, lane: str) -> str | None:
     if lane == "phone":
         return (f"phone lane: {name} doesn't run from a call (a misheard "
                 "sentence must not change the boat) -- answer from what you "
-                "can read, or plant the request with `intend` so a loop "
+                "can read, or plant the request with goal(action='plant') so a loop "
                 "carries it out")
     r = _LANE_REFUSALS.get(name) if lane == "plan" else _LISTENER_REFUSALS.get(name)
     if r is not None:

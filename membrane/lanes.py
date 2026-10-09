@@ -301,7 +301,7 @@ def _seat_card(srv, mcp_on: bool, serve: bool = False) -> str:
         L.append(
             "- EXEC: you have NO built-in tools this seat (bash/read/edit/"
             "grep/... are switched off in the config) -- every command, "
-            "file work rides the executor (entity_link: it runs inline "
+            "file work rides the executor (exec(action='link'): it runs inline "
             "and the result rides the SAME tool call) or an entity script's "
             "verdicts (one shell command -> one `c:<head>` membrane entity "
             "it runs THROUGH: the result lands on the entity, errors reach "
@@ -928,7 +928,7 @@ def _intents_context_block(srv) -> str | None:
                 "think-ahead are UNSTEERED -- nothing guides the idle "
                 "mind's branches. When your current work has a direction "
                 "worth keeping across sessions, plant YOUR commitment "
-                "(the `intend` tool / 'membrane: intend that <goal> "
+                "(goal(action='plant') / 'membrane: intend that <goal> "
                 "[for 2w]'); fulfillment is explicit (`membrane: fulfill "
                 "#N`), never automatic. Context, not instructions -- "
                 "plant only when it serves the work.")

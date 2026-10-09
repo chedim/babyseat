@@ -436,9 +436,10 @@ def loop_task_text(ev: dict) -> str:
         detail = ""
     return (f"{head}\n{detail}\n"
             "Decide: REACT (one concrete step through the membrane tools "
-            "-- entity_read / entity_query / entities_related to look, "
-            "entity_add / entity_edit / entity_link to act, learn, "
-            "fulfill) or IGNORE. Budget: at most "
+            "-- find / entity(action='read') to look; entity add/edit, "
+            "exec(action='link') to act -- re-link a command entity you "
+            "already have before writing a new one; memory(action='learn'); "
+            "goal(action='close')) or IGNORE. Budget: at most "
             f"{LOOP_TOOL_BUDGET} tool calls this pass; the pulse brings "
             "the rest back. Reply briefly (a few plain sentences, no "
             "essay) and END with exactly one verdict line:\n"
@@ -454,7 +455,7 @@ _VERDICT_RE = re.compile(r"^(done|step|blocked|ignored)\b[\s:,.\-–—]*(.*)$",
                          re.IGNORECASE | re.DOTALL)
 FULFILL_NUDGE = ("You ended with DONE, but goal {eid} is still OPEN on the "
                  "board, so the pulse would keep bringing it back. Call "
-                 "`fulfill` now with spec {eid} and the receipt as evidence. "
+                 "goal(action='close', spec='{eid}', evidence=<the receipt>) now. "
                  "If it is not really done, end with STEP or BLOCKED instead.")
 
 

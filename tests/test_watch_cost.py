@@ -245,7 +245,7 @@ class TestDrainerVerdicts(unittest.TestCase):
         self.srv.run_loop_turn = run
         self.drainer.handle({"kind": "intent-planted", "entity": self.eid, "text": "wire HA"})
         self.assertEqual(len(run.calls), 2)
-        self.assertIn("fulfill", run.calls[1])
+        self.assertIn("action='close'", run.calls[1])
         self.assertIn(self.eid, run.calls[1])
 
     def test_done_and_fulfilled_needs_no_nudge(self):
