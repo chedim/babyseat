@@ -43,7 +43,16 @@ class TestStop(unittest.TestCase):
         while not q.empty():
             evs.append(q.get())
         self.assertIn("session.idle", [e.get("type") for e in evs])
-        self.assertNotIn(sid, r._aborting)
+
+    def test_stop_right_after_send_still_cancels(self):
+        calls = []
+        r = S.TurnRunner(S.SSEHub(), S.SessionStore(), S.MessageStore(),
+                         _TwoRounds(), lambda n, a, c: calls.append(n) or "ok",
+                         system="", model="m")
+        sid = r.sessions.create(title="t")["id"]
+        r.abort(sid)
+        r.run(sid, "go", user_info={"id": "msg_u1", "role": "user", "agent": "build"})
+        self.assertEqual(calls, [])
 
     def test_stop_mid_turn_flags_and_cuts_the_model_call(self):
         r = self._runner()
@@ -61,7 +70,8 @@ class TestStop(unittest.TestCase):
                          _TwoRounds(), lambda n, a, c: calls.append(n) or "ok",
                          system="", model="m")
         sid = r.sessions.create(title="t")["id"]
-        r.abort(sid)                                   # pressed while idle
+        r.abort(sid)                                   # pressed while idle...
+        r._abort_ts[sid] -= 60                         # ...a minute ago
         r.run(sid, "go", user_info={"id": "msg_u1", "role": "user", "agent": "build"})
         self.assertTrue(calls)                         # the tool still ran
 

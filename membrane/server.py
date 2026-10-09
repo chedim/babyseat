@@ -919,16 +919,19 @@ class TurnRunner:
         """THE STOP BUTTON (2026-10-09, the operator: "the stop button is not
         stopping"). A running turn: the flag (checked between rounds) AND
         the turn's model socket closed, so a round blocked in the model
-        call fails now, not after its rung budget. Nothing running: no
-        flag (a stale one cut the NEXT turn's tools short) and an honest
-        idle -- the cosmetic busy kept the button on with nothing to stop."""
+        call fails now, not after its rung budget. Nothing running: an
+        honest idle (the cosmetic busy kept the button on with nothing to
+        stop) and a flag that only a turn starting within ABORT_PREARM_S
+        honours (Stop right after Send still cancels; a stale press used to
+        cut the NEXT turn's tools short whenever it came)."""
         self._aborting = getattr(self, "_aborting", None) or set()
         self._turn_activity = getattr(self, "_turn_activity", {}) or {}
+        self._aborting.add(sid)
         if sid in (getattr(self, "_busy", None) or {}):
-            self._aborting.add(sid)
             self._kill_turn_socket(sid)
             return
-        self._aborting.discard(sid)
+        self._abort_ts = getattr(self, "_abort_ts", None) or {}
+        self._abort_ts[sid] = time.time()
         self.hub.publish({"type": "session.status",
                           "status": {"type": "idle"}, "sessionID": sid})
         self.hub.publish({"type": "session.idle", "sessionID": sid})
@@ -1452,9 +1455,15 @@ class TurnRunner:
         agent = (self._agents or {}).get(sid)
         return agent in (None, "build", "plan")
 
+    ABORT_PREARM_S = 10.0
+
     def _run_inner(self, sid: str, text: str, user_info: dict | None = None,
             user_parts: list | None = None) -> dict:
         self._aborting = getattr(self, "_aborting", None) or set()
+        # a Stop pressed with nothing running lapses (see abort)
+        _ats = (getattr(self, "_abort_ts", None) or {}).pop(sid, None)
+        if _ats is not None and time.time() - _ats > self.ABORT_PREARM_S:
+            self._aborting.discard(sid)
         now = int(time.time() * 1000)
         _t_turn = time.time()
         self._busy[sid] = {"type": "busy"}
