@@ -155,3 +155,30 @@ test("a pick rides the message; back to the seat default undoes a session pick",
   assert.equal(L.modelField("", "glm-5.3-flash:cloud", "glm-5.3-flash:cloud"), null);
   assert.deepEqual(j(L.modelField("", "qwen3:8b", "glm-5.3-flash:cloud")), { providerID: "membrane", modelID: "glm-5.3-flash:cloud" });
 });
+
+// MEMBRANE'S OWN VOICE (2026-10-09): the third participant's line rides
+// beside the user message it answered; the teaching controls render.
+test("voice: the reducer keys the line by the user message it answered", () => {
+  const st = L.chatState("s1");
+  const ev = (type, properties) => ({ type, properties });
+  assert.equal(L.applyEvent(st, ev("membrane.voice", { sessionID: "s1",
+    line: { id: "vox_1", mid: "msg_u1", text: "Battery is fine." } })), true);
+  assert.equal(st.voice.msg_u1.text, "Battery is fine.");
+  assert.ok(st.dirty.has("msg_u1"));
+  L.applyEvent(st, ev("membrane.voice", { sessionID: "s1", line: { id: "vox_1", mid: "msg_u1", closeness: 0.71 } }));
+  assert.equal(st.voice.msg_u1.text, "Battery is fine.");      // the grade merges in
+  assert.equal(st.voice.msg_u1.closeness, 0.71);
+  assert.equal(L.applyEvent(st, ev("membrane.voice", { sessionID: "s2", line: { id: "x", mid: "m" } })), false);
+});
+
+test("voice: history load and the bubble", () => {
+  const st = L.chatState("s1");
+  L.loadVoice(st, [{ id: "vox_1", mid: "msg_u1", text: "<b>hi</b>", closeness: 0.5, vote: "up" }]);
+  const h = L.voiceHtml(st.voice.msg_u1, false);
+  assert.ok(h.includes("&lt;b&gt;hi"));                       // escaped
+  assert.ok(h.includes("50%"));
+  assert.ok(/vbtn on" data-vvote="up"/.test(h));
+  assert.ok(!h.includes("vedit\""));
+  assert.ok(L.voiceHtml(st.voice.msg_u1, true).includes("vteach"));
+  assert.equal(L.voiceHtml(null), "");
+});

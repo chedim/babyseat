@@ -1489,6 +1489,14 @@ class TurnRunner:
         history = self._prior_history(sid, str(user_info.get("id") or "")) \
             if user_info else []
         history.append({"role": "user", "content": text})
+        # MEMBRANE'S OWN VOICE (the third participant): it speaks first,
+        # in its own thread, outside the session's messages
+        try:
+            from . import voice as _voice
+            _voice.on_turn_start(self, sid, text, str(user_info.get("id") or ""),
+                                 _lane_of((self._agents or {}).get(sid)))
+        except Exception:
+            pass
         aid = _gen_id("msg")
         # THE STAMP'S TRUTH (the TUI's chip reads the session's
         # model): the assistant row's modelID = the TURN'S pick (the
@@ -1912,6 +1920,15 @@ class TurnRunner:
                               "sessionID": sid})
             self.hub.publish({"type": "session.idle", "sessionID": sid})
         self._touch_session(sid)
+        # the voice's teachers: the operator's words and the LLM's reply
+        try:
+            from . import voice as _voice
+            _voice.on_turn_end(self, sid, text,
+                               "\n".join(p.get("text") or "" for p in parts
+                                         if isinstance(p, dict) and p.get("type") == "text"),
+                               _lane_of((self._agents or {}).get(sid)))
+        except Exception:
+            pass
         return {"info": a_info, "parts": parts}
 
 
@@ -2197,6 +2214,11 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 if segments_len(segs) == 2:
                     if segs[1] in ("todo", "children"):
                         return self._json_out([])
+                    if segs[1] == "voice":
+                        # membrane's own voice: this session's lines
+                        from . import voice as _voice
+                        _v = _voice.of(srv or getattr(runner, "srv", None))
+                        return self._json_out(_v.of_session(sid) if _v else [])
                     if segs[1] == "diff":
                         # the attached TUI seeds its Modified Files
                         # sidebar state from this fetch; the old
@@ -2406,6 +2428,15 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 sid = segs[0]
                 if segments_len(segs) == 2:
                     action = segs[1]
+                    if action == "voice":
+                        # the teaching: {id, vote: up|down, rewrite}
+                        from . import voice as _voice
+                        _v = _voice.of(srv or getattr(runner, "srv", None))
+                        b = self._read_body()
+                        rec = _v.lines.get(str(b.get("id") or "")) if _v else None
+                        if rec is None or rec.get("sid") != sid:
+                            return self._notfound()
+                        return self._json_out(_v.feedback(rec["id"], b.get("vote"), b.get("rewrite")))
                     if action in ("message", "prompt_async"):
                         return self._message(sid, bool(action ==
                                                        "prompt_async"))

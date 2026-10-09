@@ -180,7 +180,7 @@ function stripSpeaker(text) {
 
 /** One chat's live state: ordered rows {info, parts[]} + the status. */
 function chatState(sid) {
-  return { sid, rows: [], byId: {}, status: { type: "idle" }, dirty: new Set(), all: true };
+  return { sid, rows: [], byId: {}, status: { type: "idle" }, dirty: new Set(), all: true, voice: {} };
 }
 
 function eventSid(props) {
@@ -248,6 +248,15 @@ function applyEvent(st, ev) {
     case "session.idle":
       st.status = { type: "idle" };
       return true;
+    case "membrane.voice": {
+      // membrane's own voice: a line beside the user message it answers
+      const line = props.line || {};
+      if (!line.id || !line.mid) return false;
+      st.voice = st.voice || {};
+      st.voice[line.mid] = Object.assign({}, st.voice[line.mid] || {}, line);
+      st.dirty.add(line.mid);
+      return true;
+    }
     default:
       return false;
   }
@@ -266,6 +275,33 @@ function loadRows(st, rows) {
   }
   sortRows(st);
   st.all = true;
+}
+
+/** The session's voice lines (GET /session/{sid}/voice), keyed by the
+ *  user message each one answered. */
+function loadVoice(st, lines) {
+  st.voice = {};
+  for (const l of lines || []) if (l && l.mid) st.voice[l.mid] = Object.assign({}, l);
+  st.all = true;
+}
+
+/** The voice's bubble: its line, its closeness to the LLM's reply, and
+ *  the teaching controls (👍 / 👎 / say it better). */
+function voiceHtml(line, editing) {
+  if (!line || !line.text) return "";
+  const c = typeof line.closeness === "number" ? '<span class="vclose" title="closeness to the LLM\'s reply">' +
+    Math.round(line.closeness * 100) + "%</span>" : "";
+  const up = line.vote === "up" ? " on" : "", down = line.vote === "down" ? " on" : "";
+  const id = escAttr(line.id);
+  let h = '<div class="vox" data-vid="' + id + '"><div class="vwho">membrane ' + c + "</div>" +
+    '<div class="vtext">' + escText(line.text) + "</div>" +
+    '<div class="vbar"><button class="vbtn' + up + '" data-vvote="up" title="good">👍</button>' +
+    '<button class="vbtn' + down + '" data-vvote="down" title="not like that">👎</button>' +
+    '<button class="vbtn" data-vedit="1" title="say it better">✎</button></div>';
+  if (line.rewrite) h += '<div class="vre">you taught: ' + escText(line.rewrite) + "</div>";
+  if (editing) h += '<div class="vedit"><textarea rows="2" placeholder="how membrane should have said it"></textarea>' +
+    '<button class="btn primary vteach">teach</button></div>';
+  return h + "</div>";
 }
 
 function pretty(v) {
@@ -327,7 +363,7 @@ function modelField(pick, sessionModel, seatModel) {
 }
 
 const AiPanelLogic = { ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
-                       loadRows, toolView, shouldStick, fmtElapsed, fmtUsage };
+                       loadRows, loadVoice, voiceHtml, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
 // ------------------------------------------------------------ the element
@@ -390,6 +426,13 @@ const STYLE = `
                    border-radius:14px 14px 4px 14px; padding:8px 12px; max-width:85%; }
   .msg.user .bub a { color:inherit; }
   .msg.ai { border-left:2px solid rgba(128,128,128,.35); padding-left:12px; }
+  .vox { margin:8px 0 0; max-width:85%; border:1px dashed rgba(156,110,220,.6); border-radius:14px 14px 14px 4px;
+         padding:6px 12px; background:rgba(156,110,220,.08); }
+  .vwho { font-size:11px; opacity:.65; margin-bottom:2px; } .vclose { margin-left:6px; opacity:.9; }
+  .vtext { font-style:italic; } .vbar { margin-top:4px; display:flex; gap:4px; }
+  .vbtn { border:0; background:transparent; cursor:pointer; opacity:.45; font-size:14px; padding:0 4px; }
+  .vbtn:hover, .vbtn.on { opacity:1; } .vre { font-size:12px; opacity:.7; margin-top:4px; }
+  .vedit { display:flex; gap:6px; margin-top:6px; } .vedit textarea { flex:1; font:inherit; border-radius:8px; padding:4px 8px; }
   .msg.ai.live { border-left-color:var(--primary-color,#3477d6); }
   .who { font-size:11px; opacity:.55; margin-bottom:2px; }
   .md p { margin:.35em 0; } .md h3,.md h4,.md h5,.md h6 { margin:.7em 0 .3em; }
@@ -513,6 +556,7 @@ function definePanel() {
             <select class="agent" title="Agent (/build, /plan)"></select>
             <select class="modelpick" title="Model (what membrane sees on Ollama)"><option value="">model…</option></select>
             <span class="pill state">…</span>
+            <button class="btn icon voicebtn" title="membrane's own voice (show / hide)">🗣</button>
             <button class="btn icon mindsbtn" title="membrane's minds">🧠</button>
           </div>
           <div class="minds"></div>
@@ -553,6 +597,14 @@ function definePanel() {
       this._menuBtn.addEventListener("click", () => this.dispatchEvent(
         new Event("hass-toggle-menu", { bubbles: true, composed: true })));
       $(".mindsbtn").addEventListener("click", () => this._toggleMinds());
+      this._voiceBtn = $(".voicebtn");
+      this._voiceOn = true;               // per page view (sessions stay server-side)
+      this._voiceBtn.style.opacity = this._voiceOn ? "1" : ".4";
+      this._voiceBtn.addEventListener("click", () => {
+        this._voiceOn = !this._voiceOn;
+        this._voiceBtn.style.opacity = this._voiceOn ? "1" : ".4";
+        if (this._chat) { this._chat.all = true; this._schedule(); }
+      });
       this._titleEl.addEventListener("dblclick", () => this._rename());
       this._agentSel.addEventListener("change", () => { this._agent = this._agentSel.value; });
       this._modelSel = this.shadowRoot.querySelector(".modelpick");
@@ -830,12 +882,14 @@ function definePanel() {
     async _resync() {
       if (!this._chat) return;
       const sid = this._sid;
-      const [hist, st] = await Promise.all([
+      const [hist, st, vox] = await Promise.all([
         this._api(SERVE + "/session/" + sid + "/message"),
         this._api(SERVE + "/session/status"),
+        this._api(SERVE + "/session/" + sid + "/voice").catch(() => ({ ok: false })),
       ]);
       if (sid !== this._sid) return;
       loadRows(this._chat, hist.ok && Array.isArray(hist.data) ? hist.data : []);
+      loadVoice(this._chat, vox && vox.ok && Array.isArray(vox.data) ? vox.data : []);
       if (st.ok && st.data && typeof st.data === "object") {
         this._statusBy = st.data;
         const mine = st.data[sid];
@@ -1093,9 +1147,17 @@ function definePanel() {
       const info = row.info || {};
       const el = document.createElement("div");
       if (info.role === "user") {
-        el.className = "msg user";
         const text = row.parts.filter((p) => p.type === "text" && !p.synthetic).map((p) => p.text || "").join("\n");
-        el.innerHTML = '<div class="bub md">' + md(stripSpeaker(text)) + "</div>";
+        const line = this._voiceOn && this._chat && (this._chat.voice || {})[info.id];
+        if (!line) {
+          el.className = "msg user";
+          el.innerHTML = '<div class="bub md">' + md(stripSpeaker(text)) + "</div>";
+          return el;
+        }
+        // the user's message, then membrane's own line answering it
+        el.innerHTML = '<div class="msg user"><div class="bub md">' + md(stripSpeaker(text)) + "</div></div>" +
+          voiceHtml(line, this._expanded.has("vox:" + line.id));
+        el.dataset.mid = info.id;
         return el;
       }
       const live = this._busy() && !(info.time || {}).completed;
@@ -1148,7 +1210,34 @@ function definePanel() {
         (out ? '<div class="lbl">output</div><pre>' + escText(out) + "</pre>" + more : "") + "</div></details>";
     }
 
+    async _voiceTeach(vid, body) {
+      const r = await this._api(SERVE + "/session/" + this._sid + "/voice",
+        { method: "POST", body: JSON.stringify(Object.assign({ id: vid }, body)) });
+      if (r.ok && r.data && r.data.mid && this._chat) {
+        this._chat.voice[r.data.mid] = Object.assign({}, this._chat.voice[r.data.mid] || {}, r.data);
+        this._chat.dirty.add(r.data.mid);
+        this._schedule();
+      }
+    }
+
     _onMsgClick(ev) {
+      const vox = ev.target.closest(".vox");
+      if (vox) {
+        const vid = vox.dataset.vid;
+        const vote = ev.target.closest("[data-vvote]");
+        if (vote) { this._voiceTeach(vid, { vote: vote.dataset.vvote }).catch(() => {}); return; }
+        if (ev.target.closest("[data-vedit]")) {
+          const k = "vox:" + vid;
+          if (this._expanded.has(k)) this._expanded.delete(k); else this._expanded.add(k);
+          this._chat.all = true; this._schedule(); return;
+        }
+        if (ev.target.closest(".vteach")) {
+          const ta = vox.querySelector(".vedit textarea");
+          const t = ta && ta.value.trim();
+          if (t) { this._expanded.delete("vox:" + vid); this._voiceTeach(vid, { rewrite: t }).catch(() => {}); }
+          return;
+        }
+      }
       const copy = ev.target.closest(".copy");
       if (copy) {
         const code = copy.closest("pre").querySelector("code");
