@@ -231,3 +231,15 @@ class TestBoot(unittest.TestCase):
             time.sleep(0.05)
         self.assertTrue(v._booted)
         self.assertEqual(v.lines, {})
+
+
+class TestAim(unittest.TestCase):
+    def test_the_message_leads_and_a_disagreeing_now_is_ignored(self):
+        q = np.zeros(1024); q[0] = 1
+        now = np.zeros(1024); now[0] = -1; now[1] = 1          # points away
+        self.assertAlmostEqual(float(V.aim(q, now) @ q), 1.0)
+        agree = np.zeros(1024); agree[0] = 1; agree[1] = 1
+        t = V.aim(q, agree)
+        self.assertGreater(float(t @ q), 0.95)                   # leans, never leads
+        self.assertGreater(t[1], 0)
+        self.assertAlmostEqual(float(V.aim(q, None) @ q), 1.0)

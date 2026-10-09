@@ -513,6 +513,23 @@ def history_texts(runner):
                     yield p["text"]
 
 
+NOW_PULL = 0.25
+
+
+def aim(qv, now) -> np.ndarray:
+    """The voice's target: the message first; the field's present leans in
+    only where it agrees with the message (the 'now' state is a residual --
+    mixed in blindly at half weight it cancelled the message's pull: the
+    live seat's first line aligned -0.01 with its own target)."""
+    q = _unit(np.asarray(qv, dtype=float))
+    if now is None:
+        return q
+    n = _unit(np.asarray(now, dtype=float))
+    if n.shape != q.shape or float(n @ q) <= 0.0:
+        return q
+    return _unit(q + NOW_PULL * float(n @ q) * n)
+
+
 def on_turn_start(runner, sid: str, text: str, mid: str, lane: str) -> None:
     """Speak first (a thread: never delays the LLM)."""
     srv = getattr(runner, "srv", None)
@@ -547,8 +564,8 @@ def on_turn_start(runner, sid: str, text: str, mid: str, lane: str) -> None:
             from .lanes import _efield_of
             from . import massage
             fld = _efield_of(srv)
-            qv = np.asarray(v.embedder.embed([text])[0], dtype=float)
-            tgt = massage.target(fld, qv) if fld is not None else qv
+            qv = np.asarray(v.embedder.embed([clean(text) or text])[0], dtype=float)
+            tgt = aim(qv, massage.field_now(fld) if fld is not None else None)
             rec = v.speak(tgt, message=text, sid=sid, mid=mid)
             if rec is not None:
                 runner._voice_last = getattr(runner, "_voice_last", {})
