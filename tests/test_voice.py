@@ -471,13 +471,13 @@ class TestStuckTeacher(unittest.TestCase):
         fld = type("F", (), {"_states": {"a": _St("c:uptime", "live", 5), "b": _St("w:the", "live", 50),
                                          "c": _St("person:x", "live", 9), "d": _St("f:x.py", "nursery", 9)}})()
         for _ in range(5):
-            self.assertEqual(V.fresh_topic(fld)[0], "c:uptime")
+            self.assertTrue(V.fresh_topic(fld)[0].startswith("c:uptime"))
         self.assertIn("never repeat", V.frame("x"))
 
 
 class TestTopicNote(unittest.TestCase):
     def test_the_teacher_is_told_what_it_aimed_at(self):
-        self.assertIn("trying to talk about: c:uptime", V.frame("x", "c:uptime"))
+        self.assertIn("trying to describe: c:uptime", V.frame("x", "c:uptime"))
         self.assertIn("answering your last reply", V.frame("x"))
 
 

@@ -79,7 +79,9 @@ CORRECTION_PULL = 0.35
 # no gap); every ROTATE_EVERY rounds -- and right after a repeat -- the
 # voice aims at a fresh live entity of the field instead of the last reply
 REPEAT_LESSON_COS = 0.92
-ROTATE_EVERY = 3
+ROTATE_EVERY = 1               # SHOW-AND-TELL (2026-10-09, "still stuck"): every round
+                               # grounds on a fresh live entity -- a mirror of two talkers
+                               # converges on one theme; the boat keeps it moving
 CORRECTION_DECAY = 0.5
 VOCAB_WARM = 4000
 BOOT_TEXT_CAP = 3_000_000      # characters of history the bootstrap hears (newest first)
@@ -997,8 +999,8 @@ def frame(line: str, topic: str = "") -> str:
     sentence the voice should have said (the lesson it hears, x2). The
     teacher is told what the voice was aiming at -- without it every line
     read as the voice talking about itself (the speech-theme cycle)."""
-    aim_note = (f"(it was trying to talk about: {topic})" if topic
-                else "(it was answering your last reply)")
+    aim_note = (f"(it was trying to describe: {topic} -- teach it a plain true sentence about THAT)"
+                if topic else "(it was answering your last reply)")
     return (VOICE_PREFIX + "membrane's own voice (the field learning to speak -- "
             "not the operator) said: \u00ab" + line + "\u00bb " + aim_note + "\n"
             "You are its teacher. Reply in at most two short plain sentences "
@@ -1060,8 +1062,9 @@ def auto_set(runner, sid: str, on: bool) -> dict:
 
 
 def fresh_topic(fld):
-    """(surface, state vector) of a random live, specific entity -- new
-    material when the auto-chat circles one thread."""
+    """(surface + its latest real line, state vector) of a random live,
+    specific entity -- the world to talk about, so the auto-chat is
+    grounded instead of a mirror."""
     import random
     try:
         from .eids import is_specific
@@ -1072,7 +1075,15 @@ def fresh_topic(fld):
         if not cands:
             return None
         st = random.choice(cands)
-        return (st.surface or st.eid), np.asarray(st.state, dtype=float)
+        fact = ""
+        try:
+            ev = fld.evidence(st.eid, k=1)
+            if ev:
+                fact = " ".join(str(ev[0].get("text") or "").split())[:140]
+        except Exception:
+            pass
+        label = st.eid + (f" (latest: {fact})" if fact else "")
+        return label, np.asarray(st.state, dtype=float)
     except Exception:
         return None
 
