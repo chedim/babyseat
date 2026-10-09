@@ -468,25 +468,35 @@ def voice_rules(est) -> list:
     for d in docs:
         for p in ((d.properties or {}).get("parents") or []):
             kids.setdefault(p, []).append(d)
-    out = []
+    from .classes import short_name
+
+    def _names(ents):
+        names = set()
+        for m in ents:
+            sn = short_name(m.eid)
+            tail = re.split(r"[:.]", sn)[-1]
+            names.update({sn.lower(), tail.lower(), tail.replace("_", " ").lower(),
+                          str((m.properties or {}).get("name") or "").lower()})
+        names.discard("")
+        return names
+
+    # THE PRECEDENCE (the seat's review): a member's own rule, then its
+    # classes nearest-first (smaller classes before the ones above them),
+    # then the global rules; the first veto wins
+    ranked = []
     for d in docs:
         code = (d.properties or {}).get("voice_rule")
         if not code or _rule_strikes.get(d.eid, 0) >= 3:
             continue
         members = kids.get(d.eid)
-        names = None
         if members:
-            from .classes import short_name
-            names = set()
-            for m in members:
-                sn = short_name(m.eid)
-                tail = re.split(r"[:.]", sn)[-1]
-                names.update({sn.lower(), tail.lower(), tail.replace("_", " ").lower(),
-                              str((m.properties or {}).get("name") or "").lower()})
-            names.discard("")
-        out.append((d.eid, str(code), names))
-        if len(out) >= RULES_MAX:
-            break
+            ranked.append((1, len(members), d.eid, str(code), _names(members)))      # a class
+        elif (d.properties or {}).get("parents"):
+            ranked.append((0, 1, d.eid, str(code), _names([d])))                    # a member's own
+        else:
+            ranked.append((2, 0, d.eid, str(code), None))                          # global
+    ranked.sort(key=lambda r: (r[0], r[1]))
+    out = [(eid, code, names) for _, _, eid, code, names in ranked[:RULES_MAX]]
     try:
         est._voice_rules_cache = (now, out)
     except Exception:
@@ -508,8 +518,16 @@ def rule_violation(rules, text: str) -> str | None:
             _rule_strikes[eid] = _rule_strikes.get(eid, 0) + 1
             continue
         if out.get("ok") is False:
+            _veto_log.append({"rule": eid, "text": text[:300], "why": str(out.get("why") or "")[:160],
+                              "time": int(time.time() * 1000)})
+            del _veto_log[:-VETO_LOG_MAX]
             return eid
     return None
+
+
+VETO_LOG_MAX = 200
+_veto_log: list = []                   # every veto, with the sentence it stopped (the seat: "log
+                                       # every veto with the original text")
 
 
 def recall(pool: SentencePool, target, message_vec=None, exclude=(), now: float | None = None,

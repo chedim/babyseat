@@ -2388,17 +2388,20 @@ _SCRIPT_KEY = {"mention": "mention_script", "thought": "thought_script",
                "dreamed": "dreamed_script", "consolidation": "nudge_script",
                "tick": "tick_script", "watch": "watch_script", "getter": "getter_script"}
 INHERITED_TRIGGERS = frozenset(("getter", "mention", "thought", "dreamed", "tick"))
+# THE RESOLUTION RULE (the seat's review, 2026-10-09: "'nearest ancestor' is
+# undefined when an entity has two parents -- fix the rule before anything
+# depends on it"): breadth-first by generation, parents in their DECLARED
+# order -- all parents before any grandparent; the first ancestor holding
+# the script wins. The same order resolves inherited properties.
+# THE KILL SWITCH: a class with inherit_disabled (or script_disabled) stops
+# inheritance through it for every member at once.
 
 
-def effective_script(est, ent, trigger: str) -> tuple[str | None, str | None]:
-    """(code, the ancestor it came from or None for the entity's own)."""
-    key = _SCRIPT_KEY.get(trigger)
-    props = (getattr(ent, "properties", None) or {})
-    own = props.get(key) if key else None
-    if own or trigger not in INHERITED_TRIGGERS or est is None:
-        return own, None
+def ancestors(est, ent) -> list:
+    """The ISA ancestors in resolution order (cycle-safe, bounded)."""
     from .entities import MultiParentOps
-    seen, queue = {ent.eid}, list(MultiParentOps._parents_of(props))
+    props = (getattr(ent, "properties", None) or {})
+    seen, queue, out = {ent.eid}, list(MultiParentOps._parents_of(props)), []
     hops = 0
     while queue and hops < MultiParentOps.MAX_CHAIN * 4:
         hops += 1
@@ -2408,13 +2411,49 @@ def effective_script(est, ent, trigger: str) -> tuple[str | None, str | None]:
         seen.add(pid)
         anc = (est.docs or {}).get(pid) or est._resolve_spec(pid)
         if anc is None:
-            continue
+            continue                       # an unlinked/deleted class degrades to nothing
+        out.append(anc)
+        queue.extend(MultiParentOps._parents_of(anc.properties or {}))
+    return out
+
+
+def effective_script(est, ent, trigger: str) -> tuple[str | None, str | None]:
+    """(code, the ancestor it came from or None for the entity's own)."""
+    key = _SCRIPT_KEY.get(trigger)
+    props = (getattr(ent, "properties", None) or {})
+    own = props.get(key) if key else None
+    if own or trigger not in INHERITED_TRIGGERS or est is None:
+        return own, None
+    for anc in ancestors(est, ent):
         ap = anc.properties or {}
+        if ap.get("inherit_disabled") or ap.get("script_disabled"):
+            return None, None              # the class's kill switch: none of its members inherit
         code = ap.get(key)
         if code and (trigger != "tick" or ap.get("tick_inherits")):
             return code, anc.eid
-        queue.extend(MultiParentOps._parents_of(ap))
     return None, None
+
+
+# what a member never inherits: identity, its own scripts and run residue,
+# the class's own controls
+_NOT_INHERITED = re.compile(r"^(?:name|summary|parents|class|eid|links|command|runs|last_run_ts|"
+                            r"last_fed|voice_rule|tick_inherits|inherit_disabled|script_.*|.*_script|"
+                            r"run_.*|silent_birth|merged_into|published|junk_anchor|derived_by)$")
+
+
+def effective_properties(est, ent) -> dict:
+    """The member's properties with its classes' defaults under them
+    (nearest class wins among the classes; the member's own always win)."""
+    own = dict(getattr(ent, "properties", None) or {})
+    if est is None or not own.get("parents"):
+        return own
+    merged: dict = {}
+    for anc in reversed(ancestors(est, ent)):           # farthest first, nearer overwrite
+        for k, v in (anc.properties or {}).items():
+            if not _NOT_INHERITED.match(k):
+                merged[k] = v
+    merged.update(own)
+    return merged
 
 
 def run_entity_update_script(srv, ent, trigger: str,
@@ -2442,7 +2481,9 @@ def run_entity_update_script(srv, ent, trigger: str,
     ALWAYS: any script error notifies the model's event pool (kind
     'script-error') -- errors are events, never stderr dust."""
     props = ent.properties or {}
-    code, _from = effective_script(getattr(srv, "entity_store", None), ent, trigger)
+    _est = getattr(srv, "entity_store", None)
+    _EST_FOR_PROPS["est"] = _est
+    code, _from = effective_script(_est, ent, trigger)
     if not code:
         return {"error": "no script"}
     now = time.time()
@@ -2739,6 +2780,16 @@ def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
     return _Membrane()
 
 
+_EST_FOR_PROPS = {"est": None}       # the running seat's store (set at run time)
+
+
+def _props_for_script(ent) -> dict:
+    try:
+        return effective_properties(_EST_FOR_PROPS["est"], ent)
+    except Exception:
+        return dict(ent.properties or {})
+
+
 def _script_state(ent, now: float, extra: dict, trigger: str,
                   timeout: float) -> dict:
     """The script's state: geometry + properties (script_ internal keys
@@ -2751,7 +2802,7 @@ def _script_state(ent, now: float, extra: dict, trigger: str,
             "velocity": (ent.ring_velocity(now)
                          if getattr(ent, "position", None) else 0.0),
             "cells": len(ent.links or []),
-            "properties": {k: v for k, v in (ent.properties or {}).items()
+            "properties": {k: v for k, v in (_props_for_script(ent)).items()
                            if not k.startswith("script_")},
             "data": dict((ent.properties or {}).get("script_data") or {}),
             "now": now,

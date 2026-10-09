@@ -125,3 +125,68 @@ class TestClassInduction(unittest.TestCase):
         from membrane import classes as C
         est = self._store()
         self.assertFalse(C.inherit_many(est, "nomatch*", ["x"])["ok"])
+
+
+class TestReviewFixes(unittest.TestCase):
+    """The seat's own review of the inheritance (2026-10-09): a defined
+    multi-parent rule, fleet safety, rule precedence + a veto log, and
+    properties that inherit with the member's own values winning."""
+
+    def test_the_multi_parent_rule_is_declared_order_by_generation(self):
+        srv, est, cls, kids = _world()
+        other = _add(est, "other class", "x")
+        other.properties["getter_script"] = "result = {'state': {'who': 'other'}}"
+        grand = _add(est, "grand", "x")
+        grand.properties["getter_script"] = "result = {'state': {'who': 'grand'}}"
+        cls.properties.pop("getter_script")
+        cls.properties["parents"] = [grand.eid]
+        kids[0].properties["parents"] = [cls.eid, other.eid]        # cls first, but cls has no getter
+        self.assertEqual(N.effective_script(est, kids[0], "getter")[1], other.eid)   # parents before grandparents
+        kids[0].properties["parents"] = [other.eid, cls.eid]
+        self.assertEqual(N.effective_script(est, kids[0], "getter")[1], other.eid)
+
+    def test_the_class_kill_switch_stops_every_member(self):
+        srv, est, cls, kids = _world()
+        cls.properties["inherit_disabled"] = True
+        for k in kids:
+            self.assertEqual(N.effective_script(est, k, "getter"), (None, None))
+
+    def test_properties_inherit_and_the_member_wins(self):
+        srv, est, cls, kids = _world()
+        cls.properties.update({"api_path": "/api/states/", "tick_every": 30, "unit": "%"})
+        kids[0].properties["unit"] = "W"
+        p = N.effective_properties(est, kids[0])
+        self.assertEqual(p["api_path"], "/api/states/")
+        self.assertEqual(p["unit"], "W")                             # the member's own wins
+        self.assertNotIn("getter_script", {k for k in p if k not in kids[0].properties})
+        self.assertEqual(p["name"], kids[0].properties["name"])      # identity is never inherited
+        cls.properties["getter_script"] = "result = {'state': {'path': state['properties'].get('api_path')}}"
+        self.assertEqual(WA.entity_read_back(srv, kids[1], force=True)["state"]["path"], "/api/states/")
+
+    def test_a_deleted_class_degrades_to_nothing(self):
+        srv, est, cls, kids = _world()
+        del est.docs[cls.eid]
+        self.assertEqual(N.effective_script(est, kids[0], "getter"), (None, None))
+        self.assertEqual(N.effective_properties(est, kids[0])["entity_id"], kids[0].properties["entity_id"])
+
+
+class TestRulePrecedence(unittest.TestCase):
+    def test_member_then_class_then_global_and_the_veto_is_logged(self):
+        from membrane import voice as V
+        from membrane.entities import EntityStore
+        V._rule_strikes.clear()
+        V._veto_log.clear()
+        est = EntityStore(path=None, shared=False)
+        g = _add(est, "voice rule global", "x")
+        g.properties["voice_rule"] = "result = {'ok': False, 'why': 'global'}"
+        c = _add(est, "ha:light class", "x")
+        c.properties["voice_rule"] = "result = {'ok': False, 'why': 'class'}"
+        m = _add(est, "ha:light.port_strip", "x")
+        m.properties["parents"] = [c.eid]
+        m.properties["voice_rule"] = "result = {'ok': False, 'why': 'member'}"
+        rules = V.voice_rules(est)
+        self.assertEqual([r[0] for r in rules], [m.eid, c.eid, g.eid])
+        self.assertEqual(V.rule_violation(rules, "The port strip is on."), m.eid)   # the member's own first
+        self.assertEqual(V.rule_violation(rules, "The battery is fine."), g.eid)    # no member named: global
+        self.assertEqual(V._veto_log[-1]["text"], "The battery is fine.")
+        self.assertEqual(V._veto_log[-1]["why"], "global")

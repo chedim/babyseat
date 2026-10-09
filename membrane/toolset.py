@@ -160,7 +160,17 @@ HELP = {
         "entity(action='edit', spec=<it>, properties={'voice_rule': \"result = {'ok': <a python test "
         "on state['text']>}\"}) -- e.g. {'ok': not state['text'].rstrip().endswith((',', ':'))}. "
         "Put the rule on a CLASS (an entity others inherit from) and it applies only to sentences "
-        "about that class's members. A sentence that breaks a rule is never said."),
+        "about that class's members. A sentence that breaks a rule is never said. Precedence: a "
+        "member's own rule, then its classes nearest-first, then global rules; the first veto wins; "
+        "every veto is logged with its sentence."),
+    "classes": (
+        "Inheritance: an entity without its own getter/mention/thought/dreamed script runs its "
+        "nearest class's, ON ITSELF (state['eid'], its own properties merged over its classes' "
+        "defaults -- the member's own values win). Resolution: parents in declared order, all "
+        "parents before any grandparent; first found wins. Ticks inherit only where the class sets "
+        "tick_inherits: true, staggered across members. inherit_disabled: true on a class stops it "
+        "for all members at once. Classify a family in one call: entity(action='inherit', "
+        "spec='ha:light.*', parents=['ha light']). New members are never adopted automatically."),
     "lanes": (
         "Your chat holds every hand. Watch loops hold the same but never plant goals. A phone call "
         "reads and answers (no exec or entity writes; plant a caller's request as a goal). Plan "

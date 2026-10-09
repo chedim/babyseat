@@ -37,6 +37,7 @@ per minute (THINK_MODEL_CAP). Never on the turn path.
 from __future__ import annotations
 
 import threading
+import zlib
 import time
 import traceback
 from collections import deque
@@ -432,6 +433,10 @@ class Thinker:
                 continue          # no tick of its own, none inherited (opt-in classes)
             if night and not props.get("wakes"):
                 continue          # the body at rest; the whisker listens
+            inherited_tick = not props.get("tick_script")
+            if inherited_tick:
+                from .night import effective_properties
+                props = effective_properties(est, ent)          # the class's tick_every reaches it
             try:
                 every = max(1, int(props.get("tick_every") or 1))
             except (TypeError, ValueError):
@@ -445,7 +450,10 @@ class Thinker:
                 every = effective_tick_every(props, every)
             except Exception:
                 pass
-            if beat % every:
+            # THE FLEET STAGGER (the seat's review): a class's members
+            # tick spread over the interval, never all on one beat
+            offset = (zlib.crc32(ent.eid.encode()) % every) if inherited_tick else 0
+            if (beat + offset) % every:
                 continue
             from .night import run_entity_update_script, apply_entity_update
             out = run_entity_update_script(self.srv, ent, "tick")
