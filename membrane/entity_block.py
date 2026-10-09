@@ -121,7 +121,8 @@ def entity_view(field, eid: str, qvec=None, n_evidence: int = 2) -> dict:
                                         streams=("discourse", "code")), n_evidence)
     observed = field.evidence(eid, k=1, streams=("observation",))    # the latest
     rels = []
-    for r in field.relations_of(eid)[:6]:
+    for r in [r for r in field.relations_of(eid)
+              if r.get("subj") != "seat:self"][:6]:      # the seat's own voice talks about everything
         if r["subj"] == eid:
             rels.append(f"{r['rel']} {r['obj']}")
         else:

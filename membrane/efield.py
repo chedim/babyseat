@@ -445,7 +445,9 @@ class EntityField:
     def _sentences_of(self, ev: dict) -> list[str]:
         st = ev.get("stream")
         if st == "discourse":
-            return ST.sentences(ev.get("text") or "")
+            # the speaker line is who, not what (speakers.py)
+            from .speakers import prose_of
+            return ST.sentences(prose_of(ev))
         if st == "observation":
             if ev.get("outcome") == "call-only":
                 return []
@@ -522,6 +524,14 @@ class EntityField:
                 if subj not in seen:
                     mentions.insert(0, [subj, 0,
                                         subj.split(":", 1)[-1] or subj])
+            if sents:
+                # WHO SAID IT (speakers.py): every intake lane, one place.
+                # Its own slot, not a mention: mentions are what a message
+                # is ABOUT (the fit, the thinker's tags, the banner's diff)
+                from .speakers import speaker_of
+                spk = speaker_of(ev)
+                if spk is not None:
+                    ev["speaker"] = [spk[0], spk[1]]
             ev["sids"] = sids
             ev["mentions"] = mentions
             surfaces.update(m[2] for m in mentions)
@@ -734,6 +744,7 @@ class EntityField:
                 continue
             self._update(st, X[sidx], stream, sids[sidx], seq, sidx, key, ts,
                          ev.get("role") or "")
+        self._apply_speaker(ev, key, X, sids, skip, seq, stream, ts)
         for i in live_idx:
             self._bg_update(stream, X[i])
         # THE EVENT-INDEX DELTA (the word-bar's companion): EVERY
@@ -760,6 +771,35 @@ class EntityField:
             for subj, rel, obj in R.observation_triples(ev.get("tool") or "",
                                                         ev.get("outcome") or "", f_eid):
                 R.upsert(self.b, self.origin, subj, rel, obj, "observation", key, ts)
+
+    SPEAKER_TOPICS = 3
+
+    def _apply_speaker(self, ev: dict, key: str, X, sids, skip, seq, stream, ts) -> None:
+        """The speaker learns from every sentence they said (their state is
+        where their words land), and talks_about edges join them to the
+        message's main topics (the event's entity coordinates)."""
+        spk = ev.get("speaker")
+        if not spk:
+            return
+        st = self._get_or_new(spk[0], spk[1])
+        if st is None:
+            return
+        for i, sid in enumerate(sids[:8]):
+            if i in skip or X[i] is None:
+                continue
+            if st.tier == "nursery":
+                st.pending.append([sid, seq, i, stream, key, ts, ev.get("role") or ""])
+                if sid not in st.distinct:
+                    st.distinct.append(sid)
+                self._dirty.add(st.eid)
+                if self._mat_bar(st.eid) <= len(st.distinct):
+                    self._materialize(st)
+                continue
+            self._update(st, X[i], stream, sid, seq, i, key, ts, ev.get("role") or "")
+        from . import relations as R
+        for eid, _w in (ev.get("coords") or [])[:self.SPEAKER_TOPICS]:
+            if eid != spk[0]:
+                R.upsert(self.b, self.origin, spk[0], "talks_about", eid, "discourse", key, ts)
 
     def apply_pending(self, limit: int = 200) -> int:
         # THE LOCK-HOLD FIX (the swirl exhibit): the old
@@ -1192,6 +1232,9 @@ class EntityField:
             # word-bar's recall route) are BOOKKEEPING, not entity
             # state -- the diff reads real entities only
             if d.get("eid", "").startswith("e:"):
+                continue
+            # a speaker's drift is who talked, not what changed
+            if d.get("eid", "").startswith(("person:", "seat:")):
                 continue
             out.setdefault(d["eid"], []).append(d)
         return out

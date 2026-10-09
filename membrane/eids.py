@@ -33,8 +33,9 @@ from . import vsa
 from .entities import extract_entities
 from .slash import STOP
 
-KINDS = ("w", "p", "f", "s", "c", "port", "m", "u", "ha", "tool", "ctx")
-SPECIFIC = frozenset(("f", "s", "c", "port", "m", "u", "ha", "tool"))
+KINDS = ("w", "p", "f", "s", "c", "port", "m", "u", "ha", "tool", "ctx", "person", "seat")
+# person/seat: who said it (speakers.py) -- live at the first word they say
+SPECIFIC = frozenset(("f", "s", "c", "port", "m", "u", "ha", "tool", "person", "seat"))
 MAX_MENTIONS = 16
 _WORD = re.compile(r"[A-Za-z][A-Za-z_]+")
 _LEGACY_KIND = {"files": "f", "symbols": "s", "models": "m", "shell": "c",
