@@ -1169,6 +1169,10 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
             lib = command_library(getattr(srv, "entity_store", None))
             if lib:
                 lines.append(lib)
+            from .classes import proposals_line
+            cp = proposals_line(srv)
+            if cp:
+                lines.append(cp)
         except Exception:
             pass
     if not lines:
@@ -6362,7 +6366,17 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         parents = [str(p).strip() for p in parents if str(p).strip()]
         if not spec or not parents:
             self._json_err_raw(400, "spec + parents required"); return
-        res = est.set_parents(spec, parents)
+        if "*" in spec:
+            # a FAMILY (classes.py): every match gets the parents, a missing
+            # parent is minted as the class
+            from .classes import inherit_many
+            res = inherit_many(est, spec, parents)
+            try:
+                srv._class_props_cache = None
+            except Exception:
+                pass
+        else:
+            res = est.set_parents(spec, parents)
         self._entity_audit("inherit", res)
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return

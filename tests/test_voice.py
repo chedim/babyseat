@@ -533,3 +533,47 @@ class TestRecall(unittest.TestCase):
         got = V.pool_sentences("- a bullet line that is long enough to pass the size. "
                                "A real sentence about the battery charge today. It meant: no.")
         self.assertEqual(got, ["A real sentence about the battery charge today."])
+
+
+class TestVoiceRules(unittest.TestCase):
+    def setUp(self):
+        V._rule_strikes.clear()
+
+    def _est(self):
+        from membrane.entities import EntityStore, CLASS_COMPONENT
+        est = EntityStore(path=None, shared=False)
+        r = est.add(cls=CLASS_COMPONENT, name="voice rule no dangling if", summary="x")
+        est.docs[r["eid"]].properties["voice_rule"] = "result = {'ok': not state['text'].startswith('If ')}"
+        c = est.add(cls=CLASS_COMPONENT, name="ha:light class", summary="x")
+        cls = est.docs[c["eid"]]
+        cls.properties["voice_rule"] = "result = {'ok': 'light' in state['text'].lower()}"
+        k = est.add(cls=CLASS_COMPONENT, name="ha:light.port_strip", summary="x")
+        est.docs[k["eid"]].properties["parents"] = [cls.eid]
+        b = est.add(cls=CLASS_COMPONENT, name="voice rule broken", summary="x")
+        est.docs[b["eid"]].properties["voice_rule"] = "raise ValueError('oops')"
+        return est
+
+    def test_global_and_class_scoped_rules(self):
+        rules = V.voice_rules(self._est())
+        self.assertEqual(len(rules), 3)
+        self.assertIsNotNone(V.rule_violation(rules, "If the loop is an echo."))
+        self.assertIsNone(V.rule_violation(rules, "The battery is fine."))      # no member named: class rule idle
+        self.assertIsNotNone(V.rule_violation(rules, "The port strip is on."))   # mentions a member, breaks its rule
+        self.assertIsNone(V.rule_violation(rules, "The port strip light is on."))
+
+    def test_recall_skips_what_a_rule_forbids(self):
+        P = V.SentencePool()
+        E = FakeEmbedder()
+        P.add(E, ["If the anchor chain is out forty meters.", "The anchor chain holds on a sand bottom."])
+        rules = V.voice_rules(self._est())
+        out = V.recall(P, E.embed(["anchor chain"])[0], rules=rules, max_sents=1)
+        self.assertFalse(out["text"].startswith("If "))
+
+    def test_a_broken_rule_is_set_aside_not_fatal(self):
+        est = self._est()
+        rules = V.voice_rules(est)
+        for _ in range(4):
+            V.rule_violation(rules, "Anything.")
+        est._voice_rules_cache = None
+        self.assertEqual(len(V.voice_rules(est)), 2)
+        self.assertIn("help('voice')", V.frame("x"))

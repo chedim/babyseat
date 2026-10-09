@@ -2377,6 +2377,46 @@ def _stamp_cooldown(props: dict, trigger: str, now: float) -> None:
     props["script_cooldowns"] = cds
 
 
+# ---- SCRIPT INHERITANCE (2026-10-09, the operator: "it also has entity
+# inheritance to do generalizations, why is it not doing that?"): an entity
+# without its own script runs its nearest ancestor's (ISA, breadth-first) --
+# ON ITSELF: the script sees the child's own properties. Write a sense once
+# on a class; every member has it. Ticks inherit only where the class opts
+# in (tick_inherits: true) -- a class of 15 would tick 15x unasked; watch
+# scripts stay per entity (each carries its own subscription).
+_SCRIPT_KEY = {"mention": "mention_script", "thought": "thought_script",
+               "dreamed": "dreamed_script", "consolidation": "nudge_script",
+               "tick": "tick_script", "watch": "watch_script", "getter": "getter_script"}
+INHERITED_TRIGGERS = frozenset(("getter", "mention", "thought", "dreamed", "tick"))
+
+
+def effective_script(est, ent, trigger: str) -> tuple[str | None, str | None]:
+    """(code, the ancestor it came from or None for the entity's own)."""
+    key = _SCRIPT_KEY.get(trigger)
+    props = (getattr(ent, "properties", None) or {})
+    own = props.get(key) if key else None
+    if own or trigger not in INHERITED_TRIGGERS or est is None:
+        return own, None
+    from .entities import MultiParentOps
+    seen, queue = {ent.eid}, list(MultiParentOps._parents_of(props))
+    hops = 0
+    while queue and hops < MultiParentOps.MAX_CHAIN * 4:
+        hops += 1
+        pid = queue.pop(0)
+        if pid in seen:
+            continue
+        seen.add(pid)
+        anc = (est.docs or {}).get(pid) or est._resolve_spec(pid)
+        if anc is None:
+            continue
+        ap = anc.properties or {}
+        code = ap.get(key)
+        if code and (trigger != "tick" or ap.get("tick_inherits")):
+            return code, anc.eid
+        queue.extend(MultiParentOps._parents_of(ap))
+    return None, None
+
+
 def run_entity_update_script(srv, ent, trigger: str,
                              extra_state: dict | None = None) -> dict:
     """The getter/setter dispatch (the thinker's + the dreamer's hooks):
@@ -2402,21 +2442,7 @@ def run_entity_update_script(srv, ent, trigger: str,
     ALWAYS: any script error notifies the model's event pool (kind
     'script-error') -- errors are events, never stderr dust."""
     props = ent.properties or {}
-    code = None
-    if trigger == "mention":
-        code = props.get("mention_script")
-    elif trigger == "thought":
-        code = props.get("thought_script")
-    elif trigger == "dreamed":
-        code = props.get("dreamed_script")
-    elif trigger == "consolidation":
-        code = props.get("nudge_script")
-    elif trigger == "tick":
-        code = props.get("tick_script")
-    elif trigger == "watch":
-        code = props.get("watch_script")
-    elif trigger == "getter":
-        code = props.get("getter_script")
+    code, _from = effective_script(getattr(srv, "entity_store", None), ent, trigger)
     if not code:
         return {"error": "no script"}
     now = time.time()
@@ -2718,7 +2744,8 @@ def _script_state(ent, now: float, extra: dict, trigger: str,
     """The script's state: geometry + properties (script_ internal keys
     hidden) + own data + THE TRIGGER SHAPE (what fired, with what) +
     the trigger's timeout (the script can see its own budget)."""
-    return {"position": ent.position,
+    return {"eid": ent.eid,             # whose script this run is (a class's script runs on its member)
+            "position": ent.position,
             "ring": [p for _, p in (getattr(ent, "position_history",
                                             []) or [])],
             "velocity": (ent.ring_velocity(now)

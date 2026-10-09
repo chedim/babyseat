@@ -1317,12 +1317,13 @@ def entity_read_back(srv, ent, force: bool = False) -> dict:
     `force=True` (the explicit read tool) bypasses it (a re-run is the
     caller's call); the getter's kind rides the engine's dispatch."""
     props = ent.properties or {}
-    code = props.get("getter_script")
-    if not code:
-        return {"fired": False, "reason": "no getter_script"}
     est = getattr(srv, "entity_store", None)
     if est is None:
         return {"fired": False, "reason": "the entity layer is off"}
+    from .night import effective_script
+    code, inherited_from = effective_script(est, ent, "getter")
+    if not code:
+        return {"fired": False, "reason": "no getter_script"}
     now = time.time()
     if not force:
         last = _getter_last_ts.get(ent.eid, 0.0)
@@ -1365,6 +1366,8 @@ def entity_read_back(srv, ent, force: bool = False) -> dict:
                       "ts": now})
     out["applied"] = applied
     res = {"fired": True, "state": state, "run_result": out.get("run_result")}
+    if inherited_from:
+        res["inherited_from"] = inherited_from
     if note:
         res["note"] = note
     return res

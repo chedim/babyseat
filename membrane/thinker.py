@@ -422,10 +422,14 @@ class Thinker:
             return
         beat = self._beat
         fired, movers = [], []
+        from .night import effective_script
         for ent in list(est.docs.values()):
             props = ent.properties or {}
-            if props.get("script_disabled") or not props.get("tick_script"):
+            if props.get("script_disabled"):
                 continue
+            if not props.get("tick_script") and not (
+                    props.get("parents") and effective_script(est, ent, "tick")[0]):
+                continue          # no tick of its own, none inherited (opt-in classes)
             if night and not props.get("wakes"):
                 continue          # the body at rest; the whisker listens
             try:
@@ -594,12 +598,12 @@ class Thinker:
         if est is not None and tags:
             try:
                 from .night import run_entity_update_script, \
-                    apply_entity_update
+                    apply_entity_update, effective_script
                 for tag in tags[:4]:
                     ent = est._resolve_spec(str(tag))
                     if ent is None:
                         continue
-                    if not (ent.properties or {}).get("mention_script"):
+                    if not effective_script(est, ent, "mention")[0]:
                         continue
                     out = run_entity_update_script(
                         self.srv, ent, "mention",

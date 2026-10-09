@@ -1271,6 +1271,11 @@ def tool_entity_inherit(args: dict, port: int) -> str:
     if not out.get("ok"):
         return f"Inherit failed: {out.get('error', 'unknown error')}"
     added = out.get("added") or []
+    if out.get("pattern"):
+        return (f"Classified {len(out.get('linked') or [])} entities ({out['pattern']}) ISA "
+                f"{', '.join(added)}" + (f" (minted: {', '.join(out.get('minted') or [])})" if out.get("minted") else "")
+                + " -- a script on the class now runs on each member (getter, mention, thought, "
+                  "dreamed; tick where the class sets tick_inherits).")
     if added:
         return (f"Entity {out['child']} ISA {', '.join(added)} -- "
                 f"constraints inherited down the ISA chain (latch, "

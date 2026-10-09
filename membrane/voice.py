@@ -444,8 +444,76 @@ class SentencePool:
             pass
 
 
+# ---- VOICE RULES (2026-10-09, "it should generalize by building entities"):
+# a lesson that is GENERAL becomes an entity -- a `voice_rule` property, a
+# python check on state['text'] setting result = {'ok': bool} -- and fixes
+# every future sentence, not one. A rule on a CLASS applies to sentences
+# that mention one of its members; anywhere else it is global. Three
+# errors set a rule aside (a broken rule never silences the voice).
+RULES_CACHE_S = 60.0
+RULES_MAX = 24
+_rule_strikes: dict = {}
+
+
+def voice_rules(est) -> list:
+    """[(eid, code, member names or None)] -- cached a minute."""
+    if est is None:
+        return []
+    now = time.time()
+    cache = getattr(est, "_voice_rules_cache", None)
+    if cache and now - cache[0] < RULES_CACHE_S:
+        return cache[1]
+    docs = list((est.docs or {}).values())
+    kids: dict = {}
+    for d in docs:
+        for p in ((d.properties or {}).get("parents") or []):
+            kids.setdefault(p, []).append(d)
+    out = []
+    for d in docs:
+        code = (d.properties or {}).get("voice_rule")
+        if not code or _rule_strikes.get(d.eid, 0) >= 3:
+            continue
+        members = kids.get(d.eid)
+        names = None
+        if members:
+            from .classes import short_name
+            names = set()
+            for m in members:
+                sn = short_name(m.eid)
+                tail = re.split(r"[:.]", sn)[-1]
+                names.update({sn.lower(), tail.lower(), tail.replace("_", " ").lower(),
+                              str((m.properties or {}).get("name") or "").lower()})
+            names.discard("")
+        out.append((d.eid, str(code), names))
+        if len(out) >= RULES_MAX:
+            break
+    try:
+        est._voice_rules_cache = (now, out)
+    except Exception:
+        pass
+    return out
+
+
+def rule_violation(rules, text: str) -> str | None:
+    """The eid of the first rule the sentence breaks, or None."""
+    if not rules or not text:
+        return None
+    from .night import run_entity_script
+    low = text.lower()
+    for eid, code, names in rules:
+        if names is not None and not any(n and n in low for n in names):
+            continue                       # a class's rule: only sentences about its members
+        out = run_entity_script(code, {"text": text})
+        if out.get("error"):
+            _rule_strikes[eid] = _rule_strikes.get(eid, 0) + 1
+            continue
+        if out.get("ok") is False:
+            return eid
+    return None
+
+
 def recall(pool: SentencePool, target, message_vec=None, exclude=(), now: float | None = None,
-           max_sents: int = 2) -> dict:
+           max_sents: int = 2, rules=None) -> dict:
     """Pick 1-2 whole sentences toward the target: no echo of the message,
     no stale facts, a second sentence only if it continues the first."""
     if not len(pool):
@@ -468,6 +536,8 @@ def recall(pool: SentencePool, target, message_vec=None, exclude=(), now: float 
         v = pool.M[j].astype(np.float32)
         if mv is not None and float(v @ mv) > ECHO_COS:
             continue
+        if rules and rule_violation(rules, txt):
+            continue                                               # a teacher's rule says no
         if bag is not None:
             if float(_unit(bag) @ v) < 0.6 or float(_unit(bag + v) @ t) <= float(_unit(bag) @ t) + 0.005:
                 continue
@@ -611,7 +681,7 @@ class Voice:
         return "recall" if n % 2 == 0 else "walk"
 
     def speak(self, target_vec, message: str = "", sid: str = "", mid: str = "",
-              message_vec=None, exclude=()) -> dict | None:
+              message_vec=None, exclude=(), rules=None) -> dict | None:
         if target_vec is None:
             return None
         mode = self.next_mode()
@@ -621,7 +691,7 @@ class Voice:
             if sh is not None and sh.shape == tgt.shape:
                 tgt = _unit(tgt + REGISTER_SHIFT * sh)
             with self._lock:
-                out = recall(self.pool, tgt, message_vec, exclude)
+                out = recall(self.pool, tgt, message_vec, exclude, rules=rules)
             if out["text"]:
                 rec = {"id": "vox_" + secrets.token_hex(6), "sid": sid, "mid": mid, "mode": "recall",
                        "text": out["text"], "alignment": out["alignment"], "time": int(time.time() * 1000)}
@@ -642,6 +712,11 @@ class Voice:
                           stale=stale, stale_starts=starts)
         if not out["text"]:
             return None
+        broke = rule_violation(rules, out["text"]) if rules else None
+        if broke:
+            self._ledger({"id": "vox_" + secrets.token_hex(6), "sid": sid, "mid": "", "mode": "walk",
+                          "text": out["text"], "suppressed_by": broke, "time": int(time.time() * 1000)})
+            return None                          # held back: a teacher's rule says no
         rec = {"id": "vox_" + secrets.token_hex(6), "sid": sid, "mid": mid, "mode": "walk",
                "text": out["text"], "alignment": out["alignment"],
                "time": int(time.time() * 1000)}
@@ -912,7 +987,8 @@ def on_turn_start(runner, sid: str, text: str, mid: str, lane: str) -> None:
             _ensure_pool(v, runner)
             qv = np.asarray(v.embedder.embed([clean(text) or text])[0], dtype=float)
             tgt = v.steer(sid, aim(qv, massage.field_now(fld) if fld is not None else None))
-            rec = v.speak(tgt, message=text, sid=sid, mid=mid, message_vec=qv)
+            rec = v.speak(tgt, message=text, sid=sid, mid=mid, message_vec=qv,
+                          rules=voice_rules(getattr(srv, "entity_store", None)))
             if rec is not None:
                 runner._voice_last = getattr(runner, "_voice_last", {})
                 runner._voice_last[sid] = rec["id"]
@@ -1006,7 +1082,8 @@ def frame(line: str, topic: str = "") -> str:
             "You are its teacher. Reply in at most two short plain sentences "
             "(no analysis of where its words came from), then end with one line "
             "exactly: It meant: <the plain sentence it could have said>. "
-            "Teach from ITS new words; never repeat an earlier lesson.")
+            "Teach from ITS new words; never repeat an earlier lesson. A mistake it keeps "
+            "making is a voice rule, not a lesson: help('voice').")
 
 
 _MEANT = re.compile(r"^\W*it meant\W*:\s*(.+?)\s*$", re.I | re.M)
@@ -1126,7 +1203,8 @@ def auto_next(runner, sid: str, reply: str) -> None:
             _ensure_pool(v, runner)
             rec = v.speak(v.steer(sid, aim(qv, massage.field_now(fld) if fld is not None else None)),
                           message=src, sid=sid, mid=mid, message_vec=qv,
-                          exclude=pool_sentences(reply))      # never quote the reply it answers
+                          exclude=pool_sentences(reply),      # never quote the reply it answers
+                          rules=voice_rules(getattr(srv, "entity_store", None)))
             if rec is None or not auto_on(runner, sid):
                 return
             runner._voice_last = getattr(runner, "_voice_last", {})

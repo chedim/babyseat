@@ -153,6 +153,14 @@ HELP = {
         "({op: near|away|around, rel: <entity>|self, z|y: distance}) / watch_fields "
         "({verb: pos|vel|align, arg}). At the limit membrane refuses with the inventory: drop what "
         "you no longer need."),
+    "voice": (
+        "Membrane's own voice learns from your 'It meant:' lessons (x2) and Dmitrii's rewrites. A "
+        "mistake that is GENERAL belongs in a VOICE RULE, which fixes every future sentence: "
+        "entity(action='add', name='voice rule: <what>', summary=...), then "
+        "entity(action='edit', spec=<it>, properties={'voice_rule': \"result = {'ok': <a python test "
+        "on state['text']>}\"}) -- e.g. {'ok': not state['text'].rstrip().endswith((',', ':'))}. "
+        "Put the rule on a CLASS (an entity others inherit from) and it applies only to sentences "
+        "about that class's members. A sentence that breaks a rule is never said."),
     "lanes": (
         "Your chat holds every hand. Watch loops hold the same but never plant goals. A phone call "
         "reads and answers (no exec or entity writes; plant a caller's request as a goal). Plan "
