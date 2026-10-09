@@ -796,6 +796,11 @@ def _lane_refusal(name: str, lane: str) -> str | None:
 def _openai_tools_for(agent: str | None) -> list:
     """The ADVERTISED tools for the lane (the same registry, filtered)."""
     names = _lane_tools(_lane_of(agent))
+    # THE TOOL FAMILIES (the token diet, 2026-10-09): ~10 action-tools that
+    # resolve to these same impls; MEMBRANE_TOOL_FAMILIES=0 = the legacy 24
+    if os.environ.get("MEMBRANE_TOOL_FAMILIES", "1") != "0":
+        from . import toolset as _ts
+        return _ts.advertised(names)
     return [t for t in _mcp.TOOLS if t["name"] in names]
 
 
@@ -1717,6 +1722,7 @@ class TurnRunner:
                             args = {}
                     except json.JSONDecodeError:
                         args = {}
+                    disp_args = args
                     tstart = int(time.time() * 1000)
                     part = mkpart({"type": "tool", "callID": call_id,
                                    "tool": name,
@@ -1738,9 +1744,33 @@ class TurnRunner:
                         # impls -- the honest refusal text IS the tool
                         # result, audited. An explicit tools param =
                         # the constructor's own surface (passthrough).
-                        _refusal = (None if self.tools is not None
-                                    else _lane_refusal(name, lane))
-                        if _refusal is not None:
+                        # THE TOOL FAMILIES: a family call resolves to the
+                        # existing tool first, so the gate and the impls see
+                        # the names they always did (the part keeps the
+                        # family's name and input -- what the model sent)
+                        _help = None
+                        _bad = None
+                        if self.tools is None:
+                            from . import toolset as _ts
+                            if name == "help":
+                                _help = _ts.help_text(str(args.get("topic") or ""))
+                            else:
+                                try:
+                                    name_l, args = _ts.resolve(name, args)
+                                except ValueError as e:
+                                    _bad, name_l = str(e), name
+                        else:
+                            name_l = name
+                        if _help is not None or _bad is not None:
+                            _refusal = None
+                        else:
+                            _refusal = (None if self.tools is not None
+                                        else _lane_refusal(name_l, lane))
+                        if _help is not None:
+                            output = _help
+                        elif _bad is not None:
+                            output = f"Error: {_bad}"
+                        elif _refusal is not None:
                             output = f"Refused: {_refusal}"
                             try:
                                 mem = getattr(self, "_audit_mem", None)
@@ -1749,7 +1779,7 @@ class TurnRunner:
                                     _write_audit(mem, {
                                         "event": "lane-refused",
                                         "origin": "serve",
-                                        "lane": lane, "tool": name,
+                                        "lane": lane, "tool": name_l,
                                         "sid": sid})
                             except Exception:
                                 pass
@@ -1757,32 +1787,32 @@ class TurnRunner:
                             # the watch hands carry their planter: the
                             # owner the attention inventory shows
                             args = stamp_watch_owner(
-                                name, args, (self._agents or {}).get(sid))
+                                name_l, args, (self._agents or {}).get(sid))
                             # THE FIELD'S PULSE: which mind touched which
                             # entity (ids + the tool name only)
                             try:
                                 from .fieldpulse import of as _pulse_of
                                 _fp = _pulse_of(getattr(self, "srv", None))
                                 if _fp is not None:
-                                    _fp.touch((self._agents or {}).get(sid), name, args)
+                                    _fp.touch((self._agents or {}).get(sid), name_l, args)
                             except Exception:
                                 pass
-                            output = self.executor(name, args, call_id)
+                            output = self.executor(name_l, args, call_id)
                         # THE TOOL'S TOUCH (the activity clock): a
                         # completed tool = the turn moved
                         self._turn_activity[sid] = time.time()
                         part["state"] = {"status": "completed",
-                                         "input": args,
+                                         "input": disp_args,
                                          "output": str(output or ""),
-                                         "title": _tool_title(name, args),
+                                         "title": _tool_title(name, disp_args),
                                          "time": {"start": tstart,
                                                   "end": int(
                                                       time.time() * 1000)}}
                     except Exception as e:
-                        part["state"] = {"status": "error", "input": args,
+                        part["state"] = {"status": "error", "input": disp_args,
                                          "error": (f"{type(e).__name__}:"
                                                    f" {e}")[:300],
-                                         "title": _tool_title(name, args),
+                                         "title": _tool_title(name, disp_args),
                                          "time": {"start": tstart,
                                                   "end": int(
                                                       time.time() * 1000)}}

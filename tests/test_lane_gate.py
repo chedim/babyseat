@@ -82,6 +82,13 @@ def _board(est):
     return b
 
 
+def _reach(agent):
+    """The existing tools a lane's advertised surface reaches (the tool
+    families resolve to them, 2026-10-09)."""
+    from membrane import toolset
+    return toolset.legacy_names(SRV._openai_tools_for(agent))
+
+
 class TestLaneGate(unittest.TestCase):
     def test_lane_resolution(self):
         self.assertEqual(SRV._lane_of(None), "operator")
@@ -106,7 +113,7 @@ class TestLaneGate(unittest.TestCase):
             self.assertNotIn(t, SRV._lane_tools("plan"))
         self.assertIsNone(SRV._lane_refusal("entity_link", "operator"))
         self.assertIn("plan mode", SRV._lane_refusal("entity_link", "plan"))
-        names = {t["name"] for t in SRV._openai_tools_for("build")}
+        names = _reach("build")
         self.assertIn("entity_link", names)
         self.assertIn("intend", SRV._lane_tools("operator"))
         self.assertNotIn("intend", SRV._lane_tools("listener"))
@@ -143,9 +150,9 @@ class TestLaneGate(unittest.TestCase):
 
     def test_advertised_tools_follow_the_lane(self):
         """The per-turn tool list = the registry filtered to the lane."""
-        op = {t["name"] for t in SRV._openai_tools_for("build")}
-        li = {t["name"] for t in SRV._openai_tools_for("watch: f:x.py")}
-        pl = {t["name"] for t in SRV._openai_tools_for("plan")}
+        op = _reach("build")
+        li = _reach("watch: f:x.py")
+        pl = _reach("plan")
         self.assertIn("entity_add", op)
         self.assertIn("field_watch", op)
         self.assertNotIn("entity_add", pl)
