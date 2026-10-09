@@ -63,6 +63,12 @@ LLM_WEIGHT = 0.5
 MEANT_WEIGHT = 2.0
 RECENT_LINES = 8               # its own recent lines: openings and words not to reuse
 RECENT_START_PENALTY = 12.0
+# HEARING ITSELF, THE CHILD'S WAY (2026-10-09, the operator's yes): not
+# learning from its own lines (that loops babble) -- comparing what came
+# out (said) with what it meant (the teacher's sentence) and leaning the
+# next aim along that gap; the correction fades unless a lesson renews it
+CORRECTION_PULL = 0.35
+CORRECTION_DECAY = 0.5
 VOCAB_WARM = 4000
 BOOT_TEXT_CAP = 3_000_000      # characters of history the bootstrap hears (newest first)
 KEY_BUDGET = 250_000           # contexts kept; past it the weakest go (~17 MB per 1 MB heard)
@@ -354,6 +360,7 @@ class Voice:
         self.lines: dict[str, dict] = {}
         self._lock = threading.Lock()
         self._booted = False
+        self.correction: dict[str, np.ndarray] = {}     # sid -> meant - said
         self._dirty = 0
         if self.dir is not None:
             self._load()
@@ -488,6 +495,31 @@ class Voice:
         self.save()
         return self.lines.get(line_id)
 
+    def learn_gap(self, sid: str, said: str, meant: str) -> float | None:
+        """Hear the gap between what it said and what it meant: the
+        session's correction (meant - said, in the embedder's space)."""
+        if not said or not meant:
+            return None
+        try:
+            E = self.embedder.embed([said, meant])
+            a, b = _unit(np.asarray(E[0], float)), _unit(np.asarray(E[1], float))
+        except Exception:
+            return None
+        self.correction[sid] = b - a
+        return round(float(np.linalg.norm(b - a)), 4)
+
+    def steer(self, sid: str, target) -> np.ndarray:
+        """The aim, leaned along the last lesson's gap (then the gap fades)."""
+        t = _unit(np.asarray(target, dtype=float))
+        c = self.correction.get(sid)
+        if c is None or c.shape != t.shape:
+            return t
+        self.correction[sid] = c * CORRECTION_DECAY
+        if float(np.linalg.norm(c)) < 1e-3:
+            self.correction.pop(sid, None)
+            return t
+        return _unit(t + CORRECTION_PULL * c)
+
     def pair(self, line_id: str | None, meant: str) -> None:
         """THE DISTILLER'S TRAINING PAIRS: what the voice said, and the
         teacher's sentence for it (with the line's target alignment) --
@@ -603,7 +635,7 @@ def on_turn_start(runner, sid: str, text: str, mid: str, lane: str) -> None:
             from . import massage
             fld = _efield_of(srv)
             qv = np.asarray(v.embedder.embed([clean(text) or text])[0], dtype=float)
-            tgt = aim(qv, massage.field_now(fld) if fld is not None else None)
+            tgt = v.steer(sid, aim(qv, massage.field_now(fld) if fld is not None else None))
             rec = v.speak(tgt, message=text, sid=sid, mid=mid)
             if rec is not None:
                 runner._voice_last = getattr(runner, "_voice_last", {})
@@ -645,6 +677,9 @@ def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
             if meant:
                 v.hear(meant, MEANT_WEIGHT)
                 v.pair(lid, meant)
+                gap = v.learn_gap(sid, (v.lines.get(lid or "") or {}).get("text", ""), meant)
+                if gap is not None and lid:
+                    v._ledger({"id": lid, "gap": gap})
             if lid:
                 c = v.grade(lid, meant or reply)
                 if c is not None:
@@ -756,7 +791,7 @@ def auto_next(runner, sid: str, reply: str) -> None:
             src = clean(reply) or reply or "hello"
             qv = np.asarray(v.embedder.embed([src[:4000]])[0], dtype=float)
             mid = _gen_id("msg")
-            rec = v.speak(aim(qv, massage.field_now(fld) if fld is not None else None),
+            rec = v.speak(v.steer(sid, aim(qv, massage.field_now(fld) if fld is not None else None)),
                           message=src, sid=sid, mid=mid)
             if rec is None or not auto_on(runner, sid):
                 return

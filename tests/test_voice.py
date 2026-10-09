@@ -385,3 +385,26 @@ class TestTeacher(unittest.TestCase):
         self.assertNotIn("membrane", v.table.uni)                                # never the frame
         pairs = (Path(d) / "voice" / "pairs.jsonl").read_text().splitlines()
         self.assertIn("Volts look healthy tonight.", pairs[-1])
+
+
+class TestHearingItself(unittest.TestCase):
+    def test_the_gap_leans_the_next_aim_and_fades(self):
+        v = _voice()
+        E = FakeEmbedder()
+        gap = v.learn_gap("s1", "the anchor chain is out", "the battery charge is fine")
+        self.assertGreater(gap, 0.1)
+        q = E.embed(["how are we"])[0]
+        bat = V._unit(E.embed(["battery charge"])[0])
+        plain = V._unit(q)
+        leaned = v.steer("s1", q)
+        self.assertGreater(float(leaned @ bat), float(plain @ bat))     # toward what it meant
+        n1 = float(np.linalg.norm(v.correction["s1"]))
+        v.steer("s1", q)
+        self.assertLess(float(np.linalg.norm(v.correction.get("s1", np.zeros(1)))), n1)   # fades
+        self.assertAlmostEqual(float(v.steer("other", q) @ plain), 1.0)   # per session
+
+    def test_its_own_lines_still_never_teach_it(self):
+        v = _voice()
+        before = dict(v.table.uni)
+        v.learn_gap("s1", "zzqx unheard words", "the battery charge is fine")
+        self.assertEqual(v.table.uni, before)                           # the gap steers, it never hears
