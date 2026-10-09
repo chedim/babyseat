@@ -11,6 +11,7 @@ class TestFieldPaths(unittest.TestCase):
     def test_field_reads_allowed(self):
         for p in ("membrane/state", "membrane/map/field", "membrane/field/entity",
                   "membrane/map/distance",
+                  "membrane/map/field3d", "membrane/map/tile", "membrane/map/locate",
                   "membrane/entity/read", "membrane/entity-related"):
             self.assertTrue(allowed_path(p), p)
             self.assertTrue(read_only_path(p), p)
@@ -24,6 +25,25 @@ class TestFieldPaths(unittest.TestCase):
     def test_chat_paths_are_not_read_only(self):
         self.assertFalse(read_only_path("session"))
         self.assertFalse(read_only_path("session/x/message"))
+
+
+class TestLiveLayer(unittest.TestCase):
+    """The viewer's live layer (2026-10-08): field.* / mind.* frames are
+    session-less -- admins see them, nobody else does."""
+
+    def test_admins_only(self):
+        for t in ("field.moved", "field.applied", "mind.touch", "mind.focus"):
+            ev = {"type": t, "properties": {"eids": ["f:a"]}}
+            self.assertTrue(SP.visible_event(ev, {}, "u1", True), t)
+            self.assertFalse(SP.visible_event(ev, {}, "u1", False), t)
+
+    def test_other_session_less_frames_stay_inside(self):
+        self.assertFalse(SP.visible_event({"type": "session.updated", "properties": {}}, {}, "u1", True))
+
+    def test_chat_frames_keep_their_owner_rule(self):
+        ev = {"type": "message.updated", "properties": {"sessionID": "s9"}}
+        self.assertFalse(SP.visible_event(ev, {"s9": "other"}, "u1", True))
+        self.assertTrue(SP.visible_event(ev, {"s9": "u1"}, "u1", False))
 
 
 class _User:

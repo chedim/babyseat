@@ -129,6 +129,13 @@ class Dreamer:
             return self._idle * 4        # a young field has nothing to dream ON
         if hot >= MAX_DREAMS_HOT:
             return self._idle * 2        # board backed up: let reality vote first
+        try:
+            from .fieldpulse import of as _pulse_of
+            _fp = _pulse_of(srv)
+            if _fp is not None:
+                _fp.mind("dreamer", goal=str(getattr(open_intents[0], "eid", "") or ""))
+        except Exception:
+            pass
         # ---- propose ----
         ngram = FieldNGram(trusted, n=3)
         commit_vecs: list[tuple[str, np.ndarray]] = []

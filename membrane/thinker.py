@@ -539,6 +539,16 @@ class Thinker:
             self.mind_log.append({"ts": time.time(), **entry})
         except Exception:
             pass
+        try:
+            from .fieldpulse import of as _pulse_of
+            _fp = _pulse_of(self.srv)
+            if _fp is not None:
+                about = str(entry.get("about") or "")
+                eidish = ":" in about and " " not in about
+                _fp.mind("thinker", kind=str(entry.get("kind") or ""),
+                         eid=about if eidish else "")
+        except Exception:
+            pass
 
     def _process_one(self, item: dict) -> None:
         kind = item.get("kind")

@@ -3643,6 +3643,49 @@ def _efield_state_rows(srv, fld, m: int = 400) -> list[dict]:
     return out
 
 
+FIELD3D_FRESH_S = 60.0
+FIELD3D_KEEP = 4
+_field3d_lock = threading.Lock()
+
+
+def _field_vec(fld, eid: str):
+    from .efstore import unpack_f16
+    docs = [d for _, d in fld.b.scan("entity_states", {"eid": eid, "tier": "live"})]
+    if docs and docs[0].get("state"):
+        return np.asarray(unpack_f16(docs[0]["state"]), dtype=float)
+    return None
+
+
+def field3d_projection(srv, axes: str = ""):
+    """The whole-field 3D projection for these axes (field3d.build), reused
+    for FIELD3D_FRESH_S; the last FIELD3D_KEEP stay addressable by pid (the
+    viewer keeps pulling tiles of the one it holds; the live layer places
+    moved entities into each)."""
+    from . import field3d as _F3
+    from .efstore import unpack_f16
+    fld = _efield_of(srv)
+    if fld is None:
+        raise LookupError("the field is not loaded")
+    key = ",".join(_F3.parse_axes(axes))
+    with _field3d_lock:
+        by_pid = getattr(srv, "_field3d", None)
+        if by_pid is None:
+            by_pid = srv._field3d = {}
+        for p in by_pid.values():
+            if ",".join(a.id for a in p.axes) == key and time.time() - p.ts < FIELD3D_FRESH_S:
+                return p
+
+        def rows():
+            return (d for _, d in fld.b.scan(
+                "entity_states", {"origin": fld.origin, "tier": "live"}) if d.get("state"))
+        rels = [d for _, d in fld.b.scan("relations", {"origin": fld.origin, "superseded": False})]
+        proj = _F3.build(rows, unpack_f16, key, ref_vec=lambda e: _field_vec(fld, e), rels=rels)
+        by_pid[proj.pid] = proj
+        for old in sorted(by_pid.values(), key=lambda p: p.ts)[:-FIELD3D_KEEP]:
+            by_pid.pop(old.pid, None)
+        return proj
+
+
 def _entity_points(srv, fld, m: int = 400) -> list[dict]:
     """The viewer's cloud on the entity field: the top-m live states by mass,
     PCA 3D in the shared universe projection (the basis fit once per
@@ -3730,6 +3773,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 self._field_entity(); return
             if path == "/membrane/map/distance":
                 self._map_distance(); return
+            if path == "/membrane/map/field3d":
+                self._map_field3d(); return
+            if path == "/membrane/map/tile":
+                self._map_tile(); return
+            if path == "/membrane/map/locate":
+                self._map_locate(); return
             if path == "/membrane/map/axis":
                 # the thin alias: the axis query params ride /cloud (the
                 # contract's shape; the reproject uses cloud+entities)
@@ -4022,6 +4071,60 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._json_err_raw(500, f"field map failed: {e!r}"[:200]); return
         cache[m] = (time.time(), out)
         self._json_out(out)
+
+    def _map_field3d(self):
+        """GET /membrane/map/field3d?axes=pc1,pc2,e:<eid>[:toward]: THE WHOLE
+        FIELD IN 3D (field3d.build over every live entity) -> its pid +
+        meta; the viewer then pulls octree tiles by pid. Cached 60s per
+        axes; the last few projections stay servable for tiles."""
+        from urllib.parse import parse_qs
+        qs = parse_qs(self.path.split("?", 1)[-1] if "?" in self.path else "")
+        axes = (qs.get("axes") or [""])[0]
+        try:
+            proj = field3d_projection(self.server, axes)
+        except LookupError as e:
+            self._json_err_raw(503, str(e)); return
+        except Exception as e:                          # noqa: BLE001
+            self._json_err_raw(500, f"field3d failed: {e!r}"[:200]); return
+        out = proj.meta()
+        out["root"] = proj.tile(0, 0, 0, 0)
+        self._json_out(out)
+
+    def _field3d_of(self, qs):
+        pid = (qs.get("pid") or [""])[0]
+        proj = (getattr(self.server, "_field3d", None) or {}).get(pid)
+        if proj is None:
+            self._json_err_raw(410, f"projection {pid!r} expired: re-fetch "
+                               "/membrane/map/field3d"); return None
+        return proj
+
+    def _map_tile(self):
+        """GET /membrane/map/tile?pid&l&x&y&z: one octree cell's entities
+        (its own level only) + their edges to coarser levels."""
+        from urllib.parse import parse_qs
+        qs = parse_qs(self.path.split("?", 1)[-1] if "?" in self.path else "")
+        proj = self._field3d_of(qs)
+        if proj is None:
+            return
+        try:
+            lv, x, y, z = (int((qs.get(k) or ["0"])[0]) for k in ("l", "x", "y", "z"))
+        except ValueError:
+            self._json_err_raw(400, "l, x, y, z must be integers"); return
+        self._json_out(proj.tile(lv, x, y, z))
+
+    def _map_locate(self):
+        """GET /membrane/map/locate?pid&eid: where an entity sits (its tile +
+        cube position) -- search, jump-to, and the live avatars' targets."""
+        from urllib.parse import parse_qs
+        qs = parse_qs(self.path.split("?", 1)[-1] if "?" in self.path else "")
+        proj = self._field3d_of(qs)
+        if proj is None:
+            return
+        eid = (qs.get("eid") or [""])[0].strip()
+        hit = proj.locate(eid)
+        if hit is None:
+            self._json_err_raw(404, f"{eid!r} is not in this projection"); return
+        self._json_out(hit)
 
     def _map_distance(self):
         """GET /membrane/map/distance?eid=X[&mode=toward]: THE ENTITY AXIS --
@@ -6298,9 +6401,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         fld = _efield_of(srv)
         tail, n_verd = _audit_tail(mem.audit_path)
         vit = _efield_vitals(srv) or {}
+        _fp = getattr(srv, "_field_pulse", None)
         out = {
             "mode": "DEV",
             "backend": srv.backend,
+            # the viewer v3's live layer: beating, bound to the hub, publishing
+            "field_pulse": _fp.stats() if _fp is not None else None,
             "embed_model": getattr(mem.embedder, "model", None),
             # the operator's stable point (RAM-only; the acting lanes hold)
             "paused": nerve_paused(srv),

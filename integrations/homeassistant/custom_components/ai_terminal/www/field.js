@@ -253,6 +253,12 @@ const FSTYLE = `
   .msg { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:2;
          pointer-events:none; opacity:.7; white-space:pre-wrap; text-align:center; padding:20px; }
   .tip { position:absolute; z-index:4; pointer-events:none; padding:3px 8px; font-size:12px; display:none; max-width:320px; }
+  .host3d { position:absolute; inset:0; display:none; }
+  :host([mode="3d"]) .host3d { display:block; }
+  :host([mode="3d"]) canvas.c2d, :host([mode="3d"]) .only2d { display:none !important; }
+  :host(:not([mode="3d"])) .only3d { display:none !important; }
+  .agents { position:absolute; right:10px; top:60px; z-index:3; padding:6px 8px; font-size:12px; display:none; }
+  :host([mode="3d"]) .agents.has { display:block; }
 `;
 
 function defineFieldPanel() {
@@ -280,36 +286,65 @@ function defineFieldPanel() {
 
     connectedCallback() {
       if (!this._cv) this._build();
+      if (!this.hasAttribute("mode")) this.setAttribute("mode", "3d");
       if (!this._booted && this._hass) { this._booted = true; this._load(); }
     }
-    disconnectedCallback() { this._booted = false; clearInterval(this._hudTimer); if (this._ro) this._ro.disconnect(); }
+    disconnectedCallback() { this._booted = false; clearInterval(this._hudTimer); if (this._ro) this._ro.disconnect();
+      if (this._v3) { this._v3.stop(); this._v3 = null; } }
 
     _build() {
       const st = document.createElement("style");
       st.textContent = FSTYLE;
       const root = document.createElement("div");
       root.innerHTML = `
-        <canvas></canvas>
+        <canvas class="c2d"></canvas>
+        <div class="host3d"></div>
         <div class="msg">loading the field…</div>
         <div class="top">
           <button class="btn card menu" style="display:none" title="Home Assistant menu">☰</button>
           <span class="card title">Membrane Field</span>
-          <span class="card ctl"><label>X</label><select class="ax"></select><span class="axchip" data-axis="x"></span>
+          <span class="card ctl"><button class="btn mode3d on" title="3D: the whole field, live">3D</button><button class="btn mode2d" title="2D: today's map of the heaviest entities">2D</button></span>
+          <span class="card ctl only3d"><label>X</label><select class="a3" data-i="0"></select><span class="axchip3" data-i="0"></span>
+            <label>Y</label><select class="a3" data-i="1"></select><span class="axchip3" data-i="1"></span>
+            <label>Z</label><select class="a3" data-i="2"></select><span class="axchip3" data-i="2"></span></span>
+          <span class="card ctl only3d"><button class="btn on edges3" title="Relations">edges</button><button class="btn on labels3">labels</button>
+            <span class="status3" style="opacity:.75;font-size:12px"></span></span>
+          <span class="card ctl only2d"><label>X</label><select class="ax"></select><span class="axchip" data-axis="x"></span>
             <label>Y</label><select class="ay"></select><span class="axchip" data-axis="y"></span>
             <button class="btn swap" title="Swap axes">⇄</button></span>
-          <span class="card ctl"><label>nodes</label><select class="mm">
+          <span class="card ctl only2d"><label>nodes</label><select class="mm">
             <option value="400">400</option><option value="1200" selected>1200</option><option value="3000">3000</option></select>
             <button class="btn on edges" title="Relations">edges</button><button class="btn on labels">labels</button>
             <button class="btn fit" title="Fit">⤢</button><button class="btn reload" title="Reload the field">↻</button></span>
           <span class="card ctl searchbox"><input class="q" placeholder="search entities…"><div class="card hits"></div></span>
         </div>
         <div class="hud"></div>
+        <div class="card agents"></div>
         <div class="card legend"></div>
         <div class="card drawer"></div>
         <div class="card tip"></div>`;
       this.shadowRoot.append(st, root);
       const $ = (q) => root.querySelector(q);
-      this._cv = $("canvas"); this._ctx = this._cv.getContext("2d");
+      this._cv = $("canvas.c2d"); this._ctx = this._cv.getContext("2d");
+      this._host3d = $(".host3d"); this._status3 = $(".status3"); this._agents = $(".agents");
+      $(".mode3d").addEventListener("click", () => this._setMode("3d"));
+      $(".mode2d").addEventListener("click", () => this._setMode("2d"));
+      root.querySelectorAll(".a3").forEach((sel) => sel.addEventListener("change", () => {
+        const i = +sel.dataset.i, v = sel.value;
+        const spec = v.startsWith("kind:") ? { kind: "kind", name: v.slice(5) } : { kind: "pc", index: +v.slice(2) };
+        if (this._v3) this._v3.setAxis(i, spec).then(() => this._paint3dAxes()).catch((e) => this._err3(e));
+      }));
+      root.querySelectorAll(".axchip3").forEach((c) => c.addEventListener("click", (e) => {
+        if (!e.target.closest(".unx") || !this._v3) return;
+        const i = +c.dataset.i, a = this._v3.ax[i];
+        const next = e.target.closest(".mode") ? Object.assign({}, a, { mode: a.mode === "toward" ? "distance" : "toward" })
+          : (a.prev || { kind: "pc", index: i + 1 });
+        this._v3.setAxis(i, next).then(() => this._paint3dAxes()).catch((er) => this._err3(er));
+      }));
+      const tog3 = (sel, key) => $(sel).addEventListener("click", (e) => {
+        if (!this._v3) return; this._v3[key] = !this._v3[key]; e.target.classList.toggle("on", this._v3[key]);
+        this._v3._edgesDirty = true; if (key === "showLabels" && !this._v3.showLabels) this._v3.labels.forEach((l) => { l.style.display = "none"; }); });
+      tog3(".edges3", "showEdges"); tog3(".labels3", "showLabels");
       this._msg = $(".msg"); this._hud = $(".hud"); this._legend = $(".legend");
       this._drawer = $(".drawer"); this._tip = $(".tip"); this._hits = $(".hits");
       this._axSel = $(".ax"); this._aySel = $(".ay"); this._q = $(".q");
@@ -343,15 +378,17 @@ function defineFieldPanel() {
       this._q.addEventListener("input", () => this._showHits());
       this._hits.addEventListener("click", (e) => {
         const h = e.target.closest(".hit"); if (!h) return;
-        this._hits.classList.remove("open"); this._flyTo(h.dataset.id);
+        this._hits.classList.remove("open");
+        if (this._is3d()) { this._v3.flyTo(h.dataset.id).then((ok) => { if (ok) this._select3d(h.dataset.id); }); }
+        else this._flyTo(h.dataset.id);
       });
       this._legend.addEventListener("click", (e) => {
         const k = e.target.closest(".lk"); if (!k) return;
         const kd = k.dataset.kind;
         if (this._hidden.has(kd)) this._hidden.delete(kd); else this._hidden.add(kd);
-        this._paintLegend(); this._draw();
+        if (this._is3d()) { this._v3.setHidden(this._hidden); this._paintLegend3d(); } else { this._paintLegend(); this._draw(); }
       });
-      this._drawer.addEventListener("click", (e) => this._onDrawer(e));
+      this._drawer.addEventListener("click", (e) => (this._is3d() ? this._onDrawer3d(e) : this._onDrawer(e)));
       this._wireCanvas();
       this._ro = new ResizeObserver(() => this._resize());
       this._ro.observe(this);
@@ -366,6 +403,7 @@ function defineFieldPanel() {
     }
 
     async _load() {
+      if (this.getAttribute("mode") === "3d") return this._load3d();
       this._msg.style.display = ""; this._msg.textContent = "loading the field…";
       try {
         const d = await this._get("/membrane/map/field?m=" + this._m);
@@ -387,6 +425,142 @@ function defineFieldPanel() {
       this._hudOnce();
       clearInterval(this._hudTimer);
       this._hudTimer = setInterval(() => this._hudOnce(), 60000);
+    }
+
+    // ---------------------------------------------------------- 3D
+    _is3d() { return this.getAttribute("mode") === "3d" && !!this._v3; }
+
+    _setMode(m) {
+      if (this.getAttribute("mode") === m) return;
+      this.setAttribute("mode", m);
+      this.shadowRoot.querySelector(".mode3d").classList.toggle("on", m === "3d");
+      this.shadowRoot.querySelector(".mode2d").classList.toggle("on", m === "2d");
+      this._sel = null; this._drawer.classList.remove("open"); this._tip.style.display = "none";
+      if (m === "3d") { this._load3d(); }
+      else { if (this._v3) { this._v3.stop(); this._v3 = null; } this._agents.classList.remove("has"); this._data = null; this._load(); }
+    }
+
+    _err3(e) { this._msg.style.display = ""; this._msg.textContent = "3D field unavailable\n" + ((e && e.message) || e); }
+
+    async _load3d() {
+      this._msg.style.display = ""; this._msg.textContent = "projecting the whole field…";
+      try {
+        if (!window.MembraneField3D) await import("/api/ai_terminal/www/field3d.js");
+        if (this._v3) this._v3.stop();
+        const hass = this._hass;
+        const api = {
+          get: (path) => this._get(path),
+          stream: (path, signal) => hass.fetchWithAuth(FSERVE + path, { signal, headers: { Accept: "text/event-stream" } }),
+          kindColor, isAdmin: !!(hass.user && hass.user.is_admin),
+          onStatus: (t) => { this._status3.textContent = t; this._paintAgents(); },
+          onSelect: (m) => { if (m) this._select3d(m.id); else { this._sel = null; this._drawer.classList.remove("open"); } },
+          onHover: (m, x, y) => {
+            if (!m) { this._tip.style.display = "none"; return; }
+            this._tip.textContent = m.label + "  ·  " + m.kind + "  ·  mass " + m.mass;
+            this._tip.style.left = Math.min(x + 14, (this._host3d.clientWidth || 0) - 220) + "px";
+            this._tip.style.top = (y + 14) + "px"; this._tip.style.display = "block";
+          },
+        };
+        this._v3 = new window.MembraneField3D(this._host3d, api);
+        this._v3.setHidden(this._hidden);
+        await this._v3.start();
+        this._paint3dAxes(); this._paintLegend3d();
+        this._msg.style.display = (this._v3.info || {}).n_total ? "none" : "";
+        if (!(this._v3.info || {}).n_total) this._msg.textContent = "the field is empty";
+      } catch (e) { this._err3(e); }
+      this._hudOnce();
+      clearInterval(this._hudTimer);
+      this._hudTimer = setInterval(() => this._hudOnce(), 60000);
+    }
+
+    _paint3dAxes() {
+      const v = this._v3; if (!v || !v.info) return;
+      const ex = v.info.explained || [];
+      const pcs = ex.map((e, i) => '<option value="pc' + (i + 1) + '">PC' + (i + 1) + " (" + (e * 100).toFixed(1) + "%)</option>").join("");
+      const kinds = (v.info.kinds || []).slice(0, 10).map((k) => '<option value="kind:' + fesc(k) + '">toward ' + fesc(k) + "</option>").join("");
+      const html = '<optgroup label="components">' + pcs + '</optgroup><optgroup label="kinds">' + kinds + "</optgroup>";
+      this.shadowRoot.querySelectorAll(".a3").forEach((sel) => {
+        const i = +sel.dataset.i, a = v.ax[i];
+        const chip = this.shadowRoot.querySelector('.axchip3[data-i="' + i + '"]');
+        sel.innerHTML = html;
+        if (a.kind === "entity") {
+          sel.style.display = "none";
+          const tw = a.mode === "toward";
+          chip.innerHTML = '<span class="tagchip" title="' + (tw ? "toward " : "distance from ") + fesc(a.id) + '">' +
+            '<button class="unx mode" title="Switch to ' + (tw ? "distance" : "toward (signed)") + '">' + (tw ? "±" : "⟂") + "</button> " +
+            fesc(a.label || a.id) + ' <button class="unx" title="Back to the previous axis">✕</button></span>';
+        } else {
+          sel.style.display = ""; chip.innerHTML = "";
+          sel.value = a.kind === "kind" ? "kind:" + a.name : "pc" + (a.index || i + 1);
+        }
+      });
+    }
+
+    _paintLegend3d() {
+      const v = this._v3; if (!v || !v.info) return;
+      const counts = v.info.kind_counts || {};
+      this._legend.innerHTML = (v.info.kinds || []).slice(0, 24).map((k) =>
+        '<div class="lk' + (this._hidden.has(k) ? " off" : "") + '" data-kind="' + fesc(k) + '"><span class="sw" style="background:' +
+        kindColor(k) + '"></span>' + fesc(k) + ' <span style="opacity:.5">' + (counts[k] || 0).toLocaleString() + "</span></div>").join("");
+    }
+
+    _paintAgents() {
+      const v = this._v3; if (!v) return;
+      const now = Date.now();
+      const rows = [...v.avatars.values()].map((a) => '<div class="lk" title="' + fesc(a.eid || "") + '"><span class="sw" style="background:' +
+        (window.MembraneField3DAgents || {})[a.agent] + '"></span><b>' + fesc(a.agent) + "</b>&nbsp;" +
+        fesc(a.attached(now) ? (a.eid || "").slice(0, 36) : "idle") + "</div>");
+      this._agents.innerHTML = rows.join("");
+      this._agents.classList.toggle("has", rows.length > 0);
+    }
+
+    _select3d(id) {
+      const v = this._v3; if (!v) return;
+      const s = v.slots.get(id), m = s == null ? null : v.meta[s];
+      if (!m) return;
+      this._sel = id;
+      v.select(id);
+      const ax = ["X", "Y", "Z"];
+      this._drawer.innerHTML =
+        '<button class="x" title="Close">✕</button><h3>' + fesc(m.label) + '</h3><div class="id">' + fesc(m.id) + "</div>" +
+        '<div class="kv"><span>kind</span><span><span class="sw" style="display:inline-block;background:' + kindColor(m.kind) + '"></span> ' + fesc(m.kind) +
+        "</span><span>mass</span><span>" + fesc(m.mass) + "</span><span>detail level</span><span>" + fesc(m.lv) + "</span>" +
+        (m.c ? "<span>conflicts</span><span style=\"color:#ff7a7a\">" + fesc(m.c) + "</span>" : "") +
+        ax.map((k, i) => "<span>" + k + "</span><span>" + fesc((+m.p[i]).toFixed(3)) + "</span>").join("") + "</div>" +
+        '<button class="btn on ask">Ask the brain about this</button> <button class="btn read">Entity details</button>' +
+        '<div style="margin-top:6px">' + ax.map((k, i) => '<button class="btn mk3" data-i="' + i + '" title="Distance from this entity becomes the ' + k +
+          ' axis">Make ' + k + "-axis</button>").join(" ") + "</div>" +
+        '<div class="detail"></div>';
+      this._drawer.classList.add("open");
+    }
+
+    async _onDrawer3d(e) {
+      const v = this._v3; if (!v) return;
+      if (e.target.closest(".x")) { this._sel = null; v.select(null); this._drawer.classList.remove("open"); return; }
+      const nb = e.target.closest(".nb");
+      if (nb) { if (await v.flyTo(nb.dataset.id)) this._select3d(nb.dataset.id); return; }
+      const s = v.slots.get(this._sel), m = s == null ? null : v.meta[s];
+      if (!m) return;
+      const mk = e.target.closest(".mk3");
+      if (mk) {
+        const i = +mk.dataset.i, prev = v.ax[i].kind === "entity" ? v.ax[i].prev : v.ax[i];
+        try { await v.setAxis(i, { kind: "entity", id: m.id, label: m.label, mode: "distance", prev }); this._paint3dAxes(); }
+        catch (er) { this._err3(er); }
+        return;
+      }
+      if (e.target.closest(".ask")) {
+        const q = "Tell me about " + m.label + " (" + m.id + ") from your field: what it is, how it relates, why it matters.";
+        history.pushState(null, "", "/ai-terminal?ask=" + encodeURIComponent(q));
+        window.dispatchEvent(new CustomEvent("location-changed"));
+        return;
+      }
+      if (e.target.closest(".read")) {
+        const box = this._drawer.querySelector(".detail");
+        box.innerHTML = "<pre>loading…</pre>";
+        this._byId = this._byId || new Map();
+        try { box.innerHTML = this._cardHtml(await this._get("/membrane/field/entity?eid=" + encodeURIComponent(m.id))); }
+        catch (err) { box.innerHTML = "<pre>" + fesc(err.message || err) + "</pre>"; }
+      }
     }
 
     _paintAxes() {
@@ -761,7 +935,7 @@ function defineFieldPanel() {
     }
 
     _showHits() {
-      const hits = this._data ? search(this._data.nodes, this._q.value) : [];
+      const hits = this._is3d() ? this._v3.search(this._q.value) : (this._data ? search(this._data.nodes, this._q.value) : []);
       this._hits.innerHTML = hits.map((n) => '<div class="hit" data-id="' + fesc(n.id) + '"><span class="sw" style="display:inline-block;background:' +
         kindColor(n.kind) + '"></span> ' + fesc(n.label) + ' <span style="opacity:.5">' + fesc(n.kind) + "</span></div>").join("");
       this._hits.classList.toggle("open", hits.length > 0);

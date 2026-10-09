@@ -59,6 +59,8 @@ ALLOWED_EXACT = ("global/health", "agent", "event")
 # relays (membrane/server.py SEAT_READ_PATHS) -- GET only, exact paths
 READ_ONLY_EXACT = ("membrane/state", "membrane/map/field",
                    "membrane/field/entity", "membrane/map/distance",
+                   "membrane/map/field3d", "membrane/map/tile",
+                   "membrane/map/locate",
                    "membrane/entity/read", "membrane/entity-related")
 EVENT_HELLO = "server.connected"
 
@@ -162,11 +164,18 @@ def event_session_id(ev) -> str | None:
     return None
 
 
-def visible_event(ev, owners: dict, user_id: str) -> bool:
+LIVE_FIELD_PREFIXES = ("field.", "mind.")
+
+
+def visible_event(ev, owners: dict, user_id: str, is_admin: bool = False) -> bool:
     """May this frame reach the caller: the stream's hello, or an event of
-    a session the caller owns. Session-less frames stay inside HA."""
+    a session the caller owns. Session-less frames stay inside HA -- except
+    the field viewer's live layer (field.* / mind.*: entity ids, kinds and
+    tool names, never message text), which reaches HA ADMINS only."""
     if isinstance(ev, dict) and ev.get("type") == EVENT_HELLO:
         return True
+    if isinstance(ev, dict) and str(ev.get("type") or "").startswith(LIVE_FIELD_PREFIXES):
+        return bool(is_admin)
     sid = event_session_id(ev)
     return bool(user_id and sid and owners.get(sid) == user_id)
 
@@ -276,7 +285,7 @@ class ServeProxyView(HomeAssistantView):
                               rest)
             return web.Response(status=502, text=f"serve error: {e!r}")
 
-    async def _stream_events(self, request, comp, uid, owners):
+    async def _stream_events(self, request, comp, uid, owners, is_admin=False):
         """GET serve/event: the brain's /event, filtered to the caller's
         sessions, as a live text/event-stream. Ends when either side
         hangs up; the panel reconnects (and resyncs over REST)."""
@@ -306,7 +315,7 @@ class ServeProxyView(HomeAssistantView):
                     return resp
                 async for chunk in up.content.iter_any():
                     for ev in parser.feed(chunk):
-                        if visible_event(ev, owners, uid):
+                        if visible_event(ev, owners, uid, is_admin):
                             await resp.write(b"data: " + json.dumps(
                                 ev).encode() + b"\n\n")
                     if b": ping" in chunk:
@@ -342,7 +351,9 @@ class ServeProxyView(HomeAssistantView):
         if rest == "event":
             if method != "GET":
                 return web.Response(status=405, text="event is GET only")
-            return await self._stream_events(request, comp, uid, owners)
+            return await self._stream_events(
+                request, comp, uid, owners,
+                bool(getattr(user, "is_admin", False)))
 
         body = None
         if method in ("POST", "PATCH"):

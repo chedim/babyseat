@@ -245,6 +245,13 @@ def sweep_watch_ops(est, queue: "WatchEvents", rel_positions: dict,
                         est.fire_watch(eid, ev)
                     except Exception:
                         pass
+                    try:
+                        from .fieldpulse import of as _pulse_of
+                        _fp = _pulse_of(getattr(est, "_srv", None))
+                        if _fp is not None:
+                            _fp.watch(eid, kind)
+                    except Exception:
+                        pass
                     st["last_fire"] = now
                 st["last_d"] = d
                 state[f"{kind}:{rel_eid}"] = st
@@ -273,6 +280,13 @@ def sweep_watch_ops(est, queue: "WatchEvents", rel_positions: dict,
                     queue.put(ev)
                     try:
                         est.fire_watch(eid, ev)
+                    except Exception:
+                        pass
+                    try:
+                        from .fieldpulse import of as _pulse_of
+                        _fp = _pulse_of(getattr(est, "_srv", None))
+                        if _fp is not None:
+                            _fp.watch(eid, kind)
                     except Exception:
                         pass
                     st["last_fire"] = now
@@ -552,12 +566,23 @@ class _LoopDrainer:
             if pool is not None:
                 pool.put(ev)
             return "requeue"
+        from .fieldpulse import of as _pulse_of
+        _fp = _pulse_of(self.srv)
+        titles = getattr(loops, "titles", None)
+        if isinstance(titles, list):
+            titles.append(agent)
+        if _fp is not None:
+            _fp.focus(agent, ent, "start")
         try:
             return self._turn(ev, ent, agent)
         except Exception:
             return "error"
         finally:
             loops.release(desc)
+            if isinstance(titles, list) and agent in titles:
+                titles.remove(agent)
+            if _fp is not None:
+                _fp.focus(agent, ent, "end")
 
     def _turn(self, ev: dict, ent: str, agent: str) -> str:
         srv = self.srv

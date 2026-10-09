@@ -657,6 +657,12 @@ class EntityField:
             if sid in vecs:
                 self._update(st, unit(vecs[sid]["vec"]), stream, sid, seq, sidx, evkey, ts, role)
         self._dirty.add(st.eid)
+        _born = getattr(self, "pulse_born", None)
+        if _born is not None:
+            try:
+                _born(st.eid)
+            except Exception:
+                pass
 
     def _apply(self, key: str, ev: dict) -> None:
         stream, seq, ts = ev["stream"], int(ev["seq"]), ev.get("ts")
@@ -816,6 +822,17 @@ class EntityField:
                                                       None), _store, _ent)
             except Exception:
                 pass
+            # THE FIELD'S PULSE (viewer v3): the dirty live states re-place
+            # into the cached 3D projections (fieldpulse.FieldPulse.moved)
+            _moved = getattr(self, "pulse_moved", None)
+            if _moved is not None:
+                for e in list(self._dirty):
+                    _st = self._states.get(e)
+                    if _st is not None and _st.tier == "live" and _st.state is not None:
+                        try:
+                            _moved(e, _st.state)
+                        except Exception:
+                            pass
             self._dirty.clear()
         if self._deltas:
             self.b.upsert_multi("entity_deltas", self._deltas)

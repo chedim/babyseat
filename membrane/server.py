@@ -1737,6 +1737,15 @@ class TurnRunner:
                             # owner the attention inventory shows
                             args = stamp_watch_owner(
                                 name, args, (self._agents or {}).get(sid))
+                            # THE FIELD'S PULSE: which mind touched which
+                            # entity (ids + the tool name only)
+                            try:
+                                from .fieldpulse import of as _pulse_of
+                                _fp = _pulse_of(getattr(self, "srv", None))
+                                if _fp is not None:
+                                    _fp.touch((self._agents or {}).get(sid), name, args)
+                            except Exception:
+                                pass
                             output = self.executor(name, args, call_id)
                         # THE TOOL'S TOUCH (the activity clock): a
                         # completed tool = the turn moved
@@ -1920,6 +1929,8 @@ SEAT_READ_PATHS = ("/membrane/state", "/membrane/map/cloud",
                    "/membrane/map/entities", "/membrane/map/axes",
                    "/membrane/map/axis", "/membrane/map/field",
                    "/membrane/field/entity", "/membrane/map/distance",
+                   "/membrane/map/field3d", "/membrane/map/tile",
+                   "/membrane/map/locate",
                    "/membrane/entity/read",
                    "/membrane/entity-related")
 
