@@ -1163,6 +1163,14 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
                 lines.append(f"peer[{frm}]: {text}")
         except Exception:
             pass
+    if not events_only:
+        try:
+            from .night import command_library
+            lib = command_library(getattr(srv, "entity_store", None))
+            if lib:
+                lines.append(lib)
+        except Exception:
+            pass
     if not lines:
         return None
     return ("WHERE WE ARE:\n- " + "\n- ".join(lines))
@@ -6180,7 +6188,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             res = entity_link(srv, est, _efield_on(srv), srv.membrane,
                               str(body.get("executor") or ""),
                               body.get("commands"),
-                              create=bool(body.get("create", True)))
+                              create=bool(body.get("create", True)),
+                              args=body.get("args") if isinstance(body.get("args"), dict) else None)
         else:
             res = entity_unlink(srv, est, _efield_on(srv), srv.membrane,
                                 str(body.get("executor") or ""),

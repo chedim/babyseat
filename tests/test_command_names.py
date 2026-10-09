@@ -30,7 +30,7 @@ class TestCommandNames(unittest.TestCase):
         b = N.command_name("set -a; . ~/hass.env; curl -s $HASS_URL/api/states/y")
         self.assertNotEqual(a, b)
         self.assertEqual(a, N.command_name("set -a; . ~/hass.env; curl -s $HASS_URL/api/states/x"))
-        self.assertTrue(a.startswith("set-"), a)
+        self.assertTrue(a.startswith("curl-") and "states" in a, a)   # named by its action (2026-10-09)
 
     def test_a_single_word_keeps_its_name(self):
         self.assertEqual(N.command_name("uptime"), "uptime")

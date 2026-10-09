@@ -1228,7 +1228,7 @@ EXEC_WALK_NODES_CAP = 12   # nodes run per pass (the reaper continues)
 EXEC_WALK_DEPTH = MultiParentOps.MAX_CHAIN   # the ancestry's depth (16)
 
 
-def _exec_command_doc(srv, est, fld, mem, doc) -> dict:
+def _exec_command_doc(srv, est, fld, mem, doc, args: dict | None = None) -> dict:
     """THE PIPELINE ENTRY (the composition covenant, 2026-10-06: 'parent
     executes first, the child is fed its parent's output' -- the entity
     inheritance IS the pipeline): run ONE linked node's whole ancestry
@@ -1250,15 +1250,22 @@ def _exec_command_doc(srv, est, fld, mem, doc) -> dict:
                 "error": "the linked entity carries no 'command' prop "
                          "(and no parents to compose) -- give it a "
                          "command, an ISA parent, or both"}
+    missing = [p for p in command_params(str(props.get("command") or ""))
+               if p not in (args or {})]
+    if missing:
+        return {"ok": False, "eid": doc.eid,
+                "error": "needs args: " + ", ".join(missing)
+                         + " -- exec(action='link', commands=<name>, args={"
+                         + ", ".join(f"'{m}': ..." for m in missing) + "})"}
     budget = [0]
-    out = _exec_node(srv, est, fld, mem, doc, {}, budget)
+    out = _exec_node(srv, est, fld, mem, doc, {}, budget, args=args)
     out["nodes_run"] = budget[0]
     out["eid"] = doc.eid
     return out
 
 
 def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
-               depth: int = 0) -> dict:
+               depth: int = 0, args: dict | None = None) -> dict:
     """One node of the ancestry walk (post-order: parents, then self).
     Returns the node's run/residue dict; memo[eid] holds it (a diamond's
     shared ancestor runs once). `budget` = [n] -- the pass's node count
@@ -1329,8 +1336,12 @@ def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
             return res
         budget[0] += 1
         fed = _substitute_parents(cmd, parent_residues, order)
+        fed = substitute_args(fed, args)
+        # THE TEMPLATE STAYS (2026-10-09): the fed line used to overwrite
+        # the command -- a {{parent.head}} pipeline worked exactly once,
+        # then ran its first output forever; the fed line is the residue
         if fed != cmd:
-            doc.properties["command"] = fed
+            doc.properties["last_fed"] = fed
         out = run_command_entity(fld, est, mem, fed, timeout_s=EXEC_TIMEOUT_S)
         out.pop("doc", None)
         # THE RESIDUE lands on the asking doc (the canon doc carries its
@@ -1485,6 +1496,43 @@ def split_label(spec: str) -> tuple[str, str]:
     return m.group(1).lower(), m.group(2).strip()
 
 
+# a command's setup prefixes say nothing about what it does (the '.-01c5d8'
+# exhibit, 2026-10-09: every '. ~/.config/x.env; curl ...' was named '.')
+_SETUP = re.compile(r"^\s*(?:(?:\.|source)\s+\S+(?:\s+\d*>\S*)*|set\s+-[a-z]+|export\s+[^;&]+|cd\s+\S+|"
+                    r"[A-Z_][A-Z0-9_]*=\S+)\s*(?:;|&&|\|\|)\s*")
+_PARAM = re.compile(r"\{\{\s*([A-Za-z_][\w]*)\s*\}\}")
+
+
+def command_params(cmd: str) -> list[str]:
+    """A command's parameters: its {{name}} placeholders (never the
+    pipeline's {{parent...}} feeds)."""
+    return [p for p in dict.fromkeys(_PARAM.findall(cmd or ""))
+            if p != "parent" and not p.startswith("parent")]
+
+
+def substitute_args(cmd: str, args: dict | None) -> str:
+    """Fill {{name}} from args, each value shell-quoted (an argument is
+    data, never shell)."""
+    import shlex
+    if not args:
+        return cmd
+
+    def rep(m):
+        k = m.group(1)
+        return shlex.quote(str(args[k])) if k in args else m.group(0)
+    return _PARAM.sub(rep, cmd)
+
+
+def _action_of(cmd: str) -> str:
+    c = cmd
+    for _ in range(6):
+        m = _SETUP.match(c)
+        if not m:
+            break
+        c = c[m.end():]
+    return c.strip() or cmd
+
+
 def command_name(cmd: str) -> str:
     """An ad-hoc command line's entity name: one plain word keeps its name;
     anything longer is '<head>-<hash6>' -- distinct per command line,
@@ -1492,15 +1540,63 @@ def command_name(cmd: str) -> str:
     `set -a; ...; curl` was ONE entity, shell:set, each run overwriting
     the last (158 mentions, 2026-10-08)."""
     cmd = " ".join((cmd or "").split())
-    head = re.match(r"[A-Za-z0-9._-]+", cmd)
-    head_s = (head.group(0).lower() if head else "cmd")[:32] or "cmd"
+    act = _action_of(cmd)
+    head = re.match(r"[A-Za-z0-9_-]+", act)
+    head_s = (head.group(0).lower() if head else "cmd")[:24] or "cmd"
     if re.fullmatch(r"[A-Za-z0-9._-]+", cmd):
         return head_s
-    return f"{head_s}-{hashlib.sha1(cmd.encode()).hexdigest()[:6]}"
+    # the salient word after the verb: a url's path tail, else the first
+    # plain argument (flags, quotes and variables skipped)
+    sal = ""
+    url = re.search(r"https?://\S+|\$\{?[A-Z_]+\}?(/[\w./-]+)", act)
+    if url:
+        path = (url.group(1) or url.group(0)).split("?")[0].strip("\"'")
+        parts = [p for p in re.split(r"[/.]", path) if p and not p.startswith("$") and p not in ("http:", "https:")]
+        sal = "-".join(parts[-2:])
+    else:
+        for tok in act.split()[1:]:
+            t = tok.strip("\"'")
+            if t and not t.startswith(("-", "$", "{", "<", ">", "|", "&")) and re.match(r"[A-Za-z]", t):
+                sal = t
+                break
+    sal = re.sub(r"[^a-z0-9_]+", "-", sal.lower()).strip("-")[:24]
+    h = hashlib.sha1(cmd.encode()).hexdigest()[:4]
+    return f"{head_s}-{sal}-{h}" if sal else f"{head_s}-{h}"
+
+
+def _norm_cmd(c: str) -> str:
+    return " ".join((c or "").split())
+
+
+LIBRARY_MAX = 12
+_JUNK_NAME = re.compile(r"^(?:[.\-]|cmd-|set-|export-)")
+
+
+def command_library(est, k: int = LIBRARY_MAX) -> str | None:
+    """'your commands: ha-states x14, light-on{entity} x3, ...' -- the seat's
+    own reusable commands, most used first (it cannot reuse what it cannot
+    see). Hash-junk names (the '.-01c5d8' era) stay out."""
+    if est is None:
+        return None
+    rows = []
+    for d in list((getattr(est, "docs", None) or {}).values()):
+        p = d.properties or {}
+        cmd = str(p.get("command") or "")
+        n = int(p.get("runs") or 0)
+        name = str(p.get("name") or "")
+        if not cmd or n < 1 or not name or _JUNK_NAME.match(name):
+            continue
+        rows.append((n, float(p.get("last_run_ts") or 0), name, command_params(cmd)))
+    if not rows:
+        return None
+    rows.sort(key=lambda r: (-r[0], -r[1]))
+    items = [f"{nm}{('{' + ','.join(ps) + '}') if ps else ''} x{n}" for n, _, nm, ps in rows[:k]]
+    return ("your commands (re-run by name: exec link commands=<name>, args for {params}): "
+            + ", ".join(items))
 
 
 def entity_link(srv, est, fld, mem, executor_spec: str,
-                commands, create: bool = True) -> dict:
+                commands, create: bool = True, args: dict | None = None) -> dict:
     """THE LINK HAND (the model's exec door, 2026-10-06): link command
     entities to the executor and RUN them inline -- the edge (a
     relations triple, rel='executes') IS THE QUEUE: live = owed,
@@ -1555,6 +1651,19 @@ def entity_link(srv, est, fld, mem, executor_spec: str,
                 (ent.properties or {})["command"] = cmdline
         else:
             ent = est._resolve_spec(spec)
+        reused = False
+        if ent is None and not label:
+            # RE-USE (2026-10-09): the same command line is the SAME entity
+            # (its runs and history kept) -- the fly-mint below used to
+            # rebuild it from scratch on every link; and a line identical to
+            # a labelled command re-runs that one
+            ent = (est.docs or {}).get(MEMBRANE_NS + overlay_key(E.canon("c", command_name(cmdline))))
+            if ent is None:
+                want = _norm_cmd(cmdline)
+                ent = next((d for d in (est.docs or {}).values()
+                            if _norm_cmd(str((d.properties or {}).get("command") or "")) == want),
+                           None)
+            reused = ent is not None
         created = False
         if ent is None:
             if not create:
@@ -1581,7 +1690,14 @@ def entity_link(srv, est, fld, mem, executor_spec: str,
             R.upsert(be, origin, ex_key, EXEC_REL, ent.eid, "model-link",
                      ts=time.time())
         linked.append({"eid": ent.eid, "created": created})
-        run = _exec_command_doc(srv, est, fld, mem, ent)
+        run = _exec_command_doc(srv, est, fld, mem, ent, args=args)
+        _p = ent.properties or {}
+        _p["runs"] = int(_p.get("runs") or 0) + 1
+        _p["last_run_ts"] = time.time()
+        ent.properties = _p
+        run.update({"name": _p.get("name") or ent.eid, "reused": reused or (not created and not label),
+                    "created": created, "labelled": bool(label), "run_n": _p["runs"],
+                    "params": command_params(str(_p.get("command") or ""))})
         # THE UNLINK-ON-DONE (the queue's honest close): processed --
         # success OR failure -- stamps the edge superseded WITH ITS
         # RECEIPT (the seat's symmetry rule: a cancellation as durable

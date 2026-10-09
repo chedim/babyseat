@@ -65,8 +65,9 @@ FAMILIES: dict[str, dict] = {
                        "returns rc + output; unlink drops a queued one. Pipelines: help('exec').",
         "actions": {"link": "entity_link", "unlink": "entity_unlink"},
         "params": {"commands": {"type": ["string", "array"], "description": "a command line (or a list; 'label :: cmd' names one)"},
+                   "args": {"type": "object", "description": "values for the command's {{name}} parameters"},
                    "executor": _S("optional executor entity"), "create": _B("create missing command entities")},
-        "map": {"link": lambda a: _pick(a, "commands", "executor", "create"),
+        "map": {"link": lambda a: _pick(a, "commands", "executor", "create", "args"),
                 "unlink": lambda a: _pick(a, "commands", "executor")},
     },
     "goal": {
@@ -136,7 +137,11 @@ HELP = {
         "{{parent.tail}}. A failed step halts the pipeline. THE EDGE IS THE QUEUE: a link stays owed "
         "until its run lands (success or failure); there is no auto-retry -- re-link to re-run. "
         "entity(action='read') on a command shows its last run (rc/head/tail); on the executor, "
-        "pending/done. Caps: 32 owed links, 12 steps a pass."),
+        "pending/done. Caps: 32 owed links, 12 steps a pass. REUSE: a command you keep is a "
+        "tool -- name it ('light-on :: curl ... {{entity}} ...'), give it {{name}} parameters, "
+        "re-run it with exec(action='link', commands='light-on', args={'entity': 'switch.x'}); "
+        "the same command line re-runs its existing entity. Your named commands ride your "
+        "context ('your commands: ...')."),
     "goals": (
         "goal(action='plant') makes a commitment; the watch loops take it up. A loop ends each pass "
         "with one line: DONE <receipt> / STEP <what moved> / BLOCKED <on whom, or 'on <entity>', or "

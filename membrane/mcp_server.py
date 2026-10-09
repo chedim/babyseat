@@ -1323,6 +1323,8 @@ def tool_entity_link(args: dict, port: int) -> str:
     """The executor's link hand: link + inline run, post-run state back."""
     body = {"commands": _link_commands(args),
             "executor": str(args.get("executor") or "")}
+    if isinstance(args.get("args"), dict):
+        body["args"] = args["args"]
     if args.get("create") is not None:
         body["create"] = bool(args.get("create"))
     out = _http(port, "POST", "/membrane/entity/link", body)
@@ -1332,8 +1334,18 @@ def tool_entity_link(args: dict, port: int) -> str:
              f"{len(out.get('linked') or [])} command(s), ran inline:"]
     for r in out.get("runs") or []:
         eid = str(r.get("eid") or "?")
+        # THE LIBRARY'S RECEIPT: which command ran, and how to reuse it
+        tag = ""
+        if r.get("name"):
+            p = r.get("params") or []
+            sig = r["name"] + (("{" + ",".join(p) + "}") if p else "")
+            if r.get("created") and not r.get("labelled"):
+                tag = (f" [new command '{sig}' -- reuse it by name: commands='{r['name']}'; "
+                       f"name it yourself with '<label> :: <command>']")
+            else:
+                tag = f" [re-ran '{sig}', run #{r.get('run_n')}]"
         if r.get("ok"):
-            lines.append(f"- {eid}: rc={r.get('rc')} {r.get('outcome')} "
+            lines.append(f"- {eid}{tag}: rc={r.get('rc')} {r.get('outcome')} "
                          f"({r.get('ms', 0)}ms) "
                          f"head: {str(r.get('head'))[:600]}")
         else:
