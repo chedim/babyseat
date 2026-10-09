@@ -64,7 +64,7 @@ LLM_WEIGHT = 0.5
 # hear meself and me is fine"): its own lines enter its word table at a
 # quarter of a teacher's word -- the teachers stay louder, a 👎 still
 # unlearns a bad line (and its own quarter with it)
-SELF_WEIGHT = 0.25
+SELF_WEIGHT = 0.1             # demoted 0.25 -> 0.1 (the operator, same day)
 MEANT_WEIGHT = 2.0
 RECENT_LINES = 8               # its own recent lines: openings and words not to reuse
 RECENT_START_PENALTY = 12.0
