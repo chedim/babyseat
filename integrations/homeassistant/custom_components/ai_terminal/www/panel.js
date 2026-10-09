@@ -248,6 +248,9 @@ function applyEvent(st, ev) {
     case "session.idle":
       st.status = { type: "idle" };
       return true;
+    case "membrane.auto":
+      st.auto = { on: !!props.on, rounds: props.rounds || 0 };
+      return true;
     case "membrane.voice": {
       // membrane's own voice: a line beside the user message it answers
       const line = props.line || {};
@@ -275,6 +278,12 @@ function loadRows(st, rows) {
   }
   sortRows(st);
   st.all = true;
+}
+
+/** The voice's line inside an auto-chat turn's framed text. */
+function voiceTurnText(text) {
+  const m = /\u00ab([\s\S]*?)\u00bb/.exec(text || "");
+  return m ? m[1] : String(text || "").replace(/^\[membrane voice\]\s*/, "");
 }
 
 /** The session's voice lines (GET /session/{sid}/voice), keyed by the
@@ -363,7 +372,7 @@ function modelField(pick, sessionModel, seatModel) {
 }
 
 const AiPanelLogic = { ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
-                       loadRows, loadVoice, voiceHtml, toolView, shouldStick, fmtElapsed, fmtUsage };
+                       loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
 // ------------------------------------------------------------ the element
@@ -432,6 +441,7 @@ const STYLE = `
   .vtext { font-style:italic; } .vbar { margin-top:4px; display:flex; gap:4px; }
   .vbtn { border:0; background:transparent; cursor:pointer; opacity:.45; font-size:14px; padding:0 4px; }
   .vbtn:hover, .vbtn.on { opacity:1; } .vre { font-size:12px; opacity:.7; margin-top:4px; }
+  .autobtn.spinning { animation:aspin 2.4s linear infinite; } @keyframes aspin { to { transform:rotate(360deg); } }
   .vedit { display:flex; gap:6px; margin-top:6px; } .vedit textarea { flex:1; font:inherit; border-radius:8px; padding:4px 8px; }
   .msg.ai.live { border-left-color:var(--primary-color,#3477d6); }
   .who { font-size:11px; opacity:.55; margin-bottom:2px; }
@@ -558,6 +568,7 @@ function definePanel() {
             <span class="pill state">…</span>
             <button class="btn icon voicebtn" title="membrane's own voice (show / hide)">🗣</button>
             <button class="btn icon llmbtn" title="the LLM (off: talk to membrane alone)">🤖</button>
+            <button class="btn icon autobtn" title="auto-chat: membrane and the LLM talk; you can join any time">⟳</button>
             <button class="btn icon mindsbtn" title="membrane's minds">🧠</button>
           </div>
           <div class="minds"></div>
@@ -606,6 +617,8 @@ function definePanel() {
         this._voiceBtn.style.opacity = this._voiceOn ? "1" : ".4";
         if (this._chat) { this._chat.all = true; this._schedule(); }
       });
+      this._autoBtn = $(".autobtn");
+      this._autoBtn.addEventListener("click", () => this._toggleAuto().catch(() => {}));
       this._llmBtn = $(".llmbtn");
       this._llmOn = true;                 // per page view
       this._llmBtn.addEventListener("click", () => {
@@ -892,14 +905,17 @@ function definePanel() {
     async _resync() {
       if (!this._chat) return;
       const sid = this._sid;
-      const [hist, st, vox] = await Promise.all([
+      const [hist, st, vox, auto] = await Promise.all([
         this._api(SERVE + "/session/" + sid + "/message"),
         this._api(SERVE + "/session/status"),
         this._api(SERVE + "/session/" + sid + "/voice").catch(() => ({ ok: false })),
+        this._api(SERVE + "/session/" + sid + "/auto").catch(() => ({ ok: false })),
       ]);
       if (sid !== this._sid) return;
       loadRows(this._chat, hist.ok && Array.isArray(hist.data) ? hist.data : []);
       loadVoice(this._chat, vox && vox.ok && Array.isArray(vox.data) ? vox.data : []);
+      this._chat.auto = auto && auto.ok && auto.data ? auto.data : { on: false };
+      this._paintAuto();
       if (st.ok && st.data && typeof st.data === "object") {
         this._statusBy = st.data;
         const mine = st.data[sid];
@@ -996,6 +1012,7 @@ function definePanel() {
       if (this._chat && applyEvent(this._chat, ev)) {
         this._schedule();
         this._paintStatus();
+        if (ev.type === "membrane.auto") this._paintAuto();
       }
     }
 
@@ -1160,6 +1177,13 @@ function definePanel() {
       if (info.role === "user") {
         const text = row.parts.filter((p) => p.type === "text" && !p.synthetic).map((p) => p.text || "").join("\n");
         const line = this._voiceOn && this._chat && (this._chat.voice || {})[info.id];
+        if (info.voiceTurn) {
+          // auto-chat: the voice's own turn -- drawn as the voice, not as you
+          el.className = "msg";
+          el.innerHTML = line ? voiceHtml(line, this._expanded.has("vox:" + line.id))
+                              : '<div class="vox"><div class="vwho">membrane</div><div class="vtext">' + escText(voiceTurnText(text)) + "</div></div>";
+          return el;
+        }
         if (!line) {
           el.className = "msg user";
           el.innerHTML = '<div class="bub md">' + md(stripSpeaker(text)) + "</div>";
@@ -1219,6 +1243,22 @@ function definePanel() {
         (v.ms != null ? '<span class="ms">' + fmtElapsed(v.ms) + "</span>" : "") + '</summary><div class="io">' +
         (v.input ? '<div class="lbl">input</div><pre>' + escText(v.input) + "</pre>" : "") +
         (out ? '<div class="lbl">output</div><pre>' + escText(out) + "</pre>" + more : "") + "</div></details>";
+    }
+
+    async _toggleAuto() {
+      if (!this._sid || !this._chat) return;
+      const on = !(this._chat.auto && this._chat.auto.on);
+      const r = await this._api(SERVE + "/session/" + this._sid + "/auto", { method: "POST", body: JSON.stringify({ on }) });
+      if (r.ok && r.data) { this._chat.auto = r.data; this._paintAuto(); }
+    }
+
+    _paintAuto() {
+      const a = (this._chat && this._chat.auto) || { on: false };
+      if (!this._autoBtn) return;
+      this._autoBtn.style.opacity = a.on ? "1" : ".4";
+      this._autoBtn.classList.toggle("spinning", !!a.on);
+      this._autoBtn.title = a.on ? "auto-chat ON (round " + (a.rounds || 0) + ") -- click or Stop to end"
+                                 : "auto-chat: membrane and the LLM talk; you can join any time";
     }
 
     async _voiceTeach(vid, body) {

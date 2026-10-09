@@ -927,6 +927,12 @@ class TurnRunner:
         self._aborting = getattr(self, "_aborting", None) or set()
         self._turn_activity = getattr(self, "_turn_activity", {}) or {}
         self._aborting.add(sid)
+        try:                                     # Stop ends auto-chat too
+            from . import voice as _voice
+            if _voice.auto_on(self, sid):
+                _voice.auto_set(self, sid, False)
+        except Exception:
+            pass
         if sid in (getattr(self, "_busy", None) or {}):
             self._kill_turn_socket(sid)
             return
@@ -1517,8 +1523,9 @@ class TurnRunner:
         # in its own thread, outside the session's messages
         try:
             from . import voice as _voice
-            _voice.on_turn_start(self, sid, text, str(user_info.get("id") or ""),
-                                 _lane_of((self._agents or {}).get(sid)))
+            if not user_info.get("voiceTurn"):       # the voice just spoke: it IS this turn
+                _voice.on_turn_start(self, sid, text, str(user_info.get("id") or ""),
+                                     _lane_of((self._agents or {}).get(sid)))
         except Exception:
             pass
         # MEMBRANE ONLY (the chat's LLM switch off): the voice answers, the
@@ -1974,7 +1981,8 @@ class TurnRunner:
             _voice.on_turn_end(self, sid, text,
                                "\n".join(p.get("text") or "" for p in parts
                                          if isinstance(p, dict) and p.get("type") == "text"),
-                               _lane_of((self._agents or {}).get(sid)))
+                               _lane_of((self._agents or {}).get(sid)),
+                               voice_turn=bool((user_info or {}).get("voiceTurn")))
         except Exception:
             pass
         return {"info": a_info, "parts": parts}
@@ -2262,6 +2270,9 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 if segments_len(segs) == 2:
                     if segs[1] in ("todo", "children"):
                         return self._json_out([])
+                    if segs[1] == "auto":
+                        from . import voice as _voice
+                        return self._json_out(_voice.auto_state(runner, sid) if runner else {"on": False})
                     if segs[1] == "voice":
                         # membrane's own voice: this session's lines
                         from . import voice as _voice
@@ -2476,6 +2487,13 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 sid = segs[0]
                 if segments_len(segs) == 2:
                     action = segs[1]
+                    if action == "auto":
+                        # auto-chat: {on: bool} -- the voice and the model talk
+                        from . import voice as _voice
+                        if runner is None or sessions.get(sid) is None:
+                            return self._notfound()
+                        b = self._read_body()
+                        return self._json_out(_voice.auto_set(runner, sid, bool(b.get("on"))))
                     if action == "voice":
                         # the teaching: {id, vote: up|down, rewrite}
                         from . import voice as _voice

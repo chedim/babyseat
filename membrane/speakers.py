@@ -27,6 +27,8 @@ SPEAKER_PREFIX = "[HA user: "
 # capture collapses whitespace: the line may run straight into the message
 _LINE = re.compile(r"^\s*\[HA user: ([^\]\n]{1,80})\][ \t]*\n?")
 SEAT = ("seat:self", "seat")
+VOICE = ("seat:voice", "voice")
+VOICE_PREFIX = "[membrane voice] "         # voice.py's auto-chat turns
 OPERATOR = ("person:operator", "operator")
 
 
@@ -52,6 +54,8 @@ def speaker_of(ev: dict) -> tuple[str, str] | None:
     if role in ("model", "reasoning"):
         return SEAT
     if role == "user":
+        if (ev.get("text") or "").startswith(VOICE_PREFIX):
+            return VOICE
         name, _ = split_speaker(ev.get("text") or "")
         return (f"person:{slug(name)}", name) if name else OPERATOR
     return None
@@ -61,5 +65,7 @@ def prose_of(ev: dict) -> str:
     """The text a discourse event contributes to the field's geometry."""
     t = ev.get("text") or ""
     if ev.get("stream") == "discourse" and (ev.get("role") or "") == "user":
+        if t.startswith(VOICE_PREFIX):
+            return ""          # the voice's babble never enters the field's memory
         return split_speaker(t)[1]
     return t

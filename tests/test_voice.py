@@ -289,3 +289,56 @@ class TestMembraneOnly(unittest.TestCase):
         self.assertEqual(lad.n, 1)
         sent = [m["content"] for m in lad.last["messages"] if m["role"] == "user"]
         self.assertNotIn("is the anchor holding?", " ".join(sent))   # not the model's history
+
+
+class TestAutoChat(unittest.TestCase):
+    def _runner(self):
+        d = tempfile.mkdtemp()
+        srv = _Srv()
+        srv._models_path = str(Path(d) / "models.json")
+        srv.membrane = type("M", (), {"embedder": FakeEmbedder()})()
+        lad = _CountingLadder()
+        r = S.TurnRunner(S.SSEHub(), S.SessionStore(), S.MessageStore(), lad,
+                         lambda n, a, c: "ok", system="", model="m")
+        r.srv = srv
+        V.of(srv).bootstrap(CORPUS * 3)
+        return r, srv, lad
+
+    def setUp(self):
+        self._pause = V.AUTO_PAUSE_S
+        V.AUTO_PAUSE_S = 0.02
+
+    def tearDown(self):
+        V.AUTO_PAUSE_S = self._pause
+
+    def test_they_loop_until_stopped_and_the_voice_never_hears_itself(self):
+        r, srv, lad = self._runner()
+        sid = r.sessions.create(title="t")["id"]
+        V.auto_set(r, sid, True)
+        end = time.time() + 15
+        while time.time() < end and lad.n < 3:
+            time.sleep(0.05)
+        self.assertGreaterEqual(lad.n, 3)                              # rounds go on by themselves
+        r.abort(sid)                                                    # Stop ends it
+        self.assertFalse(V.auto_state(r, sid)["on"])
+        time.sleep(0.5)
+        n = lad.n
+        time.sleep(0.5)
+        self.assertLessEqual(lad.n, n + 1)                              # at most the round in flight
+        rows = r.messages.list(sid)
+        vt = [m for m in rows if (m.get("info") or {}).get("voiceTurn")]
+        self.assertTrue(vt)
+        self.assertTrue(all(p["text"].startswith(V.VOICE_PREFIX) for m in vt for p in m["parts"]))
+        heard = V.WordTable()
+        for t in CORPUS * 3:
+            heard.observe(t)
+        for _ in range(lad.n):
+            heard.observe("The battery is at ninety percent.")
+        v = V.of(srv)
+        self.assertEqual(set(v.table.uni), set(heard.uni))              # only the teachers' words
+
+    def test_a_voice_turn_brings_no_prose_to_the_field(self):
+        from membrane import speakers as SP
+        ev = {"stream": "discourse", "role": "user", "text": V.frame("battery charge fine")}
+        self.assertEqual(SP.prose_of(ev), "")
+        self.assertEqual(SP.speaker_of(ev), SP.VOICE)

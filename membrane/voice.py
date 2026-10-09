@@ -509,7 +509,8 @@ def history_texts(runner):
             continue
         for r in rows or []:
             for p in r.get("parts") or []:
-                if p.get("type") == "text" and not p.get("synthetic") and p.get("text"):
+                if p.get("type") == "text" and not p.get("synthetic") and p.get("text") \
+                        and not p["text"].startswith("[membrane voice] "):     # never itself
                     yield p["text"]
 
 
@@ -580,9 +581,12 @@ def on_turn_start(runner, sid: str, text: str, mid: str, lane: str) -> None:
     th.start()
 
 
-def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str) -> None:
+def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
+                voice_turn: bool = False) -> None:
     """The teachers speak: the operator's message and the LLM's reply are
-    heard; the line it said this turn is graded against the reply."""
+    heard; the line it said this turn is graded against the reply. A voice
+    turn's 'user' text is the voice itself: never heard (it never hears
+    itself). In auto-chat the voice then answers the reply."""
     srv = getattr(runner, "srv", None)
     if lane not in _CHAT_LANES:
         return
@@ -596,7 +600,8 @@ def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str) -> None
         try:
             if th is not None:
                 th.join(60)              # its line first, then the grade
-            v.hear(user_text)
+            if not voice_turn:
+                v.hear(user_text)
             v.hear(reply)
             lid = (getattr(runner, "_voice_last", {}) or {}).pop(sid, None)
             if lid:
@@ -606,5 +611,110 @@ def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str) -> None
                                         "line": dict(v.lines.get(lid) or {})})
         except Exception as e:
             print(f"[voice] hear failed: {e!r}", file=sys.stderr)
+        if auto_on(runner, sid):
+            auto_next(runner, sid, reply)
 
     threading.Thread(target=go, daemon=True, name="voice-hear").start()
+
+
+# ---- AUTO-CHAT (2026-10-09, the operator: "the LLM talks to membrane and my
+# input is optional ... they loop onto each other, my messages injected as
+# they arrive"). The voice speaks, its line goes to the model as a framed
+# turn, the model's reply is the next lesson and the voice answers it.
+# The operator's choices: the chat's full hands, no round cap (Stop or the
+# button ends it). In memory only: a restart ends auto mode.
+VOICE_PREFIX = "[membrane voice] "
+AUTO_PAUSE_S = 3.0
+
+
+def frame(line: str) -> str:
+    return (VOICE_PREFIX + "membrane's own voice (the field learning to speak -- "
+            "not the operator) said: \u00ab" + line + "\u00bb\n"
+            "Answer it, and say in one sentence what it was trying to say.")
+
+
+def auto_on(runner, sid: str) -> bool:
+    return sid in (getattr(runner, "_auto", None) or {})
+
+
+def auto_state(runner, sid: str) -> dict:
+    a = (getattr(runner, "_auto", None) or {}).get(sid)
+    return {"on": a is not None, "rounds": (a or {}).get("rounds", 0)}
+
+
+def _publish_auto(runner, sid: str) -> None:
+    runner.hub.publish({"type": "membrane.auto", "sessionID": sid, **auto_state(runner, sid)})
+
+
+def auto_set(runner, sid: str, on: bool) -> dict:
+    runner._auto = getattr(runner, "_auto", None) or {}
+    if not on:
+        runner._auto.pop(sid, None)
+        _publish_auto(runner, sid)
+        return auto_state(runner, sid)
+    if sid not in runner._auto:
+        runner._auto[sid] = {"rounds": 0, "since": time.time()}
+        _publish_auto(runner, sid)
+        if sid not in (getattr(runner, "_busy", None) or {}):
+            last = ""
+            try:
+                for r in reversed(runner.messages.list(sid) or []):
+                    if (r.get("info") or {}).get("role") == "assistant":
+                        last = "\n".join(p.get("text") or "" for p in r.get("parts") or []
+                                         if p.get("type") == "text")
+                        if last.strip():
+                            break
+            except Exception:
+                pass
+            auto_next(runner, sid, last)
+    return auto_state(runner, sid)
+
+
+def auto_next(runner, sid: str, reply: str) -> None:
+    """One round: the voice answers the reply, its line becomes the next
+    turn (after a short pause -- an operator message waiting goes first:
+    its turn ends and calls this again)."""
+    srv = getattr(runner, "srv", None)
+    v = of(srv)
+    if v is None:
+        return
+
+    def go():
+        time.sleep(AUTO_PAUSE_S)
+        if not auto_on(runner, sid):
+            return
+        try:
+            if sid in (getattr(runner, "_busy", None) or {}) or runner._queued_depth(sid):
+                return
+        except Exception:
+            pass
+        try:
+            from .server import _gen_id
+            from .lanes import _efield_of
+            from . import massage
+            fld = _efield_of(srv)
+            src = clean(reply) or reply or "hello"
+            qv = np.asarray(v.embedder.embed([src[:4000]])[0], dtype=float)
+            mid = _gen_id("msg")
+            rec = v.speak(aim(qv, massage.field_now(fld) if fld is not None else None),
+                          message=src, sid=sid, mid=mid)
+            if rec is None or not auto_on(runner, sid):
+                return
+            runner._voice_last = getattr(runner, "_voice_last", {})
+            runner._voice_last[sid] = rec["id"]
+            runner.hub.publish({"type": "membrane.voice", "sessionID": sid, "line": dict(rec)})
+            now = int(time.time() * 1000)
+            agent = str((runner.sessions.get(sid) or {}).get("agent") or "build")
+            text = frame(rec["text"])
+            info = {"id": mid, "sessionID": sid, "role": "user", "agent": agent,
+                    "voiceTurn": True, "time": {"created": now}}
+            parts = [{"id": _gen_id("prt"), "sessionID": sid, "messageID": mid,
+                      "type": "text", "text": text, "time": {"start": now}}]
+            runner.messages.append(sid, info, parts)
+            runner._auto[sid]["rounds"] = runner._auto[sid].get("rounds", 0) + 1
+            _publish_auto(runner, sid)
+            runner.run(sid, text, user_info=info, user_parts=parts)
+        except Exception as e:
+            print(f"[voice] auto round failed: {e!r}", file=sys.stderr)
+
+    threading.Thread(target=go, daemon=True, name="voice-auto").start()
