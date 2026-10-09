@@ -11,7 +11,7 @@ class TestFieldPaths(unittest.TestCase):
     def test_field_reads_allowed(self):
         for p in ("membrane/state", "membrane/map/field", "membrane/field/entity",
                   "membrane/map/distance",
-                  "membrane/map/field3d", "membrane/map/tile", "membrane/map/locate",
+                  "membrane/map/field3d", "membrane/map/tile", "membrane/map/locate", "v1/models",
                   "membrane/entity/read", "membrane/entity-related"):
             self.assertTrue(allowed_path(p), p)
             self.assertTrue(read_only_path(p), p)

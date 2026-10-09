@@ -60,7 +60,7 @@ ALLOWED_EXACT = ("global/health", "agent", "event")
 READ_ONLY_EXACT = ("membrane/state", "membrane/map/field",
                    "membrane/field/entity", "membrane/map/distance",
                    "membrane/map/field3d", "membrane/map/tile",
-                   "membrane/map/locate",
+                   "membrane/map/locate", "v1/models",
                    "membrane/entity/read", "membrane/entity-related")
 EVENT_HELLO = "server.connected"
 

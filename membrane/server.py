@@ -1930,7 +1930,7 @@ SEAT_READ_PATHS = ("/membrane/state", "/membrane/map/cloud",
                    "/membrane/map/axis", "/membrane/map/field",
                    "/membrane/field/entity", "/membrane/map/distance",
                    "/membrane/map/field3d", "/membrane/map/tile",
-                   "/membrane/map/locate",
+                   "/membrane/map/locate", "/v1/models",
                    "/membrane/entity/read",
                    "/membrane/entity-related")
 

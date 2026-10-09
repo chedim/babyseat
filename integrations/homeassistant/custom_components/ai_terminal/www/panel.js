@@ -309,7 +309,24 @@ function fmtUsage(info) {
   return out.join(" · ");
 }
 
-const AiPanelLogic = { md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
+/** The models membrane sees on Ollama (the /v1/models rows it owns as
+ * 'membrane->ollama'), in its own order; the router's catalogue stays out. */
+function ollamaModels(rows) {
+  // ('@explore' rides the same owner: membrane's lane sentinel, not a model)
+  return (rows || []).filter((r) => r && r.owned_by === "membrane->ollama" && r.id && !String(r.id).startsWith("@"))
+    .map((r) => String(r.id));
+}
+
+/** The message body's model: a pick rides as {providerID, modelID}; no pick
+ * (the seat's default) sends nothing -- unless the session holds another
+ * pick, which the seat's own model then replaces. */
+function modelField(pick, sessionModel, seatModel) {
+  if (pick) return { providerID: "membrane", modelID: pick };
+  if (sessionModel && seatModel && sessionModel !== seatModel) return { providerID: "membrane", modelID: seatModel };
+  return null;
+}
+
+const AiPanelLogic = { ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
                        loadRows, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
@@ -492,6 +509,7 @@ function definePanel() {
             <button class="btn icon sidetoggle" title="Chats">☷</button>
             <span class="title" title="Double-click to rename"></span>
             <select class="agent" title="Agent (/build, /plan)"></select>
+            <select class="modelpick" title="Model (what membrane sees on Ollama)"><option value="">model…</option></select>
             <span class="pill state">…</span>
             <button class="btn icon mindsbtn" title="membrane's minds">🧠</button>
           </div>
@@ -535,6 +553,8 @@ function definePanel() {
       $(".mindsbtn").addEventListener("click", () => this._toggleMinds());
       this._titleEl.addEventListener("dblclick", () => this._rename());
       this._agentSel.addEventListener("change", () => { this._agent = this._agentSel.value; });
+      this._modelSel = this.shadowRoot.querySelector(".modelpick");
+      this._modelSel.addEventListener("change", () => { this._pick = this._modelSel.value || ""; });
       this._sendBtn.addEventListener("click", () => this._submit());
       this._stopBtn.addEventListener("click", () => this._abort());
       this._jump.addEventListener("click", () => { this._stick = true; this._toBottom(); });
@@ -654,6 +674,37 @@ function definePanel() {
         const m = r.ok && r.data && (r.data.model || (r.data.agent && r.data.agent.build && r.data.agent.build.model));
         if (m) { this._model = String(m); this._foot.textContent = this._model + " · " + this._foot.textContent; }
       } catch (e) { /* cosmetic */ }
+      // THE MODEL PICKER (2026-10-08): what membrane sees on Ollama
+      try {
+        const r = await this._api(SERVE + "/v1/models");
+        this._models = ollamaModels(r.ok && r.data ? r.data.data : []);
+      } catch (e) { this._models = []; }
+      this._paintModels();
+    }
+
+    _seatModel() { return String(this._model || "").replace(/^membrane\//, ""); }
+
+    _paintModels() {
+      if (!this._modelSel) return;
+      const seat = this._seatModel();
+      const opts = ['<option value="">' + escText(seat ? seat + " (seat default)" : "seat default") + "</option>"]
+        .concat((this._models || []).filter((m) => m !== seat).map((m) =>
+          '<option value="' + escAttr(m) + '">' + escText(m) + (/:cloud$|-cloud$/.test(m) ? " ☁" : "") + "</option>"));
+      this._modelSel.innerHTML = opts.join("");
+      const cur = this._pick || (this._sessionModel && this._sessionModel !== seat ? this._sessionModel : "");
+      if (cur && !(this._models || []).includes(cur)) {
+        this._modelSel.insertAdjacentHTML("beforeend", '<option value="' + escAttr(cur) + '">' + escText(cur) + " (session)</option>");
+      }
+      this._modelSel.value = cur;
+    }
+
+    async _loadSessionModel(sid) {
+      try {
+        const r = await this._api(SERVE + "/session/" + sid);
+        const m = r.ok && r.data && r.data.model;
+        this._sessionModel = m ? String(m.id || m.modelID || "") : "";
+      } catch (e) { this._sessionModel = ""; }
+      if (sid === this._sid) { this._pick = ""; this._paintModels(); }
     }
 
     _toggleMinds() {
@@ -726,6 +777,7 @@ function definePanel() {
     async _open(sid) {
       this._stopPoll();
       this._sid = sid;
+      this._loadSessionModel(sid);
       this._chat = chatState(sid);
       this._rowEls = null;
       this._stick = true;
@@ -881,7 +933,9 @@ function definePanel() {
       }
       try {
         const r = await this._api(SERVE + "/session/" + this._sid + "/prompt_async", {
-          method: "POST", body: JSON.stringify({ agent: this._agent, parts: [{ type: "text", text }] }),
+          method: "POST", body: JSON.stringify(Object.assign({ agent: this._agent, parts: [{ type: "text", text }] },
+            (() => { const mf = modelField(this._pick, this._sessionModel, this._seatModel());
+                     if (mf) this._sessionModel = mf.modelID; return mf ? { model: mf } : {}; })())),
         });
         if (!r.ok) throw new Error(this._apiErr("send failed", r));
       } catch (e) {

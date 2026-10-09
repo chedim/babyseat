@@ -139,3 +139,19 @@ test("elapsed + usage formatting", () => {
                "in 1.2k · out 56 · 3.5s");
   assert.equal(L.fmtUsage({}), "");
 });
+
+test("the model picker lists what membrane sees on Ollama, nothing else", () => {
+  const rows = [{ id: "qwen3:8b", owned_by: "membrane->ollama" }, { id: "glm-5.3-flash:cloud", owned_by: "membrane->ollama" },
+                { id: "autoselect", owned_by: "membrane-router" }, { id: "openai/gpt-5", owned_by: "membrane->openrouter" },
+                { id: "@explore", owned_by: "membrane->ollama" }];
+  assert.deepEqual(JSON.parse(JSON.stringify(L.ollamaModels(rows))), ["qwen3:8b", "glm-5.3-flash:cloud"]);
+  assert.deepEqual(JSON.parse(JSON.stringify(L.ollamaModels(null))), []);
+});
+
+test("a pick rides the message; back to the seat default undoes a session pick", () => {
+  const j = (x) => JSON.parse(JSON.stringify(x));
+  assert.deepEqual(j(L.modelField("qwen3:8b", "", "glm-5.3-flash:cloud")), { providerID: "membrane", modelID: "qwen3:8b" });
+  assert.equal(L.modelField("", "", "glm-5.3-flash:cloud"), null);
+  assert.equal(L.modelField("", "glm-5.3-flash:cloud", "glm-5.3-flash:cloud"), null);
+  assert.deepEqual(j(L.modelField("", "qwen3:8b", "glm-5.3-flash:cloud")), { providerID: "membrane", modelID: "glm-5.3-flash:cloud" });
+});
