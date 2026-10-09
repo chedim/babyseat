@@ -18,8 +18,8 @@ child's is: by hearing words spoken while a concept state is active.
              the strongest lesson
 
 THE COVENANTS:
-  - it never hears itself: its own lines feed the table only through the
-    operator's 👍 (the operator's words, then)
+  - it hears itself QUIETLY: its own lines feed the table at SELF_WEIGHT
+    (a quarter of a teacher's word; until 2026-10-09 not at all)
   - it never enters the field: its lines live in the voice ledger only --
     not in the session's messages, the LLM's history or the recall
   - it has no hands: no tools, no goals, nothing it says actuates
@@ -60,6 +60,11 @@ REWRITE_WEIGHT = 5.0
 # "It meant:" sentence in auto-chat 2 (a short rewrite-shaped lesson),
 # the operator's rewrites 5
 LLM_WEIGHT = 0.5
+# IT HEARS ITSELF (2026-10-09, the operator: "lets let it hear itself, I can
+# hear meself and me is fine"): its own lines enter its word table at a
+# quarter of a teacher's word -- the teachers stay louder, a 👎 still
+# unlearns a bad line (and its own quarter with it)
+SELF_WEIGHT = 0.25
 MEANT_WEIGHT = 2.0
 RECENT_LINES = 8               # its own recent lines: openings and words not to reuse
 RECENT_START_PENALTY = 12.0
@@ -457,6 +462,7 @@ class Voice:
                "text": out["text"], "alignment": out["alignment"],
                "time": int(time.time() * 1000)}
         self._ledger(rec)
+        self.hear(out["text"], SELF_WEIGHT)               # it hears itself, quietly
         return rec
 
     # ---- grading -----------------------------------------------------------

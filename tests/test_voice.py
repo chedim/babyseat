@@ -174,7 +174,12 @@ class TestTheTurn(unittest.TestCase):
         for t in CORPUS * 3 + ["how is the battery?"]:
             heard.observe(t)
         heard.observe("The battery is at ninety percent.", V.LLM_WEIGHT)   # the model counts half
-        self.assertEqual(V.of(srv).table.uni, heard.uni)   # the teachers' words, nothing else
+        for ln in V.of(srv).lines.values():                  # ...and its own line, a quarter
+            heard.observe(ln["text"], V.SELF_WEIGHT)
+        got = V.of(srv).table.uni
+        self.assertEqual(set(got), set(heard.uni))
+        for w in heard.uni:
+            self.assertAlmostEqual(got[w], heard.uni[w])
 
 if __name__ == "__main__":
     unittest.main()
@@ -336,7 +341,9 @@ class TestAutoChat(unittest.TestCase):
         for _ in range(lad.n):
             heard.observe("The battery is at ninety percent.")
         v = V.of(srv)
-        self.assertEqual(set(v.table.uni), set(heard.uni))              # only the teachers' words
+        for ln in v.lines.values():
+            heard.observe(ln["text"], V.SELF_WEIGHT)
+        self.assertEqual(set(v.table.uni), set(heard.uni))              # teachers + itself, quietly
 
     def test_a_voice_turn_brings_no_prose_to_the_field(self):
         from membrane import speakers as SP
@@ -408,3 +415,19 @@ class TestHearingItself(unittest.TestCase):
         before = dict(v.table.uni)
         v.learn_gap("s1", "zzqx unheard words", "the battery charge is fine")
         self.assertEqual(v.table.uni, before)                           # the gap steers, it never hears
+
+
+class TestItHearsItself(unittest.TestCase):
+    def test_its_line_counts_a_quarter_and_a_down_vote_takes_it_back(self):
+        v = _voice()
+        before = {k: dict(d) for k, d in v.table.t.items()}
+        rec = v.speak(FakeEmbedder().embed(["battery charge"])[0])
+        quarter = V.WordTable()
+        quarter.observe(rec["text"], V.SELF_WEIGHT)
+        for k, d in quarter.t.items():
+            for w, c in d.items():
+                self.assertAlmostEqual(v.table.t[k][w] - before.get(k, {}).get(w, 0), c)
+        k0, w0 = next((k, w) for k, d in quarter.t.items() for w in d)
+        after_speak = v.table.t[k0][w0]
+        v.feedback(rec["id"], vote="down")
+        self.assertLess(v.table.t[k0][w0], after_speak)                  # the down vote takes it back
