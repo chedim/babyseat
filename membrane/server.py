@@ -1502,6 +1502,15 @@ class TurnRunner:
         # MEMBRANE ONLY (the chat's LLM switch off): the voice answers, the
         # model is never called; the voice still hears the operator
         if user_info.get("membraneOnly"):
+            # the field hears the operator either way (the replay path's
+            # precedent: the message alone, no model prose -- and never
+            # the voice's own line)
+            try:
+                _cap = getattr(getattr(self, "srv", None), "capturer", None)
+                if _cap is not None:
+                    _cap.on_turn(text)
+            except Exception:
+                pass
             try:
                 from . import voice as _voice
                 _voice.on_turn_end(self, sid, text, "",

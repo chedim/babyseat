@@ -264,6 +264,8 @@ class TestMembraneOnly(unittest.TestCase):
         lad = _CountingLadder()
         r = S.TurnRunner(S.SSEHub(), S.SessionStore(), S.MessageStore(), lad,
                          lambda n, a, c: "ok", system="", model="m")
+        heard = []
+        srv.capturer = type("C", (), {"on_turn": lambda self, q, *a, **k: heard.append(q)})()
         r.srv = srv
         V.of(srv).bootstrap(CORPUS * 3)
         q = r.hub.subscribe()
@@ -279,6 +281,7 @@ class TestMembraneOnly(unittest.TestCase):
                     lines.append(e)
             time.sleep(0.05)
         self.assertTrue(lines)                                       # the voice answered
+        self.assertEqual(heard, ["is the anchor holding?"])          # the field heard the operator
         self.messages_ok = True
         r.messages.append(sid, {"id": "msg_u1", "role": "user", "membraneOnly": True},
                           [{"id": "p1", "type": "text", "text": "is the anchor holding?"}])
