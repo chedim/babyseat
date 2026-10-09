@@ -133,7 +133,10 @@ HELP = {
         "not 'source') and returns rc + output; the command becomes an entity (stable name; "
         "'label :: cmd' names it). COMPOSITION IS INHERITANCE: entity(action='inherit', "
         "spec=cmd, parents=[...]) makes the parents run first; their output feeds {{parent.head}} / "
-        "{{parent.tail}}. A failed step halts the pipeline. Re-link to re-run."),
+        "{{parent.tail}}. A failed step halts the pipeline. THE EDGE IS THE QUEUE: a link stays owed "
+        "until its run lands (success or failure); there is no auto-retry -- re-link to re-run. "
+        "entity(action='read') on a command shows its last run (rc/head/tail); on the executor, "
+        "pending/done. Caps: 32 owed links, 12 steps a pass."),
     "goals": (
         "goal(action='plant') makes a commitment; the watch loops take it up. A loop ends each pass "
         "with one line: DONE <receipt> / STEP <what moved> / BLOCKED <on whom, or 'on <entity>', or "
