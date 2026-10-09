@@ -16,7 +16,7 @@ import re
 import time
 
 MIN_MEMBERS = 3
-MAX_LINK = 64
+MAX_LINK = 150                 # the live seat's 'ha switch' family alone is 87
 PROPOSALS_SHOWN = 3
 _CACHE_S = 300.0
 # the bookkeeping kinds: not things in the world, never a class
@@ -39,7 +39,7 @@ def family_key(eid: str) -> str | None:
         return None
     i = max(s.rfind(":"), s.rfind("."))
     stem = s[:i]
-    return stem if stem and len(s) - i > 2 else None
+    return stem if stem and len(stem) >= 3 and len(s) - i > 2 else None
 
 
 def label_of(stem: str) -> str:
@@ -72,7 +72,7 @@ def proposals(est) -> list[dict]:
             continue                      # already classified
         out.append({"stem": stem, "label": label_of(stem), "n": len(members),
                     "pattern": stem + "*",
-                    "examples": [short_name(m.eid) for m in members[:3]]})
+                    "examples": list(dict.fromkeys(short_name(m.eid) for m in members))[:3]})
     out.sort(key=lambda p: -p["n"])
     return out
 

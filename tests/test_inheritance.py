@@ -102,6 +102,7 @@ class TestClassInduction(unittest.TestCase):
         self.assertEqual(C.short_name("membrane::Component:ha:light.port_strip"), "ha:light.port_strip")
         self.assertEqual(C.family_key("membrane::Component:ha:light.port_strip"), "ha:light")
         self.assertIsNone(C.family_key("membrane::shell:curl-a"))           # bookkeeping kinds: never
+        self.assertIsNone(C.family_key("membrane::c:agdroid"))               # a 1-letter stem says nothing
         ps = {p["stem"]: p for p in C.proposals(self._store())}
         self.assertEqual(ps["ha:light"]["n"], 3)
         self.assertEqual(ps["argus:organs"]["label"], "argus organs")

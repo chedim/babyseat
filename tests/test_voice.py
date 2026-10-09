@@ -11,6 +11,7 @@ import os
 import sys
 import tempfile
 import time
+import zlib
 import unittest
 from pathlib import Path
 
@@ -39,7 +40,7 @@ class FakeEmbedder:
                 lw = w.lower()
                 if lw in TOPICS:
                     v[TOPICS[lw]] += 3.0
-                rng = np.random.default_rng(abs(hash(lw)) % (2**32))
+                rng = np.random.default_rng(zlib.crc32(lw.encode()))   # stable across runs (hash() is seeded per process)
                 v[2:] += 0.05 * rng.standard_normal(1022)
             out.append(v)
         return np.array(out)
