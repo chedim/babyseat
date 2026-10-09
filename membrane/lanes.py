@@ -995,7 +995,24 @@ def _digest_lines(srv, drain: bool = True) -> list[str]:
     return [head] + [f"  {r}" for r in rows]
 
 
-def _where_we_are(srv, vec, drain: bool = True) -> str | None:
+def _injection_mode(srv) -> str:
+    """'massage' (the field's words, picked) or 'banner' (the old state block)."""
+    # the BANNER stays the default until the massage is proven on the live
+    # field (it picked nothing there and left the seat without context)
+    m = getattr(srv, "injection_mode", None) or os.environ.get("MEMBRANE_INJECTION", "banner")
+    return "massage" if str(m).strip().lower() == "massage" else "banner"
+
+
+def _note_massage(srv, stats: dict) -> None:
+    """The ruler's running record: alignment + tokens, last 50 turns."""
+    hist = getattr(srv, "_massage_hist", None)
+    if hist is None:
+        hist = srv._massage_hist = []
+    hist.append({"alignment": stats.get("alignment", 0.0), "tokens": stats.get("tokens", 0)})
+    del hist[:-50]
+
+
+def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> str | None:
     """THE 'I' TRACK -- the model's position, not its persona.
 
     One compact header computed per turn (zero model calls): what we're
@@ -1057,7 +1074,9 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
                         lines.append(ln)
                         speak(srv, ln, kind="note")
                 from .entity_block import now_line, track_line
-                for t in est.list_tracks():
+                # THE MASSAGE MODE: the events stay (they happened); the
+                # track stories are state, and the massage replaces state
+                for t in ([] if events_only else est.list_tracks()):
                     if t["key"] == "session:now":
                         ln = now_line(fld, getattr(srv, "_efield_boot_seq", 0))
                         if ln:
@@ -1084,7 +1103,7 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
     #    branches under the true timeline, as tracks -- the model sees what
     #    futures are open from the present (suggestions, never lived).
     est = getattr(srv, "entity_store", None)
-    if est is not None:
+    if est is not None and not events_only:
         try:
             tls = est.open_timelines(limit=3)
             if tls:
@@ -1102,7 +1121,7 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
     # 4.5. THE LOOPS LINE (the reactive layer's ambient load): the
     # thinking loops' running + queued counts + their agent titles.
     try:
-        _loops_line = loops_banner_line(srv)
+        _loops_line = None if events_only else loops_banner_line(srv)
         if _loops_line:
             lines.append(_loops_line)
     except Exception:
@@ -1116,7 +1135,7 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
     try:
         _fr = getattr(srv, "_frame", None)
         from .frame import Frame as _Frame
-        _fl = _fr.line() if isinstance(_fr, _Frame) else ""
+        _fl = _fr.line() if (isinstance(_fr, _Frame) and not events_only) else ""
         if _fl:
             lines.append(_fl)
     except Exception:
@@ -4837,10 +4856,33 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # removes the banner from the injection entirely (recall stays --
         # it is content). The ruler's third arm; the flag exists so the
         # measurement can actually run.
+        # THE MASSAGE (2026-10-08, the operator's design): the injection is
+        # the field's own sentences picked to align the input with where
+        # the field is -- not its state verbatim. Only the EVENTS keep the
+        # banner (pause, alerts, announcements, the digest, peers).
+        # MEMBRANE_INJECTION=banner restores the old block (the A/B arm).
+        _massage = _injection_mode(srv) == "massage"
         banner_block = (None if getattr(srv, "no_banner", False)
-                        else _where_delta(srv, _where_we_are(srv, vec)))
+                        else _where_delta(srv, _where_we_are(srv, vec, events_only=_massage)))
         if banner_block:
             ctx = (ctx + "\n\n" + banner_block) if ctx else banner_block
+        srv._massage_last = None
+        if _massage and not _is_tool_round:
+            _mf = _efield_of(srv)
+            if _mf is not None:
+                try:
+                    from . import massage as _MSG
+                    _own = [str(m.get("content") or "") for m in (body.get("messages") or [])
+                            if isinstance(m, dict) and isinstance(m.get("content"), str)]
+                    _mo = _MSG.build(_mf, query_vec=vec, exclude_texts=_own)
+                    srv._massage_last = {k: _mo[k] for k in ("alignment", "tokens", "candidates")}
+                    srv._massage_last["picked"] = len(_mo["picked"])
+                    _note_massage(srv, srv._massage_last)
+                    if _mo["block"]:
+                        ctx = (ctx + "\n\n" + _mo["block"]) if ctx else _mo["block"]
+                except Exception as e:
+                    srv._massage_last = {"error": f"{type(e).__name__}: {e}"[:200]}
+                    print(f"[massage] error: {e}", file=sys.stderr)
         # THE ENTITY DIFF (normal mode): what changed in the entities since
         # the last message the model processed -- code, entity scripts and
         # other sessions quoted, this conversation's own turns counted. The
@@ -4855,7 +4897,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                     diff = state_diff(fld, getattr(srv, "_efield_mark", None) or efield_mark,
                                       _own_session_prefix(srv),
                                       include_own=not _is_tool_round)
-                    if diff:
+                    if diff and not _massage:
                         ctx = (ctx + "\n\n" + diff) if ctx else diff
             except Exception as e:
                 print(f"[efield] diff error: {e}", file=sys.stderr)
@@ -4863,7 +4905,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # builder existed and was never called -- the OPEN INTENTIONS view
         # and the empty-board nudge ride turns only from now; the nudge
         # is rate-limited inside the builder).
-        if not _is_tool_round:
+        if not _is_tool_round and not _massage:
             try:
                 i_block = _intents_context_block(srv)
                 if i_block:
@@ -5333,6 +5375,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             # THE USAGE PASS-THROUGH (the 0-token display fix): the
             # backend's own usage stays verbatim; when it gives none, an
             # estimate rides along so no client ever reads a hardcoded zero
+            # THE INJECTION, VISIBLE (2026-10-08): what membrane added rides
+            # the response so the serve can show it like a tool call
+            if resp_obj is not None and ctx:
+                resp_obj["membrane"] = {"injection": ctx,
+                                        "massage": getattr(srv, "_massage_last", None)}
+                resp_bytes = json.dumps(resp_obj).encode()
             if resp_obj is not None and not (resp_obj.get("usage") or {}):
                 est_in = Registry.estimate_tokens(up.get("messages"))
                 m0 = (resp_obj.get("choices") or [{}])[0].get("message") or {}
@@ -6420,6 +6468,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             "backend": srv.backend,
             # the viewer v3's live layer: beating, bound to the hub, publishing
             "field_pulse": _fp.stats() if _fp is not None else None,
+            # the massage's ruler: the injection mode + the last turns'
+            # alignment with the field state and their token cost
+            "injection": {"mode": _injection_mode(srv), "last": getattr(srv, "_massage_last", None),
+                          "avg_alignment": (round(sum(h["alignment"] for h in getattr(srv, "_massage_hist", []) or [])
+                                                  / max(1, len(getattr(srv, "_massage_hist", []) or [])), 4)
+                                            if getattr(srv, "_massage_hist", None) else None)},
             # the watch frame: what the seat watches, as axes (lean = fast - slow)
             "frame": (getattr(srv, "_frame", None).readings()
                       if getattr(srv, "_frame", None) is not None else None),

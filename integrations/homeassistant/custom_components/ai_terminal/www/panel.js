@@ -1129,8 +1129,11 @@ function definePanel() {
     _toolHtml(p) {
       const v = toolView(p);
       const key = "tool:" + (p.callID || p.id);
-      const icon = { completed: "✓", error: "✕", refused: "⛔", running: "⋯", pending: "⋯" }[v.status] || "•";
-      const badge = v.status === "refused" ? "lane refused" : v.status;
+      // the 'membrane' card is the turn's injection (what membrane added
+      // to the model's input), not a tool the model called
+      const inj = v.name === "membrane";
+      const icon = inj ? "⟐" : ({ completed: "✓", error: "✕", refused: "⛔", running: "⋯", pending: "⋯" }[v.status] || "•");
+      const badge = inj ? "injected" : (v.status === "refused" ? "lane refused" : v.status);
       let out = v.output;
       let more = "";
       if (out.length > OUTPUT_CLIP && !this._expanded.has(key + ":full")) {

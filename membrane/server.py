@@ -1635,6 +1635,27 @@ class TurnRunner:
             msg = ((resp.get("choices") or [{}])[0].get("message")
                    or {})
             _tokens_fill(a_info, resp)
+            # THE INJECTION AS A CARD (2026-10-08, the operator: show it
+            # like every tool call): what membrane added to this round --
+            # the first round's, and any later round's that differs
+            _inj = (resp.get("membrane") or {}).get("injection") \
+                if isinstance(resp.get("membrane"), dict) else None
+            if isinstance(_inj, str) and _inj.strip() and _inj != getattr(self, "_last_inj", {}).get(sid):
+                if not hasattr(self, "_last_inj"):
+                    self._last_inj = {}
+                self._last_inj[sid] = _inj
+                _now = int(time.time() * 1000)
+                _ms = (resp.get("membrane") or {}).get("massage") or {}
+                _title = f"membrane injection · ~{len(_inj) // 4} tokens" + (
+                    f" · alignment {_ms.get('alignment')}" if _ms.get("alignment") else "")
+                _ip = mkpart({"type": "tool", "callID": f"inj-{rounds}", "tool": "membrane",
+                              "state": {"status": "completed",
+                                        "input": {"round": rounds, **({k: _ms[k] for k in ("alignment", "tokens", "picked") if k in _ms})},
+                                        "output": _inj, "title": _title,
+                                        "time": {"start": _now, "end": _now}},
+                              "time": {"start": _now, "end": _now}})
+                self.hub.publish({"type": "message.part.updated", "part": dict(_ip),
+                                  "time": _now, "sessionID": sid})
             tcs = msg.get("tool_calls")
             content = (msg.get("content") or "").strip()
             reason = "tool-calls" if tcs else "stop"
