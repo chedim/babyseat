@@ -302,7 +302,8 @@ function voiceHtml(line, editing) {
     Math.round(line.closeness * 100) + "%</span>" : "";
   const up = line.vote === "up" ? " on" : "", down = line.vote === "down" ? " on" : "";
   const id = escAttr(line.id);
-  let h = '<div class="vox" data-vid="' + id + '"><div class="vwho">membrane ' + c + "</div>" +
+  const mode = line.mode ? '<span class="vmode">· ' + escText(line.mode) + "</span> " : "";
+  let h = '<div class="vox" data-vid="' + id + '"><div class="vwho">membrane ' + mode + c + "</div>" +
     '<div class="vtext">' + escText(line.text) + "</div>" +
     '<div class="vbar"><button class="vbtn' + up + '" data-vvote="up" title="good">👍</button>' +
     '<button class="vbtn' + down + '" data-vvote="down" title="not like that">👎</button>' +
@@ -438,7 +439,7 @@ const STYLE = `
   .vox { margin:8px 0 0; max-width:85%; border:1px dashed rgba(156,110,220,.6); border-radius:14px 14px 14px 4px;
          padding:6px 12px; background:rgba(156,110,220,.08); }
   .vwho { font-size:11px; opacity:.65; margin-bottom:2px; } .vclose { margin-left:6px; opacity:.9; }
-  .vtext { font-style:italic; } .vbar { margin-top:4px; display:flex; gap:4px; }
+  .vtext { font-style:italic; } .vmode { opacity:.7; } .vbar { margin-top:4px; display:flex; gap:4px; }
   .vbtn { border:0; background:transparent; cursor:pointer; opacity:.45; font-size:14px; padding:0 4px; }
   .vbtn:hover, .vbtn.on { opacity:1; } .vre { font-size:12px; opacity:.7; margin-top:4px; }
   .autobtn.spinning { animation:aspin 2.4s linear infinite; } @keyframes aspin { to { transform:rotate(360deg); } }

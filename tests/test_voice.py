@@ -158,8 +158,9 @@ class TestTheTurn(unittest.TestCase):
         self.assertTrue(lines)
         line = lines[-1].get("line") or lines[-1]["properties"]["line"]
         self.assertIn("closeness", line)
-        stored = " ".join(p.get("text") or "" for m in r.messages.list(sid) for p in m.get("parts") or [])
-        self.assertNotIn(line["text"], stored)                  # never in the session
+        roles = [(m.get("info") or {}).get("role") for m in r.messages.list(sid)]
+        self.assertEqual(roles, ["assistant"])                  # the model's row only -- never a voice row
+        self.assertFalse(any((m.get("info") or {}).get("voiceTurn") for m in r.messages.list(sid)))
         self.assertEqual(V.of(srv).of_session(sid)[0]["id"], line["id"])
 
     def test_loops_and_calls_have_no_voice(self):
@@ -478,3 +479,57 @@ class TestTopicNote(unittest.TestCase):
     def test_the_teacher_is_told_what_it_aimed_at(self):
         self.assertIn("trying to talk about: c:uptime", V.frame("x", "c:uptime"))
         self.assertIn("answering your last reply", V.frame("x"))
+
+
+class TestRecall(unittest.TestCase):
+    def _pool(self, now=None):
+        P = V.SentencePool()
+        E = FakeEmbedder()
+        P.add(E, ["The battery charge is holding steady through the night.",
+                  "The anchor chain is out forty meters on a sand bottom.",
+                  "The bms reads the battery at 92 percent right now."], "reply", ts=now)
+        return P, E
+
+    def test_whole_sentences_toward_the_target(self):
+        P, E = self._pool()
+        out = V.recall(P, E.embed(["anchor chain wind"])[0])
+        self.assertTrue(out["text"].startswith("The anchor chain"))
+
+    def test_stale_facts_are_skipped_fresh_ones_kept(self):
+        P, E = self._pool(now=time.time() - 3 * V.FRESH_S)
+        out = V.recall(P, E.embed(["battery bms percent"])[0])
+        self.assertNotIn("92", out["text"])                     # old number: not said
+        P2, _ = self._pool()
+        self.assertIn("92", V.recall(P2, E.embed(["battery bms percent"])[0], max_sents=2)["text"])
+
+    def test_no_echo_and_exclusions(self):
+        P, E = self._pool()
+        msg = "The anchor chain is out forty meters on a sand bottom."
+        out = V.recall(P, E.embed([msg])[0], message_vec=E.embed([msg])[0])
+        self.assertNotIn("forty meters", out["text"])
+        out2 = V.recall(P, E.embed(["anchor chain"])[0], exclude=[msg])
+        self.assertNotIn("forty meters", out2["text"])
+
+    def test_the_ab_takes_turns_and_tags_the_mode(self):
+        v = _voice()
+        v.pool, _ = self._pool()
+        modes = [v.speak(FakeEmbedder().embed(["battery"])[0])["mode"] for _ in range(4)]
+        self.assertEqual(modes, ["recall", "walk", "recall", "walk"])
+
+    def test_the_register_shift_and_persistence(self):
+        d = tempfile.mkdtemp()
+        v = V.Voice(FakeEmbedder(), d)
+        v.bootstrap(CORPUS * 3)
+        v.pool, _ = self._pool()
+        v.note_pair(np.ones(1024), np.r_[np.ones(512), -np.ones(512)])
+        self.assertIsNotNone(v.shift())
+        v.save()
+        w = V.Voice(FakeEmbedder(), d)
+        self.assertEqual(len(w.pool), 3)
+        self.assertEqual(w._n_pairs, 1)
+        self.assertTrue(w._pool_booted)
+
+    def test_pool_sentences_filter(self):
+        got = V.pool_sentences("- a bullet line that is long enough to pass the size. "
+                               "A real sentence about the battery charge today. It meant: no.")
+        self.assertEqual(got, ["A real sentence about the battery charge today."])

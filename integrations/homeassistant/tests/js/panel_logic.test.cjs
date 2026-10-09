@@ -189,3 +189,8 @@ test("auto-chat: the reducer tracks the mode; a voice turn shows its line", () =
   eq(st.auto, { on: true, rounds: 2 });
   assert.equal(L.voiceTurnText("[membrane voice] membrane's own voice said: «Battery is fine.»\nAnswer it"), "Battery is fine.");
 });
+
+test("voice: the bubble names the mode that spoke (the recall/walk A/B)", () => {
+  assert.ok(L.voiceHtml({ id: "v1", text: "Hi.", mode: "recall" }).includes("· recall"));
+  assert.ok(!L.voiceHtml({ id: "v2", text: "Hi." }).includes("vmode"));
+});

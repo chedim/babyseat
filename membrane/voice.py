@@ -361,6 +361,121 @@ def render(table: WordTable, words: list[str]) -> str:
     return out
 
 
+# ---- RECALL: speech from whole heard sentences (2026-10-09, the offline
+# A/B: retrieval beat the word walk 35/40 on closeness to the model's real
+# reply, 0.60 vs 0.50; every line grammatical by construction) -------------
+POOL_MAX = 8000
+POOL_BOOT = 4000               # the first build: the newest reply sentences
+FRESH_S = 1800.0               # a fact-bearing sentence older than this is stale
+REGISTER_SHIFT = 1.0           # topic (the message) + the reply register (offline best)
+ECHO_COS = 0.93                # a candidate that just restates the message
+KIND_BONUS = {"reply": 0.0, "lesson": 0.03, "rewrite": 0.06}
+_FACT = re.compile(r"\d|%|\b(?:on|off|ON|OFF|open|closed|charging|discharging)\b")
+_LISTY = re.compile(r"^\s*(?:[-*\u2022\u00b7]|\d+[.)]|#)")
+_SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
+
+
+def pool_sentences(text: str) -> list[str]:
+    out = []
+    for s in _SENT_SPLIT.split(clean(strip_meant(text or ""))):
+        s = s.strip()
+        if (25 <= len(s) <= 170 and not _LISTY.match(s) and not s.lower().startswith("it meant")
+                and sum(c.isalpha() for c in s) > 0.6 * len(s)):
+            out.append(s)
+    return out
+
+
+class SentencePool:
+    """The teachers' sentences with their vectors (f16), newest kept."""
+
+    def __init__(self):
+        self.texts: list[str] = []
+        self.ts: list[float] = []
+        self.kind: list[str] = []
+        self.M = np.zeros((0, 0), dtype=np.float16)
+        self._seen: set = set()
+
+    def __len__(self):
+        return len(self.texts)
+
+    def add(self, embedder, texts, kind: str = "reply", ts: float | None = None) -> int:
+        new = [t for t in dict.fromkeys(texts) if t and t.lower() not in self._seen]
+        if not new:
+            return 0
+        vs = []
+        for i in range(0, len(new), 32):
+            try:
+                E = np.asarray(embedder.embed(new[i:i + 32]), dtype=np.float32)
+            except Exception:
+                return 0
+            E /= (np.linalg.norm(E, axis=1, keepdims=True) + 1e-9)
+            vs.append(E.astype(np.float16))
+        V = np.vstack(vs)
+        self.M = V if not self.M.size else np.vstack([self.M, V])
+        now = ts or time.time()
+        self.texts += new
+        self.ts += [now] * len(new)
+        self.kind += [kind] * len(new)
+        self._seen.update(t.lower() for t in new)
+        if len(self.texts) > POOL_MAX:
+            cut = len(self.texts) - POOL_MAX
+            for t in self.texts[:cut]:
+                self._seen.discard(t.lower())
+            self.texts, self.ts, self.kind = self.texts[cut:], self.ts[cut:], self.kind[cut:]
+            self.M = self.M[cut:]
+        return len(new)
+
+    def save(self, d: Path) -> None:
+        if not self.texts:
+            return
+        np.save(str(d / "pool.npy"), self.M)
+        json.dump({"texts": self.texts, "ts": self.ts, "kind": self.kind}, open(d / "pool.json", "w"))
+
+    def load(self, d: Path) -> None:
+        try:
+            meta = json.load(open(d / "pool.json"))
+            M = np.load(str(d / "pool.npy"))
+            if len(meta["texts"]) == M.shape[0]:
+                self.texts, self.ts, self.kind, self.M = meta["texts"], meta["ts"], meta["kind"], M
+                self._seen = {t.lower() for t in self.texts}
+        except Exception:
+            pass
+
+
+def recall(pool: SentencePool, target, message_vec=None, exclude=(), now: float | None = None,
+           max_sents: int = 2) -> dict:
+    """Pick 1-2 whole sentences toward the target: no echo of the message,
+    no stale facts, a second sentence only if it continues the first."""
+    if not len(pool):
+        return {"text": "", "alignment": 0.0}
+    now = now or time.time()
+    t = _unit(np.asarray(target, dtype=np.float32))
+    S = pool.M.astype(np.float32) @ t
+    n = len(pool)
+    S += 0.04 * (np.arange(n) / max(n - 1, 1))                    # the recency lean
+    S += np.array([KIND_BONUS.get(k, 0.0) for k in pool.kind], dtype=np.float32)
+    mv = _unit(np.asarray(message_vec, dtype=np.float32)) if message_vec is not None else None
+    ex = {e.lower() for e in exclude}
+    picked, bag = [], None
+    for j in np.argsort(-S)[:80]:
+        txt = pool.texts[j]
+        if txt.lower() in ex:
+            continue
+        if _FACT.search(txt) and now - pool.ts[j] > FRESH_S:
+            continue                                               # C-lite: no stale facts
+        v = pool.M[j].astype(np.float32)
+        if mv is not None and float(v @ mv) > ECHO_COS:
+            continue
+        if bag is not None:
+            if float(_unit(bag) @ v) < 0.6 or float(_unit(bag + v) @ t) <= float(_unit(bag) @ t) + 0.005:
+                continue
+        picked.append(txt)
+        bag = v if bag is None else bag + v
+        if len(picked) >= max_sents:
+            break
+    return {"text": " ".join(picked), "alignment": round(float(_unit(bag) @ t), 4) if bag is not None else 0.0}
+
+
 class Voice:
     """The third participant: the table, the vectors, the ledger."""
 
@@ -371,10 +486,16 @@ class Voice:
         self.vecs = WordVecs(embedder)
         self.lines: dict[str, dict] = {}
         self._lock = threading.Lock()
+        self._save_lock = threading.Lock()   # one writer at a time (the hear/grade/boot threads)
         self._booted = False
         self.correction: dict[str, np.ndarray] = {}     # sid -> meant - said
         self._last_meant: dict[str, np.ndarray] = {}    # sid -> the last lesson's vector
         self.stuck: dict[str, bool] = {}                # sid -> the teacher just repeated itself
+        self.pool = SentencePool()
+        self._sum_q = None                              # running sums: messages / replies
+        self._sum_a = None
+        self._n_pairs = 0
+        self._pool_booted = False
         self._dirty = 0
         if self.dir is not None:
             self._load()
@@ -387,6 +508,12 @@ class Voice:
                 self.table = WordTable.from_json(json.load(open(p)))
                 self._booted = bool(self.table.t)
             self.vecs.load(self.dir / "vecs.npz")
+            self.pool.load(self.dir)
+            self._pool_booted = len(self.pool) > 0
+            rp = self.dir / "register.npz"
+            if rp.exists():
+                z = np.load(str(rp))
+                self._sum_q, self._sum_a, self._n_pairs = z["q"], z["a"], int(z["n"])
             lp = self.dir / "lines.jsonl"
             if lp.exists():
                 for ln in open(lp):
@@ -401,17 +528,22 @@ class Voice:
     def save(self) -> None:
         if self.dir is None:
             return
-        try:
-            self.dir.mkdir(parents=True, exist_ok=True)
-            tmp = self.dir / "table.json.tmp"
-            with self._lock:
-                self.table.fit_budget()
-                json.dump(self.table.to_json(), open(tmp, "w"))
-            os.replace(tmp, self.dir / "table.json")
-            self.vecs.save(self.dir / "vecs.npz")
-            self._dirty = 0
-        except Exception as e:
-            print(f"[voice] save failed: {e}", file=sys.stderr)
+        with self._save_lock:
+            try:
+                self.dir.mkdir(parents=True, exist_ok=True)
+                tmp = self.dir / "table.json.tmp"
+                with self._lock:
+                    self.table.fit_budget()
+                    json.dump(self.table.to_json(), open(tmp, "w"))
+                os.replace(tmp, self.dir / "table.json")
+                self.vecs.save(self.dir / "vecs.npz")
+                with self._lock:
+                    self.pool.save(self.dir)
+                if self._n_pairs:
+                    np.savez(str(self.dir / "register.npz"), q=self._sum_q, a=self._sum_a, n=self._n_pairs)
+                self._dirty = 0
+            except Exception as e:
+                print(f"[voice] save failed: {e}", file=sys.stderr)
 
     def _ledger(self, rec: dict) -> None:
         cur = self.lines.setdefault(rec["id"], {})
@@ -452,8 +584,49 @@ class Voice:
             self.save()
 
     # ---- speaking ----------------------------------------------------------
-    def speak(self, target_vec, message: str = "", sid: str = "", mid: str = "") -> dict | None:
-        if not self.table.t or target_vec is None:
+    # ---- the register: replies live elsewhere than the messages they answer
+    def note_pair(self, qv, av) -> None:
+        q, a = _unit(np.asarray(qv, float)), _unit(np.asarray(av, float))
+        self._sum_q = q if self._sum_q is None else self._sum_q + q
+        self._sum_a = a if self._sum_a is None else self._sum_a + a
+        self._n_pairs += 1
+
+    def shift(self):
+        if not self._n_pairs:
+            return None
+        return (self._sum_a - self._sum_q) / self._n_pairs
+
+    def pool_add(self, text: str, kind: str = "reply") -> int:
+        sents = pool_sentences(text) if kind == "reply" else [" ".join((text or "").split())]
+        with self._lock:
+            return self.pool.add(self.embedder, [x for x in sents if x], kind)
+
+    def next_mode(self) -> str:
+        """The A/B: recall and walk take turns (walk alone until the pool exists)."""
+        if not len(self.pool):
+            return "walk"
+        n = sum(1 for r in self.lines.values() if r.get("mode"))
+        return "recall" if n % 2 == 0 else "walk"
+
+    def speak(self, target_vec, message: str = "", sid: str = "", mid: str = "",
+              message_vec=None, exclude=()) -> dict | None:
+        if target_vec is None:
+            return None
+        mode = self.next_mode()
+        if mode == "recall":
+            tgt = _unit(np.asarray(target_vec, dtype=float))
+            sh = self.shift()
+            if sh is not None and sh.shape == tgt.shape:
+                tgt = _unit(tgt + REGISTER_SHIFT * sh)
+            with self._lock:
+                out = recall(self.pool, tgt, message_vec, exclude)
+            if out["text"]:
+                rec = {"id": "vox_" + secrets.token_hex(6), "sid": sid, "mid": mid, "mode": "recall",
+                       "text": out["text"], "alignment": out["alignment"], "time": int(time.time() * 1000)}
+                self._ledger(rec)
+                return rec                                  # quotes are not heard back
+            mode = "walk"
+        if not self.table.t:
             return None
         t = self.vecs.project(target_vec)
         if t is None:
@@ -467,7 +640,7 @@ class Voice:
                           stale=stale, stale_starts=starts)
         if not out["text"]:
             return None
-        rec = {"id": "vox_" + secrets.token_hex(6), "sid": sid, "mid": mid,
+        rec = {"id": "vox_" + secrets.token_hex(6), "sid": sid, "mid": mid, "mode": "walk",
                "text": out["text"], "alignment": out["alignment"],
                "time": int(time.time() * 1000)}
         self._ledger(rec)
@@ -505,6 +678,10 @@ class Voice:
             upd["vote"] = vote
         if rewrite and rewrite.strip():
             self.hear(rewrite.strip(), REWRITE_WEIGHT)
+            try:
+                self.pool_add(rewrite.strip(), "rewrite")
+            except Exception:
+                pass
             upd["rewrite"] = rewrite.strip()[:2000]
         self._ledger(upd)
         self.save()
@@ -627,6 +804,75 @@ def aim(qv, now) -> np.ndarray:
     return _unit(q + NOW_PULL * float(n @ q) * n)
 
 
+def history_replies(runner, limit: int = POOL_BOOT):
+    """(the newest model reply texts across every session, chat pairs
+    (message, reply) for the register) -- the recall pool's first hearing."""
+    sessions = getattr(getattr(runner, "sessions", None), "sessions", None) or {}
+    replies, pairs = [], []
+    from .server import _lane_of
+    for sid, doc in list(sessions.items()):
+        try:
+            rows = runner.messages.list(sid)
+        except Exception:
+            continue
+        chat = _lane_of((doc or {}).get("agent")) in _CHAT_LANES and \
+            not str((doc or {}).get("title") or "").startswith(("watch:", "Phone:"))
+        last_user = None
+        for r in rows or []:
+            info = r.get("info") or {}
+            t = "\n".join(p.get("text") or "" for p in r.get("parts") or []
+                          if p.get("type") == "text" and not p.get("synthetic"))
+            ts = ((info.get("time") or {}).get("created") or 0) / 1000
+            if info.get("role") == "user":
+                last_user = None if (info.get("voiceTurn") or info.get("membraneOnly")) else t
+            elif info.get("role") == "assistant" and t.strip():
+                replies.append((ts, t))
+                if chat and last_user:
+                    pairs.append((last_user, t))
+                last_user = None
+    replies.sort(key=lambda x: x[0])
+    sents = []
+    for ts, t in reversed(replies):
+        for x in pool_sentences(t):
+            sents.append((ts, x))
+        if len(sents) >= limit:
+            break
+    return list(reversed(sents[:limit])), pairs[-300:]
+
+
+def pool_bootstrap(v, runner) -> None:
+    sents, pairs = history_replies(runner)
+    with v._lock:
+        for i in range(0, len(sents), 256):
+            chunk = sents[i:i + 256]
+            v.pool.add(v.embedder, [x for _, x in chunk], "reply", ts=chunk[-1][0])
+    for q, a in pairs:
+        try:
+            E = v.embedder.embed([clean(q)[:2000] or q[:2000], clean(a)[:4000] or a[:4000]])
+            v.note_pair(E[0], E[1])
+        except Exception:
+            break
+    v._pool_booted = True
+    v.save()
+    print(f"[voice] recall pool: {len(v.pool)} sentences, register from {v._n_pairs} pairs", file=sys.stderr)
+
+
+def _ensure_pool(v, runner) -> None:
+    if v._pool_booted or getattr(v, "_pool_booting", False):
+        return
+    v._pool_booting = True
+
+    def boot():
+        try:
+            pool_bootstrap(v, runner)
+        except Exception as e:
+            print(f"[voice] pool bootstrap failed: {e!r}", file=sys.stderr)
+        finally:
+            v._pool_booting = False
+
+    threading.Thread(target=boot, daemon=True, name="voice-pool").start()
+
+
 def on_turn_start(runner, sid: str, text: str, mid: str, lane: str) -> None:
     """Speak first (a thread: never delays the LLM)."""
     srv = getattr(runner, "srv", None)
@@ -661,9 +907,10 @@ def on_turn_start(runner, sid: str, text: str, mid: str, lane: str) -> None:
             from .lanes import _efield_of
             from . import massage
             fld = _efield_of(srv)
+            _ensure_pool(v, runner)
             qv = np.asarray(v.embedder.embed([clean(text) or text])[0], dtype=float)
             tgt = v.steer(sid, aim(qv, massage.field_now(fld) if fld is not None else None))
-            rec = v.speak(tgt, message=text, sid=sid, mid=mid)
+            rec = v.speak(tgt, message=text, sid=sid, mid=mid, message_vec=qv)
             if rec is not None:
                 runner._voice_last = getattr(runner, "_voice_last", {})
                 runner._voice_last[sid] = rec["id"]
@@ -700,6 +947,15 @@ def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
                 v.hear(user_text)
             meant = it_meant(reply) if voice_turn else ""
             v.hear(strip_meant(reply), LLM_WEIGHT)
+            if v._pool_booted:
+                v.pool_add(reply, "reply")                   # the recall pool grows with each reply
+                if not voice_turn and user_text and reply:
+                    try:
+                        E = v.embedder.embed([clean(user_text)[:2000] or user_text[:2000],
+                                              clean(reply)[:4000] or reply[:4000]])
+                        v.note_pair(E[0], E[1])              # the register keeps learning
+                    except Exception:
+                        pass
             lid = (getattr(runner, "_voice_last", {}) or {}).pop(sid, None)
             if meant and v.is_repeat_lesson(sid, meant):
                 if lid:
@@ -708,6 +964,8 @@ def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
             if meant:
                 v.hear(meant, MEANT_WEIGHT)
                 v.pair(lid, meant)
+                if v._pool_booted:
+                    v.pool_add(meant, "lesson")
                 gap = v.learn_gap(sid, (v.lines.get(lid or "") or {}).get("text", ""), meant)
                 if gap is not None and lid:
                     v._ledger({"id": lid, "gap": gap})
@@ -854,8 +1112,10 @@ def auto_next(runner, sid: str, reply: str) -> None:
                     v.correction.pop(sid, None)
                     v.stuck[sid] = False
             mid = _gen_id("msg")
+            _ensure_pool(v, runner)
             rec = v.speak(v.steer(sid, aim(qv, massage.field_now(fld) if fld is not None else None)),
-                          message=src, sid=sid, mid=mid)
+                          message=src, sid=sid, mid=mid, message_vec=qv,
+                          exclude=pool_sentences(reply))      # never quote the reply it answers
             if rec is None or not auto_on(runner, sid):
                 return
             runner._voice_last = getattr(runner, "_voice_last", {})
