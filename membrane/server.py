@@ -2257,6 +2257,10 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 return
             elif path == "/experimental/workspace/status":
                 self._json_out([])
+            elif path == "/membrane/models":
+                from . import minds_models as _MM
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                self._json_out(_MM.read(psrv) if psrv is not None else {})
             elif path == "/agent":
                 self._json_out(_agent_shapes(getattr(self, "seat", None)))
             elif path == "/command":
@@ -2295,6 +2299,28 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 self.end_headers()
                 return
             path = self.path.split("?", 1)[0]
+            if path == "/membrane/models":
+                # THE MINDS' MODELS: the watch loops' and the background
+                # cortex's models, live (the chat picker sets one session)
+                from . import minds_models as _MM
+                b = self._read_body()
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                if psrv is None:
+                    self.send_response(503); self.send_header("Content-Length", "0"); self.end_headers(); return
+                try:
+                    from .lanes import _chat_capable_models
+                    known = _chat_capable_models(getattr(psrv, "backend", ""))
+                except Exception:
+                    known = None
+                try:
+                    out = _MM.apply(psrv, loops=b.get("loops"), cortex=b.get("cortex"),
+                                    known=known or None)
+                except ValueError as e:
+                    body = json.dumps({"error": str(e)}).encode()
+                    self.send_response(400); self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+                    return
+                return self._json_out(out)
             if path == "/session":
                 b = self._read_body()
                 s = sessions.create(title=b.get("title"),

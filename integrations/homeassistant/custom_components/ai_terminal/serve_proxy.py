@@ -54,7 +54,9 @@ ALLOWED_PREFIXES = ("session", "config", "provider", "mcp")
 # agent: the primary agents + membrane's live minds (loop workers,
 # thinker, dreamer); event: the per-user SSE relay (never global/event,
 # its unscoped twin)
-ALLOWED_EXACT = ("global/health", "agent", "event")
+ALLOWED_EXACT = ("global/health", "agent", "event", "membrane/models")
+# the minds' models: everyone reads, only an HA ADMIN switches them
+ADMIN_WRITE_EXACT = ("membrane/models",)
 # the field dashboard + the drawer: the seat's read surfaces the serve
 # relays (membrane/server.py SEAT_READ_PATHS) -- GET only, exact paths
 READ_ONLY_EXACT = ("membrane/state", "membrane/map/field",
@@ -348,6 +350,8 @@ class ServeProxyView(HomeAssistantView):
         method = request.method
         if read_only_path(rest) and method != "GET":
             return web.Response(status=405, text="field reads are GET only")
+        if rest in ADMIN_WRITE_EXACT and method != "GET" and not getattr(user, "is_admin", False):
+            return web.Response(status=403, text="only an admin switches the minds' models")
         if rest == "event":
             if method != "GET":
                 return web.Response(status=405, text="event is GET only")

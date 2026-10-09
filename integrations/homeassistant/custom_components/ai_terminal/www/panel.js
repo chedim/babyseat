@@ -383,6 +383,8 @@ const STYLE = `
   .msgs { max-width:920px; margin:0 auto; padding:16px 18px 24px; }
   .empty { opacity:.5; text-align:center; margin-top:18vh; }
   .msg { margin:14px 0; overflow-wrap:anywhere; }
+  .mmrow { flex-basis:100%; display:flex; flex-wrap:wrap; gap:10px; align-items:center; font-size:12px; margin-top:4px; }
+  .mmrow select { font:inherit; border-radius:6px; padding:1px 4px; }
   .msg.user { display:flex; justify-content:flex-end; }
   .msg.user .bub { background:var(--primary-color,#3477d6); color:var(--text-primary-color,#fff);
                    border-radius:14px 14px 4px 14px; padding:8px 12px; max-width:85%; }
@@ -707,11 +709,47 @@ function definePanel() {
       if (sid === this._sid) { this._pick = ""; this._paintModels(); }
     }
 
+    // THE MINDS' MODELS: the watch loops' and the background cortex's
+    // models (the bar's picker sets only this chat's)
+    async _loadMindsModels() {
+      try {
+        const [cur, list] = await Promise.all([this._api(SERVE + "/membrane/models"),
+          this._models ? Promise.resolve(null) : this._api(SERVE + "/v1/models")]);
+        if (list && list.ok && list.data) this._models = ollamaModels(list.data.data);
+        this._mindsModels = cur.ok ? cur.data : null;
+      } catch (e) { this._mindsModels = null; }
+      this._paintMinds();
+    }
+
+    _mindsModelsHtml() {
+      const mm = this._mindsModels;
+      if (!mm || !(this._models || []).length) return "";
+      const admin = !!(this._hass && this._hass.user && this._hass.user.is_admin);
+      const sel = (mind, label, title) => {
+        const cur = mm[mind] || "";
+        const opts = (this._models || []).slice();
+        if (cur && !opts.includes(cur)) opts.unshift(cur);
+        return '<label class="mm" title="' + escAttr(title) + '">' + escText(label) + ' <select data-mind="' + mind + '"' +
+          (admin ? "" : " disabled") + ">" + opts.map((m) => '<option value="' + escAttr(m) + '"' + (m === cur ? " selected" : "") + ">" +
+          escText(m) + (/:cloud$|-cloud$/.test(m) ? " ☁" : "") + "</option>").join("") + "</select></label>";
+      };
+      return '<div class="mmrow">' + sel("loops", "watch loops", "the model the goal / watch loops run on") + " " +
+        sel("cortex", "cortex", "the background cortex: thinker, dreamer, claim judges (keep it local: it runs often)") +
+        (admin ? "" : ' <span style="opacity:.6">(admins switch these)</span>') + "</div>";
+    }
+
+    async _setMindModel(mind, model) {
+      const r = await this._api(SERVE + "/membrane/models", { method: "POST", body: JSON.stringify({ [mind]: model }) });
+      if (r.ok) this._mindsModels = r.data;
+      else this._err("model switch refused: " + (typeof r.data === "string" ? r.data : JSON.stringify(r.data)).slice(0, 160));
+      this._paintMinds();
+    }
+
     _toggleMinds() {
       const open = !this._mindsEl.classList.contains("open");
       this._mindsEl.classList.toggle("open", open);
       clearInterval(this._mindsTimer);
-      if (open) { this._loadAgents(); this._mindsTimer = setInterval(() => this._loadAgents(), 15000); }
+      if (open) { this._loadAgents(); this._loadMindsModels(); this._mindsTimer = setInterval(() => this._loadAgents(), 15000); }
     }
 
     _paintMinds() {
@@ -720,6 +758,9 @@ function definePanel() {
         ? ms.map((a) => '<span class="mind" title="' + escAttr(a.description || "") + '"><b>' + escText(a.name) +
             "</b> " + escText((a.description || "").replace(/^A thinking-loop worker /, "").slice(0, 90)) + "</span>").join("")
         : '<span class="mind">no live minds reported</span>';
+      this._mindsEl.insertAdjacentHTML("beforeend", this._mindsModelsHtml());
+      this._mindsEl.querySelectorAll("select[data-mind]").forEach((sel) =>
+        sel.addEventListener("change", () => this._setMindModel(sel.dataset.mind, sel.value)));
     }
 
     // ---------------------------------------------------------- sessions

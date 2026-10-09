@@ -842,6 +842,7 @@ def main() -> None:
         import json as _json
         from .attention import AlertGate
         srv._attention_path = str(_wdir / "attention.json")
+        srv._models_path = str(_wdir / "models.json")      # the minds' models
         _saved = None
         if os.path.exists(srv._attention_path):
             _saved = _json.loads(open(srv._attention_path).read() or "{}")
@@ -1732,6 +1733,12 @@ def main() -> None:
             # THE LOOPS' RUNNER (the reactive layer): the loops' turns
             # are real serve turns on their child sessions
             srv._loop_runner = runner
+            # THE MINDS' MODELS: the saved picks for the loops + the cortex
+            try:
+                from .minds_models import load as _mm_load
+                _mm_load(srv)
+            except Exception as e:
+                print(f"[seat] minds' models not restored ({e})", file=sys.stderr)
             if getattr(srv, "_field_pulse", None) is not None:
                 srv._field_pulse.start()
             runner.srv = srv               # /agent reads the live minds

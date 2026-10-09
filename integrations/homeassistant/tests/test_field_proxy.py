@@ -27,6 +27,13 @@ class TestFieldPaths(unittest.TestCase):
         self.assertFalse(read_only_path("session/x/message"))
 
 
+class TestMindsModels(unittest.TestCase):
+    def test_reachable_and_admin_gated(self):
+        self.assertTrue(allowed_path("membrane/models"))
+        self.assertFalse(read_only_path("membrane/models"))      # POST passes the read-only gate...
+        self.assertIn("membrane/models", SP.ADMIN_WRITE_EXACT)   # ...behind the admin check
+
+
 class TestLiveLayer(unittest.TestCase):
     """The viewer's live layer (2026-10-08): field.* / mind.* frames are
     session-less -- admins see them, nobody else does."""

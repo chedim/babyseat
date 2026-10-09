@@ -780,6 +780,7 @@ def _install_judges(srv) -> None:
         return
     base = str(getattr(srv, "backend", "") or "http://localhost:11434").rstrip("/")
     judge = OllamaClaimJudge(model, base_url=base)
+    srv._claim_judge = judge          # the minds' models switch it live
 
     def idle() -> bool:
         return not nerve_paused(srv) and \
