@@ -73,6 +73,13 @@ RECENT_START_PENALTY = 12.0
 # out (said) with what it meant (the teacher's sentence) and leaning the
 # next aim along that gap; the correction fades unless a lesson renews it
 CORRECTION_PULL = 0.35
+# THE STUCK TEACHER (2026-10-09, the operator: "they are looped"): the model
+# repeated one lesson verbatim for six rounds and the voice circled it.
+# A lesson near-identical to the last one teaches nothing new (not heard,
+# no gap); every ROTATE_EVERY rounds -- and right after a repeat -- the
+# voice aims at a fresh live entity of the field instead of the last reply
+REPEAT_LESSON_COS = 0.92
+ROTATE_EVERY = 4
 CORRECTION_DECAY = 0.5
 VOCAB_WARM = 4000
 BOOT_TEXT_CAP = 3_000_000      # characters of history the bootstrap hears (newest first)
@@ -366,6 +373,8 @@ class Voice:
         self._lock = threading.Lock()
         self._booted = False
         self.correction: dict[str, np.ndarray] = {}     # sid -> meant - said
+        self._last_meant: dict[str, np.ndarray] = {}    # sid -> the last lesson's vector
+        self.stuck: dict[str, bool] = {}                # sid -> the teacher just repeated itself
         self._dirty = 0
         if self.dir is not None:
             self._load()
@@ -500,6 +509,18 @@ class Voice:
         self._ledger(upd)
         self.save()
         return self.lines.get(line_id)
+
+    def is_repeat_lesson(self, sid: str, meant: str) -> bool:
+        """A lesson (nearly) the same as the last one: no new teaching."""
+        try:
+            m = _unit(np.asarray(self.embedder.embed([meant])[0], float))
+        except Exception:
+            return False
+        last = self._last_meant.get(sid)
+        self._last_meant[sid] = m
+        rep = last is not None and last.shape == m.shape and float(last @ m) >= REPEAT_LESSON_COS
+        self.stuck[sid] = rep
+        return rep
 
     def learn_gap(self, sid: str, said: str, meant: str) -> float | None:
         """Hear the gap between what it said and what it meant: the
@@ -680,6 +701,10 @@ def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
             meant = it_meant(reply) if voice_turn else ""
             v.hear(strip_meant(reply), LLM_WEIGHT)
             lid = (getattr(runner, "_voice_last", {}) or {}).pop(sid, None)
+            if meant and v.is_repeat_lesson(sid, meant):
+                if lid:
+                    v._ledger({"id": lid, "lesson": "repeat"})
+                meant = ""                       # the stuck teacher: nothing new to hear
             if meant:
                 v.hear(meant, MEANT_WEIGHT)
                 v.pair(lid, meant)
@@ -716,7 +741,8 @@ def frame(line: str) -> str:
             "not the operator) said: \u00ab" + line + "\u00bb\n"
             "You are its teacher. Reply in at most two short plain sentences "
             "(no analysis of where its words came from), then end with one line "
-            "exactly: It meant: <the plain sentence it could have said>")
+            "exactly: It meant: <the plain sentence it could have said>. "
+            "Teach from ITS new words; never repeat an earlier lesson.")
 
 
 _MEANT = re.compile(r"^\W*it meant\W*:\s*(.+?)\s*$", re.I | re.M)
@@ -771,6 +797,24 @@ def auto_set(runner, sid: str, on: bool) -> dict:
     return auto_state(runner, sid)
 
 
+def fresh_topic(fld):
+    """(surface, state vector) of a random live, specific entity -- new
+    material when the auto-chat circles one thread."""
+    import random
+    try:
+        from .eids import is_specific
+        cands = [st for st in list(getattr(fld, "_states", {}).values())
+                 if getattr(st, "tier", "") == "live" and st.state is not None
+                 and is_specific(st.eid) and not st.eid.startswith(("person:", "seat:"))
+                 and int(getattr(st, "n", 0) or 0) >= 3]
+        if not cands:
+            return None
+        st = random.choice(cands)
+        return (st.surface or st.eid), np.asarray(st.state, dtype=float)
+    except Exception:
+        return None
+
+
 def auto_next(runner, sid: str, reply: str) -> None:
     """One round: the voice answers the reply, its line becomes the next
     turn (after a short pause -- an operator message waiting goes first:
@@ -796,6 +840,13 @@ def auto_next(runner, sid: str, reply: str) -> None:
             fld = _efield_of(srv)
             src = clean(reply) or reply or "hello"
             qv = np.asarray(v.embedder.embed([src[:4000]])[0], dtype=float)
+            rounds = (runner._auto.get(sid) or {}).get("rounds", 0)
+            if v.stuck.get(sid) or (rounds and rounds % ROTATE_EVERY == 0):
+                fresh = fresh_topic(fld)
+                if fresh is not None:
+                    qv, src = fresh[1], fresh[0]   # a new place in the field to talk about
+                    v.correction.pop(sid, None)
+                    v.stuck[sid] = False
             mid = _gen_id("msg")
             rec = v.speak(v.steer(sid, aim(qv, massage.field_now(fld) if fld is not None else None)),
                           message=src, sid=sid, mid=mid)

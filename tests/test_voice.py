@@ -431,3 +431,45 @@ class TestItHearsItself(unittest.TestCase):
         after_speak = v.table.t[k0][w0]
         v.feedback(rec["id"], vote="down")
         self.assertLess(v.table.t[k0][w0], after_speak)                  # the down vote takes it back
+
+
+class TestStuckTeacher(unittest.TestCase):
+    def test_a_repeated_lesson_teaches_nothing_new(self):
+        v = _voice()
+        self.assertFalse(v.is_repeat_lesson("s1", "the anchor chain is out forty meters"))
+        self.assertTrue(v.is_repeat_lesson("s1", "the anchor chain is out forty meters"))
+        self.assertTrue(v.stuck["s1"])
+        self.assertFalse(v.is_repeat_lesson("s1", "the battery charge is fine today"))
+
+    def test_a_voice_turn_with_a_repeat_lesson_is_not_heard(self):
+        d = tempfile.mkdtemp()
+        srv = _Srv()
+        srv._models_path = str(Path(d) / "models.json")
+        srv.membrane = type("M", (), {"embedder": FakeEmbedder()})()
+        r = S.TurnRunner(S.SSEHub(), S.SessionStore(), S.MessageStore(), _Ladder(),
+                         lambda n, a, c: "ok", system="", model="m")
+        r.srv = srv
+        v = V.of(srv)
+        v.bootstrap(CORPUS * 3)
+        v.is_repeat_lesson("s1", "Volts look healthy tonight.")
+        rec = v.speak(FakeEmbedder().embed(["battery"])[0], sid="s1")
+        r._voice_last = {"s1": rec["id"]}
+        before = v.table.uni.get("volts", 0)
+        V.on_turn_end(r, "s1", V.frame(rec["text"]), "Again.\nIt meant: Volts look healthy tonight.",
+                      "operator", voice_turn=True)
+        end = time.time() + 5
+        while time.time() < end and "lesson" not in v.lines[rec["id"]]:
+            time.sleep(0.05)
+        self.assertEqual(v.lines[rec["id"]].get("lesson"), "repeat")
+        self.assertEqual(v.table.uni.get("volts", 0), before)                # not heard again
+
+    def test_fresh_topic_picks_a_live_specific_entity(self):
+        class _St:
+            def __init__(self, eid, tier, n):
+                self.eid, self.tier, self.n, self.surface = eid, tier, n, eid
+                self.state = np.ones(4)
+        fld = type("F", (), {"_states": {"a": _St("c:uptime", "live", 5), "b": _St("w:the", "live", 50),
+                                         "c": _St("person:x", "live", 9), "d": _St("f:x.py", "nursery", 9)}})()
+        for _ in range(5):
+            self.assertEqual(V.fresh_topic(fld)[0], "c:uptime")
+        self.assertIn("never repeat", V.frame("x"))
