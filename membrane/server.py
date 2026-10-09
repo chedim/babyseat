@@ -975,6 +975,8 @@ class TurnRunner:
             role = info.get("role")
             if role not in ("user", "assistant"):
                 continue
+            if info.get("membraneOnly"):
+                continue          # said to the voice alone, not to the model
             text = "\n".join(
                 str(p.get("text") or "") for p in row.get("parts") or []
                 if isinstance(p, dict) and p.get("type") == "text").strip()
@@ -1497,6 +1499,21 @@ class TurnRunner:
                                  _lane_of((self._agents or {}).get(sid)))
         except Exception:
             pass
+        # MEMBRANE ONLY (the chat's LLM switch off): the voice answers, the
+        # model is never called; the voice still hears the operator
+        if user_info.get("membraneOnly"):
+            try:
+                from . import voice as _voice
+                _voice.on_turn_end(self, sid, text, "",
+                                   _lane_of((self._agents or {}).get(sid)))
+            except Exception:
+                pass
+            self._busy.pop(sid, None)
+            self.sessions.touch(sid)
+            self.hub.publish({"type": "session.status",
+                              "status": {"type": "idle"}, "sessionID": sid})
+            self.hub.publish({"type": "session.idle", "sessionID": sid})
+            return {"info": dict(user_info), "parts": []}
         aid = _gen_id("msg")
         # THE STAMP'S TRUTH (the TUI's chip reads the session's
         # model): the assistant row's modelID = the TURN'S pick (the
@@ -2540,6 +2557,9 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                     "agent": body.get("agent") or "build",
                     "model": model,
                     "time": {"created": now}, "summary": {"diffs": []}}
+            # the chat's "membrane only" switch: the voice answers alone
+            if body.get("membrane_only") is True:
+                info["membraneOnly"] = True
             row = messages.append(sid, info, [{"id": _gen_id("prt"),
                                                "sessionID": sid,
                                                "messageID": info["id"],

@@ -243,3 +243,46 @@ class TestAim(unittest.TestCase):
         self.assertGreater(float(t @ q), 0.95)                   # leans, never leads
         self.assertGreater(t[1], 0)
         self.assertAlmostEqual(float(V.aim(q, None) @ q), 1.0)
+
+
+class _CountingLadder(_Ladder):
+    def __init__(self):
+        self.n = 0
+
+    def __call__(self, body):
+        self.n += 1
+        self.last = body
+        return super().__call__(body)
+
+
+class TestMembraneOnly(unittest.TestCase):
+    def test_the_llm_switch_off(self):
+        d = tempfile.mkdtemp()
+        srv = _Srv()
+        srv._models_path = str(Path(d) / "models.json")
+        srv.membrane = type("M", (), {"embedder": FakeEmbedder()})()
+        lad = _CountingLadder()
+        r = S.TurnRunner(S.SSEHub(), S.SessionStore(), S.MessageStore(), lad,
+                         lambda n, a, c: "ok", system="", model="m")
+        r.srv = srv
+        V.of(srv).bootstrap(CORPUS * 3)
+        q = r.hub.subscribe()
+        sid = r.sessions.create(title="t")["id"]
+        r.run(sid, "is the anchor holding?",
+              user_info={"id": "msg_u1", "role": "user", "agent": "build", "membraneOnly": True})
+        self.assertEqual(lad.n, 0)                                   # no model call
+        end, lines = time.time() + 10, []
+        while time.time() < end and not lines:
+            while not q.empty():
+                e = q.get()
+                if e.get("type") == "membrane.voice":
+                    lines.append(e)
+            time.sleep(0.05)
+        self.assertTrue(lines)                                       # the voice answered
+        self.messages_ok = True
+        r.messages.append(sid, {"id": "msg_u1", "role": "user", "membraneOnly": True},
+                          [{"id": "p1", "type": "text", "text": "is the anchor holding?"}])
+        r.run(sid, "and the battery?", user_info={"id": "msg_u2", "role": "user", "agent": "build"})
+        self.assertEqual(lad.n, 1)
+        sent = [m["content"] for m in lad.last["messages"] if m["role"] == "user"]
+        self.assertNotIn("is the anchor holding?", " ".join(sent))   # not the model's history

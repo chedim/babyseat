@@ -557,6 +557,7 @@ function definePanel() {
             <select class="modelpick" title="Model (what membrane sees on Ollama)"><option value="">model…</option></select>
             <span class="pill state">…</span>
             <button class="btn icon voicebtn" title="membrane's own voice (show / hide)">🗣</button>
+            <button class="btn icon llmbtn" title="the LLM (off: talk to membrane alone)">🤖</button>
             <button class="btn icon mindsbtn" title="membrane's minds">🧠</button>
           </div>
           <div class="minds"></div>
@@ -604,6 +605,15 @@ function definePanel() {
         this._voiceOn = !this._voiceOn;
         this._voiceBtn.style.opacity = this._voiceOn ? "1" : ".4";
         if (this._chat) { this._chat.all = true; this._schedule(); }
+      });
+      this._llmBtn = $(".llmbtn");
+      this._llmOn = true;                 // per page view
+      this._llmBtn.addEventListener("click", () => {
+        this._llmOn = !this._llmOn;
+        this._llmBtn.style.opacity = this._llmOn ? "1" : ".4";
+        this._llmBtn.title = this._llmOn ? "the LLM (off: talk to membrane alone)" : "LLM off: membrane answers alone";
+        this._ta.placeholder = this._llmOn ? "Ask the brain…" : "Talk to membrane (no LLM)…";
+        if (!this._llmOn && !this._voiceOn) this._voiceBtn.click();
       });
       this._titleEl.addEventListener("dblclick", () => this._rename());
       this._agentSel.addEventListener("change", () => { this._agent = this._agentSel.value; });
@@ -1029,6 +1039,7 @@ function definePanel() {
       try {
         const r = await this._api(SERVE + "/session/" + this._sid + "/prompt_async", {
           method: "POST", body: JSON.stringify(Object.assign({ agent: this._agent, parts: [{ type: "text", text }] },
+            this._llmOn ? {} : { membrane_only: true },
             (() => { const mf = modelField(this._pick, this._sessionModel, this._seatModel());
                      if (mf) this._sessionModel = mf.modelID; return mf ? { model: mf } : {}; })())),
         });
