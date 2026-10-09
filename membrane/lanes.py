@@ -3805,6 +3805,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 self._map_distance(); return
             if path == "/membrane/map/field3d":
                 self._map_field3d(); return
+            if path == "/membrane/massage/preview":
+                self._massage_preview(); return
             if path == "/membrane/map/tile":
                 self._map_tile(); return
             if path == "/membrane/map/locate":
@@ -4119,6 +4121,39 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         out = proj.meta()
         out["root"] = proj.tile(0, 0, 0, 0)
         self._json_out(out)
+
+    def _massage_preview(self):
+        """GET /membrane/massage/preview?q=...: the massage's picks for q on
+        the live field, next to the current banner -- read-only (no turn,
+        no drain, nothing written); both blocks' alignment with the same
+        target, so they compare at their own token cost."""
+        from urllib.parse import parse_qs
+        from . import massage as _MSG
+        qs = parse_qs(self.path.split("?", 1)[-1] if "?" in self.path else "")
+        q = (qs.get("q") or [""])[0].strip()
+        fld = _efield_of(self.server)
+        emb = getattr(getattr(self.server, "membrane", None), "embedder", None)
+        if fld is None or emb is None or not q:
+            self._json_err_raw(400, "q required (and a loaded field)"); return
+        try:
+            qv = np.asarray(emb.embed([q])[0], dtype=float)
+            out = _MSG.build(fld, query_vec=qv, exclude_texts=[q])
+            t = _MSG.target(fld, qv)
+            banner = _where_we_are(self.server, qv, drain=False) or ""
+            b_align = None
+            if banner and t is not None:
+                bv = np.asarray(emb.embed([banner[:4000]])[0], dtype=float)
+                b_align = round(float(bv @ t / (np.linalg.norm(bv) + 1e-12)), 4)
+            p_align = None
+            if out["picked"] and t is not None:
+                pv = np.asarray(emb.embed([" ".join(out["picked"])[:4000]])[0], dtype=float)
+                p_align = round(float(pv @ t / (np.linalg.norm(pv) + 1e-12)), 4)
+        except Exception as e:                          # noqa: BLE001
+            self._json_err_raw(500, f"preview failed: {e!r}"[:200]); return
+        self._json_out({"q": q, "massage": {"picked": out["picked"], "tokens": out["tokens"],
+                                            "alignment_sum": out["alignment"], "alignment_text": p_align,
+                                            "candidates": out["candidates"]},
+                        "banner": {"text": banner, "tokens": len(banner) // 4, "alignment_text": b_align}})
 
     def _field3d_of(self, qs):
         pid = (qs.get("pid") or [""])[0]
@@ -6468,6 +6503,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             "backend": srv.backend,
             # the viewer v3's live layer: beating, bound to the hub, publishing
             "field_pulse": _fp.stats() if _fp is not None else None,
+            # the vector indexes the recall searches (built rows / pending)
+            "vector_index": (_efield_of(srv).b.vec_status()
+                             if _efield_of(srv) is not None and hasattr(_efield_of(srv).b, "vec_status") else None),
             # the massage's ruler: the injection mode + the last turns'
             # alignment with the field state and their token cost
             "injection": {"mode": _injection_mode(srv), "last": getattr(srv, "_massage_last", None),

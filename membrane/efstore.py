@@ -73,7 +73,9 @@ def _build_matrix(snap):
     if not keys:
         return None
     first = np.asarray(unpack_f16(next(v for _, v in snap if v is not None)), dtype=np.float32)
-    M = np.empty((len(keys), first.shape[0]), dtype=np.float32)
+    # stored as float16 (2026-10-09: 113k sentences x 1024 = 460 MB in f32 on
+    # the brain phone); scored in f32 chunks, see _scores
+    M = np.empty((len(keys), first.shape[0]), dtype=np.float16)
     i = 0
     for _, v in snap:
         if v is None:
@@ -81,9 +83,19 @@ def _build_matrix(snap):
         M[i] = unpack_f16(v)
         i += 1
     for lo in range(0, M.shape[0], 2048):          # in chunks: no full-size temp
-        blk = M[lo:lo + 2048]
+        blk = M[lo:lo + 2048].astype(np.float32)
         blk /= (np.sqrt(np.einsum("ij,ij->i", blk, blk))[:, None] + 1e-12)
+        M[lo:lo + 2048] = blk
     return np.array(keys), M
+
+
+def _scores(M, q, chunk: int = 4096):
+    """cos of every (normed) row to q: f32 math over the f16 store, chunked."""
+    q = q.astype(np.float32)
+    out = np.empty(M.shape[0], dtype=np.float32)
+    for lo in range(0, M.shape[0], chunk):
+        out[lo:lo + chunk] = M[lo:lo + chunk].astype(np.float32) @ q
+    return out
 
 
 def unpack_f16(s) -> np.ndarray:
@@ -198,6 +210,12 @@ class MemBackend:
         return pair
 
     _vec_rebuilding = False
+
+    def vec_status(self) -> dict:
+        """The vector indexes: built (rows each), wanted, rebuilding."""
+        return {"built": {f"{c}.{f}": int(m.shape[0]) for (c, f), (_, m) in list(self._vec_cache.items())},
+                "wanted": sorted(f"{c}.{f}" for c, f in getattr(self, "_vec_want", ()) or ()),
+                "dirty": sorted(self._vec_dirty), "rebuilding": bool(self._vec_rebuilding)}
 
     def _vec_rebuild_async(self) -> None:
         """ONE background rebuild at a time (the request threads never
@@ -342,7 +360,7 @@ class MemBackend:
                 M = M[keep]
         if M.shape[0] == 0:
             return []
-        s = M.astype(np.float32) @ q.astype(np.float32)
+        s = _scores(M, q)
         idx = np.argsort(-s)[:k]
         return [(str(cache_keys[i]), float(s[i])) for i in idx]
 
