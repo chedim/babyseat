@@ -917,6 +917,14 @@ def main() -> None:
                 srv.efield.listeners.append(efield_listener(srv))
             except Exception as e:
                 print(f"[seat] field pulse off ({e})", file=sys.stderr)
+            # THE WATCH FRAME (entities as axes): what the seat watches is
+            # the frame every applied message is measured along
+            try:
+                from .frame import Frame, listener as _frame_listener
+                srv._frame = Frame(srv)
+                srv.efield.listeners.append(_frame_listener(srv))
+            except Exception as e:
+                print(f"[seat] watch frame off ({e})", file=sys.stderr)
             if srv.capturer.mode == "on":
                 srv.efield.listeners.append(_efield_watch_listener(srv))
                 from .efmind import DreamSource, on_applied_fn

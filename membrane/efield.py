@@ -109,14 +109,20 @@ def f32(v) -> np.ndarray:
     return np.asarray(v, dtype=np.float32).astype(np.float64)
 
 
-def fit(x, A) -> np.ndarray:
-    """Non-negative-clipped least squares of x on the rows of A (E18)."""
+def fit_weights(x, A):
+    """Non-negative-clipped least squares of x on the rows of A (E18): the
+    reconstruction AND its weights (the event's coordinates in entity terms)."""
     A = np.asarray(A, dtype=float)
     w, *_ = np.linalg.lstsq(A.T, x, rcond=None)
     w = np.clip(w, 0.0, None)
     if w.sum() <= 1e-12:
         w = np.ones(len(A)) / len(A)
-    return A.T @ w
+    return A.T @ w, w
+
+
+def fit(x, A) -> np.ndarray:
+    """Non-negative-clipped least squares of x on the rows of A (E18)."""
+    return fit_weights(x, A)[0]
 
 
 def coherence_of(rsum, n: int) -> float:
@@ -690,10 +696,18 @@ class EntityField:
             except Exception:
                 pass
         mentioned = {m[0] for m in ev.get("mentions") or [] if m[1] in live_idx}
-        A = [st.state for st in (self.get(e) for e in sorted(mentioned))
-             if st is not None and st.tier == "live"]
+        live = [(e, st) for e, st in ((e, self.get(e)) for e in sorted(mentioned))
+                if st is not None and st.tier == "live"]
+        A = [st.state for _, st in live]
         if A:
-            xh = fit(x_msg, A)
+            xh, w = fit_weights(x_msg, A)
+            # THE EVENT'S ENTITY COORDINATES (2026-10-08, entities as axes):
+            # how much of this message each mentioned entity explains
+            tot = float(w.sum()) or 1.0
+            coords = sorted(((e, round(float(wi) / tot, 3)) for (e, _), wi in zip(live, w)
+                             if wi / tot >= 0.02), key=lambda c: -c[1])[:8]
+            if coords:
+                ev["coords"] = [[e, c] for e, c in coords]
             ev["surprise"] = float(1.0 - unit(xh) @ x_msg)
             resid = x_msg - xh
         else:

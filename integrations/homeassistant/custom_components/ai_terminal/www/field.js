@@ -607,6 +607,11 @@ function defineFieldPanel() {
           ["waiting", waiting], ["thinker beats", th.processed], ["loops busy", loops.length ? busy + "/" + loops.length : null],
           ["relations", ((this._data || {}).field || {}).relations], [st.paused ? "PAUSED" : "running", ""],
         ].filter(([, v]) => v !== undefined && v !== null);
+        // the watch frame: what the brain watches, as axes -- the ones the
+        // talk leans along most (+ = more than usual)
+        for (const r of (st.frame || []).filter((r) => r.n >= 3).slice(0, 3)) {
+          chips.push(["axis " + String(r.axis).replace(/^membrane::/, "").slice(0, 28), (r.lean > 0 ? "+" : "") + (+r.lean).toFixed(2)]);
+        }
         this._hud.innerHTML = chips.map(([k, v]) => '<span class="card chip">' + fesc(k) + (v !== "" ? " <b>" + fesc(v) + "</b>" : "") + "</span>").join("");
       } catch (e) { this._hud.innerHTML = '<span class="card chip">brain unreachable</span>'; }
     }

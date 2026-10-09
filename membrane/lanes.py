@@ -1110,6 +1110,16 @@ def _where_we_are(srv, vec, drain: bool = True) -> str | None:
     # alert budget, folded here instead of N interrupt turns
     for _dl in _digest_lines(srv, drain=drain):
         lines.append(_dl)
+    # THE WATCH FRAME (2026-10-08, entities as axes): the axes the talk
+    # leans along now, measured on what the seat chose to watch
+    try:
+        _fr = getattr(srv, "_frame", None)
+        from .frame import Frame as _Frame
+        _fl = _fr.line() if isinstance(_fr, _Frame) else ""
+        if _fl:
+            lines.append(_fl)
+    except Exception:
+        pass
     # 5. THE PEER SUBSTRATES (the operator's multi-seat design): the
     #    REGISTRY heartbeat + the seats line (who else is connected) +
     #    unread PEER-CHANNEL messages (cross-seat chatter, read-once per
@@ -6409,6 +6419,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             "backend": srv.backend,
             # the viewer v3's live layer: beating, bound to the hub, publishing
             "field_pulse": _fp.stats() if _fp is not None else None,
+            # the watch frame: what the seat watches, as axes (lean = fast - slow)
+            "frame": (getattr(srv, "_frame", None).readings()
+                      if getattr(srv, "_frame", None) is not None else None),
             "embed_model": getattr(mem.embedder, "model", None),
             # the operator's stable point (RAM-only; the acting lanes hold)
             "paused": nerve_paused(srv),
