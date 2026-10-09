@@ -916,9 +916,22 @@ class TurnRunner:
         return self._busy_lock
 
     def abort(self, sid: str) -> None:
+        """THE STOP BUTTON (2026-10-09, the operator: "the stop button is not
+        stopping"). A running turn: the flag (checked between rounds) AND
+        the turn's model socket closed, so a round blocked in the model
+        call fails now, not after its rung budget. Nothing running: no
+        flag (a stale one cut the NEXT turn's tools short) and an honest
+        idle -- the cosmetic busy kept the button on with nothing to stop."""
         self._aborting = getattr(self, "_aborting", None) or set()
-        self._aborting.add(sid)
         self._turn_activity = getattr(self, "_turn_activity", {}) or {}
+        if sid in (getattr(self, "_busy", None) or {}):
+            self._aborting.add(sid)
+            self._kill_turn_socket(sid)
+            return
+        self._aborting.discard(sid)
+        self.hub.publish({"type": "session.status",
+                          "status": {"type": "idle"}, "sessionID": sid})
+        self.hub.publish({"type": "session.idle", "sessionID": sid})
 
     def _kill_turn_socket(self, sid: str) -> None:
         """THE ABORT'S TEETH (the wedged round's fast kill, 2026-10-07):
