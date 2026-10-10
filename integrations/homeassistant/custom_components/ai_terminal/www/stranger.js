@@ -126,10 +126,16 @@
     acc.move = acc.dx = acc.dy = acc.click = 0;
   };
 
-  let lastXY = null, pointer = [0, 0];
+  // the view turns only while the pointer moves: motion feeds a spin that
+  // eases out when the pointer rests
+  let lastXY = null, pointer = [0, 0], spin = [0, 0];
   const onMove = (x, y) => {
     pointer = [(x / innerWidth) * 2 - 1, (y / innerHeight) * 2 - 1];
-    if (lastXY) { acc.dx += x - lastXY[0]; acc.dy += y - lastXY[1]; acc.move += 1; }
+    if (lastXY) {
+      const dx = x - lastXY[0], dy = y - lastXY[1];
+      acc.dx += dx; acc.dy += dy; acc.move += 1;
+      spin = [spin[0] + dx * 0.00035, spin[1] + dy * 0.00025];
+    }
     lastXY = [x, y];
   };
   addEventListener("pointermove", (e) => onMove(e.clientX, e.clientY), { passive: true });
@@ -172,7 +178,7 @@
   let colors = null;
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  let yaw = 0, tilt = [0, 0];
+  let yaw = 0, pitch = 0, tilt = [0, 0];
   const project = (p) => {
     const x0 = p[0] + offset[0], y0 = p[1] + offset[1], z0 = p[2] + offset[2];
     const cy = Math.cos(yaw), sy = Math.sin(yaw);
@@ -190,9 +196,12 @@
     const dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     if (!colors) colors = { node: cssRGB("--sg-node"), edge: cssRGB("--sg-edge"), me: cssRGB("--sg-me") };
-    if (!reduce) yaw += dt * 0.05;
-    tilt = [tilt[0] + (pointer[0] * 0.25 - tilt[0]) * dt * 2, tilt[1] + (pointer[1] * 0.25 - tilt[1]) * dt * 2];
-    yaw += (tilt[0] * 0.02);
+    const k = reduce ? 0.3 : 1;
+    yaw += spin[0] * k;
+    pitch = Math.max(-0.6, Math.min(0.6, pitch + spin[1] * k));
+    const ease = Math.exp(-dt * 3);
+    spin = [spin[0] * ease, spin[1] * ease];
+    tilt = [0, pitch];
     ctx.clearRect(0, 0, W, H);
 
     const draw = (set, alphaOf) => {
