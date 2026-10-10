@@ -2161,6 +2161,39 @@ EACH_MAX_CEILING = 150
 def members_of(est, over: str) -> list:
     """The objects a fan-out reaches: entities inheriting (transitively) from
     the class `over`, or matching it as a pattern ('ha:light.*')."""
+    return member_split(est, over)[0]
+
+
+def _weight(d) -> tuple:
+    pp = d.properties or {}
+    return (len(pp.get("readings") or []), len(pp.get("calls") or []), len(pp))
+
+
+def member_split(est, over: str) -> tuple[list, list]:
+    """(members, unconfirmed). Two cleanups the seat's first fan-out probe
+    found (2026-10-10): ONE member per name (the field held two eids for
+    'ha:light.aft_cabin_light' and it ran twice -- the one with more lived
+    history wins); and a member served by a class GETTER that never gave it
+    a reading of its own is unconfirmed ('ha:light.turn_on', '.x', '.head':
+    tokens the night minted from text) -- reported, not called."""
+    from .classes import short_name
+    raw = _raw_members(est, over)
+    best: dict[str, object] = {}
+    for d in raw:
+        k = short_name(d.eid)
+        if k not in best or _weight(d) > _weight(best[k]):
+            best[k] = d
+    members, unconfirmed = [], []
+    for d in best.values():
+        pp = d.properties or {}
+        if not pp.get("readings") and not pp.get("calls") and effective_script(est, d, "getter")[0]:
+            unconfirmed.append(d)
+        else:
+            members.append(d)
+    return members, unconfirmed
+
+
+def _raw_members(est, over: str) -> list:
     if not over:
         return []
     if "*" in over:
@@ -2184,14 +2217,18 @@ def method_each(srv, est, fld, mem, over: str, method: str, args: dict | None = 
                 max_n=None, dry_run: bool = False, on_fail: str = "abort", _depth: int = 0) -> dict:
     if est is None:
         return {"ok": False, "status": "blocked", "error": "entity layer unavailable"}
-    members = members_of(est, over)
+    members, unconf = member_split(est, over)
     names = [short_name_of(m) for m in members]
+    skipped = [short_name_of(m) for m in unconf]
     try:
         cap = int(max_n) if max_n not in (None, "") else EACH_MAX_DEFAULT
     except (TypeError, ValueError):
         cap = EACH_MAX_DEFAULT
     cap = max(1, min(cap, EACH_MAX_CEILING))
     base = {"over": over, "method": method, "n": len(members), "max": cap}
+    if skipped:
+        base["unconfirmed"] = skipped[:30]
+        base["n_unconfirmed"] = len(skipped)
     if not members:
         return {**base, "ok": False, "status": "blocked",
                 "error": f"no members of {over!r} (a class others inherit from, or a pattern)"}
@@ -2222,6 +2259,20 @@ def method_each(srv, est, fld, mem, over: str, method: str, args: dict | None = 
                  "n": len(members), "ran": ran, "ok": n_ok, "status": status})
     return {**base, "ok": status == "ok", "status": status, "ran": ran, "n_ok": n_ok,
             "stopped": ran < len(members), "results": results}
+
+
+def removal_refusal(est, spec: str) -> str | None:
+    """A live METHOD is not a stub (the seat's cleanup removed
+    'shell:ha-light.status' as one, 2026-10-10, and 33 lights lost status):
+    removing a method that has an owner or has run takes force=true."""
+    from .classes import short_name
+    d = est._resolve_spec(spec) if est is not None else None
+    pp = (getattr(d, "properties", None) or {}) if d is not None else {}
+    if not pp.get("method_name") or not (pp.get("method_of") or pp.get("runs")):
+        return None
+    owners = ", ".join(short_name(o) for o in (pp.get("method_of") or [])) or "global"
+    return (f"{d.eid} is the method {pp['method_name']!r} of {owners} ({int(pp.get('runs') or 0)} runs) -- "
+            f"every member of {owners} loses it; force=true removes it anyway")
 
 
 def short_name_of(obj) -> str:

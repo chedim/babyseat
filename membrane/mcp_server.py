@@ -1152,7 +1152,10 @@ def tool_entity_remove(args: dict, port: int) -> str:
     spec = _arg(args, "spec", "eid", "name", "entity", "key", "id")
     if not spec:
         raise ProxyError(400, "spec required (eid or exact name)")
-    out = _http(port, "POST", "/membrane/entity/remove", {"spec": spec})
+    force = str(args.get("force") or "").lower() in ("true", "1", "yes")
+    out = _http(port, "POST", "/membrane/entity/remove", {"spec": spec, "force": force})
+    if out.get("refused"):
+        return f"Not removed: {out['refused']}"
     n = int(out.get("removed") or 0)
     return f"Removed {spec!r}." if n \
         else (f"Nothing removed: no single entity matches {spec!r} "
@@ -1426,16 +1429,19 @@ def tool_method_each(args: dict, port: int) -> str:
         "args": a if isinstance(a, dict) else {}, "max": args.get("max"),
         "dry_run": bool(args.get("dry_run")) and str(args.get("dry_run")).lower() not in ("false", "0"),
         "on_fail": str(args.get("on_fail") or "abort")})
+    skip = (f" | skipped {out['n_unconfirmed']} unconfirmed (the class getter never read them -- "
+            f"likely text artifacts; check, then entity remove or give them a reading): "
+            + ", ".join(out.get("unconfirmed") or [])) if out.get("n_unconfirmed") else ""
     if out.get("dry_run"):
         return (f"dry run: {out['method']} over {out['over']} would reach {out['n']} (max {out['max']}): "
-                + ", ".join(out.get("members") or []))
+                + ", ".join(out.get("members") or []) + skip)
     head = f"[{out.get('status')}] {out.get('method')} over {out.get('over')}: "
     if out.get("status") == "blocked" and not out.get("results"):
-        return head + str(out.get("error"))
+        return head + str(out.get("error")) + skip
     rows = "; ".join(f"{r['object']}:{r['status']}" for r in (out.get("results") or [])[:40])
     return (head + f"{out.get('n_ok', 0)}/{out.get('n')} ok, ran {out.get('ran')}"
             + (" (stopped at the first failure; on_fail='continue' runs the rest)" if out.get("stopped") else "")
-            + f" -- {rows}")
+            + f" -- {rows}" + skip)
 
 
 def tool_entity_unlink(args: dict, port: int) -> str:

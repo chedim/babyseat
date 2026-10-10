@@ -46,6 +46,7 @@ FAMILIES: dict[str, dict] = {
                    "class": _S("add/edit: its class"), "summary": _S("what it is"),
                    "links": {"type": "array", "items": {"type": "string"}, "description": "related entities"},
                    "run": _B("read: fire the getter now"),
+                   "force": _B("remove: even a live method"),
                    "parents": {"type": "array", "items": {"type": "string"}, "description": "inherit: ISA parents"},
                    "scripts": {"type": "object", "description": "kind -> python: " + ", ".join(SCRIPT_KINDS)},
                    "properties": {"type": "object", "description": "edit: properties to set"},
@@ -59,7 +60,7 @@ FAMILIES: dict[str, dict] = {
                                    **({"properties": {**(a.get("properties") or {}),
                                                       **({"parents": a["parents"]} if "parents" in a else {})}}
                                       if (a.get("properties") or "parents" in a) else {})},
-                "remove": lambda a: _pick(a, "spec"),
+                "remove": lambda a: _pick(a, "spec", "force"),
                 "inherit": lambda a: _pick(a, "spec", "parents")},
     },
     "exec": {

@@ -6171,6 +6171,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if not spec:
             self._json_err_raw(400, "spec required (eid or name fragment)")
             return
+        from .night import removal_refusal
+        why = None if body.get("force") else removal_refusal(est, spec)
+        if why:
+            self._entity_audit("remove", {"ok": False, "eid": spec, "refused": why})
+            self._json_out({"removed": 0, "refused": why}); return
         n = est.remove(spec)
         self._entity_audit("remove", {"ok": n > 0, "eid": spec, "count": n})
         self._json_out({"removed": n})

@@ -340,3 +340,50 @@ class TestOldNameHabits(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertIn("is a method", r["error"])
         self.assertTrue(N.entity_link(srv, est, f, None, "", ["echo still-a-command"])["ok"])
+
+
+class TestFanOutMembersAndRemoval(unittest.TestCase):
+    """The seat's first fan-out probe (2026-10-10): a light ran twice (two
+    eids, one name), night-minted text tokens rode the sweep, and a cleanup
+    removed the class's real 'status' method as a 'stub'."""
+
+    def test_one_member_per_name_the_lived_one_wins(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        twin = est.docs[est.add(cls="Sensor", name="ha:light.port_strip", summary="x")["eid"]]
+        twin.properties.update({"parents": [light.eid]})
+        port.properties["readings"] = [{"ts": 1, "v": {"state": "on"}}]
+        ms = N.members_of(est, light.eid)
+        names = [N.short_name_of(m) for m in ms]
+        self.assertEqual(names.count("ha:light.port_strip"), 1)
+        self.assertIn(port.eid, [m.eid for m in ms])
+
+    def test_a_class_getter_member_without_a_reading_is_unconfirmed(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        light.properties["getter_script"] = "result = {}"
+        port.properties["readings"] = [{"ts": 1, "v": {"state": "on"}}]
+        ghost = _add(est, "ha:light.turn_on", parents=[light.eid])
+        ms, unc = N.member_split(est, light.eid)
+        self.assertIn(port.eid, [m.eid for m in ms])
+        self.assertIn(ghost.eid, [m.eid for m in unc])
+        self.assertIn(aft.eid, [m.eid for m in unc])              # never read either
+        N.method_define(srv, est, f, None, light.eid, "status", "echo st", read_only=True)
+        r = N.method_each(srv, est, f, None, light.eid, "status", on_fail="continue")
+        self.assertEqual(r["n"], 1)
+        self.assertEqual(r["n_unconfirmed"], 2)
+        self.assertEqual(r["status"], "ok")
+
+    def test_without_a_class_getter_every_member_counts(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        ms, unc = N.member_split(est, light.eid)
+        self.assertEqual(len(ms), 2)
+        self.assertEqual(unc, [])
+
+    def test_removing_a_live_method_needs_force(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        d = N.method_define(srv, est, f, None, light.eid, "status", "echo st", read_only=True)
+        why = N.removal_refusal(est, d["eid"])
+        self.assertIn("method 'status'", why)
+        self.assertIn("force=true", why)
+        self.assertIsNone(N.removal_refusal(est, port.eid))
+        stub = N.entity_link(srv, est, f, None, "", ["echo a-stub"])
+        self.assertTrue(stub["ok"])
