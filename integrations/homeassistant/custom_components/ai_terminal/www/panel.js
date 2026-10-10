@@ -388,7 +388,14 @@ function replyToSpeak(rows) {
   for (let i = (rows || []).length - 1; i >= 0; i--) {
     const r = rows[i];
     if (!r || !r.info) continue;
-    if (r.info.role === "user") return null;
+    if (r.info.role === "user") {
+      // only a PERSON's row ends the search: membrane's own voice lines and
+      // auto-chat frames land as user rows DURING Argus's turn (the reply
+      // was never spoken, 2026-10-10)
+      const said = (r.parts || []).map((p) => p.text || "").join("\n");
+      if (said.includes(SPEAKER_PREFIX)) return null;
+      continue;
+    }
     if (r.info.role !== "assistant") continue;
     if (!(r.info.time || {}).completed) return null;
     const text = (r.parts || []).filter((p) => p.type === "text" && !p.synthetic).map((p) => p.text || "").join("\n")
@@ -1096,6 +1103,10 @@ function definePanel() {
         this._schedule();
         this._paintStatus();
         if (ev.type === "membrane.auto") this._paintAuto();
+      }
+      if (this._chat && sid === this._chat.sid && (ev.type === "session.idle" ||
+          (ev.type === "session.status" && (p.status || {}).type === "idle"))) {
+        this.dispatchEvent(new CustomEvent("ai-idle", { bubbles: true, composed: true }));
       }
       // a finished reply, announced once (membrane home speaks it)
       if (this._chat && sid === this._chat.sid && (ev.type === "session.idle" || ev.type === "message.updated")) {

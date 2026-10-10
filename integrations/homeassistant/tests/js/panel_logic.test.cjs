@@ -209,5 +209,11 @@ test("the reply to speak: the newest finished assistant text, frames and markdow
       { type: "tool", text: "ignored" }])];
   eq(L.replyToSpeak(rows), { id: "a1", text: "Sure. The lights are on." });
   assert.equal(L.replyToSpeak([...rows, row("a2", "assistant", [{ type: "text", text: "half" }], false)]), null);
-  assert.equal(L.replyToSpeak([...rows, row("u2", "user", [{ type: "text", text: "and?" }])]), null);
+  assert.equal(L.replyToSpeak([...rows, row("u2", "user", [{ type: "text", text: "[HA user: D]\nand?" }])]), null);
+  // membrane's own voice line lands as a user row DURING the turn: it doesn't hide the reply
+  const voiced = [row("u3", "user", [{ type: "text", text: "[HA user: D]\nhi" }]),
+    row("v1", "user", [{ type: "text", text: "[membrane voice] hello there" }]),
+    row("a3", "assistant", [{ type: "text", text: "Hi Dmitrii." }])];
+  eq(L.replyToSpeak(voiced), { id: "a3", text: "Hi Dmitrii." });
+  eq(L.replyToSpeak([voiced[0], voiced[2], voiced[1]]), { id: "a3", text: "Hi Dmitrii." });
 });

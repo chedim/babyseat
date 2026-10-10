@@ -332,26 +332,27 @@ const HSTYLE = `
   @keyframes recpulse { 50% { box-shadow:0 0 0 8px color-mix(in srgb, var(--error-color,#c0392b) 30%, transparent); } }
   .card { bottom:76px !important; }
   .top .tilt[hidden] { display:none; }
-  /* THE ORB (Siri-like): listening breathes with your voice, thinking
-     shimmers, speaking pulses; your words float above it */
-  .orb { position:absolute; z-index:4; left:50%; bottom:24px; transform:translateX(-50%); width:120px; height:120px;
-         pointer-events:none; display:none; }
-  .orb.on { display:block; }
-  .orb .core { position:absolute; inset:18px; border-radius:50%; filter:blur(2px);
-               background:conic-gradient(#ff3b8a, #7a5cff, #2ec5ff, #3dffb5, #ff3b8a);
-               transform:scale(var(--s, 1)); transition:transform .08s linear; animation:orbspin 3.2s linear infinite; }
-  .orb .glow { position:absolute; inset:0; border-radius:50%; filter:blur(18px); opacity:.75;
-               background:conic-gradient(#ff3b8a, #7a5cff, #2ec5ff, #3dffb5, #ff3b8a);
-               transform:scale(calc(var(--s, 1) * 1.1)); animation:orbspin 3.2s linear infinite reverse; }
-  .orb.thinking .core, .orb.thinking .glow { animation-duration:1.1s; transform:scale(.8); }
-  .orb.speaking .core { animation:orbspin 2s linear infinite, orbpulse .9s ease-in-out infinite; }
-  @keyframes orbspin { to { rotate:360deg; } }
-  @keyframes orbpulse { 50% { transform:scale(1.12); } }
-  .orbtext { position:absolute; z-index:4; left:50%; bottom:156px; transform:translateX(-50%); max-width:min(640px, calc(100% - 32px));
-             text-align:center; font-size:20px; line-height:1.35; font-weight:500; pointer-events:none; display:none;
-             text-shadow:0 1px 6px color-mix(in srgb, var(--primary-background-color,#000) 80%, transparent); }
-  .orbtext.on { display:block; }
-  @media (max-width: 760px) { .orb { bottom:calc(56dvh + 80px); } .orbtext { bottom:calc(56dvh + 210px); font-size:18px; }
+  /* THE ORB: a soft glow that breathes -- with your voice while listening,
+     slowly while Argus thinks, a little faster while he speaks. No spinning
+     (the operator: "the atrocious carousel animation") */
+  .orb { position:absolute; z-index:4; left:50%; bottom:28px; transform:translateX(-50%); width:84px; height:84px;
+         pointer-events:none; opacity:0; transition:opacity .35s ease; }
+  .orb.on { opacity:1; }
+  .orb .core { position:absolute; inset:14px; border-radius:50%;
+               background:radial-gradient(circle at 40% 35%, #ffffff 0%, #b9d4ff 22%, #6f8cff 55%, #8a5cff 100%);
+               box-shadow:0 0 22px 6px color-mix(in srgb, #6f8cff 55%, transparent);
+               transform:scale(var(--s, 1)); transition:transform .12s ease-out; }
+  .orb .glow { position:absolute; inset:0; border-radius:50%; filter:blur(14px); opacity:.55;
+               background:radial-gradient(circle, #8fb0ff 0%, #8a5cff 60%, transparent 72%);
+               transform:scale(calc(var(--s, 1) * 1.05)); transition:transform .12s ease-out; }
+  .orb.thinking .core, .orb.thinking .glow { animation:orbbreathe 2.4s ease-in-out infinite; }
+  .orb.speaking .core, .orb.speaking .glow { animation:orbbreathe 1.1s ease-in-out infinite; }
+  @keyframes orbbreathe { 0%, 100% { transform:scale(.9); opacity:.8; } 50% { transform:scale(1.06); opacity:1; } }
+  .orbtext { position:absolute; z-index:4; left:50%; bottom:122px; transform:translateX(-50%); max-width:min(640px, calc(100% - 32px));
+             text-align:center; font-size:19px; line-height:1.35; font-weight:500; pointer-events:none; opacity:0;
+             transition:opacity .4s ease; text-shadow:0 1px 6px color-mix(in srgb, var(--primary-background-color,#000) 80%, transparent); }
+  .orbtext.on { opacity:1; }
+  @media (max-width: 760px) { .orb { bottom:calc(56dvh + 80px); } .orbtext { bottom:calc(56dvh + 172px); font-size:17px; }
                               .chat.hidden ~ .orb { bottom:84px; } }
   .msg { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:1;
          pointer-events:none; opacity:.6; white-space:pre-line; text-align:center; padding:24px; }
@@ -781,6 +782,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       document.addEventListener("visibilitychange", this._onVis);
       if (lsGet(LS_HOTWORD, "0") === "1") setTimeout(() => this._hotStart(), 800);
       // voice in -> voice out: an answer to something SAID is spoken even with 🔈 off
+      // the chat went idle without a reply to speak (or before one): the orb rests
+      this._chat.addEventListener("ai-idle", () => {
+        setTimeout(() => { if (!this._speaking && !this._busyChat()) this._orb(null); }, 1500);
+      });
       this._chat.addEventListener("ai-reply", (e) => {
         const said = this._voiceTurns > 0;
         if (said) this._voiceTurns -= 1;
@@ -959,6 +964,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     _sendSaid(text, cut) {
       this._orbText(text); this._orb("thinking");
+      clearTimeout(this._orbTextT);
+      this._orbTextT = setTimeout(() => { if (!this._speaking) this._orbText(""); }, 4000);   // the phrase fades
       const queued = this._busyChat();
       this._voiceTurns = (this._voiceTurns || 0) + 1;
       this._sendToChat(text);
@@ -1227,6 +1234,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     _hushTts() {
       this._ttsGen = (this._ttsGen || 0) + 1;
+      this._speaking = false;
       if (this._audio) { try { this._audio.pause(); if (this._audio.onended) this._audio.onended(); } catch (e) { /* gone */ } this._audio = null; }
       if (window.speechSynthesis) window.speechSynthesis.cancel();
     }
@@ -1248,13 +1256,15 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._hushTts();
       if (this._voice && window.speechSynthesis) {          // ON THE DEVICE: nothing sent anywhere
         const gen = this._ttsGen;
+        this._speaking = true;
         this._orb("speaking");
         for (const chunk of speechChunks(text)) {
           if (gen !== this._ttsGen) return;
           this._orbText(chunk);
           await this._say1(chunk);
         }
-        if (gen === this._ttsGen) this._orb(null);
+        this._speaking = false;
+        if (gen === this._ttsGen) { this._orb(null); this._orbText(""); }
         return;
       }
       if (!this._noLocalVoiceSaid) {
