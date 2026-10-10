@@ -52,7 +52,7 @@ FAMILIES: dict[str, dict] = {
                    "watch_ops": {"type": "array", "items": {"type": "object"}, "description": "edit: geometric watches (help('watches'))"},
                    "watch_fields": {"type": "array", "items": {"type": "object"}, "description": "edit: own-motion watches"},
                    "merged_into": _S("edit: merge into this entity")},
-        "map": {"read": lambda a: _pick({"spec": a.get("spec") or a.get("name"), "run": a.get("run")}, "spec", "run"),
+        "map": {"read": lambda a: _pick({"spec": a.get("spec") or a.get("name") or a.get("object"), "run": a.get("run")}, "spec", "run"),
                 "add": lambda a: _pick(a, "class", "name", "summary", "links"),
                 "edit": lambda a: _pick(a, "spec", "summary", "links", "class", "merged_into",
                                         "properties", "watch", "watch_ops", "watch_fields",

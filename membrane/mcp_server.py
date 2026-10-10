@@ -1433,7 +1433,7 @@ def tool_entity_read(args: dict, port: int) -> str:
     """The read-back tool: the entity's value AFTER processing."""
     import urllib.parse
     spec = urllib.parse.quote(_arg(args, "spec", "eid", "entity", "name",
-                                    "key", "id"))
+                                    "key", "id", "object"))     # Cliffhanger's word for a target
     qs = f"/membrane/entity/read?spec={spec}"
     if args.get("run"):
         qs += "&run=1"

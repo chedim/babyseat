@@ -188,3 +188,9 @@ class TestReadByName(unittest.TestCase):
     def test_read_takes_name_too(self):
         self.assertEqual(T.resolve("entity", {"action": "read", "name": "ha:light.x", "run": True}),
                          ("entity_read", {"spec": "ha:light.x", "run": True}))
+
+
+class TestReadByObject(unittest.TestCase):
+    def test_read_takes_object_too(self):
+        self.assertEqual(T.resolve("entity", {"action": "read", "object": "ha:sensor.x"}),
+                         ("entity_read", {"spec": "ha:sensor.x"}))
