@@ -96,3 +96,19 @@ test("👂 stays quiet for speech that doesn't call it", { timeout: 240000 }, as
     assert.deepEqual(await page.evaluate(() => window.__said.slice()), []);
   });
 });
+
+test("👂 while Argus speaks: his name cuts him off (barge-in)", { timeout: 240000 }, async () => {
+  await withPage(spoken("Hey Argus, stop."), async (page) => {
+    await page.evaluate(() => {
+      localStorage.setItem("membrane.home.stt", "device");
+      const el = window.__home;
+      window.__hushed = 0;
+      const hush = el._hushTts.bind(el);
+      el._hushTts = () => { if (el._speaking) window.__hushed += 1; hush(); };
+      el._speaking = true;                                 // as if a reply were being read aloud
+      el.shadowRoot.querySelector(".ear").click();
+    });
+    await page.waitForFunction(() => window.__hushed > 0, null, { timeout: 200000 });
+    assert.ok(await page.evaluate(() => window.__hushed) > 0);
+  });
+});

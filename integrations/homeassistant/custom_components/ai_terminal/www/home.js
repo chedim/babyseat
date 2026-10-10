@@ -162,8 +162,18 @@ const LS_HOTWORD = "membrane.home.hotword";
 const HOT_MIN_S = 0.4, HOT_MAX_S = 8, HOT_END_MS = 450, HOT_PER_MIN = 16, HOT_FOLLOW_MS = 8000;
 const HOT_EARLY_S = 1.3;          // the first stretch is checked while you are still talking
 const HOT_ACKS = ["Yes?", "Uh-huh?", "Mm-hm?", "I'm listening."];
-const HOT_NAMES = "argus|argos|argus's|angus|argo|august|augustus|arcus|our gus|are gus";
+const HOT_NAMES = "argus|argos|argus's|angus|argo|august|augustus|arcus|our gus|are gus|are guess|our guess|gus";
 const HOT_RE = new RegExp("^(?:(?:hey|hi|hay|ok|okay|hello|yo)[\\s,.!-]+)?(?:" + HOT_NAMES + ")\\b[\\s,.!?-]*(.*)$", "i");
+
+/** What gets spoken: the first few sentences, "the rest is in the chat". */
+function speakable(text) {
+  const all = speechChunks(text);
+  const out = []; let n = 0;
+  for (const c of all) { if (out.length >= SPEAK_MAX_SENTENCES || n + c.length > SPEAK_MAX_CHARS) break; out.push(c); n += c.length; }
+  if (!out.length && all.length) out.push(all[0].slice(0, SPEAK_MAX_CHARS));
+  if (out.length < all.length) out.push("The rest is in the chat.");
+  return out;
+}
 
 /** 'Hey Argus, turn on the lights' -> {hit: true, rest: 'turn on the lights'}. */
 function hotword(text) {
@@ -186,9 +196,11 @@ const LS_STT = "membrane.home.stt";          // "device" (default) | "lan"
 // a greeting is required: a bare name in the grammar matched "turn on" (the
 // recognizer squeezes every sound into its few phrases -- the browser test
 // caught it, 2026-10-10)
-const WAKE_GRAMMAR = ["hey are gus", "hey our gus", "hey angus", "hey august", "hi are gus", "okay are gus",
-                      "ok are gus", "[unk]"];
-const WAKE_RE = /\b(hey|hi|okay|ok) (are gus|our gus|angus|august)\b/;
+const WAKE_NAMES = ["are gus", "our gus", "are guess", "our guess", "angus", "august", "gus"];
+const WAKE_GREETS = ["hey", "hay", "hi", "okay", "ok"];
+const WAKE_GRAMMAR = WAKE_GREETS.flatMap((g) => WAKE_NAMES.map((n) => g + " " + n)).concat(["[unk]"]);
+const WAKE_RE = new RegExp("\\b(" + WAKE_GREETS.join("|") + ") (" + WAKE_NAMES.join("|") + ")\\b");
+const SPEAK_MAX_SENTENCES = 3, SPEAK_MAX_CHARS = 380;    // Siri-short: the rest stays in the chat
 const DICTATE_END_MS = 600, DICTATE_WAIT_MS = 2500;
 
 function loadScript(src) {
@@ -259,7 +271,7 @@ function pickVoice(voices, lang = "en") {
   return local.find((v) => !/google/i.test(v.name)) || local[0] || null;
 }
 
-const HomeLogic = { personSlug, menuEntries, hotword, pickVoice, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, angleStep };
+const HomeLogic = { personSlug, menuEntries, hotword, pickVoice, speakable, WAKE_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, angleStep };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
 const HSTYLE = `
@@ -755,7 +767,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       });
       // a laptop's PTT: hold Space anywhere but a text box
       const typing = (e) => e.composedPath().some((n) => n && (n.tagName === "TEXTAREA" || n.tagName === "INPUT" || n.isContentEditable));
-      this._onKeyDown = (e) => { if (e.code === "Space" && !e.repeat && !typing(e) && this.isConnected) { e.preventDefault(); this._recStart("ptt"); } };
+      this._onKeyDown = (e) => {
+        if (e.key === "Escape" && this._speaking) { this._hushTts(); this._orb(null); this._orbText(""); return; }
+        if (e.code === "Space" && !e.repeat && !typing(e) && this.isConnected) { e.preventDefault(); this._recStart("ptt"); }
+      };
       this._onKeyUp = (e) => { if (e.code === "Space" && this._rec && this._rec.mode === "ptt" && !typing(e)) { e.preventDefault(); this._recStop(true); } };
       this._listenKeys(true);
       this._engine = lsGet(LS_STT, "device") === "lan" ? "lan" : "device";
@@ -773,6 +788,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const load = () => { this._voice = pickVoice(window.speechSynthesis.getVoices()); };
         load(); window.speechSynthesis.addEventListener && window.speechSynthesis.addEventListener("voiceschanged", load);
       }
+      // a tap anywhere stops him talking (the orb, the field, any button)
+      root.addEventListener("pointerdown", () => { if (this._speaking) { this._hushTts(); this._orb(null); this._orbText(""); } }, true);
       this._earBtn = root.querySelector(".ear");
       this._earBtn.addEventListener("click", () => {
         this._unlockAudio();
@@ -1048,6 +1065,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     _localWake(h, text) {
       if (h.state !== "wake" || !WAKE_RE.test(String(text || ""))) return;
+      this._hushTts();                                     // called by name: he stops talking
       this._hotHeard(h);                                   // the chime, now
       this._dictate(h, false);
     }
@@ -1064,8 +1082,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     _hotLocalFrame(h, buf) {
       const f32 = buf.getChannelData(0);
-      const busy = h.paused || h.muteUntil > performance.now() || this._rec || this._recBusy ||
-        (this._audio && !this._audio.paused) || (window.speechSynthesis && window.speechSynthesis.speaking);
+      // Argus speaking does NOT stop the ear: his name cuts him off (Siri-like barge-in)
+      const busy = h.paused || h.muteUntil > performance.now() || this._rec || this._recBusy;
       let ss = 0; for (let i = 0; i < f32.length; i++) ss += f32[i] * f32[i];
       const rms = Math.sqrt(ss / f32.length), thr = Math.max(0.012, h.floor * 3.5);
       this._orbLevel(rms);
@@ -1258,7 +1276,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const gen = this._ttsGen;
         this._speaking = true;
         this._orb("speaking");
-        for (const chunk of speechChunks(text)) {
+        for (const chunk of speakable(text)) {
           if (gen !== this._ttsGen) return;
           this._orbText(chunk);
           await this._say1(chunk);
@@ -1272,7 +1290,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         this._vsay("this device has no voice of its own: using Home Assistant's", 5000);
       }
       const gen = this._ttsGen, engine = this._ttsEngine();
-      for (const chunk of speechChunks(text)) {
+      for (const chunk of speakable(text)) {
         if (gen !== this._ttsGen || !this._ttsOn) return;
         try {
           if (!engine) throw new Error("no tts entity");

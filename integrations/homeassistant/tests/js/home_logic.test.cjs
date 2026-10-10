@@ -114,3 +114,14 @@ test("the local engine's spellings of the name wake it and are stripped from the
   assert.equal(H.hotword("hey are gus turn on the lights").rest, "turn on the lights");
   assert.equal(H.hotword("hey our gus").hit, true);
 });
+
+test("speech is Siri-short: three sentences at most, then a pointer to the chat", () => {
+  const long = "One. Two. Three. Four. Five.";
+  assert.equal(JSON.stringify(H.speakable(long)), JSON.stringify(["One.", "Two.", "Three.", "The rest is in the chat."]));
+  assert.equal(JSON.stringify(H.speakable("Just this.")), JSON.stringify(["Just this."]));
+});
+
+test("the wake phrase: greetings + the model's spellings of Argus", () => {
+  for (const t of ["hey are gus", "hey our guess", "hay angus", "okay august", "hi gus"]) assert.ok(H.WAKE_RE.test(t), t);
+  for (const t of ["turn on", "are gus", "angus", "the august sale"]) assert.ok(!H.WAKE_RE.test(t), t);
+});
