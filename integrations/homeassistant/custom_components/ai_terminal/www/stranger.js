@@ -15,8 +15,8 @@
   const VIEW_EVERY_MS = 3000;
   const FLUSH_EVERY_MS = 2000;
   // mirrors membrane/strangers.py: cube units per pixel / per event, over the window radius
-  const STEP_W = 0.00015 / 0.05;
-  const MAX_STEP_W = 0.004 / 0.05;
+  const STEP_W = 0.00015 / 0.1;
+  const MAX_STEP_W = 0.004 / 0.1;
 
   // ---- the form behind a button -------------------------------------------
   const css = document.createElement("style");
@@ -90,7 +90,8 @@
     fading = nodes.map((n) => ({ ...n }));
     const now = performance.now();
     nodes = (v.p || []).map((p, i) => ({ p, m: (v.m || [])[i] || 0, a: 0, glow: 0, born: now }));
-    edges = (v.e || []).filter(([a, b]) => a < nodes.length && b < nodes.length);
+    edges = (v.e || []).filter(([a, b]) => a < nodes.length && b < nodes.length).map(([a, b]) => [a, b, 1]);
+    for (const [a, b] of v.n || []) if (a < nodes.length && b < nodes.length) edges.push([a, b, 0.45]);
     for (const i of v.pulse || []) if (nodes[i]) nodes[i].glow = 1;
     if (v.me_pulse) meGlow = 1;
     offset = [0, 0, 0];
@@ -187,10 +188,10 @@
     const draw = (set, alphaOf) => {
       const pts = set.map((n) => project(n.p));
       ctx.lineWidth = dpr;
-      for (const [a, b] of set === nodes ? edges : []) {
+      for (const [a, b, w] of set === nodes ? edges : []) {
         const pa = pts[a], pb = pts[b];
         if (!pa || !pb) continue;
-        const al = Math.min(alphaOf(set[a]), alphaOf(set[b])) * 0.18 * Math.min(pa[2], pb[2]) * 2;
+        const al = Math.min(alphaOf(set[a]), alphaOf(set[b])) * 0.22 * w * Math.min(pa[2], pb[2]) * 2;
         ctx.strokeStyle = `rgba(${colors.edge}, ${al.toFixed(3)})`;
         ctx.beginPath(); ctx.moveTo(pa[0], pa[1]); ctx.lineTo(pb[0], pb[1]); ctx.stroke();
         if (set[a].glow > 0.05 || set[b].glow > 0.05) {

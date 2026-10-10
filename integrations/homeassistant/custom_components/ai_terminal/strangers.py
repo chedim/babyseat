@@ -40,6 +40,7 @@ KINDS = ("move", "click", "stay", "focus", "blur")
 BUCKET_SIZE = 12          # requests
 BUCKET_RATE = 2.0         # refilled per second
 TIMEOUT_S = 8.0
+VISIT_TIMEOUT_S = 20.0    # the first visit may build the seat's projection (~5 s)
 RETENTION_DAYS = 30
 LOG_NAME = "ai_terminal_strangers.jsonl"
 LOG_MAX_BYTES = 2_000_000
@@ -155,7 +156,8 @@ class StrangerView(HomeAssistantView):
         try:
             async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(force_close=True)) as sess:
                 async with sess.get(url, headers=headers, params=params,
-                                    timeout=aiohttp.ClientTimeout(total=TIMEOUT_S)) as up:
+                                    timeout=aiohttp.ClientTimeout(
+                                        total=VISIT_TIMEOUT_S if op == "visit" else TIMEOUT_S)) as up:
                     out = await up.json(content_type=None)
                     status = up.status
         except Exception as e:                          # noqa: BLE001

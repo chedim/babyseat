@@ -73,8 +73,8 @@ class TestStrangers(unittest.TestCase):
         blob = repr(v)
         self.assertNotIn("e1", blob.replace("'e':", ""))         # no ids leak
         self.assertNotIn("site:login", blob)
-        self.assertEqual(set(v), {"ok", "name", "p", "m", "e", "pulse", "me_pulse", "ttl"})
-        for a, b in v["e"]:
+        self.assertEqual(set(v), {"ok", "name", "p", "m", "e", "n", "pulse", "me_pulse", "ttl"})
+        for a, b in v["e"] + v["n"]:
             self.assertTrue(0 <= a < len(v["p"]) and 0 <= b < len(v["p"]))
 
     def test_pulses_are_indices_into_the_window(self):

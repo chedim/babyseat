@@ -33,8 +33,9 @@ MAX_LIVE = 20
 PER_IP_LIVE = 2
 TTL_S = 15 * 60.0                 # after the last sign of life
 LIFETIME_S = 2 * 3600.0
-RADIUS = 0.05                     # the window: cube units around the stranger
+RADIUS = 0.1                      # the window: cube units around the stranger (~110 of 14k)
 MAX_NODES = 150
+NEAREST_K = 2
 VIEW_CACHE_S = 3.0
 STEP = 0.00015                    # cube units per reported mouse pixel
 MAX_STEP = 0.004                  # per event
@@ -243,7 +244,7 @@ def view(srv, tok: str, now: float | None = None) -> dict:
                 proj = _projection(srv)
             except Exception:
                 proj = None
-            cached = _window(proj, s["me"]) if proj is not None else {"idx": [], "ids": [], "p": [], "m": [], "e": []}
+            cached = _window(proj, s["me"]) if proj is not None else {"idx": [], "ids": [], "p": [], "m": [], "e": [], "n": []}
             s["view"], s["view_ts"] = cached, now
         hot = _recent_applied(srv, s["pulse_ts"])
         s["pulse_ts"] = now
@@ -251,14 +252,14 @@ def view(srv, tok: str, now: float | None = None) -> dict:
         pulses = [k for k, e in enumerate(cached["ids"]) if e in hot]
         self_hot = s["eid"] in hot or any(e.endswith(s["name"]) for e in hot)
         return {"ok": True, "name": s["name"], "p": cached["p"], "m": cached["m"],
-                "e": cached["e"], "pulse": pulses, "me_pulse": bool(self_hot),
+                "e": cached["e"], "n": cached.get("n", []), "pulse": pulses, "me_pulse": bool(self_hot),
                 "ttl": int(TTL_S - (now - s["last"]))}
 
 
 def _window(proj, me) -> dict:
     C = np.asarray(proj.coords, dtype=np.float32)
     if not len(C):
-        return {"idx": [], "ids": [], "p": [], "m": [], "e": []}
+        return {"idx": [], "ids": [], "p": [], "m": [], "e": [], "n": []}
     c = np.asarray(me, dtype=np.float32)
     d = np.abs(C - c).max(axis=1)
     near = np.nonzero(d <= RADIUS)[0]
@@ -277,8 +278,20 @@ def _window(proj, me) -> dict:
             if sx in pos and tx in pos and sx != tx:
                 a, b = pos[sx], pos[tx]
                 edges.add((min(a, b), max(a, b)))
+    # proximity: each node to its NEAREST_K closest in the window -- the
+    # piece's shape where the kept edges are sparse (positions only)
+    prox = set()
+    if len(near) > 1:
+        P = np.asarray(p, dtype=np.float32)
+        D = ((P[:, None, :] - P[None, :, :]) ** 2).sum(-1)
+        np.fill_diagonal(D, np.inf)
+        for a in range(len(near)):
+            for b in np.argsort(D[a])[:NEAREST_K]:
+                pair = (min(a, int(b)), max(a, int(b)))
+                if pair not in edges:
+                    prox.add(pair)
     return {"idx": near, "ids": [proj.ids[i] for i in near], "p": p, "m": m,
-            "e": sorted(edges)[:MAX_NODES * 3]}
+            "e": sorted(edges)[:MAX_NODES * 3], "n": sorted(prox)[:MAX_NODES * NEAREST_K]}
 
 
 def event(srv, tok: str, kind: str, n: int = 1, dx: int = 0, dy: int = 0,
