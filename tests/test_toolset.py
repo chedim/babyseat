@@ -161,3 +161,30 @@ class TestTheTurn(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLooseArgs(unittest.TestCase):
+    """The seat's three dead calls adopting the light class (2026-10-09)."""
+
+    def test_scripts_as_a_json_string(self):
+        leg, a = T.resolve("entity", {"action": "edit", "spec": "c:x", "scripts": '{"getter": "result = {}"}'})
+        self.assertEqual(a["getter_script"], "result = {}")
+
+    def test_the_old_edit_name_takes_scripts_too(self):
+        leg, a = T.resolve("entity_edit", {"spec": "c:x", "scripts": {"getter": "result = {}"}})
+        self.assertEqual(a.get("getter_script"), "result = {}")
+        self.assertNotIn("scripts", a)
+
+    def test_learn_with_the_learn_key(self):
+        self.assertEqual(T.resolve("memory", {"action": "learn", "learn": "x"}), ("learn", {"lesson": "x"}))
+
+    def test_parents_as_a_json_string(self):
+        self.assertEqual(M._listish('["ha light"]'), ["ha light"])
+        self.assertEqual(M._listish("ha light"), ["ha light"])
+        self.assertEqual(M._listish(["a", "b"]), ["a", "b"])
+
+
+class TestReadByName(unittest.TestCase):
+    def test_read_takes_name_too(self):
+        self.assertEqual(T.resolve("entity", {"action": "read", "name": "ha:light.x", "run": True}),
+                         ("entity_read", {"spec": "ha:light.x", "run": True}))

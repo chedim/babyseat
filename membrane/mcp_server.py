@@ -886,7 +886,7 @@ def tool_state(args: dict, port: int) -> str:
 
 def tool_learn(args: dict, port: int) -> str:
     payload = _arg(args, "lesson", "text", "value", "content", "data",
-                   "fact", "note")
+                   "fact", "note", "learn", "summary")   # the seat's own spellings (2026-10-09)
     if not payload:
         raise ProxyError(400, "lesson required")
     out = _http(port, "POST", "/membrane/learn", {"lesson": payload})
@@ -1259,11 +1259,25 @@ def tool_graph(args: dict, port: int) -> str:
     return "\n".join(lines)
 
 
+def _listish(v) -> list:
+    """A list the model may have sent as a JSON string ('["ha light"]'
+    arrived literally and died 'no parent matches', 2026-10-09)."""
+    if isinstance(v, str):
+        t = v.strip()
+        if t.startswith("[") and t.endswith("]"):
+            try:
+                d = json.loads(t)
+                if isinstance(d, list):
+                    return [str(x) for x in d]
+            except ValueError:
+                pass
+        return [t] if t else []
+    return [str(x) for x in (v or [])]
+
+
 def tool_entity_inherit(args: dict, port: int) -> str:
-    spec = str(args.get("spec") or "").strip()
-    parents = args.get("parents") or []
-    if isinstance(parents, str):
-        parents = [parents]
+    spec = str(args.get("spec") or args.get("name") or "").strip()
+    parents = _listish(args.get("parents") or args.get("parent") or [])
     if not spec or not parents:
         raise ProxyError(400, "spec + parents required")
     out = _http(port, "POST", "/membrane/entity/inherit",

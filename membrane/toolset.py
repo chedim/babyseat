@@ -52,7 +52,7 @@ FAMILIES: dict[str, dict] = {
                    "watch_ops": {"type": "array", "items": {"type": "object"}, "description": "edit: geometric watches (help('watches'))"},
                    "watch_fields": {"type": "array", "items": {"type": "object"}, "description": "edit: own-motion watches"},
                    "merged_into": _S("edit: merge into this entity")},
-        "map": {"read": lambda a: _pick(a, "spec", "run"),
+        "map": {"read": lambda a: _pick({"spec": a.get("spec") or a.get("name"), "run": a.get("run")}, "spec", "run"),
                 "add": lambda a: _pick(a, "class", "name", "summary", "links"),
                 "edit": lambda a: _pick(a, "spec", "summary", "links", "class", "merged_into",
                                         "properties", "watch", "watch_ops", "watch_fields",
@@ -83,7 +83,8 @@ FAMILIES: dict[str, dict] = {
         "description": "learn: keep one lesson you earned; forget: drop a memory (by #N or text).",
         "actions": {"learn": "learn", "forget": "forget"},
         "params": {"text": _S("learn: the lesson"), "spec": _S("forget: what to drop")},
-        "map": {"learn": lambda a: {"lesson": a.get("text") or a.get("lesson")},
+        "map": {"learn": lambda a: {"lesson": a.get("text") or a.get("lesson") or a.get("learn")
+                                           or a.get("summary")},
                 "forget": lambda a: _pick(a, "spec")},
     },
     "track": {
@@ -208,12 +209,31 @@ def advertised(lane_tools) -> list[dict]:
     return out
 
 
+def _scripts_of(args: dict) -> dict:
+    """`scripts` as a dict -- the model sends it as a JSON string too (the
+    'str' object has no attribute 'items' crash, 2026-10-09)."""
+    sc = args.get("scripts")
+    if isinstance(sc, str):
+        import json as _json
+        try:
+            sc = _json.loads(sc)
+        except ValueError:
+            sc = None
+    return sc if isinstance(sc, dict) else {}
+
+
 def resolve(name: str, args: dict) -> tuple[str, dict]:
     """(existing tool name, its args) for a family call; an existing tool's
     own name passes through; ValueError names the valid actions."""
     args = dict(args or {})
     fam = FAMILIES.get(name)
     if fam is None:
+        if name in ("entity_edit", "entity_add") and "scripts" in args:
+            # the old names take the scripts object too (it was silently dropped)
+            for kind, code in _scripts_of(args).items():
+                if kind in SCRIPT_KINDS:
+                    args[f"{kind}_script"] = code
+            args.pop("scripts", None)
         return name, args
     action = str(args.pop("action", "") or "")
     if action not in fam["actions"]:
@@ -225,7 +245,7 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
     legacy = fam["actions"][action]
     mapped = {k: v for k, v in fam["map"][action](args).items() if v is not None}
     if name == "entity" and action in ("edit", "add"):
-        for kind, code in (args.get("scripts") or {}).items():
+        for kind, code in _scripts_of(args).items():
             if kind in SCRIPT_KINDS:
                 mapped[f"{kind}_script"] = code
         for k, v in args.items():
