@@ -256,6 +256,12 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
     args = dict(args or {})
     fam = FAMILIES.get(name)
     if fam is None:
+        if name == "entity_edit" and "parents" in args:
+            # the old name drops unknown fields: parents ride the properties patch
+            # (the order-replacing path) -- the probe's swap died here twice
+            args["properties"] = {**(args.get("properties") or {}), "parents": args.pop("parents")}
+        if name == "entity_edit" and "spec" not in args and args.get("name"):
+            args["spec"] = args["name"]
         if name in ("entity_edit", "entity_add") and "scripts" in args:
             # the old names take the scripts object too (it was silently dropped)
             for kind, code in _scripts_of(args).items():

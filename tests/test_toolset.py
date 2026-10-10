@@ -194,3 +194,11 @@ class TestReadByObject(unittest.TestCase):
     def test_read_takes_object_too(self):
         self.assertEqual(T.resolve("entity", {"action": "read", "object": "ha:sensor.x"}),
                          ("entity_read", {"spec": "ha:sensor.x"}))
+
+
+class TestOldEditTakesParents(unittest.TestCase):
+    def test_the_old_entity_edit_name_carries_parents(self):
+        leg, a = T.resolve("entity_edit", {"name": "probe:dispatch", "parents": ["b", "a"]})
+        self.assertEqual(leg, "entity_edit")
+        self.assertEqual(a["properties"]["parents"], ["b", "a"])
+        self.assertEqual(a["spec"], "probe:dispatch")
