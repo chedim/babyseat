@@ -112,3 +112,26 @@ test("👂 while Argus speaks: his name cuts him off (barge-in)", { timeout: 240
     assert.ok(await page.evaluate(() => window.__hushed) > 0);
   });
 });
+
+test("streamed replies are said sentence by sentence, the rest when the part closes", { timeout: 120000 }, async () => {
+  await withPage(spoken("."), async (page) => {
+    const said = await page.evaluate(() => {
+      const chat = window.__home.shadowRoot.querySelector("ai-terminal-panel");
+      const out = [];
+      chat.addEventListener("ai-speak", (e) => out.push(e.detail.kind + ": " + e.detail.text));
+      chat._chat = { sid: "s1", byId: {} };                 // the message itself not known yet (streaming)
+      const ev = (type, props) => chat._announceSpeech({ type, properties: props }, props);
+      ev("message.part.updated", { part: { id: "p1", messageID: "m1", type: "text", text: "", time: { start: 1 } } });
+      for (const d of ["The deck lights ", "are on now. The batt", "ery sits at 92 percent", " and charging. Anything", " else?"])
+        ev("message.part.delta", { partID: "p1", messageID: "m1", field: "text", delta: d });
+      const mid = out.slice();
+      ev("message.part.updated", { part: { id: "p1", messageID: "m1", type: "text", text: "The deck lights are on now. The battery sits at 92 percent and charging. Anything else?", time: { start: 1, end: 2 } } });
+      ev("message.part.updated", { part: { id: "r1", messageID: "m1", type: "reasoning", text: "", time: { start: 1 } } });
+      ev("message.part.delta", { partID: "r1", messageID: "m1", field: "text", delta: "I think. I should check. " });
+      ev("message.part.updated", { part: { id: "u1", messageID: "m2", type: "text", text: "[HA user: D]\nhi there. how are you. fine.", time: { start: 1, end: 2 } } });
+      return { mid, out };
+    });
+    assert.deepEqual(said.mid, ["argus: The deck lights are on now.", "argus: The battery sits at 92 percent and charging."]);
+    assert.deepEqual(said.out, [...said.mid, "argus: Anything else?"]);                 // reasoning and the person's text never said
+  });
+});

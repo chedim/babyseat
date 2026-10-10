@@ -1089,27 +1089,64 @@ function definePanel() {
     }
 
     _announceSpeech(ev, p) {
+      // SENTENCE BY SENTENCE AS IT STREAMS (2026-10-10, the operator: "voice
+      // text messages as they appear"): a text part's finished sentences are
+      // said while the rest is still coming; the remainder when it closes.
+      // A part whose message isn't known yet (streaming sends parts first) is
+      // Argus's unless it carries a person's speaker line.
       this._spokenParts = this._spokenParts || new Set();
-      const say = (kind, id, text) => {
+      this._live = this._live || {};
+      const emit = (kind, id, text) => {
         const t = speakText(text);
         if (!t || this._spokenParts.has(id)) return;
         this._spokenParts.add(id);
-        if (this._spokenParts.size > 500) this._spokenParts = new Set([...this._spokenParts].slice(-250));
+        if (this._spokenParts.size > 800) this._spokenParts = new Set([...this._spokenParts].slice(-400));
         this.dispatchEvent(new CustomEvent("ai-speak", { detail: { kind, id, text: t }, bubbles: true, composed: true }));
+      };
+      const roleOf = (mid) => { const r = this._chat.byId && this._chat.byId[mid]; return r && r.info && r.info.role; };
+      const isArgus = (mid, text) => {
+        const role = roleOf(mid);
+        if (role) return role === "assistant";
+        return !String(text || "").includes(SPEAKER_PREFIX) && !/^\s*\[membrane voice\]/i.test(text || "");
+      };
+      const flush = (st, partId, upto) => {                // say whole sentences up to `upto` (exclusive)
+        const chunk = st.buf.slice(st.said, upto);
+        if ((chunk.match(/```/g) || []).length % 2) return; // inside a code block: wait for its end
+        if (chunk.trim()) emit("argus", partId + ":" + st.said, chunk);
+        st.said = upto;
       };
       if (ev.type === "message.part.updated") {
         const part = p.part || {};
-        if (part.type !== "text" || part.synthetic || !(part.time || {}).end) return;
-        const row = this._chat.byId && this._chat.byId[part.messageID];
-        const role = row && row.info && row.info.role;
-        if (role === "assistant") say("argus", part.id, part.text);
-        else if (role === "user" && /^\s*\[membrane voice\]/i.test(part.text || "")) {
-          const line = voiceTurnText(part.text);           // only membrane's own words, not the «…» frame around them
-          say("membrane", "mv:" + speakText(line), line);
+        if (part.type) this._live[part.id] = Object.assign(this._live[part.id] || { buf: "", said: 0 }, { type: part.type, mid: part.messageID });
+        if (part.type !== "text" || part.synthetic) return;
+        if (!(part.time || {}).end) return;
+        const st = this._live[part.id] || { buf: "", said: 0 };
+        delete this._live[part.id];
+        if (/^\s*\[membrane voice\]/i.test(part.text || "")) {
+          if (roleOf(part.messageID) !== "assistant") {
+            const line = voiceTurnText(part.text);
+            emit("membrane", "mv:" + speakText(line), line);
+          }
+          return;
         }
+        if (!isArgus(part.messageID, part.text)) return;
+        const full = String(part.text || "");
+        st.buf = full.length >= st.buf.length ? full : st.buf;
+        if (st.said < st.buf.length) { const rest = st.buf.slice(st.said); if (rest.trim()) emit("argus", part.id + ":" + st.said, rest); }
+      } else if (ev.type === "message.part.delta") {
+        if (p.field && p.field !== "text") return;
+        const st = this._live[p.partID] || (this._live[p.partID] = { buf: "", said: 0, mid: p.messageID });
+        if (st.type && st.type !== "text") return;         // reasoning streams the same way: never said
+        st.buf += String(p.delta || "");
+        if (!isArgus(st.mid || p.messageID, st.buf)) return;
+        const re = /[.!?…](?=\s|$)|\n/g;
+        let m, upto = -1;
+        re.lastIndex = st.said;
+        while ((m = re.exec(st.buf))) upto = m.index + m[0].length;
+        if (upto > st.said && st.buf.slice(st.said, upto).split(/\s+/).filter(Boolean).length >= 3) flush(st, p.partID, upto);
       } else if (ev.type === "membrane.voice") {
         const line = p.line || {};
-        if (line.id && line.text) say("membrane", "mv:" + speakText(line.text), line.text);
+        if (line.id && line.text) emit("membrane", "mv:" + speakText(line.text), line.text);
       }
     }
 
