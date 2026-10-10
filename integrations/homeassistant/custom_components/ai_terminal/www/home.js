@@ -215,7 +215,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._mode = FOLLOW_MODES.includes(lsGet(LS_FOLLOW, "activity")) ? lsGet(LS_FOLLOW, "activity") : "activity";
       this._modeBtn = $(".me"); this._modeBtn.textContent = "◎ " + this._mode;
       this._modeBtn.addEventListener("click", () => {
-        this._mode = nextMode(this._mode); lsSet(LS_FOLLOW, this._mode);
+        this._mode = nextMode(this._mode); lsSet(LS_FOLLOW, this._mode); this._tracked = null;
         this._modeBtn.textContent = "◎ " + this._mode;
         this._lastTouch = 0; this._goal = null; this._aim(true);
       });
@@ -253,7 +253,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           get: (p) => this._get(p),
           stream: (p, signal) => hass.fetchWithAuth(HSERVE + p, { signal, headers: { Accept: "text/event-stream" } }),
           // the live layer for every signed-in user (the proxy relays it to them all)
-          kindColor: hKindColor, isAdmin: true, labels: false, maxFps: 30,
+          kindColor: hKindColor, isAdmin: true, maxFps: 30, labelIds: () => this._labelIds(),
           onStatus: (t) => { this._v3Txt = t; this._paintStatus(); },
           onSelect: (m) => this._select(m),
           onRelated: () => {},
@@ -287,6 +287,36 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         if (hit && hit.p) return [(hit.p[0] - 0.5) * 1000, (hit.p[1] - 0.5) * 1000, (hit.p[2] - 0.5) * 1000];
       }
       return null;
+    }
+
+    /** The labels: what is tracked and what it interacts with (its edges),
+     * and in activity mode whatever is active. */
+    _labelIds() {
+      const v = this._v3, out = new Set();
+      if (!v) return out;
+      if (v.sel) {
+        out.add(v.sel);
+        if (v.selNb && v.selNb.id === v.sel) for (const x of v.selNb.nb) out.add(x.id);
+        return out;
+      }
+      if (this._mode === "activity") {
+        for (const id of v.activeIds()) out.add(id);
+      } else if (this._tracked) {
+        out.add(this._tracked.id);
+        for (const id of this._tracked.nb) out.add(id);
+      }
+      return out;
+    }
+
+    async _trackNb(ids) {
+      const v = this._v3;
+      if (!v || !v.pid) return;
+      for (const id of ids) {
+        try {
+          const hit = await v.api.get("/membrane/map/locate?pid=" + v.pid + "&eid=" + encodeURIComponent(id) + "&nb=1");
+          if (hit && hit.id) { this._tracked = { id: hit.id, nb: (hit.neighbours || []).map((x) => x.id) }; return; }
+        } catch (e) { /* the next candidate */ }
+      }
     }
 
     async _posOf(id) {
@@ -323,6 +353,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._lastLocate = now;
       const ids = this._mode === "you" ? [this._me] : SEAT_IDS;
       const p = await this._locateWorld(ids);
+      if (p) this._trackNb(ids);
       if (p) {
         this._goal = { p, r: 600 };
         this._msgEl.style.display = "none";

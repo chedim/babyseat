@@ -561,13 +561,17 @@ class Field3DView {
   }
 
   _paintLabels() {
-    if (this.api.labels === false) {                  // a label-free view (membrane home)
+    if (this.api.labels === false) {                  // a label-free view
       for (const el of this.labels) el.style.display = "none";
       return;
     }
+    // api.labelIds() -> Set: label only these (membrane home: what is
+    // tracked and what it touches, what is active)
+    const only = this.api.labelIds ? this.api.labelIds() : null;
     const cands = [];
     for (const [id, s] of this.slots) {
       if (!this.sizeA[s]) continue;
+      if (only && !only.has(id)) continue;
       const m = this.meta[s];
       const p = [this.posA[s * 3], this.posA[s * 3 + 1], this.posA[s * 3 + 2]];
       const sc = this._project(p);
@@ -857,6 +861,19 @@ class Field3DView {
     a.label = eid;
     if (p) a.attach(eid, p, holdMs, Date.now());
     a.tag.textContent = agent + " · " + eid;
+  }
+
+  /** The ids active now: the minds' current entities + those pulsed in the
+   * last `ms` (membrane home labels them in activity mode). */
+  activeIds(ms = 6000) {
+    const out = new Set(), now = Date.now(), pn = performance.now();
+    for (const a of this.avatars.values()) if (a.eid && a.attached(now)) out.add(a.eid);
+    for (const [sl, t] of this.recentHits || []) {
+      if (pn - t > ms) continue;
+      const m = this.meta[sl];
+      if (m && m.id) out.add(m.id);
+    }
+    return out;
   }
 
   /** Where things happen now (membrane home's camera): the mind that most
