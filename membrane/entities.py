@@ -1963,6 +1963,15 @@ class EntityStore(MultiParentOps, TimelineOps):
         hits = [q for q in list(self.docs.values())
                 if q.eid.lower().endswith(":" + low)
                 or str((q.properties or {}).get("name", "")).lower() == low]
+        if len(hits) > 1:
+            # THE DELIBERATE ONE WINS (2026-10-10: a night-minted twin
+            # 'models:mqtt:bridge' shadowed Argus's 'Component:mqtt:bridge'):
+            # an entity someone made beats one the night materialized from text
+            def _made(q):
+                pp = q.properties or {}
+                night = pp.get("materialized_by") == "night" or "membrane-night" in (q.derived_by or [])
+                return 0 if not night else 1
+            hits.sort(key=_made)                     # stable: same-rank order kept
         return hits[0] if hits else None
 
     def miss_hint(self, spec: str) -> str:

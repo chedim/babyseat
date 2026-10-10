@@ -414,3 +414,21 @@ class TestAgentSurface(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestNoNightTwins(unittest.TestCase):
+    def test_a_name_already_given_is_not_minted_again(self):
+        """2026-10-10: Argus made 'Component:mqtt:bridge'; the night minted
+        'models:mqtt:bridge' from the field's hot 'm:mqtt:bridge' and the
+        twin shadowed it -- an existing NAME now stops the mint."""
+        from membrane import night as N
+        from membrane.entities import EntityStore, CLASS_COMPONENT
+        for made in (True, False):
+            est = EntityStore(bucket="t-twin", shared=False)
+            fld = _field()
+            fld.b.upsert("entity_states", "st-mqtt", {"origin": fld.origin, "tier": "live",
+                                                      "eid": "m:mqtt:bridge", "n": 7})
+            if made:
+                est.add(cls=CLASS_COMPONENT, name="mqtt:bridge", summary="Argus's bridge")
+            N.consolidate_entities(fld, est, materialize=8)
+            twins = [k for k in est.docs if k.endswith("models:mqtt:bridge")]
+            self.assertEqual(bool(twins), not made, (made, list(est.docs)[:6]))

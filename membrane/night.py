@@ -282,6 +282,14 @@ def consolidate_entities(fld, est, mem=None, materialize: int = 8,
     _ANNOUNCE_KINDS = ("files", "models", "f", "m")
     if materialize > 0 and not only_keys:
         hot = []
+        # THE NAME CHECK (2026-10-10, the operator: "does the night overwrite
+        # the mqtt entity, erasing what Argus made?"): Argus's
+        # 'Component:mqtt:bridge' got a night twin 'models:mqtt:bridge' (the
+        # key check only knew its own key form) and the twin won every lookup
+        # -- a name someone already gave an entity is never minted again
+        _names = {str((q.properties or {}).get("name") or "").lower()
+                  for q in list(est.docs.values())}
+        _names.discard("")
         for _, d in fld.b.scan("entity_states",
                                {"origin": fld.origin, "tier": "live"}):
             eid = d["eid"]
@@ -317,6 +325,8 @@ def consolidate_entities(fld, est, mem=None, materialize: int = 8,
                 cid = cid[len(MEMBRANE_NS):]
             key = overlay_key(cid)
             if f"{MEMBRANE_NS}{key}" in est.docs or est.find(key) is not None:
+                continue
+            if key.partition(":")[2].lower() in _names:
                 continue
             hot.append((int(d.get("n") or 0), cid, key))
         hot.sort(key=lambda t: -t[0])

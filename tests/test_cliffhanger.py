@@ -455,3 +455,18 @@ class TestInterfaces(unittest.TestCase):
         from membrane.mcp_server import method_signature
         self.assertEqual(method_signature("exec(code, timeout)"), ("exec", ["code", "timeout"]))
         self.assertEqual(method_signature("status"), ("status", []))
+
+
+class TestNightTwins(unittest.TestCase):
+    """The night's twins (2026-10-10): 'models:mqtt:bridge' shadowed Argus's
+    'Component:mqtt:bridge' -- the deliberate one wins, the night mints no twin."""
+
+    def test_a_name_lookup_prefers_the_entity_someone_made(self):
+        from membrane.entities import QuantumEntity, MEMBRANE_NS
+        est = EntityStore(path=None, shared=False)
+        twin = QuantumEntity(eid=MEMBRANE_NS + "models:mqtt:bridge", cls="AIModel",
+                             properties={"name": "mqtt:bridge", "materialized_by": "night"}, derived_by=["membrane-night"])
+        est.docs[twin.eid] = twin                             # the night's came first
+        mine = _add(est, "mqtt:bridge", summary="the bridge")
+        self.assertEqual(est._resolve_spec("mqtt:bridge").eid, mine.eid)
+        self.assertEqual(est._resolve_spec(twin.eid).eid, twin.eid)    # still reachable by its own id
