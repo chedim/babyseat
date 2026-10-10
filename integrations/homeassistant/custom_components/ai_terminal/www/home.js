@@ -351,27 +351,26 @@ const HSTYLE = `
   @keyframes recpulse { 50% { box-shadow:0 0 0 8px color-mix(in srgb, var(--error-color,#c0392b) 30%, transparent); } }
   .card { bottom:76px !important; }
   .top .tilt[hidden] { display:none; }
-  /* THE ORB: a soft glow that breathes -- with your voice while listening,
-     slowly while Argus thinks, a little faster while he speaks. No spinning
-     (the operator: "the atrocious carousel animation") */
-  .orb { position:absolute; z-index:4; left:50%; bottom:28px; transform:translateX(-50%); width:84px; height:84px;
+  /* THE WAVE (2026-10-10, the operator: "a wavy animation like Siri, but
+     angly and graph-y"): a chain of nodes joined by straight edges -- a strip
+     of the field -- that moves with the voice: your mic level while
+     listening, syllable bursts while he speaks, a slow ripple while he thinks */
+  .orb { position:absolute; z-index:4; left:50%; bottom:22px; transform:translateX(-50%); width:280px; height:70px;
          pointer-events:none; opacity:0; transition:opacity .35s ease; }
   .orb.on { opacity:1; }
-  .orb .core { position:absolute; inset:14px; border-radius:50%;
-               background:radial-gradient(circle at 40% 35%, #ffffff 0%, #b9d4ff 22%, #6f8cff 55%, #8a5cff 100%);
-               box-shadow:0 0 22px 6px color-mix(in srgb, #6f8cff 55%, transparent);
-               transform:scale(var(--s, 1)); transition:transform .12s ease-out; }
-  .orb .glow { position:absolute; inset:0; border-radius:50%; filter:blur(14px); opacity:.55;
-               background:radial-gradient(circle, #8fb0ff 0%, #8a5cff 60%, transparent 72%);
-               transform:scale(calc(var(--s, 1) * 1.05)); transition:transform .12s ease-out; }
-  .orb.thinking .core, .orb.thinking .glow { animation:orbbreathe 2.4s ease-in-out infinite; }
-  .orb.speaking .core, .orb.speaking .glow { animation:orbbreathe 1.1s ease-in-out infinite; }
-  @keyframes orbbreathe { 0%, 100% { transform:scale(.9); opacity:.8; } 50% { transform:scale(1.06); opacity:1; } }
-  .orbtext { position:absolute; z-index:4; left:50%; bottom:122px; transform:translateX(-50%); max-width:min(640px, calc(100% - 32px));
+  .orb canvas { width:100%; height:100%; display:block; }
+  /* centred in the field that shows (left of the chat card on wide screens) */
+  @media (min-width: 761px) {
+    .orb, .orbtext { left:calc((100% - min(460px, 44vw) - 24px) / 2) !important; }
+    .chat.hidden ~ .orb, .chat.hidden ~ .orbtext { left:50% !important; }
+    .orb { bottom:84px !important; }                     /* above the voice buttons */
+    .orbtext { bottom:162px !important; max-width:calc(100% - min(460px, 44vw) - 72px); }
+  }
+  .orbtext { position:absolute; z-index:4; left:50%; bottom:100px; transform:translateX(-50%); max-width:min(640px, calc(100% - 32px));
              text-align:center; font-size:19px; line-height:1.35; font-weight:500; pointer-events:none; opacity:0;
              transition:opacity .4s ease; text-shadow:0 1px 6px color-mix(in srgb, var(--primary-background-color,#000) 80%, transparent); }
   .orbtext.on { opacity:1; }
-  @media (max-width: 760px) { .orb { bottom:calc(56dvh + 80px); } .orbtext { bottom:calc(56dvh + 172px); font-size:17px; }
+  @media (max-width: 760px) { .orb { bottom:calc(56dvh + 70px); width:220px; height:56px; } .orbtext { bottom:calc(56dvh + 132px); font-size:17px; }
                               .chat.hidden ~ .orb { bottom:84px; } }
   .msg { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:1;
          pointer-events:none; opacity:.6; white-space:pre-line; text-align:center; padding:24px; }
@@ -504,7 +503,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         </div>
         <nav class="hamenu glass" role="menu"></nav>
         <div class="chat glass"><ai-terminal-panel overlay></ai-terminal-panel></div>
-        <div class="orb" aria-hidden="true"><div class="glow"></div><div class="core"></div></div>
+        <div class="orb" aria-hidden="true"><canvas class="wave" width="560" height="140"></canvas></div>
         <div class="orbtext" aria-live="polite"></div>
         <div class="voice glass">
           <div class="vsay glass" role="status" aria-live="polite"></div>
@@ -822,6 +821,12 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       });
       // SPEECH AS IT COMES: Argus's words the moment each part closes (🔊 on, or
       // a turn you started by voice), membrane's own lines in its own voice (🔊 on)
+      // the reply finished (auto-chat keeps the chat busy forever: idle never
+      // comes) -- the voice turn is over; the wave rests once speech is done
+      this._chat.addEventListener("ai-reply", () => {
+        this._voiceTurn = false;
+        setTimeout(() => { if (!this._speaking && !(this._speechQ || []).length) this._speechDone(); }, 400);
+      });
       this._chat.addEventListener("ai-speak", (e) => {
         const d = e.detail || {};
         if (d.kind === "membrane" ? this._ttsOn : (this._ttsOn || this._voiceTurn)) this._enqueueSpeech(d.kind, d.text);
@@ -867,49 +872,70 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const o = this.shadowRoot.querySelector(".orb"), t = this.shadowRoot.querySelector(".orbtext");
       if (!o) return;
       clearTimeout(this._orbT); clearTimeout(this._orbMax);
-      if (mode === "thinking") this._orbMax = setTimeout(() => this._orb(null), 5 * 60000);   // never shimmer forever
+      if (mode === "thinking") this._orbMax = setTimeout(() => this._orb(null), 5 * 60000);   // never ripple forever
+      this._waveMode = mode || null;
       o.classList.toggle("on", !!mode);
-      o.classList.toggle("thinking", mode === "thinking");
-      o.classList.toggle("speaking", mode === "speaking");
-      if (!mode) { o.style.setProperty("--s", "1"); this._orbT = setTimeout(() => t.classList.remove("on"), 2500); }
+      if (mode) this._waveRun();
+      if (!mode) this._orbT = setTimeout(() => t.classList.remove("on"), 2500);
       if (mode === "listening") { t.textContent = ""; t.classList.remove("on"); }
+    }
+
+    /** The wave's frame loop: runs while the orb shows, stops after it fades. */
+    _waveRun() {
+      if (this._waveRaf) return;
+      const cv = this.shadowRoot.querySelector(".orb canvas"); if (!cv) return;
+      const g = cv.getContext("2d");
+      const N = 15, amps = new Float32Array(N), seeds = Array.from({ length: N }, (_, i) => i * 1.7 + Math.random() * 3);
+      let last = performance.now(), off = 0, burst = 0, next = 0;
+      const step = (t) => {
+        const dt = Math.min(0.1, (t - last) / 1000); last = t;
+        const W = cv.width, H = cv.height, mid = H / 2, mode = this._waveMode;
+        if (!mode) off += dt; else off = 0;
+        if (off > 0.6) { g.clearRect(0, 0, W, H); this._waveRaf = 0; return; }
+        // the energy that drives the nodes
+        let energy;
+        if (mode === "listening") energy = Math.min(1, Math.sqrt(this._lvl || 0) * 3.2);
+        else if (mode === "speaking") {                    // syllable-like bursts (speech gives no level to read)
+          if (t > next) { burst = 0.45 + Math.random() * 0.55; next = t + 90 + Math.random() * 170; }
+          burst *= Math.exp(-dt * 6); energy = 0.4 + burst * 1.1;
+        } else energy = 0.18;                              // thinking: a slow ripple
+        for (let i = 0; i < N; i++) {
+          const edge = Math.sin(Math.PI * (i + 0.5) / N);  // calm at the ends, alive in the middle
+          const wob = mode === "thinking" ? Math.sin(t / 520 + seeds[i]) : (Math.sin(t / 95 + seeds[i] * 2.3) + Math.sin(t / 61 + seeds[i]) * 0.5) / 1.5;
+          const target = wob * energy * edge;
+          amps[i] += (target - amps[i]) * Math.min(1, dt * (mode === "thinking" ? 3 : 14));
+        }
+        g.clearRect(0, 0, W, H);
+        const pts = Array.from(amps, (a, i) => [W * (i + 0.5) / N, mid + Math.max(-0.92, Math.min(0.92, a)) * mid]);
+        const grad = g.createLinearGradient(0, 0, W, 0);
+        grad.addColorStop(0, "#6f8cff"); grad.addColorStop(0.5, "#b07cff"); grad.addColorStop(1, "#4fd1ff");
+        // the edges: straight segments (angular, a strip of graph) + a faint mirror
+        for (const [mirror, alpha, width] of [[true, 0.25, 2], [false, 1, 3]]) {
+          g.globalAlpha = alpha; g.strokeStyle = grad; g.lineWidth = width; g.lineJoin = "miter";
+          g.beginPath();
+          pts.forEach(([x, y], i) => { const yy = mirror ? 2 * mid - y : y; if (i) g.lineTo(x, yy); else g.moveTo(x, yy); });
+          g.stroke();
+        }
+        // the nodes: dots sized by how hard each one moves
+        g.globalAlpha = 1;
+        pts.forEach(([x, y], i) => {
+          const r = 2.5 + Math.abs(amps[i]) * 7;
+          g.fillStyle = grad; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+        });
+        this._waveRaf = requestAnimationFrame(step);
+      };
+      this._waveRaf = requestAnimationFrame(step);
     }
     _orbText(text) {
       const t = this.shadowRoot.querySelector(".orbtext"); if (!t) return;
       t.textContent = text || ""; t.classList.toggle("on", !!text);
     }
-    _orbLevel(rms) {
-      const o = this.shadowRoot.querySelector(".orb");
-      if (!o || !o.classList.contains("on") || o.classList.contains("thinking") || o.classList.contains("speaking")) return;
-      o.style.setProperty("--s", String(Math.min(1.5, 0.85 + Math.sqrt(rms) * 2.2)));
-    }
+    _orbLevel(rms) { this._lvl = rms; }
 
-    _voiceMenu() {
-      const vs = (window.speechSynthesis ? window.speechSynthesis.getVoices() : [])
-        .filter((v) => v.localService && String(v.lang || "").toLowerCase().startsWith("en"));
-      let m = this.shadowRoot.querySelector(".vmenu");
-      if (!m) {
-        m = document.createElement("div"); m.className = "vmenu glass hamenu open"; m.setAttribute("role", "menu");
-        this.shadowRoot.querySelector(".voice").appendChild(m);
-        m.addEventListener("click", (e) => {
-          const a = e.target.closest("a[data-v]"); if (!a) return;
-          e.preventDefault();
-          lsSet(LS_VOICE, a.dataset.v);
-          this._voice = pickVoice(window.speechSynthesis.getVoices(), "en", a.dataset.v);
-          m.remove();
-          this._hushTts(); this._say1("Hi, I'm Argus. This is how I'll sound.");
-        });
-        setTimeout(() => {
-          const close = (e) => { if (!e.composedPath().includes(m)) { m.remove(); window.removeEventListener("pointerdown", close, true); } };
-          window.addEventListener("pointerdown", close, true);
-        }, 0);
-      }
-      const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-      const cur = this._voice ? this._voice.name : "";
-      m.innerHTML = vs.length ? vs.map((v) => '<a role="menuitem" href="#" data-v="' + esc(v.name) + '">' + (v.name === cur ? "● " : "") +
-        esc(v.name) + ' <span style="opacity:.55">' + esc(v.lang) + "</span></a>").join("") +
-        '<hr><div style="padding:4px 12px;font-size:12px;opacity:.7;max-width:260px">Better voices: download Enhanced / Premium ones in this device\'s Spoken Content settings.</div>'
-        : '<div style="padding:8px 12px">this device has no voices of its own</div>';
+    /** "Voice" UI: the speech queue's end -- the wave rests unless a reply you asked for by voice is still coming. */
+    _speechDone() {
+      if (this._voiceTurn && this._busyChat()) this._orb("thinking");
+      else { this._orb(null); this._orbText(""); }
     }
 
     _paintTts() {
@@ -1320,7 +1346,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         }
       } finally {
         this._qRunning = false;
-        if (!(this._speechQ || []).length && !this._busyChat()) { this._orb(null); this._orbText(""); }
+        this._speaking = false;
+        if (!(this._speechQ || []).length) this._speechDone();   // auto-chat keeps the chat busy: don't wait for idle
       }
     }
 
