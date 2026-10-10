@@ -159,7 +159,9 @@ function tiltOrbit(base, lr, fb, gain = TILT_GAIN) {
 // starts with the hotword reaches the chat. Opt-in (👂), paused while the page
 // is hidden, while you hold PTT and while Argus speaks; capped.
 const LS_HOTWORD = "membrane.home.hotword";
-const HOT_MIN_S = 0.4, HOT_MAX_S = 8, HOT_END_MS = 650, HOT_PER_MIN = 12, HOT_FOLLOW_MS = 8000;
+const HOT_MIN_S = 0.4, HOT_MAX_S = 8, HOT_END_MS = 450, HOT_PER_MIN = 16, HOT_FOLLOW_MS = 8000;
+const HOT_EARLY_S = 1.3;          // the first stretch is checked while you are still talking
+const HOT_ACKS = ["Yes?", "Uh-huh?", "Mm-hm?", "I'm listening."];
 const HOT_NAMES = "argus|argos|argus's|angus|argo|august|augustus|arcus|our gus|are gus";
 const HOT_RE = new RegExp("^(?:(?:hey|hi|hay|ok|okay|hello|yo)[\\s,.!-]+)?(?:" + HOT_NAMES + ")\\b[\\s,.!?-]*(.*)$", "i");
 
@@ -783,7 +785,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     async _hotStart() {
       if (this._hot) return;
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { this._vsay("no microphone here"); return; }
-      const h = this._hot = { cur: null, below: 0, above: 0, floor: 0.004, sends: [], inflight: false, follow: 0, paused: false };
+      const h = this._hot = { cur: null, below: 0, above: 0, floor: 0.004, sends: [], follow: 0, paused: false, muteUntil: 0 };
+      this._prefetchAcks();
       this._earBtn.classList.add("on"); this._earBtn.setAttribute("aria-pressed", "true");
       try {
         h.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
@@ -794,6 +797,17 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         h.proc = h.ctx.createScriptProcessor(2048, 1, 1);
         h.proc.onaudioprocess = (ev) => this._hotFrame(h, ev.inputBuffer.getChannelData(0));
         h.src.connect(h.proc); h.proc.connect(h.ctx.destination);
+        // started without a tap (remembered from last time), the browser
+        // keeps audio SUSPENDED: the first tap anywhere wakes it
+        if (h.ctx.state === "suspended") {
+          await h.ctx.resume().catch(() => {});
+          if (h.ctx.state === "suspended") {
+            this._vsay("tap anywhere to start listening for “Hey Argus”", 0);
+            const wake = () => { h.ctx.resume().then(() => this._vsay("listening for “Hey Argus”")).catch(() => {}); };
+            window.addEventListener("pointerdown", wake, { once: true, capture: true });
+            return;
+          }
+        }
         this._vsay("listening for “Hey Argus”");
       } catch (e) {
         this._hotStop(); lsSet(LS_HOTWORD, "0");
@@ -813,8 +827,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     _hotPause(on) { if (this._hot) { this._hot.paused = on; if (on) { this._hot.cur = null; this._earBtn.classList.remove("hearing"); } } }
 
     _hotFrame(h, f32) {
-      if (h.paused || this._rec || this._recBusy || (this._audio && !this._audio.paused) ||
-          (window.speechSynthesis && window.speechSynthesis.speaking)) { h.cur = null; return; }
+      if (h.paused || h.muteUntil > performance.now() || this._rec || this._recBusy || (this._audio && !this._audio.paused) ||
+          (window.speechSynthesis && window.speechSynthesis.speaking)) { if (h.cur) h.cur = null; return; }
       let ss = 0; for (let i = 0; i < f32.length; i++) ss += f32[i] * f32[i];
       const rms = Math.sqrt(ss / f32.length), thr = Math.max(0.012, h.floor * 3.5);
       const frameMs = (f32.length / h.rate) * 1000;
@@ -822,24 +836,27 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         h.floor = rms < h.floor * 3 ? h.floor * 0.995 + rms * 0.005 : h.floor;     // the room's own noise
         h.pre = (h.pre || []).concat([new Float32Array(f32)]).slice(-3);
         h.above = rms >= thr ? h.above + 1 : 0;
-        if (h.above >= 2) { h.cur = h.pre.slice(); h.below = 0; this._earBtn.classList.add("hearing"); }
+        if (h.above >= 2) { h.cur = { chunks: h.pre.slice(), early: null, follow: Date.now() < h.follow }; h.below = 0; this._earBtn.classList.add("hearing"); }
         return;
       }
-      h.cur.push(new Float32Array(f32));
+      const u = h.cur;
+      u.chunks.push(new Float32Array(f32));
       h.below = rms < thr * 0.6 ? h.below + frameMs : 0;
-      const len = h.cur.reduce((a, c) => a + c.length, 0) / h.rate;
+      const len = u.chunks.reduce((a, c) => a + c.length, 0) / h.rate;
+      // THE EARLY LOOK: the first stretch goes now, while they keep talking
+      if (!u.follow && !u.early && len >= HOT_EARLY_S) u.early = this._hotStt(h, u.chunks.slice(), true);
       if (h.below >= HOT_END_MS || len >= HOT_MAX_S) {
-        const chunks = h.cur; h.cur = null; this._earBtn.classList.remove("hearing");
-        if (len >= HOT_MIN_S) this._hotCheck(h, chunks);
+        h.cur = null; this._earBtn.classList.remove("hearing");
+        if (len >= HOT_MIN_S) this._hotDone(h, u);
       }
     }
 
-    async _hotCheck(h, chunks) {
+    /** One whisper look (budgeted): the transcript, or null. */
+    async _hotStt(h, chunks, early) {
       const now = Date.now();
       h.sends = h.sends.filter((t) => now - t < 60000);
-      const following = now < h.follow;
-      if (h.inflight || (!following && h.sends.length >= HOT_PER_MIN)) return;   // the brain phone's budget
-      h.sends.push(now); h.inflight = true;
+      if (h.sends.length >= HOT_PER_MIN) return null;     // the brain phone's budget
+      h.sends.push(now);
       const n = chunks.reduce((a, c) => a + c.length, 0), all = new Float32Array(n); let o = 0;
       for (const c of chunks) { all.set(c, o); o += c.length; }
       try {
@@ -847,16 +864,73 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const r = await this._hass.fetchWithAuth(STT_PATH, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: wav });
         const d = await r.json().catch(() => ({}));
         const text = (r.ok && d.text || "").trim();
-        if (!text || this._hot !== h) return;
-        if (following) { h.follow = 0; this._hotSend(text); return; }
-        const w = hotword(text);
-        if (!w.hit) return;                                  // not for us: dropped, nothing kept
-        if (w.rest.split(/\s+/).filter(Boolean).length >= 2) { this._hotSend(w.rest); return; }
-        h.follow = Date.now() + HOT_FOLLOW_MS;
-        this._vsay("yes? (I'm listening)", HOT_FOLLOW_MS);
-      } catch (e) {
-        /* the speech service is away: the ear keeps listening */
-      } finally { h.inflight = false; }
+        if (early && text && hotword(text).hit && this._hot === h) this._hotHeard(h);   // the chime, mid-sentence
+        return text;
+      } catch (e) { return null; }
+    }
+
+    /** The utterance ended: decide what it was. */
+    async _hotDone(h, u) {
+      if (u.follow) {                                       // the sentence after a bare "Hey Argus"
+        h.follow = 0;
+        const t = await this._hotStt(h, u.chunks, false);
+        if (t && this._hot === h) this._hotSend(t); else this._vsay("didn't catch that");
+        return;
+      }
+      let early = null;
+      if (u.early) {
+        early = await u.early;
+        if (early === null || !hotword(early).hit) return;  // not for us: the rest isn't sent at all
+      }
+      const t = await this._hotStt(h, u.chunks, false);
+      if (!t || this._hot !== h) return;
+      const w = hotword(t);
+      if (!w.hit && !early) return;                        // a short burst that wasn't the name: dropped
+      if (!u.early) this._hotHeard(h);
+      const rest = w.hit ? w.rest : t;
+      if (rest.split(/\s+/).filter(Boolean).length >= 2) { this._hotSend(rest); return; }
+      h.follow = Date.now() + HOT_FOLLOW_MS;
+      this._hotAck(h);
+    }
+
+    /** It heard its name: the chime, at once (made here, no network). */
+    _hotHeard(h) {
+      if (h.chimed && performance.now() - h.chimed < 1500) return;
+      h.chimed = performance.now();
+      h.muteUntil = performance.now() + 350;                // don't hear the chime itself
+      try {
+        const ctx = h.ctx, t0 = ctx.currentTime;
+        for (const [f, at] of [[880, 0], [1318.5, 0.11]]) {
+          const o = ctx.createOscillator(), g = ctx.createGain();
+          o.type = "sine"; o.frequency.value = f;
+          g.gain.setValueAtTime(0.0001, t0 + at); g.gain.exponentialRampToValueAtTime(0.18, t0 + at + 0.015);
+          g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + 0.16);
+          o.connect(g); g.connect(ctx.destination); o.start(t0 + at); o.stop(t0 + at + 0.18);
+        }
+      } catch (e) { /* no sound: the bubble still says it */ }
+      this._vsay("👂 yes?", 3000);
+    }
+
+    /** A bare "Hey Argus": a short spoken ack in Argus's voice (fetched once). */
+    async _hotAck(h) {
+      const ack = HOT_ACKS[Math.floor(Math.random() * HOT_ACKS.length)];
+      this._vsay("“" + ack + "” (say it now)", HOT_FOLLOW_MS);
+      const url = (this._ackUrls || {})[ack];
+      h.muteUntil = performance.now() + 900;
+      if (url && this._player) {
+        try { this._player.src = url; await this._player.play(); return; } catch (e) { /* the browser's voice */ }
+      }
+      try { if (window.speechSynthesis) window.speechSynthesis.speak(new SpeechSynthesisUtterance(ack)); } catch (e) { /* silent */ }
+    }
+
+    async _prefetchAcks() {
+      if (this._ackUrls) return;
+      const engine = this._ttsEngine(); if (!engine) return;
+      this._ackUrls = {};
+      for (const a of HOT_ACKS) {
+        try { const r = await this._hass.callApi("POST", "tts_get_url", { engine_id: engine, message: a }); this._ackUrls[a] = r.path || r.url; }
+        catch (e) { /* that one falls back to the browser's voice */ }
+      }
     }
 
     _hotSend(text) {
