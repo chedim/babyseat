@@ -128,11 +128,23 @@ def matches(d: dict, eq: dict | None) -> bool:
     return True
 
 
+# THE SCAN INDEX (2026-10-10, the gate's stage clock: efgate 1-5 s a round):
+# scan() walked EVERY row of a collection; answer_of() scans the events of ONE
+# session, several times a round, over 20k+ events. Equality on an indexed
+# field now jumps to its rows -- in the collection's own order, built lazily
+# (after the boot load), kept by every write. Same results, by construction.
+SCAN_INDEX: dict[str, tuple[str, ...]] = {"events": ("session",)}
+_NOPE = object()
+
+
 class MemBackend:
     """The RAM home. Same contract the Couchbase backend implements."""
 
     def __init__(self):
         self.colls: dict[str, dict[str, dict]] = {c: {} for c in COLLECTIONS}
+        self._idx: dict[tuple[str, str], dict] = {}      # (coll, field) -> value -> {key: None} (ordered)
+        self._idx_off: set[tuple[str, str]] = set()      # gave up (an unhashable value)
+        self._idx_dirty: set[tuple[str, str, object]] = set()   # a bucket a row MOVED into: re-ordered on its next scan
         self._leases: dict[str, tuple[str, float]] = {}
         # THE SCAN LOCK (the 'dictionary changed size during iteration'
         # flood: the capture worker's embed/apply scans + the chat
@@ -254,6 +266,46 @@ class MemBackend:
         with self._ram_lock:
             return self.colls.setdefault(coll, {})
 
+    # ---- the scan index (under _ram_lock, always)
+    def _idx_get(self, coll: str, fld: str) -> dict | None:
+        k = (coll, fld)
+        if k in self._idx_off:
+            return None
+        idx = self._idx.get(k)
+        if idx is None:
+            idx = {}
+            try:
+                for key, d in self.colls.get(coll, {}).items():
+                    idx.setdefault(d.get(fld), {})[key] = None
+            except TypeError:                            # an unhashable value: no index, full scans
+                self._idx_off.add(k)
+                return None
+            self._idx[k] = idx
+        return idx
+
+    def _idx_move(self, coll: str, key: str, old: dict | None, new: dict | None) -> None:
+        for fld in SCAN_INDEX.get(coll, ()):
+            idx = self._idx.get((coll, fld))
+            if idx is None:
+                continue
+            ov = old.get(fld) if old is not None else None
+            nv = new.get(fld) if new is not None else None
+            try:
+                if old is not None and (new is None or ov != nv):
+                    b = idx.get(ov)
+                    if b is not None:
+                        b.pop(key, None)
+                        if not b:
+                            idx.pop(ov, None)
+                if new is not None and (old is None or ov != nv):
+                    idx.setdefault(nv, {})[key] = None
+                    if old is not None:
+                        # an existing row changed bucket: the collection keeps
+                        # its place, the bucket appended it -- rebuild in order
+                        self._idx_dirty.add((coll, fld, nv))
+            except TypeError:
+                self._idx.pop((coll, fld), None); self._idx_off.add((coll, fld))
+
     def get(self, coll: str, key: str) -> dict | None:
         with self._ram_lock:
             d = self._c(coll).get(key)
@@ -266,13 +318,18 @@ class MemBackend:
 
     def upsert(self, coll: str, key: str, doc: dict) -> None:
         with self._ram_lock:
-            self._c(coll)[key] = dict(doc)
+            c = self._c(coll)
+            old = c.get(key)
+            c[key] = dict(doc)
+            self._idx_move(coll, key, old, c[key])
 
     def upsert_multi(self, coll: str, docs: dict[str, dict]) -> None:
         with self._ram_lock:
             c = self._c(coll)
             for k, d in docs.items():
+                old = c.get(k)
                 c[k] = dict(d)
+                self._idx_move(coll, k, old, c[k])
 
     def insert_if_absent(self, coll: str, key: str, doc: dict) -> bool:
         with self._ram_lock:
@@ -280,21 +337,28 @@ class MemBackend:
             if key in c:
                 return False
             c[key] = dict(doc)
+            self._idx_move(coll, key, None, c[key])
             return True
 
     def delete(self, coll: str, key: str) -> None:
         with self._ram_lock:
-            self._c(coll).pop(key, None)
+            old = self._c(coll).pop(key, None)
+            if old is not None:
+                self._idx_move(coll, key, old, None)
 
     def cas_update(self, coll: str, key: str,
                    fn: Callable[[dict | None], dict | None]) -> dict | None:
         with self._ram_lock:
             c = self._c(coll)
+            old = c.get(key)
             new = fn(dict(c[key]) if key in c else None)
             if new is None:
                 c.pop(key, None)
+                if old is not None:
+                    self._idx_move(coll, key, old, None)
             else:
                 c[key] = dict(new)
+                self._idx_move(coll, key, old, c[key])
             return new
 
     def scan(self, coll: str, eq: dict | None = None, order: tuple = (),
@@ -305,8 +369,28 @@ class MemBackend:
         the matches+sort run on a COPY taken under the RAM lock --
         another thread's upsert mid-scan never tears the iteration."""
         with self._ram_lock:
-            items = [(k, dict(d)) for k, d in self._c(coll).items()
-                     if matches(d, eq)]
+            c = self._c(coll)
+            keys = None
+            for fld in SCAN_INDEX.get(coll, ()):
+                want = (eq or {}).get(fld, _NOPE)
+                if want is _NOPE or isinstance(want, (dict, list, tuple, set, frozenset)):
+                    continue
+                idx = self._idx_get(coll, fld)
+                if idx is not None:
+                    try:
+                        if (coll, fld, want) in self._idx_dirty:
+                            self._idx_dirty.discard((coll, fld, want))
+                            idx[want] = {k: None for k, d in c.items() if d.get(fld) == want}
+                            if not idx[want]:
+                                idx.pop(want, None)
+                        keys = list((idx.get(want) or {}).keys())
+                    except TypeError:
+                        keys = None
+                    break
+            if keys is None:
+                items = [(k, dict(d)) for k, d in c.items() if matches(d, eq)]
+            else:                                        # the index's rows, still matched in full
+                items = [(k, dict(c[k])) for k in keys if k in c and matches(c[k], eq)]
         for f in reversed(order):                        # stable multi-key sort
             fld = f[0] if isinstance(f, tuple) else f
             rev = isinstance(f, tuple) and not str(f[1]).upper().startswith("ASC")

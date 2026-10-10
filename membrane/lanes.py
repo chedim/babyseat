@@ -1046,6 +1046,11 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
     #    drains -- the chat path is the only consumer; a state peek passes
     #    drain=False and shows nothing, consuming nothing). The unified
     #    banner's event lane.
+    _bt = [time.time()]
+    _bs = srv._banner_stages = {}
+
+    def _bmark(name):                       # the banner's own splits (the gate's 'recall+banner')
+        now = time.time(); _bs[name] = round(now - _bt[0], 3); _bt[0] = now
     est = getattr(srv, "entity_store", None)
     if est is not None and getattr(est, "tracks", None):
         try:
@@ -1085,6 +1090,7 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
                     lines.append(track_line(fld, t["key"], t.get("label") or ""))
         except Exception as e:
             print(f"[opencode] banner render error: {e}", file=sys.stderr)
+    _bmark("tracks")
     # 4. THE NULL-RECALL NOTICE (absence is information): a fresh all-
     #    orthogonal ask rides the header so the model knows the field has
     #    nothing on this direction -- proceed on your own, don't re-derive
@@ -1118,6 +1124,7 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
                                  f"{term}")
         except Exception as e:
             print(f"[opencode] timeline render error: {e}", file=sys.stderr)
+    _bmark("timelines")
     # 4.5. THE LOOPS LINE (the reactive layer's ambient load): the
     # thinking loops' running + queued counts + their agent titles.
     try:
@@ -1126,6 +1133,7 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
             lines.append(_loops_line)
     except Exception:
         pass
+    _bmark("loops")
     # THE ALERT DIGEST (2026-10-08): the watch events past the seat's
     # alert budget, folded here instead of N interrupt turns
     for _dl in _digest_lines(srv, drain=drain):
@@ -1140,6 +1148,7 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
             lines.append(_fl)
     except Exception:
         pass
+    _bmark("digest+frame")
     # 5. THE PEER SUBSTRATES (the operator's multi-seat design): the
     #    REGISTRY heartbeat + the seats line (who else is connected) +
     #    unread PEER-CHANNEL messages (cross-seat chatter, read-once per
@@ -1163,6 +1172,7 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
                 lines.append(f"peer[{frm}]: {text}")
         except Exception:
             pass
+    _bmark("peers")
     if not events_only:
         try:
             from .night import command_library
@@ -1179,6 +1189,7 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
                 lines.append(cp)
         except Exception:
             pass
+    _bmark("library")
     if not lines:
         return None
     return ("WHERE WE ARE:\n- " + "\n- ".join(lines))
@@ -3726,7 +3737,8 @@ class _Stages:
         if ring is None:
             ring = srv._gate_stages = []
         ring.append({"ts": int(time.time()), "gate_s": total, **extra,
-                     "stages": {n: round(d, 3) for n, d in self.marks}})
+                     "stages": {n: round(d, 3) for n, d in self.marks},
+                     "banner": dict(getattr(srv, "_banner_stages", None) or {})})
         del ring[:-self.KEEP]
 
 
@@ -4996,11 +5008,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                         ctx = (ctx + "\n\n" + diff) if ctx else diff
             except Exception as e:
                 print(f"[efield] diff error: {e}", file=sys.stderr)
+        _st.mark("field")
         # THE INTENTIONS BLOCK (the plan channel rewired, 2026-10-06: the
         # builder existed and was never called -- the OPEN INTENTIONS view
         # and the empty-board nudge ride turns only from now; the nudge
         # is rate-limited inside the builder).
-        _st.mark("field")
         if not _is_tool_round and not _massage:
             try:
                 i_block = _intents_context_block(srv)
