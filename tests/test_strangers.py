@@ -112,15 +112,17 @@ class TestStrangers(unittest.TestCase):
     def test_caps_and_ttl(self):
         srv = _srv()
         self.assertTrue(SG.visit(srv, ip_key="x", now=1000.0)["ok"])
-        self.assertTrue(SG.visit(srv, ip_key="x", now=1000.0)["ok"])
-        self.assertEqual(SG.visit(srv, ip_key="x", now=1000.0)["error"], "busy")
+        self.assertTrue(SG.visit(srv, ip_key="x", now=1000.2)["ok"])
+        self.assertTrue(SG.visit(srv, ip_key="x", now=1000.5)["ok"])    # the address's oldest makes room
+        self.assertEqual(sum(1 for s in srv._strangers["by_token"].values() if s["ip"] == "x"), 2)
+        self.assertIsNone(srv.entity_store._resolve_spec("stranger1"))
         for i in range(SG.MAX_LIVE - 2):
             self.assertTrue(SG.visit(srv, ip_key=f"k{i}", now=1000.0)["ok"])
         self.assertEqual(SG.visit(srv, ip_key="new", now=1000.0)["error"], "busy")
         later = 1000.0 + SG.TTL_S + 1
         self.assertTrue(SG.visit(srv, ip_key="new", now=later)["ok"])
         self.assertEqual(SG.stats(srv)["live"], 1)
-        self.assertIsNone(srv.entity_store._resolve_spec("stranger1"))   # expired = removed
+        self.assertIsNone(srv.entity_store._resolve_spec("stranger2"))   # expired = removed
 
     def test_leave_removes_the_entity_and_says_so(self):
         srv = _srv()
@@ -138,6 +140,42 @@ class TestStrangers(unittest.TestCase):
         SG.visit(srv, now=1001.0)
         self.assertIsNone(srv.entity_store._resolve_spec("stranger1"))
         self.assertIsNotNone(srv.entity_store._resolve_spec("stranger2"))
+
+
+class TestReloadsAndReturns(unittest.TestCase):
+    V = "a" * 16
+
+    def test_a_reload_resumes_the_live_stranger(self):
+        srv = _srv()
+        a = SG.visit(srv, ip_key="x", vkey=self.V, now=1000.0)
+        b = SG.visit(srv, ip_key="x", vkey=self.V, now=1005.0)
+        self.assertEqual(a["t"], b["t"])
+        self.assertTrue(b["resumed"])
+        self.assertEqual(SG.stats(srv)["live"], 1)
+        self.assertEqual(srv.efield.lines.count("stranger1 arrived at the login page"), 1)
+
+    def test_a_returning_browser_gets_its_name_and_place_back(self):
+        srv = _srv()
+        t = SG.visit(srv, vkey=self.V, now=1000.0)["t"]
+        SG.event(srv, t, "move", n=3, dx=500, dy=0, now=1001.0)
+        left_at = list(next(iter(srv._strangers["by_token"].values()))["me"])
+        SG.visit(srv, vkey="b" * 16, now=1002.0)                       # someone else: stranger2
+        SG.leave(srv, t, now=1003.0)
+        r = SG.visit(srv, vkey=self.V, now=5000.0)
+        self.assertEqual((r["name"], r["visit"]), ("stranger1", 2))
+        self.assertIn("stranger1 came back to the login page (visit 2)", srv.efield.lines)
+        me = srv._strangers["by_token"][r["t"]]["me"]
+        self.assertEqual([round(v, 4) for v in me], [round(v, 4) for v in left_at])
+        self.assertEqual(SG.visit(srv, vkey="c" * 16, now=5001.0)["name"], "stranger3")
+
+    def test_quiet_goes_in_two_minutes_hidden_in_fifteen(self):
+        srv = _srv()
+        quiet = SG.visit(srv, ip_key="q", now=1000.0)["t"]
+        hidden = SG.visit(srv, ip_key="h", now=1000.0)["t"]
+        SG.event(srv, hidden, "blur", now=1000.0)
+        SG.view(srv, "nothing", now=1000.0 + SG.TTL_S + 1)            # a sweep
+        self.assertFalse(SG.view(srv, quiet, now=1000.0 + SG.TTL_S + 2)["ok"])
+        self.assertTrue(SG.view(srv, hidden, now=1000.0 + SG.TTL_S + 2)["ok"])
 
 
 if __name__ == "__main__":

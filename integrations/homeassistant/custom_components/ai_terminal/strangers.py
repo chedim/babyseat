@@ -68,6 +68,11 @@ def clean_params(op: str, query) -> dict | None:
     if op not in OPS:
         return None
     out = {}
+    if op == "visit":
+        v = str(query.get("v", "") or "")
+        if v and _HEX.match(v):
+            # the browser's own random id, hashed: a reload resumes, a return is recognised
+            out["v"] = hashlib.sha256(("ai_terminal-visitor:" + v).encode()).hexdigest()[:16]
     if op != "visit":
         t = str(query.get("t", "") or "")
         if not _HEX.match(t):

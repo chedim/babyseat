@@ -137,15 +137,25 @@
   document.addEventListener("visibilitychange", () => {
     if (token) get("event", { t: token, kind: document.hidden ? "blur" : "focus", n: 1 });
   });
-  addEventListener("pagehide", () => { alive = false; if (token) get("leave", { t: token }); });
+  // a reload is the same stranger: the page only says it went quiet (the
+  // seat lets a quiet stranger go after 2 min, a hidden one after 15)
+  addEventListener("pagehide", () => { alive = false; if (token) get("event", { t: token, kind: "blur", n: 1 }); });
 
-  get("visit").then((r) => {
+  const store = (k, v) => { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } };
+  let vid = store("sg.v");
+  if (!vid || !/^[0-9a-f]{32}$/.test(vid)) {
+    const b = new Uint8Array(16); crypto.getRandomValues(b);
+    vid = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+    store("sg.v", vid);
+  }
+  const start = (r) => {
     if (!r.ok) return;
     token = r.t;
     poll();
     setInterval(poll, VIEW_EVERY_MS);
     setInterval(flush, FLUSH_EVERY_MS);
-  });
+  };
+  get("visit", { v: vid }).then(start);
 
   // ---- drawing (canvas 2D: ~150 nodes, no library) ---------------------------
   const ctx = canvas.getContext("2d");

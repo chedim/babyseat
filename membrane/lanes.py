@@ -6255,7 +6255,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         op = path.rsplit("/", 1)[-1]
         try:
             if op == "visit":
-                out = _SG.visit(self.server, ip_key=q("ip"))
+                out = _SG.visit(self.server, ip_key=q("ip"), vkey=q("v"))
             elif op == "view":
                 out = _SG.view(self.server, q("t"))
             elif op == "event":

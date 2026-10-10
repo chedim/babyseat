@@ -31,7 +31,9 @@ import numpy as np
 SITE = "site:login"
 MAX_LIVE = 20
 PER_IP_LIVE = 2
-TTL_S = 15 * 60.0                 # after the last sign of life
+TTL_S = 120.0                     # after the last sign of life (the page polls every 3 s)
+TTL_AWAY_S = 15 * 60.0            # ... unless it said it was hidden (a background tab)
+KNOWN_MAX = 500                   # visitor ids remembered (their strangerN comes back)
 LIFETIME_S = 2 * 3600.0
 RADIUS = 0.1                      # the window: cube units around the stranger (~110 of 14k)
 MAX_NODES = 150
@@ -105,7 +107,8 @@ def _sweep_boot(srv, st) -> None:
 
 def _sweep(srv, st, now: float) -> None:
     for tok, s in list(st["by_token"].items()):
-        if now - s["last"] > TTL_S or now - s["born"] > LIFETIME_S:
+        quiet = TTL_AWAY_S if s.get("away") else TTL_S
+        if now - s["last"] > quiet or now - s["born"] > LIFETIME_S:
             _end(srv, st, tok, "expired", now)
 
 
@@ -115,6 +118,11 @@ def _end(srv, st, tok: str, why: str, now: float) -> None:
         return
     _flush_field(srv, st, s, now, force=True, closing=why)
     est = _est(srv)
+    if est is not None and s.get("vkey"):
+        site = est._resolve_spec(SITE)
+        known = (site.properties or {}).get("known_visitors") if site is not None else None
+        if isinstance(known, dict) and s["vkey"] in known:
+            known[s["vkey"]] = list(known[s["vkey"]][:2]) + [[round(v, 4) for v in s["me"]]]
     if est is not None:
         try:
             est.remove(s["eid"])
@@ -163,25 +171,49 @@ def _flush_field(srv, st, s, now: float, force: bool = False, closing: str = "")
 
 
 # ---- the four verbs ---------------------------------------------------------
-def visit(srv, ip_key: str = "", now: float | None = None) -> dict:
+def visit(srv, ip_key: str = "", vkey: str = "", now: float | None = None) -> dict:
+    """A page load. `vkey` (a hash of the browser's own random id, kept in
+    its localStorage) makes a reload RESUME its live stranger and a
+    returning browser get its old strangerN back."""
     now = now or _now()
     with _lock:
         st = _state(srv)
         _sweep_boot(srv, st)
         _sweep(srv, st, now)
         live = st["by_token"]
-        if len(live) >= MAX_LIVE:
-            return {"ok": False, "error": "busy"}
+        vkey = str(vkey or "")[:32]
         ip_key = str(ip_key or "")[:32]
-        if ip_key and sum(1 for s in live.values() if s["ip"] == ip_key) >= PER_IP_LIVE:
+        if vkey:
+            for tok, s in live.items():
+                if s.get("vkey") == vkey:                  # a reload / a second tab
+                    s["last"], s["away"] = now, False
+                    s["loads"] = s.get("loads", 1) + 1
+                    return {"ok": True, "t": tok, "name": s["name"], "ttl": int(TTL_S), "resumed": True}
+        if ip_key:
+            mine = sorted((s["last"], tok) for tok, s in live.items() if s["ip"] == ip_key)
+            while len(mine) >= PER_IP_LIVE:                 # the address's oldest makes room
+                _end(srv, st, mine.pop(0)[1], "replaced", now)
+        if len(live) >= MAX_LIVE:
             return {"ok": False, "error": "busy"}
         est = _est(srv)
         if est is None:
             return {"ok": False, "error": "the entity layer is off"}
         site = _site(est)
         sp = (site.properties or {}) if site is not None else {}
-        n = int(sp.get("strangers_seen") or 0) + 1
-        sp["strangers_seen"] = n
+        known = dict(sp.get("known_visitors") or {})
+        start_at = None
+        back = known.get(vkey) if vkey else None
+        if back:
+            n, visits = int(back[0]), int(back[1]) + 1
+            if len(back) > 2 and isinstance(back[2], list) and len(back[2]) == 3:
+                start_at = [float(v) for v in back[2]]
+        else:
+            n, visits = int(sp.get("strangers_seen") or 0) + 1, 1
+            sp["strangers_seen"] = n
+        if vkey:
+            known.pop(vkey, None)
+            known[vkey] = [n, visits] + ([start_at] if start_at else [])
+            sp["known_visitors"] = dict(list(known.items())[-KNOWN_MAX:])
         name = f"stranger{n}"
         from .entities import CLASS_SESSION
         r = est.add(cls=CLASS_SESSION, name=name,
@@ -190,7 +222,7 @@ def visit(srv, ip_key: str = "", now: float | None = None) -> dict:
         if d is None:
             return {"ok": False, "error": "could not mint the stranger"}
         d.properties.update({"stranger": True, "until": now + TTL_S, "parents": [],
-                             "visits": SITE})
+                             "visits": SITE, "visit_n": visits})
         try:
             proj = _projection(srv)
         except Exception:
@@ -208,13 +240,17 @@ def visit(srv, ip_key: str = "", now: float | None = None) -> dict:
             start = [0.5 + rnd.uniform(-0.15, 0.15) for _ in range(3)]
         jit = random.Random(n * 7919)
         me = [min(1.0, max(0.0, v + jit.uniform(-RADIUS / 3, RADIUS / 3))) for v in start]
+        if start_at:
+            me = start_at                                  # back where it left
         tok = secrets.token_hex(16)
         live[tok] = {"eid": d.eid, "name": name, "ip": ip_key, "born": now, "last": now,
                      "me": me, "counts": {k: 0 for k in KINDS}, "field_ts": now,
-                     "view": None, "view_ts": 0.0, "pulse_ts": now}
+                     "view": None, "view_ts": 0.0, "pulse_ts": now,
+                     "vkey": vkey, "away": False, "loads": 1}
         if _budget_ok(st, now):
-            _field_line(srv, name, f"{name} arrived at the login page", now)
-        return {"ok": True, "t": tok, "name": name, "ttl": int(TTL_S)}
+            _field_line(srv, name, f"{name} came back to the login page (visit {visits})" if visits > 1
+                        else f"{name} arrived at the login page", now)
+        return {"ok": True, "t": tok, "name": name, "ttl": int(TTL_S), "visit": visits}
 
 
 def _recent_applied(srv, since: float) -> set:
@@ -237,7 +273,7 @@ def view(srv, tok: str, now: float | None = None) -> dict:
         s = st["by_token"].get(str(tok or ""))
         if s is None:
             return {"ok": False, "error": "gone"}
-        s["last"] = now
+        s["last"], s["away"] = now, False
         cached = s["view"]
         if cached is None or now - s["view_ts"] > VIEW_CACHE_S:
             try:
@@ -316,6 +352,8 @@ def event(srv, tok: str, kind: str, n: int = 1, dx: int = 0, dy: int = 0,
         except (TypeError, ValueError):
             return {"ok": False, "error": "numbers"}
         s["counts"][kind] = s["counts"].get(kind, 0) + n
+        if kind in ("blur", "focus"):
+            s["away"] = kind == "blur"
         if kind == "move" and (dx or dy):
             step = [dx * STEP, -dy * STEP, (dx - dy) * STEP * 0.3]
             norm = max(abs(v) for v in step)

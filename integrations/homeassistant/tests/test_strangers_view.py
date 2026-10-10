@@ -21,6 +21,12 @@ class TestStrangerParams(unittest.TestCase):
         self.assertEqual(SV.clean_params("event", {"t": self.T, "kind": "move", "n": "3", "dx": "99999", "dy": "-4", "text": "x"}),
                          {"t": self.T, "kind": "move", "n": "3", "dx": "2000", "dy": "-4"})
 
+    def test_the_visitor_id_is_hashed_and_must_be_hex(self):
+        out = SV.clean_params("visit", {"v": self.T})
+        self.assertEqual(len(out["v"]), 16)
+        self.assertNotIn(out["v"], self.T)
+        self.assertEqual(SV.clean_params("visit", {"v": "<script>"}), {})
+
     def test_the_bucket_throttles_per_address(self):
         b = SV.Bucket(size=3, rate=1.0)
         self.assertEqual([b.take("a", now=10.0) for _ in range(4)], [True, True, True, False])
