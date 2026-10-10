@@ -1,0 +1,21 @@
+<!doctype html><html><head><meta charset="utf-8"><title>membrane home voice harness</title></head>
+<body style="margin:0;background:#111;color:#ddd">
+<script>
+  // a stub hass: enough for membrane home to render and run its voice; the
+  // field and the chat fail quietly (no seat behind this page)
+  window.__said = [];
+  window.fakeHass = { user: { id: "u-test", name: "Test User", is_admin: true }, states: {}, panels: {}, language: "en",
+    fetchWithAuth: async () => new Response("{}", { status: 404 }), callApi: async () => { throw new Error("no api"); },
+    callWS: async () => ({}), connection: { subscribeEvents: async () => () => {} } };
+</script>
+<script type="module">
+  await import("/api/ai_terminal/www/panel.js");
+  await import("/api/ai_terminal/www/home.js");
+  const el = document.createElement("membrane-home-panel");
+  document.body.appendChild(el);
+  el.hass = window.fakeHass;
+  el._sendToChat = (t) => window.__said.push(t);       // what the voice would send
+  window.__home = el;
+  window.__ready = true;
+</script>
+</body></html>

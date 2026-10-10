@@ -183,9 +183,12 @@ const VOSK_MODEL = "/api/ai_terminal/www/vosk-model-en.tar.gz";
 const VOSK_CACHE = "membrane-voice-v1";
 const LS_STT = "membrane.home.stt";          // "device" (default) | "lan"
 // 'argus' is not in the small model's words: these sound like it
+// a greeting is required: a bare name in the grammar matched "turn on" (the
+// recognizer squeezes every sound into its few phrases -- the browser test
+// caught it, 2026-10-10)
 const WAKE_GRAMMAR = ["hey are gus", "hey our gus", "hey angus", "hey august", "hi are gus", "okay are gus",
-                      "are gus", "angus", "[unk]"];
-const WAKE_RE = /\b(are gus|our gus|angus|august)\b/;
+                      "ok are gus", "[unk]"];
+const WAKE_RE = /\b(hey|hi|okay|ok) (are gus|our gus|angus|august)\b/;
 const DICTATE_END_MS = 600, DICTATE_WAIT_MS = 2500;
 
 function loadScript(src) {

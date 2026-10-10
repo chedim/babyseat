@@ -139,7 +139,38 @@
     lastXY = [x, y];
   };
   addEventListener("pointermove", (e) => onMove(e.clientX, e.clientY), { passive: true });
-  addEventListener("pointerdown", () => { acc.click += 1; }, { passive: true });
+  addEventListener("pointerdown", () => { acc.click += 1; askTilt(); }, { passive: true });
+
+  // ---- tilt (2026-10-10): on a phone the device's tilt turns the view too
+  // (tilt right turns right, toward you looks from above -- membrane home's
+  // convention); iOS asks once, on the first tap
+  let tiltBase = null, tiltTarget = null, tiltAsked = false;
+  const tiltAxes = (beta, gamma, angle) => {
+    const a = (((angle || 0) % 360) + 360) % 360;
+    if (a === 90) return [beta, -gamma];
+    if (a === 270) return [-beta, gamma];
+    if (a === 180) return [-gamma, -beta];
+    return [gamma, beta];
+  };
+  const onTilt = (e) => {
+    if (e.beta == null || e.gamma == null) return;
+    const [lr, fb] = tiltAxes(e.beta, e.gamma, (screen.orientation && screen.orientation.angle) || window.orientation || 0);
+    if (!tiltBase) tiltBase = { lr, fb, yaw, pitch };
+    const d = Math.PI / 180;
+    tiltTarget = { yaw: tiltBase.yaw + (lr - tiltBase.lr) * d * 1.2,
+                   pitch: Math.max(-0.6, Math.min(0.6, tiltBase.pitch + (fb - tiltBase.fb) * d * 1.2)) };
+  };
+  const touchDevice = (navigator.maxTouchPoints || 0) > 0;
+  if (touchDevice && typeof window.DeviceOrientationEvent !== "undefined" &&
+      typeof window.DeviceOrientationEvent.requestPermission !== "function") {
+    addEventListener("deviceorientation", onTilt);            // Android: no prompt needed
+  }
+  function askTilt() {
+    const DOE = window.DeviceOrientationEvent;
+    if (tiltAsked || !touchDevice || !DOE || typeof DOE.requestPermission !== "function") return;
+    tiltAsked = true;                                          // iOS: once, from a tap
+    DOE.requestPermission().then((r) => { if (r === "granted") addEventListener("deviceorientation", onTilt); }).catch(() => {});
+  }
   document.addEventListener("visibilitychange", () => {
     if (token) get("event", { t: token, kind: document.hidden ? "blur" : "focus", n: 1 });
   });
@@ -199,6 +230,11 @@
     const k = reduce ? 0.3 : 1;
     yaw += spin[0] * k;
     pitch = Math.max(-0.6, Math.min(0.6, pitch + spin[1] * k));
+    if (tiltTarget) {                                          // the phone's tilt eases the view toward it
+      const kt = 1 - Math.exp(-dt * 6);
+      yaw += (tiltTarget.yaw - yaw) * kt;
+      pitch += (tiltTarget.pitch - pitch) * kt;
+    }
     const ease = Math.exp(-dt * 3);
     spin = [spin[0] * ease, spin[1] * ease];
     tilt = [0, pitch];
