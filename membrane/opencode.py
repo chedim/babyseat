@@ -1048,6 +1048,20 @@ def main() -> None:
                       "entity_link runs commands through it)", file=sys.stderr)
         except Exception as e:
             print(f"[seat] executor seeding skipped ({e})", file=sys.stderr)
+        # THE WARM-UP (2026-10-10: the first turn after a restart paid 11.8 s
+        # for the intent seeds -- a full scan + every seed embedded cold):
+        # done in the background right after boot, nobody waits for it
+        def _warm_seeds(_srv=srv):
+            try:
+                time.sleep(20)
+                from . import lanes as _L
+                _L._embed_seed_matrix(_srv)
+                _L._field_seed_topics(_srv)
+                _L._embed_field_seed_matrix(_srv)
+                print("[seat] intent seeds warmed", file=sys.stderr)
+            except Exception as e:
+                print(f"[seat] seed warm-up skipped ({e})", file=sys.stderr)
+        threading.Thread(target=_warm_seeds, name="seed-warmup", daemon=True).start()
         # THE FIRST INTERFACE (2026-10-10): remote_executor -- exec(code, timeout)
         try:
             from .night import seed_interfaces
