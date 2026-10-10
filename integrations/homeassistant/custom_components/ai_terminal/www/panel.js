@@ -384,6 +384,13 @@ function membraneLanding(path, haChosen) { return !haChosen && LANDING_RE.test(S
 /** The newest finished assistant reply, speakable: its text parts (no tool
  * output, no reasoning), without 'membrane:' frame lines or markdown marks
  * -- membrane home reads it aloud (2026-10-10). null when nothing new. */
+/** Text made fit for speaking: no 'membrane:' frame lines, no markdown. */
+function speakText(text) {
+  return String(text || "").split("\n").filter((l) => !/^\s*[*_`>]*\s*membrane\s*:/i.test(l)).join("\n")
+    .replace(/```[\s\S]*?```/g, " ").replace(/[*_`#>|]/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/^\s*\[membrane voice\]\s*/i, "").replace(/\s+/g, " ").trim();
+}
+
 function replyToSpeak(rows) {
   for (let i = (rows || []).length - 1; i >= 0; i--) {
     const r = rows[i];
@@ -407,7 +414,7 @@ function replyToSpeak(rows) {
   return null;
 }
 
-const AiPanelLogic = { replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
+const AiPanelLogic = { speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
@@ -1081,6 +1088,28 @@ function definePanel() {
       }
     }
 
+    _announceSpeech(ev, p) {
+      this._spokenParts = this._spokenParts || new Set();
+      const say = (kind, id, text) => {
+        const t = speakText(text);
+        if (!t || this._spokenParts.has(id)) return;
+        this._spokenParts.add(id);
+        if (this._spokenParts.size > 500) this._spokenParts = new Set([...this._spokenParts].slice(-250));
+        this.dispatchEvent(new CustomEvent("ai-speak", { detail: { kind, id, text: t }, bubbles: true, composed: true }));
+      };
+      if (ev.type === "message.part.updated") {
+        const part = p.part || {};
+        if (part.type !== "text" || part.synthetic || !(part.time || {}).end) return;
+        const row = this._chat.byId && this._chat.byId[part.messageID];
+        const role = row && row.info && row.info.role;
+        if (role === "assistant") say("argus", part.id, part.text);
+        else if (role === "user" && /^\s*\[membrane voice\]/i.test(part.text || "")) say("membrane", "mv:" + part.text, part.text);
+      } else if (ev.type === "membrane.voice") {
+        const line = p.line || {};
+        if (line.id && line.text) say("membrane", "mv:" + line.text, line.text);
+      }
+    }
+
     _closeStream() {
       if (this._streamCtl) { this._streamCtl.abort(); this._streamCtl = null; }
       this._live = false;
@@ -1108,6 +1137,10 @@ function definePanel() {
           (ev.type === "session.status" && (p.status || {}).type === "idle"))) {
         this.dispatchEvent(new CustomEvent("ai-idle", { bubbles: true, composed: true }));
       }
+      // SPEECH AS IT COMES (2026-10-10, the operator: "why does it voice
+      // messages MUCH after they appear?"): each of Argus's text parts the
+      // moment it closes, and each of membrane's own lines, once
+      if (this._chat && sid === this._chat.sid && this._repliesArmed) this._announceSpeech(ev, p);
       // a finished reply, announced once (membrane home speaks it)
       if (this._chat && sid === this._chat.sid && (ev.type === "session.idle" || ev.type === "message.updated")) {
         const r = replyToSpeak(this._chat.rows);

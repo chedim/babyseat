@@ -217,3 +217,9 @@ test("the reply to speak: the newest finished assistant text, frames and markdow
   eq(L.replyToSpeak(voiced), { id: "a3", text: "Hi Dmitrii." });
   eq(L.replyToSpeak([voiced[0], voiced[2], voiced[1]]), { id: "a3", text: "Hi Dmitrii." });
 });
+
+test("speakText: what gets said aloud, frames and markdown out, membrane's own tag off", () => {
+  assert.equal(L.speakText("**Done.** The `light` is on.\nmembrane: learn that x"), "Done. The light is on.");
+  assert.equal(L.speakText("[membrane voice] the room feels quiet"), "the room feels quiet");
+  assert.equal(L.speakText("see [the docs](http://x)"), "see the docs");
+});

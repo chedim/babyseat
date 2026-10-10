@@ -810,16 +810,19 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._onVis = () => { if (document.hidden) this._hotPause(true); else this._hotPause(false); };
       document.addEventListener("visibilitychange", this._onVis);
       if (lsGet(LS_HOTWORD, "0") === "1") setTimeout(() => this._hotStart(), 800);
-      // voice in -> voice out: an answer to something SAID is spoken even with 🔈 off
-      // the chat went idle without a reply to speak (or before one): the orb rests
+      // the chat went idle: the spoken turn is over, the orb rests once the queue is done
       this._chat.addEventListener("ai-idle", () => {
-        setTimeout(() => { if (!this._speaking && !this._busyChat()) this._orb(null); }, 1500);
+        setTimeout(() => {
+          if (this._busyChat()) return;
+          this._voiceTurn = false;
+          if (!this._speaking && !(this._speechQ || []).length) this._orb(null);
+        }, 1500);
       });
-      this._chat.addEventListener("ai-reply", (e) => {
-        const said = this._voiceTurns > 0;
-        if (said) this._voiceTurns -= 1;
-        if ((this._ttsOn || said) && e.detail && e.detail.text) this._speak(e.detail.text);
-        else this._orb(null);                              // answered (on screen): the orb rests
+      // SPEECH AS IT COMES: Argus's words the moment each part closes (🔊 on, or
+      // a turn you started by voice), membrane's own lines in its own voice (🔊 on)
+      this._chat.addEventListener("ai-speak", (e) => {
+        const d = e.detail || {};
+        if (d.kind === "membrane" ? this._ttsOn : (this._ttsOn || this._voiceTurn)) this._enqueueSpeech(d.kind, d.text);
       });
     }
 
@@ -1024,7 +1027,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       clearTimeout(this._orbTextT);
       this._orbTextT = setTimeout(() => { if (!this._speaking) this._orbText(""); }, 4000);   // the phrase fades
       const queued = this._busyChat();
-      this._voiceTurns = (this._voiceTurns || 0) + 1;
+      this._voiceTurn = true;
       this._sendToChat(text);
       this._vsay("“" + text + "” — " + (queued ? "cutting in on Argus's turn" : "sent; Argus is thinking…"), 12000);
     }
@@ -1279,7 +1282,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     _hotSend(text) {
       const queued = this._busyChat();
-      this._voiceTurns = (this._voiceTurns || 0) + 1;
+      this._voiceTurn = true;
       this._sendToChat(text);
       this._vsay("“" + text + "” — " + (queued ? "cutting in on Argus's turn" : "sent; Argus is thinking…"), 12000);
     }
@@ -1293,16 +1296,48 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     _hushTts() {
       this._ttsGen = (this._ttsGen || 0) + 1;
       this._speaking = false;
+      this._speechQ = [];
       if (this._audio) { try { this._audio.pause(); if (this._audio.onended) this._audio.onended(); } catch (e) { /* gone */ } this._audio = null; }
       if (window.speechSynthesis) window.speechSynthesis.cancel();
     }
 
+    /** The speech queue: segments play in order, Argus and membrane alike. */
+    _enqueueSpeech(kind, text) {
+      (this._speechQ = this._speechQ || []).push({ kind, text });
+      if (this._speechQ.length > 12) this._speechQ.splice(0, this._speechQ.length - 12);   // never minutes behind
+      if (!this._qRunning) this._drainSpeech();
+    }
+
+    async _drainSpeech() {
+      this._qRunning = true;
+      const gen = this._ttsGen;
+      try {
+        while ((this._speechQ || []).length && gen === this._ttsGen) {
+          const { kind, text } = this._speechQ.shift();
+          await this._speak(text, kind === "membrane" ? "membrane" : "argus", true);
+        }
+      } finally {
+        this._qRunning = false;
+        if (!(this._speechQ || []).length && !this._busyChat()) { this._orb(null); this._orbText(""); }
+      }
+    }
+
+    /** Membrane's own voice: another of this device's voices, a little higher. */
+    _membraneVoice() {
+      const vs = (window.speechSynthesis ? window.speechSynthesis.getVoices() : [])
+        .filter((v) => v.localService && String(v.lang || "").toLowerCase().startsWith("en") && v !== this._voice);
+      return vs.find((v) => !/google/i.test(v.name) && /female|samantha|karen|moira|tessa|zoe|ava|allison|susan/i.test(v.name))
+        || vs.find((v) => !/google/i.test(v.name)) || this._voice;
+    }
+
     /** One utterance in the device's own voice; resolves when it ends. */
-    _say1(text) {
+    _say1(text, who = "argus") {
       return new Promise((res) => {
         try {
           const u = new SpeechSynthesisUtterance(text);
-          if (this._voice) { u.voice = this._voice; u.lang = this._voice.lang; }
+          const v = who === "membrane" ? this._membraneVoice() : this._voice;
+          if (v) { u.voice = v; u.lang = v.lang; }
+          if (who === "membrane") { u.pitch = 1.25; u.rate = 1.05; }
           u.onend = u.onerror = () => res();
           window.speechSynthesis.speak(u);
           setTimeout(res, 2000 + text.length * 120);        // a stuck engine never holds the mic
@@ -1310,8 +1345,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       });
     }
 
-    async _speak(text) {
-      this._hushTts();
+    async _speak(text, who = "argus", queued = false) {
+      if (!queued) this._hushTts();
       if (this._voice && window.speechSynthesis) {          // ON THE DEVICE: nothing sent anywhere
         const gen = this._ttsGen;
         this._speaking = true;
@@ -1319,10 +1354,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         for (const chunk of speakable(text)) {
           if (gen !== this._ttsGen) return;
           this._orbText(chunk);
-          await this._say1(chunk);
+          await this._say1(chunk, who);
         }
         this._speaking = false;
-        if (gen === this._ttsGen) { this._orb(null); this._orbText(""); }
+        if (gen === this._ttsGen && !queued) { this._orb(null); this._orbText(""); }
         return;
       }
       if (!this._noLocalVoiceSaid) {
