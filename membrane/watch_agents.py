@@ -1353,6 +1353,13 @@ def entity_read_back(srv, ent, force: bool = False) -> dict:
     applied = apply_entity_update(srv, ent, out, trigger="getter")
     state = out.get("state")
     if isinstance(state, dict):
+        # STEP 0 of the generalization plan: the reading is experience --
+        # a field event about this entity (its own values), and the ring
+        try:
+            from .consolidate import record_reading
+            record_reading(srv, ent, state, now)
+        except Exception:
+            pass
         merged = dict((ent.properties or {}).get("script_data") or {})
         merged.update(state)
         props = ent.properties or {}

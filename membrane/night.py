@@ -1941,6 +1941,15 @@ def run_night(srv, fld, est, now: float | None = None) -> dict:
                                          srv, "momentum_vec", None))
     except Exception as e:
         print(f"[night] consolidation skipped ({e})", file=sys.stderr)
+    # THE GENERALIZATION PHASE (docs/plans/2026-10-10-generalization.md):
+    # induce, test on held-out experience -- shadow, logged only
+    try:
+        from .consolidate import maybe_induce
+        rep = maybe_induce(srv, fld, est, now)
+        if rep is not None:
+            out["induce"] = {k: rep.get(k) for k in ("clusters", "geometry_gain", "name_gain", "entities", "ms")}
+    except Exception as e:
+        print(f"[night] induction skipped ({e})", file=sys.stderr)
     return out
 
 
