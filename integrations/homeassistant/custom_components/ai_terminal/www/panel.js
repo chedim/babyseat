@@ -249,7 +249,7 @@ function applyEvent(st, ev) {
       st.status = { type: "idle" };
       return true;
     case "membrane.auto":
-      st.auto = { on: !!props.on, rounds: props.rounds || 0 };
+      st.auto = { on: !!props.on, rounds: props.rounds || 0, mode: props.mode || "explore" };
       return true;
     case "membrane.voice": {
       // membrane's own voice: a line beside the user message it answers
@@ -619,7 +619,7 @@ function definePanel() {
         if (this._chat) { this._chat.all = true; this._schedule(); }
       });
       this._autoBtn = $(".autobtn");
-      this._autoBtn.addEventListener("click", () => this._toggleAuto().catch(() => {}));
+      this._autoBtn.addEventListener("click", (ev) => this._toggleAuto(ev && ev.shiftKey ? "teach" : "explore").catch(() => {}));
       this._llmBtn = $(".llmbtn");
       this._llmOn = true;                 // per page view
       this._llmBtn.addEventListener("click", () => {
@@ -1246,10 +1246,11 @@ function definePanel() {
         (out ? '<div class="lbl">output</div><pre>' + escText(out) + "</pre>" + more : "") + "</div></details>";
     }
 
-    async _toggleAuto() {
+    async _toggleAuto(mode) {
       if (!this._sid || !this._chat) return;
       const on = !(this._chat.auto && this._chat.auto.on);
-      const r = await this._api(SERVE + "/session/" + this._sid + "/auto", { method: "POST", body: JSON.stringify({ on }) });
+      const r = await this._api(SERVE + "/session/" + this._sid + "/auto",
+        { method: "POST", body: JSON.stringify({ on, mode: mode || "explore" }) });
       if (r.ok && r.data) { this._chat.auto = r.data; this._paintAuto(); }
     }
 
@@ -1258,8 +1259,8 @@ function definePanel() {
       if (!this._autoBtn) return;
       this._autoBtn.style.opacity = a.on ? "1" : ".4";
       this._autoBtn.classList.toggle("spinning", !!a.on);
-      this._autoBtn.title = a.on ? "auto-chat ON (round " + (a.rounds || 0) + ") -- click or Stop to end"
-                                 : "auto-chat: membrane and the LLM talk; you can join any time";
+      this._autoBtn.title = a.on ? "auto-chat ON: " + (a.mode || "explore") + " (round " + (a.rounds || 0) + ") -- click or Stop to end"
+                                 : "auto-chat: click = explore together, shift-click = teach; you can join any time";
     }
 
     async _voiceTeach(vid, body) {

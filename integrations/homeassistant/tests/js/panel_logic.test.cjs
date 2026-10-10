@@ -186,7 +186,7 @@ test("voice: history load and the bubble", () => {
 test("auto-chat: the reducer tracks the mode; a voice turn shows its line", () => {
   const st = L.chatState("s1");
   assert.equal(L.applyEvent(st, { type: "membrane.auto", properties: { sessionID: "s1", on: true, rounds: 2 } }), true);
-  eq(st.auto, { on: true, rounds: 2 });
+  eq(st.auto, { on: true, rounds: 2, mode: "explore" });
   assert.equal(L.voiceTurnText("[membrane voice] membrane's own voice said: «Battery is fine.»\nAnswer it"), "Battery is fine.");
 });
 

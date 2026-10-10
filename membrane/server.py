@@ -2493,7 +2493,8 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                         if runner is None or sessions.get(sid) is None:
                             return self._notfound()
                         b = self._read_body()
-                        return self._json_out(_voice.auto_set(runner, sid, bool(b.get("on"))))
+                        return self._json_out(_voice.auto_set(runner, sid, bool(b.get("on")),
+                                                              str(b.get("mode") or "explore")))
                     if action == "voice":
                         # the teaching: {id, vote: up|down, rewrite}
                         from . import voice as _voice

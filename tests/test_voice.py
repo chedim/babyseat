@@ -578,3 +578,42 @@ class TestVoiceRules(unittest.TestCase):
         est._voice_rules_cache = None
         self.assertEqual(len(V.voice_rules(est)), 2)
         self.assertIn("help('voice')", V.frame("x"))
+
+
+class TestExploreTogether(unittest.TestCase):
+    def test_explore_is_the_default_and_has_no_grading(self):
+        r = type("R", (), {"_auto": {}, "hub": S.SSEHub(), "_busy": {"s1": 1}, "messages": S.MessageStore()})()
+        st = V.auto_set(r, "s1", True)
+        self.assertEqual(st["mode"], "explore")
+        f = V.frame_explore("I saw the port strip.", "ha:light.port_strip (latest: on)")
+        self.assertIn("Explore it together", f)
+        self.assertNotIn("It meant", f)
+        self.assertEqual(V.auto_set(r, "s1", True, "teach")["mode"], "teach")
+
+    def test_a_finding_is_heard_at_full_weight_and_logged(self):
+        d = tempfile.mkdtemp()
+        srv = _Srv()
+        srv._models_path = str(Path(d) / "models.json")
+        srv.membrane = type("M", (), {"embedder": FakeEmbedder()})()
+        r = S.TurnRunner(S.SSEHub(), S.SessionStore(), S.MessageStore(), _Ladder(),
+                         lambda n, a, c: "ok", system="", model="m")
+        r.srv = srv
+        r._auto = {"s1": {"rounds": 1, "mode": "explore"}}
+        v = V.of(srv)
+        v.bootstrap(CORPUS * 3)
+        rec = v.speak(FakeEmbedder().embed(["battery"])[0], sid="s1")
+        r._voice_last = {"s1": rec["id"]}
+        r._auto = {}                                     # stop before the next round fires
+        r._auto_mode_probe = None
+        V.auto_set(r, "s1", False)
+        r._auto["s1"] = {"rounds": 1, "mode": "explore"}
+        before = v.table.uni.get("volts", 0)
+        V.on_turn_end(r, "s1", V.frame_explore(rec["text"]), "Volts read fine on the bank today.",
+                      "operator", voice_turn=True)
+        r._auto.pop("s1", None)
+        end = time.time() + 5
+        while time.time() < end and "closeness" not in v.lines[rec["id"]]:
+            time.sleep(0.05)
+        self.assertAlmostEqual(v.table.uni.get("volts", 0) - before, V.EXPLORE_WEIGHT)
+        pairs = (Path(d) / "voice" / "pairs.jsonl").read_text().splitlines()
+        self.assertIn('"kind": "found"', pairs[-1])

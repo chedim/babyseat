@@ -819,7 +819,7 @@ class Voice:
             return t
         return _unit(t + CORRECTION_PULL * c)
 
-    def pair(self, line_id: str | None, meant: str) -> None:
+    def pair(self, line_id: str | None, meant: str, kind: str = "meant") -> None:
         """THE DISTILLER'S TRAINING PAIRS: what the voice said, and the
         teacher's sentence for it (with the line's target alignment) --
         the data a learned formulator will train on later."""
@@ -829,7 +829,7 @@ class Voice:
         try:
             self.dir.mkdir(parents=True, exist_ok=True)
             with open(self.dir / "pairs.jsonl", "a") as f:
-                f.write(json.dumps({"line": rec.get("text", ""), "meant": meant,
+                f.write(json.dumps({"line": rec.get("text", ""), "meant": meant, "kind": kind,
                                     "alignment": rec.get("alignment"),
                                     "sid": rec.get("sid"), "time": int(time.time() * 1000)}) + "\n")
         except Exception:
@@ -1041,8 +1041,11 @@ def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
                 th.join(60)              # its line first, then the grade
             if not voice_turn:
                 v.hear(user_text)
-            meant = it_meant(reply) if voice_turn else ""
-            v.hear(strip_meant(reply), LLM_WEIGHT)
+            exploring = voice_turn and auto_mode(runner, sid) != "teach"
+            meant = it_meant(reply) if (voice_turn and not exploring) else ""
+            v.hear(strip_meant(reply), EXPLORE_WEIGHT if exploring else LLM_WEIGHT)
+            if exploring and reply:
+                v.pair((getattr(runner, "_voice_last", {}) or {}).get(sid), clean(reply)[:600], kind="found")
             if v._pool_booted:
                 v.pool_add(reply, "reply")                   # the recall pool grows with each reply
                 if not voice_turn and user_text and reply:
@@ -1088,6 +1091,23 @@ VOICE_PREFIX = "[membrane voice] "
 AUTO_PAUSE_S = 3.0
 
 
+AUTO_MODES = ("explore", "teach")
+EXPLORE_WEIGHT = 1.0               # findings about the world: heard like the operator's words
+
+
+def frame_explore(line: str, topic: str = "") -> str:
+    """EXPLORING TOGETHER (2026-10-10, the operator: "are we forcing the LLM
+    to be a teacher? can explore together instead?"): no grades -- the voice
+    brings what it noticed, the model looks into it (tools if worth it) and
+    says plainly what it found; the voice hears the finding."""
+    about = f" (it noticed: {topic})" if topic else ""
+    return (VOICE_PREFIX + "membrane's own voice (the field learning to speak -- not the "
+            "operator) said: \u00ab" + line + "\u00bb" + about + "\n"
+            "Explore it together: if it is worth a look, check what is true about it now "
+            "(your tools), then say in one or two plain sentences what you found -- or "
+            "what you would look at next. No grading, no lesson.")
+
+
 def frame(line: str, topic: str = "") -> str:
     """The model as TEACHER, not analyst: a short plain answer, then the one
     sentence the voice should have said (the lesson it hears, x2). The
@@ -1125,21 +1145,32 @@ def auto_on(runner, sid: str) -> bool:
 
 def auto_state(runner, sid: str) -> dict:
     a = (getattr(runner, "_auto", None) or {}).get(sid)
-    return {"on": a is not None, "rounds": (a or {}).get("rounds", 0)}
+    return {"on": a is not None, "rounds": (a or {}).get("rounds", 0),
+            "mode": (a or {}).get("mode", "explore")}
+
+
+def auto_mode(runner, sid: str) -> str:
+    """explore by default in auto-chat; a voice turn outside it keeps the
+    teacher's form (the older path)."""
+    a = (getattr(runner, "_auto", None) or {}).get(sid)
+    return "teach" if a is None else a.get("mode", "explore")
 
 
 def _publish_auto(runner, sid: str) -> None:
     runner.hub.publish({"type": "membrane.auto", "sessionID": sid, **auto_state(runner, sid)})
 
 
-def auto_set(runner, sid: str, on: bool) -> dict:
+def auto_set(runner, sid: str, on: bool, mode: str = "explore") -> dict:
     runner._auto = getattr(runner, "_auto", None) or {}
     if not on:
         runner._auto.pop(sid, None)
         _publish_auto(runner, sid)
         return auto_state(runner, sid)
+    mode = mode if mode in AUTO_MODES else "explore"
+    if sid in runner._auto:
+        runner._auto[sid]["mode"] = mode
     if sid not in runner._auto:
-        runner._auto[sid] = {"rounds": 0, "since": time.time()}
+        runner._auto[sid] = {"rounds": 0, "since": time.time(), "mode": mode}
         _publish_auto(runner, sid)
         if sid not in (getattr(runner, "_busy", None) or {}):
             last = ""
@@ -1230,7 +1261,8 @@ def auto_next(runner, sid: str, reply: str) -> None:
             runner.hub.publish({"type": "membrane.voice", "sessionID": sid, "line": dict(rec)})
             now = int(time.time() * 1000)
             agent = str((runner.sessions.get(sid) or {}).get("agent") or "build")
-            text = frame(rec["text"], topic)
+            text = (frame(rec["text"], topic) if auto_mode(runner, sid) == "teach"
+                    else frame_explore(rec["text"], topic))
             info = {"id": mid, "sessionID": sid, "role": "user", "agent": agent,
                     "voiceTurn": True, "time": {"created": now}}
             parts = [{"id": _gen_id("prt"), "sessionID": sid, "messageID": mid,
