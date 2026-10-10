@@ -378,6 +378,8 @@ if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLog
 
 // ------------------------------------------------------------ the element
 
+const OVERLAY_ROWS = 200;
+
 const STYLE = `
   :host { display:block; height:100vh; height:100dvh; overflow:hidden;
           background:var(--primary-background-color,#111); color:var(--primary-text-color,#ddd);
@@ -508,11 +510,9 @@ const STYLE = `
   :host([overlay]) { height:100%; background:transparent; }
   :host([overlay]) .app.sidehidden .side { display:none; }
   :host([overlay]) .app.sidehidden .sidetoggle { display:inline-block; }
-  :host([overlay]) .side { background:color-mix(in srgb, var(--card-background-color,#111) 82%, transparent);
-                           backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); }
+  :host([overlay]) .side { background:color-mix(in srgb, var(--card-background-color,#111) 92%, transparent); }
   :host([overlay]) .bar, :host([overlay]) .composer {
-    background:color-mix(in srgb, var(--card-background-color,#111) 62%, transparent);
-    backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+    background:color-mix(in srgb, var(--card-background-color,#111) 80%, transparent); }
   :host([overlay]) .scroller { background:color-mix(in srgb, var(--primary-background-color,#111) 30%, transparent); }
   :host([overlay]) .msgs { padding:10px 12px 16px; }
   /* the card is narrower than a page: the bar wraps instead of clipping its
@@ -1176,10 +1176,13 @@ function definePanel() {
       const st = this._chat;
       if (!st) return;
       const stick = this._stick;
+      // the overlay keeps only the newest OVERLAY_ROWS in the DOM: an endless
+      // auto-chat grew the transcript without bound (2026-10-10)
+      const cap = this.hasAttribute("overlay") ? OVERLAY_ROWS : 0;
       if (st.all || !this._rowEls) {
         this._msgs.innerHTML = "";
         this._rowEls = {};
-        for (const row of st.rows) { const el = this._rowEl(row); this._msgs.appendChild(el); this._rowEls[row.info.id] = el; }
+        for (const row of cap ? st.rows.slice(-cap) : st.rows) { const el = this._rowEl(row); this._msgs.appendChild(el); this._rowEls[row.info.id] = el; }
         st.all = false;
         st.dirty.clear();
       } else {
@@ -1192,6 +1195,14 @@ function definePanel() {
           else this._insertRow(row, el);
         }
         st.dirty.clear();
+      }
+      if (cap) {
+        let rows = this._msgs.querySelectorAll(":scope > .msg");
+        for (let i = 0; i < rows.length - cap; i++) {
+          const el = rows[i];
+          for (const k in this._rowEls) if (this._rowEls[k] === el) { delete this._rowEls[k]; break; }
+          el.remove();
+        }
       }
       const tail = this._msgs.querySelector(".working, .empty");
       if (tail) tail.remove();

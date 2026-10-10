@@ -67,8 +67,9 @@ const HSTYLE = `
   * { box-sizing:border-box; }
   button { font:inherit; color:inherit; cursor:pointer; }
   .field { position:absolute; inset:0; }
-  .glass { background:color-mix(in srgb, var(--card-background-color,#111) 62%, transparent);
-           backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+  /* no backdrop-filter: a blur over a live WebGL canvas is re-computed every
+     frame for every glass box and saturated the Mac's compositor (2026-10-10) */
+  .glass { background:color-mix(in srgb, var(--card-background-color,#111) 80%, transparent);
            border:1px solid color-mix(in srgb, var(--divider-color,#888) 45%, transparent); }
   .top { position:absolute; top:12px; left:12px; z-index:3; display:flex; gap:6px; align-items:center;
          padding:4px; border-radius:999px; max-width:calc(100% - 24px); }
@@ -249,7 +250,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const api = {
           get: (p) => this._get(p),
           stream: (p, signal) => hass.fetchWithAuth(HSERVE + p, { signal, headers: { Accept: "text/event-stream" } }),
-          kindColor: hKindColor, isAdmin: !!(hass.user && hass.user.is_admin), labels: false,
+          kindColor: hKindColor, isAdmin: !!(hass.user && hass.user.is_admin), labels: false, maxFps: 30,
           onStatus: (t) => { this._v3Txt = t; this._paintStatus(); },
           onSelect: (m) => this._select(m),
           onRelated: () => {},
@@ -341,8 +342,9 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     _glide() {
       let last = performance.now();
+      const id = this._glideId = (this._glideId || 0) + 1;     // one loop, ever
       const step = (t) => {
-        if (!this._started || !this._v3) return;
+        if (!this._started || !this._v3 || id !== this._glideId) return;
         const dt = Math.min(0.1, (t - last) / 1000); last = t;
         const v = this._v3, g = this._goal;
         const idle = performance.now() - this._lastTouch >= IDLE_BEFORE_FOLLOW_MS;

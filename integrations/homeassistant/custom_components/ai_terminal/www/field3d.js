@@ -23,6 +23,7 @@
  * wheel / pinch = zoom, click = the drawer, double-click = fly there.
  */
 const F3_WORLD = 1000;
+const LOCATE_CACHE_MAX = 500;      // every entity a mind touches is located: cap it
 const F3_AGENTS = {
   chat: "#ffd166", phone: "#06d6a0", "loop-1": "#ef476f", "loop-2": "#f78c6b",
   "loop-3": "#c77dff", loop: "#ff8fab", thinker: "#4cc9f0", dreamer: "#b5e48c",
@@ -306,7 +307,15 @@ class Field3DView {
     this._ro.observe(this.host);
     this._resize();
     this._t = performance.now();
-    const loop = () => { if (!this._alive) return; this._frame(); this._raf = requestAnimationFrame(loop); };
+    // api.maxFps caps the frame rate (membrane home: 30 -- a full-screen
+    // canvas at 60 fps under page chrome taxes the whole machine)
+    const minGap = this.api.maxFps ? 1000 / this.api.maxFps - 1 : 0;
+    let lastT = 0;
+    const loop = (t) => {
+      if (!this._alive) return;
+      if (!minGap || t - lastT >= minGap) { lastT = t; this._frame(); }
+      this._raf = requestAnimationFrame(loop);
+    };
     this._raf = requestAnimationFrame(loop);
     await this.load();
     if (this.api.isAdmin) this._live();
@@ -678,6 +687,7 @@ class Field3DView {
       catch (e) { hit = null; }
     }
     this.locateCache.set(eid, hit);
+    if (this.locateCache.size > LOCATE_CACHE_MAX) this.locateCache.delete(this.locateCache.keys().next().value);
     return hit;
   }
 
