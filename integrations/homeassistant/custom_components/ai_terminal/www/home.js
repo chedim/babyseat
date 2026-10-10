@@ -265,11 +265,16 @@ function recognizer(model, rate, grammar, onPartial) {
 }
 
 /** The device's own voice: English, on-device, not a Google one when there is a choice. */
-function pickVoice(voices, lang = "en") {
+function pickVoice(voices, lang = "en", chosen = "") {
   const en = (voices || []).filter((v) => String(v.lang || "").toLowerCase().startsWith(lang));
   const local = en.filter((v) => v.localService);
-  return local.find((v) => !/google/i.test(v.name)) || local[0] || null;
+  if (chosen) { const c = local.find((v) => v.name === chosen); if (c) return c; }
+  // the better downloaded voices first (Apple's Enhanced / Premium), never a Google one when there is a choice
+  const good = local.filter((v) => !/google/i.test(v.name));
+  return good.find((v) => /premium/i.test(v.name)) || good.find((v) => /enhanced/i.test(v.name)) ||
+         good[0] || local[0] || null;
 }
+const LS_VOICE = "membrane.home.voice";
 
 const HomeLogic = { personSlug, menuEntries, hotword, pickVoice, speakable, WAKE_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, angleStep };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
@@ -335,6 +340,7 @@ const HSTYLE = `
   .voice button.on { background:color-mix(in srgb, var(--primary-color,#3477d6) 55%, transparent); }
   .voice button.rec { background:var(--error-color,#c0392b); color:#fff; animation:recpulse 1.1s ease-in-out infinite; }
   .voice button.busy { opacity:.6; }
+  .vmenu { position:absolute; bottom:calc(100% + 8px); right:0; left:auto; top:auto; max-height:50vh; }
   .voice .vsep { width:1px; align-self:stretch; margin:6px 2px; background:color-mix(in srgb, var(--divider-color,#888) 60%, transparent); }
   .voice button.ear.on { background:color-mix(in srgb, #2e9d5b 60%, transparent); }
   .voice button.ear.hearing { box-shadow:0 0 0 3px color-mix(in srgb, #2e9d5b 55%, transparent); }
@@ -760,7 +766,13 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         this._unlockAudio();
         if (this._rec && this._rec.mode === "lock") this._recStop(true); else this._recStart("lock");
       });
-      this._ttsBtn.addEventListener("click", () => {
+      // long-press / right-click: choose the voice (this device's own, on-device ones)
+      let lp = 0;
+      this._ttsBtn.addEventListener("pointerdown", () => { lp = setTimeout(() => { lp = -1; this._voiceMenu(); }, 550); });
+      this._ttsBtn.addEventListener("pointerup", () => clearTimeout(lp));
+      this._ttsBtn.addEventListener("contextmenu", (e) => { e.preventDefault(); this._voiceMenu(); });
+      this._ttsBtn.addEventListener("click", (e) => {
+        if (lp === -1) { lp = 0; e.preventDefault(); return; }   // the long-press opened the menu
         this._unlockAudio();
         this._ttsOn = !this._ttsOn; lsSet(LS_TTS, this._ttsOn ? "1" : "0"); this._paintTts();
         if (!this._ttsOn) this._hushTts();
@@ -785,7 +797,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         if (this._hot) { this._hotStop(); this._hotStart(); }
       });
       if (window.speechSynthesis) {
-        const load = () => { this._voice = pickVoice(window.speechSynthesis.getVoices()); };
+        const load = () => { this._voice = pickVoice(window.speechSynthesis.getVoices(), "en", lsGet(LS_VOICE, "")); };
         load(); window.speechSynthesis.addEventListener && window.speechSynthesis.addEventListener("voiceschanged", load);
       }
       // a tap anywhere stops him talking (the orb, the field, any button)
@@ -865,6 +877,34 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const o = this.shadowRoot.querySelector(".orb");
       if (!o || !o.classList.contains("on") || o.classList.contains("thinking") || o.classList.contains("speaking")) return;
       o.style.setProperty("--s", String(Math.min(1.5, 0.85 + Math.sqrt(rms) * 2.2)));
+    }
+
+    _voiceMenu() {
+      const vs = (window.speechSynthesis ? window.speechSynthesis.getVoices() : [])
+        .filter((v) => v.localService && String(v.lang || "").toLowerCase().startsWith("en"));
+      let m = this.shadowRoot.querySelector(".vmenu");
+      if (!m) {
+        m = document.createElement("div"); m.className = "vmenu glass hamenu open"; m.setAttribute("role", "menu");
+        this.shadowRoot.querySelector(".voice").appendChild(m);
+        m.addEventListener("click", (e) => {
+          const a = e.target.closest("a[data-v]"); if (!a) return;
+          e.preventDefault();
+          lsSet(LS_VOICE, a.dataset.v);
+          this._voice = pickVoice(window.speechSynthesis.getVoices(), "en", a.dataset.v);
+          m.remove();
+          this._hushTts(); this._say1("Hi, I'm Argus. This is how I'll sound.");
+        });
+        setTimeout(() => {
+          const close = (e) => { if (!e.composedPath().includes(m)) { m.remove(); window.removeEventListener("pointerdown", close, true); } };
+          window.addEventListener("pointerdown", close, true);
+        }, 0);
+      }
+      const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+      const cur = this._voice ? this._voice.name : "";
+      m.innerHTML = vs.length ? vs.map((v) => '<a role="menuitem" href="#" data-v="' + esc(v.name) + '">' + (v.name === cur ? "● " : "") +
+        esc(v.name) + ' <span style="opacity:.55">' + esc(v.lang) + "</span></a>").join("") +
+        '<hr><div style="padding:4px 12px;font-size:12px;opacity:.7;max-width:260px">Better voices: download Enhanced / Premium ones in this device\'s Spoken Content settings.</div>'
+        : '<div style="padding:8px 12px">this device has no voices of its own</div>';
     }
 
     _paintTts() {

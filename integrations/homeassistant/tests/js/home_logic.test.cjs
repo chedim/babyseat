@@ -125,3 +125,12 @@ test("the wake phrase: greetings + the model's spellings of Argus", () => {
   for (const t of ["hey are gus", "hey our guess", "hay angus", "okay august", "hi gus"]) assert.ok(H.WAKE_RE.test(t), t);
   for (const t of ["turn on", "are gus", "angus", "the august sale"]) assert.ok(!H.WAKE_RE.test(t), t);
 });
+
+test("the voice: the chosen one, else Apple's Premium / Enhanced, never Google's when there's a choice", () => {
+  const v = (name, local = true) => ({ name, lang: "en-US", localService: local });
+  const all = [v("Google US English"), v("Samantha"), v("Evan (Enhanced)"), v("Zoe (Premium)")];
+  assert.equal(H.pickVoice(all).name, "Zoe (Premium)");
+  assert.equal(H.pickVoice(all.slice(0, 3)).name, "Evan (Enhanced)");
+  assert.equal(H.pickVoice(all, "en", "Samantha").name, "Samantha");
+  assert.equal(H.pickVoice(all, "en", "Gone Voice").name, "Zoe (Premium)");
+});
