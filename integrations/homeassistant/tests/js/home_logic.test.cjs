@@ -136,3 +136,10 @@ test("the voice: the chosen one, else Apple's Premium / Enhanced, never Google's
   assert.equal(H.pickVoice(all, "en", "Samantha").name, "Samantha");
   assert.equal(H.pickVoice(all, "en", "Gone Voice").name, "Zoe (Premium)");
 });
+
+test("the hotword in runglish: Аргус, with or without a greeting", () => {
+  assert.equal(H.hotword("Аргус, включи свет на палубе").rest, "включи свет на палубе");
+  assert.equal(H.hotword("Эй, Аргус проверь battery level").rest, "проверь battery level");
+  assert.equal(H.hotword("Аргусик пришёл").hit, false);
+  assert.equal(H.hotword("Hey Argus, turn on the lights").rest, "turn on the lights");   // still English
+});

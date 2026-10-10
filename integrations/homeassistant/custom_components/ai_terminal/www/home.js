@@ -162,8 +162,11 @@ const LS_HOTWORD = "membrane.home.hotword";
 const HOT_MIN_S = 0.4, HOT_MAX_S = 8, HOT_END_MS = 450, HOT_PER_MIN = 16, HOT_FOLLOW_MS = 8000;
 const HOT_EARLY_S = 1.3;          // the first stretch is checked while you are still talking
 const HOT_ACKS = ["Yes?", "Uh-huh?", "Mm-hm?", "I'm listening."];
-const HOT_NAMES = "argus|argos|argus's|angus|argo|august|augustus|arcus|our gus|are gus|are guess|our guess|gus";
-const HOT_RE = new RegExp("^(?:(?:hey|hi|hay|ok|okay|hello|yo)[\\s,.!-]+)?(?:" + HOT_NAMES + ")\\b[\\s,.!?-]*(.*)$", "i");
+// Latin and Cyrillic (runglish, 2026-10-10: "Аргус, включи свет"); JS's \b
+// knows no Cyrillic, so the name ends at a space, a mark or the end
+const HOT_NAMES = "argus|argos|argus's|angus|argo|august|augustus|arcus|our gus|are gus|are guess|our guess|gus|аргус|аргос|аргуш";
+const HOT_GREETS = "hey|hi|hay|ok|okay|hello|yo|эй|хей|привет|окей|ок";
+const HOT_RE = new RegExp("^(?:(?:" + HOT_GREETS + ")[\\s,.!-]+)?(?:" + HOT_NAMES + ")(?=$|[\\s,.!?-])[\\s,.!?-]*([\\s\\S]*)$", "iu");
 
 /** What gets spoken: the message, up to the safety net. */
 function speakable(text) {
@@ -176,7 +179,7 @@ function speakable(text) {
 
 /** 'Hey Argus, turn on the lights' -> {hit: true, rest: 'turn on the lights'}. */
 function hotword(text) {
-  const t = String(text || "").trim().replace(/^[^a-z0-9]+/i, "");
+  const t = String(text || "").trim().replace(/^[\s\p{P}\p{S}]+/u, "");   // marks only: Cyrillic letters stay
   const m = HOT_RE.exec(t);
   if (!m) return { hit: false, rest: "" };
   return { hit: true, rest: (m[1] || "").trim() };
