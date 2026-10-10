@@ -4656,10 +4656,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # before the intercepts: even a recall/state turn may carry the previous
         # turn's tool results; pairing must not be skipped. A capture error
         # must never break the chat.
+        _st.mark("read+hydrate")
         try:
             _capture_tool_results(srv, body)
         except Exception as cap_e:
             print(f"[opencode] result-capture error: {cap_e}", file=sys.stderr)
+        _st.mark("capture")
         # ---- THOUGHT intercept (detect): the agent's own asks in
         # assistant-role text ("field state", "membrane: learn that ...").
         # Detection only -- the marked answer block is injected POST-GATE (into
@@ -4693,6 +4695,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 _th.enqueue_chat(q_early)
         except Exception:
             pass
+        _st.mark("thoughts")
         model_escaped = q_early.strip().lower().startswith("model:")
         # ---- pre-gate detection: lexical frames first (deterministic fast
         # path); when nothing matches, the 4-family semantic gate routes on
@@ -4721,6 +4724,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                     learn_hit = True
                 elif s_fam == "forget":
                     forget_hit = True
+        _st.mark("families")
         # ---- THE RECEIPT LANE RETIRED (the operator's ruling, the
         # zombie-ack root): byte-deterministic acks served from a cached
         # tool result OVERRODE the model turn -- and every plain chat turn
@@ -4856,12 +4860,13 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._serve_intercept_answer(model, text,
                                          bool(body.get("stream", False)))
             return
+        _st.mark("intercepts")                # the learn/recall/state/watch/intent/code checks
         try:
             turn = mem.turn(body)
         except Exception as e:
             print(f"[opencode] turn front error, forwarding raw: {e}", file=sys.stderr)
             self._forward_raw(raw); return
-        _st.mark("front")                     # the intercepts + mem.turn (the query's embedding)
+        _st.mark("turn")                      # mem.turn: the query's embedding + binding
         if turn.vec is None:
             self._forward_raw(raw); return
         vec, query = turn.vec, turn.query
