@@ -191,7 +191,9 @@ def induce_classes(fld, est=None, now: float | None = None, rng=None) -> dict:
     from .classes import family_key, label_of
     cands = [st.eid for st in list(getattr(fld, "_states", {}).values())
              if getattr(st, "tier", "") == "live" and is_specific(st.eid)
-             and not st.eid.startswith(("person:", "seat:"))][:MAX_ENTITIES * 3]
+             and not st.eid.startswith(("person:", "seat:", "m:", "s:?"))][:MAX_ENTITIES * 3]
+    # m: = the field's mirror of membrane's own renders, s:? = tool-name token
+    # echoes -- the first shadow night's junk clusters (2026-10-10)
     halves, t_mid = _halves(fld, cands, now)
     ids = list(halves)[:MAX_ENTITIES]
     rep = {"ts": int(now), "kind": "classes-by-geometry", "shadow": True,

@@ -81,6 +81,16 @@ class TestClassesByGeometry(unittest.TestCase):
         self.assertTrue(any(all(m.startswith("ha:light") for m in g) for g in tops))
         self.assertTrue(rep["shadow"])
 
+    def test_mirror_and_symbol_junk_never_cluster(self):
+        now = time.time()
+        f = _Field(now)
+        for eid in list(f._states)[:6]:
+            new = "m:m:" + eid
+            f._states[new] = type("St", (), {"eid": new, "tier": "live"})()
+            f._deltas[new] = f._deltas[eid]
+        rep = C.induce_classes(f, now=now, rng=random.Random(1))
+        self.assertFalse(any(m.startswith("m:") for c in rep["top_clusters"] for m in c["members"]))
+
     def test_too_little_history_says_so(self):
         f = type("F", (), {"_states": {}, "deltas_of": lambda s, e: [], "b": None})()
         self.assertIn("note", C.induce_classes(f, now=time.time()))
