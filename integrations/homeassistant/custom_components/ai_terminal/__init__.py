@@ -42,6 +42,8 @@ async def async_setup(hass: HomeAssistant, config) -> bool:
     hass.http.register_view(AssetView())
     hass.http.register_view(ServeProxyView())
     hass.http.register_view(ConfView())
+    from .strangers import StrangerView
+    hass.http.register_view(StrangerView())
 
     # THE PANEL (programmatic, this HA version has no yaml panels): a
     # panel_custom element running INSIDE HA's frontend.

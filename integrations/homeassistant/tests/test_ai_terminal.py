@@ -112,7 +112,7 @@ class TestChatOnlySurface(unittest.TestCase):
         for name in ("terminal.py", "tickets.py", "seat.py"):
             self.assertFalse((self.PKG / name).exists(), name)
         self.assertEqual(sorted(p.name for p in (self.PKG / "www").iterdir()),
-                         ["field.js", "field3d.js", "panel.js", "three.min.js"])
+                         ["field.js", "field3d.js", "panel.js", "stranger.js", "three.min.js"])
 
     def test_panel_speaks_serve_only(self):
         js = (self.PKG / "www" / "panel.js").read_text()

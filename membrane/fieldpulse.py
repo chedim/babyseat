@@ -20,6 +20,7 @@ shows them to admins whatever session they came from.
 """
 from __future__ import annotations
 
+import collections
 import threading
 import time
 
@@ -28,6 +29,7 @@ MAX_EIDS = 300
 MAX_GROUPS = 80               # events per beat that keep their own entity group (edge pulses)
 GROUP_EIDS = 12
 MAX_MIND = 40
+RECENT_MAX = 4000            # (ts, eid) for the strangers' windows
 ENTITY_ARGS = ("spec", "eid", "entity", "key", "name", "id")
 
 
@@ -56,6 +58,8 @@ class FieldPulse:
         self._moved: dict[str, list] = {}
         self._mind: list = []
         self._slots: dict[str, str] = {}       # loop agent -> loop-N
+        # the strangers' windows read pulses by time, not by frame
+        self._recent: collections.deque = collections.deque(maxlen=RECENT_MAX)
         self._alive = False
         self.beats = 0
         self.published = 0
@@ -80,10 +84,18 @@ class FieldPulse:
                 groups = self._groups = []
             if len(grp) >= 2 and len(groups) < MAX_GROUPS:
                 groups.append({"s": stream or "", "e": grp})
+            _t = time.time()
+            for e in list(dict.fromkeys(eids))[:GROUP_EIDS * 2]:
+                self._recent.append((_t, e))
             for e in eids:
                 if len(self._applied) >= MAX_EIDS and e not in self._applied:
                     break
                 self._applied.setdefault(e, set()).add(stream or "")
+
+    def recent_since(self, since: float) -> set:
+        """The entities applied since `since` (the login page's pulses)."""
+        with self._lock:
+            return {e for t, e in self._recent if t >= since}
 
     def moved(self, eid: str, vec) -> None:
         with self._lock:

@@ -3698,6 +3698,10 @@ def _field_vec(fld, eid: str):
     return None
 
 
+STRANGER_PATHS = ("/membrane/stranger/visit", "/membrane/stranger/view",
+                  "/membrane/stranger/event", "/membrane/stranger/leave")
+
+
 def field3d_projection(srv, axes: str = ""):
     """The whole-field 3D projection for these axes (field3d.build), reused
     for FIELD3D_FRESH_S; the last FIELD3D_KEEP stay addressable by pid (the
@@ -3780,6 +3784,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._membrane_intents(); return
         if path == "/membrane/entity/read":
             self._entity_read(); return
+        if path in STRANGER_PATHS:
+            self._stranger(path); return
         if path == "/membrane/intend":
             self._membrane_intend(); return
         if path == "/membrane/entity-related":
@@ -6238,6 +6244,28 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
         self._json_out(res)
+
+    def _stranger(self, path: str) -> None:
+        """GET /membrane/stranger/visit|view|event|leave: the login page's
+        visitors (membrane/strangers.py) -- numbers in, shape out."""
+        from urllib.parse import parse_qs
+        from . import strangers as _SG
+        qs = parse_qs(self.path.split("?", 1)[-1] if "?" in self.path else "")
+        q = lambda k, d="": (qs.get(k) or [d])[0]
+        op = path.rsplit("/", 1)[-1]
+        try:
+            if op == "visit":
+                out = _SG.visit(self.server, ip_key=q("ip"))
+            elif op == "view":
+                out = _SG.view(self.server, q("t"))
+            elif op == "event":
+                out = _SG.event(self.server, q("t"), q("kind"), n=q("n", "1") or 1,
+                                dx=q("dx", "0") or 0, dy=q("dy", "0") or 0)
+            else:
+                out = _SG.leave(self.server, q("t"))
+        except Exception as e:                          # noqa: BLE001
+            self._json_err_raw(500, f"stranger {op} failed: {e!r}"[:160]); return
+        self._json_out(out)
 
     def _entity_read(self) -> None:
         """GET /membrane/entity/read?spec=... : the READ-BACK's HTTP door
