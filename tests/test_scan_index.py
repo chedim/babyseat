@@ -75,3 +75,64 @@ class TestScanIndex(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRangeIndexAndIncrementalChanges(unittest.TestCase):
+    """The seq range index + changes_since's incremental read: always the
+    rows a fresh full read gives, in the same order."""
+
+    def _field(self):
+        from membrane.efield import EntityField
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from test_cliffhanger import FakeEmbedder  # noqa: E402
+        return EntityField(ES.MemBackend(), FakeEmbedder(), "seat@t")
+
+    def _fresh(self, f, seq):
+        f.__dict__.pop("_cs_memo", None)
+        return f.changes_since(seq)
+
+    def test_range_scans_match_the_full_walk(self):
+        rnd = random.Random(3)
+        b = ES.MemBackend()
+        for step in range(2500):
+            k = f"d{rnd.randrange(300)}"
+            op = rnd.random()
+            if op < 0.6:
+                b.upsert("entity_deltas", k, {"origin": "o", "seq": rnd.randrange(200), "sidx": rnd.randrange(3), "eid": f"x{rnd.randrange(9)}"})
+            elif op < 0.75:
+                b.delete("entity_deltas", k)
+            else:
+                b.insert_if_absent("entity_deltas", k, {"origin": "o", "seq": rnd.randrange(200), "sidx": 0, "eid": "y"})
+            if step % 101 == 0:
+                for lo in (0, 50, 150, 199):
+                    for want in ({"gt": lo}, {"gte": lo}):
+                        eq = {"origin": "o", "seq": want}
+                        self.assertEqual(list(b.scan("entity_deltas", eq, order=("seq", "sidx"))),
+                                         full_scan(b, "entity_deltas", eq, ("seq", "sidx")), (lo, want))
+                        self.assertEqual(sorted(k for k, _ in b.scan("entity_deltas", eq)),
+                                         sorted(k for k, _ in full_scan(b, "entity_deltas", eq)))
+
+    def test_incremental_changes_since_equals_a_fresh_read(self):
+        rnd = random.Random(11)
+        f = self._field()
+        f.flush = lambda: None                                   # no capture queue in this test
+        seq = 0
+        for step in range(1500):
+            op = rnd.random()
+            if op < 0.8:
+                seq += rnd.choice([0, 1, 1, 2])                  # several rows per event, sometimes
+                f.b.upsert("entity_deltas", f"d{step}", {"origin": f.origin, "seq": seq, "sidx": rnd.randrange(3),
+                                                        "eid": rnd.choice(["f:a", "f:b", "e:x", "person:p", "f:c"]),
+                                                        "event": f"ev{seq}", "stream": "discourse"})
+            elif op < 0.9:
+                f.b.delete("entity_deltas", f"d{rnd.randrange(step + 1)}")
+            else:                                                # an older seq arrives late
+                f.b.upsert("entity_deltas", f"late{step}", {"origin": f.origin, "seq": max(0, seq - 5), "sidx": 0,
+                                                           "eid": "f:a", "event": "late", "stream": "code"})
+            if step % 37 == 0:
+                for wm in (0, 7):
+                    got = f.changes_since(wm)
+                    memo = f.__dict__.get("_cs_memo")
+                    ref = self._fresh(f, wm)
+                    f.__dict__["_cs_memo"] = memo                 # keep the incremental state going
+                    self.assertEqual(got, ref, (step, wm))

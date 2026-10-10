@@ -135,6 +135,11 @@ def matches(d: dict, eq: dict | None) -> bool:
 # (after the boot load), kept by every write. Same results, by construction.
 SCAN_INDEX: dict[str, tuple[str, ...]] = {"events": ("session",)}
 _NOPE = object()
+# THE RANGE INDEX (the banner's 'tracks' 1-19 s a round): changes_since()
+# asks entity_deltas for seq > N -- a walk over 160k+ rows every round. A
+# sorted seq index answers it from the newer rows only; every key's POSITION
+# is kept too, so the rows come back in the collection's own order.
+SCAN_RANGE: dict[str, str] = {"entity_deltas": "seq"}
 
 
 class MemBackend:
@@ -145,6 +150,8 @@ class MemBackend:
         self._idx: dict[tuple[str, str], dict] = {}      # (coll, field) -> value -> {key: None} (ordered)
         self._idx_off: set[tuple[str, str]] = set()      # gave up (an unhashable value)
         self._idx_dirty: set[tuple[str, str, object]] = set()   # a bucket a row MOVED into: re-ordered on its next scan
+        self._rng: dict[str, dict] = {}                  # coll -> {"seqs": sorted distinct, "by": seq -> {key}, "pos": key -> n, "next": n}
+        self.write_gen: dict[str, int] = {}             # bumps on a delete / an out-of-order write (incremental readers start over)
         self._leases: dict[str, tuple[str, float]] = {}
         # THE SCAN LOCK (the 'dictionary changed size during iteration'
         # flood: the capture worker's embed/apply scans + the chat
@@ -283,7 +290,66 @@ class MemBackend:
             self._idx[k] = idx
         return idx
 
+    def _rng_get(self, coll: str) -> dict | None:
+        fld = SCAN_RANGE.get(coll)
+        if fld is None:
+            return None
+        r = self._rng.get(coll)
+        if r is None:
+            import bisect  # noqa: F401  (used by the move)
+            by: dict = {}
+            pos: dict = {}
+            n = 0
+            for key, d in self.colls.get(coll, {}).items():
+                pos[key] = n; n += 1
+                v = d.get(fld)
+                if isinstance(v, (int, float)):
+                    by.setdefault(v, set()).add(key)
+            r = self._rng[coll] = {"seqs": sorted(by), "by": by, "pos": pos, "next": n, "max": max(by) if by else None}
+        return r
+
+    def _rng_move(self, coll: str, key: str, old: dict | None, new: dict | None) -> None:
+        fld = SCAN_RANGE.get(coll)
+        if fld is None:
+            return
+        if new is None or (old is not None and old.get(fld) != new.get(fld)):
+            self.write_gen[coll] = self.write_gen.get(coll, 0) + 1
+        r = self._rng.get(coll)
+        if r is None:
+            if new is not None and old is None:
+                v = new.get(fld)
+                mx = getattr(self, "_rng_max_seen", {}).get(coll)
+                if isinstance(v, (int, float)) and mx is not None and v <= mx:
+                    self.write_gen[coll] = self.write_gen.get(coll, 0) + 1
+            return
+        import bisect
+        ov = old.get(fld) if old is not None else None
+        nv = new.get(fld) if new is not None else None
+        if old is not None and isinstance(ov, (int, float)) and (new is None or ov != nv):
+            b = r["by"].get(ov)
+            if b is not None:
+                b.discard(key)
+                if not b:
+                    r["by"].pop(ov, None)
+                    i = bisect.bisect_left(r["seqs"], ov)
+                    if i < len(r["seqs"]) and r["seqs"][i] == ov:
+                        r["seqs"].pop(i)
+        if new is None:
+            r["pos"].pop(key, None)
+            return
+        if old is None:
+            r["pos"][key] = r["next"]; r["next"] += 1
+            if isinstance(nv, (int, float)) and r["max"] is not None and nv <= r["max"]:
+                self.write_gen[coll] = self.write_gen.get(coll, 0) + 1   # an older seq arrived late
+        if isinstance(nv, (int, float)) and (old is None or ov != nv):
+            if nv not in r["by"]:
+                bisect.insort(r["seqs"], nv)
+                r["by"][nv] = set()
+            r["by"][nv].add(key)
+            r["max"] = nv if r["max"] is None else max(r["max"], nv)
+
     def _idx_move(self, coll: str, key: str, old: dict | None, new: dict | None) -> None:
+        self._rng_move(coll, key, old, new)
         for fld in SCAN_INDEX.get(coll, ()):
             idx = self._idx.get((coll, fld))
             if idx is None:
@@ -387,6 +453,17 @@ class MemBackend:
                     except TypeError:
                         keys = None
                     break
+            if keys is None and coll in SCAN_RANGE:
+                want = (eq or {}).get(SCAN_RANGE[coll])
+                if isinstance(want, dict) and want and set(want) <= {"gt", "gte"}:
+                    r = self._rng_get(coll)
+                    if r is not None:
+                        import bisect
+                        lo = max(want.values())
+                        i = (bisect.bisect_right if "gt" in want and want.get("gt") == lo else bisect.bisect_left)(r["seqs"], lo)
+                        cand = [k for v in r["seqs"][i:] for k in r["by"][v]]
+                        cand.sort(key=lambda k: r["pos"].get(k, 0))      # the collection's own order
+                        keys = cand
             if keys is None:
                 items = [(k, dict(d)) for k, d in c.items() if matches(d, eq)]
             else:                                        # the index's rows, still matched in full

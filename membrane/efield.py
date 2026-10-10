@@ -1225,19 +1225,53 @@ class EntityField:
         what moved since a watermark -- discourse, observations, code or an
         entity script's event alike."""
         self.flush()
+        # THE INCREMENTAL READ (2026-10-10, the banner asked "since boot" every
+        # round: 160k+ deltas walked and sorted each time): the same watermark
+        # asked again only reads what came after the last look -- unless the
+        # deltas were deleted or written out of order since (write_gen), or
+        # the newest event grew more rows (then it is read again in full)
+        gen = getattr(self.b, "write_gen", None)
+        gen = gen.get("entity_deltas", 0) if isinstance(gen, dict) else None
+        memo = self.__dict__.setdefault("_cs_memo", {})
+        m = memo.get(seq)
+        if m is not None and gen is not None and m["gen"] == gen:
+            extra = list(self.b.scan("entity_deltas", {"origin": self.origin, "seq": {"gte": m["upto"]}},
+                                     order=("seq", "sidx")))
+            fresh = [d for k, d in extra if k not in m["at_upto"] and (d.get("seq") or 0) > seq]
+            if not any(d.get("seq") == m["upto"] for d in fresh):
+                for d in fresh:
+                    self._cs_add(m["out"], d)
+                if fresh:
+                    m["upto"] = max(d.get("seq") or 0 for d in fresh)
+                    m["at_upto"] = {k for k, d in extra if d.get("seq") == m["upto"]}
+                return {e: list(rows) for e, rows in m["out"].items()}
         out: dict[str, list[dict]] = {}
-        for _, d in self.b.scan("entity_deltas", {"origin": self.origin, "seq": {"gt": seq}},
+        upto, at_upto = seq, set()
+        for k, d in self.b.scan("entity_deltas", {"origin": self.origin, "seq": {"gt": seq}},
                                 order=("seq", "sidx")):
-            # the event-index meta-entities ('e:<event-key>' rows, the
-            # word-bar's recall route) are BOOKKEEPING, not entity
-            # state -- the diff reads real entities only
-            if d.get("eid", "").startswith("e:"):
-                continue
-            # a speaker's drift is who talked, not what changed
-            if d.get("eid", "").startswith(("person:", "seat:")):
-                continue
-            out.setdefault(d["eid"], []).append(d)
-        return out
+            sq = d.get("seq") or 0
+            if sq > upto:
+                upto, at_upto = sq, set()
+            if sq == upto:
+                at_upto.add(k)
+            self._cs_add(out, d)
+        if gen is not None:
+            memo[seq] = {"gen": gen, "upto": upto, "at_upto": at_upto, "out": out}
+            while len(memo) > 4:
+                memo.pop(next(iter(memo)))
+        return {e: list(rows) for e, rows in out.items()}
+
+    @staticmethod
+    def _cs_add(out: dict, d: dict) -> None:
+        # the event-index meta-entities ('e:<event-key>' rows, the
+        # word-bar's recall route) are BOOKKEEPING, not entity
+        # state -- the diff reads real entities only
+        if d.get("eid", "").startswith("e:"):
+            return
+        # a speaker's drift is who talked, not what changed
+        if d.get("eid", "").startswith(("person:", "seat:")):
+            return
+        out.setdefault(d["eid"], []).append(d)
 
     def refresh_activity(self, eid: str) -> float | None:
         """Drift between the first and second half of an entity's mentions."""
