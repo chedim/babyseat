@@ -136,3 +136,9 @@ test("edge pulses: visible edges only, from the event's first entity outwards, c
   assert.equal(F.edgePulsePairs(many, () => true, 5).length, 5);
   assert.equal(F.edgePulsePairs(null, has).length, 0);
 });
+
+test("an avatar remembers when it attached (the home camera's 'most recent mind')", () => {
+  const a = new F.Avatar("chat", [0, 0, 0]);
+  a.attach("e1", [1, 2, 3], 4000, 1000);
+  assert.equal(a.at, 1000);
+});

@@ -14,6 +14,15 @@ const FOLLOW_EVERY_MS = 15000;
 const IDLE_BEFORE_FOLLOW_MS = 30000;
 const LS_CHAT = "membrane.home.chat";
 const LS_IMMERSIVE = "membrane.home.immersive";
+const LS_FOLLOW = "membrane.home.follow";
+// what the camera follows (the operator, 2026-10-10: "the seat (the most
+// interesting entity) or thinker/chat, whoever's active, to show what Argus
+// is thinking/doing, or even just where stuff is changing")
+const FOLLOW_MODES = ["activity", "seat", "you"];
+const SEAT_IDS = ["seat:self", "seat"];
+const ACTIVITY_EVERY_MS = 1500;
+
+function nextMode(m) { const i = FOLLOW_MODES.indexOf(m); return FOLLOW_MODES[(i + 1) % FOLLOW_MODES.length]; }
 
 function personSlug(name) {
   return String(name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "unknown";
@@ -30,7 +39,7 @@ function hKindColor(kind) { return "hsl(" + (hhash("kind:" + kind) % 360) + ", 6
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } };
 
-const HomeLogic = { personSlug };
+const HomeLogic = { personSlug, nextMode, FOLLOW_MODES };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
 const HSTYLE = `
@@ -135,7 +144,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         <div class="msg">finding you on the field…</div>
         <div class="top glass">
           <button class="ha" title="Home Assistant's dashboards (and its sidebar)">HA</button>
-          <button class="me" title="Back to you">◎</button>
+          <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you">◎ activity</button>
           <button class="chatbtn" title="Show / hide the chat">💬</button>
           <button class="start" title="Open Home Assistant here (this browser)">☆</button>
           <span class="status"></span>
@@ -155,7 +164,13 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._chatBox.classList.toggle("hidden", !chatOn);
       $(".chatbtn").classList.toggle("on", chatOn);
       $(".ha").addEventListener("click", () => this._toHA());
-      $(".me").addEventListener("click", () => { this._lastTouch = 0; this._followMe(true); });
+      this._mode = FOLLOW_MODES.includes(lsGet(LS_FOLLOW, "activity")) ? lsGet(LS_FOLLOW, "activity") : "activity";
+      this._modeBtn = $(".me"); this._modeBtn.textContent = "◎ " + this._mode;
+      this._modeBtn.addEventListener("click", () => {
+        this._mode = nextMode(this._mode); lsSet(LS_FOLLOW, this._mode);
+        this._modeBtn.textContent = "◎ " + this._mode;
+        this._lastTouch = 0; this._goal = null; this._aim(true);
+      });
       $(".chatbtn").addEventListener("click", (e) => {
         const on = this._chatBox.classList.toggle("hidden") === false;
         e.currentTarget.classList.toggle("on", on);
@@ -190,7 +205,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           get: (p) => this._get(p),
           stream: (p, signal) => hass.fetchWithAuth(HSERVE + p, { signal, headers: { Accept: "text/event-stream" } }),
           kindColor: hKindColor, isAdmin: !!(hass.user && hass.user.is_admin),
-          onStatus: (t) => { this._statusEl.textContent = t; },
+          onStatus: (t) => { this._v3Txt = t; this._paintStatus(); },
           onSelect: (m) => this._select(m),
           onRelated: () => {},
           onHover: (m, x, y) => {
@@ -204,24 +219,81 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         if (window.matchMedia("(max-width: 760px)").matches) { v.budget = 3000; v.cache.budget = 3000; }
         await v.start();
         if (!this._started) { v.stop(); return; }
-        await this._followMe(true);
+        await this._aim(true);
+        this._glide();
       } catch (e) {
         this._msgEl.style.display = ""; this._msgEl.textContent = "the field is unavailable\n" + ((e && e.message) || e);
         return;
       }
       clearInterval(this._follow);
-      this._follow = setInterval(() => this._followMe(false), FOLLOW_EVERY_MS);
+      this._follow = setInterval(() => this._aim(false), ACTIVITY_EVERY_MS);
     }
 
-    async _followMe(force) {
+    // ---------------------------------------------------------- the camera
+    async _locateWorld(ids) {
+      const v = this._v3;
+      for (const id of ids) {
+        v.locateCache.delete(id);                            // entities move
+        const hit = await v._locate(id);
+        if (hit && hit.p) return [(hit.p[0] - 0.5) * 1000, (hit.p[1] - 0.5) * 1000, (hit.p[2] - 0.5) * 1000];
+      }
+      return null;
+    }
+
+    async _aim(force) {
       const v = this._v3; if (!v) return;
-      if (!force && performance.now() - this._lastTouch < IDLE_BEFORE_FOLLOW_MS) return;
-      if (!force) v.locateCache.delete(this._me);           // it moves as you talk
-      const ok = await v.flyTo(this._me);
-      if (ok) { this._msgEl.style.display = "none"; v.select(null); return; }
-      this._msgEl.style.display = "";
-      this._msgEl.textContent = "you are not on the field yet — say something to membrane";
-      setTimeout(() => { if (this._msgEl.textContent.startsWith("you are not")) this._msgEl.style.display = "none"; }, 6000);
+      const idle = performance.now() - this._lastTouch >= IDLE_BEFORE_FOLLOW_MS;
+      if (!force && !idle) return;
+      const now = performance.now();
+      if (this._mode === "activity") {
+        const a = v.activity();
+        if (a) {
+          this._goal = { p: a.p, r: a.kind === "mind" ? 520 : 900 };
+          this._say(a.kind === "mind" ? "following " + a.agent + " · " + a.eid : "following the field's changes");
+          this._msgEl.style.display = "none";
+          return;
+        }
+        if (this._goal && !force) return;                   // quiet: stay where it last happened
+      }
+      // seat / you, and activity's first aim before anything happened
+      if (!force && this._lastLocate && now - this._lastLocate < FOLLOW_EVERY_MS) return;
+      this._lastLocate = now;
+      const ids = this._mode === "you" ? [this._me] : SEAT_IDS;
+      const p = await this._locateWorld(ids);
+      if (p) {
+        this._goal = { p, r: 600 };
+        this._msgEl.style.display = "none";
+        this._say(this._mode === "you" ? "following you" : (this._mode === "seat" ? "following the seat" : "waiting for activity · at the seat"));
+        return;
+      }
+      if (this._mode === "you") {
+        this._msgEl.style.display = "";
+        this._msgEl.textContent = "you are not on the field yet — say something to membrane";
+        setTimeout(() => { if (this._msgEl.textContent.startsWith("you are not")) this._msgEl.style.display = "none"; }, 6000);
+      } else {
+        this._msgEl.style.display = "none";
+      }
+    }
+
+    _say(t) { this._followTxt = t; this._paintStatus(); }
+    _paintStatus() {
+      if (this._statusEl) this._statusEl.textContent = [this._followTxt, this._v3Txt].filter(Boolean).join("  ·  ");
+    }
+
+    _glide() {
+      let last = performance.now();
+      const step = (t) => {
+        if (!this._started || !this._v3) return;
+        const dt = Math.min(0.1, (t - last) / 1000); last = t;
+        const v = this._v3, g = this._goal;
+        if (g && performance.now() - this._lastTouch >= IDLE_BEFORE_FOLLOW_MS && !v._flyAnim) {
+          const k = 1 - Math.exp(-dt * 0.9);
+          for (let i = 0; i < 3; i++) v.orbit.target[i] += (g.p[i] - v.orbit.target[i]) * k;
+          v.orbit.r += (g.r - v.orbit.r) * k * 0.6;
+        }
+        requestAnimationFrame(step);
+      };
+      requestAnimationFrame(step);
     }
 
     _select(m) {

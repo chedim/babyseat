@@ -15,3 +15,10 @@ test("the followed entity is the speaker's own (membrane/speakers.py slug)", () 
   assert.equal(H.personSlug("  Claude (engineer) "), "claude-engineer");
   assert.equal(H.personSlug(""), "unknown");
 });
+
+test("the follow button cycles activity -> seat -> you -> activity", () => {
+  assert.equal(H.nextMode("activity"), "seat");
+  assert.equal(H.nextMode("seat"), "you");
+  assert.equal(H.nextMode("you"), "activity");
+  assert.equal(H.nextMode("bogus"), "activity");
+});

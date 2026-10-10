@@ -522,7 +522,7 @@ const STYLE = `
                            box-shadow:2px 0 14px rgba(0,0,0,.35); }
   :host([overlay]) .ctl { display:flex; flex-direction:column; gap:2px; padding:2px 8px 8px;
                           border-bottom:1px solid var(--divider-color,rgba(128,128,128,.25)); }
-  :host([overlay]) .ctl select.agent { width:100%; margin:0 0 4px; border-radius:8px; padding:4px 8px; color:inherit;
+  :host([overlay]) .ctl select { width:100%; margin:0 0 4px; border-radius:8px; padding:4px 8px; color:inherit;
                                        border:1px solid rgba(128,128,128,.35); background:var(--secondary-background-color,#222); font:inherit; }
   :host([overlay]) .ctl .btn.icon { display:flex; align-items:center; gap:10px; width:100%; text-align:left; padding:6px 8px; }
   :host([overlay]) .ctl .ico { width:1.4em; text-align:center; display:inline-block; }
@@ -530,7 +530,7 @@ const STYLE = `
   :host([overlay]) .ctl .autobtn.spinning .ico { animation:aspin 2.4s linear infinite; }
   :host([overlay]) .bar .title { flex:1 1 120px; }
   :host([overlay]) .bar select.agent { max-width:120px; }
-  :host([overlay]) .hint, :host([overlay]) .modelpick { display:none; }
+  :host([overlay]) .hint { display:none; }
   :host([overlay]) .msg:not(.user) .bub, :host([overlay]) .msg:not(.user) > .md {
     text-shadow:0 1px 2px color-mix(in srgb, var(--primary-background-color,#000) 85%, transparent); }
 `;
@@ -622,7 +622,7 @@ function definePanel() {
         // listeners come along)
         const ctl = document.createElement("div");
         ctl.className = "ctl";
-        for (const [cls, label] of [["agent", null], ["voicebtn", "membrane's voice"], ["llmbtn", "LLM replies"],
+        for (const [cls, label] of [["agent", null], ["modelpick", null], ["voicebtn", "membrane's voice"], ["llmbtn", "LLM replies"],
                                     ["autobtn", "auto-chat"], ["mindsbtn", "minds"]]) {
           const el = app.querySelector("." + cls);
           if (!el) continue;

@@ -121,6 +121,7 @@ class Avatar {
   constructor(agent, idle) { this.agent = agent; this.idle = idle.slice(); this.pos = idle.slice(); this.target = idle.slice();
     this.eid = null; this.until = 0; this.trail = []; this._lastTrail = 0; this.hold = false; }
   attach(eid, p, holdMs, now) { this.eid = eid; this.target = p.slice(); this.hold = holdMs == null;
+    this.at = now == null ? Date.now() : now;
     this.until = (now == null ? Date.now() : now) + (holdMs == null ? 0 : holdMs); }
   release() { this.hold = false; this.until = 0; }
   attached(now) { return !!this.eid && (this.hold || (now == null ? Date.now() : now) < this.until); }
@@ -779,7 +780,12 @@ class Field3DView {
         if (this.meta[s]) this.meta[s].p = [mv[1], mv[2], mv[3]];
       }
     } else if (t === "field.applied") {
-      for (const id of p.eids || []) { const s = this.slots.get(id); if (s != null) this.pulses.set(s, now); }
+      const hits = this.recentHits || (this.recentHits = []);
+      for (const id of p.eids || []) {
+        const s = this.slots.get(id);
+        if (s != null) { this.pulses.set(s, now); hits.push([s, now]); }
+      }
+      if (hits.length > 600) hits.splice(0, hits.length - 600);
       const pairs = edgePulsePairs(p.groups, (a, b) => this.edgeSet.has(a + "|" + b));
       for (const [a, b, st] of pairs) {
         if (this.edgePulses.length >= this.pulseCap) break;
@@ -837,6 +843,28 @@ class Field3DView {
     a.label = eid;
     if (p) a.attach(eid, p, holdMs, Date.now());
     a.tag.textContent = agent + " · " + eid;
+  }
+
+  /** Where things happen now (membrane home's camera): the mind that most
+   * recently attached to an entity, else the mass-weighted centre of the
+   * last few seconds' pulses, else null. World coordinates. */
+  activity(mindMs = 8000, pulseMs = 10000) {
+    const now = Date.now();
+    let best = null;
+    for (const a of this.avatars.values()) {
+      if (a.eid && a.at && now - a.at < mindMs && (!best || a.at > best.at)) best = a;
+    }
+    if (best) return { kind: "mind", agent: best.agent, eid: best.eid, p: best.target.slice() };
+    const pn = performance.now();
+    let w = 0; const c = [0, 0, 0];
+    for (const [sl, t] of this.recentHits || []) {
+      if (pn - t > pulseMs || !this.meta[sl]) continue;
+      const k = 1 + Math.log2(2 + ((this.meta[sl] || {}).mass || 0));
+      for (let i = 0; i < 3; i++) c[i] += this.posA[sl * 3 + i] * k;
+      w += k;
+    }
+    if (w > 0) return { kind: "pulses", p: c.map((v) => v / w) };
+    return null;
   }
 
   _stepAvatars(dt) {
