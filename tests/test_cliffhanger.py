@@ -387,3 +387,71 @@ class TestFanOutMembersAndRemoval(unittest.TestCase):
         self.assertIsNone(N.removal_refusal(est, port.eid))
         stub = N.entity_link(srv, est, f, None, "", ["echo a-stub"])
         self.assertTrue(stub["ok"])
+
+
+class TestInterfaces(unittest.TestCase):
+    """Interfaces (2026-10-10, the operator: "we should have interfaces"):
+    abstract methods make a contract; remote_executor is the first."""
+
+    def _iface(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        self.assertTrue(N.seed_interfaces(est))
+        self.assertFalse(N.seed_interfaces(est))                      # idempotent
+        return srv, f, est
+
+    def test_the_seed_declares_remote_executor_exec(self):
+        srv, f, est = self._iface()
+        ie = est._resolve_spec("remote_executor")
+        self.assertTrue(ie.properties["interface"])
+        self.assertEqual(N.abstract_methods(est, ie), [{"name": "exec", "interface": ie.eid, "params": ["code", "timeout"]}])
+        self.assertEqual(N.methods_of(est, ie), [])                    # abstract is no answer
+
+    def test_an_implementer_is_blocked_until_it_implements(self):
+        srv, f, est = self._iface()
+        box = _add(est, "env:seat-shell", parents=[est._resolve_spec("remote_executor").eid])
+        r = N.method_call(srv, est, f, None, box.eid, "exec", {"code": "echo hi"})
+        self.assertEqual(r["status"], "blocked")
+        self.assertIn("implements remote_executor, which requires exec(code, timeout)", r["error"])
+        self.assertIn("implements remote_executor; missing: exec(code, timeout)", N.contract_note(est, box))
+        self.assertFalse(N.implements(est, box, "remote_executor"))
+        N.method_define(srv, est, f, None, box.eid, "exec", "echo ran: {{code}}")
+        self.assertTrue(N.implements(est, box, "remote_executor"))
+        self.assertEqual(N.contract_note(est, box), "implements remote_executor")
+        r = N.method_call(srv, est, f, None, box.eid, "exec", {"code": "x"})
+        self.assertEqual(r["status"], "ok", r)
+        self.assertIn("ran: x", str(r["head"]))
+
+    def test_a_class_between_fulfils_it_for_all_its_members(self):
+        srv, f, est = self._iface()
+        ie = est._resolve_spec("remote_executor")
+        shells = _add(est, "sh environments", parents=[ie.eid])
+        a = _add(est, "env:a", parents=[shells.eid])
+        N.method_define(srv, est, f, None, shells.eid, "exec", "echo sh {{code}}")
+        self.assertTrue(N.implements(est, a, "remote_executor"))
+        self.assertIn(a.eid, [m.eid for m in N.members_of(est, ie.eid)])
+
+    def test_a_global_method_of_that_name_does_not_fulfil_a_contract(self):
+        srv, f, est = self._iface()
+        N.method_define(srv, est, f, None, "", "exec", "echo global")
+        box = _add(est, "env:b", parents=[est._resolve_spec("remote_executor").eid])
+        self.assertFalse(N.implements(est, box, "remote_executor"))
+
+    def test_abstract_is_a_signature_only(self):
+        srv, f, est = self._iface()
+        r = N.method_define(srv, est, f, None, "remote_executor", "run", "echo no", abstract=True)
+        self.assertFalse(r["ok"])
+        self.assertIn("signature only", r["error"])
+        self.assertFalse(N.method_define(srv, est, f, None, "", "run", "", abstract=True)["ok"])
+
+    def test_the_banner_names_interfaces_and_their_implementers(self):
+        srv, f, est = self._iface()
+        box = _add(est, "env:c", parents=[est._resolve_spec("remote_executor").eid])
+        self.assertIn("remote_executor exec(code, timeout) -- implemented by: nobody yet", N.interfaces_line(srv))
+        N.method_define(srv, est, f, None, box.eid, "exec", "echo {{code}}")
+        srv._iface_line_cache = None
+        self.assertIn("implemented by: env:c", N.interfaces_line(srv))
+
+    def test_the_tool_parses_an_inline_signature(self):
+        from membrane.mcp_server import method_signature
+        self.assertEqual(method_signature("exec(code, timeout)"), ("exec", ["code", "timeout"]))
+        self.assertEqual(method_signature("status"), ("status", []))

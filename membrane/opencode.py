@@ -1048,6 +1048,13 @@ def main() -> None:
                       "entity_link runs commands through it)", file=sys.stderr)
         except Exception as e:
             print(f"[seat] executor seeding skipped ({e})", file=sys.stderr)
+        # THE FIRST INTERFACE (2026-10-10): remote_executor -- exec(code, timeout)
+        try:
+            from .night import seed_interfaces
+            if seed_interfaces(srv.entity_store):
+                print("[seat] interface planted: remote_executor (exec(code, timeout))", file=sys.stderr)
+        except Exception as e:
+            print(f"[seat] interface seeding skipped ({e})", file=sys.stderr)
         srv.autonode = None
         if not args.no_autonode:
             try:

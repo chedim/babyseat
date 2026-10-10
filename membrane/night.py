@@ -1924,14 +1924,26 @@ COMPOSITE_DEPTH = 3            # Argus: "composite depth <= 3" -- feed-forward, 
 
 
 def method_define(srv, est, fld, mem, on: str, method: str, command: str,
-                  read_only: bool = False, guard: str = "", steps=None) -> dict:
+                  read_only: bool = False, guard: str = "", steps=None,
+                  abstract: bool = False, params=None) -> dict:
     """A method: a command, or a COMPOSITE (steps: calls / commands, in
-    order, as entities -- its parents), optionally behind a GUARD entity."""
+    order, as entities -- its parents), optionally behind a GUARD entity.
+
+    abstract=True: an INTERFACE's required method (2026-10-10, the operator:
+    "we should have interfaces"): a signature (params), no command. Its owner
+    becomes an interface; every entity inheriting it must bring its own
+    implementation (own or from a class in between) -- until then a call is
+    blocked with what is missing."""
     if est is None:
         return {"ok": False, "error": "entity layer unavailable"}
     method = re.sub(r"[^A-Za-z0-9_]+", "_", (method or "").strip()).strip("_")
     steps = list(steps or [])
-    if not method or not ((command or "").strip() or steps):
+    if abstract:
+        if (command or "").strip() or steps or (guard or "").strip():
+            return {"ok": False, "error": "an abstract method is a signature only: no command, steps or guard"}
+        if not method or not on:
+            return {"ok": False, "error": "an abstract method needs its interface (on) and a name"}
+    elif not method or not ((command or "").strip() or steps):
         return {"ok": False, "error": "on, method and a command or steps required"}
     if (command or "").strip():
         bad = lint_command(command)
@@ -1961,6 +1973,15 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
     p = doc.properties or {}
     p.update({"command": (command or "").strip(), "method_name": method,
               "method_of": [owner.eid] if owner else [], "read_only": bool(read_only)})
+    if abstract:
+        names = [re.sub(r"[^A-Za-z0-9_]+", "_", str(x)).strip("_") for x in (params or [])]
+        p.update({"abstract": True, "params": [x for x in names if x]})
+        op = owner.properties or {}
+        op["interface"] = True
+        owner.properties = op
+        est.upsert(owner, embedder=None)
+    else:
+        p.pop("abstract", None)
     # THE NODES AS ENTITIES: the guard first, then the steps in order --
     # the method's parents (the executor runs parents first, stop-on-failure)
     nodes = []
@@ -1988,8 +2009,8 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
     est.upsert(doc, embedder=None)
     _audit(mem, {"event": "agent-method-define", "origin": "mcp", "eid": eid,
                  "on": owner.eid if owner else "", "method": method, "ok": True})
-    return {"ok": True, "eid": eid, "method": label, "created": created,
-            "params": command_params(command), "read_only": bool(read_only)}
+    return {"ok": True, "eid": eid, "method": label, "created": created, "abstract": bool(abstract),
+            "params": p.get("params") if abstract else command_params(command), "read_only": bool(read_only)}
 
 
 def _node(est, method_eid: str, name: str, props: dict) -> str:
@@ -2029,15 +2050,98 @@ def resolve_method(est, obj, method: str):
 
 
 def methods_of(est, obj) -> list[str]:
-    """The method names an object answers to (for the refusal's hint)."""
+    """The method names an object answers to (for the refusal's hint) --
+    implemented ones only: an interface's abstract method is not an answer."""
     owners = {obj.eid} | {a.eid for a in ancestors(est, obj)}
     out = []
     for d in list((est.docs or {}).values()):
         pp = d.properties or {}
         mo = pp.get("method_of")
-        if pp.get("method_name") and (not mo or owners & set(mo)):
+        if pp.get("method_name") and not pp.get("abstract") and (not mo or owners & set(mo)):
             out.append(pp["method_name"])
     return sorted(set(out))
+
+
+# ---- INTERFACES (2026-10-10) -------------------------------------------------
+def interfaces_of(est, obj) -> list:
+    """The interfaces an entity implements: itself or any ancestor marked
+    interface (an abstract method was defined on it)."""
+    if est is None or obj is None:
+        return []
+    return [a for a in [obj] + ancestors(est, obj) if (a.properties or {}).get("interface")]
+
+
+def abstract_methods(est, obj) -> list[dict]:
+    """{name, interface, params} for every abstract method the entity's
+    interfaces require."""
+    ifaces = {i.eid for i in interfaces_of(est, obj)}
+    out = []
+    for d in list((est.docs or {}).values()):
+        pp = d.properties or {}
+        if pp.get("abstract") and pp.get("method_name") and ifaces & set(pp.get("method_of") or []):
+            out.append({"name": pp["method_name"], "interface": (pp.get("method_of") or [""])[0],
+                        "params": list(pp.get("params") or [])})
+    return out
+
+
+def missing_methods(est, obj) -> list[dict]:
+    """The required methods the entity does not implement yet (an interface
+    itself implements nothing: it is abstract)."""
+    # a GLOBAL method of the same name does not fulfil a contract: only one
+    # owned by the entity or a class on its chain does
+    return [m for m in abstract_methods(est, obj) if resolve_method(est, obj, m["name"])[1] is None]
+
+
+def implements(est, obj, iface_spec: str) -> bool:
+    """Does `obj` fully implement the interface `iface_spec`?"""
+    iface = est._resolve_spec(iface_spec or "") if est is not None else None
+    if iface is None or obj is None or not (iface.properties or {}).get("interface"):
+        return False
+    if iface.eid not in {i.eid for i in interfaces_of(est, obj)}:
+        return False
+    return not [m for m in missing_methods(est, obj) if m["interface"] == iface.eid]
+
+
+_IFACE_CACHE_S = 300.0
+
+
+def interfaces_line(srv) -> str | None:
+    """'interfaces: remote_executor exec(code, timeout) -- implemented by: a, b'
+    (the banner's line; cached 5 min, the member scan is not free)."""
+    est = getattr(srv, "entity_store", None)
+    if est is None:
+        return None
+    hit = getattr(srv, "_iface_line_cache", None)
+    now = time.time()
+    if hit and now - hit[0] < _IFACE_CACHE_S:
+        return hit[1]
+    from .classes import short_name
+    parts = []
+    for d in list((est.docs or {}).values()):
+        if not (d.properties or {}).get("interface"):
+            continue
+        sigs = [f"{m['name']}({', '.join(m['params'])})" for m in abstract_methods(est, d)]
+        done = [short_name(m.eid) for m in members_of(est, d.eid) if implements(est, m, d.eid)][:8]
+        parts.append(f"{short_name(d.eid)} {'; '.join(sigs)} -- implemented by: "
+                     + (", ".join(done) if done else "nobody yet"))
+    line = ("interfaces (implement: inherit it, then define each method on yourself or a class): "
+            + " | ".join(parts)) if parts else None
+    srv._iface_line_cache = (now, line)
+    return line
+
+
+def contract_note(est, obj) -> str:
+    """'implements remote_executor; missing: exec(code, timeout)' -- or ''."""
+    from .classes import short_name
+    ifaces = interfaces_of(est, obj)
+    if not ifaces:
+        return ""
+    miss = missing_methods(est, obj)
+    names = ", ".join(short_name(i.eid) for i in ifaces)
+    if not miss:
+        return f"implements {names}"
+    sig = ", ".join(f"{m['name']}({', '.join(m['params'])})" for m in miss)
+    return f"implements {names}; missing: {sig}"
 
 
 # THE OUTCOMES (Argus's review, 2026-10-10: "partial must not silently count
@@ -2063,6 +2167,14 @@ def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | Non
     m, via = resolve_method(est, obj, (method or "").strip())
     mro = [short_name_of(a) for a in [obj] + ancestors(est, obj)][:8]
     if m is None:
+        req = next((x for x in abstract_methods(est, obj) if x["name"] == (method or "").strip()), None)
+        if req is not None:
+            from .classes import short_name
+            return _blocked(obj, method, f"{short_name_of(obj)} implements {short_name(req['interface'])}, "
+                            f"which requires {req['name']}({', '.join(req['params'])}), but it has no "
+                            f"{req['name']} of its own yet -- implement it: exec(action='define', "
+                            f"on=<it, or a class between it and the interface>, method='{req['name']}', command=...)",
+                            mro=mro, missing=req)
         have = methods_of(est, obj)
         return _blocked(obj, method, f"{short_name_of(obj)} has no method {method!r}"
                         + (f"; it answers to: {', '.join(have)}" if have else "")
@@ -2909,6 +3021,32 @@ def seed_executor_entity(est) -> bool:
     except Exception:
         pass
     return True
+
+
+REMOTE_EXECUTOR = "remote_executor"
+REMOTE_EXECUTOR_SUMMARY = (
+    "INTERFACE: an environment that runs code (the operator, 2026-10-10). An entity that "
+    "implements it is ISA remote_executor and brings its own exec(code, timeout): the command "
+    "that carries {{code}} into THAT environment. Describe the environment on the entity: "
+    "lang (sh, jinja, js...), env (what it is and what it can reach), trust (who must approve a "
+    "run). members_of('remote_executor') = every place code can run.")
+
+
+def seed_interfaces(est) -> bool:
+    """The boot seeding of the first interface (idempotent; the seat's edits
+    survive): remote_executor with its one abstract method exec(code, timeout)."""
+    if est is None:
+        return False
+    d = est._resolve_spec(REMOTE_EXECUTOR)
+    if d is not None and (d.properties or {}).get("interface"):
+        return False
+    if d is None:
+        r = est.add(cls=CLASS_COMPONENT, name=REMOTE_EXECUTOR, summary=REMOTE_EXECUTOR_SUMMARY)
+        if not (isinstance(r, dict) and r.get("eid")):
+            return False
+    res = method_define(None, est, None, None, REMOTE_EXECUTOR, "exec", "", abstract=True,
+                        params=["code", "timeout"])
+    return bool(res.get("ok"))
 
 
 def _cooldown_ok(props: dict, trigger: str, now: float) -> bool:

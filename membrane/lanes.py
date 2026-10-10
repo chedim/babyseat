@@ -1169,6 +1169,10 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
             lib = command_library(getattr(srv, "entity_store", None))
             if lib:
                 lines.append(lib)
+            from .night import interfaces_line
+            il = interfaces_line(srv)
+            if il:
+                lines.append(il)
             from .classes import proposals_line
             cp = proposals_line(srv)
             if cp:
@@ -6207,7 +6211,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             res = method_define(srv, est, _efield_on(srv), srv.membrane, str(body.get("on") or ""),
                                 str(body.get("method") or ""), str(body.get("command") or ""),
                                 read_only=bool(body.get("read_only")), guard=str(body.get("guard") or ""),
-                                steps=body.get("steps") if isinstance(body.get("steps"), list) else None)
+                                steps=body.get("steps") if isinstance(body.get("steps"), list) else None,
+                                abstract=bool(body.get("abstract")),
+                                params=body.get("params") if isinstance(body.get("params"), list) else None)
         else:
             a = body.get("args")
             res = method_call(srv, est, _efield_on(srv), srv.membrane, str(body.get("object") or ""),
@@ -6447,6 +6453,17 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         self._entity_audit("inherit", res)
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
+        # THE CONTRACT (interfaces, 2026-10-10): what the child now implements
+        # and what it still owes
+        try:
+            from .night import contract_note
+            if not res.get("pattern"):
+                child = est._resolve_spec(spec)
+                note = contract_note(est, child) if child is not None else ""
+                if note:
+                    res["contract"] = note
+        except Exception:
+            pass
         self._json_out(res)
 
     def _membrane_entity_query(self) -> None:

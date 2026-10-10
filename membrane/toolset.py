@@ -64,22 +64,23 @@ FAMILIES: dict[str, dict] = {
                 "inherit": lambda a: _pick(a, "spec", "parents")},
     },
     "exec": {
-        "description": "Cliffhanger methods: define on a class/object, call on an object (ISA "
-                       "dispatch); link runs a raw command. help('cliffhanger').",
+        "description": "Cliffhanger: define methods on classes (abstract = interface), call "
+                       "them on objects; link runs a raw command. help('cliffhanger').",
         "actions": {"call": "method_call", "each": "method_each", "define": "method_define",
                     "link": "entity_link", "unlink": "entity_unlink"},
         "params": {"commands": {"type": ["string", "array"], "description": "link: command line(s)"},
                    "args": {"type": "object", "description": "{{param}} values"},
-                   "object": _S("call: target"), "on": _S("define: owner (omit = global)"),
-                   "over": _S("each: class or pattern"), "max": _I("each: cap (default 20)"),
-                   "dry_run": _B("each: list, run nothing"), "on_fail": _S("each: abort|continue"),
+                   "object": _S("call: target"), "on": _S("define: owner"),
+                   "over": _S("each: class or pattern"), "max": _I("each: cap (20)"),
+                   "dry_run": _B("each: list only"), "on_fail": _S("each: abort|continue"),
                    "method": _S("method name"), "command": _S("define: command template"),
-                   "read_only": _B("define: a read"), "guard": _S("define: check script"),
+                   "read_only": _B("define: a read"), "guard": _S("define: guard"),
+                   "abstract": _B("define: f(a,b), no command"),
                    "steps": {"type": "array", "items": {"type": "object"}, "description": "define: composite steps"},
                    "executor": _S("optional"), "create": _B("optional")},
         "map": {"call": lambda a: _pick(a, "object", "method", "args"),
                 "each": lambda a: _pick(a, "over", "method", "args", "max", "dry_run", "on_fail"),
-                "define": lambda a: _pick(a, "on", "method", "command", "read_only", "guard", "steps"),
+                "define": lambda a: _pick(a, "on", "method", "command", "read_only", "guard", "steps", "abstract"),
                 "link": lambda a: _pick(a, "commands", "executor", "create", "args"),
                 "unlink": lambda a: _pick(a, "commands", "executor")},
     },
@@ -199,7 +200,12 @@ HELP = {
         "FAN-OUT: exec(action='each', over='ha light', method='status', dry_run=true) lists who would "
         "be hit; without dry_run it runs on every member (cap max=20, raise it explicitly; ceiling 150), "
         "on_fail='abort' (default) | 'continue', one summary receipt; as a step: {'name': 'all', "
-        "'each': 'ha light', 'call': 'turn_off'}."),
+        "'each': 'ha light', 'call': 'turn_off'}. INTERFACES: exec(action='define', on='remote_executor', "
+        "method='exec(code, timeout)', abstract=true) declares a required method (no command) and makes "
+        "its owner an interface; an entity that inherits it must implement each one (own or a class "
+        "between) -- until then the call is blocked with what is missing, and inherit says what it owes. "
+        "remote_executor (exec(code, timeout)) is the first: an environment that runs code; give each "
+        "implementation lang / env / trust properties."),
     "classes": (
         "Inheritance: an entity without its own getter/mention/thought/dreamed script runs its "
         "nearest class's, ON ITSELF (state['eid'], its own properties merged over its classes' "

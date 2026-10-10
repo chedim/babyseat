@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -1293,12 +1294,13 @@ def tool_entity_inherit(args: dict, port: int) -> str:
                 f"{', '.join(added)}" + (f" (minted: {', '.join(out.get('minted') or [])})" if out.get("minted") else "")
                 + " -- a script on the class now runs on each member (getter, mention, thought, "
                   "dreamed; tick where the class sets tick_inherits).")
+    contract = f" Contract: {out['contract']}." if out.get("contract") else ""
     if added:
         return (f"Entity {out['child']} ISA {', '.join(added)} -- "
                 f"constraints inherited down the ISA chain (latch, "
                 f"`living`); the child's position comes from its own "
-                f"lived instances, the parents classify it.")
-    return f"Entity {out['child']} parents refreshed (no new links)."
+                f"lived instances, the parents classify it." + contract)
+    return f"Entity {out['child']} parents refreshed (no new links)." + contract
 
 
 def tool_peer_seats(args: dict, port: int) -> str:
@@ -1385,15 +1387,30 @@ def _steps_arg(v):
     return v if isinstance(v, list) else None
 
 
+def method_signature(method: str) -> tuple[str, list[str]]:
+    """'exec(code, timeout)' -> ('exec', ['code', 'timeout']); a bare name -> (name, [])."""
+    m = re.match(r"^\s*([A-Za-z_][\w]*)\s*\((.*)\)\s*$", str(method or ""))
+    if not m:
+        return str(method or "").strip(), []
+    return m.group(1), [x.strip() for x in m.group(2).split(",") if x.strip()]
+
+
 def tool_method_define(args: dict, port: int) -> str:
+    name, sig = method_signature(str(args.get("method") or ""))
     out = _http(port, "POST", "/membrane/method/define", {
-        "on": str(args.get("on") or args.get("object") or ""), "method": str(args.get("method") or ""),
+        "on": str(args.get("on") or args.get("object") or ""), "method": name,
         "command": str(args.get("command") or args.get("commands") or ""),
         "read_only": bool(args.get("read_only")), "guard": str(args.get("guard") or ""),
-        "steps": _steps_arg(args.get("steps"))})
+        "steps": _steps_arg(args.get("steps")),
+        "abstract": str(args.get("abstract") or "").lower() in ("true", "1", "yes"),
+        "params": _listish(args.get("params")) or sig})
     if not out.get("ok"):
         return f"define failed: {out.get('error', 'unknown error')}"
     p = out.get("params") or []
+    if out.get("abstract"):
+        return (f"abstract method {out['method']}({', '.join(p)}) declared -- its owner is an interface; "
+                f"each entity inheriting it must implement {out['method'].split('.')[-1]} itself "
+                f"(exec(action='define', on=<it or a class between>, method=..., command=...))")
     return (f"method {out['method']}{('{' + ','.join(p) + '}') if p else ''} "
             f"{'defined' if out.get('created') else 'updated'} -- call it on any object that is (or "
             f"inherits from) its owner: exec(action='call', object=..., method=...)")

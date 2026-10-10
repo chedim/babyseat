@@ -223,13 +223,25 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const row = (e) => '<a role="menuitem" href="/' + esc(e.path) + '" data-path="' + esc(e.path) + '"><ha-icon icon="' +
         esc(e.icon) + '"></ha-icon><span>' + esc(e.title) + "</span></a>";
       const main = items.filter((e) => !TAIL.includes(e.path)), tail = items.filter((e) => TAIL.includes(e.path));
-      this._menu.innerHTML = main.map(row).join("") + (tail.length ? "<hr>" + tail.map(row).join("") : "");
+      this._menu.innerHTML = main.map(row).join("") + (tail.length ? "<hr>" + tail.map(row).join("") : "") +
+        '<hr><a role="menuitem" href="#" data-logout="1"><ha-icon icon="mdi:logout"></ha-icon><span>Log out</span></a>';
+    }
+
+    /** Log out (HA's own 'hass-logout': it revokes the refresh token and goes
+     * to the login page). Not a "left through the menu": the next login lands
+     * on membrane again. */
+    _logout() {
+      lsSet(LS_LEFT, "0");
+      this._toggleMenu(false);
+      this._dock("restore");
+      this.dispatchEvent(new CustomEvent("hass-logout", { bubbles: true, composed: true }));
     }
 
     /** Leave the field for an HA page: HA's sidebar comes back, and the next
      * fresh start stays in HA (until membrane is opened again). */
     _leaveTo(path) {
-      lsSet(LS_LEFT, "1");
+      // the profile page is where people log out: it is not "switching to HA"
+      lsSet(LS_LEFT, path === "/profile" ? "0" : "1");
       this._toggleMenu(false);
       this._dock("restore");
       history.pushState(null, "", path);
@@ -282,6 +294,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._menu = $(".hamenu"); this._haBtn = $(".ha");
       this._haBtn.addEventListener("click", () => this._toggleMenu());
       this._menu.addEventListener("click", (e) => {
+        if (e.target.closest("a[data-logout]")) { e.preventDefault(); this._logout(); return; }
         const a = e.target.closest("a[data-path]"); if (!a) return;
         e.preventDefault();
         this._leaveTo("/" + a.dataset.path);
