@@ -58,6 +58,55 @@ def own_reading(eid: str, state: dict) -> dict:
     return state
 
 
+def keyed_reading(eid: str, state: dict) -> dict | None:
+    """This entity's entry in a fan-out map keyed by entity ids, or None."""
+    from .classes import short_name
+    if not isinstance(state, dict):
+        return None
+    me = short_name(eid)
+    for k in (eid, me, me.split(":", 1)[-1]):
+        v = state.get(k)
+        if isinstance(v, dict):
+            return v
+    return None
+
+
+CLASS_SPREAD_MAX = 150
+_class_spread_ts: dict[str, float] = {}
+
+
+def record_class_readings(srv, est, cls_eid: str, state: dict, skip: str = "",
+                          now: float | None = None) -> int:
+    """A CLASS getter's one fetch holds every member's state: each member
+    found in the map gets its own reading, not only the one that was read
+    (the seat's fan-out probe, 2026-10-10: 27 real lights stayed
+    'unconfirmed' because nobody had read them one by one). At most once a
+    minute per class."""
+    now = now or time.time()
+    if est is None or not isinstance(state, dict) or len(state) < 2:
+        return 0
+    if now - _class_spread_ts.get(cls_eid, 0.0) < READING_MIN_S:
+        return 0
+    _class_spread_ts[cls_eid] = now
+    from .night import _raw_members
+    n = 0
+    for m in _raw_members(est, cls_eid)[:CLASS_SPREAD_MAX * 2]:
+        if m.eid == skip:
+            continue
+        vals = keyed_reading(m.eid, state)
+        if vals is None:
+            continue
+        if record_reading(srv, m, {m.eid: vals}, now):
+            n += 1
+            try:
+                est.upsert(m, embedder=None)
+            except Exception:
+                pass
+        if n >= CLASS_SPREAD_MAX:
+            break
+    return n
+
+
 def _render(values: dict) -> str:
     parts = []
     for k, v in list(values.items())[:8]:

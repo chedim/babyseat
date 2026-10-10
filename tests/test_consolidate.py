@@ -108,3 +108,31 @@ class TestClassesByGeometry(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestClassReadingsSpread(unittest.TestCase):
+    """The seat's fan-out probe (2026-10-10): a class getter's one fetch
+    held all lights, but only the member being read got a reading -- 27 real
+    lights stayed 'unconfirmed'."""
+
+    def test_every_member_in_the_map_gets_its_own_reading(self):
+        from membrane.entities import EntityStore, CLASS_COMPONENT
+        from membrane import night as N
+        est = EntityStore(path=None, shared=False)
+        cls = est.docs[est.add(cls=CLASS_COMPONENT, name="ha light", summary="x")["eid"]]
+        cls.properties["getter_script"] = "result = {}"
+        ms = []
+        for n in ("ha:light.a_one", "ha:light.b_two", "ha:light.ghost"):
+            d = est.docs[est.add(cls=CLASS_COMPONENT, name=n, summary="x")["eid"]]
+            d.properties["parents"] = [cls.eid]
+            ms.append(d)
+        srv = type("S", (), {"efield": None})()
+        C._class_spread_ts.clear()
+        state = {"light.a_one": {"state": "on"}, "light.b_two": {"state": "off"}}
+        self.assertEqual(C.record_class_readings(srv, est, cls.eid, state, now=1000.0), 2)
+        self.assertEqual(ms[1].properties["readings"][-1]["v"], {"state": "off"})
+        self.assertNotIn("readings", ms[2].properties)               # the ghost stays unconfirmed
+        members, unc = N.member_split(est, cls.eid)
+        self.assertEqual({N.short_name_of(m) for m in members}, {"ha:light.a_one", "ha:light.b_two"})
+        self.assertEqual([N.short_name_of(m) for m in unc], ["ha:light.ghost"])
+        self.assertEqual(C.record_class_readings(srv, est, cls.eid, state, now=1010.0), 0)   # once a minute

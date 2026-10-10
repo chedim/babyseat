@@ -1356,8 +1356,10 @@ def entity_read_back(srv, ent, force: bool = False) -> dict:
         # STEP 0 of the generalization plan: the reading is experience --
         # a field event about this entity (its own values), and the ring
         try:
-            from .consolidate import record_reading
+            from .consolidate import record_reading, record_class_readings
             record_reading(srv, ent, state, now)
+            if inherited_from:
+                record_class_readings(srv, est, inherited_from, state, skip=ent.eid, now=now)
         except Exception:
             pass
         merged = dict((ent.properties or {}).get("script_data") or {})
