@@ -207,3 +207,40 @@ class TestGuardsAndComposites(unittest.TestCase):
             N.method_define(srv, est, f, None, light.eid, f"m{i}", "", steps=[{"name": "s", "call": f"m{i - 1}", "object": "self"}])
         self.assertEqual(N.method_call(srv, est, f, None, port.eid, "m2")["status"], "ok")
         self.assertEqual(N.method_call(srv, est, f, None, port.eid, "m4")["status"], "blocked")
+
+
+class TestProbeSuiteFindings(unittest.TestCase):
+    """Argus's probe suite (2026-10-10): four findings on the engine's side."""
+
+    def test_single_entity_inherit_works_through_the_route_code(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        probe = _add(est, "probe:dispatch")
+        from membrane.entities import MultiParentOps
+        r = MultiParentOps.set_parents(est, probe.eid, [light.eid, switch.eid])
+        self.assertTrue(r["ok"], r)
+        import inspect
+        from membrane import lanes as L
+        self.assertNotIn("est.set_parents(", inspect.getsource(L))       # the unmounted bound form is gone
+
+    def test_edit_with_a_parents_patch_sets_them(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        probe = _add(est, "probe:two")
+        r = est.edit(probe.eid, properties={"parents": '["ha light", "ha switch"]'})
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(len(probe.properties["parents"]), 2)
+        N.method_define(srv, est, f, None, light.eid, "who", "echo LIGHT")
+        N.method_define(srv, est, f, None, switch.eid, "who", "echo SWITCH")
+        self.assertIn("LIGHT", str(N.method_call(srv, est, f, None, probe.eid, "who")["head"]))   # declared order
+
+    def test_self_id_and_ha_entity_id_from_the_name(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        bloom = _add(est, "ha:light.port_hue_bloom", parents=[light.eid])
+        N.method_define(srv, est, f, None, light.eid, "ids", "echo {{self.id}} {{self.entity_id}}")
+        self.assertIn("light.port_hue_bloom light.port_hue_bloom",
+                      str(N.method_call(srv, est, f, None, bloom.eid, "ids")["head"]))
+
+    def test_define_on_a_missing_owner_mints_the_class(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        d = N.method_define(srv, est, f, None, "ha sensor", "who", "echo SENSOR")
+        self.assertTrue(d["ok"], d)
+        self.assertIsNotNone(est._resolve_spec("ha sensor"))

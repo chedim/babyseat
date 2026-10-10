@@ -1911,7 +1911,12 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
             return {"ok": False, "error": f"step refused: {lint_command(str(st['command']))}"}
     owner = est._resolve_spec(on) if on else None
     if on and owner is None:
-        return {"ok": False, "error": f"no entity matches {on!r}"}
+        # a missing owner is minted as a class (the probe suite: 'ha light' existed,
+        # 'ha sensor' did not -- define must not depend on which came first)
+        r = est.add(cls=CLASS_COMPONENT, name=on, summary=f"class (methods defined on it): {on}")
+        owner = (est.docs or {}).get(r.get("eid", "")) if isinstance(r, dict) else None
+        if owner is None:
+            return {"ok": False, "error": f"no entity matches {on!r} and it could not be created"}
     from .classes import short_name
     label = f"{short_name(owner.eid) if owner else 'any'}.{method}"
     eid = MEMBRANE_NS + overlay_key(E.canon("c", re.sub(r"[^a-z0-9_.:-]+", "-", label.lower())))
@@ -2028,7 +2033,12 @@ def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | Non
                         mro=mro)
     props = effective_properties(est, obj)
     full = {f"self.{k}": v for k, v in props.items() if isinstance(v, (str, int, float, bool))}
-    full.update({"self.eid": obj.eid, "self.name": str(props.get("name") or short_name_of(obj))})
+    sid = short_name_of(obj)
+    bare = sid.split(":", 1)[1] if ":" in sid else sid
+    full.update({"self.eid": obj.eid, "self.name": str(props.get("name") or sid),
+                 "self.id": bare})                        # 'ha:light.x' -> 'light.x' (the probe suite's sed)
+    if sid.startswith("ha:") and not str(full.get("self.entity_id") or "").strip():
+        full["self.entity_id"] = bare                     # an HA entity's id is its name
     full.update(dict(args or {}))
     # NO SILENT EMPTIES (Argus: "silent empties cause real-world effects"): every
     # placeholder must have a non-empty value before anything runs

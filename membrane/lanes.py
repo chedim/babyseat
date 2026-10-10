@@ -6401,7 +6401,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             except Exception:
                 pass
         else:
-            res = est.set_parents(spec, parents)
+            from .entities import MultiParentOps
+            res = MultiParentOps.set_parents(est, spec, parents)   # the bound form never mounted:
+            # every single-entity inherit raised TypeError -> 'proxy unreachable' (2026-10-10)
         self._entity_audit("inherit", res)
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return

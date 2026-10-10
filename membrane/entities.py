@@ -1060,7 +1060,7 @@ class TimelineOps:
         # parentless rather than failing the commit.
         try:
             if store._resolve_spec(parent) is not None:
-                store.set_parents(ent.eid, [parent])
+                MultiParentOps.set_parents(store, ent.eid, [parent])   # the static form (the bound one never mounted)
         except Exception:
             pass
         return store.docs.get(ent.eid, ent)
@@ -2322,14 +2322,29 @@ class EntityStore(MultiParentOps, TimelineOps):
         # values, the engine's script_* keys and another entity's keys
         # untouchable. The goal's own status IS touchable (fulfill/drop
         # via the edit surface; audited).
+        parents_patch = None
         if isinstance(properties, dict) and properties:
             for k, v in list(properties.items())[:16]:
                 kk = str(k)[:80]
                 if kk.startswith("script_"):
                     continue
+                if kk in ("parents", "parent"):
+                    # ISA goes through set_parents (names resolved, cycles
+                    # refused) -- a raw write was silently inert (2026-10-10)
+                    if isinstance(v, str):
+                        try:
+                            v = json.loads(v) if v.strip().startswith("[") else [v]
+                        except ValueError:
+                            v = [v]
+                    parents_patch = [str(x) for x in (v or [])]
+                    continue
                 props2 = ent.properties or {}
                 props2[kk] = (v if not isinstance(v, str) else v[:2000])
                 ent.properties = props2
+        if parents_patch is not None:
+            pr = MultiParentOps.set_parents(self, ent.eid, parents_patch)
+            if not pr.get("ok"):
+                return {"ok": False, "error": f"parents: {pr.get('error')}"}
         if merged_into:
             dst = self._resolve_spec(str(merged_into))
             if dst is None or dst.eid == ent.eid:
