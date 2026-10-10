@@ -87,3 +87,16 @@ test("tilt: the axes follow the screen's rotation; the orbit turns relative to t
   assert.ok(H.tiltOrbit(base, 0, 500).phi <= Math.PI - 0.05);
   assert.ok(H.tiltOrbit(base, 0, -500).phi >= 0.05);
 });
+
+test("the hotword: 'Hey Argus' and whisper's usual misspellings, the rest is the message", () => {
+  const same = (t, hit, rest) => { const w = H.hotword(t); assert.equal(w.hit, hit, t); if (hit) assert.equal(w.rest, rest, t); };
+  same("Hey Argus, turn on the deck lights.", true, "turn on the deck lights.");
+  same("hey, argus!", true, "");
+  same("Argos what's the battery?", true, "what's the battery?");
+  same("OK Angus. How are you", true, "How are you");
+  same("...Hey Argus", true, "");
+  same("I told Argus about it", false);
+  same("hey august", true, "");
+  same("Argusville is a town", false);
+  same("", false);
+});

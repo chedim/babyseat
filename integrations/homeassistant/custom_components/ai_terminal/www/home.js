@@ -153,7 +153,25 @@ function tiltOrbit(base, lr, fb, gain = TILT_GAIN) {
            phi: Math.max(0.05, Math.min(Math.PI - 0.05, base.phi + (fb - base.fb) * d * gain)) };
 }
 
-const HomeLogic = { personSlug, menuEntries, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, angleStep };
+// ---- THE HOTWORD (2026-10-10, the operator: "can you add hotword detection?
+// 'Hey, Argus'"): the browser measures loudness locally; only a burst of
+// speech goes to the LAN's whisper (the PTT path), and only a transcript that
+// starts with the hotword reaches the chat. Opt-in (👂), paused while the page
+// is hidden, while you hold PTT and while Argus speaks; capped.
+const LS_HOTWORD = "membrane.home.hotword";
+const HOT_MIN_S = 0.4, HOT_MAX_S = 8, HOT_END_MS = 650, HOT_PER_MIN = 12, HOT_FOLLOW_MS = 8000;
+const HOT_NAMES = "argus|argos|argus's|angus|argo|august|augustus|arcus|our gus|are gus";
+const HOT_RE = new RegExp("^(?:(?:hey|hi|hay|ok|okay|hello|yo)[\\s,.!-]+)?(?:" + HOT_NAMES + ")\\b[\\s,.!?-]*(.*)$", "i");
+
+/** 'Hey Argus, turn on the lights' -> {hit: true, rest: 'turn on the lights'}. */
+function hotword(text) {
+  const t = String(text || "").trim().replace(/^[^a-z0-9]+/i, "");
+  const m = HOT_RE.exec(t);
+  if (!m) return { hit: false, rest: "" };
+  return { hit: true, rest: (m[1] || "").trim() };
+}
+
+const HomeLogic = { personSlug, menuEntries, hotword, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, angleStep };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
 const HSTYLE = `
@@ -170,14 +188,18 @@ const HSTYLE = `
   .top { position:absolute; top:12px; left:12px; z-index:3; display:flex; gap:6px; align-items:center;
          padding:4px; border-radius:999px; max-width:calc(100% - 24px); }
   .top button { border:0; background:transparent; border-radius:999px; padding:6px 12px; white-space:nowrap; }
-  .top button:hover, .top button.on { background:color-mix(in srgb, var(--primary-color,#3477d6) 28%, transparent); }
+  .top button.on { background:color-mix(in srgb, var(--primary-color,#3477d6) 28%, transparent); }
+  /* hover only where there is one: a phone keeps :hover on the last tapped
+     button, which looked like 📱 stayed on after it was switched off */
+  @media (hover: hover) { .top button:hover { background:color-mix(in srgb, var(--primary-color,#3477d6) 28%, transparent); } }
   .top .ha { font-size:18px; line-height:1; padding:5px 11px; }
   .hamenu { position:absolute; z-index:6; top:58px; left:12px; min-width:220px; max-width:calc(100% - 24px);
             max-height:70vh; max-height:70dvh; overflow:auto; border-radius:14px; padding:6px; display:none; }
   .hamenu.open { display:block; }
   .hamenu a { display:flex; align-items:center; gap:12px; padding:8px 12px; border-radius:10px; color:inherit;
               text-decoration:none; white-space:nowrap; }
-  .hamenu a:hover, .hamenu a:focus-visible { background:color-mix(in srgb, var(--primary-color,#3477d6) 25%, transparent); outline:none; }
+  @media (hover: hover) { .hamenu a:hover { background:color-mix(in srgb, var(--primary-color,#3477d6) 25%, transparent); } }
+  .hamenu a:focus-visible { background:color-mix(in srgb, var(--primary-color,#3477d6) 25%, transparent); outline:none; }
   .hamenu ha-icon { --mdc-icon-size:20px; opacity:.85; }
   .hamenu hr { border:0; border-top:1px solid color-mix(in srgb, var(--divider-color,#888) 50%, transparent); margin:4px 6px; }
   .sbox { position:relative; }
@@ -213,6 +235,9 @@ const HSTYLE = `
   .voice button.on { background:color-mix(in srgb, var(--primary-color,#3477d6) 55%, transparent); }
   .voice button.rec { background:var(--error-color,#c0392b); color:#fff; animation:recpulse 1.1s ease-in-out infinite; }
   .voice button.busy { opacity:.6; }
+  .voice .vsep { width:1px; align-self:stretch; margin:6px 2px; background:color-mix(in srgb, var(--divider-color,#888) 60%, transparent); }
+  .voice button.ear.on { background:color-mix(in srgb, #2e9d5b 60%, transparent); }
+  .voice button.ear.hearing { box-shadow:0 0 0 3px color-mix(in srgb, #2e9d5b 55%, transparent); }
   .vsay { position:absolute; left:0; bottom:calc(100% + 8px); max-width:min(360px, calc(100vw - 32px)); padding:6px 10px;
           border-radius:12px; font-size:13px; line-height:1.35; white-space:normal; display:none; pointer-events:none; }
   .vsay.show { display:block; }
@@ -264,6 +289,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     disconnectedCallback() {
       this._started = false;
       if (this._rec) this._recStop(false);
+      this._hotStop();
+      if (this._onVis) document.removeEventListener("visibilitychange", this._onVis);
       this._hushTts(); this._tiltStop();
       this._listenKeys(false);
       clearInterval(this._follow);
@@ -352,6 +379,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <div class="vsay glass" role="status" aria-live="polite"></div>
           <button class="ptt" title="Hold to talk (or hold Space)" aria-label="Hold to talk">🎙</button>
           <button class="lock" title="Hands-free: tap to start, tap again to send" aria-label="Talk hands-free">🔒</button>
+          <button class="ear" title="Hands-free by name: listen for “Hey Argus” (speech near this device is transcribed on your network)" aria-label="Listen for Hey Argus" aria-pressed="false">👂</button>
+          <span class="vsep" aria-hidden="true"></span>
           <button class="tts" title="Speak membrane's answers" aria-label="Speak answers" aria-pressed="false">🔈</button>
         </div>
         <div class="card glass"><div class="t"></div><div class="k"></div>
@@ -616,6 +645,14 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._onKeyDown = (e) => { if (e.code === "Space" && !e.repeat && !typing(e) && this.isConnected) { e.preventDefault(); this._recStart("ptt"); } };
       this._onKeyUp = (e) => { if (e.code === "Space" && this._rec && this._rec.mode === "ptt" && !typing(e)) { e.preventDefault(); this._recStop(true); } };
       this._listenKeys(true);
+      this._earBtn = root.querySelector(".ear");
+      this._earBtn.addEventListener("click", () => {
+        this._unlockAudio();
+        if (this._hot) { this._hotStop(); lsSet(LS_HOTWORD, "0"); } else { lsSet(LS_HOTWORD, "1"); this._hotStart(); }
+      });
+      this._onVis = () => { if (document.hidden) this._hotPause(true); else this._hotPause(false); };
+      document.addEventListener("visibilitychange", this._onVis);
+      if (lsGet(LS_HOTWORD, "0") === "1") setTimeout(() => this._hotStart(), 800);
       // voice in -> voice out: an answer to something SAID is spoken even with 🔈 off
       this._chat.addEventListener("ai-reply", (e) => {
         const said = this._voiceTurns > 0;
@@ -666,6 +703,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     async _recStart(mode) {
       if (this._rec || this._recBusy) return;
+      this._hotPause(true);
       this._hushTts();                                     // talking over it stops it
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
         this._vsay("no microphone here (it needs https and a browser that allows it)"); return;
@@ -697,6 +735,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       if (rec.ctx) rec.ctx.close().catch(() => {});
       this._ptt.classList.remove("rec"); this._lockBtn.classList.remove("rec");
       if (this._rec === rec) this._rec = null;
+      setTimeout(() => { if (!this._rec) this._hotPause(false); }, 300);
     }
 
     async _recStop(send) {
@@ -738,6 +777,93 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       ta.dispatchEvent(new Event("input", { bubbles: true }));
       if (this._chatBox.classList.contains("hidden")) this.shadowRoot.querySelector(".chatbtn").click();
       send.click();
+    }
+
+    // ---------------------------------------------------------- the hotword
+    async _hotStart() {
+      if (this._hot) return;
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { this._vsay("no microphone here"); return; }
+      const h = this._hot = { cur: null, below: 0, above: 0, floor: 0.004, sends: [], inflight: false, follow: 0, paused: false };
+      this._earBtn.classList.add("on"); this._earBtn.setAttribute("aria-pressed", "true");
+      try {
+        h.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+        if (this._hot !== h) { h.stream.getTracks().forEach((t) => t.stop()); return; }
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        h.ctx = new Ctx(); h.rate = h.ctx.sampleRate;
+        h.src = h.ctx.createMediaStreamSource(h.stream);
+        h.proc = h.ctx.createScriptProcessor(2048, 1, 1);
+        h.proc.onaudioprocess = (ev) => this._hotFrame(h, ev.inputBuffer.getChannelData(0));
+        h.src.connect(h.proc); h.proc.connect(h.ctx.destination);
+        this._vsay("listening for “Hey Argus”");
+      } catch (e) {
+        this._hotStop(); lsSet(LS_HOTWORD, "0");
+        this._vsay("the microphone is blocked: " + ((e && e.name) || e));
+      }
+    }
+
+    _hotStop() {
+      const h = this._hot; this._hot = null;
+      if (this._earBtn) { this._earBtn.classList.remove("on", "hearing"); this._earBtn.setAttribute("aria-pressed", "false"); }
+      if (!h) return;
+      try { h.proc && h.proc.disconnect(); h.src && h.src.disconnect(); } catch (e) { /* gone */ }
+      if (h.stream) h.stream.getTracks().forEach((t) => t.stop());
+      if (h.ctx) h.ctx.close().catch(() => {});
+    }
+
+    _hotPause(on) { if (this._hot) { this._hot.paused = on; if (on) { this._hot.cur = null; this._earBtn.classList.remove("hearing"); } } }
+
+    _hotFrame(h, f32) {
+      if (h.paused || this._rec || this._recBusy || (this._audio && !this._audio.paused) ||
+          (window.speechSynthesis && window.speechSynthesis.speaking)) { h.cur = null; return; }
+      let ss = 0; for (let i = 0; i < f32.length; i++) ss += f32[i] * f32[i];
+      const rms = Math.sqrt(ss / f32.length), thr = Math.max(0.012, h.floor * 3.5);
+      const frameMs = (f32.length / h.rate) * 1000;
+      if (!h.cur) {
+        h.floor = rms < h.floor * 3 ? h.floor * 0.995 + rms * 0.005 : h.floor;     // the room's own noise
+        h.pre = (h.pre || []).concat([new Float32Array(f32)]).slice(-3);
+        h.above = rms >= thr ? h.above + 1 : 0;
+        if (h.above >= 2) { h.cur = h.pre.slice(); h.below = 0; this._earBtn.classList.add("hearing"); }
+        return;
+      }
+      h.cur.push(new Float32Array(f32));
+      h.below = rms < thr * 0.6 ? h.below + frameMs : 0;
+      const len = h.cur.reduce((a, c) => a + c.length, 0) / h.rate;
+      if (h.below >= HOT_END_MS || len >= HOT_MAX_S) {
+        const chunks = h.cur; h.cur = null; this._earBtn.classList.remove("hearing");
+        if (len >= HOT_MIN_S) this._hotCheck(h, chunks);
+      }
+    }
+
+    async _hotCheck(h, chunks) {
+      const now = Date.now();
+      h.sends = h.sends.filter((t) => now - t < 60000);
+      const following = now < h.follow;
+      if (h.inflight || (!following && h.sends.length >= HOT_PER_MIN)) return;   // the brain phone's budget
+      h.sends.push(now); h.inflight = true;
+      const n = chunks.reduce((a, c) => a + c.length, 0), all = new Float32Array(n); let o = 0;
+      for (const c of chunks) { all.set(c, o); o += c.length; }
+      try {
+        const wav = wavBytes(downsample(all, h.rate, STT_RATE), STT_RATE);
+        const r = await this._hass.fetchWithAuth(STT_PATH, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: wav });
+        const d = await r.json().catch(() => ({}));
+        const text = (r.ok && d.text || "").trim();
+        if (!text || this._hot !== h) return;
+        if (following) { h.follow = 0; this._hotSend(text); return; }
+        const w = hotword(text);
+        if (!w.hit) return;                                  // not for us: dropped, nothing kept
+        if (w.rest.split(/\s+/).filter(Boolean).length >= 2) { this._hotSend(w.rest); return; }
+        h.follow = Date.now() + HOT_FOLLOW_MS;
+        this._vsay("yes? (I'm listening)", HOT_FOLLOW_MS);
+      } catch (e) {
+        /* the speech service is away: the ear keeps listening */
+      } finally { h.inflight = false; }
+    }
+
+    _hotSend(text) {
+      const queued = this._busyChat();
+      this._voiceTurns = (this._voiceTurns || 0) + 1;
+      this._sendToChat(text);
+      this._vsay("“" + text + "” — " + (queued ? "cutting in on Argus's turn" : "sent; Argus is thinking…"), 12000);
     }
 
     // ---------------------------------------------------------- speech out
