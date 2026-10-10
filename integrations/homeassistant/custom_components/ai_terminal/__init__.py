@@ -61,6 +61,14 @@ async def async_setup(hass: HomeAssistant, config) -> bool:
         sidebar_icon="mdi:graph-outline", frontend_url_path=FIELD_PANEL_URL_PATH,
         config=field_panel_config(DOMAIN), require_admin=True, update=True)
 
+    # MEMBRANE HOME (2026-10-10): the field in 3D following you + the chat
+    # overlaid; HA's UI one button away
+    from .panel_config import HOME_PANEL_URL_PATH, home_panel_config
+    fe.async_register_built_in_panel(
+        hass, "custom", sidebar_title="Membrane",
+        sidebar_icon="mdi:cube-scan", frontend_url_path=HOME_PANEL_URL_PATH,
+        config=home_panel_config(DOMAIN), require_admin=True, update=True)
+
     async def _close_session(_event):
         sess = component.get("http_session")
         if sess is not None and not sess.closed:

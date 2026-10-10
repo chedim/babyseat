@@ -72,6 +72,16 @@ class TestPanelContract(unittest.TestCase):
         self.assertEqual(FIELD_PANEL_URL_PATH, "membrane-field")
 
 
+    def test_home_panel_contract(self):
+        """Membrane home (2026-10-10): the 3D field + the chat overlaid."""
+        from ai_terminal.panel_config import HOME_PANEL_URL_PATH, home_panel_config
+        inner = home_panel_config()["_panel_custom"]
+        self.assertEqual(inner["name"], "membrane-home-panel")
+        self.assertEqual(inner["module_url"], "/api/ai_terminal/www/home.js")
+        self.assertTrue(inner["trust_external"])
+        self.assertEqual(HOME_PANEL_URL_PATH, "membrane")
+
+
 class TestAssetMimeContract(unittest.TestCase):
     """The nosniff lesson: HA's static serving guessed text/plain for
     .js/.css on the box and the browser BLOCKED the response. The asset
@@ -112,7 +122,7 @@ class TestChatOnlySurface(unittest.TestCase):
         for name in ("terminal.py", "tickets.py", "seat.py"):
             self.assertFalse((self.PKG / name).exists(), name)
         self.assertEqual(sorted(p.name for p in (self.PKG / "www").iterdir()),
-                         ["field.js", "field3d.js", "panel.js", "stranger.js", "three.min.js"])
+                         ["field.js", "field3d.js", "home.js", "panel.js", "stranger.js", "three.min.js"])
 
     def test_panel_speaks_serve_only(self):
         js = (self.PKG / "www" / "panel.js").read_text()

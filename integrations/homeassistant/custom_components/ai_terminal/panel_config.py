@@ -42,6 +42,20 @@ def field_panel_config(domain: str = "ai_terminal") -> dict:
     }}
 
 
+HOME_PANEL_URL_PATH = "membrane"
+HOME_PANEL_ELEMENT = "membrane-home-panel"
+
+
+def home_panel_config(domain: str = "ai_terminal") -> dict:
+    """Membrane home (2026-10-10): the 3D field following you, the chat on
+    glass over it, HA's own UI one button away."""
+    return {"_panel_custom": {
+        "name": HOME_PANEL_ELEMENT,
+        "module_url": f"/api/{domain}/www/home.js",
+        "trust_external": True,
+    }}
+
+
 def static_paths(domain: str = "ai_terminal") -> list[tuple[str, str]]:
     """The (url_path, dir_name) static mounts the integration serves."""
     return [(f"/api/{domain}/www", "www")]

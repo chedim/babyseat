@@ -503,6 +503,21 @@ const STYLE = `
   }
   @media (min-width: 761px) { .sidetoggle { display:none; } .app.sidehidden .side { display:none; }
                               .app.sidehidden .sidetoggle { display:inline-block; } }
+  /* THE OVERLAY (2026-10-10, membrane home): the chat floats over the 3D
+     field -- glass surfaces, the graph visible through the transcript */
+  :host([overlay]) { height:100%; background:transparent; }
+  :host([overlay]) .app.sidehidden .side { display:none; }
+  :host([overlay]) .app.sidehidden .sidetoggle { display:inline-block; }
+  :host([overlay]) .side { background:color-mix(in srgb, var(--card-background-color,#111) 82%, transparent);
+                           backdrop-filter:blur(10px); -webkit-backdrop-filter:blur(10px); }
+  :host([overlay]) .bar, :host([overlay]) .composer {
+    background:color-mix(in srgb, var(--card-background-color,#111) 62%, transparent);
+    backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
+  :host([overlay]) .scroller { background:color-mix(in srgb, var(--primary-background-color,#111) 30%, transparent); }
+  :host([overlay]) .msgs { padding:10px 12px 16px; }
+  :host([overlay]) .hint, :host([overlay]) .modelpick { display:none; }
+  :host([overlay]) .msg:not(.user) .bub, :host([overlay]) .msg:not(.user) > .md {
+    text-shadow:0 1px 2px color-mix(in srgb, var(--primary-background-color,#000) 85%, transparent); }
 `;
 
 function definePanel() {
@@ -585,6 +600,7 @@ function definePanel() {
           </div>
         </section>`;
       this.shadowRoot.append(s, app);
+      if (this.hasAttribute("overlay")) app.classList.add("sidehidden");
       const $ = (q) => app.querySelector(q);
       this._app = app;
       this._list = $(".list");
