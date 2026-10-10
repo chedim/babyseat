@@ -3702,6 +3702,34 @@ def _field_vec(fld, eid: str):
     return None
 
 
+class _Stages:
+    """The gate's stage clock (2026-10-10, the operator: "optimize our
+    membrane pre-llm processes"): mark() after each step; summary() lists the
+    steps that took >= 50 ms; keep() files the round in srv._gate_stages (the
+    last 30, shown in /membrane/state)."""
+    KEEP = 30
+
+    def __init__(self):
+        self.t = time.time()
+        self.marks: list[tuple[str, float]] = []
+
+    def mark(self, name: str) -> None:
+        now = time.time()
+        self.marks.append((name, now - self.t))
+        self.t = now
+
+    def summary(self) -> str:
+        return " ".join(f"{n} {d:.2f}" for n, d in self.marks if d >= 0.05) or "all < 50 ms"
+
+    def keep(self, srv, total: float, **extra) -> None:
+        ring = getattr(srv, "_gate_stages", None)
+        if ring is None:
+            ring = srv._gate_stages = []
+        ring.append({"ts": int(time.time()), "gate_s": total, **extra,
+                     "stages": {n: round(d, 3) for n, d in self.marks}})
+        del ring[:-self.KEEP]
+
+
 STRANGER_PATHS = ("/membrane/stranger/visit", "/membrane/stranger/view",
                   "/membrane/stranger/event", "/membrane/stranger/leave")
 
@@ -3790,6 +3818,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._entity_read(); return
         if path in STRANGER_PATHS:
             self._stranger(path); return
+        if path == "/membrane/gate-stages":           # the gate's stage clock, the last rounds
+            self._json_out({"rounds": list(getattr(self.server, "_gate_stages", None) or [])}); return
         if path == "/membrane/intend":
             self._membrane_intend(); return
         if path == "/membrane/entity-related":
@@ -4535,6 +4565,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # an attr nothing writes).
         srv.last_turn_ts = time.time()
         _t_v1 = time.time()                   # the stage clock's t0
+        _st = _Stages()                       # ...and its splits (2026-10-10: the gate ran 2-28 s)
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length) if length else b""
         try:
@@ -4810,6 +4841,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         except Exception as e:
             print(f"[opencode] turn front error, forwarding raw: {e}", file=sys.stderr)
             self._forward_raw(raw); return
+        _st.mark("front")                     # the intercepts + mem.turn (the query's embedding)
         if turn.vec is None:
             self._forward_raw(raw); return
         vec, query = turn.vec, turn.query
@@ -4833,6 +4865,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 verdict["sim"] = gv.get("sim")
             except Exception as e:
                 print(f"[efgate] error: {e}", file=sys.stderr)
+        _st.mark("efgate")
         if not _is_tool_round:
             mem.remember(turn.query_raw)
         # THE PLANNER'S CONTEXT SIGNAL (the loop's first half): the turn's
@@ -4850,6 +4883,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             srv._last_context_sig = "unknown"
         # ---- INTERNAL: the 'model:' escape hatch only (recall/state were both
         # fully handled above, pre-gate) ----
+        _st.mark("remember")
         q = _last_user_text(body)
         ctx = None
         # THE NULL-RECALL LANE (peer-reported from rosetta-check: 3 of 5
@@ -4925,6 +4959,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                         else _where_delta(srv, _where_we_are(srv, vec, events_only=_massage)))
         if banner_block:
             ctx = (ctx + "\n\n" + banner_block) if ctx else banner_block
+        _st.mark("recall+banner")
         srv._massage_last = None
         if _massage and not _is_tool_round:
             _mf = _efield_of(srv)
@@ -4946,6 +4981,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # the last message the model processed -- code, entity scripts and
         # other sessions quoted, this conversation's own turns counted. The
         # watermark advances only once this turn is delivered.
+        _st.mark("massage")
         fld = _efield_on(srv)
         efield_mark = None
         if fld is not None:
@@ -4964,6 +5000,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # builder existed and was never called -- the OPEN INTENTIONS view
         # and the empty-board nudge ride turns only from now; the nudge
         # is rate-limited inside the builder).
+        _st.mark("field")
         if not _is_tool_round and not _massage:
             try:
                 i_block = _intents_context_block(srv)
@@ -4982,6 +5019,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # same near memory (a repeat/re-ask shape) => -1 (the speech was
         # noise); otherwise 0 (ignored -- no adjustment). One label per
         # delivered batch, on the sig the speech was planned under.
+        _st.mark("intents")
         _pending = getattr(srv, "_pending_speech_label", None)
         srv_act_tab = getattr(srv, "_act_table", None)
         if _pending and srv_act_tab is not None and _pending[0] and _pending[1]:
@@ -5004,6 +5042,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # message. The relay contract (the model re-utters marked lines
         # into the conversation) and the reinforcement label are
         # unchanged.
+        _st.mark("act")
         speak_block = _speak_block(srv)
         up = dict(body)
         # THE REQUEST'S MODEL SPEAKS BARE (the 'membrane/<rung>' =
@@ -5117,6 +5156,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if speak_block:
             _msgs = up.get("messages") or (body.get("messages") or [])
             up["messages"] = _inject_after(_msgs, speak_block)
+        _st.mark("assemble")
         # ---- the orchestration router: model-vs-model on escalations ----
         # Score proposes (fit_hat - delay - price); the REVERSED cost-floor
         # disposes (cheapest eligible cloud holds the floor; locals must
@@ -5161,8 +5201,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             except Exception as e:
                 print(f"[opencode] router error (plain path): {e}",
                       file=sys.stderr)
-        print(f"[proxy] turn staged: gate {round(time.time()-_t_v1,2)}s "
-              f"(model {str(up.get('model'))[:30]})", file=sys.stderr)
+        _st.mark("router")
+        _gate_s = round(time.time() - _t_v1, 2)
+        print(f"[proxy] turn staged: gate {_gate_s}s "
+              f"(model {str(up.get('model'))[:30]}) -- {_st.summary()}", file=sys.stderr)
+        _st.keep(srv, _gate_s, tool_round=_is_tool_round)
         try:
             _t_del = time.time()
             self._v1_deliver(up, raw, query, vec, verdict, ctx)

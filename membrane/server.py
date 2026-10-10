@@ -2094,7 +2094,8 @@ SEAT_READ_PATHS = ("/membrane/state", "/membrane/map/cloud",
                    # the login page's strangers (membrane/strangers.py):
                    # GET, numbers in, shape out
                    "/membrane/stranger/visit", "/membrane/stranger/view",
-                   "/membrane/stranger/event", "/membrane/stranger/leave")
+                   "/membrane/stranger/event", "/membrane/stranger/leave",
+                   "/membrane/gate-stages")
 
 
 def seat_read_url(srv, path_qs: str) -> str | None:
