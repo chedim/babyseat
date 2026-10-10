@@ -142,3 +142,19 @@ test("an avatar remembers when it attached (the home camera's 'most recent mind'
   a.attach("e1", [1, 2, 3], 4000, 1000);
   assert.equal(a.at, 1000);
 });
+
+test("a snapshot keeps the meta without the root and the newest tiles only", () => {
+  const tiles = new Map();
+  for (let i = 0; i < 5; i++) tiles.set("0/" + i, { nodes: [{ id: "n" + i }] });
+  const snap = F.snapshotOf({ pid: "p1", kinds: ["a"], root: { big: true } }, tiles, 3);
+  assert.equal(snap.v, 1);
+  assert.equal(snap.meta.pid, "p1");
+  assert.equal(snap.meta.root, undefined);
+  same(snap.tiles.map((t) => t[0]), ["0/2", "0/3", "0/4"]);
+});
+
+test("the snapshot store answers null where IndexedDB is missing (private mode, node)", async () => {
+  const c = new F.IDBCache("x");
+  assert.equal(await c.get("snapshot"), null);
+  assert.equal(await c.put("snapshot", {}), false);
+});

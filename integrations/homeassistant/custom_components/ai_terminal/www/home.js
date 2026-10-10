@@ -254,6 +254,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           stream: (p, signal) => hass.fetchWithAuth(HSERVE + p, { signal, headers: { Accept: "text/event-stream" } }),
           // the live layer for every signed-in user (the proxy relays it to them all)
           kindColor: hKindColor, isAdmin: true, maxFps: 30, labelIds: () => this._labelIds(),
+          snapshot: "membrane-home-" + ((hass.user && hass.user.id) || "anon"),   // IndexedDB: the last view at once
           onStatus: (t) => { this._v3Txt = t; this._paintStatus(); },
           onSelect: (m) => this._select(m),
           onRelated: () => {},

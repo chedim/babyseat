@@ -3685,7 +3685,7 @@ def _efield_state_rows(srv, fld, m: int = 400) -> list[dict]:
     return out
 
 
-FIELD3D_FRESH_S = 60.0
+FIELD3D_FRESH_S = 300.0       # a rebuild costs seconds on the phone; field.moved keeps loaded nodes current between
 FIELD3D_KEEP = 4
 _field3d_lock = threading.Lock()
 

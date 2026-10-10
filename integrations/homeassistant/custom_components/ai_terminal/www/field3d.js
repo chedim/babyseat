@@ -178,7 +178,52 @@ function edgePulsePairs(groups, hasEdge, cap = 48) {
   return out;
 }
 
-const F3Logic = { locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS };
+/** A tiny IndexedDB key-value store (the viewer's snapshot: it opens on the
+ * last view at once while the seat projects afresh). Every call swallows
+ * errors and answers null: private windows, blocked storage and old browsers
+ * just load from the network as before. */
+class IDBCache {
+  constructor(name) { this.name = name; this._db = null; }
+  _open() {
+    if (this._db) return this._db;
+    this._db = new Promise((res) => {
+      try {
+        if (typeof indexedDB === "undefined") return res(null);
+        const rq = indexedDB.open(this.name, 1);
+        rq.onupgradeneeded = () => rq.result.createObjectStore("kv");
+        rq.onsuccess = () => res(rq.result);
+        rq.onerror = () => res(null);
+        rq.onblocked = () => res(null);
+      } catch (e) { res(null); }
+    });
+    return this._db;
+  }
+  async get(key) {
+    const db = await this._open(); if (!db) return null;
+    return new Promise((res) => {
+      try { const rq = db.transaction("kv").objectStore("kv").get(key); rq.onsuccess = () => res(rq.result || null); rq.onerror = () => res(null); }
+      catch (e) { res(null); }
+    });
+  }
+  async put(key, val) {
+    const db = await this._open(); if (!db) return false;
+    return new Promise((res) => {
+      try { const tx = db.transaction("kv", "readwrite"); tx.objectStore("kv").put(val, key); tx.oncomplete = () => res(true); tx.onerror = () => res(false); }
+      catch (e) { res(false); }
+    });
+  }
+}
+
+/** What a snapshot keeps: the projection's meta and the loaded tiles (the
+ * newest `max`), plain data only. */
+function snapshotOf(info, tiles, max = 400) {
+  const meta = { ...info }; delete meta.root;
+  const out = [];
+  for (const [key, t] of tiles) { out.push([key, t]); }
+  return { v: 1, ts: Date.now(), meta, tiles: out.slice(-max) };
+}
+
+const F3Logic = { snapshotOf, IDBCache, locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS };
 if (typeof module !== "undefined" && module.exports) module.exports = F3Logic;
 
 // ------------------------------------------------------------ three.js
@@ -317,11 +362,39 @@ class Field3DView {
       this._raf = requestAnimationFrame(loop);
     };
     this._raf = requestAnimationFrame(loop);
-    await this.load();
+    // THE SNAPSHOT (2026-10-10, the operator: "it takes forever to load"):
+    // the last view draws at once from IndexedDB; the fresh projection loads
+    // behind it and replaces it when it lands
+    this.snap = this.api.snapshot ? new IDBCache(this.api.snapshot) : null;
+    const old = this.snap ? await this.snap.get("snapshot") : null;
+    if (old && old.v === 1 && old.meta && old.meta.pid && Array.isArray(old.tiles) && this._alive) {
+      this._fromSnapshot(old);
+      this.load().catch((e) => this.api.onStatus("the seat is slow to answer: showing the saved view (" + ((e && e.message) || e) + ")"));
+    } else {
+      await this.load();
+    }
+    if (this.snap) this._snapTimer = setInterval(() => this._saveSnapshot(), 30000);
     if (this.api.isAdmin) this._live();
   }
 
+  _fromSnapshot(snap) {
+    this.stale = true;
+    this.info = snap.meta; this.pid = snap.meta.pid; this.kinds = snap.meta.kinds || [];
+    this.kindRGB = this.kinds.map((k) => new this.THREE.Color(this.api.kindColor(k)));
+    for (const [key, tile] of snap.tiles) if (tile && Array.isArray(tile.nodes)) this._ingest(key, tile);
+    this._lastWant = 0;
+    this._status();
+    this.api.onStatus("saved view (" + Math.round((Date.now() - snap.ts) / 60000) + " min old) · projecting afresh…");
+  }
+
+  _saveSnapshot() {
+    if (!this.snap || this.stale || !this.info || !this.cache.tiles.size) return;
+    this.snap.put("snapshot", snapshotOf(this.info, this.cache.tiles)).catch(() => {});
+  }
+
   stop() {
+    this._saveSnapshot();
+    clearInterval(this._snapTimer);
     this._alive = false; cancelAnimationFrame(this._raf);
     if (this._ro) this._ro.disconnect();
     if (this._streamAbort) this._streamAbort.abort();
@@ -333,7 +406,7 @@ class Field3DView {
   async load() {
     this.api.onStatus("projecting the whole field…");
     const d = await this.api.get("/membrane/map/field3d?axes=" + encodeURIComponent(axesSpec(this.ax)));
-    this.info = d; this.pid = d.pid; this.kinds = d.kinds || [];
+    this.info = d; this.pid = d.pid; this.kinds = d.kinds || []; this.stale = false;
     this.kindRGB = this.kinds.map((k) => new this.THREE.Color(this.api.kindColor(k)));
     for (const k of [...this.cache.tiles.keys()]) this._unload(k);
     this.cache.clear(); this.known.clear(); this.pending.clear(); this.locateCache.clear();
@@ -394,6 +467,7 @@ class Field3DView {
   }
 
   async _fetchTile(t) {
+    if (this.stale) return;               // the saved view's pid: wait for the fresh one
     this.pending.add(t.key);
     try {
       const d = await this.api.get("/membrane/map/tile?pid=" + this.pid + "&l=" + t.l + "&x=" + t.x + "&y=" + t.y + "&z=" + t.z);
@@ -499,7 +573,7 @@ class Field3DView {
     this.camera.position.set(cv.pos[0], cv.pos[1], cv.pos[2]);
     this.camera.lookAt(this.orbit.target[0], this.orbit.target[1], this.orbit.target[2]);
     // the recycler: what the camera wants, fetch / unload, ~4x a second
-    if (this.pid && now - this._lastWant > 250) {
+    if (this.pid && !this.stale && now - this._lastWant > 250) {
       this._lastWant = now;
       const want = wantedTiles({ pos: cv.pos, fwd: cv.fwd, fovY: this.camera.fov * Math.PI / 180, aspect: this.camera.aspect,
         heightPx: this._h || 600 }, { maxLevel: (this.info || {}).max_level || 0, known: this.known });
