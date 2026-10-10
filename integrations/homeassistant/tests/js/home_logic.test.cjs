@@ -82,7 +82,8 @@ test("tilt: the axes follow the screen's rotation; the orbit turns relative to t
   assert.equal(JSON.stringify(H.tiltAxes(10, 20, -90)), "[-10,20]");
   const base = { lr: 0, fb: 40, theta: 1, phi: 1 };
   const o = H.tiltOrbit(base, 10, 40, 1);
-  assert.ok(Math.abs(o.theta - (1 - 10 * Math.PI / 180)) < 1e-9);
+  assert.ok(Math.abs(o.theta - (1 + 10 * Math.PI / 180)) < 1e-9);
   assert.equal(o.phi, 1);
-  assert.ok(H.tiltOrbit(base, 0, -500).phi <= Math.PI - 0.05);
+  assert.ok(H.tiltOrbit(base, 0, 500).phi <= Math.PI - 0.05);
+  assert.ok(H.tiltOrbit(base, 0, -500).phi >= 0.05);
 });

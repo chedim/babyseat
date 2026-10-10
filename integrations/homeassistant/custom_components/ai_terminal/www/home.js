@@ -147,8 +147,10 @@ function tiltAxes(beta, gamma, angle) {
 /** The orbit angles for a tilt relative to where it started. */
 function tiltOrbit(base, lr, fb, gain = TILT_GAIN) {
   const d = Math.PI / 180;
-  return { theta: base.theta - (lr - base.lr) * d * gain,
-           phi: Math.max(0.05, Math.min(Math.PI - 0.05, base.phi - (fb - base.fb) * d * gain)) };
+  // the operator, 2026-10-10: "feels like it should be inverted" -- tilt
+  // right turns the field right, tilt toward you looks from above
+  return { theta: base.theta + (lr - base.lr) * d * gain,
+           phi: Math.max(0.05, Math.min(Math.PI - 0.05, base.phi + (fb - base.fb) * d * gain)) };
 }
 
 const HomeLogic = { personSlug, menuEntries, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, angleStep };
