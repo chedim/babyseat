@@ -173,7 +173,90 @@ function hotword(text) {
   return { hit: true, rest: (m[1] || "").trim() };
 }
 
-const HomeLogic = { personSlug, menuEntries, hotword, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, angleStep };
+// ---- THE LOCAL VOICE (2026-10-10, the operator: "can it all be in-page?
+// pleeease? and fast?"): Vosk (Apache-2.0, WebAssembly, in a worker) hears
+// the wake word and transcribes ON THE DEVICE -- no audio leaves it; replies
+// speak in the device's own voice. ⚙ switches transcription to the brain
+// phone's whisper (more accurate, over the LAN) for whoever wants that.
+const VOSK_JS = "/api/ai_terminal/www/vosk.js";
+const VOSK_MODEL = "/api/ai_terminal/www/vosk-model-en.tar.gz";
+const VOSK_CACHE = "membrane-voice-v1";
+const LS_STT = "membrane.home.stt";          // "device" (default) | "lan"
+// 'argus' is not in the small model's words: these sound like it
+const WAKE_GRAMMAR = ["hey are gus", "hey our gus", "hey angus", "hey august", "hi are gus", "okay are gus",
+                      "are gus", "angus", "[unk]"];
+const WAKE_RE = /\b(are gus|our gus|angus|august)\b/;
+const DICTATE_END_MS = 600, DICTATE_WAIT_MS = 2500;
+
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    if (document.querySelector('script[data-src="' + src + '"]')) { res(); return; }
+    const el = document.createElement("script");
+    el.src = src; el.dataset.src = src; el.onload = () => res(); el.onerror = () => rej(new Error("could not load " + src));
+    document.head.appendChild(el);
+  });
+}
+
+/** The model as a blob: URL, from the browser's Cache Storage after the first time. */
+async function modelBlobUrl(onProgress) {
+  let resp = null, cache = null;
+  try { cache = await caches.open(VOSK_CACHE); resp = await cache.match(VOSK_MODEL); } catch (e) { cache = null; }
+  if (!resp) {
+    const r = await fetch(VOSK_MODEL);
+    if (!r.ok) throw new Error("the voice model is missing (" + r.status + ")");
+    const total = +r.headers.get("Content-Length") || 41e6, reader = r.body.getReader(), parts = [];
+    let got = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      parts.push(value); got += value.length;
+      if (onProgress) onProgress(got, total);
+    }
+    resp = new Response(new Blob(parts, { type: "application/gzip" }));
+    if (cache) { try { await cache.put(VOSK_MODEL, resp.clone()); } catch (e) { /* quota: next time again */ } }
+  }
+  return URL.createObjectURL(await resp.blob());
+}
+
+/** One Vosk model per page (shared by PTT, the ear and every recognizer). */
+function localVoice(onProgress) {
+  if (!window.__membraneVoice) {
+    window.__membraneVoice = (async () => {
+      await loadScript(VOSK_JS);
+      const url = await modelBlobUrl(onProgress);
+      return window.Vosk.createModel(url);
+    })();
+    window.__membraneVoice.catch(() => { window.__membraneVoice = null; });
+  }
+  return window.__membraneVoice;
+}
+
+/** A Vosk recognizer that collects its results (one per pause) and, on
+ * finish(), flushes the rest and answers the whole text. */
+function recognizer(model, rate, grammar, onPartial) {
+  const kr = grammar ? new model.KaldiRecognizer(rate, JSON.stringify(grammar)) : new model.KaldiRecognizer(rate);
+  const r = { kr, texts: [], waiting: null, onResult: null };
+  kr.on("result", (m) => {
+    const t = ((m.result && m.result.text) || "").trim();
+    if (t) r.texts.push(t);
+    if (r.onResult) r.onResult(t);
+    if (r.waiting) { const w = r.waiting; r.waiting = null; w(); }
+  });
+  kr.on("partialresult", (m) => { const t = m.result && m.result.partial; if (t && onPartial) onPartial(t); });
+  r.finish = () => new Promise((res) => { r.waiting = res; kr.retrieveFinalResult(); setTimeout(res, 2500); })
+    .then(() => { try { kr.remove(); } catch (e) { /* gone */ } return r.texts.join(" ").trim(); });
+  r.drop = () => { try { kr.remove(); } catch (e) { /* gone */ } };
+  return r;
+}
+
+/** The device's own voice: English, on-device, not a Google one when there is a choice. */
+function pickVoice(voices, lang = "en") {
+  const en = (voices || []).filter((v) => String(v.lang || "").toLowerCase().startsWith(lang));
+  const local = en.filter((v) => v.localService);
+  return local.find((v) => !/google/i.test(v.name)) || local[0] || null;
+}
+
+const HomeLogic = { personSlug, menuEntries, hotword, pickVoice, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, angleStep };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
 const HSTYLE = `
@@ -246,6 +329,27 @@ const HSTYLE = `
   @keyframes recpulse { 50% { box-shadow:0 0 0 8px color-mix(in srgb, var(--error-color,#c0392b) 30%, transparent); } }
   .card { bottom:76px !important; }
   .top .tilt[hidden] { display:none; }
+  /* THE ORB (Siri-like): listening breathes with your voice, thinking
+     shimmers, speaking pulses; your words float above it */
+  .orb { position:absolute; z-index:4; left:50%; bottom:24px; transform:translateX(-50%); width:120px; height:120px;
+         pointer-events:none; display:none; }
+  .orb.on { display:block; }
+  .orb .core { position:absolute; inset:18px; border-radius:50%; filter:blur(2px);
+               background:conic-gradient(#ff3b8a, #7a5cff, #2ec5ff, #3dffb5, #ff3b8a);
+               transform:scale(var(--s, 1)); transition:transform .08s linear; animation:orbspin 3.2s linear infinite; }
+  .orb .glow { position:absolute; inset:0; border-radius:50%; filter:blur(18px); opacity:.75;
+               background:conic-gradient(#ff3b8a, #7a5cff, #2ec5ff, #3dffb5, #ff3b8a);
+               transform:scale(calc(var(--s, 1) * 1.1)); animation:orbspin 3.2s linear infinite reverse; }
+  .orb.thinking .core, .orb.thinking .glow { animation-duration:1.1s; transform:scale(.8); }
+  .orb.speaking .core { animation:orbspin 2s linear infinite, orbpulse .9s ease-in-out infinite; }
+  @keyframes orbspin { to { rotate:360deg; } }
+  @keyframes orbpulse { 50% { transform:scale(1.12); } }
+  .orbtext { position:absolute; z-index:4; left:50%; bottom:156px; transform:translateX(-50%); max-width:min(640px, calc(100% - 32px));
+             text-align:center; font-size:20px; line-height:1.35; font-weight:500; pointer-events:none; display:none;
+             text-shadow:0 1px 6px color-mix(in srgb, var(--primary-background-color,#000) 80%, transparent); }
+  .orbtext.on { display:block; }
+  @media (max-width: 760px) { .orb { bottom:calc(56dvh + 80px); } .orbtext { bottom:calc(56dvh + 210px); font-size:18px; }
+                              .chat.hidden ~ .orb { bottom:84px; } }
   .msg { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:1;
          pointer-events:none; opacity:.6; white-space:pre-line; text-align:center; padding:24px; }
   @media (max-width: 760px) {
@@ -377,12 +481,15 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         </div>
         <nav class="hamenu glass" role="menu"></nav>
         <div class="chat glass"><ai-terminal-panel overlay></ai-terminal-panel></div>
+        <div class="orb" aria-hidden="true"><div class="glow"></div><div class="core"></div></div>
+        <div class="orbtext" aria-live="polite"></div>
         <div class="voice glass">
           <div class="vsay glass" role="status" aria-live="polite"></div>
           <button class="ptt" title="Hold to talk (or hold Space)" aria-label="Hold to talk">🎙</button>
           <button class="lock" title="Hands-free: tap to start, tap again to send" aria-label="Talk hands-free">🔒</button>
           <button class="ear" title="Hands-free by name: listen for “Hey Argus” (speech near this device is transcribed on your network)" aria-label="Listen for Hey Argus" aria-pressed="false">👂</button>
           <span class="vsep" aria-hidden="true"></span>
+          <button class="eng" title="Where speech is recognised: on this device (private, fast) or on the brain phone (more accurate)" aria-label="Speech recognition engine">⚙</button>
           <button class="tts" title="Speak membrane's answers" aria-label="Speak answers" aria-pressed="false">🔈</button>
         </div>
         <div class="card glass"><div class="t"></div><div class="k"></div>
@@ -647,6 +754,21 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._onKeyDown = (e) => { if (e.code === "Space" && !e.repeat && !typing(e) && this.isConnected) { e.preventDefault(); this._recStart("ptt"); } };
       this._onKeyUp = (e) => { if (e.code === "Space" && this._rec && this._rec.mode === "ptt" && !typing(e)) { e.preventDefault(); this._recStop(true); } };
       this._listenKeys(true);
+      this._engine = lsGet(LS_STT, "device") === "lan" ? "lan" : "device";
+      this._engBtn = root.querySelector(".eng");
+      const paintEng = () => { this._engBtn.textContent = this._engine === "device" ? "⚙" : "⚙ᴸ";
+        this._engBtn.title = this._engine === "device" ? "Speech is recognised ON THIS DEVICE (private, fast). Tap: use the brain phone's whisper (more accurate, over your network)"
+                                                       : "Speech is recognised on the brain phone (whisper, over your network). Tap: on this device"; };
+      paintEng();
+      this._engBtn.addEventListener("click", () => {
+        this._engine = this._engine === "device" ? "lan" : "device"; lsSet(LS_STT, this._engine); paintEng();
+        this._vsay(this._engine === "device" ? "speech recognised on this device" : "speech recognised on the brain phone (whisper)");
+        if (this._hot) { this._hotStop(); this._hotStart(); }
+      });
+      if (window.speechSynthesis) {
+        const load = () => { this._voice = pickVoice(window.speechSynthesis.getVoices()); };
+        load(); window.speechSynthesis.addEventListener && window.speechSynthesis.addEventListener("voiceschanged", load);
+      }
       this._earBtn = root.querySelector(".ear");
       this._earBtn.addEventListener("click", () => {
         this._unlockAudio();
@@ -660,6 +782,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const said = this._voiceTurns > 0;
         if (said) this._voiceTurns -= 1;
         if ((this._ttsOn || said) && e.detail && e.detail.text) this._speak(e.detail.text);
+        else this._orb(null);                              // answered (on screen): the orb rests
       });
     }
 
@@ -697,6 +820,28 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       return !!(st && st.type && st.type !== "idle");
     }
 
+    /** The orb: null | "listening" | "thinking" | "speaking". */
+    _orb(mode) {
+      const o = this.shadowRoot.querySelector(".orb"), t = this.shadowRoot.querySelector(".orbtext");
+      if (!o) return;
+      clearTimeout(this._orbT); clearTimeout(this._orbMax);
+      if (mode === "thinking") this._orbMax = setTimeout(() => this._orb(null), 5 * 60000);   // never shimmer forever
+      o.classList.toggle("on", !!mode);
+      o.classList.toggle("thinking", mode === "thinking");
+      o.classList.toggle("speaking", mode === "speaking");
+      if (!mode) { o.style.setProperty("--s", "1"); this._orbT = setTimeout(() => t.classList.remove("on"), 2500); }
+      if (mode === "listening") { t.textContent = ""; t.classList.remove("on"); }
+    }
+    _orbText(text) {
+      const t = this.shadowRoot.querySelector(".orbtext"); if (!t) return;
+      t.textContent = text || ""; t.classList.toggle("on", !!text);
+    }
+    _orbLevel(rms) {
+      const o = this.shadowRoot.querySelector(".orb");
+      if (!o || !o.classList.contains("on") || o.classList.contains("thinking") || o.classList.contains("speaking")) return;
+      o.style.setProperty("--s", String(Math.min(1.5, 0.85 + Math.sqrt(rms) * 2.2)));
+    }
+
     _paintTts() {
       this._ttsBtn.classList.toggle("on", this._ttsOn);
       this._ttsBtn.textContent = this._ttsOn ? "🔊" : "🔈";
@@ -718,9 +863,32 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const Ctx = window.AudioContext || window.webkitAudioContext;
         rec.ctx = new Ctx();
         rec.src = rec.ctx.createMediaStreamSource(rec.stream);
-        rec.proc = rec.ctx.createScriptProcessor(4096, 1, 1);
-        rec.proc.onaudioprocess = (ev) => rec.chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
+        rec.proc = rec.ctx.createScriptProcessor(2048, 1, 1);
+        rec.local = this._engine === "device";
+        // while the on-device model loads (the first time only), audio is kept and fed after
+        this._orb("listening");
+        rec.spoke = false; rec.silent = 0;
+        rec.proc.onaudioprocess = (ev) => {
+          const f = ev.inputBuffer.getChannelData(0);
+          let ss = 0; for (let i = 0; i < f.length; i += 2) ss += f[i] * f[i];
+          const rms = Math.sqrt(ss / (f.length / 2)); this._orbLevel(rms);
+          if (rec.local && rec.mode === "lock") {           // Siri-like: a pause ends it
+            if (rms > 0.02) { rec.spoke = true; rec.silent = 0; } else rec.silent += (f.length / rec.ctx.sampleRate) * 1000;
+            if (rec.spoke && rec.silent > 1200 && this._rec === rec) setTimeout(() => this._recStop(true), 0);
+          }
+          if (rec.vr) rec.vr.kr.acceptWaveform(ev.inputBuffer);
+          else rec.chunks.push(new Float32Array(f));
+        };
         rec.src.connect(rec.proc); rec.proc.connect(rec.ctx.destination);
+        if (rec.local) {
+          this._voiceModel().then((model) => {
+            if (this._rec !== rec && !rec.stopping) return;
+            rec.vr = recognizer(model, rec.ctx.sampleRate, null, (t) => { this._vsay("… " + t, 0); this._orbText(t); });
+            for (const c of rec.chunks) rec.vr.kr.acceptWaveformFloat(c, rec.ctx.sampleRate);
+            rec.chunks = [];
+            if (rec.onReady) rec.onReady();
+          }).catch((e) => { rec.failed = e; if (rec.onReady) rec.onReady(); this._vsay("the on-device voice failed: " + ((e && e.message) || e)); });
+        }
         rec.timer = setTimeout(() => { if (this._rec === rec) this._recStop(true); }, REC_MAX_S * 1000);
         this._vsay(mode === "lock" ? "listening… tap 🔒 again to send" : "listening… release to send", 0);
       } catch (e) {
@@ -743,7 +911,9 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     async _recStop(send) {
       const rec = this._rec; if (!rec) return;
       const rate = rec.ctx ? rec.ctx.sampleRate : 48000;
+      rec.stopping = true;
       this._recCleanup(rec);
+      if (rec.local) return this._recStopLocal(rec, send);
       const n = rec.chunks.reduce((a, c) => a + c.length, 0);
       if (!send || n / rate < REC_MIN_S) { this._vsay(send ? "too short to hear" : ""); return; }
       const all = new Float32Array(n); let o = 0;
@@ -752,23 +922,50 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       if (Math.sqrt(ss / Math.max(1, n / 4)) < 0.004) { this._vsay("didn't hear anything (is the mic muted?)"); return; }   // silence: whisper would invent "You"
       const wav = wavBytes(downsample(all, rate, STT_RATE), STT_RATE);
       this._recBusy = true; this._ptt.classList.add("busy"); this._lockBtn.classList.add("busy");
-      this._vsay("transcribing…", 0);
+      this._vsay("transcribing…", 0); this._orb("thinking");
       try {
         const r = await this._hass.fetchWithAuth(STT_PATH, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: wav });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d.error || ("speech service " + r.status));
         const text = (d.text || "").trim();
-        if (!text) { this._vsay("didn't catch that"); return; }
-        const queued = this._busyChat();
-        this._voiceTurns = (this._voiceTurns || 0) + 1;
-        this._sendToChat(text);
-        this._vsay("“" + text + "” — " + (queued ? "Argus is still on an earlier turn; yours is queued"
-                                                  : "sent; Argus is thinking…"), 12000);
+        if (!text) { this._vsay("didn't catch that"); this._orb(null); return; }
+        this._sendSaid(text);
       } catch (e) {
         this._vsay("couldn't transcribe: " + ((e && e.message) || e));
       } finally {
         this._recBusy = false; this._ptt.classList.remove("busy"); this._lockBtn.classList.remove("busy");
       }
+    }
+
+    async _recStopLocal(rec, send) {
+      if (!send) { if (rec.vr) rec.vr.drop(); this._orb(null); return; }
+      this._recBusy = true; this._ptt.classList.add("busy"); this._lockBtn.classList.add("busy");
+      try {
+        if (!rec.vr && !rec.failed) {                       // still loading: wait for it
+          this._vsay("loading the on-device voice…", 0);
+          await new Promise((res) => { rec.onReady = res; });
+        }
+        if (!rec.vr) return;
+        const text = await rec.vr.finish();
+        if (!text) { this._vsay("didn't catch that"); this._orb(null); return; }
+        this._sendSaid(text);
+      } finally {
+        this._recBusy = false; this._ptt.classList.remove("busy"); this._lockBtn.classList.remove("busy");
+      }
+    }
+
+    _sendSaid(text, cut) {
+      this._orbText(text); this._orb("thinking");
+      const queued = this._busyChat();
+      this._voiceTurns = (this._voiceTurns || 0) + 1;
+      this._sendToChat(text);
+      this._vsay("“" + text + "” — " + (queued ? "cutting in on Argus's turn" : "sent; Argus is thinking…"), 12000);
+    }
+
+    /** The on-device model, with its first-time download in the bubble. */
+    _voiceModel() {
+      return localVoice((got, total) => this._vsay("loading the on-device voice (once): " +
+        Math.round(got / 1e6) + " / " + Math.round(total / 1e6) + " MB", 0));
     }
 
     _sendToChat(text) {
@@ -795,7 +992,13 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         h.ctx = new Ctx(); h.rate = h.ctx.sampleRate;
         h.src = h.ctx.createMediaStreamSource(h.stream);
         h.proc = h.ctx.createScriptProcessor(2048, 1, 1);
-        h.proc.onaudioprocess = (ev) => this._hotFrame(h, ev.inputBuffer.getChannelData(0));
+        h.local = this._engine === "device";
+        h.proc.onaudioprocess = (ev) => (h.local ? this._hotLocalFrame(h, ev.inputBuffer) : this._hotFrame(h, ev.inputBuffer.getChannelData(0)));
+        if (h.local) {
+          h.model = await this._voiceModel();
+          if (this._hot !== h) return;
+          this._wakeRecognizer(h);
+        }
         h.src.connect(h.proc); h.proc.connect(h.ctx.destination);
         // started without a tap (remembered from last time), the browser
         // keeps audio SUSPENDED: the first tap anywhere wakes it
@@ -822,6 +1025,73 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       try { h.proc && h.proc.disconnect(); h.src && h.src.disconnect(); } catch (e) { /* gone */ }
       if (h.stream) h.stream.getTracks().forEach((t) => t.stop());
       if (h.ctx) h.ctx.close().catch(() => {});
+    }
+
+    // ---- the wake word ON THE DEVICE: every frame to a grammar-bound
+    // recognizer; its partial result says the name within a few hundred ms
+    _wakeRecognizer(h) {
+      if (h.wake) h.wake.drop();
+      h.wake = recognizer(h.model, h.rate, WAKE_GRAMMAR, (t) => this._localWake(h, t));
+      h.wake.onResult = (t) => this._localWake(h, t);
+      h.state = "wake";
+    }
+
+    _localWake(h, text) {
+      if (h.state !== "wake" || !WAKE_RE.test(String(text || ""))) return;
+      this._hotHeard(h);                                   // the chime, now
+      this._dictate(h, false);
+    }
+
+    /** Transcribe what follows (on the device): the same breath after the
+     * name, or -- after a bare "Hey Argus" -- the next sentence. */
+    _dictate(h, follow) {
+      h.state = "dictate"; h.follow = follow; h.spoke = !follow; h.silent = 0; h.dStart = performance.now();
+      h.free = recognizer(h.model, h.rate, null, (t) => { this._vsay("… " + t, 0); this._orbText(t); });
+      if (!follow) for (const c of h.ring || []) h.free.kr.acceptWaveformFloat(c, h.rate);   // the name's own breath
+      h.ring = [];
+      this._orb("listening");
+    }
+
+    _hotLocalFrame(h, buf) {
+      const f32 = buf.getChannelData(0);
+      const busy = h.paused || h.muteUntil > performance.now() || this._rec || this._recBusy ||
+        (this._audio && !this._audio.paused) || (window.speechSynthesis && window.speechSynthesis.speaking);
+      let ss = 0; for (let i = 0; i < f32.length; i++) ss += f32[i] * f32[i];
+      const rms = Math.sqrt(ss / f32.length), thr = Math.max(0.012, h.floor * 3.5);
+      this._orbLevel(rms);
+      if (h.state === "wake") {
+        if (busy) return;
+        if (rms < h.floor * 3) h.floor = h.floor * 0.995 + rms * 0.005;
+        const copy = new Float32Array(f32);
+        h.ring = (h.ring || []).concat([copy]);
+        while (h.ring.length > Math.ceil(1.6 * h.rate / f32.length)) h.ring.shift();
+        h.wake.kr.acceptWaveform(buf);
+        return;
+      }
+      if (h.state !== "dictate") return;                   // finishing: frames are not needed
+      h.free.kr.acceptWaveform(buf);
+      const ms = (f32.length / h.rate) * 1000;
+      if (rms >= thr) { h.spoke = true; h.silent = 0; } else h.silent += ms;
+      const age = performance.now() - h.dStart;
+      if ((h.spoke && h.silent >= DICTATE_END_MS) || (!h.spoke && age > (h.follow ? HOT_FOLLOW_MS : DICTATE_WAIT_MS)) || age > 15000) {
+        this._dictateDone(h);
+      }
+    }
+
+    async _dictateDone(h) {
+      h.state = "busy";
+      const follow = h.follow, text = await h.free.finish();
+      if (this._hot !== h) return;
+      this._wakeRecognizer(h);
+      if (follow) {
+        if (text) this._sendSaid(hotword(text).hit ? hotword(text).rest || text : text);
+        else { this._vsay("didn't catch that"); this._orb(null); }
+        return;
+      }
+      const w = hotword(text), rest = w.hit ? w.rest : text.replace(/^\s*(hey|hi|okay|ok)\s+(are gus|our gus|angus|august)\b/i, "").trim();
+      if (rest.split(/\s+/).filter(Boolean).length >= 2) { this._sendSaid(rest); return; }
+      await this._hotAck(h);
+      if (this._hot === h) this._dictate(h, true);
     }
 
     _hotPause(on) { if (this._hot) { this._hot.paused = on; if (on) { this._hot.cur = null; this._earBtn.classList.remove("hearing"); } } }
@@ -915,6 +1185,12 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     async _hotAck(h) {
       const ack = HOT_ACKS[Math.floor(Math.random() * HOT_ACKS.length)];
       this._vsay("“" + ack + "” (say it now)", HOT_FOLLOW_MS);
+      this._orbText(ack); this._orb("speaking");
+      if (this._voice && window.speechSynthesis) {          // on the device, and wait for it (the mic must not hear it)
+        await this._say1(ack);
+        this._orb("listening");
+        return;
+      }
       const url = (this._ackUrls || {})[ack];
       h.muteUntil = performance.now() + 900;
       if (url && this._player) {
@@ -924,7 +1200,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     }
 
     async _prefetchAcks() {
-      if (this._ackUrls) return;
+      if (this._ackUrls || this._voice) return;
       const engine = this._ttsEngine(); if (!engine) return;
       this._ackUrls = {};
       for (const a of HOT_ACKS) {
@@ -952,8 +1228,36 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       if (window.speechSynthesis) window.speechSynthesis.cancel();
     }
 
+    /** One utterance in the device's own voice; resolves when it ends. */
+    _say1(text) {
+      return new Promise((res) => {
+        try {
+          const u = new SpeechSynthesisUtterance(text);
+          if (this._voice) { u.voice = this._voice; u.lang = this._voice.lang; }
+          u.onend = u.onerror = () => res();
+          window.speechSynthesis.speak(u);
+          setTimeout(res, 2000 + text.length * 120);        // a stuck engine never holds the mic
+        } catch (e) { res(); }
+      });
+    }
+
     async _speak(text) {
       this._hushTts();
+      if (this._voice && window.speechSynthesis) {          // ON THE DEVICE: nothing sent anywhere
+        const gen = this._ttsGen;
+        this._orb("speaking");
+        for (const chunk of speechChunks(text)) {
+          if (gen !== this._ttsGen) return;
+          this._orbText(chunk);
+          await this._say1(chunk);
+        }
+        if (gen === this._ttsGen) this._orb(null);
+        return;
+      }
+      if (!this._noLocalVoiceSaid) {
+        this._noLocalVoiceSaid = true;
+        this._vsay("this device has no voice of its own: using Home Assistant's", 5000);
+      }
       const gen = this._ttsGen, engine = this._ttsEngine();
       for (const chunk of speechChunks(text)) {
         if (gen !== this._ttsGen || !this._ttsOn) return;

@@ -121,8 +121,9 @@ class TestChatOnlySurface(unittest.TestCase):
     def test_no_terminal_modules(self):
         for name in ("terminal.py", "tickets.py", "seat.py"):
             self.assertFalse((self.PKG / name).exists(), name)
-        self.assertEqual(sorted(p.name for p in (self.PKG / "www").iterdir()),
-                         ["field.js", "field3d.js", "home.js", "panel.js", "stranger.js", "three.min.js"])
+        # the on-device voice model is fetched, not committed (scripts/fetch-voice-model.sh)
+        self.assertEqual(sorted(p.name for p in (self.PKG / "www").iterdir() if p.name != "vosk-model-en.tar.gz"),
+                         ["field.js", "field3d.js", "home.js", "panel.js", "stranger.js", "three.min.js", "vosk.js"])
 
     def test_panel_speaks_serve_only(self):
         js = (self.PKG / "www" / "panel.js").read_text()

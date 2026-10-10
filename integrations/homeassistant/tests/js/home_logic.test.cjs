@@ -100,3 +100,17 @@ test("the hotword: 'Hey Argus' and whisper's usual misspellings, the rest is the
   same("Argusville is a town", false);
   same("", false);
 });
+
+test("the device's own voice: English, on-device, not Google's when there is a choice", () => {
+  const v = (name, lang, local) => ({ name, lang, localService: local });
+  assert.equal(H.pickVoice([v("Google US English", "en-US", false), v("Samantha", "en-US", true)]).name, "Samantha");
+  assert.equal(H.pickVoice([v("Google UK", "en-GB", true), v("Daniel", "en-GB", true)]).name, "Daniel");
+  assert.equal(H.pickVoice([v("Google US English", "en-US", true)]).name, "Google US English");   // on-device anyway
+  assert.equal(H.pickVoice([v("Google US English", "en-US", false)]), null);                       // network-only: no
+  assert.equal(H.pickVoice([]), null);
+});
+
+test("the local engine's spellings of the name wake it and are stripped from the message", () => {
+  assert.equal(H.hotword("hey are gus turn on the lights").rest, "turn on the lights");
+  assert.equal(H.hotword("hey our gus").hit, true);
+});

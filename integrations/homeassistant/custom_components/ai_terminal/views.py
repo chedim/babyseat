@@ -26,6 +26,7 @@ class AssetView(HomeAssistantView):
         ".css": "text/css",
         ".html": "text/html",
         ".map": "application/json",
+        ".gz": "application/gzip",        # the on-device voice model (vosk)
     }
 
     async def get(self, request, asset: str = ""):
@@ -46,8 +47,11 @@ class AssetView(HomeAssistantView):
             _read_bytes, path)               # no blocking open on the loop
         # the module URL never changes: revalidate, or a browser keeps
         # running the previous panel after a deploy
+        # the voice engine and model are big and never change in place: cached
+        # (a week); everything else revalidates on every load
+        cache = "public, max-age=604800" if asset.startswith("vosk") else "no-cache"
         return web.Response(body=body, content_type=ctype,
-                            headers={"Cache-Control": "no-cache"})
+                            headers={"Cache-Control": cache})
 
 
 def _read_bytes(path: str) -> bytes:

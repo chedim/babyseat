@@ -72,3 +72,4 @@ recon.txt
 :memory:
 :memory:.*
 *.migrated
+integrations/homeassistant/custom_components/ai_terminal/www/vosk-model-en.tar.gz
