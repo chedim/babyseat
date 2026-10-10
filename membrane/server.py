@@ -942,6 +942,21 @@ class TurnRunner:
                           "status": {"type": "idle"}, "sessionID": sid})
         self.hub.publish({"type": "session.idle", "sessionID": sid})
 
+    def preempt(self, sid: str) -> bool:
+        """A PERSON SPOKE (2026-10-10, the operator: "interrupt the chat loop
+        whenever there is a message"): the running turn of this session is cut
+        now -- the abort flag (between rounds) + its model socket (a round
+        blocked in the model) -- and its finally drains the queue, so the
+        person's message runs next. Unlike Stop, auto-chat stays on: the loop
+        goes on, with the person's message in it. False when nothing runs."""
+        running = sid in (getattr(self, "_turn_stops", None) or {}) or sid in (getattr(self, "_busy", None) or {})
+        if not running:
+            return False
+        self._aborting = getattr(self, "_aborting", None) or set()
+        self._aborting.add(sid)
+        self._kill_turn_socket(sid)
+        return True
+
     def _kill_turn_socket(self, sid: str) -> None:
         """THE ABORT'S TEETH (the wedged round's fast kill, 2026-10-07):
         the abort flag is only checked BETWEEN rounds -- a turn wedged
@@ -1121,6 +1136,12 @@ class TurnRunner:
             # (two queued messages answered 11x and 7x, alternating)
             guard.acquire()
         elif not got:
+            # a PERSON's message does not wait behind a running turn: that
+            # turn is cut and this one goes next (loops and goals still wait)
+            if _from_person(text, user_parts):
+                if self.preempt(sid):
+                    print(f"[serve] {sid}: a person spoke -- the running turn is cut, theirs is next",
+                          file=sys.stderr)
             depth = self._queued_depth(sid)
             if depth >= self.queue_depth_max:
                 # THE FLOOD GUARD: too many turns already waiting in the
@@ -2049,6 +2070,19 @@ def mcp_executor(port: int):
 # onto the /v1 proxy -- that proxy binds 127.0.0.1 with no auth and has
 # write routes; the basic-authed serve passes exactly these, GET only (the
 # HA field dashboard + its sensors: state, the universe map, the drawer).
+def _from_person(text, parts=None) -> bool:
+    """Does this user message come from a PERSON -- the HA proxy's / calld's
+    '[HA user: <name>]' speaker line, in the text or a part? (A loop's goal
+    pulse, the auto-chat's own lines and membrane's voice carry none.)"""
+    from .speakers import split_speaker
+    if split_speaker(str(text or ""))[0]:
+        return True
+    for p in parts or []:
+        if isinstance(p, dict) and p.get("type") == "text" and split_speaker(str(p.get("text") or ""))[0]:
+            return True
+    return False
+
+
 SEAT_READ_PATHS = ("/membrane/state", "/membrane/map/cloud",
                    "/membrane/map/entities", "/membrane/map/axes",
                    "/membrane/map/axis", "/membrane/map/field",
