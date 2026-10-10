@@ -165,13 +165,12 @@ const HOT_ACKS = ["Yes?", "Uh-huh?", "Mm-hm?", "I'm listening."];
 const HOT_NAMES = "argus|argos|argus's|angus|argo|august|augustus|arcus|our gus|are gus|are guess|our guess|gus";
 const HOT_RE = new RegExp("^(?:(?:hey|hi|hay|ok|okay|hello|yo)[\\s,.!-]+)?(?:" + HOT_NAMES + ")\\b[\\s,.!?-]*(.*)$", "i");
 
-/** What gets spoken: the first few sentences, "the rest is in the chat". */
+/** What gets spoken: the message, up to the safety net. */
 function speakable(text) {
   const all = speechChunks(text);
   const out = []; let n = 0;
   for (const c of all) { if (out.length >= SPEAK_MAX_SENTENCES || n + c.length > SPEAK_MAX_CHARS) break; out.push(c); n += c.length; }
   if (!out.length && all.length) out.push(all[0].slice(0, SPEAK_MAX_CHARS));
-  if (out.length < all.length) out.push("The rest is in the chat.");
   return out;
 }
 
@@ -200,7 +199,9 @@ const WAKE_NAMES = ["are gus", "our gus", "are guess", "our guess", "angus", "au
 const WAKE_GREETS = ["hey", "hay", "hi", "okay", "ok"];
 const WAKE_GRAMMAR = WAKE_GREETS.flatMap((g) => WAKE_NAMES.map((n) => g + " " + n)).concat(["[unk]"]);
 const WAKE_RE = new RegExp("\\b(" + WAKE_GREETS.join("|") + ") (" + WAKE_NAMES.join("|") + ")\\b");
-const SPEAK_MAX_SENTENCES = 3, SPEAK_MAX_CHARS = 380;    // Siri-short: the rest stays in the chat
+// a safety net for very long messages, cut silently (the operator didn't want
+// "the rest is in the chat"; answers are short now and he can be interrupted)
+const SPEAK_MAX_SENTENCES = 12, SPEAK_MAX_CHARS = 1500;
 const DICTATE_END_MS = 600, DICTATE_WAIT_MS = 2500;
 
 function loadScript(src) {

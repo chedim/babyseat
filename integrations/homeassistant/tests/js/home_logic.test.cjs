@@ -115,10 +115,12 @@ test("the local engine's spellings of the name wake it and are stripped from the
   assert.equal(H.hotword("hey our gus").hit, true);
 });
 
-test("speech is Siri-short: three sentences at most, then a pointer to the chat", () => {
-  const long = "One. Two. Three. Four. Five.";
-  assert.equal(JSON.stringify(H.speakable(long)), JSON.stringify(["One.", "Two.", "Three.", "The rest is in the chat."]));
-  assert.equal(JSON.stringify(H.speakable("Just this.")), JSON.stringify(["Just this."]));
+test("speech reads the message whole, cut silently only past a long safety net", () => {
+  assert.equal(JSON.stringify(H.speakable("One. Two. Three. Four. Five.")), JSON.stringify(["One.", "Two.", "Three.", "Four.", "Five."]));
+  const many = Array.from({ length: 20 }, (_, i) => "Sentence " + i + ".").join(" ");
+  const out = H.speakable(many);
+  assert.equal(out.length, 12);
+  assert.ok(!out.some((c) => /rest is in the chat/i.test(c)));
 });
 
 test("the wake phrase: greetings + the model's spellings of Argus", () => {
