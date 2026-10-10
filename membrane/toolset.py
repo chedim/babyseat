@@ -257,12 +257,21 @@ def _scripts_of(args: dict) -> dict:
     return sc if isinstance(sc, dict) else {}
 
 
+_LEGACY_FAMILY = {leg: fam for fam, f in FAMILIES.items() for leg in f["actions"].values()}
+
+
 def resolve(name: str, args: dict) -> tuple[str, dict]:
     """(existing tool name, its args) for a family call; an existing tool's
     own name passes through; ValueError names the valid actions."""
     args = dict(args or {})
     fam = FAMILIES.get(name)
     if fam is None:
+        # an OLD member's name carrying a family action (entity_link +
+        # action='each' -- the seat's habit, 2026-10-10) is the family's call
+        owner = _LEGACY_FAMILY.get(name)
+        act = str(args.get("action") or "")
+        if owner and act and act in FAMILIES[owner]["actions"] and FAMILIES[owner]["actions"][act] != name:
+            return resolve(owner, args)
         if name == "entity_edit" and "parents" in args:
             # the old name drops unknown fields: parents ride the properties patch
             # (the order-replacing path) -- the probe's swap died here twice

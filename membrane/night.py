@@ -1805,6 +1805,14 @@ def entity_link(srv, est, fld, mem, executor_spec: str,
         _bad = lint_command(_sp)
         if _bad:
             return {"ok": False, "error": f"refused {_sp[:60]!r}: {_bad}"}
+        # a bare word that names a defined METHOD is not a shell command (it ran
+        # as 'sh: status: not found' and minted a colliding stub, 2026-10-10)
+        if est is not None and re.fullmatch(r"[A-Za-z_][\w.-]*", _sp.strip()) \
+                and est._resolve_spec(_sp.strip()) is None:
+            _mn = _sp.strip().split(".")[-1]
+            if any((d.properties or {}).get("method_name") == _mn for d in list((est.docs or {}).values())):
+                return {"ok": False, "error": f"{_sp!r} is a method, not a command line -- "
+                                              f"exec(action='call', object=<entity>, method='{_mn}')"}
     if len(specs) > EXEC_LINK_BATCH_CAP:
         return {"ok": False,
                 "error": f"failed to link: batch cap {EXEC_LINK_BATCH_CAP} "
