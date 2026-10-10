@@ -1186,6 +1186,8 @@ function definePanel() {
       this._ta.value = "";
       this._grow();
       this._stick = true;
+      // a message sent: whatever is being read aloud stops (membrane home)
+      this.dispatchEvent(new CustomEvent("ai-sent", { bubbles: true, composed: true }));
       if (!this._busy()) {
         this._chat.status = { type: "busy", since: Date.now() };
         this._paintStatus();

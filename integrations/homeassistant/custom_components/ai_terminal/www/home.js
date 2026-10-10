@@ -781,7 +781,6 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       // a laptop's PTT: hold Space anywhere but a text box
       const typing = (e) => e.composedPath().some((n) => n && (n.tagName === "TEXTAREA" || n.tagName === "INPUT" || n.isContentEditable));
       this._onKeyDown = (e) => {
-        if (e.key === "Escape" && this._speaking) { this._hushTts(); this._orb(null); this._orbText(""); return; }
         if (e.code === "Space" && !e.repeat && !typing(e) && this.isConnected) { e.preventDefault(); this._recStart("ptt"); }
       };
       this._onKeyUp = (e) => { if (e.code === "Space" && this._rec && this._rec.mode === "ptt" && !typing(e)) { e.preventDefault(); this._recStop(true); } };
@@ -801,15 +800,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const load = () => { this._voice = pickVoice(window.speechSynthesis.getVoices(), "en", lsGet(LS_VOICE, "")); };
         load(); window.speechSynthesis.addEventListener && window.speechSynthesis.addEventListener("voiceschanged", load);
       }
-      // a tap ON THE FIELD stops him talking (the graph, the orb) -- not the
-      // chat (typing a reply while he talks), menus or buttons
-      root.addEventListener("pointerdown", (e) => {
-        if (!this._speaking) return;
-        const path = e.composedPath();
-        if (path.some((n) => n && n.classList && (n.classList.contains("chat") || n.classList.contains("top") ||
-            n.classList.contains("voice") || n.classList.contains("hamenu") || n.classList.contains("card")))) return;
-        this._hushTts(); this._orb(null); this._orbText("");
-      }, true);
+      // WHAT STOPS HIM (the operator: "only a tap that sends a message or starts
+      // the microphone, or 'Hey Argus'"): sending (below), 🎙/🔒 (_recStart),
+      // his name (_localWake) -- nothing else
+      this._chat.addEventListener("ai-sent", () => { if (this._speaking || (this._speechQ || []).length) { this._hushTts(); this._orb(null); this._orbText(""); } });
       this._earBtn = root.querySelector(".ear");
       this._earBtn.addEventListener("click", () => {
         this._unlockAudio();
