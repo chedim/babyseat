@@ -194,3 +194,10 @@ test("voice: the bubble names the mode that spoke (the recall/walk A/B)", () => 
   assert.ok(L.voiceHtml({ id: "v1", text: "Hi.", mode: "recall" }).includes("· recall"));
   assert.ok(!L.voiceHtml({ id: "v2", text: "Hi." }).includes("vmode"));
 });
+
+test("a fresh tab on the default dashboard lands on membrane home; deep links and HA-chosen tabs don't", () => {
+  const land = (p, ha) => L.membraneLanding(p, ha);
+  for (const p of ["/", "/lovelace", "/lovelace/", "/lovelace/0", "/lovelace/default_view", "/home"]) assert.ok(land(p, false), p);
+  for (const p of ["/config/integrations", "/lovelace-boat/0", "/lovelace/0/edit", "/history", "/membrane", "/ai-terminal"]) assert.ok(!land(p, false), p);
+  assert.ok(!land("/", true));
+});

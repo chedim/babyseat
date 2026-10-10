@@ -162,6 +162,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     }
 
     _toHA() {
+      // this tab stays in HA until it is closed (panel.js's landing rule)
+      try { sessionStorage.setItem("membrane.home.ha", "1"); } catch (e) { /* private mode */ }
       this._dock("restore");
       history.pushState(null, "", "/lovelace");
       window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
@@ -250,7 +252,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const api = {
           get: (p) => this._get(p),
           stream: (p, signal) => hass.fetchWithAuth(HSERVE + p, { signal, headers: { Accept: "text/event-stream" } }),
-          kindColor: hKindColor, isAdmin: !!(hass.user && hass.user.is_admin), labels: false, maxFps: 30,
+          // the live layer for every signed-in user (the proxy relays it to them all)
+          kindColor: hKindColor, isAdmin: true, labels: false, maxFps: 30,
           onStatus: (t) => { this._v3Txt = t; this._paintStatus(); },
           onSelect: (m) => this._select(m),
           onRelated: () => {},

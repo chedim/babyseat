@@ -36,13 +36,15 @@ class TestMindsModels(unittest.TestCase):
 
 class TestLiveLayer(unittest.TestCase):
     """The viewer's live layer (2026-10-08): field.* / mind.* frames are
-    session-less -- admins see them, nobody else does."""
+    session-less. Since 2026-10-10 (membrane home is everyone's UI, the
+    operator's option 2) every SIGNED-IN user gets them; no user, none."""
 
-    def test_admins_only(self):
+    def test_every_signed_in_user(self):
         for t in ("field.moved", "field.applied", "mind.touch", "mind.focus"):
             ev = {"type": t, "properties": {"eids": ["f:a"]}}
             self.assertTrue(SP.visible_event(ev, {}, "u1", True), t)
-            self.assertFalse(SP.visible_event(ev, {}, "u1", False), t)
+            self.assertTrue(SP.visible_event(ev, {}, "u1", False), t)
+            self.assertFalse(SP.visible_event(ev, {}, "", False), t)
 
     def test_other_session_less_frames_stay_inside(self):
         self.assertFalse(SP.visible_event({"type": "session.updated", "properties": {}}, {}, "u1", True))

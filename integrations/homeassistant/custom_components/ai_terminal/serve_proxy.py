@@ -173,11 +173,13 @@ def visible_event(ev, owners: dict, user_id: str, is_admin: bool = False) -> boo
     """May this frame reach the caller: the stream's hello, or an event of
     a session the caller owns. Session-less frames stay inside HA -- except
     the field viewer's live layer (field.* / mind.*: entity ids, kinds and
-    tool names, never message text), which reaches HA ADMINS only."""
+    tool names, never message text), which reaches every SIGNED-IN user
+    (2026-10-10: membrane home is everyone's UI -- the operator's option 2;
+    it was admins only)."""
     if isinstance(ev, dict) and ev.get("type") == EVENT_HELLO:
         return True
     if isinstance(ev, dict) and str(ev.get("type") or "").startswith(LIVE_FIELD_PREFIXES):
-        return bool(is_admin)
+        return bool(user_id)
     sid = event_session_id(ev)
     return bool(user_id and sid and owners.get(sid) == user_id)
 

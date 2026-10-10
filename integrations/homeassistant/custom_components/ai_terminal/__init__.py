@@ -67,7 +67,7 @@ async def async_setup(hass: HomeAssistant, config) -> bool:
     fe.async_register_built_in_panel(
         hass, "custom", sidebar_title="Membrane",
         sidebar_icon="mdi:cube-scan", frontend_url_path=HOME_PANEL_URL_PATH,
-        config=home_panel_config(DOMAIN), require_admin=True, update=True)
+        config=home_panel_config(DOMAIN), require_admin=False, update=True)   # everyone's UI (option 2)
 
     async def _close_session(_event):
         sess = component.get("http_session")
