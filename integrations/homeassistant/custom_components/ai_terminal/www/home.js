@@ -211,6 +211,9 @@ const HSTYLE = `
   .voice button.on { background:color-mix(in srgb, var(--primary-color,#3477d6) 55%, transparent); }
   .voice button.rec { background:var(--error-color,#c0392b); color:#fff; animation:recpulse 1.1s ease-in-out infinite; }
   .voice button.busy { opacity:.6; }
+  .vsay { position:absolute; left:0; bottom:calc(100% + 8px); max-width:min(360px, calc(100vw - 32px)); padding:6px 10px;
+          border-radius:12px; font-size:13px; line-height:1.35; white-space:normal; display:none; pointer-events:none; }
+  .vsay.show { display:block; }
   @keyframes recpulse { 50% { box-shadow:0 0 0 8px color-mix(in srgb, var(--error-color,#c0392b) 30%, transparent); } }
   .card { bottom:76px !important; }
   .top .tilt[hidden] { display:none; }
@@ -344,6 +347,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         <nav class="hamenu glass" role="menu"></nav>
         <div class="chat glass"><ai-terminal-panel overlay></ai-terminal-panel></div>
         <div class="voice glass">
+          <div class="vsay glass" role="status" aria-live="polite"></div>
           <button class="ptt" title="Hold to talk (or hold Space)" aria-label="Hold to talk">🎙</button>
           <button class="lock" title="Hands-free: tap to start, tap again to send" aria-label="Talk hands-free">🔒</button>
           <button class="tts" title="Speak membrane's answers" aria-label="Speak answers" aria-pressed="false">🔈</button>
@@ -590,16 +594,18 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._ptt = $(".ptt"); this._lockBtn = $(".lock"); this._ttsBtn = $(".tts");
       this._ttsOn = lsGet(LS_TTS, "0") === "1";
       this._paintTts();
-      const down = (e) => { e.preventDefault(); this._ptt.setPointerCapture && this._ptt.setPointerCapture(e.pointerId); this._recStart("ptt"); };
+      const down = (e) => { e.preventDefault(); this._unlockAudio(); this._ptt.setPointerCapture && this._ptt.setPointerCapture(e.pointerId); this._recStart("ptt"); };
       const up = () => { if (this._rec && this._rec.mode === "ptt") this._recStop(true); };
       this._ptt.addEventListener("pointerdown", down);
       this._ptt.addEventListener("pointerup", up);
       this._ptt.addEventListener("pointercancel", () => { if (this._rec && this._rec.mode === "ptt") this._recStop(false); });
       this._ptt.addEventListener("contextmenu", (e) => e.preventDefault());
       this._lockBtn.addEventListener("click", () => {
+        this._unlockAudio();
         if (this._rec && this._rec.mode === "lock") this._recStop(true); else this._recStart("lock");
       });
       this._ttsBtn.addEventListener("click", () => {
+        this._unlockAudio();
         this._ttsOn = !this._ttsOn; lsSet(LS_TTS, this._ttsOn ? "1" : "0"); this._paintTts();
         if (!this._ttsOn) this._hushTts();
       });
@@ -608,7 +614,12 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._onKeyDown = (e) => { if (e.code === "Space" && !e.repeat && !typing(e) && this.isConnected) { e.preventDefault(); this._recStart("ptt"); } };
       this._onKeyUp = (e) => { if (e.code === "Space" && this._rec && this._rec.mode === "ptt" && !typing(e)) { e.preventDefault(); this._recStop(true); } };
       this._listenKeys(true);
-      this._chat.addEventListener("ai-reply", (e) => { if (this._ttsOn && e.detail && e.detail.text) this._speak(e.detail.text); });
+      // voice in -> voice out: an answer to something SAID is spoken even with 🔈 off
+      this._chat.addEventListener("ai-reply", (e) => {
+        const said = this._voiceTurns > 0;
+        if (said) this._voiceTurns -= 1;
+        if ((this._ttsOn || said) && e.detail && e.detail.text) this._speak(e.detail.text);
+      });
     }
 
     _listenKeys(on) {
@@ -616,6 +627,33 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._keysOn = on;
       const f = on ? "addEventListener" : "removeEventListener";
       window[f]("keydown", this._onKeyDown); window[f]("keyup", this._onKeyUp);
+    }
+
+    /** The voice status, by the buttons (the top bar's status is hidden on phones). */
+    _vsay(text, ms = 6000) {
+      const el = this.shadowRoot.querySelector(".vsay"); if (!el) return;
+      clearTimeout(this._vsayT);
+      el.textContent = text || ""; el.classList.toggle("show", !!text);
+      if (text && ms) this._vsayT = setTimeout(() => el.classList.remove("show"), ms);
+      if (text) this._say(text);
+    }
+
+    /** Phones only play sound that a tap started: the first tap on a voice
+     * button plays a blink of silence on THE player, which every reply reuses. */
+    _unlockAudio() {
+      if (this._player) return;
+      const a = this._player = new Audio();
+      try {
+        const blob = new Blob([wavBytes(new Int16Array(800), 16000)], { type: "audio/wav" });
+        a.src = URL.createObjectURL(blob);
+        a.play().catch(() => {});
+      } catch (e) { /* the fallback voice remains */ }
+      try { if (window.speechSynthesis) window.speechSynthesis.speak(new SpeechSynthesisUtterance("")); } catch (e) { /* none */ }
+    }
+
+    _busyChat() {
+      const st = this._chat && this._chat._chat && this._chat._chat.status;
+      return !!(st && st.type && st.type !== "idle");
     }
 
     _paintTts() {
@@ -628,7 +666,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       if (this._rec || this._recBusy) return;
       this._hushTts();                                     // talking over it stops it
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        this._say("no microphone here (it needs https and a browser that allows it)"); return;
+        this._vsay("no microphone here (it needs https and a browser that allows it)"); return;
       }
       const rec = this._rec = { mode, chunks: [], t0: performance.now() };
       (mode === "ptt" ? this._ptt : this._lockBtn).classList.add("rec");
@@ -642,10 +680,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         rec.proc.onaudioprocess = (ev) => rec.chunks.push(new Float32Array(ev.inputBuffer.getChannelData(0)));
         rec.src.connect(rec.proc); rec.proc.connect(rec.ctx.destination);
         rec.timer = setTimeout(() => { if (this._rec === rec) this._recStop(true); }, REC_MAX_S * 1000);
-        this._say(mode === "lock" ? "listening (tap 🔒 again to send)" : "listening…");
+        this._vsay(mode === "lock" ? "listening… tap 🔒 again to send" : "listening… release to send", 0);
       } catch (e) {
         this._recCleanup(rec);
-        this._say("the microphone is blocked: " + ((e && e.name) || e));
+        this._vsay("the microphone is blocked: " + ((e && e.name) || e));
       }
     }
 
@@ -664,24 +702,27 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const rate = rec.ctx ? rec.ctx.sampleRate : 48000;
       this._recCleanup(rec);
       const n = rec.chunks.reduce((a, c) => a + c.length, 0);
-      if (!send || n / rate < REC_MIN_S) { this._say(send ? "too short to hear" : ""); return; }
+      if (!send || n / rate < REC_MIN_S) { this._vsay(send ? "too short to hear" : ""); return; }
       const all = new Float32Array(n); let o = 0;
       for (const c of rec.chunks) { all.set(c, o); o += c.length; }
       let ss = 0; for (let i = 0; i < n; i += 4) ss += all[i] * all[i];
-      if (Math.sqrt(ss / Math.max(1, n / 4)) < 0.004) { this._say("didn't hear anything"); return; }   // silence: whisper would invent "You"
+      if (Math.sqrt(ss / Math.max(1, n / 4)) < 0.004) { this._vsay("didn't hear anything (is the mic muted?)"); return; }   // silence: whisper would invent "You"
       const wav = wavBytes(downsample(all, rate, STT_RATE), STT_RATE);
       this._recBusy = true; this._ptt.classList.add("busy"); this._lockBtn.classList.add("busy");
-      this._say("transcribing…");
+      this._vsay("transcribing…", 0);
       try {
         const r = await this._hass.fetchWithAuth(STT_PATH, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: wav });
         const d = await r.json().catch(() => ({}));
         if (!r.ok) throw new Error(d.error || ("speech service " + r.status));
         const text = (d.text || "").trim();
-        if (!text) { this._say("didn't catch that"); return; }
-        this._say("you said: " + text);
+        if (!text) { this._vsay("didn't catch that"); return; }
+        const queued = this._busyChat();
+        this._voiceTurns = (this._voiceTurns || 0) + 1;
         this._sendToChat(text);
+        this._vsay("“" + text + "” — " + (queued ? "Argus is still on an earlier turn; yours is queued"
+                                                  : "sent; Argus is thinking…"), 12000);
       } catch (e) {
-        this._say("couldn't transcribe: " + ((e && e.message) || e));
+        this._vsay("couldn't transcribe: " + ((e && e.message) || e));
       } finally {
         this._recBusy = false; this._ptt.classList.remove("busy"); this._lockBtn.classList.remove("busy");
       }
@@ -705,7 +746,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     _hushTts() {
       this._ttsGen = (this._ttsGen || 0) + 1;
-      if (this._audio) { try { this._audio.pause(); } catch (e) { /* gone */ } this._audio = null; }
+      if (this._audio) { try { this._audio.pause(); if (this._audio.onended) this._audio.onended(); } catch (e) { /* gone */ } this._audio = null; }
       if (window.speechSynthesis) window.speechSynthesis.cancel();
     }
 
@@ -718,14 +759,18 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           if (!engine) throw new Error("no tts entity");
           const r = await this._hass.callApi("POST", "tts_get_url", { engine_id: engine, message: chunk });
           if (gen !== this._ttsGen) return;
-          await new Promise((res) => {
-            // the PATH (same origin): the url may be HA's http LAN address, which an https page can't play
-            const a = this._audio = new Audio(r.path || r.url);
-            a.onended = a.onerror = () => res();
-            a.play().catch(() => res());
+          await new Promise((res, rej) => {
+            // THE unlocked player (phones refuse a fresh one); the PATH (same
+            // origin): the url may be HA's http LAN address, which https can't play
+            const a = this._audio = this._player || new Audio();
+            a.onended = () => res();
+            a.onerror = () => rej(new Error("audio failed"));
+            a.src = r.path || r.url;
+            a.play().catch(rej);                           // refused: the browser's voice instead
           });
         } catch (e) {
-          if (!window.speechSynthesis) return;             // the browser's own voice as the fallback
+          if (gen !== this._ttsGen) return;
+          if (!window.speechSynthesis) { this._vsay("can't play sound here: tap 🔊 once"); return; }
           await new Promise((res) => { const u = new SpeechSynthesisUtterance(chunk); u.onend = u.onerror = () => res(); window.speechSynthesis.speak(u); });
         }
       }
