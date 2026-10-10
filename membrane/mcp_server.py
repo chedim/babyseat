@@ -1376,7 +1376,8 @@ def tool_entity_link(args: dict, port: int) -> str:
 def tool_method_define(args: dict, port: int) -> str:
     out = _http(port, "POST", "/membrane/method/define", {
         "on": str(args.get("on") or args.get("object") or ""), "method": str(args.get("method") or ""),
-        "command": str(args.get("command") or args.get("commands") or "")})
+        "command": str(args.get("command") or args.get("commands") or ""),
+        "read_only": bool(args.get("read_only"))})
     if not out.get("ok"):
         return f"define failed: {out.get('error', 'unknown error')}"
     p = out.get("params") or []
@@ -1395,12 +1396,12 @@ def tool_method_call(args: dict, port: int) -> str:
     out = _http(port, "POST", "/membrane/method/call", {
         "object": str(args.get("object") or args.get("spec") or ""),
         "method": str(args.get("method") or ""), "args": a if isinstance(a, dict) else {}})
-    if not out.get("object"):
-        return f"call failed: {out.get('error', 'unknown error')}"
-    if out.get("error") and out.get("rc") is None:
-        return f"call failed: {out['error']}"
-    return (f"{out['method']} on {out['object']} (via {out['via']}): rc={out.get('rc')} "
-            f"{out.get('outcome')} head: {str(out.get('head') or '')[:600]}")
+    if not out.get("object") or out.get("status") == "blocked":
+        return (f"call {out.get('status', 'blocked')}: {out.get('error', 'unknown error')}"
+                + (f" [resolution order: {' > '.join(out['mro'])}]" if out.get("mro") else ""))
+    return (f"[{out.get('status')}] {out['method']} on {out['object']} (via {out['via']}; order "
+            f"{' > '.join(out.get('mro') or [])}): rc={out.get('rc')} {out.get('outcome')}\n"
+            f"ran: {str(out.get('fed') or '')[:300]}\nhead: {str(out.get('head') or '')[:600]}")
 
 
 def tool_entity_unlink(args: dict, port: int) -> str:

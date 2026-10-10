@@ -6187,7 +6187,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         from .night import method_define, method_call
         if op == "define":
             res = method_define(srv, est, _efield_on(srv), srv.membrane, str(body.get("on") or ""),
-                                str(body.get("method") or ""), str(body.get("command") or ""))
+                                str(body.get("method") or ""), str(body.get("command") or ""),
+                                read_only=bool(body.get("read_only")))
         else:
             a = body.get("args")
             res = method_call(srv, est, _efield_on(srv), srv.membrane, str(body.get("object") or ""),

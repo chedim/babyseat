@@ -1732,7 +1732,8 @@ def entity_link(srv, est, fld, mem, executor_spec: str,
 CALLS_RING = 12
 
 
-def method_define(srv, est, fld, mem, on: str, method: str, command: str) -> dict:
+def method_define(srv, est, fld, mem, on: str, method: str, command: str,
+                  read_only: bool = False) -> dict:
     if est is None:
         return {"ok": False, "error": "entity layer unavailable"}
     method = re.sub(r"[^A-Za-z0-9_]+", "_", (method or "").strip()).strip("_")
@@ -1754,13 +1755,13 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str) -> dic
         est.docs[eid] = doc
     p = doc.properties or {}
     p.update({"command": command.strip(), "method_name": method,
-              "method_of": [owner.eid] if owner else []})
+              "method_of": [owner.eid] if owner else [], "read_only": bool(read_only)})
     doc.properties = p
     est.upsert(doc, embedder=None)
     _audit(mem, {"event": "agent-method-define", "origin": "mcp", "eid": eid,
                  "on": owner.eid if owner else "", "method": method, "ok": True})
     return {"ok": True, "eid": eid, "method": label, "created": created,
-            "params": command_params(command)}
+            "params": command_params(command), "read_only": bool(read_only)}
 
 
 def resolve_method(est, obj, method: str):
@@ -1793,26 +1794,63 @@ def methods_of(est, obj) -> list[str]:
     return sorted(set(out))
 
 
+# THE OUTCOMES (Argus's review, 2026-10-10: "partial must not silently count
+# as success"): ok | blocked (refused before running: a missing method, a
+# missing or empty value) | error (ran, failed) | timeout | partial (a
+# composite that got part-way -- step 2)
+OUTCOMES = ("ok", "blocked", "error", "timeout", "partial")
+
+
+def _blocked(obj, method, why, **extra) -> dict:
+    return {"ok": False, "status": "blocked", "object": getattr(obj, "eid", None),
+            "method": method, "error": why, **extra}
+
+
 def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | None = None) -> dict:
     if est is None:
-        return {"ok": False, "error": "entity layer unavailable"}
+        return {"ok": False, "status": "blocked", "error": "entity layer unavailable"}
     obj = est._resolve_spec(obj_spec or "")
     if obj is None:
-        return {"ok": False, "error": f"no object matches {obj_spec!r} -- a call names its object"}
+        return {"ok": False, "status": "blocked",
+                "error": f"no object matches {obj_spec!r} -- a call names its object"}
     m, via = resolve_method(est, obj, (method or "").strip())
+    mro = [short_name_of(a) for a in [obj] + ancestors(est, obj)][:8]
     if m is None:
         have = methods_of(est, obj)
-        return {"ok": False, "error": f"{short_name_of(obj)} has no method {method!r}"
-                + (f"; it answers to: {', '.join(have)}" if have else "")
-                + " -- define one: exec(action='define', on=<class or object>, method=..., command=...)"}
+        return _blocked(obj, method, f"{short_name_of(obj)} has no method {method!r}"
+                        + (f"; it answers to: {', '.join(have)}" if have else "")
+                        + " -- define one: exec(action='define', on=<class or object>, method=..., command=...)",
+                        mro=mro)
     props = effective_properties(est, obj)
     full = {f"self.{k}": v for k, v in props.items() if isinstance(v, (str, int, float, bool))}
     full.update({"self.eid": obj.eid, "self.name": str(props.get("name") or short_name_of(obj))})
     full.update(dict(args or {}))
+    # NO SILENT EMPTIES (Argus: "silent empties cause real-world effects"): every
+    # placeholder must have a non-empty value before anything runs
+    template = str((m.properties or {}).get("command") or "")
+    missing = [p for p in dict.fromkeys(_PARAM.findall(template))
+               if not p.startswith("parent") and (p not in full or str(full[p]).strip() == "")]
+    if missing:
+        selfs = [p for p in missing if p.startswith("self.")]
+        given = [p for p in missing if not p.startswith("self.")]
+        why = []
+        if selfs:
+            why.append(f"{short_name_of(obj)} has no value for {', '.join(selfs)} (set it on the object or its class)")
+        if given:
+            why.append("needs args: " + ", ".join(given))
+        return _blocked(obj, method, "; ".join(why), via=via or "global", mro=mro,
+                        params=command_params(template))
     # a call is a synchronous EVENT, not a queued link: the method entity
     # runs directly (its id would read as a 'label :: command' line to the
     # link parser); the run count and success rate land on the method
     run = _exec_command_doc(srv, est, fld, mem, m, args=full)
+    fed = run.get("fed") or substitute_args(template, full)
+    rc = run.get("rc")
+    status = ("ok" if rc == 0 else
+              "timeout" if "timeout" in str(run.get("outcome") or run.get("error") or "").lower() else
+              "blocked" if rc is None and str(run.get("error") or "").startswith("needs args") else
+              "error")
+    read_only = bool((m.properties or {}).get("read_only"))
     mp = m.properties or {}
     mp["runs"] = int(mp.get("runs") or 0) + 1
     mp["last_run_ts"] = time.time()
@@ -1821,20 +1859,23 @@ def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | Non
     m.properties = mp
     _audit(mem, {"event": "agent-method-call", "origin": "mcp", "eid": m.eid,
                  "object": obj.eid, "rc": run.get("rc"), "ok": run.get("rc") == 0})
-    # THE RECEIPT ON THE OBJECT: its call ring + a field event about it
-    op = obj.properties or {}
-    ring = list(op.get("calls") or [])
+    # THE RECEIPT ON THE OBJECT: its call ring + a field event about it (a
+    # read_only method's calls stay out of the ring -- status polls must not
+    # drown the state changes, nor feed the habits induction)
     shown = {k: v for k, v in (args or {}).items()}
-    ring.append({"ts": round(time.time(), 1), "method": method, "args": shown,
-                 "rc": run.get("rc"), "outcome": run.get("outcome") or run.get("error")})
-    op["calls"] = ring[-CALLS_RING:]
-    obj.properties = op
-    est.upsert(obj, embedder=None)
+    if not read_only:
+        op = obj.properties or {}
+        ring = list(op.get("calls") or [])
+        ring.append({"ts": round(time.time(), 1), "method": method, "args": shown, "via": via or "global",
+                     "status": status, "rc": rc, "fed": fed[:300]})
+        op["calls"] = ring[-CALLS_RING:]
+        obj.properties = op
+        est.upsert(obj, embedder=None)
     if fld is not None:
         try:
             subj = short_name_of(obj)
             argtxt = ", ".join(f"{k}={v}" for k, v in shown.items())
-            fld.write_events([ST.Event(stream="observation", tool="call",
+            fld.write_events([ST.Event(stream="observation", tool="read" if read_only else "call",
                                        args={"object": subj, "method": method},
                                        result_head=(f"{subj}.{method}({argtxt}) -> rc {run.get('rc')} "
                                                     f"{run.get('outcome') or ''} {str(run.get('head') or '')[:120]}"),
@@ -1842,10 +1883,10 @@ def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | Non
                                        ts=time.time(), subject=subj)], session="calls")
         except Exception:
             pass
-    return {"ok": bool(run.get("ok")), "object": obj.eid, "method": mp.get("name") or method,
-            "via": via or "global", "rc": run.get("rc"), "outcome": run.get("outcome"),
+    return {"ok": status == "ok", "status": status, "object": obj.eid, "method": mp.get("name") or method,
+            "via": via or "global", "mro": mro, "fed": fed, "rc": rc, "outcome": run.get("outcome"),
             "head": run.get("head"), "tail": run.get("tail"), "error": run.get("error"),
-            "params": command_params(str(mp.get("command") or ""))}
+            "read_only": read_only, "params": command_params(template)}
 
 
 def short_name_of(obj) -> str:

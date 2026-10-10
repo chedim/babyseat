@@ -101,3 +101,44 @@ class TestCliffhanger(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestReviewFixes(unittest.TestCase):
+    """Argus's review of step 1 (2026-10-10)."""
+
+    def test_a_missing_or_empty_self_value_blocks_before_anything_runs(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        N.method_define(srv, est, f, None, light.eid, "dim", "echo dim {{self.room}} {{self.entity_id}}")
+        r = N.method_call(srv, est, f, None, port.eid, "dim")
+        self.assertEqual(r["status"], "blocked")
+        self.assertIn("self.room", r["error"])
+        self.assertNotIn("calls", port.properties)                  # nothing ran, nothing recorded
+        port.properties["room"] = ""
+        self.assertEqual(N.method_call(srv, est, f, None, port.eid, "dim")["status"], "blocked")
+        light.properties["room"] = "aft cabin"                      # a class default fills it
+        port.properties.pop("room")
+        self.assertEqual(N.method_call(srv, est, f, None, port.eid, "dim")["status"], "ok")
+
+    def test_the_receipt_says_who_answered_and_what_ran(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        N.method_define(srv, est, f, None, light.eid, "turn_on", "echo on {{self.entity_id}}")
+        r = N.method_call(srv, est, f, None, port.eid, "turn_on")
+        self.assertEqual(r["via"], light.eid)
+        self.assertEqual(r["fed"], "echo on light.port_strip")
+        self.assertEqual(r["mro"][:2], ["ha:light.port_strip", "ha-light"])
+        self.assertEqual(port.properties["calls"][-1]["fed"], "echo on light.port_strip")
+
+    def test_read_only_calls_stay_out_of_the_call_ring(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        N.method_define(srv, est, f, None, light.eid, "status", "echo st {{self.entity_id}}", read_only=True)
+        r = N.method_call(srv, est, f, None, port.eid, "status")
+        self.assertEqual(r["status"], "ok")
+        self.assertTrue(r["read_only"])
+        self.assertNotIn("calls", port.properties)
+
+    def test_outcomes(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        N.method_define(srv, est, f, None, light.eid, "fail", "sh -c 'exit 3'")
+        self.assertEqual(N.method_call(srv, est, f, None, port.eid, "fail")["status"], "error")
+        self.assertEqual(N.method_call(srv, est, f, None, port.eid, "nope")["status"], "blocked")
+        self.assertEqual(set(N.OUTCOMES), {"ok", "blocked", "error", "timeout", "partial"})

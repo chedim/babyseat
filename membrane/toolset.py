@@ -72,9 +72,10 @@ FAMILIES: dict[str, dict] = {
                    "on": _S("define: the class or object that owns the method (omit = global)"),
                    "method": _S("call/define: the method's name"),
                    "command": _S("define: the method's command line ({{self.<prop>}}, {{param}})"),
+                   "read_only": _B("define: a read (its calls stay out of the object's call ring)"),
                    "executor": _S("optional executor entity"), "create": _B("create missing command entities")},
         "map": {"call": lambda a: _pick(a, "object", "method", "args"),
-                "define": lambda a: _pick(a, "on", "method", "command"),
+                "define": lambda a: _pick(a, "on", "method", "command", "read_only"),
                 "link": lambda a: _pick(a, "commands", "executor", "create", "args"),
                 "unlink": lambda a: _pick(a, "commands", "executor")},
     },
@@ -182,7 +183,10 @@ HELP = {
         "fills from the object (its own values over its classes'); other {{params}} come from args. "
         "Dispatch: the object's own method, then its classes (ISA order), then global methods -- "
         "the same name on another class is its own implementation. The receipt lands on the "
-        "object. Compose methods with parents (help('exec'))."),
+        "object. Compose methods with parents (help('exec')). A missing or empty value BLOCKS the "
+        "call (nothing runs); outcomes: ok | blocked | error | timeout | partial. The receipt shows "
+        "which implementation answered (via), the resolution order and the exact command that ran. "
+        "Mark reads read_only=true."),
     "classes": (
         "Inheritance: an entity without its own getter/mention/thought/dreamed script runs its "
         "nearest class's, ON ITSELF (state['eid'], its own properties merged over its classes' "
