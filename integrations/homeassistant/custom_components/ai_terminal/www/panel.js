@@ -518,6 +518,16 @@ const STYLE = `
   /* the card is narrower than a page: the bar wraps instead of clipping its
      buttons (membrane / LLM / auto-chat / minds) off the edge */
   :host([overlay]) .bar { flex-wrap:wrap; row-gap:4px; padding:6px 10px; }
+  :host([overlay]) .side { position:absolute; z-index:5; top:0; bottom:0; left:0; width:min(260px, 80%);
+                           box-shadow:2px 0 14px rgba(0,0,0,.35); }
+  :host([overlay]) .ctl { display:flex; flex-direction:column; gap:2px; padding:2px 8px 8px;
+                          border-bottom:1px solid var(--divider-color,rgba(128,128,128,.25)); }
+  :host([overlay]) .ctl select.agent { width:100%; margin:0 0 4px; border-radius:8px; padding:4px 8px; color:inherit;
+                                       border:1px solid rgba(128,128,128,.35); background:var(--secondary-background-color,#222); font:inherit; }
+  :host([overlay]) .ctl .btn.icon { display:flex; align-items:center; gap:10px; width:100%; text-align:left; padding:6px 8px; }
+  :host([overlay]) .ctl .ico { width:1.4em; text-align:center; display:inline-block; }
+  :host([overlay]) .ctl .autobtn.spinning { animation:none; }
+  :host([overlay]) .ctl .autobtn.spinning .ico { animation:aspin 2.4s linear infinite; }
   :host([overlay]) .bar .title { flex:1 1 120px; }
   :host([overlay]) .bar select.agent { max-width:120px; }
   :host([overlay]) .hint, :host([overlay]) .modelpick { display:none; }
@@ -605,7 +615,28 @@ function definePanel() {
           </div>
         </section>`;
       this.shadowRoot.append(s, app);
-      if (this.hasAttribute("overlay")) app.classList.add("sidehidden");
+      if (this.hasAttribute("overlay")) {
+        app.classList.add("sidehidden");
+        // the card is narrow: the controls live in the hideable side menu,
+        // above the conversations (the same nodes -- their state and
+        // listeners come along)
+        const ctl = document.createElement("div");
+        ctl.className = "ctl";
+        for (const [cls, label] of [["agent", null], ["voicebtn", "membrane's voice"], ["llmbtn", "LLM replies"],
+                                    ["autobtn", "auto-chat"], ["mindsbtn", "minds"]]) {
+          const el = app.querySelector("." + cls);
+          if (!el) continue;
+          if (label) {
+            const ico = document.createElement("span");
+            ico.className = "ico"; ico.textContent = el.textContent; el.textContent = "";
+            const lbl = document.createElement("span");
+            lbl.className = "lbl"; lbl.textContent = label;
+            el.append(ico, lbl);
+          }
+          ctl.appendChild(el);
+        }
+        app.querySelector(".side .head").after(ctl);
+      }
       const $ = (q) => app.querySelector(q);
       this._app = app;
       this._list = $(".list");
