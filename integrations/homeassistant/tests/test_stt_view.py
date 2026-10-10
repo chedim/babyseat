@@ -20,3 +20,8 @@ class TestStt(unittest.TestCase):
 
     def test_non_speech_tags_are_dropped(self):
         self.assertEqual(S.clean_text(" [BLANK_AUDIO] turn on (music) the lights "), "turn on the lights")
+
+    def test_whispers_phrases_from_silence_are_nothing(self):
+        for t in ("You", " you. ", "Thank you.", "Thanks for watching!"):
+            self.assertEqual(S.clean_text(t), "", t)
+        self.assertEqual(S.clean_text("Thank you, turn it off."), "Thank you, turn it off.")

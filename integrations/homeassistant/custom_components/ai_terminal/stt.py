@@ -38,10 +38,18 @@ def multipart(wav: bytes, hint: str = HINT) -> tuple[bytes, str]:
     return body, f"multipart/form-data; boundary={b}"
 
 
+# what whisper says to silence and noise when it is the WHOLE transcript
+SILENCE_PHRASES = {"you", "thank you", "thanks for watching", "thank you for watching", "bye"}
+
+
 def clean_text(text: str) -> str:
-    """whisper's non-speech tags ([BLANK_AUDIO], (music)) out."""
+    """whisper's non-speech tags ([BLANK_AUDIO], (music)) out, and its
+    phrases-from-silence ('You', 'Thank you.') when they are all it heard."""
     text = re.sub(r"\[[^\]]*\]|\([^)]*\)", " ", str(text or ""))
-    return " ".join(text.split())
+    text = " ".join(text.split())
+    if re.sub(r"[^a-z ]", "", text.lower()).strip() in SILENCE_PHRASES:
+        return ""
+    return text
 
 
 def looks_like_wav(data: bytes) -> bool:

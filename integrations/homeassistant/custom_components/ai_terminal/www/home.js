@@ -667,6 +667,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       if (!send || n / rate < REC_MIN_S) { this._say(send ? "too short to hear" : ""); return; }
       const all = new Float32Array(n); let o = 0;
       for (const c of rec.chunks) { all.set(c, o); o += c.length; }
+      let ss = 0; for (let i = 0; i < n; i += 4) ss += all[i] * all[i];
+      if (Math.sqrt(ss / Math.max(1, n / 4)) < 0.004) { this._say("didn't hear anything"); return; }   // silence: whisper would invent "You"
       const wav = wavBytes(downsample(all, rate, STT_RATE), STT_RATE);
       this._recBusy = true; this._ptt.classList.add("busy"); this._lockBtn.classList.add("busy");
       this._say("transcribing…");
