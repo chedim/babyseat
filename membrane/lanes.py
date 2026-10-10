@@ -1065,6 +1065,7 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
             else:
                 from .entity_block import track_count
                 est.evaluate_tracks(count_fn=lambda k: track_count(fld, k))
+                _bmark("t.evaluate")
                 if drain:
                     for a in est.take_alerts():
                         lines.append(f"ALERT: {a['label']} {a['kind']} its "
@@ -1078,16 +1079,23 @@ def _where_we_are(srv, vec, drain: bool = True, events_only: bool = False) -> st
                         ln = announce_line(a)
                         lines.append(ln)
                         speak(srv, ln, kind="note")
+                _bmark("t.alerts")
                 from .entity_block import now_line, track_line
                 # THE MASSAGE MODE: the events stay (they happened); the
                 # track stories are state, and the massage replaces state
                 for t in ([] if events_only else est.list_tracks()):
                     if t["key"] == "session:now":
+                        _t0 = time.time(); fld.flush(); _bs["t.flush"] = round(time.time() - _t0, 3)
+                        _t0 = time.time()
                         ln = now_line(fld, getattr(srv, "_efield_boot_seq", 0))
+                        _bs["t.now"] = round(time.time() - _t0, 3)
                         if ln:
                             lines.append(ln)
                         continue
+                    _t0 = time.time()
                     lines.append(track_line(fld, t["key"], t.get("label") or ""))
+                    _bs["t.lines"] = round(_bs.get("t.lines", 0) + time.time() - _t0, 3)
+                    _bs["t.n"] = _bs.get("t.n", 0) + 1
         except Exception as e:
             print(f"[opencode] banner render error: {e}", file=sys.stderr)
     _bmark("tracks")

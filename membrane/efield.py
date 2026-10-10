@@ -889,9 +889,20 @@ class EntityField:
                             pass
             self._dirty.clear()
         if self._deltas:
+            g0 = self._dgen()
             self.b.upsert_multi("entity_deltas", self._deltas)
+            # THE INDEX KEEPS (2026-10-10: every flush threw the per-entity
+            # index away -- the next deltas_of() re-walked 160k+ deltas, and
+            # the banner's track lines paid it every round): this flush's own
+            # deltas merge in; anything else since (a delete) rebuilds it
+            if self._deltas_index is not None and g0 is not None and self._deltas_index_gen == g0:
+                self._index_merge(self._deltas.values())
+                self._deltas_index_gen = self._dgen()
+            else:
+                self._invalidate_delta_index()
             self._deltas = {}
-        self._invalidate_delta_index()
+        elif self._dgen() is None:
+            self._invalidate_delta_index()        # a backend that can't say what changed: the old rule
         self.b.upsert("origin_stats", self._okey, self._ostats)
 
     @_locked
@@ -949,6 +960,30 @@ class EntityField:
     def _deltas_index_name(self):
         return "deltas_by_eid"
 
+    def _dgen(self):
+        wg = getattr(self.b, "write_gen", None)
+        return wg.get("entity_deltas", 0) if isinstance(wg, dict) else None
+
+    def _index_merge(self, rows) -> None:
+        """New deltas into the per-entity lists, kept in (seq, sidx) order --
+        unique per entity, so the merge equals a rebuild."""
+        import bisect
+        idx = self._deltas_index
+        for d in rows:
+            if d.get("origin") != self.origin:
+                continue
+            lst = idx.setdefault(d.get("eid") or "", [])
+            k = (d.get("seq") or 0, d.get("sidx") or 0)
+            if not lst or (lst[-1].get("seq") or 0, lst[-1].get("sidx") or 0) < k:
+                lst.append(d)
+                continue
+            keys = [(x.get("seq") or 0, x.get("sidx") or 0) for x in lst]
+            i = bisect.bisect_left(keys, k)
+            if i < len(lst) and keys[i] == k:
+                lst[i] = d                       # the same delta rewritten
+            else:
+                lst.insert(i, d)
+
     def _invalidate_delta_index(self) -> None:
         """The index stales on every flush (the deltas changed); the
         next deltas_of() rebuilds once (one pass over the collection,
@@ -960,11 +995,13 @@ class EntityField:
         bulk out-of-band delta write). Returns the indexed count."""
         with self._lock:
             idx: dict[str, list[dict]] = {}
+            gen = self._dgen()
             for k, d in self.b.scan("entity_deltas",
                                     {"origin": self.origin},
                                     order=("seq", "sidx")):
                 idx.setdefault(d.get("eid") or "", []).append(d)
             self._deltas_index = idx
+            self._deltas_index_gen = gen
             return sum(len(v) for v in idx.values())
 
     def relabel_roles(self, now: float | None = None, batch: int = 200) -> dict:
@@ -1028,16 +1065,19 @@ class EntityField:
         bumps on flush); O(1) per-entity lookups replace per-entity
         full scans (the night's 63M row-checks per tick)."""
         with self._lock:
-            if self._deltas_index is None:
+            gen = self._dgen()
+            if self._deltas_index is None or (gen is not None and gen != self._deltas_index_gen):
                 idx: dict[str, list[dict]] = {}
                 for k, d in self.b.scan("entity_deltas",
                                         {"origin": self.origin},
                                         order=("seq", "sidx")):
                     idx.setdefault(d.get("eid") or "", []).append(d)
                 self._deltas_index = idx
+                self._deltas_index_gen = gen
             return list(self._deltas_index.get(eid) or [])
 
     _deltas_index: dict | None = None
+    _deltas_index_gen = None
 
     @_locked
     def number_events(self) -> int:

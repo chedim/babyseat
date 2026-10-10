@@ -136,3 +136,53 @@ class TestRangeIndexAndIncrementalChanges(unittest.TestCase):
                     ref = self._fresh(f, wm)
                     f.__dict__["_cs_memo"] = memo                 # keep the incremental state going
                     self.assertEqual(got, ref, (step, wm))
+
+
+class TestDeltaIndexKeeps(unittest.TestCase):
+    """deltas_of() after many flushes and deletes equals a fresh rebuild --
+    the index merges a flush's own deltas instead of being thrown away."""
+
+    def test_merged_index_equals_a_rebuild(self):
+        from membrane.efield import EntityField
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from test_cliffhanger import FakeEmbedder  # noqa: E402
+        rnd = random.Random(5)
+        f = EntityField(ES.MemBackend(), FakeEmbedder(), "seat@t")
+        eids = ["f:a", "f:b", "f:c", "e:x"]
+        seq, built = 0, 0
+        f.deltas_of("f:a")                                   # the index exists from the start
+        for step in range(1200):
+            r = rnd.random()
+            if r < 0.7:
+                for _ in range(rnd.randrange(1, 4)):
+                    seq += rnd.choice([0, 1])
+                    e = rnd.choice(eids)
+                    sq = seq if rnd.random() > 0.1 else max(0, seq - rnd.randrange(1, 6))   # sometimes late
+                    sx = rnd.randrange(3)
+                    f._deltas[f"d:{f.o}:{e}:{sq}:{sx}"] = {"_k": "dl", "eid": e, "origin": f.origin,
+                                                          "seq": sq, "sidx": sx, "v": step}
+                f.flush()
+            elif r < 0.8:
+                keys = [k for k, _ in f.b.scan("entity_deltas")]
+                if keys:
+                    f.b.delete("entity_deltas", rnd.choice(keys))
+            if step % 41 == 0:
+                got = {e: f.deltas_of(e) for e in eids}
+                kept_gen = f._deltas_index_gen
+                f.rebuild_delta_index()
+                ref = {e: f.deltas_of(e) for e in eids}
+                self.assertEqual(got, ref, step)
+                built += 1
+        self.assertGreater(built, 20)
+
+    def test_a_flush_without_new_deltas_keeps_the_index(self):
+        from membrane.efield import EntityField
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from test_cliffhanger import FakeEmbedder  # noqa: E402
+        f = EntityField(ES.MemBackend(), FakeEmbedder(), "seat@t")
+        f._deltas["d1"] = {"eid": "f:a", "origin": f.origin, "seq": 1, "sidx": 0}
+        f.flush()
+        f.deltas_of("f:a")
+        idx = f._deltas_index
+        f.flush(); f.flush()
+        self.assertIs(f._deltas_index, idx)                  # not thrown away
