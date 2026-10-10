@@ -223,3 +223,8 @@ test("speakText: what gets said aloud, frames and markdown out, membrane's own t
   assert.equal(L.speakText("[membrane voice] the room feels quiet"), "the room feels quiet");
   assert.equal(L.speakText("see [the docs](http://x)"), "see the docs");
 });
+
+test("membrane's framed auto-chat line: only its own words are spoken", () => {
+  const framed = "[membrane voice] membrane's own voice (the field learning to speak -- not the operator) said: «the lights hum before the dark»";
+  assert.equal(L.speakText(L.voiceTurnText(framed)), "the lights hum before the dark");
+});

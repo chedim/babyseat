@@ -1103,10 +1103,13 @@ function definePanel() {
         const row = this._chat.byId && this._chat.byId[part.messageID];
         const role = row && row.info && row.info.role;
         if (role === "assistant") say("argus", part.id, part.text);
-        else if (role === "user" && /^\s*\[membrane voice\]/i.test(part.text || "")) say("membrane", "mv:" + part.text, part.text);
+        else if (role === "user" && /^\s*\[membrane voice\]/i.test(part.text || "")) {
+          const line = voiceTurnText(part.text);           // only membrane's own words, not the «…» frame around them
+          say("membrane", "mv:" + speakText(line), line);
+        }
       } else if (ev.type === "membrane.voice") {
         const line = p.line || {};
-        if (line.id && line.text) say("membrane", "mv:" + line.text, line.text);
+        if (line.id && line.text) say("membrane", "mv:" + speakText(line.text), line.text);
       }
     }
 
