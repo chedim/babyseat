@@ -244,3 +244,22 @@ class TestProbeSuiteFindings(unittest.TestCase):
         d = N.method_define(srv, est, f, None, "ha sensor", "who", "echo SENSOR")
         self.assertTrue(d["ok"], d)
         self.assertIsNotNone(est._resolve_spec("ha sensor"))
+
+
+class TestDispatchOrder(unittest.TestCase):
+    def test_an_edit_sets_the_exact_order_and_the_family_passes_parents(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        a, b = _add(est, "probe:parentA"), _add(est, "probe:parentB")
+        probe = _add(est, "probe:dispatch2")
+        N.method_define(srv, est, f, None, a.eid, "who", "echo A")
+        N.method_define(srv, est, f, None, b.eid, "who", "echo B")
+        self.assertTrue(est.edit(probe.eid, properties={"parents": ["probe:parentA", "probe:parentB"]})["ok"])
+        self.assertIn("A", str(N.method_call(srv, est, f, None, probe.eid, "who")["head"]))
+        self.assertTrue(est.edit(probe.eid, properties={"parents": ["probe:parentB", "probe:parentA"]})["ok"])
+        self.assertEqual(probe.properties["parents"], [b.eid, a.eid])
+        self.assertIn("B", str(N.method_call(srv, est, f, None, probe.eid, "who")["head"]))   # swapped
+        self.assertTrue(est.edit(probe.eid, properties={"parents": ["probe:parentB"]})["ok"])
+        self.assertEqual(probe.properties["parents"], [b.eid])                              # replaced, not added
+        leg, args = T.resolve("entity", {"action": "edit", "spec": "x", "parents": '["p1"]'})
+        self.assertEqual(args["properties"]["parents"], '["p1"]')
+        self.assertFalse(est.edit(probe.eid, properties={"parents": [probe.eid]})["ok"])     # never itself

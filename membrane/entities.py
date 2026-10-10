@@ -2342,9 +2342,24 @@ class EntityStore(MultiParentOps, TimelineOps):
                 props2[kk] = (v if not isinstance(v, str) else v[:2000])
                 ent.properties = props2
         if parents_patch is not None:
-            pr = MultiParentOps.set_parents(self, ent.eid, parents_patch)
+            # a parents patch REPLACES the list, in exactly the given order --
+            # the dispatch order is the author's (inherit only ADDS; the probe
+            # suite could not swap an order, 2026-10-10)
+            resolved = []
+            for spec in parents_patch:
+                d = self._resolve_spec(spec)
+                if d is None:
+                    return {"ok": False, "error": f"parents: no entity matches {spec!r}"}
+                if d.eid == ent.eid:
+                    return {"ok": False, "error": "parents: an entity cannot be its own parent"}
+                if d.eid not in resolved:
+                    resolved.append(d.eid)
+            ent.properties = ent.properties or {}
+            ent.properties["parents"] = []
+            pr = MultiParentOps.set_parents(self, ent.eid, resolved) if resolved else {"ok": True}
             if not pr.get("ok"):
                 return {"ok": False, "error": f"parents: {pr.get('error')}"}
+            ent.properties["parents"] = [x for x in resolved if x in (ent.properties.get("parents") or resolved)]
         if merged_into:
             dst = self._resolve_spec(str(merged_into))
             if dst is None or dst.eid == ent.eid:
