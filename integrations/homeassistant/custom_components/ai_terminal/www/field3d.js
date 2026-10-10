@@ -159,7 +159,24 @@ function parseSSE(buf) {
   return { frames, rest };
 }
 
-const F3Logic = { locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD };
+/** EDGE PULSES (2026-10-10, the operator: "show all the events on the visible
+ *  edges of the graph as pulses"): for each event's entity group, the pairs
+ *  joined by a VISIBLE edge, from the event's first entity outwards, capped. */
+const PULSE_COLORS = { discourse: [1.0, 0.82, 0.35], observation: [0.35, 0.85, 1.0], code: [0.75, 0.55, 1.0] };
+function edgePulsePairs(groups, hasEdge, cap = 48) {
+  const out = [];
+  for (const g of groups || []) {
+    const e = g.e || [];
+    for (let i = 0; i < e.length && out.length < cap; i++) {
+      for (let j = i + 1; j < e.length && out.length < cap; j++) {
+        if (hasEdge(e[i], e[j])) out.push([e[i], e[j], g.s || ""]);
+      }
+    }
+  }
+  return out;
+}
+
+const F3Logic = { locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS };
 if (typeof module !== "undefined" && module.exports) module.exports = F3Logic;
 
 // ------------------------------------------------------------ three.js
@@ -248,6 +265,20 @@ class Field3DView {
     eg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), F3_WORLD * 2);
     this.edges = new THREE.LineSegments(eg, new THREE.LineBasicMaterial({ color: 0x8aa0c8, transparent: true, opacity: 0.12, depthWrite: false }));
     this.scene.add(this.edges);
+    // edge pulses: small bright points running along visible edges
+    this.edgeSet = new Set();
+    this.edgePulses = [];
+    this.pulseCap = 256;
+    const pg = new THREE.BufferGeometry();
+    this.pulseP = new Float32Array(this.pulseCap * 3);
+    this.pulseC = new Float32Array(this.pulseCap * 3);
+    pg.setAttribute("position", new THREE.BufferAttribute(this.pulseP, 3));
+    pg.setAttribute("color", new THREE.BufferAttribute(this.pulseC, 3));
+    pg.setDrawRange(0, 0);
+    pg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), F3_WORLD * 2);
+    this.pulsePts = new THREE.Points(pg, new THREE.PointsMaterial({ size: 7, sizeAttenuation: false, vertexColors: true,
+      transparent: true, opacity: 0.95, depthWrite: false }));
+    this.scene.add(this.pulsePts);
     // the selected entity's edges, bright (the 2D map's gold highlight)
     const hg = new THREE.BufferGeometry();
     this.hiCap = 2000;
@@ -362,8 +393,31 @@ class Field3DView {
     } finally { this.pending.delete(t.key); }
   }
 
+  _stepEdgePulses(now) {
+    let k = 0;
+    const keep = [];
+    for (const q of this.edgePulses) {
+      const u = (now - q.t0) / q.dur;
+      if (u >= 1) continue;
+      keep.push(q);
+      if (u < 0) continue;
+      const a = this.slots.get(q.a), b = this.slots.get(q.b);
+      if (a == null || b == null || k >= this.pulseCap) continue;
+      for (let i = 0; i < 3; i++) {
+        this.pulseP[k * 3 + i] = this.posA[a * 3 + i] + (this.posA[b * 3 + i] - this.posA[a * 3 + i]) * u;
+        this.pulseC[k * 3 + i] = q.col[i] * (0.4 + 0.6 * Math.sin(Math.PI * u));
+      }
+      k++;
+    }
+    this.edgePulses = keep;
+    this.pulsePts.geometry.setDrawRange(0, k);
+    this.pulsePts.geometry.attributes.position.needsUpdate = true;
+    this.pulsePts.geometry.attributes.color.needsUpdate = true;
+  }
+
   _rebuildEdges() {
     this._edgesDirty = false;
+    this.edgeSet = new Set();
     let n = 0, h = 0;
     const sel = this.sel;
     const posOf = (id, cube) => {
@@ -401,6 +455,7 @@ class Field3DView {
           const a = this.slots.get(e.s), b = this.slots.get(e.t);
           if (a == null || b == null || !this.sizeA[a] || !this.sizeA[b]) continue;
           if (n >= this.edgeCap) break outer;
+          this.edgeSet.add(e.s + "|" + e.t); this.edgeSet.add(e.t + "|" + e.s);
           this.edgeA.set(this.posA.subarray(a * 3, a * 3 + 3), n * 6);
           this.edgeA.set(this.posA.subarray(b * 3, b * 3 + 3), n * 6 + 3);
           n++;
@@ -470,6 +525,7 @@ class Field3DView {
     if (moved) { this._dirtyPoints(); this._edgesDirty = true; }
     if (this._edgesDirty) this._rebuildEdges();
     this._stepRings(now);
+    this._stepEdgePulses(now);
     this._stepAvatars(dt);
     if (this.showLabels && now - this._lastLabels > 180) { this._lastLabels = now; this._paintLabels(); }
     this.renderer.render(this.scene, this.camera);
@@ -724,6 +780,11 @@ class Field3DView {
       }
     } else if (t === "field.applied") {
       for (const id of p.eids || []) { const s = this.slots.get(id); if (s != null) this.pulses.set(s, now); }
+      const pairs = edgePulsePairs(p.groups, (a, b) => this.edgeSet.has(a + "|" + b));
+      for (const [a, b, st] of pairs) {
+        if (this.edgePulses.length >= this.pulseCap) break;
+        this.edgePulses.push({ a, b, t0: now + Math.random() * 300, dur: 900, col: PULSE_COLORS[st] || [1, 1, 1] });
+      }
     } else if (t === "field.born") {
       for (const id of p.eids || []) { const s = this.slots.get(id); if (s != null) this.pulses.set(s, now); }
     } else if (t === "field.watch") {

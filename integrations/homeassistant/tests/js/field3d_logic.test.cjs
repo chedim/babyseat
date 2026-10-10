@@ -126,3 +126,13 @@ test("store specs map to the field's keys", () => {
   assert.ok(c("component:argus").includes("m:component:argus"));
   assert.equal(c("f:a.py")[0], "f:a.py");
 });
+
+test("edge pulses: visible edges only, from the event's first entity outwards, capped", () => {
+  const edges = new Set(["a|b", "b|a", "a|c", "c|a"]);
+  const has = (x, y) => edges.has(x + "|" + y);
+  const pairs = F.edgePulsePairs([{ s: "discourse", e: ["a", "b", "c", "d"] }, { s: "observation", e: ["c", "a"] }], has);
+  assert.deepEqual(JSON.parse(JSON.stringify(pairs)), [["a", "b", "discourse"], ["a", "c", "discourse"], ["c", "a", "observation"]]);
+  const many = [{ s: "", e: Array.from({ length: 12 }, (_, i) => "n" + i) }];
+  assert.equal(F.edgePulsePairs(many, () => true, 5).length, 5);
+  assert.equal(F.edgePulsePairs(null, has).length, 0);
+});

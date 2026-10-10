@@ -25,6 +25,8 @@ import time
 
 PULSE_S = 1.0
 MAX_EIDS = 300
+MAX_GROUPS = 80               # events per beat that keep their own entity group (edge pulses)
+GROUP_EIDS = 12
 MAX_MIND = 40
 ENTITY_ARGS = ("spec", "eid", "entity", "key", "name", "id")
 
@@ -69,6 +71,15 @@ class FieldPulse:
     # ---- intake (cheap, any thread)
     def applied(self, eids, stream: str = "") -> None:
         with self._lock:
+            # THE EVENT'S GROUP (2026-10-10, the operator: "show all the events on
+            # the visible edges of the graph as pulses"): which entities one event
+            # touched together -- the viewer pulses along the edges between them
+            grp = [e for e in dict.fromkeys(eids)][:GROUP_EIDS]
+            groups = getattr(self, "_groups", None)
+            if groups is None:
+                groups = self._groups = []
+            if len(grp) >= 2 and len(groups) < MAX_GROUPS:
+                groups.append({"s": stream or "", "e": grp})
             for e in eids:
                 if len(self._applied) >= MAX_EIDS and e not in self._applied:
                     break
@@ -130,6 +141,7 @@ class FieldPulse:
     def frames(self) -> list[dict]:
         with self._lock:
             applied, self._applied = self._applied, {}
+            groups, self._groups = getattr(self, "_groups", None) or [], []
             born, self._born = self._born, set()
             watch, self._watch = self._watch, []
             moved, self._moved = self._moved, {}
@@ -137,7 +149,8 @@ class FieldPulse:
         out = []
         if applied:
             out.append({"type": "field.applied", "eids": sorted(applied),
-                        "streams": sorted({s for v in applied.values() for s in v if s})})
+                        "streams": sorted({s for v in applied.values() for s in v if s}),
+                        "groups": groups})
         if born:
             out.append({"type": "field.born", "eids": sorted(born)})
         if watch:

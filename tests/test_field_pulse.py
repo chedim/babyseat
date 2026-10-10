@@ -65,6 +65,17 @@ class TestFrames(unittest.TestCase):
         self.assertEqual(ap["streams"], ["discourse", "observation"])
         self.assertEqual(self.p.beat(), 0)                      # drained
 
+    def test_each_event_keeps_its_group_for_edge_pulses(self):
+        self.p.applied(["f:a", "f:b", "f:c"], "discourse")
+        self.p.applied(["f:a"], "observation")                  # one entity: no edge to pulse
+        self.p.beat()
+        ap = next(f for f in self.hub.frames if f["type"] == "field.applied")
+        self.assertEqual(ap["groups"], [{"s": "discourse", "e": ["f:a", "f:b", "f:c"]}])
+        for i in range(FP.MAX_GROUPS + 20):
+            self.p.applied([f"f:x{i}", f"f:y{i}"], "observation")
+        self.p.beat()
+        self.assertEqual(len(self.hub.frames[-1]["groups"]), FP.MAX_GROUPS)
+
     def test_moves_land_in_cached_projections_only(self):
         proj, rows = _proj()
         self.srv._field3d = {proj.pid: proj}
