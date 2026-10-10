@@ -23,6 +23,7 @@ every mutation carries an audit event"""
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -1228,7 +1229,8 @@ EXEC_WALK_NODES_CAP = 12   # nodes run per pass (the reaper continues)
 EXEC_WALK_DEPTH = MultiParentOps.MAX_CHAIN   # the ancestry's depth (16)
 
 
-def _exec_command_doc(srv, est, fld, mem, doc, args: dict | None = None) -> dict:
+def _exec_command_doc(srv, est, fld, mem, doc, args: dict | None = None,
+                      ctx: dict | None = None) -> dict:
     """THE PIPELINE ENTRY (the composition covenant, 2026-10-06: 'parent
     executes first, the child is fed its parent's output' -- the entity
     inheritance IS the pipeline): run ONE linked node's whole ancestry
@@ -1245,7 +1247,7 @@ def _exec_command_doc(srv, est, fld, mem, doc, args: dict | None = None) -> dict
     supersede = processed)."""
     props = doc.properties or {}
     if not str(props.get("command") or "").strip() \
-            and not MultiParentOps._parents_of(props):
+            and not MultiParentOps._parents_of(props) and not _is_step(props):
         return {"ok": False, "eid": doc.eid,
                 "error": "the linked entity carries no 'command' prop "
                          "(and no parents to compose) -- give it a "
@@ -1258,14 +1260,103 @@ def _exec_command_doc(srv, est, fld, mem, doc, args: dict | None = None) -> dict
                          + " -- exec(action='link', commands=<name>, args={"
                          + ", ".join(f"'{m}': ..." for m in missing) + "})"}
     budget = [0]
-    out = _exec_node(srv, est, fld, mem, doc, {}, budget, args=args)
+    out = _exec_node(srv, est, fld, mem, doc, {}, budget, args=args, ctx=ctx)
     out["nodes_run"] = budget[0]
     out["eid"] = doc.eid
     return out
 
 
+def _is_step(props: dict) -> bool:
+    """A Cliffhanger node that runs without a shell command: a guard or a call."""
+    return bool(props.get("guard") or props.get("call"))
+
+
+def _step_name(doc) -> str:
+    p = doc.properties or {}
+    return str(p.get("step") or p.get("name") or doc.eid).split(":")[-1].split(".")[-1]
+
+
+def _parsed(head):
+    """A step's output as data when it is JSON (the {{steps.x.state.key}} reads)."""
+    try:
+        v = json.loads(str(head or ""))
+        return v if isinstance(v, (dict, list)) else None
+    except Exception:
+        return None
+
+
+def _ref(ctx: dict, key: str):
+    """{{key}} in a call's context: args/self.* first, then steps.<name>.<path>
+    (captured when that step finished), then entities.<spec>.<path> (read
+    now). None = unresolved."""
+    if key in ctx.get("vars", {}):
+        return ctx["vars"][key]
+
+    def walk(cur, path):
+        for k in path:
+            if isinstance(cur, dict) and k in cur:
+                cur = cur[k]
+            elif isinstance(cur, list) and k.isdigit() and int(k) < len(cur):
+                cur = cur[int(k)]
+            else:
+                return None
+        return cur
+    if key.startswith("steps."):
+        parts = key.split(".")
+        return walk(ctx.get("steps", {}).get(parts[1]) if len(parts) > 1 else None, parts[2:])
+    if key.startswith("entities.") and ctx.get("est") is not None:
+        parts = key[len("entities."):].split(".")
+        est = ctx["est"]
+        for i in range(len(parts) - 1, 0, -1):          # the spec may hold dots: longest that resolves
+            ent = est._resolve_spec(".".join(parts[:i]))
+            if ent is not None:
+                p = ent.properties or {}
+                data = {**p, **dict(p.get("script_data") or {})}
+                data.setdefault("state", p.get("script_data") or {})
+                return walk(data, parts[i:])
+    return None
+
+
+def _fill_raw(value: str, ctx: dict) -> tuple:
+    """A call step's argument: a lone {{ref}} passes its value as-is (data
+    to another method, not a shell word); mixed text gets plain strings."""
+    m = _PARAM.fullmatch((value or "").strip())
+    if m:
+        v = _ref(ctx, m.group(1))
+        return (v, []) if v is not None and str(v).strip() != "" else (None, [m.group(1)])
+    missing = []
+
+    def rep(mm):
+        v = _ref(ctx, mm.group(1))
+        if v is None or str(v).strip() == "":
+            missing.append(mm.group(1))
+            return mm.group(0)
+        return json.dumps(v) if isinstance(v, (dict, list)) else str(v)
+    return _PARAM.sub(rep, value or ""), missing
+
+
+def _fill(template: str, ctx: dict) -> tuple[str, list]:
+    """Every {{ref}} filled shell-quoted; (text, the refs that did not resolve
+    or were empty -- no silent empties)."""
+    import shlex
+    missing = []
+
+    def rep(m):
+        k = m.group(1)
+        if k == "parent" or k.startswith("parent"):
+            return m.group(0)                          # the pipeline feed fills these
+        v = _ref(ctx, k)
+        if v is None or str(v).strip() == "":
+            missing.append(k)
+            return m.group(0)
+        if isinstance(v, (dict, list)):
+            v = json.dumps(v)
+        return shlex.quote(str(v))
+    return _PARAM.sub(rep, template or ""), missing
+
+
 def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
-               depth: int = 0, args: dict | None = None) -> dict:
+               depth: int = 0, args: dict | None = None, ctx: dict | None = None) -> dict:
     """One node of the ancestry walk (post-order: parents, then self).
     Returns the node's run/residue dict; memo[eid] holds it (a diamond's
     shared ancestor runs once). `budget` = [n] -- the pass's node count
@@ -1301,10 +1392,10 @@ def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
             # stay classification)
             pprops = pdoc.properties or {}
             if not str(pprops.get("command") or "").strip() \
-                    and not MultiParentOps._parents_of(pprops):
+                    and not MultiParentOps._parents_of(pprops) and not _is_step(pprops):
                 continue
             sub = _exec_node(srv, est, fld, mem, pdoc, memo, budget,
-                             depth + 1)
+                             depth + 1, ctx=ctx)
             memo[pp] = sub
             parent_residues[pp] = sub
             order.append(pp)
@@ -1321,6 +1412,10 @@ def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
                                         f"{sub.get('outcome')}"
                                         if sub.get("error") is None
                                         else str(sub.get("error")))[:160]
+                if sub.get("status") == "blocked":
+                    res["status"] = "blocked"          # a guard (or an unresolved ref) said no
+                elif len(order) > 1:
+                    res["status"] = "partial"          # earlier steps ran: say so
                 break
         if res.get("failed_step"):
             res["ok"] = False
@@ -1328,6 +1423,54 @@ def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
                             f"{res['failed_reason']}")
             memo[eid] = res
             return res
+    if ctx is not None and props.get("guard"):
+        # CLIFFHANGER'S GUARD: a check, never a shell; false = blocked
+        state = {"self": {k[5:]: v for k, v in ctx.get("vars", {}).items() if k.startswith("self.")},
+                 "args": {k: v for k, v in ctx.get("vars", {}).items() if not k.startswith("self.")},
+                 "steps": dict(ctx.get("steps", {}))}
+        out = run_entity_script(str(props["guard"]), state)
+        ok = not out.get("error") and out.get("ok") is not False
+        why = str(out.get("error") or out.get("why") or "")
+        ctx.setdefault("steps", {})[_step_name(doc)] = {"ok": ok, "why": why}
+        res.update({"ok": ok, "rc": 0 if ok else None,
+                    "outcome": "pass" if ok else "blocked",
+                    "status": None if ok else "blocked",
+                    "error": None if ok else f"guard {_step_name(doc)}: {why or 'false'}"})
+        memo[eid] = res
+        return res
+    if ctx is not None and props.get("call"):
+        # CLIFFHANGER'S CALL STEP: a method on an object, through dispatch
+        if int(ctx.get("depth", 0)) >= COMPOSITE_DEPTH:
+            res.update({"ok": False, "status": "blocked",
+                        "error": f"composites nest at most {COMPOSITE_DEPTH} deep"})
+            memo[eid] = res
+            return res
+        obj_t, miss = _fill_raw(str(props.get("object") or "self"), ctx)
+        obj_spec = ctx.get("self_eid", "") if str(obj_t) == "self" else str(obj_t or "")
+        call_args, missing = {}, list(miss)
+        for k, v in dict(props.get("args") or {}).items():
+            if isinstance(v, str):
+                fv, m2 = _fill_raw(v, ctx)
+                missing += m2
+                call_args[k] = fv
+            else:
+                call_args[k] = v
+        if missing:
+            res.update({"ok": False, "status": "blocked",
+                        "error": f"step {_step_name(doc)}: unresolved {', '.join(missing)}"})
+            memo[eid] = res
+            return res
+        r = method_call(srv, est, fld, mem, obj_spec, str(props["call"]), call_args,
+                        _depth=int(ctx.get("depth", 0)) + 1)
+        ctx.setdefault("steps", {})[_step_name(doc)] = {
+            "rc": r.get("rc"), "status": r.get("status"), "head": r.get("head"),
+            "tail": r.get("tail"), "state": _parsed(r.get("head"))}
+        res.update({"ok": r.get("status") == "ok", "rc": r.get("rc"), "outcome": r.get("outcome"),
+                    "head": r.get("head"), "tail": r.get("tail"),
+                    "status": "blocked" if r.get("status") == "blocked" else None,
+                    "error": r.get("error")})
+        memo[eid] = res
+        return res
     if cmd:
         if budget[0] >= EXEC_WALK_NODES_CAP:
             res["continued"] = True
@@ -1336,7 +1479,15 @@ def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
             return res
         budget[0] += 1
         fed = _substitute_parents(cmd, parent_residues, order)
-        fed = substitute_args(fed, args)
+        if ctx is not None:
+            fed, missing = _fill(fed, ctx)
+            if missing:
+                res.update({"ok": False, "status": "blocked",
+                            "error": f"unresolved {', '.join(missing)}"})
+                memo[eid] = res
+                return res
+        else:
+            fed = substitute_args(fed, args)
         # THE TEMPLATE STAYS (2026-10-09): the fed line used to overwrite
         # the command -- a {{parent.head}} pipeline worked exactly once,
         # then ran its first output forever; the fed line is the residue
@@ -1360,6 +1511,10 @@ def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
         res.update({k: out.get(k) for k in ("ok", "rc", "outcome", "head",
                                             "tail", "ms", "error")})
         res["fed"] = fed if fed != cmd else None
+        if ctx is not None:
+            ctx.setdefault("steps", {})[_step_name(doc)] = {
+                "rc": out.get("rc"), "head": out.get("head"), "tail": out.get("tail"),
+                "state": _parsed(out.get("head"))}
     elif parent_residues:
         # THE COMPOSITION NODE'S EXIT: the last parent's residue
         last = order[-1] if order else ""
@@ -1417,6 +1572,8 @@ def _substitute_parents(cmd: str, residues: dict, order: list[str]) -> str:
 
     def _sub(m):
         tok = m.group(1).strip()
+        if not (tok == "parent" or tok.startswith(("parent.", "parent:"))):
+            return m.group(0)          # not a feed token ({{self.x}}, {{param}}, {{steps..}}): left for the call
         if tok.startswith("parent:"):
             rest = tok[len("parent:"):]
             peid, _, field = rest.rpartition(".")
@@ -1500,14 +1657,14 @@ def split_label(spec: str) -> tuple[str, str]:
 # exhibit, 2026-10-09: every '. ~/.config/x.env; curl ...' was named '.')
 _SETUP = re.compile(r"^\s*(?:(?:\.|source)\s+\S+(?:\s+\d*>\S*)*|set\s+-[a-z]+|export\s+[^;&]+|cd\s+\S+|"
                     r"[A-Z_][A-Z0-9_]*=\S+)\s*(?:;|&&|\|\|)\s*")
-_PARAM = re.compile(r"\{\{\s*([A-Za-z_][\w.]*)\s*\}\}")
+_PARAM = re.compile(r"\{\{\s*([A-Za-z_][\w.:-]*)\s*\}\}")   # entity specs carry ':' and '-'
 
 
 def command_params(cmd: str) -> list[str]:
     """A command's parameters: its {{name}} placeholders (never the
     pipeline's {{parent...}} feeds)."""
     return [p for p in dict.fromkeys(_PARAM.findall(cmd or ""))
-            if p != "parent" and not p.startswith(("parent", "self."))]
+            if p != "parent" and not p.startswith(("parent", "self.", "steps.", "entities."))]
 
 
 def substitute_args(cmd: str, args: dict | None) -> str:
@@ -1730,18 +1887,28 @@ def entity_link(srv, est, fld, mem, executor_spec: str,
 # object's properties merged over its classes'; other {{params}} are the
 # call's args (shell-quoted). The receipt lands ON the object.
 CALLS_RING = 12
+COMPOSITE_DEPTH = 3            # Argus: "composite depth <= 3" -- feed-forward, not Turing-complete
 
 
 def method_define(srv, est, fld, mem, on: str, method: str, command: str,
-                  read_only: bool = False) -> dict:
+                  read_only: bool = False, guard: str = "", steps=None) -> dict:
+    """A method: a command, or a COMPOSITE (steps: calls / commands, in
+    order, as entities -- its parents), optionally behind a GUARD entity."""
     if est is None:
         return {"ok": False, "error": "entity layer unavailable"}
     method = re.sub(r"[^A-Za-z0-9_]+", "_", (method or "").strip()).strip("_")
-    if not method or not (command or "").strip():
-        return {"ok": False, "error": "on, method and command required"}
-    bad = lint_command(command)
-    if bad:
-        return {"ok": False, "error": f"refused {command[:60]!r}: {bad}"}
+    steps = list(steps or [])
+    if not method or not ((command or "").strip() or steps):
+        return {"ok": False, "error": "on, method and a command or steps required"}
+    if (command or "").strip():
+        bad = lint_command(command)
+        if bad:
+            return {"ok": False, "error": f"refused {command[:60]!r}: {bad}"}
+    for st in steps:
+        if not isinstance(st, dict) or not (st.get("call") or st.get("command")):
+            return {"ok": False, "error": "each step is {name, call, object?, args?} or {name, command}"}
+        if st.get("command") and lint_command(str(st["command"])):
+            return {"ok": False, "error": f"step refused: {lint_command(str(st['command']))}"}
     owner = est._resolve_spec(on) if on else None
     if on and owner is None:
         return {"ok": False, "error": f"no entity matches {on!r}"}
@@ -1754,8 +1921,27 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
         doc = QuantumEntity(eid=eid, cls=CLASS_TOOL, properties={"name": label, "silent_birth": True})
         est.docs[eid] = doc
     p = doc.properties or {}
-    p.update({"command": command.strip(), "method_name": method,
+    p.update({"command": (command or "").strip(), "method_name": method,
               "method_of": [owner.eid] if owner else [], "read_only": bool(read_only)})
+    # THE NODES AS ENTITIES: the guard first, then the steps in order --
+    # the method's parents (the executor runs parents first, stop-on-failure)
+    nodes = []
+    if (guard or "").strip():
+        nodes.append(_node(est, eid, "guard", {"guard": guard.strip(), "step": "guard"}))
+    for i, st in enumerate(steps):
+        name = re.sub(r"[^A-Za-z0-9_]+", "_", str(st.get("name") or f"step{i + 1}")).strip("_")
+        props = {"step": name}
+        if st.get("call"):
+            props.update({"call": str(st["call"]), "object": str(st.get("object") or "self"),
+                          "args": dict(st.get("args") or {})})
+        else:
+            props["command"] = str(st["command"])
+        nodes.append(_node(est, eid, name, props))
+    old = list(p.get("parents") or [])
+    old_nodes = [x for x in old if str(x).startswith(eid + ":")]
+    if nodes or old_nodes:
+        # its own nodes are replaced; any other parent (a hand-made pipeline) stays
+        p["parents"] = nodes + [x for x in old if x not in old_nodes and x not in nodes]
     doc.properties = p
     est.upsert(doc, embedder=None)
     _audit(mem, {"event": "agent-method-define", "origin": "mcp", "eid": eid,
@@ -1764,11 +1950,29 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
             "params": command_params(command), "read_only": bool(read_only)}
 
 
+def _node(est, method_eid: str, name: str, props: dict) -> str:
+    """One Cliffhanger node entity (a guard or a step) owned by its method."""
+    eid = f"{method_eid}:{name}"
+    d = est.docs.get(eid)
+    if d is None:
+        d = QuantumEntity(eid=eid, cls=CLASS_TOOL, properties={"name": f"{name}", "silent_birth": True})
+        est.docs[eid] = d
+    dp = d.properties or {}
+    for k in ("guard", "call", "object", "args", "command"):
+        dp.pop(k, None)
+    dp.update(props)
+    dp["node_of"] = method_eid
+    d.properties = dp
+    est.upsert(d, embedder=None)
+    return eid
+
+
 def resolve_method(est, obj, method: str):
     """The method's entity for this object (own -> classes -> global)."""
     docs = list((est.docs or {}).values())
     named = [d for d in docs if (d.properties or {}).get("method_name") == method
-             and str((d.properties or {}).get("command") or "").strip()]
+             and (str((d.properties or {}).get("command") or "").strip()
+                  or (d.properties or {}).get("parents"))]
     if not named:
         return None, None
     order = [obj] + ancestors(est, obj)
@@ -1806,7 +2010,8 @@ def _blocked(obj, method, why, **extra) -> dict:
             "method": method, "error": why, **extra}
 
 
-def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | None = None) -> dict:
+def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | None = None,
+                _depth: int = 0) -> dict:
     if est is None:
         return {"ok": False, "status": "blocked", "error": "entity layer unavailable"}
     obj = est._resolve_spec(obj_spec or "")
@@ -1829,7 +2034,8 @@ def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | Non
     # placeholder must have a non-empty value before anything runs
     template = str((m.properties or {}).get("command") or "")
     missing = [p for p in dict.fromkeys(_PARAM.findall(template))
-               if not p.startswith("parent") and (p not in full or str(full[p]).strip() == "")]
+               if not p.startswith(("parent", "steps.", "entities."))
+               and (p not in full or str(full[p]).strip() == "")]
     if missing:
         selfs = [p for p in missing if p.startswith("self.")]
         given = [p for p in missing if not p.startswith("self.")]
@@ -1843,13 +2049,20 @@ def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | Non
     # a call is a synchronous EVENT, not a queued link: the method entity
     # runs directly (its id would read as a 'label :: command' line to the
     # link parser); the run count and success rate land on the method
-    run = _exec_command_doc(srv, est, fld, mem, m, args=full)
-    fed = run.get("fed") or substitute_args(template, full)
+    ctx = {"vars": full, "steps": {}, "depth": _depth, "est": est, "self_eid": obj.eid}
+    run = _exec_command_doc(srv, est, fld, mem, m, args=full, ctx=ctx)
+    fed = run.get("fed") or (_fill(template, ctx)[0] if template else "")
     rc = run.get("rc")
-    status = ("ok" if rc == 0 else
-              "timeout" if "timeout" in str(run.get("outcome") or run.get("error") or "").lower() else
-              "blocked" if rc is None and str(run.get("error") or "").startswith("needs args") else
-              "error")
+    if run.get("status") in ("blocked", "partial"):
+        status = run["status"]
+    elif run.get("ok") or rc == 0:
+        status = "ok"
+    elif "timeout" in str(run.get("outcome") or run.get("error") or "").lower():
+        status = "timeout"
+    elif rc is None and str(run.get("error") or "").startswith("needs args"):
+        status = "blocked"
+    else:
+        status = "error"
     read_only = bool((m.properties or {}).get("read_only"))
     mp = m.properties or {}
     mp["runs"] = int(mp.get("runs") or 0) + 1
@@ -1886,7 +2099,8 @@ def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | Non
     return {"ok": status == "ok", "status": status, "object": obj.eid, "method": mp.get("name") or method,
             "via": via or "global", "mro": mro, "fed": fed, "rc": rc, "outcome": run.get("outcome"),
             "head": run.get("head"), "tail": run.get("tail"), "error": run.get("error"),
-            "read_only": read_only, "params": command_params(template)}
+            "read_only": read_only, "params": command_params(template),
+            "steps": {k: {kk: vv for kk, vv in v.items() if kk != "tail"} for k, v in ctx["steps"].items()}}
 
 
 def short_name_of(obj) -> str:

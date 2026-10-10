@@ -61,21 +61,19 @@ FAMILIES: dict[str, dict] = {
                 "inherit": lambda a: _pick(a, "spec", "parents")},
     },
     "exec": {
-        "description": "Cliffhanger, membrane's method language: define a method on a class or "
-                       "object, call it on an object (dispatch through ISA); link runs a raw "
-                       "command; unlink drops a queued one. help('cliffhanger').",
+        "description": "Cliffhanger methods: define on a class/object, call on an object (ISA "
+                       "dispatch); link runs a raw command. help('cliffhanger').",
         "actions": {"call": "method_call", "define": "method_define",
                     "link": "entity_link", "unlink": "entity_unlink"},
-        "params": {"commands": {"type": ["string", "array"], "description": "a command line (or a list; 'label :: cmd' names one)"},
-                   "args": {"type": "object", "description": "values for the command's {{name}} parameters"},
-                   "object": _S("call: the object the method runs on"),
-                   "on": _S("define: the class or object that owns the method (omit = global)"),
-                   "method": _S("call/define: the method's name"),
-                   "command": _S("define: the method's command line ({{self.<prop>}}, {{param}})"),
-                   "read_only": _B("define: a read (its calls stay out of the object's call ring)"),
-                   "executor": _S("optional executor entity"), "create": _B("create missing command entities")},
+        "params": {"commands": {"type": ["string", "array"], "description": "link: command line(s)"},
+                   "args": {"type": "object", "description": "{{param}} values"},
+                   "object": _S("call: target"), "on": _S("define: owner (omit = global)"),
+                   "method": _S("method name"), "command": _S("define: command template"),
+                   "read_only": _B("define: a read"), "guard": _S("define: check script"),
+                   "steps": {"type": "array", "items": {"type": "object"}, "description": "define: composite steps"},
+                   "executor": _S("optional"), "create": _B("optional")},
         "map": {"call": lambda a: _pick(a, "object", "method", "args"),
-                "define": lambda a: _pick(a, "on", "method", "command", "read_only"),
+                "define": lambda a: _pick(a, "on", "method", "command", "read_only", "guard", "steps"),
                 "link": lambda a: _pick(a, "commands", "executor", "create", "args"),
                 "unlink": lambda a: _pick(a, "commands", "executor")},
     },
@@ -186,7 +184,12 @@ HELP = {
         "object. Compose methods with parents (help('exec')). A missing or empty value BLOCKS the "
         "call (nothing runs); outcomes: ok | blocked | error | timeout | partial. The receipt shows "
         "which implementation answered (via), the resolution order and the exact command that ran. "
-        "Mark reads read_only=true."),
+        "Mark reads read_only=true. GUARDS: define(..., guard=\"result = {'ok': state['self'].get('reachable') "
+        "== 'yes'}\") runs first; false = blocked, nothing runs. COMPOSITES: define(..., steps=[{'name': "
+        "'soc', 'call': 'read', 'object': 'argus:battery'}, {'name': 'lights', 'call': 'turn_off', 'object': "
+        "'self'}]) -- steps run in order, stop on failure (partial if earlier ones ran), nest at most 3 "
+        "deep; {{steps.soc.state.soc}} reads a step's captured result (JSON output becomes .state), "
+        "{{entities.<spec>.<field>}} reads an entity now. Every node is an entity you can read."),
     "classes": (
         "Inheritance: an entity without its own getter/mention/thought/dreamed script runs its "
         "nearest class's, ON ITSELF (state['eid'], its own properties merged over its classes' "

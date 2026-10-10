@@ -6188,7 +6188,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if op == "define":
             res = method_define(srv, est, _efield_on(srv), srv.membrane, str(body.get("on") or ""),
                                 str(body.get("method") or ""), str(body.get("command") or ""),
-                                read_only=bool(body.get("read_only")))
+                                read_only=bool(body.get("read_only")), guard=str(body.get("guard") or ""),
+                                steps=body.get("steps") if isinstance(body.get("steps"), list) else None)
         else:
             a = body.get("args")
             res = method_call(srv, est, _efield_on(srv), srv.membrane, str(body.get("object") or ""),

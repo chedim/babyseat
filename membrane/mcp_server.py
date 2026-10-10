@@ -1373,11 +1373,21 @@ def tool_entity_link(args: dict, port: int) -> str:
     return "\n".join(lines)
 
 
+def _steps_arg(v):
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except ValueError:
+            return None
+    return v if isinstance(v, list) else None
+
+
 def tool_method_define(args: dict, port: int) -> str:
     out = _http(port, "POST", "/membrane/method/define", {
         "on": str(args.get("on") or args.get("object") or ""), "method": str(args.get("method") or ""),
         "command": str(args.get("command") or args.get("commands") or ""),
-        "read_only": bool(args.get("read_only"))})
+        "read_only": bool(args.get("read_only")), "guard": str(args.get("guard") or ""),
+        "steps": _steps_arg(args.get("steps"))})
     if not out.get("ok"):
         return f"define failed: {out.get('error', 'unknown error')}"
     p = out.get("params") or []

@@ -142,3 +142,68 @@ class TestReviewFixes(unittest.TestCase):
         self.assertEqual(N.method_call(srv, est, f, None, port.eid, "fail")["status"], "error")
         self.assertEqual(N.method_call(srv, est, f, None, port.eid, "nope")["status"], "blocked")
         self.assertEqual(set(N.OUTCOMES), {"ok", "blocked", "error", "timeout", "partial"})
+
+
+class TestGuardsAndComposites(unittest.TestCase):
+    """Cliffhanger nodes as entities (2026-10-10): guards, call steps, named
+    data flow, blocked/partial."""
+
+    def test_a_guard_blocks_and_nothing_runs(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        d = N.method_define(srv, est, f, None, light.eid, "turn_on", "echo ON {{self.entity_id}}",
+                            guard="result = {'ok': state['self'].get('reachable') == 'yes', 'why': 'unreachable'}")
+        self.assertTrue(d["ok"], d)
+        r = N.method_call(srv, est, f, None, port.eid, "turn_on")
+        self.assertEqual(r["status"], "blocked")
+        self.assertIn("unreachable", str(r["error"]))
+        self.assertNotIn("ON", str(r.get("head") or ""))
+        port.properties["reachable"] = "yes"
+        r = N.method_call(srv, est, f, None, port.eid, "turn_on")
+        self.assertEqual(r["status"], "ok", r)
+        self.assertIn("ON light.port_strip", str(r["head"]))
+        guard = est.docs[d["eid"] + ":guard"]                      # the guard is an entity
+        self.assertIn("guard", guard.properties)
+
+    def test_a_composite_passes_data_by_name(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        battery = _add(est, "argus:battery")
+        N.method_define(srv, est, f, None, battery.eid, "read", 'echo \'{"soc": 92}\'', read_only=True)
+        N.method_define(srv, est, f, None, light.eid, "set_level", "echo LEVEL {{self.entity_id}} {{level}}")
+        d = N.method_define(srv, est, f, None, light.eid, "evening", "", steps=[
+            {"name": "soc", "call": "read", "object": "argus:battery"},
+            {"name": "dim", "call": "set_level", "object": "self", "args": {"level": "{{steps.soc.state.soc}}"}}])
+        self.assertTrue(d["ok"], d)
+        r = N.method_call(srv, est, f, None, port.eid, "evening")
+        self.assertEqual(r["status"], "ok", r)
+        self.assertIn("LEVEL light.port_strip 92", str(r["steps"]["dim"]["head"]))
+
+    def test_partial_when_a_later_step_fails(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        N.method_define(srv, est, f, None, light.eid, "a", "echo A")
+        N.method_define(srv, est, f, None, light.eid, "b", "sh -c 'exit 2'")
+        N.method_define(srv, est, f, None, light.eid, "both", "", steps=[
+            {"name": "a", "call": "a", "object": "self"}, {"name": "b", "call": "b", "object": "self"}])
+        r = N.method_call(srv, est, f, None, port.eid, "both")
+        self.assertEqual(r["status"], "partial", r)
+
+    def test_an_unresolved_ref_blocks(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        N.method_define(srv, est, f, None, light.eid, "x", "", steps=[
+            {"name": "s", "call": "set_level", "object": "self", "args": {"level": "{{steps.nope.state.v}}"}}])
+        r = N.method_call(srv, est, f, None, port.eid, "x")
+        self.assertEqual(r["status"], "blocked", r)
+
+    def test_entities_refs_read_now(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        battery = _add(est, "argus:battery")
+        battery.properties["script_data"] = {"soc": 77}
+        N.method_define(srv, est, f, None, light.eid, "show", "echo SOC {{entities.argus:battery.soc}}")
+        self.assertIn("SOC 77", str(N.method_call(srv, est, f, None, port.eid, "show")["head"]))
+
+    def test_composites_nest_at_most_three_deep(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        N.method_define(srv, est, f, None, light.eid, "m0", "echo deep")
+        for i in range(1, 5):
+            N.method_define(srv, est, f, None, light.eid, f"m{i}", "", steps=[{"name": "s", "call": f"m{i - 1}", "object": "self"}])
+        self.assertEqual(N.method_call(srv, est, f, None, port.eid, "m2")["status"], "ok")
+        self.assertEqual(N.method_call(srv, est, f, None, port.eid, "m4")["status"], "blocked")
