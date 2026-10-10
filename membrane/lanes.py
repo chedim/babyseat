@@ -3868,7 +3868,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._entity_inherit(); return
         if path == "/membrane/entity/link":
             self._entity_link_unlink(link=True); return
-        if path in ("/membrane/method/define", "/membrane/method/call"):
+        if path in ("/membrane/method/define", "/membrane/method/call", "/membrane/method/each"):
             self._method(path.rsplit("/", 1)[-1]); return
         if path == "/membrane/entity/unlink":
             self._entity_link_unlink(link=False); return
@@ -6184,7 +6184,14 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if est is None:
             self._json_err_raw(503, "entity layer unavailable"); return
         body = self._json_body()
-        from .night import method_define, method_call
+        from .night import method_define, method_call, method_each
+        if op == "each":
+            a = body.get("args")
+            res = method_each(srv, est, _efield_on(srv), srv.membrane, str(body.get("over") or ""),
+                              str(body.get("method") or ""), a if isinstance(a, dict) else {},
+                              max_n=body.get("max"), dry_run=bool(body.get("dry_run")),
+                              on_fail=str(body.get("on_fail") or "abort"))
+            self._json_out(res); return
         if op == "define":
             res = method_define(srv, est, _efield_on(srv), srv.membrane, str(body.get("on") or ""),
                                 str(body.get("method") or ""), str(body.get("command") or ""),

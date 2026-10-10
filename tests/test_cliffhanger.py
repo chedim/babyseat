@@ -263,3 +263,61 @@ class TestDispatchOrder(unittest.TestCase):
         leg, args = T.resolve("entity", {"action": "edit", "spec": "x", "parents": '["p1"]'})
         self.assertEqual(args["properties"]["parents"], '["p1"]')
         self.assertFalse(est.edit(probe.eid, properties={"parents": [probe.eid]})["ok"])     # never itself
+
+
+class TestFanOut(unittest.TestCase):
+    """Fan-out (2026-10-10, Argus's guard list): members, cap, dry_run, on_fail,
+    one summary, as a composite step. Echo only."""
+
+    def test_dry_run_lists_and_runs_nothing(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        N.method_define(srv, est, f, None, light.eid, "turn_off", "echo OFF {{self.id}}")
+        r = N.method_each(srv, est, f, None, "ha light", "turn_off", dry_run=True)
+        self.assertTrue(r["dry_run"])
+        self.assertEqual(sorted(r["members"]), ["ha:light.aft_cabin", "ha:light.port_strip"])
+        self.assertNotIn("calls", port.properties)                           # nothing ran
+
+    def test_runs_on_every_member_with_one_summary(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        N.method_define(srv, est, f, None, light.eid, "turn_off", "echo OFF {{self.id}}")
+        r = N.method_each(srv, est, f, None, "ha light", "turn_off")
+        self.assertEqual((r["status"], r["n"], r["n_ok"]), ("ok", 2, 2))
+        self.assertEqual(port.properties["calls"][-1]["method"], "turn_off")  # each member's own receipt
+
+    def test_the_cap_blocks_unless_raised(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        for i in range(4):
+            _add(est, f"ha:light.extra{i}", parents=[light.eid])
+        N.method_define(srv, est, f, None, light.eid, "turn_off", "echo OFF {{self.id}}")
+        r = N.method_each(srv, est, f, None, "ha light", "turn_off", max_n=3)
+        self.assertEqual(r["status"], "blocked")
+        self.assertIn("exceed max=3", r["error"])
+        self.assertEqual(N.method_each(srv, est, f, None, "ha light", "turn_off", max_n=10)["n_ok"], 6)
+        self.assertEqual(N.method_each(srv, est, f, None, "ha light", "turn_off", max_n=10 ** 6)["max"], N.EACH_MAX_CEILING)
+
+    def test_on_fail_abort_vs_continue_and_partial(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        N.method_define(srv, est, f, None, light.eid, "flaky", "sh -c 'exit 1'")
+        N.method_define(srv, est, f, None, port.eid, "flaky", "echo fine")       # one member's own wins
+        r = N.method_each(srv, est, f, None, "ha light", "flaky", on_fail="continue")
+        self.assertEqual(r["status"], "partial")
+        self.assertEqual(r["ran"], 2)
+        r2 = N.method_each(srv, est, f, None, "ha light", "flaky")
+        self.assertIn(r2["status"], ("partial", "error"))
+        self.assertTrue(r2["stopped"] or r2["ran"] == 2)
+
+    def test_each_as_a_composite_step(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        room = _add(est, "room:aft")
+        N.method_define(srv, est, f, None, light.eid, "turn_off", "echo OFF {{self.id}}")
+        N.method_define(srv, est, f, None, room.eid, "lights_out", "", steps=[
+            {"name": "all", "each": "ha light", "call": "turn_off", "max": 5}])
+        r = N.method_call(srv, est, f, None, room.eid, "lights_out")
+        self.assertEqual(r["status"], "ok", r)
+        self.assertEqual(r["steps"]["all"]["n_ok"], 2)
+
+    def test_the_family(self):
+        self.assertEqual(T.resolve("exec", {"action": "each", "over": "ha light", "method": "m", "dry_run": True}),
+                         ("method_each", {"over": "ha light", "method": "m", "dry_run": True}))
+        self.assertIn("method_each", S.OPERATOR_TOOLS)
+        self.assertNotIn("method_each", S.PHONE_TOOLS)

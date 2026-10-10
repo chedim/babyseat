@@ -1414,6 +1414,30 @@ def tool_method_call(args: dict, port: int) -> str:
             f"ran: {str(out.get('fed') or '')[:300]}\nhead: {str(out.get('head') or '')[:600]}")
 
 
+def tool_method_each(args: dict, port: int) -> str:
+    a = args.get("args")
+    if isinstance(a, str):
+        try:
+            a = json.loads(a)
+        except ValueError:
+            a = None
+    out = _http(port, "POST", "/membrane/method/each", {
+        "over": str(args.get("over") or args.get("each") or ""), "method": str(args.get("method") or ""),
+        "args": a if isinstance(a, dict) else {}, "max": args.get("max"),
+        "dry_run": bool(args.get("dry_run")) and str(args.get("dry_run")).lower() not in ("false", "0"),
+        "on_fail": str(args.get("on_fail") or "abort")})
+    if out.get("dry_run"):
+        return (f"dry run: {out['method']} over {out['over']} would reach {out['n']} (max {out['max']}): "
+                + ", ".join(out.get("members") or []))
+    head = f"[{out.get('status')}] {out.get('method')} over {out.get('over')}: "
+    if out.get("status") == "blocked" and not out.get("results"):
+        return head + str(out.get("error"))
+    rows = "; ".join(f"{r['object']}:{r['status']}" for r in (out.get("results") or [])[:40])
+    return (head + f"{out.get('n_ok', 0)}/{out.get('n')} ok, ran {out.get('ran')}"
+            + (" (stopped at the first failure; on_fail='continue' runs the rest)" if out.get("stopped") else "")
+            + f" -- {rows}")
+
+
 def tool_entity_unlink(args: dict, port: int) -> str:
     """The executor's unlink hand: supersede the edges."""
     out = _http(port, "POST", "/membrane/entity/unlink", {
@@ -1507,6 +1531,7 @@ TOOL_IMPLS = {
     "entity_link": tool_entity_link,
     "method_define": tool_method_define,
     "method_call": tool_method_call,
+    "method_each": tool_method_each,
     "entity_unlink": tool_entity_unlink,
     "entity_read": tool_entity_read,
 }

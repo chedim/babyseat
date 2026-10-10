@@ -1267,8 +1267,8 @@ def _exec_command_doc(srv, est, fld, mem, doc, args: dict | None = None,
 
 
 def _is_step(props: dict) -> bool:
-    """A Cliffhanger node that runs without a shell command: a guard or a call."""
-    return bool(props.get("guard") or props.get("call"))
+    """A Cliffhanger node that runs without a shell command: a guard, a call or a fan-out."""
+    return bool(props.get("guard") or props.get("call") or props.get("each"))
 
 
 def _step_name(doc) -> str:
@@ -1436,6 +1436,31 @@ def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
                     "outcome": "pass" if ok else "blocked",
                     "status": None if ok else "blocked",
                     "error": None if ok else f"guard {_step_name(doc)}: {why or 'false'}"})
+        memo[eid] = res
+        return res
+    if ctx is not None and props.get("each"):
+        # CLIFFHANGER'S FAN-OUT STEP: a method over a class's members, capped
+        over, miss = _fill_raw(str(props["each"]), ctx)
+        call_args, missing = {}, list(miss)
+        for k, v in dict(props.get("args") or {}).items():
+            if isinstance(v, str):
+                fv, m2 = _fill_raw(v, ctx)
+                missing += m2
+                call_args[k] = fv
+            else:
+                call_args[k] = v
+        if missing or not props.get("call"):
+            res.update({"ok": False, "status": "blocked",
+                        "error": f"step {_step_name(doc)}: " + (f"unresolved {', '.join(missing)}" if missing else "each needs call")})
+            memo[eid] = res
+            return res
+        r = method_each(srv, est, fld, mem, str(over), str(props["call"]), call_args,
+                        max_n=props.get("max"), on_fail=str(props.get("on_fail") or "abort"),
+                        _depth=int(ctx.get("depth", 0)) + 1)
+        ctx.setdefault("steps", {})[_step_name(doc)] = {k: r.get(k) for k in ("status", "n", "ran", "n_ok", "results")}
+        res.update({"ok": r.get("status") == "ok", "rc": 0 if r.get("status") == "ok" else None,
+                    "outcome": r.get("status"), "head": f"{r.get('n_ok', 0)}/{r.get('n', 0)} ok",
+                    "status": "blocked" if r.get("status") == "blocked" else None, "error": r.get("error")})
         memo[eid] = res
         return res
     if ctx is not None and props.get("call"):
@@ -1906,7 +1931,7 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
             return {"ok": False, "error": f"refused {command[:60]!r}: {bad}"}
     for st in steps:
         if not isinstance(st, dict) or not (st.get("call") or st.get("command")):
-            return {"ok": False, "error": "each step is {name, call, object?, args?} or {name, command}"}
+            return {"ok": False, "error": "each step is {name, call, object?, args?}, {name, each, call, args?, max?} or {name, command}"}
         if st.get("command") and lint_command(str(st["command"])):
             return {"ok": False, "error": f"step refused: {lint_command(str(st['command']))}"}
     owner = est._resolve_spec(on) if on else None
@@ -1936,7 +1961,11 @@ def method_define(srv, est, fld, mem, on: str, method: str, command: str,
     for i, st in enumerate(steps):
         name = re.sub(r"[^A-Za-z0-9_]+", "_", str(st.get("name") or f"step{i + 1}")).strip("_")
         props = {"step": name}
-        if st.get("call"):
+        if st.get("each"):
+            props.update({"each": str(st["each"]), "call": str(st["call"]),
+                          "args": dict(st.get("args") or {}), "max": st.get("max"),
+                          "on_fail": str(st.get("on_fail") or "abort")})
+        elif st.get("call"):
             props.update({"call": str(st["call"]), "object": str(st.get("object") or "self"),
                           "args": dict(st.get("args") or {})})
         else:
@@ -1963,7 +1992,7 @@ def _node(est, method_eid: str, name: str, props: dict) -> str:
         d = QuantumEntity(eid=eid, cls=CLASS_TOOL, properties={"name": f"{name}", "silent_birth": True})
         est.docs[eid] = d
     dp = d.properties or {}
-    for k in ("guard", "call", "object", "args", "command"):
+    for k in ("guard", "call", "object", "args", "command", "each", "max", "on_fail"):
         dp.pop(k, None)
     dp.update(props)
     dp["node_of"] = method_eid
@@ -2111,6 +2140,80 @@ def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | Non
             "head": run.get("head"), "tail": run.get("tail"), "error": run.get("error"),
             "read_only": read_only, "params": command_params(template),
             "steps": {k: {kk: vv for kk, vv in v.items() if kk != "tail"} for k, v in ctx["steps"].items()}}
+
+
+# ---- FAN-OUT (Argus's review: "a named fan-out verb, not cardinality smuggled
+# into ordinary calls"; "dry_run is the guard I'd use most -- show me who's
+# about to be hit"): one method over every member of a class (or a pattern),
+# capped, one summary receipt; each member's own call still lands on it
+EACH_MAX_DEFAULT = 20
+EACH_MAX_CEILING = 150
+
+
+def members_of(est, over: str) -> list:
+    """The objects a fan-out reaches: entities inheriting (transitively) from
+    the class `over`, or matching it as a pattern ('ha:light.*')."""
+    if not over:
+        return []
+    if "*" in over:
+        from .classes import matches
+        return [d for d in matches(est, over) if not (d.properties or {}).get("method_name")]
+    cls = est._resolve_spec(over)
+    if cls is None:
+        return []
+    out = []
+    for d in list((est.docs or {}).values()):
+        if d.eid == cls.eid or (d.properties or {}).get("method_name") or (d.properties or {}).get("node_of"):
+            continue
+        if not (d.properties or {}).get("parents"):
+            continue
+        if any(a.eid == cls.eid for a in ancestors(est, d)):
+            out.append(d)
+    return out
+
+
+def method_each(srv, est, fld, mem, over: str, method: str, args: dict | None = None,
+                max_n=None, dry_run: bool = False, on_fail: str = "abort", _depth: int = 0) -> dict:
+    if est is None:
+        return {"ok": False, "status": "blocked", "error": "entity layer unavailable"}
+    members = members_of(est, over)
+    names = [short_name_of(m) for m in members]
+    try:
+        cap = int(max_n) if max_n not in (None, "") else EACH_MAX_DEFAULT
+    except (TypeError, ValueError):
+        cap = EACH_MAX_DEFAULT
+    cap = max(1, min(cap, EACH_MAX_CEILING))
+    base = {"over": over, "method": method, "n": len(members), "max": cap}
+    if not members:
+        return {**base, "ok": False, "status": "blocked",
+                "error": f"no members of {over!r} (a class others inherit from, or a pattern)"}
+    if dry_run:
+        return {**base, "ok": True, "status": "ok", "dry_run": True, "members": names}
+    if len(members) > cap:
+        return {**base, "ok": False, "status": "blocked", "members": names[:30],
+                "error": f"{len(members)} members exceed max={cap} -- raise max explicitly "
+                         f"(ceiling {EACH_MAX_CEILING}) or narrow it; dry_run=true lists them"}
+    results, n_ok = [], 0
+    for m in members:
+        r = method_call(srv, est, fld, mem, m.eid, method, args, _depth=_depth)
+        st = r.get("status")
+        results.append({"object": short_name_of(m), "status": st, "rc": r.get("rc"),
+                        "error": (str(r.get("error") or "")[:120] or None)})
+        if st == "ok":
+            n_ok += 1
+        elif on_fail != "continue":
+            break
+    ran = len(results)
+    if n_ok == len(members):
+        status = "ok"
+    elif n_ok:
+        status = "partial"
+    else:
+        status = "blocked" if all(x["status"] == "blocked" for x in results) else "error"
+    _audit(mem, {"event": "agent-method-each", "origin": "mcp", "over": over, "method": method,
+                 "n": len(members), "ran": ran, "ok": n_ok, "status": status})
+    return {**base, "ok": status == "ok", "status": status, "ran": ran, "n_ok": n_ok,
+            "stopped": ran < len(members), "results": results}
 
 
 def short_name_of(obj) -> str:
