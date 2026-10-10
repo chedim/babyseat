@@ -37,3 +37,20 @@ test("angles turn the short way round", () => {
   assert.ok(Math.abs(H.angleStep(3.0, -3.0, 1) - (3.0 + (2 * Math.PI - 6.0))) < 1e-9);
   assert.equal(H.angleStep(0, 1, 0.5), 0.5);
 });
+
+test("the HA menu: the user's sidebar order, hidden panels out, this page out, settings last", () => {
+  const panels = {
+    lovelace: { url_path: "lovelace", component_name: "lovelace", title: null, icon: null },
+    "boat-dash": { url_path: "boat-dash", component_name: "lovelace", title: "Boat", icon: "mdi:sail-boat" },
+    energy: { url_path: "energy", component_name: "energy", title: null, icon: null },
+    config: { url_path: "config", component_name: "config", title: null, icon: null },
+    profile: { url_path: "profile", component_name: "profile", title: null, icon: null },
+    membrane: { url_path: "membrane", component_name: "custom", title: "Membrane", icon: "mdi:cube-scan" },
+    hidden: { url_path: "hidden", component_name: "custom", title: "Secret", icon: "mdi:x" },
+    notitle: { url_path: "notitle", component_name: "weird", title: null, icon: null },
+  };
+  const e = H.menuEntries(panels, ["boat-dash", "energy"], ["hidden"], "membrane");
+  assert.equal(JSON.stringify(e.map((x) => x.path)), JSON.stringify(["boat-dash", "energy", "lovelace", "config", "profile"]));
+  assert.equal(e.find((x) => x.path === "lovelace").title, "Overview");
+  assert.equal(e.find((x) => x.path === "boat-dash").icon, "mdi:sail-boat");
+});

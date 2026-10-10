@@ -40,6 +40,40 @@ function angleStep(a, b, k) {
   return a + d * k;
 }
 
+// HA's sidebar as a drop-down (2026-10-10, the operator: "replace the HA
+// button with that sidebar ... float over the field like a drop-down menu;
+// exit the field whenever the user uses it to navigate away; any click
+// outside closes it; don't load membrane automatically if the user last left
+// membrane thru that menu")
+const LS_LEFT = "membrane.home.left";      // panel.js's landing rule reads it
+const BUILTIN_TITLES = { lovelace: "Overview", energy: "Energy", map: "Map", logbook: "Logbook", history: "History",
+  "media-browser": "Media", todo: "To-do lists", calendar: "Calendar", config: "Settings",
+  "developer-tools": "Developer tools", profile: "Profile" };
+const BUILTIN_ICONS = { lovelace: "mdi:view-dashboard", energy: "mdi:lightning-bolt", map: "mdi:tooltip-account",
+  logbook: "mdi:format-list-bulleted-type", history: "mdi:chart-box", "media-browser": "mdi:play-box-multiple",
+  todo: "mdi:clipboard-list", calendar: "mdi:calendar", config: "mdi:cog", "developer-tools": "mdi:hammer",
+  profile: "mdi:account" };
+const TAIL = ["developer-tools", "config", "profile"];
+
+/** HA's sidebar entries, in the user's own sidebar order, minus the hidden
+ * ones and this page; settings / developer tools / profile last. */
+function menuEntries(panels, order, hidden, self) {
+  const out = [];
+  for (const p of Object.values(panels || {})) {
+    if (!p || !p.url_path || p.url_path === self) continue;
+    const title = p.title || BUILTIN_TITLES[p.url_path] || BUILTIN_TITLES[p.component_name];
+    if (!title || (hidden || []).includes(p.url_path)) continue;
+    out.push({ path: p.url_path, title, icon: p.icon || BUILTIN_ICONS[p.url_path] || BUILTIN_ICONS[p.component_name] || "mdi:circle-small" });
+  }
+  const rank = (e) => {
+    const t = TAIL.indexOf(e.path);
+    if (t >= 0) return 1e6 + t;
+    const i = (order || []).indexOf(e.path);
+    return i >= 0 ? i : 1e5 + (e.path === "lovelace" ? -1 : 0);
+  };
+  return out.sort((a, b) => rank(a) - rank(b) || a.title.localeCompare(b.title));
+}
+
 function nextMode(m) { const i = FOLLOW_MODES.indexOf(m); return FOLLOW_MODES[(i + 1) % FOLLOW_MODES.length]; }
 
 function personSlug(name) {
@@ -57,7 +91,7 @@ function hKindColor(kind) { return "hsl(" + (hhash("kind:" + kind) % 360) + ", 6
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } };
 
-const HomeLogic = { personSlug, nextMode, FOLLOW_MODES, throughCenter, angleStep };
+const HomeLogic = { personSlug, menuEntries, nextMode, FOLLOW_MODES, throughCenter, angleStep };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
 const HSTYLE = `
@@ -76,6 +110,14 @@ const HSTYLE = `
   .top button { border:0; background:transparent; border-radius:999px; padding:6px 12px; white-space:nowrap; }
   .top button:hover, .top button.on { background:color-mix(in srgb, var(--primary-color,#3477d6) 28%, transparent); }
   .top .ha { font-weight:600; }
+  .hamenu { position:absolute; z-index:6; top:58px; left:12px; min-width:220px; max-width:calc(100% - 24px);
+            max-height:70vh; max-height:70dvh; overflow:auto; border-radius:14px; padding:6px; display:none; }
+  .hamenu.open { display:block; }
+  .hamenu a { display:flex; align-items:center; gap:12px; padding:8px 12px; border-radius:10px; color:inherit;
+              text-decoration:none; white-space:nowrap; }
+  .hamenu a:hover, .hamenu a:focus-visible { background:color-mix(in srgb, var(--primary-color,#3477d6) 25%, transparent); outline:none; }
+  .hamenu ha-icon { --mdc-icon-size:20px; opacity:.85; }
+  .hamenu hr { border:0; border-top:1px solid color-mix(in srgb, var(--divider-color,#888) 50%, transparent); margin:4px 6px; }
   .sbox { position:relative; }
   .sbox input { width:180px; border:0; border-radius:999px; padding:6px 12px; font:inherit; color:inherit; outline:none;
                 background:color-mix(in srgb, var(--secondary-background-color,#222) 70%, transparent); }
@@ -135,6 +177,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     set panel(p) { this._panel = p; }
 
     connectedCallback() {
+      lsSet(LS_LEFT, "0");               // back on membrane: fresh starts land here again
       if (!this.shadowRoot.firstChild) this._render();
       if (this._hass && !this._started) this._start();
       if (lsGet(LS_IMMERSIVE, "1") === "1") this._dock("always_hidden");
@@ -161,11 +204,35 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._hidSidebar = mode === "always_hidden";
     }
 
-    _toHA() {
-      // this tab stays in HA until it is closed (panel.js's landing rule)
-      try { sessionStorage.setItem("membrane.home.ha", "1"); } catch (e) { /* private mode */ }
+    _toggleMenu(open) {
+      open = open == null ? !this._menu.classList.contains("open") : open;
+      if (open) this._paintMenu();
+      this._menu.classList.toggle("open", open);
+      this._haBtn.setAttribute("aria-expanded", String(open));
+      this._haBtn.classList.toggle("on", open);
+    }
+
+    _paintMenu() {
+      const h = this._hass || {};
+      let order = [], hidden = [];
+      try { order = JSON.parse(lsGet("sidebarPanelOrder", "[]")) || []; } catch (e) { /* HA's own key */ }
+      try { hidden = JSON.parse(lsGet("sidebarHiddenPanels", "[]")) || []; } catch (e) { /* HA's own key */ }
+      const self = (this._panel && this._panel.url_path) || "membrane";
+      const items = menuEntries(h.panels, order, hidden, self);
+      const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+      const row = (e) => '<a role="menuitem" href="/' + esc(e.path) + '" data-path="' + esc(e.path) + '"><ha-icon icon="' +
+        esc(e.icon) + '"></ha-icon><span>' + esc(e.title) + "</span></a>";
+      const main = items.filter((e) => !TAIL.includes(e.path)), tail = items.filter((e) => TAIL.includes(e.path));
+      this._menu.innerHTML = main.map(row).join("") + (tail.length ? "<hr>" + tail.map(row).join("") : "");
+    }
+
+    /** Leave the field for an HA page: HA's sidebar comes back, and the next
+     * fresh start stays in HA (until membrane is opened again). */
+    _leaveTo(path) {
+      lsSet(LS_LEFT, "1");
+      this._toggleMenu(false);
       this._dock("restore");
-      history.pushState(null, "", "/lovelace");
+      history.pushState(null, "", path);
       window.dispatchEvent(new CustomEvent("location-changed", { detail: { replace: false } }));
     }
 
@@ -178,13 +245,14 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         <div class="field"></div>
         <div class="msg">finding you on the field…</div>
         <div class="top glass">
-          <button class="ha" title="Home Assistant's dashboards (and its sidebar)">HA</button>
+          <button class="ha" title="Home Assistant: its dashboards and pages" aria-haspopup="menu" aria-expanded="false">☰ HA</button>
           <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you">◎ activity</button>
           <button class="chatbtn" title="Show / hide the chat">💬</button>
           <button class="start" title="Open Home Assistant here (this browser)">☆</button>
           <span class="sbox"><input class="q" placeholder="search entities…" autocomplete="off"><div class="hits glass"></div></span>
           <span class="status"></span>
         </div>
+        <nav class="hamenu glass" role="menu"></nav>
         <div class="chat glass"><ai-terminal-panel overlay></ai-terminal-panel></div>
         <div class="card glass"><div class="t"></div><div class="k"></div>
           <div class="row"><button class="ask">Ask about it</button><button class="go">Fly there</button><button class="x">×</button></div></div>
@@ -211,7 +279,20 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const chatOn = lsGet(LS_CHAT, "1") === "1";
       this._chatBox.classList.toggle("hidden", !chatOn);
       $(".chatbtn").classList.toggle("on", chatOn);
-      $(".ha").addEventListener("click", () => this._toHA());
+      this._menu = $(".hamenu"); this._haBtn = $(".ha");
+      this._haBtn.addEventListener("click", () => this._toggleMenu());
+      this._menu.addEventListener("click", (e) => {
+        const a = e.target.closest("a[data-path]"); if (!a) return;
+        e.preventDefault();
+        this._leaveTo("/" + a.dataset.path);
+      });
+      // any click outside the menu closes it
+      root.addEventListener("pointerdown", (e) => {
+        if (!this._menu.classList.contains("open")) return;
+        const path = e.composedPath();
+        if (!path.includes(this._menu) && !path.includes(this._haBtn)) this._toggleMenu(false);
+      });
+      root.addEventListener("keydown", (e) => { if (e.key === "Escape") this._toggleMenu(false); });
       this._mode = FOLLOW_MODES.includes(lsGet(LS_FOLLOW, "activity")) ? lsGet(LS_FOLLOW, "activity") : "activity";
       this._modeBtn = $(".me"); this._modeBtn.textContent = "◎ " + this._mode;
       this._modeBtn.addEventListener("click", () => {

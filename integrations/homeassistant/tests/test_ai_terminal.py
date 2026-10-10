@@ -131,8 +131,11 @@ class TestChatOnlySurface(unittest.TestCase):
         self.assertIn("/api/ai_terminal/serve", js)
         # turn completion reads the brain's own status, not a stability guess
         self.assertIn("/session/status", js)
-        # sessions follow the user (server-side list), not this browser
-        self.assertNotIn("localStorage", js)
+        # sessions follow the user (server-side list), not this browser: the
+        # only thing it reads from browser storage is membrane home's landing
+        # flag (2026-10-10)
+        import re as _re
+        self.assertEqual(set(_re.findall(r'localStorage\.\w+\("([^"]+)"', js)), {"membrane.home.left"})
         # the proxy's speaker line is hidden from the transcript
         self.assertIn('SPEAKER_PREFIX = "[HA user: "', js)
         # the field map's "ask the brain" hands its question over the URL

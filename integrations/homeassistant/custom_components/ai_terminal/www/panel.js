@@ -375,8 +375,9 @@ function modelField(pick, sessionModel, seatModel) {
 // MEMBRANE HOME IS THE LANDING (2026-10-10, the operator: "make the
 // /membrane renderer default ui for everyone unless they switch to HA thru
 // the button"): a fresh HA tab that opens on the default dashboard goes to
-// /membrane; the home's "HA" button marks the tab (sessionStorage), and that
-// tab stays in HA until it is closed. Deep links are never redirected.
+// /membrane -- unless the user last LEFT membrane through its HA menu
+// (localStorage 'membrane.home.left' = '1'; opening membrane clears it).
+// Deep links are never redirected.
 const LANDING_RE = /^\/(?:lovelace(?:\/[^/]*)?|home)?\/?$/;
 function membraneLanding(path, haChosen) { return !haChosen && LANDING_RE.test(String(path || "")); }
 
@@ -1391,7 +1392,7 @@ function definePanel() {
 
 if (typeof window !== "undefined" && typeof history !== "undefined" && window.location && !window.__membraneLanding) {
   window.__membraneLanding = true;
-  const chosen = () => { try { return sessionStorage.getItem("membrane.home.ha") === "1"; } catch (e) { return false; } };
+  const chosen = () => { try { return localStorage.getItem("membrane.home.left") === "1"; } catch (e) { return false; } };
   if (membraneLanding(location.pathname, chosen())) {
     // HA's router may still be settling its own '/' -> default-dashboard hop
     const go = () => {
