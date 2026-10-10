@@ -22,3 +22,18 @@ test("the follow button cycles activity -> seat -> you -> activity", () => {
   assert.equal(H.nextMode("you"), "activity");
   assert.equal(H.nextMode("bogus"), "activity");
 });
+
+test("the camera sits on the ray from the centre through the followed point", () => {
+  const camDir = (a) => [Math.sin(a.phi) * Math.sin(a.theta), Math.cos(a.phi), Math.sin(a.phi) * Math.cos(a.theta)];
+  for (const p of [[300, 0, 0], [0, 0, -250], [120, 200, 80], [-90, -300, 10]]) {
+    const a = H.throughCenter(p), d = camDir(a), n = Math.hypot(...p);
+    // the camera's offset from p points AWAY from the centre: it looks at the centre through p
+    for (let i = 0; i < 3; i++) assert.ok(Math.abs(d[i] - p[i] / n) < 0.06, JSON.stringify([p, d]));
+  }
+  assert.equal(H.throughCenter([5, 5, 5]), null);
+});
+
+test("angles turn the short way round", () => {
+  assert.ok(Math.abs(H.angleStep(3.0, -3.0, 1) - (3.0 + (2 * Math.PI - 6.0))) < 1e-9);
+  assert.equal(H.angleStep(0, 1, 0.5), 0.5);
+});

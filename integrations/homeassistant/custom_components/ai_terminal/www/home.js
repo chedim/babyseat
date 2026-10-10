@@ -22,6 +22,24 @@ const FOLLOW_MODES = ["activity", "seat", "you"];
 const SEAT_IDS = ["seat:self", "seat"];
 const ACTIVITY_EVERY_MS = 1500;
 
+/** The orbit angles that put the camera on the ray from the field's centre
+ * through p (beyond it), so it looks at the centre THROUGH p -- the
+ * activity in front, the field behind. null when p is the centre. */
+function throughCenter(p) {
+  const n = Math.hypot(p[0], p[1], p[2]);
+  if (n < 40) return null;
+  const d = [p[0] / n, p[1] / n, p[2] / n];
+  return { phi: Math.max(0.05, Math.min(Math.PI - 0.05, Math.acos(d[1]))), theta: Math.atan2(d[0], d[2]) };
+}
+
+/** a -> b the short way round (angles). */
+function angleStep(a, b, k) {
+  let d = b - a;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  return a + d * k;
+}
+
 function nextMode(m) { const i = FOLLOW_MODES.indexOf(m); return FOLLOW_MODES[(i + 1) % FOLLOW_MODES.length]; }
 
 function personSlug(name) {
@@ -39,7 +57,7 @@ function hKindColor(kind) { return "hsl(" + (hhash("kind:" + kind) % 360) + ", 6
 const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch (e) { return d; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* private mode */ } };
 
-const HomeLogic = { personSlug, nextMode, FOLLOW_MODES };
+const HomeLogic = { personSlug, nextMode, FOLLOW_MODES, throughCenter, angleStep };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
 const HSTYLE = `
@@ -180,7 +198,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         lsSet("defaultPanel", JSON.stringify((this._panel && this._panel.url_path) || "membrane"));
         this._statusEl.textContent = "this browser opens here now (Profile → Dashboard changes it)";
       });
-      $(".x").addEventListener("click", () => { this._card.classList.remove("open"); if (this._v3) this._v3.select(null); });
+      $(".x").addEventListener("click", () => { this._card.classList.remove("open"); if (this._v3) this._v3.select(null); this._select(null); });
       $(".go").addEventListener("click", () => { if (this._v3 && this._sel) { this._lastTouch = performance.now(); this._v3.flyTo(this._sel.id); } });
       $(".ask").addEventListener("click", () => this._askAbout());
       this._host3d.addEventListener("pointerdown", () => { this._lastTouch = performance.now(); });
@@ -240,8 +258,22 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       return null;
     }
 
+    async _posOf(id) {
+      const v = this._v3, s = v.slots.get(id);
+      if (s != null) return [v.posA[s * 3], v.posA[s * 3 + 1], v.posA[s * 3 + 2]];
+      return this._locateWorld([id]);
+    }
+
     async _aim(force) {
       const v = this._v3; if (!v) return;
+      if (this._selFollow) {                                // a selected node: the camera stays on it
+        const id = this._selFollow, p = await this._posOf(id);
+        if (p && this._selFollow === id) {
+          this._goal = { p, r: this._goal && this._goal.sel ? this._goal.r : Math.min(v.orbit.r, 520), sel: true };
+          this._say("following the selected " + id);
+        }
+        return;
+      }
       const idle = performance.now() - this._lastTouch >= IDLE_BEFORE_FOLLOW_MS;
       if (!force && !idle) return;
       const now = performance.now();
@@ -286,10 +318,19 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         if (!this._started || !this._v3) return;
         const dt = Math.min(0.1, (t - last) / 1000); last = t;
         const v = this._v3, g = this._goal;
-        if (g && performance.now() - this._lastTouch >= IDLE_BEFORE_FOLLOW_MS && !v._flyAnim) {
-          const k = 1 - Math.exp(-dt * 0.9);
+        const idle = performance.now() - this._lastTouch >= IDLE_BEFORE_FOLLOW_MS;
+        if (g && !v._flyAnim && (idle || g.sel)) {
+          const k = 1 - Math.exp(-dt * (g.sel ? 2.2 : 0.9));
           for (let i = 0; i < 3; i++) v.orbit.target[i] += (g.p[i] - v.orbit.target[i]) * k;
-          v.orbit.r += (g.r - v.orbit.r) * k * 0.6;
+          if (idle) {
+            v.orbit.r += (g.r - v.orbit.r) * k * 0.6;
+            const a = throughCenter(v.orbit.target);
+            if (a) {
+              const ka = 1 - Math.exp(-dt * 0.5);
+              v.orbit.theta = angleStep(v.orbit.theta, a.theta, ka);
+              v.orbit.phi += (a.phi - v.orbit.phi) * ka;
+            }
+          }
         }
         requestAnimationFrame(step);
       };
@@ -298,7 +339,9 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     _select(m) {
       this._sel = m || null;
-      if (!m) { this._card.classList.remove("open"); return; }
+      this._selFollow = m ? m.id : null;
+      if (!m) { this._card.classList.remove("open"); this._goal = null; this._aim(true); return; }
+      this._aim(true);
       this._lastTouch = performance.now();
       this._card.querySelector(".t").textContent = m.label || m.id;
       this._card.querySelector(".k").textContent = (m.kind || "") + (m.mass != null ? "  ·  mass " + m.mass : "");
