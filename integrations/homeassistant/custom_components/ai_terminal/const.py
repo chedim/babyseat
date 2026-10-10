@@ -16,3 +16,8 @@ CONF_SERVE_PASS = "serve_pass"           # from the brain's serve-auth.json
 DEFAULT_SERVE_PASS = ""
 PROXY_BASE = "/api/ai_terminal/serve"
 PROXY_TIMEOUT_S = 1800.0                 # a model turn may run minutes
+
+# ---- voice in the field UI (2026-10-10): the browser's recordings go to the
+# whisper-server on the brain phone (the one calld uses), through HA
+CONF_STT_URL = "stt_url"
+DEFAULT_STT_URL = "http://192.168.1.112:11510/inference"

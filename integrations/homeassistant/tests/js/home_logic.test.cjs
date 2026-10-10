@@ -54,3 +54,35 @@ test("the HA menu: the user's sidebar order, hidden panels out, this page out, s
   assert.equal(e.find((x) => x.path === "lovelace").title, "Overview");
   assert.equal(e.find((x) => x.path === "boat-dash").icon, "mdi:sail-boat");
 });
+
+test("the recording: 48 kHz float -> 16 kHz int16 -> a WAV whisper reads", () => {
+  const f = new Float32Array(4800).fill(0.5);
+  const i16 = H.downsample(f, 48000, 16000);
+  assert.equal(i16.length, 1600);
+  assert.ok(Math.abs(i16[10] - 0.5 * 0x7fff) < 2);
+  const w = H.wavBytes(i16, 16000);
+  assert.equal(String.fromCharCode(...w.slice(0, 4)), "RIFF");
+  assert.equal(String.fromCharCode(...w.slice(8, 12)), "WAVE");
+  assert.equal(w.length, 44 + 3200);
+  const dv = new DataView(w.buffer);
+  assert.equal(dv.getUint32(24, true), 16000);
+  assert.equal(dv.getUint16(22, true), 1);
+});
+
+test("speech comes in sentences, long ones split at a space", () => {
+  const c = H.speechChunks("The lights are on. Battery is at 80%! " + "word ".repeat(80));
+  assert.equal(c[0], "The lights are on.");
+  assert.equal(c[1], "Battery is at 80%!");
+  assert.ok(c.slice(2).every((x) => x.length <= 220));
+});
+
+test("tilt: the axes follow the screen's rotation; the orbit turns relative to the start", () => {
+  assert.equal(JSON.stringify(H.tiltAxes(10, 20, 0)), "[20,10]");
+  assert.equal(JSON.stringify(H.tiltAxes(10, 20, 90)), "[10,-20]");
+  assert.equal(JSON.stringify(H.tiltAxes(10, 20, -90)), "[-10,20]");
+  const base = { lr: 0, fb: 40, theta: 1, phi: 1 };
+  const o = H.tiltOrbit(base, 10, 40, 1);
+  assert.ok(Math.abs(o.theta - (1 - 10 * Math.PI / 180)) < 1e-9);
+  assert.equal(o.phi, 1);
+  assert.ok(H.tiltOrbit(base, 0, -500).phi <= Math.PI - 0.05);
+});

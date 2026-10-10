@@ -381,7 +381,26 @@ function modelField(pick, sessionModel, seatModel) {
 const LANDING_RE = /^\/(?:lovelace(?:\/[^/]*)?|home)?\/?$/;
 function membraneLanding(path, haChosen) { return !haChosen && LANDING_RE.test(String(path || "")); }
 
-const AiPanelLogic = { membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
+/** The newest finished assistant reply, speakable: its text parts (no tool
+ * output, no reasoning), without 'membrane:' frame lines or markdown marks
+ * -- membrane home reads it aloud (2026-10-10). null when nothing new. */
+function replyToSpeak(rows) {
+  for (let i = (rows || []).length - 1; i >= 0; i--) {
+    const r = rows[i];
+    if (!r || !r.info) continue;
+    if (r.info.role === "user") return null;
+    if (r.info.role !== "assistant") continue;
+    if (!(r.info.time || {}).completed) return null;
+    const text = (r.parts || []).filter((p) => p.type === "text" && !p.synthetic).map((p) => p.text || "").join("\n")
+      .split("\n").filter((l) => !/^\s*[*_`>]*\s*membrane\s*:/i.test(l)).join("\n")
+      .replace(/```[\s\S]*?```/g, " ").replace(/[*_`#>|]/g, "").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/\s+/g, " ").trim();
+    return text ? { id: r.info.id, text } : null;
+  }
+  return null;
+}
+
+const AiPanelLogic = { replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
@@ -975,6 +994,8 @@ function definePanel() {
       ]);
       if (sid !== this._sid) return;
       loadRows(this._chat, hist.ok && Array.isArray(hist.data) ? hist.data : []);
+      // what was already said is not announced again (only replies from now on)
+      { const r0 = replyToSpeak(this._chat.rows); this._spokenId = r0 ? r0.id : null; this._repliesArmed = true; }
       loadVoice(this._chat, vox && vox.ok && Array.isArray(vox.data) ? vox.data : []);
       this._chat.auto = auto && auto.ok && auto.data ? auto.data : { on: false };
       this._paintAuto();
@@ -1075,6 +1096,14 @@ function definePanel() {
         this._schedule();
         this._paintStatus();
         if (ev.type === "membrane.auto") this._paintAuto();
+      }
+      // a finished reply, announced once (membrane home speaks it)
+      if (this._chat && sid === this._chat.sid && (ev.type === "session.idle" || ev.type === "message.updated")) {
+        const r = replyToSpeak(this._chat.rows);
+        if (r && r.id !== this._spokenId) {
+          this._spokenId = r.id;
+          if (this._repliesArmed) this.dispatchEvent(new CustomEvent("ai-reply", { detail: r, bubbles: true, composed: true }));
+        }
       }
     }
 

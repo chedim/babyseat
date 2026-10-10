@@ -201,3 +201,13 @@ test("a fresh tab on the default dashboard lands on membrane home; deep links an
   for (const p of ["/config/integrations", "/lovelace-boat/0", "/lovelace/0/edit", "/history", "/membrane", "/ai-terminal"]) assert.ok(!land(p, false), p);
   assert.ok(!land("/", true));
 });
+
+test("the reply to speak: the newest finished assistant text, frames and markdown out", () => {
+  const row = (id, role, parts, done = true) => ({ info: { id, role, time: done ? { completed: 1 } : {} }, parts });
+  const rows = [row("u1", "user", [{ type: "text", text: "hi" }]),
+    row("a1", "assistant", [{ type: "reasoning", text: "thinking" }, { type: "text", text: "**Sure.** The lights are `on`.\nmembrane: learn that x" },
+      { type: "tool", text: "ignored" }])];
+  eq(L.replyToSpeak(rows), { id: "a1", text: "Sure. The lights are on." });
+  assert.equal(L.replyToSpeak([...rows, row("a2", "assistant", [{ type: "text", text: "half" }], false)]), null);
+  assert.equal(L.replyToSpeak([...rows, row("u2", "user", [{ type: "text", text: "and?" }])]), null);
+});

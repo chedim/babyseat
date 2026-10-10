@@ -35,6 +35,8 @@ async def async_setup(hass: HomeAssistant, config) -> bool:
                                            DEFAULT_SERVE_USER) or "")
     component["serve_pass"] = str(conf.get(CONF_SERVE_PASS,
                                            DEFAULT_SERVE_PASS) or "")
+    from .const import CONF_STT_URL, DEFAULT_STT_URL
+    component["stt_url"] = str(conf.get(CONF_STT_URL, DEFAULT_STT_URL) or "")
 
     # the views ride HA's own router (auth = the HA session)
     from .views import AssetView
@@ -44,6 +46,8 @@ async def async_setup(hass: HomeAssistant, config) -> bool:
     hass.http.register_view(ConfView())
     from .strangers import StrangerView
     hass.http.register_view(StrangerView())
+    from .stt import SttView
+    hass.http.register_view(SttView())
 
     # THE PANEL (programmatic, this HA version has no yaml panels): a
     # panel_custom element running INSIDE HA's frontend.
