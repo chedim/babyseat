@@ -1276,7 +1276,7 @@ def _listish(v) -> list:
 
 
 def tool_entity_inherit(args: dict, port: int) -> str:
-    spec = str(args.get("spec") or args.get("name") or "").strip()
+    spec = str(args.get("spec") or args.get("name") or args.get("key") or args.get("child") or "").strip()
     parents = _listish(args.get("parents") or args.get("parent") or [])
     if not spec or not parents:
         raise ProxyError(400, "spec + parents required")
