@@ -684,7 +684,7 @@ OPERATOR_TOOLS = frozenset((
     # receipt comes back in the same turn. The HA seat's main chat kept
     # planting 'run X' goals and waiting a whole loop pass for a listener
     # to do a one-line command. The other entity hands stay the listeners'.
-    "entity_link", "entity_unlink",
+    "entity_link", "entity_unlink", "method_define", "method_call",
     # THE FLOOD GATES (2026-10-08, the operator's call: "open the flood gates
     # between the lanes"): the chat lane holds the entity hands and the
     # watches too -- refused -> intend -> a loop cost more than it protected
@@ -696,13 +696,13 @@ OPERATOR_TOOLS = frozenset((
 LISTENER_TOOLS = (OPERATOR_TOOLS | {
     # the entity hands (the listeners' material)
     "entity_add", "entity_edit", "entity_remove",
-    "entity_link", "entity_unlink",
+    "entity_link", "entity_unlink", "method_define", "method_call",
     # the board's spatial watches (2026-10-08): attention is the
     # listeners' to allocate; the chat lane announces through intend
     "field_watch",
 }) - {"intend"}
 # plan reads/communicates: never plants, closes or executes
-PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill", "entity_link",
+PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill", "entity_link", "method_define", "method_call",
                                "entity_unlink", "entity_add", "entity_edit",
                                "entity_remove", "field_watch",
                                "entity_inherit"}

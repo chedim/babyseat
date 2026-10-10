@@ -61,13 +61,21 @@ FAMILIES: dict[str, dict] = {
                 "inherit": lambda a: _pick(a, "spec", "parents")},
     },
     "exec": {
-        "description": "Run shell commands through the executor: link runs them now and "
-                       "returns rc + output; unlink drops a queued one. Pipelines: help('exec').",
-        "actions": {"link": "entity_link", "unlink": "entity_unlink"},
+        "description": "Cliffhanger, membrane's method language: define a method on a class or "
+                       "object, call it on an object (dispatch through ISA); link runs a raw "
+                       "command; unlink drops a queued one. help('cliffhanger').",
+        "actions": {"call": "method_call", "define": "method_define",
+                    "link": "entity_link", "unlink": "entity_unlink"},
         "params": {"commands": {"type": ["string", "array"], "description": "a command line (or a list; 'label :: cmd' names one)"},
                    "args": {"type": "object", "description": "values for the command's {{name}} parameters"},
+                   "object": _S("call: the object the method runs on"),
+                   "on": _S("define: the class or object that owns the method (omit = global)"),
+                   "method": _S("call/define: the method's name"),
+                   "command": _S("define: the method's command line ({{self.<prop>}}, {{param}})"),
                    "executor": _S("optional executor entity"), "create": _B("create missing command entities")},
-        "map": {"link": lambda a: _pick(a, "commands", "executor", "create", "args"),
+        "map": {"call": lambda a: _pick(a, "object", "method", "args"),
+                "define": lambda a: _pick(a, "on", "method", "command"),
+                "link": lambda a: _pick(a, "commands", "executor", "create", "args"),
                 "unlink": lambda a: _pick(a, "commands", "executor")},
     },
     "goal": {
@@ -164,6 +172,17 @@ HELP = {
         "about that class's members. A sentence that breaks a rule is never said. Precedence: a "
         "member's own rule, then its classes nearest-first, then global rules; the first veto wins; "
         "every veto is logged with its sentence."),
+    "cliffhanger": (
+        "Cliffhanger is membrane as an OOP language: entities are objects, ISA parents are classes, "
+        "METHODS are commands attached to a class or object, a CALL is an event on an object. "
+        "Define once: exec(action='define', on='ha light', method='turn_on', command='. "
+        "~/.config/membrane/hass.env; curl -s -X POST -H \"Authorization: Bearer $HASS_TOKEN\" -d "
+        "\"{\\\"entity_id\\\": \\\"{{self.entity_id}}\\\"}\" $HASS_URL/api/services/light/turn_on'). Call it on any "
+        "member: exec(action='call', object='ha:light.port_strip', method='turn_on'). {{self.<prop>}} "
+        "fills from the object (its own values over its classes'); other {{params}} come from args. "
+        "Dispatch: the object's own method, then its classes (ISA order), then global methods -- "
+        "the same name on another class is its own implementation. The receipt lands on the "
+        "object. Compose methods with parents (help('exec'))."),
     "classes": (
         "Inheritance: an entity without its own getter/mention/thought/dreamed script runs its "
         "nearest class's, ON ITSELF (state['eid'], its own properties merged over its classes' "

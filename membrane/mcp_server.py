@@ -1373,6 +1373,36 @@ def tool_entity_link(args: dict, port: int) -> str:
     return "\n".join(lines)
 
 
+def tool_method_define(args: dict, port: int) -> str:
+    out = _http(port, "POST", "/membrane/method/define", {
+        "on": str(args.get("on") or args.get("object") or ""), "method": str(args.get("method") or ""),
+        "command": str(args.get("command") or args.get("commands") or "")})
+    if not out.get("ok"):
+        return f"define failed: {out.get('error', 'unknown error')}"
+    p = out.get("params") or []
+    return (f"method {out['method']}{('{' + ','.join(p) + '}') if p else ''} "
+            f"{'defined' if out.get('created') else 'updated'} -- call it on any object that is (or "
+            f"inherits from) its owner: exec(action='call', object=..., method=...)")
+
+
+def tool_method_call(args: dict, port: int) -> str:
+    a = args.get("args")
+    if isinstance(a, str):
+        try:
+            a = json.loads(a)
+        except ValueError:
+            a = None
+    out = _http(port, "POST", "/membrane/method/call", {
+        "object": str(args.get("object") or args.get("spec") or ""),
+        "method": str(args.get("method") or ""), "args": a if isinstance(a, dict) else {}})
+    if not out.get("object"):
+        return f"call failed: {out.get('error', 'unknown error')}"
+    if out.get("error") and out.get("rc") is None:
+        return f"call failed: {out['error']}"
+    return (f"{out['method']} on {out['object']} (via {out['via']}): rc={out.get('rc')} "
+            f"{out.get('outcome')} head: {str(out.get('head') or '')[:600]}")
+
+
 def tool_entity_unlink(args: dict, port: int) -> str:
     """The executor's unlink hand: supersede the edges."""
     out = _http(port, "POST", "/membrane/entity/unlink", {
@@ -1464,6 +1494,8 @@ TOOL_IMPLS = {
     "entity_query": tool_entity_query,
     "entity_inherit": tool_entity_inherit,
     "entity_link": tool_entity_link,
+    "method_define": tool_method_define,
+    "method_call": tool_method_call,
     "entity_unlink": tool_entity_unlink,
     "entity_read": tool_entity_read,
 }

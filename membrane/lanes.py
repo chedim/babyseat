@@ -3868,6 +3868,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._entity_inherit(); return
         if path == "/membrane/entity/link":
             self._entity_link_unlink(link=True); return
+        if path in ("/membrane/method/define", "/membrane/method/call"):
+            self._method(path.rsplit("/", 1)[-1]); return
         if path == "/membrane/entity/unlink":
             self._entity_link_unlink(link=False); return
         if path == "/membrane/entity/remove":
@@ -6172,6 +6174,27 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         n = est.remove(spec)
         self._entity_audit("remove", {"ok": n > 0, "eid": spec, "count": n})
         self._json_out({"removed": n})
+
+    def _method(self, op: str) -> None:
+        """POST /membrane/method/define|call: Cliffhanger's two verbs."""
+        if self._paused_write_refused():
+            return
+        srv = self.server
+        est = getattr(srv, "entity_store", None)
+        if est is None:
+            self._json_err_raw(503, "entity layer unavailable"); return
+        body = self._json_body()
+        from .night import method_define, method_call
+        if op == "define":
+            res = method_define(srv, est, _efield_on(srv), srv.membrane, str(body.get("on") or ""),
+                                str(body.get("method") or ""), str(body.get("command") or ""))
+        else:
+            a = body.get("args")
+            res = method_call(srv, est, _efield_on(srv), srv.membrane, str(body.get("object") or ""),
+                              str(body.get("method") or ""), a if isinstance(a, dict) else {})
+        if not res.get("ok") and not res.get("object"):
+            self._json_err_raw(400, str(res.get("error"))); return
+        self._json_out(res)
 
     def _entity_link_unlink(self, link: bool) -> None:
         """POST /membrane/entity/link | /membrane/entity/unlink: the

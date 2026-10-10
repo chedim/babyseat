@@ -1500,14 +1500,14 @@ def split_label(spec: str) -> tuple[str, str]:
 # exhibit, 2026-10-09: every '. ~/.config/x.env; curl ...' was named '.')
 _SETUP = re.compile(r"^\s*(?:(?:\.|source)\s+\S+(?:\s+\d*>\S*)*|set\s+-[a-z]+|export\s+[^;&]+|cd\s+\S+|"
                     r"[A-Z_][A-Z0-9_]*=\S+)\s*(?:;|&&|\|\|)\s*")
-_PARAM = re.compile(r"\{\{\s*([A-Za-z_][\w]*)\s*\}\}")
+_PARAM = re.compile(r"\{\{\s*([A-Za-z_][\w.]*)\s*\}\}")
 
 
 def command_params(cmd: str) -> list[str]:
     """A command's parameters: its {{name}} placeholders (never the
     pipeline's {{parent...}} feeds)."""
     return [p for p in dict.fromkeys(_PARAM.findall(cmd or ""))
-            if p != "parent" and not p.startswith("parent")]
+            if p != "parent" and not p.startswith(("parent", "self."))]
 
 
 def substitute_args(cmd: str, args: dict | None) -> str:
@@ -1586,6 +1586,8 @@ def command_library(est, k: int = LIBRARY_MAX) -> str | None:
         name = str(p.get("name") or "")
         if not cmd or n < 1 or not name or _JUNK_NAME.match(name):
             continue
+        if p.get("method_name"):
+            name = str(p.get("name") or name)                 # 'ha light.turn_on'
         rows.append((n, float(p.get("last_run_ts") or 0), name, command_params(cmd)))
     if not rows:
         return None
@@ -1715,6 +1717,140 @@ def entity_link(srv, est, fld, mem, executor_spec: str,
                  "commands": [l["eid"] for l in linked]})
     return {"ok": True, "executor": ex_ent.eid,
             "linked": linked, "runs": runs}
+
+
+# ---- CLIFFHANGER: membrane as an OOP language (2026-10-10, the operator:
+# "compose commands kinda like proteins and use membrane as an OOP-language"
+# -- named after his graph-operation language, github.com/chedim/cliffhanger).
+# A METHOD is a command entity attached to a class or an object
+# (method_of + method_name); a CALL is an event on an object, never a new
+# entity. Dispatch: the object's own methods, then its classes in the ISA
+# resolution order, then the global ones -- the same name on two classes is
+# two implementations (polymorphism). {{self.<prop>}} fills from the
+# object's properties merged over its classes'; other {{params}} are the
+# call's args (shell-quoted). The receipt lands ON the object.
+CALLS_RING = 12
+
+
+def method_define(srv, est, fld, mem, on: str, method: str, command: str) -> dict:
+    if est is None:
+        return {"ok": False, "error": "entity layer unavailable"}
+    method = re.sub(r"[^A-Za-z0-9_]+", "_", (method or "").strip()).strip("_")
+    if not method or not (command or "").strip():
+        return {"ok": False, "error": "on, method and command required"}
+    bad = lint_command(command)
+    if bad:
+        return {"ok": False, "error": f"refused {command[:60]!r}: {bad}"}
+    owner = est._resolve_spec(on) if on else None
+    if on and owner is None:
+        return {"ok": False, "error": f"no entity matches {on!r}"}
+    from .classes import short_name
+    label = f"{short_name(owner.eid) if owner else 'any'}.{method}"
+    eid = MEMBRANE_NS + overlay_key(E.canon("c", re.sub(r"[^a-z0-9_.:-]+", "-", label.lower())))
+    doc = est.docs.get(eid)
+    created = doc is None
+    if created:
+        doc = QuantumEntity(eid=eid, cls=CLASS_TOOL, properties={"name": label, "silent_birth": True})
+        est.docs[eid] = doc
+    p = doc.properties or {}
+    p.update({"command": command.strip(), "method_name": method,
+              "method_of": [owner.eid] if owner else []})
+    doc.properties = p
+    est.upsert(doc, embedder=None)
+    _audit(mem, {"event": "agent-method-define", "origin": "mcp", "eid": eid,
+                 "on": owner.eid if owner else "", "method": method, "ok": True})
+    return {"ok": True, "eid": eid, "method": label, "created": created,
+            "params": command_params(command)}
+
+
+def resolve_method(est, obj, method: str):
+    """The method's entity for this object (own -> classes -> global)."""
+    docs = list((est.docs or {}).values())
+    named = [d for d in docs if (d.properties or {}).get("method_name") == method
+             and str((d.properties or {}).get("command") or "").strip()]
+    if not named:
+        return None, None
+    order = [obj] + ancestors(est, obj)
+    for owner in order:
+        for d in named:
+            if owner.eid in ((d.properties or {}).get("method_of") or []):
+                return d, owner.eid
+    for d in named:
+        if not (d.properties or {}).get("method_of"):
+            return d, None                                   # a global method
+    return None, None
+
+
+def methods_of(est, obj) -> list[str]:
+    """The method names an object answers to (for the refusal's hint)."""
+    owners = {obj.eid} | {a.eid for a in ancestors(est, obj)}
+    out = []
+    for d in list((est.docs or {}).values()):
+        pp = d.properties or {}
+        mo = pp.get("method_of")
+        if pp.get("method_name") and (not mo or owners & set(mo)):
+            out.append(pp["method_name"])
+    return sorted(set(out))
+
+
+def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | None = None) -> dict:
+    if est is None:
+        return {"ok": False, "error": "entity layer unavailable"}
+    obj = est._resolve_spec(obj_spec or "")
+    if obj is None:
+        return {"ok": False, "error": f"no object matches {obj_spec!r} -- a call names its object"}
+    m, via = resolve_method(est, obj, (method or "").strip())
+    if m is None:
+        have = methods_of(est, obj)
+        return {"ok": False, "error": f"{short_name_of(obj)} has no method {method!r}"
+                + (f"; it answers to: {', '.join(have)}" if have else "")
+                + " -- define one: exec(action='define', on=<class or object>, method=..., command=...)"}
+    props = effective_properties(est, obj)
+    full = {f"self.{k}": v for k, v in props.items() if isinstance(v, (str, int, float, bool))}
+    full.update({"self.eid": obj.eid, "self.name": str(props.get("name") or short_name_of(obj))})
+    full.update(dict(args or {}))
+    # a call is a synchronous EVENT, not a queued link: the method entity
+    # runs directly (its id would read as a 'label :: command' line to the
+    # link parser); the run count and success rate land on the method
+    run = _exec_command_doc(srv, est, fld, mem, m, args=full)
+    mp = m.properties or {}
+    mp["runs"] = int(mp.get("runs") or 0) + 1
+    mp["last_run_ts"] = time.time()
+    if run.get("rc") == 0:
+        mp["ok_runs"] = int(mp.get("ok_runs") or 0) + 1
+    m.properties = mp
+    _audit(mem, {"event": "agent-method-call", "origin": "mcp", "eid": m.eid,
+                 "object": obj.eid, "rc": run.get("rc"), "ok": run.get("rc") == 0})
+    # THE RECEIPT ON THE OBJECT: its call ring + a field event about it
+    op = obj.properties or {}
+    ring = list(op.get("calls") or [])
+    shown = {k: v for k, v in (args or {}).items()}
+    ring.append({"ts": round(time.time(), 1), "method": method, "args": shown,
+                 "rc": run.get("rc"), "outcome": run.get("outcome") or run.get("error")})
+    op["calls"] = ring[-CALLS_RING:]
+    obj.properties = op
+    est.upsert(obj, embedder=None)
+    if fld is not None:
+        try:
+            subj = short_name_of(obj)
+            argtxt = ", ".join(f"{k}={v}" for k, v in shown.items())
+            fld.write_events([ST.Event(stream="observation", tool="call",
+                                       args={"object": subj, "method": method},
+                                       result_head=(f"{subj}.{method}({argtxt}) -> rc {run.get('rc')} "
+                                                    f"{run.get('outcome') or ''} {str(run.get('head') or '')[:120]}"),
+                                       outcome="ok" if run.get("rc") == 0 else "failed",
+                                       ts=time.time(), subject=subj)], session="calls")
+        except Exception:
+            pass
+    return {"ok": bool(run.get("ok")), "object": obj.eid, "method": mp.get("name") or method,
+            "via": via or "global", "rc": run.get("rc"), "outcome": run.get("outcome"),
+            "head": run.get("head"), "tail": run.get("tail"), "error": run.get("error"),
+            "params": command_params(str(mp.get("command") or ""))}
+
+
+def short_name_of(obj) -> str:
+    from .classes import short_name
+    return short_name(obj.eid)
 
 
 def entity_unlink(srv, est, fld, mem, executor_spec: str, commands) -> dict:
