@@ -109,7 +109,7 @@ const HSTYLE = `
          padding:4px; border-radius:999px; max-width:calc(100% - 24px); }
   .top button { border:0; background:transparent; border-radius:999px; padding:6px 12px; white-space:nowrap; }
   .top button:hover, .top button.on { background:color-mix(in srgb, var(--primary-color,#3477d6) 28%, transparent); }
-  .top .ha { font-weight:600; }
+  .top .ha { font-size:18px; line-height:1; padding:5px 11px; }
   .hamenu { position:absolute; z-index:6; top:58px; left:12px; min-width:220px; max-width:calc(100% - 24px);
             max-height:70vh; max-height:70dvh; overflow:auto; border-radius:14px; padding:6px; display:none; }
   .hamenu.open { display:block; }
@@ -257,7 +257,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         <div class="field"></div>
         <div class="msg">finding you on the field…</div>
         <div class="top glass">
-          <button class="ha" title="Home Assistant: its dashboards and pages" aria-haspopup="menu" aria-expanded="false">☰ HA</button>
+          <button class="ha" title="Home Assistant: its dashboards and pages" aria-haspopup="menu" aria-expanded="false" aria-label="Home Assistant menu">☰</button>
           <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you">◎ activity</button>
           <button class="chatbtn" title="Show / hide the chat">💬</button>
           <button class="start" title="Open Home Assistant here (this browser)">☆</button>
