@@ -552,6 +552,10 @@ class Field3DView {
   }
 
   _paintLabels() {
+    if (this.api.labels === false) {                  // a label-free view (membrane home)
+      for (const el of this.labels) el.style.display = "none";
+      return;
+    }
     const cands = [];
     for (const [id, s] of this.slots) {
       if (!this.sizeA[s]) continue;

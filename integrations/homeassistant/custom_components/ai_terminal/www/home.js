@@ -75,6 +75,16 @@ const HSTYLE = `
   .top button { border:0; background:transparent; border-radius:999px; padding:6px 12px; white-space:nowrap; }
   .top button:hover, .top button.on { background:color-mix(in srgb, var(--primary-color,#3477d6) 28%, transparent); }
   .top .ha { font-weight:600; }
+  .sbox { position:relative; }
+  .sbox input { width:180px; border:0; border-radius:999px; padding:6px 12px; font:inherit; color:inherit; outline:none;
+                background:color-mix(in srgb, var(--secondary-background-color,#222) 70%, transparent); }
+  .hits { position:absolute; top:36px; left:0; width:300px; max-height:50vh; overflow:auto; display:none; z-index:5;
+          border-radius:12px; padding:4px; }
+  .hits.open { display:block; }
+  .hit { padding:5px 8px; border-radius:8px; cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .hit:hover { background:color-mix(in srgb, var(--primary-color,#3477d6) 25%, transparent); }
+  .hit .sw { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+  .hit .k { opacity:.5; font-size:12px; margin-left:4px; }
   .status { font-size:12px; opacity:.7; padding:0 10px 0 4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0; }
   .chat { position:absolute; z-index:2; top:12px; right:12px; bottom:12px; width:min(460px, 44vw);
           border-radius:16px; overflow:hidden; display:flex; flex-direction:column;
@@ -98,7 +108,11 @@ const HSTYLE = `
     .card { bottom:calc(56dvh + 16px); }
     .chat.hidden ~ .card { bottom:12px; }
     .status { display:none; }
+    .sbox input { width:110px; }
+    .top { max-width:calc(100% - 24px) !important; }
   }
+  .top { max-width:calc(100% - min(460px, 44vw) - 36px); flex-wrap:wrap; }
+  .top:has(~ .chat.hidden) { max-width:calc(100% - 24px); }
 `;
 
 if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" &&
@@ -165,6 +179,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you">◎ activity</button>
           <button class="chatbtn" title="Show / hide the chat">💬</button>
           <button class="start" title="Open Home Assistant here (this browser)">☆</button>
+          <span class="sbox"><input class="q" placeholder="search entities…" autocomplete="off"><div class="hits glass"></div></span>
           <span class="status"></span>
         </div>
         <div class="chat glass"><ai-terminal-panel overlay></ai-terminal-panel></div>
@@ -176,6 +191,18 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._host3d = $(".field"); this._msgEl = $(".msg"); this._statusEl = $(".status");
       this._chatBox = $(".chat"); this._chat = $("ai-terminal-panel");
       this._card = $(".card"); this._tip = $(".tip");
+      this._q = $(".q"); this._hits = $(".hits");
+      this._q.addEventListener("input", () => this._showHits());
+      this._q.addEventListener("focus", () => this._showHits());
+      this._q.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") { this._q.value = ""; this._showHits(); this._q.blur(); }
+        else if (e.key === "Enter") { const h = this._hits.querySelector(".hit"); if (h) h.click(); }
+      });
+      this._hits.addEventListener("click", (e) => {
+        const h = e.target.closest(".hit"); if (!h) return;
+        this._pickHit(h.dataset.id);
+      });
+      root.addEventListener("pointerdown", (e) => { if (!e.composedPath().includes(this._q.parentNode)) this._hits.classList.remove("open"); });
       if (this._hass) this._chat.hass = this._hass;
       if (this._narrow != null) this._chat.narrow = this._narrow;
       const chatOn = lsGet(LS_CHAT, "1") === "1";
@@ -222,7 +249,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const api = {
           get: (p) => this._get(p),
           stream: (p, signal) => hass.fetchWithAuth(HSERVE + p, { signal, headers: { Accept: "text/event-stream" } }),
-          kindColor: hKindColor, isAdmin: !!(hass.user && hass.user.is_admin),
+          kindColor: hKindColor, isAdmin: !!(hass.user && hass.user.is_admin), labels: false,
           onStatus: (t) => { this._v3Txt = t; this._paintStatus(); },
           onSelect: (m) => this._select(m),
           onRelated: () => {},
@@ -346,6 +373,27 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._card.querySelector(".t").textContent = m.label || m.id;
       this._card.querySelector(".k").textContent = (m.kind || "") + (m.mass != null ? "  ·  mass " + m.mass : "");
       this._card.classList.add("open");
+    }
+
+    _showHits() {
+      const v = this._v3, q = this._q.value;
+      const hits = v && q.trim() ? v.search(q) : [];
+      const esc = (t) => String(t == null ? "" : t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+      this._hitMeta = new Map(hits.map((n) => [n.id, n]));
+      this._hits.innerHTML = hits.map((n) => '<div class="hit" data-id="' + esc(n.id) + '"><span class="sw" style="background:' +
+        hKindColor(n.kind) + '"></span>' + esc(n.label) + '<span class="k">' + esc(n.kind) + "</span></div>").join("") ||
+        (q.trim() && v ? '<div class="hit" data-id="' + esc(q.trim()) + '">go to ' + esc(q.trim()) + '<span class="k">(by id)</span></div>' : "");
+      this._hits.classList.toggle("open", !!this._hits.innerHTML);
+    }
+
+    async _pickHit(id) {
+      const v = this._v3; if (!v) return;
+      this._hits.classList.remove("open");
+      const m = (this._hitMeta && this._hitMeta.get(id)) || { id, label: id, kind: "" };
+      this._lastTouch = performance.now();
+      const ok = await v.flyTo(id);
+      if (!ok) { this._say("not on the field: " + id); return; }
+      this._select(m);
     }
 
     _askAbout() {
