@@ -801,8 +801,15 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const load = () => { this._voice = pickVoice(window.speechSynthesis.getVoices(), "en", lsGet(LS_VOICE, "")); };
         load(); window.speechSynthesis.addEventListener && window.speechSynthesis.addEventListener("voiceschanged", load);
       }
-      // a tap anywhere stops him talking (the orb, the field, any button)
-      root.addEventListener("pointerdown", () => { if (this._speaking) { this._hushTts(); this._orb(null); this._orbText(""); } }, true);
+      // a tap ON THE FIELD stops him talking (the graph, the orb) -- not the
+      // chat (typing a reply while he talks), menus or buttons
+      root.addEventListener("pointerdown", (e) => {
+        if (!this._speaking) return;
+        const path = e.composedPath();
+        if (path.some((n) => n && n.classList && (n.classList.contains("chat") || n.classList.contains("top") ||
+            n.classList.contains("voice") || n.classList.contains("hamenu") || n.classList.contains("card")))) return;
+        this._hushTts(); this._orb(null); this._orbText("");
+      }, true);
       this._earBtn = root.querySelector(".ear");
       this._earBtn.addEventListener("click", () => {
         this._unlockAudio();
