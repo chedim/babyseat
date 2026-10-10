@@ -48,6 +48,9 @@ def last_user(body: dict) -> str | None:
     return None
 
 
+QVEC_REUSE_S = 300.0
+
+
 def time_prefix() -> str:
     """'[2026-09-01T21:34Z] ': the era rides the embed input only."""
     from datetime import datetime, timezone
@@ -94,7 +97,19 @@ class Seat:
                 failed = True
         vec = None
         if self.embedder is not None:
-            vec = np.asarray(self.embedder.embed([time_prefix() + query])[0], dtype=float)
+            # THE SAME QUESTION, ONE EMBEDDING (2026-10-10: tool rounds re-embedded
+            # it -- 8-9 s each under auto-chat's load on the Ollama box): reused
+            # for QVEC_REUSE_S; the minute stamp inside drifts at most that much
+            import time as _time
+            cache = self.__dict__.setdefault("_qvec_cache", {})
+            hit = cache.get(query)
+            if hit is not None and _time.time() - hit[0] < QVEC_REUSE_S:
+                vec = hit[1]
+            else:
+                vec = np.asarray(self.embedder.embed([time_prefix() + query])[0], dtype=float)
+                cache[query] = (_time.time(), vec)
+                while len(cache) > 64:
+                    cache.pop(next(iter(cache)))
         drift = None
         if vec is not None and self._last_vec is not None:
             n = float(np.linalg.norm(vec) * np.linalg.norm(self._last_vec))

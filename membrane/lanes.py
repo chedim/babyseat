@@ -4726,8 +4726,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         forget_hit = (not model_escaped) and _is_forget_query(q_early)
         rec_hit = (not model_escaped) and _is_recall_query(q_early)
         state_hit = (not model_escaped) and _is_state_query(q_early)
+        # a TOOL ROUND's user text is the first round's: had it been a memory
+        # command, that round would have caught it -- the semantic check
+        # (its own embedding) is skipped there
         if (not any((learn_hit, forget_hit, rec_hit, state_hit))
-                and srv.sem_intercept and not model_escaped):
+                and srv.sem_intercept and not model_escaped and not _tool_round(body)):
             # the semantic fallback embeds the query itself (an outbound read,
             # never learned). 4-family: recall/state answer from the field;
             # learn/forget are operator writes routed without the incantation.

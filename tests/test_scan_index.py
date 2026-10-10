@@ -216,3 +216,22 @@ class TestSeedTopicsIncremental(unittest.TestCase):
             L._SEED_CACHE["field"] = keep
             self.assertEqual(got, ref, step)
         self.assertTrue(any(fam == "learn" for _, fam, _ in got))
+
+
+class TestQueryVectorReuse(unittest.TestCase):
+    def test_the_same_question_is_embedded_once(self):
+        from membrane.seat import Seat as Membrane
+        calls = []
+
+        class E:
+            def embed(self, texts):
+                calls.append(texts)
+                return [[1.0, 0.0, 0.0]]
+        m = Membrane.__new__(Membrane)
+        m.embedder, m.pronoun_bind, m._bind_ctx, m._last_vec = E(), False, [], None
+        body = {"messages": [{"role": "user", "content": "how is the battery?"}]}
+        a = m.turn(body); b = m.turn(body)
+        self.assertEqual(len(calls), 1)
+        self.assertTrue((a.vec == b.vec).all())
+        m.turn({"messages": [{"role": "user", "content": "and the lights?"}]})
+        self.assertEqual(len(calls), 2)
