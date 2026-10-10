@@ -186,3 +186,33 @@ class TestDeltaIndexKeeps(unittest.TestCase):
         idx = f._deltas_index
         f.flush(); f.flush()
         self.assertIs(f._deltas_index, idx)                  # not thrown away
+
+
+class TestSeedTopicsIncremental(unittest.TestCase):
+    """The field-grown intent seeds: the incremental look between full scans
+    finds exactly what a full scan finds."""
+
+    def test_incremental_equals_full(self):
+        from membrane import lanes as L
+        from membrane.efield import EntityField
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from test_cliffhanger import FakeEmbedder  # noqa: E402
+        f = EntityField(ES.MemBackend(), FakeEmbedder(), "seat@t")
+        srv = type("S", (), {})(); srv.efield = f; srv.field_seeds = True
+        L._SEED_CACHE["field"] = {"size": -1, "matrix": None, "thr": None, "topics": [], "scanned": False}
+        rnd = random.Random(2)
+        texts = ["remember that the boat is blue", "what's the battery", "forget the old note",
+                 "recall the anchor depth", "hello there", "note that we leave at nine"]
+        n = 0
+        for step in range(60):
+            n += 1
+            f.b.upsert("events", f"ev{n}", {"origin": f.origin, "stream": "discourse", "role": rnd.choice(["user", "model", "reasoning"]),
+                                           "text": rnd.choice(texts), "n": n})
+            f._ostats["ev_n"] = n
+            got = list(L._field_seed_topics(srv))
+            keep = dict(L._SEED_CACHE["field"])
+            L._SEED_CACHE["field"] = {"size": -1, "matrix": None, "thr": None, "topics": [], "scanned": False}
+            ref = list(L._field_seed_topics(srv))
+            L._SEED_CACHE["field"] = keep
+            self.assertEqual(got, ref, step)
+        self.assertTrue(any(fam == "learn" for _, fam, _ in got))

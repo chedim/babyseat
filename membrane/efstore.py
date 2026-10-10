@@ -139,7 +139,7 @@ _NOPE = object()
 # asks entity_deltas for seq > N -- a walk over 160k+ rows every round. A
 # sorted seq index answers it from the newer rows only; every key's POSITION
 # is kept too, so the rows come back in the collection's own order.
-SCAN_RANGE: dict[str, str] = {"entity_deltas": "seq"}
+SCAN_RANGE: dict[str, str] = {"entity_deltas": "seq", "events": "n"}
 
 
 class MemBackend:

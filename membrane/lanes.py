@@ -2315,6 +2315,9 @@ def _embed_seed_matrix(srv) -> bool:
 # old captured-thought misroute cannot happen on events).
 
 
+SEED_FULL_SCAN_S = 600.0
+
+
 def _field_seed_topics(srv) -> list:
     """(text, family, #n) for every discourse event carrying a canonical
     skill frame (user/model prose only -- not reasoning turns). Cached on
@@ -2328,10 +2331,20 @@ def _field_seed_topics(srv) -> list:
     c = _SEED_CACHE["field"]
     if c["size"] == n and c["scanned"]:
         return c["topics"]
-    topics: list = []
-    for _k, d in fld.b.scan("events", {"origin": fld.origin,
-                                       "stream": "discourse",
-                                       "role": ["user", "model"]}):
+    # THE INCREMENTAL LOOK (2026-10-10, the gate's 'families' 2-5 s a first
+    # round): every new event re-scanned all 25k+ events and re-built the
+    # seed matrix. Between full scans (every SEED_FULL_SCAN_S -- a seed whose
+    # event was forgotten drops out there) only the events numbered after the
+    # last look are read, and the matrix re-builds only for a NEW seed.
+    full = not c["scanned"] or time.time() - float(c.get("full_ts") or 0) > SEED_FULL_SCAN_S
+    eq = {"origin": fld.origin, "stream": "discourse", "role": ["user", "model"]}
+    if not full:
+        eq["n"] = {"gt": int(c.get("last_n") or 0)}
+    topics: list = [] if full else list(c["topics"])
+    last_n = 0 if full else int(c.get("last_n") or 0)
+    found = 0
+    for _k, d in fld.b.scan("events", eq):
+        last_n = max(last_n, int(d.get("n") or 0))
         if d.get("status") == "forgotten":
             continue
         text = " ".join((d.get("text") or "").split())
@@ -2357,10 +2370,15 @@ def _field_seed_topics(srv) -> list:
         else:
             continue
         topics.append((text, fam, d.get("n")))
+        found += 1
     c["topics"] = topics
     c["size"] = n
     c["scanned"] = True
-    c["matrix"] = None            # force re-embed on next use
+    c["last_n"] = last_n
+    if full:
+        c["full_ts"] = time.time()
+    if full or found:
+        c["matrix"] = None        # force re-embed on next use (cached vectors make it cheap)
     return topics
 
 
@@ -5070,6 +5088,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         _st.mark("act")
         speak_block = _speak_block(srv)
         up = dict(body)
+        # the serve's streamed rounds ask for membrane's injection as data
+        # (the card), not as a reasoning monologue -- the flag never leaves
+        self._membrane_ext = bool(up.pop("membrane_ext", False))
         # THE REQUEST'S MODEL SPEAKS BARE (the 'membrane/<rung>' =
         # the client's namespacing): strip at the request's entry
         # (the dict/string/dict-id shapes) — the rung-lookup sees
@@ -5343,7 +5364,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             # the gate monologue; recall and where-we-are rode silently --
             # the dark-banner bug (the surface log proved the bytes were
             # sent while the thinking channel showed nothing).
-            if getattr(srv, "gate_monologue", True) and ctx:
+            if getattr(self, "_membrane_ext", False) and ctx:
+                # the card's data FIRST (the serve shows it before the words)
+                self.wfile.write(_sse_line({"membrane": {"injection": ctx,
+                                                         "massage": getattr(srv, "_massage_last", None)}}))
+            elif getattr(srv, "gate_monologue", True) and ctx:
                 for chunk in _openai_sse_chunks(
                         up.get("model", "membrane"),
                         "[membrane] injecting this turn:\n\n" + ctx + "\n\n",

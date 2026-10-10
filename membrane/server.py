@@ -942,6 +942,29 @@ class TurnRunner:
                           "status": {"type": "idle"}, "sessionID": sid})
         self.hub.publish({"type": "session.idle", "sessionID": sid})
 
+    def _inject_card(self, sid: str, ext: dict, rounds: int, mkpart) -> None:
+        """THE INJECTION AS A CARD (2026-10-08, the operator: show it like
+        every tool call): what membrane added to this round -- the first
+        round's, and any later round's that differs."""
+        _inj = ext.get("injection") if isinstance(ext, dict) else None
+        if not (isinstance(_inj, str) and _inj.strip()) or _inj == getattr(self, "_last_inj", {}).get(sid):
+            return
+        if not hasattr(self, "_last_inj"):
+            self._last_inj = {}
+        self._last_inj[sid] = _inj
+        _now = int(time.time() * 1000)
+        _ms = ext.get("massage") or {}
+        _title = f"membrane injection · ~{len(_inj) // 4} tokens" + (
+            f" · alignment {_ms.get('alignment')}" if _ms.get("alignment") else "")
+        _ip = mkpart({"type": "tool", "callID": f"inj-{rounds}", "tool": "membrane",
+                      "state": {"status": "completed",
+                                "input": {"round": rounds, **({k: _ms[k] for k in ("alignment", "tokens", "picked") if k in _ms})},
+                                "output": _inj, "title": _title,
+                                "time": {"start": _now, "end": _now}},
+                      "time": {"start": _now, "end": _now}})
+        self.hub.publish({"type": "message.part.updated", "part": dict(_ip),
+                          "time": _now, "sessionID": sid})
+
     def preempt(self, sid: str) -> bool:
         """A PERSON SPOKE (2026-10-10, the operator: "interrupt the chat loop
         whenever there is a message"): the running turn of this session is cut
@@ -1702,8 +1725,33 @@ class TurnRunner:
             if tools:
                 body["tools"] = tools
             mkpart({"type": "step-start"})
+            live = {"text": None, "reasoning": None}
+
+            def _on_event(kind, val, _live=live):
+                if kind == "tick":
+                    return sid in self._aborting
+                if kind == "ext":
+                    self._inject_card(sid, val, rounds, mkpart)
+                    return False
+                p = _live.get(kind)
+                if p is None:
+                    p = _live[kind] = mkpart({"type": kind, "text": "",
+                                              "time": {"start": int(time.time() * 1000)}})
+                p["text"] += val
+                self.hub.publish({"type": "message.part.delta", "sessionID": sid, "messageID": aid,
+                                  "partID": p["id"], "field": "text", "delta": val})
+                return False
+            _stream = getattr(self.call_ladder, "stream", None) if STREAM_ROUNDS else None
             try:
-                resp = self.call_ladder(body)
+                if _stream is not None:
+                    try:
+                        resp = _stream(body, _on_event)
+                    except Exception:
+                        if live["text"] is not None or live["reasoning"] is not None:
+                            raise                    # words already shown: the round failed for real
+                        resp = self.call_ladder(body)   # nothing shown yet: the buffered call, as before
+                else:
+                    resp = self.call_ladder(body)
                 if not isinstance(resp, dict):
                     raise RuntimeError(
                         f"call_ladder returned {type(resp).__name__}, "
@@ -1727,24 +1775,8 @@ class TurnRunner:
             # THE INJECTION AS A CARD (2026-10-08, the operator: show it
             # like every tool call): what membrane added to this round --
             # the first round's, and any later round's that differs
-            _inj = (resp.get("membrane") or {}).get("injection") \
-                if isinstance(resp.get("membrane"), dict) else None
-            if isinstance(_inj, str) and _inj.strip() and _inj != getattr(self, "_last_inj", {}).get(sid):
-                if not hasattr(self, "_last_inj"):
-                    self._last_inj = {}
-                self._last_inj[sid] = _inj
-                _now = int(time.time() * 1000)
-                _ms = (resp.get("membrane") or {}).get("massage") or {}
-                _title = f"membrane injection · ~{len(_inj) // 4} tokens" + (
-                    f" · alignment {_ms.get('alignment')}" if _ms.get("alignment") else "")
-                _ip = mkpart({"type": "tool", "callID": f"inj-{rounds}", "tool": "membrane",
-                              "state": {"status": "completed",
-                                        "input": {"round": rounds, **({k: _ms[k] for k in ("alignment", "tokens", "picked") if k in _ms})},
-                                        "output": _inj, "title": _title,
-                                        "time": {"start": _now, "end": _now}},
-                              "time": {"start": _now, "end": _now}})
-                self.hub.publish({"type": "message.part.updated", "part": dict(_ip),
-                                  "time": _now, "sessionID": sid})
+            if isinstance(resp.get("membrane"), dict):
+                self._inject_card(sid, resp["membrane"], rounds, mkpart)
             tcs = msg.get("tool_calls")
             content = (msg.get("content") or "").strip()
             reason = "tool-calls" if tcs else "stop"
@@ -1758,13 +1790,17 @@ class TurnRunner:
                 # (the sync POST /message lane renders the STORED part)
                 rtext = str(msg.get("reasoning") or msg.get("thinking")
                             or "")
-                rpart = mkpart({"type": "reasoning", "text": "",
-                                "time": {"start": now}})
-                rpart["text"] = rtext
-                self.hub.publish({"type": "message.part.delta",
-                                  "sessionID": sid, "messageID": aid,
-                                  "partID": rpart["id"], "field": "text",
-                                  "delta": rtext})
+                rpart = live["reasoning"]
+                if rpart is None:                    # buffered: the whole text at once
+                    rpart = mkpart({"type": "reasoning", "text": "",
+                                    "time": {"start": now}})
+                    rpart["text"] = rtext
+                    self.hub.publish({"type": "message.part.delta",
+                                      "sessionID": sid, "messageID": aid,
+                                      "partID": rpart["id"], "field": "text",
+                                      "delta": rtext})
+                else:
+                    rpart["text"] = rtext
                 rpart["time"]["end"] = int(time.time() * 1000)
                 self.hub.publish({"type": "message.part.updated",
                                   "part": dict(rpart),
@@ -1777,13 +1813,17 @@ class TurnRunner:
                 # model's history, so a phone caller heard silence through
                 # the whole tool chain
                 now = int(time.time() * 1000)
-                lpart = mkpart({"type": "text", "text": "",
-                                "time": {"start": now}})
-                lpart["text"] = content
-                self.hub.publish({"type": "message.part.delta",
-                                  "sessionID": sid, "messageID": aid,
-                                  "partID": lpart["id"], "field": "text",
-                                  "delta": content})
+                lpart = live["text"]
+                if lpart is None:
+                    lpart = mkpart({"type": "text", "text": "",
+                                    "time": {"start": now}})
+                    lpart["text"] = content
+                    self.hub.publish({"type": "message.part.delta",
+                                      "sessionID": sid, "messageID": aid,
+                                      "partID": lpart["id"], "field": "text",
+                                      "delta": content})
+                else:
+                    lpart["text"] = content
                 lpart["time"]["end"] = int(time.time() * 1000)
                 self.hub.publish({"type": "message.part.updated",
                                   "part": dict(lpart),
@@ -1924,13 +1964,17 @@ class TurnRunner:
                 # real serve streams the text part: it opens EMPTY with
                 # time.start, the deltas ride, a final part.updated closes
                 # it with time.end
-                part = mkpart({"type": "text", "text": "",
-                               "time": {"start": now}})
-                part["text"] = content
-                self.hub.publish({"type": "message.part.delta",
-                                  "sessionID": sid, "messageID": aid,
-                                  "partID": part["id"], "field": "text",
-                                  "delta": content})
+                part = live["text"]
+                if part is None:
+                    part = mkpart({"type": "text", "text": "",
+                                   "time": {"start": now}})
+                    part["text"] = content
+                    self.hub.publish({"type": "message.part.delta",
+                                      "sessionID": sid, "messageID": aid,
+                                      "partID": part["id"], "field": "text",
+                                      "delta": content})
+                else:
+                    part["text"] = content
                 part["time"]["end"] = int(time.time() * 1000)
                 self.hub.publish({"type": "message.part.updated",
                                   "part": dict(part),
@@ -2049,6 +2093,79 @@ def loopback_ladder(port: int, runner=None, cell=None):
             headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=CLOUD_TIMEOUT_S) as resp:
             return _json.loads(resp.read())
+
+    def stream(body: dict, on_event) -> dict:
+        """THE STREAMED ROUND (2026-10-10: the buffered call showed nothing
+        until the model had FINISHED -- 20-30 s of silence a round): the same
+        /v1 with stream=true; on_event('text'|'reasoning', delta) as the words
+        come, on_event('ext', {...}) for membrane's injection card (the proxy
+        sends it first when asked: membrane_ext), on_event('tick') between
+        chunks (True = stop: an abort). Returns the buffered call's shape."""
+        sid = None
+        _r = runner if runner is not None else (
+            (cell or {}).get("runner") if cell else None)
+        if _r is not None:
+            sid = getattr(_r, "_current_turn_sid", None)
+        body = dict(body, stream=True, membrane_ext=True, **({"_turn_sid": sid} if sid else {}))
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{port}/v1/chat/completions", data=_json.dumps(body).encode(),
+            method="POST", headers={"Content-Type": "application/json"})
+        content, reasoning, tcs = [], [], {}
+        usage, ext, finish = None, None, None
+        with urllib.request.urlopen(req, timeout=CLOUD_TIMEOUT_S) as resp:
+            for raw in resp:
+                line = raw.strip()
+                if not line.startswith(b"data:"):
+                    continue
+                payload = line[5:].strip()
+                if payload == b"[DONE]":
+                    break
+                try:
+                    d = _json.loads(payload)
+                except ValueError:
+                    continue
+                if isinstance(d.get("membrane"), dict) and not d.get("choices"):
+                    ext = d["membrane"]
+                    on_event("ext", ext)
+                    continue
+                if d.get("usage"):
+                    usage = d["usage"]
+                for ch in d.get("choices") or []:
+                    delta = ch.get("delta") or ch.get("message") or {}
+                    if ch.get("finish_reason"):
+                        finish = ch["finish_reason"]
+                    if delta.get("content"):
+                        content.append(delta["content"])
+                        on_event("text", delta["content"])
+                    r = delta.get("reasoning") or delta.get("reasoning_content") or delta.get("thinking")
+                    if r:
+                        reasoning.append(r)
+                        on_event("reasoning", r)
+                    for tc in delta.get("tool_calls") or []:
+                        i = tc.get("index", len(tcs))
+                        cur = tcs.setdefault(i, {"id": "", "type": "function",
+                                                 "function": {"name": "", "arguments": ""}})
+                        if tc.get("id"):
+                            cur["id"] = tc["id"]
+                        fn = tc.get("function") or {}
+                        if fn.get("name") and not cur["function"]["name"].endswith(fn["name"]):
+                            cur["function"]["name"] += fn["name"]
+                        a = fn.get("arguments")
+                        if a:
+                            cur["function"]["arguments"] += a if isinstance(a, str) else _json.dumps(a)
+                if on_event("tick", None):
+                    break
+        msg = {"role": "assistant", "content": "".join(content)}
+        if reasoning:
+            msg["reasoning"] = "".join(reasoning)
+        if tcs:
+            msg["tool_calls"] = [tcs[i] for i in sorted(tcs)]
+        out = {"choices": [{"message": msg, "finish_reason": finish or ("tool_calls" if tcs else "stop")}],
+               "usage": usage or {}}
+        if ext is not None:
+            out["membrane"] = ext
+        return out
+    call.stream = stream
     return call
 
 
@@ -2070,6 +2187,11 @@ def mcp_executor(port: int):
 # onto the /v1 proxy -- that proxy binds 127.0.0.1 with no auth and has
 # write routes; the basic-authed serve passes exactly these, GET only (the
 # HA field dashboard + its sensors: state, the universe map, the drawer).
+# the serve's rounds stream from the /v1 proxy (words show as they come);
+# MEMBRANE_STREAM_ROUNDS=0 returns to the buffered call
+STREAM_ROUNDS = os.environ.get("MEMBRANE_STREAM_ROUNDS", "1") != "0"
+
+
 def _from_person(text, parts=None) -> bool:
     """Does this user message come from a PERSON -- the HA proxy's / calld's
     '[HA user: <name>]' speaker line, in the text or a part? (A loop's goal
