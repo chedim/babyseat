@@ -515,6 +515,11 @@ const STYLE = `
     backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); }
   :host([overlay]) .scroller { background:color-mix(in srgb, var(--primary-background-color,#111) 30%, transparent); }
   :host([overlay]) .msgs { padding:10px 12px 16px; }
+  /* the card is narrower than a page: the bar wraps instead of clipping its
+     buttons (membrane / LLM / auto-chat / minds) off the edge */
+  :host([overlay]) .bar { flex-wrap:wrap; row-gap:4px; padding:6px 10px; }
+  :host([overlay]) .bar .title { flex:1 1 120px; }
+  :host([overlay]) .bar select.agent { max-width:120px; }
   :host([overlay]) .hint, :host([overlay]) .modelpick { display:none; }
   :host([overlay]) .msg:not(.user) .bub, :host([overlay]) .msg:not(.user) > .md {
     text-shadow:0 1px 2px color-mix(in srgb, var(--primary-background-color,#000) 85%, transparent); }
