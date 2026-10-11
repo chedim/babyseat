@@ -97,6 +97,16 @@ class TestWakeLedger(unittest.TestCase):
         WA._LoopDrainer(srv).handle({"kind": "operator-message", "entity": "", "event_id": "op-1"})
         self.assertEqual(srv.rows(), [])
 
+    def test_script_health_and_the_gate_ride_the_features(self):
+        srv = _Srv()
+        srv.entity_store.docs[PUMP].properties.update({"script_failures": 3, "script_disabled": True})
+        from membrane.attention import AlertGate
+        srv._alert_gate = AlertGate(budget=6)
+        WA._LoopDrainer(srv).handle({"kind": "near", "entity": PUMP, "event_id": "e4"})
+        r = srv.rows()[0]
+        self.assertEqual(r["script"], {"failures": 3, "disabled": True})
+        self.assertEqual((r["gate"]["budget"], r["gate"]["spent"]), (6, 0))     # as it ARRIVED, before its charge
+
     def test_a_folded_wake_is_labelled(self):
         srv = _Srv()
         srv._alert_gate = type("G", (), {"allow": lambda s, ev: False, "refund": lambda s: None})()

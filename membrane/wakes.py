@@ -62,6 +62,20 @@ def features(srv, ev: dict, now: float) -> dict:
         f["cls"] = getattr(doc, "cls", None)
         f["last_verdicts"] = [str(x.get("verdict") or "") for x in (pp.get("watch_decisions") or [])][-3:]
         f["consequences"] = len(pp.get("consequences") or [])
+        # script health (Argus's review: a broken getter is a wake's context too)
+        f["script"] = {"failures": int(pp.get("script_failures") or 0),
+                       "disabled": bool(pp.get("script_disabled"))}
+    # WHAT THE OTHER GATES WOULD SAY (Argus's review: replay one policy against
+    # three when they merge): the alert budget's state as the wake arrived
+    g = getattr(srv, "_alert_gate", None)
+    if g is not None:
+        try:
+            from .attention import is_exempt
+            spent = [t for t in (getattr(g, "_spent", None) or []) if now - t < float(getattr(g, "window_s", 600))]
+            f["gate"] = {"mode": getattr(g, "mode", None), "budget": getattr(g, "budget", None),
+                         "spent": len(spent), "exempt": bool(is_exempt(ev))}
+        except Exception:
+            pass
     try:
         from .watch_agents import loop_task_text
         f["head"] = loop_task_text(ev).split("\n", 1)[0][:HEAD_MAX]
