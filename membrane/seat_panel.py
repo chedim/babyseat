@@ -73,6 +73,58 @@ def _mem() -> tuple[int | None, int | None]:
     return rss, avail
 
 
+# THE BATTERY (2026-10-11: the phone died overnight -- the seat drew more than
+# agdroid's hub port gave): read through Termux:API, once a minute
+BATTERY_EVERY_S = 60.0
+BATTERY_LOW = 20
+BATTERY_CRITICAL = 8
+BATTERY_RESUME = 15
+_bat = {"ts": 0.0, "val": None}
+
+
+def battery(force: bool = False) -> dict | None:
+    """{percentage, status, plugged, temperature} or None (no Termux:API)."""
+    now = time.time()
+    if not force and now - _bat["ts"] < BATTERY_EVERY_S:
+        return _bat["val"]
+    _bat["ts"] = now
+    try:
+        import json as _json
+        import subprocess
+        p = subprocess.run(["termux-battery-status"], capture_output=True, text=True, timeout=12)
+        d = _json.loads(p.stdout or "{}")
+        _bat["val"] = {k: d.get(k) for k in ("percentage", "status", "plugged", "temperature", "health")}
+    except Exception:
+        _bat["val"] = None
+    return _bat["val"]
+
+
+def _charging(b: dict) -> bool:
+    return str(b.get("status") or "").upper() in ("CHARGING", "FULL")
+
+
+def _battery_guard(srv, b, pp: dict) -> None:
+    """Low: an event. Critical and not charging: the seat pauses itself (its
+    acting lanes drain the battery); charging back past BATTERY_RESUME: resumed
+    -- only a pause the battery made, never the operator's."""
+    if not b or b.get("percentage") is None:
+        return
+    pct, chg = int(b["percentage"]), _charging(b)
+    if pct < BATTERY_LOW and not chg and not pp.get("_bat_low"):
+        pp["_bat_low"] = True
+        note(srv, "battery-low", percentage=pct, status=b.get("status"))
+    elif (pct >= BATTERY_LOW or chg) and pp.get("_bat_low"):
+        pp["_bat_low"] = False
+    if pct < BATTERY_CRITICAL and not chg and not getattr(srv, "paused", False):
+        srv.paused = True
+        pp["_bat_paused"] = True
+        note(srv, "paused", by="battery", percentage=pct)
+    elif pp.get("_bat_paused") and chg and pct >= BATTERY_RESUME:
+        srv.paused = False
+        pp["_bat_paused"] = False
+        note(srv, "resumed", by="battery", percentage=pct)
+
+
 def _runner(srv):
     return getattr(srv, "_loop_runner", None)
 
@@ -110,6 +162,7 @@ def state(srv) -> dict:
         "mem_available_mb": avail,
         "stream_clients": len(getattr(hub, "_subs", []) or []) if hub is not None else 0,
         "failing_scripts": failing,
+        "battery": battery(),
         "ts": time.time(),
     }
 
@@ -149,7 +202,9 @@ def refresh(srv) -> dict:
     elif was and not pressure:
         note(srv, "memory-ok", seat_rss_mb=st.get("seat_rss_mb"), mem_available_mb=st.get("mem_available_mb"))
     pp["_pressure"] = pressure
-    if prev.get("paused") != st["paused"] and prev:
+    _battery_guard(srv, st.get("battery"), pp)
+    st["paused"] = bool(getattr(srv, "paused", False)) or st["paused"]
+    if prev.get("paused") != st["paused"] and prev and not pp.get("_bat_paused"):
         note(srv, "resumed" if not st["paused"] else "paused", by="decree")
     try:
         _est(srv).upsert(ent, embedder=None)

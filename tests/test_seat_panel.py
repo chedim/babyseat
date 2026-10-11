@@ -112,3 +112,32 @@ class TestSeatPanel(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheBattery(unittest.TestCase):
+    def _with(self, srv, pct, status):
+        SP._bat.update(ts=time.time(), val={"percentage": pct, "status": status, "plugged": None, "temperature": 30})
+        return SP.refresh(srv)
+
+    def test_low_warns_critical_pauses_charging_resumes_and_the_operators_pause_is_kept(self):
+        srv, r, _ = _seat()
+        self._with(srv, 50, "DISCHARGING")
+        self._with(srv, 15, "DISCHARGING")
+        self._with(srv, 6, "DISCHARGING")
+        self.assertTrue(srv.paused)                                       # the battery paused the seat
+        self._with(srv, 10, "CHARGING")
+        self.assertTrue(srv.paused)                                       # not yet past the resume mark
+        self._with(srv, 16, "CHARGING")
+        self.assertFalse(srv.paused)                                      # charging back: resumed
+        kinds = [e["kind"] for e in srv.entity_store.docs[MEMBRANE_NS + "presence"].properties["events"]]
+        self.assertIn("battery-low", kinds)
+        self.assertEqual([e.get("by") for e in srv.entity_store.docs[MEMBRANE_NS + "presence"].properties["events"]
+                          if e["kind"] in ("paused", "resumed")], ["battery", "battery"])
+        SP.control(srv, {"paused": True})                                 # the operator's own pause...
+        self._with(srv, 90, "CHARGING")
+        self.assertTrue(srv.paused)                                       # ...is never lifted by the battery
+        SP._bat.update(ts=0.0, val=None)
+
+    def test_no_termux_api_no_battery(self):
+        SP._bat.update(ts=0.0, val=None)
+        self.assertIsNone(SP.battery(force=True) if not __import__("shutil").which("termux-battery-status") else None)

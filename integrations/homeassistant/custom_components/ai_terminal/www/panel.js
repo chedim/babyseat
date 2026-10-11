@@ -401,9 +401,11 @@ function voiceLogItems(rows, said, voiceLines) {
 function seatView(st) {
   const paused = !!(st && st.paused);
   const mem = st && st.seat_rss_mb ? " · seat " + st.seat_rss_mb + " MB" + (st.mem_available_mb != null ? ", " + st.mem_available_mb + " MB free" : "") : "";
+  const b = st && st.battery;
+  const bat = b && b.percentage != null ? " · phone " + b.percentage + "% " + String(b.status || "").toLowerCase() : "";
   return paused
-    ? { paused, icon: "▶", label: "seat paused: resume", title: "the seat is PAUSED: loops, dreamer, thinker and night stand down -- click to resume" + mem }
-    : { paused, icon: "⏸", label: "pause the seat", title: "pause the seat: every acting lane stands down (loops, dreamer, thinker, night)" + mem };
+    ? { paused, icon: "▶", label: "seat paused: resume", title: "the seat is PAUSED: loops, dreamer, thinker and night stand down -- click to resume" + mem + bat }
+    : { paused, icon: "⏸", label: "pause the seat", title: "pause the seat: every acting lane stands down (loops, dreamer, thinker, night)" + mem + bat };
 }
 
 function roleNext(auto) { return (auto && auto.role) === "predict" ? "babble" : "predict"; }
