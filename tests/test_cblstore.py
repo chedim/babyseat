@@ -181,3 +181,75 @@ class TestTheLadder(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(HAVE, "Couchbase Lite libraries not fetched (scripts/fetch-cbl.sh)")
+class TestTheSwitchOver(unittest.TestCase):
+    """The import runs while the old seat still writes its journals; the
+    switch-over boot replays only what they gained since."""
+
+    def test_the_tails_written_after_the_import_replay_at_the_switch(self):
+        tmp = tempfile.mkdtemp()
+        jdir = Path(tmp) / "field"
+        f = FileBackend(jdir)
+        for i in range(5):
+            f.upsert("entity_states", f"e{i}", {"origin": "o", "mass": float(i)})
+        f.insert_if_absent("sentences", "s0", {"_k": "sent", "text": "zero", "vec": f16(vecs(1, 2)[0])})
+        f.flush()
+        pre = CBLiteBackend(Path(tmp) / "field.cblite", journal_dir=jdir)      # the pre-import, seat still up
+        pre.close()
+        # the old seat keeps living
+        f.upsert("entity_states", "e9", {"origin": "o", "mass": 9.0})
+        f.upsert("entity_states", "e1", {"origin": "o", "mass": 1.5})
+        f.delete("entity_states", "e3")
+        f.insert_if_absent("sentences", "s1", {"_k": "sent", "text": "one", "vec": f16(vecs(1, 3)[0])})
+        f.flush()
+        want = list(FileBackend(jdir).scan("entity_states"))
+        b = CBLiteBackend(Path(tmp) / "field.cblite", journal_dir=jdir)        # the switch-over boot
+        try:
+            self.assertEqual(list(b.scan("entity_states")), want)
+            self.assertEqual(b.get("sentences", "s1")["text"], "one")
+            self.assertEqual(b.replay_tails(jdir), {})                          # caught up: nothing twice
+        finally:
+            b.close()
+
+    def test_a_journal_rewritten_since_replays_whole(self):
+        tmp = tempfile.mkdtemp()
+        jdir = Path(tmp) / "field"
+        f = FileBackend(jdir)
+        for i in range(6):
+            f.upsert("entity_states", f"e{i}", {"origin": "o", "mass": float(i)})
+        f.flush()
+        CBLiteBackend(Path(tmp) / "field.cblite", journal_dir=jdir).close()
+        f.delete("entity_states", "e2")
+        f.delete("entity_states", "e4")
+        jf = jdir / "entity_states.jsonl"
+        rows = list(FileBackend(jdir).scan("entity_states"))
+        jf.unlink()                                                            # a compaction: a new, shorter file
+        jf.write_text("".join(json.dumps({"k": k, "d": d}) + "\n" for k, d in rows))
+        b = CBLiteBackend(Path(tmp) / "field.cblite", journal_dir=jdir)
+        try:
+            self.assertEqual(sorted(k for k, _ in b.scan("entity_states")), sorted(k for k, _ in rows))
+        finally:
+            b.close()
+
+
+@unittest.skipUnless(HAVE, "Couchbase Lite libraries not fetched (scripts/fetch-cbl.sh)")
+class TestLeanPreImport(unittest.TestCase):
+    def test_the_lean_import_then_the_switch_boot(self):
+        from membrane.cblstore import import_only
+        tmp = tempfile.mkdtemp()
+        jdir = Path(tmp) / "field"
+        f = FileBackend(jdir)
+        for i in range(4):
+            f.upsert("events", f"ev{i}", {"origin": "o", "session": "s", "n": i})
+        f.flush()
+        self.assertEqual(import_only(Path(tmp) / "db", jdir)["events"], 4)
+        self.assertEqual(import_only(Path(tmp) / "db", jdir), {})                # once
+        f.upsert("events", "ev9", {"origin": "o", "session": "s", "n": 9})
+        f.flush()
+        b = CBLiteBackend(Path(tmp) / "db", journal_dir=jdir)
+        try:
+            self.assertEqual([k for k, _ in b.scan("events")], ["ev0", "ev1", "ev2", "ev3", "ev9"])
+        finally:
+            b.close()

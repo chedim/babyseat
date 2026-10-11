@@ -111,6 +111,8 @@ class CBLiteBackend(MemBackend):
             self.migrate_from(Path(journal_dir))
         self._ensure_vector_indexes()              # after the import: sized for what came in
         self._load_hot()
+        if journal_dir is not None:
+            self.replay_tails(Path(journal_dir))
         self._worker = threading.Thread(target=self._catchup_loop, name="cbl-vec", daemon=True)
         self._worker.start()
         self._wake.set()
@@ -155,12 +157,39 @@ class CBLiteBackend(MemBackend):
               f"({self.db.count('sentences')} sentences on disk)", file=sys.stderr)
 
     # ---- the one-time import of the journals --------------------------------
+    @staticmethod
+    def _lines(jf: Path, off: int = 0):
+        """(row, end offset) per complete journal line from `off` -- a torn
+        last line (no newline yet) is left for the next read."""
+        with jf.open("rb") as fh:
+            fh.seek(off)
+            for raw in fh:
+                if not raw.endswith(b"\n"):
+                    return
+                off += len(raw)
+                line = raw.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except Exception:
+                    continue
+                if isinstance(row, dict) and row.get("k"):
+                    yield row, off
+
+    @staticmethod
+    def _mark(jf: Path, off: int) -> dict:
+        st = jf.stat()
+        return {"off": int(off), "ino": int(st.st_ino)}
+
     def migrate_from(self, jdir: Path) -> dict:
         """Stream every <coll>.jsonl (and a legacy <coll>.json snapshot with no
         journal) into CBL: last line wins, a tombstone purges, ordinals by
         first appearance (a delete + re-add moves to the end -- the RAM
-        dict's own rule)."""
+        dict's own rule). How far each journal was read is recorded: a seat
+        still writing them is caught up later from there (replay_tails)."""
         counts: dict[str, int] = {}
+        marks: dict[str, dict] = {}
         t0 = time.time()
         if not jdir.is_dir():
             self._set_meta("migrated", {"from": str(jdir), "ts": time.time(), "rows": {}, "none": True})
@@ -186,23 +215,14 @@ class CBLiteBackend(MemBackend):
             self.db.begin()
             try:
                 if jf.exists():
-                    with jf.open() as fh:
-                        for line in fh:
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                row = json.loads(line)
-                            except Exception:
-                                continue
-                            k = row.get("k")
-                            if not k:
-                                continue
-                            put(k, row.get("d"))
-                            n += 1
-                            if n % 5000 == 0:
-                                self.db.end()
-                                self.db.begin()
+                    off = 0
+                    for row, off in self._lines(jf):
+                        put(row["k"], row.get("d"))
+                        n += 1
+                        if n % 5000 == 0:
+                            self.db.end()
+                            self.db.begin()
+                    marks[c] = self._mark(jf, off)
                 elif sf.exists():
                     try:
                         for k, d in json.loads(sf.read_text()).items():
@@ -214,9 +234,50 @@ class CBLiteBackend(MemBackend):
                 self.db.end()
             counts[c] = len(ords)
             print(f"[efield]   {c}: {n} lines -> {len(ords)} rows ({time.time() - t0:.0f}s)", file=sys.stderr)
-        self._set_meta("migrated", {"from": str(jdir), "ts": time.time(), "rows": counts,
+        self._set_meta("migrated", {"from": str(jdir), "ts": time.time(), "rows": counts, "journals": marks,
                                     "seconds": round(time.time() - t0, 1)})
         return counts
+
+    def replay_tails(self, jdir: Path) -> dict:
+        """THE CATCH-UP (the switch without the long boot): the import ran
+        while the old seat kept writing its journals; whatever they gained
+        since replays here, through the backend's own writes. A journal
+        rewritten since (a compaction: a new file, or a shorter one) replays
+        whole, and rows it no longer holds are deleted."""
+        mig = self._meta("migrated") or {}
+        marks = dict(mig.get("journals") or {})
+        done: dict[str, int] = {}
+        for c in COLLECTIONS:
+            jf, rec = jdir / f"{c}.jsonl", marks.get(c)
+            if rec is None or not jf.exists():
+                continue
+            st = jf.stat()
+            whole = st.st_ino != rec.get("ino") or st.st_size < int(rec.get("off") or 0)
+            if not whole and st.st_size == int(rec.get("off") or 0):
+                continue
+            n, off, final = 0, 0 if whole else int(rec["off"]), {}
+            for row, off in self._lines(jf, off):
+                k, d = row["k"], row.get("d")
+                if isinstance(d, dict):
+                    self.upsert(c, k, d)
+                    final[k] = True
+                else:
+                    self.delete(c, k)
+                    final.pop(k, None)
+                n += 1
+            if whole:
+                have = (list(self.colls[c]) if c not in COLD else
+                        [r["k"] for r in self.db.query(f"SELECT META().id AS k FROM membrane.{c}")])
+                for k in have:
+                    if k not in final:
+                        self.delete(c, k)
+            marks[c] = self._mark(jf, off)
+            done[c] = n
+        if done:
+            mig["journals"] = marks
+            self._set_meta("migrated", mig)
+            print(f"[efield] couchbase lite: journal tails replayed {done}", file=sys.stderr)
+        return done
 
     # ---- the cold collection ---------------------------------------------------
     def _cold_get(self, key: str) -> dict | None:
@@ -434,3 +495,32 @@ class CBLiteBackend(MemBackend):
         except Exception:
             pass
         self.db.close()
+
+
+def import_only(path, journal_dir, lib_dir=None) -> dict:
+    """THE LEAN PRE-IMPORT (2026-10-10): the journals into the database and
+    nothing else -- no hot rows in RAM, no catch-up thread -- so it can run
+    beside a live seat on a phone with little memory to spare (the full
+    rehearsal's 1.1 GB peak beside the seat's 2.9 GB woke the low-memory
+    killer). The switch-over boot then loads and replays the tails only."""
+    lib = CB.load(lib_dir)
+    db = CB.Database(lib, "field", str(path))
+    shell = CBLiteBackend.__new__(CBLiteBackend)
+    shell.db, shell.lib = db, lib
+    try:
+        CBLiteBackend._ensure_indexes(shell)
+        out = {} if shell._meta("migrated") else CBLiteBackend.migrate_from(shell, Path(journal_dir))
+        CBLiteBackend._ensure_vector_indexes(shell)
+        return out
+    finally:
+        db.close()
+
+
+if __name__ == "__main__":
+    # python -m membrane.cblstore <db dir> <journal dir>
+    import resource
+    t = time.time()
+    rows = import_only(sys.argv[1], sys.argv[2])
+    peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    print(f"imported {rows} in {time.time() - t:.0f}s, peak RSS "
+          f"{peak // (1024 * 1024) if sys.platform == 'darwin' else peak // 1024} MB")
