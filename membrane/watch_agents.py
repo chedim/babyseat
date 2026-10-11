@@ -399,6 +399,15 @@ def loop_task_text(ev: dict) -> str:
     elif kind == "llm-call":
         head = f"a model call ({ev.get('caller') or '?'}) about '{ent}':"
         detail = str(ev.get("prompt") or "")
+        w = ev.get("wake")
+        if isinstance(w, dict):
+            # a WAKE (llm.py): the seat's own deadline came due
+            _at = time.strftime("%a %H:%M", time.localtime(float(w.get("at") or 0)))
+            _set = time.strftime("%a %H:%M", time.localtime(float(w.get("set_ts") or 0)))
+            head = (f"YOUR WAKE {w.get('id', '')} ({ev.get('caller') or '?'}), set {_set} for {_at}"
+                    + (" -- firing LATE (the seat was down or busy)" if w.get("late") else "")
+                    + f", about '{ent}':")
+            detail += "\nYou asked to be woken for this. Read the entity's state now before acting -- time has passed."
         if ev.get("readonly"):
             # a FIELD-CALL (llm.py): the field asks, read-only, one line back
             return (f"{head}\n{detail}\n"
@@ -462,6 +471,13 @@ def loop_task_text(ev: dict) -> str:
             at = time.strftime("%H:%M", time.localtime(float(x.get("ts") or 0)))
             detail += f"\n  - {at} {str(x.get('verdict') or '-').upper()}: {str(x.get('decision') or '')[:240]}"
         detail += "\nContinue from there -- do not redo what landed; if this event changes nothing, ignore it."
+    # CONSEQUENCES (consequences.py): what followed the earlier decisions here
+    cons = ev.get("consequences") or []
+    if cons:
+        detail += "\nWhat followed your earlier decisions here (facts, oldest first):"
+        for ln in cons[-3:]:
+            detail += f"\n  - {str(ln)[:300]}"
+        detail += "\nWeigh them before deciding again: a decision that didn't hold wants a different one."
     return (f"{head}\n{detail}\n"
             "Decide: REACT (one concrete step through the membrane tools "
             "-- find / entity(action='read') to look; entity add/edit, "
@@ -650,6 +666,10 @@ class _LoopDrainer:
                 doc = (est0.docs or {}).get(ent)
                 if doc is not None and (doc.properties or {}).get("watch_decisions"):
                     ev = {**ev, "previous": list(doc.properties["watch_decisions"])}
+            doc = (est0.docs or {}).get(ent) if ent else None
+            if doc is not None and (doc.properties or {}).get("consequences"):
+                from . import consequences as _CQ
+                ev = {**ev, "consequences": _CQ.on_entity(doc)}
         _called = str(ev.get("kind")) == "llm-call"
         if _called:                             # llm.py: the depth rides the thread while the called turn runs
             from . import llm as _LLM
@@ -700,6 +720,12 @@ class _LoopDrainer:
                           "session": sid, "ts": time.time()})
             except Exception:
                 pass
+            if verdict in ("done", "step") and not ev.get("readonly"):
+                try:                           # consequences.py: looked at again 1 h / 24 h / 72 h on
+                    from . import consequences as _CQ
+                    _CQ.record(srv, ent, decision, who=agent, session=sid, kind=verdict)
+                except Exception:
+                    pass
         if goal is not None:
             props = goal.properties or {}
             if verdict == "blocked":
@@ -760,8 +786,16 @@ def loops_banner_line(srv) -> str | None:
     pool = getattr(srv, "events_pool", None)
     run = loops.running() if loops is not None else 0
     queued = pool.depth() if pool is not None else 0
+    wake = ""
+    try:                                       # llm.py: the seat's next self-scheduled wake
+        from . import llm as _LLM
+        nw = _LLM.next_wake(srv)
+        if nw:
+            wake = f"next wake {_LLM._hm(float(nw['at']), time.time())} on {str(nw.get('about') or '?').replace('membrane::', '')}"
+    except Exception:
+        pass
     if not run and not queued:
-        return None
+        return ("loops: idle, " + wake) if wake else None
     titles = []
     try:
         titles = (_loop_titles(srv) or [])[:3]
@@ -772,6 +806,8 @@ def loops_banner_line(srv) -> str | None:
         bits.append("(" + ", ".join(titles) + ")")
     if queued:
         bits.append(f"{queued} queued")
+    if wake:
+        bits.append(wake)
     return "loops: " + ", ".join(bits)
 
 

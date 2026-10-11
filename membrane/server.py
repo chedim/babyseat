@@ -2097,6 +2097,20 @@ class TurnRunner:
                                     _fp.touch((self._agents or {}).get(sid), name_l, args)
                             except Exception:
                                 pass
+                            # CONSEQUENCES (consequences.py): a write is a decision that acted
+                            try:
+                                from . import consequences as _CQ
+                                if _CQ.is_write(name_l, args):
+                                    from .fieldpulse import touched_eid as _teid
+                                    _e = _teid(name_l, args)
+                                    if _e:
+                                        _act = str((args or {}).get("action") or "")
+                                        _CQ.record(getattr(self, "srv", None), _e,
+                                                   f"{name_l}{'(' + _act + ')' if _act else ''}",
+                                                   who=(self._agents or {}).get(sid) or "chat",
+                                                   session=sid, kind=name_l)
+                            except Exception:
+                                pass
                             _p = _pre.get(call_id)
                             output = (_p[1].result() if _p is not None and _p[0] == name_l
                                       else self.executor(name_l, args, call_id))

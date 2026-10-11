@@ -444,7 +444,16 @@ def watermark(field) -> dict:
     """Where the model's view of the field stands: the applier's cursor and
     the conflict counter. Taken when a model turn is delivered."""
     return {"seq": int(field._ostats.get("cursor") or 0),
-            "conflicts": int(field._ostats.get("conflict_n") or 0)}
+            "conflicts": int(field._ostats.get("conflict_n") or 0),
+            "consequences": _cq_counter()}
+
+
+def _cq_counter() -> int:
+    try:
+        from . import consequences as _CQ
+        return _CQ.counter()
+    except Exception:
+        return 0
 
 
 def state_diff(field, mark: dict, own_session_prefix: str = "", budget: int = 1600,
@@ -486,6 +495,13 @@ def state_diff(field, mark: dict, own_session_prefix: str = "", budget: int = 16
         c = field.b.get("claims", entry["claim"]) or {}
         lines.append(f"! new conflict on {', '.join(entry['eids'])}: "
                      f"\"{(c.get('text') or '')[:160]}\" ({c.get('status', '?')})")
+    # CONSEQUENCES (consequences.py): what followed earlier decisions, settled since
+    if "consequences" in mark:
+        try:
+            from . import consequences as _CQ
+            lines += _CQ.diff_lines(int(mark.get("consequences") or 0))
+        except Exception:
+            pass
     if not lines:
         return None
     out = [DIFF_HEADER]

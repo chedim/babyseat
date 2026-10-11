@@ -765,7 +765,13 @@ def run_command_entity(fld, est, mem, command: str,
     t0 = time.time()
     err = ""
     try:
-        if cmd.startswith("llm::call"):
+        if cmd.startswith("llm::wake") or cmd.startswith("llm::unwake"):
+            # SELF-SCHEDULED WAKES (llm.py): kept on the llm entity, never a shell
+            from . import llm as _LLM
+            _r = (_LLM.unwake_from_command(cmd[len("llm::unwake"):].strip()) if cmd.startswith("llm::unwake")
+                  else _LLM.wake_from_command(cmd[len("llm::wake"):].strip()))
+            rc, text = _r["rc"], _r["text"]
+        elif cmd.startswith("llm::call"):
             # THE MODEL AS AN ENTITY (llm.py): a queued loop turn, never a shell
             from . import llm as _LLM
             _r = _LLM.from_command(cmd[len("llm::call"):].strip())
@@ -3546,6 +3552,16 @@ def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
                 return _LLM.request(srv, str(prompt), about=about or ent.eid,
                                     caller="script:" + str(getattr(ent, "eid", "?")).replace("membrane::", ""))
             self.call_llm = _call_llm
+            # A WAKE, FROM A SCRIPT (llm.py): one per fire; it fires read-only (a field-call)
+            woke = [False]
+            def _wake(at, prompt, about: str = "") -> dict:
+                if woke[0]:
+                    return {"rc": 1, "text": "one wake per fire"}
+                woke[0] = True
+                from . import llm as _LLM
+                return _LLM.set_wake(srv, about or ent.eid, str(at), str(prompt),
+                                     caller="script:" + str(getattr(ent, "eid", "?")).replace("membrane::", ""))
+            self.wake = _wake
 
     return _Membrane()
 

@@ -42,6 +42,21 @@ GLOBAL_PER_HOUR = 120
 PROMPT_MAX = 4000
 RING = 20
 
+# SELF-SCHEDULED WAKES (2026-10-11, Argus: "I have no way to hold a goal and
+# wake myself to pursue it"): wake(about, at, prompt) -- at that time the
+# prompt becomes a model turn on `about`, through request() (caps, depth,
+# the switch, pause and offline all apply). Kept on this entity (`wakes`):
+# they survive restarts; one missed while the seat was down fires at boot,
+# marked late. Time only: a CONDITION is a watch's job.
+WAKE_METHOD = "wake"
+WAKE_COMMAND = "llm::wake {{about}} {{at}} {{prompt}}"
+UNWAKE_METHOD = "unwake"
+UNWAKE_COMMAND = "llm::unwake {{id}}"
+WAKE_MIN_S = 300.0
+WAKE_MAX_S = 30 * 86400.0
+WAKES_MAX = 20
+WAKE_TICK_S = 30.0
+
 MAX_DEPTH = 2
 ECHO_S = 600.0
 _ctx = threading.local()                      # the depth of the called turn running in this thread
@@ -80,10 +95,12 @@ def bind(srv) -> None:
         def _of(d):
             mo = (d.properties or {}).get("method_of")
             return ent.eid in (mo if isinstance(mo, list) else [mo])
-        if not any(_of(d) and (d.properties or {}).get("method_name") == METHOD
-                   for d in list((est.docs or {}).values())):
-            from .night import method_define
-            method_define(srv, est, None, None, on=ent.eid, method=METHOD, command=COMMAND)
+        for meth, cmd in ((METHOD, COMMAND), (WAKE_METHOD, WAKE_COMMAND), (UNWAKE_METHOD, UNWAKE_COMMAND)):
+            if not any(_of(d) and (d.properties or {}).get("method_name") == meth
+                       for d in list((est.docs or {}).values())):
+                from .night import method_define
+                method_define(srv, est, None, None, on=ent.eid, method=meth, command=cmd)
+        _paint_wakes(ent)
         est.upsert(ent, embedder=None)
     except Exception as e:                      # noqa: BLE001
         import sys
@@ -105,7 +122,8 @@ def _budget(caller: str, now: float) -> str | None:
     return None
 
 
-def request(srv, prompt: str, about: str = "", caller: str = "", now: float | None = None) -> dict:
+def request(srv, prompt: str, about: str = "", caller: str = "", now: float | None = None,
+            extra: dict | None = None, readonly: bool | None = None) -> dict:
     """Queue a model turn on `about` with `prompt`: {rc, text}."""
     now = now or time.time()
     prompt = str(prompt or "").strip()[:PROMPT_MAX]
@@ -153,10 +171,10 @@ def request(srv, prompt: str, about: str = "", caller: str = "", now: float | No
     if len(_echo) > 500:
         for k in sorted(_echo, key=lambda k: _echo[k]["ts"])[:250]:
             _echo.pop(k, None)
-    field_call = caller.startswith("script:")
+    field_call = caller.startswith("script:") if readonly is None else bool(readonly)
     pool.put({"kind": "llm-call", "entity": about_eid, "prompt": prompt, "caller": caller, "ts": now,
               "event_id": f"llm-{int(now * 1000)}", "depth": depth + 1, "echo": key,
-              "origin": "field-call" if field_call else "call", "readonly": field_call})
+              "origin": "field-call" if field_call else "call", "readonly": field_call, **(extra or {})})
     _remember(srv, ent, now, caller, about_eid, prompt)
     try:
         from . import score as _SC
@@ -216,3 +234,205 @@ def answered(srv, ev: dict, text: str) -> None:
             est.upsert(doc, embedder=None)
         except Exception:
             pass
+
+
+# ---- self-scheduled wakes ------------------------------------------------------------
+def parse_at(at: str, now: float) -> float:
+    """'18:00' (its next occurrence), 'in 2h' / '3d' / '45m' / '1h30m', an ISO
+    time, or epoch seconds -> the epoch it names. ValueError otherwise."""
+    import re
+    import datetime as _dt
+    t = str(at or "").strip().lower()
+    if not t:
+        raise ValueError("when? '18:00', 'in 2h', '3d' or an ISO time")
+    rel = re.fullmatch(r"(?:in\s+)?((?:\d+(?:\.\d+)?\s*(?:d|h|m|min|mins|minutes?|hours?|days?)\s*)+)", t)
+    if rel:
+        mult = {"d": 86400, "h": 3600, "m": 60}
+        total = 0.0
+        for n, u in re.findall(r"(\d+(?:\.\d+)?)\s*([a-z]+)", rel.group(1)):
+            total += float(n) * mult[u[0]]
+        return now + total
+    m = re.fullmatch(r"(\d{1,2}):(\d{2})", t)
+    if m:
+        h, mi = int(m.group(1)), int(m.group(2))
+        if h > 23 or mi > 59:
+            raise ValueError(f"no such time: {at}")
+        base = _dt.datetime.fromtimestamp(now)
+        cand = base.replace(hour=h, minute=mi, second=0, microsecond=0)
+        if cand.timestamp() <= now:
+            cand += _dt.timedelta(days=1)
+        return cand.timestamp()
+    if re.fullmatch(r"\d{9,11}(?:\.\d+)?", t):
+        return float(t)
+    try:
+        d = _dt.datetime.fromisoformat(str(at).strip().replace("Z", "+00:00"))
+        return d.timestamp()
+    except ValueError:
+        raise ValueError(f"can't read the time '{at}': say '18:00', 'in 2h', '3d' or an ISO time")
+
+
+def _hm(ts: float, now: float) -> str:
+    fmt = "%H:%M" if abs(ts - now) < 86400 * 0.9 and time.localtime(ts).tm_yday == time.localtime(now).tm_yday \
+        else "%a %m-%d %H:%M"
+    return time.strftime(fmt, time.localtime(ts))
+
+
+def _paint_wakes(ent, now: float | None = None) -> None:
+    now = now or time.time()
+    pp = ent.properties or {}
+    ws = sorted(pp.get("wakes") or [], key=lambda w: float(w.get("at") or 0))
+    pp["wakes"] = ws
+    wl = (f"{len(ws)} wake(s) pending, next {_hm(float(ws[0]['at']), now)} on {ws[0].get('about')}"
+          if ws else "no wakes pending")
+    pp["wake_state"] = wl
+    ent.properties = pp
+
+
+def next_wake(srv, now: float | None = None) -> dict | None:
+    ent = _entity(srv)
+    ws = sorted(((ent.properties or {}).get("wakes") or []) if ent is not None else [],
+                key=lambda w: float(w.get("at") or 0))
+    return ws[0] if ws else None
+
+
+def set_wake(srv, about: str, at: str, prompt: str, caller: str = "", now: float | None = None) -> dict:
+    now = now or time.time()
+    prompt = str(prompt or "").strip()[:PROMPT_MAX]
+    if srv is None:
+        return {"rc": 127, "text": "no seat"}
+    if not prompt:
+        return {"rc": 2, "text": "a wake needs a prompt (what to do when it fires)"}
+    try:
+        ts = parse_at(at, now)
+    except ValueError as e:
+        return {"rc": 2, "text": str(e)}
+    if ts - now < WAKE_MIN_S:
+        return {"rc": 2, "text": f"too soon: a wake is at least {int(WAKE_MIN_S // 60)} min out (sooner: call)"}
+    if ts - now > WAKE_MAX_S:
+        return {"rc": 2, "text": f"too far: at most {int(WAKE_MAX_S // 86400)} days out"}
+    ent = _entity(srv)
+    if ent is None:
+        return {"rc": 127, "text": "no entity store"}
+    est = getattr(srv, "entity_store", None)
+    about_eid = ent.eid
+    if about and est is not None:
+        try:
+            t = est._resolve_spec(str(about))
+            about_eid = t.eid if t is not None else about_eid
+        except Exception:
+            pass
+    with _lock:
+        pp = ent.properties or {}
+        ws = list(pp.get("wakes") or [])
+        if len(ws) >= WAKES_MAX:
+            return {"rc": 1, "text": f"{WAKES_MAX} wakes are pending already: unwake one first"}
+        w = {"id": f"w{int(now * 1000) % 10**9}", "about": about_eid, "at": round(ts, 1), "prompt": prompt,
+             "caller": str(caller or "unknown")[:120], "set_ts": round(now, 1)}
+        pp["wakes"] = ws + [w]
+        ent.properties = pp
+        _paint_wakes(ent, now)
+    try:
+        est.upsert(ent, embedder=None)
+    except Exception:
+        pass
+    return {"rc": 0, "text": f"wake {w['id']} set for {_hm(ts, now)} on {about_eid} (unwake {w['id']} cancels it)"}
+
+
+def unwake(srv, wid: str) -> dict:
+    ent = _entity(srv)
+    if ent is None:
+        return {"rc": 127, "text": "no entity store"}
+    wid = str(wid or "").strip()
+    with _lock:
+        pp = ent.properties or {}
+        ws = list(pp.get("wakes") or [])
+        keep = [w for w in ws if w.get("id") != wid]
+        if len(keep) == len(ws):
+            return {"rc": 1, "text": f"no pending wake {wid or '?'}" +
+                    (f" (pending: {', '.join(w['id'] for w in ws)})" if ws else "")}
+        pp["wakes"] = keep
+        ent.properties = pp
+        _paint_wakes(ent)
+    try:
+        srv.entity_store.upsert(ent, embedder=None)
+    except Exception:
+        pass
+    return {"rc": 0, "text": f"wake {wid} cancelled"}
+
+
+def fire_due(srv, now: float | None = None, late_after_s: float = 120.0) -> list[dict]:
+    """The due wakes, fired through request(); each leaves the list once fired."""
+    now = now or time.time()
+    ent = _entity(srv)
+    if ent is None:
+        return []
+    with _lock:
+        pp = ent.properties or {}
+        ws = list(pp.get("wakes") or [])
+        due = [w for w in ws if float(w.get("at") or 0) <= now]
+        if not due:
+            return []
+        pp["wakes"] = [w for w in ws if w not in due]
+        ent.properties = pp
+    out = []
+    for w in due:
+        late = now - float(w["at"]) > late_after_s
+        caller = str(w.get("caller") or "unknown")
+        r = request(srv, w["prompt"], about=w.get("about") or "", caller="wake:" + caller, now=now,
+                    readonly=caller.startswith("script:"),
+                    extra={"wake": {"id": w["id"], "at": w["at"], "set_ts": w.get("set_ts"), "late": late}})
+        out.append({**w, "late": late, "rc": r["rc"], "text": r["text"]})
+    # no loops yet (boot) or the seat paused: the wake waits, it isn't lost
+    back = [{k: v for k, v in x.items() if k not in ("late", "rc", "text")} for x in out
+            if x["rc"] == 127 or "paused" in str(x["text"])]
+    out = [x for x in out if not (x["rc"] == 127 or "paused" in str(x["text"]))]
+    with _lock:
+        pp = ent.properties or {}
+        if back:
+            pp["wakes"] = list(pp.get("wakes") or []) + back
+        pp["wakes_fired"] = (list(pp.get("wakes_fired") or []) +
+                             [{"id": x["id"], "at": x["at"], "fired": round(now, 1), "about": x.get("about"),
+                               "rc": x["rc"], "late": x["late"]} for x in out])[-RING:]
+        ent.properties = pp
+        _paint_wakes(ent, now)
+    try:
+        srv.entity_store.upsert(ent, embedder=None)
+    except Exception:
+        pass
+    return out
+
+
+def wake_from_command(rest: str, caller: str = "method") -> dict:
+    """`llm::wake <about> <at> <prompt>` (shell-quoted)."""
+    try:
+        parts = shlex.split(rest)
+    except ValueError:
+        parts = rest.split(None, 2)
+    if len(parts) < 3:
+        return {"rc": 2, "text": "wake(about, at, prompt): the entity, when ('18:00', 'in 2h', '3d'), what to do"}
+    return set_wake(seat(), parts[0], parts[1], " ".join(parts[2:]), caller=caller)
+
+
+def unwake_from_command(rest: str) -> dict:
+    try:
+        parts = shlex.split(rest)
+    except ValueError:
+        parts = rest.split()
+    return unwake(seat(), parts[0] if parts else "")
+
+
+def start_wakes(srv) -> None:
+    """The wakes' clock: every WAKE_TICK_S, on time (not only when idle)."""
+    import os
+    if os.environ.get("MEMBRANE_RUN", "1") == "0":
+        return
+
+    def loop():
+        time.sleep(15)                         # the loops' pool comes up first
+        while True:
+            try:
+                fire_due(srv)
+            except Exception:
+                pass
+            time.sleep(WAKE_TICK_S)
+    threading.Thread(target=loop, daemon=True, name="llm-wakes").start()

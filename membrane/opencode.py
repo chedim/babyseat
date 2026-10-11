@@ -1797,6 +1797,8 @@ def main() -> None:
                 _SP.start(srv)
                 from . import score as _SC        # the score: the field's share of the work (an entity)
                 _SC.start(srv)
+                from . import consequences as _CQ  # what followed its decisions, 1 h / 24 h / 72 h on
+                _CQ.start(srv)
                 try:                               # the field's m: mirror names only what the store holds
                     from .efield import wire_store_names
                     if getattr(srv, "efield", None) is not None and getattr(srv, "entity_store", None) is not None:
@@ -1805,6 +1807,7 @@ def main() -> None:
                     print(f"[seat] m: name check not wired ({e})", file=sys.stderr)
                 from . import llm as _LLM         # the model as an entity: llm.call(about, prompt)
                 _LLM.bind(srv)
+                _LLM.start_wakes(srv)             # the seat's own deadlines: llm.wake(about, at, prompt)
                 from . import restarts as _RS     # restarts: told to Argus; a staged one is his to do
                 _RS.bind(srv)
                 _RS.on_boot(srv)
