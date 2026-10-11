@@ -1214,6 +1214,64 @@ def strip_meant(reply: str) -> str:
 ROLES = ("babble", "predict")
 
 
+# THE SWITCHES SURVIVE A RESTART (2026-10-11, the operator: "does restart have
+# to stop auto-chat and reset settings? :("): auto-chat on/off + its mode and
+# membrane's role, per session, saved beside the voice's data at every change
+# and restored at boot -- auto-chat resumes from the last reply. A Stop is a
+# change too: what was stopped stays stopped.
+STATE_FILE = "auto-state.json"
+RESUME_AFTER_S = 15.0
+
+
+def _state_path(runner):
+    srv = getattr(runner, "srv", None)
+    mp = getattr(srv, "_models_path", None)
+    return Path(mp).parent / "voice" / STATE_FILE if mp else None
+
+
+def save_state(runner) -> None:
+    p = _state_path(runner)
+    if p is None:
+        return
+    try:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        d = {"auto": {sid: {"mode": (a or {}).get("mode", "explore")}
+                      for sid, a in (getattr(runner, "_auto", None) or {}).items()},
+             "role": dict(getattr(runner, "_voice_role", None) or {})}
+        tmp = p.with_suffix(".tmp")
+        tmp.write_text(json.dumps(d))
+        os.replace(tmp, p)
+    except Exception as e:
+        print(f"[voice] auto state not saved: {e!r}", file=sys.stderr)
+
+
+def restore_state(runner, delay: float | None = None) -> dict:
+    """Boot: the roles back at once; every saved auto-chat resumed after the
+    seat settles (its own thread)."""
+    p = _state_path(runner)
+    if p is None or not p.exists():
+        return {}
+    try:
+        d = json.loads(p.read_text())
+    except Exception:
+        return {}
+    runner._voice_role = {sid: r for sid, r in (d.get("role") or {}).items() if r in ROLES}
+    autos = {sid: a for sid, a in (d.get("auto") or {}).items() if runner.sessions.get(sid) is not None}
+
+    def go():
+        time.sleep(RESUME_AFTER_S if delay is None else delay)
+        for sid, a in autos.items():
+            try:
+                auto_set(runner, sid, True, str((a or {}).get("mode") or "explore"))
+                print(f"[voice] auto-chat resumed on {sid} ({role(runner, sid)})", file=sys.stderr)
+            except Exception as e:
+                print(f"[voice] auto-chat not resumed on {sid}: {e!r}", file=sys.stderr)
+
+    if autos:
+        threading.Thread(target=go, daemon=True, name="voice-resume").start()
+    return {"auto": list(autos), "role": runner._voice_role}
+
+
 def role(runner, sid: str) -> str:
     return (getattr(runner, "_voice_role", None) or {}).get(sid, "babble")
 
@@ -1222,6 +1280,7 @@ def role_set(runner, sid: str, r: str) -> str:
     runner._voice_role = getattr(runner, "_voice_role", None) or {}
     runner._voice_role[sid] = r if r in ROLES else "babble"
     _publish_auto(runner, sid)
+    save_state(runner)
     return runner._voice_role[sid]
 
 
@@ -1309,6 +1368,7 @@ def auto_set(runner, sid: str, on: bool, mode: str = "explore") -> dict:
     if not on:
         runner._auto.pop(sid, None)
         _publish_auto(runner, sid)
+        save_state(runner)
         return auto_state(runner, sid)
     mode = mode if mode in AUTO_MODES else "explore"
     if sid in runner._auto:
@@ -1316,6 +1376,7 @@ def auto_set(runner, sid: str, on: bool, mode: str = "explore") -> dict:
     if sid not in runner._auto:
         runner._auto[sid] = {"rounds": 0, "since": time.time(), "mode": mode}
         _publish_auto(runner, sid)
+        save_state(runner)
         if sid not in (getattr(runner, "_busy", None) or {}):
             last = ""
             try:

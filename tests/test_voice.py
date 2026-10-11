@@ -739,3 +739,48 @@ class TestBabbleEveryMove(unittest.TestCase):
         line = [m["content"] for m in second if m["content"].startswith(V.VOICE_PREFIX)]
         self.assertTrue(line, second)
         self.assertRegex(line[0], r"^\[membrane voice\] «[^»]+»$")    # its words only, no instructions
+
+
+class TestTheSwitchesSurviveARestart(unittest.TestCase):
+    """2026-10-11, the operator: "does restart have to stop auto-chat and reset
+    settings? :(" -- auto-chat and membrane's role, saved and restored."""
+
+    def _runner(self, d):
+        srv = _Srv()
+        srv._models_path = str(Path(d) / "models.json")
+        srv.membrane = type("M", (), {"embedder": FakeEmbedder()})()
+        r = S.TurnRunner(S.SSEHub(), S.SessionStore(), S.MessageStore(), _CountingLadder(),
+                         lambda n, a, c: "ok", system="", model="m")
+        r.srv = srv
+        return r
+
+    def test_auto_chat_and_the_role_come_back_after_a_restart(self):
+        d = tempfile.mkdtemp()
+        r = self._runner(d)
+        sid = r.sessions.create(title="t")["id"]
+        other = r.sessions.create(title="u")["id"]
+        r._busy = {sid: 1, other: 1}                      # no rounds fire in this test
+        V.role_set(r, sid, "predict")
+        V.auto_set(r, sid, True, "teach")
+        V.role_set(r, other, "predict")
+        V.auto_set(r, other, True)
+        V.auto_set(r, other, False)                       # a Stop is remembered too
+        # the restart: a fresh runner over the same sessions and data dir
+        r2 = self._runner(d)
+        r2.sessions = r.sessions
+        r2.messages = r.messages
+        r2._busy = {sid: 1, other: 1}
+        got = V.restore_state(r2, delay=0.0)
+        self.assertEqual(got["auto"], [sid])
+        self.assertEqual(V.role(r2, sid), "predict")
+        self.assertEqual(V.role(r2, other), "predict")
+        end = time.time() + 3
+        while time.time() < end and not V.auto_on(r2, sid):
+            time.sleep(0.02)
+        self.assertTrue(V.auto_on(r2, sid))
+        self.assertEqual(V.auto_state(r2, sid)["mode"], "teach")
+        self.assertFalse(V.auto_on(r2, other))
+
+    def test_no_state_no_trouble(self):
+        r = self._runner(tempfile.mkdtemp())
+        self.assertEqual(V.restore_state(r, delay=0.0), {})

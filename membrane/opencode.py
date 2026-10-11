@@ -1780,6 +1780,13 @@ def main() -> None:
             start(serve_port or 4096, surf_host, serve_su,
                   serve_sp, cfg, runner, sess_store, msg_store)
             native_up = True
+            try:                           # auto-chat + membrane's role survive the restart
+                from . import voice as _voice_boot
+                _rs = _voice_boot.restore_state(runner)
+                if _rs:
+                    print(f"[seat] restored auto-chat {_rs.get('auto')} roles {_rs.get('role')}", file=sys.stderr)
+            except Exception as e:
+                print(f"[seat] auto-chat state not restored ({e})", file=sys.stderr)
             print(f"[opencode] native serve up: session store "
                   f"{d / 'serve-sessions.json'}; the proxy's /v1 is "
                   "the turn lane", file=sys.stderr)

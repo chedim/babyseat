@@ -261,3 +261,12 @@ test("predict mode: membrane's guessed moves are phantoms in their places", () =
   assert.ok(L.isMove({ type: "text", text: "hi" }) && !L.isMove({ type: "reasoning", text: "x" }) && !L.isMove({ type: "text", text: "" }));
   assert.equal(L.phantomHtml({ label: "" }), "");
 });
+
+test("the status says loading / connecting before it says offline", () => {
+  const now = 100000;
+  assert.equal(L.connLabel(true, true, null, now, false), "");
+  assert.equal(L.connLabel(false, false, now - 60000, now, false), "loading…");      // never live yet
+  assert.equal(L.connLabel(false, true, now - 3000, now, false), "connecting…");     // a fresh drop
+  assert.equal(L.connLabel(false, true, now - 20000, now, false), "offline");
+  assert.equal(L.connLabel(false, true, now - 20000, now, true), "polling");
+});

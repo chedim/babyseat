@@ -353,6 +353,18 @@ function voiceHtml(line, editing) {
   return h + "</div>";
 }
 
+/** The connection's word in the status pill (2026-10-11, the operator: "can it
+ *  say 'loading' while loading?"): nothing while live; "loading…" until the
+ *  first live stream; "connecting…" for RECONNECT_GRACE_MS after a drop;
+ *  only then "offline" (or "polling", when the fallback poll runs). */
+const RECONNECT_GRACE_MS = 15000;
+function connLabel(live, everLive, since, now, polling) {
+  if (live) return "";
+  if (!everLive) return "loading…";
+  if (since && now - since < RECONNECT_GRACE_MS) return "connecting…";
+  return polling ? "polling" : "offline";
+}
+
 /** Membrane's role, its own switch beside auto-chat: babble (its lines go to
  *  the LLM) or predict (the LLM never hears it; it guesses each turn). */
 function roleNext(auto) { return (auto && auto.role) === "predict" ? "babble" : "predict"; }
@@ -479,7 +491,7 @@ function replyToSpeak(rows) {
   return null;
 }
 
-const AiPanelLogic = { phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
+const AiPanelLogic = { connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
@@ -1136,10 +1148,14 @@ function definePanel() {
       this._streamCtl = ctl;
       let backoff = 1000;
       while (!ctl.signal.aborted && this.isConnected) {
+        if (!this._connSince) this._connSince = Date.now();     // connecting since (cleared once live)
+        this._paintStatus();
         try {
           const r = await this._hass.fetchWithAuth(SERVE + "/event", { signal: ctl.signal, headers: { Accept: "text/event-stream" } });
           if (!r.ok || !r.body) throw new Error("stream " + r.status);
           this._live = true;
+          this._everLive = true;
+          this._connSince = null;
           this._stopPoll();
           this._paintStatus();
           await this._resync();                  // whatever happened while we were away
@@ -1156,6 +1172,7 @@ function definePanel() {
           if (ctl.signal.aborted) return;
         }
         this._live = false;
+        if (!this._connSince) this._connSince = Date.now();     // dropped: "connecting…" first, not "offline"
         this._paintStatus();
         if (this._busy()) this._startPoll();
         await new Promise((res) => setTimeout(res, backoff));
@@ -1358,7 +1375,8 @@ function definePanel() {
         if (st.depth) txt += " · " + st.depth + " queued";
         cls += " busy";
       } else txt = "idle";
-      if (!this._live) { txt += this._pollTimer ? " · polling" : " · offline"; if (!this._pollTimer) cls += " off"; }
+      const conn = connLabel(this._live, this._everLive, this._connSince, Date.now(), !!this._pollTimer);
+      if (conn) { txt += " · " + conn; if (conn === "offline") cls += " off"; }
       this._pill.className = cls;
       this._pill.textContent = txt;
       this._pill.title = this._live ? "live (streaming)" : "not streaming: polling fallback";
