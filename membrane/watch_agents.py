@@ -444,6 +444,15 @@ def loop_task_text(ev: dict) -> str:
     else:
         head = f"watch event ({kind}) on '{ent}'"
         detail = ""
+    # THE LAST PASSES (2026-10-11: each watch pass started fresh and redid
+    # the same reads): what the earlier passes on this entity decided
+    prev = ev.get("previous") or []
+    if prev:
+        detail += "\nYour last passes on it (oldest first):"
+        for x in prev[-3:]:
+            at = time.strftime("%H:%M", time.localtime(float(x.get("ts") or 0)))
+            detail += f"\n  - {at} {str(x.get('verdict') or '-').upper()}: {str(x.get('decision') or '')[:240]}"
+        detail += "\nContinue from there -- do not redo what landed; if this event changes nothing, ignore it."
     return (f"{head}\n{detail}\n"
             "Decide: REACT (one concrete step through the membrane tools "
             "-- find / entity(action='read') to look; entity add/edit, "
@@ -573,6 +582,13 @@ class _LoopDrainer:
         ent = str(ev.get("entity") or "")
         agent = loop_agent_name("watch", ent or ev.get("kind"))
         desc = LoopDesc("watch", eid=ent or ev.get("event_id", ""))
+        holds = getattr(loops, "holds", None)
+        if ent and callable(holds) and holds(desc.eid):
+            if gate is not None:
+                gate.refund()
+            if pool is not None:
+                pool.put(ev)        # its entity is in another loop's hands: it waits, alone
+            return "held"
         if not loops.admit(desc):
             if gate is not None:
                 gate.refund()       # re-queued, not run: no charge
@@ -607,6 +623,11 @@ class _LoopDrainer:
                 _fp.loop_session(agent, ent, sid)
         except Exception:
             pass
+        if est0 := getattr(srv, "entity_store", None):
+            if str(ev.get("kind")) != "intent-planted" and ent:     # a goal carries its own landings
+                doc = (est0.docs or {}).get(ent)
+                if doc is not None and (doc.properties or {}).get("watch_decisions"):
+                    ev = {**ev, "previous": list(doc.properties["watch_decisions"])}
         out = srv.run_loop_turn(sid, loop_task_text(ev), agent) or {}
         text = str(out.get("text") or out.get("verdict_text") or "")
         verdict, detail = parse_verdict(text)
@@ -755,8 +776,18 @@ class LoopRunner:
             if len(self._held) >= self.max:
                 return False
             key = loop.eid or loop.kind
+            # ONE LOOP PER ENTITY (2026-10-11: the set admitted a second
+            # loop on an entity already held, and the first release
+            # un-held it under the second): it waits, and runs with the
+            # first one's outcome in hand
+            if loop.eid and key in self._held:
+                return False
             self._held.add(key)
             return True
+
+    def holds(self, eid: str) -> bool:
+        with self._lk:
+            return bool(eid) and eid in self._held
 
     def release(self, loop: LoopDesc) -> None:
         with self._lk:

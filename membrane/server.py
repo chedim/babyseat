@@ -800,6 +800,44 @@ def _mcp_names() -> frozenset:
     return frozenset(t["name"] for t in _mcp.TOOLS)
 
 
+PARALLEL_READS = frozenset(("find", "query", "state", "graph", "entities_related", "entity_query",
+                            "entity_read", "entity_tracks", "intents"))
+PARALLEL_READS_MAX = 4
+
+
+def _thinking(runner, sid: str, phase: str) -> None:
+    """mind.think {agent, phase} (no text): a model round of this mind
+    started / its answer arrived -- membrane home's orb shows the wait."""
+    try:
+        from .fieldpulse import of as _pulse_of
+        fp = _pulse_of(getattr(runner, "srv", None))
+        if fp is not None:
+            fp.thinking((runner._agents or {}).get(sid), phase)
+    except Exception:
+        pass
+
+
+def _claim_note(srv, session_agent, tool: str, args: dict, output):
+    """THE CLAIM (2026-10-11): a mind touching an entity ANOTHER loop is
+    working on hears so in the tool's result -- no lock, the work stays
+    parallel; it just isn't done twice."""
+    try:
+        from .fieldpulse import of as _pulse_of, touched_eid
+        fp = _pulse_of(srv)
+        eid = touched_eid(tool, args) if fp is not None else ""
+        if not eid:
+            return output
+        h = fp.holder(eid, mine=str(session_agent or ""))
+        if not h:
+            return output
+        slot, since, held = h
+        return (str(output or "") + f"\n[note: {slot} is working on {held} right now (since "
+                f"{time.strftime('%H:%M', time.localtime(since))}) -- don't redo its pass; its result "
+                "lands on the entity (watch_last_decision)]")
+    except Exception:
+        return output
+
+
 def _lane_refusal(name: str, lane: str) -> str | None:
     """The honest refusal for a cross-lane tool call (None = allowed or
     nothing to say)."""
@@ -1477,6 +1515,30 @@ class TurnRunner:
         except Exception:
             pass
 
+    def _prefetch_reads(self, tcs, lane) -> dict:
+        """{call_id: (resolved name, Future)} for the round's leading
+        read-only calls (two or more), started together."""
+        from concurrent.futures import ThreadPoolExecutor
+        from . import toolset as _ts
+        lead = []
+        for tc in tcs or []:
+            fn = tc.get("function") or {}
+            name = fn.get("name") or ""
+            try:
+                a = json.loads(fn.get("arguments") or "{}")
+                name_l, a = _ts.resolve(name, a if isinstance(a, dict) else {})
+            except Exception:
+                break
+            if name == "help" or name_l not in PARALLEL_READS or _lane_refusal(name_l, lane) is not None:
+                break
+            lead.append((tc.get("id") or "", name_l, a))
+        if len(lead) < 2:
+            return {}
+        pool = ThreadPoolExecutor(max_workers=min(PARALLEL_READS_MAX, len(lead)), thread_name_prefix="read")
+        out = {cid: (nl, pool.submit(self.executor, nl, a, cid)) for cid, nl, a in lead}
+        pool.shutdown(wait=False)
+        return out
+
     def _tool_watchdog_start(self, sid: str, name: str, call_id: str,
                              args: dict) -> None:
         if not hasattr(self, "_tool_t0"):
@@ -1776,6 +1838,7 @@ class TurnRunner:
                 _score.note("round", lane=_lane_of((self._agents or {}).get(sid)))
             except Exception:
                 pass
+            _thinking(self, sid, "start")      # the orb: this mind is thinking (membrane home)
             body = {"model": turn_model,
                     "messages": ([{"role": "system", "content": self.system}]
                                  if self.system else []) + history}
@@ -1858,7 +1921,9 @@ class TurnRunner:
                         "time": {"start": now, "end": now}})
                 a_info["error"] = {"name": "Error", "data":
                                    {"message": str(e)[:300]}}
+                _thinking(self, sid, "end")
                 break
+            _thinking(self, sid, "end")
             msg = ((resp.get("choices") or [{}])[0].get("message")
                    or {})
             _tokens_fill(a_info, resp)
@@ -1936,6 +2001,10 @@ class TurnRunner:
                 if msg.get("reasoning"):
                     asst_msg["reasoning"] = msg["reasoning"]
                 history.append(asst_msg)
+                # PARALLEL READS (2026-10-11): the round's LEADING read-only
+                # calls run together; the loop below takes each result in
+                # order (a read after a write is not prefetched -- it waits)
+                _pre = self._prefetch_reads(tcs, lane) if self.tools is None else {}
                 for tc in tcs:
                     fn = tc.get("function") or {}
                     name = fn.get("name") or "?"
@@ -2026,7 +2095,11 @@ class TurnRunner:
                                     _fp.touch((self._agents or {}).get(sid), name_l, args)
                             except Exception:
                                 pass
-                            output = self.executor(name_l, args, call_id)
+                            _p = _pre.get(call_id)
+                            output = (_p[1].result() if _p is not None and _p[0] == name_l
+                                      else self.executor(name_l, args, call_id))
+                            output = _claim_note(getattr(self, "srv", None), (self._agents or {}).get(sid),
+                                                 name_l, args, output)
                         # THE TOOL'S TOUCH (the activity clock): a
                         # completed tool = the turn moved
                         self._turn_activity[sid] = time.time()

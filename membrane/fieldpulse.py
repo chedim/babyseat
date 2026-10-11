@@ -37,6 +37,11 @@ def of(srv) -> "FieldPulse | None":
     return getattr(srv, "_field_pulse", None) if srv is not None else None
 
 
+def _ekey(eid: str) -> str:
+    """An entity id without the namespace, lowercased (specs name it either way)."""
+    return str(eid or "").strip().lower().replace("membrane::", "")
+
+
 def touched_eid(tool: str, args: dict) -> str:
     """The entity a tool call names (the MCP tools' alias set), or ''."""
     if not isinstance(args, dict):
@@ -138,8 +143,28 @@ class FieldPulse:
 
     def focus(self, agent: str, eid: str, phase: str) -> None:
         slot = self.loop_slot(agent, take=(phase == "start"))
+        with self._lock:
+            held = self.__dict__.setdefault("_held", {})
+            if phase == "start" and eid:
+                held[agent] = (slot, eid, time.time())
+            else:
+                held.pop(agent, None)
         if slot:
             self.mind("focus", agent=slot, eid=eid, phase=phase)
+
+    def holder(self, eid: str, mine: str = "") -> tuple | None:
+        """(loop-N, since, the held id) of ANOTHER loop holding this entity, or None."""
+        k = _ekey(eid)
+        if not k:
+            return None
+        with self._lock:
+            for agent, (slot, held, since) in list((getattr(self, "_held", None) or {}).items()):
+                if agent == mine:
+                    continue
+                hk = _ekey(held)
+                if hk and (hk == k or hk.endswith(":" + k) or k.endswith(":" + hk)):
+                    return (slot or "a loop", since, held)
+        return None
 
     def loop_session(self, agent: str, eid: str, sid: str) -> None:
         """A loop's session is known: its orb carries the sid (an HA admin's
@@ -162,6 +187,15 @@ class FieldPulse:
         return {"loops": loops,
                 "thinker": list(getattr(th, "mind_log", []) or [])[-40:],
                 "dreamer": list(self._dreams)}
+
+    def _agent_of(self, session_agent) -> str:
+        a = str(session_agent or "").strip()
+        if a == "phone":
+            return "phone"
+        return (self._slots.get(a) or "loop") if a.startswith("watch") else "chat"
+
+    def thinking(self, session_agent, phase: str) -> None:
+        self.mind("think", agent=self._agent_of(session_agent), phase="start" if phase == "start" else "end")
 
     def touch(self, session_agent: str, tool: str, args: dict) -> None:
         eid = touched_eid(tool, args)

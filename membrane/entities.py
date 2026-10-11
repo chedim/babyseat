@@ -1210,6 +1210,7 @@ class TimelineOps:
             return
         props = ent.properties or {}
         props["watch_last_decision"] = dict(verdict or {})
+        props["watch_decisions"] = (list(props.get("watch_decisions") or []) + [dict(verdict or {})])[-3:]
         self.upsert(ent, embedder=None)
 
     def open_timelines(store, parent: str = "membrane::session:now",

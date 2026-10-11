@@ -118,6 +118,14 @@ class TileCache {
 
 /** One mind's avatar: glides toward its target, attached while it holds
  * an entity, back to its idle orbit when it lets go. */
+const THINK_MAX_MS = 180000;             // a lost 'end' never leaves an orb thinking forever
+/** A thinking orb's pose now: a slow circle (radius 22) and a breath (±18%). */
+function thinkPose(since, now) {
+  if (!since || now - since > THINK_MAX_MS) return { dx: 0, dy: 0, dz: 0, scale: 1 };
+  const t = (now - since) / 1000;
+  return { dx: Math.cos(t * 1.6) * 22, dy: Math.sin(t * 2.3) * 6, dz: Math.sin(t * 1.6) * 22, scale: 1 + 0.18 * Math.sin(t * 3.1) };
+}
+
 const AVATAR_HIT_PX = 26;               // a tap this close to an orb selects it
 
 class Avatar {
@@ -902,6 +910,12 @@ class Field3DView {
     } else if (t === "mind.focus") {
       if (p.phase === "end") { const a = this.avatars.get(p.agent); if (a) a.release(); }
       else { this._attach(p.agent, p.eid, null); if (p.sid) { this.agentSids = this.agentSids || {}; this.agentSids[p.agent] = p.sid; if (this.selAgent === p.agent && this.api.onAvatar) this.api.onAvatar(p.agent); } }
+    } else if (t === "mind.think") {
+      // THE WAIT, SHOWN (2026-10-11, the operator: "sometimes it's just...
+      // paused"): a model round of this mind is generating -- its orb
+      // breathes and circles where it is until the answer arrives
+      const a = this._avatar(p.agent || "chat");
+      a.thinking = p.phase === "start" ? Date.now() : 0;
     } else if (t === "mind.touch") {
       this._attach(p.agent || "chat", p.eid, 4000);
     } else if (t === "mind.thinker") {
@@ -1006,9 +1020,10 @@ class Field3DView {
     const now = Date.now();
     for (const a of this.avatars.values()) {
       a.step(dt, now);
-      a.sprite.position.set(a.pos[0], a.pos[1], a.pos[2]);
-      const big = this.selAgent === a.agent ? 84 : 46;
-      if (a.sprite.scale.x !== big) a.sprite.scale.set(big, big, 1);
+      const th = thinkPose(a.thinking, now);
+      a.sprite.position.set(a.pos[0] + th.dx, a.pos[1] + th.dy, a.pos[2] + th.dz);
+      const big = (this.selAgent === a.agent ? 84 : 46) * th.scale;
+      if (Math.abs(a.sprite.scale.x - big) > 0.5) a.sprite.scale.set(big, big, 1);
       const on = a.attached(now);
       a.beam.visible = on;
       if (on) {
@@ -1022,6 +1037,8 @@ class Field3DView {
       a.tag.style.display = sc ? "" : "none";
       if (sc) a.tag.style.transform = "translate(" + (sc[0] + 14).toFixed(0) + "px," + (sc[1] - 6).toFixed(0) + "px)";
       if (!on) a.tag.textContent = a.agent;
+      if (a.thinking && !/thinking/.test(a.tag.textContent)) a.tag.textContent += " · thinking…";
+      else if (!a.thinking && / · thinking…$/.test(a.tag.textContent)) a.tag.textContent = a.tag.textContent.replace(/ · thinking…$/, "");
     }
   }
 
