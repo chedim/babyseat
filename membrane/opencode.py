@@ -1798,6 +1798,8 @@ def main() -> None:
                         wire_store_names(srv.efield, srv.entity_store)
                 except Exception as e:
                     print(f"[seat] m: name check not wired ({e})", file=sys.stderr)
+                from . import llm as _LLM         # the model as an entity: llm.call(about, prompt)
+                _LLM.bind(srv)
                 from . import restarts as _RS     # restarts: told to Argus; a staged one is his to do
                 _RS.bind(srv)
                 _RS.on_boot(srv)

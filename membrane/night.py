@@ -759,7 +759,12 @@ def run_command_entity(fld, est, mem, command: str,
     t0 = time.time()
     err = ""
     try:
-        if cmd.startswith("seat::restart"):
+        if cmd.startswith("llm::call"):
+            # THE MODEL AS AN ENTITY (llm.py): a queued loop turn, never a shell
+            from . import llm as _LLM
+            _r = _LLM.from_command(cmd[len("llm::call"):].strip())
+            rc, text = _r["rc"], _r["text"]
+        elif cmd.startswith("seat::restart"):
             # ARGUS RESTARTS THE SEAT (restarts.py): never a shell
             from . import restarts as _RS
             from .jsexec import _unquote
@@ -3524,6 +3529,17 @@ def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
                 from . import opencode as _oc
                 return bool(_oc.speak(srv, str(text)[:500], kind=kind))
             self.speak = _speak
+            # THE MODEL, FROM A SCRIPT (llm.py): one call per fire, about
+            # this entity; capped per caller and per hour like every call
+            called = [False]
+            def _call_llm(prompt, about: str = "") -> dict:
+                if called[0]:
+                    return {"rc": 1, "text": "one model call per fire"}
+                called[0] = True
+                from . import llm as _LLM
+                return _LLM.request(srv, str(prompt), about=about or ent.eid,
+                                    caller="script:" + str(getattr(ent, "eid", "?")).replace("membrane::", ""))
+            self.call_llm = _call_llm
 
     return _Membrane()
 

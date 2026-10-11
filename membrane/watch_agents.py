@@ -396,6 +396,9 @@ def loop_task_text(ev: dict) -> str:
     elif kind == "watch-detached":
         head = f"watch detached: '{ent}' ({ev.get('lane', '?')})"
         detail = str(ev.get("detail") or "")
+    elif kind == "llm-call":
+        head = f"a model call ({ev.get('caller') or '?'}) about '{ent}':"
+        detail = str(ev.get("prompt") or "")
     elif kind == "restart-pending":
         due = time.strftime("%H:%M", time.localtime(float(ev.get("due") or 0)))
         head = (("REMINDER -- " if ev.get("reminder") else "") +
@@ -571,8 +574,8 @@ class _LoopDrainer:
         # folds into the digest (the next turn's WHERE WE ARE) instead of
         # spending a whole interrupt turn
         gate = getattr(self.srv, "_alert_gate", None)
-        if ev.get("kind") == "restart-pending":
-            gate = None                 # never folded into a digest: the restart is his to do
+        if ev.get("kind") in ("restart-pending", "llm-call"):
+            gate = None                 # never folded into a digest: the restart is his; a call has its own caps
         if gate is not None and not gate.allow(ev):
             return "skip"
         loops = getattr(self.srv, "loops", None)
