@@ -226,3 +226,11 @@ class TestArgumentsInTheName(unittest.TestCase):
             T.resolve('{"action": "read", "name": "presence.exec"}', {})
         self.assertIn("NAME held its arguments", str(cm.exception))
         self.assertIn("entity", str(cm.exception))
+
+
+    def test_an_empty_name_says_so(self):
+        from membrane import toolset as T
+        for nm in ("", '""', "  ", "''", "?"):
+            with self.assertRaises(ValueError) as cm:
+                T.resolve(nm, {"action": "read"})
+            self.assertIn("no tool name", str(cm.exception))

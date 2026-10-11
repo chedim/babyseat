@@ -308,6 +308,11 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
     # THE ARGUMENTS IN THE NAME (2026-10-11: a loop sent '{"action":' as the
     # tool's name six times and was told 'not your lane's hand' -- the wrong
     # lesson): say what happened and how to send it
+    _bare = str(name or "").strip().strip("\"'` ?")
+    if not _bare:
+        raise ValueError(
+            f"the call had no tool name ({str(name or '')!r}): name the tool -- one of "
+            f"{', '.join(sorted(FAMILIES))} -- and put its JSON in the arguments")
     if str(name or "").lstrip()[:1] in ("{", "["):
         raise ValueError(
             f"the call's NAME held its arguments ({str(name)[:80]!r}): put the tool's name -- "
