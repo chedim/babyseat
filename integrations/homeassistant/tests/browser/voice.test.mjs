@@ -11,12 +11,14 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { chromium } from "playwright-core";
+import { chromium, firefox } from "playwright-core";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WWW = path.join(HERE, "..", "..", "custom_components", "ai_terminal", "www");
 const CHROME = process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const TYPES = { ".js": "application/javascript", ".gz": "application/gzip", ".html": "text/html" };
+// BROWSER=firefox runs them in Playwright's Firefox (the operator's browser)
+const BROWSER = process.env.BROWSER || "chrome";
+const TYPES = { ".js": "application/javascript", ".mjs": "application/javascript", ".wasm": "application/wasm", ".gz": "application/gzip", ".html": "text/html" };
 
 /** A WAV of `text` spoken by macOS, padded with silence (Chrome loops it). */
 function spoken(text, padS = 2) {
@@ -35,26 +37,27 @@ function spoken(text, padS = 2) {
   return wav;
 }
 
-function serve() {
+function serve(wav) {
   const srv = http.createServer((req, res) => {
     const u = new URL(req.url, "http://x");
     let file = null;
     if (u.pathname === "/") file = path.join(HERE, "harness.html");
+    else if (u.pathname === "/fixture.wav") file = wav;
     else if (u.pathname.startsWith("/api/ai_terminal/www/")) file = path.join(WWW, path.basename(u.pathname));
     if (!file || !fs.existsSync(file)) { res.writeHead(404); res.end(); return; }
-    res.writeHead(200, { "Content-Type": TYPES[path.extname(file)] || "application/octet-stream" });
+    res.writeHead(200, { "Content-Type": TYPES[path.extname(file)] || (file.endsWith(".wav") ? "audio/wav" : "application/octet-stream") });
     fs.createReadStream(file).pipe(res);
   });
   return new Promise((ok) => srv.listen(0, "127.0.0.1", () => ok(srv)));
 }
 
 async function withPage(wav, fn) {
-  const srv = await serve();
-  const browser = await chromium.launch({ executablePath: CHROME, headless: true, args: [
-    "--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream",
-    "--use-file-for-fake-audio-capture=" + wav, "--autoplay-policy=no-user-gesture-required"] });
+  const srv = await serve(wav);
+  const browser = BROWSER === "firefox"
+    ? await firefox.launch({ headless: true, firefoxUserPrefs: { "media.autoplay.default": 0, "media.navigator.permission.disabled": true } })
+    : await chromium.launch({ executablePath: CHROME, headless: true, args: ["--autoplay-policy=no-user-gesture-required"] });
   try {
-    const ctx = await browser.newContext({ permissions: ["microphone"] });
+    const ctx = await browser.newContext(BROWSER === "firefox" ? {} : { permissions: ["microphone"] });
     const page = await ctx.newPage();
     page.on("pageerror", (e) => console.log("pageerror:", e.message));
     await page.goto("http://127.0.0.1:" + srv.address().port + "/");
@@ -175,5 +178,34 @@ test("Argus first: his words cut membrane's babble and jump its queue", { timeou
     const i = (s) => order.findIndex((x) => x === s);
     assert.ok(i("cut The room hums.") >= 0, JSON.stringify(order));                       // the playing babble was cut
     assert.ok(i("start The battery is at 92 percent.") < i("start Lights drift."), JSON.stringify(order));
+  });
+});
+
+async function addressedPage(page, transcript) {
+  await page.evaluate((tx) => {
+    window.__sttCalls = 0;
+    window.fakeHass.fetchWithAuth = async (path) => path === "/api/ai_terminal/stt"
+      ? (window.__sttCalls += 1, new Response(JSON.stringify({ text: tx }), { status: 200 }))
+      : new Response("{}", { status: 404 });
+    const el = window.__home;
+    el.hass = window.fakeHass; el._engine = "lan"; el._earMode = "addressed";
+    el.shadowRoot.querySelector(".ear").click();
+  }, transcript);
+}
+
+test("👂ᴬ addressed: his name mid-sentence makes the sentence a message", { timeout: 240000 }, async () => {
+  await withPage(spoken("Could you check the battery level for me, Argus?"), async (page) => {
+    await addressedPage(page, "Could you check the battery level for me, Argus?");
+    const out = await said(page, 200000);
+    assert.equal(out[0], "Could you check the battery level for me, Argus?");
+  });
+});
+
+test("👂ᴬ addressed: a sentence that doesn't name him is never sent to be transcribed", { timeout: 240000 }, async () => {
+  await withPage(spoken("Could you check the battery level for me, please?"), async (page) => {
+    await addressedPage(page, "Could you check the battery level for me, please?");
+    await page.waitForFunction(() => window.__membraneVoice, null, { timeout: 60000 });
+    await page.waitForTimeout(25000);
+    assert.deepEqual(await page.evaluate(() => [window.__said.length, window.__sttCalls]), [0, 0]);
   });
 });

@@ -27,6 +27,8 @@ class AssetView(HomeAssistantView):
         ".html": "text/html",
         ".map": "application/json",
         ".gz": "application/gzip",        # the on-device voice model (vosk)
+        ".mjs": "application/javascript", # the in-browser ML bundle + its runtime
+        ".wasm": "application/wasm",
     }
 
     async def get(self, request, asset: str = ""):
@@ -49,7 +51,7 @@ class AssetView(HomeAssistantView):
         # running the previous panel after a deploy
         # the voice engine and model are big and never change in place: cached
         # (a week); everything else revalidates on every load
-        cache = "public, max-age=604800" if asset.startswith("vosk") else "no-cache"
+        cache = "public, max-age=604800" if asset.startswith(("vosk", "voice-ml", "ort-wasm")) else "no-cache"
         return web.Response(body=body, content_type=ctype,
                             headers={"Cache-Control": cache})
 

@@ -122,7 +122,8 @@ class TestChatOnlySurface(unittest.TestCase):
         for name in ("terminal.py", "tickets.py", "seat.py"):
             self.assertFalse((self.PKG / name).exists(), name)
         # the on-device voice model is fetched, not committed (scripts/fetch-voice-model.sh)
-        self.assertEqual(sorted(p.name for p in (self.PKG / "www").iterdir() if p.name != "vosk-model-en.tar.gz"),
+        built = {"vosk-model-en.tar.gz", "voice-ml.mjs", "ort-wasm-simd-threaded.jsep.mjs", "ort-wasm-simd-threaded.jsep.wasm"}
+        self.assertEqual(sorted(p.name for p in (self.PKG / "www").iterdir() if p.name not in built),
                          ["field.js", "field3d.js", "home.js", "panel.js", "stranger.js", "three.min.js", "vosk.js"])
 
     def test_panel_speaks_serve_only(self):

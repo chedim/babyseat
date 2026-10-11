@@ -12,6 +12,17 @@
     window.speechSynthesis.cancel = () => {};
   }
   HTMLMediaElement.prototype.play = function () { return Promise.resolve(); };
+  // the microphone: the test's WAV, looped -- the same in Chrome and Firefox
+  // (Firefox can't take a file as its fake device)
+  if (navigator.mediaDevices) {
+    navigator.mediaDevices.getUserMedia = async () => {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const buf = await ctx.decodeAudioData(await (await fetch("/fixture.wav")).arrayBuffer());
+      const src = ctx.createBufferSource(); src.buffer = buf; src.loop = true;
+      const dst = ctx.createMediaStreamDestination(); src.connect(dst); src.start();
+      return dst.stream;
+    };
+  }
   window.fakeHass = { user: { id: "u-test", name: "Test User", is_admin: true }, states: {}, panels: {}, language: "en",
     fetchWithAuth: async () => new Response("{}", { status: 404 }), callApi: async () => { throw new Error("no api"); },
     callWS: async () => ({}), connection: { subscribeEvents: async () => () => {} } };

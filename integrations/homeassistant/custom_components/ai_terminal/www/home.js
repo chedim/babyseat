@@ -206,6 +206,12 @@ const WAKE_RE = new RegExp("\\b(" + WAKE_GREETS.join("|") + ") (" + WAKE_NAMES.j
 // a safety net for very long messages, cut silently (the operator didn't want
 // "the rest is in the chat"; answers are short now and he can be interrupted)
 const SPEAK_MAX_SENTENCES = 12, SPEAK_MAX_CHARS = 1500;
+// ADDRESSED (2026-10-10, the operator: "every time someone addresses Argus, not
+// just a wake phrase"): a free on-device recognizer hears every sentence; one
+// that names him anywhere goes, as audio, to whisper and becomes a message
+const LS_EARMODE = "membrane.home.earmode";          // "wake" (default) | "addressed"
+const NAME_ANY_RE = /\b(argus|argos|are gus|our gus|are guess|our guess|angus|august)\b/i;
+const ADDR_MAX_S = 15;
 const DICTATE_END_MS = 1100, DICTATE_WAIT_MS = 3000, LOCK_END_MS = 1600;
 
 function loadScript(src) {
@@ -269,6 +275,49 @@ function recognizer(model, rate, grammar, onPartial) {
   return r;
 }
 
+// ---- WHISPER IN THE BROWSER (2026-10-10, the operator: "can u use huggingface
+// models in-browser?"): transformers.js runs whisper-base.en (q8) on the
+// device -- accurate with an accent, no audio leaves it; the model comes from
+// Hugging Face once and stays in the browser's cache. Vosk stays for the wake word.
+const VOICE_ML = "/api/ai_terminal/www/voice-ml.mjs";
+const ASR_MODEL = "onnx-community/whisper-base.en";
+function voiceML() {
+  if (!window.__membraneML) {
+    window.__membraneML = (async () => {
+      const ML = await import(VOICE_ML);
+      ML.env.allowLocalModels = false;
+      ML.env.backends.onnx.wasm.wasmPaths = "/api/ai_terminal/www/";
+      return ML;
+    })();
+    window.__membraneML.catch(() => { window.__membraneML = null; });
+  }
+  return window.__membraneML;
+}
+function localASR(onProgress) {
+  if (!window.__membraneASR) {
+    window.__membraneASR = (async () => {
+      const ML = await voiceML();
+      return ML.pipeline("automatic-speech-recognition", ASR_MODEL, { dtype: "q8", device: "wasm",
+        progress_callback: (p) => { if (p && p.status === "progress" && onProgress) onProgress(p.loaded || 0, p.total || 0, p.file || ""); } });
+    })();
+    window.__membraneASR.catch(() => { window.__membraneASR = null; });
+  }
+  return window.__membraneASR;
+}
+
+/** Float32 at inRate -> Float32 at 16 kHz (whisper's rate). */
+function toWhisperRate(f32, inRate) {
+  const i16 = downsample(f32, inRate, STT_RATE), out = new Float32Array(i16.length);
+  for (let i = 0; i < i16.length; i++) out[i] = i16[i] / 32768;
+  return out;
+}
+
+/** whisper's non-speech tags and its phrases-from-silence out (the server does the same). */
+function cleanTranscript(text) {
+  const t = String(text || "").replace(/\[[^\]]*\]|\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+  return /^(you|thank you|thanks for watching|thank you for watching|bye)[.!]?$/i.test(t) ? "" : t;
+}
+
 /** The device's own voice: English, on-device, not a Google one when there is a choice. */
 function pickVoice(voices, lang = "en", chosen = "") {
   const en = (voices || []).filter((v) => String(v.lang || "").toLowerCase().startsWith(lang));
@@ -282,7 +331,7 @@ function pickVoice(voices, lang = "en", chosen = "") {
 const LS_VOICE = "membrane.home.voice";
 const IS_CHROME = typeof navigator !== "undefined" && /Chrome\//.test(navigator.userAgent || "") && !/Firefox\//.test(navigator.userAgent || "");
 
-const HomeLogic = { personSlug, menuEntries, hotword, pickVoice, speakable, WAKE_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, angleStep };
+const HomeLogic = { personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, angleStep };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
 const HSTYLE = `
@@ -795,8 +844,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._engine = lsGet(LS_STT, "lan") === "device" ? "device" : "lan";
       this._engBtn = root.querySelector(".eng");
       const paintEng = () => { this._engBtn.textContent = this._engine === "device" ? "⚙ᴰ" : "⚙";
-        this._engBtn.title = this._engine === "device" ? "Everything recognised ON THIS DEVICE (private, less accurate). Tap: dictation by the brain phone's whisper"
-                                                       : "Dictation by the brain phone's whisper (accurate, over your network; the wake word stays on this device). Tap: all on this device"; };
+        this._engBtn.title = this._engine === "device" ? "Speech recognised ON THIS DEVICE (whisper in the browser: private; ~80 MB once, slower on old phones). Tap: by the brain phone's whisper"
+                                                       : "Speech recognised by the brain phone's whisper (over your network; the wake word stays on this device). Tap: on this device (whisper in the browser)"; };
       paintEng();
       this._engBtn.addEventListener("click", () => {
         this._engine = this._engine === "device" ? "lan" : "device"; lsSet(LS_STT, this._engine); paintEng();
@@ -812,7 +861,14 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       // his name (_localWake) -- nothing else
       this._chat.addEventListener("ai-sent", () => { if (this._speaking || (this._speechQ || []).length) { this._hushTts(); this._orb(null); this._orbText(""); } });
       this._earBtn = root.querySelector(".ear");
-      this._earBtn.addEventListener("click", () => {
+      this._earMode = lsGet(LS_EARMODE, "wake") === "addressed" ? "addressed" : "wake";
+      let lpe = 0;
+      this._earBtn.addEventListener("pointerdown", () => { lpe = setTimeout(() => { lpe = -1; this._earMenu(); }, 550); });
+      this._earBtn.addEventListener("pointerup", () => clearTimeout(lpe));
+      this._earBtn.addEventListener("contextmenu", (e) => { e.preventDefault(); this._earMenu(); });
+      this._paintEar();
+      this._earBtn.addEventListener("click", (e) => {
+        if (lpe === -1) { lpe = 0; e.preventDefault(); return; }
         this._unlockAudio();
         if (this._hot) { this._hotStop(); lsSet(LS_HOTWORD, "0"); } else { lsSet(LS_HOTWORD, "1"); this._hotStart(); }
       });
@@ -946,6 +1002,65 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       else { this._orb(null); this._orbText(""); }
     }
 
+    _voiceMenu() {
+      const vs = (window.speechSynthesis ? window.speechSynthesis.getVoices() : [])
+        .filter((v) => v.localService && String(v.lang || "").toLowerCase().startsWith("en"));
+      let m = this.shadowRoot.querySelector(".vmenu");
+      if (!m) {
+        m = document.createElement("div"); m.className = "vmenu glass hamenu open"; m.setAttribute("role", "menu");
+        this.shadowRoot.querySelector(".voice").appendChild(m);
+        m.addEventListener("click", (e) => {
+          const a = e.target.closest("a[data-v]"); if (!a) return;
+          e.preventDefault();
+          lsSet(LS_VOICE, a.dataset.v);
+          this._voice = pickVoice(window.speechSynthesis.getVoices(), "en", a.dataset.v);
+          m.remove();
+          this._hushTts(); this._say1("Hi, I'm Argus. This is how I'll sound.");
+        });
+        setTimeout(() => {
+          const close = (e) => { if (!e.composedPath().includes(m)) { m.remove(); window.removeEventListener("pointerdown", close, true); } };
+          window.addEventListener("pointerdown", close, true);
+        }, 0);
+      }
+      const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+      const cur = this._voice ? this._voice.name : "";
+      m.innerHTML = vs.length ? vs.map((v) => '<a role="menuitem" href="#" data-v="' + esc(v.name) + '">' + (v.name === cur ? "● " : "") +
+        esc(v.name) + ' <span style="opacity:.55">' + esc(v.lang) + "</span></a>").join("") +
+        '<hr><div style="padding:4px 12px;font-size:12px;opacity:.7;max-width:260px">Better voices: download Enhanced / Premium ones in this device\'s Spoken Content settings.</div>'
+        : '<div style="padding:8px 12px">this device has no voices of its own</div>';
+    }
+
+    _paintEar() {
+      if (!this._earBtn) return;
+      this._earBtn.textContent = this._earMode === "addressed" ? "👂ᴬ" : "👂";
+      this._earBtn.title = this._earMode === "addressed"
+        ? "Listening for Argus being ADDRESSED anywhere in a sentence (long-press: the mode)"
+        : "Listening for “Hey Argus” (long-press: the mode)";
+    }
+
+    _earMenu() {
+      let m = this.shadowRoot.querySelector(".emenu");
+      if (m) { m.remove(); return; }
+      m = document.createElement("div"); m.className = "vmenu emenu glass hamenu open"; m.setAttribute("role", "menu");
+      const row = (mode, label, sub) => '<a role="menuitem" href="#" data-m="' + mode + '">' + (this._earMode === mode ? "● " : "") +
+        label + '<span style="opacity:.55;font-size:12px;margin-left:6px">' + sub + "</span></a>";
+      m.innerHTML = row("wake", "“Hey Argus”", "the name first") +
+        row("addressed", "Whenever he's addressed", "his name anywhere in a sentence") +
+        '<hr><div style="padding:4px 12px;font-size:12px;opacity:.7;max-width:280px">Every sentence is heard on this device; only one that names him is sent to be transcribed.</div>';
+      this.shadowRoot.querySelector(".voice").appendChild(m);
+      m.addEventListener("click", (e) => {
+        const a = e.target.closest("a[data-m]"); if (!a) return;
+        e.preventDefault();
+        this._earMode = a.dataset.m; lsSet(LS_EARMODE, this._earMode); this._paintEar(); m.remove();
+        if (this._hot) { this._hotStop(); this._hotStart(); }
+        this._vsay(this._earMode === "addressed" ? "listening for Argus being addressed" : "listening for “Hey Argus”");
+      });
+      setTimeout(() => {
+        const close = (e) => { if (!e.composedPath().includes(m)) { m.remove(); window.removeEventListener("pointerdown", close, true); } };
+        window.addEventListener("pointerdown", close, true);
+      }, 0);
+    }
+
     _paintTts() {
       this._ttsBtn.classList.toggle("on", this._ttsOn);
       this._ttsBtn.textContent = this._ttsOn ? "🔊" : "🔈";
@@ -984,15 +1099,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           else rec.chunks.push(new Float32Array(f));
         };
         rec.src.connect(rec.proc); rec.proc.connect(rec.ctx.destination);
-        if (rec.local) {
-          this._voiceModel().then((model) => {
-            if (this._rec !== rec && !rec.stopping) return;
-            rec.vr = recognizer(model, rec.ctx.sampleRate, null, (t) => { this._vsay("… " + t, 0); this._orbText(t); });
-            for (const c of rec.chunks) rec.vr.kr.acceptWaveformFloat(c, rec.ctx.sampleRate);
-            rec.chunks = [];
-            if (rec.onReady) rec.onReady();
-          }).catch((e) => { rec.failed = e; if (rec.onReady) rec.onReady(); this._vsay("the on-device voice failed: " + ((e && e.message) || e)); });
-        }
+        if (rec.local) this._asrModel();                     // loading while you talk (the first time only)
         rec.timer = setTimeout(() => { if (this._rec === rec) this._recStop(true); }, REC_MAX_S * 1000);
         this._vsay(mode === "lock" ? "listening… tap 🔒 again to send" : "listening… release to send", 0);
       } catch (e) {
@@ -1017,7 +1124,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const rate = rec.ctx ? rec.ctx.sampleRate : 48000;
       rec.stopping = true;
       this._recCleanup(rec);
-      if (rec.local) return this._recStopLocal(rec, send);
+      if (rec.local) return this._recStopLocal(rec, send, rate);
       const n = rec.chunks.reduce((a, c) => a + c.length, 0);
       if (!send || n / rate < REC_MIN_S) { this._vsay(send ? "too short to hear" : ""); return; }
       const all = new Float32Array(n); let o = 0;
@@ -1041,16 +1148,14 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       }
     }
 
-    async _recStopLocal(rec, send) {
-      if (!send) { if (rec.vr) rec.vr.drop(); this._orb(null); return; }
+    async _recStopLocal(rec, send, rate) {
+      if (!send) { this._orb(null); return; }
+      const n = rec.chunks.reduce((a, c) => a + c.length, 0);
+      if (n / rate < REC_MIN_S) { this._vsay("too short to hear"); this._orb(null); return; }
       this._recBusy = true; this._ptt.classList.add("busy"); this._lockBtn.classList.add("busy");
       try {
-        if (!rec.vr && !rec.failed) {                       // still loading: wait for it
-          this._vsay("loading the on-device voice…", 0);
-          await new Promise((res) => { rec.onReady = res; });
-        }
-        if (!rec.vr) return;
-        const text = await rec.vr.finish();
+        this._orb("thinking"); this._vsay("transcribing on this device…", 0);
+        const text = await this._whisperLocal(rec.chunks, rate);
         if (!text) { this._vsay("didn't catch that"); this._orb(null); return; }
         this._sendSaid(text);
       } finally {
@@ -1126,6 +1231,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     _hotStop() {
       const h = this._hot; this._hot = null;
+      if (h && h.any) { h.any.drop(); h.any = null; }
       if (this._earBtn) { this._earBtn.classList.remove("on", "hearing"); this._earBtn.setAttribute("aria-pressed", "false"); }
       if (!h) return;
       try { h.proc && h.proc.disconnect(); h.src && h.src.disconnect(); } catch (e) { /* gone */ }
@@ -1139,7 +1245,31 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       if (h.wake) h.wake.drop();
       h.wake = recognizer(h.model, h.rate, WAKE_GRAMMAR, (t) => this._localWake(h, t, false));
       h.wake.onResult = (t) => this._localWake(h, t, true);
+      if (this._earMode === "addressed") {
+        if (h.any) h.any.drop();
+        h.abuf = []; h.aHit = false;
+        h.any = recognizer(h.model, h.rate, null, (t) => { if (NAME_ANY_RE.test(t)) h.aHit = true; });
+        h.any.onResult = (t) => this._addressed(h, t);
+      }
       h.state = "wake";
+    }
+
+    /** A sentence heard on the device ended: did it address him? */
+    async _addressed(h, text) {
+      const chunks = h.abuf || [];
+      h.abuf = [];
+      const hit = h.aHit || NAME_ANY_RE.test(String(text || ""));
+      h.aHit = false;
+      if (!hit || h.state !== "wake" || this._hot !== h || this._speaking) return;
+      h.state = "busy";
+      this._hotHeard(h);                                   // the chime: he heard his name
+      this._orb("thinking");
+      const said = this._engine === "device" ? await this._whisperLocal(chunks, h.rate) : await this._whisper(chunks, h.rate);
+      if (this._hot !== h) return;
+      this._wakeRecognizer(h);
+      if (said && NAME_ANY_RE.test(said.replace(/[,.!?]/g, " "))) this._sendSaid(said);   // whisper agrees he was named
+      else if (said) { this._vsay("heard “" + said + "” — not for Argus", 4000); this._orb(null); }
+      else this._orb(null);
     }
 
     _localWake(h, text, final) {
@@ -1161,17 +1291,35 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
      * name, or -- after a bare "Hey Argus" -- the next sentence. */
     _dictate(h, follow) {
       h.state = "dictate"; h.follow = follow; h.spoke = !follow; h.silent = 0; h.dStart = performance.now();
-      if (this._engine === "device") {
-        h.free = recognizer(h.model, h.rate, null, (t) => { this._vsay("… " + t, 0); this._orbText(t); });
-        if (!follow) for (const c of h.ring || []) h.free.kr.acceptWaveformFloat(c, h.rate);   // the name's own breath
-        h.dchunks = null;
-      } else {                                            // the words after the name go to whisper, nothing before
-        h.free = null;
-        h.dchunks = follow ? [] : (h.ring || []).slice(-Math.ceil(0.6 * h.rate / 2048));
-        this._vsay("listening…", 0);
-      }
+      // the words after the name go to whisper (in the browser or on the brain
+      // phone), with 0.6 s before the wake kept so the first word isn't lost
+      h.free = null;
+      h.dchunks = follow ? [] : (h.ring || []).slice(-Math.ceil(0.6 * h.rate / 2048));
+      if (this._engine === "device") this._asrModel();
+      this._vsay("listening…", 0);
       h.ring = [];
       this._orb("listening");
+    }
+
+    /** The in-browser whisper, its first download shown in the bubble. */
+    _asrModel() {
+      return localASR((got, total, file) => {
+        if (total > 2e6) this._vsay("loading speech recognition on this device (once): " + Math.round(got / 1e6) + " / " + Math.round(total / 1e6) + " MB", 0);
+      });
+    }
+
+    /** Chunks of audio -> text by whisper IN THE BROWSER ('' on failure: then the brain phone's). */
+    async _whisperLocal(chunks, rate) {
+      const n = chunks.reduce((a, c) => a + c.length, 0), all = new Float32Array(n); let o = 0;
+      for (const c of chunks) { all.set(c, o); o += c.length; }
+      try {
+        const asr = await this._asrModel();
+        const r = await asr(toWhisperRate(all, rate));
+        return cleanTranscript(r && r.text);
+      } catch (e) {
+        this._vsay("on-device recognition failed (" + ((e && e.message) || e) + "): using the brain phone", 4000);
+        return this._whisper(chunks, rate);
+      }
     }
 
     /** Chunks of audio -> text by the brain phone's whisper ('' on any failure). */
@@ -1200,6 +1348,11 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         h.ring = (h.ring || []).concat([copy]);
         while (h.ring.length > Math.ceil(1.6 * h.rate / f32.length)) h.ring.shift();
         h.wake.kr.acceptWaveform(buf);
+        if (h.any) {
+          h.any.kr.acceptWaveform(buf);
+          h.abuf.push(copy);
+          while (h.abuf.length * f32.length > ADDR_MAX_S * h.rate) h.abuf.shift();
+        }
         return;
       }
       if (h.state !== "dictate") return;                   // finishing: frames are not needed
@@ -1217,7 +1370,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const follow = h.follow;
       let text = "";
       if (h.free) text = await h.free.finish();
-      else if (h.dchunks && h.dchunks.length && h.spoke) { this._orb("thinking"); text = await this._whisper(h.dchunks, h.rate); }
+      else if (h.dchunks && h.dchunks.length && h.spoke) {
+        this._orb("thinking");
+        text = this._engine === "device" ? await this._whisperLocal(h.dchunks, h.rate) : await this._whisper(h.dchunks, h.rate);
+      }
       if (this._hot !== h) return;
       this._wakeRecognizer(h);
       if (follow) {

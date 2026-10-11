@@ -143,3 +143,17 @@ test("the hotword in runglish: Аргус, with or without a greeting", () => {
   assert.equal(H.hotword("Аргусик пришёл").hit, false);
   assert.equal(H.hotword("Hey Argus, turn on the lights").rest, "turn on the lights");   // still English
 });
+
+test("every method home.js calls on itself is defined (an edit once deleted _voiceMenu)", () => {
+  const src = fs.readFileSync(SRC, "utf8");
+  const called = new Set([...src.matchAll(/this\.(_[A-Za-z]\w*)\(/g)].map((m) => m[1]));
+  const defined = new Set([...src.matchAll(/^\s+(?:async\s+)?(_[A-Za-z]\w*)\s*\([^)]*\)\s*\{/gm)].map((m) => m[1]));
+  const missing = [...called].filter((n) => !defined.has(n));
+  assert.deepEqual(missing, []);
+});
+
+test("addressed: his name anywhere in a sentence, in the spellings the local model writes", () => {
+  for (const t of ["what do you think argus", "could you check the battery our gus", "angus turn it off", "can you do it are gus please"])
+    assert.ok(H.NAME_ANY_RE.test(t), t);
+  for (const t of ["turn on the lights", "the gust was strong", "arguments aside"]) assert.ok(!H.NAME_ANY_RE.test(t), t);
+});
