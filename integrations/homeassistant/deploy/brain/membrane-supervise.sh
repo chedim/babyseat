@@ -56,10 +56,9 @@ for s in INT TERM QUIT PIPE USR1 USR2 ALRM; do
 done
 while true; do
   if ! serve_up; then
-    if ! backend_up; then
-      log "backend $BACKEND down; waiting"
-      sleep 30; continue
-    fi
+    # OFFLINE MODE (2026-10-11, the walks): the seat starts without the Mac --
+    # it runs its scripts, embeds on the phone, and its minds wait
+    backend_up || log "backend $BACKEND down: starting the seat offline"
     log "serve down: (re)starting membrane"
     stop_serve
     cd "$HOME/membrane" && nohup python -m membrane.cli serve \

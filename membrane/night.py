@@ -623,6 +623,12 @@ def run_scripted_entities(fld, est, mem=None, now: float | None = None,
 def _script_fail(est, ent, fld=None) -> None:
     """One more strike; SCRIPT_MAX_FAILURES consecutive -> auto-disable
     (a broken script cannot spam stderr or wedge the render)."""
+    try:                                   # OFFLINE (a walk): a failure there isn't the script's
+        from . import offline as _OFF
+        if _OFF.is_offline():
+            return
+    except Exception:
+        pass
     n = int((ent.properties or {}).get("script_failures") or 0) + 1
     ent.properties["script_failures"] = n
     if n >= SCRIPT_MAX_FAILURES:

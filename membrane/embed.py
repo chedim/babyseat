@@ -117,6 +117,11 @@ class OllamaEmbedder:
         return out
 
     def _embed_chunk(self, texts: list[str]) -> list[np.ndarray]:
+        # OFFLINE (offline.py): the phone's own embedder, the same weights --
+        # or a fast failure (the events wait) instead of a 120s timeout
+        from . import offline as _OFF
+        if _OFF.STATE["offline"]:
+            return _OFF.embed_local(texts)
         body = json.dumps({"model": self.model, "input": texts}).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if self.token:

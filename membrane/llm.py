@@ -163,6 +163,13 @@ def request(srv, prompt: str, about: str = "", caller: str = "", now: float | No
         _SC.note(f"call:{caller.split(':', 1)[0]}")
     except Exception:
         pass
+    try:
+        from . import offline as _OFF
+        if _OFF.is_offline():
+            return {"rc": 0, "text": f"queued on {about_eid} -- the seat is OFFLINE (no model): it runs when "
+                                     "the Mac is back"}
+    except Exception:
+        pass
     return {"rc": 0, "text": f"queued: a loop takes it up on {about_eid}; its verdict lands there "
                              "(watch_last_decision)"}
 

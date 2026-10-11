@@ -576,6 +576,19 @@ class _LoopDrainer:
             pass
         if is_operator_event(ev):
             return "skip"           # the operator lane: the chat is it
+        # OFFLINE (offline.py, a walk): no model to answer -- the event waits
+        try:
+            from . import offline as _OFF
+            if _OFF.is_offline():
+                pool = getattr(self.srv, "events_pool", None)
+                if not ev.get("_held"):
+                    ev = {**ev, "_held": True}
+                    _OFF.note_held()
+                if pool is not None:
+                    pool.put(ev)
+                return "held"
+        except Exception:
+            pass
         # THE ALERT BUDGET (2026-10-08): past the seat's dial the event
         # folds into the digest (the next turn's WHERE WE ARE) instead of
         # spending a whole interrupt turn

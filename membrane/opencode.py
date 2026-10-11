@@ -725,6 +725,11 @@ def main() -> None:
     srv.tool_keep = int(getattr(args, "tool_keep", 3))
     mem.server_ref = srv          # the router-outcome loop reads srv.router
     srv.backend = backend
+    try:                                   # offline mode (offline.py): the walks
+        from . import offline as _OFF
+        _OFF.start(srv, backend)
+    except Exception as e:
+        print(f"[seat] offline probe not started ({e})", file=sys.stderr)
     # THE ABLATION FLAG (port-notes 24): --no-banner arms the
     # banner-off measurement
     srv.no_banner = bool(getattr(args, "no_banner", False))
