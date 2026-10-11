@@ -1088,7 +1088,7 @@ class TurnRunner:
 
         # -- the loop ---------------------------------------------------------------
 
-    def _prior_history(self, sid: str, exclude_id: str) -> list[dict]:
+    def _prior_history(self, sid: str, exclude_id: str, anchor: bool = False) -> list[dict]:
         """THE SERVE-MODE NARRATIVE: the seat's turns used to carry the
         current ask ONLY -- the model never saw the conversation, so
         'who created it?' had no antecedent anywhere (the 'it'-word
@@ -1112,7 +1112,16 @@ class TurnRunner:
             if not text:
                 continue
             out.append({"role": role, "content": text[:HISTORY_TEXT_CAP]})
-        return out[-HISTORY_MAX_MESSAGES:]
+        win = out[-HISTORY_MAX_MESSAGES:]
+        # THE ANCHOR (2026-10-11, "why is auto-chat not auto-chatting?"): the
+        # predict role's continuations add only his own replies -- after 12 the
+        # window held no user message at all, and the backend answered an
+        # all-assistant conversation with nothing (done_reason 'load', 0
+        # tokens), every round. The last user message always rides first.
+        if anchor and win and not any(m["role"] == "user" for m in win):
+            last_user = next((m for m in reversed(out) if m["role"] == "user"), None)
+            win = [last_user or {"role": "user", "content": "(continue)"}] + win[1:]
+        return win
 
     # -- THE BUSY CONTRACT ----------------------------------------------------
     def _guard(self, sid: str):
@@ -1654,7 +1663,8 @@ class TurnRunner:
         # the raw OpenAI history this turn sends up: the doctrine system
         # message + the session's prior narrative + the user turn, then
         # assistant/tool pairs as they form
-        history = self._prior_history(sid, str(user_info.get("id") or "")) \
+        history = self._prior_history(sid, str(user_info.get("id") or ""),
+                                      anchor=bool(user_info.get("continueTurn"))) \
             if user_info else []
         # A CONTINUATION (auto-chat, predict role -- 2026-10-11, the operator's
         # option 2: "the turn just keeps going"): no message at all; the next

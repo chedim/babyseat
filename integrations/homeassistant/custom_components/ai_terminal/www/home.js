@@ -1059,7 +1059,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const line = Array.from(amps, (a, i) => [W * (i + 0.5) / N, mid + Math.max(-0.92, Math.min(0.92, a)) * mid]);
         // the cube turns with the field camera's orbit (the same angles), else slowly by itself
         const orbit = this._v3 && this._v3.orbit;
-        const yaw = orbit ? -orbit.theta : t / 4000, pitch = orbit ? orbit.phi - Math.PI / 2 : 0.45;
+        const yaw = orbit ? -orbit.theta : t / 4000, pitch = orbit ? Math.PI / 2 - orbit.phi : 0.45;   // above the field = above the cube (phi from +Y)
         const cube = cubePoints(N, yaw, pitch), sz = H * 0.27, at = ([x, y]) => [W / 2 + x * sz, mid - y * sz];
         const pts = line.map((p, i) => { const c = at(cube.nodes[i]); return [c[0] + (p[0] - c[0]) * u, c[1] + (p[1] - c[1]) * u]; });
         const grad = g.createLinearGradient(0, 0, W, 0);
