@@ -1060,7 +1060,6 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         }
         g.clearRect(0, 0, W, H);
         const line = Array.from(amps, (a, i) => [W * (i + 0.5) / N, mid + Math.max(-0.92, Math.min(0.92, a)) * mid]);
-        // the cube turns with the field camera's orbit (the same angles), else slowly by itself
         // the cube IS the field's box as the field camera sees it (its view matrix), else turns by itself
         const cam = this._v3 && this._v3.camera;
         const view = cam && cam.matrixWorldInverse && cam.matrixWorldInverse.elements;
