@@ -677,6 +677,8 @@ const STYLE = `
   :host([overlay]) .app.sidehidden .side { display:none; }
   :host([overlay]) .app.sidehidden .sidetoggle { display:inline-block; }
   :host([overlay]) .menu { display:none !important; }   /* membrane home has HA's menu in its own bar */
+  /* a 4" phone (2026-10-11): the menu is taller than the chat sheet -- it scrolls */
+  .side { overflow-y:auto; overscroll-behavior:contain; }
   :host([overlay]) .side { background:color-mix(in srgb, var(--card-background-color,#111) 92%, transparent); }
   :host([overlay]) .bar, :host([overlay]) .composer {
     background:color-mix(in srgb, var(--card-background-color,#111) 80%, transparent); }

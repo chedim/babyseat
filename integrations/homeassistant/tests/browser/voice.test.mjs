@@ -277,5 +277,7 @@ test("on a phone the chat's menu opens, and HA's burger isn't doubled inside mem
       return { before, after, closed: !shown(), burger: getComputedStyle(menu).display };
     });
     assert.deepEqual(r, { before: false, after: true, closed: true, burger: "none" });
+    const scrolls = await page.evaluate(() => getComputedStyle(window.__home.shadowRoot.querySelector("ai-terminal-panel").shadowRoot.querySelector(".side")).overflowY);
+    assert.equal(scrolls, "auto");                                         // a tall menu on a 4" screen scrolls
   });
 });
