@@ -1392,7 +1392,11 @@ def entity_read_back(srv, ent, force: bool = False) -> dict:
         merged = dict((ent.properties or {}).get("script_data") or {})
         changed = reading_changed(merged, state)
         if changed and not force:
-            _score("reading")                   # the field read the world without a model's ask
+            try:                                # the field read the world without a model's ask
+                from . import score as _SC
+                _SC.note_changed("reading", ent.eid)
+            except Exception:
+                pass
         if changed and not merged:
             try:
                 from . import score as _SC

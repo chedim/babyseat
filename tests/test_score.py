@@ -36,6 +36,8 @@ class TestScore(unittest.TestCase):
     def setUp(self):
         SC._pending.clear()
         SC._credits.clear()
+        SC._last.clear()
+        SC._counted.clear()
 
     def test_the_share_and_the_quality(self):
         srv, est = _srv()
@@ -84,12 +86,39 @@ class TestScore(unittest.TestCase):
         WA.entity_read_back(srv, ent)                          # a watch / the thinker read it
         self.assertEqual(sum(b.get("reading", 0) for b in SC._pending.values()), 1)
 
-    def test_a_tick_saying_the_same_thing_counts_once(self):
-        SC._last.clear()
-        self.assertTrue(SC.note_changed("tick", "e1", {"render": "40%"}))
-        self.assertFalse(SC.note_changed("tick", "e1", {"render": "40%"}))
-        self.assertTrue(SC.note_changed("tick", "e1", {"render": "39%"}))
-        self.assertEqual(sum(b.get("tick", 0) for b in SC._pending.values()), 2)
+    def test_an_entity_kept_live_counts_once_an_hour(self):
+        SC._last.clear(); SC._counted.clear()
+        t = 1_800_000_000.0
+        self.assertTrue(SC.note_changed("tick", "e1", {"render": "40%"}, ts=t))
+        self.assertFalse(SC.note_changed("tick", "e1", {"render": "39%"}, ts=t + 60))     # same hour: busy, not more work
+        self.assertTrue(SC.note_changed("tick", "e2", {"render": "on"}, ts=t + 60))       # another entity: counts
+        self.assertFalse(SC.note_changed("tick", "e1", {"render": "39%"}, ts=t + 3600))   # unchanged: never
+        self.assertTrue(SC.note_changed("tick", "e1", {"render": "38%"}, ts=t + 3600))    # next hour, moved: counts
+        self.assertEqual(sum(b.get("tick", 0) for b in SC._pending.values()), 3)
+
+    def test_growth_never_adds_and_a_collapse_takes_away(self):
+        self.assertEqual(SC.growth_factor({"eff_rank": 90}, {"eff_rank": 60}), 1.0)
+        self.assertEqual(SC.growth_factor({"eff_rank": 45}, {"eff_rank": 60}), 0.75)
+        self.assertEqual(SC.growth_factor({"eff_rank": 5}, {"eff_rank": 60}), SC.GROWTH_FLOOR)
+        self.assertEqual(SC.growth_factor({"eff_rank": 5}, None), 1.0)
+
+    def test_the_day_snapshot_and_the_degrading_word(self):
+        srv, est = _srv()
+        now = 1_800_000_000.0
+        geo = {"v": {"eff_rank": 60.0, "rank_ratio": 0.12, "free_energy": 0.1, "conflict_frac": 0.0}}
+        class _F:
+            def geometry(self):
+                return geo["v"]
+        srv.efield = _F()
+        SC.note("round", ts=now - 86400 - 60); SC.note("tick", ts=now - 86400 - 60)
+        SC.refresh(srv, now=now - 86400)                      # yesterday's picture
+        geo["v"] = {"eff_rank": 30.0, "rank_ratio": 0.06, "free_energy": 0.05, "conflict_frac": 0.0}
+        SC.note("round", ts=now - 60); SC.note("tick", ts=now - 60)
+        cur = SC.refresh(srv, now=now)
+        self.assertEqual(cur["growth_factor"], 0.5)
+        self.assertEqual(cur["score"], 0.25)                  # share 0.5 x growth 0.5
+        self.assertEqual(cur["growth_trend"]["eff_rank"], -30.0)
+        self.assertIn("DEGRADING", est.docs[MEMBRANE_NS + "score"].properties["state"])
 
     def test_the_doctrine_states_the_purpose_and_names_the_entity(self):
         d = (Path(__file__).resolve().parent.parent / "doctrine.md").read_text()
