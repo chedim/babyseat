@@ -278,3 +278,12 @@ test("the seat's pause button says what a click will do", () => {
   assert.ok(v.title.includes("PAUSED") && v.title.includes("2100 MB"));
   assert.equal(L.seatView(null).paused, false);
 });
+
+test("the voice log: what was said aloud, the chat untouched", () => {
+  const rows = [
+    { info: { id: "u1", role: "user", voiceIn: true, time: { created: 1000 } }, parts: [{ type: "text", text: "[HA user: D]\n🎙 is the camera up" }] },
+    { info: { id: "u2", role: "user", time: { created: 2000 } }, parts: [{ type: "text", text: "typed, not spoken" }] },
+  ];
+  const items = L.voiceLogItems(rows, [{ text: "Camera's awake.", ts: 3 }, { text: "Camera's awake.", ts: 3 }], [{ text: "the camera sleeps", time: 2500 }]);
+  assert.equal(JSON.stringify(items.map((x) => x.who + ":" + x.text)), JSON.stringify(["you:is the camera up", "membrane:the camera sleeps", "argus:Camera's awake."]));
+});

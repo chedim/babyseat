@@ -915,9 +915,18 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         this._voiceTurn = false;
         setTimeout(() => { if (!this._speaking && !(this._speechQ || []).length) this._speechDone(); }, 400);
       });
+      // VOICE OUT (2026-10-11, the operator: "it should not voice the chat since we
+      // have voice:out"): Argus speaks through his voice:out line (ai-say);
+      // the chat's text is never read aloud. Membrane's own voice lines still are.
+      this._chat.addEventListener("ai-say", (e) => {
+        const d = e.detail || {};
+        speechLog("argus", this._ttsOn ? "say (voice:out)" : "skip: 🔊 off", d.text);
+        if (this._ttsOn && d.text) this._enqueueSpeech("argus", d.text);
+      });
       this._chat.addEventListener("ai-speak", (e) => {
         const d = e.detail || {};
-        const ok = d.kind === "membrane" ? this._ttsOn : (this._ttsOn || this._voiceTurn);
+        if (d.kind !== "membrane") { speechLog(d.kind, "not read aloud: the chat is text (Argus speaks through voice:out)", d.text); return; }
+        const ok = this._ttsOn;
         // THE SILENT REPLY'S WHY (2026-10-11, "no TTS of messages whatsoever"):
         // every decision is in the console, and a reply held back by 🔊 says so
         speechLog(d.kind, ok ? "say" : "skip: 🔊 off", d.text);
@@ -1098,7 +1107,19 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       }, 0);
     }
 
+    /** The mic and 🔊 as the person's voice:in / voice:out (the seat stamps who). */
+    _reportVoice() {
+      const chat = this._chat; if (!chat || !chat._api) return;
+      const inMode = this._hot ? (this._earMode === "addressed" ? "addressed" : "hotword") : (this._rec ? this._rec.mode : "off");
+      const body = { in_on: inMode !== "off", in_mode: inMode, out_on: !!this._ttsOn,
+                     device: (navigator.maxTouchPoints > 0 ? "phone/tablet" : "computer") + " · " + (navigator.platform || "") };
+      clearTimeout(this._vrT);
+      this._vrT = setTimeout(() => chat._api(HSERVE + "/membrane/voice/state",
+        { method: "POST", body: JSON.stringify(body) }).catch(() => {}), 400);
+    }
+
     _paintTts() {
+      this._reportVoice();
       this._ttsBtn.classList.toggle("on", this._ttsOn);
       this._ttsBtn.textContent = this._ttsOn ? "🔊" : "🔈";
       this._ttsBtn.setAttribute("aria-pressed", String(this._ttsOn));
@@ -1112,6 +1133,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         this._vsay("no microphone here (it needs https and a browser that allows it)"); return;
       }
       const rec = this._rec = { mode, chunks: [], t0: performance.now() };
+      this._reportVoice();
       (mode === "ptt" ? this._ptt : this._lockBtn).classList.add("rec");
       try {
         rec.stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
@@ -1152,7 +1174,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       if (rec.stream) rec.stream.getTracks().forEach((t) => t.stop());
       if (rec.ctx) rec.ctx.close().catch(() => {});
       this._ptt.classList.remove("rec"); this._lockBtn.classList.remove("rec");
-      if (this._rec === rec) this._rec = null;
+      if (this._rec === rec) { this._rec = null; this._reportVoice(); }
       setTimeout(() => { if (!this._rec) this._hotPause(false); }, 300);
     }
 
@@ -1206,7 +1228,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._orbTextT = setTimeout(() => { if (!this._speaking) this._orbText(""); }, 4000);   // the phrase fades
       const queued = this._busyChat();
       this._voiceTurn = true;
-      this._sendToChat(text);
+      if (this._chat && this._chat.sendVoice) this._chat.sendVoice(text);   // voice:in, not a chat bubble
+      else this._sendToChat(text);
       this._vsay("“" + text + "” — " + (queued ? "cutting in on Argus's turn" : "sent; Argus is thinking…"), 12000);
     }
 
@@ -1231,6 +1254,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       if (this._hot) return;
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { this._vsay("no microphone here"); return; }
       const h = this._hot = { cur: null, below: 0, above: 0, floor: 0.004, sends: [], follow: 0, paused: false, muteUntil: 0 };
+      this._reportVoice();
       this._prefetchAcks();
       this._earBtn.classList.add("on"); this._earBtn.setAttribute("aria-pressed", "true");
       try {
@@ -1268,6 +1292,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     _hotStop() {
       const h = this._hot; this._hot = null;
+      this._reportVoice();
       if (h && h.any) { h.any.drop(); h.any = null; }
       if (this._earBtn) { this._earBtn.classList.remove("on", "hearing"); this._earBtn.setAttribute("aria-pressed", "false"); }
       if (!h) return;
@@ -1544,7 +1569,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     _hotSend(text) {
       const queued = this._busyChat();
       this._voiceTurn = true;
-      this._sendToChat(text);
+      if (this._chat && this._chat.sendVoice) this._chat.sendVoice(text);   // voice:in, not a chat bubble
+      else this._sendToChat(text);
       this._vsay("“" + text + "” — " + (queued ? "cutting in on Argus's turn" : "sent; Argus is thinking…"), 12000);
     }
 

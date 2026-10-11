@@ -54,7 +54,10 @@ ALLOWED_PREFIXES = ("session", "config", "provider", "mcp")
 # agent: the primary agents + membrane's live minds (loop workers,
 # thinker, dreamer); event: the per-user SSE relay (never global/event,
 # its unscoped twin)
-ALLOWED_EXACT = ("global/health", "agent", "event", "membrane/models", "membrane/seat", "membrane/seat/control")
+ALLOWED_EXACT = ("global/health", "agent", "event", "membrane/models", "membrane/seat", "membrane/seat/control",
+                 "membrane/voice", "membrane/voice/state")
+# the voice routes: the person is the HA user, stamped here, never the page's word
+VOICE_PATHS = ("membrane/voice", "membrane/voice/state")
 # the minds' models: everyone reads, only an HA ADMIN switches them
 ADMIN_WRITE_EXACT = ("membrane/models", "membrane/seat/control")
 # the field dashboard + the drawer: the seat's read surfaces the serve
@@ -373,6 +376,8 @@ class ServeProxyView(HomeAssistantView):
                     and segs[2] in ("message", "prompt_async")
                     and isinstance(parsed, dict)):
                 parsed = with_speaker(parsed, getattr(user, "name", ""))
+            if rest in VOICE_PATHS and isinstance(parsed, dict):
+                parsed["person"] = str(getattr(user, "name", "") or "")
             body = json.dumps(parsed).encode()
 
         # a specific session: the caller's own, or it does not exist

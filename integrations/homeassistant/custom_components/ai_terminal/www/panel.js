@@ -251,6 +251,13 @@ function applyEvent(st, ev) {
     case "membrane.auto":
       st.auto = { on: !!props.on, rounds: props.rounds || 0, mode: props.mode || "explore", role: props.role || "babble" };
       return true;
+    case "membrane.say": {
+      // Argus speaking (voice:out): the voice log keeps it; the page says it
+      const ln = props.line || {};
+      if (!ln.text) return false;
+      st.said = (st.said || []).concat([Object.assign({ who: "argus" }, ln)]).slice(-80);
+      return true;
+    }
     case "membrane.predict": {
       // membrane's guess of one of Argus's moves: a phantom in its place
       const it = props.item || {};
@@ -367,6 +374,29 @@ function connLabel(live, everLive, since, now, polling) {
 
 /** Membrane's role, its own switch beside auto-chat: babble (its lines go to
  *  the LLM) or predict (the LLM never hears it; it guesses each turn). */
+/** The voice log: what was said aloud, oldest first -- the person's spoken
+ *  messages (voiceIn rows), Argus's voice:out lines, membrane's own lines. */
+function voiceLogItems(rows, said, voiceLines) {
+  const out = [];
+  for (const r of rows || []) {
+    const i = (r && r.info) || {};
+    if (!i.voiceIn) continue;
+    const t = (r.parts || []).filter((p) => p.type === "text" && !p.synthetic).map((p) => p.text || "").join(" ");
+    out.push({ ts: ((i.time || {}).created || 0), who: "you", label: "🎙 you", text: stripSpeaker(t).replace(/^\s*🎙\s*/, "") });
+  }
+  const seen = new Set();
+  for (const x of said || []) {
+    const key = Math.round((x.ts || 0)) + ":" + x.text;
+    if (!x.text || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ ts: (x.ts || 0) * 1000, who: "argus", label: "🔊 Argus", text: x.text });
+  }
+  for (const v of voiceLines || []) {
+    if (v && v.text) out.push({ ts: v.time || 0, who: "membrane", label: "membrane", text: v.text });
+  }
+  return out.sort((a, b) => a.ts - b.ts);
+}
+
 /** The seat's pause, for its button: ▶ to resume when paused. */
 function seatView(st) {
   const paused = !!(st && st.paused);
@@ -500,7 +530,7 @@ function replyToSpeak(rows) {
   return null;
 }
 
-const AiPanelLogic = { seatView, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
+const AiPanelLogic = { voiceLogItems, seatView, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
@@ -573,6 +603,9 @@ const STYLE = `
   .vbtn { border:0; background:transparent; cursor:pointer; opacity:.45; font-size:14px; padding:0 4px; }
   .vbtn:hover, .vbtn.on { opacity:1; } .vre { font-size:12px; opacity:.7; margin-top:4px; }
   .vguess { font-size:11px; opacity:.6; margin-top:3px; }
+  .vlog { max-height:40%; overflow:auto; border-bottom:1px solid var(--divider-color, #444); padding:6px 10px; font-size:13px; }
+  .vlog .vlhead { font-weight:600; opacity:.7; margin-bottom:4px; } .vlog .vli { margin:3px 0; }
+  .vlog .vlwho { opacity:.6; font-size:11px; } .vlog .vli.argus .vlwho { color:var(--primary-color, #4af); }
   .phantom { opacity:.45; font-style:italic; border:1px dashed var(--divider-color, #888); border-radius:10px;
              padding:4px 9px; margin:4px 0; font-size:13px; white-space:pre-wrap; }
   .phantom.ptool { font-style:normal; font-family:var(--code-font-family, monospace); font-size:12px; }
@@ -734,10 +767,12 @@ function definePanel() {
             <button class="btn icon llmbtn" title="the LLM (off: talk to membrane alone)">🤖</button>
             <button class="btn icon autobtn" title="auto-chat: membrane and the LLM talk; you can join any time">⟳</button>
             <button class="btn icon rolebtn" title="membrane's role: babble (it talks to the LLM) or predict (it guesses the LLM, unheard)">💬</button>
+            <button class="btn icon vlogbtn" title="the voice log: what was said aloud (hidden from the chat)">🗒</button>
             <button class="btn icon pausebtn" title="pause the seat: every acting lane stands down (loops, dreamer, thinker, night)">⏸</button>
             <button class="btn icon mindsbtn" title="membrane's minds">🧠</button>
           </div>
           <div class="minds"></div>
+          <div class="vlog" hidden></div>
           <div class="err"></div>
           <div class="scroller"><div class="msgs"></div><button class="jump">↓ latest</button></div>
           <div class="composer">
@@ -758,7 +793,7 @@ function definePanel() {
         const ctl = document.createElement("div");
         ctl.className = "ctl";
         for (const [cls, label] of [["agent", null], ["modelpick", null], ["voicebtn", "membrane's voice"], ["llmbtn", "LLM replies"],
-                                    ["autobtn", "auto-chat"], ["rolebtn", "membrane babbles"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
+                                    ["autobtn", "auto-chat"], ["rolebtn", "membrane babbles"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
           const el = app.querySelector("." + cls);
           if (!el) continue;
           if (label) {
@@ -809,6 +844,9 @@ function definePanel() {
       this._autoBtn.addEventListener("click", (ev) => this._toggleAuto(ev && ev.shiftKey ? "teach" : "explore").catch(() => {}));
       this._roleBtn = $(".rolebtn");
       this._roleBtn.addEventListener("click", () => this._toggleRole().catch(() => {}));
+      this._vlogEl = $(".vlog");
+      this._vlogBtn = $(".vlogbtn");
+      this._vlogBtn.addEventListener("click", () => this._toggleVoiceLog().catch(() => {}));
       this._pauseBtn = $(".pausebtn");
       this._pauseBtn.addEventListener("click", () => this._togglePause().catch(() => {}));
       this._llmBtn = $(".llmbtn");
@@ -1278,6 +1316,11 @@ function definePanel() {
         this._sesTimer = setTimeout(() => this._listSessions().catch(() => {}), 400);
       }
       if (ev.type === "membrane.seat") this._loadSeat();          // the seat's own events: its state moved
+      if (ev.type === "membrane.say" && sid === (this._chat && this._chat.sid) && this._repliesArmed) {
+        const ln = p.line || {};
+        if (ln.text) this.dispatchEvent(new CustomEvent("ai-say", { detail: { text: ln.text }, bubbles: true, composed: true }));
+        if (this._vlogOpen) this._paintVoiceLog();
+      }
       if (this._chat && applyEvent(this._chat, ev)) {
         this._schedule();
         this._paintStatus();
@@ -1324,6 +1367,21 @@ function definePanel() {
 
     // ---------------------------------------------------------- turns
     _busy() { return !!(this._chat && this._chat.status && this._chat.status.type === "busy"); }
+
+    /** VOICE IN (voice_io.py): a spoken phrase starts the turn like a message but
+     *  lives in the voice log, not the chat (🎙 tells Argus it was spoken). */
+    async sendVoice(text) {
+      text = String(text || "").trim();
+      if (!text || !this._sid) return;
+      this.dispatchEvent(new CustomEvent("ai-sent", { bubbles: true, composed: true }));
+      if (!this._busy()) { this._chat.status = { type: "busy", since: Date.now() }; this._paintStatus(); this._schedule(); }
+      const r = await this._api(SERVE + "/session/" + this._sid + "/prompt_async", {
+        method: "POST", body: JSON.stringify(Object.assign({ agent: this._agent, voice: true, parts: [{ type: "text", text: "🎙 " + text }] },
+          this._llmOn ? {} : { membrane_only: true })),
+      });
+      if (!r.ok) this._err(this._apiErr("voice send failed", r));
+      if (!this._live) { await this._resync(); this._startPoll(); }
+    }
 
     async _submit() {
       const text = (this._ta.value || "").trim();
@@ -1473,6 +1531,7 @@ function definePanel() {
     _rowEl(row) {
       const info = row.info || {};
       const el = document.createElement("div");
+      if (info.voiceIn) { el.className = "msg vin-hidden"; el.style.display = "none"; return el; }   // the voice log has it
       if (info.role === "user") {
         const text = row.parts.filter((p) => p.type === "text" && !p.synthetic).map((p) => p.text || "").join("\n");
         const line = this._voiceOn && this._chat && (this._chat.voice || {})[info.id];
@@ -1555,6 +1614,26 @@ function definePanel() {
       const r = await this._api(SERVE + "/session/" + this._sid + "/auto",
         { method: "POST", body: JSON.stringify({ on, mode: mode || "explore" }) });
       if (r.ok && r.data) { this._chat.auto = r.data; this._paintAuto(); }
+    }
+
+    async _toggleVoiceLog() {
+      this._vlogOpen = !this._vlogOpen;
+      this._vlogEl.hidden = !this._vlogOpen;
+      this._vlogBtn.style.opacity = this._vlogOpen ? "1" : ".6";
+      if (!this._vlogOpen) return;
+      const r = await this._api(SERVE + "/membrane/voice", { method: "POST", body: "{}" }).catch(() => null);
+      this._vlogSeat = r && r.ok && r.data ? r.data : null;
+      this._paintVoiceLog();
+    }
+
+    _paintVoiceLog() {
+      if (!this._vlogEl || !this._chat) return;
+      const seat = this._vlogSeat || {};
+      const items = voiceLogItems(this._chat.rows, (this._chat.said || []).concat(((seat.out || {}).log || []).map((x) => Object.assign({ who: "argus" }, x))),
+                                  Object.values(this._chat.voice || {}));
+      this._vlogEl.innerHTML = '<div class="vlhead">voice log' + (seat.in ? ' · mic ' + escText(seat.in.mode || "off") + ' · 🔊 ' + (seat.out && seat.out.on ? "on" : "off") : "") +
+        "</div>" + (items.length ? items.map((x) => '<div class="vli ' + x.who + '"><span class="vlwho">' + escText(x.label) + "</span> " + escText(x.text) + "</div>").join("")
+                                 : '<div class="vli">nothing said aloud yet</div>');
     }
 
     /** THE SEAT'S ONE PAUSE (seat_panel.py): every acting lane stands down; HA admins only. */

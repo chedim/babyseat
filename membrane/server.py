@@ -2714,6 +2714,20 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 self.end_headers()
                 return
             path = self.path.split("?", 1)[0]
+            if path in ("/membrane/voice", "/membrane/voice/state"):
+                # VOICE IN / OUT (voice_io.py): the page's buttons, the voice log;
+                # `person` is the HA user's name, stamped by the relay
+                from . import voice_io as _VIO
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                b = self._read_body() or {}
+                person = str(b.get("person") or "")
+                if psrv is None or not person:
+                    return self._json_out({"ok": False, "error": "no person"})
+                if path.endswith("/state"):
+                    return self._json_out({"ok": True, "state": _VIO.set_state(
+                        psrv, person, in_on=b.get("in_on"), in_mode=b.get("in_mode"),
+                        out_on=b.get("out_on"), device=str(b.get("device") or ""))})
+                return self._json_out({"ok": True, **_VIO.read(psrv, person)})
             if path == "/membrane/seat/control":
                 # the operator's switches (HA admins only, through the relay)
                 from . import seat_panel as _SP
@@ -2918,6 +2932,19 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
             # the chat's "membrane only" switch: the voice answers alone
             if body.get("membrane_only") is True:
                 info["membraneOnly"] = True
+            # VOICE IN (voice_io.py): a spoken message -- it starts the turn like
+            # any message, but lives in the voice log, not the chat
+            if body.get("voice") is True:
+                info["voiceIn"] = True
+                try:
+                    from . import voice_io as _VIO
+                    from .speakers import split_speaker as _split
+                    _who, _said = _split(text)
+                    _psrv = getattr(runner, "srv", None) if runner is not None else None
+                    if _who and _psrv is not None:
+                        _VIO.heard(_psrv, _who, _said, sid)
+                except Exception:
+                    pass
             row = messages.append(sid, info, [{"id": _gen_id("prt"),
                                                "sessionID": sid,
                                                "messageID": info["id"],
