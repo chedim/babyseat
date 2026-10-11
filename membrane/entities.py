@@ -72,7 +72,10 @@ _SYMBOL_RE = re.compile(r"\b[a-zA-Z_][\w]*(?:\.[a-zA-Z_][\w]*){1,3}\b"
                         r"|\b_[a-z0-9]+(?:_[a-z0-9]+)+\b")
 _MODEL_RE = re.compile(r"\b[a-zA-Z][\w.-]*(?::[\w.-]+){1,3}\b")
 _URL_RE = re.compile(r"https?://[^\s\"'`)\]}]+")
-_HA_RE = re.compile(r"\b(?:sensor|binary_sensor|light|switch|cover|fan|pump|battery)\.[\w]+")
+# (?<![\w-]): a name INSIDE another one is not an HA id -- 'ha-light.status'
+# (the method status on the class ha-light) read as light.status, the phantom
+# HA entity that echoed to the top of the banner (2026-10-10)
+_HA_RE = re.compile(r"(?<![\w-])(?:sensor|binary_sensor|light|switch|cover|fan|pump|battery)\.[\w]+")
 _SHELL_VERBS = ("git", "docker", "kubectl", "brew", "pip", "npm", "pnpm",
                 "cargo", "make", "curl", "ssh", "ollama", "pytest",
                 "membrane", "python")

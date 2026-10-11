@@ -432,3 +432,22 @@ class TestNoNightTwins(unittest.TestCase):
             N.consolidate_entities(fld, est, materialize=8)
             twins = [k for k in est.docs if k.endswith("models:mqtt:bridge")]
             self.assertEqual(bool(twins), not made, (made, list(est.docs)[:6]))
+
+
+class TestNoEchoMints(unittest.TestCase):
+    def test_the_models_own_words_never_mint_an_entity(self):
+        """2026-10-10, the phantom ha:light.status: the seat's own text about
+        a method named ha-light.status minted 'light.status' as an HA id, the
+        night made it an entity at n>=3 -- every echo, no evidence."""
+        from membrane import night as N
+        from membrane.entities import EntityStore, _HA_RE
+        self.assertEqual(_HA_RE.findall("removed shell:ha-light.status (the stub)"), [])
+        self.assertEqual(_HA_RE.findall("turn on light.port_strip"), ["light.port_strip"])
+        for roles, minted in (({"model": 40, "reasoning": 27}, False),
+                              ({"model": 40, "observation": 3}, True)):
+            est = EntityStore(bucket="t-echo", shared=False)
+            fld = _field()
+            fld.b.upsert("entity_states", "st-x", {"origin": fld.origin, "tier": "live", "eid": "ha:light.cabin",
+                                                   "n": sum(roles.values()), "n_by_role": roles})
+            N.consolidate_entities(fld, est, materialize=8)
+            self.assertEqual(any(k.endswith("ha:light.cabin") for k in est.docs), minted, roles)

@@ -313,7 +313,17 @@ def consolidate_entities(fld, est, mem=None, materialize: int = 8,
                               "urls", "w", "p", "e")]
             if len(heads) > 1:
                 continue
-            if int(d.get("n") or 0) < 3:
+            # THE ECHO GUARD (2026-10-10, the 'phantom ha:light.status'): the
+            # model's OWN words about a name are not evidence it exists --
+            # three echoes minted a store entity that then echoed itself
+            # to the top of the banner. Evidence = observation/code/people.
+            from types import SimpleNamespace
+            from .efield import evidence_n
+            split = d.get("n_by_role") or d.get("n_by_stream")
+            ev = (evidence_n(SimpleNamespace(n_by_role=d.get("n_by_role"),
+                                             n_by_stream=d.get("n_by_stream")))
+                  if split else int(d.get("n") or 0))      # no split recorded: the count stands
+            if ev < 3:
                 continue
             # THE EXISTENCE CHECK + THE COLLAPSE (the minter's defects:
             # 'no existence check' + 'the chain mint' -- an eid like
