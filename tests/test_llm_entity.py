@@ -41,6 +41,7 @@ class _Srv:
 class TestTheCall(unittest.TestCase):
     def setUp(self):
         L._calls.clear()
+        L._echo.clear()
 
     def test_it_queues_a_loop_turn_on_the_entity(self):
         srv = _Srv()
@@ -55,10 +56,10 @@ class TestTheCall(unittest.TestCase):
     def test_capped_per_caller_and_in_all(self):
         srv = _Srv()
         for i in range(L.CALLER_PER_HOUR):
-            self.assertEqual(L.request(srv, "x", caller="script:a", now=1000.0 + i)["rc"], 0)
-        self.assertIn("this hour", L.request(srv, "x", caller="script:a", now=1100.0)["text"])
-        self.assertEqual(L.request(srv, "x", caller="script:b", now=1100.0)["rc"], 0)     # another caller
-        self.assertEqual(L.request(srv, "x", caller="script:a", now=1000.0 + 3700)["rc"], 0)  # the hour passed
+            self.assertEqual(L.request(srv, f"q{i}", caller="script:a", now=1000.0 + i)["rc"], 0)
+        self.assertIn("this hour", L.request(srv, "q-over", caller="script:a", now=1100.0)["text"])
+        self.assertEqual(L.request(srv, "q-b", caller="script:b", now=1100.0)["rc"], 0)     # another caller
+        self.assertEqual(L.request(srv, "q-later", caller="script:a", now=1000.0 + 3700)["rc"], 0)  # the hour passed
 
     def test_the_pause_holds_it_and_a_prompt_is_needed(self):
         srv = _Srv()
@@ -98,3 +99,49 @@ class TestTheCall(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestArgusFourEdges(unittest.TestCase):
+    """His review: reentrancy in the engine, echo + a switch, field-calls
+    read-only with provenance, one compact answer."""
+    def setUp(self):
+        L._calls.clear()
+        L._echo.clear()
+        L._ctx.depth = 0
+
+    def test_a_called_turn_cannot_call_past_the_depth(self):
+        srv = _Srv()
+        L._ctx.depth = L.MAX_DEPTH
+        self.assertIn("depth", L.request(srv, "deeper", caller="method")["text"])
+        L._ctx.depth = 1
+        self.assertEqual(L.request(srv, "one more", caller="method")["rc"], 0)
+        self.assertEqual(srv.events_pool.items[-1]["depth"], 2)
+
+    def test_the_same_question_is_not_asked_twice(self):
+        srv = _Srv()
+        L.request(srv, "is it charging?", about="Component:bat", caller="argus", now=1000.0)
+        out = L.request(srv, "is it charging?", about="Component:bat", caller="argus", now=1100.0)
+        self.assertIn("already asked", out["text"])
+        self.assertEqual(len(srv.events_pool.items), 1)
+        L.answered(srv, srv.events_pool.items[0], "CHARGING -- 41%, +3% in 10 min\nmore")
+        self.assertIn("CHARGING -- 41%", L.request(srv, "is it charging?", about="Component:bat",
+                                                   caller="argus", now=1200.0)["text"])
+        self.assertEqual(srv.entity_store.docs[MEMBRANE_NS + "Component:bat"].properties["llm_answer"]["text"],
+                         "CHARGING -- 41%, +3% in 10 min")
+
+    def test_the_switch(self):
+        srv = _Srv()
+        L._entity(srv).properties["enabled"] = False
+        self.assertIn("switched off", L.request(srv, "x", caller="argus")["text"])
+
+    def test_a_script_call_is_a_read_only_field_call(self):
+        from membrane import server as MS
+        srv = _Srv()
+        L.request(srv, "trend?", about="Component:bat", caller="script:Component:bat")
+        ev = srv.events_pool.items[-1]
+        self.assertEqual((ev["origin"], ev["readonly"]), ("field-call", True))
+        self.assertEqual(MS._lane_of(WA.loop_agent_name("field-call", ev["entity"])), "plan")
+        self.assertNotIn("method_call", MS.PLAN_TOOLS)                        # no second call from there
+        t = WA.loop_task_text(ev)
+        self.assertIn("Answer in ONE line", t)
+        self.assertNotIn("entity add/edit", t)

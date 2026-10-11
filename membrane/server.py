@@ -785,6 +785,8 @@ def _lane_of(agent: str | None) -> str:
         return "plan" if a == "plan" else "operator"
     if a == "phone":
         return "phone"
+    if a.startswith("field-call"):
+        return "plan"                   # llm.py: the field asked -- read-only, no second call
     return "listener"
 
 

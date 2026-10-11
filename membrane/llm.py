@@ -9,6 +9,18 @@ args={about, prompt})), a script (membrane.call_llm(prompt) -- one per
 fire, like speak), and, step by step, the seat's own triggers (a watch's
 reaction, auto-chat, the nudges) instead of composing prompts in code.
 
+ARGUS'S FOUR EDGES (his review of this design, 2026-10-11):
+  reentrancy  a call made inside a called turn carries its depth; past
+              MAX_DEPTH the engine refuses (not etiquette)
+  echo/cost   the same (about, prompt) within ECHO_S is not asked again --
+              the earlier answer comes back; `enabled` on this entity is
+              the switch (false: no calls at all)
+  provenance  a SCRIPT's call is a field-call: its turn runs read-only
+              (the plan lane: look, never write, never call again), tagged
+              origin field-call
+  output      a field-call answers in ONE line (VERDICT -- what it found),
+              kept on the entity as llm_answer for the script's next fire
+
 It returns at once (queued); the turn runs under the loops' rules -- one
 loop per entity, the cap, the pause switch -- and its verdict lands on the
 entity (watch_last_decision / watch_decisions). The calls are counted and
@@ -29,6 +41,11 @@ CALLER_PER_HOUR = 12
 GLOBAL_PER_HOUR = 120
 PROMPT_MAX = 4000
 RING = 20
+
+MAX_DEPTH = 2
+ECHO_S = 600.0
+_ctx = threading.local()                      # the depth of the called turn running in this thread
+_echo: dict[str, dict] = {}                   # hash(about, prompt) -> {ts, answer}
 
 _lock = threading.Lock()
 _calls: list[tuple[float, str]] = []          # (ts, caller) of the last hour
@@ -106,6 +123,12 @@ def request(srv, prompt: str, about: str = "", caller: str = "", now: float | No
     pool = getattr(srv, "events_pool", None)
     if pool is None:
         return {"rc": 127, "text": "no loops on this seat"}
+    depth = int(getattr(_ctx, "depth", 0) or 0)
+    if depth >= MAX_DEPTH:
+        return {"rc": 1, "text": f"not called: a called turn may not call again past depth {MAX_DEPTH}"}
+    ent0 = _entity(srv)
+    if ent0 is not None and (ent0.properties or {}).get("enabled") is False:
+        return {"rc": 1, "text": "not called: the model is switched off (llm.enabled = false)"}
     est = getattr(srv, "entity_store", None)
     target = None
     if about and est is not None:
@@ -115,12 +138,25 @@ def request(srv, prompt: str, about: str = "", caller: str = "", now: float | No
             target = None
     ent = _entity(srv)
     about_eid = target.eid if target is not None else (ent.eid if ent is not None else "")
+    import hashlib
+    key = hashlib.sha1(f"{about_eid}\n{prompt}".encode()).hexdigest()[:16]
+    seen = _echo.get(key)
+    if seen and now - seen["ts"] < ECHO_S:
+        ans = seen.get("answer")
+        return {"rc": 0, "text": (f"already asked at {time.strftime('%H:%M', time.localtime(seen['ts']))}; "
+                                  + (f"its answer: {ans}" if ans else "its answer is still coming"))}
     why = _budget(caller, now)
     if why:
         _remember(srv, ent, now, caller, about_eid, prompt, refused=why)
         return {"rc": 1, "text": f"not called: {why}"}
+    _echo[key] = {"ts": now, "answer": None}
+    if len(_echo) > 500:
+        for k in sorted(_echo, key=lambda k: _echo[k]["ts"])[:250]:
+            _echo.pop(k, None)
+    field_call = caller.startswith("script:")
     pool.put({"kind": "llm-call", "entity": about_eid, "prompt": prompt, "caller": caller, "ts": now,
-              "event_id": f"llm-{int(now * 1000)}"})
+              "event_id": f"llm-{int(now * 1000)}", "depth": depth + 1, "echo": key,
+              "origin": "field-call" if field_call else "call", "readonly": field_call})
     _remember(srv, ent, now, caller, about_eid, prompt)
     try:
         from . import score as _SC
@@ -155,3 +191,21 @@ def from_command(rest: str, caller: str = "method") -> dict:
         return {"rc": 2, "text": "call(about, prompt): name the entity it is about and what to do"}
     about, prompt = parts[0], " ".join(parts[1:])
     return request(seat(), prompt, about=about, caller=caller)
+
+
+def answered(srv, ev: dict, text: str) -> None:
+    """A called turn ended: its one line onto the entity (llm_answer) and the echo."""
+    line = next((ln.strip() for ln in str(text or "").splitlines() if ln.strip()), "")[:300]
+    if ev.get("echo") in _echo:
+        _echo[ev["echo"]]["answer"] = line or "(no answer)"
+    est = getattr(srv, "entity_store", None)
+    doc = (est.docs or {}).get(str(ev.get("entity") or "")) if est is not None else None
+    if doc is not None and line:
+        pp = doc.properties or {}
+        pp["llm_answer"] = {"ts": round(time.time(), 1), "text": line, "prompt": str(ev.get("prompt") or "")[:160],
+                            "caller": ev.get("caller")}
+        doc.properties = pp
+        try:
+            est.upsert(doc, embedder=None)
+        except Exception:
+            pass

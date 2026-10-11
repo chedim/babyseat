@@ -399,6 +399,12 @@ def loop_task_text(ev: dict) -> str:
     elif kind == "llm-call":
         head = f"a model call ({ev.get('caller') or '?'}) about '{ent}':"
         detail = str(ev.get("prompt") or "")
+        if ev.get("readonly"):
+            # a FIELD-CALL (llm.py): the field asks, read-only, one line back
+            return (f"{head}\n{detail}\n"
+                    "The field is asking (origin field-call): look with the read tools if you need to -- "
+                    "you can't write or call again from here. Answer in ONE line: VERDICT -- what you found "
+                    "or decided. It lands on the entity as llm_answer for its script's next fire.")
     elif kind == "restart-pending":
         due = time.strftime("%H:%M", time.localtime(float(ev.get("due") or 0)))
         head = (("REMINDER -- " if ev.get("reminder") else "") +
@@ -583,7 +589,7 @@ class _LoopDrainer:
         if loops is None:
             return "skip"           # no pool wired: nothing to admit
         ent = str(ev.get("entity") or "")
-        agent = loop_agent_name("watch", ent or ev.get("kind"))
+        agent = loop_agent_name("field-call" if ev.get("readonly") else "watch", ent or ev.get("kind"))
         desc = LoopDesc("watch", eid=ent or ev.get("event_id", ""))
         holds = getattr(loops, "holds", None)
         if ent and callable(holds) and holds(desc.eid):
@@ -631,8 +637,22 @@ class _LoopDrainer:
                 doc = (est0.docs or {}).get(ent)
                 if doc is not None and (doc.properties or {}).get("watch_decisions"):
                     ev = {**ev, "previous": list(doc.properties["watch_decisions"])}
-        out = srv.run_loop_turn(sid, loop_task_text(ev), agent) or {}
+        _called = str(ev.get("kind")) == "llm-call"
+        if _called:                             # llm.py: the depth rides the thread while the called turn runs
+            from . import llm as _LLM
+            _prev_depth = getattr(_LLM._ctx, "depth", 0)
+            _LLM._ctx.depth = int(ev.get("depth") or 1)
+        try:
+            out = srv.run_loop_turn(sid, loop_task_text(ev), agent) or {}
+        finally:
+            if _called:
+                _LLM._ctx.depth = _prev_depth
         text = str(out.get("text") or out.get("verdict_text") or "")
+        if _called:
+            try:
+                _LLM.answered(srv, ev, text)
+            except Exception:
+                pass
         verdict, detail = parse_verdict(text)
         is_goal = str(ev.get("kind")) == "intent-planted"
         est = getattr(srv, "entity_store", None)
