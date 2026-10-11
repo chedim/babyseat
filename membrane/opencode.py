@@ -1787,6 +1787,12 @@ def main() -> None:
                     print(f"[seat] restored auto-chat {_rs.get('auto')} roles {_rs.get('role')}", file=sys.stderr)
             except Exception as e:
                 print(f"[seat] auto-chat state not restored ({e})", file=sys.stderr)
+            try:                           # the seat as a panel: state, events, controls
+                from . import seat_panel as _SP
+                _SP.start(srv)
+                _serve_hub.on_lost = lambda: _SP.note(srv, "stream-cut")
+            except Exception as e:
+                print(f"[seat] seat panel not started ({e})", file=sys.stderr)
             print(f"[opencode] native serve up: session store "
                   f"{d / 'serve-sessions.json'}; the proxy's /v1 is "
                   "the turn lane", file=sys.stderr)

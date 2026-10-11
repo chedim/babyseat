@@ -367,6 +367,15 @@ function connLabel(live, everLive, since, now, polling) {
 
 /** Membrane's role, its own switch beside auto-chat: babble (its lines go to
  *  the LLM) or predict (the LLM never hears it; it guesses each turn). */
+/** The seat's pause, for its button: ▶ to resume when paused. */
+function seatView(st) {
+  const paused = !!(st && st.paused);
+  const mem = st && st.seat_rss_mb ? " · seat " + st.seat_rss_mb + " MB" + (st.mem_available_mb != null ? ", " + st.mem_available_mb + " MB free" : "") : "";
+  return paused
+    ? { paused, icon: "▶", label: "seat paused: resume", title: "the seat is PAUSED: loops, dreamer, thinker and night stand down -- click to resume" + mem }
+    : { paused, icon: "⏸", label: "pause the seat", title: "pause the seat: every acting lane stands down (loops, dreamer, thinker, night)" + mem };
+}
+
 function roleNext(auto) { return (auto && auto.role) === "predict" ? "babble" : "predict"; }
 function roleView(auto) {
   return (auto && auto.role) === "predict"
@@ -491,7 +500,7 @@ function replyToSpeak(rows) {
   return null;
 }
 
-const AiPanelLogic = { connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
+const AiPanelLogic = { seatView, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
@@ -725,6 +734,7 @@ function definePanel() {
             <button class="btn icon llmbtn" title="the LLM (off: talk to membrane alone)">🤖</button>
             <button class="btn icon autobtn" title="auto-chat: membrane and the LLM talk; you can join any time">⟳</button>
             <button class="btn icon rolebtn" title="membrane's role: babble (it talks to the LLM) or predict (it guesses the LLM, unheard)">💬</button>
+            <button class="btn icon pausebtn" title="pause the seat: every acting lane stands down (loops, dreamer, thinker, night)">⏸</button>
             <button class="btn icon mindsbtn" title="membrane's minds">🧠</button>
           </div>
           <div class="minds"></div>
@@ -748,7 +758,7 @@ function definePanel() {
         const ctl = document.createElement("div");
         ctl.className = "ctl";
         for (const [cls, label] of [["agent", null], ["modelpick", null], ["voicebtn", "membrane's voice"], ["llmbtn", "LLM replies"],
-                                    ["autobtn", "auto-chat"], ["rolebtn", "membrane babbles"], ["mindsbtn", "minds"]]) {
+                                    ["autobtn", "auto-chat"], ["rolebtn", "membrane babbles"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
           const el = app.querySelector("." + cls);
           if (!el) continue;
           if (label) {
@@ -799,6 +809,8 @@ function definePanel() {
       this._autoBtn.addEventListener("click", (ev) => this._toggleAuto(ev && ev.shiftKey ? "teach" : "explore").catch(() => {}));
       this._roleBtn = $(".rolebtn");
       this._roleBtn.addEventListener("click", () => this._toggleRole().catch(() => {}));
+      this._pauseBtn = $(".pausebtn");
+      this._pauseBtn.addEventListener("click", () => this._togglePause().catch(() => {}));
       this._llmBtn = $(".llmbtn");
       this._llmOn = true;                 // per page view
       this._llmBtn.addEventListener("click", () => {
@@ -1098,6 +1110,7 @@ function definePanel() {
       { const r0 = replyToSpeak(this._chat.rows); this._spokenId = r0 ? r0.id : null; this._repliesArmed = true; }
       loadVoice(this._chat, vox && vox.ok && Array.isArray(vox.data) ? vox.data : []);
       loadPhantoms(this._chat, phs && phs.ok && Array.isArray(phs.data) ? phs.data : []);
+      this._loadSeat();
       this._chat.auto = auto && auto.ok && auto.data ? auto.data : { on: false };
       this._paintAuto();
       if (st.ok && st.data && typeof st.data === "object") {
@@ -1264,6 +1277,7 @@ function definePanel() {
         clearTimeout(this._sesTimer);
         this._sesTimer = setTimeout(() => this._listSessions().catch(() => {}), 400);
       }
+      if (ev.type === "membrane.seat") this._loadSeat();          // the seat's own events: its state moved
       if (this._chat && applyEvent(this._chat, ev)) {
         this._schedule();
         this._paintStatus();
@@ -1541,6 +1555,29 @@ function definePanel() {
       const r = await this._api(SERVE + "/session/" + this._sid + "/auto",
         { method: "POST", body: JSON.stringify({ on, mode: mode || "explore" }) });
       if (r.ok && r.data) { this._chat.auto = r.data; this._paintAuto(); }
+    }
+
+    /** THE SEAT'S ONE PAUSE (seat_panel.py): every acting lane stands down; HA admins only. */
+    async _togglePause() {
+      const paused = !(this._seat && this._seat.paused);
+      const r = await this._api(SERVE + "/membrane/seat/control", { method: "POST", body: JSON.stringify({ paused }) });
+      if (r.ok && r.data && r.data.state) { this._seat = r.data.state; this._paintSeat(); }
+      else this._err(this._apiErr("pause failed (HA admins only)", r));
+    }
+
+    async _loadSeat() {
+      const r = await this._api(SERVE + "/membrane/seat").catch(() => null);
+      if (r && r.ok && r.data && r.data.state) { this._seat = r.data.state; this._paintSeat(); }
+    }
+
+    _paintSeat() {
+      if (!this._pauseBtn) return;
+      const v = seatView(this._seat);
+      const ico = this._pauseBtn.querySelector(".ico"), lbl = this._pauseBtn.querySelector(".lbl");
+      if (ico) ico.textContent = v.icon; else this._pauseBtn.textContent = v.icon;
+      if (lbl) lbl.textContent = v.label;
+      this._pauseBtn.title = v.title;
+      this._pauseBtn.style.opacity = v.paused ? "1" : ".6";
     }
 
     async _toggleRole() {

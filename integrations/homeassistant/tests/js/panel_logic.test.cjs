@@ -270,3 +270,11 @@ test("the status says loading / connecting before it says offline", () => {
   assert.equal(L.connLabel(false, true, now - 20000, now, false), "offline");
   assert.equal(L.connLabel(false, true, now - 20000, now, true), "polling");
 });
+
+test("the seat's pause button says what a click will do", () => {
+  assert.equal(L.seatView({ paused: false }).icon, "⏸");
+  const v = L.seatView({ paused: true, seat_rss_mb: 2100, mem_available_mb: 300 });
+  assert.equal(v.icon, "▶");
+  assert.ok(v.title.includes("PAUSED") && v.title.includes("2100 MB"));
+  assert.equal(L.seatView(null).paused, false);
+});

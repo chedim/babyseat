@@ -472,6 +472,12 @@ class SSEHub:
                     continue
                 q.lost = True                                 # its stream closes; the client resyncs
                 self.unsubscribe(q)
+                cb = getattr(self, "on_lost", None)           # the seat panel's event
+                if cb is not None:
+                    try:
+                        cb()
+                    except Exception:
+                        pass
 
 
 # ---- the turn loop ------------------------------------------------------------
@@ -1986,6 +1992,11 @@ class TurnRunner:
                         elif _refusal is not None:
                             output = f"Refused: {_refusal}"
                             try:
+                                from . import seat_panel as _SP
+                                _SP.note_from(self, "refused", tool=name_l, lane=lane)
+                            except Exception:
+                                pass
+                            try:
                                 mem = getattr(self, "_audit_mem", None)
                                 if mem is not None:
                                     from .opencode import _write_audit
@@ -2312,7 +2323,7 @@ SEAT_READ_PATHS = ("/membrane/state", "/membrane/map/cloud",
                    # GET, numbers in, shape out
                    "/membrane/stranger/visit", "/membrane/stranger/view",
                    "/membrane/stranger/event", "/membrane/stranger/leave",
-                   "/membrane/gate-stages", "/membrane/predict")
+                   "/membrane/gate-stages", "/membrane/predict", "/membrane/seat")
 
 
 def seat_read_url(srv, path_qs: str) -> str | None:
@@ -2655,6 +2666,16 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 from . import minds_models as _MM
                 psrv = getattr(runner, "srv", None) if runner is not None else None
                 self._json_out(_MM.read(psrv) if psrv is not None else {})
+            elif path == "/membrane/seat":
+                # the seat as a panel (seat_panel.py): state, events, the controls
+                from . import seat_panel as _SP
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                if psrv is None:
+                    self._json_out({})
+                else:
+                    _ent = _SP._entity(psrv)
+                    self._json_out({"state": _SP.state(psrv), "events": list(((_ent.properties or {}) if _ent else {}).get("events") or []),
+                                    "controls": list(_SP.CONTROLS)})
             elif path == "/agent":
                 self._json_out(_agent_shapes(getattr(self, "seat", None)))
             elif path == "/command":
@@ -2693,6 +2714,13 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 self.end_headers()
                 return
             path = self.path.split("?", 1)[0]
+            if path == "/membrane/seat/control":
+                # the operator's switches (HA admins only, through the relay)
+                from . import seat_panel as _SP
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                if psrv is None:
+                    self.send_response(503); self.send_header("Content-Length", "0"); self.end_headers(); return
+                return self._json_out(_SP.control(psrv, self._read_body() or {}, by="operator"))
             if path == "/membrane/models":
                 # THE MINDS' MODELS: the watch loops' and the background
                 # cortex's models, live (the chat picker sets one session)

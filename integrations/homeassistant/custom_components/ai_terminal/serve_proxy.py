@@ -54,9 +54,9 @@ ALLOWED_PREFIXES = ("session", "config", "provider", "mcp")
 # agent: the primary agents + membrane's live minds (loop workers,
 # thinker, dreamer); event: the per-user SSE relay (never global/event,
 # its unscoped twin)
-ALLOWED_EXACT = ("global/health", "agent", "event", "membrane/models")
+ALLOWED_EXACT = ("global/health", "agent", "event", "membrane/models", "membrane/seat", "membrane/seat/control")
 # the minds' models: everyone reads, only an HA ADMIN switches them
-ADMIN_WRITE_EXACT = ("membrane/models",)
+ADMIN_WRITE_EXACT = ("membrane/models", "membrane/seat/control")
 # the field dashboard + the drawer: the seat's read surfaces the serve
 # relays (membrane/server.py SEAT_READ_PATHS) -- GET only, exact paths
 READ_ONLY_EXACT = ("membrane/state", "membrane/map/field",

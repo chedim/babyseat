@@ -1272,6 +1272,14 @@ def restore_state(runner, delay: float | None = None) -> dict:
     return {"auto": list(autos), "role": runner._voice_role}
 
 
+def _seat_note(runner, kind: str, **detail) -> None:
+    try:
+        from . import seat_panel as _SP
+        _SP.note_from(runner, kind, **detail)
+    except Exception:
+        pass
+
+
 def role(runner, sid: str) -> str:
     return (getattr(runner, "_voice_role", None) or {}).get(sid, "babble")
 
@@ -1366,9 +1374,11 @@ def _publish_auto(runner, sid: str) -> None:
 def auto_set(runner, sid: str, on: bool, mode: str = "explore") -> dict:
     runner._auto = getattr(runner, "_auto", None) or {}
     if not on:
-        runner._auto.pop(sid, None)
+        was = runner._auto.pop(sid, None)
         _publish_auto(runner, sid)
         save_state(runner)
+        if was is not None:
+            _seat_note(runner, "auto-chat-off", session=sid)
         return auto_state(runner, sid)
     mode = mode if mode in AUTO_MODES else "explore"
     if sid in runner._auto:
@@ -1377,6 +1387,7 @@ def auto_set(runner, sid: str, on: bool, mode: str = "explore") -> dict:
         runner._auto[sid] = {"rounds": 0, "since": time.time(), "mode": mode}
         _publish_auto(runner, sid)
         save_state(runner)
+        _seat_note(runner, "auto-chat-on", session=sid, mode=mode, role=role(runner, sid))
         if sid not in (getattr(runner, "_busy", None) or {}):
             last = ""
             try:
@@ -1439,6 +1450,7 @@ def auto_next(runner, sid: str, reply: str) -> None:
             pass
         if role(runner, sid) == "predict":
             if not (reply or "").strip():
+                _seat_note(runner, "auto-chat-stalled", session=sid, why="an empty reply: nothing to continue from")
                 return                             # nothing said yet: nothing to continue
             if reply.lstrip().startswith("model ladder failed"):
                 # the model refused a conversation ending on its own reply: stop, don't spin
