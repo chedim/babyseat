@@ -836,7 +836,9 @@ class Voice:
             pass
 
     def of_session(self, sid: str) -> list[dict]:
-        return sorted((r for r in self.lines.values() if r.get("sid") == sid),
+        """The session's voice lines (its guesses of Argus's moves are not lines)."""
+        return sorted((r for r in self.lines.values() if r.get("sid") == sid
+                       and not str(r.get("mode") or "").startswith("predict")),
                       key=lambda r: r.get("time", 0))
 
 
@@ -848,7 +850,10 @@ def say_guess(srv, sid: str, qv, context: str = ""):
     if v is None or not v._booted or qv is None:
         return None
     tgt = v.steer(sid, np.asarray(qv, dtype=float))
-    return v.speak(tgt, message=(context or "")[:400], sid=sid, mid="", message_vec=np.asarray(qv, dtype=float))
+    rec = v.speak(tgt, message=(context or "")[:400], sid=sid, mid="", message_vec=np.asarray(qv, dtype=float))
+    if rec is not None:                              # a guess, not a line of the chat's
+        v._ledger({"id": rec["id"], "mode": "predict:" + str(rec.get("mode") or "")})
+    return rec
 
 
 def grade_guess(srv, sid: str, rec, actual: str) -> dict | None:
