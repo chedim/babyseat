@@ -617,3 +617,70 @@ class TestExploreTogether(unittest.TestCase):
         self.assertAlmostEqual(v.table.uni.get("volts", 0) - before, V.EXPLORE_WEIGHT)
         pairs = (Path(d) / "voice" / "pairs.jsonl").read_text().splitlines()
         self.assertIn('"kind": "found"', pairs[-1])
+
+
+class TestMembranesRole(unittest.TestCase):
+    """2026-10-10, the operator: auto-chat and membrane's role are separate
+    switches -- in auto-chat with prediction the LLM works on by itself
+    like an agent, never hearing membrane, and membrane predicts it."""
+
+    def setUp(self):
+        self._pause = V.AUTO_PAUSE_S
+        V.AUTO_PAUSE_S = 0.02
+
+    def tearDown(self):
+        V.AUTO_PAUSE_S = self._pause
+
+    def test_predict_role_auto_chat_is_the_llm_alone_and_membrane_guesses_it(self):
+        r, srv, lad = TestAutoChat._runner(self)
+        sid = r.sessions.create(title="t")["id"]
+        self.assertEqual(V.auto_state(r, sid)["role"], "babble")
+        self.assertEqual(V.role_set(r, sid, "predict"), "predict")
+        self.assertFalse(V.auto_state(r, sid)["on"])                    # the role alone starts nothing
+        V.auto_set(r, sid, True)
+        end = time.time() + 15
+        while time.time() < end and lad.n < 3:
+            time.sleep(0.05)
+        r.abort(sid)
+        self.assertGreaterEqual(lad.n, 3)
+        rows = r.messages.list(sid)
+        users = [m for m in rows if (m.get("info") or {}).get("role") == "user"]
+        self.assertTrue(users and all((m["info"]).get("autoTurn") for m in users))
+        self.assertFalse(any((m["info"]).get("voiceTurn") for m in users))
+        sent = " ".join(m["content"] for m in lad.last["messages"] if m["role"] == "user")
+        self.assertNotIn(V.VOICE_PREFIX.strip(), sent)                  # Argus never hears membrane
+        self.assertIn("carry on by yourself", sent)
+        time.sleep(0.5)
+        rep = srv._predictor.report()
+        self.assertGreaterEqual(rep["operator"]["turns"], 2)           # and membrane predicted his turns
+        v = V.of(srv)
+        self.assertEqual(v.table.uni.get("nobody", 0), 0)              # the boilerplate is never heard
+
+    def test_babble_role_keeps_the_voice_turns(self):
+        r = type("R", (), {"_auto": {}, "hub": S.SSEHub(), "_busy": {"s1": 1}, "messages": S.MessageStore()})()
+        V.role_set(r, "s1", "nonsense")
+        self.assertEqual(V.role(r, "s1"), "babble")
+        self.assertEqual(V.auto_set(r, "s1", True)["role"], "babble")
+
+
+class TestLearningFromMisses(unittest.TestCase):
+    def test_a_real_turns_reply_is_the_answer_key_and_leans_the_next_aim(self):
+        d = tempfile.mkdtemp()
+        srv = _Srv()
+        srv._models_path = str(Path(d) / "models.json")
+        srv.membrane = type("M", (), {"embedder": FakeEmbedder()})()
+        r = S.TurnRunner(S.SSEHub(), S.SessionStore(), S.MessageStore(), _Ladder(),
+                         lambda n, a, c: "ok", system="", model="m")
+        r.srv = srv
+        v = V.of(srv)
+        v.bootstrap(CORPUS * 3)
+        rec = v.speak(FakeEmbedder().embed(["battery"])[0], sid="s1")
+        r._voice_last = {"s1": rec["id"]}
+        V.on_turn_end(r, "s1", "how is the anchor?", "The anchor holds on sand. Wind is light.", "operator")
+        end = time.time() + 5
+        while time.time() < end and "miss_gap" not in v.lines[rec["id"]]:
+            time.sleep(0.05)
+        self.assertIn("miss_gap", v.lines[rec["id"]])
+        self.assertIn("s1", v.correction)                              # the next aim leans toward it
+        pairs = (Path(d) / "voice" / "pairs.jsonl").read_text()
+        self.assertIn("The anchor holds on sand.", pairs)

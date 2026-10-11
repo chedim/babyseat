@@ -1021,7 +1021,7 @@ def on_turn_start(runner, sid: str, text: str, mid: str, lane: str) -> None:
 
 
 def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
-                voice_turn: bool = False, parts=None) -> None:
+                voice_turn: bool = False, parts=None, auto_turn: bool = False) -> None:
     """The teachers speak: the operator's message and the LLM's reply are
     heard; the line it said this turn is graded against the reply. A voice
     turn's 'user' text is the voice itself: never heard (it never hears
@@ -1044,7 +1044,7 @@ def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
         try:
             if th is not None:
                 th.join(60)              # its line first, then the grade
-            if not voice_turn:
+            if not voice_turn and not auto_turn:
                 v.hear(user_text)
             exploring = voice_turn and auto_mode(runner, sid) != "teach"
             meant = it_meant(reply) if (voice_turn and not exploring) else ""
@@ -1053,7 +1053,7 @@ def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
                 v.pair((getattr(runner, "_voice_last", {}) or {}).get(sid), clean(reply)[:600], kind="found")
             if v._pool_booted:
                 v.pool_add(reply, "reply")                   # the recall pool grows with each reply
-                if not voice_turn and user_text and reply:
+                if not voice_turn and not auto_turn and user_text and reply:
                     try:
                         E = v.embedder.embed([clean(user_text)[:2000] or user_text[:2000],
                                               clean(reply)[:4000] or reply[:4000]])
@@ -1069,6 +1069,18 @@ def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
                     v._ledger({"id": lid, "guess": pr["guess"], "did": pr["did"], "guess_score": pr["score"]})
             except Exception as e:
                 print(f"[voice] predict score failed: {e!r}", file=sys.stderr)
+            # LEARNING FROM ITS MISSES (2026-10-10, the operator: "does it learn from
+            # its misses or not yet?"): on a real turn its line was a guess of the
+            # reply -- the reply's opening is what it should have said, and the gap
+            # between the two leans its next aim (teach mode's 'It meant' lesson,
+            # with Argus's own words as the answer key)
+            if lid and not voice_turn and not meant and reply:
+                said = (v.lines.get(lid) or {}).get("text", "")
+                actual = " ".join(pool_sentences(strip_meant(reply))[:2]) or clean(reply)[:300]
+                gap = v.learn_gap(sid, said, actual) if said and actual else None
+                if gap is not None:
+                    v._ledger({"id": lid, "miss_gap": gap})
+                    v.pair(lid, actual, kind="reply")
             if meant and v.is_repeat_lesson(sid, meant):
                 if lid:
                     v._ledger({"id": lid, "lesson": "repeat"})
@@ -1152,6 +1164,38 @@ def strip_meant(reply: str) -> str:
     return _MEANT.sub("", reply or "").strip()
 
 
+# MEMBRANE'S ROLE (2026-10-10, the operator: "I want these two features
+# controlled separately: in auto-chat with prediction the LLM just chats
+# with itself like an agent, and membrane predicts it"): auto-chat on/off
+# is one switch; membrane's role is the other --
+#   babble   its lines go to Argus (auto-chat's explore / teach)
+#   predict  Argus never hears it: auto-chat's turns are Argus working on as
+#            an agent from his own last reply; membrane speaks its guess first
+#            and predicts his actions (predict.py), graded when the turn ends
+ROLES = ("babble", "predict")
+AUTO_PREFIX = "[auto] "
+
+
+def role(runner, sid: str) -> str:
+    return (getattr(runner, "_voice_role", None) or {}).get(sid, "babble")
+
+
+def role_set(runner, sid: str, r: str) -> str:
+    runner._voice_role = getattr(runner, "_voice_role", None) or {}
+    runner._voice_role[sid] = r if r in ROLES else "babble"
+    _publish_auto(runner, sid)
+    return runner._voice_role[sid]
+
+
+def frame_agent(reply: str = "") -> str:
+    """The self-turn in predict mode: no one is typing, no voice line --
+    Argus carries on from his own last reply, like an agent."""
+    return (AUTO_PREFIX + "Nobody is typing -- carry on by yourself, like an agent: take the next step "
+            "that matters most now (your open goals, what you just found, what looks wrong), with "
+            "your tools if it is worth it. Then say in one or two plain sentences what you did "
+            "and what comes next.")
+
+
 def auto_on(runner, sid: str) -> bool:
     return sid in (getattr(runner, "_auto", None) or {})
 
@@ -1159,7 +1203,7 @@ def auto_on(runner, sid: str) -> bool:
 def auto_state(runner, sid: str) -> dict:
     a = (getattr(runner, "_auto", None) or {}).get(sid)
     return {"on": a is not None, "rounds": (a or {}).get("rounds", 0),
-            "mode": (a or {}).get("mode", "explore")}
+            "mode": (a or {}).get("mode", "explore"), "role": role(runner, sid)}
 
 
 def auto_mode(runner, sid: str) -> str:
@@ -1245,6 +1289,26 @@ def auto_next(runner, sid: str, reply: str) -> None:
                 return
         except Exception:
             pass
+        if role(runner, sid) == "predict":
+            try:
+                from .server import _gen_id
+                mid = _gen_id("msg")
+                runner._auto_aim = getattr(runner, "_auto_aim", None) or {}
+                runner._auto_aim[sid] = clean(reply) or reply or ""      # what the guess aims from
+                now = int(time.time() * 1000)
+                agent = str((runner.sessions.get(sid) or {}).get("agent") or "build")
+                text = frame_agent(reply)
+                info = {"id": mid, "sessionID": sid, "role": "user", "agent": agent,
+                        "autoTurn": True, "time": {"created": now}}
+                parts = [{"id": _gen_id("prt"), "sessionID": sid, "messageID": mid,
+                          "type": "text", "text": text, "time": {"start": now}}]
+                runner.messages.append(sid, info, parts)
+                runner._auto[sid]["rounds"] = runner._auto[sid].get("rounds", 0) + 1
+                _publish_auto(runner, sid)
+                runner.run(sid, text, user_info=info, user_parts=parts)
+            except Exception as e:
+                print(f"[voice] auto agent round failed: {e!r}", file=sys.stderr)
+            return
         try:
             from .server import _gen_id
             from .lanes import _efield_of

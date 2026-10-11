@@ -249,7 +249,7 @@ function applyEvent(st, ev) {
       st.status = { type: "idle" };
       return true;
     case "membrane.auto":
-      st.auto = { on: !!props.on, rounds: props.rounds || 0, mode: props.mode || "explore" };
+      st.auto = { on: !!props.on, rounds: props.rounds || 0, mode: props.mode || "explore", role: props.role || "babble" };
       return true;
     case "membrane.voice": {
       // membrane's own voice: a line beside the user message it answers
@@ -313,6 +313,15 @@ function voiceHtml(line, editing) {
   if (editing) h += '<div class="vedit"><textarea rows="2" placeholder="how membrane should have said it"></textarea>' +
     '<button class="btn primary vteach">teach</button></div>';
   return h + "</div>";
+}
+
+/** Membrane's role, its own switch beside auto-chat: babble (its lines go to
+ *  the LLM) or predict (the LLM never hears it; it guesses each turn). */
+function roleNext(auto) { return (auto && auto.role) === "predict" ? "babble" : "predict"; }
+function roleView(auto) {
+  return (auto && auto.role) === "predict"
+    ? { icon: "🔮", label: "membrane predicts", title: "membrane predicts: the LLM never hears it; in auto-chat the LLM works on by itself -- click: babble" }
+    : { icon: "💬", label: "membrane babbles", title: "membrane babbles: in auto-chat its lines go to the LLM -- click: predict (unheard)" };
 }
 
 /** Membrane's guess of what Argus would DO this turn (predict.py: virtual,
@@ -431,7 +440,7 @@ function replyToSpeak(rows) {
   return null;
 }
 
-const AiPanelLogic = { guessHtml, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
+const AiPanelLogic = { guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
@@ -660,6 +669,7 @@ function definePanel() {
             <button class="btn icon voicebtn" title="membrane's own voice (show / hide)">🗣</button>
             <button class="btn icon llmbtn" title="the LLM (off: talk to membrane alone)">🤖</button>
             <button class="btn icon autobtn" title="auto-chat: membrane and the LLM talk; you can join any time">⟳</button>
+            <button class="btn icon rolebtn" title="membrane's role: babble (it talks to the LLM) or predict (it guesses the LLM, unheard)">💬</button>
             <button class="btn icon mindsbtn" title="membrane's minds">🧠</button>
           </div>
           <div class="minds"></div>
@@ -683,7 +693,7 @@ function definePanel() {
         const ctl = document.createElement("div");
         ctl.className = "ctl";
         for (const [cls, label] of [["agent", null], ["modelpick", null], ["voicebtn", "membrane's voice"], ["llmbtn", "LLM replies"],
-                                    ["autobtn", "auto-chat"], ["mindsbtn", "minds"]]) {
+                                    ["autobtn", "auto-chat"], ["rolebtn", "membrane babbles"], ["mindsbtn", "minds"]]) {
           const el = app.querySelector("." + cls);
           if (!el) continue;
           if (label) {
@@ -732,6 +742,8 @@ function definePanel() {
       });
       this._autoBtn = $(".autobtn");
       this._autoBtn.addEventListener("click", (ev) => this._toggleAuto(ev && ev.shiftKey ? "teach" : "explore").catch(() => {}));
+      this._roleBtn = $(".rolebtn");
+      this._roleBtn.addEventListener("click", () => this._toggleRole().catch(() => {}));
       this._llmBtn = $(".llmbtn");
       this._llmOn = true;                 // per page view
       this._llmBtn.addEventListener("click", () => {
@@ -1459,12 +1471,27 @@ function definePanel() {
       if (r.ok && r.data) { this._chat.auto = r.data; this._paintAuto(); }
     }
 
+    async _toggleRole() {
+      if (!this._sid || !this._chat) return;
+      const role = roleNext(this._chat.auto);
+      const r = await this._api(SERVE + "/session/" + this._sid + "/auto",
+        { method: "POST", body: JSON.stringify({ role }) });
+      if (r.ok && r.data) { this._chat.auto = r.data; this._paintAuto(); }
+    }
+
     _paintAuto() {
       const a = (this._chat && this._chat.auto) || { on: false };
+      if (this._roleBtn) {
+        const v = roleView(a);
+        const ico = this._roleBtn.querySelector(".ico"), lbl = this._roleBtn.querySelector(".lbl");
+        if (ico) ico.textContent = v.icon; else this._roleBtn.textContent = v.icon;
+        if (lbl) lbl.textContent = v.label;
+        this._roleBtn.title = v.title;
+      }
       if (!this._autoBtn) return;
       this._autoBtn.style.opacity = a.on ? "1" : ".4";
       this._autoBtn.classList.toggle("spinning", !!a.on);
-      this._autoBtn.title = a.on ? "auto-chat ON: " + (a.mode || "explore") + " (round " + (a.rounds || 0) + ") -- click or Stop to end"
+      this._autoBtn.title = a.on ? "auto-chat ON: " + (a.role === "predict" ? "the LLM works on by itself, membrane predicts" : (a.mode || "explore")) + " (round " + (a.rounds || 0) + ") -- click or Stop to end"
                                  : "auto-chat: click = explore together, shift-click = teach; you can join any time";
     }
 

@@ -186,7 +186,7 @@ test("voice: history load and the bubble", () => {
 test("auto-chat: the reducer tracks the mode; a voice turn shows its line", () => {
   const st = L.chatState("s1");
   assert.equal(L.applyEvent(st, { type: "membrane.auto", properties: { sessionID: "s1", on: true, rounds: 2 } }), true);
-  eq(st.auto, { on: true, rounds: 2, mode: "explore" });
+  eq(st.auto, { on: true, rounds: 2, mode: "explore", role: "babble" });
   assert.equal(L.voiceTurnText("[membrane voice] membrane's own voice said: «Battery is fine.»\nAnswer it"), "Battery is fine.");
 });
 
@@ -237,4 +237,14 @@ test("membrane's guess of Argus's actions rides its voice line, scored", () => {
   assert.ok(h.includes("he did: entity.read on ha:light.aft"), h);
   assert.equal(L.guessHtml({ text: "no guess" }), "");
   assert.ok(L.guessHtml({ guess: { tools: [["(none)", 1]], ents: [] }, guess_score: { tool1: false, tool3: false } }).includes("(none) ✗"));
+});
+
+test("membrane's role is its own switch: babble <-> predict", () => {
+  assert.equal(L.roleNext({ role: "babble" }), "predict");
+  assert.equal(L.roleNext({ role: "predict" }), "babble");
+  assert.equal(L.roleNext(null), "predict");
+  assert.equal(L.roleView({ role: "predict" }).icon, "🔮");
+  assert.equal(L.roleView({}).label, "membrane babbles");
+  const st = L.chatState ? L.chatState("s1") : null;
+  if (st) { L.applyEvent(st, { type: "membrane.auto", properties: { sessionID: "s1", on: true, role: "predict" } }); assert.equal(st.auto.role, "predict"); }
 });

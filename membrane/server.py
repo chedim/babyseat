@@ -1587,10 +1587,15 @@ class TurnRunner:
         history.append({"role": "user", "content": text})
         # MEMBRANE'S OWN VOICE (the third participant): it speaks first,
         # in its own thread, outside the session's messages
+        # an auto self-turn (predict role) aims from Argus's own last reply,
+        # not from its boilerplate prompt
+        _aim_text = text
+        if user_info.get("autoTurn"):
+            _aim_text = (getattr(self, "_auto_aim", None) or {}).pop(sid, "") or text
         try:
             from . import voice as _voice
             if not user_info.get("voiceTurn"):       # the voice just spoke: it IS this turn
-                _voice.on_turn_start(self, sid, text, str(user_info.get("id") or ""),
+                _voice.on_turn_start(self, sid, _aim_text, str(user_info.get("id") or ""),
                                      _lane_of((self._agents or {}).get(sid)))
         except Exception:
             pass
@@ -1599,7 +1604,7 @@ class TurnRunner:
         try:
             if not user_info.get("membraneOnly"):
                 from . import predict as _predict
-                _predict.start_async(self, sid, text, _lane_of((self._agents or {}).get(sid)))
+                _predict.start_async(self, sid, _aim_text, _lane_of((self._agents or {}).get(sid)))
         except Exception:
             pass
         # MEMBRANE ONLY (the chat's LLM switch off): the voice answers, the
@@ -2089,7 +2094,7 @@ class TurnRunner:
                                          if isinstance(p, dict) and p.get("type") == "text"),
                                _lane_end,
                                voice_turn=bool((user_info or {}).get("voiceTurn")),
-                               parts=parts)
+                               parts=parts, auto_turn=bool((user_info or {}).get("autoTurn")))
             if _lane_end not in _voice._CHAT_LANES:      # the chat's guess rides its voice line
                 from . import predict as _predict
                 threading.Thread(target=_predict.end, args=(self, sid, list(parts)),
@@ -2702,6 +2707,12 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                         if runner is None or sessions.get(sid) is None:
                             return self._notfound()
                         b = self._read_body()
+                        # membrane's role (babble | predict) is its own switch: a
+                        # body with only {role} leaves auto-chat as it is
+                        if b.get("role"):
+                            _voice.role_set(runner, sid, str(b.get("role")))
+                        if "on" not in b:
+                            return self._json_out(_voice.auto_state(runner, sid))
                         return self._json_out(_voice.auto_set(runner, sid, bool(b.get("on")),
                                                               str(b.get("mode") or "explore")))
                     if action == "voice":
