@@ -707,3 +707,35 @@ class TestContinuationRefused(unittest.TestCase):
         finally:
             V.AUTO_PAUSE_S = old
         self.assertFalse(V.auto_on(r, "s1"))
+
+
+class TestBabbleEveryMove(unittest.TestCase):
+    def test_membranes_line_joins_between_his_moves(self):
+        d = tempfile.mkdtemp()
+        srv = _Srv()
+        srv._models_path = str(Path(d) / "models.json")
+        srv.membrane = type("M", (), {"embedder": FakeEmbedder()})()
+        bodies = []
+        holder = {}
+
+        def ladder(body):
+            bodies.append(body)
+            if len(bodies) == 1:
+                return {"choices": [{"message": {"content": "", "tool_calls": [
+                    {"id": "c1", "type": "function", "function": {"name": "state", "arguments": "{}"}}]}}]}
+            return {"choices": [{"message": {"content": "The battery is at ninety percent."}}]}
+
+        r = S.TurnRunner(S.SSEHub(), S.SessionStore(), S.MessageStore(), ladder,
+                         lambda n, a, c: "ok", system="", model="m")
+        r.srv = srv
+        V.of(srv).bootstrap(CORPUS * 3)
+        sid = r.sessions.create(title="t")["id"]
+        holder.update(r=r, sid=sid)
+        r._auto = {sid: {"rounds": 0, "mode": "explore"}}           # auto-chat on, membrane babbling
+        r.run(sid, "check the battery", user_info={"id": "msg_u1", "role": "user", "agent": "build"})
+        r._auto = {}
+        self.assertGreaterEqual(len(bodies), 2)
+        second = [m for m in bodies[1]["messages"] if m["role"] == "user"]
+        line = [m["content"] for m in second if m["content"].startswith(V.VOICE_PREFIX)]
+        self.assertTrue(line, second)
+        self.assertRegex(line[0], r"^\[membrane voice\] «[^»]+»$")    # its words only, no instructions

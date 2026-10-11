@@ -105,7 +105,7 @@ class TestEveryMove(unittest.TestCase):
             summary = P.end(r, "s1")
         self.assertEqual(summary["score"]["moves"], 3)
         self.assertEqual(summary["score"]["top1"], 3)         # by now it knows the whole dance
-        self.assertEqual(summary["did"]["tools"], ["find.memory", "entity.read", P.NONE])
+        self.assertEqual(summary["did"]["tools"], ["find.memory", "entity.read", P.TEXT])
         rep = r.srv._predictor.report()["listener"]
         self.assertEqual(rep["turns"], 12)                    # every move counted
 
@@ -122,6 +122,55 @@ class TestEveryMove(unittest.TestCase):
              {"role": "tool", "content": "light is on"}, {"role": "tool", "content": "bms ok"}]
         self.assertEqual(P.context_of(h, "hi"), "light is on\nbms ok")
         self.assertEqual(P.context_of(h[:1], "hi"), "hi")
+
+
+class TestInsideTheStep(unittest.TestCase):
+    """2026-10-11, the operator: every text message and every tool call is a
+    move -- inside one model round too, each predicted from the ones before."""
+
+    def _call(self, name, **args):
+        import json
+        return {"function": {"name": name, "arguments": json.dumps(args)}}
+
+    def test_a_round_is_its_moves_in_order(self):
+        mv = P.moves_of([self._call("find", action="memory", q="x"),
+                         self._call("entity", action="read", spec="ha:light.cabin")], "Checking the cabin light.")
+        self.assertEqual([m["action"] for m in mv], [P.TEXT, "find.memory", "entity.read"])
+        self.assertEqual(mv[2]["ents"], ["ha:light.cabin"])
+        self.assertEqual(P.moves_of([], ""), [])
+
+    def test_each_move_inside_a_round_is_guessed_from_the_ones_before(self):
+        emb = types.SimpleNamespace(embed=lambda xs: [vec(1) for _ in xs])
+        srv = types.SimpleNamespace(membrane=types.SimpleNamespace(embedder=emb), _models_path=None)
+        r = types.SimpleNamespace(srv=srv)
+        tcs = [self._call("find", action="memory", q="x"), self._call("entity", action="read", spec="ha:light.cabin"),
+               self._call("exec", action="call", object="ha:light.cabin", method="status")]
+        for _ in range(4):                                    # the same round, four turns
+            P.step_start(r, "s1", "the cabin light?", "operator", step=1)
+            res = P.step_end(r, "s1", tcs, "Looking.", step=1, wait=True)
+            P.end(r, "s1")
+        self.assertEqual(len(res), 4)                         # text + three calls: four moves in one round
+        self.assertEqual([x["tool1"] for x in res], [True, True, True, True])
+        self.assertEqual(srv._predictor.report()["operator"]["turns"], 16)
+
+    def test_every_move_leaves_a_phantom_in_its_place(self):
+        emb = types.SimpleNamespace(embed=lambda xs: [vec(1) for _ in xs])
+        srv = types.SimpleNamespace(membrane=types.SimpleNamespace(embedder=emb), _models_path=None)
+        seen = []
+        r = types.SimpleNamespace(srv=srv, hub=types.SimpleNamespace(publish=seen.append))
+        tcs = [self._call("entity", action="read", spec="ha:light.cabin"), self._call("find", action="memory", q="x")]
+        for t in range(3):
+            P.step_start(r, "s1", "the cabin light?", "operator", step=1, mid=f"msg_{t}")
+            P.step_end(r, "s1", tcs, "", step=1, wait=True, mid=f"msg_{t}")
+            P.step_start(r, "s1", "results", "operator", step=2, mid=f"msg_{t}")
+            P.step_end(r, "s1", [self._call("goal", action="list")], "", step=2, wait=True, mid=f"msg_{t}")
+            P.end(r, "s1")
+        last = {i["id"]: i for i in P.phantoms(r, "s1") if i["mid"] == "msg_2"}
+        self.assertEqual(sorted(i["n"] for i in last.values()), [0, 1, 2])      # three moves, three places
+        self.assertTrue(all(not i["pending"] for i in last.values()))
+        self.assertEqual(last["msg_2:0"]["label"], "entity.read ha:light.cabin")
+        self.assertTrue(last["msg_2:0"]["hit"] and last["msg_2:1"]["hit"] and last["msg_2:2"]["hit"])
+        self.assertTrue(all(e["type"] == "membrane.predict" for e in seen))
 
 
 if __name__ == "__main__":

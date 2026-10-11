@@ -840,6 +840,43 @@ class Voice:
                       key=lambda r: r.get("time", 0))
 
 
+def say_guess(srv, sid: str, qv, context: str = ""):
+    """THE SPEECH GENERATOR PREDICTS ARGUS'S NEXT MESSAGE (2026-10-11): what it
+    expects him to write, aimed at what he is looking at and leaned along its
+    last miss. A ledger line, never a chat message, never shown to Argus."""
+    v = of(srv)
+    if v is None or not v._booted or qv is None:
+        return None
+    tgt = v.steer(sid, np.asarray(qv, dtype=float))
+    return v.speak(tgt, message=(context or "")[:400], sid=sid, mid="", message_vec=np.asarray(qv, dtype=float))
+
+
+def grade_guess(srv, sid: str, rec, actual: str) -> dict | None:
+    """His real words grade the guess; the gap leans the next try (one
+    embedding call for both)."""
+    v = of(srv)
+    if v is None or not rec or not (actual or "").strip():
+        return None
+    key = " ".join(pool_sentences(strip_meant(actual))[:2]) or clean(actual)[:300]
+    try:
+        E = v.embedder.embed([rec["text"], key])
+        a, b = _unit(np.asarray(E[0], float)), _unit(np.asarray(E[1], float))
+    except Exception:
+        return None
+    c = round(float(a @ b), 4)
+    v.correction[sid] = b - a                       # the miss leans the next try
+    v._ledger({"id": rec["id"], "mode": "predict:" + str(rec.get("mode") or ""), "closeness": c,
+               "miss_gap": round(float(np.linalg.norm(b - a)), 4)})
+    v.pair(rec["id"], key, kind="move")
+    return {"said": rec["text"][:300], "closeness": c}
+
+
+def predict_line(srv, sid: str, qv, context: str, actual: str) -> dict | None:
+    """Say the guess, then grade it (a move whose guess could only be made
+    once the moves before it were known)."""
+    return grade_guess(srv, sid, say_guess(srv, sid, qv, context), actual)
+
+
 # ---- the seat's wiring ------------------------------------------------------
 _CHAT_LANES = ("operator", "plan")
 
@@ -1186,6 +1223,64 @@ def role_set(runner, sid: str, r: str) -> str:
     runner._voice_role[sid] = r if r in ROLES else "babble"
     _publish_auto(runner, sid)
     return runner._voice_role[sid]
+
+
+def frame_move(line: str) -> str:
+    """Membrane's line between Argus's moves: its words only, no instructions."""
+    return VOICE_PREFIX + "\u00ab" + line + "\u00bb"
+
+
+def babble_move(runner, sid: str, tool_calls, content: str = "") -> None:
+    """BABBLE, EVERY MOVE (2026-10-11, the operator: "and the same about the
+    babble mode"): in auto-chat with membrane babbling, it answers each of
+    Argus's moves -- its line aimed at what he just did, joining his
+    conversation before his next step (the mid-turn path a person's message
+    takes). A round that ends his turn is answered by the next auto round."""
+    srv = getattr(runner, "srv", None)
+    if not tool_calls or not auto_on(runner, sid) or role(runner, sid) != "babble":
+        return
+    v = of(srv)
+    if v is None or not v._booted:
+        return
+
+    def go():
+        try:
+            from .server import _gen_id
+            from .lanes import _efield_of
+            from . import massage
+            what = (content or "").strip()
+            for tc in tool_calls:
+                fn = (tc or {}).get("function") or {}
+                what += f"\n{fn.get('name') or ''} {str(fn.get('arguments') or '')[:300]}"
+            what = what.strip()
+            if not what:
+                return
+            fld = _efield_of(srv)
+            qv = np.asarray(v.embedder.embed([what[:2000]])[0], dtype=float)
+            mid = _gen_id("msg")
+            rec = v.speak(v.steer(sid, aim(qv, massage.field_now(fld) if fld is not None else None)),
+                          message=what, sid=sid, mid=mid, message_vec=qv,
+                          rules=voice_rules(getattr(srv, "entity_store", None)))
+            if rec is None or not auto_on(runner, sid):
+                return
+            runner.hub.publish({"type": "membrane.voice", "sessionID": sid, "line": dict(rec)})
+            now = int(time.time() * 1000)
+            agent = str((runner.sessions.get(sid) or {}).get("agent") or "build")
+            text = frame_move(rec["text"])
+            info = {"id": mid, "sessionID": sid, "role": "user", "agent": agent,
+                    "voiceTurn": True, "time": {"created": now}}
+            parts = [{"id": _gen_id("prt"), "sessionID": sid, "messageID": mid,
+                      "type": "text", "text": text, "time": {"start": now}}]
+            runner.messages.append(sid, info, parts)
+            runner._announce_user(sid, info, parts)
+            info["_announced"] = True
+            runner._enqueue(sid, text, info, parts, threading.Event())   # his next step takes it in
+        except Exception as e:
+            print(f"[voice] move babble failed: {e!r}", file=sys.stderr)
+
+    th = threading.Thread(target=go, daemon=True, name="voice-move")
+    runner.__dict__.setdefault("_babble_threads", {})[sid] = th      # his next step waits for it
+    th.start()
 
 
 def auto_on(runner, sid: str) -> bool:

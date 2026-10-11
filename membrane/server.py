@@ -1696,6 +1696,10 @@ class TurnRunner:
                 # history -- the model's next step sees them (a 9-minute
                 # turn kept four of them waiting, the hint it needed among
                 # them); each is consumed, never replayed as its own turn
+                # BABBLE, EVERY MOVE: membrane's line on his last move lands first
+                _bth = (getattr(self, "_babble_threads", None) or {}).pop(sid, None)
+                if _bth is not None:
+                    _bth.join(5)
                 _said = self._take_interjections(sid, aid)
                 if _said:
                     # THE REPLY SPLITS AROUND THE OPERATOR'S WORDS: the
@@ -1757,7 +1761,7 @@ class TurnRunner:
             try:
                 from . import predict as _predict
                 _predict.step_start(self, sid, _predict.context_of(history, _aim_text),
-                                    _lane_of((self._agents or {}).get(sid)), step=rounds)
+                                    _lane_of((self._agents or {}).get(sid)), step=rounds, mid=aid)
             except Exception:
                 pass
             body = {"model": turn_model,
@@ -1833,7 +1837,12 @@ class TurnRunner:
             reason = "tool-calls" if tcs else "stop"
             try:
                 from . import predict as _predict
-                _predict.step_end(self, sid, list(tcs or []), content, step=rounds)
+                _predict.step_end(self, sid, list(tcs or []), content, step=rounds, mid=aid)
+            except Exception:
+                pass
+            try:
+                from . import voice as _voice
+                _voice.babble_move(self, sid, list(tcs or []), content)
             except Exception:
                 pass
             if msg.get("reasoning") or msg.get("thinking"):
@@ -2498,6 +2507,10 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                     if segs[1] == "auto":
                         from . import voice as _voice
                         return self._json_out(_voice.auto_state(runner, sid) if runner else {"on": False})
+                    if segs[1] == "predict":
+                        # membrane's phantoms: its guesses of Argus's moves (predict.py)
+                        from . import predict as _predict
+                        return self._json_out(_predict.phantoms(runner, sid) if runner else [])
                     if segs[1] == "voice":
                         # membrane's own voice: this session's lines
                         from . import voice as _voice

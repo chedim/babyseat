@@ -251,6 +251,16 @@ function applyEvent(st, ev) {
     case "membrane.auto":
       st.auto = { on: !!props.on, rounds: props.rounds || 0, mode: props.mode || "explore", role: props.role || "babble" };
       return true;
+    case "membrane.predict": {
+      // membrane's guess of one of Argus's moves: a phantom in its place
+      const it = props.item || {};
+      if (!it.mid || typeof it.n !== "number") return false;
+      st.phantoms = st.phantoms || {};
+      const m = st.phantoms[it.mid] = st.phantoms[it.mid] || {};
+      m[it.n] = Object.assign({}, m[it.n] || {}, it);
+      st.dirty.add(it.mid);
+      return true;
+    }
     case "membrane.voice": {
       // membrane's own voice: a line beside the user message it answers
       const line = props.line || {};
@@ -292,6 +302,34 @@ function loadVoice(st, lines) {
   st.voice = {};
   for (const l of lines || []) if (l && l.mid) st.voice[l.mid] = Object.assign({}, l);
   st.all = true;
+}
+
+/** Membrane's guesses of Argus's moves (GET /session/{sid}/predict), by message and place. */
+function loadPhantoms(st, items) {
+  st.phantoms = {};
+  for (const it of items || []) {
+    if (!it || !it.mid || typeof it.n !== "number") continue;
+    (st.phantoms[it.mid] = st.phantoms[it.mid] || {})[it.n] = Object.assign({}, it);
+  }
+}
+
+/** Is this part one of Argus's moves (a text message or a tool call he made)? */
+function isMove(p) {
+  if (!p || typeof p !== "object") return false;
+  if (p.type === "text") return !!(p.text && !p.synthetic);
+  return p.type === "tool" && toolView(p).name !== "membrane";
+}
+
+/** A phantom: membrane's guess of a move, greyed -- a phrase it expected him
+ *  to write, or a tool call; ✓ / ~ (in its top 3) / ✗ once the move is made. */
+function phantomHtml(it) {
+  if (!it || !it.label) return "";
+  const mark = it.pending ? "…" : it.hit ? "✓" : it.top3 ? "~" : "✗";
+  const close = typeof it.closeness === "number" ? " " + Math.round(it.closeness * 100) + "%" : "";
+  const title = it.pending ? "membrane expects this next" : "membrane guessed this; Argus did: " + (it.actual || "?");
+  return '<div class="phantom ' + (it.kind === "tool" ? "ptool" : "ptext") + (it.pending ? " pending" : "") +
+    '" title="' + escAttr(title) + '"><span class="pmark">' + mark + close + "</span> " +
+    (it.kind === "tool" ? "🔧 " : "") + escText(it.label) + "</div>";
 }
 
 /** The voice's bubble: its line, its closeness to the LLM's reply, and
@@ -441,7 +479,7 @@ function replyToSpeak(rows) {
   return null;
 }
 
-const AiPanelLogic = { guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
+const AiPanelLogic = { phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
@@ -514,6 +552,10 @@ const STYLE = `
   .vbtn { border:0; background:transparent; cursor:pointer; opacity:.45; font-size:14px; padding:0 4px; }
   .vbtn:hover, .vbtn.on { opacity:1; } .vre { font-size:12px; opacity:.7; margin-top:4px; }
   .vguess { font-size:11px; opacity:.6; margin-top:3px; }
+  .phantom { opacity:.45; font-style:italic; border:1px dashed var(--divider-color, #888); border-radius:10px;
+             padding:4px 9px; margin:4px 0; font-size:13px; white-space:pre-wrap; }
+  .phantom.ptool { font-style:normal; font-family:var(--code-font-family, monospace); font-size:12px; }
+  .phantom.pending { opacity:.3; } .phantom .pmark { font-style:normal; font-size:11px; }
   .autobtn.spinning { animation:aspin 2.4s linear infinite; } @keyframes aspin { to { transform:rotate(360deg); } }
   .vedit { display:flex; gap:6px; margin-top:6px; } .vedit textarea { flex:1; font:inherit; border-radius:8px; padding:4px 8px; }
   .msg.ai.live { border-left-color:var(--primary-color,#3477d6); }
@@ -1031,17 +1073,19 @@ function definePanel() {
     async _resync() {
       if (!this._chat) return;
       const sid = this._sid;
-      const [hist, st, vox, auto] = await Promise.all([
+      const [hist, st, vox, auto, phs] = await Promise.all([
         this._api(SERVE + "/session/" + sid + "/message"),
         this._api(SERVE + "/session/status"),
         this._api(SERVE + "/session/" + sid + "/voice").catch(() => ({ ok: false })),
         this._api(SERVE + "/session/" + sid + "/auto").catch(() => ({ ok: false })),
+        this._api(SERVE + "/session/" + sid + "/predict").catch(() => ({ ok: false })),
       ]);
       if (sid !== this._sid) return;
       loadRows(this._chat, hist.ok && Array.isArray(hist.data) ? hist.data : []);
       // what was already said is not announced again (only replies from now on)
       { const r0 = replyToSpeak(this._chat.rows); this._spokenId = r0 ? r0.id : null; this._repliesArmed = true; }
       loadVoice(this._chat, vox && vox.ok && Array.isArray(vox.data) ? vox.data : []);
+      loadPhantoms(this._chat, phs && phs.ok && Array.isArray(phs.data) ? phs.data : []);
       this._chat.auto = auto && auto.ok && auto.data ? auto.data : { on: false };
       this._paintAuto();
       if (st.ok && st.data && typeof st.data === "object") {
@@ -1418,8 +1462,12 @@ function definePanel() {
       el.className = "msg ai" + (live ? " live" : "");
       const who = [info.agent || info.mode, info.modelID].filter(Boolean).join(" · ");
       let html = who ? '<div class="who">' + escText(who) + "</div>" : "";
+      // PREDICT MODE: membrane's guess of each move, greyed, right before the move it guessed
+      const ph = (this._chat && (this._chat.auto || {}).role === "predict" && (this._chat.phantoms || {})[info.id]) || null;
+      let k = 0;
       for (const p of row.parts) {
         if (!p || typeof p !== "object") continue;
+        if (ph && isMove(p)) { html += phantomHtml(ph[k]); k++; }
         if (p.type === "text") {
           if (p.text) html += '<div class="md">' + md(p.text) + "</div>";
         } else if (p.type === "reasoning") {
@@ -1435,6 +1483,7 @@ function definePanel() {
           html += '<div class="usage">📎 ' + escText(p.filename || p.url || "file") + "</div>";
         }
       }
+      if (ph) for (const n of Object.keys(ph).map(Number).filter((n) => n >= k).sort((a, b) => a - b)) html += phantomHtml(ph[n]);
       const usage = fmtUsage(info);
       if (usage && (info.time || {}).completed) html += '<div class="usage">' + escText(usage) + "</div>";
       if (info.error) html += '<div class="err">' + escText(pretty(info.error.data || info.error)) + "</div>";

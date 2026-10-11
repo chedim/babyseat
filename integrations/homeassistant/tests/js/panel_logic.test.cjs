@@ -249,3 +249,15 @@ test("membrane's role is its own switch: babble <-> predict", () => {
   const st = L.chatState ? L.chatState("s1") : null;
   if (st) { L.applyEvent(st, { type: "membrane.auto", properties: { sessionID: "s1", on: true, role: "predict" } }); assert.equal(st.auto.role, "predict"); }
 });
+
+test("predict mode: membrane's guessed moves are phantoms in their places", () => {
+  const st = L.chatState("s1");
+  L.applyEvent(st, { type: "membrane.predict", properties: { sessionID: "s1", item: { id: "m1:0", mid: "m1", n: 0, kind: "tool", label: "entity.read ha:light.cabin", pending: true } } });
+  L.applyEvent(st, { type: "membrane.predict", properties: { sessionID: "s1", item: { id: "m1:0", mid: "m1", n: 0, pending: false, hit: true, actual: "entity.read" } } });
+  assert.equal(st.phantoms.m1[0].label, "entity.read ha:light.cabin");
+  const h = L.phantomHtml(st.phantoms.m1[0]);
+  assert.ok(h.includes("phantom ptool") && h.includes("✓") && h.includes("🔧 entity.read ha:light.cabin"), h);
+  assert.ok(L.phantomHtml({ kind: "text", label: "The light is on.", pending: false, hit: false, top3: true, closeness: 0.71 }).includes("~ 71%"));
+  assert.ok(L.isMove({ type: "text", text: "hi" }) && !L.isMove({ type: "reasoning", text: "x" }) && !L.isMove({ type: "text", text: "" }));
+  assert.equal(L.phantomHtml({ label: "" }), "");
+});

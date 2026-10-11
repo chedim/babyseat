@@ -40,7 +40,8 @@ import numpy as np
 TOP = 3
 KNN = 16
 MEM_MAX = 4000
-NONE = "(reply)"                      # a round with no tool calls: a plain answer is a move too
+NONE = "(reply)"                      # (legacy: a whole round with no tool calls)
+TEXT = "(text)"                       # a text message: a move of its own, its words predicted too
 START = "(start)"                     # the action before a turn's first round
 SOURCES = ("named", "past", "near")
 _ENT_KEYS = ("spec", "eid", "name", "entity", "key", "id", "object", "on", "over")
@@ -313,6 +314,35 @@ def candidates(srv, text: str, qv) -> tuple[list[str], list[tuple[str, float]]]:
     return named, near
 
 
+PHANTOM_LOG = 400
+
+
+def _label(g: dict) -> tuple[str, str]:
+    """(kind, label) of a guess's top move: a tool call with its entity, or text."""
+    t = (g.get("tools") or [[TEXT, 0]])[0][0]
+    if t in (TEXT, NONE):
+        return "text", ""
+    e = (g.get("ents") or [[""]])[0][0]
+    return "tool", t + (f" {e}" if e else "")
+
+
+def publish(runner, sid: str, item: dict) -> None:
+    """A phantom: membrane's guess of one of Argus's moves, for the chat to
+    draw greyed beside the real one (and kept for a reload)."""
+    log = runner.__dict__.setdefault("_predict_log", {}).setdefault(sid, {})
+    log[item["id"]] = {**log.get(item["id"], {}), **item}
+    while len(log) > PHANTOM_LOG:
+        log.pop(next(iter(log)))
+    try:
+        runner.hub.publish({"type": "membrane.predict", "sessionID": sid, "item": dict(log[item["id"]])})
+    except Exception:
+        pass
+
+
+def phantoms(runner, sid: str) -> list[dict]:
+    return list(((runner.__dict__.get("_predict_log") or {}).get(sid) or {}).values())
+
+
 def calls_of(tool_calls) -> tuple[list[str], list[str]]:
     """A round's tool calls (the model's own shape) -> actions, entities."""
     tools, ents = [], []
@@ -342,7 +372,7 @@ def context_of(history, first_text: str = "") -> str:
     return "\n".join(reversed(tail)) if tail else first_text
 
 
-def step_start(runner, sid: str, text: str, lane: str, step: int = 1) -> None:
+def step_start(runner, sid: str, text: str, lane: str, step: int = 1, mid: str = "") -> None:
     """Before a round: the guess for this move (its own thread; the round
     never waits on it). Keyed by (session, round): moves never cross."""
     p = of(getattr(runner, "srv", None))
@@ -363,8 +393,22 @@ def step_start(runner, sid: str, text: str, lane: str, step: int = 1) -> None:
             qv = np.asarray(emb.embed([(clean(text) or text)[:2000]])[0], dtype=np.float32)
             named, near = candidates(srv, text, qv)
             g = p.guess(qv, lane, named=named, near=near, prev=prev)
+            kind, label = _label(g)
+            said = None
+            if kind == "text":
+                try:
+                    from . import voice as _voice
+                    said = _voice.say_guess(srv, sid, qv, text)
+                    label = (said or {}).get("text") or ""
+                except Exception:
+                    said = None
+            n = (runner.__dict__.get("_predict_seq") or {}).get((sid, mid), 0)
             runner.__dict__.setdefault("_predict_pending", {})[key] = {
-                "guess": g, "qv": qv, "lane": lane, "prev": prev, "ts": time.time()}
+                "guess": g, "qv": qv, "lane": lane, "prev": prev, "ts": time.time(),
+                "named": named, "near": near, "ctx": text[:600], "said": said, "n": n}
+            if label:
+                publish(runner, sid, {"id": f"{mid}:{n}", "mid": mid, "n": n, "kind": kind,
+                                      "label": label[:300], "pending": True})
         except Exception as e:
             print(f"[predict] guess failed: {e!r}", file=sys.stderr)
 
@@ -373,36 +417,88 @@ def step_start(runner, sid: str, text: str, lane: str, step: int = 1) -> None:
     th.start()
 
 
-def step_end(runner, sid: str, tool_calls, content: str = "", step: int = 1, wait: bool = False):
-    """The round answered. The move itself is noted now (the next round's
-    guess builds on it); the score lands in a thread (or inline: wait=True)."""
+def moves_of(tool_calls, content: str = "") -> list[dict]:
+    """A round's response as Argus's MOVES, in order (2026-10-11, the operator:
+    "predict/learn inside the LLM's step, every text message and every tool
+    call"): the text he writes (a lead-in or the answer), then each tool call."""
+    out = []
+    if (content or "").strip():
+        out.append({"action": TEXT, "ents": [], "text": content.strip()})
+    for tc in tool_calls or []:
+        t, e = calls_of([tc])
+        if t:
+            out.append({"action": t[0], "ents": e, "text": ""})
+    return out
+
+
+def step_end(runner, sid: str, tool_calls, content: str = "", step: int = 1, wait: bool = False,
+             mid: str = ""):
+    """The round answered: every move in it is predicted from the moves before
+    it (the round's first move by the guess made before the model ran; each
+    next one given what came before -- never the move itself), then scored and
+    learned. The moves are noted now (the next round builds on them); the
+    scoring runs in a thread (or inline: wait=True)."""
     p = of(getattr(runner, "srv", None))
     if p is None:
         return None
-    tools, ents = calls_of(tool_calls)
+    moves = moves_of(tool_calls, content)
     turn = (runner.__dict__.get("_predict_turn") or {}).get(sid)
-    if turn is not None:
-        turn["prev"] = tools[0] if tools else NONE
-        turn["did"].append(tools or [NONE])
+    if turn is not None and moves:
+        turn["prev"] = moves[-1]["action"]
+        turn["did"].append([m["action"] for m in moves])
     key = (sid, int(step))
+    srv = getattr(runner, "srv", None)
+    seq = runner.__dict__.setdefault("_predict_seq", {})
+    base = seq.get((sid, mid), 0)
+    seq[(sid, mid)] = base + len(moves)                 # each move's place in its message
 
     def go():
         th = (runner.__dict__.get("_predict_threads") or {}).pop(key, None)
         if th is not None:
             th.join(20)
         pend = (runner.__dict__.get("_predict_pending") or {}).pop(key, None)
-        if not pend:
+        if not pend or not moves:
             return None
-        res = p.score(pend["guess"], pend["qv"], pend["lane"], tools, ents,
-                      meta={"sid": sid, "move": int(step)}, prev=pend["prev"])
-        if turn is not None:
-            with p._lock:
-                turn["moves"] += 1
-                turn["top1"] += int(res["tool1"])
-                turn["top3"] += int(res["tool3"])
-                if turn["first"] is None or int(step) == 1:
-                    turn["first"] = pend["guess"]
-        return res
+        if pend.get("n", base) != base:                    # the message moved on: re-place the first guess
+            ((runner.__dict__.get("_predict_log") or {}).get(sid) or {}).pop(f"{mid}:{pend['n']}", None)
+        results = []
+        prev, g = pend["prev"], pend["guess"]
+        for i, mv in enumerate(moves):
+            if i:                                          # the next move, given the ones before it
+                g = p.guess(pend["qv"], pend["lane"], named=pend.get("named") or (),
+                            near=pend.get("near") or (), prev=prev)
+            meta = {"sid": sid, "move": f"{int(step)}.{i + 1}", "action": mv["action"]}
+            kind, label = _label(g)
+            if kind == "text":
+                try:                                       # membrane's speech generator said it first
+                    from . import voice as _voice
+                    rec = pend.get("said") if i == 0 else _voice.say_guess(srv, sid, pend["qv"], pend.get("ctx") or "")
+                    graded = _voice.grade_guess(srv, sid, rec, mv["text"]) if mv["action"] == TEXT else None
+                    label = (rec or {}).get("text") or ""
+                    if graded:
+                        meta.update(graded)
+                except Exception as e:
+                    print(f"[predict] text guess failed: {e!r}", file=sys.stderr)
+            res = p.score(g, pend["qv"], pend["lane"], [mv["action"]], mv["ents"], meta=meta, prev=prev)
+            if "closeness" in meta:
+                res["closeness"] = meta["closeness"]
+            results.append(res)
+            if label:
+                publish(runner, sid, {"id": f"{mid}:{base + i}", "mid": mid, "n": base + i, "kind": kind,
+                                      "label": label[:300], "pending": False, "hit": bool(res["tool1"]),
+                                      "top3": bool(res["tool3"]), "actual": mv["action"],
+                                      **({"closeness": res["closeness"]} if "closeness" in res else {})})
+            if turn is not None:
+                with p._lock:
+                    turn["moves"] += 1
+                    turn["top1"] += int(res["tool1"])
+                    turn["top3"] += int(res["tool3"])
+                    if "closeness" in res:
+                        turn.setdefault("closeness", []).append(res["closeness"])
+                    if turn["first"] is None:
+                        turn["first"] = g
+            prev = mv["action"]
+        return results
 
     if wait:
         return go()
@@ -426,4 +522,6 @@ def end(runner, sid: str, parts=None) -> dict | None:
     return {"guess": turn["first"],
             "did": {"tools": list(dict.fromkeys(did)), "ents": []},
             "score": {"moves": turn["moves"], "top1": turn["top1"], "top3": turn["top3"],
-                      "tool1": turn["top1"] == turn["moves"], "tool3": turn["top3"] == turn["moves"]}}
+                      "tool1": turn["top1"] == turn["moves"], "tool3": turn["top3"] == turn["moves"],
+                      **({"text_closeness": round(sum(turn["closeness"]) / len(turn["closeness"]), 3)}
+                         if turn.get("closeness") else {})}}
