@@ -1169,11 +1169,12 @@ def strip_meant(reply: str) -> str:
 # with itself like an agent, and membrane predicts it"): auto-chat on/off
 # is one switch; membrane's role is the other --
 #   babble   its lines go to Argus (auto-chat's explore / teach)
-#   predict  Argus never hears it: auto-chat's turns are Argus working on as
-#            an agent from his own last reply; membrane speaks its guess first
-#            and predicts his actions (predict.py), graded when the turn ends
+#   predict  Argus never hears it: in auto-chat his turn just keeps going --
+#            no message of anyone's, the next round starts from the
+#            conversation as it stands (2026-10-11, the operator's option 2,
+#            after an invented '[auto] carry on...' prompt was rightly refused);
+#            membrane speaks its guess first and predicts every move
 ROLES = ("babble", "predict")
-AUTO_PREFIX = "[auto] "
 
 
 def role(runner, sid: str) -> str:
@@ -1185,15 +1186,6 @@ def role_set(runner, sid: str, r: str) -> str:
     runner._voice_role[sid] = r if r in ROLES else "babble"
     _publish_auto(runner, sid)
     return runner._voice_role[sid]
-
-
-def frame_agent(reply: str = "") -> str:
-    """The self-turn in predict mode: no one is typing, no voice line --
-    Argus carries on from his own last reply, like an agent."""
-    return (AUTO_PREFIX + "Nobody is typing -- carry on by yourself, like an agent: take the next step "
-            "that matters most now (your open goals, what you just found, what looks wrong), with "
-            "your tools if it is worth it. Then say in one or two plain sentences what you did "
-            "and what comes next.")
 
 
 def auto_on(runner, sid: str) -> bool:
@@ -1290,24 +1282,26 @@ def auto_next(runner, sid: str, reply: str) -> None:
         except Exception:
             pass
         if role(runner, sid) == "predict":
+            if not (reply or "").strip():
+                return                             # nothing said yet: nothing to continue
+            if reply.lstrip().startswith("model ladder failed"):
+                # the model refused a conversation ending on its own reply: stop, don't spin
+                print(f"[voice] auto continuation stopped: {reply.strip()[:160]}", file=sys.stderr)
+                auto_set(runner, sid, False)
+                return
             try:
                 from .server import _gen_id
-                mid = _gen_id("msg")
                 runner._auto_aim = getattr(runner, "_auto_aim", None) or {}
                 runner._auto_aim[sid] = clean(reply) or reply or ""      # what the guess aims from
-                now = int(time.time() * 1000)
                 agent = str((runner.sessions.get(sid) or {}).get("agent") or "build")
-                text = frame_agent(reply)
-                info = {"id": mid, "sessionID": sid, "role": "user", "agent": agent,
-                        "autoTurn": True, "time": {"created": now}}
-                parts = [{"id": _gen_id("prt"), "sessionID": sid, "messageID": mid,
-                          "type": "text", "text": text, "time": {"start": now}}]
-                runner.messages.append(sid, info, parts)
+                info = {"id": _gen_id("msg"), "sessionID": sid, "role": "user", "agent": agent,
+                        "autoTurn": True, "continueTurn": True,
+                        "time": {"created": int(time.time() * 1000)}}
                 runner._auto[sid]["rounds"] = runner._auto[sid].get("rounds", 0) + 1
                 _publish_auto(runner, sid)
-                runner.run(sid, text, user_info=info, user_parts=parts)
+                runner.run(sid, "", user_info=info, user_parts=[])      # nothing stored, nothing said
             except Exception as e:
-                print(f"[voice] auto agent round failed: {e!r}", file=sys.stderr)
+                print(f"[voice] auto continuation failed: {e!r}", file=sys.stderr)
             return
         try:
             from .server import _gen_id

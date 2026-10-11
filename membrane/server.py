@@ -1170,7 +1170,8 @@ class TurnRunner:
             # already stored: announce ITS parts.
             _stored = self.messages.get_msg(sid, user_info.get("id"))
             user_parts = list((_stored or {}).get("parts") or [])
-        self._announce_user(sid, user_info, user_parts)
+        if not user_info.get("continueTurn"):
+            self._announce_user(sid, user_info, user_parts)
         user_info["_announced"] = True      # the inner's announce skips
         guard = self._guard(sid)
         got = guard.acquire(blocking=False)
@@ -1584,7 +1585,11 @@ class TurnRunner:
         # assistant/tool pairs as they form
         history = self._prior_history(sid, str(user_info.get("id") or "")) \
             if user_info else []
-        history.append({"role": "user", "content": text})
+        # A CONTINUATION (auto-chat, predict role -- 2026-10-11, the operator's
+        # option 2: "the turn just keeps going"): no message at all; the next
+        # round starts from the conversation as it stands, his own last reply last
+        if not user_info.get("continueTurn"):
+            history.append({"role": "user", "content": text})
         # MEMBRANE'S OWN VOICE (the third participant): it speaks first,
         # in its own thread, outside the session's messages
         # an auto self-turn (predict role) aims from Argus's own last reply,

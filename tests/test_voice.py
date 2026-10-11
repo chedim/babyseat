@@ -637,6 +637,10 @@ class TestMembranesRole(unittest.TestCase):
         self.assertEqual(V.auto_state(r, sid)["role"], "babble")
         self.assertEqual(V.role_set(r, sid, "predict"), "predict")
         self.assertFalse(V.auto_state(r, sid)["on"])                    # the role alone starts nothing
+        r.messages.append(sid, {"id": "msg_u0", "sessionID": sid, "role": "user", "time": {"created": 1}},
+                          [{"id": "p0", "type": "text", "text": "check the battery"}])
+        r.messages.append(sid, {"id": "msg_a0", "sessionID": sid, "role": "assistant", "time": {"created": 2, "completed": 3}},
+                          [{"id": "p1", "type": "text", "text": "The battery is at ninety percent."}])
         V.auto_set(r, sid, True)
         end = time.time() + 15
         while time.time() < end and lad.n < 3:
@@ -644,17 +648,16 @@ class TestMembranesRole(unittest.TestCase):
         r.abort(sid)
         self.assertGreaterEqual(lad.n, 3)
         rows = r.messages.list(sid)
-        users = [m for m in rows if (m.get("info") or {}).get("role") == "user"]
-        self.assertTrue(users and all((m["info"]).get("autoTurn") for m in users))
-        self.assertFalse(any((m["info"]).get("voiceTurn") for m in users))
-        sent = " ".join(m["content"] for m in lad.last["messages"] if m["role"] == "user")
-        self.assertNotIn(V.VOICE_PREFIX.strip(), sent)                  # Argus never hears membrane
-        self.assertIn("carry on by yourself", sent)
-        time.sleep(0.5)
-        rep = srv._predictor.report()
-        self.assertGreaterEqual(rep["operator"]["turns"], 2)           # and membrane predicted his turns
-        v = V.of(srv)
-        self.assertEqual(v.table.uni.get("nobody", 0), 0)              # the boilerplate is never heard
+        self.assertEqual([m["info"]["id"] for m in rows if m["info"].get("role") == "user"], ["msg_u0"])  # no new message of anyone's
+        sent = lad.last["messages"]
+        self.assertEqual(sent[-1]["role"], "assistant")                 # the turn just keeps going
+        blob = " ".join(str(m.get("content")) for m in sent)
+        self.assertNotIn(V.VOICE_PREFIX.strip(), blob)                  # Argus never hears membrane
+        self.assertNotIn("[auto]", blob)                                # and nothing invented is said for him
+        end = time.time() + 5
+        while time.time() < end and srv._predictor.report().get("operator", {}).get("turns", 0) < 2:
+            time.sleep(0.1)
+        self.assertGreaterEqual(srv._predictor.report()["operator"]["turns"], 2)   # and membrane predicted his moves
 
     def test_babble_role_keeps_the_voice_turns(self):
         r = type("R", (), {"_auto": {}, "hub": S.SSEHub(), "_busy": {"s1": 1}, "messages": S.MessageStore()})()
@@ -684,3 +687,23 @@ class TestLearningFromMisses(unittest.TestCase):
         self.assertIn("s1", v.correction)                              # the next aim leans toward it
         pairs = (Path(d) / "voice" / "pairs.jsonl").read_text()
         self.assertIn("The anchor holds on sand.", pairs)
+
+
+class TestContinuationRefused(unittest.TestCase):
+    def test_a_model_that_refuses_to_continue_stops_auto_chat(self):
+        r = type("R", (), {"_auto": {"s1": {"rounds": 3, "mode": "explore"}}, "hub": S.SSEHub(),
+                           "_busy": {}, "messages": S.MessageStore(), "_voice_role": {"s1": "predict"},
+                           "srv": None})()
+        srv = _Srv()
+        srv.membrane = type("M", (), {"embedder": FakeEmbedder()})()
+        r.srv = srv
+        old = V.AUTO_PAUSE_S
+        V.AUTO_PAUSE_S = 0.01
+        try:
+            V.auto_next(r, "s1", "model ladder failed: HTTPError: 400 last message must be user")
+            end = time.time() + 3
+            while time.time() < end and V.auto_on(r, "s1"):
+                time.sleep(0.02)
+        finally:
+            V.AUTO_PAUSE_S = old
+        self.assertFalse(V.auto_on(r, "s1"))
