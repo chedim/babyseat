@@ -140,6 +140,28 @@ test("streamed replies are said sentence by sentence, the rest when the part clo
   });
 });
 
+test("with the stream LIVE, Argus's parts are said too -- and membrane's lines (2026-10-11)", { timeout: 120000 }, async () => {
+  // the speech buffer shared the name `_live` with the stream's flag: once the
+  // stream was up, true[partId] = ... threw and only membrane's lines spoke
+  await withPage(spoken("."), async (page) => {
+    const said = await page.evaluate(() => {
+      const chat = window.__home.shadowRoot.querySelector("ai-terminal-panel");
+      const out = [];
+      chat.addEventListener("ai-speak", (e) => out.push(e.detail.kind + ": " + e.detail.text));
+      chat._chat = { sid: "s1", byId: { m1: { info: { id: "m1", role: "assistant" } } } };
+      chat._live = true;                                     // the stream is up
+      const ev = (type, props) => chat._announceSpeech({ type, properties: props }, props);
+      ev("message.part.updated", { part: { id: "p1", messageID: "m1", type: "text", text: "", time: { start: 1 } } });
+      ev("message.part.delta", { partID: "p1", messageID: "m1", field: "text", delta: "The relay is off now. Checking the camera" });
+      ev("message.part.updated", { part: { id: "p1", messageID: "m1", type: "text", text: "The relay is off now. Checking the camera next.", time: { start: 1, end: 2 } } });
+      ev("membrane.voice", { line: { id: "v1", text: "The camera sleeps." } });
+      return { out, live: chat._live };
+    });
+    assert.deepEqual(said.out, ["argus: The relay is off now.", "argus: Checking the camera next.", "membrane: The camera sleeps."]);
+    assert.equal(said.live, true);                          // and the flag stays a flag
+  });
+});
+
 test("👂 hybrid (the default): the wake word on the device, the words after it by whisper", { timeout: 240000 }, async () => {
   await withPage(spoken("Hey Argus, turn on the deck lights."), async (page) => {
     await page.evaluate(() => {

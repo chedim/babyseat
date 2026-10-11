@@ -1187,7 +1187,11 @@ function definePanel() {
       // A part whose message isn't known yet (streaming sends parts first) is
       // Argus's unless it carries a person's speaker line.
       this._spokenParts = this._spokenParts || new Set();
-      this._live = this._live || {};
+      // its own buffer (2026-10-11): it shared the name this._live with the
+      // stream's live flag -- `true[partId] = ...` threw in strict mode while
+      // the stream was up, so every one of Argus's parts died unannounced
+      // and only membrane's lines (another path) were spoken
+      this._speechParts = this._speechParts || {};
       const emit = (kind, id, text) => {
         const t = speakText(text);
         if (!t || this._spokenParts.has(id)) return;
@@ -1209,11 +1213,11 @@ function definePanel() {
       };
       if (ev.type === "message.part.updated") {
         const part = p.part || {};
-        if (part.type) this._live[part.id] = Object.assign(this._live[part.id] || { buf: "", said: 0 }, { type: part.type, mid: part.messageID });
+        if (part.type) this._speechParts[part.id] = Object.assign(this._speechParts[part.id] || { buf: "", said: 0 }, { type: part.type, mid: part.messageID });
         if (part.type !== "text" || part.synthetic) return;
         if (!(part.time || {}).end) return;
-        const st = this._live[part.id] || { buf: "", said: 0 };
-        delete this._live[part.id];
+        const st = this._speechParts[part.id] || { buf: "", said: 0 };
+        delete this._speechParts[part.id];
         if (/^\s*\[membrane voice\]/i.test(part.text || "")) {
           if (roleOf(part.messageID) !== "assistant") {
             const line = voiceTurnText(part.text);
@@ -1227,7 +1231,7 @@ function definePanel() {
         if (st.said < st.buf.length) { const rest = st.buf.slice(st.said); if (rest.trim()) emit("argus", part.id + ":" + st.said, rest); }
       } else if (ev.type === "message.part.delta") {
         if (p.field && p.field !== "text") return;
-        const st = this._live[p.partID] || (this._live[p.partID] = { buf: "", said: 0, mid: p.messageID });
+        const st = this._speechParts[p.partID] || (this._speechParts[p.partID] = { buf: "", said: 0, mid: p.messageID });
         if (st.type && st.type !== "text") return;         // reasoning streams the same way: never said
         st.buf += String(p.delta || "");
         if (!isArgus(st.mid || p.messageID, st.buf)) return;
