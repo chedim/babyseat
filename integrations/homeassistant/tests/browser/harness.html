@@ -4,6 +4,14 @@
   // a stub hass: enough for membrane home to render and run its voice; the
   // field and the chat fail quietly (no seat behind this page)
   window.__said = [];
+  // silent: headless Chrome on a Mac speaks through the real speakers (the
+  // operator heard the tests' "uh-huh"s) -- speech is recorded, never played
+  window.__spoken = [];
+  if (window.speechSynthesis) {
+    window.speechSynthesis.speak = (u) => { window.__spoken.push(u.text); setTimeout(() => u.onend && u.onend(), 10); };
+    window.speechSynthesis.cancel = () => {};
+  }
+  HTMLMediaElement.prototype.play = function () { return Promise.resolve(); };
   window.fakeHass = { user: { id: "u-test", name: "Test User", is_admin: true }, states: {}, panels: {}, language: "en",
     fetchWithAuth: async () => new Response("{}", { status: 404 }), callApi: async () => { throw new Error("no api"); },
     callWS: async () => ({}), connection: { subscribeEvents: async () => () => {} } };

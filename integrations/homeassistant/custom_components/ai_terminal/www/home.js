@@ -159,7 +159,8 @@ function tiltOrbit(base, lr, fb, gain = TILT_GAIN) {
 // starts with the hotword reaches the chat. Opt-in (👂), paused while the page
 // is hidden, while you hold PTT and while Argus speaks; capped.
 const LS_HOTWORD = "membrane.home.hotword";
-const HOT_MIN_S = 0.4, HOT_MAX_S = 8, HOT_END_MS = 450, HOT_PER_MIN = 16, HOT_FOLLOW_MS = 8000;
+// ends of speech waited out longer (2026-10-10, the operator: "it cuts off mid-sentence")
+const HOT_MIN_S = 0.4, HOT_MAX_S = 12, HOT_END_MS = 900, HOT_PER_MIN = 16, HOT_FOLLOW_MS = 8000;
 const HOT_EARLY_S = 1.3;          // the first stretch is checked while you are still talking
 const HOT_ACKS = ["Yes?", "Uh-huh?", "Mm-hm?", "I'm listening."];
 // Latin and Cyrillic (runglish, 2026-10-10: "Аргус, включи свет"); JS's \b
@@ -205,7 +206,7 @@ const WAKE_RE = new RegExp("\\b(" + WAKE_GREETS.join("|") + ") (" + WAKE_NAMES.j
 // a safety net for very long messages, cut silently (the operator didn't want
 // "the rest is in the chat"; answers are short now and he can be interrupted)
 const SPEAK_MAX_SENTENCES = 12, SPEAK_MAX_CHARS = 1500;
-const DICTATE_END_MS = 600, DICTATE_WAIT_MS = 2500;
+const DICTATE_END_MS = 1100, DICTATE_WAIT_MS = 3000, LOCK_END_MS = 1600;
 
 function loadScript(src) {
   return new Promise((res, rej) => {
@@ -787,11 +788,14 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       };
       this._onKeyUp = (e) => { if (e.code === "Space" && this._rec && this._rec.mode === "ptt" && !typing(e)) { e.preventDefault(); this._recStop(true); } };
       this._listenKeys(true);
-      this._engine = lsGet(LS_STT, "device") === "lan" ? "lan" : "device";
+      // DICTATION by the brain phone's whisper by default (the in-page Vosk model
+      // missed accented English, 2026-10-10); the WAKE WORD always runs on the
+      // device -- nothing is sent until the name was heard. ⚙: all on-device.
+      this._engine = lsGet(LS_STT, "lan") === "device" ? "device" : "lan";
       this._engBtn = root.querySelector(".eng");
-      const paintEng = () => { this._engBtn.textContent = this._engine === "device" ? "⚙" : "⚙ᴸ";
-        this._engBtn.title = this._engine === "device" ? "Speech is recognised ON THIS DEVICE (private, fast). Tap: use the brain phone's whisper (more accurate, over your network)"
-                                                       : "Speech is recognised on the brain phone (whisper, over your network). Tap: on this device"; };
+      const paintEng = () => { this._engBtn.textContent = this._engine === "device" ? "⚙ᴰ" : "⚙";
+        this._engBtn.title = this._engine === "device" ? "Everything recognised ON THIS DEVICE (private, less accurate). Tap: dictation by the brain phone's whisper"
+                                                       : "Dictation by the brain phone's whisper (accurate, over your network; the wake word stays on this device). Tap: all on this device"; };
       paintEng();
       this._engBtn.addEventListener("click", () => {
         this._engine = this._engine === "device" ? "lan" : "device"; lsSet(LS_STT, this._engine); paintEng();
@@ -971,9 +975,9 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           const f = ev.inputBuffer.getChannelData(0);
           let ss = 0; for (let i = 0; i < f.length; i += 2) ss += f[i] * f[i];
           const rms = Math.sqrt(ss / (f.length / 2)); this._orbLevel(rms);
-          if (rec.local && rec.mode === "lock") {           // Siri-like: a pause ends it
+          if (rec.mode === "lock") {                        // Siri-like: a pause ends it
             if (rms > 0.02) { rec.spoke = true; rec.silent = 0; } else rec.silent += (f.length / rec.ctx.sampleRate) * 1000;
-            if (rec.spoke && rec.silent > 1200 && this._rec === rec) setTimeout(() => this._recStop(true), 0);
+            if (rec.spoke && rec.silent > LOCK_END_MS && this._rec === rec) setTimeout(() => this._recStop(true), 0);
           }
           if (rec.vr) rec.vr.kr.acceptWaveform(ev.inputBuffer);
           else rec.chunks.push(new Float32Array(f));
@@ -1093,7 +1097,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         h.ctx = new Ctx(); h.rate = h.ctx.sampleRate;
         h.src = h.ctx.createMediaStreamSource(h.stream);
         h.proc = h.ctx.createScriptProcessor(2048, 1, 1);
-        h.local = this._engine === "device";
+        h.local = true;                                  // the wake word: always on this device
         h.proc.onaudioprocess = (ev) => (h.local ? this._hotLocalFrame(h, ev.inputBuffer) : this._hotFrame(h, ev.inputBuffer.getChannelData(0)));
         if (h.local) {
           h.model = await this._voiceModel();
@@ -1132,13 +1136,21 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     // recognizer; its partial result says the name within a few hundred ms
     _wakeRecognizer(h) {
       if (h.wake) h.wake.drop();
-      h.wake = recognizer(h.model, h.rate, WAKE_GRAMMAR, (t) => this._localWake(h, t));
-      h.wake.onResult = (t) => this._localWake(h, t);
+      h.wake = recognizer(h.model, h.rate, WAKE_GRAMMAR, (t) => this._localWake(h, t, false));
+      h.wake.onResult = (t) => this._localWake(h, t, true);
       h.state = "wake";
     }
 
-    _localWake(h, text) {
+    _localWake(h, text, final) {
       if (h.state !== "wake" || !WAKE_RE.test(String(text || ""))) return;
+      if (this._speaking || (this._speechQ || []).length) {
+        // while he speaks the mic hears HIM (the speakers): only a whole short
+        // utterance that IS the wake phrase interrupts -- never a partial
+        // match inside his own sentences (it cut him off, 2026-10-10)
+        const words = String(text || "").trim().split(/\s+/).filter((w) => w && w !== "[unk]");
+        if (!final || words.length > 3) return;
+        this._vsay("👂 heard my name — stopped", 3000);
+      }
       this._hushTts();                                     // called by name: he stops talking
       this._hotHeard(h);                                   // the chime, now
       this._dictate(h, false);
@@ -1148,10 +1160,29 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
      * name, or -- after a bare "Hey Argus" -- the next sentence. */
     _dictate(h, follow) {
       h.state = "dictate"; h.follow = follow; h.spoke = !follow; h.silent = 0; h.dStart = performance.now();
-      h.free = recognizer(h.model, h.rate, null, (t) => { this._vsay("… " + t, 0); this._orbText(t); });
-      if (!follow) for (const c of h.ring || []) h.free.kr.acceptWaveformFloat(c, h.rate);   // the name's own breath
+      if (this._engine === "device") {
+        h.free = recognizer(h.model, h.rate, null, (t) => { this._vsay("… " + t, 0); this._orbText(t); });
+        if (!follow) for (const c of h.ring || []) h.free.kr.acceptWaveformFloat(c, h.rate);   // the name's own breath
+        h.dchunks = null;
+      } else {                                            // the words after the name go to whisper, nothing before
+        h.free = null;
+        h.dchunks = follow ? [] : (h.ring || []).slice(-Math.ceil(0.6 * h.rate / 2048));
+        this._vsay("listening…", 0);
+      }
       h.ring = [];
       this._orb("listening");
+    }
+
+    /** Chunks of audio -> text by the brain phone's whisper ('' on any failure). */
+    async _whisper(chunks, rate) {
+      const n = chunks.reduce((a, c) => a + c.length, 0), all = new Float32Array(n); let o = 0;
+      for (const c of chunks) { all.set(c, o); o += c.length; }
+      try {
+        const wav = wavBytes(downsample(all, rate, STT_RATE), STT_RATE);
+        const r = await this._hass.fetchWithAuth(STT_PATH, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: wav });
+        const d = await r.json().catch(() => ({}));
+        return (r.ok && d.text || "").trim();
+      } catch (e) { return ""; }
     }
 
     _hotLocalFrame(h, buf) {
@@ -1171,7 +1202,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         return;
       }
       if (h.state !== "dictate") return;                   // finishing: frames are not needed
-      h.free.kr.acceptWaveform(buf);
+      if (h.free) h.free.kr.acceptWaveform(buf); else if (h.dchunks) h.dchunks.push(new Float32Array(f32));
       const ms = (f32.length / h.rate) * 1000;
       if (rms >= thr) { h.spoke = true; h.silent = 0; } else h.silent += ms;
       const age = performance.now() - h.dStart;
@@ -1182,7 +1213,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     async _dictateDone(h) {
       h.state = "busy";
-      const follow = h.follow, text = await h.free.finish();
+      const follow = h.follow;
+      let text = "";
+      if (h.free) text = await h.free.finish();
+      else if (h.dchunks && h.dchunks.length && h.spoke) { this._orb("thinking"); text = await this._whisper(h.dchunks, h.rate); }
       if (this._hot !== h) return;
       this._wakeRecognizer(h);
       if (follow) {
@@ -1190,7 +1224,9 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         else { this._vsay("didn't catch that"); this._orb(null); }
         return;
       }
-      const w = hotword(text), rest = w.hit ? w.rest : text.replace(/^\s*(hey|hi|okay|ok)\s+(are gus|our gus|angus|august)\b/i, "").trim();
+      // whisper hears the name's tail in the kept 0.6 s ("gus, turn on..."): off with it
+      const w = hotword(text), rest = w.hit ? w.rest : text
+        .replace(/^\s*(?:(?:hey|hi|okay|ok)[\s,]+)?(?:are gus|our gus|argus|argos|angus|august|gus|us)(?=$|[\s,.!?-])[\s,.!?-]*/i, "").trim();
       if (rest.split(/\s+/).filter(Boolean).length >= 2) { this._sendSaid(rest); return; }
       await this._hotAck(h);
       if (this._hot === h) this._dictate(h, true);
@@ -1366,6 +1402,11 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     _say1(text, who = "argus") {
       return new Promise((res) => {
         try {
+          // Chrome's engine stalls on long stretches: keep it awake, and clear a stuck queue first
+          const ss = window.speechSynthesis;
+          if (ss.speaking && !this._speaking) ss.cancel();
+          clearInterval(this._ssKeep);
+          this._ssKeep = setInterval(() => { if (ss.speaking) { ss.pause(); ss.resume(); } else clearInterval(this._ssKeep); }, 10000);
           const u = new SpeechSynthesisUtterance(text);
           const v = who === "membrane" ? this._membraneVoice() : this._voice;
           if (v) { u.voice = v; u.lang = v.lang; }

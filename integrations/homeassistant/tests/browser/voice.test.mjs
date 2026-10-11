@@ -68,7 +68,7 @@ const said = (page, ms) => page.waitForFunction(() => window.__said.length > 0, 
 
 test("👂 on the device: 'Hey Argus, …' wakes it and the command reaches the chat", { timeout: 240000 }, async () => {
   await withPage(spoken("Hey Argus, turn on the deck lights."), async (page) => {
-    await page.evaluate(() => { localStorage.setItem("membrane.home.stt", "device"); });
+    await page.evaluate(() => { localStorage.setItem("membrane.home.stt", "device"); window.__home._engine = "device"; });
     await page.evaluate(() => window.__home.shadowRoot.querySelector(".ear").click());
     const out = await said(page, 200000);
     console.log("said:", out);
@@ -79,7 +79,7 @@ test("👂 on the device: 'Hey Argus, …' wakes it and the command reaches the 
 
 test("🔒 on the device: hands-free dictation ends itself on a pause", { timeout: 240000 }, async () => {
   await withPage(spoken("What is the battery level?"), async (page) => {
-    await page.evaluate(() => { localStorage.setItem("membrane.home.stt", "device"); });
+    await page.evaluate(() => { localStorage.setItem("membrane.home.stt", "device"); window.__home._engine = "device"; });
     await page.evaluate(() => window.__home.shadowRoot.querySelector(".lock").click());
     const out = await said(page, 200000);
     console.log("said:", out);
@@ -89,7 +89,7 @@ test("🔒 on the device: hands-free dictation ends itself on a pause", { timeou
 
 test("👂 stays quiet for speech that doesn't call it", { timeout: 240000 }, async () => {
   await withPage(spoken("Turn on the deck lights, and what is the battery level?"), async (page) => {
-    await page.evaluate(() => { localStorage.setItem("membrane.home.stt", "device"); });
+    await page.evaluate(() => { localStorage.setItem("membrane.home.stt", "device"); window.__home._engine = "device"; });
     await page.evaluate(() => window.__home.shadowRoot.querySelector(".ear").click());
     await page.waitForFunction(() => window.__membraneVoice, null, { timeout: 60000 });
     await page.waitForTimeout(25000);                     // the loop plays it several times
@@ -102,6 +102,7 @@ test("👂 while Argus speaks: his name cuts him off (barge-in)", { timeout: 240
     await page.evaluate(() => {
       localStorage.setItem("membrane.home.stt", "device");
       const el = window.__home;
+      el._engine = "device";
       window.__hushed = 0;
       const hush = el._hushTts.bind(el);
       el._hushTts = () => { if (el._speaking) window.__hushed += 1; hush(); };
@@ -133,5 +134,26 @@ test("streamed replies are said sentence by sentence, the rest when the part clo
     });
     assert.deepEqual(said.mid, ["argus: The deck lights are on now.", "argus: The battery sits at 92 percent and charging."]);
     assert.deepEqual(said.out, [...said.mid, "argus: Anything else?"]);                 // reasoning and the person's text never said
+  });
+});
+
+test("👂 hybrid (the default): the wake word on the device, the words after it by whisper", { timeout: 240000 }, async () => {
+  await withPage(spoken("Hey Argus, turn on the deck lights."), async (page) => {
+    await page.evaluate(() => {
+      localStorage.removeItem("membrane.home.stt");          // the default engine
+      window.__sttCalls = 0;
+      window.fakeHass.fetchWithAuth = async (path, opt) => {
+        if (path === "/api/ai_terminal/stt") {
+          window.__sttCalls += 1;
+          return new Response(JSON.stringify({ text: "gus, turn on the deck lights." }), { status: 200 });
+        }
+        return new Response("{}", { status: 404 });
+      };
+      window.__home.hass = window.fakeHass;
+      window.__home.shadowRoot.querySelector(".ear").click();
+    });
+    const out = await said(page, 200000);
+    assert.deepEqual(out.slice(0, 1), ["turn on the deck lights."]);
+    assert.ok(await page.evaluate(() => window.__sttCalls) >= 1);
   });
 });
