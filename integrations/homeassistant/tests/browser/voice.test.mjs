@@ -258,3 +258,24 @@ test("the seat's JS runs in the opted-in window: page, values and console back (
     assert.equal(by.j4.ok, false); assert.match(by.j4.error, /nope/);
   });
 });
+
+
+test("on a phone the chat's menu opens, and HA's burger isn't doubled inside membrane home (2026-10-11)", { timeout: 120000 }, async () => {
+  await withPage(spoken("."), async (page) => {
+    await page.setViewportSize({ width: 390, height: 800 });
+    const r = await page.evaluate(async () => {
+      const chat = window.__home.shadowRoot.querySelector("ai-terminal-panel");
+      chat.narrow = true;
+      const sr = chat.shadowRoot, side = sr.querySelector(".side"), menu = sr.querySelector(".menu");
+      const shown = () => getComputedStyle(side).display !== "none" && getComputedStyle(side).transform === "none";
+      const before = shown();
+      sr.querySelector(".sidetoggle").click();
+      await new Promise((res) => setTimeout(res, 300));
+      const after = shown();
+      sr.querySelector(".scrim").click();
+      await new Promise((res) => setTimeout(res, 300));
+      return { before, after, closed: !shown(), burger: getComputedStyle(menu).display };
+    });
+    assert.deepEqual(r, { before: false, after: true, closed: true, burger: "none" });
+  });
+});

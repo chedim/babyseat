@@ -676,6 +676,7 @@ const STYLE = `
   :host([overlay]) { height:100%; background:transparent; }
   :host([overlay]) .app.sidehidden .side { display:none; }
   :host([overlay]) .app.sidehidden .sidetoggle { display:inline-block; }
+  :host([overlay]) .menu { display:none !important; }   /* membrane home has HA's menu in its own bar */
   :host([overlay]) .side { background:color-mix(in srgb, var(--card-background-color,#111) 92%, transparent); }
   :host([overlay]) .bar, :host([overlay]) .composer {
     background:color-mix(in srgb, var(--card-background-color,#111) 80%, transparent); }
@@ -900,6 +901,13 @@ function definePanel() {
 
     _toggleSide(open) {
       const mobile = window.matchMedia("(max-width: 760px)").matches;
+      if (this.hasAttribute("overlay")) {
+        // membrane home starts the menu hidden: on a phone the slide-in needs
+        // 'hidden' gone too (it stayed shut on Android, 2026-10-11)
+        this._app.classList.toggle("sidehidden", !open);
+        this._app.classList.toggle("sideopen", !!open && mobile);
+        return;
+      }
       if (mobile) this._app.classList.toggle("sideopen", open);
       else this._app.classList.toggle("sidehidden", !open);
     }
