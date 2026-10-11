@@ -948,21 +948,18 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       });
       // VOICE OUT (2026-10-11, the operator: "it should not voice the chat since we
       // have voice:out"): Argus speaks through his voice:out line (ai-say);
-      // the chat's text is never read aloud. Membrane's own voice lines still are.
+      // the chat's text is never read aloud, nor membrane's lines.
       this._chat.addEventListener("ai-say", (e) => {
         const d = e.detail || {};
         speechLog("argus", this._ttsOn ? "say (voice:out)" : "skip: 🔊 off", d.text);
         if (this._ttsOn && d.text) this._enqueueSpeech("argus", d.text);
       });
+      // ONLY voice:out is spoken (2026-10-11, the operator: "why does it voice
+      // membrane's babbles instead of whatever is sent thru voice:out?"): the
+      // chat and membrane's lines are text; they land in the voice log only
       this._chat.addEventListener("ai-speak", (e) => {
         const d = e.detail || {};
-        if (d.kind !== "membrane") { speechLog(d.kind, "not read aloud: the chat is text (Argus speaks through voice:out)", d.text); return; }
-        const ok = this._ttsOn;
-        // THE SILENT REPLY'S WHY (2026-10-11, "no TTS of messages whatsoever"):
-        // every decision is in the console, and a reply held back by 🔊 says so
-        speechLog(d.kind, ok ? "say" : "skip: 🔊 off", d.text);
-        if (ok) this._enqueueSpeech(d.kind, d.text);
-        else if (d.kind !== "membrane" && !this._ttsHinted) { this._ttsHinted = true; this._vhint("🔊 is off: tap it to hear replies"); }
+        speechLog(d.kind, "not read aloud: only voice:out is spoken", d.text);
       });
     }
 

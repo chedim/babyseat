@@ -203,6 +203,22 @@ test("Argus first: his words cut membrane's babble and jump its queue", { timeou
   });
 });
 
+test("only voice:out is spoken: the chat and membrane's lines are not (2026-10-11)", { timeout: 120000 }, async () => {
+  await withPage(spoken("."), async (page) => {
+    const q = await page.evaluate(() => {
+      const el = window.__home, chat = el.shadowRoot.querySelector("ai-terminal-panel"), got = [];
+      el._ttsOn = true;
+      el._enqueueSpeech = (kind, text) => got.push(kind + ": " + text);
+      const fire = (type, detail) => chat.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
+      fire("ai-speak", { kind: "membrane", text: "The room hums." });
+      fire("ai-speak", { kind: "argus", text: "The chat's own text." });
+      fire("ai-say", { text: "The battery is at 40 percent." });
+      return got;
+    });
+    assert.deepEqual(q, ["argus: The battery is at 40 percent."]);
+  });
+});
+
 async function addressedPage(page, transcript) {
   await page.evaluate((tx) => {
     window.__sttCalls = 0;
