@@ -283,6 +283,24 @@ function applyEvent(st, ev) {
 }
 
 /** Replace the transcript with a REST history load. */
+const MIND_POLL_MS = 3000;
+
+/** One line of a mind's view as a chat row (the panel's own renderer). */
+function mindRow(ts, text) {
+  const id = "mind-" + ts + "-" + String(text).length;
+  return { info: { id, role: "assistant", time: { created: Math.round((ts || 0) * 1000) } },
+           parts: [{ id: id + "-p", type: "text", text: String(text || "") }] };
+}
+
+/** A thinker / dreamer entry in words. */
+function mindLine(kind, e) {
+  e = e || {};
+  if (kind === "dreamer") return "dreaming toward " + (e.title || e.goal || "?") + (e.title && e.goal ? "  (" + e.goal + ")" : "");
+  const rest = Object.keys(e).filter((k) => k !== "ts" && k !== "kind")
+    .map((k) => k + ": " + (typeof e[k] === "string" ? e[k] : JSON.stringify(e[k]))).join(" · ");
+  return (e.kind ? "[" + e.kind + "] " : "") + rest;
+}
+
 function loadRows(st, rows) {
   st.rows = [];
   st.byId = {};
@@ -657,6 +675,9 @@ const STYLE = `
           background:var(--primary-color,#3477d6); color:var(--text-primary-color,#fff); box-shadow:0 2px 8px rgba(0,0,0,.3); }
   .jump.show { display:block; }
   .composer { border-top:1px solid var(--divider-color,rgba(128,128,128,.25)); padding:10px 12px 12px; }
+  .mindbar { display:none; border-top:1px solid var(--divider-color,rgba(128,128,128,.25)); padding:8px 12px; font-size:12px; opacity:.75; text-align:center; }
+  :host([mind]) .mindbar { display:block; }
+  :host([mind]) .composer { display:none; }
   .composer .box { max-width:920px; margin:0 auto; display:flex; gap:8px; align-items:flex-end; }
   .composer textarea { flex:1; resize:none; min-height:44px; max-height:40vh; border-radius:10px;
                        border:1px solid rgba(128,128,128,.35); background:var(--card-background-color,#111);
@@ -781,6 +802,7 @@ function definePanel() {
           <div class="vlog" hidden></div>
           <div class="err"></div>
           <div class="scroller"><div class="msgs"></div><button class="jump">↓ latest</button></div>
+          <div class="mindbar"></div>
           <div class="composer">
             <div class="box">
               <textarea rows="1" placeholder="Ask the brain…"></textarea>
@@ -1149,8 +1171,60 @@ function definePanel() {
       this._toBottom();
     }
 
+    // ---------------------------------------------------------- a mind's view
+    // (2026-10-11, membrane home's orbs): the chat shows a loop's session, the
+    // thinker's inner speech or the dreamer's goals -- read-only, polled --
+    // and goes back to the person's own chat when the orb is let go
+    viewMind(m) {
+      if (!m || !m.name) return this.endMind();
+      if (!this._mind) this._mindPrev = this._sid;
+      this._mind = m;
+      this.setAttribute("mind", "");
+      this._stopPoll();
+      clearInterval(this._mindTimer);
+      this._sid = "mind:" + m.name;
+      this._chat = chatState(this._sid);
+      this._rowEls = null; this._stick = true;
+      const bar = this.shadowRoot && this.shadowRoot.querySelector(".mindbar");
+      if (bar) bar.textContent = "watching " + m.name + " · read-only · tap the orb again to come back";
+      this._mindTick();
+      this._mindTimer = setInterval(() => this._mindTick(), MIND_POLL_MS);
+    }
+
+    async _mindTick() {
+      const m = this._mind; if (!m) return;
+      let rows = [];
+      if (m.kind === "loop") {
+        if (!m.sid) rows = [mindRow(0, "no session for " + m.name + " yet -- it shows once the loop takes its next event")];
+        else {
+          const r = await this._api(SERVE + "/session/" + m.sid + "/message");
+          rows = r.ok && Array.isArray(r.data) ? r.data : [mindRow(0, "can't read " + m.name + "'s session (" + (r.status || "?") + ")")];
+        }
+      } else {
+        const r = await this._api(SERVE + "/membrane/minds");
+        const list = r.ok && r.data ? (r.data[m.kind] || []) : null;
+        rows = list ? list.map((e, i) => mindRow(e.ts || i, mindLine(m.kind, e)))
+          : [mindRow(0, "can't read the " + m.kind + " (" + (r.status || "?") + (r.status === 403 ? ": admins only" : "") + ")")];
+        if (list && !list.length) rows = [mindRow(0, "the " + m.kind + " has said nothing yet")];
+      }
+      if (this._mind !== m) return;
+      loadRows(this._chat, rows);
+      this._schedule();
+      if (this._stick) this._toBottom();
+    }
+
+    endMind() {
+      if (!this._mind) return;
+      clearInterval(this._mindTimer); this._mindTimer = 0;
+      this._mind = null;
+      this.removeAttribute("mind");
+      const prev = this._mindPrev; this._mindPrev = null;
+      if (prev) this._open(prev);
+    }
+
     async _resync() {
       if (!this._chat) return;
+      if (this._mind) return this._mindTick();
       const sid = this._sid;
       const [hist, st, vox, auto, phs] = await Promise.all([
         this._api(SERVE + "/session/" + sid + "/message"),

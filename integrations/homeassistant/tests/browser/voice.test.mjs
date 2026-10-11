@@ -219,6 +219,36 @@ test("only voice:out is spoken: the chat and membrane's lines are not (2026-10-1
   });
 });
 
+test("an orb selected: the chat shows that mind, read-only; let go: back to the chat (2026-10-11)", { timeout: 120000 }, async () => {
+  await withPage(spoken("."), async (page) => {
+    const out = await page.evaluate(async () => {
+      const home = window.__home, chat = home.shadowRoot.querySelector("ai-terminal-panel");
+      const opened = [];
+      chat._sid = "s-own";
+      chat._open = async (sid) => { opened.push(sid); chat._sid = sid; };
+      chat._api = async (url) => url.endsWith("/membrane/minds")
+        ? { ok: true, data: { loops: { "loop-1": { sid: "ses_loop1" } }, thinker: [{ ts: 5, kind: "chat", about: "battery" }], dreamer: [] } }
+        : url.endsWith("/session/ses_loop1/message")
+          ? { ok: true, data: [{ info: { id: "m1", role: "assistant", time: { created: 1 } }, parts: [{ id: "p1", type: "text", text: "DONE read the battery" }] }] }
+          : { ok: true, data: [] };
+      home._get = async () => ({ loops: { "loop-1": { sid: "ses_loop1" } } });
+      await home._selectMind("thinker");
+      await new Promise((r) => setTimeout(r, 150));
+      const thinker = { mind: chat.hasAttribute("mind"), text: chat._chat.rows.map((r) => r.parts[0].text).join("|"),
+                        composer: getComputedStyle(chat.shadowRoot.querySelector(".composer")).display,
+                        follow: home._mindFollow };
+      await home._selectMind("loop-1");
+      await new Promise((r) => setTimeout(r, 150));
+      const loop = chat._chat.rows.map((r) => r.parts[0].text).join("|");
+      await home._selectMind(null);
+      return { thinker, loop, after: { mind: chat.hasAttribute("mind"), opened, follow: home._mindFollow } };
+    });
+    assert.deepEqual(out.thinker, { mind: true, text: "[chat] about: battery", composer: "none", follow: "thinker" });
+    assert.equal(out.loop, "DONE read the battery");
+    assert.deepEqual(out.after, { mind: false, opened: ["s-own"], follow: null });
+  });
+});
+
 async function addressedPage(page, transcript) {
   await page.evaluate((tx) => {
     window.__sttCalls = 0;

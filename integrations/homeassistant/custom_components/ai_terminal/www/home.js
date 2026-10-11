@@ -710,6 +710,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           snapshot: "membrane-home-" + ((hass.user && hass.user.id) || "anon"),   // IndexedDB: the last view at once
           onStatus: (t) => { this._v3Txt = t; this._paintStatus(); },
           onSelect: (m) => this._select(m),
+          onAvatar: (agent) => this._selectMind(agent),
           onRelated: () => {},
           onHover: (m, x, y) => {
             if (!m) { this._tip.style.display = "none"; return; }
@@ -781,6 +782,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     async _aim(force) {
       const v = this._v3; if (!v) return;
+      if (this._mindFollow) return;                         // a selected orb: the glide follows it
       if (this._selFollow) {                                // a selected node: the camera stays on it
         const id = this._selFollow, p = await this._posOf(id);
         if (p && this._selFollow === id) {
@@ -834,6 +836,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const step = (t) => {
         if (!this._started || !this._v3 || id !== this._glideId) return;
         const dt = Math.min(0.1, (t - last) / 1000); last = t;
+        if (this._mindFollow) {                              // the selected orb moves: the camera goes with it
+          const p = this._v3.avatarPos(this._mindFollow);
+          if (p) this._goal = { p, r: this._goal && this._goal.sel ? this._goal.r : 420, sel: true };
+        }
         const v = this._v3, g = this._goal;
         const idle = performance.now() - this._lastTouch >= IDLE_BEFORE_FOLLOW_MS;
         if (g && !v._flyAnim && (idle || g.sel)) {
@@ -1809,7 +1815,32 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       if (this._onTilt) window.removeEventListener("deviceorientation", this._onTilt);
     }
 
+    /** A MIND'S ORB selected (2026-10-11, the operator: "make the chat switch
+     * to the thinker's loop when I select the thinker orb, loop-x for a loop
+     * orb, ditto the dreamer; back to chat when I deselect; the cam follows
+     * the selected orb"). */
+    async _selectMind(agent) {
+      const chat = this._chat;
+      if (!agent) {
+        this._mindFollow = null; this._goal = null;
+        if (chat && chat.endMind) chat.endMind();
+        this._aim(true);
+        return;
+      }
+      this._mindFollow = agent; this._selFollow = null; this._sel = null;
+      if (this._card) this._card.classList.remove("open");
+      this._say("following " + agent);
+      const kind = /^loop/.test(agent) ? "loop" : agent;
+      let sid = ((this._v3 && this._v3.agentSids) || {})[agent] || null;
+      if (kind === "loop" && !sid) {
+        try { const d = await this._get("/membrane/minds"); sid = ((d.loops || {})[agent] || {}).sid || null; } catch (e) { /* not an admin, or the seat is old */ }
+      }
+      if (this._mindFollow !== agent) return;
+      if (chat && chat.viewMind) chat.viewMind({ name: agent, kind, sid });
+    }
+
     _select(m) {
+      if (m && this._mindFollow) { this._mindFollow = null; if (this._chat && this._chat.endMind) this._chat.endMind(); }
       this._sel = m || null;
       this._selFollow = m ? m.id : null;
       if (!m) { this._card.classList.remove("open"); this._goal = null; this._aim(true); return; }

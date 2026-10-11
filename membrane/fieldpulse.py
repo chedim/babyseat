@@ -58,6 +58,8 @@ class FieldPulse:
         self._moved: dict[str, list] = {}
         self._mind: list = []
         self._slots: dict[str, str] = {}       # loop agent -> loop-N
+        self._sids: dict[str, str] = {}        # loop-N -> its (last) session: membrane home opens it
+        self._dreams = collections.deque(maxlen=40)   # the dreamer's picks (text stays off the frames)
         # the strangers' windows read pulses by time, not by frame
         self._recent: collections.deque = collections.deque(maxlen=RECENT_MAX)
         self._alive = False
@@ -138,6 +140,28 @@ class FieldPulse:
         slot = self.loop_slot(agent, take=(phase == "start"))
         if slot:
             self.mind("focus", agent=slot, eid=eid, phase=phase)
+
+    def loop_session(self, agent: str, eid: str, sid: str) -> None:
+        """A loop's session is known: its orb carries the sid (an HA admin's
+        membrane home opens it, read-only, when the orb is selected)."""
+        slot = self._slots.get(agent)
+        if slot and sid:
+            with self._lock:
+                self._sids[slot] = sid
+            self.mind("focus", agent=slot, eid=eid, phase="start", sid=sid)
+
+    def dreamt(self, goal: str, title: str = "") -> None:
+        self._dreams.append({"ts": round(time.time(), 1), "goal": goal, "title": str(title or "")[:200]})
+
+    def minds(self) -> dict:
+        """GET /membrane/minds: the loops' sessions, the thinker's inner
+        speech, the dreamer's picks -- what an orb's chat view reads."""
+        th = getattr(self.srv, "thinker", None)
+        with self._lock:
+            loops = {slot: {"sid": sid, "running": slot in self._slots.values()} for slot, sid in self._sids.items()}
+        return {"loops": loops,
+                "thinker": list(getattr(th, "mind_log", []) or [])[-40:],
+                "dreamer": list(self._dreams)}
 
     def touch(self, session_agent: str, tool: str, args: dict) -> None:
         eid = touched_eid(tool, args)

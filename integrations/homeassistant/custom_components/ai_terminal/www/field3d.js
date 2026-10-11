@@ -118,6 +118,8 @@ class TileCache {
 
 /** One mind's avatar: glides toward its target, attached while it holds
  * an entity, back to its idle orbit when it lets go. */
+const AVATAR_HIT_PX = 26;               // a tap this close to an orb selects it
+
 class Avatar {
   constructor(agent, idle) { this.agent = agent; this.idle = idle.slice(); this.pos = idle.slice(); this.target = idle.slice();
     this.eid = null; this.until = 0; this.trail = []; this._lastTrail = 0; this.hold = false; }
@@ -799,7 +801,17 @@ class Field3DView {
     const up = (e) => {
       pts.delete(e.pointerId); if (pts.size < 2) pinch = null;
       if (!moved && e.type === "pointerup" && e.button !== 2) {
+        // A MIND'S ORB first (2026-10-11): selecting one hands it to the page
+        // (membrane home: the chat shows that mind, the camera follows it);
+        // tapping it again, or empty space, lets go
+        const av = this.pickAvatar(e.offsetX, e.offsetY);
+        if (av) {
+          this.selAgent = this.selAgent === av.agent ? null : av.agent;
+          if (this.api.onAvatar) this.api.onAvatar(this.selAgent);
+          return;
+        }
         const m = this._pick(e.offsetX, e.offsetY);
+        if (this.selAgent) { this.selAgent = null; if (this.api.onAvatar) this.api.onAvatar(null); }
         if (m) { this.select(m.id); this.api.onSelect(m); } else { this.select(null); this.api.onSelect(null); }
       }
     };
@@ -889,7 +901,7 @@ class Field3DView {
       for (const [id] of p.fires || []) { const s = this.slots.get(id); if (s != null) this._ring(s); }
     } else if (t === "mind.focus") {
       if (p.phase === "end") { const a = this.avatars.get(p.agent); if (a) a.release(); }
-      else this._attach(p.agent, p.eid, null);
+      else { this._attach(p.agent, p.eid, null); if (p.sid) { this.agentSids = this.agentSids || {}; this.agentSids[p.agent] = p.sid; if (this.selAgent === p.agent && this.api.onAvatar) this.api.onAvatar(p.agent); } }
     } else if (t === "mind.touch") {
       this._attach(p.agent || "chat", p.eid, 4000);
     } else if (t === "mind.thinker") {
@@ -897,6 +909,24 @@ class Field3DView {
     } else if (t === "mind.dreamer") {
       if (p.goal) this._attach("dreamer", p.goal, 6000);
     }
+  }
+
+  /** The orb under a screen point (within AVATAR_HIT_PX), nearest first. */
+  pickAvatar(x, y) {
+    let best = null, bd = AVATAR_HIT_PX;
+    for (const a of this.avatars.values()) {
+      const sc = this._project(a.pos);
+      if (!sc) continue;
+      const d = Math.hypot(sc[0] - x, sc[1] - y);
+      if (d < bd) { bd = d; best = a; }
+    }
+    return best;
+  }
+
+  /** Where a mind's orb is now (world coordinates), or null. */
+  avatarPos(agent) {
+    const a = this.avatars.get(agent);
+    return a ? a.pos.slice() : null;
   }
 
   _avatar(agent) {
@@ -977,6 +1007,8 @@ class Field3DView {
     for (const a of this.avatars.values()) {
       a.step(dt, now);
       a.sprite.position.set(a.pos[0], a.pos[1], a.pos[2]);
+      const big = this.selAgent === a.agent ? 84 : 46;
+      if (a.sprite.scale.x !== big) a.sprite.scale.set(big, big, 1);
       const on = a.attached(now);
       a.beam.visible = on;
       if (on) {

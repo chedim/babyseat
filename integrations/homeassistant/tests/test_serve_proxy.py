@@ -3,7 +3,7 @@ extraction, the basic-auth header -- pure logic, no network, no HA."""
 import base64
 import unittest
 
-from ai_terminal.serve_proxy import (allowed_path, basic_header,
+from ai_terminal.serve_proxy import (may_reach_session, ADMIN_READ_EXACT, allowed_path, basic_header,
                                      message_body, owned_sessions,
                                      owned_status, parts_text, reply_of,
                                      speaker_line, with_speaker)
@@ -112,3 +112,24 @@ class TestOwnership(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestLoopSessionsForAdmins(unittest.TestCase):
+    """membrane home's loop orb opens the loop's session (2026-10-11)."""
+    owners = {"mine": "u1", "theirs": "u2"}
+
+    def test_own_session_any_method(self):
+        self.assertTrue(may_reach_session(["session", "mine", "message"], "POST", self.owners, "u1"))
+
+    def test_someone_elses_never_even_for_an_admin(self):
+        self.assertFalse(may_reach_session(["session", "theirs", "message"], "GET", self.owners, "u1", True))
+
+    def test_an_unowned_loop_session_admin_get_messages_only(self):
+        self.assertTrue(may_reach_session(["session", "loop1", "message"], "GET", self.owners, "u1", True))
+        self.assertFalse(may_reach_session(["session", "loop1", "message"], "POST", self.owners, "u1", True))
+        self.assertFalse(may_reach_session(["session", "loop1"], "DELETE", self.owners, "u1", True))
+        self.assertFalse(may_reach_session(["session", "loop1", "message"], "GET", self.owners, "u1", False))
+
+    def test_the_minds_are_admin_reads(self):
+        self.assertIn("membrane/minds", ADMIN_READ_EXACT)
+        self.assertTrue(allowed_path("membrane/minds"))

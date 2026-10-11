@@ -133,7 +133,10 @@ class Dreamer:
             from .fieldpulse import of as _pulse_of
             _fp = _pulse_of(srv)
             if _fp is not None:
-                _fp.mind("dreamer", goal=str(getattr(open_intents[0], "eid", "") or ""))
+                _g = open_intents[0]
+                _fp.mind("dreamer", goal=str(getattr(_g, "eid", "") or ""))
+                _gp = getattr(_g, "properties", None) or {}
+                _fp.dreamt(str(getattr(_g, "eid", "") or ""), str(_gp.get("summary") or _gp.get("name") or _gp.get("text") or ""))
         except Exception:
             pass
         # ---- propose ----

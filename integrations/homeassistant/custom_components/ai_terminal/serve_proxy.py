@@ -67,12 +67,27 @@ READ_ONLY_EXACT = ("membrane/state", "membrane/map/field",
                    "membrane/map/field3d", "membrane/map/tile",
                    "membrane/map/locate", "v1/models",
                    "membrane/entity/read", "membrane/entity-related",
-                   "membrane/predict")
+                   "membrane/predict", "membrane/minds")
+# the minds' inner text (the thinker's log, the dreamer's goals): admins only
+ADMIN_READ_EXACT = ("membrane/minds",)
 EVENT_HELLO = "server.connected"
 
 SPEAKER_PREFIX = "[HA user: "
 OWNERS_STORE_KEY = "ai_terminal.sessions"
 OWNERS_STORE_VERSION = 1
+
+
+def may_reach_session(segs: list, method: str, owners: dict, uid: str, is_admin: bool = False) -> bool:
+    """A session path: the caller's own session -- or A LOOP'S SESSION,
+    READ-ONLY, FOR AN ADMIN (2026-10-11: membrane home's loop orb opens its
+    session): one no HA user owns, GET of its messages only. Not a session
+    path: no rule here."""
+    if not (segs and segs[0] == "session" and len(segs) >= 2 and segs[1] != "status"):
+        return True
+    if owners.get(segs[1]) == uid:
+        return True
+    return bool(is_admin and method == "GET" and len(segs) == 3 and segs[2] == "message"
+                and segs[1] not in owners)
 
 
 def allowed_path(rest: str) -> bool:
@@ -358,6 +373,8 @@ class ServeProxyView(HomeAssistantView):
             return web.Response(status=405, text="field reads are GET only")
         if rest in ADMIN_WRITE_EXACT and method != "GET" and not getattr(user, "is_admin", False):
             return web.Response(status=403, text="only an admin switches the minds' models")
+        if rest in ADMIN_READ_EXACT and not getattr(user, "is_admin", False):
+            return web.Response(status=403, text="only an admin reads the minds")
         if rest == "event":
             if method != "GET":
                 return web.Response(status=405, text="event is GET only")
@@ -381,8 +398,7 @@ class ServeProxyView(HomeAssistantView):
             body = json.dumps(parsed).encode()
 
         # a specific session: the caller's own, or it does not exist
-        if (segs[0] == "session" and len(segs) >= 2
-                and segs[1] != "status" and owners.get(segs[1]) != uid):
+        if not may_reach_session(segs, method, owners, uid, bool(getattr(user, "is_admin", False))):
             return _json_response(404, {"type": "error", "error": {
                 "message": "not found"}})
 

@@ -588,6 +588,13 @@ class _LoopDrainer:
     def _turn(self, ev: dict, ent: str, agent: str) -> str:
         srv = self.srv
         sid = srv.create_loop_session(agent, agent)
+        try:                                   # the orb carries its session (membrane home opens it)
+            from .fieldpulse import of as _pulse_of
+            _fp = _pulse_of(srv)
+            if _fp is not None:
+                _fp.loop_session(agent, ent, sid)
+        except Exception:
+            pass
         out = srv.run_loop_turn(sid, loop_task_text(ev), agent) or {}
         text = str(out.get("text") or out.get("verdict_text") or "")
         verdict, detail = parse_verdict(text)
