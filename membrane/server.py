@@ -1771,6 +1771,11 @@ class TurnRunner:
                                     _lane_of((self._agents or {}).get(sid)), step=rounds, mid=aid)
             except Exception:
                 pass
+            try:                           # THE SCORE (score.py): a model round, per lane
+                from . import score as _score
+                _score.note("round", lane=_lane_of((self._agents or {}).get(sid)))
+            except Exception:
+                pass
             body = {"model": turn_model,
                     "messages": ([{"role": "system", "content": self.system}]
                                  if self.system else []) + history}

@@ -457,12 +457,15 @@ class Thinker:
                 continue
             from .night import run_entity_update_script, apply_entity_update
             out = run_entity_update_script(self.srv, ent, "tick")
+            from . import score as _SC
             if out.get("error"):
+                _SC.note("error")
                 continue         # the error lanes already spoke (struck)
             if out.get("render") or isinstance(out.get("patch"), dict):
                 apply_entity_update(self.srv, ent, out, "tick", silent=True)
                 fired.append(ent)
                 self.stats["ticks"] += 1
+                _SC.note_changed("tick", ent.eid, [out.get("render"), out.get("patch")])  # moved, not re-said
         if fired and beat % TICK_FIELD_EVERY == 0:
             self._tick_field_move(fired)
 

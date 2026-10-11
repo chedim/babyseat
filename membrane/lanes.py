@@ -5716,6 +5716,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
     # report, delivered buffered or as SSE depending on the request.
     def _serve_intercept_answer(self, model: str, text: str,
                                 streaming: bool, thinking: str | None = None) -> None:
+        try:                                   # THE SCORE: the field answered, no model round
+            from . import score as _score
+            _score.note("answer")
+        except Exception:
+            pass
         if not streaming:
             msg = {"role": "assistant", "content": text}
             if thinking:

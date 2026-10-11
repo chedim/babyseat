@@ -1790,6 +1790,8 @@ def main() -> None:
             try:                           # the seat as a panel: state, events, controls
                 from . import seat_panel as _SP
                 _SP.start(srv)
+                from . import score as _SC        # the score: the field's share of the work (an entity)
+                _SC.start(srv)
                 _serve_hub.on_lost = lambda: _SP.note(srv, "stream-cut")
                 from . import jsexec as _JS      # the seat is a remote_executor: JS in an opted-in tab
                 _JS.bind(srv)

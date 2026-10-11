@@ -1319,6 +1319,14 @@ _GETTER_KEYS = {"state", "render", "patch", "run", "veto", "delete", "data",
 _CLOCK_KEY = re.compile(r"(^|_)(ts|time|timestamp|at|updated|checked|age|now|epoch)$", re.I)
 
 
+def _score(kind: str, **kw) -> None:
+    try:
+        from . import score as _SC
+        _SC.note(kind, **kw)
+    except Exception:
+        pass
+
+
 def reading_changed(before: dict, state: dict) -> bool:
     for k, v in (state or {}).items():
         if _CLOCK_KEY.search(str(k)):
@@ -1351,6 +1359,7 @@ def entity_read_back(srv, ent, force: bool = False) -> dict:
     from .night import run_entity_update_script, apply_entity_update
     out = run_entity_update_script(srv, ent, "getter")
     if out.get("error"):
+        _score("error")
         return {"fired": True, "error": out.get("error")}
     # THE CONTRACT SAYS ITSELF (2026-10-08: six rewrites 'fired {}' for nine
     # minutes -- only result['state'] reads back, and nothing said so)
@@ -1382,6 +1391,14 @@ def entity_read_back(srv, ent, force: bool = False) -> dict:
             pass
         merged = dict((ent.properties or {}).get("script_data") or {})
         changed = reading_changed(merged, state)
+        if changed and not force:
+            _score("reading")                   # the field read the world without a model's ask
+        if changed and not merged:
+            try:
+                from . import score as _SC
+                _SC.credit(f"the {ent.eid.split('::')[-1]} getter now reads it for you", ent.eid)
+            except Exception:
+                pass
         merged.update(state)
         props = ent.properties or {}
         props["script_data"] = merged
