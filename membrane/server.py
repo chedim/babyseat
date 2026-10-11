@@ -2745,6 +2745,17 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                         psrv, person, in_on=b.get("in_on"), in_mode=b.get("in_mode"),
                         out_on=b.get("out_on"), device=str(b.get("device") or ""))})
                 return self._json_out({"ok": True, **_VIO.read(psrv, person)})
+            if path in ("/membrane/seat/event", "/membrane/seat/restart-ask"):
+                # restarts.py: HA says it started; the engineer asks before an HA restart
+                from . import restarts as _RS
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                if psrv is None:
+                    self.send_response(503); self.send_header("Content-Length", "0"); self.end_headers(); return
+                b = self._read_body() or {}
+                if path.endswith("/event"):
+                    return self._json_out(_RS.on_event(psrv, b))
+                return self._json_out(_RS.ask(psrv, str(b.get("what") or "Home Assistant"),
+                                              str(b.get("reason") or ""), int(b.get("in_s") or 60)))
             if path == "/membrane/seat/control":
                 # the operator's switches (HA admins only, through the relay)
                 from . import seat_panel as _SP

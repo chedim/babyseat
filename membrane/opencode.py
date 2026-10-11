@@ -1792,6 +1792,9 @@ def main() -> None:
                 _SP.start(srv)
                 from . import score as _SC        # the score: the field's share of the work (an entity)
                 _SC.start(srv)
+                from . import restarts as _RS     # restarts: told to Argus; a staged one is his to do
+                _RS.bind(srv)
+                _RS.on_boot(srv)
                 _serve_hub.on_lost = lambda: _SP.note(srv, "stream-cut")
                 from . import jsexec as _JS      # the seat is a remote_executor: JS in an opted-in tab
                 _JS.bind(srv)

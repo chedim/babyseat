@@ -396,6 +396,16 @@ def loop_task_text(ev: dict) -> str:
     elif kind == "watch-detached":
         head = f"watch detached: '{ent}' ({ev.get('lane', '?')})"
         detail = str(ev.get("detail") or "")
+    elif kind == "restart-pending":
+        due = time.strftime("%H:%M", time.localtime(float(ev.get("due") or 0)))
+        head = (("REMINDER -- " if ev.get("reminder") else "") +
+                f"a seat restart is pending (due {due}): {ev.get('why') or 'new code staged'}")
+        detail = ("The engineer staged new code" + (f" ({', '.join(ev.get('files') or [])})" if ev.get("files") else "")
+                  + "; it loads when the seat restarts, and the restart is yours. When nothing of yours is "
+                  "mid-flight (a command, a write, a goal step), restart it: exec(action='call', "
+                  "object='presence', method='restart', args={why: '<one line>'}). Need longer? Say STEP "
+                  "with what you are finishing -- you will be reminded before it is due. Past due, the "
+                  "engineer asks the operator.")
     elif kind == "operator-message":
         head = f"operator messaged: {ev.get('text_head', '')[:80]}"
         detail = ""
@@ -552,6 +562,8 @@ class _LoopDrainer:
         # folds into the digest (the next turn's WHERE WE ARE) instead of
         # spending a whole interrupt turn
         gate = getattr(self.srv, "_alert_gate", None)
+        if ev.get("kind") == "restart-pending":
+            gate = None                 # never folded into a digest: the restart is his to do
         if gate is not None and not gate.allow(ev):
             return "skip"
         loops = getattr(self.srv, "loops", None)

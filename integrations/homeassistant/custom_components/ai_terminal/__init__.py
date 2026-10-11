@@ -79,6 +79,23 @@ async def async_setup(hass: HomeAssistant, config) -> bool:
             await sess.close()
     hass.bus.async_listen_once("homeassistant_stop", _close_session)
 
+    # RESTARTS, TOLD TO ARGUS (2026-10-11): HA has started -> the seat briefs him
+    async def _tell_seat_started(_event):
+        import aiohttp
+        from .serve_proxy import basic_header
+        url = str(component.get("serve_url") or "").rstrip("/")
+        if not url or not component.get("serve_pass"):
+            return
+        try:
+            async with aiohttp.ClientSession() as s:
+                await s.post(url + "/membrane/seat/event", json={"kind": "ha-start"},
+                             headers={"Authorization": basic_header(component.get("serve_user"),
+                                                                    component.get("serve_pass"))},
+                             timeout=aiohttp.ClientTimeout(total=20))
+        except Exception as e:                          # noqa: BLE001
+            _LOGGER.info("ai_terminal: could not tell the seat HA started (%r)", e)
+    hass.bus.async_listen_once("homeassistant_started", _tell_seat_started)
+
     _LOGGER.info("ai_terminal: panel + views registered (url_path "
                  "ai-terminal; serve=%s)", component["serve_url"])
     return True

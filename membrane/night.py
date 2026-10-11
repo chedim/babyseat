@@ -759,7 +759,13 @@ def run_command_entity(fld, est, mem, command: str,
     t0 = time.time()
     err = ""
     try:
-        if cmd.startswith("js::"):
+        if cmd.startswith("seat::restart"):
+            # ARGUS RESTARTS THE SEAT (restarts.py): never a shell
+            from . import restarts as _RS
+            from .jsexec import _unquote
+            _r = _RS.do_restart(_RS._seat_srv(), _unquote(cmd[len("seat::restart"):].strip()))
+            rc, text = _r["rc"], _r["text"]
+        elif cmd.startswith("js::"):
             # THE SEAT'S JS (jsexec.py): never a shell -- an opted-in browser tab runs it
             from . import jsexec as _JS
             _r = _JS.run(cmd[4:], timeout=t)

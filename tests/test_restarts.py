@@ -1,0 +1,133 @@
+"""RESTARTS, TOLD TO ARGUS -- AND HIS TO DO (2026-10-11, the operator: "announce
+HA and seat restarts to Argus ... thru its ollama proxy endpoint ... let them
+delay it if they're busy ... or better yet, have Argus do those restarts ...
+if he's 1 minute late to restart then you should consult me")."""
+
+import json
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+os.environ.setdefault("MEMBRANE_STORE", "json")
+os.environ.setdefault("MEMBRANE_RUN", "0")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from membrane import restarts as RS  # noqa: E402
+from membrane import watch_agents as WA  # noqa: E402
+from membrane.entities import EntityStore, MEMBRANE_NS  # noqa: E402
+
+
+class _Pool:
+    def __init__(self):
+        self.items = []
+
+    def put(self, ev):
+        self.items.append(ev)
+
+
+class _Srv:
+    def __init__(self):
+        self.data_dir = tempfile.mkdtemp()
+        self.entity_store = EntityStore(path=str(Path(self.data_dir) / "e.json"), shared=False)
+        self.entity_store._srv = self
+        self.events_pool = _Pool()
+
+
+class TestTheNotices(unittest.TestCase):
+    def test_a_deploy_says_why_and_how_long(self):
+        srv = _Srv()
+        Path(srv.data_dir, RS.ALIVE_FILE).write_text("1000")
+        Path(srv.data_dir, RS.REASON_FILE).write_text("Argus restarted it (new score code)")
+        t = RS.boot_text(srv, now=1095)
+        self.assertIn("down about 1 min 35 s", t)
+        self.assertIn("Why: Argus restarted it (new score code).", t)
+        self.assertTrue(t.startswith(RS.SIGN))
+        self.assertFalse(Path(srv.data_dir, RS.REASON_FILE).exists())        # consumed
+
+    def test_no_reason_is_unexpected(self):
+        self.assertIn("not announced", RS.boot_text(_Srv(), now=1e9))
+
+    def test_ha_start_is_told_once(self):
+        srv = _Srv()
+        RS._last_ha["ts"] = 0
+        with mock.patch.object(RS, "_send") as send:
+            self.assertEqual(RS.on_event(srv, {"kind": "ha-start"}), {"ok": True})
+            self.assertTrue(RS.on_event(srv, {"kind": "ha-start"}).get("dedup"))
+        self.assertEqual(send.call_count, 1)
+        self.assertIn("Home Assistant restarted", send.call_args[0][2])
+
+    def test_delay_is_his_word_capped(self):
+        self.assertEqual(RS.parse_delay("DELAY 5 -- finishing the battery getter"), 5)
+        self.assertEqual(RS.parse_delay("delay: 90"), RS.MAX_DELAY_MIN)
+        self.assertEqual(RS.parse_delay("GO"), 0)
+        self.assertEqual(RS.parse_delay(None), 0)
+
+
+class TestArgusRestarts(unittest.TestCase):
+    def _staged(self, srv, at):
+        Path(srv.data_dir, RS.PENDING_FILE).write_text(json.dumps(
+            {"staged_at": at, "files": ["score.py"], "why": "the score counts entity-hours"}))
+
+    def test_staged_once_reminded_then_overdue(self):
+        srv, t = _Srv(), 1_800_000_000.0
+        self._staged(srv, t)
+        with mock.patch("membrane.seat_panel.note") as note:
+            RS.check_pending(srv, now=t + 1)
+            RS.check_pending(srv, now=t + 20)                                 # told once
+            self.assertEqual([e["kind"] for e in srv.events_pool.items], ["restart-pending"])
+            RS.check_pending(srv, now=t + RS.DUE_S - RS.REMIND_BEFORE_S + 1)
+            self.assertTrue(srv.events_pool.items[-1].get("reminder"))
+            RS.check_pending(srv, now=t + RS.DUE_S + 30)
+            self.assertFalse(note.called)                                     # due, not yet a minute late
+            RS.check_pending(srv, now=t + RS.DUE_S + RS.OVERDUE_GRACE_S + 1)
+            self.assertEqual(note.call_args[0][1], "restart-overdue")
+        ent = srv.entity_store.docs[MEMBRANE_NS + "restart"]
+        self.assertTrue(ent.properties["pending"])
+
+    def test_his_restart_records_why_and_stops_cleanly(self):
+        srv = _Srv()
+        self._staged(srv, 1.0)
+        with mock.patch("os.kill") as kill, mock.patch("membrane.seat_panel.note"):
+            out = RS.do_restart(srv, "nothing of mine in flight", delay_s=0)
+            import time
+            time.sleep(0.2)
+        self.assertEqual(out["rc"], 0)
+        kill.assert_called_once()
+        self.assertIn("Argus restarted it (nothing of mine in flight); it loads the staged score.py",
+                      Path(srv.data_dir, RS.REASON_FILE).read_text())
+
+    def test_any_boot_loads_the_staged_code(self):
+        srv = _Srv()
+        self._staged(srv, 1.0)
+        RS.bind(srv)
+        self.assertFalse(Path(srv.data_dir, RS.PENDING_FILE).exists())
+
+    def test_the_loop_is_told_how(self):
+        t = WA.loop_task_text({"kind": "restart-pending", "entity": "membrane::restart", "why": "new score",
+                               "files": ["score.py"], "due": 1_800_000_000})
+        self.assertIn("a seat restart is pending", t)
+        self.assertIn("method='restart'", t)
+        self.assertIn("STEP", t)
+
+    def test_the_command_never_reaches_a_shell(self):
+        from membrane import night as N
+        srv = _Srv()
+        RS._SEAT["srv"] = srv
+        with mock.patch.object(RS, "do_restart", return_value={"rc": 0, "text": "restarting"}) as dr, \
+                mock.patch("subprocess.run") as sh:
+            N.run_command_entity(None, srv.entity_store, None, "seat::restart 'all quiet'")
+        dr.assert_called_once()
+        self.assertEqual(dr.call_args[0][1], "all quiet")
+        sh.assert_not_called()
+
+    def test_the_doctrine_says_the_restart_is_his(self):
+        d = (Path(__file__).resolve().parent.parent / "doctrine.md").read_text()
+        self.assertIn("RESTARTS:", d)
+        self.assertIn("method='restart'", d)
+
+
+if __name__ == "__main__":
+    unittest.main()

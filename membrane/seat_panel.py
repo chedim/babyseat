@@ -203,6 +203,13 @@ def refresh(srv) -> dict:
         note(srv, "memory-ok", seat_rss_mb=st.get("seat_rss_mb"), mem_available_mb=st.get("mem_available_mb"))
     pp["_pressure"] = pressure
     _battery_guard(srv, st.get("battery"), pp)
+    try:                                       # restarts.py: the heartbeat, a deploy's ask, a staged restart
+        from . import restarts as _RS
+        _RS.heartbeat(srv)
+        _RS.check_ask_file(srv)
+        _RS.check_pending(srv)
+    except Exception:
+        pass
     st["paused"] = bool(getattr(srv, "paused", False)) or st["paused"]
     if prev.get("paused") != st["paused"] and prev and not pp.get("_bat_paused"):
         note(srv, "resumed" if not st["paused"] else "paused", by="decree")
