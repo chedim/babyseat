@@ -124,6 +124,34 @@ class TestEveryMove(unittest.TestCase):
         self.assertEqual(P.context_of(h[:1], "hi"), "hi")
 
 
+class TestKindFirst(unittest.TestCase):
+    """2026-10-11, the operator: "it always predicts exec :D -- punish it
+    severely when it predicts a tool instead of text and vice-versa"."""
+
+    def test_a_kind_miss_teaches_five_times_harder(self):
+        p = P.Predictor()
+        for _ in range(12):                                   # exec everywhere: the majority to collapse onto
+            p.score({"tools": [], "ents": []}, None, "operator", ["exec.call"], [], prev="find.memory")
+        for i in range(3):                                    # but after a tool result he writes
+            g = p.guess(None, "operator", prev="exec.call")
+            r = p.score(g, None, "operator", [P.TEXT], [], prev="exec.call")
+            if i == 0:
+                self.assertFalse(r["kind"])                   # the first guess: the collapse
+        g = p.guess(None, "operator", prev="exec.call")
+        self.assertEqual(g["kind"], "text")
+        self.assertEqual(g["tools"][0][0], P.TEXT)
+        self.assertEqual(p.guess(None, "operator", prev="find.memory")["tools"][0][0], "exec.call")
+        self.assertIn("kind", p.report()["operator"])
+
+    def test_the_kinds_survive_a_restart(self):
+        d = tempfile.mkdtemp()
+        p = P.Predictor(d)
+        for _ in range(10):
+            p.score({"tools": [["exec.call", 1]], "ents": [], "kind": "tool"}, None, "operator", [P.TEXT], [], prev="x")
+        p.save()
+        self.assertEqual(P.Predictor(d).guess(None, "operator", prev="x")["kind"], "text")
+
+
 class TestInsideTheStep(unittest.TestCase):
     """2026-10-11, the operator: every text message and every tool call is a
     move -- inside one model round too, each predicted from the ones before."""

@@ -109,6 +109,7 @@ class Predictor:
         self.turns: list[dict] = []           # {"lane", "tools", "ents"} per remembered turn
         self.freq: dict[str, dict[str, float]] = {}
         self.src = {s: {"hit": 1.0, "prop": 2.0} for s in SOURCES}
+        self.kinds: dict[str, dict[str, float]] = {}
         self.stats: dict[str, dict] = {}
         self._load()
 
@@ -123,6 +124,7 @@ class Predictor:
                 self.turns = d.get("turns") or []
                 self.freq = d.get("freq") or {}
                 self.src.update(d.get("src") or {})
+                self.kinds = d.get("kinds") or {}
                 self.stats = d.get("stats") or {}
             z = self.dir / "predict_vecs.npy"
             if z.exists() and self.turns:
@@ -138,7 +140,8 @@ class Predictor:
         try:
             self.dir.mkdir(parents=True, exist_ok=True)
             with self._lock:
-                d = {"turns": self.turns, "freq": self.freq, "src": self.src, "stats": self.stats}
+                d = {"turns": self.turns, "freq": self.freq, "src": self.src, "stats": self.stats,
+                     "kinds": self.kinds}
                 M = np.stack(self.vecs).astype(np.float16) if self.vecs else np.zeros((0, 1), np.float16)
             tmp = self.dir / "predict_state.json.tmp"
             json.dump(d, open(tmp, "w"))
@@ -186,8 +189,30 @@ class Predictor:
                 continue
             for name, c in dist.items():
                 tv[name] = tv.get(name, 0.0) + wt * c / tot
-        z = sum(tv.values()) or 1.0
-        tools = sorted(((n, round(v / z, 3)) for n, v in tv.items()), key=lambda x: -x[1])[:TOP]
+        # KIND FIRST (2026-10-11, the operator: "it always predicts exec ... punish
+        # it severely when it predicts a tool instead of text and vice-versa"):
+        # text or a tool call is decided on its own, from the same three
+        # sources plus the kind ledger the misses feed (KIND_PENALTY); the
+        # actions are then ranked inside the winning kind
+        kv = {"text": 0.0, "tool": 0.0}
+        for name, v in tv.items():
+            kv[kind_of(name)] += v
+        for key, wt in ((f"{lane}|{prev}", 0.5), (lane, 0.2)):
+            kd = self.kinds.get(key) or {}
+            tot = sum(kd.values())
+            if tot:
+                for k in kv:
+                    kv[k] += wt * kd.get(k, 0.0) / tot
+        kz = sum(kv.values()) or 1.0
+        p_text = kv["text"] / kz
+        win = "text" if p_text >= 0.5 else "tool"
+        inner = {n: v for n, v in tv.items() if kind_of(n) == win} or {TEXT: 1.0}
+        other = {n: v for n, v in tv.items() if kind_of(n) != win}
+        zi, zo = sum(inner.values()) or 1.0, sum(other.values()) or 1.0
+        pw = p_text if win == "text" else 1.0 - p_text
+        ranked = ([(n, round(pw * v / zi, 3)) for n, v in sorted(inner.items(), key=lambda x: -x[1])]
+                  + [(n, round((1.0 - pw) * v / zo, 3)) for n, v in sorted(other.items(), key=lambda x: -x[1])])
+        tools = ranked[:TOP]
         cand: dict[str, list] = {}
 
         def add(e, score, src):
@@ -209,7 +234,7 @@ class Predictor:
         for e, s in near:
             add(e, max(float(s), 0.0), "near")
         ents = sorted(([e, round(v[0], 3), v[1], sorted(v[2])] for e, v in cand.items()), key=lambda x: -x[1])[:TOP]
-        return {"tools": [list(t) for t in tools], "ents": ents}
+        return {"tools": [list(t) for t in tools], "ents": ents, "kind": win, "p_text": round(p_text, 3)}
 
     # ---- the score -------------------------------------------------------------
     def score(self, guess: dict, qv, lane: str, tools: list[str], ents: list[str], meta=None,
@@ -218,8 +243,11 @@ class Predictor:
         actual_t = tools or [NONE]
         gt = [t[0] for t in guess.get("tools") or []]
         ge = [e[0] for e in guess.get("ents") or []]
+        actual_kind = kind_of(actual_t[0])
+        guessed_kind = guess.get("kind") or (kind_of(gt[0]) if gt else "tool")
         res = {"tool1": bool(gt) and gt[0] in actual_t,
                "tool3": any(t in actual_t for t in gt),
+               "kind": guessed_kind == actual_kind,
                "ent3": (any(e in ents for e in ge) if ents else None),
                "ents_touched": len(ents)}
         with self._lock:
@@ -234,6 +262,10 @@ class Predictor:
                 f = self.freq.setdefault(key, {})
                 for t in actual_t:
                     f[t] = f.get(t, 0.0) + 1.0
+                # the kind ledger: a right kind is one vote, a WRONG kind is
+                # KIND_PENALTY votes for the kind it should have been
+                kd = self.kinds.setdefault(key, {"text": 0.0, "tool": 0.0})
+                kd[actual_kind] = kd.get(actual_kind, 0.0) + (1.0 if res["kind"] else KIND_PENALTY)
             if qv is not None:
                 self.vecs.append(_unit(qv))
                 self.turns.append({"lane": lane, "tools": tools, "ents": ents[:12]})
@@ -243,6 +275,7 @@ class Predictor:
             s = self.stats.setdefault(lane, {"turns": 0, "tool1": 0, "tool3": 0, "ent_turns": 0, "ent3": 0,
                                              "recent": []})
             s["turns"] += 1
+            s["kind"] = s.get("kind", 0) + int(res["kind"])
             s["tool1"] += int(res["tool1"])
             s["tool3"] += int(res["tool3"])
             if res["ent3"] is not None:
@@ -268,6 +301,7 @@ class Predictor:
                     "turns": s["turns"],
                     "tool_top1": round(s["tool1"] / max(1, s["turns"]), 3),
                     "tool_top3": round(s["tool3"] / max(1, s["turns"]), 3),
+                    "kind": round(s.get("kind", 0) / max(1, s["turns"]), 3),
                     "entity_top3": round(s["ent3"] / max(1, s["ent_turns"]), 3),
                     "last50": {"tool_top1": round(sum(x[0] for x in r) / max(1, len(r)), 3),
                                "tool_top3": round(sum(x[1] for x in r) / max(1, len(r)), 3),
@@ -315,12 +349,17 @@ def candidates(srv, text: str, qv) -> tuple[list[str], list[tuple[str, float]]]:
 
 
 PHANTOM_LOG = 400
+KIND_PENALTY = 5.0                    # a text guessed as a tool call (or back): five votes for the right kind
+
+
+def kind_of(action: str) -> str:
+    return "text" if action in (TEXT, NONE) else "tool"
 
 
 def _label(g: dict) -> tuple[str, str]:
     """(kind, label) of a guess's top move: a tool call with its entity, or text."""
     t = (g.get("tools") or [[TEXT, 0]])[0][0]
-    if t in (TEXT, NONE):
+    if g.get("kind") == "text" or t in (TEXT, NONE):
         return "text", ""
     e = (g.get("ents") or [[""]])[0][0]
     return "tool", t + (f" {e}" if e else "")
