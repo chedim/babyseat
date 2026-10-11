@@ -55,9 +55,9 @@ ALLOWED_PREFIXES = ("session", "config", "provider", "mcp")
 # thinker, dreamer); event: the per-user SSE relay (never global/event,
 # its unscoped twin)
 ALLOWED_EXACT = ("global/health", "agent", "event", "membrane/models", "membrane/seat", "membrane/seat/control",
-                 "membrane/voice", "membrane/voice/state")
-# the voice routes: the person is the HA user, stamped here, never the page's word
-VOICE_PATHS = ("membrane/voice", "membrane/voice/state")
+                 "membrane/voice", "membrane/voice/state", "membrane/jsexec/register", "membrane/jsexec/result")
+# the voice + JS routes: the person is the HA user, stamped here, never the page's word
+VOICE_PATHS = ("membrane/voice", "membrane/voice/state", "membrane/jsexec/register", "membrane/jsexec/result")
 # the minds' models: everyone reads, only an HA ADMIN switches them
 ADMIN_WRITE_EXACT = ("membrane/models", "membrane/seat/control")
 # the field dashboard + the drawer: the seat's read surfaces the serve

@@ -2714,6 +2714,18 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 self.end_headers()
                 return
             path = self.path.split("?", 1)[0]
+            if path in ("/membrane/jsexec/register", "/membrane/jsexec/result"):
+                # THE SEAT'S JS (jsexec.py): an opted-in tab registers, answers its jobs
+                from . import jsexec as _JS
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                b = self._read_body() or {}
+                if psrv is None:
+                    return self._json_out({"ok": False, "error": "no seat"})
+                if path.endswith("/register"):
+                    return self._json_out(_JS.register(psrv, str(b.get("tab") or ""), str(b.get("sid") or ""),
+                                                       str(b.get("person") or ""), str(b.get("device") or ""),
+                                                       on=b.get("on") is not False))
+                return self._json_out(_JS.result(psrv, b))
             if path in ("/membrane/voice", "/membrane/voice/state"):
                 # VOICE IN / OUT (voice_io.py): the page's buttons, the voice log;
                 # `person` is the HA user's name, stamped by the relay

@@ -767,6 +767,7 @@ function definePanel() {
             <button class="btn icon llmbtn" title="the LLM (off: talk to membrane alone)">🤖</button>
             <button class="btn icon autobtn" title="auto-chat: membrane and the LLM talk; you can join any time">⟳</button>
             <button class="btn icon rolebtn" title="membrane's role: babble (it talks to the LLM) or predict (it guesses the LLM, unheard)">💬</button>
+            <button class="btn icon jsbtn" title="let Argus run JS in this tab -- it acts as you here (the page, your HA login) -- off by default">🧩</button>
             <button class="btn icon vlogbtn" title="the voice log: what was said aloud (hidden from the chat)">🗒</button>
             <button class="btn icon pausebtn" title="pause the seat: every acting lane stands down (loops, dreamer, thinker, night)">⏸</button>
             <button class="btn icon mindsbtn" title="membrane's minds">🧠</button>
@@ -793,7 +794,7 @@ function definePanel() {
         const ctl = document.createElement("div");
         ctl.className = "ctl";
         for (const [cls, label] of [["agent", null], ["modelpick", null], ["voicebtn", "membrane's voice"], ["llmbtn", "LLM replies"],
-                                    ["autobtn", "auto-chat"], ["rolebtn", "membrane babbles"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
+                                    ["autobtn", "auto-chat"], ["rolebtn", "membrane babbles"], ["jsbtn", "let Argus act as you here: off"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
           const el = app.querySelector("." + cls);
           if (!el) continue;
           if (label) {
@@ -844,6 +845,10 @@ function definePanel() {
       this._autoBtn.addEventListener("click", (ev) => this._toggleAuto(ev && ev.shiftKey ? "teach" : "explore").catch(() => {}));
       this._roleBtn = $(".rolebtn");
       this._roleBtn.addEventListener("click", () => this._toggleRole().catch(() => {}));
+      this._jsBtn = $(".jsbtn");
+      this._jsBtn.addEventListener("click", () => this._toggleJs().catch(() => {}));
+      this._jsTab = "tab_" + Math.random().toString(36).slice(2, 10);
+      this._paintJs();
       this._vlogEl = $(".vlog");
       this._vlogBtn = $(".vlogbtn");
       this._vlogBtn.addEventListener("click", () => this._toggleVoiceLog().catch(() => {}));
@@ -1316,6 +1321,7 @@ function definePanel() {
         this._sesTimer = setTimeout(() => this._listSessions().catch(() => {}), 400);
       }
       if (ev.type === "membrane.seat") this._loadSeat();          // the seat's own events: its state moved
+      if (ev.type === "membrane.jsexec") this._jsRun(p.job).catch(() => {});
       if (ev.type === "membrane.say" && sid === (this._chat && this._chat.sid) && this._repliesArmed) {
         const ln = p.line || {};
         if (ln.text) this.dispatchEvent(new CustomEvent("ai-say", { detail: { text: ln.text }, bubbles: true, composed: true }));
@@ -1614,6 +1620,58 @@ function definePanel() {
       const r = await this._api(SERVE + "/session/" + this._sid + "/auto",
         { method: "POST", body: JSON.stringify({ on, mode: mode || "explore" }) });
       if (r.ok && r.data) { this._chat.auto = r.data; this._paintAuto(); }
+    }
+
+    /** THE SEAT'S JS (jsexec.py): opt in per tab; Argus's code then runs in this
+     *  window, as you -- the switch is the consent. */
+    async _toggleJs() {
+      this._jsOn = !this._jsOn;
+      this._paintJs();
+      clearInterval(this._jsBeat);
+      await this._jsRegister();
+      if (this._jsOn) this._jsBeat = setInterval(() => this._jsRegister().catch(() => {}), 20000);
+
+    }
+
+    async _jsRegister() {
+      if (!this._sid) return;
+      await this._api(SERVE + "/membrane/jsexec/register", { method: "POST", body: JSON.stringify({
+        tab: this._jsTab, sid: this._sid, on: !!this._jsOn,
+        device: (navigator.maxTouchPoints > 0 ? "phone/tablet" : "computer") + " · " + (navigator.platform || "") }) });
+    }
+
+    _paintJs() {
+      if (!this._jsBtn) return;
+      const lbl = this._jsBtn.querySelector(".lbl");
+      if (lbl) lbl.textContent = this._jsOn ? "Argus acts as you here: ON" : "let Argus act as you here: off";
+      this._jsBtn.style.opacity = this._jsOn ? "1" : ".5";
+      this._jsBtn.title = this._jsOn ? "Argus runs JS in this tab and acts as you here (the page, your HA login) -- click to stop"
+                                     : "let Argus run JS in this tab -- it acts as you here (the page, your HA login) -- off by default";
+    }
+
+    /** Run a job IN THIS WINDOW (the operator's choice, 2026-10-11: "why a sandbox?
+     *  why not let it access the window?"): an async function with window, the HA
+     *  connection (hass) and this chat panel in reach; its console kept; a job
+     *  still waiting past its timeout is answered as a timeout. */
+    async _jsRun(job) {
+      if (!this._jsOn || !job || job.tab !== this._jsTab) return;
+      const ms = Math.max(500, Math.min(60000, (job.timeout || 15) * 1000));
+      const logs = [];
+      const show = (v) => { try { return typeof v === "string" ? v : JSON.stringify(v); } catch (x) { return String(v); } };
+      const con = {};
+      for (const k of ["log", "info", "warn", "error"]) con[k] = (...a) => { logs.push((k === "log" ? "" : k + ": ") + a.map(show).join(" ")); console[k](...a); };
+      let out;
+      try {
+        const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+        const fn = new AsyncFunction("console", "hass", "panel", "home", String(job.code || ""));
+        const home = document.querySelector("membrane-home-panel") || (this.getRootNode && this.getRootNode().host) || null;
+        const v = await Promise.race([fn(con, this._hass, this, home),
+                                      new Promise((_, rej) => setTimeout(() => rej(new Error("timeout after " + ms + " ms")), ms))]);
+        out = { id: job.id, ok: true, value: v === undefined ? undefined : show(v).slice(0, 4000), logs: logs.slice(0, 200) };
+      } catch (err) {
+        out = { id: job.id, ok: false, error: String((err && err.stack) || err).slice(0, 2000), logs: logs.slice(0, 200) };
+      }
+      await this._api(SERVE + "/membrane/jsexec/result", { method: "POST", body: JSON.stringify(out) }).catch(() => {});
     }
 
     async _toggleVoiceLog() {

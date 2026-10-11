@@ -759,11 +759,19 @@ def run_command_entity(fld, est, mem, command: str,
     t0 = time.time()
     err = ""
     try:
-        p = subprocess.run(cmd, shell=True, capture_output=True, text=True,
-                           timeout=t, cwd=os.getcwd())
-        rc = p.returncode
-        text = "\n".join(x for x in ((p.stdout or "").rstrip("\n"),
-                                     (p.stderr or "").rstrip("\n")) if x)
+        if cmd.startswith("js::"):
+            # THE SEAT'S JS (jsexec.py): never a shell -- an opted-in browser tab runs it
+            from . import jsexec as _JS
+            _r = _JS.run(cmd[4:], timeout=t)
+            rc, text, err = _r["rc"], _r["text"], _r.get("err") or ""
+            if err and rc != -1:
+                text, err = (text + "\n" if text else "") + err, ""
+        else:
+            p = subprocess.run(cmd, shell=True, capture_output=True, text=True,
+                               timeout=t, cwd=os.getcwd())
+            rc = p.returncode
+            text = "\n".join(x for x in ((p.stdout or "").rstrip("\n"),
+                                         (p.stderr or "").rstrip("\n")) if x)
     except subprocess.TimeoutExpired as e:
         rc = -1
         err = f"timeout after {t:g}s"

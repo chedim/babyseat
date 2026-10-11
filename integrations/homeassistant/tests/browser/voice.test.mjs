@@ -231,3 +231,30 @@ test("👂ᴬ addressed: a sentence that doesn't name him is never sent to be tr
     assert.deepEqual(await page.evaluate(() => [window.__said.length, window.__sttCalls]), [0, 0]);
   });
 });
+
+
+test("the seat's JS runs in the opted-in window: page, values and console back (2026-10-11)", { timeout: 120000 }, async () => {
+  await withPage(spoken("."), async (page) => {
+    const out = await page.evaluate(async () => {
+      const chat = window.__home.shadowRoot.querySelector("ai-terminal-panel");
+      const posted = [];
+      chat._api = async (path, opt) => { posted.push({ path, body: JSON.parse(opt.body) }); return { ok: true, data: {} }; };
+      chat._jsOn = true; chat._jsTab = "t1"; chat._sid = "s1";
+      document.title = "the boat";
+      await chat._jsRun({ id: "j1", tab: "t1", timeout: 5, code: "console.log('hi', {a: 1}); return 2 + 3" });
+      await chat._jsRun({ id: "j2", tab: "t1", timeout: 5, code: "return document.title + ' / ' + (panel === arguments[2]) + ' / ' + !!hass" });
+      await chat._jsRun({ id: "j3", tab: "t1", timeout: 1, code: "await new Promise(() => {})" });
+      await chat._jsRun({ id: "j4", tab: "t1", timeout: 5, code: "throw new Error('nope')" });
+      await chat._jsRun({ id: "j5", tab: "other", timeout: 5, code: "return 1" });     // not this tab's job
+      chat._jsOn = false;
+      await chat._jsRun({ id: "j6", tab: "t1", timeout: 5, code: "return 1" });       // opted out: nothing runs
+      return posted.filter((p) => p.path.endsWith("/membrane/jsexec/result")).map((p) => p.body);
+    });
+    const by = Object.fromEntries(out.map((r) => [r.id, r]));
+    assert.deepEqual(Object.keys(by).sort(), ["j1", "j2", "j3", "j4"]);
+    assert.equal(by.j1.ok, true); assert.equal(by.j1.value, "5"); assert.deepEqual(by.j1.logs, ['hi {"a":1}']);
+    assert.equal(by.j2.value, "the boat / true / true");                  // the window, the panel, the HA connection
+    assert.equal(by.j3.ok, false); assert.match(by.j3.error, /timeout/);
+    assert.equal(by.j4.ok, false); assert.match(by.j4.error, /nope/);
+  });
+});
