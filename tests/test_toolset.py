@@ -215,3 +215,14 @@ class TestOldEditTakesParents(unittest.TestCase):
         self.assertEqual((leg, a["commands"], a["args"]), ("entity_link", "c1", {"needle": "x"}))
         self.assertEqual(T.resolve("membrane-query", {"topic": "t"})[0], "query")
         self.assertEqual(T.resolve("nonsense/action-read", {})[0], "nonsense/action-read")   # still refused, honestly
+
+
+
+class TestArgumentsInTheName(unittest.TestCase):
+    """2026-10-11: '{"action":' as a tool name got a lane refusal six times."""
+    def test_it_says_what_happened(self):
+        from membrane import toolset as T
+        with self.assertRaises(ValueError) as cm:
+            T.resolve('{"action": "read", "name": "presence.exec"}', {})
+        self.assertIn("NAME held its arguments", str(cm.exception))
+        self.assertIn("entity", str(cm.exception))

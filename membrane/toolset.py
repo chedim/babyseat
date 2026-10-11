@@ -305,6 +305,14 @@ def canonical(name: str, args: dict) -> tuple[str, dict]:
 def resolve(name: str, args: dict) -> tuple[str, dict]:
     """(existing tool name, its args) for a family call; an existing tool's
     own name passes through; ValueError names the valid actions."""
+    # THE ARGUMENTS IN THE NAME (2026-10-11: a loop sent '{"action":' as the
+    # tool's name six times and was told 'not your lane's hand' -- the wrong
+    # lesson): say what happened and how to send it
+    if str(name or "").lstrip()[:1] in ("{", "["):
+        raise ValueError(
+            f"the call's NAME held its arguments ({str(name)[:80]!r}): put the tool's name -- "
+            f"one of {', '.join(sorted(FAMILIES))} -- in the name, and that JSON in the arguments, "
+            "e.g. name='entity', arguments={\"action\": \"read\", \"name\": \"presence\"}")
     name, args = canonical(name, args)
     args = dict(args or {})
     fam = FAMILIES.get(name)
