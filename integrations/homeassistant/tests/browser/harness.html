@@ -33,7 +33,11 @@
   const el = document.createElement("membrane-home-panel");
   document.body.appendChild(el);
   el.hass = window.fakeHass;
-  el._sendToChat = (t) => window.__said.push(t);       // what the voice would send
+  el._sendToChat = (t) => window.__said.push(t);       // what the voice would send (the old path)
+  // the voice's own path (voice:in, 2026-10-11): the chat panel's sendVoice
+  const chatPanel = () => el.shadowRoot && el.shadowRoot.querySelector("ai-terminal-panel");
+  const hook = () => { const c = chatPanel(); if (c) c.sendVoice = async (t) => { window.__said.push(t); }; else setTimeout(hook, 50); };
+  hook();
   window.__home = el;
   window.__ready = true;
 </script>
