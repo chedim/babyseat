@@ -10,6 +10,9 @@ still work when called. The long-form documentation lives behind `help`.
 """
 from __future__ import annotations
 
+import json
+import re
+
 SCRIPT_KINDS = ("getter", "tick", "nudge", "mention", "thought", "dreamed", "delete", "watch")
 RETIRED = {"junk_cut"}          # an operator tuning knob, not the model's
 
@@ -53,7 +56,7 @@ FAMILIES: dict[str, dict] = {
                    "watch_ops": {"type": "array", "items": {"type": "object"}, "description": "edit: geometric watches (help('watches'))"},
                    "watch_fields": {"type": "array", "items": {"type": "object"}, "description": "edit: own-motion watches"},
                    "merged_into": _S("edit: merge into this entity")},
-        "map": {"read": lambda a: _pick({"spec": a.get("spec") or a.get("name") or a.get("object"), "run": a.get("run")}, "spec", "run"),
+        "map": {"read": lambda a: _pick({"spec": a.get("spec") or a.get("name") or a.get("object") or a.get("key"), "run": a.get("run")}, "spec", "run"),
                 "add": lambda a: _pick(a, "class", "name", "summary", "links"),
                 "edit": lambda a: {**_pick(a, "spec", "summary", "links", "class", "merged_into",
                                            "watch", "watch_ops", "watch_fields", "publish", "unpublish"),
@@ -81,7 +84,9 @@ FAMILIES: dict[str, dict] = {
         "map": {"call": lambda a: _pick(a, "object", "method", "args"),
                 "each": lambda a: _pick(a, "over", "method", "args", "max", "dry_run", "on_fail"),
                 "define": lambda a: _pick(a, "on", "method", "command", "read_only", "guard", "steps", "abstract"),
-                "link": lambda a: _pick(a, "commands", "executor", "create", "args"),
+                "link": lambda a: _pick({**a, "commands": a.get("commands") or a.get("command"),
+                                         "args": a.get("args") or _json_obj(a.get("params"))},
+                                        "commands", "executor", "create", "args"),
                 "unlink": lambda a: _pick(a, "commands", "executor")},
     },
     "goal": {
@@ -267,9 +272,40 @@ def _scripts_of(args: dict) -> dict:
 _LEGACY_FAMILY = {leg: fam for fam, f in FAMILIES.items() for leg in f["actions"].values()}
 
 
+def _json_obj(v):
+    """A params object the model sent as a JSON string."""
+    if isinstance(v, dict):
+        return v
+    try:
+        o = json.loads(v) if isinstance(v, str) and v.strip().startswith("{") else None
+    except ValueError:
+        o = None
+    return o if isinstance(o, dict) else None
+
+
+_NS = re.compile(r"^(?:membrane|mcp)[-_.:/]+", re.I)
+_FAM_ACT = re.compile(r"^([a-z_]+)[/.:](?:action[-_=:]?)?([a-z_]+)$", re.I)
+
+
+def canonical(name: str, args: dict) -> tuple[str, dict]:
+    """THE NAMES THE MODEL INVENTS (2026-10-10, the operator: "why are
+    entity/action-read and exec/action-link not the operator's lane?"): the
+    seat called 'entity/action-read', 'membrane-entity_read' -- names no lane
+    lists, so even its READS were refused. A namespace prefix drops; a
+    'family/action-x' (or family.x, family:x) is the family's call."""
+    name = _NS.sub("", str(name or "").strip())
+    m = _FAM_ACT.match(name)
+    if m and m.group(1).lower() in FAMILIES:
+        fam, act = m.group(1).lower(), m.group(2).lower()
+        if act in FAMILIES[fam]["actions"]:
+            return fam, {**(args or {}), "action": act}
+    return name, args
+
+
 def resolve(name: str, args: dict) -> tuple[str, dict]:
     """(existing tool name, its args) for a family call; an existing tool's
     own name passes through; ValueError names the valid actions."""
+    name, args = canonical(name, args)
     args = dict(args or {})
     fam = FAMILIES.get(name)
     if fam is None:
@@ -285,6 +321,11 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
             args["properties"] = {**(args.get("properties") or {}), "parents": args.pop("parents")}
         if name == "entity_edit" and "spec" not in args and args.get("name"):
             args["spec"] = args["name"]
+        if name == "entity_read" and "spec" not in args:
+            for alias in ("key", "name", "object", "eid"):
+                if args.get(alias):
+                    args["spec"] = args.pop(alias)
+                    break
         if name in ("entity_edit", "entity_add") and "scripts" in args:
             # the old names take the scripts object too (it was silently dropped)
             for kind, code in _scripts_of(args).items():

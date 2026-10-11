@@ -202,3 +202,16 @@ class TestOldEditTakesParents(unittest.TestCase):
         self.assertEqual(leg, "entity_edit")
         self.assertEqual(a["properties"]["parents"], ["b", "a"])
         self.assertEqual(a["spec"], "probe:dispatch")
+
+    def test_the_names_the_seat_invents_resolve_before_the_lane_gate(self):
+        # 2026-10-10: 'entity/action-read' and 'membrane-entity_read' were
+        # refused even on the lanes that list entity_read
+        for name, args in (("entity/action-read", {"key": "m:x"}), ("membrane-entity_read", {"key": "m:x"}),
+                           ("entity.read", {"spec": "m:x"}), ("mcp_entity_read", {"name": "m:x"})):
+            leg, a = T.resolve(name, args)
+            self.assertEqual((leg, a.get("spec")), ("entity_read", "m:x"), name)
+            self.assertIsNone(S._lane_refusal(leg, "operator"), name)
+        leg, a = T.resolve("exec/action-link", {"command": "c1", "params": '{"needle": "x"}'})
+        self.assertEqual((leg, a["commands"], a["args"]), ("entity_link", "c1", {"needle": "x"}))
+        self.assertEqual(T.resolve("membrane-query", {"topic": "t"})[0], "query")
+        self.assertEqual(T.resolve("nonsense/action-read", {})[0], "nonsense/action-read")   # still refused, honestly
