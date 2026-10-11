@@ -3873,6 +3873,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._stranger(path); return
         if path == "/membrane/gate-stages":           # the gate's stage clock, the last rounds
             self._json_out({"rounds": list(getattr(self.server, "_gate_stages", None) or [])}); return
+        if path == "/membrane/predict":               # membrane predicting Argus: hit rates per lane
+            from . import predict as _predict
+            _p = _predict.of(self.server)
+            self._json_out(_p.report() if _p is not None else {"off": True}); return
         if path == "/membrane/intend":
             self._membrane_intend(); return
         if path == "/membrane/entity-related":

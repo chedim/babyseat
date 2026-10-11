@@ -1021,7 +1021,7 @@ def on_turn_start(runner, sid: str, text: str, mid: str, lane: str) -> None:
 
 
 def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
-                voice_turn: bool = False) -> None:
+                voice_turn: bool = False, parts=None) -> None:
     """The teachers speak: the operator's message and the LLM's reply are
     heard; the line it said this turn is graded against the reply. A voice
     turn's 'user' text is the voice itself: never heard (it never hears
@@ -1031,6 +1031,11 @@ def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
         return
     v = of(srv)
     if v is None:
+        try:                                     # no voice: the guess is still scored
+            from . import predict as _predict
+            threading.Thread(target=_predict.end, args=(runner, sid, list(parts or [])), daemon=True).start()
+        except Exception:
+            pass
         return
 
     th = (getattr(runner, "_voice_threads", {}) or {}).pop(sid, None)
@@ -1056,6 +1061,14 @@ def on_turn_end(runner, sid: str, user_text: str, reply: str, lane: str,
                     except Exception:
                         pass
             lid = (getattr(runner, "_voice_last", {}) or {}).pop(sid, None)
+            # the guess of Argus's actions (predict.py), scored and shown on its line
+            try:
+                from . import predict as _predict
+                pr = _predict.end(runner, sid, parts or [])
+                if pr is not None and lid:
+                    v._ledger({"id": lid, "guess": pr["guess"], "did": pr["did"], "guess_score": pr["score"]})
+            except Exception as e:
+                print(f"[voice] predict score failed: {e!r}", file=sys.stderr)
             if meant and v.is_repeat_lesson(sid, meant):
                 if lid:
                     v._ledger({"id": lid, "lesson": "repeat"})

@@ -228,3 +228,13 @@ test("membrane's framed auto-chat line: only its own words are spoken", () => {
   const framed = "[membrane voice] membrane's own voice (the field learning to speak -- not the operator) said: «the lights hum before the dark»";
   assert.equal(L.speakText(L.voiceTurnText(framed)), "the lights hum before the dark");
 });
+
+test("membrane's guess of Argus's actions rides its voice line, scored", () => {
+  const line = { id: "v1", text: "x", guess: { tools: [["entity.read", 0.7], ["find.memory", 0.2]], ents: [["ha:light.cabin", 1, "named"]] },
+                 guess_score: { tool1: true, tool3: true, ent3: false }, did: { tools: ["entity.read"], ents: ["ha:light.aft"] } };
+  const h = L.guessHtml(line);
+  assert.ok(h.includes("🔮 entity.read, find.memory ✓ · ha:light.cabin ✗"), h);
+  assert.ok(h.includes("he did: entity.read on ha:light.aft"), h);
+  assert.equal(L.guessHtml({ text: "no guess" }), "");
+  assert.ok(L.guessHtml({ guess: { tools: [["(none)", 1]], ents: [] }, guess_score: { tool1: false, tool3: false } }).includes("(none) ✗"));
+});

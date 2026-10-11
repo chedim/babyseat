@@ -309,9 +309,26 @@ function voiceHtml(line, editing) {
     '<button class="vbtn' + down + '" data-vvote="down" title="not like that">👎</button>' +
     '<button class="vbtn" data-vedit="1" title="say it better">✎</button></div>';
   if (line.rewrite) h += '<div class="vre">you taught: ' + escText(line.rewrite) + "</div>";
+  h += guessHtml(line);
   if (editing) h += '<div class="vedit"><textarea rows="2" placeholder="how membrane should have said it"></textarea>' +
     '<button class="btn primary vteach">teach</button></div>';
   return h + "</div>";
+}
+
+/** Membrane's guess of what Argus would DO this turn (predict.py: virtual,
+ *  never run), scored against what he did: ✓ top guess, ~ in the top 3. */
+function guessHtml(line) {
+  const g = line && line.guess;
+  if (!g) return "";
+  const sc = line.guess_score || {}, did = line.did || {};
+  const tools = (g.tools || []).map((x) => x[0]).join(", ");
+  const ents = (g.ents || []).map((x) => x[0]).join(", ");
+  const mark = (v) => (v === true ? "✓" : v === false ? "✗" : "");
+  const t = sc.tool1 ? "✓" : sc.tool3 ? "~" : "✗";
+  const title = "membrane guessed Argus's actions (never run) -- he did: " +
+    ((did.tools || []).join(", ") || "no tools") + ((did.ents || []).length ? " on " + did.ents.join(", ") : "");
+  return '<div class="vguess" title="' + escAttr(title) + '">🔮 ' + escText(tools || "no tools") + " " + t +
+    (ents ? " · " + escText(ents) + " " + mark(sc.ent3) : "") + "</div>";
 }
 
 function pretty(v) {
@@ -414,7 +431,7 @@ function replyToSpeak(rows) {
   return null;
 }
 
-const AiPanelLogic = { speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
+const AiPanelLogic = { guessHtml, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
@@ -486,6 +503,7 @@ const STYLE = `
   .vtext { font-style:italic; } .vmode { opacity:.7; } .vbar { margin-top:4px; display:flex; gap:4px; }
   .vbtn { border:0; background:transparent; cursor:pointer; opacity:.45; font-size:14px; padding:0 4px; }
   .vbtn:hover, .vbtn.on { opacity:1; } .vre { font-size:12px; opacity:.7; margin-top:4px; }
+  .vguess { font-size:11px; opacity:.6; margin-top:3px; }
   .autobtn.spinning { animation:aspin 2.4s linear infinite; } @keyframes aspin { to { transform:rotate(360deg); } }
   .vedit { display:flex; gap:6px; margin-top:6px; } .vedit textarea { flex:1; font:inherit; border-radius:8px; padding:4px 8px; }
   .msg.ai.live { border-left-color:var(--primary-color,#3477d6); }

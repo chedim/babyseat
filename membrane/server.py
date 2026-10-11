@@ -1594,6 +1594,14 @@ class TurnRunner:
                                      _lane_of((self._agents or {}).get(sid)))
         except Exception:
             pass
+        # MEMBRANE PREDICTS ARGUS (predict.py): the turn's tools and entities,
+        # guessed before the model runs (every lane; a virtual action, never run)
+        try:
+            if not user_info.get("membraneOnly"):
+                from . import predict as _predict
+                _predict.start_async(self, sid, text, _lane_of((self._agents or {}).get(sid)))
+        except Exception:
+            pass
         # MEMBRANE ONLY (the chat's LLM switch off): the voice answers, the
         # model is never called; the voice still hears the operator
         if user_info.get("membraneOnly"):
@@ -2075,11 +2083,17 @@ class TurnRunner:
         # the voice's teachers: the operator's words and the LLM's reply
         try:
             from . import voice as _voice
+            _lane_end = _lane_of((self._agents or {}).get(sid))
             _voice.on_turn_end(self, sid, text,
                                "\n".join(p.get("text") or "" for p in parts
                                          if isinstance(p, dict) and p.get("type") == "text"),
-                               _lane_of((self._agents or {}).get(sid)),
-                               voice_turn=bool((user_info or {}).get("voiceTurn")))
+                               _lane_end,
+                               voice_turn=bool((user_info or {}).get("voiceTurn")),
+                               parts=parts)
+            if _lane_end not in _voice._CHAT_LANES:      # the chat's guess rides its voice line
+                from . import predict as _predict
+                threading.Thread(target=_predict.end, args=(self, sid, list(parts)),
+                                 daemon=True, name="predict-end").start()
         except Exception:
             pass
         return {"info": a_info, "parts": parts}
@@ -2249,7 +2263,7 @@ SEAT_READ_PATHS = ("/membrane/state", "/membrane/map/cloud",
                    # GET, numbers in, shape out
                    "/membrane/stranger/visit", "/membrane/stranger/view",
                    "/membrane/stranger/event", "/membrane/stranger/leave",
-                   "/membrane/gate-stages")
+                   "/membrane/gate-stages", "/membrane/predict")
 
 
 def seat_read_url(srv, path_qs: str) -> str | None:

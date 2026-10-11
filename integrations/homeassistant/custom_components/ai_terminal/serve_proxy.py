@@ -63,7 +63,8 @@ READ_ONLY_EXACT = ("membrane/state", "membrane/map/field",
                    "membrane/field/entity", "membrane/map/distance",
                    "membrane/map/field3d", "membrane/map/tile",
                    "membrane/map/locate", "v1/models",
-                   "membrane/entity/read", "membrane/entity-related")
+                   "membrane/entity/read", "membrane/entity-related",
+                   "membrane/predict")
 EVENT_HELLO = "server.connected"
 
 SPEAKER_PREFIX = "[HA user: "
