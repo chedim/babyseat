@@ -2323,7 +2323,7 @@ SEAT_READ_PATHS = ("/membrane/state", "/membrane/map/cloud",
                    # GET, numbers in, shape out
                    "/membrane/stranger/visit", "/membrane/stranger/view",
                    "/membrane/stranger/event", "/membrane/stranger/leave",
-                   "/membrane/gate-stages", "/membrane/predict", "/membrane/seat")
+                   "/membrane/gate-stages", "/membrane/predict")
 
 
 def seat_read_url(srv, path_qs: str) -> str | None:

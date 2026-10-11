@@ -141,3 +141,9 @@ class TestTheBattery(unittest.TestCase):
     def test_no_termux_api_no_battery(self):
         SP._bat.update(ts=0.0, val=None)
         self.assertIsNone(SP.battery(force=True) if not __import__("shutil").which("termux-battery-status") else None)
+
+
+class TestTheRoute(unittest.TestCase):
+    def test_the_seat_route_is_served_here_not_relayed(self):
+        # it went to the /v1 proxy's read relay (404 there) -- the route lives in server.py
+        self.assertNotIn("/membrane/seat", S.SEAT_READ_PATHS)
