@@ -424,14 +424,28 @@ class MessageStore:
 class SSEHub:
     """The /event fan-out: one queue per connected client; publish is a
     snapshot fan-out under a lock (a slow client can drop events, never a
-    publisher's turn)."""
+    publisher's turn).
+
+    THE SILENT ZOMBIE (2026-10-10, the operator: "the audio is not voicing
+    any of the LLM's messages"): a streamed reply publishes one delta per
+    token; a client a moment behind (the HA relay to a phone) overflowed its
+    256-slot queue mid-reply, was UNSUBSCRIBED -- and its connection stayed
+    open on keepalives: no part ever closed for it again, so nothing was
+    voiced and nothing reconnected. Now: deltas are droppable (the part's
+    closing update carries the whole text); losing anything else CLOSES the
+    connection (q.lost), and the client reconnects and resyncs."""
+
+    QUEUE_MAX = 4096
+    DROPPABLE = ("message.part.delta",)
 
     def __init__(self):
         self._subs: list[Queue] = []
         self._lock = threading.Lock()
 
     def subscribe(self) -> Queue:
-        q: Queue = Queue(maxsize=256)
+        q: Queue = Queue(maxsize=self.QUEUE_MAX)
+        q.lost = False
+        q.dropped = 0
         q.put({"type": "server.connected", "properties": {}})
         with self._lock:
             self._subs.append(q)
@@ -445,10 +459,18 @@ class SSEHub:
     def publish(self, event: dict) -> None:
         with self._lock:
             subs = list(self._subs)
+        droppable = event.get("type") in self.DROPPABLE
         for q in subs:
+            if droppable and q.qsize() >= self.QUEUE_MAX // 2:
+                q.dropped = getattr(q, "dropped", 0) + 1     # behind: the closing update carries the text
+                continue
             try:
                 q.put_nowait(dict(event))
             except Exception:
+                if droppable:
+                    q.dropped = getattr(q, "dropped", 0) + 1
+                    continue
+                q.lost = True                                 # its stream closes; the client resyncs
                 self.unsubscribe(q)
 
 
@@ -2342,6 +2364,8 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
         def _sse_flush(self, q, keepalive_s: float = 15.0,
                        wrap: bool = False):
             while True:
+                if getattr(q, "lost", False):
+                    return                       # it fell behind: hang up, the client resyncs
                 try:
                     ev = q.get(timeout=keepalive_s)
                 except Empty:
