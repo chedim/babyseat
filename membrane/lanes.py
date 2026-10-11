@@ -1425,8 +1425,27 @@ def goal_miss_reason(est, spec: str) -> str:
             "membrane::goal:<id>, from the board or your task)")
 
 
-def _membrane_intent_create_or_pin(srv, text: str, ttl: str = ""
-                                   ) -> dict:
+_PLANT_ORIGIN: dict[str, tuple[float, str]] = {}      # goal text -> (ts, the turn's trigger)
+
+
+def note_plant_origin(text: str, origin: str) -> None:
+    """The serve's tool hook: this goal text is being planted in a turn the
+    operator / auto-chat / a loop set going (outcome learning's provenance)."""
+    k = " ".join(str(text or "").split()).lower()
+    if k:
+        _PLANT_ORIGIN[k] = (time.time(), str(origin or "model"))
+        for old in [x for x, (t, _) in _PLANT_ORIGIN.items() if time.time() - t > 300]:
+            _PLANT_ORIGIN.pop(old, None)
+
+
+def take_plant_origin(text: str) -> str:
+    k = " ".join(str(text or "").split()).lower()
+    t, o = _PLANT_ORIGIN.pop(k, (0.0, ""))
+    return o if o and time.time() - t < 300 else ""
+
+
+def _membrane_intent_create_or_pin(srv, text: str, ttl: str = "",
+                                   planted_by: str = "") -> dict:
     """THE INTENT'S CREATE-OR-PIN (the operator's design: 'the fact that a
     goal became active makes it an intent'): match an open Goal by text ->
     pin it on this seat's active set; no match -> create the Goal entity
@@ -1457,6 +1476,14 @@ def _membrane_intent_create_or_pin(srv, text: str, ttl: str = ""
             goal = e
             break
     created = False
+    if goal is not None and planted_by == "operator" and \
+            (goal.properties or {}).get("planted_by") != "operator":
+        # the operator re-planting the seat's own goal makes it theirs too
+        goal.properties = {**(goal.properties or {}), "operator_endorsed": True}
+        try:
+            est.upsert(goal, embedder=None)
+        except Exception:
+            pass
     if goal is None:
         # the slug rides LAST (':' is safe inside 'membrane::' -- split[1]
         # on 'membrane::tl:<slug>' was '' and every goal collided)
@@ -1465,7 +1492,9 @@ def _membrane_intent_create_or_pin(srv, text: str, ttl: str = ""
         goal = QuantumEntity(
             eid=eid, cls=CLASS_GOAL,
             properties={"name": (text or "")[:120], "summary": (text or "")[:600],
-                        "status": "open", "born": time.time()},
+                        "status": "open", "born": time.time(),
+                        # outcome learning: whose goal (operator / auto / loop / model / script:x)
+                        "planted_by": planted_by or "model"},
         )
         try:
             # THE STEERING COORDINATE (the pin half's fix, the loop's
@@ -1560,6 +1589,7 @@ def _intent_cmd(srv, q: str) -> str:
             if goal is not None:
                 goal.properties["status"] = "fulfilled"
                 goal.properties["fulfilled_ts"] = time.time()
+                goal.properties["fulfilled_by"] = "operator"     # the frame is the operator's own close
                 try:
                     est.upsert(goal)
                 except Exception:
@@ -6495,7 +6525,9 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if not text:
             self._json_err_raw(400, "text required"); return
         res = _membrane_intent_create_or_pin(srv, text,
-                                             ttl=str(body.get("ttl") or ""))
+                                             ttl=str(body.get("ttl") or ""),
+                                             planted_by=str(body.get("by") or "")[:40]
+                                             or take_plant_origin(text) or "model")
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
         try:

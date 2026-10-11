@@ -92,7 +92,7 @@ def is_write(tool: str, args: dict) -> bool:
 
 
 def record(srv, eid: str, what: str, who: str = "", session: str = "", kind: str = "",
-           now: float | None = None) -> dict | None:
+           now: float | None = None, active: list | None = None) -> dict | None:
     """One decision that acted, on `eid`."""
     srv = srv or _SEAT["srv"]
     est = getattr(srv, "entity_store", None)
@@ -117,7 +117,9 @@ def record(srv, eid: str, what: str, who: str = "", session: str = "", kind: str
                 return r
         rec = {"id": f"c{int(now * 1000)}", "eid": real, "ts": round(now, 1), "who": str(who or "?")[:40],
                "kind": kind, "what": str(what or "")[:160], "session": session or "",
-               "snap": _snap(doc), "done": 0}
+               "snap": _snap(doc), "done": 0,
+               # the entities active when it was decided (outcome learning's credit goes to them)
+               "active": [str(x) for x in (active or [real])][:12]}
         pp["pending"] = (pend + [rec])[-PENDING_MAX:]
         pp["state"] = f"{len(pp['pending'])} decision(s) waiting to be looked at again"
         ent.properties = pp
@@ -175,6 +177,14 @@ def _later(srv, rec: dict, hi: float, pend: list) -> int:
 
 
 def settle_line(srv, rec: dict, h: float, now: float, pend: list) -> str:
+    return settle_eval(srv, rec, h, now, pend)["line"]
+
+
+def settle_eval(srv, rec: dict, h: float, now: float, pend: list) -> dict:
+    """The look-back as data (outcome learning's reward reads these) and as
+    the one line the seat reads: {line, h, gone, moved, held, fulfilled,
+    parked, streams, operator, again}."""
+    parts = {"h": h, "gone": False, "moved": [], "held": False, "fulfilled": False, "parked": False}
     est = getattr(srv, "entity_store", None)
     doc = _doc(est, rec["eid"])
     at = time.strftime("%m-%d %H:%M", time.localtime(rec["ts"]))
@@ -183,19 +193,24 @@ def settle_line(srv, rec: dict, h: float, now: float, pend: list) -> str:
     bits = []
     if doc is None:
         bits.append("the entity is gone")
+        parts["gone"] = True
     else:
         now_s = _snap(doc)
         moved = [f"{k} {rec['snap'].get(k)!s}→{now_s.get(k)!s}" for k in sorted(set(rec["snap"]) | set(now_s))
                  if k not in ("fulfilled_ts", "blocked_until") and rec["snap"].get(k) != now_s.get(k)]
+        parts["moved"] = moved[:3]
         if moved:
             bits.append("; ".join(moved[:3]))
         elif rec["snap"]:
             bits.append("its state held")
+            parts["held"] = True
         pp = doc.properties or {}
         if pp.get("fulfilled_ts") and not rec["snap"].get("fulfilled_ts"):
             bits.append("the goal was fulfilled")
+            parts["fulfilled"] = True
         elif str(pp.get("status") or "") == "blocked" or pp.get("blocked_until"):
             bits.append("the goal is parked")
+            parts["parked"] = True
     act = _activity(srv, rec, rec["ts"] + h)
     if act["streams"]:
         bits.append(", ".join(f"{n} {s}" for s, n in sorted(act["streams"].items(), key=lambda x: -x[1])[:4])
@@ -206,7 +221,9 @@ def settle_line(srv, rec: dict, h: float, now: float, pend: list) -> str:
         bits.append(f"the operator spoke of it {act['operator']}×")
     again = _later(srv, rec, rec["ts"] + h, pend)
     bits.append(f"decided again {again}×" if again else "not decided again")
-    return f"{head} → {_fmt_dt(h)}: " + "; ".join(bits)
+    parts.update({"streams": dict(act["streams"]), "operator": act["operator"], "again": again})
+    parts["line"] = f"{head} → {_fmt_dt(h)}: " + "; ".join(bits)
+    return parts
 
 
 def _publish(srv, rec: dict, line: str, now: float) -> None:
@@ -258,20 +275,24 @@ def settle(srv=None, now: float | None = None) -> int:
         j = max((x for x in range(len(HORIZONS)) if now >= float(rec["ts"]) + HORIZONS[x]), default=-1)
         if j >= i:
             try:
-                line = settle_line(srv, rec, HORIZONS[j], now, pend)
+                parts = settle_eval(srv, rec, HORIZONS[j], now, pend)
             except Exception as e:      # noqa: BLE001
-                line = f"(couldn't settle: {e!r})"
-            out.append((rec, line))
+                parts = {"h": HORIZONS[j], "line": f"(couldn't settle: {e!r})", "error": True}
+            out.append((rec, parts))
             i = j + 1
         rec["done"] = i
         if i < len(HORIZONS):
             keep.append(rec)
-    for rec, line in out:
-        _publish(srv, rec, line, now)
+    for rec, parts in out:
+        _publish(srv, rec, parts["line"], now)
     with _lock:
         pp["pending"] = keep
-        pp["settled"] = (list(pp.get("settled") or []) + [{"ts": round(now, 1), "eid": r["eid"], "line": ln}
-                                                          for r, ln in out])[-SETTLED_MAX:]
+        # the parts ride with the line: outcome learning's rewards read them
+        pp["settled"] = (list(pp.get("settled") or []) +
+                         [{"ts": round(now, 1), "eid": r["eid"], "line": pt["line"], "who": r.get("who"),
+                           "kind": r.get("kind"), "session": r.get("session"), "active": r.get("active") or [r["eid"]],
+                           "parts": {k: v for k, v in pt.items() if k != "line"}}
+                          for r, pt in out])[-SETTLED_MAX:]
         pp["state"] = (f"{len(keep)} decision(s) waiting to be looked at again; "
                        f"{len(pp['settled'])} settled line(s) kept")
         ent.properties = pp

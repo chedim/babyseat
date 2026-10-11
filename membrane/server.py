@@ -1620,6 +1620,14 @@ class TurnRunner:
         now = int(time.time() * 1000)
         _t_turn = time.time()
         self._busy[sid] = {"type": "busy"}
+        # THE TURN'S TRIGGER (outcome learning: a goal planted in an operator's
+        # turn is the operator's; in auto-chat or a loop it is the seat's own)
+        try:
+            self._turn_origin = getattr(self, "_turn_origin", None) or {}
+            self._turn_origin[sid] = turn_origin(text, user_info, user_parts,
+                                                 (self._agents or {}).get(sid))
+        except Exception:
+            pass
         # THE AGENT REGISTRY (the cosmetic-busy decider's + the lane
         # gate's input): THE TURN'S OWN AGENT WINS (the attached TUI
         # sends the mode per message -- 'plan' rows stored build-era
@@ -2107,6 +2115,14 @@ class TurnRunner:
                                     _fp.touch((self._agents or {}).get(sid), name_l, args)
                             except Exception:
                                 pass
+                            # GOAL PROVENANCE (outcome learning): a plant carries its turn's trigger
+                            if name_l.endswith("intend"):
+                                try:
+                                    from .lanes import note_plant_origin
+                                    note_plant_origin(args.get("text") or args.get("goal") or "",
+                                                      (getattr(self, "_turn_origin", None) or {}).get(sid) or "model")
+                                except Exception:
+                                    pass
                             # CONSEQUENCES (consequences.py): a write is a decision that acted
                             try:
                                 from . import consequences as _CQ
@@ -2400,6 +2416,20 @@ def mcp_executor(port: int):
 # the serve's rounds stream from the /v1 proxy (words show as they come);
 # MEMBRANE_STREAM_ROUNDS=0 returns to the buffered call
 STREAM_ROUNDS = os.environ.get("MEMBRANE_STREAM_ROUNDS", "1") != "0"
+
+
+def turn_origin(text, user_info=None, parts=None, agent=None) -> str:
+    """Who set this turn going: 'operator' (a person's message), 'auto'
+    (auto-chat / the voice), 'loop' (a watch loop, a goal pulse, a called
+    turn) or 'model' (anything else)."""
+    ui = user_info or {}
+    if _from_person(text, parts):
+        return "operator"
+    if ui.get("autoTurn") or ui.get("voiceTurn") or ui.get("continueTurn"):
+        return "auto"
+    if _lane_of(agent) in ("listener", "plan") and str(agent or "") not in ("", "build", "plan"):
+        return "loop"
+    return "model"
 
 
 def _from_person(text, parts=None) -> bool:

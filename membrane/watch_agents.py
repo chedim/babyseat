@@ -526,6 +526,9 @@ def parse_verdict(text: str) -> tuple[str, str]:
     return "reacted", " ".join(lines)[-240:]
 
 
+_WAKE = threading.local()                       # the running wake's turn facts, for its ledger line
+
+
 class _LoopDrainer:
     """The queue's consumer: takes events (skipping the operator's --
     the main chat IS that lane's reaction), admits a loop worker, runs
@@ -581,6 +584,26 @@ class _LoopDrainer:
                     break
 
     def handle(self, ev: dict) -> str:
+        """One event -> at most one loop turn (_handle), and its line in the
+        wake ledger (wakes.py: outcome learning's training set)."""
+        _WAKE.info = None
+        feats = None
+        if not is_operator_event(ev):
+            try:                               # what the wake arrived with, BEFORE its turn stamps the entity
+                from . import wakes as _WK
+                feats = _WK.features(self.srv, ev, time.time())
+            except Exception:
+                feats = None
+        out = self._handle(ev)
+        if feats is not None:
+            try:
+                info = getattr(_WAKE, "info", None) or {}
+                _WK.log(self.srv, ev, "folded" if out == "skip" else out, feats=feats, **info)
+            except Exception:
+                pass
+        return out
+
+    def _handle(self, ev: dict) -> str:
         """One event -> at most one loop turn. Returns 'skip', 'requeue'
         or the verdict."""
         # THE WAKE CALL: a watch fire is a real sound -- the night mind
@@ -720,6 +743,8 @@ class _LoopDrainer:
                           "session": sid, "ts": time.time()})
             except Exception:
                 pass
+            _WAKE.info = {"session": sid, "decision": decision[:160],
+                          "tools": len(out.get("trail") or [])}
             if verdict in ("done", "step") and not ev.get("readonly"):
                 try:                           # consequences.py: looked at again 1 h / 24 h / 72 h on
                     from . import consequences as _CQ

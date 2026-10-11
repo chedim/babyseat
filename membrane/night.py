@@ -3758,7 +3758,9 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
                                                    "unavailable")}
         else:
             from .opencode import _membrane_intent_create_or_pin
-            ires = _membrane_intent_create_or_pin(srv, intent_text)
+            ires = _membrane_intent_create_or_pin(
+                srv, intent_text,
+                planted_by="script:" + str(getattr(ent, "eid", "?")).replace("membrane::", "")[:60])
             out["intent_result"] = ires
             if ires.get("ok"):
                 try:
