@@ -354,9 +354,12 @@ function cleanTranscript(text) {
  *  the wave's nodes sit along a path round a cube's edges, turned by the field
  *  camera's own orbit angles; projected to [-1, 1] screen units. */
 const CUBE_PATH = [[-1, -1, -1], [-1, -1, 1], [-1, 1, 1], [-1, 1, -1], [1, 1, -1], [1, 1, 1], [1, -1, 1], [1, -1, -1]];
-function cubePoints(N, yaw, pitch) {
+function cubePoints(N, yaw, pitch, view) {
   const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
-  const rot = ([x, y, z]) => { const x1 = x * cy + z * sy, z1 = -x * sy + z * cy; return [x1, y * cp - z1 * sp]; };
+  // `view`: the field camera's own world->view matrix (three.js elements, column-major) --
+  // the mini-cube is the field's box seen exactly as the camera sees it (the rotation only)
+  const rot = view ? ([x, y, z]) => [view[0] * x + view[4] * y + view[8] * z, view[1] * x + view[5] * y + view[9] * z]
+    : ([x, y, z]) => { const x1 = x * cy + z * sy, z1 = -x * sy + z * cy; return [x1, y * cp - z1 * sp]; };
   const nodes = [];
   for (let i = 0; i < N; i++) {
     const t = (CUBE_PATH.length - 1) * i / (N - 1), k = Math.min(CUBE_PATH.length - 2, Math.floor(t)), f = t - k;
@@ -1058,9 +1061,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         g.clearRect(0, 0, W, H);
         const line = Array.from(amps, (a, i) => [W * (i + 0.5) / N, mid + Math.max(-0.92, Math.min(0.92, a)) * mid]);
         // the cube turns with the field camera's orbit (the same angles), else slowly by itself
-        const orbit = this._v3 && this._v3.orbit;
-        const yaw = orbit ? -orbit.theta : t / 4000, pitch = orbit ? Math.PI / 2 - orbit.phi : 0.45;   // above the field = above the cube (phi from +Y)
-        const cube = cubePoints(N, yaw, pitch), sz = H * 0.27, at = ([x, y]) => [W / 2 + x * sz, mid - y * sz];
+        // the cube IS the field's box as the field camera sees it (its view matrix), else turns by itself
+        const cam = this._v3 && this._v3.camera;
+        const view = cam && cam.matrixWorldInverse && cam.matrixWorldInverse.elements;
+        const cube = cubePoints(N, t / 4000, 0.45, view && view.length === 16 ? view : null), sz = H * 0.27, at = ([x, y]) => [W / 2 + x * sz, mid - y * sz];
         const pts = line.map((p, i) => { const c = at(cube.nodes[i]); return [c[0] + (p[0] - c[0]) * u, c[1] + (p[1] - c[1]) * u]; });
         const grad = g.createLinearGradient(0, 0, W, 0);
         grad.addColorStop(0, "#6f8cff"); grad.addColorStop(0.5, "#b07cff"); grad.addColorStop(1, "#4fd1ff");
