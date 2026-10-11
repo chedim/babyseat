@@ -47,6 +47,13 @@ def clean_text(text: str) -> str:
     phrases-from-silence ('You', 'Thank you.') when they are all it heard."""
     text = re.sub(r"\[[^\]]*\]|\([^)]*\)", " ", str(text or ""))
     text = " ".join(text.split())
+    # a short subtitle-style line ("- Anywhere, guys.") is words made out of noise
+    # (2026-10-11: "not even close to what I said"); a long one keeps its words
+    m = re.match(r"^[-\u2013\u2014]\s*(.*)$", text)
+    if m:
+        if len(m.group(1).split()) <= 4:
+            return ""
+        text = m.group(1)
     if re.sub(r"[^a-z ]", "", text.lower()).strip() in SILENCE_PHRASES:
         return ""
     return text

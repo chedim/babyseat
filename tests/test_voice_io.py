@@ -69,3 +69,15 @@ class TestVoiceIO(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheStamp(unittest.TestCase):
+    def test_the_mic_mark_carries_the_voice_out_state_and_the_log_keeps_the_words(self):
+        srv, r, _ = _seat()
+        VIO.set_state(srv, "Dmitrii Chechetkin", out_on=True)
+        t = VIO.stamp(srv, "Dmitrii Chechetkin", "[HA user: Dmitrii Chechetkin]\n🎙 is the camera up")
+        self.assertIn("🎙 [voice:out:dmitrii-chechetkin on] is the camera up", t)
+        VIO.heard(srv, "Dmitrii Chechetkin", "🎙 [voice:out:dmitrii-chechetkin on] is the camera up")
+        self.assertEqual(VIO.read(srv, "Dmitrii Chechetkin")["in"]["log"][-1]["text"], "is the camera up")
+        VIO.set_state(srv, "Dmitrii Chechetkin", out_on=False)
+        self.assertIn("[voice:out:dmitrii-chechetkin off]", VIO.stamp(srv, "Dmitrii Chechetkin", "🎙 hi"))

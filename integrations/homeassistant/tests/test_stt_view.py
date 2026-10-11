@@ -25,3 +25,8 @@ class TestStt(unittest.TestCase):
         for t in ("You", " you. ", "Thank you.", "Thanks for watching!"):
             self.assertEqual(S.clean_text(t), "", t)
         self.assertEqual(S.clean_text("Thank you, turn it off."), "Thank you, turn it off.")
+
+
+def test_subtitle_style_inventions_are_dropped():
+    assert S.clean_text("- Anywhere, guys.") == ""
+    assert S.clean_text("- turn on the deck lights and check the battery") == "turn on the deck lights and check the battery"

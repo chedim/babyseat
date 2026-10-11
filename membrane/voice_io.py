@@ -88,11 +88,26 @@ def set_state(srv, person: str, in_on=None, in_mode=None, out_on=None, device: s
     return out
 
 
+def _bare(text: str) -> str:
+    """The spoken words without the page's 🎙 and the seat's state tag."""
+    import re
+    return re.sub(r"^\s*🎙\s*(?:\[voice:out:[^\]]*\]\s*)?", "", str(text or "")).strip()
+
+
+def stamp(srv, person: str, text: str) -> str:
+    """'🎙 <words>' -> '🎙 [voice:out:<person> on|off] <words>' (the state only)."""
+    out = entity(srv, "out", person)
+    on = bool(((out.properties or {}) if out is not None else {}).get("on"))
+    tag = f"[{name_of('out', person)} {'on' if on else 'off'}]"
+    return text.replace("🎙 ", f"🎙 {tag} ", 1) if "🎙 " in text else text
+
+
 def heard(srv, person: str, text: str, sid: str = "") -> None:
     """The person spoke (their words also start a turn, as a voiceIn message)."""
     ent = entity(srv, "in", person)
     if ent is None:
         return
+    text = _bare(text)
     pp = ent.properties or {}
     _ring(pp, "heard", {"ts": time.time(), "text": str(text or "")[:600], "session": sid})
     pp["last_heard"] = str(text or "")[:600]

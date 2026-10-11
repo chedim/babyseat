@@ -170,3 +170,18 @@ test("speech keeps up with the chat: stale sentences skipped when newer ones wai
   const many = Array.from({ length: 10 }, (_, i) => a("s" + i, 1000 - i));
   assert.deepEqual(texts(many), ["s4", "s5", "s6", "s7", "s8", "s9"]);               // at most six wait
 });
+
+test("whisper's subtitle-style inventions are not sent as messages", () => {
+  assert.equal(H.cleanTranscript("- Anywhere, guys."), "");
+  assert.equal(H.cleanTranscript("- turn on the deck lights and check the battery please"), "turn on the deck lights and check the battery please");
+  assert.equal(H.cleanTranscript("turn on the deck lights"), "turn on the deck lights");
+});
+
+test("the idle cube: the wave's nodes on a cube's edges, turned like the camera", () => {
+  const c = H.cubePoints(15, 0, 0);
+  assert.equal(c.nodes.length, 15);
+  assert.equal(c.edges.length, 12);
+  for (const [x, y] of c.nodes) assert.ok(Math.abs(x) <= 1.0001 && Math.abs(y) <= 1.0001);   // facing a face: a square
+  const turned = H.cubePoints(15, Math.PI / 4, 0.4);
+  assert.ok(turned.nodes.some(([x]) => Math.abs(x) > 1.2));                                  // turned: a corner shows
+});

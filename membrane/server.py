@@ -2943,6 +2943,9 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                     _psrv = getattr(runner, "srv", None) if runner is not None else None
                     if _who and _psrv is not None:
                         _VIO.heard(_psrv, _who, _said, sid)
+                        # the 🎙 carries the state Argus answers by (a fact, not an instruction):
+                        # which voice:out is theirs and whether it is on
+                        text = _VIO.stamp(_psrv, _who, text)
                 except Exception:
                     pass
             row = messages.append(sid, info, [{"id": _gen_id("prt"),

@@ -338,8 +338,39 @@ function toWhisperRate(f32, inRate) {
 
 /** whisper's non-speech tags and its phrases-from-silence out (the server does the same). */
 function cleanTranscript(text) {
-  const t = String(text || "").replace(/\[[^\]]*\]|\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
-  return /^(you|thank you|thanks for watching|thank you for watching|bye)[.!]?$/i.test(t) ? "" : t;
+  let t = String(text || "").replace(/\[[^\]]*\]|\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+  // a short line in subtitle style ("- Anywhere, guys.") is whisper making words out of
+  // noise (2026-10-11: "not even close to what I said"); a long one keeps its words
+  if (/^[-–—]\s*/.test(t)) {
+    if (t.replace(/^[-–—]\s*/, "").split(/\s+/).filter(Boolean).length <= 4) return "";
+    t = t.replace(/^[-–—]\s*/, "");
+  }
+  return /^(you|thank you|thanks for watching|thank you for watching|bye|okay)[.!]?$/i.test(t) ? "" : t;
+}
+
+/** THE IDLE CUBE (2026-10-11, the operator: "when voice features are enabled and
+ *  not speaking, turn the graph-y animation into a cube that rotates with the
+ *  same algorithm as the camera ... when it speaks, it unfolds into a line"):
+ *  the wave's nodes sit along a path round a cube's edges, turned by the field
+ *  camera's own orbit angles; projected to [-1, 1] screen units. */
+const CUBE_PATH = [[-1, -1, -1], [-1, -1, 1], [-1, 1, 1], [-1, 1, -1], [1, 1, -1], [1, 1, 1], [1, -1, 1], [1, -1, -1]];
+function cubePoints(N, yaw, pitch) {
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const rot = ([x, y, z]) => { const x1 = x * cy + z * sy, z1 = -x * sy + z * cy; return [x1, y * cp - z1 * sp]; };
+  const nodes = [];
+  for (let i = 0; i < N; i++) {
+    const t = (CUBE_PATH.length - 1) * i / (N - 1), k = Math.min(CUBE_PATH.length - 2, Math.floor(t)), f = t - k;
+    const a = CUBE_PATH[k], b = CUBE_PATH[k + 1];
+    nodes.push(rot([a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f]));
+  }
+  const edges = [];
+  const corners = [];
+  for (const x of [-1, 1]) for (const y of [-1, 1]) for (const z of [-1, 1]) corners.push([x, y, z]);
+  for (let i = 0; i < 8; i++) for (let j = i + 1; j < 8; j++) {
+    const d = corners[i].reduce((n, v, q) => n + (v !== corners[j][q] ? 1 : 0), 0);
+    if (d === 1) edges.push([rot(corners[i]), rot(corners[j])]);
+  }
+  return { nodes, edges };
 }
 
 /** The device's own voice: English, on-device, not a Google one when there is a choice. */
@@ -355,7 +386,7 @@ function pickVoice(voices, lang = "en", chosen = "") {
 const LS_VOICE = "membrane.home.voice";
 const IS_CHROME = typeof navigator !== "undefined" && /Chrome\//.test(navigator.userAgent || "") && !/Firefox\//.test(navigator.userAgent || "");
 
-const HomeLogic = { catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, angleStep };
+const HomeLogic = { cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, angleStep };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
 const HSTYLE = `
@@ -981,13 +1012,14 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     _orb(mode) {
       const o = this.shadowRoot.querySelector(".orb"), t = this.shadowRoot.querySelector(".orbtext");
       if (!o) return;
+      if (!mode && (this._ttsOn || this._hot)) mode = "idle";      // voice on, nobody speaking: the cube
       clearTimeout(this._orbT); clearTimeout(this._orbMax);
       if (mode === "thinking") this._orbMax = setTimeout(() => this._orb(null), 5 * 60000);   // never ripple forever
       this._waveMode = mode || null;
       o.classList.toggle("on", !!mode);
       if (mode) this._waveRun();
       if (!mode) this._orbT = setTimeout(() => t.classList.remove("on"), 2500);
-      if (mode === "listening") { t.textContent = ""; t.classList.remove("on"); }
+      if (mode === "listening" || mode === "idle") { if (mode === "listening" || !this._speaking) { t.textContent = ""; t.classList.remove("on"); } }
     }
 
     /** The wave's frame loop: runs while the orb shows, stops after it fades. */
@@ -1002,13 +1034,18 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const W = cv.width, H = cv.height, mid = H / 2, mode = this._waveMode;
         if (!mode) off += dt; else off = 0;
         if (off > 0.6) { g.clearRect(0, 0, W, H); this._waveRaf = 0; return; }
+        // unfold: 0 = the cube (voice on, quiet), 1 = the line (listening / thinking / speaking)
+        const want = mode === "idle" ? 0 : 1;
+        this._unfold = (this._unfold == null ? want : this._unfold) + (want - (this._unfold == null ? want : this._unfold)) * Math.min(1, dt * 5);
+        const u = this._unfold;
         // the energy that drives the nodes
         let energy;
         if (mode === "listening") energy = Math.min(1, Math.sqrt(this._lvl || 0) * 3.2);
         else if (mode === "speaking") {                    // syllable-like bursts (speech gives no level to read)
           if (t > next) { burst = 0.45 + Math.random() * 0.55; next = t + 90 + Math.random() * 170; }
           burst *= Math.exp(-dt * 6); energy = 0.4 + burst * 1.1;
-        } else energy = 0.18;                              // thinking: a slow ripple
+        } else if (mode === "idle") energy = 0;
+        else energy = 0.18;                                // thinking: a slow ripple
         for (let i = 0; i < N; i++) {
           const edge = Math.sin(Math.PI * (i + 0.5) / N);  // calm at the ends, alive in the middle
           const wob = mode === "thinking" ? Math.sin(t / 520 + seeds[i]) : (Math.sin(t / 95 + seeds[i] * 2.3) + Math.sin(t / 61 + seeds[i]) * 0.5) / 1.5;
@@ -1016,11 +1053,23 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           amps[i] += (target - amps[i]) * Math.min(1, dt * (mode === "thinking" ? 3 : 14));
         }
         g.clearRect(0, 0, W, H);
-        const pts = Array.from(amps, (a, i) => [W * (i + 0.5) / N, mid + Math.max(-0.92, Math.min(0.92, a)) * mid]);
+        const line = Array.from(amps, (a, i) => [W * (i + 0.5) / N, mid + Math.max(-0.92, Math.min(0.92, a)) * mid]);
+        // the cube turns with the field camera's orbit (the same angles), else slowly by itself
+        const orbit = this._v3 && this._v3.orbit;
+        const yaw = orbit ? -orbit.theta : t / 4000, pitch = orbit ? orbit.phi - Math.PI / 2 : 0.45;
+        const cube = cubePoints(N, yaw, pitch), sz = H * 0.27, at = ([x, y]) => [W / 2 + x * sz, mid - y * sz];
+        const pts = line.map((p, i) => { const c = at(cube.nodes[i]); return [c[0] + (p[0] - c[0]) * u, c[1] + (p[1] - c[1]) * u]; });
         const grad = g.createLinearGradient(0, 0, W, 0);
         grad.addColorStop(0, "#6f8cff"); grad.addColorStop(0.5, "#b07cff"); grad.addColorStop(1, "#4fd1ff");
+        // the cube's own edges, fading as it unfolds
+        if (u < 0.98) {
+          g.globalAlpha = (1 - u) * 0.55; g.strokeStyle = grad; g.lineWidth = 2; g.beginPath();
+          for (const [a, b] of cube.edges) { const p = at(a), q = at(b); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); }
+          g.stroke();
+        }
         // the edges: straight segments (angular, a strip of graph) + a faint mirror
-        for (const [mirror, alpha, width] of [[true, 0.25, 2], [false, 1, 3]]) {
+        for (const [mirror, alpha, width] of [[true, 0.25 * u, 2], [false, 1, 3]]) {
+          if (alpha <= 0.01) continue;
           g.globalAlpha = alpha; g.strokeStyle = grad; g.lineWidth = width; g.lineJoin = "miter";
           g.beginPath();
           pts.forEach(([x, y], i) => { const yy = mirror ? 2 * mid - y : y; if (i) g.lineTo(x, yy); else g.moveTo(x, yy); });
@@ -1029,7 +1078,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         // the nodes: dots sized by how hard each one moves
         g.globalAlpha = 1;
         pts.forEach(([x, y], i) => {
-          const r = 2.5 + Math.abs(amps[i]) * 7;
+          const r = 2.5 + Math.abs(amps[i]) * 7 * u;
           g.fillStyle = grad; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
         });
         this._waveRaf = requestAnimationFrame(step);
@@ -1120,6 +1169,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     _paintTts() {
       this._reportVoice();
+      if (!this._waveMode || this._waveMode === "idle") this._orb(null);   // the cube, or nothing
       this._ttsBtn.classList.toggle("on", this._ttsOn);
       this._ttsBtn.textContent = this._ttsOn ? "🔊" : "🔈";
       this._ttsBtn.setAttribute("aria-pressed", String(this._ttsOn));
@@ -1255,6 +1305,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { this._vsay("no microphone here"); return; }
       const h = this._hot = { cur: null, below: 0, above: 0, floor: 0.004, sends: [], follow: 0, paused: false, muteUntil: 0 };
       this._reportVoice();
+      if (!this._waveMode) this._orb(null);
       this._prefetchAcks();
       this._earBtn.classList.add("on"); this._earBtn.setAttribute("aria-pressed", "true");
       try {
@@ -1293,6 +1344,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     _hotStop() {
       const h = this._hot; this._hot = null;
       this._reportVoice();
+      if (!this._waveMode || this._waveMode === "idle") this._orb(null);
       if (h && h.any) { h.any.drop(); h.any = null; }
       if (this._earBtn) { this._earBtn.classList.remove("on", "hearing"); this._earBtn.setAttribute("aria-pressed", "false"); }
       if (!h) return;
@@ -1539,21 +1591,32 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     }
 
     /** A bare "Hey Argus": a short spoken ack in Argus's voice (fetched once). */
+    /** The wake word heard: a chime, not a spoken "uh-huh" (2026-10-11, the
+     *  operator: the "uh-huhs" and "yesses" cut into him listening to me). */
     async _hotAck(h) {
-      const ack = HOT_ACKS[Math.floor(Math.random() * HOT_ACKS.length)];
-      this._vsay("“" + ack + "” (say it now)", HOT_FOLLOW_MS);
-      this._orbText(ack); this._orb("speaking");
-      if (this._voice && window.speechSynthesis) {          // on the device, and wait for it (the mic must not hear it)
-        await this._say1(ack);
-        this._orb("listening");
-        return;
-      }
-      const url = (this._ackUrls || {})[ack];
-      h.muteUntil = performance.now() + 900;
-      if (url && this._player) {
-        try { this._player.src = url; await this._player.play(); return; } catch (e) { /* the browser's voice */ }
-      }
-      try { if (window.speechSynthesis) window.speechSynthesis.speak(new SpeechSynthesisUtterance(ack)); } catch (e) { /* silent */ }
+      this._vsay("listening… (say it now)", HOT_FOLLOW_MS);
+      this._orb("listening");
+      h.muteUntil = performance.now() + 260;              // the mic never hears its own chime
+      this._chime();
+    }
+
+    /** Two soft notes, made on the device (WebAudio): nothing to download, nothing spoken. */
+    _chime() {
+      try {
+        const C = window.AudioContext || window.webkitAudioContext; if (!C) return;
+        const ac = this._chimeAc = this._chimeAc || new C();
+        if (ac.state === "suspended") ac.resume().catch(() => {});
+        const t0 = ac.currentTime + 0.01;
+        for (const [f, at] of [[880, 0], [1318.5, 0.09]]) {
+          const o = ac.createOscillator(), g = ac.createGain();
+          o.type = "sine"; o.frequency.value = f;
+          g.gain.setValueAtTime(0, t0 + at);
+          g.gain.linearRampToValueAtTime(0.07, t0 + at + 0.015);
+          g.gain.exponentialRampToValueAtTime(0.0001, t0 + at + 0.16);
+          o.connect(g).connect(ac.destination);
+          o.start(t0 + at); o.stop(t0 + at + 0.18);
+        }
+      } catch (e) { /* no sound: the orb and the status line still say it */ }
     }
 
     async _prefetchAcks() {
