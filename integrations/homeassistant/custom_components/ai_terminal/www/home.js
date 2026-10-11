@@ -1368,11 +1368,30 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       if (window.speechSynthesis) window.speechSynthesis.cancel();
     }
 
-    /** The speech queue: segments play in order, Argus and membrane alike. */
+    /** The speech queue (2026-10-10: membrane's long babble queued AHEAD of
+     * Argus and the cap dropped his words): Argus first -- his segment cuts a
+     * membrane line that's playing and jumps every queued one; membrane says
+     * at most two sentences, only when Argus has nothing waiting, and a line
+     * older than 30 s is dropped. Argus's own segments are never dropped. */
     _enqueueSpeech(kind, text) {
-      (this._speechQ = this._speechQ || []).push({ kind, text });
-      if (this._speechQ.length > 12) this._speechQ.splice(0, this._speechQ.length - 12);   // never minutes behind
+      const q = this._speechQ = this._speechQ || [];
+      const item = { kind, text, ts: Date.now() };
+      if (kind === "membrane") {
+        q.push(item);
+        while (q.filter((x) => x.kind === "membrane").length > 3) q.splice(q.findIndex((x) => x.kind === "membrane"), 1);
+      } else {
+        const at = q.findIndex((x) => x.kind === "membrane");
+        if (at < 0) q.push(item); else q.splice(at, 0, item);  // ahead of every membrane line
+        if (this._speakingWho === "membrane") this._cutCurrent();
+      }
       if (!this._qRunning) this._drainSpeech();
+    }
+
+    /** Stop the utterance playing now, keep the queue. */
+    _cutCurrent() {
+      this._cutGen = (this._cutGen || 0) + 1;
+      try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch (e) { /* none */ }
+      if (this._audio) { try { this._audio.pause(); if (this._audio.onended) this._audio.onended(); } catch (e) { /* gone */ } }
     }
 
     async _drainSpeech() {
@@ -1380,12 +1399,22 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const gen = this._ttsGen;
       try {
         while ((this._speechQ || []).length && gen === this._ttsGen) {
-          const { kind, text } = this._speechQ.shift();
-          await this._speak(text, kind === "membrane" ? "membrane" : "argus", true);
+          const item = this._speechQ.shift();
+          if (item.kind === "membrane") {
+            if (Date.now() - item.ts > 30000) continue;    // stale babble
+            if (this._speechQ.some((x) => x.kind !== "membrane")) { this._speechQ.push(item); continue; }
+            this._speakingWho = "membrane";
+            await this._speak(speechChunks(item.text).slice(0, 2).join(" "), "membrane", true);
+          } else {
+            this._speakingWho = "argus";
+            await this._speak(item.text, "argus", true);
+          }
+          this._speakingWho = null;
         }
       } finally {
         this._qRunning = false;
         this._speaking = false;
+        this._speakingWho = null;
         if (!(this._speechQ || []).length) this._speechDone();   // auto-chat keeps the chat busy: don't wait for idle
       }
     }
@@ -1409,7 +1438,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           this._ssKeep = setInterval(() => { if (ss.speaking) { ss.pause(); ss.resume(); } else clearInterval(this._ssKeep); }, 10000);
           const u = new SpeechSynthesisUtterance(text);
           const v = who === "membrane" ? this._membraneVoice() : this._voice;
-          if (v) { u.voice = v; u.lang = v.lang; }
+          try { if (v) { u.voice = v; u.lang = v.lang; } } catch (e) { /* a vanished voice: the default speaks */ }
           if (who === "membrane") { u.pitch = 1.25; u.rate = 1.05; }
           u.onend = u.onerror = () => res();
           window.speechSynthesis.speak(u);
@@ -1424,8 +1453,9 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const gen = this._ttsGen;
         this._speaking = true;
         this._orb("speaking");
+        const cut = this._cutGen;
         for (const chunk of speakable(text)) {
-          if (gen !== this._ttsGen) return;
+          if (gen !== this._ttsGen || cut !== this._cutGen) break;   // hushed, or cut for Argus
           this._orbText(chunk);
           await this._say1(chunk, who);
         }

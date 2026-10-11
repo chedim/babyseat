@@ -157,3 +157,23 @@ test("👂 hybrid (the default): the wake word on the device, the words after it
     assert.ok(await page.evaluate(() => window.__sttCalls) >= 1);
   });
 });
+
+test("Argus first: his words cut membrane's babble and jump its queue", { timeout: 120000 }, async () => {
+  await withPage(spoken("."), async (page) => {
+    const order = await page.evaluate(async () => {
+      const el = window.__home, log = [];
+      el._voice = { name: "Test", lang: "en-US" };
+      window.speechSynthesis.speak = (u) => { log.push("start " + u.text); const t = setTimeout(() => { log.push("end " + u.text); u.onend && u.onend(); }, 400); u._t = t; window.__cur = u; };
+      window.speechSynthesis.cancel = () => { const u = window.__cur; if (u) { clearTimeout(u._t); log.push("cut " + u.text); u.onend && u.onend(); window.__cur = null; } };
+      el._enqueueSpeech("membrane", "The room hums.");
+      el._enqueueSpeech("membrane", "Lights drift.");
+      await new Promise((r) => setTimeout(r, 120));
+      el._enqueueSpeech("argus", "The battery is at 92 percent.");
+      await new Promise((r) => setTimeout(r, 2500));
+      return log;
+    });
+    const i = (s) => order.findIndex((x) => x === s);
+    assert.ok(i("cut The room hums.") >= 0, JSON.stringify(order));                       // the playing babble was cut
+    assert.ok(i("start The battery is at 92 percent.") < i("start Lights drift."), JSON.stringify(order));
+  });
+});
