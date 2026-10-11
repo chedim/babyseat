@@ -157,3 +157,16 @@ test("addressed: his name anywhere in a sentence, in the spellings the local mod
     assert.ok(H.NAME_ANY_RE.test(t), t);
   for (const t of ["turn on the lights", "the gust was strong", "arguments aside"]) assert.ok(!H.NAME_ANY_RE.test(t), t);
 });
+
+test("speech keeps up with the chat: stale sentences skipped when newer ones wait", () => {
+  const now = 100000;
+  const a = (t, ago) => ({ kind: "argus", text: t, ts: now - ago });
+  const m = (t, ago) => ({ kind: "membrane", text: t, ts: now - ago });
+  const texts = (q) => H.catchUp(q, now).map((x) => x.text);
+  assert.deepEqual(texts([a("old", 30000), a("new", 1000)]), ["new"]);            // behind: jump to the newest
+  assert.deepEqual(texts([a("old but last", 30000)]), ["old but last"]);           // nothing newer: still said
+  assert.deepEqual(texts([m("stale babble", 25000), m("fresh", 1000)]), ["fresh"]);
+  assert.deepEqual(texts([a("x", 1000), m("y", 1000)]), ["x", "y"]);
+  const many = Array.from({ length: 10 }, (_, i) => a("s" + i, 1000 - i));
+  assert.deepEqual(texts(many), ["s4", "s5", "s6", "s7", "s8", "s9"]);               // at most six wait
+});

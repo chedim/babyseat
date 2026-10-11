@@ -95,6 +95,26 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* pri
 // do stt into the chat + TTS button that makes membrane say its answers ...
 // rotate the graph based on accelerometer/gyro"; laptops too)
 const LS_TTS = "membrane.home.tts";
+/** THE COMMENTATOR'S RULE (2026-10-11, the operator: "the tts is very much
+ *  behind the chat"): speech keeps up with the chat instead of reading out a
+ *  backlog. A sentence that waited CATCHUP_STALE_MS is skipped when something
+ *  newer of the same speaker waits behind it; membrane's lines older than
+ *  CATCHUP_BABBLE_MS go; at most CATCHUP_KEEP of Argus's sentences wait. */
+const CATCHUP_STALE_MS = 15000, CATCHUP_BABBLE_MS = 20000, CATCHUP_KEEP = 6;
+const CATCHUP_FAST_AT = 3, CATCHUP_RATE = 1.2;
+function catchUp(queue, now) {
+  const q = (queue || []).slice();
+  const newer = (i) => q.slice(i + 1).some((y) => y.kind === q[i].kind);
+  let out = q.filter((x, i) => !(now - x.ts > (x.kind === "membrane" ? CATCHUP_BABBLE_MS : CATCHUP_STALE_MS) &&
+                                 (x.kind === "membrane" || newer(i))));
+  const argus = out.filter((x) => x.kind !== "membrane");
+  if (argus.length > CATCHUP_KEEP) {
+    const drop = new Set(argus.slice(0, argus.length - CATCHUP_KEEP));
+    out = out.filter((x) => !drop.has(x));
+  }
+  return out;
+}
+
 /** Speech decisions, in the console ("[membrane speech] ..."): why a reply was or wasn't said. */
 function speechLog(who, what, text) {
   try { console.info("[membrane speech]", who, what, String(text || "").slice(0, 80)); } catch (e) { /* no console */ }
@@ -335,7 +355,7 @@ function pickVoice(voices, lang = "en", chosen = "") {
 const LS_VOICE = "membrane.home.voice";
 const IS_CHROME = typeof navigator !== "undefined" && /Chrome\//.test(navigator.userAgent || "") && !/Firefox\//.test(navigator.userAgent || "");
 
-const HomeLogic = { personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, angleStep };
+const HomeLogic = { catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, angleStep };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
 const HSTYLE = `
@@ -1573,6 +1593,9 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const gen = this._ttsGen;
       try {
         while ((this._speechQ || []).length && gen === this._ttsGen) {
+          this._speechQ = catchUp(this._speechQ, Date.now());     // never fall behind the chat
+          this._rateBoost = this._speechQ.length > CATCHUP_FAST_AT ? CATCHUP_RATE : 1;
+          if (!this._speechQ.length) break;
           const item = this._speechQ.shift();
           if (item.kind === "membrane") {
             if (Date.now() - item.ts > 30000) continue;    // stale babble
@@ -1616,6 +1639,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           const v = who === "membrane" ? this._membraneVoice() : this._voice;
           try { if (v) { u.voice = v; u.lang = v.lang; } } catch (e) { /* a vanished voice: the default speaks */ }
           if (who === "membrane") { u.pitch = 1.25; u.rate = 1.05; }
+          u.rate = (u.rate || 1) * (this._rateBoost || 1);         // a backlog: a little faster
           u.onend = () => res();
           u.onerror = (ev) => { speechLog(who, "engine error: " + ((ev && ev.error) || "?"), text); res(); };
           window.speechSynthesis.speak(u);
