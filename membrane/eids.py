@@ -141,6 +141,48 @@ def _backtick_commands(sentence: str) -> list[str]:
     return out
 
 
+# ---- THE NURSERY GHOSTS (2026-10-11, Argus's lesson: "chopped turns can land
+# mangled-fragment entities (m:m:...-style) that the graph layer reads but
+# query and remove can never reach -- poking at them replicates them") -----
+# The model-tag regex took ANY word:word token: 'a:b', a MAC's 'ba:c4:f5',
+# 'adb:5565', 'c:-prefixed', and a 404 naming 'm:a:b' minted 'm:m:a:b'. A
+# real m: id is a model tag (glm-5.3-flash:cloud, qwen3:8b) or a store
+# entity's name (the field's mirror; efield's name_ok decides that one).
+MODEL_TAG_WORDS = frozenset(("latest", "cloud", "instruct", "chat", "base", "text", "embed", "code"))
+_HEX = re.compile(r"[0-9a-f]{1,4}")
+
+
+def is_junk_tag(v: str) -> bool:
+    """A fragment no real name has: nested mirror, a one-letter or dotted
+    or dashed-lead segment, '...', a MAC-like hex run, a host:port."""
+    s = str(v or "").strip().lower()
+    segs = s.split(":")
+    if len(segs) < 2 or segs[0] in ("m", "membrane", ""):
+        return True
+    for x in segs:
+        if len(x) < 2 or x[0] in "-." or x[-1] in "-." or ".." in x:
+            return True
+    if all(_HEX.fullmatch(x) for x in segs) and len(segs) >= 2 and any(ch.isdigit() for ch in s):
+        return True
+    if len(segs) == 2 and segs[1].isdigit():
+        return True
+    return False
+
+
+def is_model_tag(v: str) -> bool:
+    """A real model's name:tag (one colon, a version digit or a tag word)."""
+    s = str(v or "").strip().lower()
+    if is_junk_tag(s):
+        return False
+    segs = s.split(":")
+    if len(segs) != 2:
+        return False
+    name, tag = segs
+    if name in KINDS or name in _LEGACY_KIND or len(name) < 3:
+        return False
+    return any(ch.isdigit() for ch in name + tag) or tag in MODEL_TAG_WORDS
+
+
 def mentions_of(sentence: str, graph: dict | None = None,
                 phrase_vocab: set | frozenset | None = None
                 ) -> list[tuple[str, str]]:
@@ -163,6 +205,8 @@ def mentions_of(sentence: str, graph: dict | None = None,
         for v in vals:
             if k == "c" and not _is_command_use(sentence, v):
                 continue                      # 'membrane keeps picking...' is prose
+            if k == "m" and is_junk_tag(v):
+                continue                      # a fragment, not a name (the nursery ghosts)
             add(canon(k, v, graph), v)
             covered.update(w.lower() for w in _WORD.findall(v))
     for v in _backtick_commands(sentence):

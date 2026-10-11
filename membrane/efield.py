@@ -606,12 +606,65 @@ class EntityField:
         _update's word-delta skip.)"""
         return 1 if E.is_specific(eid) else K_MAT
 
+    # the store's names (boot wires it): an m: id that is no model tag must
+    # name an entity the store holds -- else it is a fragment
+    name_ok = None
+
+    def m_ok(self, eid: str) -> bool:
+        bare = eid[2:]
+        if E.is_junk_tag(bare):
+            return False
+        if E.is_model_tag(bare):
+            return True
+        ok = self.name_ok
+        return True if ok is None else bool(ok(bare))
+
+    @_locked
+    def purge_ghosts(self, dry_run: bool = True, sample: int = 20) -> dict:
+        """THE NURSERY GHOSTS OUT: every m: state that m_ok refuses -- its
+        state, its deltas, its relations, and its mentions in the events
+        (or a rebuild would mint it again). dry_run counts only."""
+        self.flush()
+        ghosts = sorted({d.get("eid") for _, d in self.b.scan("entity_states", {"origin": self.origin})
+                         if str(d.get("eid") or "").startswith("m:") and not self.m_ok(str(d["eid"]))})
+        out = {"ghosts": len(ghosts), "sample": ghosts[:sample], "dry_run": dry_run}
+        if dry_run or not ghosts:
+            return out
+        g = set(ghosts)
+        n = {"states": 0, "deltas": 0, "relations": 0, "events": 0}
+        for k, d in list(self.b.scan("entity_states", {"origin": self.origin})):
+            if d.get("eid") in g:
+                self.b.delete("entity_states", k); n["states"] += 1
+        for k, d in list(self.b.scan("entity_deltas", {"origin": self.origin})):
+            if d.get("eid") in g:
+                self.b.delete("entity_deltas", k); n["deltas"] += 1
+        for k, d in list(self.b.scan("relations", {"origin": self.origin})):
+            if d.get("subj") in g or d.get("obj") in g:
+                self.b.delete("relations", k); n["relations"] += 1
+        for k, ev in list(self.b.scan("events", {"origin": self.origin})):
+            ms = ev.get("mentions") or []
+            keep = [m for m in ms if not (m and m[0] in g)]
+            if len(keep) != len(ms):
+                ev["mentions"] = keep
+                self.b.upsert("events", k, ev); n["events"] += 1
+        for eid in g:
+            self._states.pop(eid, None)
+            self._dirty.discard(eid)
+        try:
+            self._invalidate_delta_index()
+        except Exception:
+            pass
+        out.update(n)
+        return out
+
     def _get_or_new(self, eid: str, surface: str) -> EntityState | None:
         """THE DUST CAP: a too-short word/phrase entity gets NO state
         (None returned; the caller skips it entirely) -- the 'w:showing'
         dust never enters entity_states (the CPU bomb's birth lane)."""
         if _dust_word(eid, surface):
             return None
+        if eid.startswith("m:") and not self.m_ok(eid):
+            return None                         # a nursery ghost never gets a state
         st = self.get(eid)
         if st is None:
             st = EntityState(eid=eid, kind=eid.split(":", 1)[0], surface=surface)
@@ -1557,3 +1610,32 @@ class EntityField:
                "seq_last": self._ostats.get("seq_last"), "cursor": self._ostats.get("cursor")}
         self._vitals_cache = (time.time(), out)
         return out
+
+
+def wire_store_names(fld, est, refresh_s: float = 60.0) -> None:
+    """name_ok for the field's m: mirror: the store's entity names
+    (lowercased, with and without a class head), refreshed every refresh_s
+    -- and at once on a miss older than 5 s (a just-added entity)."""
+    from .eids import _CLASS_HEADS
+    cache = {"ts": 0.0, "names": frozenset()}
+
+    def rebuild():
+        names = set()
+        for eid in list((getattr(est, "docs", None) or {}).keys()):
+            b = str(eid).lower().replace("membrane::", "", 1)
+            names.add(b)
+            head, _, rest = b.partition(":")
+            if rest and head in _CLASS_HEADS:
+                names.add(rest)
+        cache["names"], cache["ts"] = frozenset(names), time.time()
+
+    def ok(bare: str) -> bool:
+        b = str(bare or "").lower()
+        age = time.time() - cache["ts"]
+        if age > refresh_s:
+            rebuild()
+        elif b not in cache["names"] and age > 5.0:
+            rebuild()
+        return b in cache["names"]
+
+    fld.name_ok = ok

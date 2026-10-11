@@ -2818,6 +2818,15 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                         psrv, person, in_on=b.get("in_on"), in_mode=b.get("in_mode"),
                         out_on=b.get("out_on"), device=str(b.get("device") or ""))})
                 return self._json_out({"ok": True, **_VIO.read(psrv, person)})
+            if path == "/membrane/field/purge":
+                # THE NURSERY GHOSTS OUT (efield.purge_ghosts): the engineer's /
+                # operator's door (the serve's credentials), dry_run unless told
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                fld = getattr(psrv, "efield", None) if psrv is not None else None
+                if fld is None:
+                    self.send_response(503); self.send_header("Content-Length", "0"); self.end_headers(); return
+                b = self._read_body() or {}
+                return self._json_out(fld.purge_ghosts(dry_run=b.get("dry_run", True) is not False))
             if path in ("/membrane/seat/event", "/membrane/seat/restart-ask"):
                 # restarts.py: HA says it started; the engineer asks before an HA restart
                 from . import restarts as _RS
