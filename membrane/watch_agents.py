@@ -1310,6 +1310,24 @@ _GETTER_KEYS = {"state", "render", "patch", "run", "veto", "delete", "data",
                 "intent", "error", "patch_refused", "run_result", "applied"}
 
 
+# A SAME READING IS NOT NEWS (2026-10-11: a watch on the phone's battery
+# sensor read it, the read fired the getter, the getter posted
+# getter-applied, the event woke the next watch -- a fresh session every
+# 1-4 minutes redoing the same reads, 40% -> 40%). Only a changed value
+# posts the event; a key that is only a clock (ts, *_at, updated, ...)
+# changes every run and says nothing.
+_CLOCK_KEY = re.compile(r"(^|_)(ts|time|timestamp|at|updated|checked|age|now|epoch)$", re.I)
+
+
+def reading_changed(before: dict, state: dict) -> bool:
+    for k, v in (state or {}).items():
+        if _CLOCK_KEY.search(str(k)):
+            continue
+        if k not in (before or {}) or before[k] != v:
+            return True
+    return False
+
+
 def entity_read_back(srv, ent, force: bool = False) -> dict:
     """THE READ-BACK TRIGGER: a READ of a dynamic entity fires its
     getter_script (the dict return patches script_data + the entity's
@@ -1363,13 +1381,14 @@ def entity_read_back(srv, ent, force: bool = False) -> dict:
         except Exception:
             pass
         merged = dict((ent.properties or {}).get("script_data") or {})
+        changed = reading_changed(merged, state)
         merged.update(state)
         props = ent.properties or {}
         props["script_data"] = merged
         ent.properties = props
         est.upsert(ent, embedder=None)
         pool = getattr(srv, "events_pool", None)
-        if pool is not None:
+        if pool is not None and changed:
             pool.put({"kind": "getter-applied", "entity": ent.eid,
                       "state": dict(list(state.items())[:8]),
                       "ts": now})
