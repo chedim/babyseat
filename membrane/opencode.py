@@ -1760,6 +1760,12 @@ def main() -> None:
                 _mm_load(srv)
             except Exception as e:
                 print(f"[seat] minds' models not restored ({e})", file=sys.stderr)
+            # THE ACTIVE MODELS: the role entities are planted and reapplied
+            try:
+                from . import active_models as _AM
+                _AM.load(srv)
+            except Exception as e:
+                print(f"[seat] active models not loaded ({e})", file=sys.stderr)
             if getattr(srv, "_field_pulse", None) is not None:
                 srv._field_pulse.start()
             runner.srv = srv               # /agent reads the live minds

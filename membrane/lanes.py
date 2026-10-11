@@ -3739,6 +3739,21 @@ def _field_vec(fld, eid: str):
     return None
 
 
+def _active_model_hook(srv, est, spec, res) -> None:
+    """An active-model entity edited or linked: its role switches now (the
+    seat chooses its own models -- membrane/active_models.py)."""
+    try:
+        from . import active_models as AM
+        ent = est._resolve_spec(str(spec or "")) if est is not None else None
+        if ent is not None and AM.is_active_model(ent):
+            out = AM.on_change(srv, ent)
+            if out is not None:
+                res["active_model"] = out
+                est.upsert(ent, embedder=None)
+    except Exception as e:                              # noqa: BLE001
+        res["active_model"] = {"applied": False, "why": f"{type(e).__name__}: {e}"[:160]}
+
+
 class _Stages:
     """The gate's stage clock (2026-10-10, the operator: "optimize our
     membrane pre-llm processes"): mark() after each step; summary() lists the
@@ -6263,6 +6278,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
         _entity_post_process(srv, res)
+        _active_model_hook(srv, est, spec, res)
         self._json_out(res)
 
     def _entity_remove(self) -> None:
@@ -6549,6 +6565,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         self._entity_audit("inherit", res)
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
+        _active_model_hook(srv, est, spec, res)
         # THE CONTRACT (interfaces, 2026-10-10): what the child now implements
         # and what it still owes
         try:

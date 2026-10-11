@@ -1709,6 +1709,16 @@ class TurnRunner:
                     turn_model = _pick
             except Exception:
                 pass
+            # THE ACTIVE MODELS (membrane/active_models.py): the role's entity
+            # decides -- the seat can switch its own models, per person too
+            try:
+                from . import active_models as _AM
+                _am = _AM.for_turn(getattr(self, "srv", None), text,
+                                   _lane_of((self._agents or {}).get(sid)))
+                if _am:
+                    turn_model = _am
+            except Exception:
+                pass
             body = {"model": turn_model,
                     "messages": ([{"role": "system", "content": self.system}]
                                  if self.system else []) + history}
@@ -2722,6 +2732,18 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 if _row is not None:
                     _row["model"] = _pick
                     sessions._flush()
+                # THE PICKER IS A CONTROL OF THE ACTIVE MODELS: a person's
+                # pick becomes their own active-model:chat:<person>
+                try:
+                    from . import active_models as _AM
+                    from .speakers import split_speaker as _sps
+                    _who = next((_sps(str(p.get("text") or ""))[0] for p in (b.get("parts") or [])
+                                 if isinstance(p, dict) and _sps(str(p.get("text") or ""))[0]), None)
+                    _psrv = getattr(runner, "srv", None) if runner is not None else None
+                    if _who and _psrv is not None and _pick["id"] not in ("", "membrane"):
+                        _AM.mirror(_psrv, "chat", _pick["id"], person=_who)
+                except Exception:
+                    pass
             # THE AGENT'S PICK STICKS (the mode toggle's last mile): the
             # message body's agent (the TUI's build/plan selection) lands
             # on the SESSION ROW -- the same store the PATCH lane writes;

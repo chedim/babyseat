@@ -36,7 +36,7 @@ def _set(srv, mind: str, model: str) -> None:
 
 
 def apply(srv, loops: str | None = None, cortex: str | None = None,
-          known=None, persist: bool = True) -> dict:
+          known=None, persist: bool = True, mirror: bool = True) -> dict:
     """Set either or both; ValueError on a bad name (or one not in `known`,
     when the caller passes the models it sees)."""
     want = {k: v for k, v in (("loops", loops), ("cortex", cortex)) if v is not None}
@@ -47,6 +47,12 @@ def apply(srv, loops: str | None = None, cortex: str | None = None,
             raise ValueError(f"{mind}: membrane doesn't see {model!r} on its backends")
     for mind, model in want.items():
         _set(srv, mind, model)
+        if mirror:                       # the active-model entity follows the operator's switch
+            try:
+                from . import active_models as _AM
+                _AM.mirror(srv, mind, model)
+            except Exception:
+                pass
     if persist and want:
         path = getattr(srv, "_models_path", None)
         if path:
