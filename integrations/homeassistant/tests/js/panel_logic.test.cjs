@@ -236,7 +236,8 @@ test("membrane's guess of Argus's actions rides its voice line, scored", () => {
   assert.ok(h.includes("🔮 entity.read, find.memory ✓ · ha:light.cabin ✗"), h);
   assert.ok(h.includes("he did: entity.read on ha:light.aft"), h);
   assert.equal(L.guessHtml({ text: "no guess" }), "");
-  assert.ok(L.guessHtml({ guess: { tools: [["(none)", 1]], ents: [] }, guess_score: { tool1: false, tool3: false } }).includes("(none) ✗"));
+  assert.ok(L.guessHtml({ guess: { tools: [["(reply)", 1]], ents: [] }, guess_score: { tool1: false, tool3: false } }).includes("(reply) ✗"));
+  assert.ok(L.guessHtml({ guess: { tools: [["find.memory", 1]], ents: [] }, guess_score: { moves: 5, top1: 2, top3: 4 } }).includes("2/5 moves (4 in top 3)"));
 });
 
 test("membrane's role is its own switch: babble <-> predict", () => {

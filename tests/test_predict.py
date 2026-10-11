@@ -58,7 +58,7 @@ class TestTheGuessLearns(unittest.TestCase):
         p = P.Predictor()
         for i in range(3):
             p.score({"tools": [], "ents": []}, vec(5) + 0.05 * vec(i + 20), "operator", [], [])
-        self.assertEqual(p.guess(vec(5), "operator")["tools"][0][0], P.NONE)
+        self.assertEqual(p.guess(vec(5), "operator")["tools"][0][0], P.NONE)    # '(reply)': a plain answer
         self.assertTrue(p.score(p.guess(vec(5), "operator"), vec(5), "operator", [], [])["tool1"])
 
     def test_the_sources_that_are_right_get_louder(self):
@@ -80,16 +80,48 @@ class TestTheGuessLearns(unittest.TestCase):
         self.assertEqual(p2.guess(vec(3), "operator")["tools"][0][0], "goal.list")
 
 
-class TestTheSeatWiring(unittest.TestCase):
-    def test_start_and_end_pair_up_per_session_and_nothing_runs(self):
-        emb = types.SimpleNamespace(embed=lambda xs: [vec(7) for _ in xs])
+class TestEveryMove(unittest.TestCase):
+    """2026-10-11: every model round is a move -- guessed before it, scored
+    by its own response; what follows the previous action is learned."""
+
+    def _runner(self):
+        emb = types.SimpleNamespace(embed=lambda xs: [vec(len(x) % 5) for x in xs])
         srv = types.SimpleNamespace(membrane=types.SimpleNamespace(embedder=emb), _models_path=None)
-        runner = types.SimpleNamespace(srv=srv)
-        P.start_async(runner, "s1", "turn on the cabin light", "operator")
-        r = P.end(runner, "s1", [tool("entity_read", spec="ha:light.cabin")])
-        self.assertEqual(r["did"], {"tools": ["entity.read"], "ents": ["ha:light.cabin"]})
-        self.assertIsNone(P.end(runner, "s1", []))                  # once per turn
-        self.assertEqual(srv._predictor.report()["operator"]["turns"], 1)
+        return types.SimpleNamespace(srv=srv)
+
+    def _call(self, name, **args):
+        import json
+        return {"function": {"name": name, "arguments": json.dumps(args)}}
+
+    def test_each_round_is_scored_and_the_turn_sums_its_moves(self):
+        r = self._runner()
+        moves = [[self._call("find", action="memory", q="cabin")],
+                 [self._call("entity", action="read", spec="ha:light.cabin")],
+                 []]
+        for _ in range(4):                                    # the same three-move turn, four times
+            for i, tcs in enumerate(moves, 1):
+                P.step_start(r, "s1", f"context {i}", "listener", step=i)
+                P.step_end(r, "s1", tcs, "done" if not tcs else "", step=i, wait=True)
+            summary = P.end(r, "s1")
+        self.assertEqual(summary["score"]["moves"], 3)
+        self.assertEqual(summary["score"]["top1"], 3)         # by now it knows the whole dance
+        self.assertEqual(summary["did"]["tools"], ["find.memory", "entity.read", P.NONE])
+        rep = r.srv._predictor.report()["listener"]
+        self.assertEqual(rep["turns"], 12)                    # every move counted
+
+    def test_the_previous_action_predicts_the_next(self):
+        p = P.Predictor()
+        for _ in range(6):
+            p.score({"tools": [], "ents": []}, None, "operator", ["entity.read"], [], prev="find.memory")
+            p.score({"tools": [], "ents": []}, None, "operator", ["exec.call"], [], prev="entity.read")
+        self.assertEqual(p.guess(None, "operator", prev="find.memory")["tools"][0][0], "entity.read")
+        self.assertEqual(p.guess(None, "operator", prev="entity.read")["tools"][0][0], "exec.call")
+
+    def test_what_argus_is_looking_at(self):
+        h = [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "", "tool_calls": []},
+             {"role": "tool", "content": "light is on"}, {"role": "tool", "content": "bms ok"}]
+        self.assertEqual(P.context_of(h, "hi"), "light is on\nbms ok")
+        self.assertEqual(P.context_of(h[:1], "hi"), "hi")
 
 
 if __name__ == "__main__":

@@ -1599,14 +1599,7 @@ class TurnRunner:
                                      _lane_of((self._agents or {}).get(sid)))
         except Exception:
             pass
-        # MEMBRANE PREDICTS ARGUS (predict.py): the turn's tools and entities,
-        # guessed before the model runs (every lane; a virtual action, never run)
-        try:
-            if not user_info.get("membraneOnly"):
-                from . import predict as _predict
-                _predict.start_async(self, sid, _aim_text, _lane_of((self._agents or {}).get(sid)))
-        except Exception:
-            pass
+
         # MEMBRANE ONLY (the chat's LLM switch off): the voice answers, the
         # model is never called; the voice still hears the operator
         if user_info.get("membraneOnly"):
@@ -1754,6 +1747,14 @@ class TurnRunner:
                     turn_model = _am
             except Exception:
                 pass
+            # MEMBRANE PREDICTS THIS MOVE (predict.py): every round Argus takes
+            # is guessed before the model runs -- a virtual action, never run
+            try:
+                from . import predict as _predict
+                _predict.step_start(self, sid, _predict.context_of(history, _aim_text),
+                                    _lane_of((self._agents or {}).get(sid)), step=rounds)
+            except Exception:
+                pass
             body = {"model": turn_model,
                     "messages": ([{"role": "system", "content": self.system}]
                                  if self.system else []) + history}
@@ -1825,6 +1826,11 @@ class TurnRunner:
             tcs = msg.get("tool_calls")
             content = (msg.get("content") or "").strip()
             reason = "tool-calls" if tcs else "stop"
+            try:
+                from . import predict as _predict
+                _predict.step_end(self, sid, list(tcs or []), content, step=rounds)
+            except Exception:
+                pass
             if msg.get("reasoning") or msg.get("thinking"):
                 now = int(time.time() * 1000)
                 # the REAL serve streams the reasoning part exactly like

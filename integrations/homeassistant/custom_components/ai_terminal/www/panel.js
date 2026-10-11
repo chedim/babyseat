@@ -333,10 +333,11 @@ function guessHtml(line) {
   const tools = (g.tools || []).map((x) => x[0]).join(", ");
   const ents = (g.ents || []).map((x) => x[0]).join(", ");
   const mark = (v) => (v === true ? "✓" : v === false ? "✗" : "");
-  const t = sc.tool1 ? "✓" : sc.tool3 ? "~" : "✗";
+  const t = sc.moves ? sc.top1 + "/" + sc.moves + " moves" + (sc.top3 > sc.top1 ? " (" + sc.top3 + " in top 3)" : "")
+    : sc.tool1 ? "✓" : sc.tool3 ? "~" : "✗";
   const title = "membrane guessed Argus's actions (never run) -- he did: " +
-    ((did.tools || []).join(", ") || "no tools") + ((did.ents || []).length ? " on " + did.ents.join(", ") : "");
-  return '<div class="vguess" title="' + escAttr(title) + '">🔮 ' + escText(tools || "no tools") + " " + t +
+    ((did.tools || []).join(", ") || "(reply)") + ((did.ents || []).length ? " on " + did.ents.join(", ") : "");
+  return '<div class="vguess" title="' + escAttr(title) + '">🔮 ' + escText(tools || "(reply)") + " " + t +
     (ents ? " · " + escText(ents) + " " + mark(sc.ent3) : "") + "</div>";
 }
 

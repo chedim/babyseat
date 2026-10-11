@@ -4,13 +4,17 @@ actions? and then compare what it said/did to what the model said/did ...
 in that mode the LLM would not get to see membrane's mumblings ... should
 membrane's actions be virtual?").
 
-Before every turn (the chat's and the watch loops'), membrane writes down
-what it expects Argus to DO: the tools (family.action) and the entities he
-will touch, top 3 each. When the turn ends the guess is scored against the
-tool calls he really made, and the predictor learns from the miss:
+EVERY MOVE (2026-10-11, the operator: "it should predict after each LLM
+action/message, not just between full moves ... treat every generated
+message/tool call as a separate move"): before each of Argus's model rounds
+(the chat's and the watch loops'), membrane writes down what that round will
+DO -- its tools (family.action, or '(reply)' for a plain answer) and the
+entities it touches, top 3 each. The round's response scores the guess at
+once, and the predictor learns from the miss:
 
-  tools     the nearest past turns (by the message's vector) vote with
-            their tools; the lane's own frequencies back them up
+  tools     the nearest past moves (by what Argus just saw: the message,
+            or the tool results he is reading) vote with their tools; what
+            usually follows his previous action backs them up
   entities  candidates from three sources -- the entities the message
             names, the ones the nearest past turns touched, the live field
             states nearest the message -- each source weighted by how
@@ -36,7 +40,8 @@ import numpy as np
 TOP = 3
 KNN = 16
 MEM_MAX = 4000
-NONE = "(none)"                       # a turn with no tool calls is a prediction too
+NONE = "(reply)"                      # a round with no tool calls: a plain answer is a move too
+START = "(start)"                     # the action before a turn's first round
 SOURCES = ("named", "past", "near")
 _ENT_KEYS = ("spec", "eid", "name", "entity", "key", "id", "object", "on", "over")
 _CLASS_HEAD = re.compile(r"^[A-Z][A-Za-z]*:")
@@ -163,18 +168,23 @@ class Predictor:
         out = [(float(s[i]), turns[i]) for i in idx if turns[i].get("lane") == lane][:KNN]
         return out or [(float(s[i]), turns[i]) for i in idx[:KNN]]
 
-    def guess(self, qv, lane: str, named=(), near=()) -> dict:
+    def guess(self, qv, lane: str, named=(), near=(), prev: str = START) -> dict:
         """{'tools': [[name, p]...], 'ents': [[eid, score, source]...]} -- top 3."""
         nb = self._neighbours(qv, lane) if qv is not None else []
-        tv: dict[str, float] = {}
+        # three distributions, mixed: the nearest past moves, what follows his
+        # previous action (the move's own grammar), the lane's habits
+        knn: dict[str, float] = {}
         for sim, t in nb:
             w = max(sim, 0.0) ** 2
             for name in (t.get("tools") or [NONE]):
-                tv[name] = tv.get(name, 0.0) + w
-        prior = self.freq.get(lane) or {}
-        tot = sum(prior.values()) or 1.0
-        for name, c in prior.items():
-            tv[name] = tv.get(name, 0.0) + 0.25 * c / tot
+                knn[name] = knn.get(name, 0.0) + w
+        tv: dict[str, float] = {}
+        for dist, wt in ((knn, 0.5), (self.freq.get(f"{lane}|{prev}") or {}, 0.35), (self.freq.get(lane) or {}, 0.15)):
+            tot = sum(dist.values())
+            if not tot:
+                continue
+            for name, c in dist.items():
+                tv[name] = tv.get(name, 0.0) + wt * c / tot
         z = sum(tv.values()) or 1.0
         tools = sorted(((n, round(v / z, 3)) for n, v in tv.items()), key=lambda x: -x[1])[:TOP]
         cand: dict[str, list] = {}
@@ -201,7 +211,8 @@ class Predictor:
         return {"tools": [list(t) for t in tools], "ents": ents}
 
     # ---- the score -------------------------------------------------------------
-    def score(self, guess: dict, qv, lane: str, tools: list[str], ents: list[str], meta=None) -> dict:
+    def score(self, guess: dict, qv, lane: str, tools: list[str], ents: list[str], meta=None,
+              prev: str = START) -> dict:
         """The guess against what Argus did; then the predictor learns."""
         actual_t = tools or [NONE]
         gt = [t[0] for t in guess.get("tools") or []]
@@ -218,9 +229,10 @@ class Predictor:
                         self.src[src]["prop"] += 1.0
                         if e[0] in ents:
                             self.src[src]["hit"] += 1.0
-            f = self.freq.setdefault(lane, {})
-            for t in actual_t:
-                f[t] = f.get(t, 0.0) + 1.0
+            for key in (lane, f"{lane}|{prev}"):
+                f = self.freq.setdefault(key, {})
+                for t in actual_t:
+                    f[t] = f.get(t, 0.0) + 1.0
             if qv is not None:
                 self.vecs.append(_unit(qv))
                 self.turns.append({"lane": lane, "tools": tools, "ents": ents[:12]})
@@ -301,47 +313,117 @@ def candidates(srv, text: str, qv) -> tuple[list[str], list[tuple[str, float]]]:
     return named, near
 
 
-def start(runner, sid: str, text: str, lane: str, embed=None, qv=None) -> dict | None:
-    """The guess for this turn, kept until it ends (a thread's job: the
-    caller never waits on it). Returns the guess when computed inline."""
-    srv = getattr(runner, "srv", None)
-    p = of(srv)
+def calls_of(tool_calls) -> tuple[list[str], list[str]]:
+    """A round's tool calls (the model's own shape) -> actions, entities."""
+    tools, ents = [], []
+    for tc in tool_calls or []:
+        fn = (tc or {}).get("function") or {}
+        args = fn.get("arguments")
+        if isinstance(args, str):
+            try:
+                args = json.loads(args or "{}")
+            except ValueError:
+                args = {}
+        name, es = action_of(fn.get("name") or "", args if isinstance(args, dict) else {})
+        tools.append(name)
+        ents.extend(es)
+    return list(dict.fromkeys(tools)), list(dict.fromkeys(ents))
+
+
+def context_of(history, first_text: str = "") -> str:
+    """What Argus is looking at before this round: the message (first round)
+    or the tool results since his last move."""
+    tail = []
+    for m in reversed(history or []):
+        if m.get("role") == "tool":
+            tail.append(str(m.get("content") or "")[:600])
+        else:
+            break
+    return "\n".join(reversed(tail)) if tail else first_text
+
+
+def step_start(runner, sid: str, text: str, lane: str, step: int = 1) -> None:
+    """Before a round: the guess for this move (its own thread; the round
+    never waits on it). Keyed by (session, round): moves never cross."""
+    p = of(getattr(runner, "srv", None))
     if p is None or not text:
-        return None
-    try:
-        if qv is None:
+        return
+    turn = runner.__dict__.setdefault("_predict_turn", {}).setdefault(
+        sid, {"moves": 0, "top1": 0, "top3": 0, "first": None, "prev": START, "did": []})
+    prev = turn["prev"]
+    key = (sid, int(step))
+
+    def go():
+        srv = getattr(runner, "srv", None)
+        try:
             from .voice import clean
-            emb = embed or getattr(getattr(srv, "membrane", None), "embedder", None)
+            emb = getattr(getattr(srv, "membrane", None), "embedder", None)
             if emb is None:
-                return None
+                return
             qv = np.asarray(emb.embed([(clean(text) or text)[:2000]])[0], dtype=np.float32)
-        named, near = candidates(srv, text, qv)
-        g = p.guess(qv, lane, named=named, near=near)
-    except Exception as e:
-        print(f"[predict] guess failed: {e!r}", file=sys.stderr)
-        return None
-    pend = runner.__dict__.setdefault("_predict_pending", {})
-    pend[sid] = {"guess": g, "qv": qv, "lane": lane, "ts": time.time()}
-    return g
+            named, near = candidates(srv, text, qv)
+            g = p.guess(qv, lane, named=named, near=near, prev=prev)
+            runner.__dict__.setdefault("_predict_pending", {})[key] = {
+                "guess": g, "qv": qv, "lane": lane, "prev": prev, "ts": time.time()}
+        except Exception as e:
+            print(f"[predict] guess failed: {e!r}", file=sys.stderr)
 
-
-def start_async(runner, sid: str, text: str, lane: str) -> None:
-    th = threading.Thread(target=start, args=(runner, sid, text, lane), daemon=True, name="predict")
-    runner.__dict__.setdefault("_predict_threads", {})[sid] = th
+    th = threading.Thread(target=go, daemon=True, name="predict")
+    runner.__dict__.setdefault("_predict_threads", {})[key] = th
     th.start()
 
 
-def end(runner, sid: str, parts) -> dict | None:
-    """The turn ended: its guess scored against what it did."""
+def step_end(runner, sid: str, tool_calls, content: str = "", step: int = 1, wait: bool = False):
+    """The round answered. The move itself is noted now (the next round's
+    guess builds on it); the score lands in a thread (or inline: wait=True)."""
     p = of(getattr(runner, "srv", None))
     if p is None:
         return None
-    th = (runner.__dict__.get("_predict_threads") or {}).pop(sid, None)
-    if th is not None:
-        th.join(30)
-    pend = (runner.__dict__.get("_predict_pending") or {}).pop(sid, None)
-    if not pend:
+    tools, ents = calls_of(tool_calls)
+    turn = (runner.__dict__.get("_predict_turn") or {}).get(sid)
+    if turn is not None:
+        turn["prev"] = tools[0] if tools else NONE
+        turn["did"].append(tools or [NONE])
+    key = (sid, int(step))
+
+    def go():
+        th = (runner.__dict__.get("_predict_threads") or {}).pop(key, None)
+        if th is not None:
+            th.join(20)
+        pend = (runner.__dict__.get("_predict_pending") or {}).pop(key, None)
+        if not pend:
+            return None
+        res = p.score(pend["guess"], pend["qv"], pend["lane"], tools, ents,
+                      meta={"sid": sid, "move": int(step)}, prev=pend["prev"])
+        if turn is not None:
+            with p._lock:
+                turn["moves"] += 1
+                turn["top1"] += int(res["tool1"])
+                turn["top3"] += int(res["tool3"])
+                if turn["first"] is None or int(step) == 1:
+                    turn["first"] = pend["guess"]
+        return res
+
+    if wait:
+        return go()
+    threading.Thread(target=go, daemon=True, name="predict-score").start()
+    return None
+
+
+def end(runner, sid: str, parts=None) -> dict | None:
+    """The turn ended: the summary of its moves' guesses (for its voice line)."""
+    deadline = time.time() + 25
+    while time.time() < deadline and any(k[0] == sid for k in list(runner.__dict__.get("_predict_threads") or {})):
+        time.sleep(0.1)                                    # the last moves' scores land first
+    for k in ("_predict_threads", "_predict_pending"):
+        d = runner.__dict__.get(k) or {}
+        for key in [x for x in list(d) if x[0] == sid]:
+            d.pop(key, None)
+    turn = (runner.__dict__.get("_predict_turn") or {}).pop(sid, None)
+    if not turn or not turn["moves"]:
         return None
-    tools, ents = actions_of_parts(parts)
-    res = p.score(pend["guess"], pend["qv"], pend["lane"], tools, ents, meta={"sid": sid})
-    return {"guess": pend["guess"], "did": {"tools": tools, "ents": ents}, "score": res}
+    did = [t for ts in turn["did"] for t in ts]
+    return {"guess": turn["first"],
+            "did": {"tools": list(dict.fromkeys(did)), "ents": []},
+            "score": {"moves": turn["moves"], "top1": turn["top1"], "top3": turn["top3"],
+                      "tool1": turn["top1"] == turn["moves"], "tool3": turn["top3"] == turn["moves"]}}

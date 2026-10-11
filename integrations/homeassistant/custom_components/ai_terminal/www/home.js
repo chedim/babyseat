@@ -95,6 +95,10 @@ const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* pri
 // do stt into the chat + TTS button that makes membrane say its answers ...
 // rotate the graph based on accelerometer/gyro"; laptops too)
 const LS_TTS = "membrane.home.tts";
+/** Speech decisions, in the console ("[membrane speech] ..."): why a reply was or wasn't said. */
+function speechLog(who, what, text) {
+  try { console.info("[membrane speech]", who, what, String(text || "").slice(0, 80)); } catch (e) { /* no console */ }
+}
 const STT_PATH = "/api/ai_terminal/stt";
 const REC_MAX_S = 60, REC_MIN_S = 0.35, STT_RATE = 16000;
 const TILT_GAIN = 1.5;
@@ -893,7 +897,12 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       });
       this._chat.addEventListener("ai-speak", (e) => {
         const d = e.detail || {};
-        if (d.kind === "membrane" ? this._ttsOn : (this._ttsOn || this._voiceTurn)) this._enqueueSpeech(d.kind, d.text);
+        const ok = d.kind === "membrane" ? this._ttsOn : (this._ttsOn || this._voiceTurn);
+        // THE SILENT REPLY'S WHY (2026-10-11, "no TTS of messages whatsoever"):
+        // every decision is in the console, and a reply held back by 🔊 says so
+        speechLog(d.kind, ok ? "say" : "skip: 🔊 off", d.text);
+        if (ok) this._enqueueSpeech(d.kind, d.text);
+        else if (d.kind !== "membrane" && !this._ttsHinted) { this._ttsHinted = true; this._vhint("🔊 is off: tap it to hear replies"); }
       });
     }
 
@@ -902,6 +911,14 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._keysOn = on;
       const f = on ? "addEventListener" : "removeEventListener";
       window[f]("keydown", this._onKeyDown); window[f]("keyup", this._onKeyUp);
+    }
+
+    /** A status line that is only shown, never spoken. */
+    _vhint(text, ms = 8000) {
+      const el = this.shadowRoot.querySelector(".vsay"); if (!el) return;
+      clearTimeout(this._vsayT);
+      el.textContent = text || ""; el.classList.toggle("show", !!text);
+      if (text && ms) this._vsayT = setTimeout(() => el.classList.remove("show"), ms);
     }
 
     /** The voice status, by the buttons (the top bar's status is hidden on phones). */
@@ -1599,7 +1616,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           const v = who === "membrane" ? this._membraneVoice() : this._voice;
           try { if (v) { u.voice = v; u.lang = v.lang; } } catch (e) { /* a vanished voice: the default speaks */ }
           if (who === "membrane") { u.pitch = 1.25; u.rate = 1.05; }
-          u.onend = u.onerror = () => res();
+          u.onend = () => res();
+          u.onerror = (ev) => { speechLog(who, "engine error: " + ((ev && ev.error) || "?"), text); res(); };
           window.speechSynthesis.speak(u);
           setTimeout(res, 2000 + text.length * 120);        // a stuck engine never holds the mic
         } catch (e) { res(); }
