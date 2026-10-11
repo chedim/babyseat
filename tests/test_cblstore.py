@@ -253,3 +253,41 @@ class TestLeanPreImport(unittest.TestCase):
             self.assertEqual([k for k, _ in b.scan("events")], ["ev0", "ev1", "ev2", "ev3", "ev9"])
         finally:
             b.close()
+
+
+@unittest.skipUnless(HAVE, "Couchbase Lite libraries not fetched (scripts/fetch-cbl.sh)")
+class TestWriteBehind(unittest.TestCase):
+    def test_hot_writes_coalesce_and_survive_a_close(self):
+        tmp = tempfile.mkdtemp()
+        b = CBLiteBackend(Path(tmp) / "db")
+        try:
+            b._stop = True                       # hold the writer: the queue is visible
+            b._wflush.set()
+            b._writer.join(timeout=5)
+            for i in range(50):
+                b.upsert("entity_states", "e1", {"origin": "o", "mass": float(i)})
+            b.upsert("entity_states", "e2", {"origin": "o", "mass": 2.0})
+            b.delete("entity_states", "e2")
+            self.assertEqual(len(b._pending), 2)                         # 51 writes -> 2 pending
+            self.assertEqual(b.get("entity_states", "e1")["mass"], 49.0)  # RAM answers meanwhile
+        finally:
+            b.close()
+        b = CBLiteBackend(Path(tmp) / "db")
+        try:
+            self.assertEqual(b.get("entity_states", "e1")["mass"], 49.0)
+            self.assertIsNone(b.get("entity_states", "e2"))
+        finally:
+            b.close()
+
+    def test_a_reused_dict_saves_what_ram_holds(self):
+        tmp = tempfile.mkdtemp()
+        b = CBLiteBackend(Path(tmp) / "db")
+        d = {"origin": "o", "mass": 1.0}
+        b.upsert("entity_states", "e1", d)
+        d["mass"] = 99.0                                                 # the caller reuses its dict
+        b.close()
+        b = CBLiteBackend(Path(tmp) / "db")
+        try:
+            self.assertEqual(b.get("entity_states", "e1")["mass"], 1.0)
+        finally:
+            b.close()

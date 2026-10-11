@@ -44,7 +44,7 @@ COLD = ("sentences",)
 VEC = {"sentences": ("vec", "sent_vec")}            # coll -> (field, index name)
 DIM = 1024
 META = "meta"
-CACHE_N = 4096                                     # decoded cold docs kept (the gate re-reads its sids)
+CACHE_N = 16384                                    # decoded cold docs kept (~50 MB: the gate and the banner re-read their sids)
 
 
 def _finite(o):
@@ -93,6 +93,12 @@ def unpack_vec(s: str):
 class CBLiteBackend(MemBackend):
     CATCHUP_BATCH = 500
     CATCHUP_IDLE_S = 30.0
+    # THE WRITE-BEHIND (2026-10-10, the first live rounds: the banner's field
+    # flush paid a synchronous CBL save per dirty entity state, inside the
+    # RAM lock, every round): the hot rows' RAM is the truth; their saves
+    # coalesce (the same state rewritten round after round = one save) and
+    # land in one transaction per WRITE_BEHIND_S. close/flush drain it.
+    WRITE_BEHIND_S = 0.5
 
     def __init__(self, path, journal_dir=None, lib_dir=None):
         super().__init__()
@@ -106,6 +112,10 @@ class CBLiteBackend(MemBackend):
         self._stop = False
         self._idx_rows = 0
         self._idx_last = 0.0
+        self._pending: dict[tuple[str, str], tuple] = {}
+        self._pend_lock = threading.Lock()
+        self._wflush = threading.Event()
+        self._writer = None
         self._ensure_indexes()
         if journal_dir is not None and self._meta("migrated") is None:
             self.migrate_from(Path(journal_dir))
@@ -115,6 +125,8 @@ class CBLiteBackend(MemBackend):
             self.replay_tails(Path(journal_dir))
         self._worker = threading.Thread(target=self._catchup_loop, name="cbl-vec", daemon=True)
         self._worker.start()
+        self._writer = threading.Thread(target=self._writer_loop, name="cbl-write", daemon=True)
+        self._writer.start()
         self._wake.set()
 
     # ---- setup ---------------------------------------------------------------
@@ -274,6 +286,7 @@ class CBLiteBackend(MemBackend):
             marks[c] = self._mark(jf, off)
             done[c] = n
         if done:
+            self.drain()                               # the rows land before their offsets move
             mig["journals"] = marks
             self._set_meta("migrated", mig)
             print(f"[efield] couchbase lite: journal tails replayed {done}", file=sys.stderr)
@@ -308,11 +321,43 @@ class CBLiteBackend(MemBackend):
         if o is None:
             o = ords[key] = self._next[coll]
             self._next[coll] = o + 1
-        self.db.put_json(coll, key, dumps({"o": o, "d": doc}))
+        doc = self.colls[coll].get(key, doc)          # the RAM copy (the caller may reuse its dict)
+        with self._pend_lock:
+            self._pending[(coll, key)] = (o, doc)
 
     def _hot_del(self, coll: str, key: str) -> None:
         self._ord[coll].pop(key, None)
-        self.db.purge(coll, key)
+        with self._pend_lock:
+            self._pending[(coll, key)] = (None, None)
+
+    def drain(self) -> int:
+        """Save every pending hot write now (one transaction)."""
+        with self._pend_lock:
+            todo, self._pending = self._pending, {}
+        if not todo:
+            return 0
+        self.db.begin()
+        try:
+            for (c, k), (o, d) in todo.items():
+                if d is None:
+                    self.db.purge(c, k)
+                else:
+                    try:
+                        self.db.put_json(c, k, dumps({"o": o, "d": d}))
+                    except CB.CBLException as e:
+                        print(f"[efield] cbl save {c}/{k} failed ({e})", file=sys.stderr)
+        finally:
+            self.db.end()
+        return len(todo)
+
+    def _writer_loop(self) -> None:
+        while not self._stop:
+            self._wflush.wait(self.WRITE_BEHIND_S)
+            self._wflush.clear()
+            try:
+                self.drain()
+            except Exception as e:
+                print(f"[efield] cbl write-behind failed ({e})", file=sys.stderr)
 
     def _bump(self, coll: str) -> None:
         self._vec_dirty.add(coll)
@@ -355,12 +400,8 @@ class CBLiteBackend(MemBackend):
             return
         with self._ram_lock:
             super().upsert_multi(coll, docs)
-            self.db.begin()
-            try:
-                for k, d in docs.items():
-                    self._hot_put(coll, k, d)
-            finally:
-                self.db.end()
+            for k, d in docs.items():
+                self._hot_put(coll, k, d)
         self._bump(coll)
 
     def insert_if_absent(self, coll, key, doc):
@@ -485,15 +526,20 @@ class CBLiteBackend(MemBackend):
         return st
 
     def flush(self) -> None:
-        """Every write is already saved (the journals' flush has no work here)."""
+        """The pending hot writes, saved now."""
+        self.drain()
 
     def close(self) -> None:
         self._stop = True
         self._wake.set()
-        try:
-            self._worker.join(timeout=5)
-        except Exception:
-            pass
+        self._wflush.set()
+        for t in (self._worker, self._writer):
+            try:
+                if t is not None:
+                    t.join(timeout=5)
+            except Exception:
+                pass
+        self.drain()
         self.db.close()
 
 
