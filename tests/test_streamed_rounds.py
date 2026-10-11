@@ -49,8 +49,41 @@ class TestStreamedRounds(unittest.TestCase):
         self.assertEqual(len(text), 1)
         self.assertEqual(text[0]["text"], "The battery is at 92%.")
         deltas = [e["delta"] for e in seen if e.get("type") == "message.part.delta" and e.get("partID") == text[0]["id"]]
-        self.assertEqual(deltas, ["The bat", "tery is ", "at 92%."])       # live, as they came
+        self.assertEqual("".join(deltas), "The battery is at 92%.")        # live, in order, batched
+        self.assertLessEqual(len(deltas), 3)
         self.assertEqual(len([p for p in out["parts"] if p.get("tool") == "membrane"]), 1)
+
+    def test_a_flood_of_tokens_is_a_trickle_of_events(self):
+        """2026-10-11: ~100 delta events a second starved HA's relay; batched
+        to one per DELTA_COALESCE_S per part -- the same words, in order."""
+        import time as _t
+        words = [f"w{i} " for i in range(200)]
+
+        def ladder(body):
+            raise AssertionError("not used")
+
+        def stream(body, on_event):
+            for w in words[:100]:
+                on_event("reasoning", w)
+                _t.sleep(0.002)
+            for w in words[100:]:
+                on_event("text", w)
+                _t.sleep(0.002)
+            return {"choices": [{"message": {"content": "".join(words[100:]), "reasoning": "".join(words[:100])}}]}
+        ladder.stream = stream
+        r, seen = _runner(ladder)
+        sid = r.sessions.create(title="t")["id"]
+        out = r.run(sid, "go")
+        ds = [e for e in seen if e.get("type") == "message.part.delta"]
+        self.assertLess(len(ds), 20)                                      # not 200
+        by_part = {}
+        for e in ds:
+            by_part.setdefault(e["partID"], []).append(e["delta"])
+        texts = {p["type"]: p["id"] for p in out["parts"] if p.get("type") in ("text", "reasoning")}
+        self.assertEqual("".join(by_part[texts["reasoning"]]), "".join(words[:100]))
+        self.assertEqual("".join(by_part[texts["text"]]), "".join(words[100:]))
+        order = [e["partID"] for e in ds]
+        self.assertEqual(order, sorted(order, key=lambda pid: 0 if pid == texts["reasoning"] else 1))  # never interleaved
 
     def test_a_stream_that_fails_before_any_word_falls_back(self):
         calls = []

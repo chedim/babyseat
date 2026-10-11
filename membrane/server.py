@@ -885,6 +885,7 @@ def _tokens_estimate(history: list, parts: list) -> dict:
 
 
 BUSY_WAIT_S = 300.0   # a queued second POST waits this long, then gets a visible busy stub
+DELTA_COALESCE_S = 0.25   # a streaming part's text goes out at most this often (was: every token)
 HEARTBEAT_S = 15.0    # busy-heartbeat cadence while a turn runs
 QUEUE_DEPTH_MAX = 8   # queued turns per session beyond which POSTs refuse fast (the flood guard)
 
@@ -1781,8 +1782,23 @@ class TurnRunner:
                 body["tools"] = tools
             mkpart({"type": "step-start"})
             live = {"text": None, "reasoning": None}
+            # THE DELTAS, BATCHED (2026-10-11, the operator: "the whole chat dynamics
+            # is broken ... idle, offline, flaaaaky"): one event per token was ~100
+            # a second -- HA's relay on a memory-starved agdroid fell behind and the
+            # hub hung up on it (offline / idle / offline). A part's text now goes
+            # out at most every DELTA_COALESCE_S, in order; the rest at the part's end.
+            _pend: dict = {}
 
-            def _on_event(kind, val, _live=live):
+            def _flush(pid, _pend=_pend):
+                e = _pend.get(pid)
+                if e and e[0]:
+                    self.hub.publish({"type": "message.part.delta", "sessionID": sid, "messageID": aid,
+                                      "partID": pid, "field": "text", "delta": e[0]})
+                    e[0] = ""
+                if e:
+                    e[1] = time.time()
+
+            def _on_event(kind, val, _live=live, _pend=_pend):
                 if kind == "tick":
                     return sid in self._aborting
                 if kind == "ext":
@@ -1793,15 +1809,23 @@ class TurnRunner:
                     p = _live[kind] = mkpart({"type": kind, "text": "",
                                               "time": {"start": int(time.time() * 1000)}})
                 p["text"] += val
-                self.hub.publish({"type": "message.part.delta", "sessionID": sid, "messageID": aid,
-                                  "partID": p["id"], "field": "text", "delta": val})
+                for other in [k for k in _pend if k != p["id"] and _pend[k][0]]:
+                    _flush(other)                        # a new part: the last one's words first
+                e = _pend.setdefault(p["id"], ["", 0.0])
+                e[0] += val
+                if time.time() - e[1] >= DELTA_COALESCE_S:
+                    _flush(p["id"])
                 return False
             _stream = getattr(self.call_ladder, "stream", None) if STREAM_ROUNDS else None
             try:
                 if _stream is not None:
                     try:
                         resp = _stream(body, _on_event)
+                        for _pid in list(_pend):
+                            _flush(_pid)                 # the tail of every part, before it closes
                     except Exception:
+                        for _pid in list(_pend):
+                            _flush(_pid)
                         if live["text"] is not None or live["reasoning"] is not None:
                             raise                    # words already shown: the round failed for real
                         resp = self.call_ladder(body)   # nothing shown yet: the buffered call, as before
