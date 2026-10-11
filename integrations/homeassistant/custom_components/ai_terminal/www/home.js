@@ -280,6 +280,7 @@ function pickVoice(voices, lang = "en", chosen = "") {
          good[0] || local[0] || null;
 }
 const LS_VOICE = "membrane.home.voice";
+const IS_CHROME = typeof navigator !== "undefined" && /Chrome\//.test(navigator.userAgent || "") && !/Firefox\//.test(navigator.userAgent || "");
 
 const HomeLogic = { personSlug, menuEntries, hotword, pickVoice, speakable, WAKE_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, angleStep };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
@@ -1434,8 +1435,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           // Chrome's engine stalls on long stretches: keep it awake, and clear a stuck queue first
           const ss = window.speechSynthesis;
           if (ss.speaking && !this._speaking) ss.cancel();
+          // CHROME ONLY: its engine stalls on long stretches and a pause/resume
+          // keeps it going -- in Firefox a pause() can leave speech stuck for good
           clearInterval(this._ssKeep);
-          this._ssKeep = setInterval(() => { if (ss.speaking) { ss.pause(); ss.resume(); } else clearInterval(this._ssKeep); }, 10000);
+          if (IS_CHROME) this._ssKeep = setInterval(() => { if (ss.speaking) { ss.pause(); ss.resume(); } else clearInterval(this._ssKeep); }, 10000);
           const u = new SpeechSynthesisUtterance(text);
           const v = who === "membrane" ? this._membraneVoice() : this._voice;
           try { if (v) { u.voice = v; u.lang = v.lang; } } catch (e) { /* a vanished voice: the default speaks */ }
