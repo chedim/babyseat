@@ -1799,6 +1799,8 @@ def main() -> None:
                 _SC.start(srv)
                 from . import consequences as _CQ  # what followed its decisions, 1 h / 24 h / 72 h on
                 _CQ.start(srv)
+                from . import outcomes as _OC      # the shadow gate: guesses your ignores, blind; skips nothing
+                threading.Thread(target=_OC.start, args=(srv,), daemon=True, name="outcomes-boot").start()
                 try:                               # the field's m: mirror names only what the store holds
                     from .efield import wire_store_names
                     if getattr(srv, "efield", None) is not None and getattr(srv, "entity_store", None) is not None:

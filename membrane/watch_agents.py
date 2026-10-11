@@ -587,17 +587,29 @@ class _LoopDrainer:
         """One event -> at most one loop turn (_handle), and its line in the
         wake ledger (wakes.py: outcome learning's training set)."""
         _WAKE.info = None
-        feats = None
+        feats = shadow = None
         if not is_operator_event(ev):
             try:                               # what the wake arrived with, BEFORE its turn stamps the entity
                 from . import wakes as _WK
                 feats = _WK.features(self.srv, ev, time.time())
             except Exception:
                 feats = None
+            try:                               # THE SHADOW GATE (outcomes.py): its guess, BLIND --
+                from . import outcomes as _OC  # it never enters the task text; nothing is skipped
+                shadow = _OC.predict(self.srv, ev)
+            except Exception:
+                shadow = None
         out = self._handle(ev)
+        if shadow is not None:
+            try:
+                _OC.learn(self.srv, ev, shadow, out)
+            except Exception:
+                pass
         if feats is not None:
             try:
                 info = getattr(_WAKE, "info", None) or {}
+                if shadow is not None:
+                    info = {**info, "shadow": {k: shadow.get(k) for k in ("predict", "p_ignore", "level", "n", "sig")}}
                 _WK.log(self.srv, ev, "folded" if out == "skip" else out, feats=feats, **info)
             except Exception:
                 pass
