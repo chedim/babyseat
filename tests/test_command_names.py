@@ -49,6 +49,30 @@ class TestCommandNames(unittest.TestCase):
         specs = N.command_specs([{"name": "soc", "command": "curl -s x"}])
         self.assertEqual(N.split_label(specs[0]), ("soc", "curl -s x"))
 
+    def test_a_label_may_carry_the_seats_colons(self):
+        """2026-10-11: 'argus:battery.soc :: <cmd>' went to the shell whole and
+        died 'argus:battery.soc: command not found' -- Argus read it as 'ANY
+        colon gets mangled' and wrote a '~'-for-':' runner around it."""
+        self.assertEqual(N.split_label("argus:battery.soc :: curl -s http://h:8123/api/states"),
+                         ("argus:battery.soc", "curl -s http://h:8123/api/states"))
+        self.assertEqual(N.split_label("argus:mqtt:pub-soc::mosquitto_pub -t a -m 1"),
+                         ("argus:mqtt:pub-soc", "mosquitto_pub -t a -m 1"))
+        self.assertEqual(N.split_label("shell:argus:x :: echo y"), ("argus:x", "echo y"))
+        # colons in the command itself were never the problem and stay untouched
+        self.assertEqual(N.split_label("curl -s http://h:8123/x"), ("", "curl -s http://h:8123/x"))
+        self.assertEqual(N.split_label("echo a::b"), ("", "echo a::b"))
+
+    def test_a_colon_label_runs_its_command_and_relinks_by_name(self):
+        import types
+        from membrane.entities import EntityStore
+        est = EntityStore(path=None, shared=False)
+        ex = est.add(cls="Tool", name="tool:executor", summary="x")
+        r = N.entity_link(types.SimpleNamespace(), est, None, None, ex["eid"], ["argus:soc.probe :: echo SOC-1"])
+        self.assertEqual((r["runs"][0]["outcome"], r["runs"][0]["head"].strip()), ("ok", "SOC-1"))
+        r = N.entity_link(types.SimpleNamespace(), est, None, None, ex["eid"], ["argus:soc.probe :: echo SOC-2"])
+        self.assertEqual(r["runs"][0]["head"].strip(), "SOC-2")              # re-linking the label updates it
+        self.assertEqual(len([d for d in est.docs if "soc.probe" in d]), 1)  # one command, not a new stub each time
+
 
 class _Http:
     def __init__(self, reply):

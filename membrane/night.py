@@ -1686,7 +1686,11 @@ def command_specs(commands) -> list:
     return out
 
 
-_LABEL_RE = re.compile(r"^\s*(?:shell:|c:)?([A-Za-z][\w.-]{0,40})\s*::\s*(\S.*)$", re.DOTALL)
+# a label may be colon-segmented like the seat's own names ('argus:battery.soc
+# :: <command>'): without it the whole line went to the shell and died
+# 'argus:battery.soc: command not found' (2026-10-11 -- Argus took it for
+# "ANY colon gets mangled" and routed around it with a '~'-for-':' runner)
+_LABEL_RE = re.compile(r"^\s*(?:shell:|c:)?([A-Za-z][\w.-]{0,40}(?::[\w.-]{1,40}){0,3})\s*::\s*(\S.*)$", re.DOTALL)
 
 
 def split_label(spec: str) -> tuple[str, str]:
