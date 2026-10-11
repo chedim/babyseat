@@ -138,7 +138,8 @@ class TestOpenBackend(unittest.TestCase):
                     mock.patch("membrane.substrate.cb_open",
                                side_effect=RuntimeError("down")), \
                     mock.patch("membrane.substrate._is_lab_field_path",
-                               return_value=False):
+                               return_value=False), \
+                    mock.patch("membrane.efstore._cbl_wanted", return_value=False):
                 self.assertIsInstance(efstore.open_backend(fp),
                                       efstore.FileBackend)
 

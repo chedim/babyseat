@@ -1241,12 +1241,35 @@ def open_backend(field_path: str = ""):
             print(f"[efield] couchbase unavailable ({e}); file backend",
                   file=sys.stderr)
     base = Path(field_path).resolve().parent if field_path else Path.cwd()
+    jdir = base / _field_dirname_for(field_path)
+    # THE COUCHBASE LITE HOME (2026-10-10): wherever its libraries are vendored
+    # (scripts/fetch-cbl.sh: the phone, a Mac, a Linux box); =cbl forces it,
+    # =file keeps the journals. The journals import once and stay as a backup.
+    mode = os.environ.get("MEMBRANE_EFIELD_STORE", "auto")
+    cdir = jdir.with_name(jdir.name + ".cblite")
+    if mode == "cbl" or (mode == "auto" and _cbl_wanted()):
+        try:
+            from .cblstore import CBLiteBackend
+            return CBLiteBackend(cdir, journal_dir=jdir)
+        except Exception as e:
+            print(f"[efield] couchbase lite unavailable ({e}); file backend"
+                  + (" -- WARNING: the journals are a STALE backup (the field "
+                     f"moved to {cdir}); writes from here on may diverge"
+                     if cdir.exists() else ""), file=sys.stderr)
     try:
-        return FileBackend(base / _field_dirname_for(field_path))
+        return FileBackend(jdir)
     except Exception as e:
         print(f"[efield] file backend unavailable ({e}); RAM backend",
               file=sys.stderr)
         return MemBackend()
+
+def _cbl_wanted() -> bool:
+    try:
+        from . import cblite
+        return cblite.lib_paths() is not None
+    except Exception:
+        return False
+
 
 def probe_local_couchbase() -> bool:
     """Cheap one-shot probe: does a local Couchbase answer at the default

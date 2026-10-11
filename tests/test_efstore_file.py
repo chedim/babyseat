@@ -143,6 +143,7 @@ class TestOpenBackendRouting(unittest.TestCase):
             fp = os.path.join(d, "rag-field.json")
             with mock.patch("membrane.substrate._is_lab_field_path",
                             return_value=False), \
+                    mock.patch("membrane.efstore._cbl_wanted", return_value=False), \
                     mock.patch("membrane.substrate.cb_open",
                                side_effect=RuntimeError("must not be called")):
                 be = efstore.open_backend(fp)
@@ -166,6 +167,7 @@ class TestOpenBackendRouting(unittest.TestCase):
                             return_value=False), \
                     mock.patch.dict(os.environ,
                                     {"MEMBRANE_FIELD_CLOUD": "1"}), \
+                    mock.patch("membrane.efstore._cbl_wanted", return_value=False), \
                     mock.patch("membrane.substrate.cb_open",
                                side_effect=RuntimeError("down")):
                 be = efstore.open_backend(fp)
