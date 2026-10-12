@@ -25,10 +25,30 @@ class TestCheck(unittest.TestCase):
 
     def test_check_missing_repo_is_none(self):
         with mock.patch.object(update, "_find_repo", return_value=None), \
-                mock.patch.object(update, "_pip_direct_url", return_value=None):
+                mock.patch.object(update, "_pip_direct_url", return_value=None), \
+                mock.patch.object(update, "_pypi_installed", return_value=None):
             info = update.check()
         self.assertEqual(info["mode"], "none")
         self.assertFalse(info["available"])
+
+    def test_pypi_install_compares_with_pypi(self):
+        # a release install (membrane-seat from PyPI) is checked too (2026-10-12)
+        base = [mock.patch.object(update, "_find_repo", return_value=None),
+                mock.patch.object(update, "_pip_direct_url", return_value=None),
+                mock.patch.object(update, "_pypi_installed", return_value="0.3.0")]
+        for p in base:
+            p.start()
+        try:
+            with mock.patch.object(update, "_pypi_latest", return_value="0.3.1"):
+                info = update.check()
+            self.assertEqual((info["mode"], info["available"], info["remote"]), ("pypi", True, "0.3.1"))
+            with mock.patch.object(update, "_pypi_latest", return_value="0.3.0"):
+                self.assertFalse(update.check()["available"])
+            with mock.patch.object(update, "_pypi_latest", return_value=None):   # offline / not published
+                self.assertFalse(update.check()["available"])
+        finally:
+            for p in base:
+                p.stop()
 
     def test_direct_url_mode_reported(self):
         with mock.patch.object(update, "_find_repo", return_value=None), \
