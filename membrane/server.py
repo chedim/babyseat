@@ -1789,7 +1789,12 @@ class TurnRunner:
                 _bth = (getattr(self, "_babble_threads", None) or {}).pop(sid, None)
                 if _bth is not None:
                     _bth.join(5)
-                _said = self._take_interjections(sid, aid)
+                # A TURN BEING CUT TAKES NO ONE'S WORDS (2026-10-11, "I don't see the
+                # answer"): a person's message preempts the running turn AND sits in
+                # the queue -- the cut turn's next round used to absorb it as an
+                # interjection, then stop: the message was consumed, never answered.
+                # Cut, it stays queued: the drain runs it as its own turn next.
+                _said = [] if sid in self._aborting else self._take_interjections(sid, aid)
                 if _said:
                     # THE REPLY SPLITS AROUND THE OPERATOR'S WORDS: the
                     # clients order rows by creation -- a merged message
@@ -2208,6 +2213,17 @@ class TurnRunner:
             a_info.pop("finish", None)
         if not (a_info.get("tokens") or {}).get("total"):
             a_info["tokens"] = _tokens_estimate(history, parts)
+        # A TOOL CALL THAT NEVER RAN IS CLOSED (2026-10-11: a cut turn left an
+        # `exec` 'pending' forever -- the operator saw it hang for minutes)
+        _cut_now = int(time.time() * 1000)
+        for _p in parts:
+            _st = _p.get("state") if _p.get("type") == "tool" else None
+            if isinstance(_st, dict) and _st.get("status") in ("pending", "running"):
+                _st.update({"status": "error",
+                            "error": "not run: the turn was cut before this call (a person spoke, or Stop)",
+                            "time": {"start": (_st.get("time") or {}).get("start") or _cut_now, "end": _cut_now}})
+                self.hub.publish({"type": "message.part.updated", "part": copy.deepcopy(_p),
+                                  "time": _cut_now, "sessionID": sid})
         a_info["time"]["completed"] = int(time.time() * 1000)
         # THE MID-TURN INJECTS SURVIVE THE FINAL SNAPSHOT (the 'the error
         # disappears' exhibit, 2026-10-07: the watchdog's abort part rode

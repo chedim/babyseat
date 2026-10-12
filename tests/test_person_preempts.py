@@ -73,3 +73,49 @@ class TestPersonPreempts(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheCutTurnTakesNoOnesWords(unittest.TestCase):
+    """2026-10-11, "I don't see the answer": the cut turn's next round used to
+    absorb the person's queued message as an interjection and then stop --
+    consumed, never answered. Through the REAL turn loop: it must run as its
+    own turn, and the cut turn's never-run tool call must close."""
+
+    def test_the_person_is_answered_and_the_cut_call_closes(self):
+        calls = []
+        first = threading.Event()
+
+        def ladder(body):
+            msgs = body.get("messages") or []
+            last_user = next((m["content"] for m in reversed(msgs) if m.get("role") == "user"), "")
+            calls.append(last_user)
+            if len(calls) == 1:                       # the running turn's round 1: slow, ends in TWO tool calls
+                first.set()
+                time.sleep(0.8)
+                return {"choices": [{"message": {"role": "assistant", "content": "", "tool_calls": [
+                    {"id": "t1", "type": "function", "function": {"name": "find", "arguments": "{}"}},
+                    {"id": "t2", "type": "function", "function": {"name": "find", "arguments": "{}"}}]},
+                    "finish_reason": "tool_calls"}]}
+            return {"choices": [{"message": {"role": "assistant", "content": f"answer to: {last_user[-30:]}"},
+                                 "finish_reason": "stop"}]}
+
+        r = MS.TurnRunner(MS.SSEHub(), MS.SessionStore(), MS.MessageStore(), ladder,
+                          lambda *a, **k: "ok", system="", model="m", tools=[])
+        r.busy_wait_s = 15
+        r._turn_watchdog = lambda *a, **k: None
+        sid = r.sessions.create()["id"] if hasattr(r.sessions, "create") else "s1"
+        a = threading.Thread(target=r.run, args=(sid, "goal still open (the board's pulse): x"), daemon=True)
+        a.start()
+        first.wait(5)
+        b = threading.Thread(target=r.run, args=(sid, "[HA user: Dmitrii]\nlet me know what you think"),
+                             daemon=True)
+        b.start()
+        a.join(15); b.join(15)
+        self.assertTrue(any("let me know what you think" in c for c in calls[1:]), calls)
+        rows = r.messages.list(sid)
+        texts = ["".join(p.get("text") or "" for p in row.get("parts") or [] if p.get("type") == "text")
+                 for row in rows if (row.get("info") or {}).get("role") == "assistant"]
+        self.assertTrue(any("let me know what you think" in t for t in texts), texts)
+        pending = [p for row in rows for p in row.get("parts") or []
+                   if p.get("type") == "tool" and (p.get("state") or {}).get("status") in ("pending", "running")]
+        self.assertEqual(pending, [])
