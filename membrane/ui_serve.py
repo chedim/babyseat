@@ -244,6 +244,7 @@ def intercept(handler) -> bool:
     False = carry on (a /ui/serve request comes back rewritten to the seat's
     own route, with handler._ui_trusted set when the LAN guard let it in)."""
     handler._ui_trusted = False            # keep-alive: one handler, many requests
+    handler._ui_relay = False
     if not enabled():
         return False
     path, _, qs = handler.path.partition("?")
@@ -262,6 +263,8 @@ def intercept(handler) -> bool:
             return True
         handler.path = rest + ("?" + qs if qs else "")
         handler._ui_trusted = True         # lan, or the pair checked above
+        handler._ui_relay = True           # the page's request: its person's sessions (server.py)
+        handler._ui_speaker = speaker_of(handler)
         return False
     if handler.command not in ("GET", "HEAD") and path not in ("/ui/stt", "/ui/log"):
         _json(handler, {"error": "method not allowed"}, 405)

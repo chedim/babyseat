@@ -618,6 +618,9 @@ const STYLE = `
   .msg.user .bub { background:var(--primary-color,#3477d6); color:var(--text-primary-color,#fff);
                    border-radius:14px 14px 4px 14px; padding:8px 12px; max-width:85%; }
   .msg.user .bub a { color:inherit; }
+  /* a prompt membrane's own loops wrote (a watch's pulse, a goal's nudge) -- not a person: no bubble */
+  .msg.user.machine .bub { background:transparent; color:inherit; border:1px dashed rgba(128,128,128,.35);
+                           opacity:.7; font-size:.92em; }
   .msg.ai { border-left:2px solid rgba(128,128,128,.35); padding-left:12px; }
   .vox { margin:8px 0 0; max-width:85%; border:1px dashed rgba(156,110,220,.6); border-radius:14px 14px 14px 4px;
          padding:6px 12px; background:rgba(156,110,220,.08); }
@@ -1641,8 +1644,10 @@ function definePanel() {
                               : '<div class="vox"><div class="vwho">membrane</div><div class="vtext">' + escText(voiceTurnText(text)) + "</div></div>";
           return el;
         }
+        // a person's message carries the speaker line ('[HA user: X]' / '[user: X]'); the loops' don't
+        const person = row.parts.some((p) => p.type === "text" && /^\s*\[(?:HA )?user: /.test(p.text || ""));
         if (!line) {
-          el.className = "msg user";
+          el.className = "msg user" + (person ? "" : " machine");
           el.innerHTML = '<div class="bub md">' + md(stripSpeaker(text)) + "</div>";
           return el;
         }

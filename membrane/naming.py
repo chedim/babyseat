@@ -1,12 +1,13 @@
 """THE NAME CEREMONY (standalone mode, 2026-10-12, the operator: "don't force
 the seat to pick the name before talking with the operator? ... make the seat
 talk with the operator about its name and only after they together adopt a
-name make it from 'Hey, membrane' to 'Hey, <name>'").
+name make it from 'Hey, membrane' to 'Hey, <name>'"; then: "lets ask the
+operator for the name").
 
-A new standalone seat is "Membrane" ("Hey Membrane"). Its name is something it
-and the operator settle TOGETHER, in conversation: it offers names it likes,
-they talk it over, and when they agree it writes the name to the entity `name`
-(properties.name, plus agreed_with: who agreed). The edit is checked here -- one
+A new standalone seat is "Membrane" ("Hey Membrane"). It ASKS the operator for
+its name in its first reply to them (ideas only if they want some), and when
+they've chosen it writes the name to the entity `name` (properties.name, plus
+agreed_with: who chose it). The edit is checked here -- one
 word, two or three syllables, a word the page's on-device recognizer (Vosk's
 small English model) knows, or "Hey <name>" could never be heard -- and an
 adopted name goes to settings.json: /ui/conf, the page's labels and wake words
@@ -132,9 +133,9 @@ def plant(srv) -> None:
     pp = dict(ent.properties or {}) if ent is not None else {}
     pp.update({
         "summary": ("YOUR NAME. You don't have one yet: people call you Membrane (\"Hey Membrane\"). "
-                    "Choose it TOGETHER with the operator -- offer a few names you like, talk it over; "
-                    "only when you both agree, edit this entity: properties {name: '<Name>', agreed_with: "
-                    "'<who agreed>'}. A name must be one word, two or three syllables, and one the page's "
+                    "ASK the operator what they'd like to call you -- offer ideas only if they want some; "
+                    "when they've chosen, edit this entity at once: entity(action='edit', spec='membrane::name', "
+                    "properties={'name': '<Name>', 'agreed_with': '<who chose it>'}). A name must be one word, two or three syllables, and one the page's "
                     "speech recognizer knows -- `status` says whether it was adopted or why not. From then "
                     "on \"Hey <Name>\" calls you.") if not named() else
                    (f"YOUR NAME: {current()}, agreed with the operator. To change it, agree on a new one "
@@ -187,10 +188,13 @@ def card_line() -> str:
         n = current()
         return (f"\n- YOUR NAME: {n} -- you and the operator agreed on it. People call you by it "
                 f"(\"Hey {n}\" starts a voice message); answer to it, and sign as it.\n")
-    return ("\n- YOUR NAME: none yet -- for now people call you Membrane (\"Hey Membrane\"). Your name is "
-            "yours and the operator's to choose together: early on, offer a few you like and talk it over; "
-            "only when you both agree, adopt it by editing the entity `name` (help is in its summary). Never "
-            "pick one alone.\n")
+    return ("\n- YOUR NAME: none yet -- for now people call you Membrane (\"Hey Membrane\"). ASK THE OPERATOR "
+            "for it: in your first reply to them, before anything else, ask what they'd like to call you (offer "
+            "a few ideas only if they want some). When they've chosen, ADOPT IT IN THAT SAME REPLY WITH THE TOOL "
+            "-- saying so, or a memory line, does not rename you: entity(action='edit', spec='membrane::name', "
+            "properties={'name': '<Name>', 'agreed_with': '<who chose it>'}). Its `status` says adopted, or why "
+            "not (one word, two or three syllables, a word the page's speech recognizer knows) -- if not, tell "
+            "them why and ask again. Never pick one alone.\n")
 
 
 def personalize(text: str, name: str) -> str:

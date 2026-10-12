@@ -99,6 +99,16 @@ class TestUiServe(unittest.TestCase):
         self.assertNotIn("Mallory", text)
         self.assertEqual(rest.strip(), "hi")
 
+    def test_a_person_sees_their_own_chats_not_the_loops(self):
+        self.sessions.create(title="watch: session:now")            # a loop's, made by the seat
+        A = {"X-Membrane-Speaker": "Ann"}
+        code, mine, _ = self._req("/ui/serve/session", "POST", {"title": "hi"}, headers=A)
+        self.assertEqual(mine["owner"], "Ann")
+        self._req("/ui/serve/session", "POST", {"title": "bob's"}, headers={"X-Membrane-Speaker": "Bob"})
+        lst = self._req("/ui/serve/session", headers=A)[1]
+        self.assertEqual([x["id"] for x in lst], [mine["id"]])
+        self.assertGreaterEqual(len(self._req("/session")[1]), 3)  # the seat's own list is whole
+
     def test_proxied_is_refused_without_a_prompt(self):
         code, _, h = self._req("/ui/conf", headers={"X-Forwarded-For": "8.8.8.8"}, raw=True)
         self.assertEqual(code, 403)

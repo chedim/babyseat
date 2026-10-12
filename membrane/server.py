@@ -2744,7 +2744,13 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
             elif path == "/global/event":
                 self._sse(wrap=True)
             elif path == "/session":
-                self._json_out(sessions.list())
+                _all = sessions.list()
+                if getattr(self, "_ui_relay", False):
+                    # STANDALONE'S PAGE (ui_serve.py): a person's own chats, never the
+                    # loops' sessions (HA's proxy kept the same per-person list)
+                    _me = str(getattr(self, "_ui_speaker", "") or "").lower()
+                    _all = [x for x in _all if str(x.get("owner") or "").lower() == _me]
+                self._json_out(_all)
             elif path.startswith("/session/") and path.endswith("/message"):
                 sid = path[len("/session/"):-len("/message")]
                 if sessions.get(sid) is None:
@@ -3046,6 +3052,11 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 b = self._read_body()
                 s = sessions.create(title=b.get("title"),
                                     parent_id=b.get("parentID"))
+                if getattr(self, "_ui_relay", False):   # standalone's page: the session is this person's
+                    _row = sessions.sessions.get(s["id"])
+                    if _row is not None:
+                        _row["owner"] = s["owner"] = str(getattr(self, "_ui_speaker", "") or "")
+                        sessions.flush()
                 # THE REQUESTER'S PICK WINS (the 'qwen3:8b by hash
                 # order' exhibit): the POST body's model (the TUI's
                 # {providerID, modelID}) IS the session's model — the

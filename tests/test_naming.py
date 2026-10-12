@@ -38,7 +38,7 @@ class TestNaming(unittest.TestCase):
     def test_membrane_until_named(self):
         self.assertEqual(N.current(), "Membrane")
         self.assertIn("none yet", N.card_line())
-        self.assertIn("Never pick one alone", N.card_line())
+        self.assertIn("ASK THE OPERATOR", N.card_line())
 
     def test_rules(self):
         v = {"juniper", "nova", "standalone", "argus", "wren"}
