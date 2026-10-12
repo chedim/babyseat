@@ -185,6 +185,10 @@ function tiltOrbit(base, lr, fb, gain = TILT_GAIN) {
 const LS_HOTWORD = "membrane.home.hotword";
 // ends of speech waited out longer (2026-10-10, the operator: "it cuts off mid-sentence")
 const HOT_MIN_S = 0.4, HOT_MAX_S = 12, HOT_END_MS = 900, HOT_PER_MIN = 16, HOT_FOLLOW_MS = 8000;
+// THE FOLLOW-UP WINDOW, OFF (2026-10-12, the operator: "just turn it off"): a bare
+// "Hey Argus" used to open 8 s of listening for whatever came next -- ambient
+// speech went out as messages; now a bare wake word only chimes. Say it in one breath.
+const FOLLOW_ON = false;
 const HOT_EARLY_S = 1.3;          // the first stretch is checked while you are still talking
 const HOT_ACKS = ["Yes?", "Uh-huh?", "Mm-hm?", "I'm listening."];
 // Latin and Cyrillic (runglish, 2026-10-10: "Аргус, включи свет"); JS's \b
@@ -1506,7 +1510,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         .replace(/^\s*(?:(?:hey|hi|okay|ok)[\s,]+)?(?:are gus|our gus|argus|argos|angus|august|gus|us)(?=$|[\s,.!?-])[\s,.!?-]*/i, "").trim();
       if (rest.split(/\s+/).filter(Boolean).length >= 2) { this._sendSaid(rest); return; }
       await this._hotAck(h);
-      if (this._hot === h) this._dictate(h, true);
+      if (FOLLOW_ON && this._hot === h) this._dictate(h, true);
+      else if (this._hot === h) { this._wakeRecognizer(h); this._orb(null); }
     }
 
     _hotPause(on) { if (this._hot) { this._hot.paused = on; if (on) { this._hot.cur = null; this._earBtn.classList.remove("hearing"); } } }
@@ -1574,7 +1579,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       if (!u.early) this._hotHeard(h);
       const rest = w.hit ? w.rest : t;
       if (rest.split(/\s+/).filter(Boolean).length >= 2) { this._hotSend(rest); return; }
-      h.follow = Date.now() + HOT_FOLLOW_MS;
+      if (FOLLOW_ON) h.follow = Date.now() + HOT_FOLLOW_MS;
       this._hotAck(h);
     }
 
@@ -1600,7 +1605,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     /** The wake word heard: a chime, not a spoken "uh-huh" (2026-10-11, the
      *  operator: the "uh-huhs" and "yesses" cut into him listening to me). */
     async _hotAck(h) {
-      this._vsay("listening… (say it now)", HOT_FOLLOW_MS);
+      this._vsay(FOLLOW_ON ? "listening… (say it now)" : "heard my name — say it with the request, in one breath", 3000);
       this._orb("listening");
       h.muteUntil = performance.now() + 260;              // the mic never hears its own chime
       this._chime();
