@@ -6,6 +6,7 @@ try {
   const c = r.ok ? await r.json() : {};
   if (c.name && !window.MEMBRANE_NAME) window.MEMBRANE_NAME = c.name;
   if (!window.MEMBRANE_ALIASES) window.MEMBRANE_ALIASES = c.aliases || [];
+  if (!window.MEMBRANE_STT) window.MEMBRANE_STT = c.stt || "browser";   // no speech server: the browser listens
 } catch (e) { /* the seat's name stays the default */ }
 const m = new URL(import.meta.url).searchParams.get("m") || "home.js";
 // the chat first: membrane home creates it, and wants it defined when it does

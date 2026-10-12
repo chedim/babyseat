@@ -66,6 +66,7 @@
   const c = await conf();
   if (c.name) { document.title = c.name; window.MEMBRANE_NAME = c.name; }   // home.js / panel.js read it on load
   window.MEMBRANE_ALIASES = c.aliases || [];
+  window.MEMBRANE_STT = c.stt || "browser";                              // no speech server: the browser listens
   const name = savedName() || await askName(c.name, !window.isSecureContext);
   await import("/ui/www/panel.js");          // the chat element defined first: home.js sets its hass at once
   await import("/ui/www/home.js");

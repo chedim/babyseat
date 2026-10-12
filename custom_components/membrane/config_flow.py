@@ -27,9 +27,42 @@ async def ollama_models(hass, url: str) -> list[str]:
     return sorted(str(m.get("name") or "") for m in d.get("models") or [] if m.get("name"))
 
 
-def split_models(names: list[str]) -> tuple[list[str], list[str]]:
+def ha_ollama(hass) -> tuple[str, str] | None:
+    """Home Assistant's own Ollama integration, when it has one: (its server URL,
+    the model its conversation agent uses). The seat thinks with the same server."""
+    for e in hass.config_entries.async_entries("ollama"):
+        url = str((e.data or {}).get("url") or "")
+        if not url:
+            continue
+        model = str((e.data or {}).get("model") or (e.options or {}).get("model") or "")
+        for sub in (getattr(e, "subentries", None) or {}).values():
+            if getattr(sub, "subentry_type", "") == "conversation" and (sub.data or {}).get("model"):
+                model = str(sub.data["model"])
+                break
+        return url.rstrip("/"), model
+    return None
+
+
+NOT_CHAT = ("whisper", "tts", "vision-encoder")       # speech and other non-chat models
+CHAT_PREF = ("glm", "qwen3", "gpt-oss", "qwen2.5", "llama3.1", "llama3", "mistral", "gemma")   # the seat's own order
+EMBED_PREF = ("mxbai-embed-large", "nomic-embed-text", "qwen3-embedding", "bge", "all-minilm")
+
+
+def _rank(names: list[str], prefs: tuple) -> list[str]:
+    def key(n):
+        low = n.lower()
+        return (next((i for i, p in enumerate(prefs) if low.startswith(p) or "/" + p in low), len(prefs)), low)
+    return sorted(names, key=key)
+
+
+def split_models(names: list[str], first: str = "") -> tuple[list[str], list[str]]:
+    """(chat models, embedding models), best first; `first` (HA's own agent's) leads."""
     emb = [n for n in names if any(k in n.lower() for k in EMBED_MARKERS)]
-    return [n for n in names if n not in emb], emb
+    chat = [n for n in names if n not in emb and not any(k in n.lower() for k in NOT_CHAT)]
+    chat = _rank(chat, CHAT_PREF)
+    if first in chat:
+        chat = [first] + [m for m in chat if m != first]
+    return chat, _rank(emb, EMBED_PREF)
 
 
 class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -38,6 +71,8 @@ class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self):
         self._backend = DEFAULT_BACKEND
         self._models: list[str] = []
+        self._ha_model = ""             # the model HA's Ollama integration talks with
+        self._found = False
 
     async def async_step_user(self, user_input=None):
         await self.async_set_unique_id(DOMAIN)          # one seat per Home Assistant
@@ -46,6 +81,20 @@ class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_inside(self, user_input=None):
         errors = {}
+        found = ha_ollama(self.hass) if user_input is None else None
+        if found:
+            # Home Assistant already talks to an Ollama server: the seat uses it too
+            # (no URL to type); the form below stays for a server that doesn't answer
+            self._backend, self._ha_model = found
+            try:
+                self._models = await ollama_models(self.hass, self._backend)
+            except Exception:                            # noqa: BLE001
+                errors["base"] = "no_ollama"
+            else:
+                if self._models:
+                    self._found = True
+                    return await self.async_step_models()
+                errors["base"] = "no_models"
         if user_input is not None:
             self._backend = user_input[CONF_BACKEND].rstrip("/")
             try:
@@ -61,7 +110,7 @@ class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             vol.Required(CONF_BACKEND, default=self._backend): str}))
 
     async def async_step_models(self, user_input=None):
-        chat, emb = split_models(self._models)
+        chat, emb = split_models(self._models, self._ha_model)   # HA's own agent's model first
         if user_input is not None:
             return self.async_create_entry(title="Membrane", data={
                 CONF_MODE: MODE_INSIDE, CONF_BACKEND: self._backend,
@@ -71,7 +120,9 @@ class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(step_id="models", data_schema=vol.Schema({
             vol.Required(CONF_MODEL, default=(chat or self._models)[0]): pick(chat),
             vol.Required(CONF_EMBED_MODEL, default=(emb or self._models)[0]): pick(emb),
-        }), description_placeholders={"backend": self._backend})
+        }), description_placeholders={
+            "backend": self._backend,
+            "source": "Home Assistant's Ollama integration" if self._found else "the server you gave"})
 
     async def async_step_connect(self, user_input=None):
         errors = {}
@@ -99,11 +150,31 @@ class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class MembraneOptionsFlow(config_entries.OptionsFlow):
+    """Change the models (from the same Ollama server's list), the landing page,
+    speech, the loops -- the seat restarts with them."""
+
     async def async_step_init(self, user_input=None):
         if user_input is not None:
             return self.async_create_entry(data=user_input)
-        o = self.config_entry.options
+        o, d = self.config_entry.options, self.config_entry.data
+        fields = {}
+        if d.get(CONF_MODE) == MODE_INSIDE:
+            cur_m = o.get(CONF_MODEL) or d.get(CONF_MODEL, "")
+            cur_e = o.get(CONF_EMBED_MODEL) or d.get(CONF_EMBED_MODEL, "")
+            try:
+                names = await ollama_models(self.hass, d[CONF_BACKEND])
+            except Exception:                            # noqa: BLE001
+                names = []
+            chat, emb = split_models(names, cur_m)
+            chat = chat if cur_m in chat or not cur_m else [cur_m] + chat
+            emb = emb if cur_e in emb or not cur_e else [cur_e] + emb
+            pick = lambda opts: SelectSelector(SelectSelectorConfig(options=opts, mode=SelectSelectorMode.DROPDOWN))
+            if chat:
+                fields[vol.Required(CONF_MODEL, default=cur_m or chat[0])] = pick(chat)
+            if emb:
+                fields[vol.Required(CONF_EMBED_MODEL, default=cur_e or emb[0])] = pick(emb)
         return self.async_show_form(step_id="init", data_schema=vol.Schema({
+            **fields,
             vol.Required(OPT_LANDING, default=o.get(OPT_LANDING, True)): bool,
             vol.Optional(OPT_STT_URL, default=o.get(OPT_STT_URL, "")): str,
             vol.Required(OPT_LOOPS, default=o.get(OPT_LOOPS, DEFAULT_LOOPS)): vol.All(int, vol.Range(min=1, max=3)),

@@ -78,8 +78,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if data.get(CONF_MODE) == MODE_INSIDE:
         from .supervisor import SeatSupervisor
         comp["inside"] = True
-        sup = SeatSupervisor(hass, comp, data[CONF_BACKEND], data.get(CONF_MODEL, ""),
-                             data.get(CONF_EMBED_MODEL, ""), int(opts.get(OPT_LOOPS, DEFAULT_LOOPS)))
+        sup = SeatSupervisor(hass, comp, data[CONF_BACKEND],
+                             opts.get(CONF_MODEL) or data.get(CONF_MODEL, ""),          # the options' pick wins
+                             opts.get(CONF_EMBED_MODEL) or data.get(CONF_EMBED_MODEL, ""),
+                             int(opts.get(OPT_LOOPS, DEFAULT_LOOPS)))
         comp["supervisor"] = sup
 
         async def _start(_event=None):

@@ -969,7 +969,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       // DICTATION by the brain phone's whisper by default (the in-page Vosk model
       // missed accented English, 2026-10-10); the WAKE WORD always runs on the
       // device -- nothing is sent until the name was heard. ⚙: all on-device.
-      this._engine = lsGet(LS_STT, "lan") === "device" ? "device" : "lan";
+      // a host with no speech server (standalone, a Home Assistant without one set:
+      // window.MEMBRANE_STT = "browser") listens in the browser; the boat's whisper otherwise
+      const sttDefault = (typeof window !== "undefined" && window.MEMBRANE_STT === "browser") ? "device" : "lan";
+      this._engine = lsGet(LS_STT, sttDefault) === "device" ? "device" : "lan";
       this._engBtn = root.querySelector(".eng");
       const paintEng = () => { this._engBtn.textContent = this._engine === "device" ? "⚙ᴰ" : "⚙";
         this._engBtn.title = this._engine === "device" ? "Speech recognised ON THIS DEVICE (whisper in the browser: private; ~80 MB once, slower on old phones). Tap: by the brain phone's whisper"

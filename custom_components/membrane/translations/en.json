@@ -11,12 +11,12 @@
       },
       "inside": {
         "title": "The model server",
-        "description": "The seat thinks with an Ollama server (on this machine or another one on your network).",
+        "description": "The seat thinks with an Ollama server. Home Assistant has no Ollama integration set up, so give its address (this machine or another one on your network).",
         "data": { "backend": "Ollama URL" }
       },
       "models": {
         "title": "Models",
-        "description": "Pick the models on {backend}: one to talk with, one to embed text for the field.",
+        "description": "The Ollama server at {backend} ({source}). Pick one model to talk with and one to embed text for the field.",
         "data": { "model": "Chat model", "embed_model": "Embedding model" }
       },
       "connect": {
@@ -37,6 +37,8 @@
       "init": {
         "title": "Membrane",
         "data": {
+          "model": "Chat model",
+          "embed_model": "Embedding model (best left as it is once the field has grown: its memories were embedded with it)",
           "landing": "Open on membrane home (folds HA's sidebar away, as on the boat)",
           "stt_url": "Speech server URL (whisper-server; empty: the browser listens itself)",
           "loops": "Watch loops (1-3; fewer is lighter)"
