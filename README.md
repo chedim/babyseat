@@ -244,6 +244,13 @@ routing: [docs/token-economics.md](docs/token-economics.md).
 `MEMBRANE_EFIELD` selects the field's mode: `on` (the default: capture,
 embed, apply), `shadow` (capture events only — a lab ablation), `off`.
 
+### Standalone and Home Assistant
+
+`membrane standalone` is the seat with its own web UI (membrane home, the chat,
+voice) — see [docs/standalone.md](docs/standalone.md). Inside Home Assistant the
+**Membrane** integration (HACS) runs the seat as HA's child process and makes
+membrane home HA's landing page — see [docs/home-assistant.md](docs/home-assistant.md).
+
 ### Serving headless (`membrane serve`)
 
 `membrane serve` runs the seat with **no TUI and no opencode at all** —
@@ -413,6 +420,10 @@ What the numbers mean and how the field's "thermodynamics" work:
   (`--ff-only`, a dirty tree is refused) and re-execs with the same argv.
   Non-interactive sessions are never interrupted; `membrane update` runs
   the same path manually. Opt out with `MEMBRANE_NO_UPDATE_CHECK=1`.
+  A PyPI install (`membrane-seat`) compares itself with PyPI's latest and asks
+  the same way (then `pip install --upgrade` and a restart). Inside Home
+  Assistant, updates come through HACS (the integration pins its
+  `membrane-seat`).
 - **Restart only from the shell.** `./run.sh restart` (= `membrane
   reset`: kills the seat listening on :11500 — or `--listen` — and
   relaunches `membrane opencode`) is the safe procedure — see the
@@ -432,6 +443,8 @@ What the numbers mean and how the field's "thermodynamics" work:
 
 | Doc | What's in it |
 |---|---|
+| [docs/standalone.md](docs/standalone.md) | **Standalone mode** (`membrane standalone`): the web UI, the first run and the name, who can reach it, voice, `settings.json`, updates |
+| [docs/home-assistant.md](docs/home-assistant.md) | **Membrane in Home Assistant** (HACS): setup, the UI takeover, the Assist agent and sensors, what the seat may do in the house, options, where its data lives, its life |
 | [docs/entity-field.md](docs/entity-field.md) | **THE FIELD.** Design: events → entities → readers; the update rule and statistics; relations and claims; injection (full block / state diff); the gate + replay A/B; storage, sharing, the background mind; the e17–e25 evidence. **The division of hands** (the operator/listener/plan tool lanes + the remounted intent lane) |
 | [docs/shared-field-workflow.md](docs/shared-field-workflow.md) | **Team field: the process.** Day-one setup, the async loop, watches, operator rules, go-live checklist |
 | [docs/multi-dev-field.md](docs/multi-dev-field.md) | **Team field: the substrate.** The origin axis, disjoint writers / merged reads, divergence conflicts, the commons — what makes multi-seat sharing collision-free |
