@@ -93,3 +93,10 @@ class TestTimelineLifecycle(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_an_intention_describes_itself_like_a_goal():
+    # a fresh seat's intent board holds Intentions; the dreamer's vote calls
+    # describe() on what nearest() returns -- it crashed every turn on a new seat
+    from membrane.intent import Intention
+    assert Intention(iid=1, text="explore the field", probe=[1.0]).describe() == "explore the field"

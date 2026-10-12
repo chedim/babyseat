@@ -23,7 +23,7 @@ from homeassistant.core import CoreState, HomeAssistant
 
 from .const import (CONF_BACKEND, CONF_EMBED_MODEL, CONF_MODE, CONF_MODEL, CONF_SERVE_PASS,
                     CONF_SERVE_URL, CONF_SERVE_USER, DEFAULT_LOOPS, DEFAULT_SERVE_USER, DOMAIN,
-                    MODE_INSIDE, OPT_LANDING, OPT_LOOPS, OPT_STT_URL)
+                    MODE_INSIDE, OPT_HA_ACCESS, OPT_LANDING, OPT_LOOPS, OPT_STT_URL)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -83,6 +83,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                              opts.get(CONF_EMBED_MODEL) or data.get(CONF_EMBED_MODEL, ""),
                              int(opts.get(OPT_LOOPS, DEFAULT_LOOPS)))
         comp["supervisor"] = sup
+        if opts.get(OPT_HA_ACCESS, True):
+            # THE SEAT MAY USE HOME ASSISTANT (ha_access.py): a hidden user's token to act,
+            # the state changes of the entities it mirrors pushed to sense
+            from . import ha_access as HA
+            async def _ha_env():
+                return {"HASS_URL": HA.local_url(hass), "HASS_TOKEN": await HA.mint_token(hass, entry)}
+            sup.extra_env = _ha_env
+            push = HA.StatePush(hass, comp)
+            push.start()
+            comp["state_push"] = push
 
         async def _start(_event=None):
             await sup.start()
@@ -114,6 +124,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     sup = comp.pop("supervisor", None)
     if sup is not None:
         await sup.stop()
+    push = comp.pop("state_push", None)
+    if push is not None:
+        push.stop()
     for path, *_ in PANELS:
         fe.async_remove_panel(hass, path)
     if comp.pop("landing", False):
@@ -124,3 +137,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if sess is not None and not sess.closed:
         await sess.close()
     return True
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """The integration removed: the seat's hidden Home Assistant user goes with it."""
+    from . import ha_access as HA
+    await HA.remove_user(hass, entry)

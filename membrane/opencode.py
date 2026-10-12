@@ -1625,6 +1625,9 @@ def main() -> None:
             if naming_on:                  # THE NAME CEREMONY (naming.py): its own name, in its own prompt
                 from . import naming as _NM
                 text = _NM.personalize(text, _NM.current()) + _NM.card_line()
+            if os.environ.get("HASS_URL") and os.environ.get("HASS_TOKEN"):   # Home Assistant runs this seat
+                from . import ha_bridge as _HB
+                text += _HB.card_line()
             tmp = instr_path + ".tmp"
             with open(tmp, "w") as f:
                 f.write(text)

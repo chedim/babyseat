@@ -880,9 +880,21 @@ def _lane_refusal(name: str, lane: str) -> str | None:
             "the other tools still work.")
 
 
+def _peers_possible() -> bool:
+    """Other seats are reachable only through the Couchbase substrate (peers.py);
+    an install without it (Home Assistant's, a plain pip install) has no peers."""
+    import importlib.util
+    return importlib.util.find_spec("couchbase") is not None
+
+
 def _openai_tools_for(agent: str | None) -> list:
     """The ADVERTISED tools for the lane (the same registry, filtered)."""
     names = _lane_tools(_lane_of(agent))
+    # NO PEERS, NO PEER TOOLS (2026-10-12: a seat inside Home Assistant was handed
+    # peer_post, its exploration goal posted to seats that can't exist, failed, and
+    # waited "BLOCKED on the operator" for good)
+    if not _peers_possible():
+        names = [n for n in names if not str(n).startswith("peer")]
     # THE TOOL FAMILIES (the token diet, 2026-10-09): ~10 action-tools that
     # resolve to these same impls; MEMBRANE_TOOL_FAMILIES=0 = the legacy 24
     if os.environ.get("MEMBRANE_TOOL_FAMILIES", "1") != "0":
@@ -2743,6 +2755,11 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 self._sse()
             elif path == "/global/event":
                 self._sse(wrap=True)
+            elif path == "/membrane/ha/subscriptions":
+                # HOME ASSISTANT'S PUSH (ha_bridge.py): the entity_ids the seat mirrors
+                from . import ha_bridge as _HB
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                self._json_out({"entity_ids": _HB.subscriptions(psrv) if psrv is not None else []})
             elif path == "/session":
                 _all = sessions.list()
                 if getattr(self, "_ui_relay", False):
@@ -2999,6 +3016,11 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                         psrv, person, in_on=b.get("in_on"), in_mode=b.get("in_mode"),
                         out_on=b.get("out_on"), device=str(b.get("device") or ""))})
                 return self._json_out({"ok": True, **_VIO.read(psrv, person)})
+            if path == "/membrane/ha/states":
+                from . import ha_bridge as _HB
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                b = self._read_body() or {}
+                return self._json_out(_HB.apply(psrv, b.get("states") or []) if psrv is not None else {"updated": 0})
             if path == "/membrane/field/purge":
                 # THE NURSERY GHOSTS OUT (efield.purge_ghosts): the engineer's /
                 # operator's door (the serve's credentials), dry_run unless told

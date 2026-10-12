@@ -53,6 +53,8 @@ def post_failure_reason(peers) -> str:
     return "the peer channel refused the write"
 
 
+_SAID_DOWN: set = set()
+
 class PeerSubstrate:
     """The registry + the chat channel, over couchbase's ephemeral and
     permanent collections. Degradation covenant: couchbase down -> both
@@ -150,8 +152,13 @@ class PeerSubstrate:
             self._chan = self._bucket.scope("_default").collection(
                 "peer_chat")
         except Exception as e:
-            print(f"[peers] substrate unavailable ({str(e)[:80]}) -- "
-                  f"registry + chat degrade to silent", file=sys.stderr)
+            # said once per reason (a seat without couchbase -- Home Assistant's --
+            # printed it twice a turn, forever)
+            _why = str(e)[:80]
+            if _why not in _SAID_DOWN:
+                _SAID_DOWN.add(_why)
+                print(f"[peers] substrate unavailable ({_why}) -- "
+                      f"registry + chat degrade to silent", file=sys.stderr)
             self._reg = self._chan = self._cluster = None
 
     def _op_failed(self) -> None:

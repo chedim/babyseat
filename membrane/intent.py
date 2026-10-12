@@ -64,6 +64,12 @@ class Intention:
     eid: str = ""            # the goal-backed view's goal eid ('' = json)
     last_hit: float = 0.0
 
+    def describe(self) -> str:
+        """The commitment's text -- what a goal entity's describe() gives (the
+        dreamer's vote calls it on either; a fresh seat's board holds these, and
+        every vote crashed: AttributeError, 2026-10-12)."""
+        return self.text
+
     def to_json(self) -> dict:
         return {"iid": self.iid, "text": self.text, "probe": self.probe,
                 "created": self.created, "expires": self.expires,

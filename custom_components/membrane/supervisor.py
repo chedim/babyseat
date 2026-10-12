@@ -117,6 +117,7 @@ class SeatSupervisor:
         self._stopping = False
         self._tasks: list[asyncio.Task] = []
         self._log = None
+        self.extra_env = None           # async () -> dict: HASS_URL + a fresh HASS_TOKEN (ha_access.py)
 
     # -- the child ------------------------------------------------------------
 
@@ -134,6 +135,11 @@ class SeatSupervisor:
         listen = free_port(18500)
         env = child_env(self.base, self.data)
         env["MEMBRANE_LOOPS_MAX"] = str(self.loops)
+        if self.extra_env is not None:
+            try:
+                env.update(await self.extra_env())
+            except Exception as e:                   # noqa: BLE001
+                _LOGGER.warning("membrane: no Home Assistant access for the seat this run (%r)", e)
         args = child_args(self.data, self.backend, self.model, self.embed, listen, self.serve_port)
         _LOGGER.info("membrane: starting the seat (serve 127.0.0.1:%s, backend %s)", self.serve_port, self.backend)
         self.proc = await asyncio.create_subprocess_exec(

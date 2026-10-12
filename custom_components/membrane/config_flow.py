@@ -13,8 +13,8 @@ from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig,
 
 from .const import (CONF_BACKEND, CONF_EMBED_MODEL, CONF_MODE, CONF_MODEL, CONF_SERVE_PASS,
                     CONF_SERVE_URL, CONF_SERVE_USER, DEFAULT_BACKEND, DEFAULT_LOOPS,
-                    DEFAULT_SERVE_USER, DOMAIN, MODE_CONNECT, MODE_INSIDE, OPT_LANDING, OPT_LOOPS,
-                    OPT_STT_URL)
+                    DEFAULT_SERVE_USER, DOMAIN, MODE_CONNECT, MODE_INSIDE, OPT_HA_ACCESS, OPT_LANDING,
+                    OPT_LOOPS, OPT_STT_URL)
 
 EMBED_MARKERS = ("embed", "minilm", "bge", "e5-", "gte")
 
@@ -173,6 +173,7 @@ class MembraneOptionsFlow(config_entries.OptionsFlow):
                 fields[vol.Required(CONF_MODEL, default=cur_m or chat[0])] = pick(chat)
             if emb:
                 fields[vol.Required(CONF_EMBED_MODEL, default=cur_e or emb[0])] = pick(emb)
+            fields[vol.Required(OPT_HA_ACCESS, default=o.get(OPT_HA_ACCESS, True))] = bool
         return self.async_show_form(step_id="init", data_schema=vol.Schema({
             **fields,
             vol.Required(OPT_LANDING, default=o.get(OPT_LANDING, True)): bool,
