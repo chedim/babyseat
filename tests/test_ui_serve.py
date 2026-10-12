@@ -22,7 +22,7 @@ class TestUiServe(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
-        cls.env = mock.patch.dict(os.environ, {"MEMBRANE_DATA_DIR": cls.tmp.name})
+        cls.env = mock.patch.dict(os.environ, {"MEMBRANE_DATA_DIR": cls.tmp.name, "MEMBRANE_STANDALONE": "1"})
         cls.env.start()
         cls.sessions = _store()
         cls.msgs = NS.MessageStore()
@@ -124,6 +124,12 @@ class TestUiServe(unittest.TestCase):
 
     def test_stt_without_server_is_501(self):
         self.assertEqual(self._req("/ui/stt", "POST", b"RIFF....WAVE", raw=True)[0], 501)
+
+    def test_off_unless_standalone(self):
+        with mock.patch.dict(os.environ, {"MEMBRANE_STANDALONE": ""}):
+            self.assertEqual(self._req("/ui/conf", raw=True)[0], 401)            # a plain serve: its own door
+            self.assertEqual(self._req("/ui/conf", raw=True, auth=True)[0], 404)
+            self.assertEqual(self._req("/ui/serve/session", raw=True, auth=True)[0], 404)
 
     def test_lan_addresses(self):
         def h(ip, **hdr):

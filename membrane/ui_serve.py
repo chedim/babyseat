@@ -206,11 +206,19 @@ def _stt(handler) -> None:
 
 # -- the hook -----------------------------------------------------------------
 
+def enabled() -> bool:
+    """Only a seat launched as standalone (`membrane standalone`, --standalone)
+    serves the UI; a plain `membrane serve` (the boat's phone) never does."""
+    return os.environ.get("MEMBRANE_STANDALONE") == "1"
+
+
 def intercept(handler) -> bool:
     """Called first by every do_* of the serve's handler. True = answered here;
     False = carry on (a /ui/serve request comes back rewritten to the seat's
     own route, with handler._ui_trusted set when the LAN guard let it in)."""
     handler._ui_trusted = False            # keep-alive: one handler, many requests
+    if not enabled():
+        return False
     path, _, qs = handler.path.partition("?")
     if not (path == "/" or path == "/index.html" or path == "/favicon.ico" or path.startswith("/ui/")):
         return False

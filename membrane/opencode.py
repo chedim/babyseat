@@ -587,6 +587,9 @@ def main() -> None:
                     help="bind address for the serve surface (default "
                          "0.0.0.0 -- WiFi/VPN reach; 127.0.0.1 keeps it "
                          "local-only)")
+    ap.add_argument("--standalone", action="store_true",
+                    help="STANDALONE MODE: the serve also serves the web UI "
+                         "(/, ui_serve.py) and opens it in the browser")
     ap.add_argument("--no-browser", action="store_true",
                     help="standalone mode: don't open the UI in the browser "
                          "(it opens only on an interactive launch anyway)")
@@ -610,6 +613,9 @@ def main() -> None:
     args = ap.parse_args()
     # the data dir the UI routes and settings.json read (settings.py)
     os.environ.setdefault("MEMBRANE_DATA_DIR", str(Path(args.field).resolve().parent))
+    if args.standalone:
+        args.serve = True
+        os.environ["MEMBRANE_STANDALONE"] = "1"
     passthrough = args.passthrough
     if args.new_session:
         args.cont = False
@@ -1799,7 +1805,7 @@ def main() -> None:
             start(serve_port or 4096, surf_host, serve_su,
                   serve_sp, cfg, runner, sess_store, msg_store)
             native_up = True
-            if args.serve:                 # STANDALONE MODE: the UI on the serve port (ui_serve.py)
+            if args.standalone:            # STANDALONE MODE: the UI on the serve port (ui_serve.py)
                 from . import ui_serve as _UIS
                 _ui_url = _UIS.browser_url(surf_host, serve_port or 4096)
                 print(f"[seat] membrane UI: {_ui_url}", file=sys.stderr)

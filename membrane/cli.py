@@ -1,5 +1,7 @@
 """membrane CLI -- one entry point for every membrane surface.
 
+    membrane standalone   the seat with its own web UI (chat, membrane home,
+                          the field, voice) on :4096, opened in the browser
     membrane opencode     field-backed seat on :11500 + its serve server
                           (loopback) with the opencode TUI ATTACHED as a
                           thin client -- opencode is display only
@@ -479,6 +481,8 @@ def main() -> None:
         "  serve      the seat headless: membrane's own opencode-compatible\n"
         "             REST/SSE server on :4096 (basic auth; sessions, turns on\n"
         "             the /v1 loopback) -- opencode replaced, no child process\n"
+        "  standalone the serve + its own web UI (chat, membrane home, the field,\n"
+        "             voice) on :4096, opened in the browser -- no Home Assistant\n"
         "  review     print what the field learned\n"
         "  reset      kill the proxy on the port, then opencode fresh\n"
         "  update     check the install source for updates, show what\n"
@@ -511,7 +515,7 @@ def main() -> None:
     if cmd not in ("tui", "proxy", "opencode", "anthropic", "review",
                    "demo", "reset", "install", "doctor", "connect",
                    "ingest", "backfill", "codegraph", "update", "move",
-                   "migrate", "auth", "serve"):
+                   "migrate", "auth", "serve", "standalone"):
         if cmd is None and not argv:
             print(__doc__)
             return
@@ -529,7 +533,7 @@ def main() -> None:
             forwarded = [a for a in forwarded if a != "--force"]
         raise SystemExit(_install(args))
     # opencode surfaces: bind per-project data + auto-install skills first
-    if cmd in ("opencode", "reset", "serve"):
+    if cmd in ("opencode", "reset", "serve", "standalone"):
         _autoinstall_skills()
     # shared-field onboarding: hydrate the per-project env (secrets live in
     # ~/.membrane/projects/, never in the repo), and -- when nothing
@@ -566,7 +570,7 @@ def main() -> None:
         raise SystemExit(_run_module("membrane.backfill", argv2))
     if cmd == "codegraph":
         raise SystemExit(_run_module("membrane.codegraph", args.forwarded))
-    if cmd in ("opencode", "reset", "serve"):
+    if cmd in ("opencode", "reset", "serve", "standalone"):
         couchbase_onboarding()
         maybe_check_on_boot(args.forwarded)
     if cmd == "reset":
@@ -586,6 +590,10 @@ def main() -> None:
         raise SystemExit(_run_module("membrane.opencode", argv2))
     if cmd == "serve":
         argv2 = _ensure_data_dir(["--serve"] + args.forwarded)
+        raise SystemExit(_run_module("membrane.opencode", argv2))
+    if cmd == "standalone":
+        # STANDALONE MODE: the serve + its own web UI, opened in the browser
+        argv2 = _ensure_data_dir(["--standalone"] + args.forwarded)
         raise SystemExit(_run_module("membrane.opencode", argv2))
     if cmd == "review":
         argv2 = _ensure_data_dir(args.forwarded)
