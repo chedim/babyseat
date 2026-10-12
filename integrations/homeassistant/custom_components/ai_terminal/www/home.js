@@ -124,6 +124,41 @@ const REC_MAX_S = 60, REC_MIN_S = 0.35, STT_RATE = 16000;
 const TILT_GAIN = 1.5;
 
 /** Float32 at inRate -> Int16 at outRate (box-averaged decimation). */
+/** THE MIC OFF THE MAIN THREAD (2026-10-12, the operator: "the stt sometimes is
+ *  atrocious, feels like its when the animations are flying"): the ScriptProcessor
+ *  ran its callback on the page's main thread -- while the 3D field and the wave
+ *  drew, frames came late or were DROPPED, and the recognizer heard speech with
+ *  holes in it. An AudioWorklet captures on the audio thread; its frames queue
+ *  instead of dropping. Same 2048-sample AudioBuffers to the same handler; the old
+ *  node only where worklets don't exist. */
+const MIC_FRAME = 2048;
+async function micNode(ctx, handler) {
+  if (ctx.audioWorklet && window.AudioWorkletNode) {
+    try {
+      if (!ctx.__membraneTap) {
+        const code = "class T extends AudioWorkletProcessor{constructor(){super();this.b=new Float32Array(" + MIC_FRAME +
+          ");this.n=0}process(i){const c=i[0]&&i[0][0];if(c){for(let k=0;k<c.length;k++){this.b[this.n++]=c[k];" +
+          "if(this.n===this.b.length){this.port.postMessage(this.b,[this.b.buffer]);this.b=new Float32Array(" + MIC_FRAME +
+          ");this.n=0}}}return true}}registerProcessor('membrane-tap',T)";
+        const url = URL.createObjectURL(new Blob([code], { type: "application/javascript" }));
+        await ctx.audioWorklet.addModule(url);
+        ctx.__membraneTap = true;
+      }
+      const node = new AudioWorkletNode(ctx, "membrane-tap", { numberOfInputs: 1, numberOfOutputs: 0 });
+      node.port.onmessage = (e) => {
+        const f = e.data, ab = new AudioBuffer({ length: f.length, numberOfChannels: 1, sampleRate: ctx.sampleRate });
+        ab.copyToChannel(f, 0);
+        handler({ inputBuffer: ab });
+      };
+      return node;
+    } catch (e) { /* no worklet here: the old node */ }
+  }
+  const sp = ctx.createScriptProcessor(MIC_FRAME, 1, 1);
+  sp.onaudioprocess = handler;
+  sp._sp = true;
+  return sp;
+}
+
 function downsample(f32, inRate, outRate) {
   const ratio = inRate / outRate, n = Math.floor(f32.length / ratio), out = new Int16Array(n);
   for (let i = 0; i < n; i++) {
@@ -971,9 +1006,11 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         if (!h) { if (secs) this._vsay("Argus is listening for you — turn the ear (👂) on to answer by voice", 4000); return; }
         if (!secs) { if (h.state === "dictate") { this._wakeRecognizer(h); this._orb(null); } return; }
         const t0 = Date.now();
+        // his question may still be on its way to the speakers: a moment's grace, then
+        // wait while anything is queued or playing (the mic never talks over him)
         const go = () => {
           if (this._hot !== h) return;
-          if ((this._speaking || (this._speechQ || []).length) && Date.now() - t0 < 30000) { setTimeout(go, 200); return; }
+          if (Date.now() - t0 < 1200 || ((this._speaking || (this._speechQ || []).length) && Date.now() - t0 < 30000)) { setTimeout(go, 200); return; }
           if (h.state !== "wake") return;                   // already hearing something
           h.followWait = secs * 1000;
           this._vsay("listening… (Argus asked)", secs * 1000);
@@ -1236,12 +1273,11 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const Ctx = window.AudioContext || window.webkitAudioContext;
         rec.ctx = new Ctx();
         rec.src = rec.ctx.createMediaStreamSource(rec.stream);
-        rec.proc = rec.ctx.createScriptProcessor(2048, 1, 1);
         rec.local = this._engine === "device";
         // while the on-device model loads (the first time only), audio is kept and fed after
         this._orb("listening");
         rec.spoke = false; rec.silent = 0;
-        rec.proc.onaudioprocess = (ev) => {
+        const _onFrame = (ev) => {
           const f = ev.inputBuffer.getChannelData(0);
           let ss = 0; for (let i = 0; i < f.length; i += 2) ss += f[i] * f[i];
           const rms = Math.sqrt(ss / (f.length / 2)); this._orbLevel(rms);
@@ -1252,7 +1288,9 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           if (rec.vr) rec.vr.kr.acceptWaveform(ev.inputBuffer);
           else rec.chunks.push(new Float32Array(f));
         };
-        rec.src.connect(rec.proc); rec.proc.connect(rec.ctx.destination);
+        rec.proc = await micNode(rec.ctx, _onFrame);
+        if (this._rec !== rec) { this._recCleanup(rec); return; }
+        rec.src.connect(rec.proc); if (rec.proc._sp) rec.proc.connect(rec.ctx.destination);
         if (rec.local) this._asrModel();                     // loading while you talk (the first time only)
         rec.timer = setTimeout(() => { if (this._rec === rec) this._recStop(true); }, REC_MAX_S * 1000);
         this._vsay(mode === "lock" ? "listening… tap 🔒 again to send" : "listening… release to send", 0);
@@ -1359,15 +1397,16 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const Ctx = window.AudioContext || window.webkitAudioContext;
         h.ctx = new Ctx(); h.rate = h.ctx.sampleRate;
         h.src = h.ctx.createMediaStreamSource(h.stream);
-        h.proc = h.ctx.createScriptProcessor(2048, 1, 1);
         h.local = true;                                  // the wake word: always on this device
-        h.proc.onaudioprocess = (ev) => (h.local ? this._hotLocalFrame(h, ev.inputBuffer) : this._hotFrame(h, ev.inputBuffer.getChannelData(0)));
+        const _onHot = (ev) => (h.local ? this._hotLocalFrame(h, ev.inputBuffer) : this._hotFrame(h, ev.inputBuffer.getChannelData(0)));
         if (h.local) {
           h.model = await this._voiceModel();
           if (this._hot !== h) return;
           this._wakeRecognizer(h);
         }
-        h.src.connect(h.proc); h.proc.connect(h.ctx.destination);
+        h.proc = await micNode(h.ctx, _onHot);
+        if (this._hot !== h) { try { h.stream.getTracks().forEach((t) => t.stop()); } catch (e) { /* gone */ } return; }
+        h.src.connect(h.proc); if (h.proc._sp) h.proc.connect(h.ctx.destination);
         // started without a tap (remembered from last time), the browser
         // keeps audio SUSPENDED: the first tap anywhere wakes it
         if (h.ctx.state === "suspended") {

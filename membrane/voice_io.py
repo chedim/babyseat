@@ -179,6 +179,13 @@ def on_listen(srv, ent) -> dict | None:
         secs = 0.0
     person = str(pp.get("person") or "")
     sid = str(pp.get("session") or "")
+    if secs and getattr(srv, "_speaker_turn_live", None):
+        # THE QUESTION FIRST (2026-10-12, the operator: "follow-up mic turns on before
+        # the q for it is voiced and blocks the q"): a speaker turn speaks its reply when
+        # it ENDS -- a listen set inside it waits for that reply, then opens
+        pp["listen_pending"] = secs
+        ent.properties = pp
+        return {"listening": secs, "deferred": "after this turn's spoken reply"}
     pp["listen_ts"] = time.time()
     pp["listening_for_s"] = secs
     ent.properties = pp

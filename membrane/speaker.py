@@ -167,6 +167,30 @@ def _reply_text(result) -> str:
 def run(runner, routed) -> dict:
     sp, framed, info, parts = routed
     t0 = time.time()
-    res = runner.run(sp, framed, user_info=info, user_parts=parts)
+    srv = getattr(runner, "srv", None)
+    if srv is not None:
+        srv._speaker_turn_live = int(getattr(srv, "_speaker_turn_live", 0) or 0) + 1
+    try:
+        res = runner.run(sp, framed, user_info=info, user_parts=parts)
+    finally:
+        if srv is not None:
+            srv._speaker_turn_live = max(0, int(getattr(srv, "_speaker_turn_live", 1) or 1) - 1)
     speak_reply(runner, info, res, t0)
+    release_listen(srv)                          # the question is out: now the mic may open
     return res
+
+
+def release_listen(srv) -> None:
+    """A listen held during the turn (voice_io.on_listen) opens after the reply was said."""
+    try:
+        from . import voice_io as VIO
+        est = getattr(srv, "entity_store", None)
+        for ent in list((getattr(est, "docs", None) or {}).values()):
+            pp = ent.properties or {}
+            if pp.get("voice_io") == "in" and pp.get("listen_pending"):
+                pp["listen"] = pp.pop("listen_pending")
+                ent.properties = pp
+                VIO.on_listen(srv, ent)
+                est.upsert(ent, embedder=None)
+    except Exception:
+        pass

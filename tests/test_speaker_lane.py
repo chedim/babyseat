@@ -104,5 +104,29 @@ class TestArgusOpensTheMic(unittest.TestCase):
         self.assertNotIn("listen", vin.properties)                    # consumed
 
 
+class TestTheQuestionFirst(unittest.TestCase):
+    def test_a_listen_set_mid_turn_opens_after_the_spoken_reply(self):
+        r, srv, chat, calls = _seat()
+        order = []
+        pub = r.hub.publish
+        r.hub.publish = lambda ev: (order.append(ev.get("type")), pub(ev))[1]
+        vin = VIO.entity(srv, "in", WHO, create=False)
+
+        real_run = r.run
+
+        def run_and_ask(*a, **k):
+            res = real_run(*a, **k)
+            vin.properties["listen"] = 8                     # Argus opens the mic inside his turn
+            VIO.on_listen(srv, vin)
+            return res
+        r.run = run_and_ask
+        text, info, parts = _voice_msg(r, chat, "what do you think?")
+        SPK.run(r, SPK.route(r, chat, text, info, parts))
+        says = [i for i, t in enumerate(order) if t == "membrane.say"]
+        listens = [i for i, t in enumerate(order) if t == "membrane.listen"]
+        self.assertTrue(says and listens, order)
+        self.assertLess(says[-1], listens[0])                 # the question is out before the mic opens
+
+
 if __name__ == "__main__":
     unittest.main()
