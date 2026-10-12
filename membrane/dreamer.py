@@ -203,6 +203,15 @@ class Dreamer:
                 from .opencode import _write_audit
                 _write_audit(mem, {"event": "dream", "op": "commit-tl",
                                    "text": text[:200], "eid": ent.eid})
+                # THE DREAMED TRIGGER (2026-10-11: settable since 10-02, never
+                # fired): the entities the branch names run their dreamed_script
+                try:
+                    from .night import entities_named, fire_trigger
+                    for _e in entities_named(srv, text):
+                        fire_trigger(srv, _e, "dreamed",
+                                     {"dream": text[:300], "outcome": "dreamed", "branch": ent.eid})
+                except Exception:
+                    pass
         self.stats["waves"] += 1
         # sleep until likely idle again; a busy session wakes us anyway
         # (the elect refutes; the shared docs ride the ephemeral TTL)

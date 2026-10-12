@@ -2271,6 +2271,11 @@ class EntityStore(MultiParentOps, TimelineOps):
                 ent.properties.pop("script_cooldowns", None)
                 if field == "nudge_script":
                     ent.properties.pop("script_render", None)
+                # SETTING IS ARMING (2026-10-11): thought/dreamed scripts set
+                # before their triggers were wired wait dormant until set again
+                if field in ("thought_script", "dreamed_script"):
+                    import time as _t
+                    ent.properties[field.replace("_script", "_armed_ts")] = _t.time()
         # THE SPATIAL OPS (the reactive layer's CRUD; the same lane's
         # events fire -- the covenants live in watch_agents)
         if watch_ops is not None:

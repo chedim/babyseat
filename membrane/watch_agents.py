@@ -211,6 +211,8 @@ def sweep_watch_ops(est, queue: "WatchEvents", rel_positions: dict,
         my_pos = positions[eid]
         state = dict(props.get("watch_state") or {})
         for op in ops[:8]:
+            if not op.get("armed"):
+                continue                        # dormant: planted before the sweep ran; re-plant to arm
             kind = op.get("op") or ""
             rel = op.get("rel") or "operator"
             rel_eid = (OPERATOR_EID if rel == "operator"
@@ -1321,6 +1323,9 @@ def edit_watch_ops(srv, ent, ops: list, replace: bool = False) -> dict:
     for o in ops:
         o = dict(o)
         o.setdefault("ts", time.time())
+        # PLANTING IS ARMING (2026-10-11): ops planted before the sweep was
+        # wired have no `armed` -- they wait dormant until planted again
+        o["armed"] = True
         if len(cur) >= WATCH_OPS_CAP:
             return {"ok": False,
                     "error": f"watch_ops cap ({WATCH_OPS_CAP}) reached; "
@@ -1495,7 +1500,7 @@ def reading_changed(before: dict, state: dict) -> bool:
     return False
 
 
-def entity_read_back(srv, ent, force: bool = False) -> dict:
+def entity_read_back(srv, ent, force: bool = False, by: str = "model") -> dict:
     """THE READ-BACK TRIGGER: a READ of a dynamic entity fires its
     getter_script (the dict return patches script_data + the entity's
     state facts); the LRU (5s per entity) dedups a hammering loop --
@@ -1516,7 +1521,7 @@ def entity_read_back(srv, ent, force: bool = False) -> dict:
             return {"fired": False, "reason": "lru"}
     _getter_last_ts[ent.eid] = now
     from .night import run_entity_update_script, apply_entity_update
-    out = run_entity_update_script(srv, ent, "getter")
+    out = run_entity_update_script(srv, ent, "getter")     # its own reads fire nothing (night.py)
     if out.get("error"):
         _score("error")
         return {"fired": True, "error": out.get("error")}
@@ -1550,7 +1555,7 @@ def entity_read_back(srv, ent, force: bool = False) -> dict:
             pass
         merged = dict((ent.properties or {}).get("script_data") or {})
         changed = reading_changed(merged, state)
-        if changed and not force:
+        if changed and not force and by == "field":
             try:                                # the field read the world without a model's ask
                 from . import score as _SC
                 _SC.note_changed("reading", ent.eid)
@@ -1579,3 +1584,65 @@ def entity_read_back(srv, ent, force: bool = False) -> dict:
     if note:
         res["note"] = note
     return res
+
+
+SWEEP_EVERY_BEATS = 10                  # the proximity sweep's pace on the thinker's hum (~10 s by day)
+
+
+def sweep_now(srv, now: float | None = None) -> list[dict]:
+    """THE PROXIMITY SWEEP, WIRED (2026-10-11: sweep_watch_ops was written on
+    10-02 and never called -- near/away/around watches were plantable, counted
+    against the attention budget, and never fired): one sweep into the
+    seat's event pool. The thinker's hum calls it every SWEEP_EVERY_BEATS."""
+    est = getattr(srv, "entity_store", None)
+    pool = getattr(srv, "events_pool", None)
+    if est is None or pool is None:
+        return []
+    return sweep_watch_ops(est, pool, {}, now=now)
+
+
+def dormant_inventory(est) -> dict:
+    """What was planted before its trigger ran: proximity ops without `armed`
+    and thought/dreamed scripts without an arming stamp -- the list the seat
+    triages (planting again arms)."""
+    ops, scripts = [], []
+    for eid, ent in list((getattr(est, "docs", None) or {}).items()):
+        p = ent.properties or {}
+        for o in p.get("watch_ops") or []:
+            if isinstance(o, dict) and not o.get("armed"):
+                ops.append({"entity": eid, "op": o.get("op"), "rel": o.get("rel"),
+                            "y": o.get("y"), "z": o.get("z"), "planted": o.get("ts")})
+        for k in ("thought", "dreamed"):
+            if p.get(f"{k}_script") and not p.get(f"{k}_armed_ts"):
+                scripts.append({"entity": eid, "kind": k, "head": str(p[f"{k}_script"])[:120]})
+    return {"watch_ops": ops, "scripts": scripts}
+
+
+def paint_dormant(srv) -> dict:
+    """membrane::dormant: the inventory of what waits to be armed (boot)."""
+    from .entities import MEMBRANE_NS, CLASS_CONFIG, QuantumEntity
+    est = getattr(srv, "entity_store", None)
+    if est is None:
+        return {}
+    inv = dormant_inventory(est)
+    eid = MEMBRANE_NS + "dormant"
+    ent = est.docs.get(eid)
+    if ent is None:
+        ent = QuantumEntity(eid=eid, cls=CLASS_CONFIG, properties={
+            "name": "dormant",
+            "summary": ("WHAT WAITS TO BE ARMED: proximity watches (watch_ops) and thought/dreamed "
+                        "scripts planted before their triggers were wired (2026-10-11). They don't fire. "
+                        "Plant one again to arm it (entity edit with the same watch_ops / script); drop "
+                        "it with watch_ops=[] or an empty script.")})
+        est.docs[eid] = ent
+    pp = ent.properties or {}
+    pp.update({"watch_ops": inv["watch_ops"][:40], "scripts": inv["scripts"][:40],
+               "state": (f"{len(inv['watch_ops'])} proximity watch(es) and {len(inv['scripts'])} "
+                         "thought/dreamed script(s) wait to be armed" if (inv["watch_ops"] or inv["scripts"])
+                         else "nothing waits: every planted watch and trigger script is armed")})
+    ent.properties = pp
+    try:
+        est.upsert(ent, embedder=None)
+    except Exception:
+        pass
+    return inv

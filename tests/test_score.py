@@ -83,7 +83,7 @@ class TestScore(unittest.TestCase):
         self.assertEqual(len(SC._credits), 1)                  # but the getter is new: credited
         ent.properties["getter_script"] = "result = {'state': {'pct': 39}}"
         WA._getter_last_ts.clear()
-        WA.entity_read_back(srv, ent)                          # a watch / the thinker read it
+        WA.entity_read_back(srv, ent, by="field")              # a script of the field read it
         self.assertEqual(sum(b.get("reading", 0) for b in SC._pending.values()), 1)
 
     def test_an_entity_kept_live_counts_once_an_hour(self):

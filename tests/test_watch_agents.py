@@ -219,7 +219,7 @@ class TestWatchOps(unittest.TestCase):
                             properties={"name": "router.py",
                                         "watch_ops": [
                                             {"op": "away", "rel": "operator",
-                                             "y": 0.3}]})
+                                             "y": 0.3, "armed": True}]})
         ent.position = [1.0] + [0.0] * 7          # AT the operator (d=0)
         est.upsert(ent)
         q = WA.WatchEvents()
@@ -255,7 +255,7 @@ class TestWatchOps(unittest.TestCase):
                             properties={"name": "x.py",
                                         "watch_ops": [
                                             {"op": "near", "rel": "operator",
-                                             "z": 0.25}]})
+                                             "z": 0.25, "armed": True}]})
         ent.position = [0.0, 1.0] + [0.0] * 6    # orthogonal: d=1.0 (far)
         est.upsert(ent)
         q = WA.WatchEvents()
@@ -285,7 +285,7 @@ class TestWatchOps(unittest.TestCase):
                              properties={"name": "radios",
                                          "watch_ops": [
                                              {"op": "around", "rel": "*",
-                                              "z": 0.4}]})
+                                              "z": 0.4, "armed": True}]})
         sens.position = [1.0] + [0.0] * 7           # the sensor's unit spot
         est.upsert(sens)
         q = WA.WatchEvents()

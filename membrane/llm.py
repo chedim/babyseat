@@ -166,6 +166,16 @@ def request(srv, prompt: str, about: str = "", caller: str = "", now: float | No
     why = _budget(caller, now)
     if why:
         _remember(srv, ent, now, caller, about_eid, prompt, refused=why)
+        try:
+            fld = getattr(srv, "efield", None)
+            if fld is not None:
+                from . import streams as _ST
+                fld.write_events([_ST.Event(stream="observation", tool="call",
+                                            args={"object": "llm", "method": "call", "about": about_eid},
+                                            result_head=f"llm.call by {caller} REFUSED: {why}",
+                                            outcome="failed", ts=now, subject="llm")], session="calls")
+        except Exception:
+            pass
         return {"rc": 1, "text": f"not called: {why}"}
     _echo[key] = {"ts": now, "answer": None}
     if len(_echo) > 500:
@@ -176,6 +186,16 @@ def request(srv, prompt: str, about: str = "", caller: str = "", now: float | No
               "event_id": f"llm-{int(now * 1000)}", "depth": depth + 1, "echo": key,
               "origin": "field-call" if field_call else "call", "readonly": field_call, **(extra or {})})
     _remember(srv, ent, now, caller, about_eid, prompt)
+    try:                                   # THE CALL LEAVES A TRACE IN THE FIELD (Argus: "calls and
+        fld = getattr(srv, "efield", None)  # refusals leave no trace in the field at all")
+        if fld is not None:
+            from . import streams as _ST
+            fld.write_events([_ST.Event(stream="observation", tool="call", args={"object": "llm", "method": "call",
+                                                                                  "about": about_eid},
+                                        result_head=f"llm.call by {caller} about {about_eid}: {prompt[:160]}",
+                                        outcome="ok", ts=now, subject="llm")], session="calls")
+    except Exception:
+        pass
     try:
         from . import score as _SC
         _SC.note(f"call:{caller.split(':', 1)[0]}")

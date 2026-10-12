@@ -1810,6 +1810,11 @@ def main() -> None:
                 from . import llm as _LLM         # the model as an entity: llm.call(about, prompt)
                 _LLM.bind(srv)
                 _LLM.start_wakes(srv)             # the seat's own deadlines: llm.wake(about, at, prompt)
+                try:                               # what waits to be armed (proximity watches, thought/dreamed)
+                    from .watch_agents import paint_dormant
+                    paint_dormant(srv)
+                except Exception as e:
+                    print(f"[seat] dormant inventory skipped ({e})", file=sys.stderr)
                 from . import restarts as _RS     # restarts: told to Argus; a staged one is his to do
                 _RS.bind(srv)
                 _RS.on_boot(srv)

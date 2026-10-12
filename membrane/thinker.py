@@ -289,6 +289,16 @@ class Thinker:
                 _marks["ticks"] = _tm() - _tt
         except Exception:
             traceback.print_exc()
+        # THE PROXIMITY SWEEP (2026-10-11: written 10-02, never called --
+        # near/away/around watches fire now): every SWEEP_EVERY_BEATS beats
+        try:
+            from .watch_agents import sweep_now, SWEEP_EVERY_BEATS
+            if not paused and self._beat % SWEEP_EVERY_BEATS == 0:
+                _tw = _tm()
+                sweep_now(srv)
+                _marks["sweep"] = _tm() - _tw
+        except Exception:
+            traceback.print_exc()
         # THE PRESENCE PULSE (the roster anchor): on the SLOW cadence the
         # seat re-announces itself + reads who else is alive. Never raises.
         if self._beat % PRESENCE_EVERY == 0:
@@ -357,7 +367,10 @@ class Thinker:
                 if est is not None and eid in est.docs:
                     try:
                         from .night import consolidate_entities
-                        consolidate_entities(self.srv.membrane, est,
+                        _fld = getattr(self.srv, "efield", None)
+                        if _fld is None:
+                            raise RuntimeError("no field")   # the replay drifts against the field's deltas
+                        consolidate_entities(_fld, est,
                                              mem=self.srv.membrane,
                                              materialize=0,
                                              only_keys=[
@@ -564,6 +577,24 @@ class Thinker:
                          eid=about if eidish else "")
         except Exception:
             pass
+        # THE THOUGHT TRIGGER (2026-10-11: thought_script was settable since
+        # 10-02 and never fired): a thinker pass that CONCLUDED something
+        # (not a silent chew; dreams fire their own trigger) runs the
+        # thought_script of the entity it was about
+        acted = str(entry.get("acted") or "")
+        if acted and acted != "silent" and entry.get("kind") != "dream":
+            try:
+                from .night import fire_trigger, entities_named
+                est = getattr(self.srv, "entity_store", None)
+                about = str(entry.get("about") or "")
+                ents = []
+                e = est._resolve_spec(about) if (est is not None and about) else None
+                ents = [e] if e is not None else entities_named(self.srv, about, k=2)
+                for ent in ents:
+                    fire_trigger(self.srv, ent, "thought",
+                                 {"thought": {k: v for k, v in entry.items() if k != "ts"}})
+            except Exception:
+                pass
 
     def _process_one(self, item: dict) -> None:
         kind = item.get("kind")
@@ -580,6 +611,30 @@ class Thinker:
             self._digest_night(payload, est)
         elif kind == "chat":
             self._digest_chat(payload, est)
+
+    def _digest_dream(self, payload: dict, est) -> None:
+        """A dreamed branch came true (dreamer.vote_on_turn: a real turn
+        confirmed it) -- it was called for every outcome and never existed
+        (each raised AttributeError, swallowed). The entities the branch
+        names get their dreamed_script (outcome: confirmed); the mind logs
+        it; one planner-gated line may say so."""
+        eid = str(payload.get("eid") or "")
+        branch = (est.docs or {}).get(eid) if eid else None
+        terminal = str(((branch.properties or {}).get("terminal") if branch is not None else "")
+                       or payload.get("text") or "")
+        fired = 0
+        try:
+            from .night import entities_named, fire_trigger
+            for ent in entities_named(self.srv, terminal):
+                if fire_trigger(self.srv, ent, "dreamed",
+                                {"dream": terminal[:300], "outcome": "confirmed", "branch": eid}) is not None:
+                    fired += 1
+        except Exception:
+            pass
+        self._log_mind({"kind": "dream", "about": terminal[:40] or eid[:40],
+                        "acted": f"confirmed{f', {fired} script(s)' if fired else ''}"})
+        if terminal:
+            self._speak(f"a dreamed branch came true: {terminal[:140]}", act="note-pattern")
 
     def _digest_capture(self, payload: dict, est) -> None:
         """One real capture, chewed: which entities did it touch, does the

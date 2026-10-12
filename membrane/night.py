@@ -3416,6 +3416,37 @@ def _run_script_locked(srv, ent, trigger, code, props, now, is_cron,
 DEFAULT_TICK_EVERY_S = 5.0
 
 
+_FIELD_READS: set = set()                # entities whose field-fired getter is running now
+
+
+def field_read(srv, ent) -> bool:
+    """The field read `ent`: its getter fires in the background (one at a
+    time per entity; the getter's own LRU paces it). False when it had
+    no getter or one is already running."""
+    est = getattr(srv, "entity_store", None)
+    if est is None or not effective_script(est, ent, "getter")[0]:
+        return False
+    with _FR_LOCK:
+        if ent.eid in _FIELD_READS:
+            return False
+        _FIELD_READS.add(ent.eid)
+
+    def go():
+        try:
+            from .watch_agents import entity_read_back
+            entity_read_back(srv, ent, by="field")
+        except Exception:
+            pass
+        finally:
+            with _FR_LOCK:
+                _FIELD_READS.discard(ent.eid)
+    threading.Thread(target=go, daemon=True, name="field-read").start()
+    return True
+
+
+_FR_LOCK = threading.Lock()
+
+
 def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
                          extra: dict) -> dict:
     """THE MEMBRANE OBJECT (read-only, the operator's design): the
@@ -3477,6 +3508,17 @@ def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
             e = est._resolve_spec(spec) if est else None
             if e is None:
                 return None
+            # A SCRIPT'S READ IS A READ (2026-10-11, the operator: "scripts read
+            # should fire a getter too"): the target's getter runs, as on a
+            # model read -- paced by its 5s LRU, ONE level deep (a getter
+            # fired from a script's read fires no further getters), never
+            # the reading script itself. The field schedules its own reads.
+            # IN THE BACKGROUND: a real getter (a shell, an HTTP read) takes
+            # seconds and the reading script's budget is a fraction of one --
+            # the read returns the values as they stand; the fresh ones land
+            # within the getter's run (a tick's periodic read keeps it live).
+            if e.eid != getattr(ent, "eid", None) and trigger != "getter":
+                field_read(srv, e)          # a GETTER's own reads fire nothing: one level deep
             return {"eid": e.eid, "cls": e.cls,
                     "position": list(e.position or []),
                     "properties": {k: v for k, v in
@@ -3818,3 +3860,59 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
     if out.get("patch_refused"):
         _ret["patch_refused"] = out["patch_refused"]
     return _ret
+
+# ---- the thought / dreamed triggers (2026-10-11: settable since 10-02, never fired) ----
+TRIGGER_COOLDOWN_S = {"thought": 10.0, "dreamed": 30.0}
+_trigger_last: dict = {}
+
+
+def fire_trigger(srv, ent, trigger: str, extra_state: dict | None = None) -> dict | None:
+    """Run `ent`'s armed thought_/dreamed_script once (the engine's budgets,
+    3 strikes, the per-entity cooldown). None when it has none, it's dormant
+    (set before the trigger was wired: setting it again arms it) or cooling."""
+    est = getattr(srv, "entity_store", None)
+    if est is None or ent is None:
+        return None
+    code, _from = effective_script(est, ent, trigger)
+    if not code:
+        return None
+    holder = ent
+    if _from:
+        holder = (est.docs or {}).get(_from) or ent
+    if not (holder.properties or {}).get(f"{trigger}_armed_ts"):
+        return None
+    now = time.time()
+    key = (ent.eid, trigger)
+    if now - _trigger_last.get(key, 0.0) < TRIGGER_COOLDOWN_S.get(trigger, 10.0):
+        return None
+    _trigger_last[key] = now
+    out = run_entity_update_script(srv, ent, trigger, extra_state=extra_state or {})
+    apply_entity_update(srv, ent, out, trigger)
+    return out
+
+
+def entities_named(srv, text: str, k: int = 4) -> list:
+    """The store entities a text names (the field's specific mentions,
+    resolved), for the triggers that fire on what a thought or dream is about."""
+    est = getattr(srv, "entity_store", None)
+    fld = getattr(srv, "efield", None)
+    if est is None or not text:
+        return []
+    names = []
+    try:
+        from .efgate import specifics
+        names = [x if isinstance(x, str) else x[0] for x in (specifics(fld, text) or [])] if fld is not None else []
+    except Exception:
+        names = []
+    if not names:                       # no field (or nothing it knows): the id-shaped tokens
+        import re as _re
+        names = [t.strip(".,;:'\"()") for t in _re.findall(r"[\w.-]+(?::[\w.-]+)+", text)]
+    out, seen = [], set()
+    for n in names:
+        e = est._resolve_spec(str(n).split(":", 1)[-1] if str(n).startswith("m:") else str(n))
+        if e is not None and e.eid not in seen:
+            seen.add(e.eid)
+            out.append(e)
+        if len(out) >= k:
+            break
+    return out
