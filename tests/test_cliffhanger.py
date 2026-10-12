@@ -261,7 +261,7 @@ class TestDispatchOrder(unittest.TestCase):
         self.assertTrue(est.edit(probe.eid, properties={"parents": ["probe:parentB"]})["ok"])
         self.assertEqual(probe.properties["parents"], [b.eid])                              # replaced, not added
         leg, args = T.resolve("entity", {"action": "edit", "spec": "x", "parents": '["p1"]'})
-        self.assertEqual(args["properties"]["parents"], '["p1"]')
+        self.assertEqual(args["properties"]["parents"], ["p1"])          # JSON text is parsed at the door
         self.assertFalse(est.edit(probe.eid, properties={"parents": [probe.eid]})["ok"])     # never itself
 
 

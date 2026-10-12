@@ -340,6 +340,8 @@ def consolidate_entities(fld, est, mem=None, materialize: int = 8,
             # own spelling (m:component:decision is Component:decision): no twin
             if est.by_field_id(cid) is not None or est.resolve(cid, exact=True) is not None:
                 continue
+            if cid in est.junk_field_ids() or eid in est.junk_field_ids():
+                continue                     # marked junk: the night never dreams it back
             if key.partition(":")[2].lower() in _names:
                 continue
             hot.append((int(d.get("n") or 0), cid, key))

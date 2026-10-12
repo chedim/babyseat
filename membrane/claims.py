@@ -51,6 +51,14 @@ STATE_MAX_CHARS = 200
 _WRITES = re.compile(r"sed -i|>>?\s*\S|tee\s|\bpatch\b|git apply|\bmv\b|\bcp\b")
 
 ACTION_WINDOW = (-45 * 60, 5 * 60)
+# A RETRIEVAL CLAIM (2026-10-11: "that fetch ... landed in one pass" -- a turn
+# with no tool call summarized a page it never pulled; nothing flagged it):
+# I/we + a fetch-family verb in the past, or '<a fetch> landed/came back'
+_RETRIEVE = re.compile(r"\b(fetched|pulled|downloaded|curled|probed|queried|scraped|grabbed|"
+                       r"opened|loaded|ran|checked|read)\b", re.I)
+_RETRIEVE_PASSIVE = re.compile(r"\b(fetch|pull|download|curl|probe|query|request|read)\b[^.]{0,80}?"
+                               r"\b(landed|came back|returned|succeeded|went through)\b", re.I)
+RETRIEVAL_WINDOW = (-10 * 60, 2 * 60)
 TESTS_WINDOW = 60 * 60
 
 
@@ -94,6 +102,14 @@ def extract_claims(sentence: str, role: str, graph: dict | None = None,
         if objs:
             out.append(Claim("action", s, role, pol, tense, objs, m.group(1).lower(), ts=ts,
                              event=event, status="n/a" if tense == "future" else "pending"))
+    r = _RETRIEVE.search(s)
+    if r and not (_SUBJ.search(s[:r.start()]) and not _FUTURE.search(s[max(0, r.start() - 40):r.start()])
+                  and not _NEG.search(s[max(0, r.start() - 40):r.start()])):
+        r = None
+    rp = None if r else _RETRIEVE_PASSIVE.search(s)
+    if (r or rp) and not out and role == "model":
+        out.append(Claim("retrieval", s, role, 1, "past", [],
+                         (r.group(1) if r else rp.group(2)).lower(), ts=ts, event=event))
     t = _TESTS.search(s)
     if t and not _FUTURE.search(s[:t.start()]):
         out.append(Claim("tests", s, role, 1, "present", [], "pass", int(t.group(1)),
@@ -171,6 +187,32 @@ def match_action(fld, c: dict, obs=None) -> tuple[str, list]:
     return ("contradicted" if hits else "unbacked"), refs
 
 
+def match_retrieval(fld, c: dict, obs=None) -> tuple[str, list]:
+    """Backed when the claiming turn's session made ANY tool call around it
+    (the claim says something was pulled: something must have run)."""
+    if c.get("ts") is None:
+        return "n/a", []
+    ev = fld.b.get("events", c.get("event") or "") or {}
+    sess = ev.get("session")
+    lo, hi = c["ts"] + RETRIEVAL_WINDOW[0], c["ts"] + RETRIEVAL_WINDOW[1]
+    hits = [e for e in (obs if obs is not None else _obs(fld))
+            if e.get("ts") is not None and lo <= e["ts"] <= hi
+            and (not sess or e.get("session") == sess)]
+    refs = [{"event_seq": e.get("seq"), "tool": e.get("tool"), "outcome": e.get("outcome"),
+             "dt": round(e["ts"] - c["ts"], 1)} for e in hits[:5]]
+    return ("backed" if hits else "unbacked"), refs
+
+
+def _unbacked(fld, claim_key_: str) -> None:
+    """An unbacked retrieval claim rides the next diff like a conflict."""
+    with fld._lock:
+        n = int(fld._ostats.get("conflict_n") or 0) + 1
+        fld._ostats["conflict_n"] = n
+        log = fld._ostats.setdefault("conflict_log", [])
+        log.append({"n": n, "claim": claim_key_, "eids": ["no tool call backs it"]})
+        del log[:-CONFLICT_LOG]
+
+
 def match_tests(fld, c: dict, obs=None) -> tuple[str, list]:
     if c.get("ts") is None:
         return "n/a", []
@@ -204,11 +246,15 @@ def evaluate(fld, now: float | None = None, limit: int = 500) -> int:
             c["status"], c["evidence"] = match_action(fld, c, obs)
         elif c["kind"] == "tests":
             c["status"], c["evidence"] = match_tests(fld, c, obs)
+        elif c["kind"] == "retrieval":
+            c["status"], c["evidence"] = match_retrieval(fld, c, obs)
         else:
             continue
         fld.b.upsert("claims", key, c)
         if c["status"] == "contradicted":
             _conflict(fld, key, c["subjects"])
+        elif c["status"] == "unbacked" and c["kind"] == "retrieval":
+            _unbacked(fld, key)
         n += 1
     return n
 

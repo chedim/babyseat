@@ -447,6 +447,11 @@ def now_line(field, since_seq: int, k: int = 5) -> str | None:
         return None
     scored = []
     tools = _tool_names()
+    try:                                       # junk by marking (the junk hub): never the subject
+        _est = getattr(field, "_est_sink", None)
+        junk = _est.junk_field_ids() if _est is not None else set()
+    except Exception:
+        junk = set()
     for eid, rows in ds.items():
         st = field.get(eid)
         if st is None or st.tier != "live":
@@ -456,6 +461,8 @@ def now_line(field, since_seq: int, k: int = 5) -> str | None:
         # unresolved identifiers, counted as specific): tool names never rank;
         # other unresolved identifiers must be coherent, like words
         if eid.startswith("s:?") and (eid[3:] in tools or eid[3:].split(".")[-1] in tools):
+            continue
+        if eid in junk:
             continue
         specific = E.is_specific(eid) and not eid.startswith("s:?")
         if not specific and not field.is_coherent(st):

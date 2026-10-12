@@ -316,6 +316,25 @@ def canonical(name: str, args: dict) -> tuple[str, dict]:
     return name, args
 
 
+_OBJECT_PARAMS = ("properties", "args", "scripts", "params", "watch_ops", "watch_fields", "parents", "links")
+
+
+def _json_objects(args: dict) -> dict:
+    """THE OBJECT SENT AS A STRING (2026-10-11: voice-out "never spoke" --
+    properties='{"say": "..."}' arrived as a string, the edit said 'updated'
+    and set nothing; args='{"code": ...}' made presence.exec{} a shell line):
+    an object parameter given as JSON text is parsed."""
+    import json as _json
+    for k in _OBJECT_PARAMS:
+        v = args.get(k)
+        if isinstance(v, str) and v.strip()[:1] in ("{", "["):
+            try:
+                args[k] = _json.loads(v)
+            except ValueError:
+                pass
+    return args
+
+
 def resolve(name: str, args: dict) -> tuple[str, dict]:
     """(existing tool name, its args) for a family call; an existing tool's
     own name passes through; ValueError names the valid actions."""
@@ -333,7 +352,7 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
             f"one of {', '.join(sorted(FAMILIES))} -- in the name, and that JSON in the arguments, "
             "e.g. name='entity', arguments={\"action\": \"read\", \"name\": \"presence\"}")
     name, args = canonical(name, args)
-    args = dict(args or {})
+    args = _json_objects(dict(args or {}))
     fam = FAMILIES.get(name)
     if fam is None:
         # an OLD member's name carrying a family action (entity_link +

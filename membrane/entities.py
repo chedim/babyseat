@@ -1955,6 +1955,36 @@ class EntityStore(MultiParentOps, TimelineOps):
             return self._follow_merges(ent) if ent is not None else None
         return self._resolve_spec(spec)
 
+    def junk_field_ids(self) -> set:
+        """JUNK BY MARKING, NOT DELETING (2026-10-11, the operator: "instead of
+        deleting junk, you could just link it to a 'junk' node"): the field ids
+        the engine stops amplifying -- every stored entity whose ISA chain
+        holds a hub named 'junk', plus the field-only ids (a field word or an
+        unresolved symbol can't take a parent) listed on a hub's `junk`."""
+        from .eids import field_id as _fid
+        hubs = [d for d in list(self.docs.values())
+                if str((d.properties or {}).get("name") or "").lower() == "junk"
+                or d.eid.lower().endswith(":junk") or d.eid.lower() == (MEMBRANE_NS + "junk")]
+        if not hubs:
+            return set()
+        sig = (len(self.docs), tuple(sorted((h.eid, len((h.properties or {}).get("junk") or [])) for h in hubs)))
+        if getattr(self, "_junk_sig", None) == sig:
+            return self._junk_ids
+        hub_ids = {h.eid for h in hubs}
+        out = set()
+        for h in hubs:
+            for x in (h.properties or {}).get("junk") or []:
+                out.add(str(x))
+                out.add(_fid(str(x)))
+        for d in list(self.docs.values()):
+            ps = (d.properties or {}).get("parents") or []
+            ps = ps if isinstance(ps, list) else [ps]
+            if any(p in hub_ids or str(p).lower().endswith(":junk") or str(p).lower() == "junk" for p in ps):
+                out.add(_fid(d.eid))
+                out.add(d.eid)
+        self._junk_sig, self._junk_ids = sig, out
+        return out
+
     def by_field_id(self, fid: str) -> "QuantumEntity | None":
         """A FIELD id -> the stored entity it is about (the flush's intake,
         the field's subjects): field_id(eid) -> eid, rebuilt as the store moves."""

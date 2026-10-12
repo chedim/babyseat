@@ -6311,6 +6311,18 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if not spec:
             self._json_err_raw(400, "spec required (eid or name fragment)")
             return
+        _props = body.get("properties")
+        if isinstance(_props, str):
+            try:
+                _props = json.loads(_props)
+            except ValueError:
+                pass
+        if _props is not None and not isinstance(_props, dict):
+            # a non-object was silently ignored and the reply said 'updated'
+            # (voice-out's say never landed, 2026-10-11): refuse it out loud
+            self._json_err_raw(400, f"properties must be an object, e.g. {{\"say\": \"...\"}} -- "
+                                    f"got {type(_props).__name__}; nothing was set"); return
+        body["properties"] = _props
         res = est.edit(spec, summary=body.get("summary"),
                        links=body.get("links"), cls=body.get("class"),
                        merged_into=body.get("merged_into"),
