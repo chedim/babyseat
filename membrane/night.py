@@ -504,7 +504,9 @@ def run_entity_script(code: str, state: dict,
     patch?, veto?}. Any exception becomes {'error': <msg>} (the caller
     counters failures and turns them into banner events)."""
     import builtins as _bi
-    ns: dict = {"__builtins__": dict(_bi.__dict__), "state": state}
+    ns: dict = {"__builtins__": dict(_bi.__dict__), "state": state,
+                # the seat writes JSON-ish (run=true): those names mean what it meant
+                "true": True, "false": False, "null": None}
     if membrane is not None:
         ns["membrane"] = membrane
     try:
@@ -2995,7 +2997,7 @@ def note_field_change(srv, est, ent, change_ts: float | None = None) -> None:
     # THE DELIVERY: one event, the burst's grouping honest
     n = int(burst.get("n") or 1)
     span = round(now - float(burst.get("since") or now), 2)
-    pool = getattr(srv, "_events_pool", None)
+    pool = getattr(srv, "events_pool", None) or getattr(srv, "_events_pool", None)
     ev = {"kind": "field:changed",
           "entity": ent.eid,
           "verb": (hits[0]["verb"] if hits else "pos"),
@@ -3478,7 +3480,9 @@ def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
             self.cls = e.cls
             self.properties = {k: v for k, v in
                                (e.properties or {}).items()
-                               if not str(k).startswith("script_")}
+                               if not (str(k).endswith("_script")
+                                       or (str(k).startswith("script_")
+                                           and k not in ("script_data", "script_render")))}
             self.position = list(e.position or [])
             self._ent = e
         def describe(self):
@@ -3504,10 +3508,20 @@ def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
 
     class _Entities:
         """The symbolic layer, read-only."""
-        def get(self, spec):
+        def get(self, spec, run=False, **_ignored):
+            """The entity as it stands; its getter fires in the background.
+            run=True: the getter runs NOW and the fresh values come back (it
+            spends this script's budget -- a test entity's read)."""
             e = est._resolve_spec(spec) if est else None
             if e is None:
                 return None
+            if run and e.eid != getattr(ent, "eid", None) and trigger != "getter":   # a getter's reads: one level
+                try:
+                    from .watch_agents import entity_read_back
+                    entity_read_back(srv, e, force=True, by="field")
+                except Exception:
+                    pass
+                run = "done"
             # A SCRIPT'S READ IS A READ (2026-10-11, the operator: "scripts read
             # should fire a getter too"): the target's getter runs, as on a
             # model read -- paced by its 5s LRU, ONE level deep (a getter
@@ -3517,13 +3531,18 @@ def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
             # seconds and the reading script's budget is a fraction of one --
             # the read returns the values as they stand; the fresh ones land
             # within the getter's run (a tick's periodic read keeps it live).
-            if e.eid != getattr(ent, "eid", None) and trigger != "getter":
+            if run != "done" and e.eid != getattr(ent, "eid", None) and trigger != "getter":
                 field_read(srv, e)          # a GETTER's own reads fire nothing: one level deep
+            # the script CODE and its bookkeeping stay hidden -- its VALUES
+            # (script_data: what the getter read, script_render) were hidden
+            # too: no script could read another entity's live values (2026-10-11)
             return {"eid": e.eid, "cls": e.cls,
                     "position": list(e.position or []),
                     "properties": {k: v for k, v in
                                    (e.properties or {}).items()
-                                   if not str(k).startswith("script_")}}
+                                   if not (str(k).endswith("_script")
+                                           or (str(k).startswith("script_")
+                                               and k not in ("script_data", "script_render")))}}
         def timelines_of(self, spec, open_only: bool = True):
             try:
                 return [e.eid for e in est.timelines_of(
@@ -3557,6 +3576,34 @@ def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
             except Exception:
                 return None
 
+    class _Timeline:
+        """membrane.timeline.walk (advertised since 10-02, never built -- the
+        scripts calling it errored every fire): walk(n) = the open dreamed
+        branches, newest first [{eid, terminal, steps, status}]; walk("text",
+        n) = the field's token walk continuing that text (a list of words)."""
+        def walk(self, *args, limit=None, depth=None, steps=None, start=None, text=None, **_ignored):
+            n = next((a for a in args if isinstance(a, int)), None) or limit or depth or steps or 4
+            n = max(1, min(int(n), 12))
+            seed = next((a for a in args if isinstance(a, str)), None) or start or text
+            if seed:
+                tt = getattr(getattr(srv, "membrane", None), "timeline", None)
+                if tt is not None:
+                    try:
+                        toks = str(seed).lower().split()[:3]
+                        return list(tt.walk(toks, max_steps=n) or [])
+                    except Exception:
+                        return []
+                return []
+            out = []
+            try:
+                for b in est.open_timelines(limit=n):
+                    p = b.properties or {}
+                    out.append({"eid": b.eid, "terminal": p.get("terminal"), "steps": list(p.get("steps") or [])[-n:],
+                                "status": p.get("status")})
+            except Exception:
+                pass
+            return out
+
     class _Membrane:
         """The assembled read-only interface (field/me/entities/
         intents) + speak (the planner-gated voice)."""
@@ -3566,6 +3613,7 @@ def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
             self.entities = _Entities()
             ib = getattr(srv, "_intent_board", None)
             self.intents = _Intents(ib)
+            self.timeline = _Timeline()
             self.trigger = trigger
             self.timeout_s = timeout
             self.extra = dict(extra)

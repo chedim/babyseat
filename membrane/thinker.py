@@ -36,6 +36,7 @@ per minute (THINK_MODEL_CAP). Never on the turn path.
 """
 from __future__ import annotations
 
+import sys
 import threading
 import zlib
 import time
@@ -98,9 +99,12 @@ def note_wakeup_signal(srv, kind: str, payload: dict | None = None) -> bool:
     if not is_wakeup_signal(kind):
         return False
     srv.ambient_mode = "day"
-    try:
-        srv.note_wakeup({"kind": kind, "ts": time.time(),
-                         "payload": dict(payload or {})})
+    try:                                   # the ring the banners read (srv.note_wakeup never existed)
+        ws = getattr(srv, "_wakeups", None)
+        if ws is None:
+            ws = srv._wakeups = []
+        ws.append({"kind": kind, "ts": time.time(), "payload": dict(payload or {})})
+        del ws[:-20]
     except Exception:
         pass
     return True

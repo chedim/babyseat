@@ -154,8 +154,16 @@ def _send(srv, kind: str, text: str) -> None:
 
 def on_boot(srv) -> str:
     text = boot_text(srv)
+    _SEAT["booted"] = True                      # only now may the panel's beat touch alive.ts / the pending file
     _send(srv, "seat-restart", text)
     return text
+
+
+def booted() -> bool:
+    """THE BOOT ORDER (2026-10-11 sweep): the seat panel's first beat ran
+    before bind/on_boot -- its heartbeat overwrote alive.ts (the notice said
+    'down 0 s') and check_pending queued a restart for code just loaded."""
+    return bool(_SEAT.get("booted"))
 
 
 def on_event(srv, body: dict) -> dict:
@@ -288,7 +296,10 @@ COMMAND = "seat::restart {{why}}"
 
 def _pending(srv) -> dict | None:
     try:
-        d = json.loads(_read(os.path.join(_dir(srv), PENDING_FILE)) or "null")
+        p = os.path.join(_dir(srv), PENDING_FILE)
+        d = json.loads(_read(p) or "null")
+        if isinstance(d, dict) and not d.get("staged_at"):
+            d["staged_at"] = os.path.getmtime(p)   # a stable stamp: 'now' re-queued the event every beat
         return d if isinstance(d, dict) else None
     except Exception:
         return None

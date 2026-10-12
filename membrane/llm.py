@@ -56,6 +56,7 @@ WAKE_MIN_S = 300.0
 WAKE_MAX_S = 30 * 86400.0
 WAKES_MAX = 20
 WAKE_TICK_S = 30.0
+DEFER_S = 600.0                  # a wake refused by the budget / the switch tries again this much later
 
 MAX_DEPTH = 2
 ECHO_S = 600.0
@@ -398,14 +399,33 @@ def fire_due(srv, now: float | None = None, late_after_s: float = 120.0) -> list
     for w in due:
         late = now - float(w["at"]) > late_after_s
         caller = str(w.get("caller") or "unknown")
-        r = request(srv, w["prompt"], about=w.get("about") or "", caller="wake:" + caller, now=now,
-                    readonly=caller.startswith("script:"),
-                    extra={"wake": {"id": w["id"], "at": w["at"], "set_ts": w.get("set_ts"), "late": late}})
+        try:
+            r = request(srv, w["prompt"], about=w.get("about") or "", caller="wake:" + caller, now=now,
+                        readonly=caller.startswith("script:"),
+                        extra={"wake": {"id": w["id"], "at": w["at"], "set_ts": w.get("set_ts"), "late": late}})
+        except Exception as e:                       # noqa: BLE001 -- the wake waits, it isn't lost
+            r = {"rc": 127, "text": f"error: {e!r}"[:200]}
         out.append({**w, "late": late, "rc": r["rc"], "text": r["text"]})
-    # no loops yet (boot) or the seat paused: the wake waits, it isn't lost
-    back = [{k: v for k, v in x.items() if k not in ("late", "rc", "text")} for x in out
-            if x["rc"] == 127 or "paused" in str(x["text"])]
-    out = [x for x in out if not (x["rc"] == 127 or "paused" in str(x["text"]))]
+
+    # THE WAKE WAITS, IT ISN'T LOST (2026-10-11 sweep: a wake refused by the
+    # hour's budget or the switch was dropped for good): no loops yet, paused,
+    # an error -> back as it was; the budget spent or the model switched off
+    # -> back, deferred DEFER_S (it says so when it fires)
+    def _held(x):
+        t = str(x["text"])
+        return x["rc"] == 127 or "paused" in t
+    def _deferred(x):
+        t = str(x["text"])
+        return x["rc"] == 1 and ("budget" in t or "this hour" in t or "switched off" in t)
+    back = [{k: v for k, v in x.items() if k not in ("late", "rc", "text")} for x in out if _held(x)]
+    for x in out:
+        if _deferred(x):
+            w2 = {k: v for k, v in x.items() if k not in ("late", "rc", "text")}
+            w2["at"] = round(now + DEFER_S, 1)
+            w2["deferred"] = int(w2.get("deferred") or 0) + 1
+            w2["deferred_why"] = str(x["text"])[:120]
+            back.append(w2)
+    out = [x for x in out if not (_held(x) or _deferred(x))]
     with _lock:
         pp = ent.properties or {}
         if back:

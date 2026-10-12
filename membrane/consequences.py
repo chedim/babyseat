@@ -267,8 +267,9 @@ def settle(srv=None, now: float | None = None) -> int:
         return 0
     now = now or time.time()
     pp = ent.properties or {}
-    pend = list(pp.get("pending") or [])
-    out, keep = [], []
+    with _lock:
+        pend = [dict(r) for r in (pp.get("pending") or [])]     # a snapshot: record() may add while we look
+    out, done_at = [], {}
     for rec in pend:
         i = int(rec.get("done") or 0)
         # the latest horizon passed: one missed while the seat was down settles once, there
@@ -280,12 +281,19 @@ def settle(srv=None, now: float | None = None) -> int:
                 parts = {"h": HORIZONS[j], "line": f"(couldn't settle: {e!r})", "error": True}
             out.append((rec, parts))
             i = j + 1
-        rec["done"] = i
-        if i < len(HORIZONS):
-            keep.append(rec)
+        done_at[rec["id"]] = i
     for rec, parts in out:
         _publish(srv, rec, parts["line"], now)
     with _lock:
+        # THE MERGE (2026-10-11 sweep: settle wrote back its stale snapshot and
+        # dropped every record added while it looked): advance only what it saw,
+        # keep everything added since
+        keep = []
+        for r in (pp.get("pending") or []):
+            if r.get("id") in done_at:
+                r["done"] = done_at[r["id"]]
+            if int(r.get("done") or 0) < len(HORIZONS):
+                keep.append(r)
         pp["pending"] = keep
         # the parts ride with the line: outcome learning's rewards read them
         pp["settled"] = (list(pp.get("settled") or []) +

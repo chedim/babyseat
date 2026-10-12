@@ -561,7 +561,8 @@ class Autonode:
             _scan_s = self.scan_s
             try:
                 if getattr(self.srv, "ambient_mode", "day") == "night":
-                    _scan_s = self.scan_s * _night_x
+                    from .thinker import NIGHT_SWEEP_X   # was an undefined name: the scan never slowed at night
+                    _scan_s = self.scan_s * float(NIGHT_SWEEP_X)
             except Exception:
                 pass
             time.sleep(_scan_s if _idle else 1.0)

@@ -857,8 +857,25 @@ def _lane_refusal(name: str, lane: str) -> str | None:
     r = _LANE_REFUSALS.get(name) if lane == "plan" else _LISTENER_REFUSALS.get(name)
     if r is not None:
         return r
-    return (f"the {name} tool is not your lane's hand (lane: {lane}); "
-            "reads, memory and the steering surface are.")
+    # THE HONEST REFUSAL (2026-10-11: "that phrase about lanes just means that you
+    # called wrong tool, its an obsolete message" -- the seat read it as "this
+    # turn is read-only" and stopped acting): an unknown name says so
+    known = set(_mcp_names()) | set(_lane_tools("operator"))
+    try:
+        from . import toolset as _ts
+        known |= set(_ts.FAMILIES)
+    except Exception:
+        pass
+    if name not in known:
+        try:
+            from . import toolset as _ts
+            fams = ", ".join(sorted(_ts.FAMILIES))
+        except Exception:
+            fams = ""
+        return (f"no tool is named {name!r} -- the call never ran (nothing about this turn is "
+                f"read-only). The tools: {fams}")
+    return (f"{name} isn't available in this session's lane ({lane}) -- that call never ran; "
+            "the other tools still work.")
 
 
 def _openai_tools_for(agent: str | None) -> list:

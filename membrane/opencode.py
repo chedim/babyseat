@@ -988,7 +988,8 @@ def main() -> None:
         # fires, the script errors/overruns, the peer misses -- the
         # loops' reads land here; the store's watch lanes put through
         # it (attach/detach events).
-        srv._events_pool = None       # wired after the field's boot below
+        # (the pool is wired above with the field: resetting it here dropped
+        # every field:changed event -- 2026-10-11's sweep)
         # THE CLOCK (the operator's 2026-10-01 ask): plant `tool:clock`
         # once at boot -- idempotent (an already-living, model- or
         # operator-Rewritten clock survives every restart). Degrades

@@ -205,6 +205,8 @@ def refresh(srv) -> dict:
     _battery_guard(srv, st.get("battery"), pp)
     try:                                       # restarts.py: the heartbeat, a deploy's ask, a staged restart
         from . import restarts as _RS
+        if not _RS.booted():
+            raise RuntimeError("restarts not booted yet")
         _RS.heartbeat(srv)
         _RS.check_ask_file(srv)
         _RS.check_pending(srv)

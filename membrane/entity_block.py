@@ -415,6 +415,26 @@ def track_line(field, key: str, label: str = "", now: float | None = None) -> st
     return f"track: {eid}{lab} — {counts or 'waiting'}, last {_age(_EF.last_seen(st), now)}{tail}"
 
 
+_TOOLS: set = set()
+
+
+def _tool_names() -> set:
+    """The seat's tool names, families, actions and their old spellings (lowercase)."""
+    if not _TOOLS:
+        try:
+            from . import toolset as _ts
+            for fam, d in _ts.FAMILIES.items():
+                _TOOLS.add(fam)
+                for act, tool in (d.get("actions") or {}).items():
+                    _TOOLS.update({act, str(tool), f"{fam}_{act}", f"entity_{act}"})
+            from .mcp_server import TOOL_IMPLS
+            for t in TOOL_IMPLS:
+                _TOOLS.update({t.lower(), t.lower().replace("membrane_", "")})
+        except Exception:
+            pass
+    return _TOOLS
+
+
 def now_line(field, since_seq: int, k: int = 5) -> str | None:
     """What this session has been about: the entities moved most since the
     session began (specific identifiers first, coherent words after)."""
@@ -422,13 +442,21 @@ def now_line(field, since_seq: int, k: int = 5) -> str | None:
     if not ds:
         return None
     scored = []
+    tools = _tool_names()
     for eid, rows in ds.items():
         st = field.get(eid)
         if st is None or st.tier != "live":
             continue
-        if not E.is_specific(eid) and not field.is_coherent(st):
+        # THE SEAT'S OWN HANDS ARE NOT THE SUBJECT (2026-10-11: s:?entity_read
+        # 92, s:?inlet_check 72 topped the header -- its tool and method names,
+        # unresolved identifiers, counted as specific): tool names never rank;
+        # other unresolved identifiers must be coherent, like words
+        if eid.startswith("s:?") and (eid[3:] in tools or eid[3:].split(".")[-1] in tools):
             continue
-        scored.append((0 if E.is_specific(eid) else 1, -len(rows), eid))
+        specific = E.is_specific(eid) and not eid.startswith("s:?")
+        if not specific and not field.is_coherent(st):
+            continue
+        scored.append((0 if specific else 1, -len(rows), eid))
     scored.sort()
     if not scored:
         return None

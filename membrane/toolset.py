@@ -147,7 +147,12 @@ HELP = {
         "getter (runs on a read; set a TOP-LEVEL result = {'state': {...live values...}}, also "
         "'render' for the banner and 'patch' to edit properties -- a function's return or stdout is "
         "not read; run=true forces a read, else a 5s LRU paces it; 10s budget), tick (periodic), "
-        "nudge, mention (on each mention), thought, dreamed, delete, watch (on external events). "
+        "nudge, mention (on each mention), thought (when the thinker concludes about it), dreamed "
+        "(when a dream names it), delete, watch (on external events). "
+        "Inside a script, `membrane` reads: membrane.entities.get(spec, run=False) (a read FIRES the "
+        "target's getter -- a tick that reads an entity keeps it live; run=True runs it now), "
+        "membrane.timeline.walk(n), membrane.field.recall/vitals, membrane.me, membrane.intents.open, "
+        "membrane.speak(text), membrane.call_llm(prompt), membrane.wake(at, prompt). "
         "Rewriting a script clears its cooldowns. A real cooldown says 'retry in Ns'."),
     "exec": (
         "exec(action='link', commands='...') runs a command now (dash shell on this seat: use '.' "
@@ -283,7 +288,9 @@ def _json_obj(v):
     return o if isinstance(o, dict) else None
 
 
-_NS = re.compile(r"^(?:membrane|mcp)[-_.:/]+", re.I)
+# the prefixes routed models put on tool names (2026-10-11: 'mem_exec',
+# 'membrane_entity_add', 'm:tool:find' were refused as "not your lane's hand")
+_NS = re.compile(r"^(?:(?:membrane|mcp|mem|functions|m:tool|tool)[-_.:/]+)+", re.I)
 _FAM_ACT = re.compile(r"^([a-z_]+)[/.:](?:action[-_=:]?)?([a-z_]+)$", re.I)
 
 
