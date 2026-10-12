@@ -26,6 +26,9 @@
  * "[HA user: <name>]" line for the brain's memory; the panel hides it.
  * Turn completion reads the brain's own /session/status, never a guess.
  */
+// THE SEAT'S NAME (standalone mode, 2026-10-12): the standalone page sets
+// window.MEMBRANE_NAME from /ui/conf before this loads; HA's page is Argus
+const SEAT = (typeof window !== "undefined" && window.MEMBRANE_NAME) || "Argus";
 const SERVE = "/api/ai_terminal/serve";
 const SPEAKER_PREFIX = "[HA user: ";
 const NEW_TITLE = "New chat";
@@ -351,7 +354,7 @@ function phantomHtml(it) {
   if (!it || !it.label) return "";
   const mark = it.pending ? "…" : it.hit ? "✓" : it.top3 ? "~" : "✗";
   const close = typeof it.closeness === "number" ? " " + Math.round(it.closeness * 100) + "%" : "";
-  const title = it.pending ? "membrane expects this next" : "membrane guessed this; Argus did: " + (it.actual || "?");
+  const title = it.pending ? "membrane expects this next" : "membrane guessed this; " + SEAT + " did: " + (it.actual || "?");
   return '<div class="phantom ' + (it.kind === "tool" ? "ptool" : "ptext") + (it.pending ? " pending" : "") +
     '" title="' + escAttr(title) + '"><span class="pmark">' + mark + close + "</span> " +
     (it.kind === "tool" ? "🔧 " : "") + escText(it.label) + "</div>";
@@ -407,7 +410,7 @@ function voiceLogItems(rows, said, voiceLines) {
     const key = Math.round((x.ts || 0)) + ":" + x.text;
     if (!x.text || seen.has(key)) continue;
     seen.add(key);
-    out.push({ ts: (x.ts || 0) * 1000, who: "argus", label: "🔊 Argus", text: x.text });
+    out.push({ ts: (x.ts || 0) * 1000, who: "argus", label: "🔊 " + SEAT, text: x.text });
   }
   for (const v of voiceLines || []) {
     if (v && v.text) out.push({ ts: v.time || 0, who: "membrane", label: "membrane", text: v.text });
@@ -444,7 +447,7 @@ function guessHtml(line) {
   const mark = (v) => (v === true ? "✓" : v === false ? "✗" : "");
   const t = sc.moves ? sc.top1 + "/" + sc.moves + " moves" + (sc.top3 > sc.top1 ? " (" + sc.top3 + " in top 3)" : "")
     : sc.tool1 ? "✓" : sc.tool3 ? "~" : "✗";
-  const title = "membrane guessed Argus's actions (never run) -- he did: " +
+  const title = "membrane guessed " + SEAT + "'s actions (never run) -- he did: " +
     ((did.tools || []).join(", ") || "(reply)") + ((did.ents || []).length ? " on " + did.ents.join(", ") : "");
   return '<div class="vguess" title="' + escAttr(title) + '">🔮 ' + escText(tools || "(reply)") + " " + t +
     (ents ? " · " + escText(ents) + " " + mark(sc.ent3) : "") + "</div>";
@@ -793,7 +796,7 @@ function definePanel() {
             <button class="btn icon llmbtn" title="the LLM (off: talk to membrane alone)">🤖</button>
             <button class="btn icon autobtn" title="auto-chat: membrane and the LLM talk; you can join any time">⟳</button>
             <button class="btn icon rolebtn" title="membrane's role: babble (it talks to the LLM) or predict (it guesses the LLM, unheard)">💬</button>
-            <button class="btn icon jsbtn" title="let Argus run JS in this tab -- it acts as you here (the page, your HA login) -- off by default">🧩</button>
+            <button class="btn icon jsbtn" title="let ${SEAT} run JS in this tab -- it acts as you here (the page, your HA login) -- off by default">🧩</button>
             <button class="btn icon vlogbtn" title="the voice log: what was said aloud (hidden from the chat)">🗒</button>
             <button class="btn icon pausebtn" title="pause the seat: every acting lane stands down (loops, dreamer, thinker, night)">⏸</button>
             <button class="btn icon mindsbtn" title="membrane's minds">🧠</button>
@@ -821,7 +824,7 @@ function definePanel() {
         const ctl = document.createElement("div");
         ctl.className = "ctl";
         for (const [cls, label] of [["agent", null], ["modelpick", null], ["voicebtn", "membrane's voice"], ["llmbtn", "LLM replies"],
-                                    ["autobtn", "auto-chat"], ["rolebtn", "membrane babbles"], ["jsbtn", "let Argus act as you here: off"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
+                                    ["autobtn", "auto-chat"], ["rolebtn", "membrane babbles"], ["jsbtn", "let " + SEAT + " act as you here: off"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
           const el = app.querySelector("." + cls);
           if (!el) continue;
           if (label) {
@@ -1733,10 +1736,10 @@ function definePanel() {
     _paintJs() {
       if (!this._jsBtn) return;
       const lbl = this._jsBtn.querySelector(".lbl");
-      if (lbl) lbl.textContent = this._jsOn ? "Argus acts as you here: ON" : "let Argus act as you here: off";
+      if (lbl) lbl.textContent = this._jsOn ? SEAT + " acts as you here: ON" : "let " + SEAT + " act as you here: off";
       this._jsBtn.style.opacity = this._jsOn ? "1" : ".5";
-      this._jsBtn.title = this._jsOn ? "Argus runs JS in this tab and acts as you here (the page, your HA login) -- click to stop"
-                                     : "let Argus run JS in this tab -- it acts as you here (the page, your HA login) -- off by default";
+      this._jsBtn.title = this._jsOn ? SEAT + " runs JS in this tab and acts as you here (the page, your HA login) -- click to stop"
+                                     : "let " + SEAT + " run JS in this tab -- it acts as you here (the page, your HA login) -- off by default";
     }
 
     /** Run a job IN THIS WINDOW (the operator's choice, 2026-10-11: "why a sandbox?

@@ -62,7 +62,8 @@
   }
 
   const c = await conf();
-  if (c.name) document.title = c.name;
+  if (c.name) { document.title = c.name; window.MEMBRANE_NAME = c.name; }   // home.js / panel.js read it on load
+  window.MEMBRANE_ALIASES = c.aliases || [];
   const name = savedName() || await askName(c.name, !window.isSecureContext);
   await import("/ui/www/home.js");
   await customElements.whenDefined("membrane-home-panel");

@@ -9,6 +9,14 @@
 // mode) floats over it on glass. HA's own UI is one button away: "HA" docks
 // the sidebar back and goes to the dashboards; this page hides it again.
 
+// THE SEAT'S NAME (standalone mode, 2026-10-12): the standalone page sets
+// window.MEMBRANE_NAME (+ MEMBRANE_ALIASES, what speech hears for it) from
+// /ui/conf before this loads; HA's page is Argus
+const SEAT = (typeof window !== "undefined" && window.MEMBRANE_NAME) || "Argus";
+const SEAT_CUSTOM = SEAT !== "Argus";
+const SEAT_SAYS = [SEAT].concat((typeof window !== "undefined" && window.MEMBRANE_ALIASES) || [])
+  .map((a) => String(a || "").trim().toLowerCase()).filter(Boolean);
+const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const HSERVE = "/ui/serve";
 const FOLLOW_EVERY_MS = 15000;
 const IDLE_BEFORE_FOLLOW_MS = 30000;
@@ -228,7 +236,7 @@ const HOT_EARLY_S = 1.3;          // the first stretch is checked while you are 
 const HOT_ACKS = ["Yes?", "Uh-huh?", "Mm-hm?", "I'm listening."];
 // Latin and Cyrillic (runglish, 2026-10-10: "Аргус, включи свет"); JS's \b
 // knows no Cyrillic, so the name ends at a space, a mark or the end
-const HOT_NAMES = "argus|argos|argus's|angus|argo|august|augustus|arcus|our gus|are gus|are guess|our guess|gus|аргус|аргос|аргуш";
+const HOT_NAMES = SEAT_CUSTOM ? SEAT_SAYS.map(reEsc).join("|") : "argus|argos|argus's|angus|argo|august|augustus|arcus|our gus|are gus|are guess|our guess|gus|аргус|аргос|аргуш";
 const HOT_GREETS = "hey|hi|hay|ok|okay|hello|yo|эй|хей|привет|окей|ок";
 const HOT_RE = new RegExp("^(?:(?:" + HOT_GREETS + ")[\\s,.!-]+)?(?:" + HOT_NAMES + ")(?=$|[\\s,.!?-])[\\s,.!?-]*([\\s\\S]*)$", "iu");
 
@@ -262,7 +270,7 @@ const LS_STT = "membrane.home.stt";          // "device" (default) | "lan"
 // a greeting is required: a bare name in the grammar matched "turn on" (the
 // recognizer squeezes every sound into its few phrases -- the browser test
 // caught it, 2026-10-10)
-const WAKE_NAMES = ["are gus", "our gus", "are guess", "our guess", "angus", "august", "gus"];
+const WAKE_NAMES = SEAT_CUSTOM ? SEAT_SAYS : ["are gus", "our gus", "are guess", "our guess", "angus", "august", "gus"];
 const WAKE_GREETS = ["hey", "hay", "hi", "okay", "ok"];
 const WAKE_GRAMMAR = WAKE_GREETS.flatMap((g) => WAKE_NAMES.map((n) => g + " " + n)).concat(["[unk]"]);
 const WAKE_RE = new RegExp("\\b(" + WAKE_GREETS.join("|") + ") (" + WAKE_NAMES.join("|") + ")\\b");
@@ -273,7 +281,12 @@ const SPEAK_MAX_SENTENCES = 12, SPEAK_MAX_CHARS = 1500;
 // just a wake phrase"): a free on-device recognizer hears every sentence; one
 // that names him anywhere goes, as audio, to whisper and becomes a message
 const LS_EARMODE = "membrane.home.earmode";          // "wake" (default) | "addressed"
-const NAME_ANY_RE = /\b(argus|argos|are gus|our gus|are guess|our guess|angus|august)\b/i;
+const NAME_ANY_RE = SEAT_CUSTOM ? new RegExp("\\b(" + HOT_NAMES + ")\\b", "i")
+  : /\b(argus|argos|are gus|our gus|are guess|our guess|angus|august)\b/i;
+// whisper hears the name's tail ("gus, turn on..."): what is cut off the front
+const STRIP_RE = SEAT_CUSTOM
+  ? new RegExp("^\\s*(?:(?:hey|hi|okay|ok)[\\s,]+)?(?:" + HOT_NAMES + ")(?=$|[\\s,.!?-])[\\s,.!?-]*", "i")
+  : /^\s*(?:(?:hey|hi|okay|ok)[\s,]+)?(?:are gus|our gus|argus|argos|angus|august|gus|us)(?=$|[\s,.!?-])[\s,.!?-]*/i;
 const ADDR_MAX_S = 15;
 const DICTATE_END_MS = 1100, DICTATE_WAIT_MS = 3000, LOCK_END_MS = 1600;
 
@@ -660,7 +673,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <div class="vsay glass" role="status" aria-live="polite"></div>
           <button class="ptt" title="Hold to talk (or hold Space)" aria-label="Hold to talk">🎙</button>
           <button class="lock" title="Hands-free: tap to start, tap again to send" aria-label="Talk hands-free">🔒</button>
-          <button class="ear" title="Hands-free by name: listen for “Hey Argus” (speech near this device is transcribed on your network)" aria-label="Listen for Hey Argus" aria-pressed="false">👂</button>
+          <button class="ear" title="Hands-free by name: listen for “Hey ${SEAT}” (speech near this device is transcribed on your network)" aria-label="Listen for Hey ${SEAT}" aria-pressed="false">👂</button>
           <span class="vsep" aria-hidden="true"></span>
           <button class="eng" title="Where speech is recognised: on this device (private, fast) or on the brain phone (more accurate)" aria-label="Speech recognition engine">⚙</button>
           <button class="tts" title="Speak membrane's answers" aria-label="Speak answers" aria-pressed="false">🔈</button>
@@ -1003,7 +1016,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._chat.addEventListener("ai-listen", (e) => {
         const secs = Math.max(0, Math.min(30, Number((e.detail || {}).seconds) || 0));
         const h = this._hot;
-        if (!h) { if (secs) this._vsay("Argus is listening for you — turn the ear (👂) on to answer by voice", 4000); return; }
+        if (!h) { if (secs) this._vsay(SEAT + " is listening for you — turn the ear (👂) on to answer by voice", 4000); return; }
         if (!secs) { if (h.state === "dictate") { this._wakeRecognizer(h); this._orb(null); } return; }
         const t0 = Date.now();
         // his question may still be on its way to the speakers: a moment's grace, then
@@ -1013,7 +1026,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           if (Date.now() - t0 < 1200 || ((this._speaking || (this._speechQ || []).length) && Date.now() - t0 < 30000)) { setTimeout(go, 200); return; }
           if (h.state !== "wake") return;                   // already hearing something
           h.followWait = secs * 1000;
-          this._vsay("listening… (Argus asked)", secs * 1000);
+          this._vsay("listening… (" + SEAT + " asked)", secs * 1000);
           this._orb("listening");
           this._dictate(h, true);
         };
@@ -1192,7 +1205,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           lsSet(LS_VOICE, a.dataset.v);
           this._voice = pickVoice(window.speechSynthesis.getVoices(), "en", a.dataset.v);
           m.remove();
-          this._hushTts(); this._say1("Hi, I'm Argus. This is how I'll sound.");
+          this._hushTts(); this._say1("Hi, I'm " + SEAT + ". This is how I'll sound.");
         });
         setTimeout(() => {
           const close = (e) => { if (!e.composedPath().includes(m)) { m.remove(); window.removeEventListener("pointerdown", close, true); } };
@@ -1211,8 +1224,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       if (!this._earBtn) return;
       this._earBtn.textContent = this._earMode === "addressed" ? "👂ᴬ" : "👂";
       this._earBtn.title = this._earMode === "addressed"
-        ? "Listening for Argus being ADDRESSED anywhere in a sentence (long-press: the mode)"
-        : "Listening for “Hey Argus” (long-press: the mode)";
+        ? "Listening for " + SEAT + " being ADDRESSED anywhere in a sentence (long-press: the mode)"
+        : "Listening for “Hey " + SEAT + "” (long-press: the mode)";
     }
 
     _earMenu() {
@@ -1221,7 +1234,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       m = document.createElement("div"); m.className = "vmenu emenu glass hamenu open"; m.setAttribute("role", "menu");
       const row = (mode, label, sub) => '<a role="menuitem" href="#" data-m="' + mode + '">' + (this._earMode === mode ? "● " : "") +
         label + '<span style="opacity:.55;font-size:12px;margin-left:6px">' + sub + "</span></a>";
-      m.innerHTML = row("wake", "“Hey Argus”", "the name first") +
+      m.innerHTML = row("wake", "“Hey " + SEAT + "”", "the name first") +
         row("addressed", "Whenever he's addressed", "his name anywhere in a sentence") +
         '<hr><div style="padding:4px 12px;font-size:12px;opacity:.7;max-width:280px">Every sentence is heard on this device; only one that names him is sent to be transcribed.</div>';
       this.shadowRoot.querySelector(".voice").appendChild(m);
@@ -1230,7 +1243,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         e.preventDefault();
         this._earMode = a.dataset.m; lsSet(LS_EARMODE, this._earMode); this._paintEar(); m.remove();
         if (this._hot) { this._hotStop(); this._hotStart(); }
-        this._vsay(this._earMode === "addressed" ? "listening for Argus being addressed" : "listening for “Hey Argus”");
+        this._vsay(this._earMode === "addressed" ? "listening for " + SEAT + " being addressed" : "listening for “Hey " + SEAT + "”");
       });
       setTimeout(() => {
         const close = (e) => { if (!e.composedPath().includes(m)) { m.remove(); window.removeEventListener("pointerdown", close, true); } };
@@ -1363,7 +1376,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._voiceTurn = true;
       if (this._chat && this._chat.sendVoice) this._chat.sendVoice(text);   // voice:in, not a chat bubble
       else this._sendToChat(text);
-      this._vsay("“" + text + "” — " + (queued ? "cutting in on Argus's turn" : "sent; Argus is thinking…"), 12000);
+      this._vsay("“" + text + "” — " + (queued ? "cutting in on " + SEAT + "'s turn" : "sent; " + SEAT + " is thinking…"), 12000);
     }
 
     /** The on-device model, with its first-time download in the bubble. */
@@ -1412,13 +1425,13 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         if (h.ctx.state === "suspended") {
           await h.ctx.resume().catch(() => {});
           if (h.ctx.state === "suspended") {
-            this._vsay("tap anywhere to start listening for “Hey Argus”", 0);
-            const wake = () => { h.ctx.resume().then(() => this._vsay("listening for “Hey Argus”")).catch(() => {}); };
+            this._vsay("tap anywhere to start listening for “Hey " + SEAT + "”", 0);
+            const wake = () => { h.ctx.resume().then(() => this._vsay("listening for “Hey " + SEAT + "”")).catch(() => {}); };
             window.addEventListener("pointerdown", wake, { once: true, capture: true });
             return;
           }
         }
-        this._vsay("listening for “Hey Argus”");
+        this._vsay("listening for “Hey " + SEAT + "”");
       } catch (e) {
         this._hotStop(); lsSet(LS_HOTWORD, "0");
         this._vsay("the microphone is blocked: " + ((e && e.name) || e));
@@ -1467,7 +1480,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       if (this._hot !== h) return;
       this._wakeRecognizer(h);
       if (said && NAME_ANY_RE.test(said.replace(/[,.!?]/g, " "))) this._sendSaid(said);   // whisper agrees he was named
-      else if (said) { this._vsay("heard “" + said + "” — not for Argus", 4000); this._orb(null); }
+      else if (said) { this._vsay("heard “" + said + "” — not for " + SEAT, 4000); this._orb(null); }
       else this._orb(null);
     }
 
@@ -1582,7 +1595,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       }
       // whisper hears the name's tail in the kept 0.6 s ("gus, turn on..."): off with it
       const w = hotword(text), rest = w.hit ? w.rest : text
-        .replace(/^\s*(?:(?:hey|hi|okay|ok)[\s,]+)?(?:are gus|our gus|argus|argos|angus|august|gus|us)(?=$|[\s,.!?-])[\s,.!?-]*/i, "").trim();
+        .replace(STRIP_RE, "").trim();
       if (rest.split(/\s+/).filter(Boolean).length >= 2) { this._sendSaid(rest); return; }
       await this._hotAck(h);
       if (FOLLOW_ON && this._hot === h) this._dictate(h, true);
@@ -1720,7 +1733,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._voiceTurn = true;
       if (this._chat && this._chat.sendVoice) this._chat.sendVoice(text);   // voice:in, not a chat bubble
       else this._sendToChat(text);
-      this._vsay("“" + text + "” — " + (queued ? "cutting in on Argus's turn" : "sent; Argus is thinking…"), 12000);
+      this._vsay("“" + text + "” — " + (queued ? "cutting in on " + SEAT + "'s turn" : "sent; " + SEAT + " is thinking…"), 12000);
     }
 
     // ---------------------------------------------------------- speech out
