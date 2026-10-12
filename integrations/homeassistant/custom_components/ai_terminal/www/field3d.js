@@ -879,6 +879,21 @@ class Field3DView {
     }
   }
 
+  /** THE FIELD GREW (2026-10-12, the operator: "Bob says there's 200 live entities,
+   *  but my viewer is showing 0 out of 0"): the projection loads once; a page opened
+   *  on a young field never saw what was born after. Project afresh -- debounced;
+   *  at most every 20 s on a small field, every 5 min on a big one (a projection
+   *  costs the seat seconds there). */
+  _regrow(why) {
+    if (this._regrowT || !this._alive) return;
+    const gap = ((this.info || {}).n_total || 0) < 500 ? 20000 : 300000;
+    const wait = Math.max(2000, gap - (Date.now() - (this._regrownAt || 0)));
+    this._regrowT = setTimeout(() => {
+      this._regrowT = 0; this._regrownAt = Date.now(); this._unknownBorn = 0;
+      if (this._alive) this.load().catch(() => {});
+    }, wait);
+  }
+
   _onFrame(f) {
     const t = f && f.type, p = (f && f.properties) || {};
     if (!t) return;
@@ -904,7 +919,14 @@ class Field3DView {
         this.edgePulses.push({ a, b, t0: now + Math.random() * 300, dur: 900, col: PULSE_COLORS[st] || [1, 1, 1] });
       }
     } else if (t === "field.born") {
-      for (const id of p.eids || []) { const s = this.slots.get(id); if (s != null) this.pulses.set(s, now); }
+      for (const id of p.eids || []) {
+        const s = this.slots.get(id);
+        if (s != null) this.pulses.set(s, now);
+        else this._unknownBorn = (this._unknownBorn || 0) + 1;
+      }
+      // enough new ones to matter (an empty field: the first; a grown one: 5%)
+      const total = (this.info || {}).n_total || 0;
+      if ((this._unknownBorn || 0) >= Math.max(1, Math.ceil(total * 0.05))) this._regrow("born");
     } else if (t === "field.watch") {
       for (const [id] of p.fires || []) { const s = this.slots.get(id); if (s != null) this._ring(s); }
     } else if (t === "mind.focus") {
