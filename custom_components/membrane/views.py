@@ -45,7 +45,11 @@ def find(hass, name: str) -> Path | None:
     for d in dirs:
         if d is not None and (d / name).is_file():
             return d / name
-    return None
+    try:                                     # a big voice file: fetched on first use, verified (membrane/assets.py)
+        from membrane import assets
+        return assets.ensure(name, Path(hass.config.path(SEAT_DIR)) / "assets")
+    except ImportError:
+        return None
 
 
 def _read(path: Path) -> bytes:

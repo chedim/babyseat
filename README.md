@@ -26,8 +26,58 @@ sharing works, and the project's history are in the sub-documents (see
 
 ---
 
+## Quick start
+
+Membrane runs two ways. Both need an [Ollama](https://ollama.com) server with one chat model and one
+embedding model (`ollama pull qwen3:8b && ollama pull mxbai-embed-large`, or any cloud model Ollama
+serves), and 1–3 GB of RAM for the seat.
+
+### Standalone: its own web UI
+
+```bash
+pip install membrane-seat          # or: uv tool install membrane-seat
+mkdir ~/bob && cd ~/bob
+membrane standalone                # opens http://localhost:4096/ in your browser
+```
+
+You get membrane home: the field in 3D, the chat, and voice ("Hey Bob" — a new membrane is Bob
+until you agree on a name together; it will ask). Other devices on your network reach it at
+`http://<this machine>:4096/`. No login on the local network; a public or proxied caller is
+refused. Voice needs a secure origin, so the microphone works on `localhost` (the first voice use
+downloads ~65 MB of speech models, checked against their checksums).
+
+### Inside Home Assistant (HACS)
+
+1. HACS → ⋮ → Custom repositories → `https://github.com/chedim/membrane`, category *Integration*.
+2. Install **Membrane**, restart Home Assistant.
+3. Settings → Devices & services → Add integration → **Membrane** → *Inside Home Assistant*.
+   If Home Assistant already has the Ollama integration, it is used; otherwise give Ollama's
+   address. Pick the models.
+
+Home Assistant then runs the seat as its own child process (started and stopped with HA,
+restarted if it dies; its data in `<config>/membrane/`), opens on membrane home for everyone (HA's
+sidebar folds away; ☰ leads to HA's own pages — switch it off in the integration's options), adds
+the seat as an Assist conversation agent, and its field's readings as sensors.
+
+**What it can do in your house:** by default the seat may use Home Assistant through a hidden,
+non-admin, local-only user ("Membrane") — read any state, call any service, and mirror the entities
+it chooses (they update live). It acts on what people ask, but its commands are written by a
+model: turn *Let the seat use Home Assistant* off in the integration's options if you'd rather it
+only talks. It can't change Home Assistant's configuration or users.
+
+*Connect to a seat running elsewhere* is for a seat on another machine (the integration is then
+only its UI and agent).
+
+### Bugs and ideas
+
+[github.com/chedim/membrane/issues](https://github.com/chedim/membrane/issues) — your membrane
+knows this too: when it finds a bug in itself it drafts the issue and hands you the link to file.
+
+---
+
 ## Table of contents
 
+- [Quick start](#quick-start)
 - [Installation](#installation)
   - [Install the CLI](#install-the-cli-one-line-no-sudo)
   - [First run in a project](#first-run-in-a-project)

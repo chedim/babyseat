@@ -130,7 +130,8 @@ def find_file(name: str) -> Path | None:
         p = d / name
         if p.is_file():
             return p
-    return None
+    from . import assets                     # a big voice file: fetched on first use, verified
+    return assets.ensure(name, S.data_dir() / "assets")
 
 
 def _send_file(handler, p: Path) -> None:

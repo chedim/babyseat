@@ -7,7 +7,11 @@ Sources handled (in order of detection):
                    branch NEVER force-merges -- it skips with instructions).
   2. PIP DIRECT -- an install recorded with a direct_url (pip/uv from a git
                    URL): `pip install --upgrade` of the same URL.
-  3. NONE       -- a release install: not checking (say so once, quietly).
+  3. PYPI       -- a release install from PyPI (dist membrane-seat): compare
+                   with PyPI's latest; update = `pip install --upgrade
+                   membrane-seat==<latest>` (2026-10-12: release installs
+                   were skipped -- every new user's).
+  4. NONE       -- anything else: not checking.
 
 Contract:
   - the check happens at STARTUP ONLY (cli.main), never mid-session and
@@ -34,6 +38,32 @@ from pathlib import Path
 
 _CHECK_TIMEOUT = 6          # network ops: seconds (boot must not hang)
 _COMMIT_LIMIT = 12          # changelog lines shown in the prompt
+DIST = "membrane-seat"      # the PyPI name (pyproject.toml)
+PYPI_JSON = "https://pypi.org/pypi/membrane-seat/json"
+CHANGES_URL = "https://github.com/chedim/membrane/blob/main/CHANGELOG.md"
+
+
+def _vtuple(v: str) -> tuple:
+    import re
+    return tuple(int(x) for x in re.findall(r"\d+", str(v or ""))[:4])
+
+
+def _pypi_installed() -> str | None:
+    try:
+        from importlib.metadata import version
+        return version(DIST)
+    except Exception:
+        return None
+
+
+def _pypi_latest(timeout: float = _CHECK_TIMEOUT) -> str | None:
+    import json
+    import urllib.request
+    try:
+        with urllib.request.urlopen(PYPI_JSON, timeout=timeout) as r:
+            return str(json.loads(r.read())["info"]["version"])
+    except Exception:
+        return None
 
 
 def _git(repo: Path, *args: str, timeout: float = _CHECK_TIMEOUT) -> str:
@@ -116,12 +146,21 @@ def check(source: Path | None = None, timeout: float = _CHECK_TIMEOUT) -> dict:
     if url:
         return {"available": False, "mode": "direct",
                 "url": url}     # checked lazily by `membrane update`
+    have = _pypi_installed()
+    if have:
+        latest = _pypi_latest(timeout)
+        return {"available": bool(latest and _vtuple(latest) > _vtuple(have)),
+                "mode": "pypi", "local": have, "remote": latest or have}
     return {"available": False, "mode": "none"}
 
 
 def perform(info: dict) -> bool:
     """Apply an update (mode 'git' only from the startup path). Never
     force-merges: ff-only; a dirty/diverged tree skips with instructions."""
+    if info.get("mode") == "pypi" and info.get("remote"):
+        r = subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade",
+                            f"{DIST}=={info['remote']}"])
+        return r.returncode == 0
     if info.get("mode") != "git" or not info.get("repo"):
         return False
     repo: Path = info["repo"]
@@ -156,6 +195,21 @@ def prompt_and_update(info: dict, interactive: bool) -> None:
         print(f"[membrane] pip/uv install from {_pip_direct_url()} -- to "
               f"update run: pip install --upgrade "
               f"(or: uv tool upgrade membrane)", file=sys.stderr)
+        return
+    if mode == "pypi":
+        print(f"[membrane] update available: {info.get('local')} -> {info.get('remote')} "
+              f"(what changed: {CHANGES_URL})", file=sys.stderr)
+        if not interactive:
+            print("[membrane] non-interactive: not updating; run `membrane update` to apply",
+                  file=sys.stderr)
+            return
+        try:
+            answer = input("Update membrane now? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
+        if answer in ("y", "yes") and perform(info):
+            print(f"[membrane] updated; restarting on {info.get('remote')}", file=sys.stderr)
+            _reexec()
         return
     changelog = info.get("changelog") or []
     behind = info.get("behind", 0)
@@ -206,7 +260,10 @@ def main() -> int:
     os.environ.pop("MEMBRANE_NO_UPDATE_CHECK", None)
     info = check()
     if info["mode"] == "none":
-        print("[membrane] not a git/direct install; nothing to update.")
+        print("[membrane] not a git, git-URL or PyPI install; nothing to update.")
+        return 0
+    if info["mode"] == "pypi" and not info.get("available"):
+        print(f"[membrane] up to date ({info.get('local')}).")
         return 0
     if info["mode"] == "direct":
         url = _pip_direct_url()

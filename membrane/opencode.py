@@ -1624,7 +1624,7 @@ def main() -> None:
                                    serve=bool(getattr(args, "serve", False)))
             if naming_on:                  # THE NAME CEREMONY (naming.py): its own name, in its own prompt
                 from . import naming as _NM
-                text = _NM.personalize(text, _NM.current()) + _NM.card_line()
+                text = _NM.personalize(text, _NM.current()) + _NM.card_line() + _NM.feedback_line()
             if os.environ.get("HASS_URL") and os.environ.get("HASS_TOKEN"):   # Home Assistant runs this seat
                 from . import ha_bridge as _HB
                 text += _HB.card_line()

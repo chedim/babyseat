@@ -197,6 +197,23 @@ def card_line() -> str:
             "them why and ask again. Never pick one alone.\n")
 
 
+ISSUES = "https://github.com/chedim/membrane/issues"
+
+
+def feedback_line() -> str:
+    """Bugs and ideas go to membrane's tracker (2026-10-12, the operator: "let Bobs
+    know that they can report bugs or ideas/suggestions via membrane's github
+    tickets") -- drafted by the seat, filed by a person: the seat has no account
+    and posts nothing itself."""
+    return (f"\n- MEMBRANE ITSELF is open source ({ISSUES.rsplit('/', 1)[0]}). When you hit a bug in "
+            "membrane -- a tool that misbehaves, a crash, a wrong reading of your own machinery -- or "
+            "have an idea that would make it better, draft a GitHub issue: a short title, then what "
+            "happened, what you expected, and how to see it again (no private data: no names, "
+            "addresses, tokens). Give the operator the prefilled link to file it -- "
+            f"{ISSUES}/new?title=<url-encoded title>&body=<url-encoded body> -- and say why it "
+            "matters. You never post it yourself; they decide.\n")
+
+
 def personalize(text: str, name: str) -> str:
     """The doctrine as this seat reads it: the boat's seat name out, its own in."""
     return re.sub(r"\bArgus\b", name, text) if name and name != "Argus" else text

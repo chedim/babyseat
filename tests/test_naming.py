@@ -81,3 +81,9 @@ class TestNaming(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_feedback_goes_through_a_person():
+    line = N.feedback_line()
+    assert "https://github.com/chedim/membrane/issues/new?title=" in line
+    assert "never post it yourself" in line
