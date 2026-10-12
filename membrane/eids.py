@@ -335,3 +335,40 @@ def lint_key(key: str) -> str | None:
     if not s:
         return "a key is required"
     return _plain(s, KEY_MAX)
+
+
+# ---- THE ONE SPELLING (2026-10-11 sweep: one stored entity lived as up to four
+# field states -- 'm:component:decision' from prose, bare 'decision' from
+# readings, nothing from script tells, 'membrane::tool:clock' from ticks -- and
+# every cross-store lookup missed somewhere). The store side resolves any
+# spelling with EntityStore.resolve; this is the other direction.
+_NS_PREFIX = "membrane::"
+
+
+def field_id(eid: str) -> str:
+    """A store eid (or any spelling of one) -> its canonical field id: the
+    long heads shorten (files:x -> f:x, shell:x -> c:x), a class-embedded
+    name whose inner part is a kind is that kind (Component:ha:light.x ->
+    ha:light.x), a kind keeps itself (tool:clock), everything else is the
+    mirror m:<name> -- the same id prose about it gets ('Component:decision'
+    -> m:component:decision)."""
+    s = str(eid or "").strip()
+    if s.lower().startswith(_NS_PREFIX):
+        s = s[len(_NS_PREFIX):]
+    for _ in range(4):
+        head, _, rest = s.partition(":")
+        h = head.lower()
+        if not rest:
+            return "m:" + s.lower() if s else ""
+        if h in _LEGACY_KIND:
+            return _LEGACY_KIND[h] + ":" + rest
+        if h == "m":
+            return "m:" + rest.lower()
+        if h in KINDS:
+            return h + ":" + rest
+        rh = rest.partition(":")[0].lower()
+        if rh in KINDS or rh in _LEGACY_KIND:
+            s = rest                      # Component:ha:x -> ha:x
+            continue
+        return "m:" + s.lower()
+    return "m:" + s.lower()

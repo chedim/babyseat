@@ -329,6 +329,10 @@ def track_eid(field, key: str) -> str | None:
     legacy = E.legacy_to_canon(key, graph)
     if legacy:
         cands.append(legacy)
+    # the stored entity's own field spelling (2026-10-11: a 'Component:decision'
+    # track read the WORD w:decision; a 'tool:clock' track missed the ticks)
+    if ":" in (key or ""):
+        cands.append(E.field_id(key))
     for c in cands:
         if field.get(c) is not None:
             return c

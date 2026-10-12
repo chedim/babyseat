@@ -495,6 +495,7 @@ class Thinker:
             return
         try:
             from . import streams as ST
+            from .eids import field_id
             evs = []
             for ent in movers:
                 props = ent.properties or {}
@@ -504,7 +505,7 @@ class Thinker:
                                     args={"beat": self._beat},
                                     result_head=head,
                                     outcome="ok", ts=time.time(),
-                                    subject=ent.eid))
+                                    subject=field_id(ent.eid)))
             if evs:
                 fld.write_events(evs, session="")
                 fld.process(limit=8)

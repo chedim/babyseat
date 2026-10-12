@@ -923,7 +923,9 @@ class EntityField:
                 _store = getattr(self, "_est_sink", None)
                 if _store is not None:
                     for e in list(self._dirty):
-                        _ent = _store.docs.get(e)
+                        # a FIELD id -> its stored entity (the store keys are
+                        # membrane::...: docs.get(field id) never matched)
+                        _ent = _store.docs.get(e) or _store.by_field_id(e)
                         if _ent is not None:
                             note_field_change(getattr(_store, "_srv",
                                                       None), _store, _ent)

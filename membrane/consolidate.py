@@ -144,10 +144,11 @@ def record_reading(srv, ent, state, now: float | None = None) -> bool:
     try:
         from . import streams as ST
         from .classes import short_name
+        from .eids import field_id
         subj = short_name(ent.eid)
         fld.write_events([ST.Event(stream="observation", tool="read", args={"entity": subj},
                                    result_head=f"{subj}: {text}", outcome="ok", ts=now,
-                                   subject=subj)], session="readings")
+                                   subject=field_id(ent.eid))], session="readings")
     except Exception as e:
         print(f"[consolidate] reading event skipped: {e!r}", file=sys.stderr)
     return True

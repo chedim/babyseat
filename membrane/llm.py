@@ -174,7 +174,7 @@ def request(srv, prompt: str, about: str = "", caller: str = "", now: float | No
                 fld.write_events([_ST.Event(stream="observation", tool="call",
                                             args={"object": "llm", "method": "call", "about": about_eid},
                                             result_head=f"llm.call by {caller} REFUSED: {why}",
-                                            outcome="failed", ts=now, subject="llm")], session="calls")
+                                            outcome="failed", ts=now, subject="m:llm")], session="calls")
         except Exception:
             pass
         return {"rc": 1, "text": f"not called: {why}"}
@@ -194,7 +194,7 @@ def request(srv, prompt: str, about: str = "", caller: str = "", now: float | No
             fld.write_events([_ST.Event(stream="observation", tool="call", args={"object": "llm", "method": "call",
                                                                                   "about": about_eid},
                                         result_head=f"llm.call by {caller} about {about_eid}: {prompt[:160]}",
-                                        outcome="ok", ts=now, subject="llm")], session="calls")
+                                        outcome="ok", ts=now, subject="m:llm")], session="calls")
     except Exception:
         pass
     try:

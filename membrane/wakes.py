@@ -56,7 +56,9 @@ def features(srv, ev: dict, now: float) -> dict:
     if ent in _last_wake:
         f["since_last_s"] = round(now - _last_wake[ent], 1)
     est = getattr(srv, "entity_store", None)
-    doc = (est.docs or {}).get(ent) if (est is not None and ent) else None
+    doc = None
+    if est is not None and ent:
+        doc = (est.docs or {}).get(ent) or (est.resolve(ent, exact=True) if hasattr(est, "resolve") else None)
     if doc is not None:
         pp = doc.properties or {}
         f["cls"] = getattr(doc, "cls", None)

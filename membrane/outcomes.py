@@ -232,7 +232,9 @@ def of(srv) -> ShadowGate | None:
 
 def _cls(srv, eid: str):
     est = getattr(srv, "entity_store", None)
-    doc = (est.docs or {}).get(eid) if (est is not None and eid) else None
+    doc = None
+    if est is not None and eid:
+        doc = (est.docs or {}).get(eid) or (est.resolve(eid, exact=True) if hasattr(est, "resolve") else None)
     return getattr(doc, "cls", None) if doc is not None else None
 
 

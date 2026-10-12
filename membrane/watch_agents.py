@@ -182,6 +182,21 @@ def _group_distance(entity_pos, rel_pos) -> float:
     return _dist(entity_pos, rel_pos)
 
 
+def _rel_eid(est, rel: str, positions: dict) -> str | None:
+    """A watch op's `rel`, any spelling -> the positioned entity it names
+    (the resolver; the old suffix match missed 'm:'/lowercase/'f:x' and
+    picked an arbitrary entity for a bare word)."""
+    if rel in positions:
+        return rel
+    try:
+        hit = est.resolve(rel, exact=True)
+    except Exception:
+        hit = None
+    if hit is not None and hit.eid in positions:
+        return hit.eid
+    return None
+
+
 def sweep_watch_ops(est, queue: "WatchEvents", rel_positions: dict,
                     now: float | None = None,
                     cooldown_s: float | None = None) -> list[dict]:
@@ -217,8 +232,7 @@ def sweep_watch_ops(est, queue: "WatchEvents", rel_positions: dict,
             rel = op.get("rel") or "operator"
             rel_eid = (OPERATOR_EID if rel == "operator"
                        else eid if rel == "self" else
-                       next((k for k in positions
-                             if k.endswith(rel)), None))
+                       _rel_eid(est, rel, positions))
             if kind in ("away", "near"):
                 rel_pos = positions.get(rel_eid) \
                     if rel != "*" else None

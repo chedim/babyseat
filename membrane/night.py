@@ -336,6 +336,10 @@ def consolidate_entities(fld, est, mem=None, materialize: int = 8,
             key = overlay_key(cid)
             if f"{MEMBRANE_NS}{key}" in est.docs or est.find(key) is not None:
                 continue
+            # the stored entity this field id is ABOUT already exists under its
+            # own spelling (m:component:decision is Component:decision): no twin
+            if est.by_field_id(cid) is not None or est.resolve(cid, exact=True) is not None:
+                continue
             if key.partition(":")[2].lower() in _names:
                 continue
             hot.append((int(d.get("n") or 0), cid, key))
@@ -372,6 +376,11 @@ def consolidate_entities(fld, est, mem=None, materialize: int = 8,
             if not matched:
                 continue
         eid = canon_eid(key, fld)
+        if eid is None and key and key not in ("session:now", "global:now") \
+                and not key.startswith(("synth:", "junk-anchor:", "boot:")):
+            # a class-embedded doc (Component:decision) had no field id: it
+            # never drifted, so its proximity watches could never fire
+            eid = E.field_id(key)
         if eid is None:
             continue                 # overlay-only doc (junk anchors, synth)
         cell_pts = _cell_points(fld, eid)
@@ -710,7 +719,7 @@ def _script_tell(fld, eid: str, kind: str, ok: bool, text: str) -> None:
     if fld is None:
         return
     try:
-        subj = canon_eid(eid) or ""
+        subj = E.field_id(eid)             # the one spelling (class entities had none)
         fld.write_events([ST.Event(stream="discourse", role="note",
                                    text=text, ts=time.time(),
                                    src=f"script:{kind}", subject=subj)],
@@ -2309,7 +2318,7 @@ def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | Non
                                        result_head=(f"{subj}.{method}({argtxt}) -> rc {run.get('rc')} "
                                                     f"{run.get('outcome') or ''} {str(run.get('head') or '')[:120]}"),
                                        outcome="ok" if run.get("rc") == 0 else "failed",
-                                       ts=time.time(), subject=subj)], session="calls")
+                                       ts=time.time(), subject=E.field_id(obj.eid))], session="calls")
         except Exception:
             pass
     return {"ok": status == "ok", "status": status, "object": obj.eid, "method": mp.get("name") or method,

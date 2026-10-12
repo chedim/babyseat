@@ -242,7 +242,8 @@ class TestTickScripts(unittest.TestCase):
         th._tick_scripts()                     # beat 60: ONE move event
         self.assertEqual(len(fld.events), 1)
         ev = fld.events[0]
-        self.assertEqual(getattr(ev, "subject", None), ent.eid)
+        from membrane.eids import field_id
+        self.assertEqual(getattr(ev, "subject", None), field_id(ent.eid))   # the one spelling (tool:clock)
         self.assertEqual(getattr(ev, "stream", None), "observation")
         self.assertEqual(getattr(ev, "outcome", None), "ok")
         self.assertEqual(ev.args.get("beat"), TICK_FIELD_EVERY)

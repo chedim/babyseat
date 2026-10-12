@@ -63,12 +63,16 @@ def _entity(srv):
 
 
 def _doc(est, eid: str):
+    """Any spelling -> the stored entity (EntityStore.resolve, exact: a
+    guessed suffix hit is worse than none -- 'the entity is gone' came from
+    the old suffix match missing 'm:component:decision')."""
     docs = getattr(est, "docs", None) or {}
     d = docs.get(eid)
-    if d is None and eid:
-        for k in list(docs):
-            if k.endswith("::" + eid) or k.endswith(":" + eid):
-                return docs[k]
+    if d is None and eid and hasattr(est, "resolve"):
+        try:
+            d = est.resolve(eid, exact=True)
+        except Exception:
+            d = None
     return d
 
 
@@ -138,7 +142,8 @@ def _activity(srv, rec: dict, hi: float) -> dict:
         return out
     try:
         from .classes import short_name
-        ids = {rec["eid"], short_name(rec["eid"])}
+        from .eids import field_id
+        ids = {rec["eid"], short_name(rec["eid"]), field_id(rec["eid"])}
         rows = []
         for i in ids:
             rows += [d for d in (fld.deltas_of(i) or []) if rec["ts"] < float(d.get("ts") or 0) <= hi]
@@ -246,9 +251,10 @@ def _publish(srv, rec: dict, line: str, now: float) -> None:
         try:
             from . import streams as ST
             from .classes import short_name
+            from .eids import field_id
             subj = short_name(rec["eid"])
             fld.write_events([ST.Event(stream="observation", tool="consequence", args={"entity": subj},
-                                       result_head=line, outcome="ok", ts=now, subject=subj)],
+                                       result_head=line, outcome="ok", ts=now, subject=field_id(rec["eid"]))],
                              session="consequences")
         except Exception:
             pass

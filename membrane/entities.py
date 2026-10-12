@@ -1180,12 +1180,7 @@ class TimelineOps:
         (watch_last_fire: kind, entity, ts + the event head). The loop
         layer reads the queue; the ENTITY keeps its last fire's
         provenance (the react/ignore verdict lands on the doc later)."""
-        ent = self.docs.get(eid)
-        if ent is None:
-            for k in list(self.docs):
-                if k.endswith(eid):
-                    ent = self.docs[k]
-                    break
+        ent = self.docs.get(eid) or self.resolve(eid, exact=True)
         if ent is None:
             return
         props = ent.properties or {}
@@ -1200,12 +1195,7 @@ class TimelineOps:
         (reacted/ignored + what it did) stamps the entity
         (watch_last_decision) -- the loop's verdict lives beside the
         entity's watch provenance."""
-        ent = self.docs.get(eid)
-        if ent is None:
-            for k in list(self.docs):
-                if k.endswith(eid):
-                    ent = self.docs[k]
-                    break
+        ent = self.docs.get(eid) or self.resolve(eid, exact=True)
         if ent is None:
             return
         props = ent.properties or {}
@@ -1946,7 +1936,40 @@ class EntityStore(MultiParentOps, TimelineOps):
             self._lc_idx, self._lc_n = idx, n
         return idx
 
-    def _resolve_spec_raw(self, spec: str) -> QuantumEntity | None:
+    def resolve(self, spec: str, exact: bool = False) -> "QuantumEntity | None":
+        """THE ONE RESOLVER (2026-10-11 sweep): any spelling of a stored
+        entity -> its doc (the namespace, the m: mirror, the field's short
+        kinds, case, merges). exact=True drops the last-resort suffix/name
+        guess -- for write paths (stamps, consequences) where a wrong hit is
+        worse than none."""
+        if not spec:
+            return None
+        if exact:
+            from .night import canon_eid as _canon
+            c = _canon(spec)
+            if c:
+                hit = self.docs.get(MEMBRANE_NS + c.removeprefix(MEMBRANE_NS))
+                if hit is not None:
+                    return self._follow_merges(hit)
+            ent = self._resolve_spec_raw(spec, fuzzy=False)
+            return self._follow_merges(ent) if ent is not None else None
+        return self._resolve_spec(spec)
+
+    def by_field_id(self, fid: str) -> "QuantumEntity | None":
+        """A FIELD id -> the stored entity it is about (the flush's intake,
+        the field's subjects): field_id(eid) -> eid, rebuilt as the store moves."""
+        from .eids import field_id as _fid
+        n = len(self.docs)
+        idx = getattr(self, "_fid_idx", None)
+        if idx is None or getattr(self, "_fid_n", -1) != n:
+            idx = {}
+            for eid in list(self.docs.keys()):
+                idx.setdefault(_fid(eid), eid)
+            self._fid_idx, self._fid_n = idx, n
+        hit = idx.get(fid) or idx.get(str(fid or "").lower())
+        return self.docs.get(hit) if hit else None
+
+    def _resolve_spec_raw(self, spec: str, fuzzy: bool = True) -> QuantumEntity | None:
         """The direct resolution (no merge-pointer following): exact, then
         the spec's spellings (membrane:: added, the m: mirror peeled, the
         field's short kinds mapped), each case-blind; then an eid-suffix
@@ -1963,6 +1986,8 @@ class EntityStore(MultiParentOps, TimelineOps):
             hit = idx.get(c.lower())
             if hit is not None and hit in self.docs:
                 return self.docs[hit]
+        if not fuzzy:
+            return None
         low = spec.lower()
         hits = [q for q in list(self.docs.values())
                 if q.eid.lower().endswith(":" + low)
@@ -2825,6 +2850,11 @@ class EntityStore(MultiParentOps, TimelineOps):
         direct = self.docs.get(f"{MEMBRANE_NS}{key}")
         if direct is not None:
             return direct
+        # any spelling of a stored entity (m:component:decision, f:x for
+        # files:x): the boot minted twins like membrane::m:component:decision
+        hit = self.resolve(key, exact=True) or self.by_field_id(key)
+        if hit is not None:
+            return hit
         suffix = ":" + key.lower()
         for q in list(self.docs.values()):
             if q.eid.lower().endswith(suffix):

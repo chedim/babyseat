@@ -57,7 +57,8 @@ def _field_state(srv, eid: str):
     if fld is None:
         return None
     bare = eid.split("::", 1)[-1]
-    cands = [eid, bare, "m:" + bare]
+    from .eids import field_id
+    cands = [field_id(eid), eid, bare, "m:" + bare]
     try:
         from .night import canon_eid
         c = canon_eid(eid)
