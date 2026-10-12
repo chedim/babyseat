@@ -23,7 +23,7 @@ from homeassistant.core import CoreState, HomeAssistant
 
 from .const import (CONF_BACKEND, CONF_EMBED_MODEL, CONF_MODE, CONF_MODEL, CONF_SERVE_PASS,
                     CONF_SERVE_URL, CONF_SERVE_USER, DEFAULT_LOOPS, DEFAULT_SERVE_USER, DOMAIN,
-                    MODE_INSIDE, OPT_HA_ACCESS, OPT_LANDING, OPT_LOOPS, OPT_STT_URL)
+                    MODE_INSIDE, OPT_HA_ACCESS, OPT_HA_BASE_URL, OPT_LANDING, OPT_LOOPS, OPT_STT_URL)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -111,6 +111,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         comp["serve_url"] = str(data.get(CONF_SERVE_URL) or "").rstrip("/")
         comp["serve_user"] = str(data.get(CONF_SERVE_USER) or DEFAULT_SERVE_USER)
         comp["serve_pass"] = str(data.get(CONF_SERVE_PASS) or "")
+        if opts.get(OPT_HA_ACCESS, True):
+            # DETACHED HOME ASSISTANT ACCESS (ha_access.py): the same StatePush as
+            # inside mode (its target is comp["serve_url"] either way), and the
+            # token POSTed to the seat at every HA start -- it lands in the seat's
+            # ~/.config/membrane/hass.env and is read on its next turn, so an HA
+            # restart reaches the seat without a seat restart. The ha-start /
+            # ha-stop notices ride the same door (restarts.py): inside mode has
+            # no such notice because the child announces its own boot with the
+            # downtime; a detached seat would otherwise read an HA restart as the
+            # world going quiet.
+            from . import ha_access as HA
+            comp["ha_base_url"] = str(opts.get(OPT_HA_BASE_URL) or "")
+            push = HA.StatePush(hass, comp)
+            push.start()
+            comp["state_push"] = push
+
+            async def _announced():
+                await HA.push_token(hass, entry, comp)
+                if await HA.seat_event(comp, "ha-start"):
+                    _LOGGER.info("membrane: the detached seat heard Home Assistant start")
+
+            if hass.state is CoreState.running:
+                hass.async_create_background_task(_announced(), "membrane ha-start")
+            entry.async_on_unload(hass.bus.async_listen_once(
+                EVENT_HOMEASSISTANT_STARTED, lambda _e: hass.async_create_background_task(
+                    _announced(), "membrane ha-start")))
+
+            def _farewell(_event):
+                hass.async_create_background_task(
+                    HA.seat_event(comp, "ha-stop", timeout_s=5.0), "membrane ha-stop")
+            entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _farewell))
     from .coordinator import FieldCoordinator
     comp.setdefault("sessions", {})
     comp["coordinator"] = FieldCoordinator(hass, entry, comp)

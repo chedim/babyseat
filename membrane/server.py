@@ -3016,6 +3016,12 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                         psrv, person, in_on=b.get("in_on"), in_mode=b.get("in_mode"),
                         out_on=b.get("out_on"), device=str(b.get("device") or ""))})
                 return self._json_out({"ok": True, **_VIO.read(psrv, person)})
+            if path == "/membrane/ha/token":
+                # Home Assistant's DELIVERY OF THE SEAT'S HA ACCESS (detached):
+                # the pair into ~/.config/membrane/hass.env (0600), read per turn
+                from . import ha_bridge as _HB
+                b = self._read_body() or {}
+                return self._json_out(_HB.save_token(str(b.get("url") or ""), str(b.get("token") or "")))
             if path == "/membrane/ha/states":
                 from . import ha_bridge as _HB
                 psrv = getattr(runner, "srv", None) if runner is not None else None

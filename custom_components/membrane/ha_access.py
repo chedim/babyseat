@@ -1,13 +1,23 @@
 """THE SEAT'S WAY INTO HOME ASSISTANT (2026-10-12, the operator: "can it just...
-integrate?" -- then "ok, letz do it that way").
+integrate?" -- then "ok, letz do it that way"; 2026-10-12 detached: the seat is
+not HA's child -- the token RIDES TO IT over its own serve, POST /membrane/ha/token,
+and it lands in the seat's ~/.config/membrane/hass.env).
 
 - ACT: a hidden system user "Membrane" (non-admin, local-only; HA's own way for a
   component -- the Supervisor and Cloud have theirs), a system refresh token, and an
   access token minted at each seat start: the seat gets HASS_URL + HASS_TOKEN and
   uses HA's REST API like any client. The user is removed with the integration.
+  Inside mode delivers the pair in the child process's environment; CONNECT
+  (detached) mode POSTs it to the seat instead -- re-pushed at every HA start
+  (membrane/opencode.py reads the file on its next turn, no seat restart).
 - SENSE: the seat marks field entities with properties.ha_entity; HA pushes those
   entities' state changes to the seat (POST /membrane/ha/states, batched), the list
   re-read every minute (GET /membrane/ha/subscriptions) -- membrane/ha_bridge.py.
+  StatePush targets comp["serve_url"] in BOTH modes: inside = the local child,
+  connect = the seat elsewhere; the pair is already on the entry.
+- TOLD: restarts.py's contract -- the integration posts {kind: "ha-start"}
+  (and, on the way down, {kind: "ha-stop"}) to the seat's POST /membrane/seat/event,
+  so a detached seat never reads an HA restart as the world going quiet.
 """
 from __future__ import annotations
 
@@ -65,6 +75,66 @@ def local_url(hass: HomeAssistant) -> str:
     port = getattr(api, "port", None) or 8123
     scheme = "https" if getattr(api, "use_ssl", False) else "http"
     return f"{scheme}://127.0.0.1:{port}"
+
+
+def routable_url(hass: HomeAssistant) -> str:
+    """HA's address as the detached seat sees it -- a phone on the LAN, not this
+    machine's loopback (the operator's own URL, then HA's external, then local)."""
+    for u in (getattr(hass.config, "internal_url", None), getattr(hass.config, "external_url", None)):
+        if isinstance(u, str) and u.startswith("http"):
+            return u.rstrip("/")
+    return local_url(hass)
+
+
+def _auth(comp: dict) -> aiohttp.BasicAuth:
+    return aiohttp.BasicAuth(comp.get("serve_user") or "opencode", comp.get("serve_pass") or "")
+
+
+async def push_token(hass: HomeAssistant, entry, comp: dict) -> bool:
+    """Deliver HA access to a DETACHED seat: a fresh token, POSTed to its serve
+    (/membrane/ha/token) -- the seat writes ~/.config/membrane/hass.env and reads
+    it on its next turn. Re-run at every HA start: tokens stay un-minted-at-rest
+    on HA's side (restarts.py's property, kept by re-pushing)."""
+    try:
+        token = await mint_token(hass, entry)
+    except Exception as e:                           # noqa: BLE001
+        _LOGGER.warning("membrane: could not mint the seat's Home Assistant token (%r)", e)
+        return False
+    url = comp.get("serve_url") or ""
+    if not (url and comp.get("serve_pass")):
+        return False
+    body = {"url": str(comp.get("ha_base_url") or "") or routable_url(hass), "token": token}
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.post(url + "/membrane/ha/token", json=body, auth=_auth(comp),
+                              timeout=aiohttp.ClientTimeout(total=30)) as r:
+                ok = r.status == 200
+                await r.read()
+    except Exception as e:                           # noqa: BLE001
+        _LOGGER.debug("membrane: the token did not reach the seat (%r)", e)
+        return False
+    if ok:
+        _LOGGER.info("membrane: Home Assistant access delivered to the detached seat")
+    else:
+        _LOGGER.debug("membrane: the seat did not take the token")
+    return ok
+
+
+async def seat_event(comp: dict, kind: str, timeout_s: float = 30.0) -> bool:
+    """A word to the detached seat: {kind: ha-start|ha-stop} (restarts.py) -- its
+    /membrane/seat/event answers {"ok": False, ...} for unknown kinds."""
+    url = comp.get("serve_url") or ""
+    if not (url and comp.get("serve_pass")):
+        return False
+    try:
+        async with aiohttp.ClientSession() as s:
+            async with s.post(url + "/membrane/seat/event", json={"kind": kind}, auth=_auth(comp),
+                              timeout=aiohttp.ClientTimeout(total=timeout_s)) as r:
+                await r.read()
+                return r.status == 200
+    except Exception as e:                           # noqa: BLE001
+        _LOGGER.debug("membrane: %s did not reach the seat (%r)", kind, e)
+        return False
 
 
 class StatePush:

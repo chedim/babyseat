@@ -17,6 +17,7 @@ OPT_LANDING = "landing"         # membrane home is the landing page (Agatha's wa
 OPT_STT_URL = "stt_url"         # a whisper-server for speech; "" = the browser listens itself
 OPT_LOOPS = "loops"             # the seat's watch-loop pool
 OPT_HA_ACCESS = "ha_access"     # the seat may use Home Assistant (ha_access.py)
+OPT_HA_BASE_URL = "ha_base_url" # connect mode: HA's address as THE SEAT sees it ("" = HA's own)
 
 DEFAULT_BACKEND = "http://localhost:11434"
 DEFAULT_SERVE_USER = "opencode"

@@ -40,6 +40,7 @@
           "model": "Chat model",
           "embed_model": "Embedding model (best left as it is once the field has grown: its memories were embedded with it)",
           "ha_access": "Let the seat use Home Assistant (read states, call services, sense changes of the entities it mirrors) -- its own hidden, non-admin user",
+          "ha_base_url": "Home Assistant's address as the seat sees it (detached seats call this; empty: HA's own answer)",
           "landing": "Open on membrane home (folds HA's sidebar away, as on the boat)",
           "stt_url": "Speech server URL (whisper-server; empty: the browser listens itself)",
           "loops": "Watch loops (1-3; fewer is lighter)"

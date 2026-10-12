@@ -13,7 +13,8 @@ changes nothing by itself.
              it kills the serve; no reason = unexpected (a crash, the
              memory killer, the phone)
   HA         the integration posts {kind: "ha-start"} to the seat when
-             Home Assistant has started (POST /membrane/seat/event)
+             Home Assistant has started, and {kind: "ha-stop"} when it is
+             going down (POST /membrane/seat/event)
 
 A PLANNED RESTART ASKS FIRST (the operator: "and let them delay it if
 they're busy or need some time to shut down stuff gracefully"): the
@@ -43,7 +44,7 @@ MAX_DELAY_MIN = 15
 ASK_FILE = "restart-ask.json"
 ANSWER_FILE = "restart-answer.json"
 IDLE_POLL_S = 10.0
-_last_ha = {"ts": 0.0}
+_last_ha = {"ha-start": 0.0, "ha-stop": 0.0}
 
 
 def _dir(srv) -> str:
@@ -103,6 +104,12 @@ def ha_text(now: float | None = None, detail: str = "") -> str:
     return (f"{SIGN} Home Assistant restarted -- it was back up at {_clock(now)}{(' (' + detail + ')') if detail else ''}. "
             "Its entities, automations and the chat relay reloaded; states read in the first minute may be "
             "unavailable or stale.")
+
+
+def ha_stop_text(detail: str = "") -> str:
+    return (f"{SIGN} Home Assistant is going down{(' (' + detail + ')') if detail else ''} -- maintenance or a "
+            "restart. Its entities, services and the chat relay go quiet; a fresh token lands when it is "
+            "back, and I will say so then.")
 
 
 def _proxy_url(srv) -> str | None:
@@ -170,20 +177,22 @@ def booted() -> bool:
 
 
 def on_event(srv, body: dict) -> dict:
-    """POST /membrane/seat/event (the HA integration): {kind: 'ha-start', detail?}."""
+    """POST /membrane/seat/event (the HA integration): {kind: 'ha-start' | 'ha-stop', detail?}."""
     kind = str((body or {}).get("kind") or "")
-    if kind != "ha-start":
-        return {"ok": False, "error": f"unknown kind {kind!r} (ha-start)"}
+    if kind not in ("ha-start", "ha-stop"):
+        return {"ok": False, "error": f"unknown kind {kind!r} (ha-start, ha-stop)"}
     now = time.time()
-    if now - _last_ha["ts"] < HA_DEDUP_S:
+    if now - _last_ha.get(kind, 0.0) < HA_DEDUP_S:
         return {"ok": True, "dedup": True}
-    _last_ha["ts"] = now
+    _last_ha[kind] = now
     try:
         from . import seat_panel as SP
-        SP.note(srv, "ha-restart")
+        SP.note(srv, "ha-restart" if kind == "ha-start" else "ha-stop")
     except Exception:
         pass
-    _send(srv, "ha-restart", ha_text(now, str((body or {}).get("detail") or "")[:80]))
+    detail = str((body or {}).get("detail") or "")[:80]
+    _send(srv, "ha-restart" if kind == "ha-start" else "ha-stop",
+          ha_text(now, detail) if kind == "ha-start" else ha_stop_text(detail))
     return {"ok": True}
 
 
