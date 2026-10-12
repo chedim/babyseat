@@ -85,12 +85,12 @@ def child_args(data: Path, backend: str, model: str, embed: str, listen: int, se
 
 
 def read_name(data: Path) -> tuple[str, list]:
-    """The seat's agreed name (naming.py writes it to settings.json); Membrane until then."""
+    """The seat's agreed name (naming.py writes it to settings.json); Bob until then."""
     try:
         d = json.loads((data / "settings.json").read_text())
-        return str(d.get("name") or "") or "Membrane", list(d.get("aliases") or [])
+        return str(d.get("name") or "") or "Bob", list(d.get("aliases") or [])
     except (OSError, ValueError):
-        return "Membrane", []
+        return "Bob", []
 
 
 def read_auth(data: Path) -> tuple[str, str] | None:

@@ -77,7 +77,7 @@ class AssetView(HomeAssistantView):
 
 def _name(hass) -> dict:
     comp = hass.data.get(DOMAIN) or {}
-    return {"name": comp.get("name") or "Membrane", "aliases": list(comp.get("aliases") or []),
+    return {"name": comp.get("name") or "Bob", "aliases": list(comp.get("aliases") or []),
             "stt": "server" if comp.get("stt_url") else "browser"}
 
 

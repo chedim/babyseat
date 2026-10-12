@@ -61,7 +61,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     comp = hass.data.setdefault(DOMAIN, {})
     data, opts = entry.data, entry.options
     comp["stt_url"] = str(opts.get(OPT_STT_URL) or "")
-    comp.setdefault("name", "Membrane")
+    comp.setdefault("name", "Bob")
     _register_views(hass, comp)
 
     for path, title, icon, element, module, admin in PANELS:

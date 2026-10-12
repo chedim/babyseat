@@ -4,7 +4,7 @@ talk with the operator about its name and only after they together adopt a
 name make it from 'Hey, membrane' to 'Hey, <name>'"; then: "lets ask the
 operator for the name").
 
-A new standalone seat is "Membrane" ("Hey Membrane"). It ASKS the operator for
+A new seat is "Bob" ("Hey Bob"). It ASKS the operator for
 its name in its first reply to them (ideas only if they want some), and when
 they've chosen it writes the name to the entity `name` (properties.name, plus
 agreed_with: who chose it). The edit is checked here -- one
@@ -24,7 +24,7 @@ from pathlib import Path
 
 from . import settings as S
 
-DEFAULT = "Membrane"
+DEFAULT = "Bob"                 # the operator: "call new membranes Bobs until the user chooses to rename them"
 ENT = "name"
 TAKEN = {"argus", "standalone", "assistant", "ai", "bot", "seat", "agatha", "claude"}
 VOSK_ARCHIVE = "vosk-model-en.tar.gz"
@@ -132,7 +132,7 @@ def plant(srv) -> None:
     ent = est.docs.get(MEMBRANE_NS + ENT)
     pp = dict(ent.properties or {}) if ent is not None else {}
     pp.update({
-        "summary": ("YOUR NAME. You don't have one yet: people call you Membrane (\"Hey Membrane\"). "
+        "summary": ("YOUR NAME. You don't have one yet: people call you Bob (\"Hey Bob\"). "
                     "ASK the operator what they'd like to call you -- offer ideas only if they want some; "
                     "when they've chosen, edit this entity at once: entity(action='edit', spec='membrane::name', "
                     "properties={'name': '<Name>', 'agreed_with': '<who chose it>'}). A name must be one word, two or three syllables, and one the page's "
@@ -188,7 +188,7 @@ def card_line() -> str:
         n = current()
         return (f"\n- YOUR NAME: {n} -- you and the operator agreed on it. People call you by it "
                 f"(\"Hey {n}\" starts a voice message); answer to it, and sign as it.\n")
-    return ("\n- YOUR NAME: none yet -- for now people call you Membrane (\"Hey Membrane\"). ASK THE OPERATOR "
+    return ("\n- YOUR NAME: none yet -- for now people call you Bob (\"Hey Bob\"). ASK THE OPERATOR "
             "for it: in your first reply to them, before anything else, ask what they'd like to call you (offer "
             "a few ideas only if they want some). When they've chosen, ADOPT IT IN THAT SAME REPLY WITH THE TOOL "
             "-- saying so, or a memory line, does not rename you: entity(action='edit', spec='membrane::name', "

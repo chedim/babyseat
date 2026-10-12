@@ -24,7 +24,7 @@ class TestNaming(unittest.TestCase):
         self.env = mock.patch.dict(os.environ, {"MEMBRANE_DATA_DIR": self.tmp.name})
         self.env.start()
         N._VOCAB.clear()
-        self.vocab = mock.patch.object(N, "vosk_words", return_value={"juniper", "nova", "wren", "membrane"})
+        self.vocab = mock.patch.object(N, "vosk_words", return_value={"juniper", "nova", "wren", "membrane", "bob"})
         self.vocab.start()
 
     def tearDown(self):
@@ -36,7 +36,7 @@ class TestNaming(unittest.TestCase):
         return QuantumEntity(eid=MEMBRANE_NS + "name", cls=CLASS_CONFIG, properties=pp)
 
     def test_membrane_until_named(self):
-        self.assertEqual(N.current(), "Membrane")
+        self.assertEqual(N.current(), "Bob")
         self.assertIn("none yet", N.card_line())
         self.assertIn("ASK THE OPERATOR", N.card_line())
 
@@ -57,7 +57,7 @@ class TestNaming(unittest.TestCase):
         out = N.on_edit(None, ent)
         self.assertFalse(out["adopted"])
         self.assertIn("agreed_with", ent.properties["status"])
-        self.assertEqual(N.current(), "Membrane")
+        self.assertEqual(N.current(), "Bob")
         self.assertEqual(ent.properties["name"], "")
 
     def test_adopted_together(self):
@@ -72,7 +72,7 @@ class TestNaming(unittest.TestCase):
         ent = self._ent(name="Kestrel", agreed_with="Dmitrii")
         self.assertFalse(N.on_edit(None, ent)["adopted"])
         self.assertIn("recognizer", ent.properties["status"])
-        self.assertEqual(N.current(), "Membrane")
+        self.assertEqual(N.current(), "Bob")
 
     def test_personalize(self):
         self.assertEqual(N.personalize("let Argus act as you", "Membrane"), "let Membrane act as you")

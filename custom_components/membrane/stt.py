@@ -80,7 +80,7 @@ class SttView(HomeAssistantView):
             return web.json_response({"error": "too long (60 s at most)"}, status=413)
         if not looks_like_wav(data):
             return web.json_response({"error": "expected a WAV recording"}, status=400)
-        body, ctype = multipart(data, ", ".join([comp.get("name") or "Membrane"] + list(comp.get("aliases") or [])) + ", Home Assistant.")
+        body, ctype = multipart(data, ", ".join([comp.get("name") or "Bob"] + list(comp.get("aliases") or [])) + ", Home Assistant.")
         try:
             async with aiohttp.ClientSession() as sess:
                 async with sess.post(url, data=body, headers={"Content-Type": ctype},

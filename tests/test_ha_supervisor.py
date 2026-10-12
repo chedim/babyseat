@@ -45,7 +45,7 @@ def test_pair_and_name(sup, tmp_path):
     assert sup.read_auth(tmp_path) is None
     (tmp_path / "serve-auth.json").write_text(json.dumps({"user": "opencode", "password": "pw"}))
     assert sup.read_auth(tmp_path) == ("opencode", "pw")
-    assert sup.read_name(tmp_path) == ("Membrane", [])
+    assert sup.read_name(tmp_path) == ("Bob", [])
     (tmp_path / "settings.json").write_text(json.dumps({"name": "Juniper", "aliases": ["juni"]}))
     assert sup.read_name(tmp_path) == ("Juniper", ["juni"])
 
