@@ -24,8 +24,9 @@ from __future__ import annotations
 import re
 
 SPEAKER_PREFIX = "[HA user: "
+STANDALONE_PREFIX = "[user: "               # standalone mode's page (ui_serve.py): no HA in the line
 # capture collapses whitespace: the line may run straight into the message
-_LINE = re.compile(r"^\s*\[HA user: ([^\]\n]{1,80})\][ \t]*\n?")
+_LINE = re.compile(r"^\s*\[(?:HA )?user: ([^\]\n]{1,80})\][ \t]*\n?")
 SEAT = ("seat:self", "seat")
 VOICE = ("seat:voice", "voice")
 VOICE_PREFIX = "[membrane voice] "         # voice.py's auto-chat turns

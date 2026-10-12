@@ -2584,6 +2584,9 @@ def seat_read_url(srv, path_qs: str) -> str | None:
     return f"http://127.0.0.1:{port}{path_qs}"
 
 
+from . import ui_serve as _UI
+
+
 def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                  password="", config=None, runner=None, srv=None, **_dep) -> type:
     """The opencode-compatible HTTP handler, parametrized by the running
@@ -2603,6 +2606,8 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
         # -- plumbing ---------------------------------------------------------
 
         def _authed(self) -> bool:
+            if getattr(self, "_ui_trusted", False):
+                return True                  # standalone mode's LAN door (ui_serve.intercept)
             if not password:
                 return True
             hdr = self.headers.get("Authorization", "")
@@ -2720,6 +2725,8 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
         # -- routing ----------------------------------------------------------
 
         def do_GET(self):
+            if _UI.intercept(self):
+                return                       # standalone mode: the UI, its LAN door
             if not self._authed():
                 self.send_response(401)
                 self.send_header("WWW-Authenticate",
@@ -2950,6 +2957,8 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 self._notfound()
 
         def do_POST(self):
+            if _UI.intercept(self):
+                return                       # standalone mode: the UI, its LAN door
             if not self._authed():
                 self.send_response(401)
                 self.send_header("WWW-Authenticate",
@@ -3253,6 +3262,8 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
             return info, row
 
         def do_PATCH(self):
+            if _UI.intercept(self):
+                return                       # standalone mode: the UI, its LAN door
             if not self._authed():
                 return self._unauth()
             path = self.path.split("?", 1)[0]
@@ -3289,6 +3300,8 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
             self._notfound()
 
         def do_DELETE(self):
+            if _UI.intercept(self):
+                return                       # standalone mode: the UI, its LAN door
             if not self._authed():
                 return self._unauth()
             path = self.path.split("?", 1)[0]

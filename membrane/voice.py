@@ -102,7 +102,7 @@ def clean(text: str) -> str:
     lines = []
     for ln in t.splitlines():
         s = ln.strip()
-        if not s or s.startswith(("[HA user:", "membrane:", "[membrane]", "|", ">")):
+        if not s or s.startswith(("[HA user:", "[user:", "membrane:", "[membrane]", "|", ">")):
             continue
         s = re.sub(r"[*_#~]+", " ", s)
         if sum(c.isalpha() or c.isspace() for c in s) < 0.6 * len(s):

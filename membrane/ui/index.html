@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>membrane</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --primary-color: #3477d6; --text-primary-color: #fff; --error-color: #db4437; --warning-color: #ffa600;
+    --primary-background-color: #fafafa; --secondary-background-color: #e5e5e5; --card-background-color: #fff;
+    --primary-text-color: #212121; --divider-color: rgba(0,0,0,.12); --sidebar-background-color: #fff;
+    --code-font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --primary-background-color: #111; --secondary-background-color: #202020; --card-background-color: #1c1c1c;
+      --primary-text-color: #e1e1e1; --divider-color: rgba(225,225,225,.12); --sidebar-background-color: #1c1c1c;
+    }
+  }
+  html, body { margin: 0; height: 100%; background: var(--primary-background-color); color: var(--primary-text-color);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  membrane-home-panel { display: block; position: fixed; inset: 0; }
+  .who { position: fixed; inset: 0; display: grid; place-items: center; z-index: 10; }
+  .who form { background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 16px;
+    padding: 24px; width: min(360px, calc(100vw - 32px)); box-sizing: border-box; box-shadow: 0 8px 32px rgba(0,0,0,.2); }
+  .who h1 { font-size: 20px; margin: 0 0 6px; }
+  .who p { margin: 0 0 16px; opacity: .75; font-size: 14px; line-height: 1.4; }
+  .who input { width: 100%; box-sizing: border-box; font: inherit; font-size: 16px; padding: 10px 12px; border-radius: 10px;
+    border: 1px solid var(--divider-color); background: var(--primary-background-color); color: inherit; }
+  .who button { margin-top: 12px; width: 100%; font: inherit; font-size: 16px; padding: 10px; border: 0; border-radius: 10px;
+    background: var(--primary-color); color: var(--text-primary-color); cursor: pointer; }
+  .who .note { margin-top: 12px; font-size: 12px; opacity: .6; }
+</style>
+</head>
+<body>
+<script type="module">
+  import { makeHost, savedName, saveName } from "/ui/www/host.js";
+
+  async function conf() {
+    try { const r = await fetch("/ui/conf", { credentials: "same-origin" }); return r.ok ? await r.json() : {}; }
+    catch (e) { return {}; }
+  }
+
+  function askName(seat, insecure) {
+    return new Promise((done) => {
+      const box = document.createElement("div");
+      box.className = "who";
+      box.innerHTML = `<form><h1></h1><p>Your name goes with what you say here, so it knows who it is talking to.</p>
+        <input name="n" autocomplete="name" placeholder="Your name" required maxlength="60">
+        <button>Start</button>${insecure ? '<div class="note">This address is not a secure origin, so the browser keeps the microphone off. Open it on the seat\'s own machine (localhost) for voice.</div>' : ""}</form>`;
+      box.querySelector("h1").textContent = seat ? "Hi, I'm " + seat + "." : "Hi.";
+      box.querySelector("form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const n = box.querySelector("input").value.trim();
+        if (!n) return;
+        saveName(n); box.remove(); done(n);
+      });
+      document.body.appendChild(box);
+      box.querySelector("input").focus();
+    });
+  }
+
+  const c = await conf();
+  if (c.name) document.title = c.name;
+  const name = savedName() || await askName(c.name, !window.isSecureContext);
+  await import("/ui/www/home.js");
+  await customElements.whenDefined("membrane-home-panel");
+  const el = document.createElement("membrane-home-panel");
+  el.panel = { url_path: "membrane", config: {} };
+  el.narrow = false;
+  el.hass = makeHost(name);
+  document.body.appendChild(el);
+</script>
+</body>
+</html>
