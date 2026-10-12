@@ -10,18 +10,33 @@ Ollama serves for chat), and 1–3 GB of free RAM.
 
 ## A. Standalone (the beta's primary path)
 
+**A1. The zip (easiest)** — download
+[`membrane-standalone-0.3.0.zip`](https://github.com/chedim/membrane/releases/download/v0.3.0/membrane-standalone-0.3.0.zip)
+and follow its `INSTALL.txt`:
+
+```bash
+unzip membrane-standalone-0.3.0.zip && cd membrane
+pip install ./membrane_seat-0.3.0-py3-none-any.whl
+mkdir ~/bob && cd ~/bob
+membrane standalone            # opens http://localhost:4096/
+unzip <that zip>/assets.zip into ~/bob/.membrane/   # the voice files
+```
+
+**A2. From the repository** (needs SSH keys set up with GitHub):
+
 ```bash
 pip install "git+ssh://git@github.com/chedim/membrane.git@entity-field"   # or uv tool install ...
 mkdir ~/bob && cd ~/bob
 membrane standalone            # opens http://localhost:4096/
 ```
 
-For voice, download `membrane-voice-0.3.0.zip` from the
-[releases](https://github.com/chedim/membrane/releases) and unzip it into
-`~/bob/.membrane/assets/` (the seat can't fetch it from a private repository).
+For voice, either zip above comes with it (`~/bob/.membrane/assets/`); from the
+repository alone, download `membrane-voice-0.3.0.zip` from the
+[releases](https://github.com/chedim/membrane/releases) and unzip it there.
 Details: [docs/standalone.md](docs/standalone.md).
 
-**Updating:** `membrane update` (reinstalls from the same branch), then restart it.
+**Updating:** `membrane update` for a repository install (reinstalls from the
+same branch); a zip install is replaced by the next release's zip. Then restart.
 
 ## B. Inside Home Assistant (optional)
 

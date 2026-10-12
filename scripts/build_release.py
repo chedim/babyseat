@@ -11,6 +11,10 @@ Instead:
                                      PyPI, no downloads; numpy is HA's own
   dist/membrane-voice-<version>.zip  the voice files for a standalone install
                                      (unzip into <seat>/.membrane/assets/)
+  dist/membrane-standalone-<version>.zip
+                                     a standalone installer: the wheel + the
+                                     voice files, for testers who can't or
+                                     won't pip from a private repo
 
     python scripts/build_release.py
 """
@@ -66,7 +70,46 @@ def main() -> int:
     with zipfile.ZipFile(voice, "w", zipfile.ZIP_STORED) as z:
         for n in MANIFEST:
             z.write(WWW / n, n)
-    for f in (ha, voice):
+    # the standalone installer: the wheel (pure python, no build step for the
+    # tester) + the voice files, unzipped anywhere pip-installable
+    wheel = next(DIST.glob(f"membrane_seat-{v}-*.whl"), None)
+    if wheel is None:
+        print(f"building the wheel into {DIST} ...")
+        import subprocess
+        venv = ROOT / "venv" / "bin" / "python"
+        if not venv.is_file():
+            venv = ROOT / ".venv" / "bin" / "python"
+        py = str(venv) if venv.is_file() else sys.executable
+        cmd = [py, "-m", "build", "--wheel", "--outdir", str(DIST)]
+        r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+        wheel = next(DIST.glob(f"membrane_seat-{v}-*.whl"), None)
+        if wheel is None:                       # no `build`: pip wheel works the same
+            r = subprocess.run([py, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation",
+                                "--wheel-dir", str(DIST), str(ROOT)],
+                               cwd=ROOT, capture_output=True, text=True)
+            wheel = next(DIST.glob(f"membrane_seat-{v}-*.whl"), None)
+        if wheel is None:
+            print((r.stdout or "")[-1500:], file=sys.stderr)
+            print((r.stderr or "")[-1500:], file=sys.stderr)
+            print("the wheel build failed", file=sys.stderr)
+            return 1
+    INSTALL = "\n".join([
+        f"membrane standalone installer {v}",
+        "",
+        "1. pip install ./" + wheel.name,
+        "2. mkdir ~/bob && cd ~/bob && membrane standalone   # opens http://localhost:4096/",
+        "3. unzip assets.zip into ~/bob/.membrane/  (you get ~/bob/.membrane/assets/)",
+        "",
+        "Details: BETA.md and docs/standalone.md on the release page.",
+    ]) + "\n"
+    st = DIST / f"membrane-standalone-{v}.zip"
+    with zipfile.ZipFile(st, "w", zipfile.ZIP_STORED) as z:
+        z.writestr("INSTALL.txt", INSTALL)
+        z.write(wheel, wheel.name)
+        for n in MANIFEST:
+            with (WWW / n).open("rb") as f:
+                z.writestr(f"assets/{n}", f.read())
+    for f in (ha, voice, st):
         print(f"{f.relative_to(ROOT)}  {f.stat().st_size / 1e6:.1f} MB")
     return 0
 
