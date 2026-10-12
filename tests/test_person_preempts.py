@@ -116,6 +116,14 @@ class TestTheCutTurnTakesNoOnesWords(unittest.TestCase):
         texts = ["".join(p.get("text") or "" for p in row.get("parts") or [] if p.get("type") == "text")
                  for row in rows if (row.get("info") or {}).get("role") == "assistant"]
         self.assertTrue(any("let me know what you think" in t for t in texts), texts)
-        pending = [p for row in rows for p in row.get("parts") or []
-                   if p.get("type") == "tool" and (p.get("state") or {}).get("status") in ("pending", "running")]
-        self.assertEqual(pending, [])
+        tools = [p for row in rows for p in row.get("parts") or [] if p.get("type") == "tool"]
+        self.assertEqual([(p.get("state") or {}).get("status") for p in tools], ["completed", "completed"])
+        # the round's calls ran (2026-10-12: a person's message no longer leaves "not run" boxes)
+
+    def test_stop_still_stops_mid_round(self):
+        r = MS.TurnRunner(MS.SSEHub(), MS.SessionStore(), MS.MessageStore(), None, None, system="", model="m")
+        r._busy["s"] = {"type": "busy"}
+        r.preempt("s")
+        r.abort("s")
+        self.assertIn("s", r._aborting)
+        self.assertNotIn("s", r._preempted)

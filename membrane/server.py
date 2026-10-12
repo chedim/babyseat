@@ -1013,6 +1013,7 @@ class TurnRunner:
         self._aborting = getattr(self, "_aborting", None) or set()
         self._turn_activity = getattr(self, "_turn_activity", {}) or {}
         self._aborting.add(sid)
+        (getattr(self, "_preempted", None) or set()).discard(sid)   # Stop is a stop, even after a preempt
         try:                                     # Stop ends auto-chat too
             from . import voice as _voice
             if _voice.auto_on(self, sid):
@@ -1063,6 +1064,8 @@ class TurnRunner:
             return False
         self._aborting = getattr(self, "_aborting", None) or set()
         self._aborting.add(sid)
+        self._preempted = getattr(self, "_preempted", None) or set()
+        self._preempted.add(sid)                 # not a Stop: the round's calls may finish
         self._kill_turn_socket(sid)
         return True
 
@@ -1638,7 +1641,7 @@ class TurnRunner:
         # a Stop pressed with nothing running lapses (see abort)
         _ats = (getattr(self, "_abort_ts", None) or {}).pop(sid, None)
         if _ats is not None and time.time() - _ats > self.ABORT_PREARM_S:
-            self._aborting.discard(sid)
+            self._aborting.discard(sid); (getattr(self, "_preempted", None) or set()).discard(sid)
         now = int(time.time() * 1000)
         _t_turn = time.time()
         self._busy[sid] = {"type": "busy"}
@@ -2098,7 +2101,12 @@ class TurnRunner:
                                              "raw": json.dumps(args)},
                                    "time": {"start": tstart}})
                     self.messages.append(sid, a_info, list(parts))
-                    if sid in self._aborting:
+                    # A PERSON'S MESSAGE LETS THE ROUND FINISH (2026-10-12, "not run: the
+                    # turn was cut" on every voice message): the round's calls are short
+                    # now (jobs.py: reads answer from the store, slow runs become jobs) --
+                    # they all run, and the turn hands over before its next model round.
+                    # Stop still stops here.
+                    if sid in self._aborting and sid not in (getattr(self, "_preempted", None) or set()):
                         break
                     self._tool_watchdog_start(sid, name, call_id, args)
                     try:
@@ -2303,7 +2311,7 @@ class TurnRunner:
         self.hub.publish({"type": "message.updated", "sessionID": sid,
                           "info": dict(a_info)})
         self._busy.pop(sid, None)
-        self._aborting.discard(sid)
+        self._aborting.discard(sid); (getattr(self, "_preempted", None) or set()).discard(sid)
         self.sessions.touch(sid)
         # THE TURN'S HONEST CLOCK (the latency's own ledger): the
         # phases' cost prints at the turn's end -- the 25s-turn
