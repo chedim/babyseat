@@ -2318,6 +2318,17 @@ class EntityStore(MultiParentOps, TimelineOps):
                                  f"the body's own functions) or move the "
                                  f"extra logic into a second entity + a "
                                  f"watch/field lane"}
+            if sval.strip():
+                # THE SYNTAX AT THE DOOR (jobs.py, 2026-10-12): a define returns
+                # before its first fire -- a script that can't even compile is
+                # refused now, with the reason ('return' outside function: the
+                # engine runs scripts as module code, set result = {...})
+                try:
+                    compile(sval, f"<{field}>", "exec")
+                except SyntaxError as e:
+                    hint = (" -- scripts run as module code: set a top-level result = {...}, "
+                            "no return outside a function") if "return" in str(e) else ""
+                    return {"ok": False, "error": f"{field} doesn't compile: {e.msg} (line {e.lineno}){hint}"}
             if not sval.strip():
                 ent.properties.pop(field, None)
                 ent.properties.pop("script_disabled", None)

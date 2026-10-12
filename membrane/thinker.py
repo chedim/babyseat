@@ -89,6 +89,7 @@ WAKEUP_SIGNALS = frozenset((
     "near", "away", "around",
     "field:changed",
     "llm-call",
+    "job-done",
 ))
 
 

@@ -297,7 +297,7 @@ def _json_obj(v):
 
 # the prefixes routed models put on tool names (2026-10-11: 'mem_exec',
 # 'membrane_entity_add', 'm:tool:find' were refused as "not your lane's hand")
-_NS = re.compile(r"^(?:(?:membrane|mcp|mem|functions|m:tool|tool)[-_.:/]+)+", re.I)
+_NS = re.compile(r"^(?:(?:membrane|mcp_tool|mcp|mem|functions|m:tool|tool)[-_.:/]+)+", re.I)
 _FAM_ACT = re.compile(r"^([a-z_]+)[/.:](?:action[-_=:]?)?([a-z_]+)$", re.I)
 
 

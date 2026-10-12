@@ -6343,7 +6343,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         self._entity_audit("edit", res)
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
-        _entity_post_process(srv, res)
+        if not body.get("defer_post"):               # jobs.py: the first fire runs as a job
+            _entity_post_process(srv, res)
         _active_model_hook(srv, est, spec, res)
         self._json_out(res)
 
@@ -6492,8 +6493,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._json_err_raw(404, msg); return
         from . import watch_agents as _wa
         from .night import executor_value
-        fired = _wa.entity_read_back(srv, ent, force=bool(
-            (qs.get("run") or ["0"])[0] in ("1", "true")))
+        if (qs.get("nofire") or ["0"])[0] in ("1", "true"):
+            fired = {"fired": False, "reason": "deferred: the refresh runs as a job (jobs.py)"}
+        else:
+            fired = _wa.entity_read_back(srv, ent, force=bool(
+                (qs.get("run") or ["0"])[0] in ("1", "true")))
         # executor_value resolves the relations backend itself (the
         # est's _srv wiring) -- the queue split rides with no args here
         val = executor_value(est, ent.eid)

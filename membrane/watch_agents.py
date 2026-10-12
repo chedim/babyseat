@@ -475,6 +475,11 @@ def loop_task_text(ev: dict) -> str:
                 f"its {ev.get('boundary', '?')} "
                 f"(count {ev.get('count', '?')})")
         detail = str(ev.get("detail") or "")
+    elif kind == "job-done":
+        # jobs.py: a job this loop started has finished
+        head = f"your job #{ev.get('job', '?')} finished ({ev.get('what', '?')}, {ev.get('secs', '?')} s)" + \
+               (f" -- about '{ent}'" if ent else "")
+        detail = f"Its result:\n{str(ev.get('result') or '')[:1500]}"
     elif kind == "getter-applied":
         # WHAT CHANGED (2026-10-11 sweep: the loop was woken with an empty task)
         head = f"a reading changed on '{ent}' (its getter ran)"
@@ -669,7 +674,7 @@ class _LoopDrainer:
         # folds into the digest (the next turn's WHERE WE ARE) instead of
         # spending a whole interrupt turn
         gate = getattr(self.srv, "_alert_gate", None)
-        if ev.get("kind") in ("restart-pending", "llm-call"):
+        if ev.get("kind") in ("restart-pending", "llm-call", "job-done"):
             gate = None                 # never folded into a digest: the restart is his; a call has its own caps
         if gate is not None and not gate.allow(ev):
             return "skip"
@@ -714,6 +719,12 @@ class _LoopDrainer:
     def _turn(self, ev: dict, ent: str, agent: str) -> str:
         srv = self.srv
         sid = srv.create_loop_session(agent, agent)
+        if str(ev.get("kind")) == "job-done":
+            try:                                   # jobs.py: the woken pass carries its depth
+                from . import jobs as _jobs
+                _jobs.PENDING_DEPTH[sid] = int(ev.get("job_depth") or 1)
+            except Exception:
+                pass
         try:                                   # the orb carries its session (membrane home opens it)
             from .fieldpulse import of as _pulse_of
             _fp = _pulse_of(srv)

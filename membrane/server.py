@@ -1543,7 +1543,7 @@ class TurnRunner:
         except Exception:
             pass
 
-    def _prefetch_reads(self, tcs, lane) -> dict:
+    def _prefetch_reads(self, tcs, lane, sid: str = "") -> dict:
         """{call_id: (resolved name, Future)} for the round's leading
         read-only calls (two or more), started together."""
         from concurrent.futures import ThreadPoolExecutor
@@ -1563,7 +1563,10 @@ class TurnRunner:
         if len(lead) < 2:
             return {}
         pool = ThreadPoolExecutor(max_workers=min(PARALLEL_READS_MAX, len(lead)), thread_name_prefix="read")
-        out = {cid: (nl, pool.submit(self.executor, nl, a, cid)) for cid, nl, a in lead}
+        from . import jobs as _jobs
+        out = {cid: (nl, pool.submit(_jobs.dispatch, self, sid, nl, a, cid,
+                                     lambda aa, _n=nl, _c=cid: self.executor(_n, aa, _c)))
+               for cid, nl, a in lead}
         pool.shutdown(wait=False)
         return out
 
@@ -1637,6 +1640,14 @@ class TurnRunner:
         now = int(time.time() * 1000)
         _t_turn = time.time()
         self._busy[sid] = {"type": "busy"}
+        # THE TURN'S JOB DEPTH (jobs.py): a turn a finished job woke carries it;
+        # a loop pass on a job-done event set it before its turn
+        try:
+            from . import jobs as _jobs
+            _d = (user_info or {}).get("jobDepth")
+            _jobs.DEPTH[sid] = int(_d if _d is not None else _jobs.PENDING_DEPTH.pop(sid, 0))
+        except Exception:
+            pass
         # THE TURN'S TRIGGER (outcome learning: a goal planted in an operator's
         # turn is the operator's; in auto-chat or a loop it is the seat's own)
         try:
@@ -2062,7 +2073,7 @@ class TurnRunner:
                 # PARALLEL READS (2026-10-11): the round's LEADING read-only
                 # calls run together; the loop below takes each result in
                 # order (a read after a write is not prefetched -- it waits)
-                _pre = self._prefetch_reads(tcs, lane) if self.tools is None else {}
+                _pre = self._prefetch_reads(tcs, lane, sid) if self.tools is None else {}
                 for tc in tcs:
                     fn = tc.get("function") or {}
                     name = fn.get("name") or "?"
@@ -2176,8 +2187,16 @@ class TurnRunner:
                             except Exception:
                                 pass
                             _p = _pre.get(call_id)
-                            output = (_p[1].result() if _p is not None and _p[0] == name_l
-                                      else self.executor(name_l, args, call_id))
+                            if _p is not None and _p[0] == name_l:
+                                output = _p[1].result()
+                            elif self.tools is None:
+                                # jobs.py: reads answer from the store, slow runs and a
+                                # define's first fire become jobs whose results are events
+                                from . import jobs as _jobs
+                                output = _jobs.dispatch(self, sid, name_l, args, call_id,
+                                                        lambda a, _n=name_l, _c=call_id: self.executor(_n, a, _c))
+                            else:
+                                output = self.executor(name_l, args, call_id)
                             output = _claim_note(getattr(self, "srv", None), (self._agents or {}).get(sid),
                                                  name_l, args, output)
                         # THE TOOL'S TOUCH (the activity clock): a

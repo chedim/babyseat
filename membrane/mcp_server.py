@@ -1087,7 +1087,7 @@ def tool_entity_add(args: dict, port: int) -> str:
     extra = {k: args[k] for k in _EDIT_FIELDS if args.get(k) not in (None, "", [], {})}
     if extra:
         ed = _http(port, "POST", "/membrane/entity/edit",
-                   {"spec": out["eid"], **extra})
+                   {"spec": out["eid"], **extra, **({"defer_post": True} if args.get("defer_post") else {})})
         msg += (f" Also set: {', '.join(sorted(extra))}." if ed.get("ok")
                 else f" But setting {', '.join(sorted(extra))} failed: "
                      f"{ed.get('error', 'unknown error')} (retry with entity_edit).")
@@ -1107,7 +1107,7 @@ def tool_entity_edit(args: dict, port: int) -> str:
               "watch_ops", "watch_fields", "watch", "properties"):
         if args.get(f) is not None:
             body[f] = args[f]
-    for f in ("publish", "unpublish"):        # the tier-2 gestures
+    for f in ("publish", "unpublish", "defer_post"):        # the tier-2 gestures; jobs.py's deferral
         if args.get(f):
             body[f] = True
     out = _http(port, "POST", "/membrane/entity/edit", body)
@@ -1490,6 +1490,8 @@ def tool_entity_read(args: dict, port: int) -> str:
     qs = f"/membrane/entity/read?spec={spec}"
     if args.get("run"):
         qs += "&run=1"
+    if args.get("nofire"):
+        qs += "&nofire=1"
     out = _http(port, "GET", qs)
     if not out.get("ok"):
         return f"read failed: {out.get('error', 'unknown error')}"

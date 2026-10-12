@@ -135,7 +135,7 @@ def _turn(agent, calls):
 class TestTheTurn(unittest.TestCase):
     def test_a_family_call_runs_the_existing_tool(self):
         seen, tools, lad = _turn("build", [("entity", {"action": "read", "spec": "c:x"})])
-        self.assertEqual(seen, [("entity_read", {"spec": "c:x"})])
+        self.assertEqual(seen, [("entity_read", {"spec": "c:x", "nofire": True})])   # jobs.py: the read answers from the store
         self.assertEqual(tools[0]["tool"], "entity")                 # what the model sent
         self.assertEqual(tools[0]["state"]["input"]["action"], "read")
         sent = {(t.get("function") or t)["name"] for t in lad.bodies[0]["tools"]}
@@ -156,7 +156,7 @@ class TestTheTurn(unittest.TestCase):
 
     def test_old_names_still_run(self):
         seen, _, _ = _turn("build", [("entity_read", {"spec": "c:x"})])
-        self.assertEqual(seen, [("entity_read", {"spec": "c:x"})])
+        self.assertEqual(seen, [("entity_read", {"spec": "c:x", "nofire": True})])
 
 
 if __name__ == "__main__":
