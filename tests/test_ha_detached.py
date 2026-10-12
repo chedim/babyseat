@@ -139,6 +139,31 @@ def test_ha_start_and_stop_are_told(serve, haa):
         haa.seat_event({}, "ha-start")) is False            # nothing configured: silence
 
 
+def test_the_sync_word_reaches_the_seat_too(serve, haa):
+    """ha-stop posts by hand from an executor thread during HA's shutdown
+    (2026-10-12 docker rehearsal: the sync listener's background task died
+    with 'loop is not the running loop')."""
+    serve._loop = asyncio.get_event_loop_policy().get_event_loop()
+    import threading
+
+    def pump():
+        serve._loop.run_forever()
+
+    pumper = threading.Thread(target=pump, daemon=True)      # the fixture's loop must run for the
+    pumper.start()                                           # aiohttp server to answer a plain thread
+    try:
+        out = []
+        t = threading.Thread(target=lambda: out.append(haa.seat_event_sync(_comp(serve), "ha-stop")))
+        t.start()
+        t.join(30)
+        assert out == [True]                                # no loop, no coroutines: plain urllib
+        assert serve.events[-1] == {"kind": "ha-stop"}
+        assert haa.seat_event_sync({}, "ha-stop") is False
+        assert haa.seat_event_sync({"serve_url": "http://127.0.0.1:1", "serve_pass": "x"}, "ha-stop") is False
+    finally:
+        serve._loop.call_soon_threadsafe(serve._loop.stop)
+
+
 def test_ha_urls_a_loopback_falls_back(haa):
     class C:                                    # no configured URLs: HA's local door
         internal_url = None

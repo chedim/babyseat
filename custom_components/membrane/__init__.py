@@ -127,21 +127,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             push.start()
             comp["state_push"] = push
 
-            async def _announced():
+            # NOTE (learned in the 2026-10-12 docker rehearsal): a bus listener
+            # that is a plain sync callable runs in HA's executor thread --
+            # a lambda there called hass.async_create_background_task, an
+            # event-loop-only method, and died with "loop is not the running
+            # loop"; the ha-start coroutine was never awaited. ha-start is an
+            # async listener on the loop. ha-stop must survive shutdown, when
+            # background tasks are the first things cancelled -- so it posts
+            # by itself, in whatever thread it lands in (seat_event_sync).
+            async def _announced(_event=None):
                 await HA.push_token(hass, entry, comp)
                 if await HA.seat_event(comp, "ha-start"):
                     _LOGGER.info("membrane: the detached seat heard Home Assistant start")
 
             if hass.state is CoreState.running:
                 hass.async_create_background_task(_announced(), "membrane ha-start")
+            entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _announced))
             entry.async_on_unload(hass.bus.async_listen_once(
-                EVENT_HOMEASSISTANT_STARTED, lambda _e: hass.async_create_background_task(
-                    _announced(), "membrane ha-start")))
-
-            def _farewell(_event):
-                hass.async_create_background_task(
-                    HA.seat_event(comp, "ha-stop", timeout_s=5.0), "membrane ha-stop")
-            entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _farewell))
+                EVENT_HOMEASSISTANT_STOP, lambda _e: HA.seat_event_sync(comp, "ha-stop")))
     from .coordinator import FieldCoordinator
     comp.setdefault("sessions", {})
     comp["coordinator"] = FieldCoordinator(hass, entry, comp)

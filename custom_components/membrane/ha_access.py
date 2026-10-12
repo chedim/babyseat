@@ -137,6 +137,31 @@ async def seat_event(comp: dict, kind: str, timeout_s: float = 30.0) -> bool:
         return False
 
 
+def seat_event_sync(comp: dict, kind: str, timeout_s: float = 5.0) -> bool:
+    """The same word, without the loop: the ha-stop listener runs from an
+    executor thread during HA's shutdown (async listeners' tasks are cancelled
+    first), so the POST goes by hand. Returns False on anything."""
+    import json as _json
+    import urllib.request
+
+    url = (comp.get("serve_url") or "").rstrip("/")
+    if not (url and comp.get("serve_pass")):
+        return False
+    req = urllib.request.Request(
+        url + "/membrane/seat/event", data=_json.dumps({"kind": kind}).encode(),
+        headers={"Content-Type": "application/json"})
+    import base64
+    pair = base64.b64encode(f"{comp.get('serve_user') or 'opencode'}:{comp.get('serve_pass')}".encode()).decode()
+    req.add_header("Authorization", "Basic " + pair)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout_s) as r:
+            r.read()
+            return r.status == 200
+    except Exception as e:                           # noqa: BLE001
+        _LOGGER.debug("membrane: %s did not reach the seat (%r)", kind, e)
+        return False
+
+
 class StatePush:
     """HA's state changes of the entities the seat mirrors, pushed in batches."""
 
