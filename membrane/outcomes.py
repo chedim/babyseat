@@ -191,7 +191,9 @@ class ShadowGate:
 
     def report(self) -> dict:
         out = {}
-        for book, kinds in self.record.items():
+        with _lock:                                # learn() adds kinds from other threads
+            snap = {b: {k: dict(r) for k, r in ks.items()} for b, ks in self.record.items()}
+        for book, kinds in snap.items():
             for kind, r in kinds.items():
                 out.setdefault(book, {})[kind] = {
                     **r, "precision": round(r["tp"] / r["pred_ign"], 3) if r["pred_ign"] else None,

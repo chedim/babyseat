@@ -30,6 +30,8 @@ JUNK_MIN_N = 24           # said this often ...
 JUNK_MAX_COH = 0.02       # ... and still no shared direction
 NULL_EVERY_S = 86400.0
 
+ACTIVITY_CAP = 500                  # the night's activity refreshes per pass
+
 
 def legacy_tags(ev: dict) -> list[str]:
     """The event's specific entities in the entity layer's key form
@@ -162,10 +164,19 @@ def night(srv, fld, est, now: float | None = None) -> dict:
             out[name] = {"error": str(e)[:120]}
     try:
         mark = int(fld._ostats.get("night_seq") or 0)
-        moved = list(fld.changes_since(mark))[:500]
+        ch = fld.changes_since(mark)
+        # earliest first; past the cap the watermark stops BEFORE the first
+        # entity not refreshed (2026-10-11 sweep: it jumped to the cursor and
+        # every entity past the 500th never got its activity refreshed)
+        order = sorted(ch, key=lambda e: min(int(d.get("seq") or 0) for d in ch[e]) if ch[e] else 0)
+        moved = order[:ACTIVITY_CAP]
         for eid in moved:
             fld.refresh_activity(eid)
-        fld._ostats["night_seq"] = int(fld._ostats.get("cursor") or 0)
+        if len(order) > ACTIVITY_CAP:
+            rest = order[ACTIVITY_CAP]
+            fld._ostats["night_seq"] = max(mark, min(int(d.get("seq") or 0) for d in ch[rest]) - 1)
+        else:
+            fld._ostats["night_seq"] = int(fld._ostats.get("cursor") or 0)
         out["activity"] = len(moved)
     except Exception as e:
         out["activity"] = {"error": str(e)[:120]}

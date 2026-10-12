@@ -1421,9 +1421,11 @@ class EntityStore(MultiParentOps, TimelineOps):
             # each entity's scalar state + properties dict -- no
             # to_doc, no embedding copies, under the lock.
             with self._store_lock:
+                # list(): the docs are added to by threads that don't take
+                # this lock (every module's _entity()) -- iterate a copy
                 flat = [(eid, dict(ent.properties or {}), ent.cls,
                          list(ent.links), list(ent.derived_by))
-                        for eid, ent in self.docs.items()
+                        for eid, ent in list(self.docs.items())
                         if not ((ent.properties or {}).get("ephemeral"))]
                 tracks = dict(self.tracks) if self.tracks else None
             snapshot: dict = {}
@@ -1500,7 +1502,11 @@ class EntityStore(MultiParentOps, TimelineOps):
         if not self._dirty:
             return
         try:
-            self._dirty = getattr(self, "_side_saved", True) is False
+            # THE LOST MARK (2026-10-11 sweep): clearing _dirty AFTER the save
+            # erased the mark of a write that landed DURING it -- that write
+            # waited for some unrelated next upsert. Cleared BEFORE: a write
+            # during the save re-marks it and arms the next debounce.
+            self._dirty = False
             self.save()
         finally:
             # THE RETRY (the silent-starve exhibit): _dirty stays up
@@ -1508,8 +1514,8 @@ class EntityStore(MultiParentOps, TimelineOps):
             # (the file never starves because poison exists)
             if not getattr(self, "_side_saved", True):
                 self._dirty = True
-            else:
-                self._dirty = False
+                if self._save_timer is None:
+                    self.save_soon()
 
     def flush(self) -> None:
         """Make pending store writes durable NOW (tests, shutdown)."""

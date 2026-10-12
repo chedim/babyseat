@@ -178,10 +178,11 @@ def request(srv, prompt: str, about: str = "", caller: str = "", now: float | No
         except Exception:
             pass
         return {"rc": 1, "text": f"not called: {why}"}
-    _echo[key] = {"ts": now, "answer": None}
-    if len(_echo) > 500:
-        for k in sorted(_echo, key=lambda k: _echo[k]["ts"])[:250]:
-            _echo.pop(k, None)
+    with _lock:                                    # threads share the echo table (2026-10-11 sweep)
+        _echo[key] = {"ts": now, "answer": None}
+        if len(_echo) > 500:
+            for k in sorted(list(_echo), key=lambda k: _echo[k]["ts"])[:250]:
+                _echo.pop(k, None)
     field_call = caller.startswith("script:") if readonly is None else bool(readonly)
     pool.put({"kind": "llm-call", "entity": about_eid, "prompt": prompt, "caller": caller, "ts": now,
               "event_id": f"llm-{int(now * 1000)}", "depth": depth + 1, "echo": key,
@@ -242,8 +243,10 @@ def from_command(rest: str, caller: str = "method") -> dict:
 def answered(srv, ev: dict, text: str) -> None:
     """A called turn ended: its one line onto the entity (llm_answer) and the echo."""
     line = next((ln.strip() for ln in str(text or "").splitlines() if ln.strip()), "")[:300]
-    if ev.get("echo") in _echo:
-        _echo[ev["echo"]]["answer"] = line or "(no answer)"
+    with _lock:
+        _e = _echo.get(ev.get("echo"))
+        if _e is not None:
+            _e["answer"] = line or "(no answer)"
     est = getattr(srv, "entity_store", None)
     doc = (est.docs or {}).get(str(ev.get("entity") or "")) if est is not None else None
     if doc is not None and line:

@@ -231,6 +231,12 @@ def control(srv, body: dict, by: str = "operator") -> dict:
         srv.paused = bool(body["paused"])
         done["paused"] = srv.paused
         note(srv, "paused" if srv.paused else "resumed", by=by)
+        try:                                       # the refresh's diff must not note it again "by decree"
+            _st = (_entity(srv).properties or {}).get("state")
+            if isinstance(_st, dict):
+                _st["paused"] = srv.paused
+        except Exception:
+            pass
     if "loops_max" in body and getattr(srv, "loops", None) is not None:
         try:
             n = max(1, min(8, int(body["loops_max"])))
