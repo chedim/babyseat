@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, EVENT_HOMEASSISTANT_STOP
+from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import CoreState, HomeAssistant
 
 from .const import (CONF_BACKEND, CONF_EMBED_MODEL, CONF_MODE, CONF_MODEL, CONF_SERVE_PASS,
@@ -28,6 +28,8 @@ from .const import (CONF_BACKEND, CONF_EMBED_MODEL, CONF_MODE, CONF_MODEL, CONF_
 _LOGGER = logging.getLogger(__name__)
 
 ENTRY = "/api/membrane/www/entry.js?m="
+# the seat as Assist's conversation agent + its field's readings (from the boat's membrane_ai)
+PLATFORMS = [Platform.CONVERSATION, Platform.SENSOR, Platform.BINARY_SENSOR]
 PANELS = (  # url path, sidebar title, icon, element, module, admin only
     ("membrane", "Membrane", "mdi:cube-scan", "membrane-home-panel", "home.js", False),
     ("membrane-chat", "Membrane chat", "mdi:brain", "ai-terminal-panel", "panel.js", True),
@@ -109,6 +111,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         comp["serve_url"] = str(data.get(CONF_SERVE_URL) or "").rstrip("/")
         comp["serve_user"] = str(data.get(CONF_SERVE_USER) or DEFAULT_SERVE_USER)
         comp["serve_pass"] = str(data.get(CONF_SERVE_PASS) or "")
+    from .coordinator import FieldCoordinator
+    comp.setdefault("sessions", {})
+    comp["coordinator"] = FieldCoordinator(hass, entry, comp)
+    hass.async_create_task(comp["coordinator"].async_refresh())     # never wait on the seat at setup
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(_reload))
     _LOGGER.info("membrane: set up (%s)", "the seat inside HA" if comp["inside"] else comp.get("serve_url"))
     return True
@@ -120,7 +127,11 @@ async def _reload(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from homeassistant.components import frontend as fe
+    if not await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
+        return False
     comp = hass.data.get(DOMAIN) or {}
+    comp.pop("coordinator", None)
+    comp["sessions"] = {}
     sup = comp.pop("supervisor", None)
     if sup is not None:
         await sup.stop()
