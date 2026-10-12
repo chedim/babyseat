@@ -1089,16 +1089,31 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const view = cam && cam.matrixWorldInverse && cam.matrixWorldInverse.elements;
         const cube = cubePoints(N, t / 4000, 0.45, view && view.length === 16 ? view : null), sz = H * 0.27, at = ([x, y]) => [W / 2 + x * sz, mid - y * sz];
         const pts = line.map((p, i) => { const c = at(cube.nodes[i]); return [c[0] + (p[0] - c[0]) * u, c[1] + (p[1] - c[1]) * u]; });
+        // THE LISTENING RING (2026-10-12, the operator: "a squiggly red line that makes a
+        // circle whenever mic is actively listening"): the line closes into a circle,
+        // wiggling with the mic's level, and turns red; it opens again when the mic stops
+        this._ringT = (this._ringT || 0) + ((mode === "listening" ? 1 : 0) - (this._ringT || 0)) * Math.min(1, dt * 6);
+        const ring = this._ringT;
+        if (ring > 0.002) {
+          const R = Math.min(W, H) * 0.3;
+          for (let i = 0; i < pts.length; i++) {
+            const a = -Math.PI / 2 + (2 * Math.PI * i) / (pts.length - 1), rr = R * (1 + amps[i] * 0.45);
+            const cx = W / 2 + Math.cos(a) * rr, cy = mid + Math.sin(a) * rr;
+            pts[i] = [pts[i][0] + (cx - pts[i][0]) * ring, pts[i][1] + (cy - pts[i][1]) * ring];
+          }
+        }
+        const mix = (a, b) => { const p = (h) => [1, 3, 5].map((k) => parseInt(h.slice(k, k + 2), 16));
+          const x = p(a), y = p(b); return "rgb(" + x.map((v, k) => Math.round(v + (y[k] - v) * ring)).join(",") + ")"; };
         const grad = g.createLinearGradient(0, 0, W, 0);
-        grad.addColorStop(0, "#6f8cff"); grad.addColorStop(0.5, "#b07cff"); grad.addColorStop(1, "#4fd1ff");
+        grad.addColorStop(0, mix("#6f8cff", "#ff3b3b")); grad.addColorStop(0.5, mix("#b07cff", "#ff2e63")); grad.addColorStop(1, mix("#4fd1ff", "#ff6b3d"));
         // the cube's own edges, fading as it unfolds
-        if (u < 0.98) {
-          g.globalAlpha = (1 - u) * 0.55; g.strokeStyle = grad; g.lineWidth = 2; g.beginPath();
+        if (u < 0.98 && ring < 0.98) {
+          g.globalAlpha = (1 - u) * 0.55 * (1 - ring); g.strokeStyle = grad; g.lineWidth = 2; g.beginPath();
           for (const [a, b] of cube.edges) { const p = at(a), q = at(b); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); }
           g.stroke();
         }
         // the edges: straight segments (angular, a strip of graph) + a faint mirror
-        for (const [mirror, alpha, width] of [[true, 0.25 * u, 2], [false, 1, 3]]) {
+        for (const [mirror, alpha, width] of [[true, 0.25 * u * (1 - ring), 2], [false, 1, 3]]) {
           if (alpha <= 0.01) continue;
           g.globalAlpha = alpha; g.strokeStyle = grad; g.lineWidth = width; g.lineJoin = "miter";
           g.beginPath();
