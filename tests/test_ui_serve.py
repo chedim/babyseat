@@ -71,18 +71,14 @@ class TestUiServe(unittest.TestCase):
         self.assertEqual(self._req("/ui/www/../settings.py", raw=True)[0], 404)
         self.assertEqual(self._req("/ui/www/nope.js", raw=True)[0], 404)
 
-    def test_conf_default_name_is_the_folder(self):
+    def test_conf_is_membrane_until_named(self):
         code, c, _ = self._req("/ui/conf")
         self.assertEqual(code, 200)
         self.assertTrue(c["serve_ok"] and c["standalone"])
         self.assertFalse(c["named"])
-        self.assertEqual(c["name"], S.default_name())
-        S.save({"name": "Agatha"})
-        self.assertEqual(self._req("/ui/conf")[1]["name"], "Agatha")
-
-    def test_default_name(self):
-        self.assertEqual(S.default_name("/home/x/agatha"), "Agatha")
-        self.assertEqual(S.default_name("/home/x/sea-witch"), "Sea Witch")
+        self.assertEqual(c["name"], "Membrane")
+        S.save({"name": "Juniper"})
+        self.assertEqual(self._req("/ui/conf")[1]["name"], "Juniper")
 
     def test_no_password_on_the_lan(self):
         code, lst, _ = self._req("/ui/serve/session")
@@ -119,6 +115,10 @@ class TestUiServe(unittest.TestCase):
         r = c.getresponse(); r.read()
         self.assertEqual(r.status, 401)
         c.close()
+
+    def test_page_voice_log(self):
+        self.assertEqual(self._req("/ui/log", "POST", {"who": "you", "what": "dictation", "text": "{}"}, raw=True)[0], 204)
+        self.assertIn("dictation", (S.data_dir() / "page-voice.log").read_text())
 
     def test_stt_without_server_is_501(self):
         self.assertEqual(self._req("/ui/stt", "POST", b"RIFF....WAVE", raw=True)[0], 501)

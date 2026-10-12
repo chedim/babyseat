@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>membrane</title>
+<link rel="icon" type="image/svg+xml" href="/ui/www/favicon.svg">
 <style>
   :root {
     color-scheme: light dark;
@@ -61,6 +62,7 @@
     });
   }
 
+  import("/ui/www/favicon.js").then((m) => m.startFavicon()).catch(() => {});   // the tab's turning cube
   const c = await conf();
   if (c.name) { document.title = c.name; window.MEMBRANE_NAME = c.name; }   // home.js / panel.js read it on load
   window.MEMBRANE_ALIASES = c.aliases || [];
@@ -73,6 +75,11 @@
   el.narrow = false;
   el.hass = makeHost(name);
   document.body.appendChild(el);
+  // the seat adopted a name (naming.py): the page comes back with "Hey <name>"
+  setInterval(async () => {
+    const n = (await conf()).name;
+    if (n && c.name && n !== c.name) location.reload();
+  }, 15000);
 </script>
 </body>
 </html>

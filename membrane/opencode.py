@@ -1601,11 +1601,7 @@ def main() -> None:
                                    serve=bool(getattr(args, "serve", False)))
             if args.standalone:            # THE NAME CEREMONY (naming.py): its own name, in its own prompt
                 from . import naming as _NM
-                from . import ui_serve as _UIS
-                _name = _NM.ensure(backend, model or "", (_UIS.S.data_dir() / "assets", _UIS.UI_DIR, _UIS.DEV_WWW))
-                text = _NM.personalize(text, _name)
-                text += (f"\n- YOUR NAME: {_name} -- you chose it yourself at your first boot. People call you "
-                         f"by it (\"Hey {_name}\" starts a voice message); answer to it, and sign as it.\n")
+                text = _NM.personalize(text, _NM.current()) + _NM.card_line()
             tmp = instr_path + ".tmp"
             with open(tmp, "w") as f:
                 f.write(text)
@@ -1815,6 +1811,11 @@ def main() -> None:
             if args.standalone:            # STANDALONE MODE: the UI on the serve port (ui_serve.py)
                 from . import ui_serve as _UIS
                 _ui_url = _UIS.browser_url(surf_host, serve_port or 4096)
+                try:                       # the entity `name`: agreed with the operator, never picked alone
+                    from . import naming as _NM
+                    _NM.plant(srv)
+                except Exception as e:
+                    print(f"[seat] name entity not planted ({e})", file=sys.stderr)
                 print(f"[seat] membrane UI: {_ui_url}", file=sys.stderr)
                 if not args.no_browser and sys.stdin.isatty():
                     _UIS.open_when_up(serve_port or 4096, _ui_url)

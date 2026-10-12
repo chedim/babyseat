@@ -64,10 +64,3 @@ def save(changes: dict) -> dict:
         os.replace(tmp, p)
         return cur
 
-
-def default_name(cwd: str | None = None) -> str:
-    """The name ceremony's first candidate: the launch folder's name
-    (~/agatha -> "Agatha")."""
-    base = Path(cwd or os.getcwd()).name
-    words = [w for w in base.replace("_", " ").replace("-", " ").split() if w]
-    return " ".join(w[:1].upper() + w[1:] for w in words) or "Membrane"

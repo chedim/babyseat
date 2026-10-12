@@ -161,8 +161,9 @@ def _json(handler, obj, code: int = 200) -> None:
 
 
 def conf() -> dict:
+    from . import naming as NM
     st = S.load()
-    name = str(st.get("name") or "") or S.default_name()
+    name = NM.current()
     return {"serve_ok": True, "serve_url": "standalone", "standalone": True,
             "name": name, "named": bool(st.get("name")), "aliases": list(st.get("aliases") or []),
             "stt": "server" if str(st.get("stt") or "").startswith("http") else "browser",
@@ -192,7 +193,8 @@ def _stt(handler) -> None:
     wav = handler.rfile.read(n) if n else b""
     if not (len(wav) > 44 and wav[:4] == b"RIFF" and wav[8:12] == b"WAVE"):
         return _json(handler, {"error": "expected a WAV recording"}, 400)
-    name = str(st.get("name") or "") or S.default_name()
+    from . import naming as NM
+    name = NM.current()
     body, ctype = _multipart(wav, ", ".join([name] + list(st.get("aliases") or [])) + ".")
     try:
         req = urllib.request.Request(url, data=body, headers={"Content-Type": ctype}, method="POST")
@@ -202,6 +204,31 @@ def _stt(handler) -> None:
         return _json(handler, {"error": f"the speech server is not answering ({type(e).__name__})"}, 502)
     text = " ".join(re.sub(r"\[[^\]]*\]|\([^)]*\)", " ", str(text or "")).split())
     return _json(handler, {"text": text})
+
+
+# -- the page's voice log -----------------------------------------------------
+
+PAGE_LOG = "page-voice.log"
+PAGE_LOG_MAX = 2_000_000
+
+
+def _page_log(handler) -> None:
+    """One line of the page's voice log (home.js speechLog), appended for the
+    engineer to read: what the page heard, how loud, which engine, what failed."""
+    n = min(int(handler.headers.get("Content-Length") or 0), 4096)
+    raw = handler.rfile.read(n) if n else b""
+    try:
+        line = json.dumps(json.loads(raw), ensure_ascii=False)
+        p = S.data_dir() / PAGE_LOG
+        if p.exists() and p.stat().st_size > PAGE_LOG_MAX:
+            os.replace(p, p.with_suffix(".log.old"))
+        with p.open("a") as f:
+            f.write(line + "\n")
+    except (ValueError, OSError):
+        pass
+    handler.send_response(204)
+    handler.send_header("Content-Length", "0")
+    handler.end_headers()
 
 
 # -- the hook -----------------------------------------------------------------
@@ -236,17 +263,17 @@ def intercept(handler) -> bool:
         handler.path = rest + ("?" + qs if qs else "")
         handler._ui_trusted = True         # lan, or the pair checked above
         return False
-    if handler.command not in ("GET", "HEAD") and path != "/ui/stt":
+    if handler.command not in ("GET", "HEAD") and path not in ("/ui/stt", "/ui/log"):
         _json(handler, {"error": "method not allowed"}, 405)
         return True
     if path in ("/", "/index.html"):
         _send_file(handler, UI_DIR / "index.html")
     elif path == "/favicon.ico":
-        handler.send_response(204)
-        handler.send_header("Content-Length", "0")
-        handler.end_headers()
+        _send_file(handler, UI_DIR / "favicon.svg")
     elif path == "/ui/conf":
         _json(handler, conf())
+    elif path == "/ui/log":
+        _page_log(handler)
     elif path == "/ui/stt":
         if handler.command != "POST":
             _json(handler, {"error": "POST a WAV"}, 405)

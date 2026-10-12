@@ -3782,6 +3782,17 @@ def _active_model_hook(srv, est, spec, res) -> None:
                 est.upsert(ent, embedder=None)
     except Exception as e:                              # noqa: BLE001
         res["active_model"] = {"applied": False, "why": f"{type(e).__name__}: {e}"[:160]}
+    # THE NAME (naming.py): the name the seat and the operator agreed on, adopted or refused
+    try:
+        from . import naming as NM
+        ent = est._resolve_spec(str(spec or "")) if est is not None else None
+        if ent is not None and NM.is_name_entity(ent):
+            out = NM.on_edit(srv, ent)
+            if out is not None:
+                res["name"] = out
+                est.upsert(ent, embedder=None)
+    except Exception as e:                              # noqa: BLE001
+        res["name"] = {"adopted": False, "why": f"{type(e).__name__}: {e}"[:160]}
     # VOICE OUT (voice_io.py): an edit of a voice:out entity's `say` is spoken
     try:
         from . import voice_io as VIO

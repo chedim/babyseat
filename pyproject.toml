@@ -20,4 +20,4 @@ packages = ["membrane"]
 
 [tool.setuptools.package-data]
 membrane = ["skills/*/SKILL.md", "skills/*/*.md", "viewer.html", "three.min.js", "*.woff2",
-            "ui/*.html", "ui/*.js", "ui/*.mjs"]
+            "ui/*.html", "ui/*.js", "ui/*.mjs", "ui/*.svg"]

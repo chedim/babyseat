@@ -4,6 +4,11 @@
  * browser), everyone on the LAN is an admin, the voices are the browser's.
  * The seat stamps the speaker line from the X-Membrane-Speaker header. */
 window.MEMBRANE_STANDALONE = true;
+// the page's voice log goes to the seat: <data dir>/page-voice.log (ui_serve.py)
+window.MEMBRANE_SPEECH_LOG = (who, what, text) => {
+  const line = JSON.stringify({ t: new Date().toISOString(), who, what, text, ua: navigator.userAgent.split(" ").pop() });
+  try { navigator.sendBeacon("/ui/log", new Blob([line], { type: "application/json" })); } catch (e) { /* best effort */ }
+};
 
 const LS_NAME = "membrane-standalone-person";
 

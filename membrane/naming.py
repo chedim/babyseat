@@ -1,36 +1,42 @@
-"""THE NAME CEREMONY (standalone mode, 2026-10-12, the operator: "it should pick
-a diff name :) ... 'Hey, <AI name that it picks itself>'").
+"""THE NAME CEREMONY (standalone mode, 2026-10-12, the operator: "don't force
+the seat to pick the name before talking with the operator? ... make the seat
+talk with the operator about its name and only after they together adopt a
+name make it from 'Hey, membrane' to 'Hey, <name>'").
 
-A standalone seat with no name in settings.json names ITSELF at its first boot:
-one model call proposes a few names; the first one a person can call it by
-wins -- one word, two or three syllables, and a word the page's on-device
-recognizer (Vosk's small English model) knows, or "Hey <name>" can never be
-heard. The name goes to settings.json, the doctrine and the seat card (the
-model's own prompt), /ui/conf (the page's labels and wake words).
+A new standalone seat is "Membrane" ("Hey Membrane"). Its name is something it
+and the operator settle TOGETHER, in conversation: it offers names it likes,
+they talk it over, and when they agree it writes the name to the entity `name`
+(properties.name, plus agreed_with: who agreed). The edit is checked here -- one
+word, two or three syllables, a word the page's on-device recognizer (Vosk's
+small English model) knows, or "Hey <name>" could never be heard -- and an
+adopted name goes to settings.json: /ui/conf, the page's labels and wake words
+(the page reloads itself), the doctrine and seat card from the next boot.
 """
 from __future__ import annotations
 
-import json
 import re
 import struct
 import sys
 import tarfile
-import urllib.request
+import time
 from pathlib import Path
 
 from . import settings as S
 
-TAKEN = {"argus", "membrane", "standalone", "assistant", "ai", "bot", "seat", "agatha", "claude"}
-FALLBACK = ("Juniper", "Atlas", "Willow", "Orion", "Ember", "Marlow", "Nova", "Sable")
+DEFAULT = "Membrane"
+ENT = "name"
+TAKEN = {"argus", "standalone", "assistant", "ai", "bot", "seat", "agatha", "claude"}
 VOSK_ARCHIVE = "vosk-model-en.tar.gz"
 _SYL = re.compile(r"[aeiouy]+")
+_VOCAB: dict = {}
 
-PROMPT = (
-    "You are a new AI seat booting for the first time on someone's computer. Choose your own name: "
-    "the people here will call you by it out loud (\"Hey <name>\"), so it must be ONE ordinary English "
-    "word or common first name, two or three syllables, easy to say and to hear, distinct from everyday "
-    "words people say all the time. Not Argus, not Membrane, not Claude. "
-    "Reply with JSON only: {\"names\": [five candidates, your favourite first], \"why\": \"one sentence\"}")
+
+def current() -> str:
+    return str(S.load().get("name") or "") or DEFAULT
+
+
+def named() -> bool:
+    return bool(S.load().get("name"))
 
 
 def syllables(word: str) -> int:
@@ -44,10 +50,13 @@ def syllables(word: str) -> int:
 def vosk_words(dirs) -> set[str] | None:
     """The small model's vocabulary (its Gr.fst symbol table), cached as
     vosk-words.txt in the data dir; None when no model is at hand."""
+    if "words" in _VOCAB:
+        return _VOCAB["words"]
     cache = S.data_dir() / "vosk-words.txt"
     try:
         if cache.exists():
-            return set(cache.read_text().split())
+            _VOCAB["words"] = set(cache.read_text().split())
+            return _VOCAB["words"]
     except OSError:
         pass
     for d in dirs:
@@ -57,9 +66,10 @@ def vosk_words(dirs) -> set[str] | None:
         try:
             with tarfile.open(arc, "r:gz") as tf:
                 m = next((x for x in tf.getmembers() if x.name.endswith("graph/Gr.fst")), None)
-                if m is None:
+                f = tf.extractfile(m) if m is not None else None
+                if f is None:
                     continue
-                b = tf.extractfile(m).read()
+                b = f.read()
         except (OSError, tarfile.TarError):
             continue
         words = _fst_symbols(b)
@@ -69,6 +79,7 @@ def vosk_words(dirs) -> set[str] | None:
                 cache.write_text("\n".join(sorted(words)))
             except OSError:
                 pass
+            _VOCAB["words"] = words
             return words
     return None
 
@@ -92,60 +103,94 @@ def _fst_symbols(b: bytes) -> set[str]:
     return {w for w in out if w.isalpha()}
 
 
-def acceptable(name: str, vocab: set[str] | None) -> bool:
+def check(name: str, vocab: set[str] | None) -> str | None:
+    """None when a person can call the seat by this name, else why not."""
     n = str(name or "").strip()
-    if not re.fullmatch(r"[A-Za-z]{3,10}", n) or n.lower() in TAKEN:
-        return False
+    if not re.fullmatch(r"[A-Za-z]{3,10}", n):
+        return "one plain word, 3-10 letters"
+    if n.lower() in TAKEN:
+        return f"{n} is taken"
     if not 2 <= syllables(n) <= 3:
-        return False
-    return vocab is None or n.lower() in vocab
+        return "two or three syllables (one is too easy to miss, four too hard to say)"
+    if vocab is not None and n.lower() not in vocab:
+        return f"the page's speech recognizer doesn't know the word '{n.lower()}' -- \"Hey {n}\" could never be heard"
+    return None
 
 
-def propose(backend: str, model: str, timeout: float = 60.0) -> list[str]:
-    """One model call (Ollama's /api/chat, or an OpenAI-compatible /v1) -> candidates."""
-    body = {"model": model, "stream": False, "format": "json",
-            "messages": [{"role": "user", "content": PROMPT}]}
-    text = ""
+def _dirs():
+    from . import ui_serve as U
+    return (S.data_dir() / "assets", U.UI_DIR, U.DEV_WWW)
+
+
+def plant(srv) -> None:
+    """The entity `name` (a standalone boot): where the agreed name is written."""
+    from .entities import MEMBRANE_NS, CLASS_CONFIG, QuantumEntity
+    est = getattr(srv, "entity_store", None)
+    if est is None:
+        return
+    ent = est.docs.get(MEMBRANE_NS + ENT)
+    pp = dict(ent.properties or {}) if ent is not None else {}
+    pp.update({
+        "summary": ("YOUR NAME. You don't have one yet: people call you Membrane (\"Hey Membrane\"). "
+                    "Choose it TOGETHER with the operator -- offer a few names you like, talk it over; "
+                    "only when you both agree, edit this entity: properties {name: '<Name>', agreed_with: "
+                    "'<who agreed>'}. A name must be one word, two or three syllables, and one the page's "
+                    "speech recognizer knows -- `status` says whether it was adopted or why not. From then "
+                    "on \"Hey <Name>\" calls you.") if not named() else
+                   (f"YOUR NAME: {current()}, agreed with the operator. To change it, agree on a new one "
+                    "together first, then edit properties.name (and agreed_with)."),
+        "name": current() if named() else "",
+    })
+    if ent is None:
+        ent = QuantumEntity(eid=MEMBRANE_NS + ENT, cls=CLASS_CONFIG, properties=pp)
+    else:
+        ent.properties = pp
+    est.docs[ent.eid] = ent
     try:
-        req = urllib.request.Request(backend.rstrip("/") + "/api/chat", data=json.dumps(body).encode(),
-                                     headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=timeout) as r:
-            text = (json.loads(r.read()).get("message") or {}).get("content") or ""
+        est.upsert(ent, embedder=None)
     except Exception:
-        try:
-            body2 = {"model": model, "messages": body["messages"]}
-            req = urllib.request.Request(backend.rstrip("/") + "/v1/chat/completions", data=json.dumps(body2).encode(),
-                                         headers={"Content-Type": "application/json"})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                text = json.loads(r.read())["choices"][0]["message"]["content"]
-        except Exception as e:
-            print(f"[naming] the model did not answer ({e!r})"[:200], file=sys.stderr)
-            return []
-    m = re.search(r"\{.*\}", text, re.S)
-    try:
-        names = json.loads(m.group(0)).get("names") if m else None
-    except ValueError:
-        names = None
-    if not isinstance(names, list):
-        names = re.findall(r"\b[A-Z][a-z]{2,9}\b", text)
-    return [str(x).strip() for x in names if str(x).strip()]
+        pass
 
 
-def ensure(backend: str, model: str, dirs) -> str:
-    """The seat's name: settings.json's, or one it picks now (and keeps)."""
-    st = S.load()
-    if st.get("name"):
-        return str(st["name"])
-    vocab = vosk_words(dirs)
-    pick = next((n for n in propose(backend, model) if acceptable(n, vocab)), None)
-    how = "chose"
-    if pick is None:
-        pick = next((n for n in FALLBACK if acceptable(n, vocab)), FALLBACK[0])
-        how = "fell back to"
-    pick = pick[:1].upper() + pick[1:].lower()
-    S.save({"name": pick})
-    print(f"[naming] the seat {how} its name: {pick}", file=sys.stderr)
-    return pick
+def is_name_entity(ent) -> bool:
+    from .entities import MEMBRANE_NS
+    return getattr(ent, "eid", "") == MEMBRANE_NS + ENT
+
+
+def on_edit(srv, ent) -> dict | None:
+    """The seat wrote a name: adopt it (settings.json) or say why not."""
+    pp = dict(ent.properties or {})
+    want = str(pp.get("name") or "").strip()
+    if not want or (named() and want.lower() == current().lower()):
+        return None
+    if not str(pp.get("agreed_with") or "").strip():
+        why = "agreed_with is empty: a name is adopted only once the operator agreed -- ask them first"
+    else:
+        why = check(want, vosk_words(_dirs()))
+    if why:
+        pp["status"] = f"NOT adopted: {why}"
+        pp["name"] = current() if named() else ""
+        ent.properties = pp
+        return {"adopted": False, "why": why}
+    want = want[:1].upper() + want[1:].lower()
+    S.save({"name": want})
+    pp.update({"name": want, "status": f"adopted {time.strftime('%Y-%m-%d %H:%M')}: \"Hey {want}\" calls you now "
+               "(the page reloads with it; your prompt says it from the next boot)",
+               "summary": f"YOUR NAME: {want}, agreed with {pp.get('agreed_with')}."})
+    ent.properties = pp
+    print(f"[naming] adopted the name {want} (agreed with {pp.get('agreed_with')})", file=sys.stderr)
+    return {"adopted": True, "name": want}
+
+
+def card_line() -> str:
+    if named():
+        n = current()
+        return (f"\n- YOUR NAME: {n} -- you and the operator agreed on it. People call you by it "
+                f"(\"Hey {n}\" starts a voice message); answer to it, and sign as it.\n")
+    return ("\n- YOUR NAME: none yet -- for now people call you Membrane (\"Hey Membrane\"). Your name is "
+            "yours and the operator's to choose together: early on, offer a few you like and talk it over; "
+            "only when you both agree, adopt it by editing the entity `name` (help is in its summary). Never "
+            "pick one alone.\n")
 
 
 def personalize(text: str, name: str) -> str:

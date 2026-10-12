@@ -126,6 +126,8 @@ function catchUp(queue, now) {
 /** Speech decisions, in the console ("[membrane speech] ..."): why a reply was or wasn't said. */
 function speechLog(who, what, text) {
   try { console.info("[membrane speech]", who, what, String(text || "").slice(0, 80)); } catch (e) { /* no console */ }
+  // the standalone page sends its voice log to the seat (host.js): <data dir>/page-voice.log
+  try { if (window.MEMBRANE_SPEECH_LOG) window.MEMBRANE_SPEECH_LOG(who, what, String(text || "").slice(0, 400)); } catch (e) { /* best effort */ }
 }
 const STT_PATH = "/api/ai_terminal/stt";
 const REC_MAX_S = 60, REC_MIN_S = 0.35, STT_RATE = 16000;
@@ -1063,6 +1065,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     /** The voice status, by the buttons (the top bar's status is hidden on phones). */
     _vsay(text, ms = 6000) {
+      if (text) speechLog("page", "status", text);
       const el = this.shadowRoot.querySelector(".vsay"); if (!el) return;
       clearTimeout(this._vsayT);
       el.textContent = text || ""; el.classList.toggle("show", !!text);
@@ -1529,6 +1532,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const r = await asr(toWhisperRate(all, rate));
         return cleanTranscript(r && r.text);
       } catch (e) {
+        speechLog("you", "on-device recognition failed", String((e && (e.stack || e.message)) || e));
         this._vsay("on-device recognition failed (" + ((e && e.message) || e) + "): using the brain phone", 4000);
         return this._whisper(chunks, rate);
       }
@@ -1542,8 +1546,9 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const wav = wavBytes(downsample(all, rate, STT_RATE), STT_RATE);
         const r = await this._hass.fetchWithAuth(STT_PATH, { method: "POST", headers: { "Content-Type": "audio/wav" }, body: wav });
         const d = await r.json().catch(() => ({}));
+        if (!r.ok) speechLog("you", "speech server " + r.status, d.error || "");
         return (r.ok && d.text || "").trim();
-      } catch (e) { return ""; }
+      } catch (e) { speechLog("you", "speech server unreachable", String(e)); return ""; }
     }
 
     _hotLocalFrame(h, buf) {
@@ -1568,6 +1573,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         return;
       }
       if (h.state !== "dictate") return;                   // finishing: frames are not needed
+      if (rms > (h.dpeak || 0)) h.dpeak = rms;              // the voice log: how loud the request came in
+      h.dthr = thr;
       if (h.free) h.free.kr.acceptWaveform(buf); else if (h.dchunks) h.dchunks.push(new Float32Array(f32));
       const ms = (f32.length / h.rate) * 1000;
       if (rms >= thr) { h.spoke = true; h.silent = 0; } else h.silent += ms;
@@ -1586,6 +1593,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         this._orb("thinking");
         text = this._engine === "device" ? await this._whisperLocal(h.dchunks, h.rate) : await this._whisper(h.dchunks, h.rate);
       }
+      speechLog("you", "dictation", JSON.stringify({ engine: this._engine, spoke: !!h.spoke, free: !!h.free,
+        secs: +((h.dchunks || []).reduce((a, c) => a + c.length, 0) / (h.rate || 1)).toFixed(2),
+        peak: +(h.dpeak || 0).toFixed(4), thr: +(h.dthr || 0).toFixed(4), floor: +(h.floor || 0).toFixed(4), text }));
+      h.dpeak = 0;
       if (this._hot !== h) return;
       this._wakeRecognizer(h);
       if (follow) {
