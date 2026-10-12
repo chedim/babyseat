@@ -92,13 +92,25 @@ def _find_repo() -> Path | None:
 def _pip_direct_url() -> str | None:
     """A git URL this package was pip/uv-installed from, if any."""
     import importlib.metadata as md
-    try:
-        for f in md.distribution("membrane").files or []:
-            if f.name == "direct_url.json":
-                import json
-                return json.loads(Path(f.locate()).read_text()).get("url")
-    except Exception:
-        pass
+    import json
+    for dist in ("membrane-seat", "membrane"):        # the PyPI name since 0.3.0, the old one before
+        try:
+            files = md.distribution(dist).files or []
+        except Exception:
+            continue
+        for f in files:
+            if f.name != "direct_url.json":
+                continue
+            try:
+                d = json.loads(Path(f.locate()).read_text())
+            except Exception:
+                return None
+            url = str(d.get("url") or "")
+            vcs = d.get("vcs_info") or {}
+            if vcs.get("vcs") == "git":                # a beta tester's install from the repo: same branch
+                rev = vcs.get("requested_revision")
+                return f"git+{url}" + (f"@{rev}" if rev else "")
+            return url or None
     return None
 
 

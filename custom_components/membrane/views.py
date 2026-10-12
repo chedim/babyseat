@@ -28,7 +28,12 @@ TYPES = {".js": "application/javascript", ".mjs": "application/javascript", ".cs
 BIG = (".wasm", ".gz")
 
 
+VENDOR = Path(__file__).resolve().parent / "vendor"     # the private beta's zip: the package inside
+
+
 def package_ui() -> Path | None:
+    if (VENDOR / "membrane" / "ui").is_dir():
+        return VENDOR / "membrane" / "ui"
     spec = importlib.util.find_spec("membrane")
     locs = list(getattr(spec, "submodule_search_locations", None) or []) if spec else []
     for loc in locs:
@@ -41,7 +46,7 @@ def package_ui() -> Path | None:
 def find(hass, name: str) -> Path | None:
     if not name or "/" in name or "\\" in name or name.startswith("."):
         return None
-    dirs = [HERE, package_ui(), Path(hass.config.path(SEAT_DIR)) / "assets"]
+    dirs = [HERE, package_ui(), VENDOR / "assets", Path(hass.config.path(SEAT_DIR)) / "assets"]
     for d in dirs:
         if d is not None and (d / name).is_file():
             return d / name

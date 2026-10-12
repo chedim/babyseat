@@ -79,3 +79,4 @@ integrations/homeassistant/custom_components/ai_terminal/www/voice-ml.mjs
 
 # Couchbase Lite libraries (scripts/fetch-cbl.sh)
 vendor/cbl/
+dist/

@@ -40,6 +40,13 @@ LOG_MAX = 5_000_000
 # the child's environment: chosen, never HA's own (HA OS gives HA a SUPERVISOR_TOKEN --
 # the seat runs model-written commands, it must not hold the keys to the host)
 ENV_KEEP = ("PATH", "LANG", "LC_ALL", "TZ", "SSL_CERT_FILE", "SSL_CERT_DIR")
+# the private beta's zip carries the package itself (scripts/build_release.py)
+VENDOR = Path(__file__).resolve().parent / "vendor"
+
+
+def package_found() -> bool:
+    import importlib.util
+    return (VENDOR / "membrane" / "opencode.py").is_file() or importlib.util.find_spec("membrane") is not None
 
 
 def free_port(preferred: int) -> int:
@@ -67,6 +74,8 @@ def child_env(base: Path, data: Path) -> dict:
         "MEMBRANE_NAME_CEREMONY": "1",          # a new seat asks its operator for its name (naming.py)
         "PYTHONUNBUFFERED": "1",
     })
+    if (VENDOR / "membrane").is_dir():
+        env["PYTHONPATH"] = str(VENDOR)         # the vendored package wins
     return env
 
 
@@ -170,6 +179,10 @@ class SeatSupervisor:
     # -- the life ---------------------------------------------------------------
 
     async def start(self) -> None:
+        if not await self.hass.async_add_executor_job(package_found):
+            _LOGGER.error("membrane: the membrane package isn't installed (and this copy of the "
+                          "integration carries none) -- install the release zip, or pip install membrane-seat")
+            return
         self._stopping = False
         await self._spawn()
         self._tasks = [self.hass.async_create_background_task(self._watch(), "membrane seat"),
