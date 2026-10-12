@@ -3,14 +3,22 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "membrane"
-version = "0.2.0b1"
-description = "A local-first memory field for coding agents: RAG + learning gate + thermodynamics, served through an OpenAI-compatible proxy."
+name = "membrane-seat"
+version = "0.3.0"
+description = "Membrane: a local-first memory field and seat for AI -- its own web UI (`membrane standalone`) or inside Home Assistant (HACS)."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Dmitrii Chechetkin" }]
-dependencies = ["numpy>=1.26", "couchbase>=4.6"]
+dependencies = ["numpy>=1.26"]
+
+[project.optional-dependencies]
+couchbase = ["couchbase>=4.6"]      # a Couchbase cluster for the field / peers; the default stores need none
+mdns = ["zeroconf"]                 # peers found on the LAN
+
+[project.urls]
+Homepage = "https://github.com/chedim/membrane"
+Issues = "https://github.com/chedim/membrane/issues"
 
 [project.scripts]
 membrane = "membrane.cli:main"

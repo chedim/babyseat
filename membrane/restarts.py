@@ -47,7 +47,10 @@ _last_ha = {"ts": 0.0}
 
 
 def _dir(srv) -> str:
-    d = getattr(srv, "data_dir", None) or os.path.expanduser("~/membrane/.membrane")
+    # the seat's own data dir (the field's folder, opencode.py exports it); the old
+    # fallback wrote restart files to ~/membrane/.membrane wherever the seat ran
+    d = (getattr(srv, "data_dir", None) or os.environ.get("MEMBRANE_DATA_DIR")
+         or os.path.expanduser("~/membrane/.membrane"))
     return str(d)
 
 

@@ -44,6 +44,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -673,9 +674,15 @@ def main() -> None:
                 # THE RECYCLE GUARD: a pid file's dead-seat pid gets
                 # recycled by any process -- the lock only bites when
                 # the pid IS a membrane process:
-                _cmdline = subprocess.run(
-                    ["ps", "-p", str(_running), "-o", "command="],
-                    capture_output=True, text=True, timeout=4).stdout
+                # /proc first (BusyBox ps -- HA's Alpine image -- has no -p: the
+                # lock silently never bit there), ps on systems without /proc
+                try:
+                    with open(f"/proc/{_running}/cmdline", "rb") as _f:
+                        _cmdline = _f.read().replace(b"\0", b" ").decode("utf-8", "replace")
+                except OSError:
+                    _cmdline = subprocess.run(
+                        ["ps", "-p", str(_running), "-o", "command="],
+                        capture_output=True, text=True, timeout=4).stdout
                 _is_ours = "membrane" in _cmdline
             except Exception:
                 _is_ours = False
@@ -1510,12 +1517,24 @@ def main() -> None:
     # resolve the embedder AT BOOT: the field must be able to embed before a
     # single turn (a fresh field also needs nothing, but the resolver proves
     # the embed role early rather than on the first chat).
-    if srv.embed_model_arg:
+    # a backend that doesn't answer at all fails every probe -- after up to 180 s
+    # each (an HA child waited minutes for nothing): one quick check first
+    _backend_up = True
+    try:
+        with urllib.request.urlopen(backend + "/api/version", timeout=8):
+            pass
+    except urllib.error.HTTPError:
+        pass                               # it answered (an OpenAI-only server, say)
+    except Exception as e:
+        _backend_up = False
+        print(f"[opencode] backend {backend} not answering ({type(e).__name__}): no embed "
+              "probes -- the seat runs offline until it does", file=sys.stderr)
+    if srv.embed_model_arg and _backend_up:
         emb = _probe_embedder(backend, srv.embed_model_arg)
         if emb is not None:
             mem.embedder = emb
             srv.pending_embed_error = None
-    if mem.embedder is None:
+    if mem.embedder is None and _backend_up:
         # ladder: known embed models, then the selected chat model
         for cand in _known_embed_names(backend) + ([model] if model else []):
             if cand in [srv.embed_model_arg]:
@@ -2039,6 +2058,20 @@ def main() -> None:
                         pid_path.unlink()
                 except OSError:
                     pass
+            else:
+                # a DEAD TUI's pid is a ghost, never followed: the proxy exited at once
+                # on a stale file (an HA child, a seat without opencode on PATH)
+                try:
+                    _old = int(pid_path.read_text().strip()) if pid_path.exists() else 0
+                    if _old:
+                        os.kill(_old, 0)
+                except PermissionError:
+                    pass                   # alive (another user's): followed as before
+                except (ValueError, ProcessLookupError, OSError):
+                    try:
+                        pid_path.unlink()
+                    except OSError:
+                        pass
             watched_pid = None
             try:
                 if pid_path.exists():

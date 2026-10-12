@@ -3272,7 +3272,7 @@ def _openai_sse_chunks(model: str, content: str, piece: int = 128,
 def _known_embed_names(backend: str) -> list:
     """Ollama model names whose tag looks like an embedding model."""
     try:
-        with urllib.request.urlopen(backend + "/api/tags", timeout=30) as r:
+        with urllib.request.urlopen(backend + "/api/tags", timeout=10) as r:
             tags = json.loads(r.read())
     except Exception:
         return ["mxbai-embed-large", "nomic-embed-text"]
@@ -3621,7 +3621,7 @@ def _chat_capable_models(backend: str) -> list:
     router routes under, applied to the picker, /v1/models and the default
     model choice. Cloud entries (size 0 / remote_host) always pass."""
     try:
-        with urllib.request.urlopen(backend + "/api/tags", timeout=30) as r:
+        with urllib.request.urlopen(backend + "/api/tags", timeout=10) as r:
             tags = json.loads(r.read())
     except Exception:
         return []
@@ -3674,7 +3674,7 @@ def _pick_idle_cortex_model(backend: str, preferred: str | None) -> str:
     hardcoded name survives only as the last resort."""
     fallback = preferred or "granite3.3:8b"
     try:
-        with urllib.request.urlopen(backend + "/api/tags", timeout=30) as r:
+        with urllib.request.urlopen(backend + "/api/tags", timeout=10) as r:
             tags = json.loads(r.read())
     except Exception:
         return fallback
