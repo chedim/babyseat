@@ -1945,6 +1945,8 @@ def main() -> None:
                 print("[opencode] serve surface is down; no TUI child "
                       "(proxy only -- point any client at a surface "
                       "manually)", file=sys.stderr)
+            elif args.standalone:
+                pass                       # standalone: the browser is the client, no TUI
             elif not tui_direct and not legacy_serve:
                 # THE CLIENT (stage 3.5): the TUI attaches to membrane's
                 # serve server -- sessions/messages in membrane's stores,
@@ -2023,7 +2025,7 @@ def main() -> None:
             # ignores (and clears) a stale pid file: the operator's
             # rule binds a LAUNCHING proxy to its child, never a
             # headless one to a dead launcher's ghost.
-            if not args.launch:
+            if not args.launch or args.standalone:   # standalone has no TUI to follow
                 try:
                     if pid_path.exists():
                         pid_path.unlink()
