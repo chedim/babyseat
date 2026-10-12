@@ -234,3 +234,16 @@ class TestArgumentsInTheName(unittest.TestCase):
             with self.assertRaises(ValueError) as cm:
                 T.resolve(nm, {"action": "read"})
             self.assertIn("no tool name", str(cm.exception))
+
+
+def test_a_nameless_call_is_salvaged_by_its_action():
+    # an HA seat, 2026-10-12: the backend lost the tool's name ('no_name_1') and
+    # wrapped the arguments as {"input": "<json>"}; the model retried it 14 times
+    from membrane import toolset as T
+    name, args = T.resolve("no_name_1", {"input": '{"action": "edit", "spec": "membrane::name", '
+                                                   '"properties": {"name": "Juniper", "agreed_with": "Tester"}}'})
+    assert name == "entity_edit"
+    assert args["spec"] == "membrane::name" and args["properties"]["name"] == "Juniper"
+    import pytest
+    with pytest.raises(ValueError, match="WITHOUT its tool name"):
+        T.resolve("no_name_2", {"action": "list"})          # goal or track: say so, don't guess

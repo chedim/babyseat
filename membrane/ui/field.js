@@ -284,7 +284,17 @@ function defineFieldPanel() {
     get hass() { return this._hass; }
     set narrow(n) { this._narrow = !!n; if (this._menuBtn) this._menuBtn.style.display = n ? "" : "none"; }
 
+    // properties HA set before this class was defined (its panel loader can make the
+    // element first): own properties that shadow the setters -- take them over
+    _takeEarly() {
+      for (const k of ["panel", "route", "narrow", "hass"]) {
+        if (!Object.prototype.hasOwnProperty.call(this, k)) continue;
+        const v = this[k]; delete this[k]; this[k] = v;
+      }
+    }
+
     connectedCallback() {
+      this._takeEarly();
       if (!this._cv) this._build();
       if (!this.hasAttribute("mode")) this.setAttribute("mode", "3d");
       if (!this._booted && this._hass) { this._booted = true; this._load(); }

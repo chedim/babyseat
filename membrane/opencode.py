@@ -617,6 +617,10 @@ def main() -> None:
     if args.standalone:
         args.serve = True
         os.environ["MEMBRANE_STANDALONE"] = "1"
+    # THE NAME CEREMONY (naming.py): a new seat asks its operator for its name --
+    # standalone, and a seat Home Assistant runs (its supervisor sets the env);
+    # never a seat that has one already in its doctrine (the boat's Argus)
+    naming_on = args.standalone or os.environ.get("MEMBRANE_NAME_CEREMONY") == "1"
     passthrough = args.passthrough
     if args.new_session:
         args.cont = False
@@ -1388,7 +1392,7 @@ def main() -> None:
     # (one deliberation per loop, no tools -- the honest degrade).
     srv.loops = None
     if getattr(srv, "events_pool", None) is not None:
-        srv.loops = LoopRunner(max_loops=3)
+        srv.loops = LoopRunner(max_loops=max(1, int(os.environ.get("MEMBRANE_LOOPS_MAX") or 3)))   # an HA box: fewer
         srv.loops._srv = srv
         srv.loops.titles = []          # the running agents' names (the banner)
 
@@ -1618,7 +1622,7 @@ def main() -> None:
             if getattr(args, "seat_card", True):
                 text += _seat_card(srv, bool(getattr(args, "mcp", True)),
                                    serve=bool(getattr(args, "serve", False)))
-            if args.standalone:            # THE NAME CEREMONY (naming.py): its own name, in its own prompt
+            if naming_on:                  # THE NAME CEREMONY (naming.py): its own name, in its own prompt
                 from . import naming as _NM
                 text = _NM.personalize(text, _NM.current()) + _NM.card_line()
             tmp = instr_path + ".tmp"
@@ -1827,14 +1831,15 @@ def main() -> None:
             start(serve_port or 4096, surf_host, serve_su,
                   serve_sp, cfg, runner, sess_store, msg_store)
             native_up = True
-            if args.standalone:            # STANDALONE MODE: the UI on the serve port (ui_serve.py)
-                from . import ui_serve as _UIS
-                _ui_url = _UIS.browser_url(surf_host, serve_port or 4096)
+            if naming_on:
                 try:                       # the entity `name`: agreed with the operator, never picked alone
                     from . import naming as _NM
                     _NM.plant(srv)
                 except Exception as e:
                     print(f"[seat] name entity not planted ({e})", file=sys.stderr)
+            if args.standalone:            # STANDALONE MODE: the UI on the serve port (ui_serve.py)
+                from . import ui_serve as _UIS
+                _ui_url = _UIS.browser_url(surf_host, serve_port or 4096)
                 print(f"[seat] membrane UI: {_ui_url}", file=sys.stderr)
                 if not args.no_browser and sys.stdin.isatty():
                     _UIS.open_when_up(serve_port or 4096, _ui_url)

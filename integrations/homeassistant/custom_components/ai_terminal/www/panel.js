@@ -737,6 +737,15 @@ function definePanel() {
   class AiTerminalPanel extends HTMLElement {
     constructor() {
       super();
+      // made before this class was defined (membrane home creates the chat while
+      // panel.js still loads): the hass / narrow it was given are own properties
+      // that would shadow the setters forever -- the chat never booted. Take them over.
+      const own = (k) => Object.prototype.hasOwnProperty.call(this, k);
+      const early = { hass: own("hass") ? this.hass : undefined, narrow: own("narrow") ? this.narrow : undefined };
+      if (own("hass")) delete this.hass;
+      if (own("narrow")) delete this.narrow;
+      if (early.hass) this._hass = early.hass;
+      if (early.narrow != null) this._narrow = !!early.narrow;
       this.attachShadow({ mode: "open" });
       this._sid = null;
       this._sessions = [];

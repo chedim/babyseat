@@ -353,6 +353,24 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
             "e.g. name='entity', arguments={\"action\": \"read\", \"name\": \"presence\"}")
     name, args = canonical(name, args)
     args = _json_objects(dict(args or {}))
+    # THE NAMELESS CALL (2026-10-12, a seat inside Home Assistant: the backend's
+    # parser lost the tool's name -- 'no_name_1' -- and wrapped the arguments as
+    # {"input": "<json>"}; told "no tool is named 'no_name_1'", the model sent it
+    # 14 more times): unwrap it, and an action only ONE family has names the call
+    if re.fullmatch(r"no_name(_\d+)?", str(name or "")):
+        inner = args
+        if set(args) == {"input"} and isinstance(args.get("input"), str):
+            try:
+                inner = _json_objects(dict(json.loads(args["input"]) or {}))
+            except (ValueError, TypeError):
+                inner = args
+        act = str(inner.get("action") or "")
+        owners = [f for f, d in FAMILIES.items() if act and act in d["actions"]]
+        if len(owners) == 1:
+            return resolve(owners[0], inner)
+        raise ValueError(
+            "the call arrived WITHOUT its tool name (the model server lost it): send it again "
+            f"naming the tool -- one of {', '.join(sorted(FAMILIES))} -- with the same arguments")
     fam = FAMILIES.get(name)
     if fam is None:
         # an OLD member's name carrying a family action (entity_link +

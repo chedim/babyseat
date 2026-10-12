@@ -572,7 +572,17 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     set narrow(n) { this._narrow = !!n; if (this._chat) this._chat.narrow = n; }
     set panel(p) { this._panel = p; }
 
+    // properties HA set before this class was defined (its panel loader can make the
+    // element first): own properties that shadow the setters -- take them over
+    _takeEarly() {
+      for (const k of ["panel", "route", "narrow", "hass"]) {
+        if (!Object.prototype.hasOwnProperty.call(this, k)) continue;
+        const v = this[k]; delete this[k]; this[k] = v;
+      }
+    }
+
     connectedCallback() {
+      this._takeEarly();
       lsSet(LS_LEFT, "0");               // back on membrane: fresh starts land here again
       if (!this.shadowRoot.firstChild) this._render();
       this._listenKeys(true);
