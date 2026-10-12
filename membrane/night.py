@@ -2936,8 +2936,16 @@ def _field_filter_hits(ent, props) -> list[dict]:
                 hits.append({"verb": "pos", "arg": arg, "dist": round(d, 4)})
                 props[stamp_k] = list(pos)
         elif verb == "align":
-            v = float(props.get("coherence")
-                      or props.get("net_align") or 0.0)
+            # the entity's FIELD state carries coherence (2026-10-11 sweep: the
+            # verb read entity properties nothing writes -- always 0, never crossed)
+            v = float(props.get("coherence") or props.get("net_align") or 0.0)
+            try:
+                _srv = getattr(getattr(ent, "_store", None), "_srv", None) or _EST_SRV.get("srv")
+                _st = _srv.efield.get(E.field_id(ent.eid)) if _srv is not None else None
+                if _st is not None:
+                    v = float(_st.coherence or 0.0)
+            except Exception:
+                pass
             stamp = props.get("wf_stamp_align")
             if stamp is None:
                 props[stamp_k] = v
@@ -2946,7 +2954,14 @@ def _field_filter_hits(ent, props) -> list[dict]:
                 hits.append({"verb": "align", "arg": arg, "now": v})
             props[stamp_k] = v
         elif verb == "vel":
-            v = float(props.get("ring_velocity") or 0.0)
+            # the drift ring's velocity is a METHOD (the prop was never written)
+            if props.get("ring_velocity") is not None:
+                v = float(props.get("ring_velocity") or 0.0)
+            else:
+                try:
+                    v = float(ent.ring_velocity(time.time()) or 0.0)
+                except Exception:
+                    v = 0.0
             stamp = props.get("wf_stamp_vel")
             if stamp is None:
                 props[stamp_k] = v
@@ -2957,6 +2972,9 @@ def _field_filter_hits(ent, props) -> list[dict]:
     return hits
 
 
+_EST_SRV: dict = {"srv": None}        # the running seat, for the align verb's field read
+
+
 def note_field_change(srv, est, ent, change_ts: float | None = None) -> None:
     """THE FLUSH'S INTAKE (called by the field's flush per dirty
     entity): the filters check, the gravity/freeze gate decides, the
@@ -2965,6 +2983,8 @@ def note_field_change(srv, est, ent, change_ts: float | None = None) -> None:
     the burst delivers on subsidence/melt/max-latency."""
     if est is None or ent is None:
         return
+    if srv is not None:
+        _EST_SRV["srv"] = srv
     props = ent.properties or {}
     if not props.get("watch_fields"):
         return
@@ -3766,6 +3786,16 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
             changed += 1
         if refused:
             out["patch_refused"] = refused   # the visible refusal
+    # THE REFUSAL ON THE ENTITY (2026-10-11 sweep: the docs promised patch of
+    # any property and delete; the engine refuses both -- by covenant -- but
+    # only a getter's caller ever saw it): every trigger's refusal is noted
+    # where an entity read shows it
+    _ref = list(out.get("patch_refused") or [])
+    if out.get("delete") and trigger not in ("consolidation", "delete"):
+        _ref.append("delete (only a delete_script retires; else entity remove)")
+    if _ref:
+        props["patch_refused"] = {"keys": _ref[:12], "trigger": trigger, "ts": round(time.time(), 1),
+                                  "allowed": "render, patch.script_data, patch.position, run, intent"}
     # THE RUN VERDICT (the exec's only lane, the operator's ruling
     # 2026-10-02): a script returning {run: true} makes the ENGINE
     # exec the entity's OWN 'command' prop (run_command_entity -- the

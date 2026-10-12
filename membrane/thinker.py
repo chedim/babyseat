@@ -84,6 +84,11 @@ WAKEUP_SIGNALS = frozenset((
     "boundary",                # a listener-owned track's crossing
     "intent-planted",          # a commitment landed -- the loops receive it
     "operator-message",        # the operator talks
+    # what the sweep found never woke the night (2026-10-11): the kinds that
+    # are actually emitted -- a proximity fire, a field-watch crossing, a call
+    "near", "away", "around",
+    "field:changed",
+    "llm-call",
 ))
 
 

@@ -475,6 +475,15 @@ def loop_task_text(ev: dict) -> str:
                 f"its {ev.get('boundary', '?')} "
                 f"(count {ev.get('count', '?')})")
         detail = str(ev.get("detail") or "")
+    elif kind == "getter-applied":
+        # WHAT CHANGED (2026-10-11 sweep: the loop was woken with an empty task)
+        head = f"a reading changed on '{ent}' (its getter ran)"
+        st = ev.get("state") if isinstance(ev.get("state"), dict) else {}
+        detail = ("New values: " + ", ".join(f"{k}={str(v)[:40]}" for k, v in list(st.items())[:8])) if st else ""
+    elif kind == "field:changed":
+        head = (f"the field moved '{ent}': your watch_fields filter '{ev.get('verb', '?')}' crossed"
+                + (" (it was frozen hot; this is the burst after the melt)" if ev.get("frozen") else ""))
+        detail = f"{ev.get('n_changes', 1)} change(s) over {ev.get('span_s', 0)} s."
     else:
         head = f"watch event ({kind}) on '{ent}'"
         detail = ""

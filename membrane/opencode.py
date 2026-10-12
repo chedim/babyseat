@@ -996,6 +996,11 @@ def main() -> None:
         # silently (the store is the guard).
         try:
             from .night import seed_clock_entity
+            try:                                  # the operator: the default rel of every watch op
+                from .watch_agents import plant_operator
+                plant_operator(srv.entity_store)
+            except Exception as e:
+                print(f"[opencode] operator entity not planted ({e})", file=sys.stderr)
             if seed_clock_entity(srv.entity_store):
                 print("[seat] the clock entity is planted (tool:clock, "
                       "fires on the thinker's heartbeat)", file=sys.stderr)
@@ -1412,9 +1417,12 @@ def main() -> None:
                 return {"verdict_text": (out or "")[:200]}
             return go
         srv.run_loop_turn = _run_loop_turn()
-        WA_start_loop_drainer(srv)
-        from .watch_agents import start_goal_pulse
-        start_goal_pulse(srv)
+        from .watch_agents import enabled_loops as _wa_on, start_goal_pulse
+        if _wa_on():                       # MEMBRANE_WATCH_LOOPS=0: the documented kill switch (never read before)
+            WA_start_loop_drainer(srv)
+            start_goal_pulse(srv)
+        else:
+            print("[opencode] watch loops OFF (MEMBRANE_WATCH_LOOPS=0)", file=sys.stderr)
         print("[opencode] the loop pool is live (3 loops + the "
               "operator's lane; the drainer consumes the watch events)",
               file=sys.stderr)

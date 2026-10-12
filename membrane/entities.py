@@ -2369,6 +2369,16 @@ class EntityStore(MultiParentOps, TimelineOps):
         if isinstance(properties, dict) and properties:
             for k, v in list(properties.items())[:16]:
                 kk = str(k)[:80]
+                if kk in ("script_every_n", "script_cooldown_s"):
+                    # the two documented knobs (2026-10-11 sweep: every script_*
+                    # key was skipped, so neither could ever be set) -- bounded
+                    try:
+                        num = float(v)
+                        ent.properties[kk] = (int(min(96, max(1, num))) if kk == "script_every_n"
+                                              else round(min(3600.0, max(0.0, num)), 1))
+                    except (TypeError, ValueError):
+                        pass
+                    continue
                 if kk.startswith("script_"):
                     continue
                 if kk in ("parents", "parent"):

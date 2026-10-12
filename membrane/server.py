@@ -1645,6 +1645,22 @@ class TurnRunner:
                                                  (self._agents or {}).get(sid))
         except Exception:
             pass
+        # THE OPERATOR MOVES (2026-10-11 sweep: membrane::operator was never
+        # planted or moved, so every watch op relative to the operator -- the
+        # default rel -- was dead): a person's message drifts it, off the turn's path
+        if (getattr(self, "_turn_origin", None) or {}).get(sid) == "operator":
+            _srv = getattr(self, "srv", None)
+            _est = getattr(_srv, "entity_store", None)
+            if _est is not None:
+                def _op_move(_t=text, _est=_est, _srv=_srv):
+                    try:
+                        from .watch_agents import operator_on_message
+                        from .speakers import split_speaker
+                        operator_on_message(_est, split_speaker(str(_t or ""))[1] or _t,
+                                            embedder=getattr(getattr(_srv, "membrane", None), "embedder", None))
+                    except Exception:
+                        pass
+                threading.Thread(target=_op_move, daemon=True, name="operator-move").start()
         # THE AGENT REGISTRY (the cosmetic-busy decider's + the lane
         # gate's input): THE TURN'S OWN AGENT WINS (the attached TUI
         # sends the mode per message -- 'plan' rows stored build-era

@@ -57,7 +57,13 @@ FAMILIES: dict[str, dict] = {
                    "watch_fields": {"type": "array", "items": {"type": "object"}, "description": "edit: own-motion watches"},
                    "merged_into": _S("edit: merge into this entity")},
         "map": {"read": lambda a: _pick({"spec": a.get("spec") or a.get("name") or a.get("object") or a.get("key"), "run": a.get("run")}, "spec", "run"),
-                "add": lambda a: _pick(a, "class", "name", "summary", "links"),
+                # an add keeps what it was given (2026-10-11 sweep: properties and
+                # watches were stripped here -- the add 'succeeded' with nothing set)
+                "add": lambda a: {**_pick(a, "class", "name", "summary", "links",
+                                          "watch", "watch_ops", "watch_fields", "publish"),
+                                  **({"properties": {**(a.get("properties") or {}),
+                                                     **({"parents": a["parents"]} if "parents" in a else {})}}
+                                     if (a.get("properties") or "parents" in a) else {})},
                 "edit": lambda a: {**_pick(a, "spec", "summary", "links", "class", "merged_into",
                                            "watch", "watch_ops", "watch_fields", "publish", "unpublish"),
                                    **({"properties": {**(a.get("properties") or {}),
@@ -145,7 +151,8 @@ HELP = {
     "scripts": (
         "Entity scripts are python, set with entity(action='edit', scripts={kind: code}). Kinds: "
         "getter (runs on a read; set a TOP-LEVEL result = {'state': {...live values...}}, also "
-        "'render' for the banner and 'patch' to edit properties -- a function's return or stdout is "
+        "'render' for the banner and 'patch' = {script_data, position} only (other keys are refused, "
+        "noted as patch_refused) -- a function's return or stdout is "
         "not read; run=true forces a read, else a 5s LRU paces it; 10s budget), tick (periodic), "
         "nudge, mention (on each mention), thought (when the thinker concludes about it), dreamed "
         "(when a dream names it), delete, watch (on external events). "
