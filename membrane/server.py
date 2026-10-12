@@ -2333,11 +2333,26 @@ def loopback_ladder(port: int, runner=None, cell=None):
         if _r is not None:
             sid = getattr(_r, "_current_turn_sid", None)
         body = dict(body, stream=True, membrane_ext=True, **({"_turn_sid": sid} if sid else {}))
+        # THE DROPPED STREAM (2026-10-11, "aaaand it is stuck"): the backend's
+        # stream was cut mid-generation -- the reader just saw the end, the
+        # round counted as a silent 'stop', the operator's question got an
+        # empty reply and auto-chat stalled on it. A stream that ends without
+        # its finish is TRUNCATED: with nothing usable yet it is asked again
+        # (STREAM_RETRIES); words already given are kept; a half tool call never runs.
+        for _attempt in range(STREAM_RETRIES + 1):
+            out = _stream_once(body, on_event)
+            if out is not _TRUNCATED_EMPTY:
+                return out
+            on_event("reasoning", "\n[membrane: the model's stream dropped -- asking again]\n")
+        raise ConnectionError(f"the model's stream dropped {STREAM_RETRIES + 1} times with nothing usable")
+
+    def _stream_once(body: dict, on_event):
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}/v1/chat/completions", data=_json.dumps(body).encode(),
             method="POST", headers={"Content-Type": "application/json"})
         content, reasoning, tcs = [], [], {}
         usage, ext, finish = None, None, None
+        done = False
         with urllib.request.urlopen(req, timeout=CLOUD_TIMEOUT_S) as resp:
             for raw in resp:
                 line = raw.strip()
@@ -2345,6 +2360,7 @@ def loopback_ladder(port: int, runner=None, cell=None):
                     continue
                 payload = line[5:].strip()
                 if payload == b"[DONE]":
+                    done = True
                     break
                 try:
                     d = _json.loads(payload)
@@ -2380,7 +2396,13 @@ def loopback_ladder(port: int, runner=None, cell=None):
                         if a:
                             cur["function"]["arguments"] += a if isinstance(a, str) else _json.dumps(a)
                 if on_event("tick", None):
+                    done = True                  # an abort is not a drop
                     break
+        if not done and finish is None:
+            if not content:
+                return _TRUNCATED_EMPTY          # nothing usable (a half tool call never runs): ask again
+            tcs = {}                             # words came: keep them; drop any half-built call
+            finish = "length"
         msg = {"role": "assistant", "content": "".join(content)}
         if reasoning:
             msg["reasoning"] = "".join(reasoning)
@@ -2413,6 +2435,9 @@ def mcp_executor(port: int):
 # onto the /v1 proxy -- that proxy binds 127.0.0.1 with no auth and has
 # write routes; the basic-authed serve passes exactly these, GET only (the
 # HA field dashboard + its sensors: state, the universe map, the drawer).
+STREAM_RETRIES = 2
+_TRUNCATED_EMPTY = object()          # a dropped stream that gave nothing usable
+
 # the serve's rounds stream from the /v1 proxy (words show as they come);
 # MEMBRANE_STREAM_ROUNDS=0 returns to the buffered call
 STREAM_ROUNDS = os.environ.get("MEMBRANE_STREAM_ROUNDS", "1") != "0"

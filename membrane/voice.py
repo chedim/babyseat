@@ -1435,6 +1435,22 @@ def fresh_topic(fld):
         return None
 
 
+AUTO_EMPTY_MAX = 2
+
+
+def _last_words(runner, sid: str) -> str:
+    """His last non-empty reply in the session (what a continuation aims from)."""
+    try:
+        for r in reversed(runner.messages.list(sid) or []):
+            if (r.get("info") or {}).get("role") == "assistant":
+                t = "\n".join(p.get("text") or "" for p in r.get("parts") or [] if p.get("type") == "text")
+                if t.strip():
+                    return t
+    except Exception:
+        pass
+    return ""
+
+
 def auto_next(runner, sid: str, reply: str) -> None:
     """One round: the voice answers the reply, its line becomes the next
     turn (after a short pause -- an operator message waiting goes first:
@@ -1445,6 +1461,7 @@ def auto_next(runner, sid: str, reply: str) -> None:
         return
 
     def go():
+        nonlocal reply
         time.sleep(AUTO_PAUSE_S)
         if not auto_on(runner, sid):
             return
@@ -1454,9 +1471,18 @@ def auto_next(runner, sid: str, reply: str) -> None:
         except Exception:
             pass
         if role(runner, sid) == "predict":
+            st = runner._auto.get(sid) or {}
             if not (reply or "").strip():
-                _seat_note(runner, "auto-chat-stalled", session=sid, why="an empty reply: nothing to continue from")
-                return                             # nothing said yet: nothing to continue
+                # ONE EMPTY TURN ISN'T THE END (2026-10-11: a dropped stream left an
+                # empty reply and auto-chat stalled for good): continue from his last
+                # real words, twice at most in a row, then stall
+                st["empty"] = int(st.get("empty") or 0) + 1
+                reply = _last_words(runner, sid) if st["empty"] <= AUTO_EMPTY_MAX else ""
+                if not reply.strip():
+                    _seat_note(runner, "auto-chat-stalled", session=sid, why="an empty reply: nothing to continue from")
+                    return                         # nothing said yet: nothing to continue
+            else:
+                st["empty"] = 0
             if reply.lstrip().startswith("model ladder failed"):
                 # the model refused a conversation ending on its own reply: stop, don't spin
                 print(f"[voice] auto continuation stopped: {reply.strip()[:160]}", file=sys.stderr)
