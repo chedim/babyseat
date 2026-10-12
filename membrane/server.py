@@ -1356,7 +1356,9 @@ class TurnRunner:
             taken, self._queue[sid] = list(q), []
         out = []
         for ent in taken:
-            out.append((str(ent.get("text") or ""), ent.get("user_info") or {}))
+            # a job's continuation carries its result as jobText (no stored row)
+            out.append((str(ent.get("text") or (ent.get("user_info") or {}).get("jobText") or ""),
+                        ent.get("user_info") or {}))
             self._drain_results[ent["qid"]] = {"status": "merged", "into": aid,
                                                "sessionID": sid}
             try:
@@ -1723,6 +1725,9 @@ class TurnRunner:
         # round starts from the conversation as it stands, his own last reply last
         if not user_info.get("continueTurn"):
             history.append({"role": "user", "content": text})
+        elif user_info.get("jobText"):
+            # jobs.py: a finished job's result, the turn's input (its card is a tool box)
+            history.append({"role": "user", "content": str(user_info["jobText"])})
         # MEMBRANE'S OWN VOICE (the third participant): it speaks first,
         # in its own thread, outside the session's messages
         # an auto self-turn (predict role) aims from Argus's own last reply,

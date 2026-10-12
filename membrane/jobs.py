@@ -211,14 +211,31 @@ def deliver(runner, sid: str, n: int, what: str, result: str, secs: float, depth
         pool.put({"kind": "job-done", "entity": entity, "job": n, "what": what, "result": result,
                   "secs": secs, "job_depth": depth + 1, "event_id": f"job-{n}", "ts": time.time()})
         return "loop"
-    info = {"id": f"msg_job{n}_{int(time.time() * 1000)}", "sessionID": sid, "role": "user",
-            "agent": str(((getattr(runner, "sessions", None) and runner.sessions.get(sid)) or {}).get("agent") or "build"),
-            "jobTurn": True, "jobDepth": depth + 1, "time": {"created": int(time.time() * 1000)}}
-    parts = [{"id": f"prt_job{n}", "sessionID": sid, "messageID": info["id"], "type": "text", "text": text}]
+    # THE RESULT IS A TOOL BOX, NOT A BUBBLE (2026-10-12, the operator: "NOT AS GIANT
+    # BLUE BUBBLES ... put them back into tool call boxes"): a card row of its own,
+    # one tool part (job #N, its output); the continuation turn takes the text
+    # invisibly, as auto-chat's continuations do
+    now = int(time.time() * 1000)
+    agent = str(((getattr(runner, "sessions", None) and runner.sessions.get(sid)) or {}).get("agent") or "build")
+    card = {"id": f"msg_job{n}_{now}", "sessionID": sid, "role": "assistant", "parentID": "",
+            "modelID": "membrane", "providerID": "membrane", "mode": "build", "agent": agent,
+            "path": {"cwd": "", "root": ""}, "cost": 0.0,
+            "tokens": {"total": 0, "input": 0, "output": 0, "reasoning": 0, "cache": {"read": 0, "write": 0}},
+            "time": {"created": now, "completed": now}, "finish": "stop", "jobCard": True}
+    part = {"id": f"prt_job{n}_{now}", "sessionID": sid, "messageID": card["id"], "type": "tool",
+            "callID": f"job-{n}", "tool": "job",
+            "state": {"status": "completed", "input": {"job": n, "what": what, "seconds": secs},
+                      "output": result, "title": f"job #{n} finished · {what} ({secs} s)",
+                      "time": {"start": now, "end": now}}}
     try:
-        runner.messages.append(sid, info, parts)
+        runner.messages.append(sid, card, [part])
+        runner.hub.publish({"type": "message.updated", "sessionID": sid, "info": dict(card)})
+        runner.hub.publish({"type": "message.part.updated", "part": dict(part), "time": now, "sessionID": sid})
     except Exception:
         pass
-    threading.Thread(target=lambda: runner.run(sid, text, user_info=info, user_parts=parts),
+    info = {"id": f"msg_jobturn{n}_{now}", "sessionID": sid, "role": "user", "agent": agent,
+            "continueTurn": True, "jobTurn": True, "jobDepth": depth + 1, "jobText": text,
+            "time": {"created": now}}
+    threading.Thread(target=lambda: runner.run(sid, "", user_info=info, user_parts=[]),
                      daemon=True, name=f"job-{n}-turn").start()
     return "chat"

@@ -80,8 +80,11 @@ class TestRuns(unittest.TestCase):
         self.assertIn("NOT finished", tool_out)
         self.assertTrue(_wait(lambda: any("job #" in s and "3 devices" in s for s in lad.seen)), lad.seen)
         rows = r.messages.list("s1")
-        self.assertTrue(any("[membrane] job #" in "".join(p.get("text") or "" for p in row.get("parts") or [])
-                            for row in rows if (row.get("info") or {}).get("role") == "user"))
+        cards = [p for row in rows for p in row.get("parts") or [] if p.get("type") == "tool" and p.get("tool") == "job"]
+        self.assertEqual(len(cards), 1)                                    # a tool box ...
+        self.assertIn("3 devices", cards[0]["state"]["output"])
+        self.assertFalse(any("[membrane] job #" in "".join(p.get("text") or "" for p in row.get("parts") or [])
+                             for row in rows if (row.get("info") or {}).get("role") == "user"))   # ... no bubble
 
     def test_a_fast_run_stays_inline(self):
         lad = _Ladder("entity_link", {"commands": "true"})
@@ -90,6 +93,16 @@ class TestRuns(unittest.TestCase):
         tool_out = [p for row in r.messages.list("s2") for p in row.get("parts") or [] if p.get("type") == "tool"
                     ][0]["state"]["output"]
         self.assertEqual(tool_out, "rc=0 ran: quick")
+
+
+class TestMidTurn(unittest.TestCase):
+    def test_a_job_landing_mid_turn_joins_the_next_round(self):
+        r = _runner(lambda b: {}, lambda *a: "")
+        done = threading.Event()
+        r._queue = {"s": [{"qid": "q1", "text": "", "user_info": {"jobText": "[membrane] job #3 finished: ok"},
+                           "done": done}]}
+        said = r._take_interjections("s", "a1")
+        self.assertEqual(said[0][0], "[membrane] job #3 finished: ok")
 
 
 class TestDelivery(unittest.TestCase):
