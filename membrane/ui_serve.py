@@ -12,11 +12,11 @@ serves the web UI built for HA -- the chat, membrane home, the 3D field, voice
     /ui/serve/<rest>  the seat's own routes (/session, /event, /membrane/...),
                       what HA's serve_proxy relayed -- in process
 
-THE LAN GUARD: the serve's routes ask for the basic-auth pair; /ui/* answers a
-private, loopback or tailnet address without it (the operator: no login on the
-LAN -- a person types their name in the page). Anything forwarded by a proxy
-(X-Forwarded-For, Forwarded) or from a public address still needs the pair, and
-`ui_lan_open: false` in settings.json closes the LAN door too.
+THE LAN GUARD: standalone asks no password of a private, loopback or tailnet
+address -- on any route, the UI's or the seat's own (the operator: "no auth
+needed"; a person types their name in the page). Anything forwarded by a proxy
+(X-Forwarded-For, Forwarded) or from a public address gets a 403, never a login
+prompt (the basic-auth pair still opens it for scripts).
 
 THE SPEAKER LINE: the page sends the name it holds (X-Membrane-Speaker); every
 message posted through /ui/serve carries '[user: <name>]' as its first line
@@ -220,14 +220,13 @@ def intercept(handler) -> bool:
     if not enabled():
         return False
     path, _, qs = handler.path.partition("?")
+    lan = trusted(handler)
+    if lan:
+        handler._ui_trusted = True         # standalone: no password anywhere on the LAN (the operator's rule)
     if not (path == "/" or path == "/index.html" or path == "/favicon.ico" or path.startswith("/ui/")):
         return False
-    lan = trusted(handler)
     if not lan and not handler._authed():
-        handler.send_response(401)
-        handler.send_header("WWW-Authenticate", 'Basic realm="membrane"')
-        handler.send_header("Content-Length", "0")
-        handler.end_headers()
+        _json(handler, {"error": "membrane answers the local network only"}, 403)   # never a login prompt
         return True
     if path.startswith("/ui/serve/"):
         rest = "/" + path[len("/ui/serve/"):].lstrip("/")
@@ -235,7 +234,7 @@ def intercept(handler) -> bool:
             _json(handler, {"type": "error", "error": {"message": "body must be a JSON object"}}, 400)
             return True
         handler.path = rest + ("?" + qs if qs else "")
-        handler._ui_trusted = True
+        handler._ui_trusted = True         # lan, or the pair checked above
         return False
     if handler.command not in ("GET", "HEAD") and path != "/ui/stt":
         _json(handler, {"error": "method not allowed"}, 405)

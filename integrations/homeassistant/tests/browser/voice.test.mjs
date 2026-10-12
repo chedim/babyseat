@@ -51,7 +51,7 @@ function serve(wav) {
   return new Promise((ok) => srv.listen(0, "127.0.0.1", () => ok(srv)));
 }
 
-async function withPage(wav, fn) {
+async function withPage(wav, fn, query = "") {
   const srv = await serve(wav);
   const browser = BROWSER === "firefox"
     ? await firefox.launch({ headless: true, firefoxUserPrefs: { "media.autoplay.default": 0, "media.navigator.permission.disabled": true } })
@@ -60,7 +60,7 @@ async function withPage(wav, fn) {
     const ctx = await browser.newContext(BROWSER === "firefox" ? {} : { permissions: ["microphone"] });
     const page = await ctx.newPage();
     page.on("pageerror", (e) => console.log("pageerror:", e.message));
-    await page.goto("http://127.0.0.1:" + srv.address().port + "/");
+    await page.goto("http://127.0.0.1:" + srv.address().port + "/" + query);
     await page.waitForFunction(() => window.__ready, null, { timeout: 30000 });
     await fn(page);
   } finally { await browser.close(); srv.close(); }
@@ -78,6 +78,18 @@ test("👂 on the device: 'Hey Argus, …' wakes it and the command reaches the 
     assert.ok(out.some((t) => /deck|lights?|turn on/i.test(t)), JSON.stringify(out));
     assert.ok(!out.some((t) => /\b(argus|are gus|our gus|angus|august)\b/i.test(t.split(" ").slice(0, 2).join(" "))), "the name is stripped");
   });
+});
+
+test("👂 a seat that named itself: 'Hey Juniper, …' wakes it (standalone mode)", { timeout: 240000 }, async () => {
+  const NAME = process.env.WAKE_NAME || "Juniper";
+  await withPage(spoken("Hey " + NAME + ", turn on the deck lights."), async (page) => {
+    await page.evaluate(() => { localStorage.setItem("membrane.home.stt", "device"); window.__home._engine = "device"; });
+    await page.evaluate(() => window.__home.shadowRoot.querySelector(".ear").click());
+    const out = await said(page, 200000);
+    console.log("said:", out);
+    assert.ok(out.some((t) => /deck|lights?|turn on/i.test(t)), JSON.stringify(out));
+    assert.ok(!out.some((t) => new RegExp("^\\s*(hey\\s+)?" + NAME + "\\b", "i").test(t)), "the name is stripped");
+  }, "?name=" + encodeURIComponent(NAME));
 });
 
 test("🔒 on the device: hands-free dictation ends itself on a pause", { timeout: 240000 }, async () => {

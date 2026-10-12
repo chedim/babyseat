@@ -84,11 +84,11 @@ class TestUiServe(unittest.TestCase):
         self.assertEqual(S.default_name("/home/x/agatha"), "Agatha")
         self.assertEqual(S.default_name("/home/x/sea-witch"), "Sea Witch")
 
-    def test_relay_without_password_on_loopback(self):
+    def test_no_password_on_the_lan(self):
         code, lst, _ = self._req("/ui/serve/session")
         self.assertEqual(code, 200)
         self.assertIsInstance(lst, list)
-        self.assertEqual(self._req("/session", raw=True)[0], 401)    # the serve's own door is unchanged
+        self.assertEqual(self._req("/session")[0], 200)          # the seat's own routes too
 
     def test_message_carries_the_speaker_line(self):
         s = self.sessions.create()
@@ -103,21 +103,19 @@ class TestUiServe(unittest.TestCase):
         self.assertNotIn("Mallory", text)
         self.assertEqual(rest.strip(), "hi")
 
-    def test_proxied_or_closed_needs_the_pair(self):
-        self.assertEqual(self._req("/ui/conf", headers={"X-Forwarded-For": "8.8.8.8"}, raw=True)[0], 401)
+    def test_proxied_is_refused_without_a_prompt(self):
+        code, _, h = self._req("/ui/conf", headers={"X-Forwarded-For": "8.8.8.8"}, raw=True)
+        self.assertEqual(code, 403)
+        self.assertIsNone(h.get("WWW-Authenticate"))
         self.assertEqual(self._req("/ui/conf", headers={"X-Forwarded-For": "8.8.8.8"}, auth=True)[0], 200)
-        S.save({"ui_lan_open": False})
-        self.assertEqual(self._req("/", raw=True)[0], 401)
-        self.assertEqual(self._req("/ui/serve/session", raw=True)[0], 401)
-        self.assertEqual(self._req("/ui/serve/session", auth=True)[0], 200)
 
     def test_keepalive_does_not_leak_trust(self):
         import http.client
         c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
-        c.request("GET", "/ui/serve/session")
+        c.request("GET", "/ui/conf")
         r = c.getresponse(); r.read()
         self.assertEqual(r.status, 200)
-        c.request("GET", "/session")                      # the same connection, the serve's door
+        c.request("GET", "/session", headers={"X-Forwarded-For": "8.8.8.8"})   # same connection, now proxied
         r = c.getresponse(); r.read()
         self.assertEqual(r.status, 401)
         c.close()

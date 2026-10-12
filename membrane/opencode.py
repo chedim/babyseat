@@ -1599,6 +1599,13 @@ def main() -> None:
             if getattr(args, "seat_card", True):
                 text += _seat_card(srv, bool(getattr(args, "mcp", True)),
                                    serve=bool(getattr(args, "serve", False)))
+            if args.standalone:            # THE NAME CEREMONY (naming.py): its own name, in its own prompt
+                from . import naming as _NM
+                from . import ui_serve as _UIS
+                _name = _NM.ensure(backend, model or "", (_UIS.S.data_dir() / "assets", _UIS.UI_DIR, _UIS.DEV_WWW))
+                text = _NM.personalize(text, _name)
+                text += (f"\n- YOUR NAME: {_name} -- you chose it yourself at your first boot. People call you "
+                         f"by it (\"Hey {_name}\" starts a voice message); answer to it, and sign as it.\n")
             tmp = instr_path + ".tmp"
             with open(tmp, "w") as f:
                 f.write(text)

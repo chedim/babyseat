@@ -28,6 +28,9 @@
     callWS: async () => ({}), connection: { subscribeEvents: async () => () => {} } };
 </script>
 <script type="module">
+  // a custom seat name (standalone mode): ?name=Juniper, set before the UI loads
+  const nm = new URLSearchParams(location.search).get("name");
+  if (nm) window.MEMBRANE_NAME = nm;
   await import("/api/ai_terminal/www/panel.js");
   await import("/api/ai_terminal/www/home.js");
   const el = document.createElement("membrane-home-panel");
