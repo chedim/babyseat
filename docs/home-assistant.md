@@ -19,6 +19,42 @@ built on.
 Needs: an Ollama server with a chat model and an embedding model, and 1–3 GB of
 free RAM for the seat.
 
+## Connect mode = your own detached seat
+
+"Connect to a seat running elsewhere" is the mode when **you** own the seat:
+you run it on a machine you like (a Mac, a Linux box, even unrooted Android via
+Termux) with `membrane serve`, the integration only introduces itself over the
+network. Nothing is spawned inside Home Assistant, and **a restart of Home
+Assistant never restarts the seat** — its field and sessions keep running.
+
+What the integration still does for such a seat:
+
+- **Panels, chat and Assist** ride the seat through a proxy: your Home Assistant
+  login is the only credential the browser needs; the seat's own pair
+  (`serve-auth.json`) stays server-side. Sessions created from Home Assistant
+  are owned by the HA user who made them.
+- **Let the seat use Home Assistant** (on by default) works in this mode too, in
+  two halves:
+  - the seat's HA access is **delivered instead of inherited**: at every Home
+    Assistant start the integration mints a fresh token for its hidden user and
+    POSTs it to the seat; the seat files it in `~/.config/membrane/hass.env`
+    (0600) and reads it on its next turn — so an HA restart reaches the seat
+    without a seat restart. Set **HA's address as the seat sees it** in the
+    options when the seat is on another machine (Home Assistant's own
+    `internal_url` answer otherwise; empty = that default).
+  - **State push** is the mirror of the inside mode: entities the seat marks
+    `ha_entity` are pushed to it (in batches) on every change, watches fire
+    without polling.
+- **Restarts are announced to a detached seat**: the integration posts
+  `ha-start` when Home Assistant is up and `ha-stop` on the way down
+  (`restarts.py` notices); the seat never reads an HA restart as the world
+  going quiet.
+
+Keeping the seat current is the seat's owner's job — on a machine where the
+code is a git clone of this repo, that's `git pull` (or `membrane update`)
+plus a seat restart the seat itself performs; the integration is independent
+of the seat's version.
+
 ## What it changes
 
 - **Membrane home is the landing page** for everyone: opening Home Assistant goes to
@@ -58,11 +94,12 @@ chosen, not inherited.
 
 | Option | What |
 |---|---|
-| Chat model / Embedding model | from the same Ollama server's list (keep the embedder once the field has grown) |
-| Let the seat use Home Assistant | the hidden user + the state push (above) |
+| Chat model / Embedding model | from the same Ollama server's list (keep the embedder once the field has grown) — inside mode only |
+| Let the seat use Home Assistant | the hidden user + the state push (above); connect mode also gets the delivered token (`hass.env`) |
+| HA's address as the seat sees it | connect mode: what URL the seat reaches Home Assistant at (empty: HA's own `internal_url`) |
 | Open on membrane home | the landing page + the folded sidebar |
 | Speech server URL | a whisper-server; empty = the browser transcribes |
-| Watch loops (1–3) | the seat's background loops; fewer is lighter, more is livelier |
+| Watch loops (1–3) | the seat's background loops; fewer is lighter, more is livelier (inside mode only) |
 
 Changing an option restarts the seat.
 
