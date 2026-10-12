@@ -787,6 +787,8 @@ def _lane_of(agent: str | None) -> str:
         return "phone"
     if a.startswith("field-call"):
         return "plan"                   # llm.py: the field asked -- read-only, no second call
+    if a == "speaker":
+        return "operator"               # speaker.py: a person talking -- the chat's hands
     return "listener"
 
 
@@ -1126,6 +1128,8 @@ class TurnRunner:
                 continue
             if info.get("membraneOnly"):
                 continue          # said to the voice alone, not to the model
+            if info.get("speakerRouted"):
+                continue          # answered in the speaker lane (speaker.py), not here
             text = "\n".join(
                 str(p.get("text") or "") for p in row.get("parts") or []
                 if isinstance(p, dict) and p.get("type") == "text").strip()
@@ -3165,6 +3169,24 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                 if _row is not None and _row.get("agent") != _ma:
                     _row["agent"] = _ma
                     sessions.flush()   # the public form (the lock's owned)
+            # THE SPEAKER LANE (speaker.py): a spoken message runs in the seat's
+            # speaker session, beside the chat -- it never cuts the chat's work
+            _routed = None
+            try:
+                from . import speaker as _SPK
+                _routed = _SPK.route(runner, sid, text, user_info, row["parts"])
+            except Exception:
+                _routed = None
+            if _routed is not None:
+                if async_:
+                    threading.Thread(target=_SPK.run, args=(runner, _routed), daemon=True).start()
+                    self.send_response(204)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                result = _SPK.run(runner, _routed)
+                return self._json_out({"info": (result or {}).get("info") if isinstance(result, dict) else result,
+                                       "parts": (result or {}).get("parts", []) if isinstance(result, dict) else []})
             if async_:
                 # the row's parts ride along (the sync lane below does the
                 # same): the door's announcement carries the text

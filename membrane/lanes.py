@@ -3791,6 +3791,11 @@ def _active_model_hook(srv, est, spec, res) -> None:
             if out is not None:
                 res["voice_out"] = out
                 est.upsert(ent, embedder=None)
+        elif ent is not None and (ent.properties or {}).get("voice_io") == "in":
+            lis = VIO.on_listen(srv, ent)           # Argus opens / closes the mic for an answer
+            if lis is not None:
+                res["voice_in"] = lis
+                est.upsert(ent, embedder=None)
     except Exception as e:                              # noqa: BLE001
         res["voice_out"] = {"spoken": False, "why": f"{type(e).__name__}: {e}"[:160]}
 

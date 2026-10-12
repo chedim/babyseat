@@ -1408,6 +1408,10 @@ function definePanel() {
       }
       if (ev.type === "membrane.seat") this._loadSeat();          // the seat's own events: its state moved
       if (ev.type === "membrane.jsexec") this._jsRun(p.job).catch(() => {});
+      if (ev.type === "membrane.listen" && sid === (this._chat && this._chat.sid)) {
+        // Argus opens (or closes) the mic for an answer (voice_io.on_listen)
+        this.dispatchEvent(new CustomEvent("ai-listen", { detail: { seconds: Number(p.seconds) || 0 }, bubbles: true, composed: true }));
+      }
       if (ev.type === "membrane.say" && sid === (this._chat && this._chat.sid) && this._repliesArmed) {
         const ln = p.line || {};
         if (ln.text) this.dispatchEvent(new CustomEvent("ai-say", { detail: { text: ln.text }, bubbles: true, composed: true }));

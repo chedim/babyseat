@@ -962,6 +962,26 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       // VOICE OUT (2026-10-11, the operator: "it should not voice the chat since we
       // have voice:out"): Argus speaks through his voice:out line (ai-say);
       // the chat's text is never read aloud, nor membrane's lines.
+      // ARGUS OPENS THE MIC (2026-10-12, the operator: "let argus turn listening on and
+      // off instead of that follow-up mode"): voice:in's `listen` -> listen that long once
+      // he has finished speaking (never his own voice); 0 closes. Needs the ear (👂) on.
+      this._chat.addEventListener("ai-listen", (e) => {
+        const secs = Math.max(0, Math.min(30, Number((e.detail || {}).seconds) || 0));
+        const h = this._hot;
+        if (!h) { if (secs) this._vsay("Argus is listening for you — turn the ear (👂) on to answer by voice", 4000); return; }
+        if (!secs) { if (h.state === "dictate") { this._wakeRecognizer(h); this._orb(null); } return; }
+        const t0 = Date.now();
+        const go = () => {
+          if (this._hot !== h) return;
+          if ((this._speaking || (this._speechQ || []).length) && Date.now() - t0 < 30000) { setTimeout(go, 200); return; }
+          if (h.state !== "wake") return;                   // already hearing something
+          h.followWait = secs * 1000;
+          this._vsay("listening… (Argus asked)", secs * 1000);
+          this._orb("listening");
+          this._dictate(h, true);
+        };
+        setTimeout(go, 300);
+      });
       this._chat.addEventListener("ai-say", (e) => {
         const d = e.detail || {};
         speechLog("argus", this._ttsOn ? "say (voice:out)" : "skip: 🔊 off", d.text);
@@ -1375,6 +1395,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         h.any = recognizer(h.model, h.rate, null, (t) => { if (NAME_ANY_RE.test(t)) h.aHit = true; });
         h.any.onResult = (t) => this._addressed(h, t);
       }
+      h.followWait = 0;                                   // an Argus-opened window is one-shot
       h.state = "wake";
     }
 
@@ -1484,7 +1505,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const ms = (f32.length / h.rate) * 1000;
       if (rms >= thr) { h.spoke = true; h.silent = 0; } else h.silent += ms;
       const age = performance.now() - h.dStart;
-      if ((h.spoke && h.silent >= DICTATE_END_MS) || (!h.spoke && age > (h.follow ? HOT_FOLLOW_MS : DICTATE_WAIT_MS)) || age > 15000) {
+      if ((h.spoke && h.silent >= DICTATE_END_MS) || (!h.spoke && age > (h.follow ? (h.followWait || HOT_FOLLOW_MS) : DICTATE_WAIT_MS)) || age > Math.max(15000, (h.followWait || 0) + 2000)) {
         this._dictateDone(h);
       }
     }

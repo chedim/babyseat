@@ -158,3 +158,34 @@ def read(srv, person: str) -> dict:
         out[kind] = {k: pp.get(k) for k in ("on", "mode", "device", "session")}
         out[kind]["log"] = list(pp.get("heard" if kind == "in" else "said") or [])
     return out
+
+
+LISTEN_MAX_S = 30
+
+
+def on_listen(srv, ent) -> dict | None:
+    """ARGUS OPENS THE MIC (2026-10-12, the operator: "let argus turn listening on
+    and off instead of that follow-up mode -- they can control it if they need a
+    response"): an edit of voice:in's `listen` (seconds; 0 closes) tells the
+    person's page to listen that long -- the words come back as a voice message,
+    no wake word needed. Only while their ear (👂) is on, at most LISTEN_MAX_S."""
+    pp = (getattr(ent, "properties", None) or {})
+    if pp.get("voice_io") != "in" or "listen" not in pp:
+        return None
+    try:
+        secs = max(0.0, min(float(pp.pop("listen") or 0), LISTEN_MAX_S))
+    except (TypeError, ValueError):
+        pp.pop("listen", None)
+        secs = 0.0
+    person = str(pp.get("person") or "")
+    sid = str(pp.get("session") or "")
+    pp["listen_ts"] = time.time()
+    pp["listening_for_s"] = secs
+    ent.properties = pp
+    r = getattr(srv, "_loop_runner", None)
+    try:
+        if r is not None and sid:
+            r.hub.publish({"type": "membrane.listen", "sessionID": sid, "person": person, "seconds": secs})
+    except Exception:
+        pass
+    return {"listening": secs, "session": sid}
