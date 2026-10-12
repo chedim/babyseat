@@ -19,7 +19,7 @@ unzip membrane-standalone-0.3.0.zip && cd membrane
 pip install ./membrane_seat-0.3.0-py3-none-any.whl
 mkdir ~/bob && cd ~/bob
 membrane standalone            # opens http://localhost:4096/
-unzip <that zip>/assets.zip into ~/bob/.membrane/   # the voice files
+cp -R <unzipped>/assets ~/bob/.membrane/      # the voice files (~/.membrane/assets)
 ```
 
 **A2. From the repository** (needs SSH keys set up with GitHub):

@@ -98,7 +98,7 @@ def main() -> int:
         "",
         "1. pip install ./" + wheel.name,
         "2. mkdir ~/bob && cd ~/bob && membrane standalone   # opens http://localhost:4096/",
-        "3. unzip assets.zip into ~/bob/.membrane/  (you get ~/bob/.membrane/assets/)",
+        "3. copy the zip's assets/ into ~/bob/.membrane/  (you get ~/bob/.membrane/assets/)",
         "",
         "Details: BETA.md and docs/standalone.md on the release page.",
     ]) + "\n"
