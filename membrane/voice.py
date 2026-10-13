@@ -1286,7 +1286,7 @@ def _seat_note(runner, kind: str, **detail) -> None:
 
 
 def role(runner, sid: str) -> str:
-    return (getattr(runner, "_voice_role", None) or {}).get(sid, "babble")
+    return (getattr(runner, "_voice_role", None) or {}).get(sid, "predict")
 
 
 def role_set(runner, sid: str, r: str) -> str:

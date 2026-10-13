@@ -61,7 +61,7 @@ def test_querys_own_words_excluded_when_fresh(tmp_path, monkeypatch):
     assert all(e != "w:again" for e, s in hits2), hits2
 
 
-def test_old_evidence_still_hits(tmp_path):
+def test_old_evidence_hops_to_facts(tmp_path):
     """An entity with real history (its cells predate the query)
     stays a valid hit -- the exclusion can't starve good recall."""
     import pathlib
@@ -81,7 +81,11 @@ def test_old_evidence_still_hits(tmp_path):
     fld.process()
     qv = fld.emb.embed([q])[0]
     hits = dict(fld.recall(qv, k=4))
-    assert "w:ghost" in hits, hits      # the OLD evidence still hits
+    assert "w:ghost" not in hits, hits      # ISSUE #1: word-kind hits park on unfiltered asks
+    assert hits, hits
+    assert "person:operator" in hits, hits   # the hop lands a real co-mentioned entity
+    old = dict(fld.recall(qv, k=4, hop=False))
+    assert "w:ghost" in old, old       # hop=False restores the pre-patch shape
 
 
 def test_recall_excludes_the_current_turn(tmp_path, monkeypatch):

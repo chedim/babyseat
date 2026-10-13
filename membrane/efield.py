@@ -1454,8 +1454,8 @@ class EntityField:
         return None
 
     def recall(self, vec, k: int = 8, kinds=None, tier: str = "live",
-               by: str = "state", exclude_session: str | None = None
-               ) -> list[tuple[str, float]]:
+               by: str = "state", exclude_session: str | None = None,
+               hop: bool = True) -> list[tuple[str, float]]:
         """THE SELF-FEEDING GUARD (the seat's #4 datum: a query's own
         topic words topped its hits -- the read fed itself): pass
         ``exclude_session`` (the CURRENT turn's session id) and
@@ -1467,9 +1467,23 @@ class EntityField:
             eq={"origin": self.origin, "tier": tier,
                 **({"kind": list(kinds)} if kinds else {})})
         out = []
+        # ISSUE #1 WORD-HOP: a word entity carries its word as state, so an
+        # unfiltered ask (kinds=None) lets word hits score cos ~1.0 and
+        # flood top-k, drowning facts. Park word kinds; after the loop hop
+        # parked words through their evidence events to the entities
+        # co-mentioned there; hop=False restores prior behavior.
+        parked: list = []
         for key, s in hits:
             d = self.b.get("entity_states", key)
             if d is None:
+                continue
+            _pre = d.get("eid") or key
+            _pre = _pre.split(":", 1)[0]
+            _kd = d.get("kind") or _pre
+            if hop and _pre == "e":
+                continue
+            if hop and kinds is None and (_kd == "word" or _pre == "w"):
+                parked.append((d.get("eid") or key, s))
                 continue
             if by == "mean" and d.get("mean"):
                 s = float(unit(unpack_f16(d["mean"])) @ unit(vec))
@@ -1482,6 +1496,35 @@ class EntityField:
                         for d2 in deltas):
                     continue      # THIS turn's capture only: no hit
             out.append((d["eid"], s))
+        # THE HOP (issue #1): a parked word lends a discounted share of
+        # its cosine to the entities co-mentioned with it in its evidence
+        # events (event docs carry mention tuples: eid, sidx, surface).
+        # Fires only when the ask left room below its real entity hits;
+        # a fact-rich ask stays untouched. hop=False disables it.
+        if hop and kinds is None and parked and len(out) < k:
+            hopped: dict = {}
+            for weid, wscore in parked[:6]:
+                cnt: dict = {}
+                try:
+                    rows = self.evidence(weid, k=4)
+                except Exception:
+                    rows = []
+                for row in rows:
+                    evd = self.b.get("events", row.get("event") or "")
+                    for mt in (evd.get("mentions") or []):
+                        mid = mt[0] if mt else ""
+                        if not mid or mid == weid:
+                            continue
+                        if mid.startswith(("w:", "e:", "seat:")):
+                            continue
+                        if any(mid == oe for oe, _s in out):
+                            continue
+                        cnt[mid] = cnt.get(mid, 0) + 1
+                for mid, c in cnt.items():
+                    s2 = wscore * (0.62 if c == 1 else 0.78)
+                    hopped[mid] = max(hopped.get(mid, 0.0), s2)
+            take = min(len(hopped), k - len(out))
+            out.extend(sorted(hopped.items(), key=lambda t: -t[1])[:take])
         out.sort(key=lambda t: -t[1])
         return out[:k]
 
