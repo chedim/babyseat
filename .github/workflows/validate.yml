@@ -36,8 +36,10 @@ jobs:
       # there is no cluster in CI, the FakeCluster stands in for one.
       - run: pip install -e ".[couchbase]" pytest aiohttp
       # The seat's suite (tests/) -- live-lane tests skip themselves when the
-      # runner has no ollama.
-      - run: pytest -q -p no:cacheprovider --deselect tests/test_thinking_indicator.py
+      # runner has no ollama. (The thinking-indicator file was deselected at
+      # e385aec and its tests went stale under a changed wire contract -- the
+      # close publish; repaired 2026-10-13, back in the gate.)
+      - run: pytest -q -p no:cacheprovider
       # The integration's suite is its own tree with its own stub-conftest
       # (a fake HA + aiohttp) -- run in its own process, never together with
       # the seat's.

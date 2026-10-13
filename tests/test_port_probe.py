@@ -7,7 +7,7 @@ binds like the server: TIME_WAIT is free, a live listener is busy."""
 import socket
 import unittest
 
-from membrane.lanes import _port_free, _pick_listen_port
+from membrane.lanes import _port_free, _pick_listen_port, _pick_serve_port
 
 
 def _listener():
@@ -25,6 +25,25 @@ class TestPortProbe(unittest.TestCase):
             port = s.getsockname()[1]
             self.assertFalse(_port_free(port))
             self.assertNotEqual(_pick_listen_port(port), port)
+        finally:
+            s.close()
+
+    def test_a_wildcard_listener_is_busy_for_the_wildcard(self):
+        # THE SILENT BOOT DEATH (2026-10-13): the probe bound 127.0.0.1 and
+        # a loopback probe BLESSES the port while the wildcard is held --
+        # the lab seat's proxy lives on *:11500, the next seat's default
+        # --listen 11500 probe passed it by and the real 0.0.0.0 bind died
+        # Errno 48, silently (launch mode owns stderr). The probe now asks
+        # the address the real bind will use.
+        s = socket.socket()
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(("", 0))
+        s.listen(4)
+        try:
+            port = s.getsockname()[1]
+            self.assertFalse(_port_free(port, host="0.0.0.0"))     # wildcard bind: busy
+            self.assertNotEqual(_pick_listen_port(port, host="0.0.0.0"), port)
+            self.assertNotEqual(_pick_serve_port(port, host="0.0.0.0"), port)
         finally:
             s.close()
 

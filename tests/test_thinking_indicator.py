@@ -82,20 +82,24 @@ TC = {"type": "function",
 def test_turn_opens_and_closes_the_thinking_part():
     """A turn with model-provided reasoning: ONE reasoning part opens
     at step-start, the model's text rides as the delta, it closes —
-    no double-open."""
+    no double-open. THE WIRE: the part rides as part.updated TWICE (the
+    open, the close) + its delta; "no double-open" = ONE part id."""
     w = _world([_resp(reasoning="I chewed it", content="pong")])
     q = w["hub"].subscribe()
     w["t"].run(w["s"]["id"], "say pong")
     events = _types(w["hub"], q)
     types = [e["type"] for e in events]
-    # the reasoning parts:
+    # the reasoning part-updates (open + the final close of one part):
     rparts = [e.get("part") for e in events
               if e["type"] == "message.part.updated"
               and isinstance(e.get("part"), dict)
               and e["part"].get("type") == "reasoning"]
     assert rparts, types
-    assert len(rparts) == 1, rparts            # ONE, not double-open
-    p = rparts[0]
+    ids = [p["id"] for p in rparts]
+    assert len(set(ids)) == 1, ids             # ONE id, not double-open
+    assert len(rparts) == 2, rparts            # the open + its close
+    assert rparts[0]["time"]["start"] and not rparts[0]["time"].get("end")
+    p = rparts[-1]
     assert p["text"] == "I chewed it"
     assert p["time"]["start"] and p["time"]["end"]  # closed
 
@@ -118,12 +122,13 @@ def test_a_no_reasoning_turn_still_indicates_then_releases():
 
 
 def test_tool_round_closes_and_reopens():
-    """A tool round: the thinking part closes BEFORE the tool part
-    streams; the second round REOPENS its own; both close."""
-    w = _world([_resp(calls=[{"id": "c1", "function": {
-                                "name": "echo",
-                                "arguments": "{\"x\": \"1\"}"}}]),
-                _resp(content="done")],
+    """A thinking tool round: the part closes BEFORE the tool part
+    streams; the second round opens its OWN; both close."""
+    w = _world([_resp(reasoning="looking at it",
+                      calls=[{"id": "c1", "function": {
+                                  "name": "echo",
+                                  "arguments": "{\"x\": \"1\"}"}}]),
+                _resp(reasoning="then", content="done")],
                tools=True)
     q = w["hub"].subscribe()
     w["t"].run(w["s"]["id"], "echo it")
@@ -131,17 +136,29 @@ def test_tool_round_closes_and_reopens():
     order = [(e["type"], (e.get("part") or {}).get("type")
               if isinstance(e.get("part"), dict) else None)
              for e in events if e["type"].startswith("message.part")]
-    # the reasoning opens appear TWICE (one per round):
+    # one reasoning part per round (each rides open + close on the wire):
     rparts = [e.get("part") for e in events
               if e["type"] == "message.part.updated"
               and isinstance(e.get("part"), dict)
               and e["part"].get("type") == "reasoning"]
-    assert len(rparts) == 2, order
-    # both closed:
-    assert all(p["time"].get("end") for p in rparts), rparts
-    # the tool part rode BETWEEN the closes:
-    tool_ix = [i for i, (t, pt) in enumerate(order) if pt == "tool"]
-    assert tool_ix, order
+    ids = [p["id"] for p in rparts]
+    assert len(set(ids)) == 2, order           # TWO ids, one per round
+    assert len(rparts) == 4, rparts            # each: the open + its close
+    for pid in set(ids):                      # one close per id (the open
+        closes = [p for p in rparts if p["id"] == pid   # ride carries none)
+                  and p["time"].get("end")]
+        assert len(closes) == 1, rparts
+    # the first close (round 1's) landed BEFORE the tool part streamed:
+    first_end_ix = next(i for i, e in enumerate(events)
+                        if e["type"] == "message.part.updated"
+                        and isinstance(e.get("part"), dict)
+                        and e["part"].get("type") == "reasoning"
+                        and e["part"].get("time", {}).get("end"))
+    tool_ix = next(i for i, e in enumerate(events)
+                   if e["type"] == "message.part.updated"
+                   and isinstance(e.get("part"), dict)
+                   and e["part"].get("type") == "tool")
+    assert first_end_ix < tool_ix, (first_end_ix, tool_ix, order)
 
 
 def test_no_open_parts_at_the_turns_end():

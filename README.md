@@ -393,7 +393,7 @@ python experiments/variety_toy.py        # the variety toy: the gate's calibrati
 
 Working lab, in daily use on its own development (dogfooded: this repo's own
 field holds ~14k live entities and its background mind digests, dreams, and
-speaks about its own work). Version **0.3.3**; API and flag surfaces may still
+speaks about its own work). Version **0.3.4**; API and flag surfaces may still
 move. Licensing: **private-use license** (see [LICENSE](LICENSE)) — free for
 home and personal use; commercial use, redistribution and paid offerings need
 the author's written permission.

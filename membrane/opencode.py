@@ -701,12 +701,18 @@ def main() -> None:
         pass                       # the lock's write degrades (the seats
                                  # keep their no-lock behavior)
 
-    listen = _pick_listen_port(args.listen)
+    # the probes ask the address each real bind will use (the wildcard
+    # 0.0.0.0 a loopback probe blesses even while another seat holds it --
+    # the silent Errno 48 boot death, 2026-10-13)
+    listen = _pick_listen_port(args.listen, host=proxy_bind_host(args))
     if listen != args.listen:
         print(f"[opencode] port {args.listen} busy -> using {listen} "
               f"(pass --listen to pin)", file=sys.stderr)
     serve_wanted = bool(args.serve) or bool(args.launch)
-    serve_port = _pick_serve_port(args.serve_port) if serve_wanted else None
+    serve_port = (_pick_serve_port(args.serve_port,
+                                   host=args.serve_host if args.serve
+                                   else "127.0.0.1")
+                  if serve_wanted else None)
     if serve_port is not None and serve_port != args.serve_port:
         print(f"[opencode] serve port {args.serve_port} busy -> using "
               f"{serve_port} (pass --serve-port to pin)", file=sys.stderr)
@@ -730,7 +736,7 @@ def main() -> None:
         except OSError as e:
             _serve_socket.close()
             _serve_socket = None
-            serve_port = _pick_serve_port(serve_port + 1)
+            serve_port = _pick_serve_port(serve_port + 1, host=_serve_bind)
             print(f"[opencode] the serve port was taken mid-boot -> "
                   f"re-picked {serve_port} ({e})", file=sys.stderr)
             _serve_socket = _sk.socket(_sk.AF_INET, _sk.SOCK_STREAM)
@@ -2224,4 +2230,19 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except BaseException:
+        # launch/serve mode owns the terminal's stderr (it is a log file
+        # now), so a
+        # boot that dies here wrote its only trace into a file nobody is
+        # reading -- the silent Errno 48 boot death took an hour to find
+        # (2026-10-13). A fatal boot echoes its traceback to the REAL
+        # stderr too: the supervisor's log sees the why.
+        if sys.stderr is not sys.__stderr__:
+            import traceback
+            try:
+                traceback.print_exc(file=sys.__stderr__)
+            except Exception:
+                pass
+        raise

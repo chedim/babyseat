@@ -3299,16 +3299,23 @@ def _one_line(e: Exception) -> str:
     return re.sub(r"\s+", " ", str(e))[:140]
 
 
-def _port_free(port: int) -> bool:
+def _port_free(port: int, host: str = "127.0.0.1") -> bool:
     # probe the way the servers bind (allow_reuse_address): a bare bind
     # also fails on the port's TIME_WAIT leftovers -- every restart of a
     # seat whose loops talk to its own :11500 walked to :11501 for a
     # minute (2026-10-08). A LIVE listener still refuses the bind.
+    # THE HOST IS THE PROBE (2026-10-13, the silent boot death): the probe
+    # used to bind 127.0.0.1 while --listen-host/--serve-host 0.0.0.0 bind
+    # the WILDCARD, which a loopback probe can bless while the wildcard is
+    # held (another seat's proxy lives on *:11500; the loopback probe
+    # passed, the real bind died Errno 48, and the boot exited silently
+    # into launch mode's log). The probe now asks the exact address the
+    # real bind will use.
     s = socket.socket()
     s.settimeout(0.5)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     try:
-        s.bind(("127.0.0.1", port))
+        s.bind((host or "127.0.0.1", port))
         return True
     except OSError:
         return False
@@ -3356,7 +3363,7 @@ def _peer_heartbeat(srv) -> None:
             pass
 
 
-def _pick_listen_port(preferred: int) -> int:
+def _pick_listen_port(preferred: int, host: str = "127.0.0.1") -> int:
     """A port the proxy can actually bind.
 
     Explicit --listen is respected but not sacred: if it (or the default
@@ -3367,7 +3374,7 @@ def _pick_listen_port(preferred: int) -> int:
     """
     port = preferred
     for _ in range(64):
-        if _port_free(port):
+        if _port_free(port, host):
             return port
         port += 1
         if port > 65535:
@@ -3377,11 +3384,11 @@ def _pick_listen_port(preferred: int) -> int:
         f"(probed 64); pass --listen explicitly")
 
 
-def _pick_serve_port(preferred: int) -> int:
+def _pick_serve_port(preferred: int, host: str = "127.0.0.1") -> int:
     """The port `opencode serve` will bind (same walk, own flag in the error)."""
     port = preferred
     for _ in range(64):
-        if _port_free(port):
+        if _port_free(port, host):
             return port
         port += 1
         if port > 65535:

@@ -644,9 +644,13 @@ def _mind_rows(srv, allow) -> list:
 
 def _openai_tools(mcp_tools: list | None = None) -> list:
     """The MCP tool list in the OpenAI chat-completions format (the wire
-    name is `function`, parameters come from the MCP inputSchema)."""
+    name is `function`, parameters come from the MCP inputSchema).
+    Wire-shaped rows (a custom caller's explicit set) pass through -- the
+    wrapper only shapes the MCP registry's own rows (2026-10-13: an
+    explicit set used to die here on a bare KeyError('name'))."""
     tools = _mcp.TOOLS if mcp_tools is None else mcp_tools
-    return [{"type": "function",
+    return [t if isinstance(t, dict) and "function" in t else
+            {"type": "function",
              "function": {"name": t["name"],
                           "description": t.get("description", ""),
                           "parameters": t.get("inputSchema") or
