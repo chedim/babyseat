@@ -5,6 +5,7 @@
 - **Restarts are announced across the wire**: the integration posts `ha-start` when Home Assistant is up and `ha-stop` on the way down to `POST /membrane/seat/event` (`restarts.py` notices) — a detached seat never reads an HA restart as the world going quiet.
 - From the docker rehearsal: a bus listener that is a plain sync callable runs in HA's executor thread — ha-stop posts by hand from whatever thread it lands in (`seat_event_sync`), ha-start is an async listener on the loop.
 - The boat's deploy script stages all three components (`membrane` patched at staging time so connect mode needs no PyPI package yet); docs: "connect mode = your own detached seat".
+- **Licensed for private use**: the MIT text is replaced by the **Membrane Private Use License** — use, run, modify freely at home (workplace evaluation and internal testing included); commercial use, redistribution and paid offerings need the author's separate written permission. Beta testers' private installs are unaffected; the wheel/sdist metadata carries the new license (`LicenseRef-Membrane-Private-Use-1.0`, setuptools >= 77).
 
 ## 0.3.0 — 2026-10-12 (standalone + Home Assistant)
 - **Standalone mode** (`membrane standalone`): the seat serves its own web UI — membrane home (the field in 3D following you), the chat on glass, voice — and opens it in the browser. No login on the local network (private, loopback, tailnet); a public or proxied caller is refused, never prompted. The person's name is typed once in the page. See docs/standalone.md.

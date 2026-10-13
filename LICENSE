@@ -1,21 +1,51 @@
-MIT License
+Membrane Private Use License
+(version 1, 2026-10-13)
 
 Copyright (c) 2026 Dmitrii Chechetkin
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+0. The grant. Permission is granted, without fee, to any person who
+   obtains a copy of this software and its documentation ("the software")
+   to use, copy, run, and modify the software privately: for themselves,
+   for their household, and on their own machines and home systems —
+   including a private home-automation install and any seats or machines
+   the person runs for their own purposes.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. What counts as private use. Private use includes personal, household,
+   hobby, educational, and research use, and evaluation or internal
+   testing within a workplace, so long as the software is not used in
+   the operation of a paid or revenue-generating product, service, or
+   offering. A home is private use. A paid hosted product built on the
+   software is not.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+2. What the grant does not include. Without separate written permission
+   from the author, you may not:
+   - use the software in the operation of any commercial or
+     revenue-generating product, service, or offering;
+   - charge money (directly or bundled) for the software or for access
+     to it;
+   - distribute copies of the software — original or modified — or make
+     it available to others as a download, bundle, or appliance;
+   - offer the software, or a service built on it, to others.
+   The author's own distribution of the software is unaffected by this
+   section: the copyright holder's own rights are not limited by this
+   license.
+
+3. What you keep. You own your modifications. You may run your modified
+   copy privately for as long as you like, and you are encouraged to
+   send changes, bug reports, and fixes back to the author (issues and
+   pull requests in the software's repository).
+
+4. Other rights. The author may grant additional rights — commercial
+   use, distribution, embedding — to anyone, case by case. Ask.
+
+5. Notice. Keep this license and the copyright notice with any copy of
+   the software, and inside any file where the original notice stood.
+
+6. The usual disclaimers. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT
+   WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+   TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+   PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE AUTHOR OR
+   COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+   WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+   IN THE SOFTWARE.

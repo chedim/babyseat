@@ -813,7 +813,10 @@ def run_command_entity(fld, est, mem, command: str,
         err = f"timeout after {t:g}s"
         text = "\n".join(x.decode(errors="replace") if isinstance(x, bytes)
                          else (x or "") for x in (e.stdout, e.stderr))
-    ms = int((time.time() - t0) * 1000)
+    # a real exec (process spawn alone) is never truly 0 ms; the int
+    # truncation on a fast machine can round a sub-millisecond run
+    # down to 0 and the tool:run record would add nothing -- floor at 1
+    ms = max(1, int((time.time() - t0) * 1000))
     head, tail = text[:ST.RESULT_HEAD], text[-ST.RESULT_TAIL:]
     oc = "timeout" if err else ST.outcome(canon_e, head, tail, rc=rc)
     ok = rc == 0 and not err
