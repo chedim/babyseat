@@ -1473,6 +1473,7 @@ class EntityField:
         # parked words through their evidence events to the entities
         # co-mentioned there; hop=False restores prior behavior.
         parked: list = []
+        speak: list = []   # speaker rows: real evidence, but never above subjects
         for key, s in hits:
             d = self.b.get("entity_states", key)
             if d is None:
@@ -1495,12 +1496,17 @@ class EntityField:
                         d2.get("sid") == exclude_session
                         for d2 in deltas):
                     continue      # THIS turn's capture only: no hit
+            _spe = d.get("eid") or key
+            if _spe.startswith(("person:", "seat:")):
+                speak.append((_spe, s))   # WHO never outranks WHAT (#1)
+                continue
             out.append((d["eid"], s))
         # THE HOP (issue #1): a parked word lends a discounted share of
         # its cosine to the entities co-mentioned with it in its evidence
         # events (event docs carry mention tuples: eid, sidx, surface).
         # Fires only when the ask left room below its real entity hits;
         # a fact-rich ask stays untouched. hop=False disables it.
+        n_real = len(out)  # hop guard: hopped candidates rank below real evidence
         if hop and kinds is None and parked and len(out) < k:
             hopped: dict = {}
             for weid, wscore in parked[:6]:
@@ -1525,8 +1531,11 @@ class EntityField:
                     hopped[mid] = max(hopped.get(mid, 0.0), s2)
             take = min(len(hopped), k - len(out))
             out.extend(sorted(hopped.items(), key=lambda t: (-t[1], t[0]))[:take])
-        out.sort(key=lambda t: (-t[1], str(t[0])))  # deterministic tie-break: equal scores keep a stable order
-        return out[:k]
+        real, hopd = out[:n_real], out[n_real:]
+        real.sort(key=lambda t: (-t[1], str(t[0])))
+        hopd.sort(key=lambda t: (-t[1], str(t[0])))
+        speak.sort(key=lambda t: (-t[1], str(t[0])))
+        return (real + speak + hopd)[:k]
 
     def evidence(self, eid: str, k: int = 6, query_vec=None, streams=None) -> list[dict]:
         ds = [d for d in self.deltas_of(eid) if streams is None or d["stream"] in streams]

@@ -108,7 +108,7 @@ class TestParity(unittest.TestCase):
             out.append(st)
             q = EF.unit(FakeEmbedder().embed(["gateway errors"])[0])
             with mock.patch.dict(os.environ, {"MEMBRANE_EF_ANN": "0"}):
-                self.assertEqual(f.recall(q, k=1)[0][0], "w:gateway")
+                self.assertEqual(f.recall(q, k=1)[0][0], "f:membrane/router.py")  # word-hop (a2dd1d8): parked words never return; the ask resolves to the co-discussed subject (issue #1)
         self.assertEqual(out[0].keys(), out[1].keys())
         for k in out[0]:
             np.testing.assert_allclose(out[0][k], out[1][k], atol=1e-12)
