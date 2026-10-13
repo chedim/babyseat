@@ -1,8 +1,6 @@
 # membrane
 
-<p align="center">
-<video src="membrane-home.mp4" autoplay loop muted playsinline controls></video>
-</p>
+![Membrane](membrane-home.gif)
 
 > A **text-based hypervector entity-field hippocampus for opencode** that
 > learns as you go, shares a Couchbase-backed team memory, and **orchestrates
