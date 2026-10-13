@@ -654,7 +654,11 @@ class TestMembranesRole(unittest.TestCase):
         blob = " ".join(str(m.get("content")) for m in sent)
         self.assertNotIn(V.VOICE_PREFIX.strip(), blob)                  # Argus never hears membrane
         self.assertNotIn("[auto]", blob)                                # and nothing invented is said for him
-        end = time.time() + 5
+        # 30s, not 5s: on a slow runner the auto loop's second turn can
+        # land past the earlier 15s window (the CI exhibit: 1 not >= 2);
+        # the contract is the same -- membrane predicts his moves -- it
+        # just needs the wall clock to give the loop room
+        end = time.time() + 30
         while time.time() < end and srv._predictor.report().get("operator", {}).get("turns", 0) < 2:
             time.sleep(0.1)
         self.assertGreaterEqual(srv._predictor.report()["operator"]["turns"], 2)   # and membrane predicted his moves
