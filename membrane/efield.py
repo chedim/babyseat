@@ -1524,8 +1524,8 @@ class EntityField:
                     s2 = wscore * (0.62 if c == 1 else 0.78)
                     hopped[mid] = max(hopped.get(mid, 0.0), s2)
             take = min(len(hopped), k - len(out))
-            out.extend(sorted(hopped.items(), key=lambda t: -t[1])[:take])
-        out.sort(key=lambda t: -t[1])
+            out.extend(sorted(hopped.items(), key=lambda t: (-t[1], t[0]))[:take])
+        out.sort(key=lambda t: (-t[1], str(t[0])))  # deterministic tie-break: equal scores keep a stable order
         return out[:k]
 
     def evidence(self, eid: str, k: int = 6, query_vec=None, streams=None) -> list[dict]:

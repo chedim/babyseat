@@ -322,6 +322,7 @@ class TestAutoChat(unittest.TestCase):
     def test_they_loop_until_stopped_and_the_voice_never_hears_itself(self):
         r, srv, lad = self._runner()
         sid = r.sessions.create(title="t")["id"]
+        V.role_set(r, sid, "babble")  # pinned: babble rounds (old default)
         V.auto_set(r, sid, True)
         end = time.time() + 15
         while time.time() < end and lad.n < 3:
@@ -634,7 +635,7 @@ class TestMembranesRole(unittest.TestCase):
     def test_predict_role_auto_chat_is_the_llm_alone_and_membrane_guesses_it(self):
         r, srv, lad = TestAutoChat._runner(self)
         sid = r.sessions.create(title="t")["id"]
-        self.assertEqual(V.auto_state(r, sid)["role"], "babble")
+        self.assertEqual(V.auto_state(r, sid)["role"], "predict")
         self.assertEqual(V.role_set(r, sid, "predict"), "predict")
         self.assertFalse(V.auto_state(r, sid)["on"])                    # the role alone starts nothing
         r.messages.append(sid, {"id": "msg_u0", "sessionID": sid, "role": "user", "time": {"created": 1}},
@@ -734,6 +735,7 @@ class TestBabbleEveryMove(unittest.TestCase):
         V.of(srv).bootstrap(CORPUS * 3)
         sid = r.sessions.create(title="t")["id"]
         holder.update(r=r, sid=sid)
+        V.role_set(r, sid, "babble")  # pinned: babble join (old default)
         r._auto = {sid: {"rounds": 0, "mode": "explore"}}           # auto-chat on, membrane babbling
         r.run(sid, "check the battery", user_info={"id": "msg_u1", "role": "user", "agent": "build"})
         r._auto = {}
