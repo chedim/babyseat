@@ -16,8 +16,9 @@ jobs:
           # not published); the check re-arms when it is. license: the private
           # use license is a LicenseRef custom license (no SPDX id) -- HACS's
           # repository license check reads that as NOASSERTION and refuses.
-          # Every other check (hassfest, validate) runs.
-          ignore: brands,license
+          # SPACE separated (the action splits INPUT_IGNORE on " ", not on
+          # ","); every other check (hassfest, validate) runs.
+          ignore: brands license
   hassfest:
     runs-on: ubuntu-latest
     steps:
