@@ -12,6 +12,10 @@ jobs:
       - uses: hacs/action@main
         with:
           category: integration
+          # brands: the integration is not in home-assistant/brands yet (it is
+          # not published); the check re-arms when it is. Every other check
+          # (hassfest, validate) runs.
+          ignore: brands
   hassfest:
     runs-on: ubuntu-latest
     steps:
