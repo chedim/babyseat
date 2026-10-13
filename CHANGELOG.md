@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.3 — 2026-10-13 (the money line)
+- The private-use license's workplace allowance is gone: anything done for money is banned, paid research included — through an employer or a contract, whatever the work produces. Private use means personal, household, hobby, educational, and research use **done for no money**; §2's prohibition names paid and contract work explicitly. Ships as 0.3.3 because 0.3.2's files are immutable on PyPI.
+
 ## 0.3.2 — 2026-10-13 (the license's teeth)
 - The private-use license's final section is now the full at-your-own-risk clause: AS IS, WITH ALL ITS DEFECTS, no warranties of any kind (safety and accuracy named), the consequences of running it are yours, no liability for any damage to data, systems, devices or anything connected — even if advised of the possibility, even if a remedy fails of its essential purpose, and in no event more than the least amount you paid, which is zero. 0.3.1's shipped license text said the same thing shorter; the published copy now carries the full wording (0.3.1 stays on PyPI, files are immutable, 0.3.2 replaces it for everyone).
 
