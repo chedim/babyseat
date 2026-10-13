@@ -2,6 +2,7 @@
 nursery promotion, idempotence, rebuild, surprise, and the E18/E19
 distinguishability claim as a regression."""
 
+import math
 import sys
 import unittest
 from pathlib import Path
@@ -12,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from membrane import efield as EF  # noqa: E402
 from membrane import streams as ST  # noqa: E402
+from membrane import fieldmap as FM  # noqa: E402
 from membrane.efstore import MemBackend  # noqa: E402
 from _ef_fakes import FakeEmbedder  # noqa: E402
 
@@ -270,3 +272,102 @@ class TestLearnForget(unittest.TestCase):
         f.b.upsert("events", k, d)
         self.assertEqual(f.number_events(), 1)
         self.assertEqual(f.b.get("events", k)["n"], 3)
+
+
+class TestMassMetabolism(unittest.TestCase):
+    """THE FIELD'S METABOLISM (2026-10-13, docs/comparison.md §5, borrowed
+    from holomem): mass fades on a half-life from the state's last accreting
+    touch, a fresh accreting mention re-inflates it, an unresolved conflict
+    damps it. Read-time only -- `accr` stays the raw counter, and a rebuild
+    replays `last_accrue_ts` exactly like it replays `accr`. Flag OFF ->
+    everything is the raw counter (the deploy-day no-op)."""
+
+    HL = 100.0                       # a short half-life for the arithmetic
+
+    def setUp(self):
+        self._saved = (EF.MASS_METABOLISM, EF.MASS_HALF_LIFE_S)
+        EF.MASS_METABOLISM = True
+        EF.MASS_HALF_LIFE_S = self.HL
+
+    def tearDown(self):
+        EF.MASS_METABOLISM, EF.MASS_HALF_LIFE_S = self._saved
+
+    def test_mass_halves_after_a_half_life_of_stillness(self):
+        st = EF.EntityState(eid="w:gateway", kind="term", accr=4, last_accrue_ts=1000.0)
+        self.assertEqual(EF.mass_eff(st, 1000.0), 4.0)
+        self.assertAlmostEqual(EF.mass_eff(st, 1000.0 + self.HL), 2.0, places=6)
+        self.assertAlmostEqual(EF.mass_eff(st, 1000.0 + 2 * self.HL), 1.0, places=6)
+        self.assertLessEqual(EF.mass_eff(st, 9e9), 4.0)
+        self.assertGreaterEqual(EF.mass_eff(st, 1000.0), 0.0)
+
+    def test_a_fresh_accreting_mention_restores_mass(self):
+        f = field()
+        say(f, ["the gateway keeps timing out", "the gateway returns errors today",
+                "restart the gateway after lunch"])
+        st = f.get("w:gateway")
+        self.assertGreaterEqual(st.accr, 1)
+        mid = st.last_accrue_ts + 30 * self.HL          # long dead
+        low = EF.mass_eff(st, mid)
+        self.assertLess(low, float(st.accr) * 0.5)
+        evs = [ST.Event(stream="discourse", role="user",
+                        text="the gateway keeps timing out again", ts=mid + 5.0)]
+        f.write_events(evs, session="s2")
+        f.process()
+        st2 = f.get("w:gateway")
+        self.assertGreater(EF.mass_eff(st2, mid + 5.0), low)
+        self.assertEqual(st2.last_accrue_ts, mid + 5.0)
+
+    def test_rebuild_derives_the_last_accreting_touch(self):
+        f = field()
+        say(f, ["the gateway keeps timing out", "the gateway returns errors today",
+                "restart the gateway after lunch"])
+        st = f.get("w:gateway")
+        before = st.to_doc(f.origin)
+        f.rebuild()
+        after = f.get("w:gateway").to_doc(f.origin)
+        self.assertEqual(before["accr"], after["accr"])
+        self.assertEqual(before["last_accrue_ts"], after["last_accrue_ts"])
+
+    def test_an_unresolved_conflict_damps_the_mass(self):
+        st = EF.EntityState(eid="w:gateway", kind="term", accr=4, last_accrue_ts=1000.0,
+                            conflicts=["c"])
+        self.assertAlmostEqual(
+            EF.mass_eff(st, 1000.0), 4.0 / (1.0 + EF.MASS_CONFLICT_DAMP), places=9)
+        st2 = EF.EntityState(eid="w:gateway", kind="term", accr=4, last_accrue_ts=1000.0,
+                             conflicts=["c", "d"])
+        self.assertAlmostEqual(
+            EF.mass_eff(st2, 1000.0), 4.0 / (1.0 + 2 * EF.MASS_CONFLICT_DAMP), places=9)
+
+    def test_edges_of_the_metabolism(self):
+        self.assertEqual(EF.mass_eff({"accr": 0, "last_accrue_ts": 1.0}, 1.0), 0.0)
+        self.assertEqual(EF.mass_eff(EF.EntityState(eid="w:g", kind="term"), 9e9), 0.0)
+        # a pre-metabolism snapshot: only last_ts on the clock is the best it had
+        legacy = {"accr": 8, "last_ts": 1000.0}
+        self.assertAlmostEqual(EF.mass_eff(legacy, 1000.0 + self.HL), 4.0, places=6)
+        # a clock it never had: no decay yet, mass stays
+        self.assertEqual(EF.mass_eff({"accr": 8}, 9e9), 8.0)
+
+    def test_the_flag_off_is_the_raw_counter(self):
+        EF.MASS_METABOLISM = False
+        st = EF.EntityState(eid="w:gateway", kind="term", accr=4, last_accrue_ts=0.0)
+        self.assertEqual(EF.mass_eff(st, 9e9), 4.0)
+        self.assertEqual(st.mass, 4)
+        self.assertEqual(EF.mass_eff({"accr": 8, "last_ts": 0.0}, 9e9), 8.0)
+
+    def test_the_card_and_the_map_carry_the_effective_mass(self):
+        doc = {"eid": "w:gateway", "kind": "term", "surface": "gateway",
+               "accr": 16, "mass_eff": 4.0}
+        card = FM.entity_card(doc, [], [], [])
+        self.assertEqual(card["mass_eff"], 4.0)
+        self.assertEqual(card["accr"], 16)
+        rng = np.random.default_rng(2)
+        rows = [{"eid": f"w:e{i}", "kind": "term", "surface": f"e{i}",
+                 "state": (rng.normal(size=8)).tolist(), "accr": 16,
+                 "mass_eff": 4.0, "coherence": 0.5, "first_ts": 0, "last_ts": 0,
+                 "activity": 0.0, "conflicts": []} for i in range(12)]
+        m = FM.field_map(rows, [], k=2)
+        ids = [a["id"] for a in m["axes"]]
+        mass_i = ids.index("mass")
+        for n in m["nodes"]:
+            self.assertEqual(n["mass"], 4)                  # the node's mass
+            self.assertEqual(n["v"][mass_i], round(math.log1p(4.0), 3))  # the axis

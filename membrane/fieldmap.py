@@ -127,7 +127,8 @@ def field_map(rows, rels, k: int = 8, max_kinds: int = 8,
     for i, r in enumerate(rows):
         v = [round(float(x), 3) for x in pcs[i]]
         v += [round(float(kv[i]), 3) for kv in kind_vals]
-        v += [round(math.log1p(max(0.0, float(r.get("accr") or 0))), 3),
+        v += [round(math.log1p(max(0.0, float(r.get("mass_eff") or r.get("accr")
+                                    or 0))), 3),
               float(r.get("last_ts") or 0),
               round(newest_first - float(r.get("first_ts") or newest_first), 3),
               round(float(r.get("activity") or 0), 3),
@@ -135,7 +136,9 @@ def field_map(rows, rels, k: int = 8, max_kinds: int = 8,
               float(deg.get(r["eid"], 0))]
         label = str(r.get("surface") or r["eid"]).replace("\n", " ").strip()
         nodes.append({"id": r["eid"], "kind": str(r.get("kind") or "?"),
-                      "label": label[:LABEL_MAX], "mass": int(r.get("accr") or 0),
+                      "label": label[:LABEL_MAX],
+                      "mass": int(round(float(r.get("mass_eff") or r.get("accr")
+                                         or 0))),
                       "contest": len(r.get("conflicts") or []),
                       "deg": deg.get(r["eid"], 0), "v": v})
     return {"axes": axes, "nodes": nodes, "edges": edges, "kinds": kinds,
@@ -143,8 +146,8 @@ def field_map(rows, rels, k: int = 8, max_kinds: int = 8,
 
 
 CARD_FIELDS = ("eid", "kind", "surface", "tier", "n", "n_by_stream", "accr",
-               "coherence", "net_align", "first_ts", "last_ts", "activity",
-               "conflicts")
+               "mass_eff", "coherence", "net_align", "first_ts", "last_ts",
+               "activity", "conflicts")
 
 
 def entity_card(doc, evidence, near, relations, self_eid: str | None = None) -> dict | None:

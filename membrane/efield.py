@@ -14,7 +14,12 @@ Per entity (EntityState):
           pairwise cosine of the residuals (E23) -- it separates words
           that MEAN something here from filler
   mass    accreted agreeing evidence (E21: grows with mentions; it is
-          importance / centrality, not entity-ness)
+          importance / centrality, not entity-ness). THE METABOLISM (the
+          MEMBRANE_MASS_METABOLISM=1 env flag, default OFF): read-time on
+          top of the raw counter, mass_eff() -- a 14-day half-life from
+          the state's last ACCRETING touch, unresolved conflicts damp it.
+          Dead names sink, re-mentioned ones rise. Nothing stored changes;
+          flag off = the raw counter (the deploy-day no-op)
 Words and phrases wait in a NURSERY until K_MAT distinct sentences
 (buffered mentions replay in order on promotion); specific identifiers
 materialize at their first mention. Boilerplate sentences (per-origin
@@ -138,6 +143,17 @@ def coherence_of(rsum, n: int) -> float:
 ECHO_ROLES = ("model", "reasoning")
 ECHO_HALF_LIFE_S = 6 * 3600.0
 
+# THE FIELD'S METABOLISM (2026-10-13, docs/comparison.md §5, borrowed from
+# holomem): mass fades on a half-life from the state's LAST ACCRETING touch,
+# every accreting mention re-inflates it, an unresolved conflict damps the
+# effective weight. Read-time only (echo's rule): nothing mutates, so a
+# rebuild replays identically. OFF by default -- deploy day stays a provable
+# no-op; the operator turns it on (env + restart, like the sibling knobs).
+MASS_METABOLISM = os.environ.get("MEMBRANE_MASS_METABOLISM", "0") == "1"
+MASS_HALF_LIFE_S = float(os.environ.get("MEMBRANE_MASS_HALF_LIFE_S")
+                         or 14 * 24 * 3600.0)
+MASS_CONFLICT_DAMP = 0.5          # damp = 1 / (1 + DAMP * len(conflicts))
+
 
 def echo_now(st, now: float) -> float:
     """The model-echo count at `now` (half-life ECHO_HALF_LIFE_S)."""
@@ -147,6 +163,28 @@ def echo_now(st, now: float) -> float:
         return e
     dt = max(0.0, float(now) - float(ts))
     return e * 0.5 ** (dt / ECHO_HALF_LIFE_S)
+
+
+def mass_eff(st, now: float) -> float:
+    """The state's (or state doc's) effective mass at `now`: raw accr decayed
+    on a half-life from its last accreting touch, damped by unresolved
+    conflicts. Never above accr, never negative. Reads both EntityState
+    objects and backend doc dicts; read-time only -- accr stays raw."""
+    accr = int((st.get("accr") or 0) if isinstance(st, dict) else st.accr or 0)
+    if not MASS_METABOLISM or accr <= 0:
+        return float(accr)
+    ts = (st.get("last_accrue_ts") if isinstance(st, dict)
+          else getattr(st, "last_accrue_ts", None))
+    if ts is None:                      # a pre-metabolism snapshot: the last
+        ts = (st.get("last_ts") if isinstance(st, dict)   # mention of any
+              else getattr(st, "last_ts", None))          # kind is the best
+    if ts is None:                      # a clock it never had: no decay yet
+        return float(accr)
+    dt = max(0.0, float(now) - float(ts))
+    conflicts = ((st.get("conflicts") if isinstance(st, dict)
+                  else getattr(st, "conflicts", None)) or [])
+    return max(0.0, min(accr * 0.5 ** (dt / MASS_HALF_LIFE_S), float(accr))) \
+        / (1.0 + MASS_CONFLICT_DAMP * len(conflicts))
 
 
 def adopt_legacy(st, ts=None) -> None:
@@ -231,6 +269,9 @@ class EntityState:
     accr: int = 0
     first_ts: float | None = None
     last_ts: float | None = None
+    last_accrue_ts: float | None = None        # the LAST ACCRETING touch (the
+                                               # metabolism's clock; derived
+                                               # exactly like accr on replay)
     last_pos: tuple = (-1, -1)                 # (seq, sentence index) applied
     recent: list = field(default_factory=list)
     pending: list = field(default_factory=list)  # nursery: [sid, seq, sidx, stream, ev, ts, role]
@@ -249,6 +290,11 @@ class EntityState:
 
     @property
     def mass(self) -> int:
+        # the EFFECTIVE mass when the metabolism is on (the raw counter is
+        # still .accr): the card, the birth ranking and the system card all
+        # read this -- dead names sink, re-mentioned ones rise
+        if MASS_METABOLISM:
+            return int(round(mass_eff(self, time.time())))
         return self.accr
 
     def specialization(self, bg) -> float | None:
@@ -263,7 +309,8 @@ class EntityState:
              "n": self.n, "n_by_stream": dict(self.n_by_stream),
              "net_align": self.net_align, "accr": self.accr,
              "coherence": self.coherence, "first_ts": self.first_ts,
-             "last_ts": self.last_ts, "last_pos": list(self.last_pos),
+             "last_ts": self.last_ts, "last_accrue_ts": self.last_accrue_ts,
+             "last_pos": list(self.last_pos),
              "recent": list(self.recent), "conflicts": list(self.conflicts),
              "activity": self.activity, "n_by_role": dict(self.n_by_role),
              "echo": self.echo, "echo_ts": self.echo_ts}
@@ -284,6 +331,7 @@ class EntityState:
                  n_by_stream=dict(d.get("n_by_stream") or {}),
                  net_align=float(d.get("net_align", 0.0)), accr=int(d.get("accr", 0)),
                  first_ts=d.get("first_ts"), last_ts=d.get("last_ts"),
+                 last_accrue_ts=d.get("last_accrue_ts"),
                  last_pos=tuple(d.get("last_pos") or (-1, -1)),
                  recent=list(d.get("recent") or []),
                  pending=[list(p) for p in d.get("pending") or []],
@@ -693,6 +741,9 @@ class EntityField:
         note_mention(st, stream, role, ts, adopt=False)
         st.net_align += align
         st.accr += int(align >= ACCRETE)
+        if align >= ACCRETE:              # the metabolism's clock: derived
+            st.last_accrue_ts = ts        # exactly like accr, so a rebuild
+                                          # replays it identically
         st.first_ts = st.first_ts if st.first_ts is not None else ts
         st.last_ts = ts if ts is not None else st.last_ts
         st.last_pos = pos
@@ -1570,17 +1621,24 @@ class EntityField:
             return cached[1]
         rows = [d for _, d in self.b.scan(
             "entity_states", {"origin": self.origin, "tier": "live"},
+            # SQL orders by the RAW counter (the index has no clock): with the
+            # metabolism on, a dead-but-heavy name can occupy a top slot until
+            # the weights below push it down -- only geometry consumes this
             order=(("accr", "DESC"),), limit=m) if d.get("state")]
         if len(rows) < 2:
             out = {"entities": len(rows), "eff_rank": None, "rank_ratio": None,
                    "free_energy": None, "conflict_frac": None}
         else:
+            now = time.time()
             X = np.asarray([unpack_f16(d["state"]) for d in rows], dtype=float)
             sv = np.linalg.svd(X - X.mean(axis=0), compute_uv=False)
             p = sv ** 2 / max(float(np.sum(sv ** 2)), 1e-12)
             p = p[p > 1e-12]
             eff = float(np.exp(-np.sum(p * np.log(p))))
-            w = np.asarray([max(int(d.get("accr") or 0), 1) for d in rows], dtype=float)
+            # the effective mass weights the thermodynamics: dead names lose
+            # their pull, conflicted ones their certainty (floor 1 so a state
+            # still counts)
+            w = np.asarray([max(mass_eff(d, now), 1.0) for d in rows], dtype=float)
             conflicted = np.asarray([1.0 if d.get("conflicts") else 0.0 for d in rows])
             cf = float((w * conflicted).sum() / w.sum())
             variety = eff / len(rows)

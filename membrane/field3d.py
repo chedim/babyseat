@@ -213,7 +213,8 @@ def build(rows_factory, unpack, axes_spec: str = "", ref_vec=None, rels=(),
         kd = str(r.get("kind") or "?")
         ksum[kd] = ksum[kd] + v if kd in ksum else v.copy()
         kcnt[kd] = kcnt.get(kd, 0) + 1
-        mass = int(r.get("accr") or 0)
+        # the metabolism rows carry mass_eff when on; raw accr stays the fallback
+        mass = int(round(float(r.get("mass_eff") or r.get("accr") or 0)))
         item = (mass, n, v)
         if len(top) < sample_top:
             heapq.heappush(top, item)

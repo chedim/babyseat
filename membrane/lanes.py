@@ -3749,12 +3749,27 @@ def _audit_tail(path, k: int = 24):
     return out[-k:], len(out)
 
 
+def _decorate_field_row(d: dict, now: float) -> dict:
+    """The metabolism (docs/comparison.md §5, borrowed from holomem): rows
+    carry the EFFECTIVE mass (`mass_eff`, decayed from the last accreting
+    touch, conflict-damped) beside the raw counter (`accr`). Read-time only,
+    like echo -- nothing here mutates the store."""
+    d["mass_eff"] = round(_efield_mod.mass_eff(d, now), 3)
+    return d
+
+
 def _efield_state_rows(srv, fld, m: int = 400) -> list[dict]:
     """The m brightest live states by mass (the cloud's rows)."""
     from .efstore import unpack_f16
     rows = [d for _, d in fld.b.scan("entity_states", {"origin": fld.origin, "tier": "live"})
             if d.get("state")]
-    rows.sort(key=lambda d: -int(d.get("accr") or 0))
+    now = time.time()
+    if _efield_mod.MASS_METABOLISM:
+        for d in rows:
+            _decorate_field_row(d, now)
+        rows.sort(key=lambda d: -(d.get("mass_eff") or 0))
+    else:
+        rows.sort(key=lambda d: -int(d.get("accr") or 0))
     out = []
     for d in rows[:m]:
         d = dict(d)
@@ -3871,8 +3886,12 @@ def field3d_projection(srv, axes: str = ""):
                 return p
 
         def rows():
-            return (d for _, d in fld.b.scan(
-                "entity_states", {"origin": fld.origin, "tier": "live"}) if d.get("state"))
+            now = time.time()            # live rows carry the effective mass too
+            return (_decorate_field_row(d, now)
+                    if _efield_mod.MASS_METABOLISM else d
+                    for _, d in fld.b.scan(
+                        "entity_states", {"origin": fld.origin, "tier": "live"})
+                    if d.get("state"))
         rels = [d for _, d in fld.b.scan("relations", {"origin": fld.origin, "superseded": False})]
         proj = _F3.build(rows, unpack_f16, key, ref_vec=lambda e: _field_vec(fld, e), rels=rels)
         by_pid[proj.pid] = proj
@@ -3905,7 +3924,8 @@ def _entity_points(srv, fld, m: int = 400) -> list[dict]:
             basis = srv._ef_basis = Vt[:3]
         coords = (V - mu) @ basis.T if basis is not None else np.zeros((len(rows), 3))
     return [{"p": [round(float(c), 4) for c in coords[i]], "eid": d["eid"],
-             "tags": [d.get("kind") or "?"], "mass": int(d.get("accr") or 0),
+             "tags": [d.get("kind") or "?"],
+             "mass": int(round(_efield_mod.mass_eff(d, time.time()))),
              "safe": not d.get("conflicts"), "reask": 0,
              "contest": len(d.get("conflicts") or [])}
             for i, d in enumerate(rows)]
@@ -4248,7 +4268,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                           round(float(c[2]), 2)],
                     "eid": d.get("eid"),
                     "tags": [d.get("kind") or "?"],
-                    "mass": int(d.get("accr") or 0),
+                    "mass": int(round(_efield_mod.mass_eff(d, time.time()))),
                     "safe": not d.get("conflicts"),
                     "contest": len(d.get("conflicts") or []),
                 })
