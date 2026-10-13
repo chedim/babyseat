@@ -7,8 +7,18 @@ MODEL=glm-5.3-flash:cloud   # flash: the full glm-5.3 burned the ollama cloud cr
 LOCK=$HOME/.membrane-supervise.pid
 LOG=$HOME/membrane/supervise.log
 
-if [ -f "$LOCK" ] && kill -0 "$(cat "$LOCK")" 2>/dev/null; then
-  echo "supervisor already running (pid $(cat "$LOCK"))"; exit 0
+if [ -f "$LOCK" ]; then
+  # the pid-recycle guard (the seat's own boot lock has the same rule): a
+  # dead supervisor's pid recycled by an unrelated process must not sit in
+  # the lock forever -- it made every re-arm silently no-op "already
+  # running" (the 2026-10-13 exhibit: the phone's Android killed the
+  # supervisor, the pid was recycled, and nothing restarted the serve for
+  # hours). The holder counts only if it IS a supervisor.
+  _lp="$(cat "$LOCK" 2>/dev/null)"
+  _lcmd="$(tr '\0' ' ' < "/proc/$_lp/cmdline" 2>/dev/null)"
+  case "$_lcmd" in *membrane-supervise*) echo "supervisor already running (pid $_lp)"; exit 0 ;; esac
+  echo "stale lock (pid $_lp, now $(basename "${_lcmd:-gone}")): taking it over" >> "$LOG"
+  rm -f "$LOCK"
 fi
 echo $$ > "$LOCK"
 
