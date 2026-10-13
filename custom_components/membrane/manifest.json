@@ -1,13 +1,21 @@
 {
   "domain": "membrane",
   "name": "Membrane",
-  "codeowners": ["@chedim"],
+  "codeowners": [
+    "@chedim"
+  ],
   "config_flow": true,
-  "dependencies": ["http", "frontend", "conversation"],
+  "dependencies": [
+    "http",
+    "frontend",
+    "conversation"
+  ],
   "documentation": "https://github.com/chedim/membrane",
   "integration_type": "service",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/chedim/membrane/issues",
-  "requirements": ["membrane-seat==0.3.0"],
-  "version": "0.3.0"
+  "requirements": [
+    "membrane-seat==0.3.1"
+  ],
+  "version": "0.3.1"
 }
