@@ -1,0 +1,35 @@
+name: publish
+
+# THE PYPI LANE (2026-10-13, the operator set the PYPI_TOKEN repo secret):
+# publishing a release's packages was done by hand from the operator's Mac --
+# now the lane runs itself: the tag's package builds in CI and uploads with
+# the secret, no credentials on any machine or in any checkout. A GitHub
+# release going published triggers it; workflow-dispatch covers the catch-up
+# case (a version released before the lane existed).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "the tag to publish (e.g. v0.3.4)"
+        required: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+      # couchbase: NOT needed here -- the seat package's own extra stays out
+      # of the sdist's build requirements
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install build
+      - run: python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_TOKEN }}

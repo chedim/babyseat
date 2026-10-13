@@ -29,6 +29,11 @@ const LS_FOLLOW = "membrane.home.follow";
 const FOLLOW_MODES = ["activity", "seat", "you"];
 const SEAT_IDS = ["seat:self", "seat"];
 const ACTIVITY_EVERY_MS = 1500;
+// THE VIEW (2026-10-13, the operator: the standalone burger menu "just with
+// links to chat-only and graph-only interfaces"): the standalone page puts
+// ?view= in the URL (index.html) -- chat alone (no field) or the field
+// alone (no chat); anything else is everything.
+const VIEW = window.MEMBRANE_VIEW === "chat" || window.MEMBRANE_VIEW === "graph" ? window.MEMBRANE_VIEW : "";
 
 /** The orbit angles that put the camera on the ray from the field's centre
  * through p (beyond it), so it looks at the centre THROUGH p -- the
@@ -473,6 +478,7 @@ const HSTYLE = `
   @media (hover: hover) { .hamenu a:hover { background:color-mix(in srgb, var(--primary-color,#3477d6) 25%, transparent); } }
   .hamenu a:focus-visible { background:color-mix(in srgb, var(--primary-color,#3477d6) 25%, transparent); outline:none; }
   .hamenu ha-icon { --mdc-icon-size:20px; opacity:.85; }
+  .hamenu .mi { width:20px; text-align:center; font-size:15px; opacity:.9; }
   .hamenu hr { border:0; border-top:1px solid color-mix(in srgb, var(--divider-color,#888) 50%, transparent); margin:4px 6px; }
   .sbox { position:relative; }
   .sbox input { width:180px; border:0; border-radius:999px; padding:6px 12px; font:inherit; color:inherit; outline:none;
@@ -490,6 +496,11 @@ const HSTYLE = `
           transition:transform .2s ease, opacity .2s ease; }
   .chat.hidden { transform:translateX(calc(100% + 24px)); opacity:0; pointer-events:none; }
   .chat ai-terminal-panel { flex:1; min-height:0; height:auto; }
+  /* THE VIEW (2026-10-13, the operator's burger-menu ask): chat-only fills
+   * the screen with the conversation -- nothing but field chrome left */
+  .view-chat .chat { left:12px; width:auto; }
+  .view-chat .sbox, .view-chat .me, .view-chat .start, .view-chat .chatbtn,
+  .view-chat .card, .view-chat .tip, .view-chat .field { display:none; }
   .tip { position:absolute; z-index:4; pointer-events:none; display:none; padding:4px 8px; border-radius:8px;
          font-size:12px; max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .card { position:absolute; z-index:3; left:12px; bottom:12px; max-width:min(420px, calc(100% - 24px));
@@ -642,12 +653,27 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     _paintMenu() {
       const h = this._hass || {};
+      const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+      if (h.standalone) {
+        // THE STANDALONE BURGER (2026-10-13, the operator: "bring the burger
+        // menu back (the one that works in hass mode), just with links to
+        // chat-only and graph-only interfaces"): no HA sidebar here and
+        // nothing to log out of -- the three views of the same page; the
+        // view rides ?view= (VIEW). No <ha-icon> in standalone (HA's own
+        // element): the icon is a plain span.
+        const self = new URLSearchParams(location.search).get("view") || "";
+        const row = (v, icon, title) => '<a role="menuitem" href="/' + (v ? "?view=" + v : "") + '"' +
+          (self === v ? ' aria-current="page"' : "") + '><span class="mi">' + icon +
+          '</span><span>' + esc(title) + "</span></a>";
+        this._menu.innerHTML = row("chat", "💬", "Chat only") + row("graph", "🕸", "Graph only") +
+          (self || VIEW ? row("", "◎", "Everything") : "");
+        return;
+      }
       let order = [], hidden = [];
       try { order = JSON.parse(lsGet("sidebarPanelOrder", "[]")) || []; } catch (e) { /* HA's own key */ }
       try { hidden = JSON.parse(lsGet("sidebarHiddenPanels", "[]")) || []; } catch (e) { /* HA's own key */ }
       const self = (this._panel && this._panel.url_path) || "membrane";
       const items = menuEntries(h.panels, order, hidden, self);
-      const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
       const row = (e) => '<a role="menuitem" href="/' + esc(e.path) + '" data-path="' + esc(e.path) + '"><ha-icon icon="' +
         esc(e.icon) + '"></ha-icon><span>' + esc(e.title) + "</span></a>";
       const main = items.filter((e) => !TAIL.includes(e.path)), tail = items.filter((e) => TAIL.includes(e.path));
@@ -731,10 +757,22 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._wireTilt(root);
       if (this._hass) this._chat.hass = this._hass;
       if (this._narrow != null) this._chat.narrow = this._narrow;
-      const chatOn = lsGet(LS_CHAT, "1") === "1";
+      const chatOn = VIEW === "chat" || lsGet(LS_CHAT, "1") === "1";
       this._chatBox.classList.toggle("hidden", !chatOn);
       $(".chatbtn").classList.toggle("on", chatOn);
-      this._menu = $(".hamenu"); this._haBtn = $(".ha"); if (window.MEMBRANE_STANDALONE) this._haBtn.style.display = "none";
+      // THE VIEW (2026-10-13, the operator's burger-menu ask): graph-only
+      // hides the chat and its buttons; chat-only fills the screen with the
+      // conversation -- the search box and the follow modes have nothing to
+      // aim at there
+      if (VIEW === "graph") {
+        this._chatBox.classList.add("hidden");
+        $(".chatbtn").style.display = "none"; this._autoBtn.style.display = "none";
+      } else if (VIEW === "chat") {
+        root.classList.add("view-chat");
+      }
+      this._menu = $(".hamenu"); this._haBtn = $(".ha");
+      this._haBtn.title = window.MEMBRANE_STANDALONE
+        ? "Membrane's interfaces: chat only, graph only, everything" : this._haBtn.title;
       this._haBtn.addEventListener("click", () => this._toggleMenu());
       this._menu.addEventListener("click", (e) => {
         if (e.target.closest("a[data-logout]")) { e.preventDefault(); this._logout(); return; }
@@ -799,6 +837,9 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._started = true;
       const hass = this._hass;
       this._me = "person:" + personSlug(hass.user && hass.user.name);
+      if (VIEW === "chat") {          // THE VIEW: chat-only never boots the
+        this._msgEl.style.display = "none"; return;   // field -- the camera
+      }                                                 // loop is a no-op anyway
       try {
         if (!window.MembraneField3D) await import("/ui/www/field3d.js");
         const api = {

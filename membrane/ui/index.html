@@ -63,6 +63,10 @@
   }
 
   import("/ui/www/favicon.js").then((m) => m.startFavicon()).catch(() => {});   // the tab's turning cube
+  // THE VIEW (2026-10-13, the operator: the standalone burger menu links the
+  // interfaces): ?view=chat -- the conversation alone; ?view=graph -- the
+  // field alone; anything else is everything
+  window.MEMBRANE_VIEW = new URLSearchParams(location.search).get("view") || "";
   const c = await conf();
   if (c.name) { document.title = c.name; window.MEMBRANE_NAME = c.name; }   // home.js / panel.js read it on load
   window.MEMBRANE_ALIASES = c.aliases || [];
