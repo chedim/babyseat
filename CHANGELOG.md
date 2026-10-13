@@ -1,3 +1,7 @@
+## v0.4.1 (2026-10-13)
+- recall: speaker rows (person:/seat:) rank below subject hits; hop guard pins real evidence above hop discounts (issue #1)
+- tests: parity recall assert reconciled to word-hop semantics (a2dd1d8) -- closes the CI red on d0074b9
+
 ## v0.4.0 (2026-10-13)
 
 - metabolism (88fb61e): per-entity mass, 14-day half-life, decayed at read time
