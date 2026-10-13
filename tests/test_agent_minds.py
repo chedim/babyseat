@@ -5,6 +5,7 @@ their live stats. The operator's ask: the pool of thinking agents
 APPEARS IN opencode's agent list."""
 import json
 import os
+import socket
 import subprocess
 import sys
 import urllib.request
@@ -15,6 +16,23 @@ import pytest
 # running pytest interpreter (CI installs the package with -e .).
 _PY = os.path.join(os.path.dirname(__file__), "..", ".venv", "bin", "python")
 _SPAWN = _PY if os.path.exists(_PY) else sys.executable
+
+# A REAL SEAT BOOT (its router wants a backend): no ollama here (CI) --
+# the seat never became ready there (the CI exhibit) -- skip the module.
+_HOST = "127.0.0.1"
+_PORT = int(os.environ.get("OLLAMA_PORT", "11434"))
+
+
+def _ollama_alive():
+    try:
+        socket.create_connection((_HOST, _PORT), timeout=1).close()
+        return True
+    except OSError:
+        return False
+
+
+if not _ollama_alive():
+    pytest.skip("needs a local ollama (the live lane)", allow_module_level=True)
 
 
 def _get(url: str):
