@@ -1,3 +1,10 @@
+## v0.4.0 (2026-10-13)
+
+- metabolism (88fb61e): per-entity mass, 14-day half-life, decayed at read time
+- commons across membranes (57d73eb): global-field slices 1-4, gate/replay fixes
+- efield: deterministic recall top-1 tie-break (c10aa8b) — cross-backend parity, closes #1 symptom
+- tests: voice recall-loopback update
+- known issue: raw presence.exec payloads eval as JS in the browser panel, shell shapes fail (#2)
 # Changelog
 
 ## 0.3.4 — 2026-10-13 (three live exhibits)
