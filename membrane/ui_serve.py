@@ -252,7 +252,12 @@ def intercept(handler) -> bool:
     lan = trusted(handler)
     if lan:
         handler._ui_trusted = True         # standalone: no password anywhere on the LAN (the operator's rule)
-    if not (path == "/" or path == "/index.html" or path == "/favicon.ico" or path.startswith("/ui/")):
+    # /membrane too: the page rewrote the bar to the HA panel's url_path
+    # (panel.js's landing hop, meaningless here -- HA serves that URL, the
+    # seat doesn't), and a reload of it used to die with a bare not-found
+    # (the operator's exhibit, 2026-10-13). Serve the page; both spellings.
+    if not (path in ("/", "/membrane", "/index.html") or path == "/favicon.ico"
+            or path.startswith("/ui/")):
         return False
     if not lan and not handler._authed():
         _json(handler, {"error": "membrane answers the local network only"}, 403)   # never a login prompt
@@ -270,7 +275,7 @@ def intercept(handler) -> bool:
     if handler.command not in ("GET", "HEAD") and path not in ("/ui/stt", "/ui/log"):
         _json(handler, {"error": "method not allowed"}, 405)
         return True
-    if path in ("/", "/index.html"):
+    if path in ("/", "/membrane", "/index.html"):
         _send_file(handler, UI_DIR / "index.html")
     elif path == "/favicon.ico":
         _send_file(handler, UI_DIR / "favicon.svg")

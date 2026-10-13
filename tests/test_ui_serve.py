@@ -71,6 +71,16 @@ class TestUiServe(unittest.TestCase):
         self.assertEqual(self._req("/ui/www/../settings.py", raw=True)[0], 404)
         self.assertEqual(self._req("/ui/www/nope.js", raw=True)[0], 404)
 
+    def test_the_panel_path_serves_the_page(self):
+        # THE OPERATOR'S EXHIBIT (2026-10-13): the page's landing hop writes
+        # /membrane into the address bar (the HA panel's url_path); a reload
+        # of it used to 404 on the standalone serve -- HA serves that URL,
+        # the seat didn't. Both spellings load the page now.
+        code, b, h = self._req("/membrane", raw=True)
+        self.assertEqual(code, 200)
+        self.assertIn(b"membrane-home-panel", b)
+        self.assertTrue(h["Content-Type"].startswith("text/html"))
+
     def test_conf_is_bob_until_named(self):
         code, c, _ = self._req("/ui/conf")
         self.assertEqual(code, 200)
