@@ -2,13 +2,14 @@
 
 ![Membrane](membrane-home.gif)
 
-> A **text-based hypervector entity-field hippocampus for opencode** that
-> learns as you go, shares a Couchbase-backed team memory, and **orchestrates
-> LLM calls** between local and cloud inference.
+> A **living entity-field memory for a resident AI seat** — hypervectors with
+> a readable geometry, a background mind that works while you're away, every
+> write guarded and audited, shared across seats by construction. Local-first;
+> it runs in front of [Ollama](https://ollama.com) (or inside
+> [Home Assistant](docs/home-assistant.md)).
 
-A **Python lab**. It runs as a local HTTP server on
-`127.0.0.1` in front of Ollama (or Anthropic) — technically a proxy, but that
-is the mechanism, not the point. The point is the field.
+A Python lab. It runs as a local HTTP server on `127.0.0.1` — technically a
+proxy, but that is the mechanism, not the point. The point is the field.
 
 > **Why that name?** The project began as one question — *how do you measure
 > "variety" for a memory that decides absorb-a-cached-answer vs
@@ -18,18 +19,101 @@ is the mechanism, not the point. The point is the field.
 > absorbs what it has the variety for and escalates the rest. The measured
 > underpinnings are in [The math findings](docs/math-findings.md).
 
-This README is the **developer workflow** — install, launch, connect a team
-field, and the daily loop. How the entity field works under the hood, how
-sharing works, and the project's history are in the sub-documents (see
-[Documentation map](#documentation-map)).
+---
+
+## What separates membrane from other agentic memory on GitHub
+
+Most memory projects give your agent a store to query. Membrane is built on
+different ground rules; each one is checkable in the repo.
+
+### 1. The memory has a shape, not just a bag of chunks
+
+The field is not cosine-over-pasted-summaries. It is an entity field over
+hypervectors with a geometry you can read and measure: entities with positions
+and states, relations between them, tiers of life (nursery → live → dormant),
+effective rank, free energy, a conflict fraction. `membrane state` prints the
+geometry of a running field; [experiments/variety_toy.py](experiments/variety_toy.py)
+shows in one command why a low-variety store reads its outliers as novel and a
+high-variety store doesn't (the absorb-vs-escalate decision is measured, not
+vibes); [docs/math-findings.md](docs/math-findings.md) carries the experiments.
+
+### 2. It is a seat, not a decorator
+
+You don't bolt it onto an app — the memory **is** the resident process: its own
+REST/SSE serve surface, its own chat UI, voice, the Home Assistant integration.
+The turn loop runs inside the seat, so every client's turn goes through the
+same field path; conversation transcript and memory are the same store, not two
+systems reconciling each other (see `membrane serve`, below). While nobody is
+talking, a background mind keeps working the field — a thinker digesting event
+streams, a dreamer consolidating at night, watchers, entity scripts — and its
+minds are visible as live agents at `GET /agent` (counters served fresh from
+the running process, nothing cached, nothing faked). The repo dogfoods it: its
+own field holds ~14k live entities and learned the codebase while it was
+written.
+
+### 3. Structure crystallizes; you curate nothing
+
+No schema to define, no tags to assign, no knowledge graph to hand-build.
+Entities are born when experience names them, their states move as the world
+speaks, relations and claims accumulate, symbols crystallize through language
+([docs/symbol-birth.md](docs/symbol-birth.md)). When two seats assert opposite
+things about the same entity, the **divergence is surfaced, never silently
+overwritten** — nothing in a teammate's field is destroyed by yours.
+
+### 4. Every write stands trial
+
+A memory that lets the model whisper to itself unsupervised drifts into
+self-flattery. Membrane's writes run the same guards a turn runs: dedup,
+variety gate, length limits, fenced-code refusal, junk cut — every write
+audited with its origin (`agent` / `mcp` / `night` / operator) in
+`audit.jsonl`, and every claim traces back to the events that earned it. A
+dedicated lane replays earlier gate-verdicts against what the model actually
+answered and judges agreement — shadow by default (`--replay-ab P=0`:
+recorded, never bypassing you), measured at 0.77 mean similarity on a live
+seat ([docs/ab-critic-scorecard.md](docs/ab-critic-scorecard.md) faces the six
+criticisms honestly).
+
+### 5. Multi-seat sharing is a property of the data model, not a feature
+
+Every event, state, relation and claim is namespaced by the seat (origin) that
+wrote it — writes are disjoint, reads are merged, so one team bucket is
+collision-free by construction: a foreign entity's effective state is the seed
+plus the mass-weighted mean of every seat's displacement, cross-seat agreement
+is promoted into the **commons** at night, and disputed claims get marked
+`disputed`, not overwritten. Live peer asks (LAN/VPN, bounded fan-out) let a
+seat consult a sibling's field mid-turn. The mechanics:
+[docs/multi-dev-field.md](docs/multi-dev-field.md); the team process:
+[docs/shared-field-workflow.md](docs/shared-field-workflow.md).
+
+### 6. Local-first, and it degrades honestly
+
+No SaaS, no account, no telemetry, no cloud round-trip required: chat and
+embeddings run on your Ollama (cloud models are routable rungs you add with
+`membrane auth`); the substrate is your Couchbase bucket — and with no cluster
+reachable the seat drops to a RAM field and **still boots** (degradation,
+never failure). The whole field is a substrate you own and can move
+(`membrane move` / `reembed`). The memory is for your data: the private-use
+license covers personal use and keeps it out of paid products
+([LICENSE](LICENSE)).
+
+### How it maps to the patterns you've already seen
+
+| The common pattern | What membrane does instead |
+|---|---|
+| Vector store + retriever: paste docs, query chunks | Events with provenance; recall returns nearest **past situations-and-actions** and the named entities' held evidence, not loose chunks |
+| Transcript summarizers / rolling history | The full transcript is never replayed: each turn carries a **since-your-last-message diff** of what actually moved |
+| Hand-curated knowledge graphs | No hand work: entities, relations, claims crystallize from experience; structure emerges, and every element is auditable back to events |
+| In-framework memory (your agent runtime keeps it) | The seat is the runtime — sessions, turns and tool parts live **in** membrane's store; memory and history can't fork |
+| Hosted memory APIs (account, endpoint, egress) | Your bucket or your disk; offline mode keeps the seat alive with no cloud at all |
 
 ---
 
 ## Quick start
 
-Membrane runs two ways. Both need an [Ollama](https://ollama.com) server with one chat model and one
-embedding model (`ollama pull qwen3:8b && ollama pull mxbai-embed-large`, or any cloud model Ollama
-serves), and 1–3 GB of RAM for the seat.
+Membrane runs two ways. Both need an [Ollama](https://ollama.com) server with
+one chat model and one embedding model (`ollama pull qwen3:8b && ollama pull
+mxbai-embed-large`, or any cloud model Ollama serves), and 1–3 GB of RAM for
+the seat.
 
 ### Standalone: its own web UI
 
@@ -39,60 +123,65 @@ mkdir ~/bob && cd ~/bob
 membrane standalone                # opens http://localhost:4096/ in your browser
 ```
 
-You get membrane home: the field in 3D, the chat, and voice ("Hey Bob" — a new membrane is Bob
-until you agree on a name together; it will ask). Other devices on your network reach it at
-`http://<this machine>:4096/`. No login on the local network; a public or proxied caller is
-refused. Voice needs a secure origin, so the microphone works on `localhost` (the first voice use
-downloads ~65 MB of speech models, checked against their checksums).
+You get membrane home: the field in 3D, the chat, and voice ("Hey Bob" — a new
+membrane is Bob until you agree on a name together; it will ask). Other
+devices on your network reach it at `http://<this machine>:4096/`. No login on
+the local network; a public or proxied caller is refused. Voice needs a secure
+origin, so the microphone works on `localhost` (the first voice use downloads
+~65 MB of speech models, checked against their checksums).
 
 ### Inside Home Assistant (HACS)
 
-1. HACS → ⋮ → Custom repositories → `https://github.com/chedim/membrane`, category *Integration*.
+1. HACS → ⋮ → Custom repositories → `https://github.com/chedim/membrane`,
+   category *Integration*.
 2. Install **Membrane**, restart Home Assistant.
-3. Settings → Devices & services → Add integration → **Membrane** → *Inside Home Assistant*.
-   If Home Assistant already has the Ollama integration, it is used; otherwise give Ollama's
-   address. Pick the models.
+3. Settings → Devices & services → Add integration → **Membrane** →
+   *Inside Home Assistant*. If Home Assistant already has the Ollama
+   integration, it is used; otherwise give Ollama's address. Pick the models.
 
-Home Assistant then runs the seat as its own child process (started and stopped with HA,
-restarted if it dies; its data in `<config>/membrane/`), opens on membrane home for everyone (HA's
-sidebar folds away; ☰ leads to HA's own pages — switch it off in the integration's options), adds
-the seat as an Assist conversation agent, and its field's readings as sensors.
+Home Assistant then runs the seat as its own child process (started and
+stopped with HA, restarted if it dies; its data in `<config>/membrane/`),
+opens on membrane home for everyone (HA's sidebar folds away; ☰ leads to HA's
+own pages — switch it off in the integration's options), adds the seat as an
+Assist conversation agent, and its field's readings as sensors.
 
-**What it can do in your house:** by default the seat may use Home Assistant through a hidden,
-non-admin, local-only user ("Membrane") — read any state, call any service, and mirror the entities
-it chooses (they update live). It acts on what people ask, but its commands are written by a
-model: turn *Let the seat use Home Assistant* off in the integration's options if you'd rather it
-only talks. It can't change Home Assistant's configuration or users.
+**What it can do in your house:** by default the seat may use Home Assistant
+through a hidden, non-admin, local-only user ("Membrane") — read any state,
+call any service, and mirror the entities it chooses (they update live). It
+acts on what people ask, but its commands are written by a model: turn *Let
+the seat use Home Assistant* off in the integration's options if you'd rather
+it only talks. It can't change Home Assistant's configuration or users.
 
-*Connect to a seat running elsewhere* is for a seat on another machine (the integration is then
-only its UI and agent).
+*Connect to a seat running elsewhere* is for a seat on another machine (the
+integration is then only its UI and agent).
+
+### The daily work: typed tools, guarded writes
+
+A seat hands its model the membrane MCP surface — `query`, `state`, `learn`,
+`forget`, the entity-hand tools (`entity_add/edit/remove/link/inherit`,
+`entity_query`, `entity_tracks`, `entities_related` …), `intend`, `peer_post`,
+`graph`. The model reads the field with `query`/`state`, files an earned
+lesson with `learn` (same guards as any turn), cleans its own mistakes with
+`forget` — writes are audited with their origin. Meanwhile the ambient layer
+needs no command at all: every turn the model sees what the field holds about
+the entities it names, and on later turns only the **diff** — which entity
+states moved since the last message it processed, whether the change came
+from conversation, code, other seats or entity scripts. Two safety lanes run
+on every turn and stay advisory: the **gate** replays the nearest past ask
+against the live answer (A/B, shadow by default), and the **[membrane]
+monologue** in the thinking channel shows the gate verdict, field vitals and
+the per-turn memory flow (`/monologue` toggles it).
+
+Idle background loops run on a LOCAL, cheaper model by default
+(`--idle-cortex-model`) so a stuck background seat can never burn cloud
+tokens. Token economics and routing:
+[docs/token-economics.md](docs/token-economics.md).
 
 ### Bugs and ideas
 
-[github.com/chedim/membrane/issues](https://github.com/chedim/membrane/issues) — your membrane
-knows this too: when it finds a bug in itself it drafts the issue and hands you the link to file.
-
----
-
-## Table of contents
-
-- [Quick start](#quick-start)
-- [Installation](#installation)
-  - [Install the CLI](#install-the-cli-one-line-no-sudo)
-  - [First run in a project](#first-run-in-a-project)
-  - [Daily workflow](#daily-workflow)
-  - [Other surfaces](#other-surfaces)
-  - [Claude Code (Anthropic cloud)](#claude-code-anthropic-cloud)
-- [Sharing a team field (Couchbase)](#sharing-a-team-field-couchbase)
-  - [`membrane connect` (recommended)](#membrane-connect-recommended)
-  - [Manual setup via env](#manual-setup-via-env)
-  - [What sharing guarantees](#what-sharing-guarantees)
-- [Checking on the field](#checking-on-the-field)
-- [Documentation map](#documentation-map)
-- [Development](#development)
-  - [Run the tests](#run-the-tests)
-  - [The variety toy](#the-variety-toy)
-- [Status](#status)
+[github.com/chedim/membrane/issues](https://github.com/chedim/membrane/issues)
+— your membrane knows this too: when it finds a bug in itself it drafts the
+issue and hands you the link to file.
 
 ---
 
@@ -114,34 +203,17 @@ hacking on membrane):
 MEMBRANE_REPO=/path/to/membrane bash install.sh
 ```
 
-Requires Python ≥ 3.10 (numpy is the only import-time dep); embeddings/chat come from a running
-[Ollama](https://ollama.com). Without installing anything, one-off via uvx:
-`uvx --from "membrane @ git+ssh://git@github.com/chedim/membrane" membrane install`.
-
 **Dependencies, honestly:**
 
-- **Python ≥ 3.10** + **numpy** — the only import-time dep. `couchbase` (the
-  shared field) are installed by default (paho-mqtt was removed
-  2026-10-03 — the mqtt event bus is retired; cross-seat transport is
-  couch's peer_chat lane)
-  (`pip install -r requirements.txt` / the pyproject) but imported lazily;
-  either missing degrades that feature, never the boot.
-- **Ollama** (`brew install ollama` / <https://ollama.com>) — NOT auto-installed; embeddings
-  and local chat need it running on `:11434`.
-- **Couchbase** — where the field lives for real seats: one bucket per team,
-  the `membrane` scope, nine collections (`events`, `sentences`, `terms`,
-  `entity_states`, `entity_deltas`, `relations`, `claims`, `annotations`,
-  `origin_stats`), created and indexed on first boot (`ensure_infra`). With no
-  cluster configured or reachable the seat degrades to a RAM field — it runs,
-  and nothing persists across restarts.
-- **[opencode](https://opencode.ai)** — NOT auto-installed either; `membrane opencode`
-  launches it if found on PATH (`sh <(curl ... opencode.ai/install.sh)`), otherwise the
-  proxy runs bare and you point any OpenAI-compatible client at `http://127.0.0.1:11500/v1`
-  (`--no-launch` skips the spawn entirely). The other surfaces (viewer, review,
-  ingest, codegraph) need nothing beyond Python.
-- The **viewer** ships inside the package (three.js + both pixel fonts are vendored,
-  served same-origin at `/viewer`, opened in your browser on start; `--no-viewer --no-open`
-  to disable) — no CDN, no node, no browser install.
+- **Python ≥ 3.10** + **numpy** — the only import-time dep (`couchbase`
+  installed by default, imported lazily; a missing cluster degrades that
+  feature, never the boot).
+- **Ollama** (`brew install ollama` / <https://ollama.com>) — NOT
+  auto-installed; embeddings and local chat need it running on `:11434`.
+- **opencode** — optional; `membrane opencode` launches it if found on PATH,
+  otherwise point any OpenAI-compatible client at `http://127.0.0.1:11500/v1`.
+- The **viewer** ships inside the package (three.js + both pixel fonts are
+  vendored, served same-origin) — no CDN, no node, no browser install.
 
 ### First run in a project
 
@@ -150,290 +222,133 @@ cd ~/projects/my-app
 membrane opencode
 ```
 
-That's the whole workflow. On first run in a directory it bootstraps that
-project:
+On first run in a directory it bootstraps that project: auto-installs the
+agent skills into `.opencode/skills/` there (project-scoped on purpose), opens
+an entity field namespaced by the project's origin, and backfills what it can
+without cost (the codegraph; with `membrane backfill`, the project's history).
+If no memory sharing is configured it offers (once, interactive shell only) to
+connect a Couchbase cluster — decline and it stays a private local field.
 
-- auto-installs the eight agent skills (query / learn / forget / state /
-  global-field / codegraph / ingest / restart)
-  into `.opencode/skills/` there (project-scoped on purpose — an opencode
-  launched elsewhere never sees them; skip with `MEMBRANE_NO_AUTOINSTALL=1`),
-- opens an **entity field** for the project, namespaced by its origin
-  (a sha1 tag of the project path) — events, entity states, relations,
-  claims — all in the shared scope when one is configured,
-- backfills what it can without cost: the codegraph (code events and
-  `calls` relations) and, with `membrane backfill`, the project's history,
-- if no memory sharing is configured, offers (once, interactive shell only)
-  to connect a Couchbase cluster for this project — decline and it stays a
-  private local field (see
-  [Sharing a team field](#sharing-a-team-field-couchbase)).
-
-It then starts the OpenAI-compatible proxy on `:11500` (backend Ollama at
+It starts the OpenAI-compatible proxy on `:11500` (backend Ollama at
 `http://localhost:11434`, override `--backend`/`--model`) and opens the
-opencode TUI **attached to membrane's own serve surface** (stage 3.5:
-membrane IS the server — sessions, turns, tool parts and their history live
-in membrane's stores beside the field; the TUI is a thin client). The
-surface's REST/SSE triple is printed at boot and the basic-auth pair lives
-in `.membrane/serve-auth.json`. Every turn is captured into the field
-(discourse and observations as events), entities move as the conversation
-names them, and the model is grounded by what those entities hold —
+opencode TUI **attached to membrane's own serve surface**: sessions, turns,
+tool parts and their history live in membrane's stores beside the field — the
+TUI is a thin client. Every turn is captured into the field (discourse and
+observations as events), entities move as the conversation names them, and the
+model is grounded by what those entities hold —
 [docs/entity-field.md](docs/entity-field.md) is the design doc.
 
-### Daily workflow
-
-Inside opencode, the field answers five canonical frames itself —
-**intercepts: no model call, never learned**:
-
-    membrane: query the field for <topic>     read recall
-    membrane: learn that <fact>               write a memory (a NOTE event)
-    membrane: forget #N                       tombstone event #N and
-                                              recompute what it touched
-    field state                               memory health/stats
-    membrane: suggest                         review scope suggestions for
-                                              the cross-project commons
-
-The agent may also emit these frames in its own prose; answers arrive next
-turn as clearly-marked `[membrane-intercept]` blocks. Writes from model prose
-execute by default (`--no-agent-writes` reverts to report-only): a learn runs
-the same guards as any turn and is audited `origin: agent` (tagged
-`agent-note`).
-
-Everything else is ambient. Each turn the model sees what the field holds
-about the entities it names (its evidence sentences, the latest observations,
-the code, relations, conflicts) and — on later turns — only the **diff**:
-which entity states moved since the last message it processed, from
-conversation, code, other seats or entity scripts. Two safety lanes run on
-every turn and stay advisory:
-
-- **the gate** finds the earlier ask nearest this one and its answer; when it
-  is not stale (no newer observation or conflict on the ask's entities), the
-  pair is logged as an **A/B** — the replay next to what the model actually
-  answered, judged for agreement. `--replay-ab P` serves the replay on a
-  fraction P of eligible turns (default 0 = shadow: you are never bypassed);
-- **the [membrane] monologue** in the thinking channel shows the gate verdict,
-  field vitals, and the per-turn memory flow. `/monologue` toggles it.
-
-Idle background loops run on a LOCAL, cheaper model by default (`--idle-cortex-model`)
-so a stuck background seat can never burn cloud tokens. Token economics and
-routing: [docs/token-economics.md](docs/token-economics.md).
-
-### Other surfaces
+### Surfaces
 
 | Command | What it does |
 |---|---|
-| `membrane opencode` | the daily driver: seat proxy on :11500 + membrane's own serve surface (loopback) with the opencode TUI **attached as a thin client** — sessions, turns and tool parts live in membrane; opencode is display only (`MEMBRANE_TUI_DIRECT=1` restores the old direct-provider lane) |
-| `membrane serve` | the same seat, headless: membrane's OWN opencode-compatible REST/SSE server on :4096 (opencode replaced, no child process) |
+| `membrane opencode` | the daily driver: proxy on :11500 + membrane's own serve surface (loopback) with the opencode TUI **attached as a thin client** (`MEMBRANE_TUI_DIRECT=1` restores the old direct-provider lane) |
+| `membrane serve` | the same seat, headless: membrane's OWN opencode-compatible REST/SSE server (opencode replaced, no child process) |
+| `membrane standalone` | the seat with its own web UI — membrane home (the field in 3D), chat, voice; see [docs/standalone.md](docs/standalone.md) |
 | `membrane backfill` | rebuild the field from history (code first, then the audit log; idempotent, resumable) |
 | `membrane review` | print what the field learned (annotations, replay A/B with `--ab`) |
 | `membrane connect` | (re)run shared-field onboarding for THIS project |
 | `membrane reset` | kill the seat on :11500 (or `--listen`), relaunch `membrane opencode` fresh |
-| `membrane install` | install `.opencode/skills/*` explicitly (+ `.gitignore` entry); prints the AGENTS.md blurb |
-| `membrane auth` | store a cloud API key (anthropic, openrouter, gemini, groq, github, mistral) in `~/.membrane/auth.json` (600) — its models become routable rungs + picker entries |
-| `membrane move` | migrate the field between stores (`--efield`: copy the entity-field collections between clusters) |
-| `membrane migrate` | interactive migration front door: detects where the field lives, asks for the target, runs `move` |
-| `membrane reembed` | move the field to another embedding model (`--efield --embed-model M`: re-embed every live event, re-apply) |
-| `membrane update` | check the install source, show what changed, apply (`git pull --ff-only`) and re-exec |
+| `membrane install` | install `.opencode/skills/*` explicitly (+ `.gitignore` entry) |
+| `membrane auth` | store a cloud API key in `~/.membrane/auth.json` (600) — its models become routable rungs |
+| `membrane move` / `membrane migrate` | migrate the field between stores |
+| `membrane reembed` | move the field to another embedding model (re-embeds every live event, re-applies the log in order) |
+| `membrane update` | check the install source, show what changed, apply and re-exec |
 | `membrane ingest` | cold start: absorb docs/README into the field (DOC events; a second ingest is a no-op) |
 | `membrane codegraph` | stdlib-AST call graph (stats / impact / callers / callees) |
-| `membrane doctor` | what's installed/running (CLI, skills, Ollama) + the field's vitals |
-| `membrane tui` / `proxy` / `anthropic` / `demo` | RETIRED — print a pointer to `membrane opencode` |
-
-`./run.sh` still works in-repo and delegates to the same CLI (bare = opencode;
-`./run.sh restart` = `membrane reset`).
+| `membrane doctor` | what's installed/running + the field's vitals |
 
 `MEMBRANE_EFIELD` selects the field's mode: `on` (the default: capture,
 embed, apply), `shadow` (capture events only — a lab ablation), `off`.
 
-### Standalone and Home Assistant
-
-`membrane standalone` is the seat with its own web UI (membrane home, the chat,
-voice) — see [docs/standalone.md](docs/standalone.md). Inside Home Assistant the
-**Membrane** integration (HACS) runs the seat as HA's child process and makes
-membrane home HA's landing page — see [docs/home-assistant.md](docs/home-assistant.md).
-
-### Serving headless (`membrane serve`)
+### Headless serving (`membrane serve`)
 
 `membrane serve` runs the seat with **no TUI and no opencode at all** —
-membrane hosts its OWN opencode-compatible REST/SSE server
-(`membrane/server.py`): sessions, messages, turns, tool parts, aborts, the
-SSE event stream. Any opencode client connects unchanged: the [mobile
-companion app](https://opencode.app/), IDE plugins, a script. The turn
-loop calls the seat's OWN `/v1` on loopback — gate, injection, capture,
-banner and the routing ladder run through the exact code path every other
-client's turn uses, so the serve surface adds no separate memory, and the
-model's membrane tool invocations (the MCP lane, built-ins all off) appear
-to the client as ordinary tool parts riding `message.part.updated`
+sessions, messages, turns, tool parts, aborts, the SSE event stream, served by
+membrane itself on :4096 (basic auth, the pair in `.membrane/serve-auth.json`,
+credentials survive restarts). Any opencode client connects unchanged: the
+[mobile companion app](https://opencode.app/), IDE plugins, a script. The turn
+loop calls the seat's OWN `/v1` on loopback — gate, injection, capture and
+routing run through the exact code path every other client's turn uses, so
+the serve surface adds no separate memory, and the model's tool invocations
+appear to the client as ordinary tool parts riding `message.part.updated`
 (pending → completed), so you can watch what it's doing from the room.
+`--serve-port` (default 4096, walks up if busy) and `--listen` (the proxy,
+never leaves 127.0.0.1) are independent. Exposure is LAN-only by design:
+reach the server only from a network you own.
 
-The connection triple is printed at boot:
-
-    serve: http://<lan-ip>:4096  (native serve, basic auth user opencode)
-
-- **Auth is basic auth** (opencode's env names, `OPENCODE_SERVER_USERNAME`
-  / `OPENCODE_SERVER_PASSWORD`): no/incorrect credentials get `401`, only
-  the pair in `.membrane/serve-auth.json` (mode 600, generated once,
-  `--serve-pass` / `--serve-user` to override) gets through. Credentials
-  survive restarts, so a device's saved connection keeps working.
-- **Sessions and messages persist** beside the field
-  (`serve-sessions.json` / `serve-msgs.json`, atomic write-through), so a
-  device's history survives a seat restart. `--serve` + `--no-launch` is
-  legal now — the surface is a thread, independent of the launch decision.
-- **The TUI is a client too.** Every launch boot starts the serve surface
-  (loopback-only unless `--serve`) and opens the opencode TUI **attached**
-  to it (`opencode attach`, same basic-auth pair) — so a desktop session
-  and a phone session are the same store: membrane's. The TUI's own turn
-  loop, tool loop and local session storage are bypassed entirely; the
-  attached client only displays what the server publishes. Old lanes:
-  `MEMBRANE_TUI_DIRECT=1` (TUI fronting `/v1` directly) and
-  `MEMBRANE_LEGACY_SERVE=1` (the `opencode serve` child).
-- **Exposure is WiFi-only for now** (`--serve-host` defaults to `0.0.0.0`,
-  the LAN): reach the server only from a network you own. The planned
-  route makes the seat's phone (the boat's agDroid HA server) the host —
-  the security model (VPN or LAN-only, no public exposure) gets designed
-  there.
-- `--serve-port` (default 4096, walks up if busy) and `--listen` (the
-  proxy, still never leaves 127.0.0.1) are independent.
-- **The minds are visible.** `/agents` (or `GET /agent`) lists the
-  ambient minds as agents: the three thinking-loop workers (`loop-1..3`,
-  each one's description carrying its live claim — the entity it is
-  processing — and the event queue's depth) plus `thinker` and `dreamer`
-  with their real counters (beats/spoken/ticks, waves/committed/gc).
-  The list is served fresh every call from the running process — nothing
-  cached, nothing faked.
-- **The loop queue is RAM-only and dies with the seat.** Watch events
-  waiting for a thinking loop live in memory (no persistence): a seat
-  restart drops the pending queue on purpose — stale reactive work
-  outliving its justification is a failure mode, and a clean restart is
-  the correct response. If you need an event to survive a restart, it
-  belongs in the field (`membrane: learn that ...`), not in the queue.
-- The old lane survives as an ablation: `MEMBRANE_LEGACY_SERVE=1` restores
-  the previous design (launch an `opencode serve` child). A failed serve
-  bind prints loudly and the seat keeps running without the room-facing
-  surface — never a dead seat over a surface.
-
-### Claude Code (Anthropic cloud) — RETIRED
-
-The old `./run.sh anthropic` / `--anthropic` observer mode (a proxy on
-`:11435` in front of Claude Code) was cut with the proxy — `membrane
-anthropic` now only prints the retirement pointer. The opencode seat is the
-surface; to route Anthropic models through it, `membrane auth` stores the
-key (`~/.membrane/auth.json`, mode 600) and its models become rungs on the
-router's ladder.
+- **The minds are visible.** `/agents` lists the ambient minds as agents —
+  the three thinking-loop workers (each with its live claim and the event
+  queue's depth) plus `thinker` and `dreamer` with their real counters.
+- **The loop queue is RAM-only and dies with the seat** — a seat restart
+  drops pending reactive work on purpose; stale reactions must not outlive
+  their justification. What must survive a restart belongs in the field
+  (`learn`), not in the queue.
 
 ---
 
 ## Sharing a team field (Couchbase)
 
-By default a seat's field is private (RAM, or a local cluster). To make a team
-share one substrate — same project, different machines, one memory — point
-every seat at the same Couchbase bucket: one bucket per **team**, the
-`membrane` scope, the nine entity-field collections; projects distinguish
-themselves by the **origin** axis (a seat writes ONLY rows keyed by its own
-origin — do NOT add per-project buckets, that would defeat cross-seat
-agreement).
-
-### `membrane connect` (recommended)
-
-Run in the project directory; answer four prompts:
+Point every seat at the same Couchbase bucket: one bucket per **team**, the
+`membrane` scope, the nine entity-field collections (`events`, `sentences`,
+`terms`, `entity_states`, `entity_deltas`, `relations`, `claims`,
+`annotations`, `origin_stats`), created and indexed on first boot. Projects
+distinguish themselves by the **origin** axis — a seat writes ONLY rows keyed
+by its own origin; do NOT add per-project buckets (that would defeat
+cross-seat agreement).
 
 ```bash
-membrane connect
-#   conn string   [couchbase://127.0.0.1]
-#   user          [Administrator]
-#   password      (hidden)
-#   bucket        [membrane]
+membrane connect        # conn string, user, password (hidden), bucket
 ```
 
-The same offer appears automatically on the first `membrane opencode` /
-`membrane reset` in a project that has no store configured (interactive shell
-only; declining is remembered — it becomes a private field, and `membrane
-connect` re-opens the question).
-
-**Secrets never touch the repo.** Credentials are stored per-project OUTSIDE
-it, at `~/.membrane/projects/<slug>.env` (mode 600, slug = project path +
-hash), and are exported into the environment at every launch from that
-directory. A `.env` inside the repo would leak on the first `git add .` —
-that failure mode is designed out.
-
-Kill switch: `MEMBRANE_NO_ASK=1` silences the launch-time prompt (an explicit
-`membrane connect` still works, as does plain env config).
-
-### Manual setup via env
-
-The classic path still works (plain env config):
+The same offer appears automatically on the first run in a project with no
+store configured (interactive shell only; declining is remembered). **Secrets
+never touch the repo** — credentials are stored per-project OUTSIDE it, at
+`~/.membrane/projects/<slug>.env` (mode 600), and a `.env` inside the repo is
+designed-out of the failure mode. Plain env config still works:
 
     export MEMBRANE_STORE=couchbase
     export COUCHBASE_CONN_STRING=couchbase://<team-host>
     export COUCHBASE_USER=... COUCHBASE_PASSWORD=... COUCHBASE_BUCKET=membrane
 
-A **local** cluster answering at the default endpoint is auto-detected at
-boot — no config needed on a dev box that already runs one. Unreachable
-cluster → transparent fallback to the RAM field (degradation, never failure).
-
-### What sharing guarantees
-
-Mechanics that make sharing collision-free (details in
-[docs/multi-dev-field.md](docs/multi-dev-field.md) and
-[docs/entity-field.md](docs/entity-field.md)):
-
-- every event, state, relation and claim is **namespaced by origin** (the
-  seat-id where it was born); writes only ever touch own keys; foreign
-  rows are read-only inputs to **merged reads** — a foreign entity's
-  effective state is the seed plus the mass-weighted mean of every seat's
-  displacement;
-- two seats that moved the same entity in opposing directions produce a
-  **divergence** — surfaced as a cross-seat conflict in both blocks, never
-  silently overwritten (nothing is destroyed);
-- a seat's working set includes foreign states near what the session is
-  talking about (ANN) plus the **commons**: claims the same way from two or
-  more seats (promoted at night; `disputed` when a seat contradicted it);
-- teammates online get **live peer asks** (bounded fan-out, LAN/VPN);
-  `peers: N live` at boot.
-
-The full team process — day-one setup checklist, the async work loop across
-time zones, the watch layer, operator rules — is
-**[docs/shared-field-workflow.md](docs/shared-field-workflow.md)**.
+A local cluster answering at the default endpoint is auto-detected at boot;
+an unreachable cluster transparently falls back to the RAM field. What
+sharing guarantees — disjoint writes / merged reads, divergence surfaced, the
+commons, live peer asks — is in
+[docs/multi-dev-field.md](docs/multi-dev-field.md), and the full team process
+in [docs/shared-field-workflow.md](docs/shared-field-workflow.md).
 
 ---
 
-## Checking on the field
+## Measured, not promised
 
-- `field state` (in opencode) / `membrane state` / `membrane doctor` — the
-  field's vitals: mode and backend, live events by stream, entities by tier
-  (nursery/live/dormant), geometry (effective rank, free energy, the conflict
-  fraction), replay A/B ledger, the last night pass.
-- `membrane review` (`--ab` for the replay pairs) — what the field learned.
-- The MCP `state` tool exposes the same payload to the agent.
+- **Token economics, live seat (2026-10-12):** 5,736 live entities over
+  4,949 streamed events; the standing per-turn header ~3 KB (entity tracks,
+  one line each) instead of state dumps; per-turn injection is the state
+  **diff**, not the transcript; a recall of a few hundred tokens replaces
+  re-reading a 4,000-line log. [docs/token-economics.md](docs/token-economics.md)
+- **The gate is calibrated by experiment:** cosine-primary similarity with a
+  novelty specialist as the escalation judge; the variety toy reproduces the
+  decision in one command. [docs/math-findings.md](docs/math-findings.md),
+  [docs/ab-critic-scorecard.md](docs/ab-critic-scorecard.md) (replay A/B
+  agreement 0.77 on a live seat, six criticisms faced)
+- **The field's own state is readable:** `membrane state` / `membrane doctor`
+  print live events by stream, entities by tier, geometry (effective rank,
+  free energy, conflict fraction), the replay ledger, the last night pass.
 
-What the numbers mean:
-[docs/math-findings.md](docs/math-findings.md) (the measured math), with
-[docs/entity-field.md](docs/entity-field.md) connecting it to the code.
+## Lifecycle
 
-## Lifecycle: updates, restarts, compatibility
-
-- **Update check at boot.** On `membrane opencode` / `membrane reset`, membrane
-  checks its install source (the git checkout it runs from, or the pip/uv
-  direct URL it was installed from). If an update exists it prints the
-  CHANGELOG (the commits between you and the remote tip) and asks
-  `Update membrane now? [y/N]` in the terminal — answering yes pulls
-  (`--ff-only`, a dirty tree is refused) and re-execs with the same argv.
-  Non-interactive sessions are never interrupted; `membrane update` runs
-  the same path manually. Opt out with `MEMBRANE_NO_UPDATE_CHECK=1`.
-  A PyPI install (`membrane-seat`) compares itself with PyPI's latest and asks
-  the same way (then `pip install --upgrade` and a restart). Inside Home
-  Assistant, updates come through HACS (the integration pins its
-  `membrane-seat`).
-- **Restart only from the shell.** `./run.sh restart` (= `membrane
-  reset`: kills the seat listening on :11500 — or `--listen` — and
-  relaunches `membrane opencode`) is the safe procedure — see the
-  membrane-restart skill. Membrane
-  never restarts itself while running (no file watcher, no self-re-exec);
-  a restart loses nothing: the field re-hydrates from its backend
-  (`membrane reembed --efield` is the one way a restart CAN change results
-  — moving to another embedding model).
-- **Embedding-model moves.** The field's vectors are pinned to a model
-  (`terms` seeds are cached per model); `membrane reembed --efield
-  --embed-model M` re-embeds every live event and re-applies the log in
-  order — the rebuilt field pins equal to a fresh one.
+- **Update check at boot** (opt out `MEMBRANE_NO_UPDATE_CHECK=1`): the CLI
+  compares against its install source (git or PyPI), prints the CHANGELOG
+  delta, and asks before pulling (`--ff-only`; a dirty tree is refused).
+  Inside Home Assistant, updates come through HACS.
+- **Restart only from the shell** (`membrane reset` / `./run.sh restart`).
+  Membrane never restarts itself while running, and a restart loses nothing:
+  the field re-hydrates from its backend. The one way a restart CAN change
+  results is `membrane reembed` (moving to another embedding model).
+- **Field moves are first-class**: `membrane move` between stores,
+  `membrane migrate` as the interactive front door, `membrane reembed
+  --efield --embed-model M` pins the rebuilt field equal to a fresh one.
 
 ---
 
@@ -441,67 +356,44 @@ What the numbers mean:
 
 | Doc | What's in it |
 |---|---|
-| [docs/standalone.md](docs/standalone.md) | **Standalone mode** (`membrane standalone`): the web UI, the first run and the name, who can reach it, voice, `settings.json`, updates |
-| [docs/home-assistant.md](docs/home-assistant.md) | **Membrane in Home Assistant** (HACS): setup, the UI takeover, the Assist agent and sensors, what the seat may do in the house, options, where its data lives, its life |
-| [docs/entity-field.md](docs/entity-field.md) | **THE FIELD.** Design: events → entities → readers; the update rule and statistics; relations and claims; injection (full block / state diff); the gate + replay A/B; storage, sharing, the background mind; the e17–e25 evidence. **The division of hands** (the operator/listener/plan tool lanes + the remounted intent lane) |
+| [docs/standalone.md](docs/standalone.md) | **Standalone mode**: the web UI, the first run and the name, who can reach it, voice, `settings.json`, updates |
+| [docs/home-assistant.md](docs/home-assistant.md) | **Membrane in Home Assistant** (HACS): setup, the UI takeover, the Assist agent and sensors, what the seat may do in the house |
+| [docs/entity-field.md](docs/entity-field.md) | **THE FIELD.** Events → entities → readers; the update rule; relations and claims; injection (full block / state diff); the gate + replay A/B; storage, sharing, the background mind; the operator/listener/plan tool lanes + the intent lane |
+| [docs/seat-first-2-tier.md](docs/seat-first-2-tier.md) | The seat-first two-tier field: local authoritative store, a published global tier on your terms |
 | [docs/shared-field-workflow.md](docs/shared-field-workflow.md) | **Team field: the process.** Day-one setup, the async loop, watches, operator rules, go-live checklist |
-| [docs/multi-dev-field.md](docs/multi-dev-field.md) | **Team field: the substrate.** The origin axis, disjoint writers / merged reads, divergence conflicts, the commons — what makes multi-seat sharing collision-free |
+| [docs/multi-dev-field.md](docs/multi-dev-field.md) | **Team field: the substrate.** The origin axis, disjoint writers / merged reads, divergence conflicts, the commons |
 | [docs/global-field.md](docs/global-field.md) | The global commons: facts true beyond one repo; operator promotion, consensus, residency |
-| [docs/background-mind.md](docs/background-mind.md) | **The background mind:** thinker + dreamer on events, the NightClock, births/junk/activity on entity stats, entity scripts and tracks, the intent steering wheel, **the pause** (the operator's stable point: what stops, what keeps), kill switches |
-| [docs/vsa-token-lane.md](docs/vsa-token-lane.md) | **Entity keys + relations (the VSA lane).** `eids.py` canonical ids, `entity_key`/`role_key` binding, the relations composites, structure-awareness numbers, consumers, kill switches |
-| [docs/token-economics.md](docs/token-economics.md) | Where the savings come from (intercepts, the replay lane, the state diff) + the router: the ladder, the ceiling, the outage fallback, the free-tier default budget |
-| [docs/monologue.md](docs/monologue.md) | The `[membrane]` thinking-channel banner: every line explained, the memory flow (gave/learned), `/monologue` toggle |
-| [docs/symbol-birth.md](docs/symbol-birth.md) | The symbol crystallization: how the hierarchy is born — symbols come into being through language; the structural membrane mapping, the consequence to keep |
-| [docs/math-findings.md](docs/math-findings.md) | The measured math: the variety/gate experiments (cosine primary, novelty specialist) and e18–e25 (spans, streams, coherence, relations, claims) |
+| [docs/background-mind.md](docs/background-mind.md) | **The background mind:** thinker + dreamer, the NightClock, entity scripts and tracks, the intent steering wheel, **the pause**, kill switches |
+| [docs/vsa-token-lane.md](docs/vsa-token-lane.md) | **Entity keys + relations (the VSA lane).** Canonical ids, key binding, the relations composites, structure-awareness numbers |
+| [docs/token-economics.md](docs/token-economics.md) | Where the savings come from + the router: the ladder, the ceiling, the outage fallback |
+| [docs/monologue.md](docs/monologue.md) | The `[membrane]` thinking-channel banner: every line explained, `/monologue` toggle |
+| [docs/symbol-birth.md](docs/symbol-birth.md) | The symbol crystallization: how the hierarchy is born through language |
+| [docs/math-findings.md](docs/math-findings.md) | The measured math: the variety/gate experiments and the e-series evidence |
 | [docs/ab-critic-scorecard.md](docs/ab-critic-scorecard.md) | The A/B scorecard vs a plain cosine cache — six criticisms faced honestly |
-| [docs/fork-port-notes.md](docs/fork-port-notes.md) | Fork notes (the fork now runs its own memory design; what it took to port membrane's ideas there) |
-
-Retired with the exemplar field (kept in git history, removed from `docs/`):
-`close-the-gap.md` (TencentDB-gap work, superseded by the code-evidence
-lane), `post-restart-plan.md` (the pre-rewrite roadmap), `exploration-game.md`
-and `dev-organism.md` (the toy world and the cell organism — cut in
-`070af25`).
+| [docs/fork-port-notes.md](docs/fork-port-notes.md) | Fork notes (what it took to port membrane's ideas into another project) |
 
 ---
 
 ## Development
 
 Source layout: `membrane/` (the field: `streams` → `efield`/`efstore` →
-`entity_block`/`efgate`/`night`, the seat proxy, the native serve server
-(`server.py`, opencode-compatible), the opencode host (the legacy ablation),
-the CLI), `experiments/` (the e-series rigs behind math-findings), `tests/`
-(unittest + pytest, plain-python runnable).
-
-### Run the tests
+`entity_block`/`efgate`/`night`; the seat's serve server (`server.py`,
+opencode-compatible); the MCP surface (`mcp_server.py`); the CLI),
+`experiments/` (the e-series rigs behind math-findings), `tests/` (unittest +
+pytest, plain-python runnable).
 
 ```bash
-python -m unittest discover -s tests     # or: .venv/bin/python -m unittest discover -s tests
-python -m pytest tests/test_global_field.py tests/test_lab_isolation.py   # the field-backed ones
+python -m unittest discover -s tests     # everything runs against in-process fakes, no server needed
+python experiments/variety_toy.py        # the variety toy: the gate's calibration in one command
 ```
-
-No server needed: everything runs against in-process fakes
-(`tests/_ef_fakes.py` — a sha256-seeded embedder and a lazy fake cluster that
-runs exactly the SQL++ the field emits).
-
-### The variety toy
-
-The original variety experiment (what makes a store confident vs unsure —
-the gate's calibration in one command):
-
-```bash
-pip install -r requirements.txt   # numpy only
-python experiments/variety_toy.py
-```
-
-Expected: the low-variety store has low effective-rank and low spread; a query
-off its manifold reads as highly novel (gate escalates), while the same query
-against the high-variety store reads as in-manifold (gate acts).
 
 ---
 
 ## Status
 
 Working lab, in daily use on its own development (dogfooded: this repo's own
-field learned the codebase while it was being written — the backfilled field
-answers `membrane state` with ~14k live entities, and its background mind
-digests, dreams, and speaks about its own work). Version **0.2.0b1** — the first beta-testing release; API and flag surfaces may still move. Licensing: private-use license (see [LICENSE](LICENSE)) — free for home and personal use; commercial use, distribution and service offerings need the author's written permission.
+field holds ~14k live entities and its background mind digests, dreams, and
+speaks about its own work). Version **0.3.3**; API and flag surfaces may still
+move. Licensing: **private-use license** (see [LICENSE](LICENSE)) — free for
+home and personal use; commercial use, redistribution and paid offerings need
+the author's written permission.
