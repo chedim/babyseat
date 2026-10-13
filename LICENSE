@@ -41,11 +41,25 @@ Copyright (c) 2026 Dmitrii Chechetkin
 5. Notice. Keep this license and the copyright notice with any copy of
    the software, and inside any file where the original notice stood.
 
-6. The usual disclaimers. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT
-   WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
-   TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
-   PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE AUTHOR OR
-   COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
-   WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
-   IN THE SOFTWARE.
+6. Use at your own risk; the usual disclaimers. You accept the software
+   AS IS, AT YOUR OWN RISK, WITH ALL ITS DEFECTS. THE AUTHOR DOES NOT
+   REPRESENT, AND EXTENDS NO WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+   INCLUDING — WITHOUT LIMITING THAT — THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, SAFETY, ACCURACY,
+   QUIET ENJOYMENT AND NON-INFRINGEMENT. The software runs on your
+   machines, reads what you point it at, and acts where you let it act;
+   it may be wrong, it may crash, it may misbehave, and it may cause
+   damage — to your data, your systems, your devices, your home, and
+   anything connected to them, whether or not the author ever saw the
+   possibility. YOU CHOOSE TO RUN IT; WHAT HAPPENS WHEN YOU RUN IT IS
+   YOURS. To the maximum extent permitted by applicable law, IN NO
+   EVENT SHALL THE AUTHOR OR COPYRIGHT HOLDER BE LIABLE for any claim,
+   damages, loss of data, loss of profit, or other loss of any kind —
+   direct, indirect, incidental, special, exemplary, or consequential —
+   arising from, out of, or in connection with the software or its use,
+   EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE, AND EVEN IF A
+   REMEDY FAILS OF ITS ESSENTIAL PURPOSE. If a law forces a higher duty
+   on the author than this section allows, the author's total liability
+   under it is limited to the least amount that law permits, and in no
+   event to more than the least amount you paid for the software —
+   which is zero.

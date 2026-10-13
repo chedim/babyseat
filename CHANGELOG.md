@@ -1,5 +1,8 @@
 # Changelog
 
+## 0.3.2 — 2026-10-13 (the license's teeth)
+- The private-use license's final section is now the full at-your-own-risk clause: AS IS, WITH ALL ITS DEFECTS, no warranties of any kind (safety and accuracy named), the consequences of running it are yours, no liability for any damage to data, systems, devices or anything connected — even if advised of the possibility, even if a remedy fails of its essential purpose, and in no event more than the least amount you paid, which is zero. 0.3.1's shipped license text said the same thing shorter; the published copy now carries the full wording (0.3.1 stays on PyPI, files are immutable, 0.3.2 replaces it for everyone).
+
 ## 0.3.1 — 2026-10-12 (the detached seat's Home Assistant)
 - **Connect mode is a full first-class citizen**: a seat running elsewhere (the operator's own detached seat) gets the same HA access the inside child has — the same state push (`ha_entity` mirrors), and the token **delivered instead of inherited**: at every HA start the integration mints a fresh token and POSTs it to `POST /membrane/ha/token` on the seat's serve; the seat files it in `~/.config/membrane/hass.env` (0600) and reads it on its next turn, so an HA restart reaches the seat without a seat restart. An option (`ha_base_url`) says which Home Assistant address the seat should use when HA's own `internal_url` answer doesn't fit.
 - **Restarts are announced across the wire**: the integration posts `ha-start` when Home Assistant is up and `ha-stop` on the way down to `POST /membrane/seat/event` (`restarts.py` notices) — a detached seat never reads an HA restart as the world going quiet.
