@@ -96,6 +96,26 @@ class TestAutoChatAfterAnEmptyTurn(unittest.TestCase):
         r = type("R", (), {"messages": ms})()
         self.assertEqual(V._last_words(r, "s"), "real words")
 
+    def test_last_words_never_continue_from_an_error_banner(self):
+        # THE OPERATOR'S EXHIBIT (2026-10-13): the last assistant row was the
+        # stream-drop banner; every auto turn-on then read it as "the chat
+        # ended on itself" and stopped at once (rounds 0, three seconds in).
+        ms = MS.MessageStore()
+        rows = [("assistant", "real words"),
+                ("assistant", "model ladder failed: ConnectionError: dropped", True),
+                ("assistant", "model ladder failed: JSONDecodeError: torn", False)]
+        for i, row in enumerate(rows):
+            role, text = row[0], row[1]
+            info = {"id": f"m{i}", "sessionID": "s", "role": role, "time": {"created": i}}
+            if len(row) > 2:
+                info["error"] = {"name": "Error", "data": {"message": "x"}}
+            if text:
+                ms.append("s", info, [{"id": f"p{i}", "type": "text", "text": text}])
+            else:
+                ms.append("s", info, [])
+        r = type("R", (), {"messages": ms})()
+        self.assertEqual(V._last_words(r, "s"), "real words")
+
 
 if __name__ == "__main__":
     unittest.main()

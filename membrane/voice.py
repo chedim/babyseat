@@ -1394,17 +1394,7 @@ def auto_set(runner, sid: str, on: bool, mode: str = "explore") -> dict:
         save_state(runner)
         _seat_note(runner, "auto-chat-on", session=sid, mode=mode, role=role(runner, sid))
         if sid not in (getattr(runner, "_busy", None) or {}):
-            last = ""
-            try:
-                for r in reversed(runner.messages.list(sid) or []):
-                    if (r.get("info") or {}).get("role") == "assistant":
-                        last = "\n".join(p.get("text") or "" for p in r.get("parts") or []
-                                         if p.get("type") == "text")
-                        if last.strip():
-                            break
-            except Exception:
-                pass
-            auto_next(runner, sid, last)
+            auto_next(runner, sid, _last_words(runner, sid))
     return auto_state(runner, sid)
 
 
@@ -1439,13 +1429,21 @@ AUTO_EMPTY_MAX = 2
 
 
 def _last_words(runner, sid: str) -> str:
-    """His last non-empty reply in the session (what a continuation aims from)."""
+    """His last real words in the session (what a continuation aims from).
+    AN ERROR ROW IS NOT WORDS: a stream-failure banner left as the last
+    reply made every turn-on read it as a conversation that "ended on
+    itself" and stop at once (rounds 0, three seconds in; the operator's
+    exhibit, 2026-10-13) -- machine notes never continue the chat."""
     try:
         for r in reversed(runner.messages.list(sid) or []):
-            if (r.get("info") or {}).get("role") == "assistant":
-                t = "\n".join(p.get("text") or "" for p in r.get("parts") or [] if p.get("type") == "text")
-                if t.strip():
-                    return t
+            _i = r.get("info") or {}
+            if _i.get("role") != "assistant":
+                continue
+            t = "\n".join(p.get("text") or "" for p in r.get("parts") or [] if p.get("type") == "text")
+            if _i.get("error") or t.strip().startswith("model ladder failed"):
+                continue
+            if t.strip():
+                return t
     except Exception:
         pass
     return ""
