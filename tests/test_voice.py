@@ -642,11 +642,18 @@ class TestMembranesRole(unittest.TestCase):
         r.messages.append(sid, {"id": "msg_a0", "sessionID": sid, "role": "assistant", "time": {"created": 2, "completed": 3}},
                           [{"id": "p1", "type": "text", "text": "The battery is at ninety percent."}])
         V.auto_set(r, sid, True)
-        end = time.time() + 15
-        while time.time() < end and lad.n < 3:
+        # The order matters and is the contract: the predictor's score is
+        # recorded in the turn-end handler, which an abort can strand -- so
+        # wait for the recording to have LANDED (2 turns predicted) BEFORE
+        # aborting, not after; 30s budget because a slow runner's turns
+        # arrive later (the CI exhibit once squeezed this: 1 not >= 2).
+        end = time.time() + 30
+        while time.time() < end and (lad.n < 3
+                or srv._predictor.report().get("operator", {}).get("turns", 0) < 2):
             time.sleep(0.05)
         r.abort(sid)
         self.assertGreaterEqual(lad.n, 3)
+        self.assertGreaterEqual(srv._predictor.report()["operator"]["turns"], 2)   # membrane predicted his moves
         rows = r.messages.list(sid)
         self.assertEqual([m["info"]["id"] for m in rows if m["info"].get("role") == "user"], ["msg_u0"])  # no new message of anyone's
         sent = lad.last["messages"]
@@ -654,14 +661,6 @@ class TestMembranesRole(unittest.TestCase):
         blob = " ".join(str(m.get("content")) for m in sent)
         self.assertNotIn(V.VOICE_PREFIX.strip(), blob)                  # Argus never hears membrane
         self.assertNotIn("[auto]", blob)                                # and nothing invented is said for him
-        # 30s, not 5s: on a slow runner the auto loop's second turn can
-        # land past the earlier 15s window (the CI exhibit: 1 not >= 2);
-        # the contract is the same -- membrane predicts his moves -- it
-        # just needs the wall clock to give the loop room
-        end = time.time() + 30
-        while time.time() < end and srv._predictor.report().get("operator", {}).get("turns", 0) < 2:
-            time.sleep(0.1)
-        self.assertGreaterEqual(srv._predictor.report()["operator"]["turns"], 2)   # and membrane predicted his moves
 
     def test_babble_role_keeps_the_voice_turns(self):
         r = type("R", (), {"_auto": {}, "hub": S.SSEHub(), "_busy": {"s1": 1}, "messages": S.MessageStore()})()
