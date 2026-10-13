@@ -134,7 +134,7 @@ model, same embeddings. The only variable is whether the environment's push-back
 is wired in. It is, and it does exactly what the framing predicted. Not hand-
 waving — a controlled comparison.
 
-The thermodynamic part (free_energy drains on the wrong path, stable on the right,
+The free_energy part (it drains on the wrong path, stable on the right,
 grows on safe learning) is measured — `free_energy 5.76 → 1.26` on the demotion
 branch vs `5.76 → 5.76` stable. A real quantity doing real accounting.
 

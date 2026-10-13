@@ -10,7 +10,7 @@ Local fields are the actors ("no central router" — a single oracle is
 rank-1, one perspective, cannot absorb variety). The commons is
 **read-mostly substrate data**, not a server: each membrane stays
 sovereign, and the operator's hand is still the authority that writes it.
-The thermodynamics lift one level: variety that exists in one repo is
+The same rule lifts one level: variety that exists in one repo is
 *repo variety*; facts that reproduce across repos are *operator-world
 facts* and earn the commons.
 

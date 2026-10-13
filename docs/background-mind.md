@@ -24,7 +24,7 @@ broken, kept as history).
 | **Dreamer** | 60 s idle waves | solution generation: proposes from the model's own recent sentences, vets a candidate by its **surprise** against the entity states (on topic, but not already said), commits quarantined `Timeline` entities under `session:now` |
 | **NightClock** | 15 min | the entity scripts; **births**; **junk**; activity; the coherence null (once a day); entity-doc materialization + the overlay consolidation |
 
-All cadenced organs use the idle local cortex for any model calls they
+All cadenced organs use the idle local model for any model calls they
 make (`--idle-cortex-model`), so a wedged background seat can never burn
 cloud tokens.
 
@@ -133,7 +133,7 @@ writes. Per-entity cooldown, 3-strikes auto-disable, every application
 audited. A script's change to an entity emits an event, so the normal-mode
 **state diff** (SINCE YOUR LAST MESSAGE) shows it next turn.
 
-## Births, junk, activity — reading the field thermodynamically
+## Births, junk, activity — reading the field's own measures
 
 `membrane/efmind.py`, in the NightClock's pass (all thresholds constants
 there):

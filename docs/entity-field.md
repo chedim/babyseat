@@ -292,8 +292,8 @@ value is kept at its stored precision, so a restart never changes a result.
 
 `MemBackend` (RAM) serves tests and lab paths; an unreachable cluster
 degrades to it and never raises at boot. The bucket ladder (create, or
-reuse a cortex bucket when the RAM quota is spoken for) lives in
-`membrane/substrate.py`.
+reuse a bucket left behind by another seat when the RAM quota is spoken
+for) lives in `membrane/substrate.py`.
 
 ## Sharing
 

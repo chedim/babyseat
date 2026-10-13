@@ -8,7 +8,7 @@ built for this; what follows is the mechanics and the convention.
 
 ## What already works (no code needed)
 
-Set the same env on every dev machine (cortex-experiment convention):
+Set the same env on every dev machine:
 
     MEMBRANE_STORE=couchbase
     COUCHBASE_CONN_STRING=couchbase://<team-host>

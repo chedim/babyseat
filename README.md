@@ -15,9 +15,8 @@ is the mechanism, not the point. The point is the field.
 > escalate-to-the-model?* — and the answer is what makes the memory above
 > possible and is why it is called **membrane**: a selective, *active* boundary
 > between lived memory (the inside) and the incoming world (the outside) that
-> absorbs what it has the variety for and escalates the rest. The full story
-> lives in [The thermodynamic principle](docs/principle.md) and
-> [The math findings](docs/math-findings.md).
+> absorbs what it has the variety for and escalates the rest. The measured
+> underpinnings are in [The math findings](docs/math-findings.md).
 
 This README is the **developer workflow** — install, launch, connect a team
 field, and the daily loop. How the entity field works under the hood, how
@@ -213,7 +212,7 @@ every turn and stay advisory:
 - **the [membrane] monologue** in the thinking channel shows the gate verdict,
   field vitals, and the per-turn memory flow. `/monologue` toggles it.
 
-Idle background loops run on a LOCAL cortex by default (`--idle-cortex-model`)
+Idle background loops run on a LOCAL, cheaper model by default (`--idle-cortex-model`)
 so a stuck background seat can never burn cloud tokens. Token economics and
 routing: [docs/token-economics.md](docs/token-economics.md).
 
@@ -360,7 +359,7 @@ Kill switch: `MEMBRANE_NO_ASK=1` silences the launch-time prompt (an explicit
 
 ### Manual setup via env
 
-The classic path still works (cortex-experiment's env convention):
+The classic path still works (plain env config):
 
     export MEMBRANE_STORE=couchbase
     export COUCHBASE_CONN_STRING=couchbase://<team-host>
@@ -405,10 +404,9 @@ time zones, the watch layer, operator rules — is
 - `membrane review` (`--ab` for the replay pairs) — what the field learned.
 - The MCP `state` tool exposes the same payload to the agent.
 
-What the numbers mean and how the field's "thermodynamics" work:
-[docs/principle.md](docs/principle.md) (plain words) and
+What the numbers mean:
 [docs/math-findings.md](docs/math-findings.md) (the measured math), with
-[docs/entity-field.md](docs/entity-field.md) connecting both to the code.
+[docs/entity-field.md](docs/entity-field.md) connecting it to the code.
 
 ## Lifecycle: updates, restarts, compatibility
 
@@ -454,11 +452,9 @@ What the numbers mean and how the field's "thermodynamics" work:
 | [docs/token-economics.md](docs/token-economics.md) | Where the savings come from (intercepts, the replay lane, the state diff) + the router: the ladder, the ceiling, the outage fallback, the free-tier default budget |
 | [docs/monologue.md](docs/monologue.md) | The `[membrane]` thinking-channel banner: every line explained, the memory flow (gave/learned), `/monologue` toggle |
 | [docs/symbol-birth.md](docs/symbol-birth.md) | The symbol crystallization: how the hierarchy is born — symbols come into being through language; the structural membrane mapping, the consequence to keep |
-| [docs/principle.md](docs/principle.md) | "Only variety absorbs variety" — Ashby's law with the telos flipped; effective rank and free energy measured on entity states; the conflict tax |
-| [docs/math-findings.md](docs/math-findings.md) | The measured math: the substrate-phase experiments (cosine primary, novelty specialist) and e18–e25 (spans, streams, coherence, relations, claims) |
+| [docs/math-findings.md](docs/math-findings.md) | The measured math: the variety/gate experiments (cosine primary, novelty specialist) and e18–e25 (spans, streams, coherence, relations, claims) |
 | [docs/ab-critic-scorecard.md](docs/ab-critic-scorecard.md) | The A/B scorecard vs a plain cosine cache — six criticisms faced honestly |
 | [docs/fork-port-notes.md](docs/fork-port-notes.md) | Fork notes (the fork now runs its own memory design; what it took to port membrane's ideas there) |
-| *the cycled / endless environment* (sibling `cortex-experiment` repo) | The theory notes behind the principle (the loop, and the trap unbounded variety sets) |
 
 Retired with the exemplar field (kept in git history, removed from `docs/`):
 `close-the-gap.md` (TencentDB-gap work, superseded by the code-evidence
@@ -508,5 +504,4 @@ against the high-variety store reads as in-manifold (gate acts).
 Working lab, in daily use on its own development (dogfooded: this repo's own
 field learned the codebase while it was being written — the backfilled field
 answers `membrane state` with ~14k live entities, and its background mind
-digests, dreams, and speaks about its own work). Version **0.2.0b1** — the first beta-testing release; API and flag surfaces may still move. **Private project** — no
-license yet; all rights reserved by the author.
+digests, dreams, and speaks about its own work). Version **0.2.0b1** — the first beta-testing release; API and flag surfaces may still move. Licensing: private-use license (see [LICENSE](LICENSE)) — free for home and personal use; commercial use, distribution and service offerings need the author's written permission.

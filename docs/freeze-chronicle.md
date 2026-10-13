@@ -65,7 +65,7 @@ the opencode logs (the SLOW/PENDING tool warnings -- 37 in one boot).
   (prune volumes/build cache; the raw never shrinks by itself).
 - **The seats' fields migrated** (2026-10-02): membrane 8334
   entity_states / 27811 sentences / 20119 deltas; the announcer +
-  cortex seats likewise -- the `.json.migrated` files are the
+  the other sibling seats likewise -- the `.json.migrated` files are the
   originals (the bytes survived).
 - **The corrupt-file heal** (the announcer seat's torn entities.json,
   37MB): doc-by-doc `raw_decode` recovered 374/375 -- the technique

@@ -3,10 +3,11 @@
 > **Phase note.** This is the **substrate-phase** math — the gate/variety work
 > that was membrane's *original* identity. membrane has since become a
 > **field-first, self-authoring world you inhabit as a voiced character**; the
-> variety math below did not get discarded, it became the **thermodynamics of
-> the world's growth** (`effective_rank` = the world's life, `free_energy` = its
-> vitality). See `README.md` for what membrane *is* now; this doc stays the
-> honest record of what was measured and settled in the substrate phase.
+> variety math below did not get discarded, it became how the field's own
+> growth is measured (`effective_rank` = the field's variety,
+> `free_energy` = its learning pressure). See `README.md` for what
+> membrane *is* now; this doc stays the honest record of what was measured
+> and settled in the substrate phase.
 
 This documents the math we ran in `membrane` and what it settled. It is a
 narrative of three experiments, one of which **corrected an earlier one**, and a

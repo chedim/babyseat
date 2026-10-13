@@ -73,7 +73,7 @@ claimed-vs-measured win rates in `field state`. Tests:
 ## Background model budget
 
 Idle background organs (the thinker, the dreamer, the NightClock's script
-and claim judges, the replay judge) run on a LOCAL cortex by default
+and claim judges, the replay judge) run on a LOCAL model by default
 (`--idle-cortex-model`, default = the first local Ollama chat model by
 family preference — granite, glm, qwen3, qwen2.5-coder, …). **The watch
 loops are the exception:** they are real seat turns on the seat's model,
