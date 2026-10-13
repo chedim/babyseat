@@ -5,6 +5,8 @@
  *   serve/membrane/map/field3d?axes=...   the projection: pid, n_total, kinds
  *   serve/membrane/map/tile?pid&l&x&y&z   one octree cell's entities + edges
  *   serve/membrane/map/locate?pid&eid     where an entity sits
+ *   serve/membrane/map/search?q&limit     the WHOLE catalog (search needs
+ *                                         every entity, not the budget's)
  *   serve/event                           field.* / mind.* frames (HA admins)
  *
  * THE RECYCLED FIELD (Android's lists, in space): the seat projects every
@@ -271,6 +273,14 @@ class Field3DView {
   constructor(host, api) {
     this.host = host; this.api = api;
     this.budget = 8000; this.cap = 10000; this.edgeCap = 30000;
+    // THE VIEWER'S OWN PACE (2026-10-13, the operator: "limit # of nodes
+    // rendered based on its performance"): the gauge (_gaugeFrame) walks
+    // this.budget between the floor and maxBudget -- which home.js may
+    // have set lower (a small screen starts at 3000) -- from measured
+    // frame costs. maxBudget is the CONFIGURED ceiling, never exceeded
+    // by the adaptation.
+    this.maxBudget = 8000; this.budgetFloor = 1000;
+    this._ft = []; this._ftAt = 0;
     this.cache = new TileCache(this.budget);
     this.pending = new Set(); this.known = new Map();
     this.slots = new Map(); this.free = []; this.meta = []; this.hidden = new Set();
@@ -568,6 +578,35 @@ class Field3DView {
   }
 
   // ---------------------------------------------------------- the frame
+  /** THE GAUGE (2026-10-13, the operator: the node limit follows the
+   * machine): every frame's cost lands in a small window; every few
+   * seconds the median speaks. Struggling (a frame slower than the
+   * maxFps target allows) steps the budget down -- decisively, it
+   * compounds; comfortable (real headroom) grows it back slowly and
+   * never past the configured maxBudget. One bad frame (a GC pause, a
+   * tab switch) moves nothing: the median, not the mean. */
+  _gaugeFrame(cost) {
+    this._ft.push(cost);
+    if (this._ft.length > 45) this._ft.shift();
+    const now = performance.now();
+    if (this._ft.length < 30 || now < this._ftAt) return;
+    this._ftAt = now + 2500;
+    const s = [...this._ft].sort((a, b) => a - b);
+    const med = s[s.length >> 1];
+    const target = this.api.maxFps ? 1000 / this.api.maxFps - 2 : 15;
+    if (med > target) {
+      this._applyBudget(Math.round(this.budget * 0.7));
+    } else if (med < target * 0.55) {
+      this._applyBudget(Math.round(this.budget * 1.12) + 1);
+    }
+  }
+
+  _applyBudget(n) {
+    const b = Math.max(this.budgetFloor, Math.min(this.maxBudget, Math.round(n)));
+    if (b === this.budget) return;
+    this.budget = b; this.cache.budget = b;
+  }
+
   _camVecs() {
     const o = this.orbit;
     const p = [o.target[0] + o.r * Math.sin(o.phi) * Math.sin(o.theta), o.target[1] + o.r * Math.cos(o.phi),
@@ -623,6 +662,7 @@ class Field3DView {
     this._stepAvatars(dt);
     if (this.showLabels && now - this._lastLabels > 180) { this._lastLabels = now; this._paintLabels(); }
     this.renderer.render(this.scene, this.camera);
+    this._gaugeFrame(performance.now() - now);
   }
 
   /** Evicted tiles are already out of the cache: free every slot no
@@ -765,6 +805,27 @@ class Field3DView {
       if (out.length >= 40) break;
     }
     return out.sort((a, b) => b.mass - a.mass);
+  }
+
+  /** THE WHOLE-CATALOG SEARCH (2026-10-13, the operator: "still search
+   * thru all entities when using the search box"): the rendered answer
+   * comes first (search(), instant, mass-ranked), then the seat's full
+   * entity store fills the rest (membrane/map/search). A hit needn't be
+   * on the field -- flyTo locates and flies to it. */
+  async searchAll(q) {
+    const local = this.search(q);
+    let remote = [];
+    try {
+      const d = await this.api.get("/membrane/map/search?limit=40&q=" +
+        encodeURIComponent(String(q || "").trim()));
+      remote = (d && d.hits) || [];
+    } catch (e) { remote = []; }         // offline/degraded: rendered is the answer
+    const seen = new Set(local.map((m) => m.id));
+    for (const h of remote) {
+      if (!h || !h.id || seen.has(h.id)) continue;
+      seen.add(h.id); local.push(h);
+    }
+    return local.slice(0, 40);
   }
 
   async _locate(eid) {

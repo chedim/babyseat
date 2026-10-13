@@ -598,8 +598,24 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._hushTts(); this._tiltStop();
       this._listenKeys(false);
       clearInterval(this._follow);
+      clearInterval(this._autoT);
       if (this._v3) { this._v3.stop(); this._v3 = null; }
       if (this._hidSidebar) this._dock("restore");
+    }
+
+    _paintAuto() {
+      const b = this._autoBtn; if (!b) return;
+      // the auto state lives in the panel element's chat-state object
+      // (panel.js's applyEvent writes st.auto on it)
+      const a = (this._chat && this._chat._chat && this._chat._chat.auto) || null;
+      const on = !!(a && a.on);
+      b.textContent = on ? "⏸" : "▶";
+      b.style.opacity = on ? "1" : ".5";
+      b.title = on
+        ? "auto-chat ON: " + (a.role === "predict" ? "the LLM works on by itself, membrane predicts"
+                             : (a.mode || "explore"))
+          + " (round " + (a.rounds || 0) + ") -- click to pause"
+        : "auto-chat paused -- click to play (membrane and the LLM talk; you can join any time; shift-click = teach mode)";
     }
 
     // ---------------------------------------------------------- HA's own UI, one button away
@@ -672,6 +688,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <button class="ha" title="Home Assistant: its dashboards and pages" aria-haspopup="menu" aria-expanded="false" aria-label="Home Assistant menu">☰</button>
           <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you">◎ activity</button>
           <button class="chatbtn" title="Show / hide the chat">💬</button>
+          <button class="autobtn" title="auto-chat" aria-label="auto-chat">▶</button>
           <button class="start" title="Open Home Assistant here (this browser)">☆</button>
           <button class="tilt" hidden title="Turn the view by tilting the device">📱</button>
           <span class="sbox"><input class="q" placeholder="search entities…" autocomplete="off"><div class="hits glass"></div></span>
@@ -744,6 +761,21 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         e.currentTarget.classList.toggle("on", on);
         lsSet(LS_CHAT, on ? "1" : "0");
       });
+      // THE AUTO-CHAT, WHERE THE HAND IS (the operator's ask, 2026-10-13):
+      // the button used to live buried in the chat's side menu -- it drives
+      // now beside 💬, as a play/pause: ▶ starts a session's auto-chat,
+      // ⏸ ends it; shift-click plays the teach mode. The state it mirrors
+      // lives in the chat element (the panel owns the route).
+      this._autoBtn = $(".autobtn");
+      this._autoBtn.addEventListener("click", (e) => {
+        const c = this._chat;
+        if (!c || typeof c._toggleAuto !== "function") return;
+        Promise.resolve(c._toggleAuto(e.shiftKey ? "teach" : "explore"))
+          .catch(() => {})
+          .then(() => this._paintAuto());
+      });
+      this._paintAuto();
+      this._autoT = setInterval(() => this._paintAuto(), 1500);
       $(".start").addEventListener("click", () => {
         lsSet("defaultPanel", JSON.stringify((this._panel && this._panel.url_path) || "membrane"));
         this._statusEl.textContent = "this browser opens here now (Profile → Dashboard changes it)";
@@ -787,7 +819,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           },
         };
         const v = this._v3 = new window.MembraneField3D(this._host3d, api);
-        if (window.matchMedia("(max-width: 760px)").matches) { v.budget = 3000; v.cache.budget = 3000; }
+        if (window.matchMedia("(max-width: 760px)").matches) { v.maxBudget = 3000; v._applyBudget(3000); }
         await v.start();
         if (!this._started) { v.stop(); return; }
         await this._aim(true);
@@ -1973,7 +2005,22 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
 
     _showHits() {
       const v = this._v3, q = this._q.value;
-      const hits = v && q.trim() ? v.search(q) : [];
+      // the rendered nodes answer FIRST (instant); then the seat's whole
+      // catalog (membrane/map/search) fills the list -- a hit needn't be
+      // on the field (2026-10-13, the operator's ask); the newest
+      // keystroke wins (stale answers from racing fetches never paint)
+      const local = v && q.trim() ? v.search(q) : [];
+      this._paintHits(local, q);
+      if (!q.trim() || !v || typeof v.searchAll !== "function") return;
+      const seq = (this._hitSeq = (this._hitSeq || 0) + 1);
+      Promise.resolve(v.searchAll(q)).then((hits) => {
+        if (seq !== this._hitSeq || !this._v3) return;
+        this._paintHits(hits || [], q);
+      }).catch(() => {});
+    }
+
+    _paintHits(hits, q) {
+      const v = this._v3;
       const esc = (t) => String(t == null ? "" : t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
       this._hitMeta = new Map(hits.map((n) => [n.id, n]));
       this._hits.innerHTML = hits.map((n) => '<div class="hit" data-id="' + esc(n.id) + '"><span class="sw" style="background:' +

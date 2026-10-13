@@ -717,6 +717,10 @@ const STYLE = `
   /* the card is narrower than a page: the bar wraps instead of clipping its
      buttons (membrane / LLM / auto-chat / minds) off the edge */
   :host([overlay]) .bar { flex-wrap:wrap; row-gap:4px; padding:6px 10px; }
+  /* OVERLAY ONLY (2026-10-13, the operator's ask): auto-chat moved out --
+     the home page's top bar drives it (a ▶/⏸ beside 💬); the panel's own
+     node stays only for its state/listener, hidden */
+  :host([overlay]) .autobtn { display:none; }
   :host([overlay]) .side { position:absolute; z-index:5; top:0; bottom:0; left:0; width:min(260px, 80%);
                            box-shadow:2px 0 14px rgba(0,0,0,.35); }
   :host([overlay]) .ctl { display:flex; flex-direction:column; gap:2px; padding:2px 8px 8px;
@@ -836,8 +840,12 @@ function definePanel() {
         // listeners come along)
         const ctl = document.createElement("div");
         ctl.className = "ctl";
+        // the auto-chat button does NOT live here any more (2026-10-13,
+        // the operator's ask): home.js's top bar carries it beside the
+        // chat button as a ▶/⏸; the panel's own node stays (hidden --
+        // never listed) so its listener and state keep working.
         for (const [cls, label] of [["agent", null], ["modelpick", null], ["voicebtn", "membrane's voice"], ["llmbtn", "LLM replies"],
-                                    ["autobtn", "auto-chat"], ["rolebtn", "membrane babbles"], ["jsbtn", "let " + SEAT + " act as you here: off"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
+                                    ["rolebtn", "membrane babbles"], ["jsbtn", "let " + SEAT + " act as you here: off"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
           const el = app.querySelector("." + cls);
           if (!el) continue;
           if (label) {

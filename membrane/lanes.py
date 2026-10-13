@@ -3988,6 +3988,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 self._map_tile(); return
             if path == "/membrane/map/locate":
                 self._map_locate(); return
+            if path == "/membrane/map/search":
+                self._map_search(); return
             if path == "/membrane/map/axis":
                 # the thin alias: the axis query params ride /cloud (the
                 # contract's shape; the reproject uses cloud+entities)
@@ -4371,6 +4373,37 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if (qs.get("nb") or ["0"])[0] in ("1", "true"):
             hit["neighbours"] = proj.neighbours(eid)
         self._json_out(hit)
+
+    def _map_search(self):
+        """GET /membrane/map/search?q=<text>[&limit=40]: THE WHOLE-CATALOG
+        SEARCH (2026-10-13, the operator's ask): the viewer's search box
+        must find EVERY entity, not only the ones the node budget has
+        rendered -- this scans the entity store (labels + eids) directly,
+        projecting nothing. Rows carry id/label/kind only; when a hit
+        flies, /membrane/map/locate answers where it sits."""
+        from urllib.parse import parse_qs
+        qs = parse_qs(self.path.split("?", 1)[-1] if "?" in self.path else "")
+        q = (qs.get("q") or [""])[0].strip().lower()
+        try:
+            limit = max(1, min(100, int((qs.get("limit") or ["40"])[0])))
+        except ValueError:
+            limit = 40
+        est = getattr(self.server, "entity_store", None)
+        if est is None or not q:
+            self._json_out({"q": q, "hits": []}); return
+        starts, part = [], []          # label/eid starting with q first
+        for e in est.docs.values():
+            label = (e.describe() or "")[:80]
+            low, leid = label.lower(), e.eid.lower()
+            if low.startswith(q) or leid.startswith(q):
+                starts.append({"id": e.eid, "label": label, "kind": e.cls})
+                if len(starts) >= limit:
+                    break
+            elif q in low or q in leid:
+                part.append({"id": e.eid, "label": label, "kind": e.cls})
+                if len(part) >= limit:
+                    break
+        self._json_out({"q": q, "hits": (starts + part)[:limit]})
 
     def _map_distance(self):
         """GET /membrane/map/distance?eid=X[&mode=toward]: THE ENTITY AXIS --

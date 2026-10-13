@@ -4,6 +4,7 @@ reuses within the fresh window, the seat relay passes the three reads."""
 
 import os
 import sys
+import types
 import unittest
 from pathlib import Path
 
@@ -75,6 +76,58 @@ class TestRoutes(unittest.TestCase):
         for path in ("/membrane/map/field3d?axes=pc1", "/membrane/map/tile?pid=x&l=0&x=0&y=0&z=0",
                      "/membrane/map/locate?pid=x&eid=y"):
             self.assertTrue(MS.seat_read_url(S(), path), path)
+
+
+class TestWholeCatalogSearch(unittest.TestCase):
+    """The search route (2026-10-13, the operator: the search box must
+    reach EVERY entity, not the rendered budget's): label/eid matches,
+    starts-with ranked first, the limit holds, no query and no store
+    answer empty."""
+
+    @staticmethod
+    def _ent(eid, label, cls="person"):
+        return types.SimpleNamespace(eid=eid, cls=cls,
+                                     describe=lambda label=label: label)
+
+    def _fire(self, qs, ents):
+        ents = [self._ent(*e) for e in ents] if ents is not None else None
+        out = []
+        r = types.SimpleNamespace(path="/membrane/map/search" + qs,
+                                  server=types.SimpleNamespace(
+                                      entity_store=types.SimpleNamespace(
+                                          docs={e.eid: e for e in ents})
+                                      if ents is not None else None))
+        r._json_out = out.append
+        L.MembraneOpenAIHandler._map_search(r)
+        return out[0]
+
+    ENTITIES = [("w:agatha", "Agatha, the operator's seat"),
+                ("w:router", "the gateway router"),
+                ("person:zoe", "Zoe, a visitor")]
+
+    def test_label_and_eid_match_and_starts_with_ranks_first(self):
+        d = self._fire("?q=agat", self.ENTITIES)
+        self.assertEqual([h["id"] for h in d["hits"]], ["w:agatha"])
+        self.assertEqual(d["hits"][0]["kind"], "person")
+        # a substring hit from the label's middle (not its head)
+        d = self._fire("?q=router", self.ENTITIES)
+        self.assertEqual([h["id"] for h in d["hits"]], ["w:router"])
+        # an eid's head matches too
+        d = self._fire("?q=w%3Ar", self.ENTITIES)
+        self.assertEqual([h["id"] for h in d["hits"]], ["w:router"])
+
+    def test_the_limit_holds(self):
+        d = self._fire("?q=w%3A&limit=2", self.ENTITIES)
+        self.assertEqual(len(d["hits"]), 2)
+
+    def test_no_query_and_no_store_answer_empty(self):
+        self.assertEqual(self._fire("?q=", self.ENTITIES), {"q": "", "hits": []})
+        self.assertEqual(self._fire("?q=x", None), {"q": "x", "hits": []})
+
+    def test_the_route_holds_a_seat_read_pass(self):
+        class S:
+            server_address = ("127.0.0.1", 11500)
+        self.assertTrue(MS.seat_read_url(S(), "/membrane/map/search?q=x"))
 
 
 if __name__ == "__main__":
