@@ -18,12 +18,37 @@ ROOT = Path(__file__).resolve().parent.parent
 CC = ROOT / "custom_components" / "membrane"
 
 
+_HA_FAMILY = ("homeassistant", "homeassistant.auth", "homeassistant.auth.const",
+              "homeassistant.const", "homeassistant.core")
+
+
 @pytest.fixture(scope="module")
 def haa():
     pytest.importorskip("aiohttp")
-    if "homeassistant" not in sys.modules:
+    # A real Home Assistant answers first (a dev env with it installed --
+    # never CI); when any name fails to come up, top the family up with
+    # stubs -- EVERY missing name, not all-or-nothing: a partial
+    # "homeassistant" module from some other import path (the CI exhibit:
+    # the guard `if "homeassistant" not in sys.modules` skipped the
+    # install and homeassistant.auth came up missing) must not leave the
+    # family half-built.
+    real = True
+    for name in _HA_FAMILY:
+        if name in sys.modules:
+            continue
+        try:
+            importlib.import_module(name)
+        except Exception:
+            real = False
+    if not real:
+        if "homeassistant" in sys.modules and \
+                not hasattr(sys.modules["homeassistant"], "__path__"):
+            for name in _HA_FAMILY:            # a partial stub: out with it
+                sys.modules.pop(name, None)
         ha = types.ModuleType("homeassistant")
+        ha.__path__ = []                       # a namespace package
         auth = types.ModuleType("homeassistant.auth")
+        auth.__path__ = []
         auth_const = types.ModuleType("homeassistant.auth.const")
         auth_const.GROUP_ID_USER = "user"
         const = types.ModuleType("homeassistant.const")
@@ -37,9 +62,14 @@ def haa():
             pass
 
         core.HomeAssistant, core.Event, core.callback = HomeAssistant, Event, (lambda f: f)
-        sys.modules.update({"homeassistant": ha, "homeassistant.auth": auth,
-                            "homeassistant.auth.const": auth_const,
-                            "homeassistant.const": const, "homeassistant.core": core})
+        ha.auth, ha.const, ha.core = auth, const, core
+        auth.const = auth_const                # the attribute chain, for import
+        for name, stub in {"homeassistant": ha, "homeassistant.auth": auth,
+                           "homeassistant.auth.const": auth_const,
+                           "homeassistant.const": const,
+                           "homeassistant.core": core}.items():
+            if sys.modules.get(name) is None:
+                sys.modules[name] = stub
     pkg = types.ModuleType("cc_membrane"); pkg.__path__ = [str(CC)]
     sys.modules["cc_membrane"] = pkg
     for name in ("const", "ha_access"):

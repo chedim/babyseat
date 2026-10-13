@@ -13,8 +13,11 @@ when its turn's inner reaches the announce. THE CONTRACT:
 """
 import base64
 import json
+import os
 import shutil
+import socket
 import subprocess
+import sys
 import time
 import urllib.request
 
@@ -29,6 +32,25 @@ SEAT_DIR = "/tmp/door-seat"
 # call lane) makes the timing flaky under a full-suite run; solo
 # they're green. Marked: the operator's full-suite runs these last.
 pytestmark = pytest.mark.live_lane
+
+# A CHECKOUT WITHOUT OLLAMA (CI) SKIPS AT IMPORT -- the seat boots, the
+# real turns don't answer there.
+_OL = ("127.0.0.1", int(os.environ.get("OLLAMA_PORT", "11434")))
+
+
+def _ollama_alive():
+    try:
+        socket.create_connection(_OL, timeout=1).close()
+        return True
+    except OSError:
+        return False
+
+
+if not _ollama_alive():
+    pytest.skip("needs a local ollama (the live lane)", allow_module_level=True)
+
+_PY = os.path.join(os.path.dirname(__file__), "..", ".venv", "bin", "python")
+_SPAWN = _PY if os.path.exists(_PY) else sys.executable
 
 @pytest.fixture()
 def quiet_seat():
@@ -51,7 +73,7 @@ def quiet_seat():
         if os.path.exists(p):
             os.unlink(p)
     proc = subprocess.Popen(
-        [".venv/bin/python", "-m", "membrane.opencode",
+        [_SPAWN, "-m", "membrane.opencode",
          "--serve", "--serve-port", str(port), "--serve-host", "127.0.0.1",
          "--no-launch", "--no-thinker", "--no-dreamer", "--no-autonode",
          "--no-router", "--model", "granite4:latest",

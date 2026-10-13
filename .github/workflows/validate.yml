@@ -24,5 +24,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - run: pip install -e . pytest aiohttp
+      # couchbase: the optional extra -- the fakes-based efstore tests import its
+      # exception classes (the CI exhibit: ModuleNotFoundError 'couchbase');
+      # there is no cluster in CI, the FakeCluster stands in for one.
+      - run: pip install -e ".[couchbase]" pytest aiohttp
+      # The seat's suite (tests/) -- live-lane tests skip themselves when the
+      # runner has no ollama.
       - run: pytest -q -p no:cacheprovider --deselect tests/test_thinking_indicator.py
+      # The integration's suite is its own tree with its own stub-conftest
+      # (a fake HA + aiohttp) -- run in its own process, never together with
+      # the seat's.
+      - run: pytest -q -p no:cacheprovider integrations/homeassistant/tests

@@ -19,6 +19,8 @@ OPENCODE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 class TestViewerGate(unittest.TestCase):
     def _boot(self, argv, env=None):
         env = dict(env or {})
+        if not os.path.exists(LAUNCHER):
+            self.skipTest("no local .launcher.py (gitignored operator launcher)")
         spec = importlib.util.spec_from_file_location(
             "launcher_under_test", LAUNCHER)
         mod = importlib.util.module_from_spec(spec)

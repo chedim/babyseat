@@ -322,7 +322,21 @@ class TestPresencePulse(unittest.TestCase):
     def test_pulse_publishes_and_anchors_the_roster(self):
         srv = _Srv()
         srv._boot_ts = time.time() - 240
-        th = Thinker(srv)
+        # the branch pin is the pulse's own reading, not this repo's live
+        # branch (CI checks the repo out on main -- the 'main' != 'entity-field'
+        # exhibit): the test pins the identity instead.
+        with mock.patch("membrane.thinker._git_identity",
+                        return_value={"branch": "entity-field", "head": "abc1234"}):
+            th = Thinker(srv)
+            est = srv.entity_store
+            foreign = {"pub:laptop@mac:membrane::presence": {
+                "published": {"by": "laptop@mac", "ver": 3,
+                              "eid": "membrane::presence"},
+                "data": {"properties": {"seat": "laptop@mac", "uptime": 900,
+                                        "branch": "entity-field"}}}}
+            est._entities_collection = lambda c=_PubColl(foreign): c
+            th._presence_pulse()
+        r = th.stats["presence"]
         est = srv.entity_store
         foreign = {"pub:laptop@mac:membrane::presence": {
             "published": {"by": "laptop@mac", "ver": 3,

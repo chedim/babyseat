@@ -8,15 +8,36 @@ POSTs, none may hang past 30s warm.
 """
 import base64
 import json
+import os
 import shutil
 import socket
 import subprocess
+import sys
 import time
 import urllib.request
 
 import pytest
 
 SEAT_DIR = "/tmp/v1hang-seat"
+
+# THE LIVE SEAT (a local ollama + a real granite turn): a checkout without
+# one (CI) skips at import instead of failing on the missing server.
+_PY = os.path.join(os.path.dirname(__file__), "..", ".venv", "bin", "python")
+_SPAWN = _PY if os.path.exists(_PY) else sys.executable
+_HOST = "127.0.0.1"
+_PORT = int(os.environ.get("OLLAMA_PORT", "11434"))
+
+
+def _ollama_alive() -> bool:
+    try:
+        socket.create_connection((_HOST, _PORT), timeout=1).close()
+        return True
+    except OSError:
+        return False
+
+
+if not _ollama_alive():
+    pytest.skip("needs a local ollama (the live lane)", allow_module_level=True)
 
 
 def _free_port() -> int:
@@ -46,7 +67,7 @@ def boot():
     # 127.0.0.1:NNNN/v1').
     logf = open(f"{SEAT_DIR}/boot.log", "w")
     proc = subprocess.Popen(
-        [".venv/bin/python", "-m", "membrane.opencode",
+        [_SPAWN, "-m", "membrane.opencode",
          "--serve", "--serve-port", str(port), "--no-launch",
          "--no-thinker", "--no-dreamer", "--no-autonode",
          "--no-router", "--model", "granite4:latest",

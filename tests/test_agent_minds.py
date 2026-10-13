@@ -4,9 +4,17 @@ loop is processing, or idle) + the thinker and dreamer as rows carrying
 their live stats. The operator's ask: the pool of thinking agents
 APPEARS IN opencode's agent list."""
 import json
+import os
+import subprocess
+import sys
 import urllib.request
 
 import pytest
+
+# THE INTERPRETER: the dev venv when the checkout has one, else the
+# running pytest interpreter (CI installs the package with -e .).
+_PY = os.path.join(os.path.dirname(__file__), "..", ".venv", "bin", "python")
+_SPAWN = _PY if os.path.exists(_PY) else sys.executable
 
 
 def _get(url: str):
@@ -27,7 +35,7 @@ def seat(tmp_path):
     env["MEMBRANE_HOME"] = str(tmp_path)
     env["MEMBRANE_EF_ANN"] = "0"
     proc = subprocess.Popen(
-        [".venv/bin/python", "-m", "membrane.opencode",
+        [_SPAWN, "-m", "membrane.opencode",
          "--serve", "--serve-port", str(port), "--serve-host", "127.0.0.1",
          "--field", str(tmp_path / "rag-field.json")],
         env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

@@ -26,6 +26,20 @@ membrane = "membrane.cli:main"
 [tool.setuptools]
 packages = ["membrane"]
 
+[tool.pytest.ini_options]
+# The seat's own suite. The homeassistant INTEGRATION's tests
+# (integrations/homeassistant/tests) are a separate suite with its own
+# conftest -- one that installs fake `homeassistant` and `aiohttp` packages
+# at import time; collected together the two conftests poison each other's
+# sys.modules (the CI exhibits: `cannot import name 'Event'`,
+# `No module named 'homeassistant.auth'`, a fake aiohttp under the
+# detached-seat tests). Give the root run tests/ only; the integration
+# tree runs as its own pytest process (its own CI step, its own box).
+testpaths = ["tests"]
+markers = [
+    "live_lane: boots real seats and runs REAL model turns through the operator's local ollama",
+]
+
 [tool.setuptools.package-data]
 membrane = ["skills/*/SKILL.md", "skills/*/*.md", "viewer.html", "three.min.js", "*.woff2",
             "ui/*.html", "ui/*.js", "ui/*.mjs", "ui/*.svg"]
