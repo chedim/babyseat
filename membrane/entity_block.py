@@ -48,6 +48,18 @@ def _num(ev: dict) -> str:
     return f"#{ev['n']}" if ev.get("n") is not None else "#?"
 
 
+def evidence_n(st) -> int:
+    """How much tool/code evidence backs a state: only the observation
+    and code roles pay (the same two the field distills into n_by_role);
+    discourse mentions never count as evidence."""
+    roles = getattr(st, "n_by_role", None) or {}
+    n = sum(v or 0 for key, v in roles.items() if key in ("observation", "code"))
+    if n:
+        return n
+    streams = getattr(st, "n_by_stream", None) or {}
+    return sum(v or 0 for key, v in streams.items() if key in ("observation", "code"))
+
+
 def question_entities(field, text: str, qvec=None, k: int = 5) -> list[str]:
     graph = field.graph_fn()
     named = []
@@ -64,8 +76,12 @@ def question_entities(field, text: str, qvec=None, k: int = 5) -> list[str]:
     def rank(eid):
         st = field.get(eid)
         if st is None:
-            return (0, 0)
+            return (0, 0, 0)
+        # provenance before weight (issue #9): what a tool observed
+        # (observation/code) outranks prose-only phantoms of the same
+        # specificity -- nearness may not mint rank evidence never paid.
         return (0 if E.is_specific(eid) else 1,
+                0 if evidence_n(st) else 1,
                 -(st.coherence * math.log1p(max(st.mass, 0)) if not E.is_specific(eid)
                   else rank_weight(st)))
     named = sorted(dict.fromkeys(named), key=rank)[:k]
@@ -74,9 +90,13 @@ def question_entities(field, text: str, qvec=None, k: int = 5) -> list[str]:
         # them: 'can it select another port?' -> _pick_listen_port
         extra = 0
         for eid, _s in field.recall(qvec, k=8, kinds=["s", "f"]):
-            if eid not in named:
-                named.append(eid)
-                extra += 1
+            if eid in named:
+                continue
+            st = field.get(eid)
+            if st is None or not evidence_n(st):
+                continue  # prose-only phantoms never ride the code slots (issue #9)
+            named.append(eid)
+            extra += 1
             if extra >= CODE_SLOTS:
                 break
     if len(named) < k and qvec is not None:
