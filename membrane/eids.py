@@ -61,6 +61,12 @@ def _abs_root(graph: dict | None) -> str:
     return root.strip("/").lower() + "/"
 
 
+_NON_SRC_SEGMENTS = ("build", "dist", "__pycache__", ".git", ".venv", "node_modules")
+
+def _non_src(path: str) -> bool:
+    q = "/" + (path or "").lower().strip("/")
+    return any(("/" + seg + "/") in q for seg in _NON_SRC_SEGMENTS)
+
 def _resolve_file(path: str, graph: dict | None) -> str:
     p = (path or "").strip().strip("`'\"")
     root = _abs_root(graph)
@@ -74,7 +80,7 @@ def _resolve_file(path: str, graph: dict | None) -> str:
         files = dict(graph.get("files") or {})
         if p in files:
             return "f:" + p
-        hits = [f for f in files if f.lower() == low or f.lower().endswith("/" + low)]
+        hits = [f for f in files if (f.lower() == low or f.lower().endswith("/" + low)) and not _non_src(f)]
         if len(hits) == 1:
             return "f:" + hits[0]
     if "/" in p and not p.startswith(("/", "~", "..")):
@@ -82,6 +88,14 @@ def _resolve_file(path: str, graph: dict | None) -> str:
     if p and not p.startswith(("/", "~")) and graph and graph.get("root") \
             and (Path(str(graph["root"])) / p).is_file():
         return "f:" + p                          # a top-level repo file (README.md)
+    if p and not p.startswith(("/", "~")) and graph and graph.get("root"):
+        _r = Path(str(graph["root"])).resolve()
+        try:
+            _hits = sorted(q for q in _r.glob("**/" + p) if q.is_file() and not _non_src(q.as_posix()))
+        except OSError:
+            _hits = []
+        if len(_hits) == 1:
+            return "f:" + _hits[0].relative_to(_r).as_posix()
     return "f:~" + p.rsplit("/", 1)[-1]
 
 
