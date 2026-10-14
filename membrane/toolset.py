@@ -418,8 +418,13 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
         if "" in fam["actions"] and not action:
             action = ""
         else:
-            raise ValueError(f"{name}: unknown action {action!r}; actions: "
-                             + ", ".join(a for a in fam["actions"] if a))
+            # THE BARE ACTION FAMILY (issue #2: 'state' has exactly one
+            # action, the empty one -- its listing printed bare 'actions: ',
+            # undiscoverable): say how the empty action is called
+            acts = [a for a in fam["actions"] if a]
+            listing = ", ".join(acts) if acts else \
+                f"(none -- {name} takes no action, call it bare)"
+            raise ValueError(f"{name}: unknown action {action!r}; actions: {listing}")
     legacy = fam["actions"][action]
     mapped = {k: v for k, v in fam["map"][action](args).items() if v is not None}
     if name == "entity" and action in ("edit", "add"):

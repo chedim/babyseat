@@ -1379,9 +1379,19 @@ def tool_entity_link(args: dict, port: int) -> str:
                          f"({r.get('ms', 0)}ms) "
                          f"head: {str(r.get('head'))[:600]}")
         else:
-            lines.append(f"- {eid}: FAILED -- rc={r.get('rc')} "
-                         f"{str(r.get('error') or r.get('outcome'))[:120]}")
+            lines.append(_failed_line(eid, r))
     return "\n".join(lines)
+
+
+def _failed_line(eid: str, r: dict) -> str:
+    """A failed exec carries the reason (issue #2, 2026-10-14): the rc AND
+    the run's own words -- an outcome word alone read back as the bare
+    'FAILED -- error' the issue caught, with the run's text (the why, js
+    stack or stderr) shown nowhere."""
+    why = str(r.get("error") or "")
+    if not why:
+        why = str(r.get("head") or r.get("tail") or r.get("outcome") or "").strip()
+    return f"- {eid}: FAILED -- rc={r.get('rc')} {why[:200]}"
 
 
 def _steps_arg(v):
