@@ -2104,14 +2104,22 @@ class TurnRunner:
                 _pre = self._prefetch_reads(tcs, lane, sid) if self.tools is None else {}
                 for tc in tcs:
                     fn = tc.get("function") or {}
-                    name = fn.get("name") or "?"
+                    # the blank name goes to the resolver UNMASKED: '?' read
+                    # like a real tool name and its refusal pointed at the
+                    # wrong place (issue #25)
+                    name = fn.get("name") or ""
                     call_id = tc.get("id") or ""
+                    _raw_args = fn.get("arguments")
+                    _args_bad = ""
+                    args = {}
                     try:
-                        args = json.loads(fn.get("arguments") or "{}")
+                        args = json.loads(_raw_args or "{}")
                         if not isinstance(args, dict):
-                            args = {}
+                            _args_bad, args = str(_raw_args or "")[:160], {}
                     except json.JSONDecodeError:
-                        args = {}
+                        # never silently emptied (issue #12): the model got
+                        # back refusals for calls it DID see run-less
+                        _args_bad = str(_raw_args or "")[:160]
                     disp_args = args
                     tstart = int(time.time() * 1000)
                     part = mkpart({"type": "tool", "callID": call_id,
@@ -2151,6 +2159,11 @@ class TurnRunner:
                                 _help = _ts.help_text(str(args.get("topic") or ""))
                             else:
                                 try:
+                                    if _args_bad:
+                                        raise ValueError(
+                                            f"the call's ARGUMENTS did not parse "
+                                            f"({_args_bad}): that field takes a "
+                                            f"json object -- the call never ran")
                                     name_l, args = _ts.resolve(name, args)
                                 except ValueError as e:
                                     _bad, name_l = str(e), name
@@ -2485,7 +2498,13 @@ def loopback_ladder(port: int, runner=None, cell=None):
                         reasoning.append(r)
                         on_event("reasoning", r)
                     for tc in delta.get("tool_calls") or []:
-                        i = tc.get("index", len(tcs))
+                        # index DEFAULTS TO 0 (the /v1 tee's own rule,
+                        # lanes.py: 'int(tc.get("index", 0) or 0)'): a
+                        # backend that omits index streams ONE tool call's
+                        # chunks -- defaulting to len(tcs) instead spawned a
+                        # separate nameless call per argument delta, every
+                        # one refused with no tool name (issue #25)
+                        i = int(tc.get("index", 0) or 0)
                         cur = tcs.setdefault(i, {"id": "", "type": "function",
                                                  "function": {"name": "", "arguments": ""}})
                         if tc.get("id"):
