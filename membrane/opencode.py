@@ -1925,9 +1925,29 @@ def main() -> None:
     # and instead shuts itself down when the opencode child exits (polled below)
     # or on SIGTERM. In proxy-only mode there is no child, so SIGINT is the
     # normal "stop the server" signal and is handled as before.
+    # THE STOP-SIGNAL COVENANT (2026-10-14, the boot nobody could stop): a
+    # serve-bearing seat with no opencode child (standalone, serve, a
+    # nohup'd/supervised boot) inherited SIG_IGN for SIGINT from its
+    # invoker's context and NEVER restored it -- both the launcher and the
+    # serve read ctrl+c or a group kill -INT as "keep serving" (the exhibit:
+    # both pids survived a direct SIGINT to their process group). Only a
+    # TUI-launch seat has a child whose ctrl+c the seat must not steal.
     def _term(signum, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, _term)
+    # ONLY A REAL TUI LAUNCH may ignore ctrl+c: a seat riding the
+    # terminal under an opencode child has the child's message-input
+    # to protect. `--no-launch`'s dest defaults launch to TRUE, so a
+    # plain `membrane standalone` (and every supervised/nohup'd boot)
+    # ran launch-mode signal policy with NO child at all: the seat read
+    # ctrl+c AND kill -INT as "keep serving" (2026-10-14's exhibit) and
+    # a bg-invoker's inherited SIG_IGN never got restored. Every
+    # childless serve mode stops on INT via the same graceful lane.
+    _tui_launch = bool(args.launch) and not bool(args.standalone)
+    if _tui_launch:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+    else:
+        signal.signal(signal.SIGINT, _term)
 
     # THE DIAGNOSTIC EAR: RETIRED (2026-10-04, the live seat's POST
     # hang exhibit: a SIGUSR1 handler INSIDE the main thread's
@@ -1936,9 +1956,6 @@ def main() -> None:
     # own diagnostic -- the dumper's cost lands on the accept loop's
     # thread). The evidence lanes: the watchdog's dump-to-file (its
     # own thread, GIL-free) + the per-turn clocks.
-
-    if args.launch:
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     child = None
     try:
@@ -2129,6 +2146,19 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\n[membrane-opencode] bye", file=sys.stderr)
     finally:
+        # THE TEARDOWN'S BOUND (the 2026-10-14 drain exhibit: a real
+        # seat's graceful close lingered ~5 minutes -- R then S -- on a
+        # big field + the last commits lands at the very end; the
+        # throwaway with a fresh field took 5s). The chain gets its
+        # every chance, but a drain has a lease: 90s past the bye and
+        # the interpreter is cut (os._exit -- the debounced snapshots
+        # committed along the way; a bound beats a half-alive seat
+        # holding the port's covenant).
+        _teardown_halt = threading.Timer(90.0, lambda: (
+            print("\n[opencode] teardown lease (90s) expired -- cutting "
+                  "the drain", file=sys.__stderr__),
+            os._exit(70))[-1])
+        _teardown_halt.start()
         # THE PICK'S RESERVATION (teardown): an unused bind closes -- a
         # failing boot never holds the serve port against its own retry
         try:
@@ -2227,6 +2257,10 @@ def main() -> None:
                 _log_fh.close()
             except OSError:
                 pass
+        try:
+            _teardown_halt.cancel()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
