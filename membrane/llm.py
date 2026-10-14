@@ -350,7 +350,17 @@ def set_wake(srv, about: str, at: str, prompt: str, caller: str = "", now: float
         ws = list(pp.get("wakes") or [])
         if len(ws) >= WAKES_MAX:
             return {"rc": 1, "text": f"{WAKES_MAX} wakes are pending already: unwake one first"}
-        w = {"id": f"w{int(now * 1000) % 10**9}", "about": about_eid, "at": round(ts, 1), "prompt": prompt,
+        # THE SAME-MILLISECOND TWINS: the id is the wall clock's
+        # millisecond; two wakes planted back to back minted the SAME
+        # id (caught 2026-10-14) and one unwake cancelled BOTH -- the
+        # pending id set disambiguates, every wake keeps its own.
+        wid = f"w{int(now * 1000) % 10**9}"
+        have = {str(w.get("id")) for w in ws}
+        _n = 1
+        while wid in have:
+            wid = f"w{int(now * 1000) % 10**9}-{_n}"
+            _n += 1
+        w = {"id": wid, "about": about_eid, "at": round(ts, 1), "prompt": prompt,
              "caller": str(caller or "unknown")[:120], "set_ts": round(now, 1)}
         pp["wakes"] = ws + [w]
         ent.properties = pp
