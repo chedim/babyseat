@@ -2031,6 +2031,29 @@ class TurnRunner:
                 self._inject_card(sid, resp["membrane"], rounds, mkpart)
             tcs = msg.get("tool_calls")
             content = (msg.get("content") or "").strip()
+            # THE EMISSION SALVAGE (2026-10-14, the five bare one-liners):
+            # a per-turn draw sometimes writes its calls as display
+            # bullets ('🧰 **Tool call** (exec): `{...}`') INSTEAD of
+            # emitting tool_calls -- nothing ran, no receipt rode back,
+            # the turn ended on the text. When the model fired nothing
+            # but wrote the bullet shape, the bullets become the round's
+            # REAL calls: unique call_salv ids (never a duplicate of a
+            # real call id), the model's RAW args text, and the ordinary
+            # loop below does the rest -- resolve, gate, run, receipts
+            # in-turn; a bad object refuses honestly there, never
+            # guesses. Real tool_calls beside bullets stay real: the
+            # model already fired, more would double-execute.
+            if not tcs and self.tools is None and content:
+                try:
+                    from . import streams as _ST
+                    _salv = _ST.emission_calls(content)
+                except Exception:
+                    _salv = []
+                if _salv:
+                    tcs = [{"id": f"call_salv_{secrets.token_hex(6)}",
+                            "type": "function",
+                            "function": {"name": n, "arguments": a}}
+                           for n, a in _salv]
             reason = "tool-calls" if tcs else "stop"
             try:
                 from . import predict as _predict
