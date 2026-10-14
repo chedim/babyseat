@@ -22,7 +22,7 @@ from membrane.efstore import FileBackend, MemBackend  # noqa: E402
 
 HAVE = cblite.lib_paths() is not None
 if HAVE:
-    from membrane.cblstore import CBLiteBackend, dumps  # noqa: E402
+    from membrane.cblstore import CBLiteBackend, StoreBusy, dumps  # noqa: E402
 
 DIM = 1024
 
@@ -289,5 +289,41 @@ class TestWriteBehind(unittest.TestCase):
         b = CBLiteBackend(Path(tmp) / "db")
         try:
             self.assertEqual(b.get("entity_states", "e1")["mass"], 1.0)
+        finally:
+            b.close()
+
+
+@unittest.skipUnless(HAVE, "Couchbase Lite libraries not fetched (scripts/fetch-cbl.sh)")
+class TestWriterLockAndEmptyKeys(unittest.TestCase):
+    """issues #26 + #11 on the cblite home."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+
+    def test_a_second_backend_on_a_live_store_fails_fast(self):
+        # issue #26: `membrane.backfill --audit` beside a live seat opened
+        # fine (SQLite storage) and crashed LATER mid-replay
+        # ('save: database busy/locked'), leaving a half-rebuilt field --
+        # now every constructor takes a sidecar writer flock
+        b = CBLiteBackend(Path(self.tmp) / "field.cblite")
+        try:
+            with self.assertRaises(StoreBusy):
+                CBLiteBackend(Path(self.tmp) / "field.cblite")
+        finally:
+            b.close()
+        again = CBLiteBackend(Path(self.tmp) / "field.cblite")   # released with close
+        again.close()
+
+    def test_an_empty_doc_id_matches_nothing(self):
+        # issue #11: the native layer warns per call on the document id ''
+        # (night's singular `d.get('sid')`, always None); the binding now
+        # answers None without reaching it
+        b = CBLiteBackend(Path(self.tmp) / "field.cblite")
+        try:
+            self.assertIsNone(b.get("sentences", None))
+            self.assertIsNone(b.get("sentences", ""))
+            self.assertIsNone(b.db.get_json("sentences", ""))
+            self.assertFalse(b.db.exists("sentences", ""))
+            self.assertFalse(b.db.exists("sentences", None))
         finally:
             b.close()

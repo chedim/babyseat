@@ -259,7 +259,11 @@ class Database:
                 L.CBL_Release(d)
 
     def get_json(self, coll: str, key: str) -> bytes | None:
-        L, err = self.lib.L, CBLError()
+        if not key:                              # a None/'' key asked the
+            return None                          # native lib for the doc ''
+        L, err = self.lib.L, CBLError()          # ('Invalid document ID',
+        with self.lock:                          # issue #11) -- matches nothing
+            d = L.CBLCollection_GetDocument(self.coll(coll), S(key), C.byref(err))
         with self.lock:
             d = L.CBLCollection_GetDocument(self.coll(coll), S(key), C.byref(err))
             if not d:
@@ -271,6 +275,8 @@ class Database:
                 L.CBL_Release(d)
 
     def exists(self, coll: str, key: str) -> bool:
+        if not key:                              # '' can never be stored
+            return False
         L, err = self.lib.L, CBLError()
         with self.lock:
             d = L.CBLCollection_GetDocument(self.coll(coll), S(key), C.byref(err))

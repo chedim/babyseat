@@ -1248,9 +1248,16 @@ def open_backend(field_path: str = ""):
     mode = os.environ.get("MEMBRANE_EFIELD_STORE", "auto")
     cdir = jdir.with_name(jdir.name + ".cblite")
     if mode == "cbl" or (mode == "auto" and _cbl_wanted()):
+        from .cblstore import StoreBusy
         try:
             from .cblstore import CBLiteBackend
             return CBLiteBackend(cdir, journal_dir=jdir)
+        except StoreBusy as e:
+            # fail fast: falling back would replay writes into the STALE
+            # journals while the real store is live elsewhere (issue #26
+            # was exactly that crash, mid-replay, partial rebuild)
+            print(f"[efield] store busy ({e}); nothing opened", file=sys.stderr)
+            raise
         except Exception as e:
             print(f"[efield] couchbase lite unavailable ({e}); file backend"
                   + (" -- WARNING: the journals are a STALE backup (the field "

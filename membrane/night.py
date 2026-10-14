@@ -424,6 +424,14 @@ def consolidate_entities(fld, est, mem=None, materialize: int = 8,
             "avg_moved": round(total_moved / drifted, 4) if drifted else 0.0}
 
 
+def _sid_vec(fld, sid):
+    """a truthy sid only: event rows stamp the PLURAL sids, so the
+    singular read here asked the store for the document '' -- which
+    cblite's native layer warns about per call (issue #11; the guard
+    mirrors _cell_points' `get(...) if sid else None`)."""
+    return fld.b.get("sentences", sid) if sid else None
+
+
 def consolidate_now(fld, est, mem=None, momentum_vec=None) -> dict:
     """The 'now' trackers (the operator's design: the default entity is the
     session's living present, not the model):
@@ -460,7 +468,9 @@ def consolidate_now(fld, est, mem=None, momentum_vec=None) -> dict:
                                 "stream": "discourse",
                                 "seq": {"gt": max(0, last - 12)}},
                                order=("seq",), limit=12):
-            sv = fld.b.get("sentences", d.get("sid"))
+            # events carry the PLURAL sids (issue #11): a get here on the
+            # singular 'sid' (always None) asked cblite for the document ''
+            sv = _sid_vec(fld, d.get("sid"))
             if sv and sv.get("vec"):
                 pts.append((unpack_f16(sv["vec"]),
                             float(d.get("ts") or now)))
@@ -485,7 +495,7 @@ def consolidate_now(fld, est, mem=None, momentum_vec=None) -> dict:
                             "seq": {"gt": max(0, int(
                                 fld._ostats.get("seq_last") or 0) - 64)}},
                            order=("seq",), limit=64):
-        sv = fld.b.get("sentences", d.get("sid"))
+        sv = _sid_vec(fld, d.get("sid"))
         if sv and sv.get("vec") and (d.get("ts") or 0):
             gpts.append((unpack_f16(sv["vec"]),
                          float(d.get("ts") or 0)))
