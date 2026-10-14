@@ -293,6 +293,7 @@ class TestWriteBehind(unittest.TestCase):
             b.close()
 
 
+@unittest.skipUnless(HAVE, "Couchbase Lite libraries not fetched (scripts/fetch-cbl.sh)")
 class TestWriterLockAndEmptyKeys(unittest.TestCase):
     """issues #26 + #11 on the cblite home."""
 
