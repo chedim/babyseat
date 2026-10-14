@@ -326,6 +326,9 @@ class EntityState:
 
     @classmethod
     def from_doc(cls, d: dict) -> "EntityState":
+        scm = d.get("_scm")
+        if scm is not None and scm != EF_SCHEMA:
+            raise ValueError(f"schema mismatch: doc _scm={scm} != EF_SCHEMA={EF_SCHEMA} (_k={d.get('_k')!r})")
         st = cls(eid=d["eid"], kind=d.get("kind", ""), surface=d.get("surface", ""),
                  tier=d.get("tier", "nursery"), n=int(d.get("n", 0)),
                  n_by_stream=dict(d.get("n_by_stream") or {}),
