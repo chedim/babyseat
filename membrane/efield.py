@@ -783,6 +783,7 @@ class EntityField:
                 _born(st.eid)
             except Exception:
                 pass
+        self.flush()
 
     def _apply(self, key: str, ev: dict) -> None:
         stream, seq, ts = ev["stream"], int(ev["seq"]), ev.get("ts")
