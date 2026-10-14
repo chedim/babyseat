@@ -371,3 +371,37 @@ class TestSyncRule(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestLinkRefusesMethods(unittest.TestCase):
+    """ISSUE #21 (the banner listed it): a method earns its use-count
+    through the method_call door; re-running it by name through the
+    LINKER used to run the raw template with no call context (its
+    {{self.*}} stayed literal, rc=127) and streams.outcome's text order
+    relabeled that 'not-found' -- the model saw 'FAILED -- not-found'
+    while the banner advertised the same name the same turn."""
+
+    def test_a_resolved_method_refuses_through_the_linker(self):
+        f, est = _world()
+        # the method doc, exactly as method_define mints it:
+        # name='{owner}.{method}', method_name, method_of, a {{self.*}}
+        # command template
+        eid = MEMBRANE_NS + "shell:presence.exec"
+        est.docs[eid] = QuantumEntity(
+            eid=eid, cls=CLASS_TOOL,
+            properties={"name": "presence.exec", "method_name": "exec",
+                        "method_of": [MEMBRANE_NS + "presence"],
+                        "command": "js::{{code}}", "runs": 3})
+        srv = _Srv(f, est)
+        r = entity_link(srv, est, f, None, "tool:executor",
+                        ["presence.exec"], args={"code": "echo hi"})
+        self.assertFalse(r["ok"], r)
+        self.assertIn("is a method, not a command line", r.get("error", ""))
+        self.assertIn("action='call'", r.get("error", ""))
+        # refusal BEFORE the run ledger: no runs bump on a lie
+        self.assertEqual(est.docs[eid].properties.get("runs"), 3)
+        # and the banner now points at the honest door
+        lib = N.command_library(est)
+        self.assertIn("presence.exec", lib)
+        self.assertIn("action=call", lib)
+        # no phantom edges: nothing linked
+        self.assertFalse(r.get("linked"))

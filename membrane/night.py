@@ -1851,11 +1851,20 @@ def command_library(est, k: int = LIBRARY_MAX) -> str | None:
             continue
         if p.get("method_name"):
             name = str(p.get("name") or name)                 # 'ha light.turn_on'
-        rows.append((n, float(p.get("last_run_ts") or 0), name, command_params(cmd)))
+        rows.append((n, float(p.get("last_run_ts") or 0), name,
+                     command_params(cmd), bool(p.get("method_name"))))
     if not rows:
         return None
     rows.sort(key=lambda r: (-r[0], -r[1]))
-    items = [f"{nm}{('{' + ','.join(ps) + '}') if ps else ''} x{n}" for n, _, nm, ps in rows[:k]]
+    items = []
+    for n, _, nm, ps, is_m in rows[:k]:
+        body = f"{nm}{('{' + ','.join(ps) + '}') if ps else ''} x{n}"
+        if is_m:
+            # issue #21: a method re-runs through ITS door -- 'exec link
+            # commands=<name>' used to run the raw template with no call
+            # context and lie 'FAILED -- not-found'
+            body += f" [a method: exec action=call object='{nm.rsplit('.', 1)[0]}']"
+        items.append(body)
     return ("your commands (re-run by name: exec link commands=<name>, args for {params}): "
             + ", ".join(items))
 
@@ -1888,12 +1897,26 @@ def entity_link(srv, est, fld, mem, executor_spec: str,
             return {"ok": False, "error": f"refused {_sp[:60]!r}: {_bad}"}
         # a bare word that names a defined METHOD is not a shell command (it ran
         # as 'sh: status: not found' and minted a colliding stub, 2026-10-10)
-        if est is not None and re.fullmatch(r"[A-Za-z_][\w.-]*", _sp.strip()) \
-                and est._resolve_spec(_sp.strip()) is None:
-            _mn = _sp.strip().split(".")[-1]
-            if any((d.properties or {}).get("method_name") == _mn for d in list((est.docs or {}).values())):
-                return {"ok": False, "error": f"{_sp!r} is a method, not a command line -- "
-                                              f"exec(action='call', object=<entity>, method='{_mn}')"}
+        if est is not None and re.fullmatch(r"[A-Za-z_][\w.-]*", _sp.strip()):
+            _res = est._resolve_spec(_sp.strip())
+            # issue #21 (THE BANNER LISTED IT): a spec resolving BY NAME to a
+            # method doc must refuse here too -- the old guard only fired on
+            # `_resolve_spec(...) is None`, while a banner-listed method
+            # resolves (properties['name'] == the word) and then ran through
+            # the ctx-less link lane: {{self.*}} literal, step nodes skipped,
+            # shell rc=127 relabeled 'not-found'
+            _mn = (((est.docs or {}).get(_res.eid, _res).properties or {})
+                   .get("method_name")) if _res is not None else None
+            if _mn:
+                _own = str(_res.eid).rsplit(".", 1)[0].split(":")[-1]
+                return {"ok": False,
+                        "error": f"{_sp!r} is a method, not a command line -- "
+                                 f"exec(action='call', object='{_own}', method='{_mn}')"}
+            if _res is None:
+                _nm = _sp.strip().split(".")[-1]
+                if any((d.properties or {}).get("method_name") == _nm for d in list((est.docs or {}).values())):
+                    return {"ok": False, "error": f"{_sp!r} is a method, not a command line -- "
+                                                  f"exec(action='call', object=<entity>, method='{_nm}')"}
     if len(specs) > EXEC_LINK_BATCH_CAP:
         return {"ok": False,
                 "error": f"failed to link: batch cap {EXEC_LINK_BATCH_CAP} "
@@ -1956,6 +1979,15 @@ def entity_link(srv, est, fld, mem, executor_spec: str,
         if created:
             # THE FLY-MINTED DOC's command IS its spec (already set).
             pass
+        # THE STALE GUARD BELT (issue #21): any resolution path (label, reuse)
+        # that lands on a method doc stops here -- honest door, no run, no
+        # runs bump on a receipt that lied.
+        _mn = (ent.properties or {}).get("method_name")
+        if _mn:
+            _own = str(ent.eid).rsplit(".", 1)[0].split(":")[-1]
+            return {"ok": False,
+                    "error": f"'{label or spec}' is a method, not a command line -- "
+                             f"exec(action='call', object='{_own}', method='{_mn}')"}
         # THE EDGE: existence = the link action (re-link bumps n, the
         # dedupe is the store's own cas merge).
         if be is not None:
