@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from membrane.opencode import _seat_card, _mcp_tool_lines
 from membrane.mcp_server import TOOLS
+from membrane.toolset import RETIRED
 
 
 class _Router:
@@ -48,8 +49,16 @@ class TestSeatCard(unittest.TestCase):
     def test_every_mcp_tool_is_listed_when_mounted(self):
         card = _seat_card(_Srv(), mcp_on=True)
         for t in TOOLS:
-            self.assertIn(t["name"], card)
-        self.assertEqual(len(_mcp_tool_lines()), len(TOOLS))
+            # issue #24: a retired tool does not render -- the diet
+            # (2026-10-09) took it off the model's surface, the card
+            # had kept inviting it
+            if t["name"] in RETIRED:
+                self.assertNotIn(t["name"], card)
+            else:
+                self.assertIn(t["name"], card)
+        self.assertEqual(len(_mcp_tool_lines()),
+                         len(TOOLS) - len([t for t in TOOLS
+                                           if t["name"] in RETIRED]))
 
     def test_mcp_off_falls_back_to_frames(self):
         card = _seat_card(_Srv(), mcp_on=False)
