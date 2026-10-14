@@ -349,6 +349,25 @@ def proxy_bind_host(args) -> str:
             or os.environ.get("MEMBRANE_LISTEN_HOST") or "0.0.0.0")
 
 
+# ONLY A REAL TUI LAUNCH may ignore ctrl+c: a seat riding the
+# terminal under an opencode child has the child's message-input to
+# protect. `--no-launch`'s dest defaults launch to TRUE, so a plain
+# `membrane standalone` (and every supervised/nohup'd boot) ran
+# launch-mode signal policy with NO child at all: the seat read ctrl+c
+# AND kill -INT as "keep serving" (2026-10-14's exhibit, issue #35)
+# and a bg-invoker's inherited SIG_IGN never got restored. Every
+# childless serve mode stops on INT via the same graceful lane.
+def _stop_signal_policy(launch: bool, standalone: bool) -> str:
+    return "ignore" if (launch and not standalone) else "stop"
+
+# THE TEARDOWN'S LEASE (the 2026-10-14 drain exhibit): the graceful
+# close chain gets a bound -- if the drain (a big field's close, an
+# orphaned model stream) overruns past this lease past the bye, the
+# interpreter is cut. The debounced snapshots commit along the way; a
+# bound beats a half-alive seat.
+TEARDOWN_LEASE_S = 90.0
+
+
 def main() -> None:
     import argparse
     ap = argparse.ArgumentParser(
@@ -1935,15 +1954,7 @@ def main() -> None:
     def _term(signum, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, _term)
-    # ONLY A REAL TUI LAUNCH may ignore ctrl+c: a seat riding the
-    # terminal under an opencode child has the child's message-input
-    # to protect. `--no-launch`'s dest defaults launch to TRUE, so a
-    # plain `membrane standalone` (and every supervised/nohup'd boot)
-    # ran launch-mode signal policy with NO child at all: the seat read
-    # ctrl+c AND kill -INT as "keep serving" (2026-10-14's exhibit) and
-    # a bg-invoker's inherited SIG_IGN never got restored. Every
-    # childless serve mode stops on INT via the same graceful lane.
-    _tui_launch = bool(args.launch) and not bool(args.standalone)
+    _tui_launch = _stop_signal_policy(args.launch, args.standalone) == "ignore"
     if _tui_launch:
         signal.signal(signal.SIGINT, signal.SIG_IGN)
     else:
@@ -2146,17 +2157,11 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\n[membrane-opencode] bye", file=sys.stderr)
     finally:
-        # THE TEARDOWN'S BOUND (the 2026-10-14 drain exhibit: a real
-        # seat's graceful close lingered ~5 minutes -- R then S -- on a
-        # big field + the last commits lands at the very end; the
-        # throwaway with a fresh field took 5s). The chain gets its
-        # every chance, but a drain has a lease: 90s past the bye and
-        # the interpreter is cut (os._exit -- the debounced snapshots
-        # committed along the way; a bound beats a half-alive seat
-        # holding the port's covenant).
-        _teardown_halt = threading.Timer(90.0, lambda: (
-            print("\n[opencode] teardown lease (90s) expired -- cutting "
-                  "the drain", file=sys.__stderr__),
+        # THE TEARDOWN'S BOUND: the chain gets its every chance, then
+        # the lease cuts it (the lease itself: TEARDOWN_LEASE_S above).
+        _teardown_halt = threading.Timer(TEARDOWN_LEASE_S, lambda: (
+            print(f"\n[opencode] teardown lease ({TEARDOWN_LEASE_S:g}s) "
+                  "expired -- cutting the drain", file=sys.__stderr__),
             os._exit(70))[-1])
         _teardown_halt.start()
         # THE PICK'S RESERVATION (teardown): an unused bind closes -- a
