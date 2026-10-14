@@ -836,11 +836,20 @@ def run_command_entity(fld, est, mem, command: str,
             if err and rc != -1:
                 text, err = (text + "\n" if text else "") + err, ""
         else:
-            p = subprocess.run(cmd, shell=True, capture_output=True, text=True,
+            # THE NON-UTF-8 RECEIPT (2026-10-14): text=True decodes
+            # STRICTLY -- one bad byte in a command's output raised
+            # UnicodeDecodeError out of the engine, the thinker's
+            # run_pending_links died before landing, and the same link
+            # was retried forever (the seat's own log: the same pending
+            # link crashed every beat). Bytes + errors='replace' makes
+            # the receipt honest instead: rc and the output with U+FFFD
+            # where the bytes were.
+            p = subprocess.run(cmd, shell=True, capture_output=True,
                                timeout=t, cwd=os.getcwd())
             rc = p.returncode
-            text = "\n".join(x for x in ((p.stdout or "").rstrip("\n"),
-                                         (p.stderr or "").rstrip("\n")) if x)
+            text = "\n".join(
+                x.decode(errors="replace").replace("\r\n", "\n")
+                .rstrip("\n") for x in (p.stdout, p.stderr) if x)
     except subprocess.TimeoutExpired as e:
         rc = -1
         err = f"timeout after {t:g}s"
