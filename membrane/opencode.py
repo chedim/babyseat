@@ -349,6 +349,25 @@ def proxy_bind_host(args) -> str:
             or os.environ.get("MEMBRANE_LISTEN_HOST") or "0.0.0.0")
 
 
+# ONLY A REAL TUI LAUNCH may ignore ctrl+c: a seat riding the
+# terminal under an opencode child has the child's message-input to
+# protect. `--no-launch`'s dest defaults launch to TRUE, so a plain
+# `membrane standalone` (and every supervised/nohup'd boot) ran
+# launch-mode signal policy with NO child at all: the seat read ctrl+c
+# AND kill -INT as "keep serving" (2026-10-14's exhibit, issue #35)
+# and a bg-invoker's inherited SIG_IGN never got restored. Every
+# childless serve mode stops on INT via the same graceful lane.
+def _stop_signal_policy(launch: bool, standalone: bool) -> str:
+    return "ignore" if (launch and not standalone) else "stop"
+
+# THE TEARDOWN'S LEASE (the 2026-10-14 drain exhibit): the graceful
+# close chain gets a bound -- if the drain (a big field's close, an
+# orphaned model stream) overruns past this lease past the bye, the
+# interpreter is cut. The debounced snapshots commit along the way; a
+# bound beats a half-alive seat.
+TEARDOWN_LEASE_S = 90.0
+
+
 def main() -> None:
     import argparse
     ap = argparse.ArgumentParser(
@@ -1925,9 +1944,21 @@ def main() -> None:
     # and instead shuts itself down when the opencode child exits (polled below)
     # or on SIGTERM. In proxy-only mode there is no child, so SIGINT is the
     # normal "stop the server" signal and is handled as before.
+    # THE STOP-SIGNAL COVENANT (2026-10-14, the boot nobody could stop): a
+    # serve-bearing seat with no opencode child (standalone, serve, a
+    # nohup'd/supervised boot) inherited SIG_IGN for SIGINT from its
+    # invoker's context and NEVER restored it -- both the launcher and the
+    # serve read ctrl+c or a group kill -INT as "keep serving" (the exhibit:
+    # both pids survived a direct SIGINT to their process group). Only a
+    # TUI-launch seat has a child whose ctrl+c the seat must not steal.
     def _term(signum, frame):
         raise KeyboardInterrupt
     signal.signal(signal.SIGTERM, _term)
+    _tui_launch = _stop_signal_policy(args.launch, args.standalone) == "ignore"
+    if _tui_launch:
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+    else:
+        signal.signal(signal.SIGINT, _term)
 
     # THE DIAGNOSTIC EAR: RETIRED (2026-10-04, the live seat's POST
     # hang exhibit: a SIGUSR1 handler INSIDE the main thread's
@@ -1936,9 +1967,6 @@ def main() -> None:
     # own diagnostic -- the dumper's cost lands on the accept loop's
     # thread). The evidence lanes: the watchdog's dump-to-file (its
     # own thread, GIL-free) + the per-turn clocks.
-
-    if args.launch:
-        signal.signal(signal.SIGINT, signal.SIG_IGN)
 
     child = None
     try:
@@ -2129,6 +2157,13 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\n[membrane-opencode] bye", file=sys.stderr)
     finally:
+        # THE TEARDOWN'S BOUND: the chain gets its every chance, then
+        # the lease cuts it (the lease itself: TEARDOWN_LEASE_S above).
+        _teardown_halt = threading.Timer(TEARDOWN_LEASE_S, lambda: (
+            print(f"\n[opencode] teardown lease ({TEARDOWN_LEASE_S:g}s) "
+                  "expired -- cutting the drain", file=sys.__stderr__),
+            os._exit(70))[-1])
+        _teardown_halt.start()
         # THE PICK'S RESERVATION (teardown): an unused bind closes -- a
         # failing boot never holds the serve port against its own retry
         try:
@@ -2227,6 +2262,10 @@ def main() -> None:
                 _log_fh.close()
             except OSError:
                 pass
+        try:
+            _teardown_halt.cancel()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
