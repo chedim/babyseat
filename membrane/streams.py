@@ -117,6 +117,67 @@ def parse_args(raw) -> dict:
         return out
 
 
+_EMISSION_BULLET = re.compile(
+    r"Tool call\s*\*{0,2}\s*\(([^)\n]+)\)\s*:\s?", re.IGNORECASE)
+
+
+def _balanced_json(s: str) -> str:
+    """The balanced {...} at s's start (leading whitespace ok), string-
+    aware -- a brace inside a quoted value never closes the object. No
+    close by end-of-string = the raw text as it stands (which the round
+    loop's _args_bad path then refuses honestly, never a guess)."""
+    i = s.find("{")
+    if i < 0:
+        return ""
+    depth, instr, esc = 0, False, False
+    for j in range(i, len(s)):
+        c = s[j]
+        if instr:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                instr = False
+        elif c == '"':
+            instr = True
+        elif c == "{":
+            depth += 1
+        elif c == "}":
+            depth -= 1
+            if depth == 0:
+                return s[i:j + 1]
+    return s[i:].strip()
+
+
+def emission_calls(text: str) -> list[tuple[str, str]]:
+    """THE EMISSION SALVAGE (the five bare one-liners, 2026-10-14): a
+    per-turn model sometimes WRITES its call as a display bullet instead
+    of emitting a tool_call --
+
+        🧰 **Tool call** (exec): `{"action": "link", ...}`
+
+    -- nothing ran, no receipt rode back, the turn just ended. This
+    reads the bullet shape back out of the prose: one (tool, RAW-args)
+    pair per bullet, the model's own JSON text untouched, so the round
+    loop's ordinary gate parses it (and refuses honestly on a bad or
+    unterminated object, never guesses). A bullet with no object after
+    it is not a call. Prose discussing JSON without the bullet shape is
+    left alone."""
+    out: list[tuple[str, str]] = []
+    for line in (text or "").splitlines():
+        m = _EMISSION_BULLET.search(line)
+        if not m:
+            continue
+        name = (m.group(1) or "").strip()
+        rest = line[m.end():]
+        raw = _balanced_json(rest.lstrip("`* \t"))
+        if not raw:
+            continue
+        out.append((name, raw.strip()))
+    return out
+
+
 def shell_skeleton(cmd: str) -> str:
     """The command with heredoc bodies and quoted strings removed: what is
     left is shell structure (commands, flags, paths). Python run inside a
