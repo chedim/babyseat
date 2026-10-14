@@ -173,17 +173,20 @@ def outcome(tool: str, head: str, tail: str = "",
         return "applied" if "successfully" in r else ("failed" if r.strip() else "unknown")
     if tests_ran(head, tail) is not None:
         return "tests-failed" if re.search(r"failed|failures=|errors=|\bfail\b", r) else "tests-ok"
-    if "not found" in r or "no files found" in r or "no such file" in r:
-        return "not-found"
+    # the not-found TEXT classes come AFTER the rc gate: a run's exit
+    # code is ground truth, and 'file or directory not found' inside a
+    # FAILED pytest collection said nothing about the command's fate --
+    # the shell run whose rc!=0 was relabeled 'not-found' (issue #13).
+    not_found = "not found" in r or "no files found" in r or "no such file" in r
     if rc is not None:
         if rc == 0:
             # the text-error heuristic yields: a MENTION in a
             # zero-exit run is the output's content, not the run's
             # fact (the residue line honest both ways: 'ok' carries)
-            if "traceback" in r or "error" in r[:400] or "failed" in r[:400]:
-                return "ok"
-            return "ok" if r.strip() else "empty"
+            return "ok"
         return "error"
+    if not_found:
+        return "not-found"
     if "traceback" in r or "error" in r[:400] or "failed" in r[:400]:
         return "error"
     return "ok" if r.strip() else "empty"
