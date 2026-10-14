@@ -19,6 +19,7 @@ own session, so only its owner's tab receives it.
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import shlex
 import threading
@@ -115,11 +116,33 @@ def _unquote(code: str) -> str:
     return code
 
 
+# THE SHELL-LOOKING PAYLOAD (issue #2, 2026-10-14): the door runs ANYTHING
+# as JavaScript -- 'echo hi' rode the full round trip, died in the tab as
+# SyntaxError or sat till the timeout. Plain words with a space and no JS
+# syntax are shell, refused at the door with the honest receipt.
+_SHELL_LOOKS = re.compile(r"^[a-zA-Z][\w./:@-]*(?:[ \t]+[\w./:@-]+)+$")
+_JS_HEADS = {"await", "async", "return", "function", "let", "const", "var",
+             "if", "while", "for", "typeof", "new", "delete", "null", "true",
+             "false", "undefined", "this", "throw", "do", "else", "switch",
+             "case", "break", "continue", "yield", "import", "of", "void",
+             "in", "instanceof"}
+
+
 def run(code: str, timeout: float = 15.0, tab: str | None = None) -> dict:
     """Run JS in an opted-in tab: {rc, text, err}. rc 0 = it returned."""
     srv = _seat
     if srv is None:
         return {"rc": 127, "text": "", "err": "no seat bound"}
+    code = _unquote(str(code or ""))
+    _first = code.split()[:1]
+    if _SHELL_LOOKS.match(code) and not (_first and _first[0].lower() in _JS_HEADS):
+        # shell-looked: rejected loudly, nothing rides (the receipt carries
+        # the why and the door to the shell path)
+        return {"rc": 2, "text": "", "err":
+                (f"js:: runs JavaScript in the browser tab, not shell -- {code[:120]!r} "
+                 "reads shell (plain words, no JS syntax). Run it as a plain command instead "
+                 "(exec(action='link', commands='<it>')); if JavaScript is meant, give it JS "
+                 "shape -- a call, a keyword, an operator (e.g. 'await new Promise(...)').")}
     live = tabs(srv)
     if tab:
         live = [t for t in live if t["tab"] == tab]
@@ -146,10 +169,17 @@ def run(code: str, timeout: float = 15.0, tab: str | None = None) -> dict:
         return {"rc": -1, "text": "", "err": f"the tab did not answer in {timeout:g}s"}
     res = job["result"] or {}
     text = ""
+    # THE FAKE VALUE (issue #2: '=> None'): the server's job dict always
+    # CARRIES the value key (json null -> Python None), so `"value" in res`
+    # was true for a value the tab never returned -- the receipt said
+    # "=> None" for an undefined return. A failed run says why, no value.
+    if res.get("ok"):
+        if res.get("value") is not None:
+            text += "=> " + str(res.get("value"))[:RESULT_MAX]
+        else:
+            text += "=> undefined (the job returned no value)"
     if res.get("logs"):
-        text += "\n".join(str(x) for x in res["logs"])[:RESULT_MAX] + "\n"
-    if "value" in res:
-        text += "=> " + str(res.get("value"))[:RESULT_MAX]
+        text += ("\n" if text else "") + "\n".join(str(x) for x in res["logs"])[:RESULT_MAX]
     if res.get("error"):
         text += ("\n" if text else "") + "error: " + str(res["error"])[:RESULT_MAX]
     return {"rc": 0 if res.get("ok") else 1, "text": text.strip(), "err": ""}
