@@ -28,8 +28,10 @@ were -- a backup, never written again."""
 from __future__ import annotations
 
 import base64
+import fcntl
 import json
 import math
+import os
 import sys
 import threading
 import time
@@ -38,6 +40,12 @@ from pathlib import Path
 import numpy as np
 
 from . import cblite as CB
+
+
+class StoreBusy(RuntimeError):
+    """The store's writer lock is held by another membrane process
+    (issue #26): open_backend fails fast -- a replay beside a live seat
+    must never silently fall back to the stale file journals."""
 from .efstore import COLLECTIONS, MemBackend, matches
 
 COLD = ("sentences",)
@@ -103,6 +111,20 @@ class CBLiteBackend(MemBackend):
     def __init__(self, path, journal_dir=None, lib_dir=None):
         super().__init__()
         self.path = Path(path)
+        # THE WRITER LOCK (issue #26): one writer process at a time. SQLite
+        # storage lets a second open succeed and only blow up later, mid-
+        # replay ("save: database busy/locked", the backfill's partial
+        # rebuild) -- so a sidecar flock is taken here, where EVERY tool
+        # (the serve, the backfill) constructs the backend.
+        lk = self.path.parent / f".{self.path.name}.writer.lock"
+        self._lock_fd = os.open(str(lk), os.O_CREAT | os.O_RDWR, 0o600)
+        try:
+            fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            os.close(self._lock_fd)
+            self._lock_fd = None
+            raise StoreBusy(f"the store is busy: {lk} is held by another "
+                            f"membrane process (the live serve?)") from None
         self.lib = CB.load(lib_dir)
         self.db = CB.Database(self.lib, "field", str(self.path))
         self._ord: dict[str, dict[str, int]] = {c: {} for c in COLLECTIONS}
@@ -541,6 +563,9 @@ class CBLiteBackend(MemBackend):
                 pass
         self.drain()
         self.db.close()
+        if self._lock_fd is not None:            # the lock rode the fd;
+            os.close(self._lock_fd)              # released, the next writer may enter
+            self._lock_fd = None
 
 
 def import_only(path, journal_dir, lib_dir=None) -> dict:
