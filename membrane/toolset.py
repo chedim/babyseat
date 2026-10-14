@@ -296,9 +296,11 @@ def _json_obj(v):
 
 
 # the prefixes routed models put on tool names (2026-10-11: 'mem_exec',
-# 'membrane_entity_add', 'm:tool:find' were refused as "not your lane's hand")
-_NS = re.compile(r"^(?:(?:membrane|mcp_tool|mcp|mem|functions|m:tool|tool)[-_.:/]+)+", re.I)
-_FAM_ACT = re.compile(r"^([a-z_]+)[/.:](?:action[-_=:]?)?([a-z_]+)$", re.I)
+# 'membrane_entity_add', 'm:tool:find' were refused as "not your lane's hand").
+# 2026-10-14 (issue #24): the tongue slip 'membranes-exec' and the spaced
+# 'membrane exec' were refused 11 more times -- same prefix, same class.
+_NS = re.compile(r"^(?:(?:membranes?|mcp_tool|mcp|mem|functions|m:tool|tool)[-_.:/ ]+)+", re.I)
+_FAM_ACT = re.compile(r"^([a-z_]+)[/.:](?:action[-_=:]?)?([a-z_]*)$", re.I)
 
 
 def canonical(name: str, args: dict) -> tuple[str, dict]:
@@ -313,6 +315,11 @@ def canonical(name: str, args: dict) -> tuple[str, dict]:
         fam, act = m.group(1).lower(), m.group(2).lower()
         if act in FAMILIES[fam]["actions"]:
             return fam, {**(args or {}), "action": act}
+        # THE ACTION IN THE SEAM (2026-10-14, issue #24: 'entity/action' --
+        # the family named, the action lost): the family's call; with no
+        # action of its own the family's honest refusal names the actions
+        if not act:
+            return fam, {**(args or {}), "action": ""}
     return name, args
 
 
@@ -356,8 +363,10 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
     # THE NAMELESS CALL (2026-10-12, a seat inside Home Assistant: the backend's
     # parser lost the tool's name -- 'no_name_1' -- and wrapped the arguments as
     # {"input": "<json>"}; told "no tool is named 'no_name_1'", the model sent it
-    # 14 more times): unwrap it, and an action only ONE family has names the call
-    if re.fullmatch(r"no_name(_\d+)?", str(name or "")):
+    # 14 more times): unwrap it, and an action only ONE family has names the call.
+    # 2026-10-14 (issue #24): opencode's wire lost the name the same way as
+    # 'functions._name_0' -- the same artifact, another spelling.
+    if re.fullmatch(r"(?:no_)?_?name(_\d+)?", str(name or "")):
         inner = args
         if set(args) == {"input"} and isinstance(args.get("input"), str):
             try:
@@ -373,6 +382,13 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
             f"naming the tool -- one of {', '.join(sorted(FAMILIES))} -- with the same arguments")
     fam = FAMILIES.get(name)
     if fam is None:
+        # THE DASHED SPELLING (2026-10-14, issue #24: the card invited the
+        # typed names and the wire refused 112 calls across 63 invented
+        # spellings -- 'entity-read' is the card's entity_read): a dashed
+        # legacy name is the typed tool it meant, its arguments untouched.
+        sugared = str(name).replace("-", "_")
+        if sugared != name and sugared in _LEGACY_FAMILY:
+            return sugared, args
         # an OLD member's name carrying a family action (entity_link +
         # action='each' -- the seat's habit, 2026-10-10) is the family's call
         owner = _LEGACY_FAMILY.get(name)

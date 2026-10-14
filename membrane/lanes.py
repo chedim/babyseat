@@ -103,14 +103,22 @@ def _is_state_query(q: str) -> bool:
 
 
 def _mcp_tool_lines() -> list[str]:
-    """One line per MCP tool, straight from the server's registry (the
-    card can never drift from what opencode actually mounts)."""
+    """One line per MCP tool, straight from the server's registry (the card
+    can never drift from what opencode actually mounts, and the resolver
+    honors the registry). A retired tool does not render -- the diet
+    (2026-10-09) removed it from the model's surface, the card had kept it."""
     try:
         from .mcp_server import TOOLS
     except Exception:
         return []
+    try:
+        from .toolset import RETIRED as _RETIRED
+    except Exception:
+        _RETIRED = ()
     out = []
     for t in TOOLS:
+        if t.get("name") in _RETIRED:
+            continue
         d = " ".join(str(t.get("description") or "").split())
         first = re.split(r"(?<=\.)\s", d, maxsplit=1)[0]
         if len(first) > 160:
