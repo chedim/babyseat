@@ -778,11 +778,21 @@ def run_command_entity(fld, est, mem, command: str,
     t0 = time.time()
     err = ""
     try:
-        if cmd.startswith("llm::wake") or cmd.startswith("llm::unwake"):
+        # BUILTINS-FIRST (#17): wake/unwake specs arrive in the native
+        # `llm::` dialect AND the call-form `llm.` dialect (auto-minted
+        # from raw failed calls). Both route to the llm entity -- NEITHER
+        # may fall through to /bin/sh, where a call-form spec dies rc=127.
+        _p_unwake = next((p for p in ("llm::unwake", "llm.unwake")
+                          if cmd.startswith(p)), None)
+        _p_wake = None if _p_unwake else next(
+            (p for p in ("llm::wake", "llm.wake") if cmd.startswith(p)),
+            None)
+        if _p_unwake or _p_wake:
             # SELF-SCHEDULED WAKES (llm.py): kept on the llm entity, never a shell
             from . import llm as _LLM
-            _r = (_LLM.unwake_from_command(cmd[len("llm::unwake"):].strip()) if cmd.startswith("llm::unwake")
-                  else _LLM.wake_from_command(cmd[len("llm::wake"):].strip()))
+            _pfx = _p_unwake or _p_wake
+            _fn = _LLM.unwake_from_command if _p_unwake else _LLM.wake_from_command
+            _r = _fn(cmd[len(_pfx):].strip())
             rc, text = _r["rc"], _r["text"]
         elif cmd.startswith("llm::call"):
             # THE MODEL AS AN ENTITY (llm.py): a queued loop turn, never a shell

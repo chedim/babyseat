@@ -445,12 +445,31 @@ def fire_due(srv, now: float | None = None, late_after_s: float = 120.0) -> list
     return out
 
 
+def _decode_call_form(rest: str):
+    """`{about: 'x', at: '18:00', prompt: 'y'}` -> dict or None (#17)."""
+    import re
+    m = re.fullmatch(
+        r"\{\s*about:\s*['\"](?P<about>[^'\"]*)['\"]\s*,\s*"
+        r"at:\s*['\"](?P<at>[^'\"]*)['\"]\s*,\s*"
+        r"prompt:\s*['\"](?P<prompt>[^'\"]*)['\"]\s*,?\s*\}",
+        rest.strip(), re.S)
+    return m.groupdict() if m else None
+
+
 def wake_from_command(rest: str, caller: str = "method") -> dict:
     """`llm::wake <about> <at> <prompt>` (shell-quoted)."""
+    t = rest.strip()
+    if t.startswith("{"):
+        cf = _decode_call_form(t)
+        if cf:
+            return set_wake(seat(), cf["about"], cf["at"], cf["prompt"],
+                            caller=caller)
+        return {"rc": 2, "text": "wake: unrecognized call-form payload; "
+                                 "use llm::wake <about> <at> <prompt>"}
     try:
-        parts = shlex.split(rest)
+        parts = shlex.split(t)
     except ValueError:
-        parts = rest.split(None, 2)
+        parts = t.split(None, 2)
     if len(parts) < 3:
         return {"rc": 2, "text": "wake(about, at, prompt): the entity, when ('18:00', 'in 2h', '3d'), what to do"}
     return set_wake(seat(), parts[0], parts[1], " ".join(parts[2:]), caller=caller)
