@@ -14,6 +14,7 @@ from unittest import mock
 
 os.environ.setdefault("MEMBRANE_STORE", "json")
 os.environ.setdefault("MEMBRANE_RUN", "0")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import llm as L  # noqa: E402
@@ -155,3 +156,34 @@ class TestWakes(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheWakeGateReadsTheActionForm(unittest.TestCase):
+    """issue #5 residual: the builtins gate read the RAW line, so a
+    stored spec carrying a label ('argus:bat :: llm.wake ...') or a setup
+    prefix ('cd /tmp; llm.wake ...') passed the gate untouched and went
+    to /bin/sh raw -- dying on unquoted parens instead of planting."""
+
+    def _world(self):
+        from _ef_fakes import FakeEmbedder  # noqa: E402
+        from membrane.efield import EntityField  # noqa: E402
+        from membrane.efstore import MemBackend  # noqa: E402
+        f = EntityField(MemBackend(), FakeEmbedder(), "seat@t")
+        est = EntityStore(path=None, shared=False)
+        return f, est
+
+    def test_a_labelled_and_setup_prefixed_wake_never_shells(self):
+        f, est = self._world()
+        srv = _Srv()
+        srv.entity_store = est
+        L.bind(srv)
+        with mock.patch.object(N.subprocess, "run",
+                               side_effect=AssertionError("a shell")):
+            for line in ("argus:sweep :: llm::wake 'f:tmp/x' 'in 1h' 'check the run'",
+                         "cd /tmp; llm.wake {about: 'f:tmp/njl_rung_run4.txt',"
+                         " at: 'in 1h', prompt: 'sweep the rung'}"):
+                r = N.run_command_entity(f, est, None, line)
+                self.assertEqual(r.get("rc"), 0, (line, r))
+                self.assertNotIn("not found", str(r.get("outcome")), r)
+        self.assertGreaterEqual(
+            len(est.docs[MEMBRANE_NS + "llm"].properties["wakes"]), 2)

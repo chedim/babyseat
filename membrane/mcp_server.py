@@ -1429,6 +1429,16 @@ def tool_method_call(args: dict, port: int) -> str:
             a = json.loads(a)
         except ValueError:
             a = None
+    a = dict(a) if isinstance(a, dict) else {}
+    # THE PARAM BAG (issue #5 residual): the models put the wake's
+    # about/at/prompt (and the browser executor's code) at the TOP of the
+    # call -- only object/method/args rode the wire, so a
+    # `llm.wake about=x at=in 1h` reached the template with NO params and
+    # rc=2'd into a usage error instead of planting a wake
+    for k in ("about", "at", "prompt", "code"):
+        if k in args and k not in a and args[k] not in (None, "") \
+                and not isinstance(args[k], (dict, list)):
+            a[k] = args[k]
     out = _http(port, "POST", "/membrane/method/call", {
         "object": str(args.get("object") or args.get("spec") or ""),
         "method": str(args.get("method") or ""), "args": a if isinstance(a, dict) else {}})
