@@ -26,9 +26,11 @@
  * "[HA user: <name>]" line for the brain's memory; the panel hides it.
  * Turn completion reads the brain's own /session/status, never a guess.
  */
-// THE SEAT'S NAME (standalone mode, 2026-10-12): the standalone page sets
-// window.MEMBRANE_NAME from /ui/conf before this loads; HA's page is Argus
-const SEAT = (typeof window !== "undefined" && window.MEMBRANE_NAME) || "Argus";
+// THE SEAT'S NAME (2026-10-14, issue #6): the LIVE agreed name. A fresh
+// boot reads it out of /ui/conf (below, _boot); an OPEN page hears a
+// membrane.name event from the hub; until either lands it is nobody --
+// never a birth nickname a rename could make stale
+let SEAT = (typeof window !== "undefined" && window.MEMBRANE_NAME) || "the assistant";
 const SERVE = "/ui/serve";
 const SPEAKER_PREFIX = "[HA user: ";
 const SPEAKER_RE = /\[(?:HA )?user: [^\]\n]{1,80}\]/;
@@ -996,6 +998,7 @@ function definePanel() {
           return;
         }
         this._foot.textContent = conf.data.serve_url;
+        this._applySeatName(conf.data.name);      // issue #6: the conf carries it
         const health = await this._api(SERVE + "/global/health");
         if (!health.ok) { this._err(this._apiErr("brain unreachable", health)); this._paintStatus(); return; }
         this._foot.textContent = "membrane " + ((health.data && health.data.version) || "") + " · " + conf.data.serve_url;
@@ -1431,6 +1434,7 @@ function definePanel() {
         this._sesTimer = setTimeout(() => this._listSessions().catch(() => {}), 400);
       }
       if (ev.type === "membrane.seat") this._loadSeat();          // the seat's own events: its state moved
+      if (ev.type === "membrane.name") this._applySeatName(p.name);   // issue #6: the name was adopted
       if (ev.type === "membrane.jsexec") this._jsRun(p.job).catch(() => {});
       if (ev.type === "membrane.listen" && sid === (this._chat && this._chat.sid)) {
         // Argus opens (or closes) the mic for an answer (voice_io.on_listen)
@@ -1754,6 +1758,16 @@ function definePanel() {
       await this._api(SERVE + "/membrane/jsexec/register", { method: "POST", body: JSON.stringify({
         tab: this._jsTab, sid: this._sid, on: !!this._jsOn,
         device: (navigator.maxTouchPoints > 0 ? "phone/tablet" : "computer") + " · " + (navigator.platform || "") }) });
+    }
+
+    /** THE LIVE NAME (issue #6): rename and the page reads it -- a fresh
+     *  boot out of /ui/conf, an open page from the hub's membrane.name. */
+    _applySeatName(name) {
+      name = String(name || "").trim();
+      if (!name || name === SEAT) return;
+      window.MEMBRANE_NAME = name;
+      SEAT = name;
+      this._paintJs();
     }
 
     _paintJs() {

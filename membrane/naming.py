@@ -179,6 +179,16 @@ def on_edit(srv, ent) -> dict | None:
                "(the page reloads with it; your prompt says it from the next boot)",
                "summary": f"YOUR NAME: {want}, agreed with {pp.get('agreed_with')}."})
     ent.properties = pp
+    # THE LIVE NAME (issue #6): the promise above ("the page reloads with
+    # it") -- a page open somewhere hears it at once, on the same hub the
+    # panel's stream rides; without a boot there is nothing to tell it
+    try:
+        from . import seat_panel as _SP
+        r = _SP._runner(srv)
+        if r is not None and getattr(r, "hub", None) is not None:
+            r.hub.publish({"type": "membrane.name", "name": want})
+    except Exception:
+        pass                                    # no hub -- the next page load reads /ui/conf
     print(f"[naming] adopted the name {want} (agreed with {pp.get('agreed_with')})", file=sys.stderr)
     return {"adopted": True, "name": want}
 
