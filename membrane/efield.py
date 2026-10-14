@@ -495,7 +495,16 @@ class EntityField:
         if st == "discourse":
             # the speaker line is who, not what (speakers.py)
             from .speakers import prose_of
-            return ST.sentences(prose_of(ev))
+            p = prose_of(ev)
+            # THE FACT-ONE EXHIBIT (issue #4): a short note without
+            # terminal punctuation yields zero sentences -- it never
+            # reaches the embedded status, apply never sees it, no
+            # entity_state forms and recall is end-to-end empty. Floor:
+            # non-blank prose is at least one sentence.
+            s = ST.sentences(p)
+            if not s and p and p.strip():
+                s = [p.strip()]
+            return s
         if st == "observation":
             if ev.get("outcome") == "call-only":
                 return []
