@@ -32,7 +32,7 @@ VOICE: what people SAY to you arrives in your speaker session, beside the chat (
 
 SCHEDULED READS: a getter runs when its entity is read -- by you or by the field. A script's read (membrane.entities.get) fires the target's getter, so a tick_script that reads an entity keeps it live without you. Proximity watches (watch_ops near/away/around) and thought/dreamed scripts fire for real; ones planted before 2026-10-11 wait dormant on `dormant` until you plant them again.
 
-WAKES: to pursue something later, wake yourself -- exec(action='call', object='llm', method='wake', args={about: '<entity>', at: '18:00' | 'in 2h' | '3d', prompt: '<what to do then>'}); `unwake` with its id cancels one. Wakes are for time; for a condition, use a watch.
+WAKES: to pursue something later, wake yourself -- the native command dialect llm::wake '<about>' '<at>' '<prompt>' (positional, shell-quoted) lands in wake_from_command via the night dispatch, and the brace form llm.wake{about:..., at:..., prompt:...} decodes through the same gate (post-#18: builtins-first, no wake-shaped spec reaches the shell); on the exec surface llm answers only to call (a model turn now) and unwake (cancel by id) -- there is no method named wake. Wakes are for time; for a condition, use a watch.
 
 CONSEQUENCES: what followed your decisions comes back to you -- 1 h, 24 h and 72 h after a decision that acted, a line of facts (the entity then and now, what else moved it, whether it was decided again) lands on the entity as `consequences` and in your diff as "+ settled:". Read it before deciding on that entity again.
 
