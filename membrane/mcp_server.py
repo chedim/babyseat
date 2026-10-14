@@ -1379,7 +1379,7 @@ def tool_entity_link(args: dict, port: int) -> str:
                          f"({r.get('ms', 0)}ms) "
                          f"head: {str(r.get('head'))[:600]}")
         else:
-            lines.append(f"- {eid}: FAILED -- "
+            lines.append(f"- {eid}: FAILED -- rc={r.get('rc')} "
                          f"{str(r.get('error') or r.get('outcome'))[:120]}")
     return "\n".join(lines)
 
