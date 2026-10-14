@@ -108,6 +108,18 @@ class TestParsing(unittest.TestCase):
         self.assertEqual(S.outcome("bash", "head", "Ran 5 tests\nOK"), "tests-ok")
         self.assertEqual(S.tests_ran("", "Ran 524 tests in 6s"), 524)
 
+    def test_outcome_rc_trumps_notfound_text(self):
+        # issue #13: a FAILED pytest collection printed 'file or
+        # directory not found' and got run_outcome 'not-found' -- the
+        # rc gate must come first wherever an rc exists
+        self.assertEqual(S.outcome("c:pytest", "ERROR: file or directory not found: tests/foo.py\n1 error", rc=1), "error")
+        self.assertEqual(S.outcome("c:python", "FileNotFoundError: [Errno 2] No such file or directory", rc=1), "error")
+        self.assertEqual(S.outcome("c:presence.exec", "/bin/sh: 1: x: not found", rc=127), "error")
+        self.assertEqual(S.outcome("c:note", "note: /tmp/x not found", rc=0), "ok")
+        # without an rc, the text heuristic keeps its not-found class
+        self.assertEqual(S.outcome("read", "File not found: x", rc=None), "not-found")
+        self.assertEqual(S.outcome("c:make", "make: *** Error 1", rc=1), "error")
+
     def test_full_suite_detection(self):
         self.assertTrue(S.is_full_suite("python -m unittest discover -s tests"))
         self.assertTrue(S.is_full_suite("cd x && pytest -q"))
