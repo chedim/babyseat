@@ -958,6 +958,19 @@ def main() -> None:
             # the session's first event number: the 'now' line counts what
             # moved since the seat booted
             srv._efield_boot_seq = int(srv.efield._ostats.get("seq_last") or 0)
+            # THE SEEDLESS BACKLOG (issue #33): notes minted pre-7c77d8d
+            # stand 'empty' with no sids -- the boot sweep re-pends what the
+            # fixed splitter now recovers, and the ordinary embed/apply
+            # flow graduates them; a row that still yields nothing keeps
+            # its honest 'empty'. Never breaks the boot.
+            try:
+                _seeded = srv.efield.backfill_seedless()
+                if _seeded:
+                    print(f"[seat] seedless backfill: {_seeded} pre-fix "
+                          "note(s) re-embedded", file=sys.stderr)
+            except Exception as e:
+                print(f"[seat] seedless backfill skipped ({e})",
+                      file=sys.stderr)
             # THE FIELD'S PULSE (viewer v3): field + mind frames on the
             # serve's hub (the hub binds once the runner exists)
             try:
