@@ -193,10 +193,12 @@ def calibrate(mem: Membrane) -> float:
     classes together) refuse to guess: pin the line at known-max (conservative
     -- lets borderline paraphrases through, leans on the other gates) and say
     so. Calibration never sees dream candidates."""
-    res_known = [novelty(mem._nudge(mem.embedder.embed([t])[0]), mem.store,
-                         keep_fraction=NOV_KEEP_FRACTION) for t in CALIB_KNOWN]
-    res_gib = [novelty(mem._nudge(mem.embedder.embed([t])[0]), mem.store,
-                       keep_fraction=NOV_KEEP_FRACTION) for t in CALIB_GIBBERISH]
+    res_known_emb = mem.embedder.embed(list(CALIB_KNOWN))
+    res_known = [novelty(mem._nudge(e), mem.store,
+                         keep_fraction=NOV_KEEP_FRACTION) for e in res_known_emb]
+    res_gib_emb = mem.embedder.embed(list(CALIB_GIBBERISH))
+    res_gib = [novelty(mem._nudge(e), mem.store,
+                       keep_fraction=NOV_KEEP_FRACTION) for e in res_gib_emb]
     kmax, gmin = max(res_known), min(res_gib)
     if kmax < gmin:
         thr = (kmax + gmin) / 2.0
