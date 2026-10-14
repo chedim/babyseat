@@ -776,6 +776,15 @@ def run_command_entity(fld, est, mem, command: str,
     cmd = str(command or "").strip()
     if not cmd:
         return {"ok": False, "error": "empty command"}
+    # the label was the link path's nicety, never the engine's (issue #5
+    # residual: a stored 'label :: llm.wake ...' line fell to /bin/sh raw
+    # and died -- the builtins gate below reads the ACTION line); BUT the
+    # no-shell dialects share the label's 'word ::' shape (split_label
+    # reads 'seat::restart x' as the LABEL seat, js::nope() as the label
+    # js) -- the gate reads the RAW line first; only a plain shell line
+    # is split
+    if not _is_no_shell(_action_of(cmd)):
+        _, cmd = split_label(cmd)
     try:
         t = float(timeout_s or RUN_TIMEOUT_DEFAULT_S)
     except (TypeError, ValueError):
@@ -792,17 +801,21 @@ def run_command_entity(fld, est, mem, command: str,
         # `llm::` dialect AND the call-form `llm.` dialect (auto-minted
         # from raw failed calls). Both route to the llm entity -- NEITHER
         # may fall through to /bin/sh, where a call-form spec dies rc=127.
+        # The gate reads the ACTION form (issue #5 residual): a setup
+        # prefix ('cd /x; ') on a stored method's line hid the builtin and
+        # the line went to /bin/sh raw.
+        _act = _action_of(cmd)
         _p_unwake = next((p for p in ("llm::unwake", "llm.unwake")
-                          if cmd.startswith(p)), None)
+                          if _act.startswith(p)), None)
         _p_wake = None if _p_unwake else next(
-            (p for p in ("llm::wake", "llm.wake") if cmd.startswith(p)),
+            (p for p in ("llm::wake", "llm.wake") if _act.startswith(p)),
             None)
         if _p_unwake or _p_wake:
             # SELF-SCHEDULED WAKES (llm.py): kept on the llm entity, never a shell
             from . import llm as _LLM
             _pfx = _p_unwake or _p_wake
             _fn = _LLM.unwake_from_command if _p_unwake else _LLM.wake_from_command
-            _r = _fn(cmd[len(_pfx):].strip())
+            _r = _fn(_act[len(_pfx):].strip())
             rc, text = _r["rc"], _r["text"]
         elif cmd.startswith("llm::call"):
             # THE MODEL AS AN ENTITY (llm.py): a queued loop turn, never a shell
@@ -1794,6 +1807,16 @@ def substitute_args(cmd: str, args: dict | None) -> str:
         k = m.group(1)
         return shlex.quote(str(args[k])) if k in args else m.group(0)
     return _PARAM.sub(rep, cmd)
+
+
+_NO_SHELL = ("llm::unwake", "llm.unwake", "llm::wake", "llm.wake",
+             "llm::call", "seat::restart", "js::")
+
+def _is_no_shell(act: str) -> bool:
+    """The no-shell builtin dialects (the elif chain above in
+    run_command_entity) -- a line starting with one never goes through
+    the label split, or the peel eats the head it dispatches on."""
+    return any(act.startswith(p) for p in _NO_SHELL)
 
 
 def _action_of(cmd: str) -> str:
