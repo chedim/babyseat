@@ -768,8 +768,13 @@ def run_command_entity(fld, est, mem, command: str,
         return {"ok": False, "error": "empty command"}
     # the label was the link path's nicety, never the engine's (issue #5
     # residual: a stored 'label :: llm.wake ...' line fell to /bin/sh raw
-    # and died -- the builtins gate below reads the ACTION line)
-    _, cmd = split_label(cmd)
+    # and died -- the builtins gate below reads the ACTION line); BUT the
+    # no-shell dialects share the label's 'word ::' shape (split_label
+    # reads 'seat::restart x' as the LABEL seat, js::nope() as the label
+    # js) -- the gate reads the RAW line first; only a plain shell line
+    # is split
+    if not _is_no_shell(_action_of(cmd)):
+        _, cmd = split_label(cmd)
     try:
         t = float(timeout_s or RUN_TIMEOUT_DEFAULT_S)
     except (TypeError, ValueError):
@@ -1792,6 +1797,16 @@ def substitute_args(cmd: str, args: dict | None) -> str:
         k = m.group(1)
         return shlex.quote(str(args[k])) if k in args else m.group(0)
     return _PARAM.sub(rep, cmd)
+
+
+_NO_SHELL = ("llm::unwake", "llm.unwake", "llm::wake", "llm.wake",
+             "llm::call", "seat::restart", "js::")
+
+def _is_no_shell(act: str) -> bool:
+    """The no-shell builtin dialects (the elif chain above in
+    run_command_entity) -- a line starting with one never goes through
+    the label split, or the peel eats the head it dispatches on."""
+    return any(act.startswith(p) for p in _NO_SHELL)
 
 
 def _action_of(cmd: str) -> str:
