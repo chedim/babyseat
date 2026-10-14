@@ -1287,6 +1287,36 @@ class EntityField:
         self.flush()
         return n
 
+    def backfill_seedless(self, limit: int = 2000) -> int:
+        """THE SEEDLESS BACKLOG (issue #33, 2026-10-14): notes minted
+        before 7c77d8d (the sentence-splitter's length gate) never gained
+        sids -- their event rows stand at status "empty", apply never saw
+        them, no EntityState formed, and recall misses every one (note
+        40418: minted 10-12, still nursery, seed none, unresolvable). The
+        fix repaired the MINT side; nothing re-scanned the stored rows.
+        This does: re-run _sentences_of (the fixed floor -- 'fact one' is
+        one sentence now) over the empty rows; a row that now yields
+        sentences returns to pending and the ordinary embed/apply flow
+        embeds its recovered sentences, forms the state and lets the
+        graduation happen on its own. A row the fixed splitter still
+        finds nothing for stays put, honestly (its zero is real).
+        Idempotent: the sweep self-empties -- a later pass recovers
+        nothing. Returns the recovered count."""
+        recov = []
+        for key, ev in self.b.scan("events", {"origin": self.origin,
+                                              "status": "empty"}):
+            if self._sentences_of(ev):
+                recov.append(key)
+        for key in recov:
+            ev = self.b.get("events", key)
+            if ev is None:
+                continue
+            ev.update({"status": "pending", "sids": [], "mentions": []})
+            self.b.upsert("events", key, ev)
+        while recov and (self.embed_pending(limit) or self.apply_pending(limit)):
+            pass
+        return len(recov)
+
     def forget_many(self, nums: list[int], rebuild_over: int = 200) -> list[dict]:
         """forget() for several events; past rebuild_over it tombstones them
         all and rebuilds the origin once (cheaper than per-entity recomputes)."""
