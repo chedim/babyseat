@@ -218,3 +218,41 @@ class TestRunExecOnce(unittest.TestCase):
         doc = est.docs.get(NS + "tool:run")
         self.assertIsNotNone(doc)
         self.assertEqual((doc.properties or {}).get("run_count"), 1)
+
+
+class TestNonUtf8Output(unittest.TestCase):
+    """A command whose output is not UTF-8 used to kill the whole
+    thinker beat: subprocess.run(text=True) decodes STRICTLY, one bad
+    byte (0xae/0xb6 in the seat's own log, 2026-10-14) raised
+    UnicodeDecodeError out of run_command_entity, run_pending_links
+    died before landing, and the same link was retried forever. THE
+    CONTRACT: the receipt is honest -- rc and the output with the bad
+    bytes REPLACED (U+FFFD marks them), the run lands like every
+    other."""
+
+    CMD = "python3 -c 'import sys; sys.stdout.buffer.write(b\"pre\\xae\\xb6-post\")'"
+
+    def test_bad_bytes_become_a_receipt(self):
+        f, est = _world()
+        out = run_command_entity(f, est, None, self.CMD)
+        self.assertTrue(out["ok"], out)
+        self.assertEqual(out["rc"], 0)
+        self.assertIn("pre", out["head"])
+        self.assertIn("post", out["head"])
+        self.assertIn("�", out["head"])
+
+    def test_bad_bytes_on_stderr_too(self):
+        f, est = _world()
+        cmd = "python3 -c 'import sys; sys.stderr.buffer.write(b\"e\\xb6\")'"
+        out = run_command_entity(f, est, None, cmd)
+        self.assertTrue(out["ok"], out)
+    # rc is 0 -- stderr content lands with the bytes replaced
+        self.assertIn("e�", out["head"])
+
+    def test_the_landing_is_an_observation(self):
+        f, est = _world()
+        run_command_entity(f, est, None, self.CMD)
+        evs = [d for _, d in f.b.scan("events")
+               if d.get("stream") == "observation" and d.get("tool") == "shell"]
+        self.assertTrue(evs)
+        self.assertTrue(all(d["outcome"] == "ok" for d in evs))
