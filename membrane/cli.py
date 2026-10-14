@@ -483,6 +483,9 @@ def main() -> None:
         "             the /v1 loopback) -- opencode replaced, no child process\n"
         "  standalone the serve + its own web UI (chat, membrane home, the field,\n"
         "             voice) on :4096, opened in the browser -- no Home Assistant\n"
+        "  stop       stop the seat without the tty's ctrl+c (INT -> bounded\n"
+        "             TERM -> KILL on the serve ports' listeners + the pidfile;\n"
+        "             foreign listeners refused, named not touched)\n"
         "  review     print what the field learned\n"
         "  reset      kill the proxy on the port, then opencode fresh\n"
         "  update     check the install source for updates, show what\n"
@@ -515,7 +518,7 @@ def main() -> None:
     if cmd not in ("tui", "proxy", "opencode", "anthropic", "review",
                    "demo", "reset", "install", "doctor", "connect",
                    "ingest", "backfill", "codegraph", "update", "move",
-                   "migrate", "auth", "serve", "standalone"):
+                   "migrate", "auth", "serve", "standalone", "stop"):
         if cmd is None and not argv:
             print(__doc__)
             return
@@ -595,6 +598,11 @@ def main() -> None:
         # STANDALONE MODE: the serve + its own web UI, opened in the browser
         argv2 = _ensure_data_dir(["--standalone"] + args.forwarded)
         raise SystemExit(_run_module("membrane.opencode", argv2))
+    if cmd == "stop":
+        # THE STOP COMMAND: find + stop the seat without depending on the
+        # tty's ctrl+c (INT -> bounded TERM -> KILL, marker-checked)
+        from .stopseat import main as stop_main
+        raise SystemExit(stop_main(args.forwarded))
     if cmd == "review":
         argv2 = _ensure_data_dir(args.forwarded)
         raise SystemExit(_run_module("membrane.review", argv2))
