@@ -925,6 +925,16 @@ def run_command_entity(fld, est, mem, command: str,
 # MEMBRANE_RUN=0 gates both hand families (the check lives in the proxy
 # handlers).
 
+def _field_graph(fld):
+    """The field's code graph for eids' absolute->repo-relative folding
+    (fix #8's mint half); None field or a fussy graph_fn reads as no
+    graph -- canon then keeps the honest bare fallback."""
+    try:
+        return getattr(fld, "graph_fn", (lambda: None))() if fld else None
+    except Exception:
+        return None
+
+
 def _file_resolve(path) -> str:
     """~ expands, seat-relative joins the cwd -> one absolute path."""
     fp = os.path.expanduser(str(path or "").strip())
@@ -943,7 +953,7 @@ def _file_land(fld, est, mem, fp, action, ok, head, detail, err_msg=""):
     MIRROR doc under a doubled key (the stale boots' residue) retires
     into the landing doc (merged_into -- mark-don't-delete): the data
     merges, the shadow dies, the canonical grows."""
-    eid = E.canon("f", fp)
+    eid = E.canon("f", fp, _field_graph(fld))
     key = MEMBRANE_NS + overlay_key(eid)
     created = False
     if est is not None:
@@ -1021,7 +1031,7 @@ def file_read_entity(fld, est, mem, path, offset=None, limit=None) -> dict:
     if not fp:
         return {"ok": False, "error": "path required"}
     if not os.path.isfile(fp):
-        eid = E.canon("f", fp)
+        eid = E.canon("f", fp, _field_graph(fld))
         key = MEMBRANE_NS + overlay_key(eid)
         _file_land(fld, est, mem, fp, "read", False, "", {}, f"no such file: {fp}")
         return {"ok": False, "eid": eid, "key": key, "path": fp,
