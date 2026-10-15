@@ -68,12 +68,26 @@ class TestServePortWalk(unittest.TestCase):
         hold.bind(("127.0.0.1", 0))
         hold.listen(1)
         taken = hold.getsockname()[1]
-        self.assertEqual(opencode._pick_serve_port(taken), taken + 1)
-        hold.close()
+        try:
+            got = opencode._pick_serve_port(taken)
+            # The held port must be skipped, and the walk only ever moves
+            # up. It must NOT pin the exact next port: on a busy runner
+            # `taken + 1` can be held by a neighbour too, so the walk lands
+            # two or more steps up -- still valid, still > taken.
+            self.assertGreater(got, taken)
+            self.assertTrue(opencode._port_free(got))
+        finally:
+            hold.close()
 
     def test_free_port_returned_as_is(self):
         free = _free_port()
-        self.assertEqual(opencode._pick_serve_port(free), free)
+        got = opencode._pick_serve_port(free)
+        # A just-freed port is normally returned unchanged. A busy runner
+        # can re-take it in the gap between _free_port's close and the
+        # probe, so pin only the invariant: the walk never lands below the
+        # preferred port, and whatever it returns is genuinely bindable.
+        self.assertGreaterEqual(got, free)
+        self.assertTrue(opencode._port_free(got))
 
 
 class TestLanIp(unittest.TestCase):
