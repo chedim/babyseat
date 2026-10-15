@@ -1071,6 +1071,11 @@ def _file_land(fld, est, mem, fp, action, ok, head, detail, err_msg=""):
                 if base:
                     _merge_mirror_into_doc(est, MEMBRANE_NS + "files:~" + base, doc)
             props = doc.properties
+            # THE RESOLVED PATH (issue #120): the idle miner reopens the file
+            # from the doc; the overlay eid falls back to 'f:~basename' for a
+            # file outside the repo graph, so the honest absolute path must
+            # ride the props.
+            props["path"] = fp
             props[f"{action}_count"] = int(props.get(f"{action}_count") or 0) + 1
             props[f"last_{action}_ts"] = props["last_ts"] = time.time()
             for k, v in detail.items():
@@ -1343,6 +1348,76 @@ def mine_artifact(fld, est, spec, max_spans: int = MINE_MAX_SPANS,
     est.upsert(doc)
     return {"ok": True, "eid": eid, "mined": mined, "spans": len(spans),
             "concepts": nconcepts}
+
+
+# ---- THE IDLE MINER (issue #120: dream-loop policy on the lazy ingest) --------
+# The mine primitive (#116/#118) only ran when a seat ASKED (a {mine: path}
+# verdict). The idle machinery must notice the re-read, unmined artifacts on
+# its own: one bounded pass per idle wave mines the childless re-read files.
+# Policy, not a new primitive -- the salience and concept minting are exactly
+# mine_artifact's; this pass only picks WHICH files to hand it.
+
+MINE_IDLE_MAX_PER_PASS = 1      # one artifact per idle wave: never a burst
+
+
+def concept_children(est, fp) -> list[str]:
+    """The Concept eids whose ``defined_in.file`` resolves to ``fp`` -- the
+    artifact already has idea children, so an idle re-mine is redundant."""
+    if est is None:
+        return []
+    target = _file_resolve(fp)
+    out = []
+    for eid, doc in (est.docs or {}).items():
+        if doc.cls != CLASS_CONCEPT:
+            continue
+        dif = (doc.properties or {}).get("defined_in") or {}
+        if _file_resolve(str(dif.get("file") or "")) == target:
+            out.append(eid)
+    return out
+
+
+def mine_idle_artifacts(fld, est, mem=None, now=None,
+                        cap=MINE_IDLE_MAX_PER_PASS) -> dict:
+    """One idle wave over re-read, childless, unmined artifacts: mine each
+    (up to ``cap``) via ``mine_artifact`` and mark it attempted
+    (``idle_mined_ts``) REGARDLESS of outcome -- a no-salient-spans file is
+    never retried forever. Returns {scanned, attempted, mined, concepts}."""
+    now = now if now is not None else time.time()
+    summary = {"scanned": 0, "attempted": 0, "mined": 0, "concepts": 0}
+    if fld is None or est is None:
+        return summary
+    candidates: list[tuple] = []                    # (key, doc, path)
+    for key, doc in list((est.docs or {}).items()):
+        ceid = canon_eid(key, fld)
+        if not ceid or not ceid.startswith("f:"):
+            continue                                 # not a file overlay
+        props = doc.properties or {}
+        if int(props.get("read_count") or 0) < 2:
+            continue                                 # not re-read yet
+        if props.get("mined_ts") or props.get("idle_mined_ts"):
+            continue                                 # already (attempted) mined
+        path = props.get("path")
+        if not path:
+            path = ceid[2:]                          # a pre-#120 doc: eid's path
+            if path.startswith("~"):
+                continue                             # 'f:~basename': no path to open
+        if concept_children(est, path):
+            continue                                 # already has idea children
+        candidates.append((key, doc, path))
+    candidates.sort(key=lambda c: str(c[2]))         # deterministic order
+    summary["scanned"] = len(candidates)
+    for key, doc, path in candidates[:max(0, int(cap))]:
+        out = mine_artifact(fld, est, path)
+        cur = (est.docs or {}).get(key) or doc       # mine_artifact's fresh props
+        props = cur.properties or {}
+        props["idle_mined_ts"] = now
+        props["idle_mine_reason"] = out.get("reason") or "ok"
+        est.upsert(cur)
+        summary["attempted"] += 1
+        if out.get("ok"):
+            summary["mined"] += 1
+            summary["concepts"] += int(out.get("concepts") or 0)
+    return summary
 
 
 # ---- THE CONCEPT ENTITY (issue #117: quote-and-verify) ------------------------
