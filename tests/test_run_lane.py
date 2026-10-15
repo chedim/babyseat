@@ -256,3 +256,79 @@ class TestNonUtf8Output(unittest.TestCase):
                if d.get("stream") == "observation" and d.get("tool") == "shell"]
         self.assertTrue(evs)
         self.assertTrue(all(d["outcome"] == "ok" for d in evs))
+
+
+class TestTheKilledJobSpeaksItsWhy(unittest.TestCase):
+    """THE RECEIPT'S REASON (issue #51, 2026-10-15): the executor's inline
+    budget (EXEC_TIMEOUT_S = 15) killed `sleep 15` while its twin at 14
+    lived, and the receipt said only FAILED rc=-1 -- the engine computed
+    the why ('timeout after {t}s') into a LOCAL that never left
+    (run_command_entity's return had no error key, and the executor's
+    own already-wired out.get('error') read nothing). The why rides the
+    return, the executor's summary and the edge's receipt carry it, and
+    the inline cap meets the plain runs' (the same command over two
+    doors got budgets two apart)."""
+
+    def _srv(self, f, est):
+        import types
+        return types.SimpleNamespace(efield=f, entity_store=est,
+                                     membrane=None, capturer=None)
+
+    def _seedf(self):
+        import membrane.night as N
+        f, est = _world()
+        N.seed_executor_entity(est)
+        return f, est
+
+    def test_the_return_carries_the_reason(self):
+        f, est = _world()
+        out = run_command_entity(f, est, None, "sleep 5", timeout_s=1.0)
+        self.assertEqual(out["rc"], -1)
+        self.assertEqual(out["outcome"], "timeout")
+        err = out.get("error") or ""
+        self.assertIn("timeout", err)
+        self.assertIn("1", err)
+
+    def test_the_executors_summary_carries_it(self):
+        import membrane.night as N
+        f, est = self._seedf()
+        srv = self._srv(f, est)
+        saved = N.EXEC_TIMEOUT_S
+        N.EXEC_TIMEOUT_S = 0.5
+        try:
+            r = N.entity_link(srv, est, f, None, "tool:executor",
+                              ["sleep 5"])
+            lands = [x for x in (r.get("runs") or []) if x.get("rc") == -1]
+            self.assertTrue(lands, r)
+            self.assertFalse(lands[0].get("ok"))
+            self.assertIn("timeout", lands[0].get("error") or "")
+        finally:
+            N.EXEC_TIMEOUT_S = saved
+
+    def test_the_edge_receipt_says_why(self):
+        import membrane.night as N
+        f, est = self._seedf()
+        srv = self._srv(f, est)
+        saved = N.EXEC_TIMEOUT_S
+        N.EXEC_TIMEOUT_S = 0.5
+        try:
+            N.entity_link(srv, est, f, None, "tool:executor", ["sleep 5"])
+            N.run_pending_links(srv, est, f, None,
+                                NS + "tool:executor")
+        finally:
+            N.EXEC_TIMEOUT_S = saved
+        rows = [d for _k, d in f.b.scan("relations")
+                if d.get("rel") == "executes"]
+        self.assertTrue(rows)
+        rcp = (rows[-1].get("receipt") or {})
+        self.assertEqual(rcp.get("op"), "done")
+        self.assertIn("timeout", str(rcp.get("why") or ""))
+
+    def test_the_cap_meets_the_plain_runs(self):
+        import membrane.night as N
+        self.assertGreaterEqual(N.EXEC_TIMEOUT_S,
+                                N.RUN_TIMEOUT_DEFAULT_S)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -862,11 +862,15 @@ def run_command_entity(fld, est, mem, command: str,
     head, tail = text[:ST.RESULT_HEAD], text[-ST.RESULT_TAIL:]
     oc = "timeout" if err else ST.outcome(canon_e, head, tail, rc=rc)
     ok = rc == 0 and not err
+    # THE RECEIPT'S REASON (issue #51): the why leaves the engine -- the
+    # executor's summary already reads out['error'] at res.update; a bare
+    # rc=-1 told the caller HOW it died in no word, and a probe's bisect
+    # over sleep 10..15 did the diagnosis the engine should have named.
     if est is None:
         # no entity store mounted: exec, report, degrade (never wedge)
         return {"ok": ok, "eid": canon_e, "key": key, "rc": rc,
                 "outcome": oc, "head": head, "tail": tail, "ms": ms,
-                "doc": None, "created": False}
+                "error": err, "doc": None, "created": False}
     doc = (est.docs or {}).get(key)
     created = doc is None
     if created:
@@ -921,8 +925,8 @@ def run_command_entity(fld, est, mem, command: str,
                      "eid": canon_e, "rc": rc, "ok": ok, "ms": ms,
                      "command": cmd[:200]})
     return {"ok": ok, "eid": canon_e, "key": key, "rc": rc, "outcome": oc,
-            "head": head, "tail": tail, "ms": ms, "doc": doc,
-            "created": created}
+            "head": head, "tail": tail, "ms": ms, "error": err,
+            "doc": doc, "created": created}
 
 
 
@@ -1181,7 +1185,9 @@ def file_edit_entity(fld, est, mem, path, old_string, new_string,
 EXECUTOR_EID = "tool:executor"
 EXEC_REL = "executes"
 EXEC_LINK_BATCH_CAP = 3      # commands run inline per link turn
-EXEC_TIMEOUT_S = 15.0        # an inline run's budget (MCP headroom 60s)
+EXEC_TIMEOUT_S = 20.0        # an inline run's budget -- the same one
+                             # budget two doors apart starved the
+                             # executor's (MCP headroom 60s)
 EXEC_EDGES_CAP = 32          # live edges per executor (the cap IS the error)
 
 
@@ -1240,7 +1246,8 @@ def run_pending_links(srv, est, fld, mem, exec_key: str,
                             receipt={"op": "done", "rc": run.get("rc"),
                                      "outcome": run.get("outcome"),
                                      "head": str(run.get("head") or "")[:80],
-                                     "ms": run.get("ms")})
+                                     "ms": run.get("ms"),
+                                     "why": str(run.get("error") or "")[:160]})
         results.append(run)
     return results
 
@@ -2065,7 +2072,8 @@ def entity_link(srv, est, fld, mem, executor_spec: str,
                             receipt={"op": "done", "rc": run.get("rc"),
                                      "outcome": run.get("outcome"),
                                      "head": str(run.get("head") or "")[:80],
-                                     "ms": run.get("ms")})
+                                     "ms": run.get("ms"),
+                                     "why": str(run.get("error") or "")[:160]})
         runs.append(run)
     _audit(mem, {"event": "agent-entity-link", "origin": "mcp",
                  "eid": ex_ent.eid, "ok": True,
