@@ -13,9 +13,9 @@ jobs:
         with:
           category: integration
           # brands: the integration is not in home-assistant/brands yet (it is
-          # not published); the check re-arms when it is. license: the private
-          # use license is a LicenseRef custom license (no SPDX id) -- HACS's
-          # repository license check reads that as NOASSERTION and refuses.
+          # not published); the check re-arms when it is. license: PolyForm
+          # Noncommercial is not a license GitHub's detector names, so HACS's
+          # repository license check reads NOASSERTION and refuses.
           # SPACE separated (the action splits INPUT_IGNORE on " ", not on
           # ","); every other check (hassfest, validate) runs.
           ignore: brands license

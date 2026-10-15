@@ -94,9 +94,9 @@ embeddings run on your Ollama (cloud models are routable rungs you add with
 `membrane auth`); the substrate is your Couchbase bucket — and with no cluster
 reachable the seat drops to a RAM field and **still boots** (degradation,
 never failure). The whole field is a substrate you own and can move
-(`membrane move` / `reembed`). The memory is for your data: the private-use
-license covers personal use and keeps it out of paid products
-([LICENSE](LICENSE)).
+(`membrane move` / `reembed`). The memory is for your data: the PolyForm
+Noncommercial license covers personal, hobby, research and other noncommercial
+use and keeps it out of paid products ([LICENSE](LICENSE)).
 
 ### How it maps to the patterns you've already seen
 
@@ -396,6 +396,7 @@ python experiments/variety_toy.py        # the variety toy: the gate's calibrati
 Working lab, in daily use on its own development (dogfooded: this repo's own
 field holds ~14k live entities and its background mind digests, dreams, and
 speaks about its own work). Version **0.3.4**; API and flag surfaces may still
-move. Licensing: **private-use license** (see [LICENSE](LICENSE)) — free for
-home and personal use; commercial use, redistribution and paid offerings need
-the author's written permission.
+move. Licensing: **PolyForm Noncommercial 1.0.0** (see [LICENSE](LICENSE)) —
+free to use, modify and share for any noncommercial purpose (personal, hobby,
+research, education, charities and public institutions); commercial use needs
+the author's written permission — ask.
