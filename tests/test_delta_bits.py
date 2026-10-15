@@ -133,5 +133,78 @@ class TestTheFieldKeepsTheDirection(unittest.TestCase):
         self.assertFalse([d for d in _rows(f, "f:membrane/router.py") if "dbits" in d])
 
 
+class TestThePreviousMention(unittest.TestCase):
+    """STAGE 2a (2026-10-15): the move against the PREVIOUS mention. Measured
+    everywhere it was tried, it beats the running-state move dbits keeps:
+    prose sequences started/stopped/stayed 0.861 vs 0.653, broke/fixed 0.926
+    vs 0.740 (chance 0.25); real sensors 0.496 vs 0.380 (chance 0.333). The
+    state keeps the previous mention (last_x, at its STORED precision so a
+    restart never changes a later bit) and the row keeps pbits."""
+
+    E = "f:membrane/router.py"
+
+    def test_every_mention_after_the_first_carries_pbits(self):
+        f = _field()
+        _say(f, _TEXTS)
+        rows = _rows(f, self.E)
+        self.assertNotIn("pbits", rows[0])           # nothing before the first
+        for d in rows[1:]:
+            self.assertIn("pbits", d)
+            self.assertEqual(len(vsa.unpack_state(d["pbits"])), vsa.DELTA_DIM)
+
+    def test_the_bits_are_the_move_from_the_previous_mention(self):
+        f = _field()
+        _say(f, _TEXTS)
+        rows = _rows(f, self.E)
+        vec = lambda d: EF.unit(f.b.get("sentences", d["sid"])["vec"])
+        from membrane.efstore import pack_f16, unpack_f16
+        for prev, cur in zip(rows, rows[1:]):
+            want = vsa.delta_bits(unpack_f16(pack_f16(vec(prev))), vec(cur))
+            self.assertEqual(cur["pbits"], want)
+
+    def test_the_previous_mention_survives_a_save_and_load(self):
+        f = _field()
+        _say(f, _TEXTS)
+        st = f.get(self.E)
+        back = EF.EntityState.from_doc(st.to_doc(f.origin))
+        np.testing.assert_array_equal(back.last_x, st.last_x)
+
+    def test_a_restart_never_changes_a_later_bit(self):
+        """Two mentions, a save/load of the state, then the third: the same
+        pbits as a seat that never restarted."""
+        a = _field()
+        _say(a, _TEXTS)
+        want = _rows(a, self.E)[-1]["pbits"]
+        b = _field()
+        _say(b, _TEXTS[:2])
+        st = b.get(self.E)
+        b._states[self.E] = EF.EntityState.from_doc(st.to_doc(b.origin))
+        evs = [ST.Event(stream="discourse", role="user", text=_TEXTS[2], ts=1002.0)]
+        b.write_events(evs, session="s1")
+        b.process()
+        self.assertEqual(_rows(b, self.E)[-1]["pbits"], want)
+
+    def test_a_rebuild_replays_the_same_pbits(self):
+        f = _field()
+        _say(f, _TEXTS)
+        before = [d.get("pbits") for d in _rows(f, self.E)]
+        f.rebuild()
+        self.assertEqual([d.get("pbits") for d in _rows(f, self.E)], before)
+
+    def test_the_kill_switch_keeps_pbits_out_too(self):
+        with mock.patch.dict(os.environ, {"MEMBRANE_VSA": "0"}):
+            f = _field()
+            _say(f, _TEXTS)
+        self.assertFalse([d for d in _rows(f, self.E) if "pbits" in d])
+
+    def test_words_keep_no_previous_mention(self):
+        """Words and phrases write no delta rows: they carry no last_x either."""
+        f = _field()
+        _say(f, _TEXTS)
+        words = [s for s in f._states.values() if s.kind in ("w", "p")]
+        self.assertTrue(words)
+        self.assertFalse([s.eid for s in words if s.last_x is not None])
+
+
 if __name__ == "__main__":
     unittest.main()
