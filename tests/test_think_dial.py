@@ -5,8 +5,9 @@ with a 12-35s wall -- but other cards (qwen3, R1's distills) DO stop on
 think:false. The seat forwards the payload verbatim today, so the operator
 has no say in WHY the backend reasons. The dial: `--think on|off|auto`
 (auto = the default = forward verbatim: a non-thinking card never learns a
-think:true it 400s on). The dial is a DEFAULT, not an override -- the
-client's own think always wins."""
+think:true it 400s on). `on` is a DEFAULT (the client's own think wins);
+`off` is a hard kill switch -- it forces think:false even over the
+client's think:true."""
 import json
 import os
 import sys
@@ -60,8 +61,8 @@ class _Router:
 
 
 class TestApplyThinkDial:
-    """The pure injector (the turn lane's seam): default verbatim; the
-    client's think wins; on/off injects."""
+    """The pure injector (the turn lane's seam): auto forwards verbatim;
+    on is a default (the client's think wins); off is a hard override."""
 
     def test_auto_leaves_the_body_verbatim(self):
         up = {"model": "m", "messages": []}
@@ -74,10 +75,17 @@ class TestApplyThinkDial:
     def test_off_injects_false(self):
         assert apply_think_dial({"model": "m"}, False)["think"] is False
 
-    def test_the_clients_own_think_wins(self):
+    def test_the_clients_own_think_wins_over_on(self):
+        # "on" is a DEFAULT: the client's explicit think:false wins.
         up = {"model": "m", "think": False}
         assert apply_think_dial(up, True) is up
         assert up["think"] is False
+
+    def test_off_overrides_the_clients_think(self):
+        # "off" is a hard kill switch: the operator said stop reasoning, so
+        # the client's think:true loses (only "on" is a default).
+        out = apply_think_dial({"model": "m", "think": True}, False)
+        assert out["think"] is False
 
 
 class TestTheBackgroundLanes:
