@@ -24,6 +24,9 @@
     membrane codegraph    stdlib-AST call graph of this repo (stats / impact /
                           callers / callees; no model call)
     membrane doctor       show what's installed/running (CLI, skills, Ollama)
+    membrane stats        token/call accounting + the savings baseline
+                          (--baseline: bounded window vs a naive full-history
+                          replay; reads serve-msgs, no model call)
 
 Per-project DATA lives in ./.membrane/ (field, audit, review queue, logs) --
 auto-created on first run per directory. Skills are PROJECT-SCOPED on purpose
@@ -505,6 +508,9 @@ def main() -> None:
         "  backfill   rebuild the entity field from the audit log + the codebase\n"
         "  codegraph  stdlib-AST call graph (stats | impact | callers | callees)\n"
         "  doctor     what's installed/running (CLI, skills, Ollama)\n"
+        "  stats      token/call accounting + the savings baseline\n"
+        "             (--baseline compares the bounded window against a\n"
+        "             naive full-history replay; reads serve-msgs, no model call)\n"
         "\n"
         "Everything after the subcommand is forwarded verbatim to the\n"
         "underlying module.\n"
@@ -518,7 +524,8 @@ def main() -> None:
     if cmd not in ("tui", "proxy", "opencode", "anthropic", "review",
                    "demo", "reset", "install", "doctor", "connect",
                    "ingest", "backfill", "codegraph", "update", "move",
-                   "migrate", "auth", "serve", "standalone", "stop"):
+                   "migrate", "auth", "serve", "standalone", "stop",
+                   "stats"):
         if cmd is None and not argv:
             print(__doc__)
             return

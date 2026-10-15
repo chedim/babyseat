@@ -1,5 +1,7 @@
 ## Unreleased
 
+- **`membrane stats` — token/call accounting and the savings baseline**: reads a `serve-msgs` store (no model call) and prints sessions/turns/tokens (input, output, reasoning, cache-read), tool-call parts, tool-loop rounds, recall-injection size and models. `--baseline` compares the bounded replay window against a naive full-history replay, bucketed by conversation length — the numbers behind "does the seat actually save tokens" instead of a hunch.
+
 - **The speaker lane plants goals instead of voicing them**: the voice-framed turn told the model to "say so" about tool use but never that a tool call is silent, so it narrated `goal(action='plant', …)` as inline code and that was spoken aloud. The frame now says a tool call is invisible and to make the call itself, and the streamer no longer speaks inline code.
 
 ## v0.5.1 (2026-10-15) — the train ships quiet
