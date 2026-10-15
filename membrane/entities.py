@@ -1568,6 +1568,12 @@ class EntityStore(MultiParentOps, TimelineOps):
             return cached
         if not self.shared:
             return None
+        # THE FAST DEGRADE (the door-visibility CI hang): a probe-miss
+        # skips the SDK entirely -- the boot used to sit in a multi-second
+        # connect timeout here too when no cluster exists.
+        from .efstore import probe_local_couchbase
+        if not probe_local_couchbase():
+            return None
         try:
             from couchbase.cluster import Cluster
             from couchbase.auth import PasswordAuthenticator

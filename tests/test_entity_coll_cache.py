@@ -66,7 +66,9 @@ class TestEntityCollectionCache(unittest.TestCase):
                 mock.patch("couchbase.auth.PasswordAuthenticator",
                            lambda *a, **k: None), \
                 mock.patch("couchbase.options.ClusterOptions",
-                           lambda *a, **k: None):
+                           lambda *a, **k: None), \
+                mock.patch("membrane.efstore.probe_local_couchbase",
+                           lambda: True):
             c1 = store._entities_collection()
             n_after_first = _FakeCluster.constructed
             for _ in range(5):
