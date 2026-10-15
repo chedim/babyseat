@@ -125,6 +125,39 @@ def hamming(a: np.ndarray, b: np.ndarray) -> float:
         / max(len(a), 1)
 
 
+# ---- the delta bits (the delta lane, stage 1: stored, not yet read) -------
+# THE DIRECTION OF A MOVE (2026-10-15): the cortex-experiment finding on
+# membrane's own embedder -- the direction of an embedding's move names the
+# KIND of change across sensors the recall never saw (mxbai, 12 text
+# sensors, leave-one-sensor-out 1-NN: delta 0.631, these bits 0.640 at
+# 2048, the before+after pair 0.460, the after-state 0.363, chance 0.333).
+# R is the codebook's own projection (its first DELTA_DIM rows -- the same
+# seed, so every seat's bits agree); the move's SIZE is not in the bits.
+DELTA_DIM = 2048              # 256 B packed per delta row (2048 ~= 8192 here)
+_DELTA_PROJ: dict[tuple[int, int], np.ndarray] = {}
+
+
+def _delta_projection(dim: int, seed: int) -> np.ndarray:
+    P = _DELTA_PROJ.get((dim, seed))
+    if P is None:                 # == VSACodebook._matrix()[:dim] (row-major draws);
+        P = np.random.default_rng(seed).standard_normal(   # f32: 3.8x faster, 0 of
+            (dim, VSACodebook.INPUT_DIM)).astype(np.float32)  # 4M bits flipped
+        _DELTA_PROJ[(dim, seed)] = P
+    return P
+
+
+def delta_bits(before, after, dim: int = DELTA_DIM,
+               seed: int = VSA_SEED) -> str | None:
+    """sign(R @ (after - before)), packed; None when nothing moved (no
+    direction to keep)."""
+    d = np.asarray(after, dtype=float) - np.asarray(before, dtype=float)
+    if not d.size or float(np.linalg.norm(d)) < 1e-12:
+        return None
+    n = VSACodebook.INPUT_DIM
+    d = np.pad(d, (0, n - d.size)) if d.size < n else d[:n]
+    return pack_state((_delta_projection(dim, seed) @ d.astype(np.float32)) >= 0)
+
+
 def hash_token_vec(tok: str, dim: int) -> np.ndarray:
     """The no-embedder fallback: a deterministic hash bit-pattern (no
     pretrained semantics -- the lane still binds, just weaker recall)."""
