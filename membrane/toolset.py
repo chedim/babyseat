@@ -73,9 +73,10 @@ FAMILIES: dict[str, dict] = {
                 "inherit": lambda a: _pick(a, "spec", "parents")},
     },
     "exec": {
-        "description": "Cliffhanger: define methods on classes (abstract = interface), call "
-                       "them on objects; link runs a raw command. help('cliffhanger').",
+        "description": "Cliffhanger: define methods on classes, call or inspect them on "
+                       "objects; link runs a command. help('cliffhanger').",
         "actions": {"call": "method_call", "each": "method_each", "define": "method_define",
+                    "inspect": "method_inspect",
                     "link": "entity_link", "unlink": "entity_unlink"},
         "params": {"commands": {"type": ["string", "array"], "description": "link: command line(s)"},
                    "args": {"type": "object", "description": "{{param}} values"},
@@ -88,6 +89,7 @@ FAMILIES: dict[str, dict] = {
                    "steps": {"type": "array", "items": {"type": "object"}, "description": "define: composite steps"},
                    "executor": _S("optional"), "create": _B("optional")},
         "map": {"call": lambda a: _pick(a, "object", "method", "args"),
+                "inspect": lambda a: _pick(a, "object", "method", "args"),
                 "each": lambda a: _pick(a, "over", "method", "args", "max", "dry_run", "on_fail"),
                 "define": lambda a: _pick(a, "on", "method", "command", "read_only", "guard", "steps", "abstract"),
                 "link": lambda a: _pick({**a, "commands": a.get("commands") or a.get("command"),
@@ -205,7 +207,10 @@ HELP = {
         "fills from the object (its own values over its classes'); other {{params}} come from args -- "
         "ONLY {{name}} binds ({name}, $name, $1 do not): an arg the command never names is refused, a "
         "positional list args=[a, b] binds to the {{params}} in order, and args.timeout (seconds) only "
-        "ever shortens the run. "
+        "ever shortens the run. INSPECT (runs nothing): exec(action='inspect', object=..., "
+        "method=..., args=...) shows where the call resolves (via, the resolution order, who defines "
+        "it along it), the stored command, params and steps, and with args the exact command it "
+        "WOULD run or the refusal it WOULD give -- look before you redefine a broken method. "
         "Dispatch: the object's own method, then its classes (ISA order), then global methods -- "
         "the same name on another class is its own implementation. The receipt lands on the "
         "object. Compose methods with parents (help('exec')). A missing or empty value BLOCKS the "
