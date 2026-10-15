@@ -60,11 +60,53 @@ def test_land_honest_bare_fallback_without_a_graph(tmp_path):
     assert key == MEMBRANE_NS + "files:~voice.py", key
 
 
-def test_read_hand_missing_file_mints_the_graph_canon(tmp_path):
+def test_read_hand_missing_file_reports_canon_without_minting(tmp_path):
+    """THE STAT-AT-MINT COVENANT (issue #99): a READ of a path that does
+    not exist reports the canonical id (for the operator's reference) but
+    mints NO fresh f: entity -- so no getter is born to error forever."""
     from membrane.night import file_read_entity
     est = EntityStore(path=None, shared=False)
     fp = str(tmp_path / "repo" / "membrane" / "ghost.py")
     got = file_read_entity(_Fld(_repo(tmp_path)), est, None, fp, 0, None)
     assert got.get("ok") is False
     assert got.get("eid") == "f:membrane/ghost.py", got
-    assert est.docs.get(MEMBRANE_NS + "files:membrane/ghost.py") is not None
+    assert got.get("key") is None, got
+    assert est.docs.get(MEMBRANE_NS + "files:membrane/ghost.py") is None
+
+
+def test_failed_land_on_dead_path_mints_nothing(tmp_path):
+    """The mint gate lives in _file_land itself: a failed op on a
+    nonexistent path never earns a fresh entity (key is None), whatever
+    the action. A live path still mints."""
+    from membrane.night import _file_land
+    est = EntityStore(path=None, shared=False)
+    dead = str(tmp_path / "gone" / "x.py")
+    eid, key, created = _file_land(_Fld(None), est, None, dead,
+                                   "read", False, "", {}, "no such file")
+    assert eid == "f:~x.py", eid          # the canon is still reported
+    assert key is None
+    assert created is False
+    assert MEMBRANE_NS + "files:~x.py" not in est.docs
+
+    live = str(tmp_path / "gone" / "y.py")
+    (tmp_path / "gone").mkdir(exist_ok=True)
+    open(live, "w").write("y = 1\n")
+    _eid, _key, _created = _file_land(_Fld(None), est, None, live,
+                                      "read", True, "ok", {})
+    assert _key is not None
+    assert _created is True
+    assert est.docs.get(MEMBRANE_NS + "files:~y.py") is not None
+
+
+def test_failed_op_on_existing_file_still_touches_the_entity(tmp_path):
+    """A failed op is NOT always a dead path: an existing file that fails
+    (e.g. a permission problem) keeps its entity -- the gate is existence,
+    not success."""
+    from membrane.night import _file_land
+    est = EntityStore(path=None, shared=False)
+    fp = str(tmp_path / "there.py")
+    open(fp, "w").write("x = 1\n")
+    eid, key, created = _file_land(_Fld(None), est, None, fp,
+                                   "read", False, "", {}, "permission denied")
+    assert key is not None
+    assert est.docs.get(MEMBRANE_NS + "files:~there.py") is not None
