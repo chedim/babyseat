@@ -1002,6 +1002,16 @@ def main() -> None:
                 srv.efield.listeners.append(_frame_listener(srv))
             except Exception as e:
                 print(f"[seat] watch frame off ({e})", file=sys.stderr)
+            # THE FOREWARNING (stage 3a, recording only): before a tool result
+            # exists, what followed the most similar past moments; the pool
+            # rebuilds from the field's history in the background
+            try:
+                from .forewarn import Forewarn
+                srv._forewarn = Forewarn(srv.efield)
+                srv.efield.step_listeners.append(srv._forewarn.listener)
+                srv._forewarn.start()
+            except Exception as e:
+                print(f"[seat] forewarning off ({e})", file=sys.stderr)
             if srv.capturer.mode == "on":
                 srv.efield.listeners.append(_efield_watch_listener(srv))
                 from .efmind import DreamSource, on_applied_fn

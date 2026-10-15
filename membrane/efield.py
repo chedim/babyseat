@@ -376,6 +376,9 @@ class EntityField:
         # called (key, event doc, message vector) after each live event is
         # applied -- the watch and intent boards; must be cheap, never raise
         self.listeners: list = []
+        # (key, event doc, the vector of ALL its sentences) for every applied
+        # event, boilerplate included (forewarn.py) -- cheap, never raise
+        self.step_listeners: list = []
         self.b = backend
         self.emb = embedder
         self.origin = origin
@@ -838,6 +841,18 @@ class EntityField:
             boiler[nk] = boiler.get(nk, 0) + 1
             if boiler[nk] > BOILER_MIN:
                 skip.add(i)
+        # THE STEP LISTENERS (forewarn.py): every applied event, boilerplate
+        # INCLUDED -- a failure seen for the 9th time is exactly what the
+        # forewarning must not miss (the listeners below see only what moves)
+        if self.step_listeners:
+            have = [x for x in X if x is not None]
+            if have:
+                x_all = unit(np.sum(have, axis=0))
+                for fn in self.step_listeners:
+                    try:
+                        fn(key, ev, x_all)
+                    except Exception:
+                        pass
         live_idx = [i for i in range(len(sids)) if i not in skip]
         if not live_idx:
             ev["surprise"] = None
@@ -1067,8 +1082,13 @@ class EntityField:
                 self.b.delete(coll, k)
         keep_seq = self._ostats.get("seq_last", 0)
         null = self._ostats.get("null_coh")
+        # the forewarning's LIVE calibration (forewarn.py) is a record of
+        # forecasts made in real time -- not derivable, so it survives
+        fw = self._ostats.get("forewarn")
         self._ostats = self._fresh_ostats()
         self._ostats["seq_last"], self._ostats["null_coh"] = keep_seq, null
+        if fw:
+            self._ostats["forewarn"] = fw
         self._states, self._dirty, self._deltas, self._now = {}, set(), {}, {}
         for k, ev in list(self.b.scan("events", {"origin": self.origin, "status": "applied"})):
             ev["status"] = "embedded"
