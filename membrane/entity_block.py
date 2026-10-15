@@ -334,6 +334,26 @@ def related(field, text: str, qvec=None, k: int = 8) -> list[dict]:
     return out
 
 
+def annotate_store_keys(rows: list[dict], est) -> list[dict]:
+    """The graph's rows carry FIELD ids ('f:x.py'); the entity tools address
+    the STORE's key ('membrane::Component:files:x.py', the class-embedded
+    pool spelling entity_add mints). Annotate each row and each of its
+    neighbours with the true stored eid so whatever the graph returns is
+    exactly what entity_edit/entity_remove can find (issue #99: the sibling
+    spellings were unreachable). No-op when the store is absent."""
+    if est is None:
+        return rows
+    for r in rows:
+        ent = est.by_field_id(r.get("key"))
+        if ent is not None:
+            r["eid"] = ent.eid
+        for nb in (r.get("neighbors") or []):
+            nent = est.by_field_id(nb.get("key"))
+            if nent is not None:
+                nb["eid"] = nent.eid
+    return rows
+
+
 # ---- tracks + the now line (WHERE WE ARE on entity states) ----------------------
 CANON_KINDS = ("w", "p", "f", "s", "c", "port", "m", "u", "ha", "tool", "ctx")
 
