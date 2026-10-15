@@ -418,11 +418,20 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
     # tool's name six times and was told 'not your lane's hand' -- the wrong
     # lesson): say what happened and how to send it
     _bare = str(name or "").strip().strip("\"'` ?")
+    # ISSUE #74: 80 calls on one seat carried the tool name '{}' -- an EMPTY
+    # JSON object, no arguments in it -- with the whole call intact beside it;
+    # every one bounced as 'the NAME held its arguments'. An empty-JSON name is
+    # no name: the wrapper's own family routes it, else the action's one owner.
+    if re.fullmatch(r"\{\s*\}|\[\s*\]|null|none|undefined", _bare, re.I):
+        _bare = ""
     if not _bare:
         # its arguments may have arrived wrapped as a string: acknowledged,
         # echoed verbatim, so the resend carries them intact
         _inner = _call_in_args(args)
         if _inner is not None:
+            _outer = str((args or {}).get("name") or (args or {}).get("tool") or "").strip()
+            if _outer and canonical(_outer, {})[0] in FAMILIES:
+                return resolve(_outer, dict(_inner))
             _owner = _owned_by_one_family(_inner)
             if _owner:
                 return resolve(_owner, dict(_inner))
@@ -430,6 +439,11 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
                 f"the call's name was LOST but its arguments arrived "
                 f"({json.dumps(_inner)[:160]}): resend naming the tool -- one of "
                 f"{', '.join(sorted(FAMILIES))} -- with the same arguments")
+        # a whole call beside a lost name routes by its action's one owner --
+        # a bare {"action": ...} with nothing to act on still asks for the name
+        _owner = _owned_by_one_family(dict(args or {}))
+        if _owner and any(k != "action" for k in (args or {})):
+            return resolve(_owner, dict(args or {}))
         raise ValueError(
             f"the call had no tool name ({str(name or '')!r}): name the tool -- one of "
             f"{', '.join(sorted(FAMILIES))} -- and put its JSON in the arguments")
