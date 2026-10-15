@@ -150,5 +150,33 @@ class TestParsing(unittest.TestCase):
         self.assertEqual(s, ["The router picks the cheapest model for each turn."])
 
 
+class TestTheTierReadsTheRc(unittest.TestCase):
+    """THE MENTION, NOT THE FACT (issue #48, 2026-10-15): a plain rc=0
+    `git log` was stamped tests-failed because _RAN ('Ran N tests|N
+    passed') matched the log's COMMIT MESSAGES (this very repo's commits
+    end in 'N passed on this tree') and the same log's failure-worded
+    text sealed it: the sniff ran regardless of rc. But rc is the
+    run's ground truth (the residue exhibit's own doctrine), and
+    claims.py reads outcome == tests-failed as UN-BACKED -- a read-only
+    command's mention cost the seat a real claim for a word."""
+
+    def test_a_rc0_log_that_mentions_the_words_is_not_failed(self):
+        log = ("abc123 the call in the name slot (the salvages): red->green; "
+               "1768 passed on this tree) (#50)\n"
+               "dead5a a bad byte... the model sent 70 calls and failed to "
+               "pass arguments to tools; the poison link completes instead "
+               "of crashing the beat")
+        self.assertEqual(S.outcome("c:git", log, rc=0), "tests-ok")
+
+    def test_a_failing_test_run_is_still_failed(self):
+        self.assertEqual(S.outcome("bash", "Ran 5 tests",
+                                   "FAILED (failures=2)", rc=1),
+                         "tests-failed")
+
+    def test_a_passing_test_run_is_ok(self):
+        self.assertEqual(S.outcome("bash", "Ran 5 tests", "OK", rc=0),
+                         "tests-ok")
+
+
 if __name__ == "__main__":
     unittest.main()

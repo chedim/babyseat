@@ -233,7 +233,19 @@ def outcome(tool: str, head: str, tail: str = "",
     if tool in ("edit", "write"):
         return "applied" if "successfully" in r else ("failed" if r.strip() else "unknown")
     if tests_ran(head, tail) is not None:
-        return "tests-failed" if re.search(r"failed|failures=|errors=|\bfail\b", r) else "tests-ok"
+        bad = bool(re.search(r"failed|failures=|errors=|\bfail\b", r))
+        # THE TIER READS THE RC (issue #48): a rc=0 `git log` whose
+        # COMMIT MESSAGES matched _RAN ('N passed on this tree') and
+        # mentioned 'failed' was stamped tests-failed -- the words are
+        # the output's content, not the run's fact. rc is ground truth:
+        # a zero-exit run did not fail its tests; a non-zero exit kept
+        # the words' verdict; the pre-rc eras (capture-side) keep the
+        # text heuristic exactly as before.
+        if rc is None:
+            return "tests-failed" if bad else "tests-ok"
+        if rc == 0:
+            return "tests-ok"
+        return "tests-failed" if bad else "tests-ok"
     # the not-found TEXT classes come AFTER the rc gate: a run's exit
     # code is ground truth, and 'file or directory not found' inside a
     # FAILED pytest collection said nothing about the command's fate --
