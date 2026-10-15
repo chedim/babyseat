@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "membrane-seat"
-version = "0.4.1"
+version = "0.5.0"
 description = "Membrane: a local-first memory field and seat for AI -- its own web UI (`membrane standalone`) or inside Home Assistant (HACS)."
 readme = "README.md"
 requires-python = ">=3.10"
