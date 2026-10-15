@@ -65,10 +65,19 @@ def _implement(srv) -> None:
     def _of(d):
         mo = (d.properties or {}).get("method_of")
         return ent.eid in (mo if isinstance(mo, list) else [mo])
-    have = any(_of(d) and (d.properties or {}).get("method_name") == METHOD for d in list((est.docs or {}).values()))
-    if not have:
+    mine = [d for d in list((est.docs or {}).values())
+            if _of(d) and (d.properties or {}).get("method_name") == METHOD]
+    # THE DOOR IS KEPT, NOT JUST CREATED (2026-10-15, the live seat): a model
+    # call had REDEFINED presence.exec with a literal shell line, and the JS door
+    # stayed dead across every restart -- the boot only defined it when missing
+    broken = [d for d in mine if str((d.properties or {}).get("command") or "") != COMMAND]
+    if not mine or broken:
         from .night import method_define
         method_define(srv, est, None, None, on=ent.eid, method=METHOD, command=COMMAND)
+        if broken:
+            import sys
+            print(f"[jsexec] the seat's {METHOD} door was redefined "
+                  f"({str(broken[0].properties.get('command'))[:60]!r}); restored to {COMMAND}", file=sys.stderr)
     try:
         est.upsert(ent, embedder=None)
     except Exception:
