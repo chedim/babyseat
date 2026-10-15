@@ -219,13 +219,19 @@ class TestOldEditTakesParents(unittest.TestCase):
 
 
 class TestArgumentsInTheName(unittest.TestCase):
-    """2026-10-11: '{"action":' as a tool name got a lane refusal six times."""
-    def test_it_says_what_happened(self):
+    """2026-10-11: '{"action":' as a tool name got a lane refusal six times.
+    2026-10-15 (serve-msgs, 70 live calls): this class is a REAL call whose
+    json was split badly by the streamed assembly -- a decodable call in the
+    name slot routes (the one owner of the action names the family, args
+    untouched); the undecodable junk still refuses with the why."""
+    def test_it_salvages_when_the_action_names_the_tool(self):
         from membrane import toolset as T
+        leg, a = T.resolve('{"action": "read", "name": "presence.exec"}', {})
+        self.assertEqual((leg, a.get("spec")), ("entity_read", "presence.exec"))
+        # an unusable name-junk still says what happened
         with self.assertRaises(ValueError) as cm:
-            T.resolve('{"action": "read", "name": "presence.exec"}', {})
+            T.resolve('{"action":', {})
         self.assertIn("NAME held its arguments", str(cm.exception))
-        self.assertIn("entity", str(cm.exception))
 
 
     def test_an_empty_name_says_so(self):

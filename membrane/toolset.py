@@ -342,6 +342,70 @@ def _json_objects(args: dict) -> dict:
     return args
 
 
+def _call_in_name(name: str) -> tuple[str, dict] | None:
+    """THE WHOLE CALL IN THE NAME SLOT (2026-10-15, serve-msgs: 70 live calls
+    arrived with the entire call JSON riding the tool-name field -- the
+    streamed assembly split the deltas badly, all 70 on reasoning turns --
+    and the arguments slot empty; every one was refused, so the model sent
+    70 calls to nothing): a name whose JSON carries the call is un-strangled
+    into it -- the no_name_1 unwrap's doctrine, extended. Nothing decodable,
+    nameless and actionless, ambiguous: NOT this shape (the honest refusal
+    keeps its why; never a guess). Returns (real_name, real_args)."""
+    s = str(name or "").strip()
+    if not s[:1] in {"{", "["}:
+        return None
+    try:
+        d = json.loads(s)
+    except ValueError:
+        return None
+    if not isinstance(d, dict):
+        return None
+    if "parameters" in d or "arguments" in d:
+        # the WRAPPED spelling (2026-10-15, the 70 live calls): the call's
+        # args were separated, in "parameters" (older OpenAI twin spelling:
+        # "arguments")
+        inner = d.get("parameters") or d.get("arguments")
+        if isinstance(inner, str):
+            inner = _json_obj(inner)
+        if not isinstance(inner, dict):
+            return None
+        inner_name = str(d.get("name") or "")
+        if not inner_name:
+            owner = _owned_by_one_family(inner)
+            return (owner, dict(inner)) if owner else None
+        return inner_name, dict(inner)
+    # the FLAT spelling (2026-10-11's '{"action": "read", "name": ...}' in the
+    # name slot, six refusals): the WHOLE object is the args; the one owner
+    # of the action names the family -- a "name" field rides as a PARAM
+    # (entity add needs one exactly like that)
+    owner = _owned_by_one_family(d)
+    if owner:
+        return owner, dict(d)
+    # a LONE name -- {"name": "exec"} and nothing else -- is a bare tool
+    # selection: the family's own refusal lists its actions
+    if set(d) == {"name"} and str(d.get("name") or ""):
+        return str(d["name"]), {}
+    return None
+
+
+def _call_in_args(args: dict) -> dict | None:
+    """THE LOST NAME WITH A WRAPPED CALL (shape 2, 2026-10-15: 9 live calls
+    rode '"tool": ""' with the call's JSON wrapped as a string in the
+    arguments -- {"args": "<json>"}): unwrap the first decodable string that
+    holds an object, or None."""
+    for k in ("args", "input", "arguments", "parameters"):
+        o = _json_obj((args or {}).get(k))
+        if isinstance(o, dict):
+            return o
+    return None
+
+
+def _owned_by_one_family(inner: dict) -> str:
+    act = str(inner.get("action") or "")
+    owners = [f for f, fd in FAMILIES.items() if act and act in fd["actions"]]
+    return owners[0] if len(owners) == 1 else ""
+
+
 def resolve(name: str, args: dict) -> tuple[str, dict]:
     """(existing tool name, its args) for a family call; an existing tool's
     own name passes through; ValueError names the valid actions."""
@@ -350,10 +414,24 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
     # lesson): say what happened and how to send it
     _bare = str(name or "").strip().strip("\"'` ?")
     if not _bare:
+        # its arguments may have arrived wrapped as a string: acknowledged,
+        # echoed verbatim, so the resend carries them intact
+        _inner = _call_in_args(args)
+        if _inner is not None:
+            _owner = _owned_by_one_family(_inner)
+            if _owner:
+                return resolve(_owner, dict(_inner))
+            raise ValueError(
+                f"the call's name was LOST but its arguments arrived "
+                f"({json.dumps(_inner)[:160]}): resend naming the tool -- one of "
+                f"{', '.join(sorted(FAMILIES))} -- with the same arguments")
         raise ValueError(
             f"the call had no tool name ({str(name or '')!r}): name the tool -- one of "
             f"{', '.join(sorted(FAMILIES))} -- and put its JSON in the arguments")
     if str(name or "").lstrip()[:1] in ("{", "["):
+        _un = _call_in_name(name)
+        if _un is not None:
+            return resolve(_un[0], _un[1])
         raise ValueError(
             f"the call's NAME held its arguments ({str(name)[:80]!r}): put the tool's name -- "
             f"one of {', '.join(sorted(FAMILIES))} -- in the name, and that JSON in the arguments, "
