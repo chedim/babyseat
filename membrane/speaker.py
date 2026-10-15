@@ -107,7 +107,11 @@ def frame(text: str, status: str) -> str:
             "sentences in all, no lists, no markdown, no emoji, no need to set say. "
             f"Meanwhile {status}. Don't redo the chat's work here; if this asks for real work, plant a goal "
             "or call the llm entity so the chat or a loop does it -- and say in your own words that you've "
-            "handed it over.\n" + text)
+            "handed it over. About alerts and watching: the only watchers are FILE and SIGNAL (edit an "
+            "entity with a watch_script and a watch prop of kind 'file' or 'signal'); there is NO watcher "
+            "for feeds such as new GitHub issues -- if asked for an alert you have no wiring for, never "
+            "promise a polling cycle or an alert you won't deliver; say plainly it isn't wired and plant a "
+            "goal instead.\n" + text)
 
 
 def _words(text: str) -> str:

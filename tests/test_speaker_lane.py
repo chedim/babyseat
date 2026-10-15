@@ -253,6 +253,17 @@ class TestTheAnswerComesFirst(unittest.TestCase):
         self.assertIn("goal", f)
         self.assertIn("plant", f)
 
+    def test_the_voice_frame_never_promises_an_unwired_alert(self):
+        # issue #102: the lane promised "it will alert you on the next polling
+        # cycle" for gh issues, but there is no gh-issue watcher to deliver it.
+        f = SPK.frame("alert me when a new issue is filed", "the chat is idle")
+        self.assertIn("never promise", f)
+        self.assertIn("NO watcher", f)
+        self.assertIn("GitHub issues", f)
+        self.assertIn("watch_script", f)      # what it CAN wire is named
+        self.assertIn("file", f)
+        self.assertIn("signal", f)
+
 
 if __name__ == "__main__":
     unittest.main()
