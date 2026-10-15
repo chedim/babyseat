@@ -76,6 +76,24 @@ class TestGrammar(unittest.TestCase):
         self.assertEqual({r["eid"] for r in rows},
                          {"membrane::tool:clock", "membrane::tool:radios"})
 
+    def test_kind_file_sees_the_class_embedded_pool(self):
+        """issue #99: a file entity minted via entity_add lands as
+        'membrane::Component:files:x.py' (class-embedded); 'kind:file'
+        must see the files: pool inside the class, not read the class
+        itself as the kind (the query could not see the files: pool)."""
+        est = _est()
+        est.upsert(QuantumEntity(
+            eid="membrane::Component:files:membrane/router.py",
+            cls="Component", properties={"name": "router.py"}), embedder=None)
+        rows = EQ.run(est, "kind:file:*")
+        self.assertIn("membrane::Component:files:membrane/router.py",
+                      {r["eid"] for r in rows})
+        # it is still also a component (its class) -- the pool and the
+        # class are both true of it
+        rows = EQ.run(est, "kind:component:*")
+        self.assertIn("membrane::Component:files:membrane/router.py",
+                      {r["eid"] for r in rows})
+
     def test_name_prefix(self):
         est = _est()
         rows = EQ.run(est, "name~: router.py")
