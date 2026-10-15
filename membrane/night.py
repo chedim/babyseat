@@ -3967,6 +3967,26 @@ def _script_state(ent, now: float, extra: dict, trigger: str,
             "extra": dict(extra)}
 
 
+def _brief_for(out: dict) -> str:
+    """The field.changed brief for one apply: a kind-scoped word, never
+    the render/prose text (the graph's privacy guard). run -> the outcome
+    rc; intent -> 'goal'; position -> 'moved'; links -> 'linked'; else ''
+    (the trigger itself -- tick/getter/watch/... -- is the why)."""
+    if out.get("run"):
+        rr = out.get("run_result") or {}
+        rc = rr.get("rc")
+        return f"rc={rc}" if rc is not None else str(rr.get("outcome") or "ok")
+    if out.get("intent"):
+        return "goal"
+    patch = out.get("patch")
+    if isinstance(patch, dict):
+        if "position" in patch:
+            return "moved"
+        if "links" in patch:
+            return "linked"
+    return ""
+
+
 def apply_entity_update(srv, ent, out: dict, trigger: str,
                         silent: bool = False) -> dict:
     """The engine applies the script's RESULT (the authorship covenant:
@@ -4194,6 +4214,15 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
                      {"event": "agent-entity-scripted", "origin": "update-script",
                       "eid": ent.eid, "trigger": trigger,
                       "applied": changed})
+    if changed:
+        # THE GRAPH PULSE (2026-10-15): every apply lands a field.changed
+        # frame -- the graph shows ALL changes, no matter the source --
+        # with a kind/brief label, never the render/prose text. Silent
+        # ticks pulse too (the heartbeat is its own change).
+        from . import fieldpulse as _fp
+        _p = _fp.of(srv)
+        if _p is not None:
+            _p.changed(ent.eid, trigger, _brief_for(out))
     _ret = {"applied": changed}
     if out.get("patch_refused"):
         _ret["patch_refused"] = out["patch_refused"]
