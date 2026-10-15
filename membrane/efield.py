@@ -599,6 +599,36 @@ class EntityField:
                     R.upsert_co(self.b, self.origin, a, b, rb, key, seq, ts, said)
                     self._wgen += 1
 
+    _idiom_cache: tuple | None = None
+
+    def _idiom_counts(self):
+        """The act counts over this field's tool calls, rebuilt only when the field
+        wrote something since (the write counter)."""
+        from . import idioms as I
+        c = self._idiom_cache
+        if c is None or c[0] != self._wgen:
+            evs = sorted(self.b.scan("events", {"origin": self.origin, "stream": "observation"}),
+                         key=lambda kv: (kv[1].get("seq") or 0))
+            c = self._idiom_cache = (self._wgen, I.count(evs))
+        return c[1]
+
+    def idioms(self, min_n: int = 8) -> list[dict]:
+        """The seat's idioms: steps from one act to a DIFFERENT act within a
+        session, more often than chance -- {from, to, n, share, lift}, best first."""
+        from . import idioms as I
+        return I.table(*self._idiom_counts(), min_n=min_n)
+
+    def followed_by(self, eid: str, k: int = 3, min_n: int = 3) -> list[dict]:
+        """What a command or tool entity is usually followed by (most often first)."""
+        from . import idioms as I
+        name = I.name_of(eid)
+        if name is None:
+            return []
+        rows = [r for r in I.table(*self._idiom_counts(), min_n=min_n)
+                if r["from"] == name and r["lift"] >= 1.0]      # below chance is no idiom
+        rows.sort(key=lambda r: (-r["n"], -r["lift"], r["to"]))
+        return rows[:k]
+
     _co_index: dict | None = None
 
     def edges_like(self, edge, k: int = 5, min_sim: float = 0.55) -> list[dict]:
