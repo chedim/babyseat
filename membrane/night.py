@@ -1180,7 +1180,8 @@ MINE_SPAN_CHARS = 400        # and never a verbatim body: each span is capped
 
 _DEFINED_TERM_RE = re.compile(
     r"\b([A-Za-z][A-Za-z0-9 _'&/-]{2,40})\b\s+"
-    r"(?:is|are|refers\s+to|means|denotes)\b", re.IGNORECASE)
+    r"(?:is|are|refers\s+to|means|denotes|states|describes)\b",
+    re.IGNORECASE)
 
 
 def _salient_spans(text: str, max_spans: int = MINE_MAX_SPANS) -> list[str]:
@@ -1222,6 +1223,54 @@ def _salient_spans(text: str, max_spans: int = MINE_MAX_SPANS) -> list[str]:
     return spans[:max_spans]
 
 
+def _strip_article(s: str) -> str:
+    """Drop a leading article so a defined term's NAME is the bare term:
+    'The equivalence principle' -> 'equivalence principle'."""
+    s = (s or "").strip()
+    for a in ("a ", "an ", "the "):
+        if s.lower().startswith(a):
+            return s[len(a):].strip()
+    return s
+
+
+def _concept_spans(text: str,
+                   max_concepts: int = MINE_MAX_SPANS) -> list[dict]:
+    """Issue #118: the document-mode harvest -- the spans that become
+    Concept entities. An ATX section header is a topic anchor; a
+    defined-term sentence ("X is/means/states ...") is a claim whose
+    ``definition`` is the verbatim line. Each row returns {name,
+    definition, line (1-indexed)}; the ``definition`` is the SAME
+    normalized span ``_salient_spans`` keeps, so its event key is the
+    concept's ``first_seen``. Deduped by lowercased name, bounded."""
+    if not text:
+        return []
+    out: list[dict] = []
+    seen: set[str] = set()
+    lines = text.splitlines()
+    for i, ln in enumerate(lines):
+        s = ln.strip()
+        if s.startswith("#"):
+            title = " ".join(s.lstrip("#").split())[:MINE_SPAN_CHARS]
+            if title and title.lower() not in seen:
+                seen.add(title.lower())
+                out.append({"name": title, "definition": title,
+                            "line": i + 1})
+                if len(out) >= max_concepts:
+                    return out
+            continue
+        m = _DEFINED_TERM_RE.search(ln)
+        if m:
+            term = _strip_article(m.group(1))
+            if term and term.lower() not in seen:
+                seen.add(term.lower())
+                out.append({"name": term,
+                            "definition": " ".join(ln.split())[:MINE_SPAN_CHARS],
+                            "line": i + 1})
+                if len(out) >= max_concepts:
+                    return out
+    return out
+
+
 def mine_artifact(fld, est, spec, max_spans: int = MINE_MAX_SPANS,
                   force: bool = False) -> dict:
     """THE LAZY ARTIFACT INGEST (issue #116): route the SALIENT spans of a
@@ -1232,7 +1281,10 @@ def mine_artifact(fld, est, spec, max_spans: int = MINE_MAX_SPANS,
     f: entity must exist (the seat touched it) AND show a re-read
     (``read_count >= 2``, set by file_read_entity). The ``mined_ts``
     property makes a second pass a no-op; ``force`` bypasses both gates
-    (tests/manual). Returns {ok, eid, mined, spans, reason}."""
+    (tests/manual). Issue #118: the defined-term sentences and section
+    headers among those spans ALSO mint Concept entities (``concepts`` =
+    the count), each with ``first_seen`` = the mined event's key.
+    Returns {ok, eid, mined, spans, concepts, reason}."""
     if fld is None or est is None:
         return {"ok": False, "mined": 0, "spans": 0, "reason": "no field/store"}
     fp = _file_resolve(spec)
@@ -1258,22 +1310,39 @@ def mine_artifact(fld, est, spec, max_spans: int = MINE_MAX_SPANS,
         return {"ok": False, "eid": eid, "mined": 0, "spans": 0,
                 "reason": f"{type(e).__name__}: {e}"[:120]}
     spans = _salient_spans(text, max_spans)
-    if not spans:
+    concepts = _concept_spans(text, max_concepts=max_spans)
+    if not spans and not concepts:
         return {"ok": False, "eid": eid, "mined": 0, "spans": 0,
                 "reason": "no salient spans"}
     rel = os.path.relpath(fp) or fp
+    # every concept's definition is also mined as an event, so ``first_seen``
+    # always points at a REAL event (write_events is idempotent: a concept
+    # capped out of ``spans`` still gets its own row without a double-count)
+    to_write = list(spans)
+    for c in concepts:
+        if c["definition"] not in to_write:
+            to_write.append(c["definition"])
     before = int(fld._ostats.get("ev_n") or 0)
-    fld.write_events([ST.Event(stream="discourse", role="doc", text=s,
-                               src=f"artifact:{rel}", tool="mine",
-                               subject=eid) for s in spans],
-                     session="artifact")
+    keys = fld.write_events([ST.Event(stream="discourse", role="doc", text=s,
+                                      src=f"artifact:{rel}", tool="mine",
+                                      subject=eid) for s in to_write],
+                            session="artifact")
     mined = int(fld._ostats.get("ev_n") or 0) - before
+    span_key = dict(zip(to_write, keys))
+    nconcepts = 0
+    for c in concepts:
+        concept_entity(est, fp, c["name"], c["definition"],
+                       line=c["line"],
+                       first_seen=span_key.get(c["definition"]))
+        nconcepts += 1
     if getattr(fld.emb, "model", "?") != "?":
         fld.process()
     props["mined_ts"] = time.time()
     props["mine_spans"] = len(spans)
+    props["mine_concepts"] = nconcepts
     est.upsert(doc)
-    return {"ok": True, "eid": eid, "mined": mined, "spans": len(spans)}
+    return {"ok": True, "eid": eid, "mined": mined, "spans": len(spans),
+            "concepts": nconcepts}
 
 
 # ---- THE CONCEPT ENTITY (issue #117: quote-and-verify) ------------------------

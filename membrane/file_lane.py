@@ -95,6 +95,7 @@ def mine(srv, ent, spec: str) -> dict:
     if out.get("ok"):
         props["mine_mined"] = out.get("mined")
         props["mine_spans"] = out.get("spans")
+        props["mine_concepts"] = out.get("concepts")
     else:
         props["script_last_error"] = (out.get("reason") or "mine failed")[:300]
     ent.properties = props
