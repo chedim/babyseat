@@ -92,3 +92,39 @@ class TestTheIdioms(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestTheCountsAreKeptNotRescanned(unittest.TestCase):
+    """2026-10-15, the live seat: a command's card took 6 s -- the idiom counts
+    were rebuilt by rescanning every tool-call event whenever the field had
+    written anything, and a live field writes constantly. The history is scanned
+    ONCE; every tool call after that is counted as it is applied."""
+
+    def _scans(self, f):
+        real = f.b.scan
+        seen = []
+
+        def spy(coll, *a, **k):
+            eq = (a[0] if a else k.get("eq")) or {}
+            if coll == "events" and eq.get("stream") == "observation":   # the idioms' scan, not processing's
+                seen.append(1)
+            return real(coll, *a, **k)
+        f.b.scan = spy
+        return seen
+
+    def test_new_acts_are_counted_without_a_rescan(self):
+        f = _world()
+        f.idioms(min_n=1)                                   # the one scan
+        seen = self._scans(f)
+        f.write_events([_call("z", 9000.0, "shell", {"command": "curl -s http://x"}, "z1"),
+                        _call("z", 9001.0, "shell", {"command": "jq .a"}, "z2")], session="z")
+        f.process()
+        self.assertIn(("curl", "jq"), {(d["from"], d["to"]) for d in f.idioms(min_n=1)})
+        f.followed_by("c:grep"); f.suggested_methods(min_n=1)
+        self.assertEqual(seen, [], "the history was rescanned")
+
+    def test_a_rebuild_never_counts_twice(self):
+        f = _world()
+        before = {(d["from"], d["to"]): d["n"] for d in f.idioms(min_n=1)}
+        f.rebuild()
+        self.assertEqual({(d["from"], d["to"]): d["n"] for d in f.idioms(min_n=1)}, before)

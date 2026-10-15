@@ -616,18 +616,24 @@ class EntityField:
                     R.upsert_co(self.b, self.origin, a, b, rb, key, seq, ts, said)
                     self._wgen += 1
 
-    _idiom_cache: tuple | None = None
+    _idiom_cache = None                 # idioms.Tally once built
+
+    def _idiom_tally(self):
+        """The idioms' running tally: the history scanned ONCE, then every applied
+        tool call fed as it lands (_apply); a rebuild drops it (2026-10-15: the
+        rescan on every write cost a live seat 6 s per command card)."""
+        from . import idioms as I
+        if self._idiom_cache is None:
+            tl = I.Tally()
+            for _k, ev in sorted(self.b.scan("events", {"origin": self.origin, "stream": "observation"}),
+                                 key=lambda kv: (kv[1].get("seq") or 0)):
+                tl.feed(ev)
+            self._idiom_cache = tl
+        return self._idiom_cache
 
     def _idiom_counts(self):
-        """The act counts over this field's tool calls, rebuilt only when the field
-        wrote something since (the write counter)."""
-        from . import idioms as I
-        c = self._idiom_cache
-        if c is None or c[0] != self._wgen:
-            evs = sorted(self.b.scan("events", {"origin": self.origin, "stream": "observation"}),
-                         key=lambda kv: (kv[1].get("seq") or 0))
-            c = self._idiom_cache = (self._wgen, I.count(evs), I.pairs(evs))
-        return c[1]
+        tl = self._idiom_tally()
+        return tl.acts, tl.out, tl.steps
 
     def idioms(self, min_n: int = 8) -> list[dict]:
         """The seat's idioms: steps from one act to a DIFFERENT act within a
@@ -642,7 +648,7 @@ class EntityField:
         from . import idioms as I
         counts = self._idiom_counts()
         rows = {(r["from"], r["to"]): r for r in I.table(*counts, min_n=min_n) if r["lift"] >= 1.0}
-        return I.suggest(self._idiom_cache[2], rows, min_n=min_n)
+        return I.suggest(self._idiom_tally().pairs, rows, min_n=min_n)
 
     def suggested_for(self, eid: str, k: int = 2) -> list[dict]:
         """A command entity's suggested methods (it starts them)."""
@@ -1163,6 +1169,8 @@ class EntityField:
             boiler[nk] = boiler.get(nk, 0) + 1
             if boiler[nk] > BOILER_MIN:
                 skip.add(i)
+        if self._idiom_cache is not None and ev.get("stream") == "observation":
+            self._idiom_cache.feed(ev)              # the idioms' running tally
         # THE STEP LISTENERS (forewarn.py): every applied event, boilerplate
         # INCLUDED -- a failure seen for the 9th time is exactly what the
         # forewarning must not miss (the listeners below see only what moves)
@@ -1426,6 +1434,7 @@ class EntityField:
         self._states, self._dirty, self._deltas, self._now = {}, set(), {}, {}
         self._wgen += 1
         self._ep_index = None
+        self._idiom_cache = None
         for k, ev in list(self.b.scan("events", {"origin": self.origin, "status": "applied"})):
             ev["status"] = "embedded"
             self.b.upsert("events", k, ev)
@@ -1757,6 +1766,7 @@ class EntityField:
         self._states, self._dirty, self._deltas, self._now = {}, set(), {}, {}
         self._wgen += 1
         self._ep_index = None
+        self._idiom_cache = None
         n = 0
         for k, ev in list(self.b.scan("events", {"origin": self.origin,
                                                  "status": ["applied", "embedded", "empty"]})):
