@@ -1,5 +1,48 @@
-## Unreleased
-- **License: PolyForm Noncommercial 1.0.0.** The custom private-use license (and the MIT text that briefly replaced it on main, never released) gives way to a standard noncommercial license: anyone may use, modify and share membrane for noncommercial purposes — personal, hobby, research, education, charities and public institutions — and commercial use needs the author's written permission. The package metadata carries the SPDX id `PolyForm-Noncommercial-1.0.0`; LICENSE is the official text, verbatim, behind the required notice.
+## v0.5.0 (2026-10-15) — the seat gets experience
+
+This release also brings v0.4.2's fixes to PyPI for the first time (see v0.4.2 below).
+
+### Memory: the field learns from what happens
+- **Entities are worldlines** (#65). An entity's life is kept as *episodes* (centroids of runs of 5 mentions), and recall reads a young entity by its mean and a mature one by its best episode, so it can find an entity through an old chapter of its life. Replaying a real seat's history and asking who 1,500 later, never-seen mentions were about: MRR 0.210 → **0.539** (mature entities 0.206 → 0.634). `recall(by="state")` keeps the old read; `MEMBRANE_WORLDLINES=0` restores it as the default. An upgraded field keeps its history (#70): until an entity's episodes cover its life, its mean is one more point, so an old entity is never read by its newest mentions alone.
+- **Every change keeps its direction** (#55, #57; evidence in `experiments/delta_lane`, #56): beside how far a mention moved an entity, the field keeps *which way* (2048 sign bits, against the running state and against the previous mention).
+- **"Changes like this one"** (#58): an entity's latest change and the past changes most like it, on itself and on others, recalled by resemblance.
+- **Typed co-edges** (#62): a sentence naming two things records their relation's *kind* by resemblance, read with both things projected out, so the relation is measured rather than the pair. Edges written by the same sentence never answer each other.
+- **Idioms** (#67): what the seat's acts are usually followed by (`grep → read`, `entity_add → entity_edit`, `python → git`), above chance only, on command and tool cards. Recording only: an idiom never runs anything.
+- **Suggested methods** (#73): a shell idiom the seat keeps repeating on one thing (`grep -n … file` → `sed -n … file`) is offered as a ready two-step cliffhanger method, with a real example and the exact `exec(action='define', …)` to copy. Never defined by itself.
+- **The recall indexes see new writes** (#64): "changes like this one" and edge recall froze at their first build on the file store, and rebuilt on every call on Couchbase.
+
+### Forewarning (recording only: nothing reaches the model until the live calibration holds)
+- **Moments** (#59): before a tool result exists, the outcomes that followed the most similar past moments. A real seat's history: AUC 0.65; flagged moments failed twice as often.
+- **Acts** (#66): every tool call, forecast from its program's failure rate and the most similar earlier calls (the call itself, never its result). A real seat's history: AUC 0.768 on first-time calls; 71% of flagged calls went bad, against a 21% base rate.
+
+### The viewer (#68)
+The entity card shows its **life** (chapters, and its shape as percentiles among the field's grown entities: how far it jumps, how widely it ranges, how often it returns), "changes like this one", the sentence each edge was said in, and what a command is usually followed by. The HUD shows how many forewarned moments and calls went bad.
+
+### The seat
+- **The think switch** (#49, #52): `--think on|off|auto`, and a chat-menu button to change it live.
+- **`membrane stop`** (#47): stops the seat when ctrl+c is swallowed.
+- **Broken tool calls now run** (#46, #50): calls rendered as text, or with their JSON in the tool-name slot, are salvaged into real calls.
+- **Receipts tell the truth** (#45, #53, #54): a bad byte in a command's output no longer kills the thinker; a killed job says why; an rc=0 receipt is no longer marked failed for words in its output.
+- **Cliffhanger method args always bind, or the call says why** (#71, reported by Memo): the dialect is `{{name}}`; an arg the command never names is refused with the near misses it saw (`{n}`, `$n`), a positional list binds in order, and `args.timeout` is honoured (it only ever shortens a run).
+- **A leading slash is no part of a tool's name** (#72, reported by Memo): `/exec` resolves as `exec` at the seat's dispatcher and at the MCP door.
+- **The seat's own bug reports, fixed**: exec receipts carry the real rc (#27); a method re-runs through its own door (#30); wake dispatch reads the action form (#5) and wake dialects route correctly (#17); canonical file ids past build/cache twins (#8); the seat's name reaches open pages (#6); the JS door refuses shell payloads and failed runs say why (#2); card names survive every spelling (#24); notes minted before the splitter rescue graduate (#33); standalone stops on ctrl+c (#34); streamed calls without an index reassemble (#12, #25); the store's writer lock fails fast beside a live seat; tool-observed evidence outranks prose-only phantoms.
+
+### License (#63)
+**PolyForm Noncommercial 1.0.0.** Anyone may use, modify and share membrane for noncommercial purposes: personal, hobby, research, education, charities and public institutions. Commercial use needs the author's written permission. (An MIT text sat briefly on main and was never released.)
+
+### Release
+- The version is one version: `pyproject.toml`, the Home Assistant manifest (and its `membrane-seat` pin), the README and the changelog agree, enforced by a test. **The HA integration had been pinning `membrane-seat==0.3.4`**, so Home Assistant installs ran 0.3.4's seat and UI; it now pins this release.
+- The publish lane refuses a tag that isn't the package's version (v0.4.2 published on GitHub with `pyproject.toml` still at 0.4.1; PyPI refused the upload).
+
+### Tried and not shipped
+Measured on real seat fields and dropped: entity property facets from embeddings, relation kinds and relation shifts as classifiers, kinds of motion from change trajectories, learned clusters of tool calls, and "taking a memory apart" by subtracting averages or chapters. On real conversational prose, what worked was always comparing whole moments; subtracting parts left the topic.
+
+## v0.4.2 (2026-10-14) — GitHub release only; it never reached PyPI
+- Opt-in prompts render the agreed seat name (#7).
+- Entity states persist through graduation (#14).
+- Short and unpunctuated prose is rescued from the sentence splitter's length gate (#16).
+- Wakes are delivered builtins-first: no wake-shaped spec reaches `/bin/sh` (#18).
+- Docs: the `membrane opencode` command; the WAKES section matches the live wake dispatch.
 
 ## v0.4.1 (2026-10-13)
 - recall: speaker rows (person:/seat:) rank below subject hits; hop guard pins real evidence above hop discounts (issue #1)
