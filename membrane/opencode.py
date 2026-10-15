@@ -944,6 +944,7 @@ def main() -> None:
     # path. Couchbase for a real seat; RAM for lab paths or an unreachable
     # cluster (open_backend degrades, never raises).
     srv.capturer = srv.efield = None
+    srv.efield_locked = False
     try:
         from .capture import Capturer, LazyEmbedder, mode_from_env
         if mode_from_env() != "off":
@@ -1030,6 +1031,15 @@ def main() -> None:
             # every state row into the append-only journal, ~250MB; pre-split
             # states convert on their next mention: efield.adopt_legacy)
     except Exception as e:
+        try:
+            from .cblstore import StoreBusy as _StoreBusy
+            if isinstance(e, _StoreBusy):
+                # the field writer lock is held by a live serve (issue
+                # #127): the entity/read door refuses with a clear
+                # 'serve-holds-field-lock' instead of closing the conn.
+                srv.efield_locked = True
+        except Exception:
+            pass
         print(f"[efield] capture off ({e})", file=sys.stderr)
     # (srv.receipts is set above from --no-receipts; a re-assignment here
     # to True used to silently kill the kill switch)

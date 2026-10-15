@@ -6656,6 +6656,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if (qs.get("nofire") or ["0"])[0] in ("1", "true"):
             fired = {"fired": False, "reason": "deferred: the refresh runs as a job (jobs.py)"}
         else:
+            if getattr(srv, "efield_locked", False):
+                self._json_err_raw(423, "serve-holds-field-lock: the entity "
+                                        "field is held by the live serve -- "
+                                        "stop it, or read with nofire=1 for "
+                                        "the cached value"); return
             fired = _wa.entity_read_back(srv, ent, force=bool(
                 (qs.get("run") or ["0"])[0] in ("1", "true")))
         # executor_value resolves the relations backend itself (the
