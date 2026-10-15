@@ -67,6 +67,17 @@ class TestChangesLikeThisOne(unittest.TestCase):
         for g in got:
             self.assertIn("pass again", g["text"])
 
+    def test_a_new_change_is_seen_by_the_next_query(self):
+        """The index is cached; a change that lands after the first query must
+        still answer the next one (it was keyed on the backend's write_gen,
+        which plain appends never bump: the index froze at its first build)."""
+        f = _world()
+        q = _row(f, FILES[2], 2)
+        f.deltas_like(q, k=5, scope="others")                 # builds the cache
+        _say(f, [s.format(f="membrane/delta.py") for s in STORY], t0=2000.0)
+        got = {g["eid"] for g in f.deltas_like(q, k=5, scope="others")}
+        self.assertIn("f:membrane/delta.py", got)
+
     def test_self_scope_stays_on_the_entity_and_skips_the_query(self):
         f = _world()
         q = _row(f, FILES[2], 3)
