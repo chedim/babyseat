@@ -1439,6 +1439,16 @@ def tool_method_call(args: dict, port: int) -> str:
             a = json.loads(a)
         except ValueError:
             a = None
+    if isinstance(a, list):              # positional args (issue #61): the seat binds them in order
+        out = _http(port, "POST", "/membrane/method/call", {
+            "object": str(args.get("object") or args.get("spec") or ""),
+            "method": str(args.get("method") or ""), "args": a})
+        if not out.get("object") or out.get("status") == "blocked":
+            return (f"call {out.get('status', 'blocked')}: {out.get('error', 'unknown error')}"
+                    + (f" [resolution order: {' > '.join(out['mro'])}]" if out.get("mro") else ""))
+        return (f"[{out.get('status')}] {out['method']} on {out['object']} (via {out['via']}): "
+                f"rc={out.get('rc')} {out.get('outcome')}\nran: {str(out.get('fed') or '')[:300]}\n"
+                f"head: {str(out.get('head') or '')[:600]}")
     a = dict(a) if isinstance(a, dict) else {}
     # THE PARAM BAG (issue #5 residual): the models put the wake's
     # about/at/prompt (and the browser executor's code) at the TOP of the

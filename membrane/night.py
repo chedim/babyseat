@@ -1644,7 +1644,7 @@ def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
         # then ran its first output forever; the fed line is the residue
         if fed != cmd:
             doc.properties["last_fed"] = fed
-        out = run_command_entity(fld, est, mem, fed, timeout_s=EXEC_TIMEOUT_S)
+        out = run_command_entity(fld, est, mem, fed, timeout_s=_call_timeout(args))
         out.pop("doc", None)
         # THE RESIDUE lands on the asking doc (the canon doc carries its
         # own; the copy covers a differing key)
@@ -2329,6 +2329,56 @@ def _blocked(obj, method, why, **extra) -> dict:
             "method": method, "error": why, **extra}
 
 
+def _near_misses(template: str, name: str) -> list[str]:
+    """Spellings of an arg in a command that the {{name}} dialect does not bind."""
+    pats = [("{" + name + "}", r"(?<!\{)\{" + re.escape(name) + r"\}(?!\})"),
+            ("$" + name, r"\$" + re.escape(name) + r"\b"), ("${" + name + "}", r"\$\{" + re.escape(name) + r"\}")]
+    return [shown for shown, rx in pats if re.search(rx, template or "")]
+
+
+CALL_CONTROLS = ("timeout",)   # call-level controls: honoured, never a template's to bind
+
+
+def _call_timeout(args) -> float:
+    """A call's own timeout (remote_executor.exec(code, timeout) declares one):
+    honoured, but it only ever SHORTENS the inline budget."""
+    try:
+        t = float((args or {}).get("timeout"))
+    except (TypeError, ValueError):
+        return EXEC_TIMEOUT_S
+    return max(0.5, min(t, EXEC_TIMEOUT_S))
+
+
+def _bind_args(m, args):
+    """ISSUE #61 (Memo): args silently vanished -- a probe templated {n} / $n /
+    $1 / $@ ran LITERALLY and succeeded, and `gh issue view {n}` errored on a
+    literal '{n}'. The dialect is {{name}}. A positional list binds to the
+    command's parameters in order; on a plain method (a command, no steps or
+    guard of its own to read them) an arg that binds to nothing is REFUSED,
+    naming the dialect and the near misses. -> (args dict, None) | (None, why)."""
+    props = m.properties or {}
+    template = str(props.get("command") or "")
+    params = command_params(template)
+    if isinstance(args, (list, tuple)):
+        vals = list(args)
+        if not params or len(vals) > len(params):
+            have = ", ".join("{{" + x + "}}" for x in params) or "no {{name}} placeholders"
+            return None, (f"{len(vals)} positional arg(s) {vals!r} cannot bind: the command has {have} "
+                          f"(the dialect is {{{{name}}}}; pass args by name, or add placeholders)")
+        return dict(zip(params, vals)), None
+    args = dict(args or {})
+    plain = bool(template.strip()) and not props.get("parents")
+    unbound = [k for k in args if plain and k not in params and k not in CALL_CONTROLS]
+    if unbound:
+        bits = []
+        for k in unbound:
+            near = _near_misses(template, k)
+            bits.append(f"{k} (the command has no {{{{{k}}}}}" + (f"; it has {', '.join(near)} -- write {{{{{k}}}}}" if near else "") + ")")
+        return None, ("args bind to nothing: " + "; ".join(bits) + ". The method dialect is {{name}}"
+                      + (f"; this command binds: {', '.join(params)}" if params else "; this command binds no args"))
+    return args, None
+
+
 def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | None = None,
                 _depth: int = 0) -> dict:
     if est is None:
@@ -2353,6 +2403,10 @@ def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | Non
                         + (f"; it answers to: {', '.join(have)}" if have else "")
                         + " -- define one: exec(action='define', on=<class or object>, method=..., command=...)",
                         mro=mro)
+    args, why = _bind_args(m, args)
+    if why:
+        return _blocked(obj, method, why, via=via or "global", mro=mro,
+                        params=command_params(str((m.properties or {}).get("command") or "")))
     props = effective_properties(est, obj)
     full = {f"self.{k}": v for k, v in props.items() if isinstance(v, (str, int, float, bool))}
     sid = short_name_of(obj)

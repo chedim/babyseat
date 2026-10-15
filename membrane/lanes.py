@@ -6500,7 +6500,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         else:
             a = body.get("args")
             res = method_call(srv, est, _efield_on(srv), srv.membrane, str(body.get("object") or ""),
-                              str(body.get("method") or ""), a if isinstance(a, dict) else {})
+                              str(body.get("method") or ""), a if isinstance(a, (dict, list)) else {})
         if not res.get("ok") and not res.get("object"):
             self._json_err_raw(400, str(res.get("error"))); return
         self._json_out(res)
