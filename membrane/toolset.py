@@ -309,7 +309,9 @@ def canonical(name: str, args: dict) -> tuple[str, dict]:
     seat called 'entity/action-read', 'membrane-entity_read' -- names no lane
     lists, so even its READS were refused. A namespace prefix drops; a
     'family/action-x' (or family.x, family:x) is the family's call."""
-    name = _NS.sub("", str(name or "").strip())
+    # ISSUE #60 (Memo): a route string reused as a tool name kept its leading
+    # slash -- '/exec' on a headless seat's watch pulse, refused though exec is mounted
+    name = _NS.sub("", str(name or "").strip().lstrip("/").strip())
     m = _FAM_ACT.match(name)
     if m and m.group(1).lower() in FAMILIES:
         fam, act = m.group(1).lower(), m.group(2).lower()

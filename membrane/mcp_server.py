@@ -1617,7 +1617,9 @@ def _handle(req: dict, port: int) -> dict | None:
     if method == "tools/list":
         return _rpc_result(req_id, {"tools": TOOLS})
     if method == "tools/call":
-        name = str(params.get("name") or "")
+        # ISSUE #60 (Memo): a route string as a tool name ('/exec') -- the slash
+        # is no part of the name the registry advertises
+        name = str(params.get("name") or "").strip().lstrip("/")
         impl = TOOL_IMPLS.get(name)
         if impl is None:
             return _rpc_error(req_id, -32602, f"unknown tool: {name}")
