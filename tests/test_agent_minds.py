@@ -42,10 +42,7 @@ def _get(url: str):
 
 @pytest.fixture()
 def seat(tmp_path):
-    """A booted native serve on an ephemeral field."""
-    import base64
-    import os
-    import subprocess
+    """A booted native serve on an ephemeral field (open surface: no auth)."""
     import time
 
     port = 11641
@@ -58,29 +55,20 @@ def seat(tmp_path):
          "--field", str(tmp_path / "rag-field.json")],
         env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     base = f"http://127.0.0.1:{port}"
-    cred = tmp_path / "serve-auth.json"
-    hdr = None
     deadline = time.time() + 40
+    ready = False
     while time.time() < deadline:
-        if cred.exists():
-            d = json.loads(cred.read_text())
-            tok = base64.b64encode(
-                f"{d['user']}:{d['password']}".encode()).decode()
-            hdr = "Basic " + tok
-            try:
-                req = urllib.request.Request(base + "/agent",
-                                             headers={"Authorization": hdr})
-                with urllib.request.urlopen(req, timeout=3) as r:
-                    json.loads(r.read())
-                break
-            except Exception:
-                pass
-        time.sleep(0.3)
-    assert hdr, "seat never became ready"
+        try:
+            with urllib.request.urlopen(base + "/agent", timeout=3) as r:
+                json.loads(r.read())
+            ready = True
+            break
+        except Exception:
+            time.sleep(0.3)
+    assert ready, "seat never became ready"
 
     def _get(url: str):
-        req = urllib.request.Request(url, headers={"Authorization": hdr})
-        with urllib.request.urlopen(req, timeout=5) as r:
+        with urllib.request.urlopen(url, timeout=5) as r:
             return json.loads(r.read())
     yield base, _get
     proc.terminate()

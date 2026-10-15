@@ -39,14 +39,11 @@ class TestAttachLane(unittest.TestCase):
                                            cont=True))
         self.assertIn("-c", _attach_cmd("opencode", 4096, ["-c"], cont=True))
 
-    def test_env_swaps_config_for_auth(self):
-        e = _attach_env({"OPENCODE_CONFIG": "/tmp/cfg.json", "PATH": "/bin"},
-                        "opencode", "pw")
-        # the TUI must not front its own /v1 lane: config out, auth in
+    def test_env_drops_config(self):
+        e = _attach_env({"OPENCODE_CONFIG": "/tmp/cfg.json", "PATH": "/bin"})
+        # the TUI must not front its own /v1 lane: config out, env else intact
         self.assertNotIn("OPENCODE_CONFIG", e)
         self.assertNotIn("OPENCODE_CONFIG_CONTENT", e)
-        self.assertEqual(e["OPENCODE_SERVER_USERNAME"], "opencode")
-        self.assertEqual(e["OPENCODE_SERVER_PASSWORD"], "pw")
         self.assertEqual(e["PATH"], "/bin")
 
 

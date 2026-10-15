@@ -2,9 +2,9 @@
 its sensors need the seat's read surfaces (/membrane/state, the universe
 map's cloud/entities/axes, the entity drawer's read/related) -- but they
 live on the /v1 proxy (:11500), bound to 127.0.0.1 with NO auth and with
-WRITE routes beside them. The LAN-facing, basic-authed serve (:4096)
-relays exactly the read-only allow-list, GET only; everything else on the
-proxy stays unreachable from outside.
+WRITE routes beside them. The open LAN-facing serve (:4096) relays exactly
+the read-only allow-list, GET only; everything else on the proxy stays
+unreachable from outside.
 """
 import base64
 import json
@@ -79,7 +79,7 @@ class TestRelay(unittest.TestCase):
         threading.Thread(target=self.seat.serve_forever, daemon=True).start()
         handler = MS.make_handler(
             hub=MS.SSEHub(), sessions=MS.SessionStore(),
-            messages=MS.MessageStore(), user="u", password="p", config={},
+            messages=MS.MessageStore(), config={},
             runner=None, srv=self.seat)
         self.serve = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         threading.Thread(target=self.serve.serve_forever, daemon=True).start()
@@ -105,10 +105,11 @@ class TestRelay(unittest.TestCase):
         self.assertEqual(st, 200)
         self.assertEqual(body, {"echo": "/membrane/map/cloud?x=pca1&y=pca2"})
 
-    def test_needs_the_serve_login(self):
-        st, _ = self._get("/membrane/state", auth=False)
-        self.assertEqual(st, 401)
-        self.assertEqual(_Seat.seen, [])
+    def test_read_surface_is_open(self):
+        # the serve is open (no baked-in auth): a headerless read relays
+        st, body = self._get("/membrane/state", auth=False)
+        self.assertEqual(st, 200)
+        self.assertEqual(_Seat.seen, [("GET", "/membrane/state")])
 
     def test_writes_never_relay(self):
         st, _ = self._get("/membrane/entity/add")

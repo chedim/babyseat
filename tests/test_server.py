@@ -606,8 +606,7 @@ class TestHttpSurface(unittest.TestCase):
         cls.abort_seen = {}
         stub = _StubRunner(cls.abort_seen)
         handler = NS.make_handler(hub=hub, sessions=cls.sessions,
-                                  messages=cls.msgs, user="opencode",
-                                  password="pw", config=_CFG, runner=stub)
+                                  messages=cls.msgs, config=_CFG, runner=stub)
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         cls.port = cls.httpd.server_address[1]
         threading.Thread(target=cls.httpd.serve_forever,
@@ -635,8 +634,11 @@ class TestHttpSurface(unittest.TestCase):
             except Exception:
                 return e.code, {}
 
-    def test_auth_required(self):
-        self.assertEqual(self._req("/session", auth=False)[0], 401)
+    def test_serve_is_open_without_auth(self):
+        # a personal self-hosted surface: no auth baked in -- a request with
+        # no Authorization header is answered, never challenged (the operator
+        # puts an auth proxy in front when they want one)
+        self.assertEqual(self._req("/session", auth=False)[0], 200)
 
     def test_health_and_session_crud(self):
         self.assertEqual(self._req("/global/health")[0], 200)

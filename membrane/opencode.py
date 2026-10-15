@@ -272,7 +272,6 @@ from .lanes import (  # noqa: E402,F401
     _semantic_intercept_hit,
     _semantic_recall_hit,
     _serve_board,
-    _serve_credentials,
     _serve_thoughts_served,
     _speak_block,
     _sse_line,
@@ -593,8 +592,7 @@ def _build_ap():
     ap.add_argument("--serve", action="store_true",
                     help="THE NATIVE SERVE (opencode replaced): serve "
                          "membrane's own opencode-compatible REST/SSE "
-                         "surface (the companion app's endpoint; basic "
-                         "auth generated once beside the field) -- "
+                         "surface (the companion app's endpoint) -- "
                          "session/message/abort/event, the turn loop "
                          "riding THIS seat's /v1 loopback (injection, "
                          "capture, banner, routing all real), tool "
@@ -614,12 +612,6 @@ def _build_ap():
     ap.add_argument("--no-browser", action="store_true",
                     help="standalone mode: don't open the UI in the browser "
                          "(it opens only on an interactive launch anyway)")
-    ap.add_argument("--serve-user", default="opencode",
-                    help="basic-auth user the serve asks for (default "
-                         "opencode)")
-    ap.add_argument("--serve-pass", default=None,
-                    help="basic-auth password override (default: "
-                         "generated once and persisted beside the field)")
     ap.add_argument("--no-continue", dest="cont", action="store_false",
                     help="don't resume opencode's last session (default: "
                          "resume; -c/-s in passthrough still win)")
@@ -1798,25 +1790,13 @@ def main() -> None:
                      ", ".join(f"{k} {c}" for k, c in sorted(v["entities"].items())))
         except Exception:
             fld_s = type(fld.b).__name__
-    # the serve lane's credentials BEFORE the board (both print the pair's
-    # provenance): generated once, persisted beside the field, reused by
-    # every later boot (a device's saved connection survives restarts)
-    serve_su = serve_sp = serve_cred_path = None
-    serve_pw_new = False
     serve_addr = None
     legacy_serve = os.environ.get("MEMBRANE_LEGACY_SERVE") == "1"
     # THE SURFACE runs for every launch boot (the TUI attaches to it as a
     # client -- stage 3.5), loopback-only unless --serve exposes it to the
-    # room; --serve keeps its credentials/board semantics.
+    # room; no auth baked in -- a proxy in front is the operator's lane.
     surf_host = args.serve_host if args.serve else "127.0.0.1"
     if serve_wanted:
-        serve_cred_path = str(Path(args.field).resolve().parent
-                              / "serve-auth.json")
-        serve_su, serve_sp, serve_pw_new = _serve_credentials(
-            serve_cred_path, args.serve_user, args.serve_pass)
-        if args.serve and legacy_serve:
-            env["OPENCODE_SERVER_USERNAME"] = serve_su
-            env["OPENCODE_SERVER_PASSWORD"] = serve_sp
         serve_addr = ("localhost" if surf_host in ("127.0.0.1", "localhost")
                       else _lan_ip())
     print(f"membrane opencode  http://127.0.0.1:{listen}/v1  ->  {backend}\n"
@@ -1841,12 +1821,11 @@ def main() -> None:
           f" (model {getattr(srv, 'idle_cortex_model', None) or 'unresolved'})\n"
           f"  mcp tools: {mcp_state}\n"
           f"  lsp: {lsp_state}\n"
-                    f"  serve: {f'http://{serve_addr}:{serve_port} (native serve, basic auth user {serve_su})' if serve_wanted else 'off'}\n"
+                    f"  serve: {f'http://{serve_addr}:{serve_port} (native serve)' if serve_wanted else 'off'}\n"
           f"  opencode config: {cfg_path}",
           file=sys.stderr)
     if args.serve:
-        _serve_board(serve_port, args.serve_host, serve_su, serve_sp,
-                     serve_pw_new, serve_cred_path)
+        _serve_board(serve_port, args.serve_host)
     native_up = False
     if serve_wanted and not legacy_serve:
         # THE REPLACEMENT (stage 3): no opencode child -- the native
@@ -1908,8 +1887,8 @@ def main() -> None:
             # thinkers' injects ride the stream).
             runner.cosmetic_busy = True
 
-            start(serve_port or 4096, surf_host, serve_su,
-                  serve_sp, cfg, runner, sess_store, msg_store)
+            start(serve_port or 4096, surf_host, cfg, runner,
+                  sess_store, msg_store)
             native_up = True
             if naming_on:
                 try:                       # the entity `name`: agreed with the operator, never picked alone
@@ -2084,7 +2063,7 @@ def main() -> None:
                     print(f"[opencode] launching TUI as a client "
                           f"(attach): {' '.join(cmd)}", file=sys.stderr)
                     child = subprocess.Popen(
-                        cmd, env=_attach_env(env, serve_su, serve_sp),
+                        cmd, env=_attach_env(env),
                         stderr=subprocess.DEVNULL)
                     try:
                         pid_path = (Path(args.field).parent

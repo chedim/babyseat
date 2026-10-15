@@ -260,7 +260,7 @@ def intercept(handler) -> bool:
     if not (path in ("/", "/membrane", "/index.html") or path == "/favicon.ico"
             or path.startswith("/ui/")):
         return False
-    if not lan and not handler._authed():
+    if not lan:
         _json(handler, {"error": "membrane answers the local network only"}, 403)   # never a login prompt
         return True
     if path.startswith("/ui/serve/"):

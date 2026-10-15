@@ -768,7 +768,7 @@ class TestTokenMend(unittest.TestCase):
         handler = make_handler(hub=hub, sessions=type("S", (), {
             "get": staticmethod(lambda sid: {"id": sid, "agent":
                                              "build"})})(),
-            messages=msgs, user="opencode", password="", config={},
+            messages=msgs, config={},
             runner=None, srv=None)
         hs = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         threading.Thread(target=hs.serve_forever, daemon=True).start()
@@ -828,7 +828,7 @@ class TestServePortReservation(unittest.TestCase):
                                system="", model="m")
         runner._serve_socket = s          # the pick's reservation
         runner.srv = None
-        httpd, th = MS.start(port, "127.0.0.1", "opencode", "", {}, runner,
+        httpd, th = MS.start(port, "127.0.0.1", {}, runner,
                              sessions, msgs)
         try:
             self.assertEqual(httpd.socket.getsockname()[1], port)
@@ -855,7 +855,7 @@ class TestServePortReservation(unittest.TestCase):
         runner = MS.TurnRunner(hub, sessions, msgs, lambda b: {}, None,
                                system="", model="m")
         runner._serve_socket = s
-        httpd, th = MS.start(port, "127.0.0.1", "opencode", "", {},
+        httpd, th = MS.start(port, "127.0.0.1", {},
                              runner, sessions, msgs)
         try:
             self.assertIsNone(runner._serve_socket,

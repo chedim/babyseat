@@ -7,12 +7,11 @@ and stops it with HA. A separate process, so a hang, a crash or the seat's
 memory (1-3 GB on a busy field) never takes HA down with it.
 
     <config>/membrane/
-      .membrane/      the seat's data dir (field, sessions, serve-auth.json, settings)
+      .membrane/      the seat's data dir (field, sessions, settings)
       home/           its HOME (nothing of the seat's lands in /root)
       seat.log        its output, rotated at 5 MB
 
-The child listens on loopback only: HA's relay (relay.py) is the one door, with
-the basic-auth pair the seat generates in serve-auth.json.
+The child listens on loopback only: HA's relay (relay.py) is the one door.
 """
 from __future__ import annotations
 
@@ -156,23 +155,15 @@ class SeatSupervisor:
             stdout=self._log, stderr=self._log, start_new_session=True)
         self.started_at = time.time()
         self.comp["serve_url"] = f"http://127.0.0.1:{self.serve_port}"
-        self.comp["serve_pass"] = ""                 # the relay waits until the seat wrote its pair
-
-    async def _pair(self) -> None:
-        """The seat writes serve-auth.json at its first boot (kept after)."""
-        for _ in range(240):
-            got = await self.hass.async_add_executor_job(read_auth, self.data)
-            if got and got[1]:
-                self.comp["serve_user"], self.comp["serve_pass"] = got
-                return
-            await asyncio.sleep(1)
+        self.comp["serve_user"] = ""                 # open surface: no pair
+        self.comp["serve_pass"] = ""
 
     async def _healthy(self) -> bool:
         try:
             async with aiohttp.ClientSession() as s:
                 async with s.get(self.comp["serve_url"] + "/global/health",
                                  timeout=aiohttp.ClientTimeout(total=15)) as r:
-                    return r.status in (200, 401)    # 401: up, it asks the pair
+                    return r.status == 200
         except Exception:                            # noqa: BLE001
             return False
 
@@ -185,8 +176,7 @@ class SeatSupervisor:
             return
         self._stopping = False
         await self._spawn()
-        self._tasks = [self.hass.async_create_background_task(self._watch(), "membrane seat"),
-                       self.hass.async_create_background_task(self._pair(), "membrane seat pair")]
+        self._tasks = [self.hass.async_create_background_task(self._watch(), "membrane seat")]
 
     async def _watch(self) -> None:
         fails = 0
@@ -222,7 +212,6 @@ class SeatSupervisor:
             if self._stopping:
                 return
             await self._spawn()
-            self.hass.async_create_background_task(self._pair(), "membrane seat pair")
 
     async def _terminate(self, proc) -> None:
         if proc.returncode is not None:

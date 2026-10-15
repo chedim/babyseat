@@ -8,7 +8,7 @@ opencode-compatible where clients care:
 
 - `SessionStore` / `MessageStore`: opencode's Session / Message / Part
   shapes, persisted beside the field (a device's history survives a seat
-  restart, same covenant as serve-auth.json).
+  restart).
 - The TURN LOOP (`TurnRunner`): the client's text goes to THIS seat's own
   /v1 on loopback -- so the gate, the injection, the routing ladder, the
   banner and the capture machinery exercise exactly the same code path a
@@ -20,17 +20,14 @@ opencode-compatible where clients care:
   published on the SSE hub, so the model's membrane tool use shows in the
   client like any regular opencode tool.
 - `SSEHub` + the HTTP surface (`make_handler`): the /event stream and the
-  session/message/abort/config subset a chat client speaks, basic-authed
-  from the same serve-auth.json pair.
+  session/message/abort/config subset a chat client speaks.
 
 What is deliberately NOT here: opencode's file/VCS/LSP/share surface (a
 client needs to work on the room through run and the field's
 readers, which the doctrine already teaches).
 """
 import copy
-import base64
 import hashlib
-import hmac
 import json
 import os
 import secrets
@@ -69,11 +66,6 @@ _SLUG_B = ("lagoon", "wolf", "meadow", "harbor", "cedar", "ember", "dune",
 
 def _slug() -> str:
     return (secrets.choice(_SLUG_A) + "-" + secrets.choice(_SLUG_B))
-
-
-def _auth_header(user: str, password: str) -> str:
-    return "Basic " + base64.b64encode(
-        f"{user}:{password}".encode()).decode()
 
 
 # ---- stores -----------------------------------------------------------------
@@ -2651,8 +2643,8 @@ def seat_read_url(srv, path_qs: str) -> str | None:
 from . import ui_serve as _UI
 
 
-def make_handler(hub=None, sessions=None, messages=None, user="opencode",
-                 password="", config=None, runner=None, srv=None, **_dep) -> type:
+def make_handler(hub=None, sessions=None, messages=None, config=None,
+                 runner=None, srv=None, **_dep) -> type:
     """The opencode-compatible HTTP handler, parametrized by the running
     seat's stores/runner (a factory because ThreadingHTTPServer wants a
     class). `srv` is the seat itself -- /agent reads the live minds
@@ -2668,24 +2660,6 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
             pass
 
         # -- plumbing ---------------------------------------------------------
-
-        def _authed(self) -> bool:
-            if getattr(self, "_ui_trusted", False):
-                return True                  # standalone mode's LAN door (ui_serve.intercept)
-            if not password:
-                return True
-            hdr = self.headers.get("Authorization", "")
-            if not hdr.startswith("Basic "):
-                return False
-            try:
-                given = base64.b64decode(hdr[6:]).decode()
-                ok = hmac.compare_digest(given, f"{user}:{password}")
-            except Exception:
-                ok = False
-            if ok:
-                return True
-            # an Authorization on the SAME pair only; timing-safe compare
-            return ok
 
         def _json_out(self, obj, code: int = 200, close: bool = False):
             b = json.dumps(obj).encode()
@@ -2791,13 +2765,6 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
         def do_GET(self):
             if _UI.intercept(self):
                 return                       # standalone mode: the UI, its LAN door
-            if not self._authed():
-                self.send_response(401)
-                self.send_header("WWW-Authenticate",
-                                 'Basic realm="membrane"')
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
             path = self.path.split("?", 1)[0]
             if path in SEAT_READ_PATHS:
                 return self._seat_read()
@@ -3034,13 +3001,6 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
         def do_POST(self):
             if _UI.intercept(self):
                 return                       # standalone mode: the UI, its LAN door
-            if not self._authed():
-                self.send_response(401)
-                self.send_header("WWW-Authenticate",
-                                 'Basic realm="membrane"')
-                self.send_header("Content-Length", "0")
-                self.end_headers()
-                return
             path = self.path.split("?", 1)[0]
             if path in ("/membrane/jsexec/register", "/membrane/jsexec/result"):
                 # THE SEAT'S JS (jsexec.py): an opted-in tab registers, answers its jobs
@@ -3369,8 +3329,6 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
         def do_PATCH(self):
             if _UI.intercept(self):
                 return                       # standalone mode: the UI, its LAN door
-            if not self._authed():
-                return self._unauth()
             path = self.path.split("?", 1)[0]
             if path.startswith("/session/"):
                 segs = path[len("/session/"):].split("/")
@@ -3407,8 +3365,6 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
         def do_DELETE(self):
             if _UI.intercept(self):
                 return                       # standalone mode: the UI, its LAN door
-            if not self._authed():
-                return self._unauth()
             path = self.path.split("?", 1)[0]
             if path.startswith("/session/"):
                 segs = path[len("/session/"):].split("/")
@@ -3422,12 +3378,6 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
         def hub_deleted(self, sid):
             hub.publish({"type": "session.deleted",
                          "info": {"sessionID": sid}})
-
-        def _unauth(self):
-            self.send_response(401)
-            self.send_header("WWW-Authenticate", 'Basic realm="membrane"')
-            self.send_header("Content-Length", "0")
-            self.end_headers()
 
     def segments_len(segs: list) -> int:
         return len([s for s in segs if s != ""])
@@ -3449,7 +3399,7 @@ def _free_port(preferred: int) -> int:
     raise OSError(f"no free port at or above {preferred}")
 
 
-def start(port: int, host: str, user: str, password: str, config: dict,
+def start(port: int, host: str, config: dict,
           runner, sessions: SessionStore, messages: MessageStore):
     """Bind the native surface (returns (httpd, thread); the thread is a
     daemon -- the seat's main loop owns the seat's life).
@@ -3461,8 +3411,7 @@ def start(port: int, host: str, user: str, password: str, config: dict,
     pick reserved it) is BOUND here instead of rebinding: a pick-era race
     resolves at PICK (the walk retries), never post-pick."""
     handler = make_handler(hub=runner.hub, sessions=sessions,
-                           messages=messages, user=user, password=password,
-                           config=config, runner=runner,
+                           messages=messages, config=config, runner=runner,
                            srv=getattr(runner, "srv", None))
     held = getattr(runner, "_serve_socket", None)
     httpd = ThreadingHTTPServer((host, port), handler,

@@ -6,7 +6,6 @@ same seat that serves GETs fast. The test boots the seat, probes
 GETs (fast), then POSTs turns (must complete); three sequential
 POSTs, none may hang past 30s warm.
 """
-import base64
 import json
 import os
 import shutil
@@ -56,7 +55,7 @@ def boot():
     env.update({"MEMBRANE_EFIELD_STORE": "mem", "MEMBRANE_LAN": "0",
                 "MEMBRANE_NO_OPEN": "1"})
     os.makedirs(SEAT_DIR, exist_ok=True)
-    for stale in ("serve-auth.json", "opencode.pid"):
+    for stale in ("opencode.pid",):
         p = os.path.join(SEAT_DIR, stale)
         if os.path.exists(p):
             os.unlink(p)
@@ -73,28 +72,17 @@ def boot():
          "--no-router", "--model", "granite4:latest",
          "--field", f"{SEAT_DIR}/f.json", "--audit", f"{SEAT_DIR}/a.jsonl"],
         env=env, stdout=logf, stderr=subprocess.STDOUT)
-    cred = None
+    ready = False
     deadline = time.time() + 40
-    while time.time() < deadline and not cred:
-        p = os.path.join(SEAT_DIR, "serve-auth.json")
-        if os.path.exists(p):
-            try:
-                cred = json.loads(open(p).read())
-                tok = base64.b64encode(
-                    f"{cred['user']}:{cred['password']}".encode()).decode()
-                probe = urllib.request.Request(
-                    f"http://127.0.0.1:{port}/agent",
-                    headers={"Authorization": "Basic " + tok})
-                urllib.request.urlopen(probe, timeout=3)
-                break
-            except Exception:
-                cred = None
-        time.sleep(0.3)
-    assert cred, "seat never booted"
-    tok = base64.b64encode(
-        f"{cred['user']}:{cred['password']}".encode()).decode()
-    hdr = {"Authorization": "Basic " + tok,
-           "Content-Type": "application/json"}
+    while time.time() < deadline and not ready:
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{port}/agent", timeout=3)
+            ready = True
+            break
+        except Exception:
+            time.sleep(0.3)
+    assert ready, "seat never booted"
+    hdr = {"Content-Type": "application/json"}
     # THE PROXY'S REAL PORT (the /v1 lane's own): from the boot log:
     proxy_port = None
     deadline2 = time.time() + 30

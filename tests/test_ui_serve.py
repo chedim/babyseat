@@ -27,7 +27,7 @@ class TestUiServe(unittest.TestCase):
         cls.sessions = _store()
         cls.msgs = NS.MessageStore()
         handler = NS.make_handler(hub=NS.SSEHub(), sessions=cls.sessions, messages=cls.msgs,
-                                  user="opencode", password="pw", config=_CFG, runner=_StubRunner())
+                                  config=_CFG, runner=_StubRunner())
         cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         cls.port = cls.httpd.server_address[1]
         threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
@@ -119,21 +119,22 @@ class TestUiServe(unittest.TestCase):
         self.assertEqual([x["id"] for x in lst], [mine["id"]])
         self.assertGreaterEqual(len(self._req("/session")[1]), 3)  # the seat's own list is whole
 
-    def test_proxied_is_refused_without_a_prompt(self):
+    def test_proxied_is_refused(self):
         code, _, h = self._req("/ui/conf", headers={"X-Forwarded-For": "8.8.8.8"}, raw=True)
         self.assertEqual(code, 403)
-        self.assertIsNone(h.get("WWW-Authenticate"))
-        self.assertEqual(self._req("/ui/conf", headers={"X-Forwarded-For": "8.8.8.8"}, auth=True)[0], 200)
+        self.assertIsNone(h.get("WWW-Authenticate"))           # never a login prompt
+        # auth is gone: a stale basic-auth header changes nothing, the proxy stays refused
+        self.assertEqual(self._req("/ui/conf", headers={"X-Forwarded-For": "8.8.8.8"}, auth=True)[0], 403)
 
-    def test_keepalive_does_not_leak_trust(self):
+    def test_keepalive_does_not_leak_lan_trust(self):
         import http.client
         c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
-        c.request("GET", "/ui/conf")
+        c.request("GET", "/ui/conf")                          # local: trusted, 200
         r = c.getresponse(); r.read()
         self.assertEqual(r.status, 200)
-        c.request("GET", "/session", headers={"X-Forwarded-For": "8.8.8.8"})   # same connection, now proxied
+        c.request("GET", "/ui/conf", headers={"X-Forwarded-For": "8.8.8.8"})   # same connection, now proxied
         r = c.getresponse(); r.read()
-        self.assertEqual(r.status, 401)
+        self.assertEqual(r.status, 403)                       # the LAN guard still refuses
         c.close()
 
     def test_page_voice_log(self):
@@ -145,7 +146,7 @@ class TestUiServe(unittest.TestCase):
 
     def test_off_unless_standalone(self):
         with mock.patch.dict(os.environ, {"MEMBRANE_STANDALONE": ""}):
-            self.assertEqual(self._req("/ui/conf", raw=True)[0], 401)            # a plain serve: its own door
+            self.assertEqual(self._req("/ui/conf", raw=True)[0], 404)            # a plain serve: no UI route
             self.assertEqual(self._req("/ui/conf", raw=True, auth=True)[0], 404)
             self.assertEqual(self._req("/ui/serve/session", raw=True, auth=True)[0], 404)
 
