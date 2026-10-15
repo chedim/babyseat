@@ -1055,9 +1055,9 @@ def tool_related_entities(args: dict, port: int) -> str:
     for r in rel:
         nb = ""
         if r.get("neighbors"):
-            nb = " -- " + ", ".join(f"{n['key']} ({n['shared']} shared)"
+            nb = " -- " + ", ".join(f"{n.get('eid') or n['key']} ({n['shared']} shared)"
                                     for n in r["neighbors"][:3])
-        lines.append(f"- {r['key']} ({r['cells']} mentions, {r.get('how', '')})"
+        lines.append(f"- {r.get('eid') or r['key']} ({r['cells']} mentions, {r.get('how', '')})"
                      f"{nb}")
     return "\n".join(lines)
 
@@ -1259,9 +1259,9 @@ def tool_graph(args: dict, port: int) -> str:
         return "no entities matched the query"
     lines = []
     for e in items[:k]:
-        line = (f"- {e.get('key') or e.get('eid', '?')}"
+        line = (f"- {e.get('eid') or e.get('key', '?')}"
                 f" ({e.get('cells', 0)} cells, {e.get('how', '')})")
-        neighbors = [f"{n.get('key') or n.get('eid', '?')}x{n.get('shared', '')}"
+        neighbors = [f"{n.get('eid') or n.get('key', '?')}x{n.get('shared', '')}"
                      for n in (e.get("neighbors") or [])][:4]
         line += (f" | neighbors: {', '.join(neighbors)}" if neighbors
                  else "")

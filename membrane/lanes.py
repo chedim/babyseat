@@ -6283,12 +6283,14 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         fld = _efield_on(srv)
         if fld is not None:
             try:
-                from .entity_block import related
+                from .entity_block import related, annotate_store_keys
                 try:
                     qvec = fld.emb.embed([q])[0]
                 except Exception:
                     qvec = None
-                self._json_out({"query": q, "related": related(fld, q, qvec, k)}); return
+                rows = related(fld, q, qvec, k)
+                annotate_store_keys(rows, getattr(srv, "entity_store", None))
+                self._json_out({"query": q, "related": rows}); return
             except Exception as e:
                 self._json_err_raw(500, f"related lookup failed: {e}"); return
         self._json_err_raw(503, "the entity field is off"); return
