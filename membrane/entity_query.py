@@ -20,6 +20,7 @@ from __future__ import annotations
 import re
 
 from membrane.entities import MEMBRANE_NS
+from membrane.eids import legacy_to_canon
 
 # ---- THE KIND ALIAS FAMILY (the 'kind:file:* is empty' exhibit) ----
 # The graph's kind spellings come in three shapes per family: the eid's
@@ -128,7 +129,14 @@ def parse(q: str) -> list[list[tuple[str, str]]]:
 # ---- the evaluators ---------------------------------------------------------
 def _kind_of(eid: str) -> str:
     """The eid's kind segment: 'membrane::f:x' -> 'f'; a cls-named form
-    ('membrane::Component:x') -> 'component' (the class IS the kind)."""
+    ('membrane::Component:x') -> 'component' (the class IS the kind).
+
+    A class-embedded pool entity ('membrane::Component:files:x') folds to
+    its canonical field id first ('f:x'), so 'kind:file' sees the files:
+    pool inside the class (issue #99) instead of reading 'component'."""
+    canon = legacy_to_canon(eid)
+    if canon:
+        return canon.split(":", 1)[0].lower()
     body = eid[len(MEMBRANE_NS):] if eid.startswith(MEMBRANE_NS) else eid
     first = body.split(":", 1)[0]
     return first.lower()

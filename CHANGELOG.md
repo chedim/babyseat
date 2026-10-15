@@ -1,5 +1,7 @@
 ## Unreleased
 
+- **`entity_query` sees the class-embedded files: pool** (#99, reported by Memo): a file entity minted by `entity_add` lands as `membrane::Component:files:x.py` (the class in the eid, the pool inside it), and the query read only the class as the kind — so `kind:file` returned nothing for those. The kind read now folds the eid through its canonical field id first, so `kind:file` sees the pool, while the entity still also matches `kind:component` (its class).
+
 - **A dead file no longer mints an entity** (#99, reported by Memo): the file hands (`_file_land` and the read hand) minted a fresh `f:` entity for a failed op on a path that does not exist, so a deleted file kept earning graph-visible spellings whose getters error forever. The mint is now gated on existence — a failed op on a nonexistent path reports the canonical id but mints nothing (no getter to go stale); an entity that predates the file's death keeps its doc and records the error.
 
 - **`membrane stats` — token/call accounting and the savings baseline**: reads a `serve-msgs` store (no model call) and prints sessions/turns/tokens (input, output, reasoning, cache-read), tool-call parts, tool-loop rounds, recall-injection size and models. `--baseline` compares the bounded replay window against a naive full-history replay, bucketed by conversation length — the numbers behind "does the seat actually save tokens" instead of a hunch.
