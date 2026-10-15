@@ -71,6 +71,20 @@ def _dust_word(eid: str, surface: str) -> bool:
 
 
 GAIN = 0.5
+# THE WORLDLINES (2026-10-15): an entity is a process, not a point. Its life is
+# kept as EPISODES -- centroids of contiguous runs of EP_RUN mentions, at most
+# EP_MAX (the most alike NEIGHBOURS merge, so distinct old phases survive) -- and
+# recall() reads a young entity (n < MATURE) by its mean and a mature one by its
+# best episode. Held-out recognition on two seats' real fields: the fast state
+# recognized worst (MRR 0.646 vs the mean's 0.724); past ~40 mentions the best
+# episode beat the mean by +0.061 / +0.083 MRR (the second pre-registered).
+EP_RUN = 5
+EP_MAX = 48
+MATURE = 40
+
+
+def worldlines_on() -> bool:
+    return os.environ.get("MEMBRANE_WORLDLINES", "1") != "0"
 K_MAT = 3
 # THE WRITE-AMPLIFICATION FIX (the 'membranes are stuck again'
 # exhibit): words DO materialize at K_MAT (the recall contract keeps
@@ -287,6 +301,11 @@ class EntityState:
     # THE PREVIOUS MENTION (the delta lane, stage 2a): the last mention
     # sentence, at its STORED precision -- the pbits are the move from it
     last_x: np.ndarray | None = None
+    # THE WORLDLINE: closed episodes [(centroid at stored f16 precision, n)] and
+    # the open run (its f32 sum and count)
+    episodes: list = field(default_factory=list)
+    ep_acc: np.ndarray | None = None
+    ep_k: int = 0
 
     @property
     def coherence(self) -> float:
@@ -328,6 +347,10 @@ class EntityState:
             d["rsum"] = pack_f32(self.rsum)
             if self.last_x is not None:
                 d["last_x"] = pack_f16(self.last_x)
+            if self.episodes:
+                d["episodes"] = [[pack_f16(v), int(n)] for v, n in self.episodes]
+            if self.ep_acc is not None:
+                d["ep_acc"], d["ep_k"] = pack_f32(self.ep_acc), int(self.ep_k)
         return d
 
     @classmethod
@@ -354,6 +377,9 @@ class EntityState:
             st.mean = unpack_f16(d["mean"]) if d.get("mean") else None
             st.rsum = unpack_f16(d["rsum"])
             st.last_x = unpack_f16(d["last_x"]) if d.get("last_x") else None
+            st.episodes = [(unpack_f16(v), int(n)) for v, n in d.get("episodes") or []]
+            if d.get("ep_acc"):
+                st.ep_acc, st.ep_k = f32(unpack_f16(d["ep_acc"])), int(d.get("ep_k") or 0)
         return st
 
 
@@ -826,6 +852,80 @@ class EntityField:
             self._states[eid] = st
         return st
 
+    def _episode(self, st: EntityState, x) -> None:
+        """One mention into the open run; a full run closes as an episode (its
+        centroid kept at the precision a reload reads, so a restart never
+        changes a later result); past EP_MAX the most alike neighbours merge."""
+        st.ep_acc = f32(x if st.ep_acc is None else st.ep_acc + x)
+        st.ep_k += 1
+        if st.ep_k < EP_RUN:
+            return
+        st.episodes.append((unpack_f16(pack_f16(st.ep_acc / st.ep_k)), st.ep_k))
+        st.ep_acc, st.ep_k = None, 0
+        while len(st.episodes) > EP_MAX:
+            U = [unit(v) for v, _ in st.episodes]
+            i = int(np.argmax([float(U[j] @ U[j + 1]) for j in range(len(U) - 1)]))
+            (v1, n1), (v2, n2) = st.episodes[i], st.episodes[i + 1]
+            st.episodes[i:i + 2] = [(unpack_f16(pack_f16((n1 * v1 + n2 * v2) / (n1 + n2))), n1 + n2)]
+        if self._ep_index is not None and st.n + 1 >= MATURE:
+            self._ep_index["rows"][st.eid] = [v for v, _ in st.episodes]
+            self._ep_index["M"] = None
+
+    _ep_index: dict | None = None
+
+    def _wl_points(self, d: dict) -> list:
+        """The worldline's points for one state doc: a young entity's mean, a
+        mature one's episodes (the open run included)."""
+        if int(d.get("n") or 0) >= MATURE and d.get("episodes"):
+            pts = [unpack_f16(v) for v, _ in d["episodes"]]
+            if d.get("ep_acc") and int(d.get("ep_k") or 0):
+                pts.append(unpack_f16(d["ep_acc"]) / int(d["ep_k"]))
+            return pts
+        if d.get("mean"):
+            return [unpack_f16(d["mean"])]
+        return [unpack_f16(d["state"])] if d.get("state") else []
+
+    def _centered(self, v):
+        bg = self._bg("discourse")
+        return unit(np.asarray(v, dtype=float) - bg) if bg is not None else unit(np.asarray(v, dtype=float))
+
+    def _wl_score(self, d: dict, qc) -> float | None:
+        pts = self._wl_points(d)
+        return max(float(self._centered(p) @ qc) for p in pts) if pts else None
+
+    def _ep_hits(self, qc, k: int) -> list[str]:
+        """Mature entities whose best EPISODE is nearest the query -- found even
+        when their current state sits elsewhere. Kept in place (an episode that
+        closes updates its row), so it never goes stale; dropped on a rebuild."""
+        idx = self._ep_index
+        if idx is None:
+            rows = {}
+            for _k, d in self.b.scan("entity_states", {"origin": self.origin}):
+                if int(d.get("n") or 0) >= MATURE and d.get("episodes"):
+                    rows[d["eid"]] = [unpack_f16(v) for v, _ in d["episodes"]]
+            for eid, st in self._states.items():            # unflushed lives win
+                if st.n >= MATURE and st.episodes:
+                    rows[eid] = [v for v, _ in st.episodes]
+            idx = self._ep_index = {"rows": rows, "M": None}
+        if idx["M"] is None:
+            owner, pts = [], []
+            for eid, vs in idx["rows"].items():
+                for v in vs:
+                    owner.append(eid); pts.append(self._centered(v))
+            idx["owner"] = np.asarray(owner, dtype=object)
+            idx["M"] = np.asarray(pts, dtype=np.float32) if pts else np.zeros((0, 1), np.float32)
+        if not len(idx["M"]):
+            return []
+        sims = idx["M"] @ np.asarray(qc, dtype=np.float32)
+        best: dict = {}
+        for i in np.argsort(-sims)[:k * 8]:
+            e = idx["owner"][i]
+            if e not in best:
+                best[e] = float(sims[i])
+                if len(best) >= k:
+                    break
+        return list(best)
+
     def _update(self, st: EntityState, x, stream: str, sid: str, seq: int,
                 sidx: int, evkey: str, ts, role: str = "") -> None:
         ts = event_ts(ts, seq)            # an untimed event: its seq's clock
@@ -840,6 +940,8 @@ class EntityField:
         # from the backend) never changes a later result
         st.state = at_stored(unit(before + GAIN * (x - before)))
         st.mean = f32(x if st.mean is None else st.mean + (x - st.mean) / (st.n + 1))
+        if st.eid.split(":", 1)[0] not in ("w", "p", "e"):
+            self._episode(st, x)
         r = unit(x - bg) if bg is not None else x
         st.rsum = f32(r if st.rsum is None else st.rsum + r)
         st.n += 1
@@ -1189,6 +1291,7 @@ class EntityField:
             self._ostats["forewarn"] = fw
         self._states, self._dirty, self._deltas, self._now = {}, set(), {}, {}
         self._wgen += 1
+        self._ep_index = None
         for k, ev in list(self.b.scan("events", {"origin": self.origin, "status": "applied"})):
             ev["status"] = "embedded"
             self.b.upsert("events", k, ev)
@@ -1519,6 +1622,7 @@ class EntityField:
         self._ostats.update({k: v for k, v in keep.items() if v is not None})
         self._states, self._dirty, self._deltas, self._now = {}, set(), {}, {}
         self._wgen += 1
+        self._ep_index = None
         n = 0
         for k, ev in list(self.b.scan("events", {"origin": self.origin,
                                                  "status": ["applied", "embedded", "empty"]})):
@@ -1742,7 +1846,7 @@ class EntityField:
         return None
 
     def recall(self, vec, k: int = 8, kinds=None, tier: str = "live",
-               by: str = "state", exclude_session: str | None = None,
+               by: str = "worldline", exclude_session: str | None = None,
                hop: bool = True) -> list[tuple[str, float]]:
         """THE SELF-FEEDING GUARD (the seat's #4 datum: a query's own
         topic words topped its hits -- the read fed itself): pass
@@ -1754,6 +1858,17 @@ class EntityField:
             "entity_states", field_name, vec, k * 4,
             eq={"origin": self.origin, "tier": tier,
                 **({"kind": list(kinds)} if kinds else {})})
+        # THE WORLDLINES: candidates also come from mature entities' OLD
+        # episodes, and every candidate is scored by its worldline (a young
+        # entity's mean, a mature one's best episode), centered on the field's
+        # background. by="state" is the old raw read (callers whose floors were
+        # calibrated on it pin it); MEMBRANE_WORLDLINES=0 makes the default the same
+        wl = by == "worldline" and worldlines_on()
+        if wl:
+            qc = self._centered(vec)
+            have = {kk for kk, _ in hits}
+            hits = list(hits) + [(self._state_key(e), 0.0) for e in self._ep_hits(qc, k * 4)
+                                 if self._state_key(e) not in have]
         out = []
         # ISSUE #1 WORD-HOP: a word entity carries its word as state, so an
         # unfiltered ask (kinds=None) lets word hits score cos ~1.0 and
@@ -1774,8 +1889,13 @@ class EntityField:
             if hop and kinds is None and (_kd == "word" or _pre == "w"):
                 parked.append((d.get("eid") or key, s))
                 continue
+            if wl and (d.get("tier") != tier or (kinds and d.get("kind") not in kinds)):
+                continue          # an episode candidate the index did not filter
             if by == "mean" and d.get("mean"):
                 s = float(unit(unpack_f16(d["mean"])) @ unit(vec))
+            elif wl:
+                ws = self._wl_score(d, qc)
+                s = ws if ws is not None else s
             if exclude_session:
                 deltas = self.deltas_of(d["eid"])
                 if deltas and all(

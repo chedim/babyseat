@@ -3602,7 +3602,7 @@ def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
             if self._fld is None:
                 return []
             return [(eid, round(float(s), 4)) for eid, s in
-                    self._fld.recall(vec, k=min(k, 20))]
+                    self._fld.recall(vec, k=min(k, 20), by="state")]   # scripts' scores keep their scale
         def vitals(self):
             try:
                 return self._fld.vitals() if self._fld else {}
