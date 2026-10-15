@@ -158,15 +158,19 @@ def think_value(name: str | None) -> bool | None:
 
 
 def apply_think_dial(payload: dict, think: bool | None) -> dict:
-    """THE THINK DIAL'S TURN-LANE SEAM: the seat-level DEFAULT for why
-    the backend reasons (oils on|off into every forwarded body; auto =
+    """THE THINK DIAL'S TURN-LANE SEAM: the seat-level say in why the
+    backend reasons (oils on|off into every forwarded body; auto =
     forward verbatim -- a non-thinking card never learns a think:true
-    it 400s on). The client's own think always wins: the dial is a
-    default, not an override. Same object back when nothing is set."""
-    if think is None or "think" in payload:
+    it 400s on). auto forwards verbatim; on is a DEFAULT (the client's
+    own think wins); off is a hard kill switch -- it forces think:false
+    even over the client's think:true (the operator said stop reasoning).
+    Same object back when nothing is set."""
+    if think is None:
+        return payload
+    if think and "think" in payload:      # on defers to the client
         return payload
     u2 = dict(payload)
-    u2["think"] = bool(think)
+    u2["think"] = bool(think)             # off overrides it
     return u2
 
 
