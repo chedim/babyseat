@@ -29,6 +29,8 @@
                           replay; reads serve-msgs, no model call)
     membrane bench        held-out recall benchmark for the entity field
                           (MRR + hit@k across read modes; a COPY of the field)
+    membrane erase-field  stop the seat and move the field + entity
+                          side-index out of the way (--yes; recoverable)
 
 Per-project DATA lives in ./.membrane/ (field, audit, review queue, logs) --
 auto-created on first run per directory. Skills are PROJECT-SCOPED on purpose
@@ -195,6 +197,67 @@ def _reset(argv: list[str]) -> int:
         print("[cli] reset: nothing on :%d, starting fresh" % port,
               file=sys.stderr)
     return _run_module("membrane.opencode", _ensure_data_dir(argv))
+
+
+def _erase_field(argv: list[str]) -> int:
+    """`membrane erase-field [--field PATH] --yes`: stop the seat, then move
+    the entity field (``<parent>/field/``) and the entity side-index
+    (``<parent>/entities.json``) out of the way -- recoverable, timestamped
+    -- so the next boot starts from an empty memory. ``--yes`` is MANDATORY
+    (this discards the seat's memory; a manual ``mv`` was the old way).
+    Published shared-tier entities live outside ``.membrane/`` and are NOT
+    touched (unpublish them for a truly clean slate)."""
+    import argparse as _ap
+    from .efstore import _field_dirname_for
+    from .stopseat import stop_seat, DEFAULT_PORTS
+    p = _ap.ArgumentParser(prog="membrane erase-field")
+    p.add_argument("--yes", action="store_true",
+                   help="confirm the erase (MANDATORY)")
+    p.add_argument("--field", default=str(FIELD),
+                   help="the field path (default .membrane/field.json); the "
+                        "erase targets its parent's field/ + entities.json")
+    a = p.parse_args(argv)
+    base = Path(a.field).resolve().parent
+    fdir = base / _field_dirname_for(a.field)
+    ents = base / "entities.json"
+    targets = [t for t in (fdir, ents) if t.exists()]
+    if not a.yes:
+        print("membrane erase-field discards the seat's memory. Re-run "
+              "with --yes to confirm.", file=sys.stderr)
+        print("would move:", file=sys.stderr)
+        for t in targets:
+            print(f"  {t}", file=sys.stderr)
+        if not targets:
+            print(f"  (nothing found under {base})", file=sys.stderr)
+        print("Published shared-tier entities live outside .membrane/ and "
+              "are not touched -- unpublish them for a clean slate.",
+              file=sys.stderr)
+        return 2
+    # stop the seat first -- the memory must not be rewritten under our feet
+    pf = base / "opencode.pid"
+    out = stop_seat(ports=list(DEFAULT_PORTS),
+                    pidfiles=[pf] if pf.exists() else [])
+    for pid in out["stopped"]:
+        print(f"[erase-field] stopped seat pid {pid}")
+    for pid in out["killed"]:
+        print(f"[erase-field] killed seat pid {pid}")
+    ts = time.strftime("%Y%m%d-%H%M%S")
+    moved = []
+    for t in (fdir, ents):
+        if not t.exists():
+            continue
+        dst = t.with_name(t.name + ".erased-" + ts)
+        shutil.move(str(t), str(dst))
+        moved.append((t, dst))
+    if not moved:
+        print(f"[erase-field] nothing to erase under {base} -- the seat "
+              "will already boot empty.")
+        return 0
+    for src, dst in moved:
+        print(f"[erase-field] {src} -> {dst} (recoverable)")
+    print("[erase-field] memory erased; run `membrane opencode` (or serve/"
+          "standalone) to boot a fresh seat.")
+    return 0
 
 
 def _install(args: argparse.Namespace) -> int:
@@ -515,6 +578,8 @@ def main() -> None:
         "             naive full-history replay; reads serve-msgs, no model call)\n"
         "  bench      held-out recall benchmark (MRR + hit@k across read\n"
         "             modes); runs against a COPY of the field\n"
+        "  erase-field  stop the seat and move the field + entity side-index\n"
+        "             out of the way (--yes; recoverable, timestamped)\n"
         "\n"
         "Everything after the subcommand is forwarded verbatim to the\n"
         "underlying module.\n"
@@ -529,7 +594,7 @@ def main() -> None:
                    "demo", "reset", "install", "doctor", "connect",
                    "ingest", "backfill", "codegraph", "update", "move",
                    "migrate", "auth", "serve", "standalone", "stop",
-                   "stats", "bench"):
+                   "stats", "bench", "erase-field"):
         if cmd is None and not argv:
             print(__doc__)
             return
@@ -614,6 +679,8 @@ def main() -> None:
         # tty's ctrl+c (INT -> bounded TERM -> KILL, marker-checked)
         from .stopseat import main as stop_main
         raise SystemExit(stop_main(args.forwarded))
+    if cmd == "erase-field":
+        raise SystemExit(_erase_field(args.forwarded))
     if cmd == "review":
         argv2 = _ensure_data_dir(args.forwarded)
         raise SystemExit(_run_module("membrane.review", argv2))
