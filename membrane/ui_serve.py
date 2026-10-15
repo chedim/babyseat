@@ -52,7 +52,8 @@ VOICE_PATHS = ("/membrane/voice", "/membrane/voice/state", "/membrane/jsexec/reg
 _MSG = re.compile(r"^/session/[^/]+/(message|prompt_async)$")
 _ANY_SPEAKER = re.compile(r"^\s*\[(?:HA )?user: ")
 _NAME_OK = re.compile(r"^[^\x00-\x1f\[\]]{1,60}$")
-MAX_STT = 2_200_000                        # 60 s of 16 kHz s16 mono + header
+MAX_STT = 15_400_000                       # 8 min of 16 kHz s16 mono + header (under HA's 16 MiB too)
+STT_TIMEOUT_S = 180                        # long audio takes the speech server a while
 TAILNET = ipaddress.ip_network("100.64.0.0/10")
 
 
@@ -190,7 +191,7 @@ def _stt(handler) -> None:
         return _json(handler, {"error": "no speech server: the page listens itself"}, 501)
     n = int(handler.headers.get("Content-Length") or 0)
     if n > MAX_STT:
-        return _json(handler, {"error": "too long (60 s at most)"}, 413)
+        return _json(handler, {"error": "too long (8 minutes at most)"}, 413)
     wav = handler.rfile.read(n) if n else b""
     if not (len(wav) > 44 and wav[:4] == b"RIFF" and wav[8:12] == b"WAVE"):
         return _json(handler, {"error": "expected a WAV recording"}, 400)
@@ -199,7 +200,7 @@ def _stt(handler) -> None:
     body, ctype = _multipart(wav, ", ".join([name] + list(st.get("aliases") or [])) + ".")
     try:
         req = urllib.request.Request(url, data=body, headers={"Content-Type": ctype}, method="POST")
-        with urllib.request.urlopen(req, timeout=45) as up:
+        with urllib.request.urlopen(req, timeout=STT_TIMEOUT_S) as up:
             text = json.loads(up.read() or b"{}").get("text", "")
     except (urllib.error.URLError, OSError, ValueError) as e:
         return _json(handler, {"error": f"the speech server is not answering ({type(e).__name__})"}, 502)

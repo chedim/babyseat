@@ -135,7 +135,9 @@ function speechLog(who, what, text) {
   try { if (window.MEMBRANE_SPEECH_LOG) window.MEMBRANE_SPEECH_LOG(who, what, String(text || "").slice(0, 400)); } catch (e) { /* best effort */ }
 }
 const STT_PATH = "/ui/stt";
-const REC_MAX_S = 60, REC_MIN_S = 0.35, STT_RATE = 16000;
+// 8 minutes (2026-10-15: 60 s cut the operator off mid-thought): the longest the
+// HA path carries -- its web server refuses a body over 16 MiB (32 kB/s of WAV)
+const REC_MAX_S = 480, REC_MIN_S = 0.35, STT_RATE = 16000;
 const TILT_GAIN = 1.5;
 
 /** Float32 at inRate -> Int16 at outRate (box-averaged decimation). */
