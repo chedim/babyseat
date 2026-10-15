@@ -132,6 +132,25 @@ class TestLink(unittest.TestCase):
         self.assertIn("no entity matches", run["error"])
         self.assertEqual(r["linked"], [])
 
+    def test_a_bracketed_spec_reuses_the_clean_command(self):
+        """issue #87: a command name wrapped as a list/array ('['pwd-ls-73f4']'
+        or '[pwd-ls-73f4]') re-links the SAME entity -- no ghost minted with
+        the brackets/quotes baked into its name."""
+        f, est = _world()
+        srv = _Srv(f, est)
+        r = entity_link(srv, est, f, None, "tool:executor", ["pwd-ls-73f4"])
+        self.assertTrue(r["ok"])
+        eid = r["linked"][0]["eid"]
+        for bad in ("['pwd-ls-73f4']", "[pwd-ls-73f4]", '["pwd-ls-73f4"]'):
+            r2 = entity_link(srv, est, f, None, "tool:executor", bad)
+            self.assertTrue(r2["ok"], bad)
+            self.assertEqual(r2["linked"][0]["eid"], eid, bad)
+            self.assertFalse(r2["linked"][0]["created"], bad)
+        # one command doc, not one per spelling
+        docs = [d for d in est.docs.values()
+                if (d.properties or {}).get("command") == "pwd-ls-73f4"]
+        self.assertEqual(len(docs), 1, [d.eid for d in docs])
+
     def test_relink_bumps_the_edge_and_reruns(self):
         f, est = _world()
         srv = _Srv(f, est)

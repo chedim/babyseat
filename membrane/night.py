@@ -1799,7 +1799,23 @@ def command_specs(commands) -> list:
                 if isinstance(dec, list):
                     commands = dec
             except ValueError:
-                pass
+                # THE GHOST SPECS (issue #87): a command name the model
+                # wrapped as a list/array -- "['pwd-ls-73f4']" (single
+                # quotes, JSON refuses) and "[pwd-ls-73f4]" (bare, not even
+                # a literal) -- minted entities whose NAME was the repr.
+                # ast handles the single-quoted form; the bare bracketed
+                # token (one word, no spaces/operators) strips its brackets.
+                # A shell test `[ -f x ] && echo y` has spaces/operators
+                # (and doesn't even END with ']'), so it never reaches here.
+                import ast as _ast
+                try:
+                    dec = _ast.literal_eval(t)
+                    if isinstance(dec, list):
+                        commands = dec
+                except (ValueError, SyntaxError):
+                    inner = t[1:-1].strip()
+                    if inner and re.fullmatch(r"[A-Za-z0-9._@+-]+", inner):
+                        commands = [inner]
     elif not isinstance(commands, (list, tuple, set)):
         commands = [commands]
     out = []

@@ -73,6 +73,20 @@ class TestCommandNames(unittest.TestCase):
         self.assertEqual(r["runs"][0]["head"].strip(), "SOC-2")              # re-linking the label updates it
         self.assertEqual(len([d for d in est.docs if "soc.probe" in d]), 1)  # one command, not a new stub each time
 
+    def test_a_bracketed_or_quoted_spec_normalizes_to_the_name(self):
+        """issue #87: entity_link minted ghost entities named "['pwd-ls-73f4']"
+        and "[pwd-ls-73f4]" when the model wrapped the command name as a
+        list/array -- the brackets and quotes baked into the entity name."""
+        self.assertEqual(N.command_specs("['pwd-ls-73f4']"), ["pwd-ls-73f4"])
+        self.assertEqual(N.command_specs("[pwd-ls-73f4]"), ["pwd-ls-73f4"])
+        self.assertEqual(N.command_specs('["pwd-ls-73f4"]'), ["pwd-ls-73f4"])
+
+    def test_a_bracketed_shell_test_stays_whole(self):
+        """The shell test `[ -f x ] && echo y` has spaces and operators -- it
+        is a command, never a one-element list, and must not be stripped."""
+        self.assertEqual(N.command_specs("[ -f x ] && echo y"),
+                         ["[ -f x ] && echo y"])
+
 
 class _Http:
     def __init__(self, reply):
