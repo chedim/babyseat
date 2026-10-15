@@ -27,6 +27,10 @@ ENT = "speaker"
 AGENT = "speaker"
 TITLE = "🎙 voice -- the speaker lane"
 
+# CHUNKED STT (Phase 2, "more is coming"): route()'s sentinel for a streamed
+# partial transcript -- it is recorded + shown but starts no turn.
+INTERIM = "interim"
+
 
 def _entity(srv):
     from .entities import MEMBRANE_NS, CLASS_CONFIG, QuantumEntity
@@ -103,9 +107,52 @@ def frame(text: str, status: str) -> str:
             "or call the llm entity so the chat or a loop does it, and say so.\n" + text)
 
 
+def _words(text: str) -> str:
+    """The person's bare spoken words (no speaker line, no 🎙 stamp)."""
+    from .speakers import split_speaker
+    from . import voice_io as VIO
+    return VIO._bare(split_speaker(text or "")[1]).strip()
+
+
+def _streams(runner) -> dict:
+    st = getattr(runner, "_voice_streams", None)
+    if st is None:
+        st = runner._voice_streams = {}
+    return st
+
+
+def _stream_interim(runner, chat_sid: str, stream: str, text: str, user_info: dict, parts: list) -> str:
+    """An interim transcript: coalesce its words into the utterance's buffer,
+    mark the voice-log row `voiceInterim` (history never replays it), and tell
+    the page "more is coming". No turn."""
+    st = _streams(runner)
+    buf = st.setdefault(chat_sid, {}).setdefault(stream, {"text": "", "info": user_info, "parts": parts})
+    w = _words(text)
+    buf["text"] = " ".join(x for x in (buf["text"], w) if x)
+    buf["info"], buf["parts"] = user_info, parts
+    user_info["voiceInterim"] = True
+    try:
+        runner.messages.append(chat_sid, user_info, parts)
+    except Exception:
+        pass
+    try:
+        runner.hub.publish({"type": "membrane.stream", "sessionID": chat_sid, "stream": stream,
+                            "final": False, "text": buf["text"]})
+    except Exception:
+        pass
+    return INTERIM
+
+
+def _stream_final(runner, chat_sid: str, stream: str) -> dict | None:
+    """The utterance's final transcript: drop its buffer (the final text wins,
+    but a whisper flush that returns nothing falls back to the buffered words)."""
+    return (_streams(runner).get(chat_sid) or {}).pop(stream, None)
+
+
 def route(runner, chat_sid: str, text: str, user_info: dict, parts: list):
-    """A voiceIn message -> (speaker sid, framed text, info, parts), or None to
-    leave it to the chat (not voice, the lane off, no seat)."""
+    """A voiceIn message -> (speaker sid, framed text, info, parts), INTERIM for
+    a streamed partial (handled, no turn), or None to leave it to the chat (not
+    voice, the lane off, no seat)."""
     if not (user_info or {}).get("voiceIn"):
         return None
     srv = getattr(runner, "srv", None)
@@ -114,6 +161,13 @@ def route(runner, chat_sid: str, text: str, user_info: dict, parts: list):
     sp = session(runner)
     if not sp or sp == chat_sid:
         return None
+    stream = (user_info or {}).get("stream")
+    if stream is not None and not (user_info or {}).get("final"):
+        return _stream_interim(runner, chat_sid, stream, text, user_info, parts)
+    if stream is not None:
+        buf = _stream_final(runner, chat_sid, stream)
+        if buf and not _words(text):
+            text = buf["text"]                    # the whisper flush lost the words
     user_info["speakerRouted"] = True            # the chat's row: the voice log keeps it, its history skips it
     try:
         runner.messages.append(chat_sid, user_info, parts)
@@ -317,16 +371,24 @@ def run(runner, routed) -> dict:
 
 
 def release_listen(srv) -> None:
-    """A listen held during the turn (voice_io.on_listen) opens after the reply was said."""
+    """A listen held during the turn opens after the reply was said: a
+    deferred follow-up (`listen_pending`, voice_io.on_listen) and an ear the
+    auto-pause held (`listen_hold`) both reopen now that Argus is done."""
     try:
         from . import voice_io as VIO
         est = getattr(srv, "entity_store", None)
         for ent in list((getattr(est, "docs", None) or {}).values()):
             pp = ent.properties or {}
-            if pp.get("voice_io") == "in" and pp.get("listen_pending"):
+            if pp.get("voice_io") != "in":
+                continue
+            if pp.get("listen_pending"):
                 pp["listen"] = pp.pop("listen_pending")
                 ent.properties = pp
                 VIO.on_listen(srv, ent)
+                est.upsert(ent, embedder=None)
+            elif pp.get("listen_hold"):
+                ent.properties = pp
+                VIO.resume(srv, ent)
                 est.upsert(ent, embedder=None)
     except Exception:
         pass

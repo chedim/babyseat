@@ -1480,8 +1480,13 @@ function definePanel() {
       if (ev.type === "membrane.name") this._applySeatName(p.name);   // issue #6: the name was adopted
       if (ev.type === "membrane.jsexec") this._jsRun(p.job).catch(() => {});
       if (ev.type === "membrane.listen" && sid === (this._chat && this._chat.sid)) {
-        // Argus opens (or closes) the mic for an answer (voice_io.on_listen)
-        this.dispatchEvent(new CustomEvent("ai-listen", { detail: { seconds: Number(p.seconds) || 0 }, bubbles: true, composed: true }));
+        // Argus opens (or closes) the mic for an answer (voice_io.on_listen);
+        // pause = the ear holds while he speaks, resume comes as seconds again
+        this.dispatchEvent(new CustomEvent("ai-listen", { detail: { seconds: Number(p.seconds) || 0, pause: !!p.pause }, bubbles: true, composed: true }));
+      }
+      if (ev.type === "membrane.stream" && sid === (this._chat && this._chat.sid)) {
+        // the person's speech streams in (Phase 2): "more is coming" until final
+        this.dispatchEvent(new CustomEvent("ai-stream", { detail: { text: p.text || "", final: !!p.final, stream: p.stream || "" }, bubbles: true, composed: true }));
       }
       if (ev.type === "membrane.say" && sid === (this._chat && this._chat.sid) && this._repliesArmed) {
         const ln = p.line || {};
@@ -1536,15 +1541,19 @@ function definePanel() {
     _busy() { return !!(this._chat && this._chat.status && this._chat.status.type === "busy"); }
 
     /** VOICE IN (voice_io.py): a spoken phrase starts the turn like a message but
-     *  lives in the voice log, not the chat (🎙 tells Argus it was spoken). */
-    async sendVoice(text) {
+     *  lives in the voice log, not the chat (🎙 tells Argus it was spoken).
+     *  CHUNKED STT (Phase 2): opts.stream + opts.final stream the person's speech
+     *  -- interim (final:false) coalesces; final (final:true) starts the turn. */
+    async sendVoice(text, opts = {}) {
       text = String(text || "").trim();
       if (!text || !this._sid) return;
       this.dispatchEvent(new CustomEvent("ai-sent", { bubbles: true, composed: true }));
       if (!this._busy()) { this._chat.status = { type: "busy", since: Date.now() }; this._paintStatus(); this._schedule(); }
+      const body = Object.assign({ agent: this._agent, voice: true, parts: [{ type: "text", text: "🎙 " + text }] },
+        this._llmOn ? {} : { membrane_only: true });
+      if (opts.stream) { body.stream = opts.stream; body.final = !!opts.final; }
       const r = await this._api(SERVE + "/session/" + this._sid + "/prompt_async", {
-        method: "POST", body: JSON.stringify(Object.assign({ agent: this._agent, voice: true, parts: [{ type: "text", text: "🎙 " + text }] },
-          this._llmOn ? {} : { membrane_only: true })),
+        method: "POST", body: JSON.stringify(body),
       });
       if (!r.ok) this._err(this._apiErr("voice send failed", r));
       if (!this._live) { await this._resync(); this._startPoll(); }
