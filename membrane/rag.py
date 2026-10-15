@@ -147,11 +147,37 @@ def _inject_after(messages, block: str) -> list:
     return msgs
 
 
+def think_value(name: str | None) -> bool | None:
+    """`--think on|off|auto` -> the body value: on=True, off=False,
+    auto (the default) = None = forward the payload verbatim."""
+    if name == "on":
+        return True
+    if name == "off":
+        return False
+    return None            # auto / anything unrecognized = the dial says nothing
+
+
+def apply_think_dial(payload: dict, think: bool | None) -> dict:
+    """THE THINK DIAL'S TURN-LANE SEAM: the seat-level DEFAULT for why
+    the backend reasons (oils on|off into every forwarded body; auto =
+    forward verbatim -- a non-thinking card never learns a think:true
+    it 400s on). The client's own think always wins: the dial is a
+    default, not an override. Same object back when nothing is set."""
+    if think is None or "think" in payload:
+        return payload
+    u2 = dict(payload)
+    u2["think"] = bool(think)
+    return u2
+
+
 def _ollama_chat(backend: str, model: str, messages: list,
-                 temperature: float = 0.2, timeout: int = 120) -> str:
+                 temperature: float = 0.2, timeout: int = 120,
+                 think: bool | None = None) -> str:
     """One non-stream Ollama /api/chat call -> the assistant text (or "")."""
     body = {"model": model, "stream": False, "temperature": float(temperature),
             "messages": messages}
+    if think is not None:
+        body["think"] = bool(think)
     try:
         req = urllib.request.Request(backend + "/api/chat",
                                      data=json.dumps(body).encode(),
@@ -167,12 +193,15 @@ def _ollama_chat(backend: str, model: str, messages: list,
 
 
 def _openai_chat(url: str, headers: dict, model: str, messages: list,
-                 temperature: float = 0.2, timeout: int = 120) -> str:
+                 temperature: float = 0.2, timeout: int = 120,
+                 think: bool | None = None) -> str:
     """One non-stream OpenAI-compatible chat call -> the assistant text
     (or ""). The cloud-lane twin of _ollama_chat: the same background
     prompts, a different wire shape (choices[0].message.content)."""
     body = {"model": model, "stream": False, "temperature": float(temperature),
             "messages": messages}
+    if think is not None:
+        body["think"] = bool(think)
     try:
         req = urllib.request.Request(
             url, data=json.dumps(body).encode(), method="POST",
@@ -202,6 +231,7 @@ def _model_chat(srv):
     def chat(bg: str, model: str, messages: list,
              temperature: float = 0.2, timeout: int = 120) -> str:
         rec = router.records.get(model) if router is not None else None
+        think = getattr(srv, "think", None)
         if rec is not None and rec.backend:
             from .auth import PROVIDERS as _PROV
             prov = _PROV.get(rec.backend) or {}
@@ -211,9 +241,11 @@ def _model_chat(srv):
             key = (getattr(srv, "cloud_keys", None) or {}).get(rec.backend, "")
             headers = _auth._headers(rec.backend, key) if key else {}
             return _openai_chat(url, headers, model, messages,
-                                temperature=temperature, timeout=timeout)
+                                temperature=temperature, timeout=timeout,
+                                think=think)
         return _ollama_chat(bg or backend, model, messages,
-                            temperature=temperature, timeout=timeout)
+                            temperature=temperature, timeout=timeout,
+                            think=think)
 
     return chat
 

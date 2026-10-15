@@ -54,7 +54,7 @@ import numpy as np
 from .embed import OllamaEmbedder
 from .global_field import PEER_ASK_SIM_MIN
 from .rag import (RAGProxyHandler, _clip, _inject, _inject_after,
-                  _model_chat, doctrine_instructions_text)
+                  _model_chat, doctrine_instructions_text, think_value)
 from .router import (EXPLORE_LANE, AUTO_CLOUD, AUTO_LOCAL, AUTO_LANES,
                      AUTO_ALIASES, LANE_TOKENS, normalize_lane,
                      Registry)
@@ -368,7 +368,7 @@ def _stop_signal_policy(launch: bool, standalone: bool) -> str:
 TEARDOWN_LEASE_S = 90.0
 
 
-def main() -> None:
+def _build_ap():
     import argparse
     ap = argparse.ArgumentParser(
         description="Membrane field + opencode: a local field-backed coding "
@@ -628,9 +628,20 @@ def main() -> None:
                     help="skip absorption AND resume: start fresh")
     ap.add_argument("--no-autonode", action="store_true",
                     help="don't run the trigger layer (no file watchers)")
+    ap.add_argument("--think", choices=("on", "off", "auto"), default="auto",
+                    help="why the backend reasons: on forces think:true on "
+                         "every forwarded body, off think:false (cards like "
+                         "qwen3 / R1 distills stop cold; glm cloud reasons "
+                         "either way), auto (the default) forwards the "
+                         "payload verbatim -- a non-thinking card never "
+                         "learns a think:true it 400s on")
     ap.add_argument("passthrough", nargs="*",
                     help="extra args passed to opencode (use -- to separate)")
-    args = ap.parse_args()
+    return ap
+
+
+def main() -> None:
+    args = _build_ap().parse_args()
     # the data dir the UI routes and settings.json read (settings.py)
     os.environ.setdefault("MEMBRANE_DATA_DIR", str(Path(args.field).resolve().parent))
     if args.standalone:
@@ -1326,6 +1337,9 @@ def main() -> None:
     # memory = 5 items, drop-oldest; voice always planner-gated; model
     # calls capped per minute. --no-thinker stands it down.
     srv.thinker = None
+    # THE THINK DIAL (args.think -> the body's think default): auto =
+    # None = the payload rides verbatim, the seat says nothing.
+    srv.think = think_value(getattr(args, "think", None))
     if not getattr(args, "no_thinker", False):
         try:
             from .thinker import Thinker, NIGHT_PULSE_S

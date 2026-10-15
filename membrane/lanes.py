@@ -28,7 +28,7 @@ import numpy as np
 from .embed import OllamaEmbedder
 from .global_field import PEER_ASK_SIM_MIN
 from .rag import (RAGProxyHandler, _clip, _inject, _inject_after,
-                  _model_chat, doctrine_instructions_text)
+                  _model_chat, doctrine_instructions_text, apply_think_dial)
 from .router import (EXPLORE_LANE, AUTO_CLOUD, AUTO_LOCAL, AUTO_LANES,
                      AUTO_ALIASES, LANE_TOKENS, normalize_lane,
                      Registry)
@@ -5440,6 +5440,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             honestly."""
             u2 = dict(up)
             u2["model"] = model_name
+            # THE THINK DIAL (the seat's say in why the backend reasons):
+            # ride the default when the payload itself is silent; the
+            # client's own think always wins (the seam is a default).
+            u2 = apply_think_dial(u2, getattr(srv, "think", None))
             # per-rung backend: registered providers answer their
             # OpenAI-compatible chat path with their own key + header style
             # (auth.PROVIDERS carries the shapes, memory-only keys);
