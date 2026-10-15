@@ -333,6 +333,20 @@ def canonical(name: str, args: dict) -> tuple[str, dict]:
     return name, args
 
 
+def mounted_name(name: str) -> bool:
+    """Whether a tool name is a mounted tool: a family, a legacy member, or
+    a dashed spelling of one. The live capture uses it as the gate that
+    keeps a REFUSED/unmounted call (the model's invented `f_1`..`f_4`) from
+    minting a `tool:` field entity -- turn noise with no world referent
+    (issue #110, the same class as #101's stat-at-mint)."""
+    n = canonical(name or "", {})[0]
+    if n in FAMILIES or n in _LEGACY_FAMILY:
+        return True
+    if n.replace("-", "_") in _LEGACY_FAMILY:
+        return True
+    return n == "help"
+
+
 _OBJECT_PARAMS = ("properties", "args", "scripts", "params", "watch_ops", "watch_fields", "parents", "links")
 
 

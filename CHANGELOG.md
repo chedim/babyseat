@@ -1,5 +1,7 @@
 ## Unreleased
 
+- **Refused tool calls no longer mint tool entities** (#110): a tool call the seat does not mount (the model's invented `f_1`..`f_4`) was refused by the surface but still captured as an observation, minting a live `tool:f_N` entity that rode the hot list — turn noise with no world referent. The live capture now drops unmounted tool names before they become observations (a `mounted_name` gate over the membrane families + legacy members, plus the client's own toolbelt), so a refused call leaves no live entity while real tools — membrane MCP and opencode built-ins alike — still capture.
+
 - **`entity_add` takes `spec`, `fulfill` takes `intent`** (#108): the spec=/name= dialect split refused a value the model DID send — `entity_add(spec=X)` read only `name` so it answered "name required", and `fulfill(intent=176237)` / `fulfill(#N)` had no `intent` in its arg list so it answered "spec required" (even though `intend`'s own message says "fulfill #N closes it"). `entity_add` now accepts `spec` as the name (`name` still wins), and `fulfill` accepts `intent` (the `#N` / id form) as the spec.
 
 - **`entity_query` sees the class-embedded files: pool** (#99, reported by Memo): a file entity minted by `entity_add` lands as `membrane::Component:files:x.py` (the class in the eid, the pool inside it), and the query read only the class as the kind — so `kind:file` returned nothing for those. The kind read now folds the eid through its canonical field id first, so `kind:file` sees the pool, while the entity still also matches `kind:component` (its class).

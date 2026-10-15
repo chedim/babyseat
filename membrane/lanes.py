@@ -3616,12 +3616,20 @@ def _capture_plan_and_calls(mem, query: str, content: str, calls: dict) -> None:
     """One response turn's tool calls: each becomes an observation (the full
     arguments) and registers in mem._pending_tools so its RESULT (next
     request) completes it. File-touching calls (edit/write) also mark the
-    codegraph dirty."""
+    codegraph dirty. A call whose name the seat does not mount is refused
+    by the surface, so it is dropped HERE too -- before it can mint a
+    `tool:` entity (issue #110)."""
+    from . import toolset as _ts
+    kept = {
+        i: c for i, c in (calls or {}).items()
+        if (_ts.mounted_name((c.get("function") or {}).get("name") or "")
+            or (c.get("function") or {}).get("name") in _OC_BUILTIN_TOOLS)
+    }
     cap = getattr(srv_ref(mem), "capturer", None)
-    if cap is not None and calls:
-        cap.on_calls(query, calls)          # full arguments, idempotent by call id
-    if calls:
-        for idx, c in sorted(calls.items()):
+    if cap is not None and kept:
+        cap.on_calls(query, kept)          # full arguments, idempotent by call id
+    if kept:
+        for idx, c in sorted(kept.items()):
             fn = c.get("function") or {}
             name = fn.get("name") or "?"
             args = (fn.get("arguments") or "").strip()
@@ -3630,7 +3638,7 @@ def _capture_plan_and_calls(mem, query: str, content: str, calls: dict) -> None:
                 mem._pending_tools[cid] = {"query": query, "name": name, "args": args}
         _codegraph_note_dirty(srv_ref(mem), [
             _tool_arg_path(c.get("function") or {})
-            for c in calls.values()])
+            for c in kept.values()])
 
 
 def _capture_tool_results(srv, body: dict) -> None:
