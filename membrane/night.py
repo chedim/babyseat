@@ -26,6 +26,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -782,6 +783,38 @@ def _script_record_fail(fld, est, ent, eid: str, kind: str,
                      "eid": eid, "error": msg[:200]})
 
 
+# THE PLATFORM-AVAILABILITY GATE (issue #103): a reaction decision must not
+# land as an unrunnable step. `arecord` is ALSA/Linux only; on the macOS seat
+# `which arecord` returns nothing, so the step can only fail and the goal then
+# keeps steering idle loops. Before spawning the shell, resolve the command's
+# heads; a head that is neither a shell builtin nor a PATH executable names a
+# tool this seat does not have -- refuse honestly instead of running to rc 127.
+_SHELL_BUILTINS = frozenset((
+    # dash builtins with no binary in PATH (shutil.which returns None); the
+    # ones already filtered by streams._NOT_HEADS (cd/echo/export/set/...) are
+    # redundant here but listed for self-documentation
+    "break", "continue", "eval", "exec", "exit", "getopts", "hash",
+    "local", "pwd", "read", "readonly", "return", "shift", "test",
+    "times", "trap", "type", "ulimit", "umask", "unset", "wait",
+    "command", "builtin", "printf", "bg", "fg", "jobs", "source",
+))
+
+
+def _missing_binary(cmd: str) -> str | None:
+    """The command's first head that is neither a shell builtin nor a PATH
+    executable -- None when every head is available (or there are no heads:
+    a pure-builtin line like `cd /tmp`). The PRIMARY head is the gate: a
+    pipeline `arecord ... && echo done` refuses on `arecord`, the echo is
+    irrelevant."""
+    for h in ST.shell_heads(cmd or ""):
+        if h in _SHELL_BUILTINS:
+            continue
+        if shutil.which(h) is not None:
+            continue
+        return h
+    return None
+
+
 def run_command_entity(fld, est, mem, command: str,
                        timeout_s: float | None = None) -> dict:
     """THE MODEL'S HANDS (run, the owner's 2026-10-01 design):
@@ -859,20 +892,30 @@ def run_command_entity(fld, est, mem, command: str,
             if err and rc != -1:
                 text, err = (text + "\n" if text else "") + err, ""
         else:
-            # THE NON-UTF-8 RECEIPT (2026-10-14): text=True decodes
-            # STRICTLY -- one bad byte in a command's output raised
-            # UnicodeDecodeError out of the engine, the thinker's
-            # run_pending_links died before landing, and the same link
-            # was retried forever (the seat's own log: the same pending
-            # link crashed every beat). Bytes + errors='replace' makes
-            # the receipt honest instead: rc and the output with U+FFFD
-            # where the bytes were.
-            p = subprocess.run(cmd, shell=True, capture_output=True,
-                               timeout=t, cwd=os.getcwd())
-            rc = p.returncode
-            text = "\n".join(
-                x.decode(errors="replace").replace("\r\n", "\n")
-                .rstrip("\n") for x in (p.stdout, p.stderr) if x)
+            # THE PLATFORM GATE (issue #103): the primary executable must
+            # exist on this seat; a missing one is refused here, before the
+            # subprocess -- no run, an honest reason, the receipt rides the
+            # same lanes a real rc 127 would (script_last_error, edge why).
+            _miss = _missing_binary(cmd)
+            if _miss:
+                rc = 127
+                err = f"'{_miss}' not found on this platform (no such command in PATH)"
+                text = ""
+            else:
+                # THE NON-UTF-8 RECEIPT (2026-10-14): text=True decodes
+                # STRICTLY -- one bad byte in a command's output raised
+                # UnicodeDecodeError out of the engine, the thinker's
+                # run_pending_links died before landing, and the same link
+                # was retried forever (the seat's own log: the same pending
+                # link crashed every beat). Bytes + errors='replace' makes
+                # the receipt honest instead: rc and the output with U+FFFD
+                # where the bytes were.
+                p = subprocess.run(cmd, shell=True, capture_output=True,
+                                   timeout=t, cwd=os.getcwd())
+                rc = p.returncode
+                text = "\n".join(
+                    x.decode(errors="replace").replace("\r\n", "\n")
+                    .rstrip("\n") for x in (p.stdout, p.stderr) if x)
     except subprocess.TimeoutExpired as e:
         rc = -1
         err = f"timeout after {t:g}s"
