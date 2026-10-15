@@ -145,6 +145,19 @@ class TestEdgesLikeThisOne(unittest.TestCase):
         for g in got:
             self.assertNotIn("f:" + z, (g["subj"], g["obj"]), g)
 
+    def test_a_new_edge_is_seen_by_the_next_query(self):
+        """Same cache, same freeze: a co edge written after the first query must
+        answer the next one."""
+        f = _world()
+        q = _co(f, "g", "h")
+        f.edges_like(q, k=10, min_sim=0.0)                    # builds the cache
+        x, y = "membrane/new1.py", "membrane/new2.py"
+        _say(f, [f"{p} is open in the editor" for p in (x, y)]
+             + [f"someone reviewed {p} yesterday" for p in (x, y)]
+             + [f"{x} imports the helpers from {y}"], t0=4000.0)
+        pairs = [{g["subj"], g["obj"]} for g in f.edges_like(q, k=10, min_sim=0.0)]
+        self.assertIn({"f:" + x, "f:" + y}, pairs)
+
     def test_results_say_what_was_said_never_the_bits(self):
         f = _world()
         g = f.edges_like(_co(f, "e", "g"), k=1)[0]

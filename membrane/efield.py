@@ -571,6 +571,7 @@ class EntityField:
                 rb = vsa.delta_bits(np.zeros_like(xr), xr)
                 if rb is not None:
                     R.upsert_co(self.b, self.origin, a, b, rb, key, seq, ts, said)
+                    self._wgen += 1
 
     _co_index: dict | None = None
 
@@ -583,9 +584,9 @@ class EntityField:
         if not q:
             return []
         wg = getattr(self.b, "write_gen", None)
-        gen = wg.get("relations", 0) if isinstance(wg, dict) else None
+        gen = (wg.get("relations", 0) if isinstance(wg, dict) else None, self._wgen)
         idx = self._co_index
-        if idx is None or gen is None or idx["gen"] != gen:
+        if idx is None or idx["gen"] != gen:
             rows = [d for _, d in self.b.scan("relations", {"origin": self.origin, "rel": "co"})
                     if d.get("sig") and not d.get("superseded")]
             M = (np.stack([np.frombuffer(base64.b64decode(d["sig"]), np.uint8) for d in rows])
@@ -1102,8 +1103,16 @@ class EntityField:
                 pass
         return n
 
+    # THE CACHES' CLOCK: the backend's write_gen bumps only on a delete or an
+    # out-of-order write (it exists for incremental readers) -- a cache keyed on
+    # it alone froze at its first build on the file store (and rebuilt on every
+    # call on Couchbase, which keeps none). This counter moves on every write
+    # this field makes: each flush, each co edge, each rebuild/re-embed.
+    _wgen = 0
+
     @_locked
     def flush(self) -> None:
+        self._wgen += 1
         if self._dirty:
             self.b.upsert_multi("entity_states", {
                 self._state_key(e): self._states[e].to_doc(self.origin)
@@ -1179,6 +1188,7 @@ class EntityField:
         if fw:
             self._ostats["forewarn"] = fw
         self._states, self._dirty, self._deltas, self._now = {}, set(), {}, {}
+        self._wgen += 1
         for k, ev in list(self.b.scan("events", {"origin": self.origin, "status": "applied"})):
             ev["status"] = "embedded"
             self.b.upsert("events", k, ev)
@@ -1340,10 +1350,10 @@ class EntityField:
         """The packed move bits of every delta row that carries them, one
         uint8 matrix (rows x DELTA_DIM/8); rebuilt when the deltas changed."""
         import base64
-        gen = self._dgen()
+        gen = (self._dgen(), self._wgen)
         cache = self._bits_index or {}
         hit = cache.get(bits)
-        if hit is not None and gen is not None and hit["gen"] == gen:
+        if hit is not None and hit["gen"] == gen:
             return hit
         rows, packed = [], []
         for _k, d in self.b.scan("entity_deltas", {"origin": self.origin}):
@@ -1508,6 +1518,7 @@ class EntityField:
         self._ostats = self._fresh_ostats()
         self._ostats.update({k: v for k, v in keep.items() if v is not None})
         self._states, self._dirty, self._deltas, self._now = {}, set(), {}, {}
+        self._wgen += 1
         n = 0
         for k, ev in list(self.b.scan("events", {"origin": self.origin,
                                                  "status": ["applied", "embedded", "empty"]})):
