@@ -111,3 +111,12 @@ against the previous mention vs against the field's running state:
 
 On prose the running state is not useless (unlike sensor digits), but the
 previous-mention delta wins everywhere measured: the next stage stores it.
+
+## stage 2b gate: the recall on a real field (`python recall_real.py <field copy>`)
+
+A copy of a seat's field rebuilt with the stage-2 code (every historical row gets
+its pbits; no re-embedding): 49,991 rows, index build 0.5 s, one query 8 ms.
+The same KIND of change is recalled across entities at 0.70-0.85: the same proxy
+timeout on different commands, "a new entity appeared on the banner" across three
+unrelated entities. Conversational prose look-alikes sit at 0.60-0.67 (topical or
+stylistic), so the card shows only matches >= 0.68.
