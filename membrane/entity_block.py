@@ -60,6 +60,32 @@ def evidence_n(st) -> int:
     return sum(v or 0 for key, v in streams.items() if key in ("observation", "code"))
 
 
+# THE IMPORTANCE AXIS (issue #119): how much a state's DEFINITIONAL mentions
+# (role=doc, a term mined from a re-read document -- the field-side echo of a
+# Concept's first_seen) should lift it above raw mention counts when ranking
+# WHAT TO SHOW. Raw counts are honest history and are never touched here; the
+# axis only reorders. Kind gates it (only idea entities get doc mentions;
+# tools never do), recency fades it (a definition left cold sinks back).
+DEFINITIONAL_WEIGHT = 100.0            # one definitional mention ~ 100 routine ones
+DEFINITIONAL_HALF_LIFE_S = 7 * 86400.0
+
+
+def importance(st, now=None) -> float:
+    """A state's definitional lift: its doc-role mention count, faded by age
+    from its last mention. 0.0 for anything without a definitional mention --
+    so every pre-existing state ranks exactly as before."""
+    roles = getattr(st, "n_by_role", None) or {}
+    doc = int(roles.get("doc") or 0)
+    if not doc:
+        return 0.0
+    now = now if now is not None else time.time()
+    ts = _last_seen_of(st)
+    if ts is None:
+        return float(doc) * DEFINITIONAL_WEIGHT
+    age = max(0.0, now - float(ts))
+    return float(doc) * DEFINITIONAL_WEIGHT * (0.5 ** (age / DEFINITIONAL_HALF_LIFE_S))
+
+
 def question_entities(field, text: str, qvec=None, k: int = 5) -> list[str]:
     graph = field.graph_fn()
     named = []
@@ -76,11 +102,12 @@ def question_entities(field, text: str, qvec=None, k: int = 5) -> list[str]:
     def rank(eid):
         st = field.get(eid)
         if st is None:
-            return (0, 0, 0)
-        # provenance before weight (issue #9): what a tool observed
-        # (observation/code) outranks prose-only phantoms of the same
-        # specificity -- nearness may not mint rank evidence never paid.
-        return (0 if E.is_specific(eid) else 1,
+            return (0, 0, 0, 0)
+        # importance before provenance (issue #119): a definitional mention
+        # (a term the seat re-read and defined) outranks routine tool labor;
+        # then the issue #9 provenance tiebreak (observation/code over prose).
+        return (-importance(st),
+                0 if E.is_specific(eid) else 1,
                 0 if evidence_n(st) else 1,
                 -(st.coherence * math.log1p(max(st.mass, 0)) if not E.is_specific(eid)
                   else rank_weight(st)))
@@ -507,11 +534,11 @@ def now_line(field, since_seq: int, k: int = 5) -> str | None:
         specific = E.is_specific(eid) and not eid.startswith("s:?")
         if not specific and not field.is_coherent(st):
             continue
-        scored.append((0 if specific else 1, -len(rows), eid))
+        scored.append((-importance(st), 0 if specific else 1, -len(rows), eid))
     scored.sort()
     if not scored:
         return None
-    return "now: " + ", ".join(f"{eid} ({-n})" for _, n, eid in scored[:k])
+    return "now: " + ", ".join(f"{eid} ({-n})" for _, _, n, eid in scored[:k])
 
 
 # ---- the normal-mode injection: what changed since the model last looked ---------
