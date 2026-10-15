@@ -1215,13 +1215,17 @@ class FileBackend(MemBackend):
         self.flush()
 
 
-def open_backend(field_path: str = ""):
+def open_backend(field_path: str = "", readonly: bool = False):
     """THE SEAT-FIRST LADDER (the operator's stage 4): RAM for lab paths /
     MEMBRANE_EFIELD_STORE=mem (the isolation guard); the FILE home under
     the seat's own folder by DEFAULT (the field survives restarts, and
     the raw per-origin state write-throughs are retired); the couchbase
     field only when MEMBRANE_FIELD_CLOUD=1 -- and a down cluster degrades
-    to FILE, never to RAM (RAM forgets on restart)."""
+    to FILE, never to RAM (RAM forgets on restart).
+
+    readonly=True (issue #127) asks for a SNAPSHOT, never the writer lock:
+    the couchbase-lite home opens without its sidecar flock (review's
+    --metrics/--ab beside a live serve)."""
     import os
     import sys
     from .substrate import _is_lab_field_path
@@ -1251,11 +1255,13 @@ def open_backend(field_path: str = ""):
         from .cblstore import StoreBusy
         try:
             from .cblstore import CBLiteBackend
-            return CBLiteBackend(cdir, journal_dir=jdir)
+            return CBLiteBackend(cdir, journal_dir=jdir, readonly=readonly)
         except StoreBusy as e:
             # fail fast: falling back would replay writes into the STALE
             # journals while the real store is live elsewhere (issue #26
-            # was exactly that crash, mid-replay, partial rebuild)
+            # was exactly that crash, mid-replay, partial rebuild). A
+            # read-only open never takes the lock, so this is only the
+            # writer path; the message names the live serve.
             print(f"[efield] store busy ({e}); nothing opened", file=sys.stderr)
             raise
         except Exception as e:
