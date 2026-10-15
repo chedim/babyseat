@@ -128,6 +128,13 @@ class PeerSubstrate:
     _REBUILD_AFTER = 3             # consecutive failed op batches -> rebuild
 
     def _connect(self) -> None:
+        # THE FAST DEGRADE (the door-visibility CI hang): a probe-miss
+        # skips the SDK entirely -- the boot used to sit in a multi-second
+        # connect timeout per substrate when no cluster exists.
+        from .efstore import probe_local_couchbase
+        if not probe_local_couchbase():
+            self._reg = self._chan = self._cluster = None
+            return
         try:
             from couchbase.cluster import Cluster
             from couchbase.auth import PasswordAuthenticator
