@@ -24,7 +24,7 @@ THE COVENANTS:
     not in the session's messages, the LLM's history or the recall
   - it has no hands: no tools, no goals, nothing it says actuates
   - chat only (the operator / plan lanes): never a phone call, never a loop
-Kill switch: MEMBRANE_VOICE=0.
+Voice is OFF by default (LLM text only); enable with MEMBRANE_VOICE=1.
 """
 from __future__ import annotations
 
@@ -90,7 +90,7 @@ _WORD = re.compile(r"[A-Za-z0-9][A-Za-z0-9'_\-./%]*[A-Za-z0-9%]|[A-Za-z0-9]|[.,?
 
 
 def enabled() -> bool:
-    return os.environ.get("MEMBRANE_VOICE", "1") not in ("0", "false", "off")
+    return os.environ.get("MEMBRANE_VOICE", "0").lower() in ("1", "true", "on", "yes")
 
 
 def clean(text: str) -> str:

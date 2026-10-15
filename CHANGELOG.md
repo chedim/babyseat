@@ -1,3 +1,7 @@
+## v0.5.1 (2026-10-15) — the train ships quiet
+
+- **Chat voice is OFF by default**: membrane chats in LLM text only; set `MEMBRANE_VOICE=1` to opt back in. The old default (`"1"`) made the seat speak unless a kill-switch was set; the gate is now an explicit allow-list.
+
 ## v0.5.0 (2026-10-15) — the seat gets experience
 
 This release also brings v0.4.2's fixes to PyPI for the first time (see v0.4.2 below).
