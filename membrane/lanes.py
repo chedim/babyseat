@@ -4520,7 +4520,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             changes = fld.latest_changes(eid)
         except Exception:                               # noqa: BLE001
             changes = {}
-        card = _FM.entity_card(doc, ev, near, rels, changes=changes)
+        try:
+            nxt = fld.followed_by(eid)
+        except Exception:                               # noqa: BLE001
+            nxt = []
+        card = _FM.entity_card(doc, ev, near, rels, changes=changes, followed_by=nxt)
         for x in card["near"]:
             st = fld.get(x["eid"])
             x["surface"] = getattr(st, "surface", None) if st is not None else None
