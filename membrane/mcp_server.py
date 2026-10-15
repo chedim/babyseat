@@ -713,7 +713,10 @@ TOOLS: list[dict] = [
             "run=true) and the return carries the entity's current "
             "properties + script_data + any {run: true} result the getter "
             "triggered. The general rule: entity tools answer with the "
-            "entity's post-processing value."),
+            "entity's post-processing value. The whole-properties blob is "
+            "clipped at ~800 chars, so a ring-backed property (voice "
+            "heard/said) loses its newest entries to that cut -- read it "
+            "fully with prop=..., tail=N."),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -723,6 +726,15 @@ TOOLS: list[dict] = [
                         "description": "Bypass the 5s getter LRU (force a "
                                        "fresh read-through; a getter's "
                                        "{run: true} re-executes)."},
+                "prop": {"type": "string",
+                         "description": "Extract one property in full (e.g. "
+                                        "prop=heard) instead of the clipped "
+                                        "whole-properties blob."},
+                "tail": {"type": "integer",
+                         "description": "With prop: page a list-valued "
+                                        "property from its NEWEST end, "
+                                        "returning the last N items (e.g. "
+                                        "prop=heard, tail=5)."},
             },
             "required": ["spec"],
         },
@@ -1529,7 +1541,11 @@ def tool_entity_unlink(args: dict, port: int) -> str:
 
 
 def tool_entity_read(args: dict, port: int) -> str:
-    """The read-back tool: the entity's value AFTER processing."""
+    """The read-back tool: the entity's value AFTER processing. `prop`
+    extracts one property in full (the whole-properties blob is still
+    clipped at ~800 chars, so a ring-backed lane log -- voice heard/said --
+    lost its newest entries to that cut); `tail` pages a list-valued
+    property from its newest end (issue #105)."""
     import urllib.parse
     spec = urllib.parse.quote(_arg(args, "spec", "eid", "entity", "name",
                                     "key", "id", "object"))     # Cliffhanger's word for a target
@@ -1538,6 +1554,13 @@ def tool_entity_read(args: dict, port: int) -> str:
         qs += "&run=1"
     if args.get("nofire"):
         qs += "&nofire=1"
+    prop = _arg(args, "prop", "property", "field")
+    tail = None
+    if args.get("tail") is not None:
+        try:
+            tail = max(1, int(args.get("tail")))
+        except (TypeError, ValueError):
+            tail = None
     out = _http(port, "GET", qs)
     if not out.get("ok"):
         return f"read failed: {out.get('error', 'unknown error')}"
@@ -1545,7 +1568,21 @@ def tool_entity_read(args: dict, port: int) -> str:
     g = out.get("getter") or {}
     lines = [f"entity {out.get('eid')} [{out.get('cls')}] "
              f"(post-processing value):"]
-    if props:
+    if prop:
+        if prop not in props:
+            have = ", ".join(sorted(props)) or "(none)"
+            lines.append(f"no property {prop!r} (properties: {have})")
+        else:
+            val = props[prop]
+            if isinstance(val, list):
+                items = val[-tail:] if tail else val
+                lines.append(f"{prop} ({len(val)} item(s)"
+                             f"{f', tail {tail}' if tail else ''}):")
+                for it in items:
+                    lines.append("- " + json.dumps(it, default=str))
+            else:
+                lines.append(f"{prop}: " + json.dumps(val, default=str))
+    elif props:
         lines.append("properties: " + json.dumps(props, default=str)[:800])
     runs = (out.get("pending") or []) + [dict(d, queued="done")
                                          for d in (out.get("done") or [])]
