@@ -3,6 +3,36 @@
 Extracted from the README so it can go deep. This is the money story: where
 savings come from, and how each turn picks a model.
 
+## Measured numbers (the operator's live seat)
+
+From the seat's own per-turn upstream usage, not an estimate —
+`membrane stats --store .membrane/serve-msgs.json --baseline` (read-only, no
+model call). 1,215 sessions / 1,955 user messages / 3,840 assistant turns
+through 2026-10-15.
+
+| metric | value |
+|---|---|
+| input / output / reasoning | 36.1M / 5.5M / 8.5M tokens |
+| cache-read | 14.2M — 39.5% of input (prompt caching) |
+| tokens per turn (in+out) | 10.8K avg · 1.55K median · 137K p99 |
+| LLM calls per turn (tool-loop rounds) | ~4.9 |
+| recall injection | ~700 tokens median · ~1.1K p99 |
+
+**The savings baseline** — against a naive full-context runner that replays
+the whole transcript every turn (O(n²)):
+
+| replay strategy | context tokens | vs full-context |
+|---|---|---|
+| full-context replay | 74.3M | — |
+| bounded window (12 msgs × 4K chars) | 1.9M | −97% |
+| actual (window + recall + tool loop) | 36.1M | −51% net |
+
+The window's saving lands almost entirely on long conversations (turns with
+200+ prior messages carry 68.5M of the 72.4M saved); under the 12-message
+window it is neutral and the recall + tool loop is the standing ~34M-token
+cost. The naive side uses the same ~4 chars/token estimate the seat's own
+fallback uses, so the −51% is conservative.
+
 ## How it saves tokens
 
 Two honest facts up front. First: **in this architecture, learning is free** —

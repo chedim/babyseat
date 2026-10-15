@@ -263,6 +263,7 @@ model is grounded by what those entities hold —
 | `membrane ingest` | cold start: absorb docs/README into the field (DOC events; a second ingest is a no-op) |
 | `membrane codegraph` | stdlib-AST call graph (stats / impact / callers / callees) |
 | `membrane doctor` | what's installed/running + the field's vitals |
+| `membrane stats` | token/call accounting + the savings baseline (`--baseline` compares the bounded window against a naive full-history replay; reads `serve-msgs`, no model call) |
 
 `MEMBRANE_EFIELD` selects the field's mode: `on` (the default: capture,
 embed, apply), `shadow` (capture events only — a lab ablation), `off`.
@@ -327,6 +328,39 @@ in [docs/shared-field-workflow.md](docs/shared-field-workflow.md).
 ---
 
 ## Measured, not promised
+
+Token and recall numbers from the operator's own live seat (1,215 sessions,
+1,955 user messages, 3,840 assistant turns, through 2026-10-15) — real
+traffic, not a synthetic benchmark. Reproduce with
+`membrane stats --store .membrane/serve-msgs.json --baseline` (read-only, no
+model call); the recall experiments are held-out scripts in `experiments/`.
+
+| metric | value |
+|---|---|
+| input / output / reasoning tokens | 36.1M / 5.5M / 8.5M |
+| cache-read | 14.2M — **39.5% of input** (prompt caching) |
+| tokens per turn (input+output) | 10.8K avg · **1.55K median** · 137K p99 |
+| LLM calls per turn (tool-loop rounds) | ~4.9 |
+| recall injection size | **~700 tokens median** · ~1.1K p99 (never the transcript) |
+
+**Savings vs a naive full-context runner** (the default for an agent runner:
+replay the whole transcript every turn, growing O(n²)):
+
+| replay strategy | context tokens | vs full-context |
+|---|---|---|
+| full-context replay | 74.3M | — |
+| membrane's bounded window (12 msgs × 4K chars) | 1.9M | **−97%** |
+| membrane actual (window + recall + tool loop) | 36.1M | **−51% net** |
+
+The window's saving lands almost entirely on long conversations: turns with
+200+ prior messages contribute 68.5M of the 72.4M tokens saved; under the
+12-message window it is neutral (recall + tool loop is the standing cost).
+The naive side uses the seat's own ~4 chars/token estimate, so the −51% is
+conservative.
+
+**Recall quality** (held-out, over the same seat's history): entity worldlines
+lift "who 1,500 never-seen mentions were about" from MRR **0.210 → 0.539**
+(mature entities 0.206 → 0.634); see the v0.5.0 notes and `experiments/`.
 
 - **Token economics, live seat (2026-10-12):** 5,736 live entities over
   4,949 streamed events; the standing per-turn header ~3 KB (entity tracks,
