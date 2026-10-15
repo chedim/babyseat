@@ -306,6 +306,9 @@ class EntityState:
     episodes: list = field(default_factory=list)
     ep_acc: np.ndarray | None = None
     ep_k: int = 0
+    # when each chapter ran and the sentence that closed it: [(t0, t1, sid)]
+    ep_meta: list = field(default_factory=list)
+    ep_t0: float | None = None
 
     @property
     def coherence(self) -> float:
@@ -351,6 +354,10 @@ class EntityState:
                 d["episodes"] = [[pack_f16(v), int(n)] for v, n in self.episodes]
             if self.ep_acc is not None:
                 d["ep_acc"], d["ep_k"] = pack_f32(self.ep_acc), int(self.ep_k)
+            if self.ep_meta:
+                d["ep_meta"] = [list(m) for m in self.ep_meta]
+            if self.ep_t0 is not None:
+                d["ep_t0"] = self.ep_t0
         return d
 
     @classmethod
@@ -380,6 +387,8 @@ class EntityState:
             st.episodes = [(unpack_f16(v), int(n)) for v, n in d.get("episodes") or []]
             if d.get("ep_acc"):
                 st.ep_acc, st.ep_k = f32(unpack_f16(d["ep_acc"])), int(d.get("ep_k") or 0)
+            st.ep_meta = [tuple(m) for m in d.get("ep_meta") or []]
+            st.ep_t0 = d.get("ep_t0")
         return st
 
 
@@ -882,26 +891,91 @@ class EntityField:
             self._states[eid] = st
         return st
 
-    def _episode(self, st: EntityState, x) -> None:
+    def _episode(self, st: EntityState, x, ts=None, sid: str = "") -> None:
         """One mention into the open run; a full run closes as an episode (its
         centroid kept at the precision a reload reads, so a restart never
-        changes a later result); past EP_MAX the most alike neighbours merge."""
+        changes a later result) remembering when it ran and the sentence that
+        closed it; past EP_MAX the most alike neighbours merge (spans join)."""
+        if len(st.ep_meta) != len(st.episodes):        # a state from before the chapters had dates
+            st.ep_meta = [(None, None, None)] * len(st.episodes)
+        if st.ep_k == 0:
+            st.ep_t0 = ts
         st.ep_acc = f32(x if st.ep_acc is None else st.ep_acc + x)
         st.ep_k += 1
         if st.ep_k < EP_RUN:
             return
         st.episodes.append((unpack_f16(pack_f16(st.ep_acc / st.ep_k)), st.ep_k))
-        st.ep_acc, st.ep_k = None, 0
+        st.ep_meta.append((st.ep_t0, ts, sid))
+        st.ep_acc, st.ep_k, st.ep_t0 = None, 0, None
         while len(st.episodes) > EP_MAX:
             U = [unit(v) for v, _ in st.episodes]
             i = int(np.argmax([float(U[j] @ U[j + 1]) for j in range(len(U) - 1)]))
             (v1, n1), (v2, n2) = st.episodes[i], st.episodes[i + 1]
             st.episodes[i:i + 2] = [(unpack_f16(pack_f16((n1 * v1 + n2 * v2) / (n1 + n2))), n1 + n2)]
+            m1, m2 = st.ep_meta[i], st.ep_meta[i + 1]
+            st.ep_meta[i:i + 2] = [(m1[0], m2[1], m2[2])]
         if self._ep_index is not None and st.n + 1 >= MATURE:
             self._ep_index["rows"][st.eid] = [v for v, _ in st.episodes]
             self._ep_index["M"] = None
 
     _ep_index: dict | None = None
+
+    def _ep_rows(self) -> dict:
+        """eid -> episode centroids, for every MATURE entity (built once, kept in
+        place as episodes close; dropped on a rebuild)."""
+        if self._ep_index is None:
+            rows = {}
+            for _k, d in self.b.scan("entity_states", {"origin": self.origin}):
+                if int(d.get("n") or 0) >= MATURE and d.get("episodes"):
+                    rows[d["eid"]] = [unpack_f16(v) for v, _ in d["episodes"]]
+            for eid, st in self._states.items():            # unflushed lives win
+                if st.n >= MATURE and st.episodes:
+                    rows[eid] = [v for v, _ in st.episodes]
+            self._ep_index = {"rows": rows, "M": None}
+        return self._ep_index["rows"]
+
+    @staticmethod
+    def _shape(C) -> dict | None:
+        """A worldline's shape over its (centered, unit) chapters: step (how far
+        it jumps between chapters), spread (how widely it ranges), returns (how
+        often a chapter sits nearer an older one than the one before it)."""
+        if len(C) < 4:
+            return None
+        C = np.stack(C)
+        step = float(np.mean([1.0 - C[i] @ C[i - 1] for i in range(1, len(C))]))
+        spread = float(np.mean(1.0 - C @ unit(C.mean(0))))
+        rets = float(np.mean([float(np.max(C[:i - 1] @ C[i]) > C[i - 1] @ C[i]) for i in range(2, len(C))]))
+        return {"step": step, "spread": spread, "returns": rets}
+
+    def worldline_of(self, eid: str) -> dict:
+        """The card's worldline: the chapters (when each ran, its size, the
+        sentence that closed it) and, past 4 chapters, the SHAPE as percentiles
+        among the field's mature entities. Shape is a trait (two seats: first
+        half vs second half of a life, beyond size, step +0.75/+0.67, spread
+        +0.73/+0.69, returns +0.26/+0.30); a big jump between chapters marks a
+        change too weakly to say so (AUC 0.545) -- chapters are descriptive."""
+        st = self.get(eid)
+        if st is None or not st.episodes:
+            return {}
+        meta = st.ep_meta if len(st.ep_meta) == len(st.episodes) else [(None, None, None)] * len(st.episodes)
+        sids = [m[2] for m in meta if m[2]]
+        got = self.b.get_multi("sentences", sids) if sids else {}
+        out = {"chapters": [{"from": m[0], "to": m[1], "n": int(n),
+                             "said": str((got.get(m[2]) or {}).get("text") or "")[:200]}
+                            for (_v, n), m in zip(st.episodes, meta)]}
+        mine = self._shape([self._centered(v) for v, _ in st.episodes])
+        if mine is not None:
+            pop = [s for s in (self._shape([self._centered(v) for v in vs])
+                               for e, vs in self._ep_rows().items()) if s is not None]
+            if pop:
+                out["shape"] = {k: int(round(100 * sum(p[k] < mine[k] for p in pop) / len(pop)))
+                                for k in mine}
+        return out
+
+    def forewarn_calibration(self) -> dict:
+        """What both forecasts saw against what happened (the viewer's chip)."""
+        return {"moments": dict(self._ostats.get("forewarn") or {}),
+                "acts": dict(self._ostats.get("forewarn_act") or {})}
 
     def _wl_points(self, d: dict) -> list:
         """The worldline's points for one state doc: a young entity's mean, a
@@ -927,16 +1001,8 @@ class EntityField:
         """Mature entities whose best EPISODE is nearest the query -- found even
         when their current state sits elsewhere. Kept in place (an episode that
         closes updates its row), so it never goes stale; dropped on a rebuild."""
+        self._ep_rows()
         idx = self._ep_index
-        if idx is None:
-            rows = {}
-            for _k, d in self.b.scan("entity_states", {"origin": self.origin}):
-                if int(d.get("n") or 0) >= MATURE and d.get("episodes"):
-                    rows[d["eid"]] = [unpack_f16(v) for v, _ in d["episodes"]]
-            for eid, st in self._states.items():            # unflushed lives win
-                if st.n >= MATURE and st.episodes:
-                    rows[eid] = [v for v, _ in st.episodes]
-            idx = self._ep_index = {"rows": rows, "M": None}
         if idx["M"] is None:
             owner, pts = [], []
             for eid, vs in idx["rows"].items():
@@ -971,7 +1037,7 @@ class EntityField:
         st.state = at_stored(unit(before + GAIN * (x - before)))
         st.mean = f32(x if st.mean is None else st.mean + (x - st.mean) / (st.n + 1))
         if st.eid.split(":", 1)[0] not in ("w", "p", "e"):
-            self._episode(st, x)
+            self._episode(st, x, ts, sid)
         r = unit(x - bg) if bg is not None else x
         st.rsum = f32(r if st.rsum is None else st.rsum + r)
         st.n += 1

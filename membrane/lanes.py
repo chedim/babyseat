@@ -4308,6 +4308,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
                 "relations", {"origin": fld.origin, "superseded": False})]
             out = _FM.field_map(rows, rels)
             out["field"] = {"live": len(rows), "relations": len(rels), "m": m}
+            try:
+                out["field"]["forewarn"] = fld.forewarn_calibration()
+            except Exception:                           # noqa: BLE001
+                pass
         except Exception as e:                          # noqa: BLE001
             self._json_err_raw(500, f"field map failed: {e!r}"[:200]); return
         cache[m] = (time.time(), out)
@@ -4524,7 +4528,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             nxt = fld.followed_by(eid)
         except Exception:                               # noqa: BLE001
             nxt = []
-        card = _FM.entity_card(doc, ev, near, rels, changes=changes, followed_by=nxt)
+        try:
+            wl = fld.worldline_of(eid)
+        except Exception:                               # noqa: BLE001
+            wl = {}
+        card = _FM.entity_card(doc, ev, near, rels, changes=changes, followed_by=nxt, worldline=wl)
         for x in card["near"]:
             st = fld.get(x["eid"])
             x["surface"] = getattr(st, "surface", None) if st is not None else None

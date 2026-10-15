@@ -189,7 +189,8 @@ function axisValues(spec, nodes, dist) {
 }
 
 const FieldLogic = { layout, layoutXY, minSep, placeLabels, search, kindColor, neighbors, rankNorm,
-                     setEntityAxis, clearEntityAxis, axisValues, toggleAxisMode, distKey };
+                     setEntityAxis, clearEntityAxis, axisValues, toggleAxisMode, distKey,
+                     cardHtml, forewarnChip };
 if (typeof module !== "undefined" && module.exports) module.exports = FieldLogic;
 
 // ------------------------------------------------------------ the element
@@ -197,6 +198,85 @@ if (typeof module !== "undefined" && module.exports) module.exports = FieldLogic
 function fesc(s) {
   return String(s == null ? "" : s).replace(/[&<>"']/g,
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function fwhen(t) {
+  if (!t) return "";
+  const d = new Date(t > 1e12 ? t : t * 1000);
+  return isNaN(d) ? String(t) : d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+const H4 = (s) => '<h4 style="margin:10px 0 4px">' + fesc(s) + "</h4>";
+const QUOTE = (text, meta) => '<div style="margin:4px 0;padding:4px 8px;border-left:2px solid rgba(128,128,128,.4);font-size:12px">' +
+  fesc(text) + (meta ? '<div style="opacity:.5;font-size:11px">' + fesc(meta) + "</div>" : "") + "</div>";
+
+// THE CARD (pure: the drawer calls it, node renders it in the tests). onMap(eid)
+// says whether a linked entity is on the current map.
+function cardHtml(c, onMap) {
+  onMap = onMap || (() => false);
+  const streams = Object.entries(c.n_by_stream || {}).map(([k, v]) => k + " " + v).join(", ");
+  let h = '<div class="kv">' +
+    [["seen", c.n + (streams ? " (" + streams + ")" : "")], ["coherence", c.coherence != null ? (+c.coherence).toFixed(2) : ""],
+     ["activity", c.activity != null ? (+c.activity).toFixed(2) : ""], ["first seen", fwhen(c.first_ts)],
+     ["last seen", fwhen(c.last_ts)], ["tier", c.tier]]
+      .filter(([, v]) => v !== "" && v != null).map(([k, v]) => "<span>" + fesc(k) + "</span><span>" + fesc(v) + "</span>").join("") + "</div>";
+  const wl = c.worldline || {};
+  if ((wl.chapters || []).length) {
+    // its LIFE: the chapters (descriptive -- a jump between them is no claim of a change)
+    h += H4("Its life · " + wl.chapters.length + " chapter" + (wl.chapters.length === 1 ? "" : "s"));
+    const sh = wl.shape;
+    if (sh) {
+      h += '<div style="font-size:12px;opacity:.8;margin:2px 0 6px">' +
+        "jumps between chapters more than " + fesc(sh.step) + "% of grown entities · ranges wider than " +
+        fesc(sh.spread) + "% · returns to old chapters more than " + fesc(sh.returns) + "%</div>";
+    }
+    const shown = wl.chapters.slice(-8).reverse();
+    h += shown.map((ch) => QUOTE(ch.said || "(no sentence)",
+      [fwhen(ch.from), fwhen(ch.to)].filter(Boolean).join(" – ") + " · " + ch.n + " mentions")).join("");
+    if (wl.chapters.length > shown.length) {
+      h += '<div style="opacity:.5;font-size:11px">+ ' + (wl.chapters.length - shown.length) + " earlier chapters</div>";
+    }
+  }
+  const ch = c.changes || {};
+  if (ch.latest) {
+    h += H4("Changes like this one") + QUOTE(ch.latest.text, ["latest", ch.latest.n != null ? "#" + ch.latest.n : "", fwhen(ch.latest.ts)].filter(Boolean).join(" · "));
+    for (const [label, rows] of [["on itself before", ch.self], ["on other entities", ch.others]]) {
+      if (!(rows || []).length) continue;
+      h += '<div style="opacity:.6;font-size:11px;margin-top:4px">' + fesc(label) + "</div>" + rows.map((r) =>
+        '<div class="nb" data-id="' + fesc(r.eid) + '"><span class="rel">' + fesc(r.sim) + "</span><span>" + fesc(r.text) +
+        (label === "on other entities" ? ' <span style="opacity:.5">' + fesc(r.eid) + "</span>" : "") + "</span></div>").join("");
+    }
+  }
+  if ((c.followed_by || []).length) {
+    h += H4("Usually followed by") + c.followed_by.map((r) =>
+      '<div class="nb" data-id="c:' + fesc(r.to) + '"><span class="rel">' + fesc((+r.lift).toFixed(1)) + "×</span><span>→ " +
+      fesc(r.to) + ' <span style="opacity:.5">×' + fesc(r.n) + "</span></span></div>").join("");
+  }
+  if ((c.evidence || []).length) {
+    h += H4("Evidence") + c.evidence.map((e) => QUOTE(e.text, [e.role, e.stream, fwhen(e.ts)].filter(Boolean).join(" · "))).join("");
+  }
+  if ((c.near || []).length) {
+    h += H4("Nearest in the field") + c.near.map((x) =>
+      '<div class="nb" data-id="' + fesc(x.eid) + '"><span class="rel">' + fesc(x.sim) + "</span><span>" + fesc(x.surface || x.eid) +
+      (onMap(x.eid) ? "" : ' <span style="opacity:.45">(not on the map)</span>') + "</span></div>").join("");
+  }
+  if ((c.relations || []).length) {
+    h += H4("Relations") + c.relations.map((r) =>
+      '<div class="nb" data-id="' + fesc(r.subj === c.eid ? r.obj : r.subj) + '"><span class="rel">' + fesc(r.rel) +
+      "</span><span>" + fesc(r.subj === c.eid ? "→ " + r.obj : "← " + r.subj) + ' <span style="opacity:.5">×' + fesc(r.n) + "</span>" +
+      (r.said ? '<div style="opacity:.6;font-size:11px">“' + fesc(r.said) + "”</div>" : "") + "</span></div>").join("");
+  }
+  return h;
+}
+
+// THE FOREWARNING CHIP: of the moments and acts the seat forewarned, how many went
+// bad -- against the base rate (recording only; nothing reaches the model yet)
+function forewarnChip(fw) {
+  const parts = [(fw || {}).moments || {}, (fw || {}).acts || {}];
+  const fl = parts.reduce((s, p) => s + (p.flagged || 0), 0), fb = parts.reduce((s, p) => s + (p.flagged_bad || 0), 0);
+  const n = parts.reduce((s, p) => s + (p.n || 0), 0), bad = parts.reduce((s, p) => s + (p.bad || 0), 0);
+  if (!n) return "";
+  return fb + "/" + fl + " flagged went bad (base " + Math.round(100 * bad / n) + "%)";
 }
 
 const FSTYLE = `
@@ -615,7 +695,8 @@ function defineFieldPanel() {
         const chips = [
           ["entities", ents.live], ["nursery", ents.nursery], ["eff. rank", geo.eff_rank != null ? geo.eff_rank.toFixed(1) : null],
           ["waiting", waiting], ["thinker beats", th.processed], ["loops busy", loops.length ? busy + "/" + loops.length : null],
-          ["relations", ((this._data || {}).field || {}).relations], [st.paused ? "PAUSED" : "running", ""],
+          ["relations", ((this._data || {}).field || {}).relations],
+          ["forewarned", forewarnChip(((this._data || {}).field || {}).forewarn) || null], [st.paused ? "PAUSED" : "running", ""],
         ].filter(([, v]) => v !== undefined && v !== null);
         // the watch frame: what the brain watches, as axes -- the ones the
         // talk leans along most (+ = more than usual)
@@ -903,33 +984,7 @@ function defineFieldPanel() {
     }
 
     _cardHtml(c) {
-      const when = (t) => {
-        if (!t) return "";
-        const d = new Date(t > 1e12 ? t : t * 1000);
-        return isNaN(d) ? String(t) : d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-      };
-      const streams = Object.entries(c.n_by_stream || {}).map(([k, v]) => k + " " + v).join(", ");
-      let h = '<div class="kv">' +
-        [["seen", c.n + (streams ? " (" + streams + ")" : "")], ["coherence", c.coherence != null ? (+c.coherence).toFixed(2) : ""],
-         ["activity", c.activity != null ? (+c.activity).toFixed(2) : ""], ["first seen", when(c.first_ts)],
-         ["last seen", when(c.last_ts)], ["tier", c.tier]]
-          .filter(([, v]) => v !== "" && v != null).map(([k, v]) => "<span>" + fesc(k) + "</span><span>" + fesc(v) + "</span>").join("") + "</div>";
-      if ((c.evidence || []).length) {
-        h += '<h4 style="margin:10px 0 4px">Evidence</h4>' + c.evidence.map((e) =>
-          '<div style="margin:4px 0;padding:4px 8px;border-left:2px solid rgba(128,128,128,.4);font-size:12px">' + fesc(e.text) +
-          '<div style="opacity:.5;font-size:11px">' + fesc([e.role, e.stream, when(e.ts)].filter(Boolean).join(" · ")) + "</div></div>").join("");
-      }
-      if ((c.near || []).length) {
-        h += '<h4 style="margin:10px 0 4px">Nearest in the field</h4>' + c.near.map((x) =>
-          '<div class="nb" data-id="' + fesc(x.eid) + '"><span class="rel">' + fesc(x.sim) + "</span><span>" + fesc(x.surface || x.eid) +
-          (this._byId.has(x.eid) ? "" : ' <span style="opacity:.45">(not on the map)</span>') + "</span></div>").join("");
-      }
-      if ((c.relations || []).length) {
-        h += '<h4 style="margin:10px 0 4px">Relations</h4>' + c.relations.map((r) =>
-          '<div class="nb" data-id="' + fesc(r.subj === c.eid ? r.obj : r.subj) + '"><span class="rel">' + fesc(r.rel) +
-          "</span><span>" + fesc(r.subj === c.eid ? "→ " + r.obj : "← " + r.subj) + ' <span style="opacity:.5">×' + fesc(r.n) + "</span></span></div>").join("");
-      }
-      return h;
+      return cardHtml(c, (id) => this._byId.has(id));
     }
 
     async _onDrawer(e) {
