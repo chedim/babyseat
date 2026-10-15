@@ -1149,6 +1149,8 @@ class TurnRunner:
                 continue          # said to the voice alone, not to the model
             if info.get("speakerRouted"):
                 continue          # answered in the speaker lane (speaker.py), not here
+            if info.get("voiceInterim"):
+                continue          # a streamed partial (Phase 2): its final transcript replays
             text = "\n".join(
                 str(p.get("text") or "") for p in row.get("parts") or []
                 if isinstance(p, dict) and p.get("type") == "text").strip()
@@ -3270,11 +3272,19 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
             # THE SPEAKER LANE (speaker.py): a spoken message runs in the seat's
             # speaker session, beside the chat -- it never cuts the chat's work
             _routed = None
+            _interim = None
             try:
                 from . import speaker as _SPK
                 _routed = _SPK.route(runner, sid, text, user_info, row["parts"])
+                _interim = _SPK.INTERIM
             except Exception:
                 _routed = None
+            if _routed is not None and _routed == _interim:
+                # a streamed partial (Phase 2): recorded + shown, no turn yet
+                self.send_response(204)
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             if _routed is not None:
                 if async_:
                     threading.Thread(target=_SPK.run, args=(runner, _routed), daemon=True).start()
@@ -3328,6 +3338,12 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
             # any message, but lives in the voice log, not the chat
             if body.get("voice") is True:
                 info["voiceIn"] = True
+                # CHUNKED STT (Phase 2, "more is coming"): the page streams the
+                # person's speech -- interim transcripts (final false) coalesce in
+                # the speaker lane into the one turn their final transcript starts
+                if body.get("stream"):
+                    info["stream"] = body["stream"]
+                    info["final"] = bool(body.get("final", True))
                 try:
                     from . import voice_io as _VIO
                     from .speakers import split_speaker as _split

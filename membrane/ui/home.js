@@ -1134,6 +1134,14 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const d = e.detail || {};
         speechLog(d.kind, "not read aloud: only voice:out is spoken", d.text);
       });
+      // CHUNKED STT (Phase 2, "more is coming"): the person's speech streams in
+      // -- interim transcripts show as they arrive, before the turn starts
+      this._chat.addEventListener("ai-stream", (e) => {
+        const d = e.detail || {};
+        const words = String(d.text || "").trim();
+        if (!words) return;
+        this._orbText(words + (d.final ? "" : " …"));
+      });
     }
 
     _listenKeys(on) {

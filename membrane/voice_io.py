@@ -149,6 +149,7 @@ def on_edit(srv, ent, stream: bool = False) -> dict | None:
                            "line": {"text": text, "ts": now, "who": "argus"}})
     except Exception:
         pass
+    _hold_ear(srv, person)                     # the ear never hears his own voice
     return {"spoken": bool(sid), "session": sid}
 
 
@@ -164,28 +165,35 @@ def read(srv, person: str) -> dict:
 
 
 LISTEN_MAX_S = 30
+LOCK_S = 8.0                     # THE SHORTER LOCK (Phase 3): a follow-up answer
+                                 # opens this long -- a reply, not a phone call
 
 
 def on_listen(srv, ent) -> dict | None:
     """ARGUS OPENS THE MIC (2026-10-12, the operator: "let argus turn listening on
     and off instead of that follow-up mode -- they can control it if they need a
-    response"): an edit of voice:in's `listen` (seconds; 0 closes) tells the
-    person's page to listen that long -- the words come back as a voice message,
-    no wake word needed. Only while their ear (👂) is on, at most LISTEN_MAX_S."""
+    response"). An edit of voice:in's `listen` tells the person's page what to do:
+    seconds (0 closes, at most LISTEN_MAX_S -- a follow-up set mid-turn gets the
+    shorter LOCK_S), or "pause"/"resume" (Phase 3's turn-taking: hold the ear
+    while Argus speaks, reopen it after)."""
     pp = (getattr(ent, "properties", None) or {})
     if pp.get("voice_io") != "in" or "listen" not in pp:
         return None
+    val = pp.pop("listen")
+    if isinstance(val, str) and val in ("pause", "resume"):
+        return _listen_toggle(srv, ent, pp, val)
     try:
-        secs = max(0.0, min(float(pp.pop("listen") or 0), LISTEN_MAX_S))
+        secs = max(0.0, min(float(val or 0), LISTEN_MAX_S))
     except (TypeError, ValueError):
-        pp.pop("listen", None)
         secs = 0.0
     person = str(pp.get("person") or "")
     sid = str(pp.get("session") or "")
     if secs and getattr(srv, "_speaker_turn_live", None):
         # THE QUESTION FIRST (2026-10-12, the operator: "follow-up mic turns on before
         # the q for it is voiced and blocks the q"): a speaker turn speaks its reply when
-        # it ENDS -- a listen set inside it waits for that reply, then opens
+        # it ENDS -- a listen set inside it waits for that reply, then opens. The follow-up
+        # is the SHORTER LOCK, not the full window.
+        secs = min(secs, LOCK_S)
         pp["listen_pending"] = secs
         ent.properties = pp
         return {"listening": secs, "deferred": "after this turn's spoken reply"}
@@ -199,3 +207,62 @@ def on_listen(srv, ent) -> dict | None:
     except Exception:
         pass
     return {"listening": secs, "session": sid}
+
+
+def _listen_toggle(srv, ent, pp: dict, word: str) -> dict:
+    """The "listen" control's pause/resume (Phase 3): the ear holds its remaining
+    window while Argus speaks, and reopens it after -- the page needn't guess."""
+    if word == "pause":
+        held = float(pp.get("listening_for_s") or 0)
+        pp["listen_hold"] = held if held > 0 else pp.get("listen_hold") or 0
+        pp["listening_for_s"] = 0
+        pp["listen_ts"] = time.time()
+        ent.properties = pp
+        _publish_listen(srv, pp, 0, pause=True)
+        return {"listening": 0, "paused": True, "session": str(pp.get("session") or "")}
+    return resume(srv, ent)
+
+
+def resume(srv, ent) -> dict | None:
+    """Reopen a held ear: `listen_hold` seconds again (the auto-pause let go)."""
+    pp = (getattr(ent, "properties", None) or {})
+    if pp.get("voice_io") != "in":
+        return None
+    secs = float(pp.pop("listen_hold", 0) or 0)
+    if secs <= 0:
+        return None
+    pp["listen_ts"] = time.time()
+    pp["listening_for_s"] = secs
+    ent.properties = pp
+    _publish_listen(srv, pp, secs)
+    return {"listening": secs, "session": str(pp.get("session") or "")}
+
+
+def _publish_listen(srv, pp: dict, secs: float, pause: bool = False) -> None:
+    r = getattr(srv, "_loop_runner", None)
+    ev = {"type": "membrane.listen", "sessionID": str(pp.get("session") or ""),
+          "person": str(pp.get("person") or ""), "seconds": secs}
+    if pause:
+        ev["pause"] = True
+    try:
+        if r is not None and ev["sessionID"]:
+            r.hub.publish(ev)
+    except Exception:
+        pass
+
+
+def _hold_ear(srv, person: str) -> None:
+    """AUTO-PAUSE TURN-TAKING (Phase 3): while Argus speaks, the person's ear
+    holds its remaining window -- it never hears his own voice. The speaker
+    turn's release_listen reopens it."""
+    vin = entity(srv, "in", person, create=False)
+    if vin is None:
+        return
+    pp = vin.properties or {}
+    if not pp.get("on") or float(pp.get("listening_for_s") or 0) <= 0:
+        return
+    pp["listen_hold"] = pp.get("listen_hold") or float(pp.get("listening_for_s") or 0)
+    pp["listening_for_s"] = 0
+    pp["listen_ts"] = time.time()
+    vin.properties = pp
+    _publish_listen(srv, pp, 0, pause=True)
