@@ -284,6 +284,9 @@ class EntityState:
     n_by_role: dict = field(default_factory=dict)
     echo: float = 0.0
     echo_ts: float | None = None
+    # THE PREVIOUS MENTION (the delta lane, stage 2a): the last mention
+    # sentence, at its STORED precision -- the pbits are the move from it
+    last_x: np.ndarray | None = None
 
     @property
     def coherence(self) -> float:
@@ -323,6 +326,8 @@ class EntityState:
             d["seed"] = pack_f16(self.seed)
             d["mean"] = pack_f32(self.mean) if self.mean is not None else None
             d["rsum"] = pack_f32(self.rsum)
+            if self.last_x is not None:
+                d["last_x"] = pack_f16(self.last_x)
         return d
 
     @classmethod
@@ -348,6 +353,7 @@ class EntityState:
             st.seed = unpack_f16(d["seed"])
             st.mean = unpack_f16(d["mean"]) if d.get("mean") else None
             st.rsum = unpack_f16(d["rsum"])
+            st.last_x = unpack_f16(d["last_x"]) if d.get("last_x") else None
         return st
 
 
@@ -784,6 +790,16 @@ class EntityField:
             db = vsa.delta_bits(before, x)
             if db is not None:
                 row["dbits"] = db
+            # THE MOVE FROM THE PREVIOUS MENTION (stage 2a): measured stronger
+            # than the move from the running state everywhere it was tried
+            # (prose transitions 0.861/0.926 vs 0.653/0.740; real sensors
+            # 0.496 vs 0.380 -- experiments/delta_lane); the first mention
+            # has nothing before it
+            if st.last_x is not None:
+                pb = vsa.delta_bits(st.last_x, x)
+                if pb is not None:
+                    row["pbits"] = pb
+            st.last_x = unpack_f16(pack_f16(x))      # the stored precision
         self._deltas[dkey] = row
 
     def _materialize(self, st: EntityState) -> None:
