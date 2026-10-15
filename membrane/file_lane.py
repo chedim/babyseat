@@ -1,8 +1,9 @@
 """THE FILE LANE (the entity-scripts covenant, the reads/writes): the
 engine's file hands routed through a script's VERDICTS -- a script
-asks ({read}/{write}/{edit_file}), the engine execs via
-night.file_read_entity/file_write_entity, the result rides the ASKING
-entity's props (file_read_*/file_write_*), and the f:<path> entity
+asks ({read}/{write}/{edit_file}/{mine}), the engine execs via
+night.file_read_entity/file_write_entity/mine_artifact, the result rides
+the ASKING entity's props (file_read_*/file_write_*/mine_*), and the
+f:<path> entity
 mints/updates exactly as the old file tools did. NO tool surface: the
 MCP's read/write/edit are REMOVED -- everything is entity scripts.
 """
@@ -75,6 +76,27 @@ def edit(srv, ent, path: str, old: str, new: str) -> dict:
     props["file_edit_ts"] = time.time()
     if not out.get("ok"):
         props["script_last_error"] = out.get("error", "")[:300]
+    ent.properties = props
+    if est is not None:
+        est.upsert(ent, embedder=None)
+    return out
+
+
+def mine(srv, ent, spec: str) -> dict:
+    """A script's {mine: path} verdict (issue #116): the lazy-ingest
+    primitive -- route the re-read artifact's salient spans through the
+    field extractor, one bounded pass. The prototype fetch/clean/mine
+    seat scripts collapse to THIS thin wrapper over night.mine_artifact."""
+    from .night import mine_artifact
+    est, fld = _store_and_fld(srv)
+    out = mine_artifact(fld, est, str(spec))
+    props = ent.properties or {}
+    props["mine_ts"] = time.time()
+    if out.get("ok"):
+        props["mine_mined"] = out.get("mined")
+        props["mine_spans"] = out.get("spans")
+    else:
+        props["script_last_error"] = (out.get("reason") or "mine failed")[:300]
     ent.properties = props
     if est is not None:
         est.upsert(ent, embedder=None)

@@ -1167,6 +1167,115 @@ def file_read_entity(fld, est, mem, path, offset=None, limit=None) -> dict:
             "lines": lines, "scanned_lines": total, "ms": ms}
 
 
+# ---- the lazy artifact ingest (issue #116) -----------------------------------
+# THE ARTIFACT GAP: a seat re-read a paper and quoted its ideas, but the
+# field learned only the labor -- the quoted concepts never crossed the chat
+# extractor, because files live outside the stream. mine_artifact routes the
+# SALIENT spans of a demonstrably re-read file through the normal doc lane,
+# one bounded pass per artifact (the salience policy is the seat's; #118
+# upgrades it to a document mode).
+
+MINE_MAX_SPANS = 12          # one bounded pass: at most this many spans
+MINE_SPAN_CHARS = 400        # and never a verbatim body: each span is capped
+
+_DEFINED_TERM_RE = re.compile(
+    r"\b([A-Za-z][A-Za-z0-9 _'&/-]{2,40})\b\s+"
+    r"(?:is|are|refers\s+to|means|denotes)\b", re.IGNORECASE)
+
+
+def _salient_spans(text: str, max_spans: int = MINE_MAX_SPANS) -> list[str]:
+    """The default salience selector: ATX section headers, the first and
+    last paragraph, and defined-term sentences ("X is/are/refers to/
+    means ..."). Each span is collapsed + capped; the set is bounded to
+    ``max_spans``. A render/body string is NEVER a span -- spans are
+    content, but bounded."""
+    if not text:
+        return []
+    spans: list[str] = []
+    seen: set[str] = set()
+
+    def keep(s: str) -> None:
+        s = " ".join((s or "").split())[:MINE_SPAN_CHARS]
+        if not s or s in seen:
+            return
+        seen.add(s)
+        spans.append(s)
+
+    # (a) ATX headers -- a section IS the natural cell
+    for ln in text.splitlines():
+        if ln.lstrip().startswith("#"):
+            keep(ln.strip().lstrip("#").strip())
+            if len(spans) >= max_spans:
+                return spans[:max_spans]
+    # (b)/(c) first and last paragraph
+    paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    if paras:
+        keep(paras[0])
+        if len(paras) > 1:
+            keep(paras[-1])
+    # (d) defined-term sentences -- the cheapest "X is/means ..." harvest
+    for ln in text.splitlines():
+        if _DEFINED_TERM_RE.search(ln):
+            keep(ln.strip())
+            if len(spans) >= max_spans:
+                break
+    return spans[:max_spans]
+
+
+def mine_artifact(fld, est, spec, max_spans: int = MINE_MAX_SPANS,
+                  force: bool = False) -> dict:
+    """THE LAZY ARTIFACT INGEST (issue #116): route the SALIENT spans of a
+    re-read file through the normal extractor -- the same discourse/doc
+    lane ``ingest_events`` uses -- ONE bounded pass per artifact.
+
+    Never on arrival (a truncated download is never mined): the file's
+    f: entity must exist (the seat touched it) AND show a re-read
+    (``read_count >= 2``, set by file_read_entity). The ``mined_ts``
+    property makes a second pass a no-op; ``force`` bypasses both gates
+    (tests/manual). Returns {ok, eid, mined, spans, reason}."""
+    if fld is None or est is None:
+        return {"ok": False, "mined": 0, "spans": 0, "reason": "no field/store"}
+    fp = _file_resolve(spec)
+    if not fp:
+        return {"ok": False, "mined": 0, "spans": 0, "reason": "path required"}
+    eid = E.canon("f", fp, _field_graph(fld))
+    key = MEMBRANE_NS + overlay_key(eid)
+    doc = (est.docs or {}).get(key)
+    if doc is None:
+        return {"ok": False, "eid": eid, "mined": 0, "spans": 0,
+                "reason": "never read"}
+    props = doc.properties or {}
+    if not force and int(props.get("read_count") or 0) < 2:
+        return {"ok": False, "eid": eid, "mined": 0, "spans": 0,
+                "reason": "not re-read yet"}
+    if not force and props.get("mined_ts"):
+        return {"ok": False, "eid": eid, "mined": 0, "spans": 0,
+                "reason": "already mined"}
+    try:
+        with open(fp, "r", encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except OSError as e:
+        return {"ok": False, "eid": eid, "mined": 0, "spans": 0,
+                "reason": f"{type(e).__name__}: {e}"[:120]}
+    spans = _salient_spans(text, max_spans)
+    if not spans:
+        return {"ok": False, "eid": eid, "mined": 0, "spans": 0,
+                "reason": "no salient spans"}
+    rel = os.path.relpath(fp) or fp
+    before = int(fld._ostats.get("ev_n") or 0)
+    fld.write_events([ST.Event(stream="discourse", role="doc", text=s,
+                               src=f"artifact:{rel}", tool="mine",
+                               subject=eid) for s in spans],
+                     session="artifact")
+    mined = int(fld._ostats.get("ev_n") or 0) - before
+    if getattr(fld.emb, "model", "?") != "?":
+        fld.process()
+    props["mined_ts"] = time.time()
+    props["mine_spans"] = len(spans)
+    est.upsert(doc)
+    return {"ok": True, "eid": eid, "mined": mined, "spans": len(spans)}
+
+
 def file_write_entity(fld, est, mem, path, content, create_dirs=True) -> dict:
     """THE WRITE HAND: full-content overwrite (parents made), a no-op
     when the content already matches; the f: entity carries write_count,
@@ -4224,6 +4333,14 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
                                   "error": "edit_file: [path, old, new]"
                                            " required"}
             changed += 1
+    # THE MINE VERDICT (issue #116): a script's {mine: path} -- the lazy
+    # artifact ingest. The prototype fetch/clean/mine seat scripts collapse
+    # to this one verdict; the engine routes the re-read artifact's salient
+    # spans through the field extractor (one bounded pass, idempotent).
+    if out.get("mine"):
+        from . import file_lane
+        out["mine_result"] = file_lane.mine(srv, ent, str(out["mine"]))
+        changed += 1
     # THE INTENT VERDICT (C2, 2026-10-06): a script planting ITS OWN
     # commitment -- {intent: "<goal text>"} routes through the SAME
     # create-or-pin lane the model's tools use (a shared Goal entity +
