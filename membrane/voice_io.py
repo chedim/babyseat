@@ -116,8 +116,11 @@ def heard(srv, person: str, text: str, sid: str = "") -> None:
     ent.properties = pp
 
 
-def on_edit(srv, ent) -> dict | None:
-    """An edit of a voice:out entity's `say`: speak it (or say why not)."""
+def on_edit(srv, ent, stream: bool = False) -> dict | None:
+    """An edit of a voice:out entity's `say`: speak it (or say why not).
+    stream=True: one sentence of a reply being spoken as it streams (the speaker
+    lane) -- the gap between lines guards against a chatty model, not against the
+    next sentence of the same answer."""
     pp = (getattr(ent, "properties", None) or {})
     if pp.get("voice_io") != "out" or not str(pp.get("say") or "").strip():
         return None
@@ -129,7 +132,7 @@ def on_edit(srv, ent) -> dict | None:
         ent.properties = pp
         return {"spoken": False, "why": "off"}
     now = time.time()
-    if now - float(pp.get("said_ts") or 0) < SAY_GAP_S:
+    if not stream and now - float(pp.get("said_ts") or 0) < SAY_GAP_S:
         pp["say_refused"] = f"too soon after the last line ({SAY_GAP_S}s apart)"
         ent.properties = pp
         return {"spoken": False, "why": "gap"}
