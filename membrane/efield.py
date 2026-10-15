@@ -626,7 +626,7 @@ class EntityField:
         if c is None or c[0] != self._wgen:
             evs = sorted(self.b.scan("events", {"origin": self.origin, "stream": "observation"}),
                          key=lambda kv: (kv[1].get("seq") or 0))
-            c = self._idiom_cache = (self._wgen, I.count(evs))
+            c = self._idiom_cache = (self._wgen, I.count(evs), I.pairs(evs))
         return c[1]
 
     def idioms(self, min_n: int = 8) -> list[dict]:
@@ -634,6 +634,23 @@ class EntityField:
         session, more often than chance -- {from, to, n, share, lift}, best first."""
         from . import idioms as I
         return I.table(*self._idiom_counts(), min_n=min_n)
+
+    def suggested_methods(self, min_n: int = 3) -> list[dict]:
+        """The shell idioms the seat keeps repeating on ONE thing, offered as
+        two-step cliffhanger methods (a ready exec(action='define', steps=...)
+        and a real example). Never defined here: defining stays deliberate."""
+        from . import idioms as I
+        counts = self._idiom_counts()
+        rows = {(r["from"], r["to"]): r for r in I.table(*counts, min_n=min_n) if r["lift"] >= 1.0}
+        return I.suggest(self._idiom_cache[2], rows, min_n=min_n)
+
+    def suggested_for(self, eid: str, k: int = 2) -> list[dict]:
+        """A command entity's suggested methods (it starts them)."""
+        from . import idioms as I
+        name = I.name_of(eid)
+        if name is None:
+            return []
+        return [s for s in self.suggested_methods() if s["from"] == name][:k]
 
     def followed_by(self, eid: str, k: int = 3, min_n: int = 3) -> list[dict]:
         """What a command or tool entity is usually followed by (most often first)."""

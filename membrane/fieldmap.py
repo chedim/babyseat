@@ -152,7 +152,7 @@ CARD_FIELDS = ("eid", "kind", "surface", "tier", "n", "n_by_stream", "accr",
 
 def entity_card(doc, evidence, near, relations, self_eid: str | None = None,
                 changes: dict | None = None, followed_by: list | None = None,
-                worldline: dict | None = None) -> dict | None:
+                worldline: dict | None = None, suggested: list | None = None) -> dict | None:
     """The map drawer's read of ONE field entity (GET /membrane/field/entity):
     its readings, the evidence sentences, the nearest field neighbors, the
     relations. Vectors (state/seed/mean/rsum/vsa) never leave the seat."""
@@ -175,6 +175,8 @@ def entity_card(doc, evidence, near, relations, self_eid: str | None = None,
         card["changes"] = changes
     if followed_by:             # a command / tool: what usually comes next (efield.followed_by)
         card["followed_by"] = followed_by
+    if suggested:               # its idioms offered as methods (efield.suggested_for) -- never defined
+        card["suggested"] = suggested
     if worldline:               # its chapters and its shape (efield.worldline_of) -- no vectors
         card["worldline"] = worldline
     return card

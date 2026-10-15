@@ -252,6 +252,19 @@ function cardHtml(c, onMap) {
       '<div class="nb" data-id="c:' + fesc(r.to) + '"><span class="rel">' + fesc((+r.lift).toFixed(1)) + "×</span><span>→ " +
       fesc(r.to) + ' <span style="opacity:.5">×' + fesc(r.n) + "</span></span></div>").join("");
   }
+  if ((c.suggested || []).length) {
+    // an idiom offered as a cliffhanger method -- never defined by itself
+    h += H4("Suggested method") + c.suggested.map((s) => {
+      const steps = ((s.define || {}).steps || []).map((x, i) => (i + 1) + ". " + x.command).join("\n");
+      const call = "exec(" + JSON.stringify(s.define) + ")";
+      return '<div style="margin:4px 0;font-size:12px"><b>' + fesc(s.method) + "</b>" +
+        ' <span style="opacity:.6">seen ' + fesc(s.n) + " of " + fesc(s.of) + " times · params: " + fesc((s.params || []).join(", ")) + "</span>" +
+        '<pre style="white-space:pre-wrap;margin:4px 0;font-size:11px">' + fesc(steps) + "</pre>" +
+        (s.example ? '<div style="opacity:.55;font-size:11px">e.g. ' + fesc(s.example[0]) + " → " + fesc(s.example[1]) + "</div>" : "") +
+        '<details><summary style="opacity:.6;font-size:11px">define it</summary><pre style="white-space:pre-wrap;font-size:11px">' +
+        fesc(call) + "</pre></details></div>";
+    }).join("");
+  }
   if ((c.evidence || []).length) {
     h += H4("Evidence") + c.evidence.map((e) => QUOTE(e.text, [e.role, e.stream, fwhen(e.ts)].filter(Boolean).join(" · "))).join("");
   }
