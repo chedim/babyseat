@@ -108,23 +108,30 @@ class CBLiteBackend(MemBackend):
     # land in one transaction per WRITE_BEHIND_S. close/flush drain it.
     WRITE_BEHIND_S = 0.5
 
-    def __init__(self, path, journal_dir=None, lib_dir=None):
+    def __init__(self, path, journal_dir=None, lib_dir=None, readonly=False):
         super().__init__()
         self.path = Path(path)
+        self.readonly = readonly
         # THE WRITER LOCK (issue #26): one writer process at a time. SQLite
         # storage lets a second open succeed and only blow up later, mid-
         # replay ("save: database busy/locked", the backfill's partial
         # rebuild) -- so a sidecar flock is taken here, where EVERY tool
-        # (the serve, the backfill) constructs the backend.
-        lk = self.path.parent / f".{self.path.name}.writer.lock"
-        self._lock_fd = os.open(str(lk), os.O_CREAT | os.O_RDWR, 0o600)
-        try:
-            fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except OSError:
-            os.close(self._lock_fd)
+        # (the serve, the backfill) constructs the backend. A READ-ONLY open
+        # (issue #127: review beside a live serve) skips the flock entirely
+        # and reads a snapshot: no writer, no vector catch-up, no migration
+        # or tail replay -- nothing this handle can write.
+        if not readonly:
+            lk = self.path.parent / f".{self.path.name}.writer.lock"
+            self._lock_fd = os.open(str(lk), os.O_CREAT | os.O_RDWR, 0o600)
+            try:
+                fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                os.close(self._lock_fd)
+                self._lock_fd = None
+                raise StoreBusy(f"the store is busy: {lk} is held by another "
+                                f"membrane process (the live serve?)") from None
+        else:
             self._lock_fd = None
-            raise StoreBusy(f"the store is busy: {lk} is held by another "
-                            f"membrane process (the live serve?)") from None
         self.lib = CB.load(lib_dir)
         self.db = CB.Database(self.lib, "field", str(self.path))
         self._ord: dict[str, dict[str, int]] = {c: {} for c in COLLECTIONS}
@@ -138,6 +145,13 @@ class CBLiteBackend(MemBackend):
         self._pend_lock = threading.Lock()
         self._wflush = threading.Event()
         self._writer = None
+        if readonly:
+            # a snapshot: load the hot rows (the collections already exist --
+            # the live seat created them) and stop. No index creation (a
+            # write), no migration, no tail replay, no threads.
+            self._worker = None
+            self._load_hot()
+            return
         self._ensure_indexes()
         if journal_dir is not None and self._meta("migrated") is None:
             self.migrate_from(Path(journal_dir))

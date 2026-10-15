@@ -30,7 +30,9 @@ def vitals_report(field_path: str, backend=None) -> str:
         from .efstore import open_backend
         from .project_env import load_project_env
         load_project_env()
-        backend = open_backend(field_path)
+        # issue #127: review is read-only telemetry -- a snapshot beside a
+        # live serve, never the field writer lock.
+        backend = open_backend(field_path, readonly=True)
     fld = EntityField(backend, None, _origin_tag(field_path))
     v = fld.vitals()
     g = v.get("geometry")
@@ -60,7 +62,8 @@ def ab_summary(field_path: str, origin: str | None = None, last: int = 10, backe
         from .efstore import open_backend
         from .project_env import load_project_env
         load_project_env()
-        backend = open_backend(field_path)
+        # issue #127: audit snapshots read-only beside a live serve.
+        backend = open_backend(field_path, readonly=True)
     if origin is None:
         from .substrate import _origin_tag
         origin = _origin_tag(field_path)
