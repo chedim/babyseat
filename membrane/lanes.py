@@ -4532,7 +4532,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             wl = fld.worldline_of(eid)
         except Exception:                               # noqa: BLE001
             wl = {}
-        card = _FM.entity_card(doc, ev, near, rels, changes=changes, followed_by=nxt, worldline=wl)
+        try:
+            sug = fld.suggested_for(eid)
+        except Exception:                               # noqa: BLE001
+            sug = []
+        card = _FM.entity_card(doc, ev, near, rels, changes=changes, followed_by=nxt, worldline=wl,
+                               suggested=sug)
         for x in card["near"]:
             st = fld.get(x["eid"])
             x["surface"] = getattr(st, "surface", None) if st is not None else None
