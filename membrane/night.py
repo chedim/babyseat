@@ -85,6 +85,24 @@ FILE_SKIP_DIRS = frozenset({
                                # through a script on a duty cycle)
 
 
+_PATH_KINDS = {"f", "file", "d", "dir", "directory", "path"}
+
+
+def _referent_exists(val):
+    """The night's referent gate: a quoted filename is not a file.
+
+    The minter's own defect note says it plainly: 'no existence check'.
+    The night read text that merely mentions filenames (~doomed.py,
+    ~btfixworker.py) and materialized them anyway; every later probe of
+    the phantom then fed its ranking. Gate: a file-kind entity is born
+    only when its name resolves on disk -- ~-paths via expanduser,
+    bare names against the process working root.
+    """
+    if not val:
+        return False
+    return os.path.isfile(os.path.expanduser(val.strip()))
+
+
 def overlay_key(eid: str) -> str:
     """The canonical entity-field id -> the overlay doc's legacy key
     ('f:router.py' -> 'files:router.py'; words/phrases/ctx never have
@@ -348,6 +366,11 @@ def consolidate_entities(fld, est, mem=None, materialize: int = 8,
         hot.sort(key=lambda t: -t[0])
         for n, eid, key in hot[:materialize]:
             kind, _, val = key.partition(":")
+            if kind in _PATH_KINDS and not _referent_exists(val):
+                _audit(mem, {"event": "night-phantom-skip",
+                             "origin": "night-materialize",
+                             "eid": MEMBRANE_NS + key, "val": val, "cells": n})
+                continue
             ent = QuantumEntity(
                 eid=f"{MEMBRANE_NS}{key}",
                 cls=_KIND_CLASS.get(kind, kind_class(kind)),
