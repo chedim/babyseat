@@ -1512,7 +1512,7 @@ def _fill(template: str, ctx: dict) -> tuple[str, list]:
     missing = []
 
     def rep(m):
-        k = m.group(1)
+        k = m.group(2)
         if k == "parent" or k.startswith("parent"):
             return m.group(0)                          # the pipeline feed fills these
         v = _ref(ctx, k)
@@ -1522,7 +1522,7 @@ def _fill(template: str, ctx: dict) -> tuple[str, list]:
         if isinstance(v, (dict, list)):
             v = json.dumps(v)
         return shlex.quote(str(v))
-    return _PARAM.sub(rep, template or ""), missing
+    return _QUOTED_PARAM.sub(rep, template or ""), missing
 
 
 def _exec_node(srv, est, fld, mem, doc, memo: dict, budget: list,
@@ -1873,6 +1873,9 @@ def split_label(spec: str) -> tuple[str, str]:
 _SETUP = re.compile(r"^\s*(?:(?:\.|source)\s+\S+(?:\s+\d*>\S*)*|set\s+-[a-z]+|export\s+[^;&]+|cd\s+\S+|"
                     r"[A-Z_][A-Z0-9_]*=\S+)\s*(?:;|&&|\|\|)\s*")
 _PARAM = re.compile(r"\{\{\s*([A-Za-z_][\w.:-]*)\s*\}\}")   # entity specs carry ':' and '-'
+# a placeholder the model already wrapped in quotes ("{{x}}" / '{{x}}'):
+# strip that pair so the value below is shell-quoted ONCE, not twice (#128)
+_QUOTED_PARAM = re.compile(r"(['\"]?)\{\{\s*([A-Za-z_][\w.:-]*)\s*\}\}\1")
 
 
 def command_params(cmd: str) -> list[str]:
@@ -1890,9 +1893,9 @@ def substitute_args(cmd: str, args: dict | None) -> str:
         return cmd
 
     def rep(m):
-        k = m.group(1)
+        k = m.group(2)
         return shlex.quote(str(args[k])) if k in args else m.group(0)
-    return _PARAM.sub(rep, cmd)
+    return _QUOTED_PARAM.sub(rep, cmd)
 
 
 _NO_SHELL = ("llm::unwake", "llm.unwake", "llm::wake", "llm.wake",
