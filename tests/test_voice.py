@@ -24,6 +24,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from membrane import server as S  # noqa: E402
 from membrane import voice as V  # noqa: E402
 
+
+# VOICE IS OPT-IN since 0.5.1 (MEMBRANE_VOICE=1): these tests exercise the voice,
+# so this module turns it on for its own tests -- never for the rest of the suite
+from unittest import mock as _mock  # noqa: E402
+_VOICE_ON = _mock.patch.dict(os.environ, {"MEMBRANE_VOICE": "1"})
+
+
+def setUpModule():
+    _VOICE_ON.start()
+
+
+def tearDownModule():
+    _VOICE_ON.stop()
+
 TOPICS = {"battery": 0, "charge": 0, "volts": 0, "bms": 0, "cells": 0, "solar": 0,
           "anchor": 1, "chain": 1, "wind": 1, "drift": 1, "holding": 1, "bottom": 1}
 
@@ -62,6 +76,21 @@ def _voice(tmp=None):
     v = V.Voice(FakeEmbedder(), tmp)
     v.bootstrap(CORPUS * 3)
     return v
+
+
+class TestVoiceIsOptIn(unittest.TestCase):
+    """0.5.1: chat voice is OFF unless MEMBRANE_VOICE says yes."""
+
+    def test_off_by_default_and_on_only_when_asked(self):
+        with _mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("MEMBRANE_VOICE", None)
+            self.assertFalse(V.enabled())
+            for yes in ("1", "true", "on", "yes", "ON"):
+                os.environ["MEMBRANE_VOICE"] = yes
+                self.assertTrue(V.enabled(), yes)
+            for no in ("0", "false", "off", ""):
+                os.environ["MEMBRANE_VOICE"] = no
+                self.assertFalse(V.enabled(), no)
 
 
 class TestSpeech(unittest.TestCase):
