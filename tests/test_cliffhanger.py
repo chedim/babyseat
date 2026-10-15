@@ -470,3 +470,96 @@ class TestNightTwins(unittest.TestCase):
         mine = _add(est, "mqtt:bridge", summary="the bridge")
         self.assertEqual(est._resolve_spec("mqtt:bridge").eid, mine.eid)
         self.assertEqual(est._resolve_spec(twin.eid).eid, twin.eid)    # still reachable by its own id
+
+
+class TestArgsAlwaysBind(unittest.TestCase):
+    """Issue #61 (Memo, from the seat): a method's args silently vanished. The
+    probe `echo "brace={n} | dol=$n | pos=$1 | argv=$@"` called with {n: 60, b:
+    hello} or [60, hello] ran LITERALLY and succeeded -- `gh issue view {n}`
+    errored on a literal '{n}'. The dialect is {{name}}; an arg nothing binds is
+    refused LOUDLY, naming the dialect and the near misses it saw; a positional
+    list binds to the method's parameters in order."""
+
+    PROBE = 'echo "brace={n} | dol=$n | pos=$1 | argv=$@ || end"'
+
+    def test_named_args_that_bind_nothing_are_refused_with_the_dialect(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        N.method_define(srv, est, f, None, light.eid, "probe", self.PROBE)
+        r = N.method_call(srv, est, f, None, port.eid, "probe", {"n": 60, "b": "hello"})
+        self.assertFalse(r["ok"], r)
+        self.assertEqual(r["status"], "blocked")
+        self.assertIn("{{n}}", r["error"])
+        self.assertIn("{n}", r["error"])                 # the near miss it saw
+        self.assertIn("$n", r["error"])
+        self.assertNotIn("calls", port.properties)        # nothing ran
+
+    def test_a_positional_list_binds_to_the_parameters_in_order(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        N.method_define(srv, est, f, None, light.eid, "pair", "echo first={{n}} second={{b}}")
+        r = N.method_call(srv, est, f, None, port.eid, "pair", [60, "hello"])
+        self.assertEqual(r["rc"], 0, r)
+        self.assertIn("first=60 second=hello", str(r["head"]))
+
+    def test_a_positional_list_with_nowhere_to_go_is_refused(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        N.method_define(srv, est, f, None, light.eid, "probe", self.PROBE)
+        r = N.method_call(srv, est, f, None, port.eid, "probe", [60, "hello"])
+        self.assertEqual(r["status"], "blocked", r)
+        self.assertIn("{{", r["error"])
+        N.method_define(srv, est, f, None, light.eid, "one", "echo only={{n}}")
+        r = N.method_call(srv, est, f, None, port.eid, "one", [60, "extra"])
+        self.assertEqual(r["status"], "blocked", r)
+
+    def test_named_args_that_bind_still_run(self):
+        srv, f, est, light, switch, port, aft, fan = _world()
+        N.method_define(srv, est, f, None, light.eid, "view", "echo issue {{n}}")
+        r = N.method_call(srv, est, f, None, port.eid, "view", {"n": 60})
+        self.assertIn("issue 60", str(r["head"]))
+
+    def test_the_mcp_door_passes_a_list_through(self):
+        from unittest import mock
+        from membrane import mcp_server as M
+        seen = {}
+
+        def fake(port, method, path, body):
+            seen.update(body)
+            return {"object": "o", "status": "ok", "method": "m", "via": "v", "rc": 0}
+        with mock.patch.object(M, "_http", fake):
+            M.tool_method_call({"object": "o", "method": "m", "args": [60, "hello"]}, 1)
+            self.assertEqual(seen["args"], [60, "hello"])
+            M.tool_method_call({"object": "o", "method": "m", "args": "[60, \"hello\"]"}, 1)
+            self.assertEqual(seen["args"], [60, "hello"])
+
+
+class TestTheTimeoutIsHonoured(unittest.TestCase):
+    """Found beside #61: remote_executor.exec(code, timeout) declares a timeout, the
+    JS door's command is js::{{code}} -- and a call's timeout was dropped silently
+    (every method ran with the inline budget). It is a call-level control: never
+    'unbound', honoured, and only ever shortens the inline budget."""
+
+    def _seen(self, args):
+        from unittest import mock
+        srv, f, est, light, switch, port, aft, fan = _world()
+        N.method_define(srv, est, f, None, light.eid, "hi", "echo hi {{word}}")
+        got = {}
+        real = N.run_command_entity
+
+        def spy(fld, est_, mem, cmd, timeout_s=None, **kw):
+            got["t"] = timeout_s
+            return real(fld, est_, mem, cmd, timeout_s=timeout_s, **kw)
+        with mock.patch.object(N, "run_command_entity", spy):
+            r = N.method_call(srv, est, f, None, port.eid, "hi", args)
+        return r, got.get("t")
+
+    def test_a_timeout_is_not_an_unbound_arg_and_is_honoured(self):
+        r, t = self._seen({"word": "x", "timeout": 3})
+        self.assertNotEqual(r.get("status"), "blocked", r)
+        self.assertEqual(t, 3.0)
+
+    def test_it_never_stretches_the_inline_budget(self):
+        _r, t = self._seen({"word": "x", "timeout": 999})
+        self.assertEqual(t, N.EXEC_TIMEOUT_S)
+
+    def test_without_one_the_budget_stands(self):
+        _r, t = self._seen({"word": "x"})
+        self.assertEqual(t, N.EXEC_TIMEOUT_S)
