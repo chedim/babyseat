@@ -6,6 +6,10 @@ field's own events and the minds' focus into compact frames on the same
 hub, about once a second:
 
   field.applied {eids, streams}      entities an event just moved (mentions)
+  field.changed {changes:[{eid,kind,brief}]}
+                                     a script apply or edit changed an
+                                     entity (kind=why, brief=a kind-scoped
+                                     word -- never the render/prose text)
   field.moved   {pid, moves}         dirty entities re-placed into each
                                      cached 3D projection (field3d.place)
   field.born    {eids}               nursery -> live
@@ -58,6 +62,7 @@ class FieldPulse:
         self.srv, self._hub, self.every_s = srv, hub, every_s
         self._lock = threading.Lock()
         self._applied: dict[str, set] = {}
+        self._changed: dict[str, tuple[str, str]] = {}
         self._born: set = set()
         self._watch: list = []
         self._moved: dict[str, list] = {}
@@ -108,6 +113,21 @@ class FieldPulse:
         with self._lock:
             if len(self._moved) < MAX_EIDS:
                 self._moved[eid] = vec
+
+    def changed(self, eid: str, kind: str, brief: str = "") -> None:
+        """A script apply or edit changed an entity: pulse it on the graph
+        with a tiny kind/brief label (the field.changed frame). Keyed by
+        eid, last write wins; brief is kind-scoped (a word, never prose),
+        capped at 48 chars. Feeds the recent window like applied()."""
+        eid = str(eid or "")
+        if not eid:
+            return
+        with self._lock:
+            if len(self._changed) >= MAX_EIDS and eid not in self._changed:
+                return
+            self._changed[eid] = (str(kind or "")[:20],
+                                  " ".join(str(brief or "").split())[:48])
+            self._recent.append((time.time(), eid))
 
     def born(self, eid: str) -> None:
         with self._lock:
@@ -212,6 +232,7 @@ class FieldPulse:
         with self._lock:
             applied, self._applied = self._applied, {}
             groups, self._groups = getattr(self, "_groups", None) or [], []
+            changed, self._changed = self._changed, {}
             born, self._born = self._born, set()
             watch, self._watch = self._watch, []
             moved, self._moved = self._moved, {}
@@ -225,6 +246,10 @@ class FieldPulse:
             out.append({"type": "field.born", "eids": sorted(born)})
         if watch:
             out.append({"type": "field.watch", "fires": watch})
+        if changed:
+            out.append({"type": "field.changed",
+                        "changes": [{"eid": eid, "kind": kind, "brief": brief}
+                                    for eid, (kind, brief) in sorted(changed.items())]})
         if moved:
             for pid, proj in list((getattr(self.srv, "_field3d", None) or {}).items()):
                 moves = []

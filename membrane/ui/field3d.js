@@ -701,7 +701,17 @@ class Field3DView {
       const sc = this._project(p);
       if (!sc || sc[0] < 0 || sc[1] < 0 || sc[0] > this._w || sc[1] > this._h) continue;
       const d = len3(sub3(p, this._camVecs().pos));
-      cands.push({ id, txt: m.label, x: sc[0], y: sc[1], w: (m.mass + 5) / (d * d) + (id === this.sel ? 1e9 : 0) });
+      // THE TINY LABEL (2026-10-15): a fresh change stashes `act` -- show
+      // what/why changed as a one-line suffix, still 11px + ellipsis.
+      let txt = m.label;
+      if (m.act) {
+        if (performance.now() - m.act.t0 < 6000) {
+          txt = m.label + " · " + m.act.kind + (m.act.brief ? " " + m.act.brief : "");
+        } else {
+          m.act = null;
+        }
+      }
+      cands.push({ id, txt, x: sc[0], y: sc[1], w: (m.mass + 5) / (d * d) + (id === this.sel ? 1e9 : 0) });
     }
     cands.sort((a, b) => b.w - a.w);
     const shown = [], boxes = [];
@@ -978,6 +988,14 @@ class Field3DView {
       for (const [a, b, st] of pairs) {
         if (this.edgePulses.length >= this.pulseCap) break;
         this.edgePulses.push({ a, b, t0: now + Math.random() * 300, dur: 900, col: PULSE_COLORS[st] || [1, 1, 1] });
+      }
+    } else if (t === "field.changed") {
+      for (const c of p.changes || []) {
+        const s = this.slots.get(c.eid);
+        if (s == null) continue;
+        this.pulses.set(s, now);
+        const m = this.meta[s];
+        if (m) m.act = { kind: c.kind || "", brief: c.brief || "", t0: now };
       }
     } else if (t === "field.born") {
       for (const id of p.eids || []) {

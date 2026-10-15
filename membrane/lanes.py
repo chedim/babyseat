@@ -778,6 +778,33 @@ def _write_audit(mem, rec: dict) -> None:
               file=sys.stderr)
 
 
+_EDIT_BRIEF_KEYS = ("summary", "links", "class", "merged_into",
+                    "nudge_script", "delete_script", "mention_script",
+                    "thought_script", "dreamed_script", "tick_script",
+                    "watch_script", "getter_script", "watch", "watch_ops",
+                    "watch_fields")
+
+
+def _pulse_edit(srv, res: dict, body: dict) -> None:
+    """Pulse a successful entity edit on the graph (field.changed
+    kind='edit'), the brief = the changed property key(s), never a value."""
+    from . import fieldpulse as _fp
+    p = _fp.of(srv)
+    if p is None or not isinstance(res, dict) or not res.get("ok"):
+        return
+    eid = str(res.get("eid") or "")
+    if not eid:
+        return
+    keys = []
+    props = body.get("properties")
+    if isinstance(props, dict):
+        keys += [str(k)[:20] for k in props]
+    for k in _EDIT_BRIEF_KEYS:
+        if body.get(k) is not None:
+            keys.append(k)
+    p.changed(eid, "edit", ",".join(keys[:3]))
+
+
 def _install_judges(srv) -> None:
     """The idle local model judges state claims and A/B pairs -- only while
     no chat request came in for a minute, bounded per tick and per hour."""
@@ -6453,6 +6480,7 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         self._entity_audit("edit", res)
         if not res.get("ok"):
             self._json_err_raw(400, str(res.get("error"))); return
+        _pulse_edit(srv, res, body)
         if not body.get("defer_post"):               # jobs.py: the first fire runs as a job
             _entity_post_process(srv, res)
         _active_model_hook(srv, est, spec, res)
