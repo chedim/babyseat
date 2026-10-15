@@ -1224,6 +1224,105 @@ class EntityField:
     _deltas_index: dict | None = None
     _deltas_index_gen = None
 
+    # ---- the changes like this one (the delta lane, stage 2b) --------------------
+    _bits_index: dict | None = None
+
+    def _bits_idx(self, bits: str) -> dict:
+        """The packed move bits of every delta row that carries them, one
+        uint8 matrix (rows x DELTA_DIM/8); rebuilt when the deltas changed."""
+        import base64
+        gen = self._dgen()
+        cache = self._bits_index or {}
+        hit = cache.get(bits)
+        if hit is not None and gen is not None and hit["gen"] == gen:
+            return hit
+        rows, packed = [], []
+        for _k, d in self.b.scan("entity_deltas", {"origin": self.origin}):
+            b = d.get(bits)
+            # a speaker's move is who talked, not what changed (the drift
+            # rule): the person rows mirror every sentence they say
+            if not b or str(d.get("eid") or "").startswith("person:"):
+                continue
+            rows.append({"eid": d.get("eid"), "event": d.get("event"), "sid": d.get("sid"),
+                         "seq": d.get("seq"), "ts": d.get("ts")})
+            packed.append(np.frombuffer(base64.b64decode(b), dtype=np.uint8))
+        M = np.stack(packed) if packed else np.zeros((0, vsa.DELTA_DIM // 8), np.uint8)
+        hit = {"gen": gen, "rows": rows, "M": M,
+               "eid": np.asarray([r["eid"] for r in rows], dtype=object),
+               "event": np.asarray([r["event"] for r in rows], dtype=object)}
+        cache[bits] = hit
+        self._bits_index = cache
+        return hit
+
+    def deltas_like(self, query, k: int = 5, scope: str = "all", bits: str = "pbits",
+                    min_sim: float = 0.55) -> list[dict]:
+        """THE CHANGES LIKE THIS ONE: the past moves nearest a delta row's (or
+        a packed bit string's) in Hamming space -- scope 'self' (the same
+        entity), 'others', or 'all'; the query's own event never answers.
+        Each as what was SAID: {eid, text, n, ts, event, sim} (sim 1.0 =
+        identical move, 0.5 = unrelated); never the bits."""
+        import base64
+        q = query.get(bits) if isinstance(query, dict) else query
+        if not q:
+            return []
+        qeid = query.get("eid") if isinstance(query, dict) else None
+        qev = query.get("event") if isinstance(query, dict) else None
+        idx = self._bits_idx(bits)
+        M = idx["M"]
+        if not len(M):
+            return []
+        qv = np.frombuffer(base64.b64decode(q), dtype=np.uint8)
+        sim = 1.0 - np.bitwise_count(M ^ qv).sum(axis=1, dtype=np.int64) / (8.0 * M.shape[1])
+        keep = sim >= min_sim
+        if qev is not None:
+            keep &= idx["event"] != qev
+        if qeid is not None and scope == "self":
+            keep &= idx["eid"] == qeid
+        elif qeid is not None and scope == "others":
+            keep &= idx["eid"] != qeid
+        cand = np.where(keep)[0]
+        order, seen, top = cand[np.argsort(-sim[cand], kind="stable")], set(), []
+        for i in order:                   # one sentence = one change, however many entities it moved
+            ev = idx["event"][i]
+            if ev in seen:
+                continue
+            seen.add(ev)
+            top.append(i)
+            if len(top) >= max(0, k):
+                break
+        if not top:
+            return []
+        picked = [idx["rows"][i] for i in top]
+        sents = self.b.get_multi("sentences", list(dict.fromkeys(r["sid"] for r in picked if r["sid"])))
+        evs = self.b.get_multi("events", list(dict.fromkeys(r["event"] for r in picked if r["event"])))
+        out = []
+        for i, r in zip(top, picked):
+            out.append({"eid": r["eid"], "event": r["event"], "ts": r["ts"],
+                        "n": (evs.get(r["event"]) or {}).get("n"),
+                        "text": str((sents.get(r["sid"]) or {}).get("text") or "")[:400],
+                        "sim": round(float(sim[i]), 3)})
+        return out
+
+    # the card's floor (the real-field gate, 2026-10-15): the same KIND of change
+    # recalled across entities sat at 0.70-0.85 (the same proxy failure on
+    # c:head/c:python3/tool:run; 'a new entity appeared on the banner' across
+    # three unrelated entities); 0.60-0.67 was topical/stylistic look-alikes
+    CHANGES_FLOOR = 0.68
+
+    def latest_changes(self, eid: str, k: int = 3) -> dict:
+        """The card's section: this entity's latest change and the past changes
+        most like it -- on itself and on others. {} when it has none."""
+        rows = [d for d in self.deltas_of(eid) if d.get("pbits")]
+        if not rows:
+            return {}
+        last = max(rows, key=lambda d: (d.get("seq") or 0, d.get("sidx") or 0))
+        s = self.b.get("sentences", last.get("sid")) or {}
+        ev = self.b.get("events", last.get("event")) or {}
+        return {"latest": {"text": str(s.get("text") or "")[:400], "n": ev.get("n"),
+                           "ts": last.get("ts")},
+                "self": self.deltas_like(last, k=k, scope="self", min_sim=self.CHANGES_FLOOR),
+                "others": self.deltas_like(last, k=k, scope="others", min_sim=self.CHANGES_FLOOR)}
+
     @_locked
     def number_events(self) -> int:
         """Give '#N' numbers to events written before numbering existed (in

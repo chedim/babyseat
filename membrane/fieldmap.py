@@ -150,7 +150,8 @@ CARD_FIELDS = ("eid", "kind", "surface", "tier", "n", "n_by_stream", "accr",
                "activity", "conflicts")
 
 
-def entity_card(doc, evidence, near, relations, self_eid: str | None = None) -> dict | None:
+def entity_card(doc, evidence, near, relations, self_eid: str | None = None,
+                changes: dict | None = None) -> dict | None:
     """The map drawer's read of ONE field entity (GET /membrane/field/entity):
     its readings, the evidence sentences, the nearest field neighbors, the
     relations. Vectors (state/seed/mean/rsum/vsa) never leave the seat."""
@@ -168,6 +169,8 @@ def entity_card(doc, evidence, near, relations, self_eid: str | None = None) -> 
     card["relations"] = [{"subj": r.get("subj"), "rel": r.get("rel"),
                           "obj": r.get("obj"), "n": r.get("n")}
                          for r in relations or [] if isinstance(r, dict)]
+    if changes:                 # the latest change and its look-alikes (efield.latest_changes)
+        card["changes"] = changes
     return card
 
 
