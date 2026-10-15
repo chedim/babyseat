@@ -26,28 +26,12 @@ import pytest
 PORT = 11671
 SEAT_DIR = "/tmp/door-seat"
 
-# THE LIVE-LANE TESTS (the ollama-dependent): they boot real seats and
-# run REAL model turns -- the serial queue's tail (every concurrent
-# test module's boot + the seat's own lanes compete for ollama's one
-# call lane) makes the timing flaky under a full-suite run; solo
-# they're green. Marked: the operator's full-suite runs these last.
-pytestmark = pytest.mark.live_lane
-
-# A CHECKOUT WITHOUT OLLAMA (CI) SKIPS AT IMPORT -- the seat boots, the
-# real turns don't answer there.
-_OL = ("127.0.0.1", int(os.environ.get("OLLAMA_PORT", "11434")))
-
-
-def _ollama_alive():
-    try:
-        socket.create_connection(_OL, timeout=1).close()
-        return True
-    except OSError:
-        return False
-
-
-if not _ollama_alive():
-    pytest.skip("needs a local ollama (the live lane)", allow_module_level=True)
+# THESE BOOT A REAL SEAT -- against a FAKE OLLAMA (tests/_fake_ollama.py): they
+# used to run real model turns on the operator's live ollama under 30 s timeouts,
+# and whether a stored-and-announced message passed depended on model latency and
+# on everything else using ollama (flaky in every full run, green solo). What they
+# test -- the door storing and announcing -- never depended on a model's words.
+# Self-contained now: no local ollama needed, so they run in CI too.
 
 _PY = os.path.join(os.path.dirname(__file__), "..", ".venv", "bin", "python")
 _SPAWN = _PY if os.path.exists(_PY) else sys.executable
@@ -72,12 +56,16 @@ def quiet_seat():
         p = os.path.join(SEAT_DIR, stale)
         if os.path.exists(p):
             os.unlink(p)
+    sys.path.insert(0, os.path.dirname(__file__))
+    from _fake_ollama import FakeOllama
+    fake = FakeOllama().__enter__()
     proc = subprocess.Popen(
         [_SPAWN, "-m", "membrane.opencode",
          "--serve", "--serve-port", str(port), "--serve-host", "127.0.0.1",
          "--no-launch", "--no-thinker", "--no-dreamer", "--no-autonode",
          "--no-router", "--model", "granite4:latest",
-         "--field", f"{SEAT_DIR}/f.json", "--audit", f"{SEAT_DIR}/a.jsonl"],
+         "--field", f"{SEAT_DIR}/f.json", "--audit", f"{SEAT_DIR}/a.jsonl",
+         "--backend", fake.url],
         env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     cred = None
     deadline = time.time() + 40
@@ -102,29 +90,6 @@ def quiet_seat():
     hdr = {"Authorization": "Basic " + tok,
            "Content-Type": "application/json"}
     _mk = {"url": f"http://127.0.0.1:{port}"}
-    # THE MODEL WARMUP (the cold 14B's 30-115s first turn vs the
-    # test's own timeouts — prewarm the seat's default chat model
-    # DIRECTLY at ollama (the honest cost paid once, off-lane):
-    import urllib.request as _ur, json as _js
-    try:
-        _models = _js.loads(_ur.urlopen(f"{_mk_proxy}"
-                                        if False else
-                                        "http://127.0.0.1:11434/api/tags",
-                                        timeout=4).read())["models"]
-        _boot_model = next((m["name"] for m in _models
-                            if "granite" in m["name"]), None)
-        if _boot_model:
-            _ur.urlopen(_ur.Request(
-                "http://127.0.0.1:11434/api/chat",
-                data=_js.dumps({"model": _boot_model,
-                                "messages": [{"role": "user",
-                                              "content": "hi"}],
-                                "stream": False}).encode(),
-                headers={"Content-Type": "application/json"}),
-                timeout=90)
-    except Exception:
-        pass  # the prewarm's failure = the honest slower turn
-
     def _get(url):
         return json.loads(urllib.request.urlopen(
             urllib.request.Request(url, headers=hdr), timeout=8).read())
@@ -140,12 +105,15 @@ def quiet_seat():
         return _post(_mk["url"] + "/session", {})
 
     yield _mk["url"], _get, _post, new_session
+    # the seat talked to the fake, never to a real model
+    assert any(p in ("/api/chat", "/v1/chat/completions") for _, p in fake.served), fake.served[:10]
     proc.terminate()
     try:
         proc.wait(timeout=10)
     except subprocess.TimeoutExpired:
         proc.kill()
     shutil.rmtree(SEAT_DIR, ignore_errors=True)
+    fake.__exit__(None, None, None)
 
 
 def test_direct_post_announces_and_stores(quiet_seat):
