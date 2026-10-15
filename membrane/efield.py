@@ -45,6 +45,7 @@ import numpy as np
 
 from . import eids as E
 from . import streams as ST
+from . import vsa
 from .efstore import h16, o8, pack_f16, pack_f32, unpack_f16
 
 # THE DUST CAP (the 'w:showing/w:stay' birth flood, the CPU-bomb's
@@ -771,10 +772,19 @@ class EntityField:
         if st.eid.split(":", 1)[0] in ("w", "p"):
             return
         dkey = f"d:{self.o}:{h16(st.eid)}:{seq}:{sidx}"
-        self._deltas[dkey] = {"_k": "dl", "eid": st.eid, "origin": self.origin,
-                              "sid": sid, "event": evkey, "stream": stream, "ts": ts,
-                              "seq": seq, "sidx": sidx, "gain": GAIN, "align": align,
-                              "cos_before": float(before @ x)}
+        row = {"_k": "dl", "eid": st.eid, "origin": self.origin,
+               "sid": sid, "event": evkey, "stream": stream, "ts": ts,
+               "seq": seq, "sidx": sidx, "gain": GAIN, "align": align,
+               "cos_before": float(before @ x)}
+        # THE DIRECTION OF THE MOVE (the delta lane, stage 1 -- stored, not
+        # yet read): cos_before kept how FAR the event sat from the state,
+        # the old cortex kept only the norm; the bits keep WHICH WAY it
+        # moved (vsa.delta_bits). The kill switch is the VSA lane's own.
+        if vsa.enabled():
+            db = vsa.delta_bits(before, x)
+            if db is not None:
+                row["dbits"] = db
+        self._deltas[dkey] = row
 
     def _materialize(self, st: EntityState) -> None:
         st.seed = self._seed(st.surface or st.eid.split(":", 1)[-1])
