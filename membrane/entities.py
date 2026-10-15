@@ -55,10 +55,11 @@ CLASS_PROJECT = "Project"              # the opened workspace (its own arc)
 CLASS_SESSION = "Session"              # one conversation's dynamics
 CLASS_TIMELINE = "Timeline"            # a dreamed branch (the dreamer's output)
 CLASS_SEAT = "Seat"                    # a seat's presence/identity (the auto-published organ)
+CLASS_CONCEPT = "Concept"              # a quoted claim + its provenance (drift-checked)
 CLASSES = (CLASS_COMPONENT, CLASS_DECISION, CLASS_FAILURE, CLASS_MODEL,
            CLASS_TOOL, CLASS_ENDPOINT, CLASS_CONFIG, CLASS_GOAL,
            CLASS_SENSOR, CLASS_ACTUATOR, CLASS_PROJECT, CLASS_SESSION,
-           CLASS_TIMELINE, CLASS_SEAT)
+           CLASS_TIMELINE, CLASS_SEAT, CLASS_CONCEPT)
 
 # membrane-namespace doc-id prefix in the shared entities collection
 MEMBRANE_NS = "membrane::"

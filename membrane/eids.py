@@ -297,7 +297,7 @@ KEY_MAX = 240
 _BAD_CHARS = set("{}[]\"'`<>\\")
 _CLASS_HEADS = {"component", "decision", "failuremode", "aimodel", "endpoint",
                 "config", "goal", "sensor", "actuator", "project", "session",
-                "timeline", "seat"}
+                "timeline", "seat", "concept"}
 
 
 def _plain(s: str, cap: int) -> str | None:

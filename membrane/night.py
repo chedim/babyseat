@@ -38,8 +38,8 @@ from . import eids as E
 from . import streams as ST
 from .efstore import unpack_f16
 from .entities import (MEMBRANE_NS, CLASS_COMPONENT, CLASS_SESSION,
-                       CLASS_TOOL, QuantumEntity, _KIND_CLASS,
-                       MultiParentOps, kind_class)
+                       CLASS_TOOL, CLASS_CONCEPT, QuantumEntity, _KIND_CLASS,
+                       MultiParentOps, kind_class, entity_id)
 
 
 # ---- programmable entities (the script constants live in entities.py --
@@ -1274,6 +1274,91 @@ def mine_artifact(fld, est, spec, max_spans: int = MINE_MAX_SPANS,
     props["mine_spans"] = len(spans)
     est.upsert(doc)
     return {"ok": True, "eid": eid, "mined": mined, "spans": len(spans)}
+
+
+# ---- THE CONCEPT ENTITY (issue #117: quote-and-verify) ------------------------
+# The drift getter runs in run_entity_script's lifted namespace (real
+# builtins + ``state`` + ``membrane``), so ``open`` is available. ONE read
+# re-verifies the claim: re-open the artifact the concept was defined in,
+# re-read a bounded window around the span, and report whether the verbatim
+# ``definition`` still appears there -- a changed source surfaces as drift
+# instead of silent belief.
+_CONCEPT_DRIFT_GETTER = '''\
+props = state.get("properties") or {}
+defined_in = props.get("defined_in") or {}
+definition = str(props.get("definition") or "")
+path = str(defined_in.get("file") or "")
+line = defined_in.get("line")
+if not path:
+    result = {"state": {"drift": None, "error": "no defined_in.file",
+                        "definition": definition,
+                        "checked_at": state.get("now")}}
+else:
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as _fh:
+            lines = _fh.read().splitlines()
+    except OSError as _e:
+        result = {"state": {"drift": None,
+                            "error": "%s: %s" % (type(_e).__name__, _e)[:200],
+                            "definition": definition,
+                            "checked_at": state.get("now")}}
+    else:
+        start, end = 0, len(lines)
+        if line is not None:
+            try:
+                start = max(0, int(line) - 1)
+                end = min(len(lines), start + 8)
+            except (TypeError, ValueError):
+                pass
+        window = " ".join(" ".join(lines[start:end]).split())
+        norm = " ".join(definition.split())
+        result = {"state": {"drift": bool(norm) and norm not in window,
+                            "current": window[:400],
+                            "definition": definition,
+                            "checked_at": state.get("now")}}
+'''
+
+
+def concept_entity(est, spec, name, definition, line=None,
+                   first_seen=None) -> dict:
+    """THE CONCEPT ENTITY (issue #117): mint/reuse a Concept -- a quoted
+    claim bound to its evidence. The provenance rides the properties:
+    ``defined_in`` = the artifact + span (the source re-read for drift),
+    ``definition`` = the verbatim quote, ``first_seen`` = the mining
+    event's id (a passthrough here; #118 fills it from mine_artifact).
+    The planted drift getter (``_CONCEPT_DRIFT_GETTER``) re-opens the
+    span on read; a seat-authored getter_script (if already set) wins.
+    Returns {ok, eid, created, reason}."""
+    if est is None:
+        return {"ok": False, "created": False, "reason": "no store"}
+    fp = _file_resolve(spec)
+    if not fp:
+        return {"ok": False, "created": False, "reason": "path required"}
+    name = str(name or "").strip()
+    definition = str(definition or "")
+    if not name:
+        return {"ok": False, "created": False, "reason": "name required"}
+    if not definition.strip():
+        return {"ok": False, "created": False, "reason": "definition required"}
+    bad = E.lint_name(name)
+    if bad:
+        return {"ok": False, "created": False, "reason": bad[:120]}
+    eid = entity_id(CLASS_CONCEPT, name)
+    doc = (est.docs or {}).get(eid)
+    created = doc is None
+    if doc is None:
+        doc = QuantumEntity(eid=eid, cls=CLASS_CONCEPT,
+                            properties={"name": name}, derived_by=["engine"])
+    props = doc.properties or {}
+    props["defined_in"] = {"file": fp, "line": line}
+    props["definition"] = definition
+    if first_seen is not None:
+        props["first_seen"] = first_seen
+    if not props.get("getter_script"):
+        props["getter_script"] = _CONCEPT_DRIFT_GETTER
+    doc.properties = props
+    est.upsert(doc)
+    return {"ok": True, "eid": eid, "created": created}
 
 
 def file_write_entity(fld, est, mem, path, content, create_dirs=True) -> dict:
@@ -4340,6 +4425,24 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
     if out.get("mine"):
         from . import file_lane
         out["mine_result"] = file_lane.mine(srv, ent, str(out["mine"]))
+        changed += 1
+    # THE CONCEPT VERDICT (issue #117): a script's {concept: {name,
+    # definition, file, line}} mints a Concept -- the quote bound to its
+    # evidence, drift-checked on read. The seat-script thin wrapper over
+    # night.concept_entity (matching #116's {mine}).
+    if out.get("concept"):
+        c = out.get("concept")
+        if isinstance(c, dict):
+            cname = str(c.get("name") or "").strip()
+            cdef = str(c.get("definition") or "").strip()
+            cfile = c.get("file") or c.get("spec") or c.get("path")
+            out["concept_result"] = concept_entity(
+                est, cfile, cname, cdef,
+                line=c.get("line"), first_seen=c.get("first_seen"))
+        else:
+            out["concept_result"] = {"ok": False, "created": False,
+                                     "reason": "concept: {name, definition, "
+                                               "file, line} required"}
         changed += 1
     # THE INTENT VERDICT (C2, 2026-10-06): a script planting ITS OWN
     # commitment -- {intent: "<goal text>"} routes through the SAME
