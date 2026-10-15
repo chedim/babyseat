@@ -35,8 +35,12 @@ class TestStrangerParams(unittest.TestCase):
 
     def test_the_seat_sees_a_hash_not_the_address(self):
         k = SV.ip_key("203.0.113.9")
-        self.assertNotIn("203", k)
+        # a truncated sha256 hex digest: structurally never the dotted
+        # address. (The old assertNotIn("203", k) flaked -- a hex digest
+        # legitimately ends in "203" ~0.3% of the time; that is a
+        # coincidence, not a leak.)
         self.assertEqual(len(k), 16)
+        self.assertRegex(k, r"^[0-9a-f]{16}$")
         self.assertEqual(k, SV.ip_key("203.0.113.9"))
 
 
