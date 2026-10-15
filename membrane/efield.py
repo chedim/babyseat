@@ -529,6 +529,78 @@ class EntityField:
             return [ev.get("text")] if ev.get("text") else []
         return []
 
+    # ---- the typed edges (graph feature 1) ---------------------------------------
+    CO_PAIRS = 3               # co edges written per sentence
+
+    def _co_edges(self, key, ev, X, got, sids, skip, seq, ts) -> None:
+        """A sentence naming 2+ SPECIFIC entities (speakers and event-index rows
+        out; repeated boilerplate is already skipped) writes their co edges:
+        relation bits = sign(R @ (x - mean(A's other mentions) - mean(B's other
+        mentions))) -- the relation lives in the sentence, not in the pair
+        (experiments/delta_lane rungs 10-11). The states already hold this
+        mention, so each mean is taken leave-one-out."""
+        from . import relations as R
+        by: dict = {}
+        for eid, sidx, _surf in ev.get("mentions") or []:
+            if sidx in skip or sidx >= len(X) or X[sidx] is None:
+                continue
+            if not E.is_specific(eid) or eid.startswith(("person:", "e:")):
+                continue
+            by.setdefault(sidx, set()).add(eid)
+        for sidx, eids in by.items():
+            if len(eids) < 2:
+                continue
+            x = X[sidx]
+            means = {}
+            for e in sorted(eids):
+                st = self.get(e)
+                if st is None or st.tier != "live" or st.mean is None or st.n < 2:
+                    continue
+                means[e] = (st.n * np.asarray(st.mean, dtype=float) - x) / (st.n - 1)
+            ok = sorted(means)
+            pairs = [(a, b) for i, a in enumerate(ok) for b in ok[i + 1:]][:self.CO_PAIRS]
+            said = str((got.get(sids[sidx]) or {}).get("text") or "")
+            for a, b in pairs:
+                rb = vsa.delta_bits(means[a] + means[b], x)
+                if rb is not None:
+                    R.upsert_co(self.b, self.origin, a, b, rb, key, seq, ts, said)
+
+    _co_index: dict | None = None
+
+    def edges_like(self, edge, k: int = 5, min_sim: float = 0.55) -> list[dict]:
+        """The co edges whose relation signatures are nearest this edge's (a co
+        edge doc, or a packed signature): the same KIND of relation between
+        other things. Each as {subj, obj, n, said, sim} -- never the bits."""
+        import base64
+        q = edge.get("sig") if isinstance(edge, dict) else edge
+        if not q:
+            return []
+        wg = getattr(self.b, "write_gen", None)
+        gen = wg.get("relations", 0) if isinstance(wg, dict) else None
+        idx = self._co_index
+        if idx is None or gen is None or idx["gen"] != gen:
+            rows = [d for _, d in self.b.scan("relations", {"origin": self.origin, "rel": "co"})
+                    if d.get("sig") and not d.get("superseded")]
+            M = (np.stack([np.frombuffer(base64.b64decode(d["sig"]), np.uint8) for d in rows])
+                 if rows else np.zeros((0, vsa.DELTA_DIM // 8), np.uint8))
+            idx = self._co_index = {"gen": gen, "rows": rows, "M": M}
+        M = idx["M"]
+        if not len(M):
+            return []
+        qv = np.frombuffer(base64.b64decode(q), dtype=np.uint8)
+        sim = 1.0 - np.bitwise_count(M ^ qv).sum(axis=1, dtype=np.int64) / (8.0 * M.shape[1])
+        me = {edge.get("subj"), edge.get("obj")} if isinstance(edge, dict) else None
+        out = []
+        for i in np.argsort(-sim, kind="stable"):
+            if sim[i] < min_sim or len(out) >= k:
+                break
+            d = idx["rows"][i]
+            if me is not None and {d["subj"], d["obj"]} == me:
+                continue
+            out.append({"subj": d["subj"], "obj": d["obj"], "n": d.get("n"),
+                        "said": d.get("said") or "", "sim": round(float(sim[i]), 3)})
+        return out
+
     def _obs_mentions(self, ev: dict, graph) -> list[tuple[str, str]]:
         a = ev.get("args") or {}
         out = [(f"tool:{ev.get('tool')}", ev.get("tool") or "")]
@@ -902,6 +974,11 @@ class EntityField:
                 continue
             self._update(st, X[sidx], stream, sids[sidx], seq, sidx, key, ts,
                          ev.get("role") or "")
+        if vsa.enabled():
+            try:
+                self._co_edges(key, ev, X, got, sids, skip, seq, ts)
+            except Exception:
+                pass
         self._apply_speaker(ev, key, X, sids, skip, seq, stream, ts)
         for i in live_idx:
             self._bg_update(stream, X[i])

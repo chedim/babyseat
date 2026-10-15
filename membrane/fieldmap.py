@@ -166,8 +166,9 @@ def entity_card(doc, evidence, near, relations, self_eid: str | None = None,
                         for e in evidence or [] if isinstance(e, dict)]
     card["near"] = [{"eid": x, "sim": round(float(s), 3)}
                     for x, s in near or [] if x != eid]
-    card["relations"] = [{"subj": r.get("subj"), "rel": r.get("rel"),
-                          "obj": r.get("obj"), "n": r.get("n")}
+    card["relations"] = [dict({"subj": r.get("subj"), "rel": r.get("rel"),
+                               "obj": r.get("obj"), "n": r.get("n")},
+                              **({"said": r["said"]} if r.get("said") else {}))
                          for r in relations or [] if isinstance(r, dict)]
     if changes:                 # the latest change and its look-alikes (efield.latest_changes)
         card["changes"] = changes

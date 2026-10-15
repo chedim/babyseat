@@ -81,6 +81,46 @@ def upsert(backend, origin: str, subj: str, rel: str, obj: str, source: str,
     return key
 
 
+CO_KEEP = 8                # relation bits kept per co edge (the signature's vote)
+
+
+def _majority(packed: list[str]) -> str:
+    bits = np.stack([vsa.unpack_state(p) for p in packed])
+    return vsa.pack_state(bits.mean(axis=0) >= 0.5)
+
+
+def upsert_co(backend, origin: str, a: str, b: str, rbits: str, event_key: str,
+              seq: int | None, ts: float | None, said: str = "") -> str:
+    """THE TYPED EDGE (graph feature 1): an UNORDERED co edge between two
+    specific entities named in one sentence -- embeddings type a relation but
+    cannot order it (E25), so the coded triples keep direction and this edge
+    keeps the KIND: the last CO_KEEP relation bits and their majority
+    signature. One count per event, newest seq only -- a rebuild replays
+    events this edge already counted, and they never count twice."""
+    a, b = sorted((a, b))
+    key = relation_key(origin, a, "co", b)
+
+    def merge(cur):
+        if cur is None:
+            cur = {"_k": "rel", "origin": origin, "subj": a, "rel": "co", "obj": b,
+                   "source": "co-mention", "n": 0, "first_ts": ts, "last_ts": ts,
+                   "evidence": [], "superseded": False, "last_seq": -1, "rbits": []}
+        if seq is not None and seq <= int(cur.get("last_seq", -1)):
+            return cur
+        cur["n"] = int(cur.get("n", 0)) + 1
+        cur["last_seq"] = seq if seq is not None else cur.get("last_seq", -1)
+        cur["last_ts"] = ts if ts is not None else cur.get("last_ts")
+        if event_key and event_key not in cur["evidence"]:
+            cur["evidence"] = (cur["evidence"] + [event_key])[-MAX_EVIDENCE:]
+        cur["rbits"] = (list(cur.get("rbits") or []) + [rbits])[-CO_KEEP:]
+        cur["sig"] = _majority(cur["rbits"])
+        cur["said"] = str(said or "")[:200]
+        cur["superseded"] = False
+        return cur
+    backend.cas_update("relations", key, merge)
+    return key
+
+
 def of(backend, origin: str, eid: str, rel: str | None = None) -> list[dict]:
     """Relations where the entity is subject or object (LIVE only --
     superseded rows are history)."""
