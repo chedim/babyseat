@@ -65,6 +65,22 @@ class TestJsExec(unittest.TestCase):
         JS.bind(srv)                                                     # idempotent
         self.assertEqual(len([d for d in est.docs.values() if of(d)]), 1)
 
+    def test_a_corrupted_door_is_repaired_at_boot(self):
+        """2026-10-15, the live seat: presence.exec had been REDEFINED with a
+        literal shell line ('presence.exec{code: ps -eo ...}') -- the JS door was
+        dead across every restart, because the boot only defined it when MISSING.
+        The seat's own door is its to keep: a wrong command is put back."""
+        srv, _ = _seat()
+        est = srv.entity_store
+        pres = est.docs.get(MEMBRANE_NS + "presence")
+        of = lambda d: pres.eid in ((d.properties or {}).get("method_of") or [])
+        m = next(d for d in est.docs.values() if of(d) and (d.properties or {}).get("method_name") == "exec")
+        m.properties["command"] = "presence.exec{code: ps -eo lstart,pid,args | grep -m5 [m]embrane}"
+        JS.bind(srv)
+        doors = [d for d in est.docs.values() if of(d) and (d.properties or {}).get("method_name") == "exec"]
+        self.assertEqual(len(doors), 1)
+        self.assertEqual(doors[0].properties.get("command"), "js::{{code}}")
+
     def test_turning_a_tab_off_drops_it(self):
         srv, _ = _seat()
         JS.register(srv, "tab_a", "ses_1", "D")
