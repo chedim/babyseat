@@ -815,7 +815,8 @@ function definePanel() {
             <button class="btn icon llmbtn" title="the LLM (off: talk to membrane alone)">🤖</button>
             <button class="btn icon autobtn" title="auto-chat: membrane and the LLM talk; you can join any time">⟳</button>
             <button class="btn icon rolebtn" title="membrane's role: babble (it talks to the LLM) or predict (it guesses the LLM, unheard)">💬</button>
-            <button class="btn icon jsbtn" title="let ${SEAT} run JS in this tab -- it acts as you here (the page, your HA login) -- off by default">🧩</button>
+            <button class="btn icon thinkbtn" title="the think dial: the reasoning the cards do (auto = forward verbatim)">💭</button>
+            <button class="btn icon jsbtn" title="allow JS scripting in this window -- the page runs it with your HA login -- off by default">🧩</button>
             <button class="btn icon vlogbtn" title="the voice log: what was said aloud (hidden from the chat)">🗒</button>
             <button class="btn icon pausebtn" title="pause the seat: every acting lane stands down (loops, dreamer, thinker, night)">⏸</button>
             <button class="btn icon mindsbtn" title="membrane's minds">🧠</button>
@@ -847,7 +848,7 @@ function definePanel() {
         // chat button as a ▶/⏸; the panel's own node stays (hidden --
         // never listed) so its listener and state keep working.
         for (const [cls, label] of [["agent", null], ["modelpick", null], ["voicebtn", "membrane's voice"], ["llmbtn", "LLM replies"],
-                                    ["rolebtn", "membrane babbles"], ["jsbtn", "let " + SEAT + " act as you here: off"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
+                                    ["rolebtn", "membrane babbles"], ["thinkbtn", "think"], ["jsbtn", "JS scripting: off"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
           const el = app.querySelector("." + cls);
           if (!el) continue;
           if (label) {
@@ -916,6 +917,10 @@ function definePanel() {
         this._ta.placeholder = this._llmOn ? "Ask the brain…" : "Talk to membrane (no LLM)…";
         if (!this._llmOn && !this._voiceOn) this._voiceBtn.click();
       });
+      this._thinkBtn = $(".thinkbtn");
+      this._think = "";                   // the dial as the seat holds it ("" until the models GET)
+      this._paintThink();
+      this._thinkBtn.addEventListener("click", () => this._toggleThink().catch(() => {}));
       this._titleEl.addEventListener("dblclick", () => this._rename());
       this._agentSel.addEventListener("change", () => { this._agent = this._agentSel.value; });
       this._modelSel = this.shadowRoot.querySelector(".modelpick");
@@ -1004,6 +1009,7 @@ function definePanel() {
         this._foot.textContent = "membrane " + ((health.data && health.data.version) || "") + " · " + conf.data.serve_url;
         this._loadAgents();
         this._loadModel();
+        this._loadThink();                 // the THINK switch's state (one GET)
         await this._listSessions();
         const sid = this._sessions.length ? this._sessions[0].id : await this._createSession();
         await this._open(sid);
@@ -1088,8 +1094,45 @@ function definePanel() {
           this._models ? Promise.resolve(null) : this._api(SERVE + "/v1/models")]);
         if (list && list.ok && list.data) this._models = ollamaModels(list.data.data);
         this._mindsModels = cur.ok ? cur.data : null;
+        this._paintThink(cur.ok && cur.data ? cur.data.think : this._think);
       } catch (e) { this._mindsModels = null; }
       this._paintMinds();
+    }
+
+    // THE THINK DIAL (2026-10-15, the switch in the chat menu): the same
+    // GET the minds picker makes carries the seat's dial; a click cycles
+    // auto -> on -> off and POSTs it; the seat's own response repaints
+    // (a refusal names its why and the label reverts).
+    async _loadThink() {
+      const r = await this._api(SERVE + "/membrane/models");
+      if (r.ok && r.data) this._paintThink(r.data.think);
+    }
+
+    _paintThink(v) {
+      if (v) this._think = v;
+      const t = this._think || "auto";
+      const ico = this._thinkBtn.querySelector(".ico");
+      const lbl = this._thinkBtn.querySelector(".lbl");
+      if (ico) ico.textContent = "💭 " + t;
+      else this._thinkBtn.textContent = "💭 " + t;
+      if (lbl) lbl.textContent = "think " + t;
+      this._thinkBtn.style.opacity = t === "off" ? ".4" : "1";
+      this._thinkBtn.title = "the think dial (" + t + "): the reasoning injected into the seats' calls"
+                             + (t === "auto" ? " — auto = forward verbatim" : t === "on" ? " — off turns the reasoning down" : "");
+    }
+
+    async _toggleThink() {
+      const NCY = { auto: "on", on: "off", off: "auto" };
+      if (!NCY[this._think || "auto"]) await this._loadThink();   // state unknown: read first
+      const next = NCY[this._think || "auto"];
+      this._paintThink(next);
+      const r = await this._api(SERVE + "/membrane/models",
+                                { method: "POST", body: JSON.stringify({ think: next }) });
+      if (r.ok && r.data) this._paintThink(r.data.think);
+      else {
+        this._err("think switch refused: " + (typeof r.data === "string" ? r.data : JSON.stringify(r.data)).slice(0, 160));
+        await this._loadThink();          // the seat's truth repaints the label
+      }
     }
 
     _mindsModelsHtml() {
@@ -1773,10 +1816,10 @@ function definePanel() {
     _paintJs() {
       if (!this._jsBtn) return;
       const lbl = this._jsBtn.querySelector(".lbl");
-      if (lbl) lbl.textContent = this._jsOn ? SEAT + " acts as you here: ON" : "let " + SEAT + " act as you here: off";
+      if (lbl) lbl.textContent = this._jsOn ? "JS scripting: ON" : "JS scripting: off";
       this._jsBtn.style.opacity = this._jsOn ? "1" : ".5";
-      this._jsBtn.title = this._jsOn ? SEAT + " runs JS in this tab and acts as you here (the page, your HA login) -- click to stop"
-                                     : "let " + SEAT + " run JS in this tab -- it acts as you here (the page, your HA login) -- off by default";
+      this._jsBtn.title = this._jsOn ? "JS scripting is on in this window: the page runs it with your HA login -- click to stop"
+                                     : "allow JS scripting in this window: the page runs it with your HA login -- off by default";
     }
 
     /** Run a job IN THIS WINDOW (the operator's choice, 2026-10-11: "why a sandbox?

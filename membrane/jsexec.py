@@ -148,7 +148,7 @@ def run(code: str, timeout: float = 15.0, tab: str | None = None) -> dict:
         live = [t for t in live if t["tab"] == tab]
     if not live:
         return {"rc": 127, "text": "", "err": "no browser tab runs JS for this seat -- someone has to opt in "
-                                            "(membrane home: 'let the assistant act as you here')"}
+                                            "(membrane home: 'allow JS scripting in this window')"}
     t = live[0]
     job = {"id": "js_" + secrets.token_hex(5), "code": _unquote(str(code or "")), "timeout": float(timeout),
            "tab": t["tab"], "done": threading.Event(), "result": None}

@@ -87,3 +87,24 @@ class TestThePageHearsIt(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class TestTheJsSwitchSpeaksTheSwitch(unittest.TestCase):
+    """THE SWEEP'S COPY (2026-10-15, the operator's ask): the JS toggle in
+    the menu named the SEAT ('let Bob act as you here: off') -- the copy
+    names the switch instead, in the operator's own words (the seat's
+    name belongs to its own rename, not every button row)."""
+
+    def test_the_menu_row_names_the_switch(self):
+        self.assertIn('"JS scripting: off"', PANEL.read_text())
+
+    def test_the_paint_names_the_switch(self):
+        src = PANEL.read_text()
+        self.assertIn('"JS scripting: ON"', src)
+        self.assertIn('"JS scripting: off"', src)
+
+    def test_the_old_seat_naming_is_swept_out_of_the_page(self):
+        self.assertNotIn("act as you here", PANEL.read_text())
+
+    def test_the_no_tab_error_names_the_new_door(self):
+        import membrane.jsexec as J
+        self.assertNotIn("act as you here", Path(J.__file__).read_text())

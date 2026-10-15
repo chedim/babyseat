@@ -130,3 +130,124 @@ class TestTheFlag:
         assert ap.parse_args([]).think == "auto"
         assert ap.parse_args(["--think", "off"]).think == "off"
         assert ap.parse_args(["--think", "on"]).think == "on"
+
+class TestTheDialAtRuntime:
+    """THE SWITCH IN THE CHAT MENU (2026-10-15): `--think` was boot-only --
+    the operator had to reboot the seat to turn the reasoning down. The
+    dial rides the seat's minds' models surface (GET/POST /membrane/models,
+    the model.json persistence, the boot restore), which the standalone
+    chat page AND the HA panel already relay -- so one switch covers both."""
+
+    def _srv(self, tmp_path, think=None):
+        from membrane.minds_models import read, apply  # noqa: F401
+        s = _Srv(backend="", think=think)
+        s._models_path = str(tmp_path / "models.json")
+        return s
+
+    def test_read_surfaces_the_dial(self, tmp_path):
+        from membrane.minds_models import read
+        s = _Srv(backend="", think=True)
+        assert read(s)["think"] == "on"
+        s.think = False
+        assert read(s)["think"] == "off"
+        s.think = None
+        assert read(s)["think"] == "auto"
+
+    def test_apply_sets_and_persists_the_dial(self, tmp_path):
+        import json as _j
+        from membrane.minds_models import apply
+        s = self._srv(tmp_path)
+        out = apply(s, think="on")
+        assert s.think is True and out["think"] == "on"
+        assert _j.load(open(s._models_path))["think"] == "on"
+        apply(s, think="off")
+        assert s.think is False
+        assert _j.load(open(s._models_path))["think"] == "off"
+
+    def test_apply_auto_is_an_honest_none(self, tmp_path):
+        import json as _j
+        from membrane.minds_models import apply
+        s = self._srv(tmp_path)
+        out = apply(s, think="auto")
+        assert s.think is None and out["think"] == "auto"
+        assert _j.load(open(s._models_path))["think"] == "auto"
+
+    def test_a_bad_spelling_refuses_and_persists_nothing(self, tmp_path):
+        import json as _j
+        from membrane.minds_models import apply
+        s = self._srv(tmp_path)
+        import pytest
+        with pytest.raises(ValueError) as cx:
+            apply(s, think="bogus")
+        assert "on" in str(cx.value) and "off" in str(cx.value)
+        assert not (tmp_path / "models.json").exists()
+        apply(s, think="on")
+        with pytest.raises(ValueError):
+            apply(s, think="perhaps")
+        assert _j.load(open(s._models_path))["think"] == "on"
+
+    def test_the_minds_keys_survive_a_dial_persist(self, tmp_path):
+        import json as _j
+        from membrane.minds_models import apply
+        s = self._srv(tmp_path)
+        apply(s, loops="glm-5.3-flash:cloud", think="off")
+        saved = _j.load(open(s._models_path))
+        assert saved.get("loops") == "glm-5.3-flash:cloud"
+        assert saved["think"] == "off"
+
+    def test_boot_restores_the_dial(self, tmp_path):
+        import json as _j
+        from membrane.minds_models import load
+        p = tmp_path / "models.json"
+        _j.dump({"think": "on"}, open(p, "w"))
+        s = self._srv(tmp_path)
+        load(s)
+        assert s.think is True
+
+    def test_an_explicit_cli_think_beats_the_file(self, tmp_path):
+        import json as _j
+        from membrane.minds_models import load
+        _j.dump({"think": "on"}, open(tmp_path / "models.json", "w"))
+        s = self._srv(tmp_path)
+        load(s, cli_think="off")
+        assert s.think is False
+
+    def test_boot_auto_defers_to_the_file(self, tmp_path):
+        import json as _j
+        from membrane.minds_models import load
+        _j.dump({"think": "on"}, open(tmp_path / "models.json", "w"))
+        s = self._srv(tmp_path)
+        load(s, cli_think="auto")
+        assert s.think is True
+
+
+class TestTheSwitchInTheChatMenu:
+    """THE ROW BUTTON (2026-10-15, the live-name test's house shape: plain
+    JS pinned at the source): a THINK button rides the chat menu's button
+    row beside the LLM toggles, cycling auto -> on -> off; the state comes
+    from the same /membrane/models GET the minds picker already makes (so
+    the HA relay serves it untouched), a click POSTs {think: next} under
+    SERVE, and a refused POST shows the seat's why."""
+
+    def _src(self):
+        from pathlib import Path
+        return (Path(__file__).resolve().parent.parent /
+                "membrane" / "ui" / "panel.js").read_text()
+
+    def test_the_row_button_exists_and_cycles(self):
+        src = self._src()
+        assert 'class="btn icon thinkbtn"' in src
+        assert 'const NCY = { auto: "on", on: "off", off: "auto" }' in src
+
+    def test_the_click_posts_the_next_dial(self):
+        src = self._src()
+        assert 'JSON.stringify({ think: next })' in src
+        assert 'SERVE + "/membrane/models"' in src
+
+    def test_the_state_reads_the_models_get(self):
+        src = self._src()
+        assert "this._paintThink(r.data.think)" in src
+
+    def test_a_refused_post_names_the_why(self):
+        src = self._src()
+        assert 'this._err("think switch refused: "' in src

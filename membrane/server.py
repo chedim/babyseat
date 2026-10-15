@@ -3116,7 +3116,7 @@ def make_handler(hub=None, sessions=None, messages=None, user="opencode",
                     known = None
                 try:
                     out = _MM.apply(psrv, loops=b.get("loops"), cortex=b.get("cortex"),
-                                    known=known or None)
+                                    think=b.get("think"), known=known or None)
                 except ValueError as e:
                     body = json.dumps({"error": str(e)}).encode()
                     self.send_response(400); self.send_header("Content-Type", "application/json")

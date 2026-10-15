@@ -1861,9 +1861,10 @@ def main() -> None:
             # are real serve turns on their child sessions
             srv._loop_runner = runner
             # THE MINDS' MODELS: the saved picks for the loops + the cortex
+            # (+ the think dial; an explicit CLI on/off beats the file, auto defers)
             try:
                 from .minds_models import load as _mm_load
-                _mm_load(srv)
+                _mm_load(srv, cli_think=getattr(args, "think", None))
             except Exception as e:
                 print(f"[seat] minds' models not restored ({e})", file=sys.stderr)
             # THE ACTIVE MODELS: the role entities are planted and reapplied
