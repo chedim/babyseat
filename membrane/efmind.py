@@ -213,7 +213,7 @@ class DreamSource:
         return unit(self.fld.emb.embed([text])[0])
 
     def vet(self, vec) -> bool:
-        near = self.fld.recall(vec, k=6)
+        near = self.fld.recall(vec, k=6, by="state")   # TOPIC_FLOOR is a raw-state cosine
         if not near or near[0][1] < self.TOPIC_FLOOR:
             return False
         dup = self.fld.b.vector_top_k("sentences", "vec", vec, 1)
