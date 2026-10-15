@@ -1,3 +1,4 @@
+import os
 """THE SEAT AS A PANEL (2026-10-11, the operator: "does the seat's entity
 expose its state/controls/events?"): state refreshed onto membrane::presence,
 the seat's events kept there and published, the operator's controls applied
@@ -15,6 +16,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from membrane import seat_panel as SP  # noqa: E402
 from membrane import server as S  # noqa: E402
 from membrane import voice as V  # noqa: E402
+
+
+# VOICE IS OPT-IN since 0.5.1 (MEMBRANE_VOICE=1): these tests exercise the voice,
+# so this module turns it on for its own tests -- never for the rest of the suite
+from unittest import mock as _mock  # noqa: E402
+_VOICE_ON = _mock.patch.dict(os.environ, {"MEMBRANE_VOICE": "1"})
+
+
+def setUpModule():
+    _VOICE_ON.start()
+
+
+def tearDownModule():
+    _VOICE_ON.stop()
 from membrane.entities import EntityStore, MEMBRANE_NS  # noqa: E402
 from membrane.watch_agents import LoopRunner  # noqa: E402
 
