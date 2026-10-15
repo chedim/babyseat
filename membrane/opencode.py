@@ -76,6 +76,7 @@ from . import efgate as _efg
 from . import entities as _ents
 from . import streams as _streams
 from . import efield as _efield_mod
+from .safestderr import SafeStderr
 from .entities import (EntityStore, QuantumEntity, MEMBRANE_NS,
                        CLASS_COMPONENT, CLASS_TOOL)
 
@@ -669,7 +670,10 @@ def main() -> None:
             fdir = os.path.dirname(os.path.abspath(args.field))
             if os.path.basename(fdir) == ".membrane":
                 log_path = os.path.join(fdir, "opencode.log")
-        _log_fh = open(log_path, "a", buffering=1)
+        # write-through + lock-serialized (not a buffered handle): a shared
+        # line-buffered TextIOWrapper lets two threads into the buffered layer
+        # at once and CPython 3.14 aborts on that (issue #121).
+        _log_fh = SafeStderr(log_path)
         sys.stderr = _log_fh
 
     backend = args.backend.rstrip("/")
