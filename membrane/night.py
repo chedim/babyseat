@@ -2402,34 +2402,38 @@ def _bind_args(m, args):
     return args, None
 
 
-def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | None = None,
-                _depth: int = 0) -> dict:
+def _prepare_call(est, obj_spec: str, method: str, args=None, _depth: int = 0) -> dict:
+    """Everything a call decides BEFORE anything runs -- the object, the method it
+    resolves to, the bound args, the filled context -- or the refusal it gives.
+    method_call and method_inspect share it, so a dry run never disagrees with the
+    call. -> {"blocked": <result>} or {obj, m, via, mro, full, template, ctx}."""
     if est is None:
-        return {"ok": False, "status": "blocked", "error": "entity layer unavailable"}
+        return {"blocked": {"ok": False, "status": "blocked", "error": "entity layer unavailable"}}
     obj = est._resolve_spec(obj_spec or "")
     if obj is None:
-        return {"ok": False, "status": "blocked",
-                "error": f"no object matches {obj_spec!r} -- a call names its object"}
+        return {"blocked": {"ok": False, "status": "blocked",
+                            "error": f"no object matches {obj_spec!r} -- a call names its object"}}
     m, via = resolve_method(est, obj, (method or "").strip())
     mro = [short_name_of(a) for a in [obj] + ancestors(est, obj)][:8]
     if m is None:
         req = next((x for x in abstract_methods(est, obj) if x["name"] == (method or "").strip()), None)
         if req is not None:
             from .classes import short_name
-            return _blocked(obj, method, f"{short_name_of(obj)} implements {short_name(req['interface'])}, "
+            return {"blocked": _blocked(obj, method, f"{short_name_of(obj)} implements {short_name(req['interface'])}, "
                             f"which requires {req['name']}({', '.join(req['params'])}), but it has no "
                             f"{req['name']} of its own yet -- implement it: exec(action='define', "
                             f"on=<it, or a class between it and the interface>, method='{req['name']}', command=...)",
-                            mro=mro, missing=req)
+                            mro=mro, missing=req), "obj": obj, "mro": mro}
         have = methods_of(est, obj)
-        return _blocked(obj, method, f"{short_name_of(obj)} has no method {method!r}"
+        return {"blocked": _blocked(obj, method, f"{short_name_of(obj)} has no method {method!r}"
                         + (f"; it answers to: {', '.join(have)}" if have else "")
                         + " -- define one: exec(action='define', on=<class or object>, method=..., command=...)",
-                        mro=mro)
+                        mro=mro), "obj": obj, "mro": mro}
     args, why = _bind_args(m, args)
     if why:
-        return _blocked(obj, method, why, via=via or "global", mro=mro,
-                        params=command_params(str((m.properties or {}).get("command") or "")))
+        return {"blocked": _blocked(obj, method, why, via=via or "global", mro=mro,
+                        params=command_params(str((m.properties or {}).get("command") or ""))),
+                "obj": obj, "m": m, "via": via, "mro": mro}
     props = effective_properties(est, obj)
     full = {f"self.{k}": v for k, v in props.items() if isinstance(v, (str, int, float, bool))}
     sid = short_name_of(obj)
@@ -2453,12 +2457,75 @@ def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | Non
             why.append(f"{short_name_of(obj)} has no value for {', '.join(selfs)} (set it on the object or its class)")
         if given:
             why.append("needs args: " + ", ".join(given))
-        return _blocked(obj, method, "; ".join(why), via=via or "global", mro=mro,
-                        params=command_params(template))
+        return {"blocked": _blocked(obj, method, "; ".join(why), via=via or "global", mro=mro,
+                        params=command_params(template)), "obj": obj, "m": m, "via": via, "mro": mro}
+    ctx = {"vars": full, "steps": {}, "depth": _depth, "est": est, "self_eid": obj.eid}
+    return {"obj": obj, "m": m, "via": via, "mro": mro, "full": full, "template": template, "ctx": ctx,
+            "args": args}
+
+
+def method_inspect(est, obj_spec: str, method: str, args=None) -> dict:
+    """ISSUE #80 (Memo): a method could break and nobody on the seat could LOOK at
+    it. Runs NOTHING. Where the call resolves (via, the resolution order, who
+    defines the method along it), the definition (command, params, steps, guard,
+    read_only), and with args the command the call WOULD run or the refusal it
+    WOULD give -- from the same preparation the call uses."""
+    method = (method or "").strip()
+    prep = _prepare_call(est, obj_spec, method, args)
+    obj = prep.get("obj")
+    if obj is None:
+        return {"ok": False, "error": prep["blocked"]["error"]}
+    out = {"ok": True, "object": obj.eid, "method": method, "mro": prep.get("mro") or []}
+    order = [obj] + ancestors(est, obj)
+    named = [d for d in list((est.docs or {}).values())
+             if (d.properties or {}).get("method_name") == method]
+    defined = []
+    for owner in order:
+        for d in named:
+            if owner.eid in ((d.properties or {}).get("method_of") or []):
+                defined.append({"owner": owner.eid, "eid": d.eid,
+                                "command": str((d.properties or {}).get("command") or ""),
+                                "abstract": bool((d.properties or {}).get("abstract"))})
+    for d in named:
+        if not (d.properties or {}).get("method_of"):
+            defined.append({"owner": None, "eid": d.eid, "command": str((d.properties or {}).get("command") or "")})
+    out["defined_on"] = defined
+    m = prep.get("m")
+    if m is None:
+        m, _via = resolve_method(est, obj, method)
+    if m is None:
+        out.update(found=False, answers_to=methods_of(est, obj), would_refuse=prep["blocked"]["error"])
+        return out
+    mp = m.properties or {}
+    out.update(found=True, via=prep.get("via") or resolve_method(est, obj, method)[1] or "global",
+               eid=m.eid, command=str(mp.get("command") or ""),
+               params=command_params(str(mp.get("command") or "")),
+               read_only=bool(mp.get("read_only")), runs=int(mp.get("runs") or 0))
+    steps = []
+    for pe in mp.get("parents") or []:
+        d = (est.docs or {}).get(pe)
+        if d is not None:
+            pp = d.properties or {}
+            steps.append({k: pp[k] for k in ("step", "command", "call", "object", "each", "guard", "args") if pp.get(k)})
+    if steps:
+        out["steps"] = steps
+    if "blocked" in prep:
+        out["would_refuse"] = prep["blocked"]["error"]
+    elif out["command"]:
+        out["would_run"] = _fill(out["command"], prep["ctx"])[0]
+    return out
+
+
+def method_call(srv, est, fld, mem, obj_spec: str, method: str, args: dict | None = None,
+                _depth: int = 0) -> dict:
+    prep = _prepare_call(est, obj_spec, method, args, _depth)
+    if "blocked" in prep:
+        return prep["blocked"]
+    obj, m, via, mro, full, template, ctx, args = (prep[k] for k in (
+        "obj", "m", "via", "mro", "full", "template", "ctx", "args"))
     # a call is a synchronous EVENT, not a queued link: the method entity
     # runs directly (its id would read as a 'label :: command' line to the
     # link parser); the run count and success rate land on the method
-    ctx = {"vars": full, "steps": {}, "depth": _depth, "est": est, "self_eid": obj.eid}
     run = _exec_command_doc(srv, est, fld, mem, m, args=full, ctx=ctx)
     fed = run.get("fed") or (_fill(template, ctx)[0] if template else "")
     rc = run.get("rc")

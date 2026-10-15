@@ -717,6 +717,8 @@ OPERATOR_TOOLS = frozenset((
     # planting 'run X' goals and waiting a whole loop pass for a listener
     # to do a one-line command. The other entity hands stay the listeners'.
     "entity_link", "entity_unlink", "method_define", "method_call", "method_each",
+    # a method's read (issue #80): runs nothing, so plans may look too
+    "method_inspect",
     # THE FLOOD GATES (2026-10-08, the operator's call: "open the flood gates
     # between the lanes"): the chat lane holds the entity hands and the
     # watches too -- refused -> intend -> a loop cost more than it protected
@@ -735,6 +737,7 @@ LISTENER_TOOLS = (OPERATOR_TOOLS | {
 }) - {"intend"}
 # plan reads/communicates: never plants, closes or executes
 PLAN_TOOLS = OPERATOR_TOOLS - {"intend", "fulfill", "entity_link", "method_define", "method_call", "method_each",
+                               "method_inspect",
                                "entity_unlink", "entity_add", "entity_edit",
                                "entity_remove", "field_watch",
                                "entity_inherit"}

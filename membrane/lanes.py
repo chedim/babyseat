@@ -4063,7 +4063,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._entity_inherit(); return
         if path == "/membrane/entity/link":
             self._entity_link_unlink(link=True); return
-        if path in ("/membrane/method/define", "/membrane/method/call", "/membrane/method/each"):
+        if path in ("/membrane/method/define", "/membrane/method/call", "/membrane/method/each",
+                    "/membrane/method/inspect"):
             self._method(path.rsplit("/", 1)[-1]); return
         if path == "/membrane/entity/unlink":
             self._entity_link_unlink(link=False); return
@@ -6487,7 +6488,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if est is None:
             self._json_err_raw(503, "entity layer unavailable"); return
         body = self._json_body()
-        from .night import method_define, method_call, method_each
+        from .night import method_define, method_call, method_each, method_inspect
+        if op == "inspect":
+            a = body.get("args")
+            self._json_out(method_inspect(est, str(body.get("object") or ""), str(body.get("method") or ""),
+                                          a if isinstance(a, (dict, list)) else None)); return
         if op == "each":
             a = body.get("args")
             res = method_each(srv, est, _efield_on(srv), srv.membrane, str(body.get("over") or ""),

@@ -1470,6 +1470,21 @@ def tool_method_call(args: dict, port: int) -> str:
             f"ran: {str(out.get('fed') or '')[:300]}\nhead: {str(out.get('head') or '')[:600]}")
 
 
+def tool_method_inspect(args: dict, port: int) -> str:
+    """A method's read (issue #80): where a call resolves, the definition, and the
+    dry run -- nothing runs."""
+    a = args.get("args")
+    if isinstance(a, str):
+        try:
+            a = json.loads(a)
+        except ValueError:
+            a = None
+    out = _http(port, "POST", "/membrane/method/inspect", {
+        "object": str(args.get("object") or args.get("spec") or ""),
+        "method": str(args.get("method") or ""), "args": a if isinstance(a, (dict, list)) else None})
+    return json.dumps(out, indent=1)[:4000]
+
+
 def tool_method_each(args: dict, port: int) -> str:
     a = args.get("args")
     if isinstance(a, str):
@@ -1593,6 +1608,7 @@ TOOL_IMPLS = {
     "method_define": tool_method_define,
     "method_call": tool_method_call,
     "method_each": tool_method_each,
+    "method_inspect": tool_method_inspect,
     "entity_unlink": tool_entity_unlink,
     "entity_read": tool_entity_read,
 }
