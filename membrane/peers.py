@@ -4,8 +4,12 @@ heartbeats -- a dead proxy's doc expires itself) + the PEER CHANNEL
 connected seat's banner).
 
 THE REGISTRY (cortex's episodic_memory pattern): each proxy registers on
-boot -- {pid, cwd, port, model, ts} under 'proxy::<port>' with a TTL of
-3 heartbeats. Every HEARTBEAT (default 60s) re-upserts the doc,
+boot -- {pid, cwd, port, model, ts} under the FIELD's stable key
+('proxy-<field-id>', see _reg_key) with a TTL of
+3 heartbeats. Keying by the field (not the port) means a seat that
+relaunches on a shifted port overwrites its own row instead of leaving a
+stale 'proxy-<old-port>' doc alive to be probed (issue #114). Every
+HEARTBEAT (default 60s) re-upserts the doc,
 refreshing the TTL; a proxy that dies stops heartbeating and its doc
 expires -- the registry self-cleans. Consumers: the banner's 'seats:'
 line (who else is connected), membrane_doctor, the fork.
@@ -44,6 +48,20 @@ CHANNEL_TAIL = 8               # the cursor memory (last seen ts rides the
                                # own restarts via the doc's residual TTL)
 
 
+def _reg_key(field_path, port: int) -> str:
+    """The registry doc's identity: the FIELD, not the ephemeral port.
+
+    A seat keyed by its port leaves `proxy-<old-port>` alive for the TTL
+    window when it relaunches on a shifted port -- peers then probe a
+    closed port and misdiagnose a live seat as dead (issue #114). Keyed by
+    the field, a relaunch on ANY port overwrites the same row, so the
+    roster always carries the port the seat actually bound."""
+    if field_path:
+        from .global_field import field_id_for
+        return f"proxy-{field_id_for(field_path)}"
+    return f"proxy-{port}"
+
+
 def post_failure_reason(peers) -> str:
     """Why a peer post could not land (the bare 'unknown error' propped up
     an imagined sister seat, 2026-10-08)."""
@@ -79,6 +97,7 @@ class PeerSubstrate:
         self._roster_fn = roster_fn
         self.cwd = os.getcwd()
         self.seat_id = f"proxy-{self.port}"
+        self.reg_key = _reg_key(self.field_path, self.port)
         self._cluster = None
         self._bucket = None
         self._reg = None           # proxies collection (ephemeral bucket)
@@ -260,12 +279,14 @@ class PeerSubstrate:
     # ---- the registry ----
     def register(self, port: int | None = None, field: str | None = None
                  ) -> bool:
-        """Proxy boot registration: proxy::<port> {pid, cwd, port, model,
-        ts, chan_cursor} with a TTL. Returns False on couchbase failure
-        (silent). The positional (port, field) form is the slice-4
-        Peers.register signature; accepted here so call sites written
-        against either substrate work, but the doc already carries the
-        authoritative port."""
+        """Proxy boot registration: the FIELD's stable key {pid, cwd, port,
+        model, ts, chan_cursor} with a TTL. Returns False on couchbase
+        failure (silent). The doc key is self.reg_key (the field id, NOT
+        the port) so a relaunch on a shifted port overwrites this seat's
+        own row; the doc still carries the authoritative current port. The
+        positional (port, field) form is the slice-4 Peers.register
+        signature; accepted here so call sites written against either
+        substrate work."""
         if port is not None and int(port) != self.port:
             self.port = int(port)
             self.seat_id = f"proxy-{self.port}"
@@ -283,7 +304,7 @@ class PeerSubstrate:
             from couchbase.options import UpsertOptions
             from datetime import timedelta
             self._reg.upsert(
-                self.seat_id, doc,
+                self.reg_key, doc,
                 UpsertOptions(expiry=timedelta(seconds=REGISTRY_TTL_S)))
             self._op_ok()
             return True
