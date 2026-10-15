@@ -664,9 +664,12 @@ TOOLS: list[dict] = [
             "the link action's marker; a re-link re-runs (n bumps). "
             "Caps: 3 commands per call, 32 live edges per executor -- over "
             "the cap the tool ERRORS ('failed to link'), never partially "
-            "links. Long-running commands time out at 15s: the tool says "
-            "'timeout' and the thinker's tick lane picks the run up later "
-            "(the result lands on the command entity when it finishes)."),
+            "links. A link that finishes within 3s returns inline; a slower "
+            "one returns a 'job #N running' placeholder and its result "
+            "arrives as a '[membrane] job #N finished' event on the next "
+            "turn (it still lands on the command entity). Each command's "
+            "run budget is 20s: past that its outcome is 'timeout' (the "
+            "result still lands on the command entity)."),
         "inputSchema": {
             "type": "object",
             "properties": {
