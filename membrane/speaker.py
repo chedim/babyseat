@@ -101,10 +101,13 @@ def chat_status(runner, chat_sid: str) -> str:
 def frame(text: str, status: str) -> str:
     return ("[speaker lane] You're answering by VOICE: your reply is spoken aloud automatically, "
             "sentence by sentence as you write it (voice:out) -- so say your answer FIRST, in one short "
-            "sentence, before any tool call; if you need a tool, first say in a few words what you're "
-            "checking. One or two short spoken sentences in all, no lists, no markdown, no need to set say. "
+            "sentence, before any tool call. A tool call is silent and invisible to the person: when you "
+            "must act, MAKE the call itself, and never write a tool call into your spoken words (to plant a "
+            "goal, call the goal tool: goal, action 'plant', text '<the goal>'). One or two short spoken "
+            "sentences in all, no lists, no markdown, no emoji, no need to set say. "
             f"Meanwhile {status}. Don't redo the chat's work here; if this asks for real work, plant a goal "
-            "or call the llm entity so the chat or a loop does it, and say so.\n" + text)
+            "or call the llm entity so the chat or a loop does it -- and say in your own words that you've "
+            "handed it over.\n" + text)
 
 
 def _words(text: str) -> str:
@@ -228,6 +231,10 @@ def _reply_text(result) -> str:
 # from the end of speech to the first word. Now every finished sentence of the
 # turn's TEXT parts is spoken the moment it streams; reasoning and code never are.
 _SENTENCE = re.compile(r"(.+?[.!?…][\"'”’)\]]*)(?=\s|$)", re.S)
+# INLINE CODE (2026-10-15): the voice-framed model narrates a tool call as
+# `goal(action='plant', text='...')` inline code instead of making the call --
+# that must never be voiced (it reads as noise, and the goal isn't planted).
+_INLINE_CODE = re.compile(r"`[^`]*`")
 
 
 class _Streamer:
@@ -247,6 +254,7 @@ class _Streamer:
 
     def _say(self, text: str) -> None:
         text = " ".join(text.split()).strip()
+        text = " ".join(_INLINE_CODE.sub(" ", text).split()).strip()
         if len(text) < 2 or not any(ch.isalnum() for ch in text):
             return
         from . import voice_io as VIO

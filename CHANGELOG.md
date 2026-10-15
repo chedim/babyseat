@@ -1,3 +1,7 @@
+## Unreleased
+
+- **The speaker lane plants goals instead of voicing them**: the voice-framed turn told the model to "say so" about tool use but never that a tool call is silent, so it narrated `goal(action='plant', …)` as inline code and that was spoken aloud. The frame now says a tool call is invisible and to make the call itself, and the streamer no longer speaks inline code.
+
 ## v0.5.1 (2026-10-15) — the train ships quiet
 
 - **Chat voice is OFF by default**: membrane chats in LLM text only; set `MEMBRANE_VOICE=1` to opt back in. The old default (`"1"`) made the seat speak unless a kill-switch was set; the gate is now an explicit allow-list.

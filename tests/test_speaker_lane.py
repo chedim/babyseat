@@ -198,6 +198,21 @@ class TestTheReplyIsSpokenAsItStreams(unittest.TestCase):
         self.assertIn("Here it is.", said)
         self.assertIn("That was the code.", said)
 
+    def test_a_narrated_tool_call_is_never_spoken(self):
+        r, srv, chat, calls = _seat()
+        self._streaming_run(r, srv, [
+            ("part", ("t", "text")),
+            ("delta", ("t", "I'll plant a goal now. `goal(action='plant', text='comprehensive_test')`")),
+        ])
+        text, info, parts = _voice_msg(r, chat, "test everything")
+        SPK.run(r, SPK.route(r, chat, text, info, parts))
+        said = " ".join(self._said(srv))
+        self.assertIn("I'll plant a goal now.", said)
+        # the narrated tool call (inline code) is never voiced -- it reads
+        # as noise aloud, and the goal must be planted by a real tool call
+        self.assertNotIn("goal(action='plant'", said)
+        self.assertNotIn("comprehensive_test", said)
+
     def test_the_mic_opens_after_the_last_streamed_sentence(self):
         r, srv, chat, calls = _seat()
         order = []
@@ -231,6 +246,12 @@ class TestTheAnswerComesFirst(unittest.TestCase):
         f = SPK.frame("how's the battery?", "the chat is idle")
         self.assertIn("FIRST", f)
         self.assertIn("before any tool", f)
+
+    def test_the_voice_frame_says_to_call_the_tool_not_narrate_it(self):
+        f = SPK.frame("test everything", "the chat is idle")
+        self.assertIn("never write a tool call into your spoken words", f)
+        self.assertIn("goal", f)
+        self.assertIn("plant", f)
 
 
 if __name__ == "__main__":
