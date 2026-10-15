@@ -81,6 +81,14 @@ GAIN = 0.5
 EP_RUN = 5
 EP_MAX = 48
 MATURE = 40
+COVER = 0.9      # the episodes speak for a life once they hold this share of its mentions
+
+
+def ep_covered(n: int, episodes, ep_k: int = 0) -> bool:
+    """Do the episodes (and the open run) cover the life? A field that lived
+    before the worldlines has mature entities whose episodes hold only their
+    newest mentions -- until they cover the life, the mean speaks for the rest."""
+    return sum(int(c) for _v, c in episodes) + int(ep_k or 0) >= COVER * int(n or 0)
 
 
 def worldlines_on() -> bool:
@@ -915,22 +923,33 @@ class EntityField:
             m1, m2 = st.ep_meta[i], st.ep_meta[i + 1]
             st.ep_meta[i:i + 2] = [(m1[0], m2[1], m2[2])]
         if self._ep_index is not None and st.n + 1 >= MATURE:
-            self._ep_index["rows"][st.eid] = [v for v, _ in st.episodes]
+            self._ep_index["rows"][st.eid] = self._ep_row(
+                [v for v, _ in st.episodes], ep_covered(st.n + 1, st.episodes, st.ep_k), st.mean)
             self._ep_index["M"] = None
 
     _ep_index: dict | None = None
 
+    @staticmethod
+    def _ep_row(eps, covered: bool, mean) -> dict:
+        pts = list(eps) + ([] if covered or mean is None else [np.asarray(mean, dtype=float)])
+        return {"eps": list(eps), "covered": covered, "pts": pts}
+
     def _ep_rows(self) -> dict:
-        """eid -> episode centroids, for every MATURE entity (built once, kept in
-        place as episodes close; dropped on a rebuild)."""
+        """eid -> {eps, covered, pts} for every MATURE entity with episodes (built
+        once, kept in place as episodes close; dropped on a rebuild). pts are the
+        index's points: the episodes, and the mean while they do not cover the life."""
         if self._ep_index is None:
             rows = {}
             for _k, d in self.b.scan("entity_states", {"origin": self.origin}):
                 if int(d.get("n") or 0) >= MATURE and d.get("episodes"):
-                    rows[d["eid"]] = [unpack_f16(v) for v, _ in d["episodes"]]
+                    eps = [(unpack_f16(v), c) for v, c in d["episodes"]]
+                    rows[d["eid"]] = self._ep_row(
+                        [v for v, _ in eps], ep_covered(d.get("n"), eps, d.get("ep_k")),
+                        unpack_f16(d["mean"]) if d.get("mean") else None)
             for eid, st in self._states.items():            # unflushed lives win
                 if st.n >= MATURE and st.episodes:
-                    rows[eid] = [v for v, _ in st.episodes]
+                    rows[eid] = self._ep_row([v for v, _ in st.episodes],
+                                             ep_covered(st.n, st.episodes, st.ep_k), st.mean)
             self._ep_index = {"rows": rows, "M": None}
         return self._ep_index["rows"]
 
@@ -963,10 +982,11 @@ class EntityField:
         out = {"chapters": [{"from": m[0], "to": m[1], "n": int(n),
                              "said": str((got.get(m[2]) or {}).get("text") or "")[:200]}
                             for (_v, n), m in zip(st.episodes, meta)]}
-        mine = self._shape([self._centered(v) for v, _ in st.episodes])
+        mine = (self._shape([self._centered(v) for v, _ in st.episodes])
+                if ep_covered(st.n, st.episodes, st.ep_k) else None)
         if mine is not None:
-            pop = [s for s in (self._shape([self._centered(v) for v in vs])
-                               for e, vs in self._ep_rows().items()) if s is not None]
+            pop = [s for s in (self._shape([self._centered(v) for v in row["eps"]])
+                               for row in self._ep_rows().values() if row["covered"]) if s is not None]
             if pop:
                 out["shape"] = {k: int(round(100 * sum(p[k] < mine[k] for p in pop) / len(pop)))
                                 for k in mine}
@@ -984,6 +1004,8 @@ class EntityField:
             pts = [unpack_f16(v) for v, _ in d["episodes"]]
             if d.get("ep_acc") and int(d.get("ep_k") or 0):
                 pts.append(unpack_f16(d["ep_acc"]) / int(d["ep_k"]))
+            if d.get("mean") and not ep_covered(d.get("n"), d["episodes"], d.get("ep_k")):
+                pts.append(unpack_f16(d["mean"]))       # the life before the episodes
             return pts
         if d.get("mean"):
             return [unpack_f16(d["mean"])]
@@ -1005,8 +1027,8 @@ class EntityField:
         idx = self._ep_index
         if idx["M"] is None:
             owner, pts = [], []
-            for eid, vs in idx["rows"].items():
-                for v in vs:
+            for eid, row in idx["rows"].items():
+                for v in row["pts"]:
                     owner.append(eid); pts.append(self._centered(v))
             idx["owner"] = np.asarray(owner, dtype=object)
             idx["M"] = np.asarray(pts, dtype=np.float32) if pts else np.zeros((0, 1), np.float32)

@@ -134,5 +134,34 @@ class TestRecallReadsTheWorldline(unittest.TestCase):
         self.assertNotEqual(got[0], "f:" + OLD, got)
 
 
+class TestAnUpgradedField(unittest.TestCase):
+    """A field that lived before the worldlines has mature entities with NO
+    episodes; the first ones close after 5 new mentions. Scoring a mature entity
+    by those few newest episodes alone would read its last mentions and forget
+    its history (the 'last mention' read recognized worst: MRR 0.504 vs the
+    mean's 0.724) -- until the episodes cover its life, its mean is one more point."""
+
+    def _upgraded(self, new=6):
+        f = _field()
+        _say(f, _lines(OLD, A, 50, "pa", 1))                 # a whole life before the upgrade
+        st = f.get("f:" + OLD)
+        st.episodes, st.ep_meta, st.ep_acc, st.ep_k, st.ep_t0 = [], [], None, 0, None
+        f._dirty.add(st.eid); f.flush(); f._ep_index = None
+        _say(f, _lines(YOUNG, A + C, 12, "ya", 3), t0=4000.0)  # a rival half on the old topic
+        _say(f, _lines(OLD, B, new, "pb", 2), t0=6000.0)     # then a few new mentions elsewhere
+        return f
+
+    def test_the_old_life_still_answers(self):
+        f = self._upgraded()
+        self.assertEqual(len(f.get("f:" + OLD).episodes), 1)
+        got = [e for e, _ in f.recall(_q(A), k=3, kinds=["f"])]
+        self.assertEqual(got[0], "f:" + OLD, got)
+
+    def test_no_shape_until_the_chapters_cover_the_life(self):
+        f = self._upgraded(new=22)                           # 4 chapters, 20 of 72 mentions
+        self.assertEqual(len(f.get("f:" + OLD).episodes), 4)
+        self.assertNotIn("shape", f.worldline_of("f:" + OLD))
+
+
 if __name__ == "__main__":
     unittest.main()
