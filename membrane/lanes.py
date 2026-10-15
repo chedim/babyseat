@@ -3346,16 +3346,24 @@ def _port_free(port: int, host: str = "127.0.0.1") -> bool:
     # passed, the real bind died Errno 48, and the boot exited silently
     # into launch mode's log). The probe now asks the exact address the
     # real bind will use.
-    s = socket.socket()
-    s.settimeout(0.5)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    try:
-        s.bind((host or "127.0.0.1", port))
-        return True
-    except OSError:
-        return False
-    finally:
-        s.close()
+    # THE SCOPE SPLIT (2026-10-15, issue #115, the co-resident seats): on
+    # macOS/BSD SO_REUSEADDR lets a WILDCARD binder and a LOOPBACK binder
+    # coexist on one port -- two seats split the default serve port by
+    # origin and a local client silently reaches the wrong seat. A single
+    # host probe blesses the port while the OTHER scope holds it, so the
+    # probe now asks the intended host AND both default scopes (loopback +
+    # wildcard): the port is free only when none of them holds it.
+    for h in dict.fromkeys((host or "127.0.0.1", "127.0.0.1", "0.0.0.0")):
+        s = socket.socket()
+        s.settimeout(0.5)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((h, port))
+        except OSError:
+            return False
+        finally:
+            s.close()
+    return True
 
 
 def _now_iso() -> str:

@@ -58,5 +58,46 @@ class TestPortProbe(unittest.TestCase):
         self.assertTrue(_port_free(port))
 
 
+class TestScopeSplit(unittest.TestCase):
+    """ISSUE #115 (the co-resident seats): on macOS/BSD, SO_REUSEADDR lets
+    a WILDCARD binder (*:4096) and a LOOPBACK binder (127.0.0.1:4096)
+    coexist on one port -- two seats split the default serve port by
+    origin, and a local client silently reaches the wrong seat. The probe
+    must treat a port as busy when EITHER scope holds it, not just the one
+    it intends to bind."""
+
+    def test_a_wildcard_listener_is_busy_for_a_specific_host(self):
+        # seat A holds *:4096; seat B probing 127.0.0.1:4096 must see it
+        # busy -- the loopback probe alone BLESSES the port (the bug).
+        s = socket.socket()
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind(("", 0))
+        s.listen(4)
+        try:
+            port = s.getsockname()[1]
+            self.assertFalse(_port_free(port, host="127.0.0.1"))
+            self.assertNotEqual(_pick_listen_port(port, host="127.0.0.1"),
+                                port)
+            self.assertNotEqual(_pick_serve_port(port, host="127.0.0.1"),
+                                port)
+        finally:
+            s.close()
+
+    def test_a_specific_listener_is_busy_for_the_wildcard(self):
+        # seat A holds 127.0.0.1:4096; seat B probing the wildcard must
+        # see it busy -- the wildcard probe alone BLESSES the port (the
+        # reverse of the same split).
+        s = _listener()
+        try:
+            port = s.getsockname()[1]
+            self.assertFalse(_port_free(port, host="0.0.0.0"))
+            self.assertNotEqual(_pick_listen_port(port, host="0.0.0.0"),
+                                port)
+            self.assertNotEqual(_pick_serve_port(port, host="0.0.0.0"),
+                                port)
+        finally:
+            s.close()
+
+
 if __name__ == "__main__":
     unittest.main()
