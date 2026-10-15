@@ -1,5 +1,7 @@
 ## Unreleased
 
+- **`entity_add` takes `spec`, `fulfill` takes `intent`** (#108): the spec=/name= dialect split refused a value the model DID send — `entity_add(spec=X)` read only `name` so it answered "name required", and `fulfill(intent=176237)` / `fulfill(#N)` had no `intent` in its arg list so it answered "spec required" (even though `intend`'s own message says "fulfill #N closes it"). `entity_add` now accepts `spec` as the name (`name` still wins), and `fulfill` accepts `intent` (the `#N` / id form) as the spec.
+
 - **`entity_query` sees the class-embedded files: pool** (#99, reported by Memo): a file entity minted by `entity_add` lands as `membrane::Component:files:x.py` (the class in the eid, the pool inside it), and the query read only the class as the kind — so `kind:file` returned nothing for those. The kind read now folds the eid through its canonical field id first, so `kind:file` sees the pool, while the entity still also matches `kind:component` (its class).
 
 - **The graph's rows are now addressable** (#99, reported by Memo): the graph reader (`entities_related` / `graph`) returned FIELD ids (`f:x.py`), but the entity tools address the STORE's key — a file entity minted by `entity_add` lives as `membrane::Component:files:x.py` (the class-embedded pool spelling), which the field short-kind never reached. Each row (and its neighbours) now also carries the true stored `eid`, so whatever the graph returns is exactly what `entity_edit`/`entity_remove` can find.

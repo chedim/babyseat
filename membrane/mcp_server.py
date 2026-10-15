@@ -1064,7 +1064,7 @@ def tool_related_entities(args: dict, port: int) -> str:
 
 # what entity/add itself takes; the rest of an add's args ride a follow-up
 # edit (the add-hand used to DROP getter_script and friends silently)
-_ADD_FIELDS = ("class", "name", "summary", "links")
+_ADD_FIELDS = ("class", "name", "summary", "links", "spec")
 _EDIT_FIELDS = ("nudge_script", "delete_script", "mention_script",
                 "thought_script", "dreamed_script", "tick_script",
                 "watch_script", "getter_script", "watch", "watch_ops",
@@ -1074,7 +1074,7 @@ _EDIT_FIELDS = ("nudge_script", "delete_script", "mention_script",
 def tool_entity_add(args: dict, port: int) -> str:
     out = _http(port, "POST", "/membrane/entity/add", {
         "class": str(args.get("class") or ""),
-        "name": str(args.get("name") or ""),
+        "name": _arg(args, "name", "spec"),
         "summary": str(args.get("summary") or ""),
         "links": args.get("links") or [],
     })
@@ -1222,7 +1222,8 @@ def tool_fulfill(args: dict, port: int) -> str:
     """The close with a receipt: an open goal flips to fulfilled (shared)
     when the caller hands the evidence that proves it done."""
     out = _http(port, "POST", "/membrane/fulfill", {
-        "spec": _arg(args, "spec", "eid", "goal", "id", "name", "key"),
+        "spec": _arg(args, "spec", "eid", "goal", "id", "name", "key",
+                     "intent"),
         "evidence": _arg(args, "evidence", "receipt", "proof", "summary",
                          "text"),
         "by": str(args.get("by") or "")})
