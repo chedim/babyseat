@@ -29,6 +29,30 @@ from pathlib import Path
 
 MARKER = re.compile(r"(bin/membrane(?:\s|$)|membrane\.opencode|standalone)")
 DEFAULT_PORTS = (4096, 11500)
+# the seat's pick walks UP from a taken default (up to 64, lanes.py's
+# _pick_*_port): a seat on 4097 is invisible to a stop that only asks 4096.
+# The pidfile lane is the primary discovery -- this tail is the net.
+PORT_WALK = 16
+
+
+def walked_ports(ports, walk: int = PORT_WALK) -> list[int]:
+    """Expand each base port into base..base+walk-1 (deduped, ordered) --
+    a seat whose default was taken boots one or two ports up, so the stop
+    must probe the tail the seat's own pick would have walked."""
+    out: list[int] = []
+    for p in ports:
+        for q in range(int(p), int(p) + walk):
+            if q not in out:
+                out.append(q)
+    return out
+
+
+def seat_pidfiles(base: Path = Path(".membrane")) -> list[Path]:
+    """The pidfiles `membrane stop` reads, in the seat's own data dir. The
+    seat writes ITS OWN pid to `membrane.pid` at every boot (the child's
+    `opencode.pid` is launch-mode only and names the TUI, not the seat)."""
+    return [p for p in (base / "membrane.pid", base / "opencode.pid")
+            if p.exists()]
 
 
 def _cmdline(pid: int) -> str:
@@ -191,9 +215,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--term-wait", type=float, default=15.0,
                     help="the SIGTERM bound (s)")
     a = ap.parse_args(argv or [])
-    ports = a.port or list(DEFAULT_PORTS)
-    pf = Path(".membrane/opencode.pid")
-    out = stop_seat(ports=ports, pidfiles=[pf] if pf.exists() else [],
+    out = stop_seat(ports=walked_ports(a.port or list(DEFAULT_PORTS)),
+                    pidfiles=seat_pidfiles(),
                     extra_pids=a.pid, int_s=a.int_wait, term_s=a.term_wait)
     for pid in out["stopped"]:
         print(f"[stop] {pid}: stopped on {out['how'].get(pid, '?')} "
