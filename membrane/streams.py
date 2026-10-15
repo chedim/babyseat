@@ -200,6 +200,12 @@ def ports(text: str) -> list[str]:
 
 # ---- observation outcomes -------------------------------------------------------
 _RAN = re.compile(r"Ran (\d+) tests?|(\d+) passed")
+# a runner's failure COUNTERS (read on the lowered text): pytest's
+# '2 failed' / '1 error' summary and its 'FAILED path::test' lines,
+# unittest's 'FAILED (failures=1, errors=2)' -- a zero count is not one
+_RUNNER_FAIL = re.compile(r"\b[1-9]\d* (?:failed|errors?)\b"
+                          r"|\((?:failures|errors)=[1-9]"
+                          r"|^failed \S+::", re.M)
 
 
 def tests_ran(head: str, tail: str = "") -> int | None:
@@ -233,19 +239,19 @@ def outcome(tool: str, head: str, tail: str = "",
     if tool in ("edit", "write"):
         return "applied" if "successfully" in r else ("failed" if r.strip() else "unknown")
     if tests_ran(head, tail) is not None:
-        bad = bool(re.search(r"failed|failures=|errors=|\bfail\b", r))
         # THE TIER READS THE RC (issue #48): a rc=0 `git log` whose
         # COMMIT MESSAGES matched _RAN ('N passed on this tree') and
-        # mentioned 'failed' was stamped tests-failed -- the words are
-        # the output's content, not the run's fact. rc is ground truth:
-        # a zero-exit run did not fail its tests; a non-zero exit kept
-        # the words' verdict; the pre-rc eras (capture-side) keep the
-        # text heuristic exactly as before.
-        if rc is None:
-            return "tests-failed" if bad else "tests-ok"
-        if rc == 0:
-            return "tests-ok"
-        return "tests-failed" if bad else "tests-ok"
+        # mentioned 'failed' was stamped tests-failed -- the word is the
+        # output's content, not the run's fact. BUT the pipe lies about
+        # the rc: /bin/sh runs without pipefail and the seats run their
+        # suites as `pytest -q 2>&1 | tail -4` (rc = tail's 0). So the
+        # runner's own failure COUNTERS ('2 failed', 'FAILED (failures=',
+        # a 'FAILED path::test' line) are the fact whatever the rc; the
+        # bare word only counts when rc is non-zero or absent.
+        if _RUNNER_FAIL.search(r):
+            return "tests-failed"
+        bad = bool(re.search(r"failed|failures=|errors=|\bfail\b", r))
+        return "tests-failed" if bad and rc != 0 else "tests-ok"
     # the not-found TEXT classes come AFTER the rc gate: a run's exit
     # code is ground truth, and 'file or directory not found' inside a
     # FAILED pytest collection said nothing about the command's fate --

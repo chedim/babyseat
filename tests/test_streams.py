@@ -177,6 +177,28 @@ class TestTheTierReadsTheRc(unittest.TestCase):
         self.assertEqual(S.outcome("bash", "Ran 5 tests", "OK", rc=0),
                          "tests-ok")
 
+    # THE PIPE LIES ABOUT THE RC: the executor runs /bin/sh without
+    # pipefail, and the seat's own history runs its suites as
+    # `pytest -q 2>&1 | tail -4` (994 piped runs in serve-msgs.json) --
+    # the rc is TAIL's 0. A runner's own failure COUNTERS are the run's
+    # fact whatever the rc says; only the bare WORD yields to rc=0.
+
+    def test_a_piped_pytest_failure_with_rc0_is_still_failed(self):
+        self.assertEqual(S.outcome("c:pytest", "",
+                                   "FAILED tests/test_x.py::T::test_y - assert 1 == 2\n"
+                                   "2 failed, 1779 passed in 140.1s", rc=0),
+                         "tests-failed")
+
+    def test_a_piped_unittest_failure_with_rc0_is_still_failed(self):
+        self.assertEqual(S.outcome("c:python", "Ran 12 tests in 0.4s",
+                                   "FAILED (failures=1, errors=2)", rc=0),
+                         "tests-failed")
+
+    def test_a_zero_count_is_not_a_failure(self):
+        self.assertEqual(S.outcome("c:pytest", "",
+                                   "1781 passed, 0 errors in 138s", rc=0),
+                         "tests-ok")
+
 
 if __name__ == "__main__":
     unittest.main()
