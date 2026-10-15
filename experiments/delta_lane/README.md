@@ -120,3 +120,11 @@ The same KIND of change is recalled across entities at 0.70-0.85: the same proxy
 timeout on different commands, "a new entity appeared on the banner" across three
 unrelated entities. Conversational prose look-alikes sit at 0.60-0.67 (topical or
 stylistic), so the card shows only matches >= 0.68.
+
+## stage 3a gate: forewarning, causal replay (`python forewarn_replay.py <field copy>`)
+
+The real module (membrane/forewarn.py) on a seat's whole history, replayed with an
+EMPTY pool, so every forecast saw only earlier moments of other sessions, as it
+would have live: 1,579 forecasts, 23.9% failed; AUC 0.622 (the offline rung-14 gate,
+which could recall later sessions too, read 0.650); flagged 8.2% of moments, and
+42.6% of those failed (1.8x the base rate).
