@@ -1,5 +1,7 @@
 ## Unreleased
 
+- **A dead file no longer mints an entity** (#99, reported by Memo): the file hands (`_file_land` and the read hand) minted a fresh `f:` entity for a failed op on a path that does not exist, so a deleted file kept earning graph-visible spellings whose getters error forever. The mint is now gated on existence — a failed op on a nonexistent path reports the canonical id but mints nothing (no getter to go stale); an entity that predates the file's death keeps its doc and records the error.
+
 - **`membrane stats` — token/call accounting and the savings baseline**: reads a `serve-msgs` store (no model call) and prints sessions/turns/tokens (input, output, reasoning, cache-read), tool-call parts, tool-loop rounds, recall-injection size and models. `--baseline` compares the bounded replay window against a naive full-history replay, bucketed by conversation length — the numbers behind "does the seat actually save tokens" instead of a hunch.
 
 - **`membrane bench` — the held-out recall benchmark, now re-runnable**: replays a seat's history into a fresh field, holds out a fraction of the mentions, and scores `recall()` against ground truth with the standard MRR + hit@k family, side by side across the `worldline` / `mean` / `state` reads. This is the script behind the worldlines MRR 0.210 → 0.539 number, shipped so the recall claim can be re-measured on any seat (against a field **copy**, via `membrane bench --field <copy>`).

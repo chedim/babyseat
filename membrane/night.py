@@ -984,7 +984,10 @@ def _file_resolve(path) -> str:
 def _file_land(fld, est, mem, fp, action, ok, head, detail, err_msg=""):
     """One file call -> its entity: born or reused, counters + detail
     props on the doc, an observation event, errors in the script-error
-    lanes, the audit. Returns (eid, key, created).
+    lanes, the audit. Returns (eid, key, created) -- ``key`` is None when
+    the call declined to mint (a failed op on a path that does not exist).
+    STAT AT MINT (issue #99): a fresh entity requires the path to exist,
+    so a dead file never earns a getter that would error forever.
     THE MIRROR COLLAPSE (the seven-boot re-mint exhibit): any existing
     MIRROR doc under a doubled key (the stale boots' residue) retires
     into the landing doc (merged_into -- mark-don't-delete): the data
@@ -994,27 +997,35 @@ def _file_land(fld, est, mem, fp, action, ok, head, detail, err_msg=""):
     created = False
     if est is not None:
         doc = (est.docs or {}).get(key)
-        if doc is None:
+        if doc is None and not ok and not os.path.exists(fp):
+            # STAT AT MINT (issue #99): a dead path never earns a fresh
+            # entity -- and so never earns a getter that would error
+            # forever. The failure is still observed + audited below; an
+            # entity that predates the file's death keeps its doc.
+            doc = None
+            key = None
+        elif doc is None:
             doc = QuantumEntity(eid=key, cls=CLASS_COMPONENT,
                                 properties={"name": os.path.basename(fp) or fp,
                                             "silent_birth": True})
             created = True
-        # THE MIRRORS RETIRE (all the doubled-key shadows of THIS file):
-        body = eid.partition(":")[2]
-        for bad_k in list((est.docs or {}).keys()):
-            if bad_k == key or MEMBRANE_NS not in bad_k:
-                continue
-            bad_body = bad_k[len(MEMBRANE_NS):]
-            if canon_eid(bad_k) == eid and bad_body != body:
-                _merge_mirror_into_doc(est, bad_k, doc)
-        props = doc.properties
-        props[f"{action}_count"] = int(props.get(f"{action}_count") or 0) + 1
-        props[f"last_{action}_ts"] = props["last_ts"] = time.time()
-        for k, v in detail.items():
-            props[k] = v
-        if not ok:
-            props["script_last_error"] = err_msg[:300]
-        est.upsert(doc)
+        if doc is not None:
+            # THE MIRRORS RETIRE (all the doubled-key shadows of THIS file):
+            body = eid.partition(":")[2]
+            for bad_k in list((est.docs or {}).keys()):
+                if bad_k == key or MEMBRANE_NS not in bad_k:
+                    continue
+                bad_body = bad_k[len(MEMBRANE_NS):]
+                if canon_eid(bad_k) == eid and bad_body != body:
+                    _merge_mirror_into_doc(est, bad_k, doc)
+            props = doc.properties
+            props[f"{action}_count"] = int(props.get(f"{action}_count") or 0) + 1
+            props[f"last_{action}_ts"] = props["last_ts"] = time.time()
+            for k, v in detail.items():
+                props[k] = v
+            if not ok:
+                props["script_last_error"] = err_msg[:300]
+            est.upsert(doc)
     oc = "ok" if ok else "error"
     if fld is not None:
         try:
@@ -1026,7 +1037,7 @@ def _file_land(fld, est, mem, fp, action, ok, head, detail, err_msg=""):
                 fld.process(limit=8)
         except Exception as e:
             print(f"[night] file {action} event skipped ({e})", file=sys.stderr)
-    if est is not None and not ok:
+    if est is not None and not ok and key is not None:
         _script_error_announce(est, key, action, err_msg)
     if mem is not None:
         _audit(mem, {"event": "agent-file-op", "origin": action,
@@ -1062,15 +1073,16 @@ def _merge_mirror_into_doc(est, bad_key: str, doc) -> None:
 def file_read_entity(fld, est, mem, path, offset=None, limit=None) -> dict:
     """THE READ HAND: bounded content (default 200 lines, max 600, long
     lines trimmed), the file's f: entity born or touched, the read
-    observed. line strings are 'N: text' like the code readers print."""
+    observed. line strings are 'N: text' like the code readers print.
+    A missing path reports the canonical eid but mints NO entity (stat at
+    mint, issue #99) -- a dead file never earns a getter."""
     fp = _file_resolve(path)
     if not fp:
         return {"ok": False, "error": "path required"}
     if not os.path.isfile(fp):
         eid = E.canon("f", fp, _field_graph(fld))
-        key = MEMBRANE_NS + overlay_key(eid)
         _file_land(fld, est, mem, fp, "read", False, "", {}, f"no such file: {fp}")
-        return {"ok": False, "eid": eid, "key": key, "path": fp,
+        return {"ok": False, "eid": eid, "key": None, "path": fp,
                 "error": f"no such file: {fp}"[:200]}
     try:
         off = max(0, int(offset or 0))
