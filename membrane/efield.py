@@ -535,10 +535,13 @@ class EntityField:
     def _co_edges(self, key, ev, X, got, sids, skip, seq, ts) -> None:
         """A sentence naming 2+ SPECIFIC entities (speakers and event-index rows
         out; repeated boilerplate is already skipped) writes their co edges:
-        relation bits = sign(R @ (x - mean(A's other mentions) - mean(B's other
-        mentions))) -- the relation lives in the sentence, not in the pair
-        (experiments/delta_lane rungs 10-11). The states already hold this
-        mention, so each mean is taken leave-one-out."""
+        relation bits read the sentence with BOTH entities' settled means
+        PROJECTED out (QR orthogonalization of x against span{mean(A), mean(B)}),
+        not subtracted -- subtracting leaves the pair's -(mean_A + mean_B) in
+        every reading and the kind becomes unreadable (on a real field the
+        signatures agreed 82.8% with that pair-only reading; projection keeps
+        the relation, 0.983 vs 0.976 on unseen pairs, and drops the pair to
+        0.502; experiments/delta_lane rungs 10-11, sigcheck/orth_rel)."""
         from . import relations as R
         by: dict = {}
         for eid, sidx, _surf in ev.get("mentions") or []:
@@ -556,12 +559,16 @@ class EntityField:
                 st = self.get(e)
                 if st is None or st.tier != "live" or st.mean is None or st.n < 2:
                     continue
-                means[e] = (st.n * np.asarray(st.mean, dtype=float) - x) / (st.n - 1)
+                m = (st.n * np.asarray(st.mean, dtype=float) - x) / (st.n - 1)
+                if np.linalg.norm(m) > 1e-9:      # a zero column would make QR
+                    means[e] = m                  # project out an invented axis
             ok = sorted(means)
             pairs = [(a, b) for i, a in enumerate(ok) for b in ok[i + 1:]][:self.CO_PAIRS]
             said = str((got.get(sids[sidx]) or {}).get("text") or "")
             for a, b in pairs:
-                rb = vsa.delta_bits(means[a] + means[b], x)
+                q, _ = np.linalg.qr(np.stack([means[a], means[b]], axis=1))
+                xr = x - q @ (q.T @ x)
+                rb = vsa.delta_bits(np.zeros_like(xr), xr)
                 if rb is not None:
                     R.upsert_co(self.b, self.origin, a, b, rb, key, seq, ts, said)
 

@@ -9,12 +9,14 @@ dropped (rung 11). Embeddings cannot tell direction ('A calls B' vs 'B calls A'
 at cos 0.975, relations.py's E25) -- so the edge is UNORDERED: the coded
 triples keep direction, this edge keeps the KIND, by resemblance.
 
-Per sentence naming 2+ specific entities: relation bits = sign(R @ (x -
-mean(A's other mentions) - mean(B's other mentions))); the 'co' edge keeps its
-count (one per event, newest seq only -- a rebuild never double-counts), its
-evidence, the last 8 relation bits and their MAJORITY signature, and the
-sentence it was last said in. field.edges_like(edge) -> the edges whose
-signatures are nearest."""
+Per sentence naming 2+ specific entities: relation bits = sign(R @ x_res) where
+x_res is the sentence with BOTH things' settled means PROJECTED out (QR against
+span{mean_A, mean_B}); subtracting them instead leaves the pair in the reading
+(0.828 pair-agreement on a real field; see the projection test). The 'co' edge
+keeps its count (one per event, newest seq only -- a rebuild never
+double-counts), its evidence, the last 8 relation bits and their MAJORITY
+signature, and the sentence it was last said in. field.edges_like(edge) -> the
+edges whose signatures are nearest."""
 
 import os
 import sys
@@ -86,6 +88,35 @@ class TestTheEdge(unittest.TestCase):
         for d in cos:
             for side in (d["subj"], d["obj"]):
                 self.assertTrue(side.startswith("f:"), d)
+
+
+class TestTheReadingIsTheRelationNotThePair(unittest.TestCase):
+    def test_the_two_things_are_projected_out_not_subtracted(self):
+        """Subtracting both means adds the pair's own -(mean_A + mean_B) to every
+        reading: on a real field an edge's signature agreed 82.8% with that
+        means-only part (the pair, not the relation; relation shifts became
+        invisible). Projecting both out keeps the relation (0.983 vs 0.976 on
+        unseen pairs) and drops the pair (agreement 0.502 = unrelated). So the
+        reading carries NO component along either thing's mean."""
+        import numpy as np
+        f = _world()
+        e = _co(f, "e", "f")
+        from membrane import vsa
+        from membrane.efstore import unpack_f16
+        a, b = f.get(e["subj"]), f.get(e["obj"])
+        # the sentence's own vector, exactly as the field embedded it
+        sx = {d["text"]: unpack_f16(d["vec"])
+              for _, d in f.b.scan("sentences")}
+        x = sx[e["said"]]
+        loo = lambda st: (int(st.n) * np.asarray(st.mean, dtype=float) - x) / (int(st.n) - 1)
+        pair = loo(a) + loo(b)
+        pair_only = vsa.delta_bits(pair, np.zeros_like(pair))
+        sig = vsa.unpack_state(e["sig"])
+        agree = float((sig == vsa.unpack_state(pair_only)).mean())
+        # an orthogonal residual reads 0.5 +/- ~O(1/sqrt(DIM)); subtracting the
+        # means leaves the pair in the reading (0.61 on this fake world, 0.828
+        # on the real field) -- the tight band is what makes the test bite.
+        self.assertLess(abs(agree - 0.5), 0.05, agree)
 
 
 class TestEdgesLikeThisOne(unittest.TestCase):
