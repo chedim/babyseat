@@ -27,6 +27,8 @@
     membrane stats        token/call accounting + the savings baseline
                           (--baseline: bounded window vs a naive full-history
                           replay; reads serve-msgs, no model call)
+    membrane bench        held-out recall benchmark for the entity field
+                          (MRR + hit@k across read modes; a COPY of the field)
 
 Per-project DATA lives in ./.membrane/ (field, audit, review queue, logs) --
 auto-created on first run per directory. Skills are PROJECT-SCOPED on purpose
@@ -511,6 +513,8 @@ def main() -> None:
         "  stats      token/call accounting + the savings baseline\n"
         "             (--baseline compares the bounded window against a\n"
         "             naive full-history replay; reads serve-msgs, no model call)\n"
+        "  bench      held-out recall benchmark (MRR + hit@k across read\n"
+        "             modes); runs against a COPY of the field\n"
         "\n"
         "Everything after the subcommand is forwarded verbatim to the\n"
         "underlying module.\n"
@@ -525,7 +529,7 @@ def main() -> None:
                    "demo", "reset", "install", "doctor", "connect",
                    "ingest", "backfill", "codegraph", "update", "move",
                    "migrate", "auth", "serve", "standalone", "stop",
-                   "stats"):
+                   "stats", "bench"):
         if cmd is None and not argv:
             print(__doc__)
             return

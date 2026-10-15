@@ -264,6 +264,7 @@ model is grounded by what those entities hold —
 | `membrane codegraph` | stdlib-AST call graph (stats / impact / callers / callees) |
 | `membrane doctor` | what's installed/running + the field's vitals |
 | `membrane stats` | token/call accounting + the savings baseline (`--baseline` compares the bounded window against a naive full-history replay; reads `serve-msgs`, no model call) |
+| `membrane bench` | held-out recall benchmark (MRR + hit@k across the `worldline`/`mean`/`state` reads) — runs against a field **copy**, never the live store |
 
 `MEMBRANE_EFIELD` selects the field's mode: `on` (the default: capture,
 embed, apply), `shadow` (capture events only — a lab ablation), `off`.
@@ -333,7 +334,8 @@ Token and recall numbers from the operator's own live seat (1,215 sessions,
 1,955 user messages, 3,840 assistant turns, through 2026-10-15) — real
 traffic, not a synthetic benchmark. Reproduce with
 `membrane stats --store .membrane/serve-msgs.json --baseline` (read-only, no
-model call); the recall experiments are held-out scripts in `experiments/`.
+model call); the recall numbers reproduce with `membrane bench --field
+<field-copy>` (held-out, MRR + hit@k) or the scripts in `experiments/`.
 
 | metric | value |
 |---|---|
