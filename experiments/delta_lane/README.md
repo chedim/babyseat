@@ -98,3 +98,16 @@ mention says (varies). The field already uses the STABLE part to find entities
 (coherence of x - background residuals, accretion, births, junk); the delta bits
 keep the VARYING part. Weak on sensor digits, strong on prose: transitions and
 aspect differences survive across items never seen, and the 2048 sign bits keep it.
+
+## rung 4b: prose sequences -- which delta to store (`python prose_seq.py`)
+
+Per item, 40 mentions with the state flipping at random; per step, the delta
+against the previous mention vs against the field's running state:
+
+| per step (chance 0.25) | previous mention | running state (what the field stores) |
+|---|---|---|
+| started / stopped / stayed | **0.861** | 0.653 |
+| broke / fixed / stayed | **0.926** | 0.740 |
+
+On prose the running state is not useless (unlike sensor digits), but the
+previous-mention delta wins everywhere measured: the next stage stores it.
