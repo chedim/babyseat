@@ -36,30 +36,46 @@ def name_of(eid: str) -> str | None:
     return rest if kind in ("c", "tool") and rest else None
 
 
-def count(events) -> tuple[Counter, Counter, Counter]:
-    """(acts, steps out of each act, steps a -> b with b != a) over (key, ev) in seq order."""
-    acts, out, steps = Counter(), Counter(), Counter()
-    last: dict = {}                       # session -> (act, time)
-    anon = 0
-    for _k, ev in events:
+class Tally:
+    """The counts kept as acts arrive (2026-10-15: rescanning every tool call on
+    each card request cost a live seat 6 s per card). feed() one event at a time,
+    in seq order; count() and pairs() below are the same tally over a batch."""
+
+    def __init__(self):
+        self.acts, self.out, self.steps = Counter(), Counter(), Counter()
+        self.pairs: dict = {}
+        self._last: dict = {}
+        self._anon = 0
+
+    def feed(self, ev: dict) -> None:
         a = act_name(ev) if ev.get("stream") == "observation" else None
         if a is None:
-            continue
+            return
         t = float(ev.get("ts") or (ev.get("seq") or 0) / 1e6)
         s = ev.get("session") or ""
         if not s:
-            prev = last.get(f"anon{anon}")
-            if prev is not None and t - prev[1] > GAP:
-                anon += 1
-            s = f"anon{anon}"
-        acts[a] += 1
-        prev = last.get(s)
+            prev = self._last.get(f"anon{self._anon}")
+            if prev is not None and t - prev[2] > GAP:
+                self._anon += 1
+            s = f"anon{self._anon}"
+        c = (ev.get("args") or {}).get("command")
+        self.acts[a] += 1
+        prev = self._last.get(s)
         if prev is not None:
-            out[prev[0]] += 1
+            self.out[prev[0]] += 1
             if prev[0] != a:
-                steps[(prev[0], a)] += 1
-        last[s] = (a, t)
-    return acts, out, steps
+                self.steps[(prev[0], a)] += 1
+                if isinstance(c, str) and isinstance(prev[1], str):
+                    self.pairs.setdefault((prev[0], a), []).append((prev[1], c))
+        self._last[s] = (a, c, t)
+
+
+def count(events) -> tuple[Counter, Counter, Counter]:
+    """(acts, steps out of each act, steps a -> b with b != a) over (key, ev) in seq order."""
+    tl = Tally()
+    for _k, ev in events:
+        tl.feed(ev)
+    return tl.acts, tl.out, tl.steps
 
 
 def table(acts: Counter, out: Counter, steps: Counter, min_n: int = 8) -> list[dict]:
@@ -112,26 +128,10 @@ def _tokens(cmd: str) -> list[str]:
 def pairs(events) -> dict:
     """(act a, act b) -> [(command a, command b)]: consecutive command acts of a
     session, a != b (the same sessions count() reads)."""
-    out: dict = {}
-    last: dict = {}
-    anon = 0
+    tl = Tally()
     for _k, ev in events:
-        a = act_name(ev) if ev.get("stream") == "observation" else None
-        if a is None:
-            continue
-        t = float(ev.get("ts") or (ev.get("seq") or 0) / 1e6)
-        s = ev.get("session") or ""
-        if not s:
-            prev = last.get(f"anon{anon}")
-            if prev is not None and t - prev[2] > GAP:
-                anon += 1
-            s = f"anon{anon}"
-        c = (ev.get("args") or {}).get("command")
-        prev = last.get(s)
-        if prev is not None and prev[0] != a and isinstance(c, str) and isinstance(prev[1], str):
-            out.setdefault((prev[0], a), []).append((prev[1], c))
-        last[s] = (a, c, t)
-    return out
+        tl.feed(ev)
+    return tl.pairs
 
 
 def _param(name: str) -> str:
