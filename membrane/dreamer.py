@@ -112,6 +112,21 @@ class Dreamer:
         idle_for = now - getattr(srv, "last_turn_ts", now)
         if idle_for < self._idle:
             return max(1.0, self._idle - idle_for)   # chat awake: wait
+        # THE IDLE MINE (issue #120): re-read, childless, unmined artifacts
+        # become Concepts on their own -- no intention, no corpus needed, so
+        # it runs BEFORE the intent/dream gating below. A burst never: one
+        # artifact per wave (mine_idle_artifacts' own cap).
+        fld = getattr(srv, "efield", None)
+        est = getattr(srv, "entity_store", None)
+        if fld is not None and est is not None:
+            try:
+                from .night import mine_idle_artifacts
+                r = mine_idle_artifacts(fld, est, srv.membrane)
+                if r.get("mined"):
+                    self.stats["mined_artifacts"] = \
+                        self.stats.get("mined_artifacts", 0) + r["mined"]
+            except Exception:
+                pass                        # the dreamer never raises into chat
         open_intents = (ib.open_intents() if ib is not None else [])
         if not open_intents:
             # no board / empty board: dreaming is unsteered -> skip (v2's
