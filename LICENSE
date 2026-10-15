@@ -1,68 +1,21 @@
-Membrane Private Use License
-(version 1, 2026-10-13)
+MIT License
 
-Copyright (c) 2026 Dmitrii Chechetkin
+Copyright (c) 2021 Dmitrii Chechetkin
 
-0. The grant. Permission is granted, without fee, to any person who
-   obtains a copy of this software and its documentation ("the software")
-   to use, copy, run, and modify the software privately: for themselves,
-   for their household, and on their own machines and home systems —
-   including a private home-automation install and any seats or machines
-   the person runs for their own purposes.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-1. What counts as private use. Private use is personal, household,
-   hobby, educational, and research use — done for no money. Anything
-   done for money, directly or through an employer or a contract, is
-   not private use and is not granted here, even when the work itself
-   is research: paid research, paid evaluation, paid internal testing
-   are all excluded. A home is private use. Any engagement, contract,
-   or activity where the person is paid to do the work — no matter what
-   it produces or who keeps the product — is not.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
 
-2. What the grant does not include. Without separate written permission
-   from the author, you may not:
-   - use the software for anything anyone pays for — a commercial or
-     revenue-generating product, service, or offering, or paid work,
-     contract work, or paid research for an employer or a client;
-   - charge money (directly or bundled) for the software or for access
-     to it;
-   - distribute copies of the software — original or modified — or make
-     it available to others as a download, bundle, or appliance;
-   - offer the software, or a service built on it, to others.
-   The author's own distribution of the software is unaffected by this
-   section: the copyright holder's own rights are not limited by this
-   license.
-
-3. What you keep. You own your modifications. You may run your modified
-   copy privately for as long as you like, and you are encouraged to
-   send changes, bug reports, and fixes back to the author (issues and
-   pull requests in the software's repository).
-
-4. Other rights. The author may grant additional rights — commercial
-   use, distribution, embedding — to anyone, case by case. Ask.
-
-5. Notice. Keep this license and the copyright notice with any copy of
-   the software, and inside any file where the original notice stood.
-
-6. Use at your own risk; the usual disclaimers. You accept the software
-   AS IS, AT YOUR OWN RISK, WITH ALL ITS DEFECTS. THE AUTHOR DOES NOT
-   REPRESENT, AND EXTENDS NO WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
-   INCLUDING — WITHOUT LIMITING THAT — THE WARRANTIES OF
-   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, SAFETY, ACCURACY,
-   QUIET ENJOYMENT AND NON-INFRINGEMENT. The software runs on your
-   machines, reads what you point it at, and acts where you let it act;
-   it may be wrong, it may crash, it may misbehave, and it may cause
-   damage — to your data, your systems, your devices, your home, and
-   anything connected to them, whether or not the author ever saw the
-   possibility. YOU CHOOSE TO RUN IT; WHAT HAPPENS WHEN YOU RUN IT IS
-   YOURS. To the maximum extent permitted by applicable law, IN NO
-   EVENT SHALL THE AUTHOR OR COPYRIGHT HOLDER BE LIABLE for any claim,
-   damages, loss of data, loss of profit, or other loss of any kind —
-   direct, indirect, incidental, special, exemplary, or consequential —
-   arising from, out of, or in connection with the software or its use,
-   EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE, AND EVEN IF A
-   REMEDY FAILS OF ITS ESSENTIAL PURPOSE. If a law forces a higher duty
-   on the author than this section allows, the author's total liability
-   under it is limited to the least amount that law permits, and in no
-   event to more than the least amount you paid for the software —
-   which is zero.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
