@@ -200,6 +200,23 @@ def _reexec() -> None:
                               *sys.argv[1:]])
 
 
+def _ask(prompt: str) -> str:
+    """input() on a terminal put back into LINE MODE first (2026-10-15: the
+    prompt echoed ^M and never took the answer -- something earlier in that
+    terminal had left it without ICRNL, so Enter's carriage return never became
+    the newline input() waits for). CR -> NL, canonical, echo; then ask."""
+    try:
+        import termios
+        fd = sys.stdin.fileno()
+        a = termios.tcgetattr(fd)
+        a[0] |= termios.ICRNL
+        a[3] |= termios.ICANON | termios.ECHO
+        termios.tcsetattr(fd, termios.TCSANOW, a)
+    except Exception:              # not a terminal (or no termios): ask as is
+        pass
+    return input(prompt)
+
+
 def prompt_and_update(info: dict, interactive: bool) -> None:
     """Show the changelog INSIDE the y/n prompt; update + re-exec on yes."""
     mode = info.get("mode")
@@ -216,7 +233,7 @@ def prompt_and_update(info: dict, interactive: bool) -> None:
                   file=sys.stderr)
             return
         try:
-            answer = input("Update membrane now? [y/N] ").strip().lower()
+            answer = _ask("Update membrane now? [y/N] ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             answer = ""
         if answer in ("y", "yes") and perform(info):
@@ -238,7 +255,7 @@ def prompt_and_update(info: dict, interactive: bool) -> None:
               "update` to apply", file=sys.stderr)
         return
     try:
-        answer = input("Update membrane now? [y/N] ").strip().lower()
+        answer = _ask("Update membrane now? [y/N] ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         answer = ""
     if answer not in ("y", "yes"):
