@@ -157,5 +157,79 @@ class TestTheHistory(unittest.TestCase):
         self.assertFalse(f._ostats.get("forewarn"))
 
 
+# ---- THE ACT FORECAST (2026-10-15): a tool call, before its result ------------------
+# The gate (two seats, first-time acts, strictly causal): the program's own failure
+# rate (the coded kind) AUC 0.743 / 0.758; adding the failure share of the most
+# similar EARLIER acts (tool + arguments embedded, never the result) 0.774 / 0.806;
+# learned clusters lost (0.700 / 0.600). Recording only, like the moment forecast.
+
+BADWORDS = ["alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel"]
+
+
+def _act(f, session, t0, command, outcome, cid):
+    ev = ST.Event(stream="observation", tool="shell", args={"command": command},
+                  result_head="whatever came back", outcome=outcome, ts=t0, call_id=cid)
+    k = f.write_events([ev], session=session)[-1]
+    f.process()
+    return k
+
+
+def _act_history(f):
+    t = 1000.0
+    for i, w in enumerate(BADWORDS):
+        _act(f, f"s{i}", t, f"curl -s http://proxy.local/api/{w}", "error", f"c{i}"); t += 5
+        _act(f, f"s{i}", t, f"ls -la /tmp/{w}", "ok", f"l{i}"); t += 5
+    return t
+
+
+class TestTheActForecast(unittest.TestCase):
+    def test_a_first_time_act_like_failing_acts_is_forewarned(self):
+        f, fw = _field()
+        t = _act_history(f)
+        bad = f.b.get("events", _act(f, "now", t, "curl -s http://proxy.local/api/zulu", "error", "n1"))
+        ok = f.b.get("events", _act(f, "now", t + 5, "ls -la /tmp/zulu", "ok", "n2"))
+        self.assertGreater(bad["forecast_act"]["bad"], ok["forecast_act"]["bad"])
+        self.assertGreaterEqual(bad["forecast_act"]["bad"], 0.5)
+        self.assertTrue(bad["forecast_act"]["first"])
+
+    def test_the_forecast_never_reads_its_own_result(self):
+        f, fw = _field()
+        t = _act_history(f)
+        ev = f.b.get("events", _act(f, "now", t, "curl -s http://proxy.local/api/zulu", "error", "n1"))
+        for like in ev["forecast_act"]["like"]:
+            self.assertNotIn("zulu", like["act"])
+
+    def test_every_act_forecast_is_counted_against_what_happened(self):
+        f, fw = _field()
+        t = _act_history(f)
+        _act(f, "now", t, "curl -s http://proxy.local/api/zulu", "error", "n1")
+        cal = f._ostats["forewarn_act"]
+        self.assertGreaterEqual(cal["n"], 1)
+        self.assertLessEqual(cal["flagged_bad"], cal["flagged"])
+
+    def test_the_act_is_embedded_once(self):
+        f, fw = _field()
+        _act_history(f)
+        calls = f.emb.calls
+        fw2 = FW.Forewarn(f, min_pool=2, k=3)
+        fw2.bootstrap()                          # every act already carries its vector
+        self.assertEqual(f.emb.calls, calls)
+
+    def test_a_rebuild_keeps_the_live_calibration_and_never_forecasts_again(self):
+        f, fw = _field()
+        t = _act_history(f)
+        _act(f, "now", t, "curl -s http://proxy.local/api/zulu", "error", "n1")
+        n = dict(f._ostats["forewarn_act"])
+        f.rebuild()
+        self.assertEqual(f._ostats["forewarn_act"], n)
+
+    def test_the_kill_switch_records_no_act_forecast(self):
+        with mock.patch.dict(os.environ, {"MEMBRANE_FOREWARN": "0"}):
+            f, fw = _field()
+            t = _act_history(f)
+            ev = f.b.get("events", _act(f, "now", t, "curl -s http://proxy.local/api/zulu", "error", "n1"))
+        self.assertNotIn("forecast_act", ev)
+
+
 if __name__ == "__main__":
     unittest.main()

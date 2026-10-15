@@ -1182,11 +1182,10 @@ class EntityField:
         null = self._ostats.get("null_coh")
         # the forewarning's LIVE calibration (forewarn.py) is a record of
         # forecasts made in real time -- not derivable, so it survives
-        fw = self._ostats.get("forewarn")
+        fw = {k: self._ostats.get(k) for k in ("forewarn", "forewarn_act") if self._ostats.get(k)}
         self._ostats = self._fresh_ostats()
         self._ostats["seq_last"], self._ostats["null_coh"] = keep_seq, null
-        if fw:
-            self._ostats["forewarn"] = fw
+        self._ostats.update(fw)
         self._states, self._dirty, self._deltas, self._now = {}, set(), {}, {}
         self._wgen += 1
         for k, ev in list(self.b.scan("events", {"origin": self.origin, "status": "applied"})):
