@@ -41,9 +41,10 @@ class TestTheOptInPrompt(unittest.TestCase):
 
     def test_no_opted_in_tab_names_nobody(self):
         # THE EXHIBIT: a renamed seat's prompt still said 'Argus'. The
-        # refusal's prompt must name NOBODY: 'the assistant' stands in,
-        # and a birth nickname hard-coded in the door is a bug by
-        # definition.
+        # refusal's prompt must name NOBODY. The copy sweep (2026-10-15,
+        # the operator's ask: the JS toggle stops naming the seat) took
+        # 'the assistant' out of the door too -- the pin now follows the
+        # new copy, the INVARIANT is unchanged: nobody is named.
         old, JS._seat = JS._seat, _Srv()
         try:
             r = JS.run("1 + 2")
@@ -53,7 +54,7 @@ class TestTheOptInPrompt(unittest.TestCase):
         self.assertIn("no browser tab runs JS for this seat", r["err"])
         self.assertIn("opt in", r["err"])
         self.assertNotIn("Argus", r["err"], r)
-        self.assertIn("the assistant", r["err"])
+        self.assertIn("allow JS scripting in this window", r["err"])
 
 
 if __name__ == "__main__":
