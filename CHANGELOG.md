@@ -1,3 +1,6 @@
+## Unreleased
+- **License: PolyForm Noncommercial 1.0.0.** The custom private-use license (and the MIT text that briefly replaced it on main, never released) gives way to a standard noncommercial license: anyone may use, modify and share membrane for noncommercial purposes — personal, hobby, research, education, charities and public institutions — and commercial use needs the author's written permission. The package metadata carries the SPDX id `PolyForm-Noncommercial-1.0.0`; LICENSE is the official text, verbatim, behind the required notice.
+
 ## v0.4.1 (2026-10-13)
 - recall: speaker rows (person:/seat:) rank below subject hits; hop guard pins real evidence above hop discounts (issue #1)
 - tests: parity recall assert reconciled to word-hop semantics (a2dd1d8) -- closes the CI red on d0074b9
