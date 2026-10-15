@@ -23,6 +23,7 @@ per SAY_GAP_S per person, SAY_MAX chars; never to a phone call or a loop.
 """
 from __future__ import annotations
 
+import re
 import time
 
 RING = 30
@@ -94,6 +95,27 @@ def _bare(text: str) -> str:
     return re.sub(r"^\s*🎙\s*(?:\[voice:out:[^\]]*\]\s*)?", "", str(text or "")).strip()
 
 
+_WAKE = re.compile(r"^\s*hey[\s,]*([A-Za-z]+)([\s,.]*(.*))?$", re.IGNORECASE)
+
+
+def _normalize_wake(text: str) -> str:
+    """A wake word the STT mis-heard ('Hey mama' for 'Hey Memo') reaches the
+    heard log verbatim; the log is what the operator audits, so the configured
+    hotword stays canonical and the heard form rides as an annotation
+    (issue #104)."""
+    from . import naming
+    name = (naming.current() or "").strip()
+    t = str(text or "")
+    m = _WAKE.match(t)
+    if not m or not name:
+        return t
+    word, rest = m.group(1), (m.group(3) or "").strip()
+    if word.lower() == name.lower():
+        return t                        # the hotword came through clean
+    out = f"Hey {name} [heard: {word}]"
+    return out + (f" {rest}" if rest else "")
+
+
 def stamp(srv, person: str, text: str) -> str:
     """'🎙 <words>' -> '🎙 [voice:out:<person> on|off] <words>' (the state only)."""
     out = entity(srv, "out", person)
@@ -108,6 +130,7 @@ def heard(srv, person: str, text: str, sid: str = "") -> None:
     if ent is None:
         return
     text = _bare(text)
+    text = _normalize_wake(text)
     pp = ent.properties or {}
     _ring(pp, "heard", {"ts": time.time(), "text": str(text or "")[:600], "session": sid})
     pp["last_heard"] = str(text or "")[:600]
