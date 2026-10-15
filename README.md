@@ -1,3 +1,5 @@
+- Surprise isn't failure in this seat: failures are its most familiar results, because they repeat.
+
 # membrane
 
 ![Membrane](membrane-home.gif)
