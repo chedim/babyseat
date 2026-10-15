@@ -2,7 +2,7 @@
 browser records, HA forwards to a whisper-server when one is set in the
 integration's options (else the page listens itself, in the browser).
 
-POST /api/membrane/stt  (HA auth; body: audio/wav, 16 kHz mono, <= 60 s)
+POST /api/membrane/stt  (HA auth; body: audio/wav, 16 kHz mono, <= 8 min)
   -> the whisper-server on the brain phone (the one calld uses), multipart
   -> {"text": "..."}
 
@@ -25,8 +25,8 @@ from .relay import component_of
 
 _LOGGER = logging.getLogger(__name__)
 
-MAX_BYTES = 2_200_000          # 60 s of 16 kHz s16 mono + header
-STT_TIMEOUT_S = 45.0
+MAX_BYTES = 15_400_000         # 8 min of 16 kHz s16 mono + header (HA itself refuses > 16 MiB)
+STT_TIMEOUT_S = 180.0
 HINT = "membrane, Home Assistant."
 
 
@@ -77,7 +77,7 @@ class SttView(HomeAssistantView):
             return web.json_response({"error": "speech recognition is not configured"}, status=503)
         data = await request.content.read(MAX_BYTES + 1)
         if len(data) > MAX_BYTES:
-            return web.json_response({"error": "too long (60 s at most)"}, status=413)
+            return web.json_response({"error": "too long (8 minutes at most)"}, status=413)
         if not looks_like_wav(data):
             return web.json_response({"error": "expected a WAV recording"}, status=400)
         body, ctype = multipart(data, ", ".join([comp.get("name") or "Bob"] + list(comp.get("aliases") or [])) + ", Home Assistant.")
