@@ -2879,7 +2879,7 @@ class EntityStore(MultiParentOps, TimelineOps):
             evicted.append(poorest)
         return evicted
 
-    def ensure_track_entity(self, key: str) -> QuantumEntity:
+    def ensure_track_entity(self, key: str) -> QuantumEntity | None:
         """THE TRACK-ENTITY GUARANTEE (the 'entities.py has no doc' fix):
         every planted track gets a store doc immediately -- created on
         demand if neither materialization nor entity_add made one (the
@@ -2888,11 +2888,25 @@ class EntityStore(MultiParentOps, TimelineOps):
         returned untouched. The bootstrap then consolidates the key to
         seed the ring (this method does NOT consolidate -- it has no
         field access; the caller does). The birth is SILENT: the model
-        planted the track; the doc is a mechanical consequence."""
+        planted the track; the doc is a mechanical consequence.
+
+        Returns None for a file-kind track whose referent does not exist
+        (issue #99: a phantom path mentioned in prose must not re-grow a
+        store doc)."""
         ent = self._entity_for_track(key)
         if ent is not None:
             return ent
         kind, _, val = key.partition(":")
+        # STAT AT MINT, THE TRACK'S HALF (issue #99): a file track planted
+        # from a mere prose mention of a path that does not exist must not
+        # mint a store doc (a phantom whose getter would error forever) --
+        # the same referent gate the night's materialization already applies.
+        # The field still tracks the mention; only the mechanical store doc
+        # is withheld.
+        if kind.lower() in ("f", "file", "d", "dir", "directory", "path"):
+            import os as _os
+            if not val or not _os.path.isfile(_os.path.expanduser(val.strip())):
+                return None
         ent = QuantumEntity(
             eid=f"{MEMBRANE_NS}{key}",
             cls=_KIND_CLASS.get(kind, CLASS_COMPONENT),

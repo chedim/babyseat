@@ -1018,6 +1018,15 @@ def _file_land(fld, est, mem, fp, action, ok, head, detail, err_msg=""):
                 bad_body = bad_k[len(MEMBRANE_NS):]
                 if canon_eid(bad_k) == eid and bad_body != body:
                     _merge_mirror_into_doc(est, bad_k, doc)
+            # THE SIBLING-SPELLING MERGE (issue #99): a live, RESOLVED
+            # landing absorbs its '~basename' phantom -- the fallback
+            # spelling minted when the graph could not fold the path (same
+            # file, one entity; mark-don't-delete). A '~' landing is itself
+            # the fallback, so it merges nothing.
+            if not eid.startswith("f:~"):
+                base = os.path.basename(fp) or fp
+                if base:
+                    _merge_mirror_into_doc(est, MEMBRANE_NS + "files:~" + base, doc)
             props = doc.properties
             props[f"{action}_count"] = int(props.get(f"{action}_count") or 0) + 1
             props[f"last_{action}_ts"] = props["last_ts"] = time.time()
