@@ -25,3 +25,18 @@ balanced accuracy (chance 0.333, permutation p99 ~0.366):
 Read: the subtraction isolates the change; the bits keep it; there is no
 universal "up" axis (centroids ~ chance), so recall by neighbours; transfer
 follows the number's shape (digits/magnitude), not its unit.
+
+## what the field stores vs what rung 1 measured (`python obs_vs_state.py`)
+
+The field's delta is taken against the entity's RUNNING state (EMA, GAIN 0.5,
+seeded from the entity's name), not the previous reading:
+
+| delta against | stable 1-NN | noisy 1-NN |
+|---|---|---|
+| the previous reading | 0.631 (bits 0.640) | 0.557 |
+| the running state (what stage 1 stores) | 0.525 (bits 0.520) | 0.476 |
+
+Still above the null (p99 ~0.366) but about a third of the gain is lost: the
+running state blends the last few readings. Keeping the previous reading per
+entity (one more vector per entity state) would recover it -- decided on the
+real-history rung, not here.
