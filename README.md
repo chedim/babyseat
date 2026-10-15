@@ -162,7 +162,11 @@ integration is then only its UI and agent).
 A seat hands its model the membrane MCP surface — `query`, `state`, `learn`,
 `forget`, the entity-hand tools (`entity_add/edit/remove/link/inherit`,
 `entity_query`, `entity_tracks`, `entities_related` …), `intend`, `peer_post`,
-`graph`. The model reads the field with `query`/`state`, files an earned
+`graph`. Commands compose in **Cliffhanger**, membrane's command language —
+specified and documented in its own repo
+([github.com/chedim/cliffhanger](https://github.com/chedim/cliffhanger), with
+membrane's instantiation in [docs/cliffhanger.md](docs/cliffhanger.md)). The
+model reads the field with `query`/`state`, files an earned
 lesson with `learn` (same guards as any turn), cleans its own mistakes with
 `forget` — writes are audited with their origin. Meanwhile the ambient layer
 needs no command at all: every turn the model sees what the field holds about
@@ -361,6 +365,7 @@ in [docs/shared-field-workflow.md](docs/shared-field-workflow.md).
 | [docs/standalone.md](docs/standalone.md) | **Standalone mode**: the web UI, the first run and the name, who can reach it, voice, `settings.json`, updates |
 | [docs/home-assistant.md](docs/home-assistant.md) | **Membrane in Home Assistant** (HACS): setup, the UI takeover, the Assist agent and sensors, what the seat may do in the house |
 | [docs/entity-field.md](docs/entity-field.md) | **THE FIELD.** Events → entities → readers; the update rule; relations and claims; injection (full block / state diff); the gate + replay A/B; storage, sharing, the background mind; the operator/listener/plan tool lanes + the intent lane |
+| [docs/cliffhanger.md](docs/cliffhanger.md) | **The command language.** Entities as objects, ISA parents as classes, methods and calls, `{{self.*}}`/`{{name}}` binding — and the pointer to its own spec repo |
 | [docs/seat-first-2-tier.md](docs/seat-first-2-tier.md) | The seat-first two-tier field: local authoritative store, a published global tier on your terms |
 | [docs/shared-field-workflow.md](docs/shared-field-workflow.md) | **Team field: the process.** Day-one setup, the async loop, watches, operator rules, go-live checklist |
 | [docs/multi-dev-field.md](docs/multi-dev-field.md) | **Team field: the substrate.** The origin axis, disjoint writers / merged reads, divergence conflicts, the commons |
