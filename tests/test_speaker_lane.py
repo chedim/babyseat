@@ -128,5 +128,110 @@ class TestTheQuestionFirst(unittest.TestCase):
         self.assertLess(says[-1], listens[0])                 # the question is out before the mic opens
 
 
+class TestTheReplyIsSpokenAsItStreams(unittest.TestCase):
+    """2026-10-15, the operator: hands-free voice should feel fluid, snappy, like a
+    person. Spoken replies reached the page only after the WHOLE turn -- tool rounds
+    included (median 16 s from the end of speech to the first word). Now every
+    finished sentence of the voice turn's text is spoken the moment it streams;
+    reasoning and code are never spoken; the mic opens after the LAST sentence."""
+
+    def _streaming_run(self, r, srv, events, wait_for=None):
+        """A turn that streams `events` [(kind, payload)] and, at a ('wait', text)
+        step, waits until that line was spoken -- proving speech DURING the turn."""
+        spoken_mid = []
+
+        def run(sid, *a, **k):
+            pid = {}
+            for kind, val in events:
+                if kind == "part":                         # (part key, type)
+                    key, typ = val
+                    pid[key] = MS._gen_id("prt")
+                    r.hub.publish({"type": "message.part.updated", "sessionID": sid,
+                                   "part": {"id": pid[key], "sessionID": sid, "type": typ, "text": ""}})
+                elif kind == "delta":                      # (part key, text)
+                    key, txt = val
+                    r.hub.publish({"type": "message.part.delta", "sessionID": sid, "partID": pid[key],
+                                   "field": "text", "delta": txt})
+                elif kind == "wait":
+                    out = srv.entity_store._resolve_spec("voice:out:dmitrii-chechetkin")
+                    t0 = time.time()
+                    while time.time() - t0 < 3:
+                        if any(s["text"] == val for s in (out.properties.get("said") or [])):
+                            spoken_mid.append(val)
+                            break
+                        time.sleep(0.02)
+            full = "".join(v[1] for k, v in events if k == "delta" and v[0] == "t")
+            return {"parts": [{"type": "text", "text": full}]}
+        r.run = run
+        return spoken_mid
+
+    def _said(self, srv):
+        out = srv.entity_store._resolve_spec("voice:out:dmitrii-chechetkin")
+        return [s["text"] for s in (out.properties.get("said") or [])]
+
+    def test_each_sentence_is_spoken_while_the_turn_still_runs(self):
+        r, srv, chat, calls = _seat()
+        mid = self._streaming_run(r, srv, [
+            ("part", ("t", "text")),
+            ("delta", ("t", "The battery is at 63 percent. ")),
+            ("wait", "The battery is at 63 percent."),
+            ("delta", ("t", "It is charging from shore power.")),
+        ])
+        text, info, parts = _voice_msg(r, chat, "how's the battery?")
+        SPK.run(r, SPK.route(r, chat, text, info, parts))
+        self.assertEqual(mid, ["The battery is at 63 percent."])    # spoken before the turn ended
+        self.assertEqual(self._said(srv), ["The battery is at 63 percent.", "It is charging from shore power."])
+
+    def test_reasoning_and_code_are_never_spoken(self):
+        r, srv, chat, calls = _seat()
+        self._streaming_run(r, srv, [
+            ("part", ("r", "reasoning")),
+            ("delta", ("r", "I should check the shunt first. ")),
+            ("part", ("t", "text")),
+            ("delta", ("t", "Here it is. ```\nprint(1)\n``` That was the code.")),
+        ])
+        text, info, parts = _voice_msg(r, chat, "show me")
+        SPK.run(r, SPK.route(r, chat, text, info, parts))
+        said = " ".join(self._said(srv))
+        self.assertNotIn("shunt", said)
+        self.assertNotIn("print", said)
+        self.assertIn("Here it is.", said)
+        self.assertIn("That was the code.", said)
+
+    def test_the_mic_opens_after_the_last_streamed_sentence(self):
+        r, srv, chat, calls = _seat()
+        order = []
+        pub = r.hub.publish
+        r.hub.publish = lambda ev: (order.append(ev.get("type")), pub(ev))[1]
+        vin = VIO.entity(srv, "in", WHO, create=False)
+        self._streaming_run(r, srv, [
+            ("part", ("t", "text")),
+            ("delta", ("t", "Two things. First the bilge. ")),
+            ("wait", "First the bilge."),
+            ("delta", ("t", "Want me to check it?")),
+        ])
+        inner = r.run
+
+        def run_and_ask(*a, **k):
+            res = inner(*a, **k)
+            vin.properties["listen"] = 8                     # Memo asks: open the mic
+            VIO.on_listen(srv, vin)
+            return res
+        r.run = run_and_ask
+        text, info, parts = _voice_msg(r, chat, "anything?")
+        SPK.run(r, SPK.route(r, chat, text, info, parts))
+        says = [i for i, t in enumerate(order) if t == "membrane.say"]
+        listens = [i for i, t in enumerate(order) if t == "membrane.listen"]
+        self.assertEqual(len(says), 3, order)
+        self.assertLess(says[-1], listens[0])
+
+
+class TestTheAnswerComesFirst(unittest.TestCase):
+    def test_the_voice_frame_asks_for_the_answer_before_any_tool(self):
+        f = SPK.frame("how's the battery?", "the chat is idle")
+        self.assertIn("FIRST", f)
+        self.assertIn("before any tool", f)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -19,6 +19,8 @@ the chat, the old way).
 """
 from __future__ import annotations
 
+import re
+import threading
 import time
 
 ENT = "speaker"
@@ -93,8 +95,10 @@ def chat_status(runner, chat_sid: str) -> str:
 
 
 def frame(text: str, status: str) -> str:
-    return ("[speaker lane] You're answering by VOICE: your reply is spoken aloud automatically "
-            "(voice:out) -- one or two short spoken sentences, no lists, no markdown, no need to set say. "
+    return ("[speaker lane] You're answering by VOICE: your reply is spoken aloud automatically, "
+            "sentence by sentence as you write it (voice:out) -- so say your answer FIRST, in one short "
+            "sentence, before any tool call; if you need a tool, first say in a few words what you're "
+            "checking. One or two short spoken sentences in all, no lists, no markdown, no need to set say. "
             f"Meanwhile {status}. Don't redo the chat's work here; if this asks for real work, plant a goal "
             "or call the llm entity so the chat or a loop does it, and say so.\n" + text)
 
@@ -164,19 +168,151 @@ def _reply_text(result) -> str:
     return " ".join(t.split()).strip()
 
 
+# THE REPLY SPOKEN AS IT STREAMS (2026-10-15, the operator: hands-free voice
+# should feel fluid and snappy, like talking to a person). A spoken reply used to
+# reach the page only after the WHOLE turn, tool rounds included -- a median 16 s
+# from the end of speech to the first word. Now every finished sentence of the
+# turn's TEXT parts is spoken the moment it streams; reasoning and code never are.
+_SENTENCE = re.compile(r"(.+?[.!?…][\"'”’)\]]*)(?=\s|$)", re.S)
+
+
+class _Streamer:
+    """Follows one speaker turn's events on the hub and speaks its sentences."""
+
+    def __init__(self, runner, sid: str, out):
+        self.runner, self.sid, self.out = runner, sid, out
+        self.srv = getattr(runner, "srv", None)
+        self.q = runner.hub.subscribe()
+        self.kind: dict = {}          # partID -> part type
+        self.buf: dict = {}           # partID -> text not yet spoken
+        self.fence: dict = {}         # partID -> inside a ``` block
+        self.spoke = 0
+        self._stop = threading.Event()
+        self._t = threading.Thread(target=self._loop, name="speaker-stream", daemon=True)
+        self._t.start()
+
+    def _say(self, text: str) -> None:
+        text = " ".join(text.split()).strip()
+        if len(text) < 2 or not any(ch.isalnum() for ch in text):
+            return
+        from . import voice_io as VIO
+        pp = self.out.properties or {}
+        pp["say"] = text
+        self.out.properties = pp
+        r = VIO.on_edit(self.srv, self.out, stream=True)
+        try:
+            if self.srv is not None:
+                self.srv.entity_store.upsert(self.out, embedder=None)
+        except Exception:
+            pass
+        if r and r.get("spoken") is not False:
+            self.spoke += 1
+
+    def _speakable(self, pid: str, chunk: str) -> str:
+        """The chunk minus anything inside a code fence (state kept across deltas)."""
+        out, inside = [], self.fence.get(pid, False)
+        bits = chunk.split("```")
+        for i, b in enumerate(bits):
+            if i:
+                inside = not inside
+            if not inside:
+                out.append(b)
+        self.fence[pid] = inside
+        return " ".join(out)
+
+    def _feed(self, ev: dict, final: bool = False) -> None:
+        typ = ev.get("type")
+        if typ == "message.part.updated":
+            part = ev.get("part") or {}
+            if (part.get("sessionID") or ev.get("sessionID")) == self.sid and part.get("id"):
+                self.kind[part["id"]] = part.get("type")
+                if (part.get("time") or {}).get("end") and part.get("type") == "text":
+                    self._flush(part["id"], tail=True)          # the part closed: its last words
+            return
+        if typ != "message.part.delta" or ev.get("sessionID") != self.sid:
+            return
+        pid = ev.get("partID")
+        if self.kind.get(pid) != "text":
+            return                                              # reasoning, tools: never spoken
+        self.buf[pid] = self.buf.get(pid, "") + self._speakable(pid, str(ev.get("delta") or ""))
+        self._flush(pid)
+
+    def _flush(self, pid: str, tail: bool = False) -> None:
+        text = self.buf.get(pid, "")
+        last = 0
+        for m in _SENTENCE.finditer(text):
+            self._say(m.group(1))
+            last = m.end()
+        rest = text[last:]
+        if tail and rest.strip():
+            self._say(rest)
+            rest = ""
+        self.buf[pid] = rest
+
+    def _loop(self) -> None:
+        from queue import Empty
+        while not self._stop.is_set():
+            try:
+                self._feed(self.q.get(timeout=0.05))
+            except Empty:
+                continue
+            except Exception:
+                continue
+
+    def finish(self) -> None:
+        """The turn ended: what is still queued, then every part's last words."""
+        self._stop.set()
+        self._t.join(timeout=2)
+        from queue import Empty
+        while True:
+            try:
+                self._feed(self.q.get_nowait())
+            except Empty:
+                break
+            except Exception:
+                continue
+        for pid in list(self.buf):
+            self._flush(pid, tail=True)
+        try:
+            self.runner.hub.unsubscribe(self.q)
+        except Exception:
+            pass
+
+
+def _voice_out(runner, info: dict):
+    """The person's voice:out entity for this speaker turn, if it is on."""
+    srv = getattr(runner, "srv", None)
+    try:
+        from . import voice_io as VIO
+        from .speakers import split_speaker
+        text_in = ""
+        for p in (runner.messages.get_msg(info["sessionID"], info["id"]) or {}).get("parts") or []:
+            text_in += str(p.get("text") or "")
+        who = split_speaker(text_in.split("\n", 1)[-1])[0] or split_speaker(text_in)[0]
+        out = VIO.entity(srv, "out", who, create=False) if who else None
+        return out if out is not None and (out.properties or {}).get("on") else None
+    except Exception:
+        return None
+
+
 def run(runner, routed) -> dict:
     sp, framed, info, parts = routed
     t0 = time.time()
     srv = getattr(runner, "srv", None)
     if srv is not None:
         srv._speaker_turn_live = int(getattr(srv, "_speaker_turn_live", 0) or 0) + 1
+    out = _voice_out(runner, info)
+    streamer = _Streamer(runner, sp, out) if out is not None and getattr(runner, "hub", None) else None
     try:
         res = runner.run(sp, framed, user_info=info, user_parts=parts)
     finally:
+        if streamer is not None:
+            streamer.finish()
         if srv is not None:
             srv._speaker_turn_live = max(0, int(getattr(srv, "_speaker_turn_live", 1) or 1) - 1)
-    speak_reply(runner, info, res, t0)
-    release_listen(srv)                          # the question is out: now the mic may open
+    if streamer is None or not streamer.spoke:
+        speak_reply(runner, info, res, t0)      # nothing streamed (no deltas): the whole reply, as before
+    release_listen(srv)                          # the LAST sentence is out: now the mic may open
     return res
 
 
