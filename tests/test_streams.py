@@ -150,5 +150,55 @@ class TestParsing(unittest.TestCase):
         self.assertEqual(s, ["The router picks the cheapest model for each turn."])
 
 
+class TestTheTierReadsTheRc(unittest.TestCase):
+    """THE MENTION, NOT THE FACT (issue #48, 2026-10-15): a plain rc=0
+    `git log` was stamped tests-failed because _RAN ('Ran N tests|N
+    passed') matched the log's COMMIT MESSAGES (this very repo's commits
+    end in 'N passed on this tree') and the same log's failure-worded
+    text sealed it: the sniff ran regardless of rc. But rc is the
+    run's ground truth (the residue exhibit's own doctrine), and
+    claims.py reads outcome == tests-failed as UN-BACKED -- a read-only
+    command's mention cost the seat a real claim for a word."""
+
+    def test_a_rc0_log_that_mentions_the_words_is_not_failed(self):
+        log = ("abc123 the call in the name slot (the salvages): red->green; "
+               "1768 passed on this tree) (#50)\n"
+               "dead5a a bad byte... the model sent 70 calls and failed to "
+               "pass arguments to tools; the poison link completes instead "
+               "of crashing the beat")
+        self.assertEqual(S.outcome("c:git", log, rc=0), "tests-ok")
+
+    def test_a_failing_test_run_is_still_failed(self):
+        self.assertEqual(S.outcome("bash", "Ran 5 tests",
+                                   "FAILED (failures=2)", rc=1),
+                         "tests-failed")
+
+    def test_a_passing_test_run_is_ok(self):
+        self.assertEqual(S.outcome("bash", "Ran 5 tests", "OK", rc=0),
+                         "tests-ok")
+
+    # THE PIPE LIES ABOUT THE RC: the executor runs /bin/sh without
+    # pipefail, and the seat's own history runs its suites as
+    # `pytest -q 2>&1 | tail -4` (994 piped runs in serve-msgs.json) --
+    # the rc is TAIL's 0. A runner's own failure COUNTERS are the run's
+    # fact whatever the rc says; only the bare WORD yields to rc=0.
+
+    def test_a_piped_pytest_failure_with_rc0_is_still_failed(self):
+        self.assertEqual(S.outcome("c:pytest", "",
+                                   "FAILED tests/test_x.py::T::test_y - assert 1 == 2\n"
+                                   "2 failed, 1779 passed in 140.1s", rc=0),
+                         "tests-failed")
+
+    def test_a_piped_unittest_failure_with_rc0_is_still_failed(self):
+        self.assertEqual(S.outcome("c:python", "Ran 12 tests in 0.4s",
+                                   "FAILED (failures=1, errors=2)", rc=0),
+                         "tests-failed")
+
+    def test_a_zero_count_is_not_a_failure(self):
+        self.assertEqual(S.outcome("c:pytest", "",
+                                   "1781 passed, 0 errors in 138s", rc=0),
+                         "tests-ok")
+
+
 if __name__ == "__main__":
     unittest.main()
