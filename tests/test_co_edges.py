@@ -128,6 +128,23 @@ class TestEdgesLikeThisOne(unittest.TestCase):
             self.assertIn("imports", g["said"])
             self.assertNotEqual({g["subj"], g["obj"]}, {"f:" + F["g"], "f:" + F["h"]})
 
+    def test_edges_from_the_same_sentence_never_answer_each_other(self):
+        """One sentence naming three things writes three edges with the SAME
+        reading -- they would be each other's best look-alikes for free (on a real
+        field 'The tools mounted are ...' answered for its own sibling edges).
+        Like deltas_like, the query's own events never answer."""
+        f = _world()
+        x, y, z = "membrane/x.py", "membrane/y.py", "membrane/z.py"
+        _say(f, [f"{p} is open in the editor" for p in (x, y, z)]
+             + [f"someone reviewed {p} yesterday" for p in (x, y, z)]
+             + [f"{x} imports the helpers from {y} and {z}"], t0=3000.0)
+        a, b = sorted(("f:" + x, "f:" + y))
+        q = f.b.get("relations", R.relation_key(f.origin, a, "co", b))
+        got = f.edges_like(q, k=5, min_sim=0.0)
+        self.assertTrue(got)
+        for g in got:
+            self.assertNotIn("f:" + z, (g["subj"], g["obj"]), g)
+
     def test_results_say_what_was_said_never_the_bits(self):
         f = _world()
         g = f.edges_like(_co(f, "e", "g"), k=1)[0]

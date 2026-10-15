@@ -597,12 +597,17 @@ class EntityField:
         qv = np.frombuffer(base64.b64decode(q), dtype=np.uint8)
         sim = 1.0 - np.bitwise_count(M ^ qv).sum(axis=1, dtype=np.int64) / (8.0 * M.shape[1])
         me = {edge.get("subj"), edge.get("obj")} if isinstance(edge, dict) else None
+        # one sentence naming 3+ things writes sibling edges with the same reading:
+        # they would answer each other for free -- the query's own events never answer
+        own = set(edge.get("evidence") or []) if isinstance(edge, dict) else set()
         out = []
         for i in np.argsort(-sim, kind="stable"):
             if sim[i] < min_sim or len(out) >= k:
                 break
             d = idx["rows"][i]
             if me is not None and {d["subj"], d["obj"]} == me:
+                continue
+            if own and own.intersection(d.get("evidence") or ()):
                 continue
             out.append({"subj": d["subj"], "obj": d["obj"], "n": d.get("n"),
                         "said": d.get("said") or "", "sim": round(float(sim[i]), 3)})
