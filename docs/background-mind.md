@@ -198,6 +198,17 @@ section covers what is built (`membrane/self_loop.py`).
     *naive* is the gap with no experience at all.
   - In a quiet seat (no current) there is nothing to feel, and the bar says
     it is waiting on the world.
+- **Steer (after rung 1).** Rung 1 taught self to predict the current's push,
+  but it never used that. Once rung 1 has passed, self holds an **aim** for 30
+  cycles and leans into the current by the push it expects: its stride is
+  `aim − here − expected push`, up to 0.3 (its babble was 0.1, and a 0.2 pull
+  can't be beaten with that). Each cycle records how far it landed from its
+  aim (`aim_err`) against where the same stride would have landed without
+  leaning (`aim_naive`). `status()["steer"]` and the viewer's tag ("lands N%
+  closer to its aim") read that, measured and never claimed. The viewer draws
+  the aim as a white ring ("wants") with a faint line to it, and the other
+  markers as round, labelled dots: "pushes to", "expects", and "pull" (hidden
+  until self has a model of the current).
 - **Rung 2, first reach (the world's tempo).** Open once rung 1 has passed and
   the limit is at least 2. Each cycle, self also reaches for one thing that
   has a getter: reading it fires the getter (`watch_agents.entity_read_back`,
