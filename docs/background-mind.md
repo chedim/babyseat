@@ -175,8 +175,11 @@ section covers what is built (`membrane/self_loop.py`).
   babysitter to keep quiet.
 - **Rung 1, feel itself (the amoeba's problem).** Its only act moves its own
   position on the field, and the world pushes it while it moves: the field's
-  **current** (`EntityField.current()`, the context of the session that spoke
-  last), which self does not control. `expect` says beforehand where it will
+  **current** (`EntityField.current()`), which self does not control. Every
+  session that spoke lately pulls at once toward its own context: one unit of
+  pull per event, fading with a 3-minute time constant (`CURRENT_TAU_S`). So
+  busy streams pull harder, quiet ones fade out, and a lone write (a getter
+  reading, a tick) nudges the current but can't flip it. `expect` says beforehand where it will
   end up: its own step plus the push it has learned to expect there. It
   learns that push from its own moves as `push ≈ b − g·position`, kept in its
   `script_data`. `notice` sees where it actually ended up. **The gap is the
