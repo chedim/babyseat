@@ -62,7 +62,7 @@ METHODS = {
 RUNG_NAMES = {0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart",
               4: "patience", 5: "notice the world changed", 6: "meet an other",
               7: "understand an other", 8: "recognize itself", 9: "change itself", 10: "speak"}
-LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4, 5, 6)}          # the rungs built so far
+LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4, 5, 6, 7)}          # the rungs built so far
 
 try:
     PACE_S = max(1.0, float(os.environ.get("MEMBRANE_SELF_PACE_S") or 10.0))
@@ -109,6 +109,10 @@ RUNG6_PUSHES = 10           # pushes to chat:out before the test reads the split
 RUNG6_HEARD = 20            # answered looks at the other before the test reads the split
 BODY_SKILL = 0.9            # predict it this well and it is my body (zero gap), else an other
 MEET_EVERY = 30             # cycles between self's pushes to chat:out (not every try)
+RUNG7_LOOKS = 20            # paired looks (habit + model) at the other the test reads
+RUNG7_MARGIN = 0.15         # the model must remove this share of habit's Brier error to pass
+RUNG7_EVERY = 30            # cycles between self's llm::call consultations (the caps backstop)
+RUNG7_STALE_S = 600.0       # a model prediction this old no longer answers the next look
 
 _lock = threading.RLock()
 _ctx = threading.local()    # the cycle in flight: only the loop's own thread has one
@@ -366,6 +370,15 @@ def _expect(srv, seed: str) -> dict:
     if c.get("act") == "reach":
         lam, dt = c.get("lam"), c.get("dt")
         c["p"] = (1.0 - float(np.exp(-lam * dt))) if (lam and dt is not None) else _p_changed(srv, c["eid"])
+        eid = c["eid"]
+        if _available(srv, 7) and eid == _rt(srv).get("other"):
+            c["p_llm"] = _llm_pred(srv, eid)            # the model's read of the next answer
+            try:
+                n = int(seed or 0)
+            except (TypeError, ValueError):
+                n = 0
+            if n % RUNG7_EVERY == 1:
+                _ask_llm(srv, eid, _rung7_prompt(srv, eid))   # ask for the next look
         return {"rc": 0, "text": "expected"}
     w = _expected_push(srv, c["pos"])
     if c.get("aim") is not None:
@@ -433,6 +446,44 @@ def _push_chat(srv, text: str):
     _CIO.on_edit(srv, ent)
 
 
+def _llm_pred(srv, eid: str) -> float | None:
+    """THE SEAM (rung 7): the model's prediction of the next answer, already
+    landed on the entity as a one-line llm_answer. None when absent, stale or
+    not a number. Tests swap it for a deterministic stand-in."""
+    est = getattr(srv, "entity_store", None)
+    doc = (est.docs or {}).get(eid) if est is not None else None
+    ans = (doc.properties or {}).get("llm_answer") if doc is not None else None
+    if not isinstance(ans, dict):
+        return None
+    if time.time() - float(ans.get("ts") or 0) > RUNG7_STALE_S:   # stale: not this look
+        return None
+    import re
+    m = re.search(r"(\d+(?:\.\d+)?)", str(ans.get("text") or ""))
+    if m is None:
+        return None
+    return min(1.0, max(0.0, float(m.group(1))))
+
+
+def _ask_llm(srv, eid: str, prompt: str) -> None:
+    """THE SEAM (rung 7): ask the coprocessor to predict the next answer. The
+    real llm::call is async -- it queues and returns; the verdict lands on the
+    entity as llm_answer for the next look (read by _llm_pred)."""
+    from . import llm as _LLM
+    _LLM.request(srv, prompt, about=eid, caller="self", readonly=True)
+
+
+def _rung7_prompt(srv, eid: str) -> str:
+    """What to ask the coprocessor: predict the other's next answer from its
+    recent looks."""
+    recent = [r for r in _read(srv)
+              if r.get("kind") == "reach" and r.get("eid") == eid
+              and r.get("answer") in ("changed", "unchanged")][-10:]
+    hist = ", ".join(r["answer"] for r in recent) or "(no looks yet)"
+    return (f"You are predicting {eid}'s next answer. Its recent answers "
+            f"(oldest first): {hist}. Reply with ONE number, the probability "
+            "(0..1) the next answer is 'changed'.")
+
+
 def _meet(srv, seed: str, now: float | None = None) -> None:
     """RUNG 6's act: push a line to chat:out (the other answers). Practised
     from the cycle once rung 6 is available, paced at MEET_EVERY cycles so it
@@ -448,6 +499,7 @@ def _meet(srv, seed: str, now: float | None = None) -> None:
     now = time.time() if now is None else now
     resp = _CIO.entity_in(srv, _CIO.OPERATOR)              # the other, as a reach target
     to = resp.eid if resp is not None else _CIO.name_in(_CIO.OPERATOR)
+    _rt(srv)["other"] = to                                  # rung 7 predicts this one
     _push_chat(srv, "self is here")
     _append(srv, {"ts": now, "kind": "push", "n": n,
                   "eid": _CIO.name_of(_CIO.OPERATOR), "to": to})
@@ -709,6 +761,8 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
     rec = {"ts": now, "kind": "reach", "n": n, "eid": eid, "p": round(c["p"], 4),
            "answer": c["answer"], "why": c["why"],
            "dt": (round(now - float(last), 3) if last is not None else None)}
+    if c.get("p_llm") is not None:                       # rung 7: the model's read, same look
+        rec["p_llm"] = round(c["p_llm"], 4)
     if timed:
         rec["timed"] = True
         if lam:
@@ -1135,7 +1189,26 @@ def _rung6(recs: list[dict], tempo: dict | None = None) -> dict:
             "eid": to, "passed": all(v >= 1.0 for v in crit.values())}
 
 
-PROGRESS = {1: _rung1, 2: _rung2, 3: _rung3, 4: _rung4, 5: _rung5, 6: _rung6}   # rung -> its test over the record
+def _rung7(recs: list[dict], tempo: dict | None = None) -> dict:
+    """Understand an other: over paired looks at it (a habit `p` and a model
+    `p_llm` on the same look), the model removes RUNG7_MARGIN of habit's Brier
+    error -- predicting the operator's answers better than habit alone."""
+    pairs = [r for r in recs if r.get("kind") == "reach" and not r.get("audit")
+             and r.get("answer") in ("changed", "unchanged")
+             and r.get("p_llm") is not None][-RUNG7_LOOKS:]
+    crit = {"looks": min(1.0, len(pairs) / RUNG7_LOOKS)}
+    if not pairs:
+        return {"crit": {**crit, "skill": 0.0}, "skill": 0.0, "passed": False}
+    a = [1.0 if r["answer"] == "changed" else 0.0 for r in pairs]
+    b_habit = sum((x - r["p"]) ** 2 for x, r in zip(a, pairs)) / len(pairs)
+    b_llm = sum((x - r["p_llm"]) ** 2 for x, r in zip(a, pairs)) / len(pairs)
+    skill = (b_habit - b_llm) / b_habit if b_habit > 1e-9 else 0.0
+    crit["skill"] = max(0.0, min(1.0, skill / RUNG7_MARGIN))
+    return {"crit": crit, "skill": round(skill, 4),
+            "eid": pairs[-1]["eid"], "passed": all(v >= 1.0 for v in crit.values())}
+
+
+PROGRESS = {1: _rung1, 2: _rung2, 3: _rung3, 4: _rung4, 5: _rung5, 6: _rung6, 7: _rung7}   # rung -> its test over the record
 
 
 def _passed(recs: list[dict]) -> set:
