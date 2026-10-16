@@ -129,5 +129,39 @@ class TestArgusRestarts(unittest.TestCase):
         self.assertIn("method='restart'", d)
 
 
+class TestARestartRestarts(unittest.TestCase):
+    """#151: a foreground seat has no supervisor -- its self-restart's SIGTERM
+    was a stop. A requested restart now re-execs the seat after teardown
+    (same pid: a supervisor waiting on it just sees it continue)."""
+
+    def setUp(self):
+        RS.RESTART["requested"] = False       # do_restart elsewhere sets it
+
+    def tearDown(self):
+        RS.RESTART["requested"] = False
+
+    def test_do_restart_marks_the_restart_requested(self):
+        srv = _Srv()
+        with mock.patch("os.kill"), mock.patch("membrane.seat_panel.note"):
+            RS.do_restart(srv, "staged fixes", delay_s=0)
+        self.assertTrue(RS.RESTART["requested"])
+
+    def test_a_requested_restart_reexecs_the_same_command(self):
+        RS.RESTART["requested"] = True
+        argv = ["/x/membrane/opencode.py", "--standalone", "--field", "f.json"]
+        with mock.patch.object(RS.os, "execv") as ex, \
+             mock.patch.object(RS.sys, "argv", argv):
+            RS.reexec_if_requested()
+        ex.assert_called_once_with(
+            RS.sys.executable,
+            [RS.sys.executable, "-m", "membrane.opencode",
+             "--standalone", "--field", "f.json"])
+
+    def test_a_plain_stop_never_reexecs(self):
+        with mock.patch.object(RS.os, "execv") as ex:
+            RS.reexec_if_requested()
+        ex.assert_not_called()
+
+
 if __name__ == "__main__":
     unittest.main()

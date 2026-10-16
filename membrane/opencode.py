@@ -2297,6 +2297,8 @@ def main() -> None:
             _teardown_halt.cancel()
         except Exception:
             pass
+        from .restarts import reexec_if_requested
+        reexec_if_requested()           # #151: a self-restart comes back
 
 
 if __name__ == "__main__":
