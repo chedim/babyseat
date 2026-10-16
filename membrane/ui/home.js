@@ -501,7 +501,7 @@ const HSTYLE = `
   /* THE VIEW (2026-10-13, the operator's burger-menu ask): chat-only fills
    * the screen with the conversation -- nothing but field chrome left */
   .view-chat .chat { left:12px; width:auto; }
-  .view-chat .sbox, .view-chat .me, .view-chat .start, .view-chat .chatbtn,
+  .view-chat .sbox, .view-chat .me, .view-chat .selfbtn, .view-chat .chatbtn,
   .view-chat .card, .view-chat .tip, .view-chat .field { display:none; }
   .tip { position:absolute; z-index:4; pointer-events:none; display:none; padding:4px 8px; border-radius:8px;
          font-size:12px; max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -611,9 +611,18 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._hushTts(); this._tiltStop();
       this._listenKeys(false);
       clearInterval(this._follow);
-      clearInterval(this._autoT);
+      clearInterval(this._autoT); clearInterval(this._selfT);
       if (this._v3) { this._v3.stop(); this._v3 = null; }
       if (this._hidSidebar) this._dock("restore");
+    }
+
+    _paintSelf() {
+      const b = this._selfBtn, c = this._chat; if (!b) return;
+      if (!c || typeof c._selfView !== "function") return;
+      const v = c._selfView();
+      b.textContent = v.icon;
+      b.title = v.title;
+      b.style.opacity = /: off$/.test(v.label) ? ".5" : "1";
     }
 
     _paintAuto() {
@@ -717,7 +726,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you">◎ activity</button>
           <button class="chatbtn" title="Show / hide the chat">💬</button>
           <button class="autobtn" title="auto-chat" aria-label="auto-chat">▶</button>
-          <button class="start" title="Open Home Assistant here (this browser)">☆</button>
+          <button class="selfbtn" title="self (#161): the loop's switch -- off / on / watch">🌱</button>
           <button class="tilt" hidden title="Turn the view by tilting the device">📱</button>
           <span class="sbox"><input class="q" placeholder="search entities…" autocomplete="off"><div class="hits glass"></div></span>
           <span class="status"></span>
@@ -816,10 +825,18 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       });
       this._paintAuto();
       this._autoT = setInterval(() => this._paintAuto(), 1500);
-      $(".start").addEventListener("click", () => {
-        lsSet("defaultPanel", JSON.stringify((this._panel && this._panel.url_path) || "membrane"));
-        this._statusEl.textContent = "this browser opens here now (Profile → Dashboard changes it)";
+      // THE SELF SWITCH (#161, the operator's ask 2026-10-16): 🌱 where the
+      // ☆ was (that pinned HA's default dashboard to this page -- HA's own
+      // Profile -> Dashboard does the same). Off -> on -> watch; its face and
+      // its rung / bar come from the chat element (the panel owns the route).
+      this._selfBtn = $(".selfbtn");
+      this._selfBtn.addEventListener("click", () => {
+        const c = this._chat;
+        if (!c || typeof c._toggleSelf !== "function") return;
+        Promise.resolve(c._toggleSelf()).catch(() => {}).then(() => this._paintSelf());
       });
+      this._paintSelf();
+      this._selfT = setInterval(() => this._paintSelf(), 1500);
       $(".x").addEventListener("click", () => { this._card.classList.remove("open"); if (this._v3) this._v3.select(null); this._select(null); });
       $(".go").addEventListener("click", () => { if (this._v3 && this._sel) { this._lastTouch = performance.now(); this._v3.flyTo(this._sel.id); } });
       $(".ask").addEventListener("click", () => this._askAbout());

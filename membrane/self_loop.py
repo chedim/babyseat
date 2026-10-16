@@ -395,7 +395,9 @@ def _show(srv, ent, pos, c, rec) -> None:
                        "at": c["observed"], "pull": _pull(ent, len(pos))},
                       {"n": rec["n"], "gap": rec["gap"], "naive": rec["naive"], "push": rec["push"],
                        "rung": st["rung"], "bar": st["bar"], "skill": st["skill"],
-                       "mode": st["mode"], "slipping": st["slipping"]})
+                       "mode": st["mode"], "slipping": st["slipping"], "waiting_on": st["waiting_on"],
+                       "next": st["next"], "cycles": st["cycles"], "held": st["held"],
+                       "rung_name": st["rung_name"]})
     except Exception:
         pass
 
