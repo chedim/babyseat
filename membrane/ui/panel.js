@@ -437,6 +437,7 @@ function seatView(st) {
  *  above it nothing opens. Unbuilt rungs are listed, disabled. */
 function selfView(st) {
   const s = (st && st.self) || { mode: "off", limit: 0 };
+  const loaded = !!(st && st.self && Array.isArray(st.self.ladder));   // the seat's real state, not the placeholder
   const lim = s.mode === "off" ? 0 : (s.limit || 1);
   const mark = { passed: " ✓", current: " ◀", capped: " (ready, held by the limit)", locked: "", unbuilt: " (not built)" };
   const options = [{ value: 0, text: "🌱 off", disabled: false, selected: lim === 0 }];
@@ -446,13 +447,13 @@ function selfView(st) {
                    disabled: r.state === "unbuilt", selected: r.rung === lim });
   }
   if (options.length === 1) options.push({ value: 1, text: "🌱 1 · feel itself", disabled: false, selected: lim === 1 });
-  if (s.mode === "off") return { limit: 0, options, title: "self (#161) is asleep: nothing runs, nothing is erased -- choose how far it may grow" };
+  if (s.mode === "off") return { loaded, limit: 0, options, title: "self (#161) is asleep: nothing runs, nothing is erased -- choose how far it may grow" };
   const pct = Math.round(100 * (s.bar || 0));
   const rung = "rung " + (s.rung || 0) + (s.rung_name ? " (" + s.rung_name + ")" : "");
   const why = s.held ? " · HELD (3 failed cycles; re-choose to clear)" : s.waiting_on ? " · waiting on: " + s.waiting_on : "";
   const nxt = s.next == null && s.bar >= 1 ? " · the next rung is not built yet" : "";
   const slip = s.slipping ? " · slipping" : "";
-  return { limit: lim, options,
+  return { loaded, limit: lim, options,
            title: "self (#161): " + s.mode + " · " + rung + " · " + pct + "% toward the next" + why + slip + nxt
                   + " · may grow up to rung " + lim + " · " + (s.cycles || 0) + " cycles" };
 }
@@ -461,6 +462,12 @@ function selfView(st) {
  *  (an open chooser must not be yanked shut by the 1.5 s repaint). */
 function fillSelfPick(sel, v) {
   if (!sel) return;
+  // THE GUARD (live, 2026-10-16: 25 s after a restart the page sent "off"):
+  // rebuilding an open / focused <select>'s options can reset it to its
+  // first option and fire a change -- so never while it has focus, and the
+  // chooser stays disabled until the seat's real state has loaded
+  sel.disabled = !v.loaded;
+  if (sel.getRootNode().activeElement === sel) return;
   const sig = JSON.stringify(v.options);
   if (sel._sig !== sig) {
     sel.textContent = "";
@@ -1999,6 +2006,8 @@ function definePanel() {
 
     /** The growth limit: the top rung self may reach (0: off). */
     async _setSelfLimit(n) {
+      const v = selfView(this._seat);
+      if (!v.loaded || n === v.limit) return;      // nothing before the state loads, nothing for no change
       const r = await this._api(SERVE + "/membrane/seat/control", { method: "POST", body: JSON.stringify({ self_limit: n }) });
       if (r.ok && r.data && r.data.state) { this._seat = r.data.state; this._paintSeat(); }
       else { this._err(this._apiErr("the self chooser failed (HA admins only)", r)); this._paintSeat(); }

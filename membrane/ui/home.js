@@ -621,8 +621,13 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const sel = this._selfPick, c = this._chat; if (!sel) return;
       if (!c || typeof c._selfView !== "function") return;
       const v = c._selfView();
+      // THE GUARD (live, 2026-10-16: 25 s after a restart the page sent "off"):
+      // rebuilding a focused <select>'s options can reset it to "off" and fire
+      // a change -- never while it has focus; disabled until the state loads
+      sel.disabled = !v.loaded;
+      if (sel.getRootNode().activeElement === sel) return;
       const sig = JSON.stringify(v.options);
-      if (sel._sig !== sig) {                  // rebuilt only on change: an open chooser stays open
+      if (sel._sig !== sig) {                  // rebuilt only on change
         sel.textContent = "";
         for (const o of v.options) {
           const el = document.createElement("option");
@@ -631,7 +636,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         }
         sel._sig = sig;
       }
-      if (document.activeElement !== sel && this.shadowRoot.activeElement !== sel) sel.value = String(v.limit);
+      sel.value = String(v.limit);
       sel.title = v.title;
       sel.style.opacity = v.limit ? "1" : ".6";
     }
