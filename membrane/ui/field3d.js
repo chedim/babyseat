@@ -1074,6 +1074,10 @@ class Field3DView {
       const g = c.getContext("2d"), grd = g.createRadialGradient(32, 32, 2, 32, 32, 30);
       grd.addColorStop(0, "#fff"); grd.addColorStop(0.3, "#7cf0c8"); grd.addColorStop(1, "rgba(0,0,0,0)");
       g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
+      const oc = document.createElement("canvas"); oc.width = oc.height = 64;
+      const og = oc.getContext("2d"), ogrd = og.createRadialGradient(32, 32, 2, 32, 32, 30);
+      ogrd.addColorStop(0, "#fff"); ogrd.addColorStop(0.3, "#ffd27a"); ogrd.addColorStop(1, "rgba(0,0,0,0)");
+      og.fillStyle = ogrd; og.fillRect(0, 0, 64, 64);
       const line = (color, opacity) => new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
         new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false }));
       a = this.amoeba = {
@@ -1081,11 +1085,16 @@ class Field3DView {
         sprite: new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false })),
         own: line(0x5ad17a, 0.9), world: line(0xffa94d, 0.9), gap: line(0xff5d5d, 0.9), pull: line(0xb48cff, 0.35),
         aimLine: line(0xffffff, 0.25),
+        beam: line(0xffd27a, 0.9),
+        other: new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(oc), transparent: true, depthWrite: false })),
         trailLine: new THREE.Line(new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(new Float32Array(32 * 3), 3)),
           new THREE.LineBasicMaterial({ color: 0x7cf0c8, transparent: true, opacity: 0.3 })),
         tag: document.createElement("div"),
       };
       a.sprite.scale.set(40, 40, 1);
+      a.other.scale.set(30, 30, 1);
+      a.other.position.set(F3_WORLD * 0.46, F3_WORLD * 0.30, F3_WORLD * 0.46);   // the other sits at the field's edge
+      a.other.visible = false;
       a.tag.style.cssText = "position:absolute;font:600 11px system-ui,sans-serif;color:#7cf0c8;text-shadow:0 1px 2px #000;white-space:nowrap";
       a.tag.title = "self (#161): white ring = where it wants to be (its aim, once it steers) · green = where it pushes itself to · "
         + "orange = where the current took it · red = the gap from where it expected to end up · violet = where it has learned the current pulls";
@@ -1117,13 +1126,16 @@ class Field3DView {
         this.scene.add(sp);
         return Object.assign({}, m, { sp, lab });
       });
-      this.scene.add(a.sprite, a.own, a.world, a.gap, a.pull, a.aimLine, a.trailLine);
+      this.scene.add(a.sprite, a.own, a.world, a.gap, a.pull, a.aimLine, a.trailLine, a.beam, a.other);
     }
     const W = (q) => (q ? cubeToWorld(q) : null);
     a.pts = { from: W(pts.from), intent: W(pts.intent), expected: W(pts.expected), at: W(pts.at), pull: W(pts.pull), aim: W(pts.aim) };
     a.tw = { from: a.pos.slice(), to: a.pts.at, t0: now, dur: 1500 };
     a.trail.push(a.pts.at); if (a.trail.length > 32) a.trail.shift();
     a.last = p; a.t0 = now;
+    const meets0 = p.meets || {};                  // ages -> this viewer's clock: when the push/answer landed
+    a.pushAt = meets0.push_age != null ? now - meets0.push_age * 1000 : null;
+    a.heardAt = meets0.heard_age != null ? now - meets0.heard_age * 1000 : null;
   }
 
   _stepSelf(now) {
@@ -1151,6 +1163,21 @@ class Field3DView {
     const L = a.last || {};
     a.gap.material.opacity = 0.35 + 0.65 * Math.min(1, (L.gap || 0) / Math.max(1e-9, L.naive || 1e-9));
     seg(a.aimLine, a.pos, P.aim);          // how far it is from what it wants
+    // the exchange (rung 6): on a push self beams out to the other (the amber
+    // orb at the field's edge); when the other answers, the orb flashes back
+    const pushed = a.pushAt != null && now - a.pushAt < 1400;
+    const answered = a.heardAt != null && now - a.heardAt < 1400;
+    if (a.other) {
+      a.other.visible = pushed || answered;
+      if (a.other.visible) {
+        const s = 1 + (answered ? 0.8 * Math.sin(now / 110) : 0.2 * Math.sin(now / 260));
+        a.other.scale.set(30 * s, 30 * s, 1);
+        a.other.material.opacity = pushed && !answered ? 0.9 : 0.5 + 0.5 * Math.abs(Math.sin(now / 110));
+      }
+      seg(a.beam, a.pos, a.other.position.toArray());
+      a.beam.visible = pushed;                       // the outbound half only
+      a.beam.material.opacity = answered ? 0.3 : 0.9;
+    }
     for (const m of a.marks) {
       const q = P[m.key];
       m.sp.visible = !!q;

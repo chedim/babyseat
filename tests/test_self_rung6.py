@@ -191,3 +191,25 @@ def test_chat_in_is_a_reachable_entity_that_hears():
     assert (resp.properties or {}).get("getter_script")
     CIO.heard(srv, CIO.OPERATOR, "hello", "sid")
     assert (resp.properties or {}).get("heard_n") == 1
+
+
+def test_meet_carries_the_exchange_ages_to_the_viewer():
+    # the home viewer's beam + flash read push_age / heard_age off status()'s
+    # meets: a number right after a push / an answered look, absent before
+    srv = _seat()
+    now = time.time()
+    SL._append(srv, {"ts": now - 0.2, "kind": "push", "eid": "chat:out:operator",
+                     "to": RESP, "n": 1})
+    SL._append(srv, {"ts": now - 0.1, "kind": "reach", "eid": RESP, "n": 1,
+                     "answer": "changed", "p": 0.5, "why": "heard"})
+    m = SL.status(srv)["meets"]
+    assert m["other"] == RESP
+    assert isinstance(m["push_age"], float) and 0.0 <= m["push_age"] < 1.0
+    assert isinstance(m["heard_age"], float) and 0.0 <= m["heard_age"] < 1.0
+
+
+def test_meet_ages_are_absent_before_any_exchange():
+    srv = _seat()
+    m = SL.status(srv)["meets"]
+    assert m["pushes"] == 0 and m["other"] is None
+    assert m["push_age"] is None and m["heard_age"] is None

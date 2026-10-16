@@ -1215,6 +1215,17 @@ def status(srv) -> dict:
     r1 = _rung1(recs)
     spl = _split(recs, tempo)
     pushes = [r for r in recs if r.get("kind") == "push"]
+    other = pushes[-1].get("to") if pushes else None
+    now = time.time()
+    # the exchange's ages for the home viewer's beam + flash (rung 6): how long
+    # since self pushed (a beam) and since the other last answered (a flash) --
+    # ages, not wall clocks, so the viewer's clock never has to agree with the seat's
+    answered = [r for r in recs
+                if r.get("kind") == "reach" and r.get("eid") == other
+                and r.get("answer") == "changed" and not r.get("audit")]
+    meets = {"pushes": len(pushes), "other": other,
+             "push_age": round(now - pushes[-1]["ts"], 3) if pushes else None,
+             "heard_age": round(now - answered[-1]["ts"], 3) if answered else None}
     return {"mode": rt["mode"], "limit": lim, "born": born, "held": rt["held"],
             "cycles": sum(1 for r in recs if r.get("kind") == "cycle"),
             "rung": rung, "rung_name": LADDER.get(rung), "next": nxt,
@@ -1222,7 +1233,7 @@ def status(srv) -> dict:
             "slipping": slipping, "ladder": ladder,
             "world": {e: k for e, k in _kinds(recs).items() if k != "unknown"},
             "split": {e: s for e, s in spl.items() if s != "unknown"},
-            "meets": {"pushes": len(pushes), "other": pushes[-1].get("to") if pushes else None},
+            "meets": meets,
             "steer": _steer_stats(recs)}
 
 
