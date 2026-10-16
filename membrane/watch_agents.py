@@ -1647,8 +1647,11 @@ def dormant_inventory(est) -> dict:
     """What was planted before its trigger ran: proximity ops without `armed`
     and thought/dreamed scripts without an arming stamp -- the list the seat
     triages (planting again arms)."""
+    from .entities import MEMBRANE_NS
     ops, scripts = [], []
     for eid, ent in list((getattr(est, "docs", None) or {}).items()):
+        if eid == MEMBRANE_NS + "dormant":
+            continue                       # the inventory itself is not a planted watch (#171)
         p = ent.properties or {}
         for o in p.get("watch_ops") or []:
             if isinstance(o, dict) and not o.get("armed"):
@@ -1678,7 +1681,12 @@ def paint_dormant(srv) -> dict:
                         "it with watch_ops=[] or an empty script.")})
         est.docs[eid] = ent
     pp = ent.properties or {}
-    pp.update({"watch_ops": inv["watch_ops"][:40], "scripts": inv["scripts"][:40],
+    # NOT under `watch_ops` (#171): that is the key real watches use, so the
+    # attention ledger counted the mirror as live watches and the next boot
+    # re-read it as unarmed ops -- it grew at every restart. A seat carrying
+    # the old mirror drops it here.
+    pp.pop("watch_ops", None)
+    pp.update({"dormant_ops": inv["watch_ops"][:40], "scripts": inv["scripts"][:40],
                "state": (f"{len(inv['watch_ops'])} proximity watch(es) and {len(inv['scripts'])} "
                          "thought/dreamed script(s) wait to be armed" if (inv["watch_ops"] or inv["scripts"])
                          else "nothing waits: every planted watch and trigger script is armed")})
