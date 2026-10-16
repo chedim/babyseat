@@ -67,7 +67,9 @@ class TestBannerFreshness(unittest.TestCase):
         st.n = 3
         st.n_by_stream = {"observation": 3}
         st.last_ts = None
-        st.last_pos = (int((now - 3 * 3600) * 1e6), 0)
+        # a minute past the 3h boundary: the microsecond seq's float round
+        # trip can land a hair under 3h and print '2h ago' (a CI flake)
+        st.last_pos = (int((now - 3 * 3600 - 60) * 1e6), 0)
         line = EB.track_line(_Field(st), st.eid, now=now)
         self.assertNotIn("last ?", line)
         self.assertIn("last 3h ago", line)
