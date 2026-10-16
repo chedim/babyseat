@@ -166,10 +166,17 @@ evolving self in #161. It grows up a **skill ladder**: one rung per PR, each
 with a measured pass test; a rung opens by itself when its test passes. This
 section covers what is built (`membrane/self_loop.py`).
 
-- **Rung 0, sleep and wake.** A per-seat switch, off / on / watch, **off by
-  default**. Only the operator flips it: the 🌱 button (the home top bar, and
-  the chat's side menu) →
-  `POST /membrane/seat/control {"self": ...}` (`seat_panel.control`). Off runs
+- **Rung 0, sleep and wake, and the growth limit.** A per-seat chooser, **off
+  by default**, set only by the operator: the 🌱 chooser (the home top bar,
+  and the chat's side menu) → `POST /membrane/seat/control {"self_limit": n}`
+  (`seat_panel.control`). The chooser picks **the top rung self may reach**:
+  - below the limit, self still earns each rung by its test, in order;
+  - above it, nothing opens however well it does: the chooser marks such a
+    rung "ready, held by the limit", and the bar says it waits on "the limit";
+  - `0` is off, and raising the limit never grants a rung.
+
+  `{"self": "on" | "off" | "watch"}` still works. A seat switched on before
+  the limit existed gets limit 1. Off runs
   nothing and erases nothing. The mode (`<data dir>/self/mode.json`) and the
   record survive a restart. `watch` runs like `on` until there is a
   babysitter to keep quiet.

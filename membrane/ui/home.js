@@ -501,7 +501,7 @@ const HSTYLE = `
   /* THE VIEW (2026-10-13, the operator's burger-menu ask): chat-only fills
    * the screen with the conversation -- nothing but field chrome left */
   .view-chat .chat { left:12px; width:auto; }
-  .view-chat .sbox, .view-chat .me, .view-chat .selfbtn, .view-chat .chatbtn,
+  .view-chat .sbox, .view-chat .me, .view-chat .selfpick, .view-chat .chatbtn,
   .view-chat .card, .view-chat .tip, .view-chat .field { display:none; }
   .tip { position:absolute; z-index:4; pointer-events:none; display:none; padding:4px 8px; border-radius:8px;
          font-size:12px; max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -530,6 +530,7 @@ const HSTYLE = `
   @keyframes recpulse { 50% { box-shadow:0 0 0 8px color-mix(in srgb, var(--error-color,#c0392b) 30%, transparent); } }
   .card { bottom:76px !important; }
   .top .tilt[hidden] { display:none; }
+  .top .selfpick { border:0; background:transparent; color:inherit; font:inherit; border-radius:999px; padding:6px 8px; max-width:12em; cursor:pointer; }
   /* THE WAVE (2026-10-10, the operator: "a wavy animation like Siri, but
      angly and graph-y"): a chain of nodes joined by straight edges -- a strip
      of the field -- that moves with the voice: your mic level while
@@ -617,12 +618,22 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     }
 
     _paintSelf() {
-      const b = this._selfBtn, c = this._chat; if (!b) return;
+      const sel = this._selfPick, c = this._chat; if (!sel) return;
       if (!c || typeof c._selfView !== "function") return;
       const v = c._selfView();
-      b.textContent = v.icon;
-      b.title = v.title;
-      b.style.opacity = /: off$/.test(v.label) ? ".5" : "1";
+      const sig = JSON.stringify(v.options);
+      if (sel._sig !== sig) {                  // rebuilt only on change: an open chooser stays open
+        sel.textContent = "";
+        for (const o of v.options) {
+          const el = document.createElement("option");
+          el.value = String(o.value); el.textContent = o.text; el.disabled = !!o.disabled;
+          sel.appendChild(el);
+        }
+        sel._sig = sig;
+      }
+      if (document.activeElement !== sel && this.shadowRoot.activeElement !== sel) sel.value = String(v.limit);
+      sel.title = v.title;
+      sel.style.opacity = v.limit ? "1" : ".6";
     }
 
     _paintAuto() {
@@ -726,7 +737,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you · self (the 🌱 loop)">◎ activity</button>
           <button class="chatbtn" title="Show / hide the chat">💬</button>
           <button class="autobtn" title="auto-chat" aria-label="auto-chat">▶</button>
-          <button class="selfbtn" title="self (#161): the loop's switch -- off / on / watch">🌱</button>
+          <select class="selfpick" title="self (#161): how far it may grow (the top rung; off = asleep)"><option value="0">🌱 off</option></select>
           <button class="tilt" hidden title="Turn the view by tilting the device">📱</button>
           <span class="sbox"><input class="q" placeholder="search entities…" autocomplete="off"><div class="hits glass"></div></span>
           <span class="status"></span>
@@ -825,15 +836,16 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       });
       this._paintAuto();
       this._autoT = setInterval(() => this._paintAuto(), 1500);
-      // THE SELF SWITCH (#161, the operator's ask 2026-10-16): 🌱 where the
+      // THE GROWTH LIMIT (#161, the operator's ask 2026-10-16): 🌱 where the
       // ☆ was (that pinned HA's default dashboard to this page -- HA's own
-      // Profile -> Dashboard does the same). Off -> on -> watch; its face and
-      // its rung / bar come from the chat element (the panel owns the route).
-      this._selfBtn = $(".selfbtn");
-      this._selfBtn.addEventListener("click", () => {
+      // Profile -> Dashboard does the same). A chooser of the top rung self
+      // may reach (off = asleep); below it self still earns each rung. Its
+      // options and rung / bar come from the chat element (the panel owns the route).
+      this._selfPick = $(".selfpick");
+      this._selfPick.addEventListener("change", () => {
         const c = this._chat;
-        if (!c || typeof c._toggleSelf !== "function") return;
-        Promise.resolve(c._toggleSelf()).catch(() => {}).then(() => this._paintSelf());
+        if (!c || typeof c._setSelfLimit !== "function") return;
+        Promise.resolve(c._setSelfLimit(Number(this._selfPick.value))).catch(() => {}).then(() => this._paintSelf());
       });
       this._paintSelf();
       this._selfT = setInterval(() => this._paintSelf(), 1500);

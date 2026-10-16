@@ -34,6 +34,10 @@ hold it until the operator's next toggle. A paused seat runs nothing.
 THE LADDER: a rung opens when its measured test passes; the bar is the
 weakest criterion and can go down (slipping) -- a passed rung stays on the
 record. Only rungs in LADDER are built; the status says when the next is not.
+
+THE GROWTH LIMIT (the operator's chooser): the highest rung self may reach.
+Below it self still earns each rung by its test; above it nothing opens,
+however well it does ("capped"). 0 is off. Raising it never grants a rung.
 """
 from __future__ import annotations
 
@@ -53,7 +57,10 @@ METHODS = {
     "expect": "self::expect {{seed}}",
     "notice": "self::notice {{seed}}",
 }
-LADDER = {0: "sleep and wake", 1: "feel itself"}
+RUNG_NAMES = {0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart",
+              4: "patience", 5: "notice the world changed", 6: "meet an other",
+              7: "understand an other", 8: "recognize itself", 9: "change itself", 10: "speak"}
+LADDER = {0: RUNG_NAMES[0], 1: RUNG_NAMES[1]}          # the rungs built so far
 
 try:
     PACE_S = max(1.0, float(os.environ.get("MEMBRANE_SELF_PACE_S") or 10.0))
@@ -113,7 +120,7 @@ def bind(srv) -> None:
         if meth not in have:
             method_define(srv, est, None, None, on=ent.eid, method=meth, command=cmd)
     rt = _rt(srv)
-    rt["mode"] = _load_mode(srv)
+    rt["mode"], rt["limit"] = _load_mode(srv)
     rt["model"] = _load_model(srv)
 
 
@@ -121,7 +128,7 @@ def _rt(srv) -> dict:
     with _lock:
         rt = _RT.get(id(srv))
         if rt is None:
-            rt = _RT[id(srv)] = {"mode": "off", "last": None, "burst": [], "fails": 0,
+            rt = _RT[id(srv)] = {"mode": "off", "limit": 0, "last": None, "burst": [], "fails": 0,
                                  "held": False, "wake": threading.Event(), "srv": srv}
         return rt
 
@@ -138,22 +145,29 @@ def record_path(srv) -> Path | None:
     return d / "record.jsonl" if d is not None else None
 
 
-def _load_mode(srv) -> str:
+def _load_mode(srv) -> tuple[str, int]:
+    """(mode, limit). A seat switched on before the limit existed gets 1 --
+    what it had -- so no higher rung opens until the operator raises it."""
     d = _dir(srv)
     try:
-        m = json.loads((d / "mode.json").read_text()).get("mode") if d is not None else None
+        doc = json.loads((d / "mode.json").read_text()) if d is not None else {}
     except Exception:
-        m = None
-    return m if m in MODES else "off"
+        doc = {}
+    m = doc.get("mode") if doc.get("mode") in MODES else "off"
+    try:
+        lim = int(doc["limit"]) if "limit" in doc else (1 if m != "off" else 0)
+    except (TypeError, ValueError):
+        lim = 1 if m != "off" else 0
+    return m, (max(1, min(lim, max(LADDER))) if m != "off" else 0)
 
 
-def _save_mode(srv, mode: str) -> None:
+def _save_mode(srv, mode: str, limit: int) -> None:
     d = _dir(srv)
     if d is None:
         return
     d.mkdir(parents=True, exist_ok=True)
     tmp = d / "mode.json.tmp"
-    tmp.write_text(json.dumps({"mode": mode, "ts": time.time()}))
+    tmp.write_text(json.dumps({"mode": mode, "limit": limit, "ts": time.time()}))
     os.replace(tmp, d / "mode.json")
 
 
@@ -207,9 +221,29 @@ def mode(srv) -> str:
     return _rt(srv)["mode"]
 
 
+def limit(srv) -> int:
+    return _rt(srv)["limit"]
+
+
+def set_limit(srv, n, by: str = "operator") -> bool:
+    """The operator's chooser: the highest rung self may reach (0: off),
+    clamped to the rungs built. Raising it grants nothing -- each rung under
+    it is still earned by its test."""
+    try:
+        n = max(0, min(int(n), max(LADDER)))
+    except (TypeError, ValueError):
+        return False
+    rt = _rt(srv)
+    if n == 0:
+        return set_mode(srv, "off", by)
+    keep = rt["mode"] if rt["mode"] != "off" else "on"
+    rt["limit"] = n
+    return set_mode(srv, keep, by)
+
+
 def set_mode(srv, m: str, by: str = "operator") -> bool:
     """The operator's switch (seat_panel.control). The first switch-on is the
-    birth; a toggle clears a hold."""
+    birth; a toggle clears a hold. Off is limit 0; on with no limit is 1."""
     if m not in MODES:
         return False
     rt = _rt(srv)
@@ -217,7 +251,8 @@ def set_mode(srv, m: str, by: str = "operator") -> bool:
         if m != "off" and not any(r.get("kind") == "birth" for r in _read(srv)):
             _append(srv, {"ts": time.time(), "kind": "birth", "by": by})
         rt["mode"], rt["held"], rt["fails"] = m, False, 0
-        _save_mode(srv, m)
+        rt["limit"] = 0 if m == "off" else max(1, rt["limit"])
+        _save_mode(srv, m, rt["limit"])
     if m != "off":
         rt["wake"].set()                    # switching on kicks the first cycle
     return True
@@ -428,7 +463,7 @@ def _show(srv, ent, pos, c, rec) -> None:
                        "rung": st["rung"], "bar": st["bar"], "skill": st["skill"],
                        "mode": st["mode"], "slipping": st["slipping"], "waiting_on": st["waiting_on"],
                        "next": st["next"], "cycles": st["cycles"], "held": st["held"],
-                       "rung_name": st["rung_name"]})
+                       "rung_name": st["rung_name"], "limit": st["limit"]})
     except Exception:
         pass
 
@@ -444,35 +479,73 @@ def _rung1(recs: list[dict]) -> dict:
     return {"crit": crit, "skill": round(skill, 4), "passed": all(v >= 1.0 for v in crit.values())}
 
 
+PROGRESS = {1: _rung1}                  # rung -> its test over the record
+
+
+def _passed(recs: list[dict]) -> set:
+    return {0} | {r["rung"] for r in recs if r.get("kind") == "rung"}
+
+
 def _open_rungs(srv) -> None:
+    """A rung opens when its test passes -- only under the operator's limit,
+    and only above a rung already passed (the ladder is climbed in order)."""
     recs = _read(srv)
-    if not any(r.get("kind") == "rung" and r.get("rung") == 1 for r in recs) and _rung1(recs)["passed"]:
-        _append(srv, {"ts": time.time(), "kind": "rung", "rung": 1, "skill": _rung1(recs)["skill"]})
+    done, lim = _passed(recs), _rt(srv)["limit"]
+    for n in sorted(PROGRESS):
+        if n in done or n > lim or (n - 1) not in done:
+            continue
+        p = PROGRESS[n](recs)
+        if p["passed"]:
+            _append(srv, {"ts": time.time(), "kind": "rung", "rung": n, "skill": p["skill"]})
+            recs, done = _read(srv), done | {n}
 
 
 def status(srv) -> dict:
     rt = _rt(srv)
     recs = _read(srv)
     born = any(r.get("kind") == "birth" for r in recs)
-    passed = [r["rung"] for r in recs if r.get("kind") == "rung"]
-    rung = max(passed) if passed else 0
-    r1 = _rung1(recs)
+    done = _passed(recs)
+    rung = max(done)
+    lim = rt["limit"]
+    nxt = rung + 1 if rung + 1 in LADDER else None
+    # the bar reads the next rung's test; with none built, the top rung's own
+    # (so a passed rung can be seen slipping)
+    aim = nxt if nxt in PROGRESS else (rung if rung in PROGRESS else None)
+    prog = PROGRESS[aim](recs) if aim is not None else {"crit": {}, "skill": 0.0, "passed": True}
+    if prog["crit"]:
+        waiting = min(prog["crit"], key=prog["crit"].get)
+        bar = prog["crit"][waiting]
+        if bar >= 1.0:
+            waiting = None
+    else:
+        bar, waiting = 1.0, None
+    if nxt is not None and nxt > lim and rt["mode"] != "off":
+        waiting = "the limit"                    # it may be ready; the operator holds it here
     if rt["mode"] != "off" and _current(srv) is None:
         # no current right now (a fresh boot: nobody has spoken yet) -- say
         # so, or the switch reads "on" over a loop that is rightly idle
-        r1c = r1["crit"]
-        bar, waiting = (min(r1c.values()) if any(r.get("kind") == "cycle" for r in recs) else 0.0), "the world"
-    else:
-        waiting = min(r1["crit"], key=r1["crit"].get)
-        bar = r1["crit"][waiting]
-        if bar >= 1.0:
-            waiting = None
-    nxt = rung + 1 if rung + 1 in LADDER else None
-    return {"mode": rt["mode"], "born": born, "held": rt["held"],
+        if not any(r.get("kind") == "cycle" for r in recs):
+            bar = 0.0
+        waiting = "the world"
+    top = PROGRESS.get(rung)
+    slipping = bool(rung >= 1 and top is not None and not top(recs)["passed"])
+    ladder = []
+    for n, name in RUNG_NAMES.items():
+        if n not in LADDER:
+            state = "unbuilt"
+        elif n in done:
+            state = "passed"
+        elif n > lim:
+            state = "capped" if (n - 1) in done else "locked"
+        else:
+            state = "current" if (n - 1) in done else "locked"
+        ladder.append({"rung": n, "name": name, "state": state})
+    r1 = _rung1(recs)
+    return {"mode": rt["mode"], "limit": lim, "born": born, "held": rt["held"],
             "cycles": sum(1 for r in recs if r.get("kind") == "cycle"),
             "rung": rung, "rung_name": LADDER.get(rung), "next": nxt,
-            "bar": round(bar, 4), "waiting_on": waiting, "skill": r1["skill"],
-            "slipping": bool(rung >= 1 and not r1["passed"])}
+            "bar": round(bar, 4), "waiting_on": waiting, "skill": prog.get("skill", r1["skill"]),
+            "slipping": slipping, "ladder": ladder}
 
 
 # ---- the thread -----------------------------------------------------------

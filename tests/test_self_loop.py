@@ -415,11 +415,93 @@ def test_the_seat_panel_ignores_a_bad_value():
     assert SL.mode(srv) == "off"
 
 
-def test_the_panel_has_the_switch():
+def test_the_panel_has_the_chooser():
     js = (Path(__file__).resolve().parent.parent / "membrane" / "ui" / "panel.js").read_text()
-    assert 'class="btn icon selfbtn"' in js
-    assert "JSON.stringify({ self: next })" in js
-    assert '["selfbtn", "self: off"]' in js
+    assert 'class="selfpick"' in js
+    assert "JSON.stringify({ self_limit: n })" in js
+    assert '["selfpick", null]' in js
+    assert "selfbtn" not in js
+
+
+# ---- the growth limit (the operator's chooser) ------------------------------
+
+def _fake_rung2(monkeypatch, passes=True):
+    """A built rung 2 whose test is under the test's control."""
+    monkeypatch.setitem(SL.LADDER, 2, "first reach")
+    monkeypatch.setitem(SL.PROGRESS, 2, lambda recs: {"crit": {"reaches": 1.0 if passes else 0.4},
+                                                       "skill": 0.9, "passed": passes})
+
+
+def test_limit_zero_is_off_and_one_is_on():
+    srv = _seat()
+    assert SL.limit(srv) == 0
+    SL.set_limit(srv, 1)
+    assert SL.mode(srv) == "on" and SL.limit(srv) == 1
+    SL.set_limit(srv, 0)
+    assert SL.mode(srv) == "off"
+
+
+def test_a_rung_above_the_limit_stays_closed_however_well_it_does(monkeypatch):
+    _fake_rung2(monkeypatch)
+    srv = _seat()
+    SL.set_limit(srv, 1)
+    t = _cycles(srv, SL.RUNG1_CYCLES * 2)
+    st = SL.status(srv)
+    assert st["rung"] == 1                               # rung 2's test passes, the limit holds it
+    assert st["waiting_on"] == "the limit"
+    assert [x["state"] for x in st["ladder"] if x["rung"] == 2] == ["capped"]
+    SL.set_limit(srv, 2)                                 # the operator widens it
+    _cycles(srv, 1, now=t)
+    st = SL.status(srv)
+    assert st["rung"] == 2
+    assert [r["rung"] for r in _record(srv) if r["kind"] == "rung"] == [1, 2]
+
+
+def test_raising_the_limit_never_grants_a_rung(monkeypatch):
+    _fake_rung2(monkeypatch, passes=False)
+    srv = _seat()
+    SL.set_limit(srv, 2)
+    _cycles(srv, SL.RUNG1_CYCLES * 2)
+    st = SL.status(srv)
+    assert st["rung"] == 1                               # it must still earn it
+    assert [x["state"] for x in st["ladder"] if x["rung"] == 2] == ["current"]
+
+
+def test_the_limit_is_clamped_to_the_built_rungs():
+    srv = _seat()
+    SL.set_limit(srv, 9)
+    assert SL.limit(srv) == max(SL.LADDER)
+
+
+def test_the_ladder_lists_every_rung_and_marks_the_unbuilt():
+    srv = _seat()
+    SL.set_limit(srv, 1)
+    lad = {x["rung"]: x["state"] for x in SL.status(srv)["ladder"]}
+    assert lad[0] == "passed" and lad[1] == "current"
+    assert lad[10] == "unbuilt" and len(lad) == len(SL.RUNG_NAMES)
+
+
+def test_the_limit_survives_a_restart():
+    d = tempfile.mkdtemp()
+    srv = _seat(d)
+    SL.set_limit(srv, 1)
+    assert SL.limit(_seat(d)) == 1
+
+
+def test_an_on_seat_from_before_the_limit_gets_limit_one():
+    d = Path(tempfile.mkdtemp())
+    (d / "self").mkdir()
+    (d / "self" / "mode.json").write_text(json.dumps({"mode": "on", "ts": 1.0}))
+    assert SL.limit(_seat(d)) == 1
+
+
+def test_the_seat_panel_sets_the_limit():
+    srv = _seat()
+    out = SP.control(srv, {"self_limit": 1})
+    assert out["applied"]["self_limit"] == 1 and SL.mode(srv) == "on"
+    ev = srv.entity_store.docs[MEMBRANE_NS + "presence"].properties["last_event"]
+    assert ev["kind"] == "self" and ev["limit"] == 1
+    assert SP.state(srv)["self"]["limit"] == 1
 
 
 def test_a_cycle_writes_nothing_to_stderr(capsys):

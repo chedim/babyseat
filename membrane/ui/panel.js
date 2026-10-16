@@ -432,22 +432,47 @@ function seatView(st) {
     : { paused, icon: "⏸", label: "pause the seat", title: "pause the seat: every acting lane stands down (loops, dreamer, thinker, night)" + mem + bat };
 }
 
-/** #161: the self loop's switch (off -> on -> watch -> off) and its rung + exp bar. */
-function selfNext(st) {
-  const m = (st && st.self && st.self.mode) || "off";
-  return m === "off" ? "on" : m === "on" ? "watch" : "off";
-}
+/** #161: the growth limit -- the chooser of the top rung self may reach (0:
+ *  off) -- and its rung + exp bar. Below the limit self still earns each rung;
+ *  above it nothing opens. Unbuilt rungs are listed, disabled. */
 function selfView(st) {
-  const s = (st && st.self) || { mode: "off" };
-  if (s.mode === "off") return { icon: "🌱", label: "self: off", title: "self (#161) is asleep: nothing runs, nothing is erased -- click: on" };
+  const s = (st && st.self) || { mode: "off", limit: 0 };
+  const lim = s.mode === "off" ? 0 : (s.limit || 1);
+  const mark = { passed: " ✓", current: " ◀", capped: " (ready, held by the limit)", locked: "", unbuilt: " (not built)" };
+  const options = [{ value: 0, text: "🌱 off", disabled: false, selected: lim === 0 }];
+  for (const r of (s.ladder || [])) {
+    if (r.rung === 0) continue;
+    options.push({ value: r.rung, text: "🌱 " + r.rung + " · " + r.name + (mark[r.state] || ""),
+                   disabled: r.state === "unbuilt", selected: r.rung === lim });
+  }
+  if (options.length === 1) options.push({ value: 1, text: "🌱 1 · feel itself", disabled: false, selected: lim === 1 });
+  if (s.mode === "off") return { limit: 0, options, title: "self (#161) is asleep: nothing runs, nothing is erased -- choose how far it may grow" };
   const pct = Math.round(100 * (s.bar || 0));
   const rung = "rung " + (s.rung || 0) + (s.rung_name ? " (" + s.rung_name + ")" : "");
-  const why = s.held ? " · HELD (3 failed cycles; toggle to clear)" : s.waiting_on ? " · waiting on: " + s.waiting_on : "";
+  const why = s.held ? " · HELD (3 failed cycles; re-choose to clear)" : s.waiting_on ? " · waiting on: " + s.waiting_on : "";
   const nxt = s.next == null && s.bar >= 1 ? " · the next rung is not built yet" : "";
   const slip = s.slipping ? " · slipping" : "";
-  return { icon: s.held ? "🥀" : "🌿", label: "self: " + s.mode + " · " + rung + " · " + pct + "%",
+  return { limit: lim, options,
            title: "self (#161): " + s.mode + " · " + rung + " · " + pct + "% toward the next" + why + slip + nxt
-                  + " · " + (s.cycles || 0) + " cycles -- click: " + selfNext(st) };
+                  + " · may grow up to rung " + lim + " · " + (s.cycles || 0) + " cycles" };
+}
+
+/** Fill a <select> from selfView's options -- rebuilt only when they change
+ *  (an open chooser must not be yanked shut by the 1.5 s repaint). */
+function fillSelfPick(sel, v) {
+  if (!sel) return;
+  const sig = JSON.stringify(v.options);
+  if (sel._sig !== sig) {
+    sel.textContent = "";
+    for (const o of v.options) {
+      const el = document.createElement("option");
+      el.value = String(o.value); el.textContent = o.text; el.disabled = !!o.disabled;
+      sel.appendChild(el);
+    }
+    sel._sig = sig;
+  }
+  sel.value = String(v.limit);
+  sel.title = v.title;
 }
 
 function roleNext(auto) { return (auto && auto.role) === "predict" ? "babble" : "predict"; }
@@ -632,7 +657,7 @@ function jsShow(v) {
   return String(v);
 }
 
-const AiPanelLogic = { jsCompile, jsShow, voiceLogItems, seatView, selfNext, selfView, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
+const AiPanelLogic = { jsCompile, jsShow, voiceLogItems, seatView, selfView, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
@@ -891,7 +916,7 @@ function definePanel() {
             <button class="btn icon llmbtn" title="the LLM (off: talk to membrane alone)">🤖</button>
             <button class="btn icon autobtn" title="auto-chat: membrane and the LLM talk; you can join any time">⟳</button>
             <button class="btn icon rolebtn" title="membrane's role: babble (it talks to the LLM) or predict (it guesses the LLM, unheard)">💬</button>
-            <button class="btn icon selfbtn" title="self (#161): the loop's switch -- off / on / watch">🌱</button>
+            <select class="selfpick" title="self (#161): how far it may grow (the top rung; off = asleep)"><option value="0">🌱 off</option></select>
             <button class="btn icon thinkbtn" title="the think dial: the reasoning the cards do (auto = forward verbatim)">💭</button>
             <button class="btn icon jsbtn" title="allow JS scripting in this window -- the page runs it with your HA login -- off by default">🧩</button>
             <button class="btn icon vlogbtn" title="the voice log: what was said aloud (hidden from the chat)">🗒</button>
@@ -925,7 +950,7 @@ function definePanel() {
         // chat button as a ▶/⏸; the panel's own node stays (hidden --
         // never listed) so its listener and state keep working.
         for (const [cls, label] of [["agent", null], ["modelpick", null], ["voicebtn", "membrane's voice"], ["llmbtn", "LLM replies"],
-                                    ["rolebtn", "membrane babbles"], ["selfbtn", "self: off"], ["thinkbtn", "think"], ["jsbtn", "JS scripting: off"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
+                                    ["rolebtn", "membrane babbles"], ["selfpick", null], ["thinkbtn", "think"], ["jsbtn", "JS scripting: off"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
           const el = app.querySelector("." + cls);
           if (!el) continue;
           if (label) {
@@ -985,8 +1010,8 @@ function definePanel() {
       this._vlogBtn.addEventListener("click", () => this._toggleVoiceLog().catch(() => {}));
       this._pauseBtn = $(".pausebtn");
       this._pauseBtn.addEventListener("click", () => this._togglePause().catch(() => {}));
-      this._selfBtn = $(".selfbtn");
-      this._selfBtn.addEventListener("click", () => this._toggleSelf().catch(() => {}));
+      this._selfPick = $(".selfpick");
+      this._selfPick.addEventListener("change", () => this._setSelfLimit(Number(this._selfPick.value)).catch(() => {}));
       this._llmBtn = $(".llmbtn");
       this._llmOn = true;                 // per page view
       this._llmBtn.addEventListener("click", () => {
@@ -1558,7 +1583,7 @@ function definePanel() {
       if (ev.type === "membrane.seat") this._loadSeat();          // the seat's own events: its state moved
       if (ev.type === "self.cycle" && this._seat) {               // #161: the bar moves with each cycle
         const s = Object.assign({}, this._seat.self || {});
-        for (const k of ["rung", "rung_name", "bar", "skill", "mode", "slipping", "waiting_on", "next", "cycles", "held"]) if (k in p) s[k] = p[k];
+        for (const k of ["rung", "rung_name", "bar", "skill", "mode", "slipping", "waiting_on", "next", "cycles", "held", "limit"]) if (k in p) s[k] = p[k];
         s.born = true;
         this._seat = Object.assign({}, this._seat, { self: s });
         this._paintSeat();
@@ -1969,14 +1994,14 @@ function definePanel() {
       else this._err(this._apiErr("pause failed (HA admins only)", r));
     }
 
-    /** The 🌱 switch's face (home.js's top bar paints it from here too). */
+    /** The 🌱 chooser's face (home.js's top bar paints its own from here). */
     _selfView() { return selfView(this._seat); }
 
-    async _toggleSelf() {
-      const next = selfNext(this._seat);
-      const r = await this._api(SERVE + "/membrane/seat/control", { method: "POST", body: JSON.stringify({ self: next }) });
+    /** The growth limit: the top rung self may reach (0: off). */
+    async _setSelfLimit(n) {
+      const r = await this._api(SERVE + "/membrane/seat/control", { method: "POST", body: JSON.stringify({ self_limit: n }) });
       if (r.ok && r.data && r.data.state) { this._seat = r.data.state; this._paintSeat(); }
-      else this._err(this._apiErr("the self switch failed (HA admins only)", r));
+      else { this._err(this._apiErr("the self chooser failed (HA admins only)", r)); this._paintSeat(); }
     }
 
     async _loadSeat() {
@@ -1992,13 +2017,7 @@ function definePanel() {
       if (lbl) lbl.textContent = v.label;
       this._pauseBtn.title = v.title;
       this._pauseBtn.style.opacity = v.paused ? "1" : ".6";
-      if (this._selfBtn) {
-        const sv = selfView(this._seat);
-        const sico = this._selfBtn.querySelector(".ico"), slbl = this._selfBtn.querySelector(".lbl");
-        if (sico) sico.textContent = sv.icon; else this._selfBtn.textContent = sv.icon;
-        if (slbl) slbl.textContent = sv.label;
-        this._selfBtn.title = sv.title;
-      }
+      if (this._selfPick) fillSelfPick(this._selfPick, selfView(this._seat));
     }
 
     async _toggleRole() {
