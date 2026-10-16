@@ -214,6 +214,8 @@ def _cell_points(fld, eid: str, limit: int = 64) -> list:
 
 
 def _audit(mem, rec: dict) -> None:
+    if mem is None:
+        return                  # no audit log mounted (the self loop's calls, tests): nothing to write
     try:
         from .opencode import _write_audit
         _write_audit(mem, rec)
