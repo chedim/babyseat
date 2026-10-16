@@ -142,6 +142,37 @@ class TestReadsAndDefines(unittest.TestCase):
             self.assertTrue(_wait(lambda: bool(got)))
         self.assertIn("pct: 64 -> 61", got[0][4])
 
+    def test_a_getter_returning_its_me_handle_leaks_no_object_repr_into_the_job(self):
+        # issue #152: a getter whose state carried the script's `membrane.me`
+        # handle posted "me: <..._Me object at 0x..> -> <..._Me object at 0x..>"
+        est = EntityStore(path=str(Path(tempfile.mkdtemp()) / "e.json"), shared=False)
+        e = QuantumEntity(eid=MEMBRANE_NS + "Component:bat", cls="Component",
+                          properties={"name": "bat",
+                                      "getter_script": "result = {'state': {'pct': 61, 'me': membrane.me}}",
+                                      "script_data": {"pct": 64}})
+        est.docs[e.eid] = e
+        r = _runner(lambda b: {}, lambda *a: "")
+        r.srv = type("S", (), {"entity_store": est, "events_pool": None, "efield": None})()
+        got = []
+
+        def read():
+            WA._getter_last_ts.clear()
+            n = len(got)
+            with mock.patch.object(J, "deliver", lambda *a, **k: got.append(a)):
+                J.dispatch(r, "s", "entity_read", {"spec": "Component:bat"}, "c1", lambda a: "stored")
+                _wait(lambda: len(got) > n, s=1.5)
+        read()
+        self.assertTrue(got)
+        body = got[0][4]
+        self.assertIn("pct: 64 -> 61", body)
+        self.assertNotIn("object at 0x", body)
+        self.assertNotIn("_Me", body)
+        sd = est.docs[e.eid].properties["script_data"]
+        self.assertEqual(sd["me"], e.eid)              # the readable stand-in: the entity id
+        json.dumps(sd)                                 # the stored values stay json-safe
+        read()                                         # the same handle again is no news
+        self.assertEqual(len(got), 1, got[1:] and got[1][4])
+
     def test_a_script_that_cant_compile_is_refused_at_the_door(self):
         est = EntityStore(path=str(Path(tempfile.mkdtemp()) / "e.json"), shared=False)
         e = QuantumEntity(eid=MEMBRANE_NS + "Component:d", cls="Component", properties={"name": "d"})

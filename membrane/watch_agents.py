@@ -1578,6 +1578,14 @@ def entity_read_back(srv, ent, force: bool = False, by: str = "model") -> dict:
     applied = apply_entity_update(srv, ent, out, trigger="getter")
     state = out.get("state")
     if isinstance(state, dict):
+        # THE READING IS DATA (#152): the getter's state lands in script_data
+        # raw -- a helper handle (state['me'] = membrane.me) rode in as a live
+        # object, its '<..._Me object at 0x..>' repr surfaced in the job's
+        # "fresh values" diff, and a new address every fire read as a change.
+        # The same json-safe screen as the patch lane: what is stored is what
+        # persists, compares and renders.
+        from .entities import json_safe as _json_safe
+        state = {str(k): _json_safe(v) for k, v in state.items()}   # every key kept
         # STEP 0 of the generalization plan: the reading is experience --
         # a field event about this entity (its own values), and the ring
         try:
