@@ -112,11 +112,36 @@ def test_the_frame_carries_no_vectors_and_no_text():
     walk(f)
 
 
-def test_no_projection_open_no_frame():
+def test_no_projection_open_the_numbers_still_go_out():
+    # the switches' bar updates live from these, viewer open or not
     srv, hub = _seat(with_projection=False)
     SL.cycle(srv, now=1000.0)
     srv._field_pulse.beat()
-    assert _self_frames(hub) == []
+    frames = _self_frames(hub)
+    assert len(frames) == 1
+    assert frames[0]["pid"] is None and "points" not in frames[0]
+    for k in ("rung", "bar", "skill", "mode", "waiting_on", "next", "cycles", "held"):
+        assert k in frames[0]
+
+
+def test_the_frame_tells_the_switch_what_the_bar_waits_on():
+    srv, hub = _seat()
+    SL.cycle(srv, now=1000.0)
+    srv._field_pulse.beat()
+    f = _self_frames(hub)[0]
+    st = SL.status(srv)
+    assert f["waiting_on"] == st["waiting_on"] and f["cycles"] == st["cycles"]
+
+
+def test_the_home_bar_has_the_self_switch_where_the_star_was():
+    ui = Path(__file__).resolve().parent.parent / "membrane" / "ui"
+    home = (ui / "home.js").read_text()
+    assert '<button class="selfbtn"' in home
+    assert 'class="start"' not in home                 # the star (HA's default-dashboard pin) is gone
+    assert "_toggleSelf()" in home and "_selfView()" in home
+    panel = (ui / "panel.js").read_text()
+    assert "_selfView() {" in panel
+    assert 'ev.type === "self.cycle"' in panel          # the bar moves with each cycle
 
 
 def test_the_frame_drains():

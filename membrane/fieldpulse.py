@@ -20,7 +20,9 @@ hub, about once a second:
   mind.dreamer  {goal}               the dreamer steers by a goal
   self.cycle    {pid, points, ...}   the self loop's latest cycle (#161), its
                                      points placed into each cached projection:
-                                     from / intent / expected / at / pull
+                                     from / intent / expected / at / pull (with
+                                     no projection open: pid null, numbers only
+                                     -- the 🌱 switches' bar still moves)
 
 NO MESSAGE TEXT rides any frame (ids, kinds, tool names only): the HA relay
 shows them to admins whatever session they came from.
@@ -274,12 +276,15 @@ class FieldPulse:
                     out.append({"type": "field.moved", "pid": pid, "moves": moves})
         if selfc is not None:
             pts, stats = selfc
-            for pid, proj in list((getattr(self.srv, "_field3d", None) or {}).items()):
+            projs = list((getattr(self.srv, "_field3d", None) or {}).items())
+            for pid, proj in projs:
                 try:
                     placed = {k: proj.place(v) for k, v in pts.items() if v is not None}
                 except Exception:
                     continue
                 out.append({"type": "self.cycle", "pid": pid, "points": placed, **stats})
+            if not projs:
+                out.append({"type": "self.cycle", "pid": None, **stats})
         out += mind
         return out
 

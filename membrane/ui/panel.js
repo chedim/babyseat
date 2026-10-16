@@ -1556,6 +1556,13 @@ function definePanel() {
         this._sesTimer = setTimeout(() => this._listSessions().catch(() => {}), 400);
       }
       if (ev.type === "membrane.seat") this._loadSeat();          // the seat's own events: its state moved
+      if (ev.type === "self.cycle" && this._seat) {               // #161: the bar moves with each cycle
+        const s = Object.assign({}, this._seat.self || {});
+        for (const k of ["rung", "rung_name", "bar", "skill", "mode", "slipping", "waiting_on", "next", "cycles", "held"]) if (k in p) s[k] = p[k];
+        s.born = true;
+        this._seat = Object.assign({}, this._seat, { self: s });
+        this._paintSeat();
+      }
       if (ev.type === "membrane.name") this._applySeatName(p.name);   // issue #6: the name was adopted
       if (ev.type === "membrane.jsexec") this._jsRun(p.job).catch(() => {});
       if (ev.type === "membrane.listen" && sid === (this._chat && this._chat.sid)) {
@@ -1961,6 +1968,9 @@ function definePanel() {
       if (r.ok && r.data && r.data.state) { this._seat = r.data.state; this._paintSeat(); }
       else this._err(this._apiErr("pause failed (HA admins only)", r));
     }
+
+    /** The 🌱 switch's face (home.js's top bar paints it from here too). */
+    _selfView() { return selfView(this._seat); }
 
     async _toggleSelf() {
       const next = selfNext(this._seat);

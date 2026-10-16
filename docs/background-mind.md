@@ -167,7 +167,8 @@ with a measured pass test; a rung opens by itself when its test passes. This
 section covers what is built (`membrane/self_loop.py`).
 
 - **Rung 0, sleep and wake.** A per-seat switch, off / on / watch, **off by
-  default**. Only the operator flips it: the panel's 🌱 button →
+  default**. Only the operator flips it: the 🌱 button (the home top bar, and
+  the chat's side menu) →
   `POST /membrane/seat/control {"self": ...}` (`seat_panel.control`). Off runs
   nothing and erases nothing. The mode (`<data dir>/self/mode.json`) and the
   record survive a restart. `watch` runs like `on` until there is a
@@ -214,6 +215,8 @@ section covers what is built (`membrane/self_loop.py`).
   - It can go down: a passed rung stays on the record, and the bar shows it
     slipping while its test fails.
   - Only the cycles' recorded gaps feed it.
+  - It moves with each cycle: every cycle's `self.cycle` frame carries the
+    numbers, viewer open or not.
 
 ## Kill switches (one per organ)
 
