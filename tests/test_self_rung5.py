@@ -125,6 +125,15 @@ def test_a_coin_flip_thing_never_shifts(monkeypatch):
     assert not _kind(srv, "shift")
 
 
+def test_rung5_skill_is_the_share_of_the_two_shifts_not_a_raw_count():
+    # skill is 0..1 like the other rungs: of the two world-changes the audit
+    # probes (went still, moves again), how many has it noticed. 2 shifts -> 1.0,
+    # not the raw 2.0 that leaked into the chooser's "skill" as a counter.
+    assert SL._rung5([])["skill"] == 0.0
+    assert SL._rung5([{"kind": "shift"}, {"kind": "shift"}])["skill"] == 1.0
+    assert SL._rung5([{"kind": "shift"}] * 5)["skill"] == 1.0   # capped, not a running count
+
+
 def test_rung_five_opens_after_the_blind_audit(monkeypatch):
     monkeypatch.setattr(SL, "PATIENCE_MAX_S", 60.0)     # a still thing is looked at again within a minute
     monkeypatch.setattr(SL, "_read_entity", _Coins({"mover": 0.95, "half": 0.5}))

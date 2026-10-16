@@ -103,6 +103,7 @@ AUDIT5_LOOKS = 5            # self's looks at the thing in each phase of rung 5'
 AUDIT5_PAUSE_S = 3600.0     # the phases' caps (an audit that runs out is inconclusive)
 AUDIT5_RESUME_S = 3 * 3600.0
 RUNG5_LOOKS = 20            # looks with noticing on before the test reads the audit
+RUNG5_SHIFTS = 2            # the two shifts its audit probes (went still, moves again)
 
 _lock = threading.RLock()
 _ctx = threading.local()    # the cycle in flight: only the loop's own thread has one
@@ -1048,12 +1049,14 @@ def _rung4(recs: list[dict], tempo: dict | None = None) -> dict:
 
 def _rung5(recs: list[dict], tempo: dict | None = None) -> dict:
     """Notice the world changed: enough looks with noticing on, then the
-    blind audit (went still during the pause, moves again after it)."""
+    blind audit (went still during the pause, moves again after it). Its skill
+    is the share of those two shifts it has noticed, 0..1 like the other rungs."""
     looks = sum(1 for r in recs if r.get("watch5"))
     ends = [r for r in recs if r.get("kind") == "audit" and r.get("rung") == 5 and r.get("phase") == "end"]
     ok = any(r.get("passed") is True for r in ends)
     crit = {"looks": min(1.0, looks / RUNG5_LOOKS), "audit": 1.0 if ok else 0.0}
-    return {"crit": crit, "skill": float(len([r for r in recs if r.get("kind") == "shift"])),
+    shifts = len([r for r in recs if r.get("kind") == "shift"])
+    return {"crit": crit, "skill": min(1.0, shifts / RUNG5_SHIFTS),
             "passed": all(v >= 1.0 for v in crit.values())}
 
 
