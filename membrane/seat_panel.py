@@ -15,7 +15,8 @@ uptime and a beat count, nothing else). The seat's presence entity
   controls  applied by the seat itself, operator-only (POST
             /membrane/seat/control, an HA admin through the relay):
             paused (the one switch every acting lane honours), loops_max,
-            and auto-chat / role per session. Argus READS all of it; an
+            auto-chat / role per session, and the self loop (off / on /
+            watch, #161; self_loop.py). Argus READS all of it; an
             edit of these properties by a lane is not a control (the
             refresh writes the truth back) -- the stable point stays the
             operator's call, and he can never lift his own limits.
@@ -31,7 +32,7 @@ REFRESH_S = 15.0
 EVENTS_KEEP = 20
 MEM_LOW_MB = 350             # the phone's MemAvailable under this: pressure
 RSS_HIGH_MB = 2300           # the seat itself over this: pressure
-CONTROLS = ("paused", "loops_max", "auto", "role")
+CONTROLS = ("paused", "loops_max", "auto", "role", "self")
 
 
 def _est(srv):
@@ -163,8 +164,17 @@ def state(srv) -> dict:
         "stream_clients": len(getattr(hub, "_subs", []) or []) if hub is not None else 0,
         "failing_scripts": failing,
         "battery": battery(),
+        "self": _self_status(srv),
         "ts": time.time(),
     }
+
+
+def _self_status(srv) -> dict:
+    try:
+        from . import self_loop as _SELF
+        return _SELF.status(srv)
+    except Exception:
+        return {"mode": "off"}
 
 
 def note(srv, kind: str, **detail) -> None:
@@ -245,6 +255,12 @@ def control(srv, body: dict, by: str = "operator") -> dict:
             note(srv, "loops-cap", value=n, by=by)
         except (TypeError, ValueError):
             pass
+    if "self" in body:                             # #161: the self loop's switch (off / on / watch)
+        from . import self_loop as _SELF
+        m = str(body["self"] or "")
+        if _SELF.set_mode(srv, m, by=by):
+            done["self"] = m
+            note(srv, "self", value=m, by=by)
     sid = str(body.get("session") or "")
     if sid and r is not None and r.sessions.get(sid) is not None:
         if body.get("role"):

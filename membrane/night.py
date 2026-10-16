@@ -919,6 +919,12 @@ def run_command_entity(fld, est, mem, command: str,
             from . import llm as _LLM
             _r = _LLM.from_command(cmd[len("llm::call"):].strip())
             rc, text = _r["rc"], _r["text"]
+        elif cmd.startswith("self::"):
+            # THE SELF LOOP (#161, self_loop.py): its methods run only in its
+            # own loop, never a shell -- any other caller is refused
+            from . import self_loop as _SELF
+            _r = _SELF.from_command(cmd[len("self::"):].strip())
+            rc, text = _r["rc"], _r["text"]
         elif cmd.startswith("seat::restart"):
             # ARGUS RESTARTS THE SEAT (restarts.py): never a shell
             from . import restarts as _RS
@@ -2321,7 +2327,7 @@ def substitute_args(cmd: str, args: dict | None) -> str:
 
 
 _NO_SHELL = ("llm::unwake", "llm.unwake", "llm::wake", "llm.wake",
-             "llm::call", "seat::restart", "js::")
+             "llm::call", "seat::restart", "js::", "self::")
 
 def _is_no_shell(act: str) -> bool:
     """The no-shell builtin dialects (the elif chain above in
