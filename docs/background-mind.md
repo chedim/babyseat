@@ -182,7 +182,9 @@ section covers what is built (`membrane/self_loop.py`).
   reading, a tick) nudges the current but can't flip it. `expect` says beforehand where it will
   end up: its own step plus the push it has learned to expect there. It
   learns that push from its own moves as `push ≈ b − g·position`, kept in its
-  `script_data`. `notice` sees where it actually ended up. **The gap is the
+  own model file (`<data dir>/self/model.json`; its `script_data` shows the
+  learned pull strength only, because entity properties cap lists at 128 items
+  on save). `notice` sees where it actually ended up. **The gap is the
   signal:** it closes as self learns the current and reopens when the
   conversation turns.
   - The test: over the last 20 pushed cycles, `1 − gap/naive ≥ 0.5`, where

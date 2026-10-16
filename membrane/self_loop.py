@@ -13,8 +13,11 @@ other caller is refused: the LLM talks TO self, never AS it).
           self does not control. Where it meant to go and where it ended up
           differ by the push it did not account for. `expect` learns the
           current from its own moves -- where it is pulled to and how hard
-          (push ~ b - g*position, running estimates kept in its own
-          script_data) -- and the gap that is left is the signal: it closes
+          (push ~ b - g*position, running estimates kept in its own model
+          file, <data dir>/self/model.json: entity properties cap lists at
+          128 items on save, which once cut a 1024-d model and made self
+          forget its world at a restart) -- and the gap that is left is the
+          signal: it closes
           as the current is learned and reopens when the world changes (a
           topic shift). Rung 1 passes when experience measurably shrinks the
           gap against not accounting for the push at all.
@@ -111,6 +114,7 @@ def bind(srv) -> None:
             method_define(srv, est, None, None, on=ent.eid, method=meth, command=cmd)
     rt = _rt(srv)
     rt["mode"] = _load_mode(srv)
+    rt["model"] = _load_model(srv)
 
 
 def _rt(srv) -> dict:
@@ -175,6 +179,30 @@ def _read(srv) -> list[dict]:
     return out
 
 
+def _model_path(srv) -> Path | None:
+    d = _dir(srv)
+    return d / "model.json" if d is not None else None
+
+
+def _load_model(srv) -> dict | None:
+    p = _model_path(srv)
+    try:
+        m = json.loads(p.read_text()) if p is not None and p.exists() else None
+    except Exception:
+        m = None
+    return m if isinstance(m, dict) and m.get("mp") else None
+
+
+def _save_model(srv, m: dict) -> None:
+    p = _model_path(srv)
+    if p is None:
+        return
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(m))
+    os.replace(tmp, p)
+
+
 def mode(srv) -> str:
     return _rt(srv)["mode"]
 
@@ -220,23 +248,22 @@ def _current(srv):
 def _expect(srv, seed: str) -> dict:
     """Where I will end up: my own step, plus the push I have learned to expect here."""
     c = _ctx.cycle
-    ent = _entity(srv)
     c["intent"] = _unit(c["pos"] + STEP * _seed_dir(seed, len(c["pos"])))
-    c["expected"] = _unit(c["intent"] + _expected_push(ent, c["pos"]))
+    c["expected"] = _unit(c["intent"] + _expected_push(srv, c["pos"]))
     return {"rc": 0, "text": "expected"}
 
 
-def _model(ent, dim: int) -> dict | None:
-    m = ((ent.properties or {}).get("script_data") or {}).get("current_model")
+def _model(srv, dim: int) -> dict | None:
+    m = _rt(srv).get("model")
     if not isinstance(m, dict) or len(m.get("mp") or []) != dim:
         return None
     return m
 
 
-def _expected_push(ent, pos) -> np.ndarray:
+def _expected_push(srv, pos) -> np.ndarray:
     """The push I expect here: push ~ b - g*pos, from the running means and
     the push/position covariance (no model yet: none)."""
-    m = _model(ent, len(pos))
+    m = _model(srv, len(pos))
     if m is None:
         return np.zeros_like(pos)
     mp, mw = np.asarray(m["mp"]), np.asarray(m["mw"])
@@ -265,7 +292,7 @@ def _notice(srv, seed: str) -> dict:
     p = c["pos"]
     pp = ent.properties or {}
     sd = dict(pp.get("script_data") or {})
-    m = _model(ent, len(got))
+    m = _model(srv, len(got))
     if m is None:
         m = {"mp": p, "mw": push, "cov": 0.0, "var": 0.0}
     else:
@@ -274,8 +301,12 @@ def _notice(srv, seed: str) -> dict:
         m = {"mp": mp, "mw": mw,
              "cov": (1 - LEARN) * float(m["cov"]) + LEARN * float((push - mw) @ (p - mp)),
              "var": (1 - LEARN) * float(m["var"]) + LEARN * float((p - mp) @ (p - mp))}
-    sd["current_model"] = {"mp": [float(x) for x in m["mp"]], "mw": [float(x) for x in m["mw"]],
-                           "cov": float(m["cov"]), "var": float(m["var"])}
+    m = {"mp": [float(x) for x in m["mp"]], "mw": [float(x) for x in m["mw"]],
+         "cov": float(m["cov"]), "var": float(m["var"])}
+    _rt(srv)["model"] = m
+    _save_model(srv, m)
+    sd.pop("current_model", None)            # the old home (cut to 128 items on save)
+    sd["pull"] = round(-m["cov"] / m["var"], 4) if m["var"] > 1e-9 else None
     pp["script_data"] = sd
     ent.properties = pp
     c["observed"] = got
@@ -370,10 +401,10 @@ def cycle(srv, now: float | None = None) -> dict | None:
     return rec
 
 
-def _pull(ent, dim: int):
+def _pull(srv, dim: int):
     """Where it has learned the current pulls: the fixed point of
     push ~ b - g*pos (b = mean push + g*mean position), or None."""
-    m = _model(ent, dim)
+    m = _model(srv, dim)
     if m is None or float(m.get("var") or 0.0) <= 1e-9:
         return None
     g = -float(m["cov"]) / float(m["var"])
@@ -392,7 +423,7 @@ def _show(srv, ent, pos, c, rec) -> None:
             return
         st = status(srv)
         fp.self_cycle({"from": pos, "intent": c["intent"], "expected": c["expected"],
-                       "at": c["observed"], "pull": _pull(ent, len(pos))},
+                       "at": c["observed"], "pull": _pull(srv, len(pos))},
                       {"n": rec["n"], "gap": rec["gap"], "naive": rec["naive"], "push": rec["push"],
                        "rung": st["rung"], "bar": st["bar"], "skill": st["skill"],
                        "mode": st["mode"], "slipping": st["slipping"], "waiting_on": st["waiting_on"],
@@ -426,8 +457,11 @@ def status(srv) -> dict:
     passed = [r["rung"] for r in recs if r.get("kind") == "rung"]
     rung = max(passed) if passed else 0
     r1 = _rung1(recs)
-    if _current(srv) is None and not any(r.get("kind") == "cycle" for r in recs):
-        bar, waiting = 0.0, "the world"
+    if rt["mode"] != "off" and _current(srv) is None:
+        # no current right now (a fresh boot: nobody has spoken yet) -- say
+        # so, or the switch reads "on" over a loop that is rightly idle
+        r1c = r1["crit"]
+        bar, waiting = (min(r1c.values()) if any(r.get("kind") == "cycle" for r in recs) else 0.0), "the world"
     else:
         waiting = min(r1["crit"], key=r1["crit"].get)
         bar = r1["crit"][waiting]
