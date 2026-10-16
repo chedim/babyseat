@@ -364,7 +364,7 @@ def test_the_bar_fills_with_pushed_cycles_and_names_what_it_waits_on():
     _cycles(srv, SL.RUNG1_CYCLES // 2)
     st = SL.status(srv)
     assert st["rung"] == 0
-    assert 0.0 < st["bar"] <= 0.5 + 1e-9
+    assert 0.0 < st["bar"] < 1.0
     assert st["waiting_on"] in ("pushes", "skill")
 
 

@@ -246,11 +246,14 @@ section covers what is built (`membrane/self_loop.py`).
   The seat places the points into the open projection (`fieldpulse`'s
   `self.cycle` frame: cube coordinates and numbers, never vectors or text).
 - **The exp bar.** The panel shows the rung and a bar toward the next one.
-  - The bar is the **weakest** criterion of the next rung's test, named
-    ("waiting on: skill").
+  - The next rung's criteria are **stages, in order** (rung 1: pushes, then
+    skill; rung 2: reaches, skill, the audit). The bar fills through them,
+    each stage an equal share, and names the first one not yet met ("waiting
+    on: reaches"). A plain weakest-criterion bar sat at 0% on the live seat
+    while reaches piled up.
   - It can go down: a passed rung stays on the record, and the bar shows it
     slipping while its test fails.
-  - Only the cycles' recorded gaps feed it.
+  - Only the recorded cycles, reaches and audits feed it.
   - It moves with each cycle: every cycle's `self.cycle` frame carries the
     numbers, viewer open or not.
 
