@@ -198,6 +198,16 @@ section covers what is built (`membrane/self_loop.py`).
   `PACE_S` apart (`MEMBRANE_SELF_PACE_S`, default 10 s, floor 1 s) and at
   most 30 a minute. Three failed cycles in a row hold the loop until the
   operator's next toggle. A paused seat runs nothing.
+- **On the viewer.** Each cycle is drawn in the 3D field viewer as an amoeba:
+  - **green**: from where it started to where it meant to go (its own push);
+  - **orange**: on to where it ended up (the world's push);
+  - **red**: the gap from where it expected to end up (brighter when it is
+    surprised);
+  - **violet**: where it has learned the current pulls;
+  - its trail.
+
+  The seat places the points into the open projection (`fieldpulse`'s
+  `self.cycle` frame: cube coordinates and numbers, never vectors or text).
 - **The exp bar.** The panel shows the rung and a bar toward the next one.
   - The bar is the **weakest** criterion of the next rung's test, named
     ("waiting on: skill").
