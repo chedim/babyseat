@@ -254,6 +254,19 @@ section covers what is built (`membrane/self_loop.py`).
 
   (A skill-against-the-average test can't work here: timed looks are, by
   design, all predicted around 60%.)
+- **Rung 5, notice the world changed.** After each look, self reads its last
+  3–5 looks at a thing against its long memory of it. When they are both far
+  from it (by more than 0.4) and unlikely under it (binomial tail below 0.01),
+  the world changed: it records a **shift** ("went still" or "moves again")
+  and re-learns from those looks. Its patience refits from the shift on.
+  - A coin-flip thing never shifts: five in a row is p = 0.06.
+  - A mover going quiet is caught within 3 looks.
+  - **The blind audit:** membrane pauses the surest mover while self looks at
+    it 5 times, then restarts it for 5 more. Self isn't told, and here it
+    *does* learn, since re-learning is the point.
+  - **Pass:** "went still" during the pause and "moves again" after it. The
+    phases are capped at 1 h and 3 h; a still thing is looked at rarely, by
+    rung 4's patience.
 - **Its methods run only in its own loop.** `try` / `expect` / `notice` are
   cliffhanger methods (`self::` no-shell dialect), and so is `reach`. `exec inspect` shows them;
   any other caller, the model included, is refused. The LLM talks *to* self,

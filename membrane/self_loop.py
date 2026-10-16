@@ -61,7 +61,7 @@ METHODS = {
 RUNG_NAMES = {0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart",
               4: "patience", 5: "notice the world changed", 6: "meet an other",
               7: "understand an other", 8: "recognize itself", 9: "change itself", 10: "speak"}
-LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4)}          # the rungs built so far
+LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4, 5)}          # the rungs built so far
 
 try:
     PACE_S = max(1.0, float(os.environ.get("MEMBRANE_SELF_PACE_S") or 10.0))
@@ -92,6 +92,13 @@ PATIENCE_MAX_S = 1800.0     # never wait longer than this
 RUNG4_TIMED = 30            # timed looks before the test reads them
 RUNG4_CALIB = 0.1           # its predictions must match the outcomes within this
 WAIT_EVERY = 30             # a waiting stretch is recorded once per this many cycles
+SHIFT_WINDOWS = (3, 4, 5)   # recent looks read against the long memory
+SHIFT_P = 0.01              # ...a shift when they are this unlikely under it
+SHIFT_GAP = 0.4             # ...and this far from it
+AUDIT5_LOOKS = 5            # self's looks at the thing in each phase of rung 5's audit
+AUDIT5_PAUSE_S = 3600.0     # the phases' caps (an audit that runs out is inconclusive)
+AUDIT5_RESUME_S = 3 * 3600.0
+RUNG5_LOOKS = 20            # looks with noticing on before the test reads the audit
 
 _lock = threading.RLock()
 _ctx = threading.local()    # the cycle in flight: only the loop's own thread has one
@@ -595,7 +602,8 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
         eid = rng.choice(targets)
     last = (_tempo(srv).get(eid) or {}).get("last")
     au = _rt(srv).get("audit")
-    inside = bool(au and au["eid"] == eid)
+    inside = bool(au and au.get("rung", 2) == 2 and au["eid"] == eid)
+    in5 = bool(au and au.get("rung") == 5 and au["eid"] == eid)
     from .night import method_call
     _ctx.cycle = {"srv": srv, "act": "reach", "eid": eid, "audit": inside, "now": now,
                   "lam": lam, "dt": (now - float(last)) if last is not None else None}
@@ -632,17 +640,29 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
         if c["answer"] != "none":
             au["reaches"] += 1
             au["changes"] += int(c["answer"] == "changed")
+    watch = _available(srv, 5)
+    if watch:
+        rec["watch5"] = True
+    if in5:
+        rec["audit5"] = au["phase"]
+        if c["answer"] != "none":
+            au["looks"] += 1
     _append(srv, rec)
+    if watch and c["answer"] != "none" and not inside:
+        _shift_check(srv, eid, now)
     _audit_tick(srv, now)
+    _audit5_tick(srv, now)
 
 
 def _lam(recs: list[dict], eid: str) -> float | None:
     """A thing's rate of change in time: the maximum-likelihood lambda for
     P(changed | dt) = 1 - exp(-lambda dt) over its last LAM_LOOKS answered
     looks (outside audits); None before it has any."""
+    since = _last_shift_ts(recs, eid)
     obs = [(float(r["dt"]), r["answer"] == "changed") for r in recs
            if r.get("kind") == "reach" and r.get("eid") == eid and not r.get("audit")
-           and r.get("answer") in ("changed", "unchanged") and r.get("dt")][-LAM_LOOKS:]
+           and r.get("answer") in ("changed", "unchanged") and r.get("dt")
+           and (since is None or r["ts"] > since)][-LAM_LOOKS:]
     if not obs:
         return None
     dt = np.array([o[0] for o in obs])[None, :]
@@ -651,6 +671,90 @@ def _lam(recs: list[dict], eid: str) -> float | None:
     p = np.clip(1.0 - np.exp(-lam * dt), 1e-9, 1 - 1e-9)
     ll = (ch * np.log(p) + (1 - ch) * np.log(1 - p)).sum(axis=1)
     return float(LAM_GRID[int(np.argmax(ll))])
+
+
+def _last_shift_ts(recs: list[dict], eid: str):
+    return next((r["ts"] for r in reversed(recs) if r.get("kind") == "shift" and r.get("eid") == eid), None)
+
+
+def _tail(p: float, w: int, k: int) -> float:
+    """The chance of a window at least this far out under the long memory:
+    P(X >= k) when it came out high, P(X <= k) when low; X ~ Binomial(w, p)."""
+    import math
+    pmf = [math.comb(w, i) * p ** i * (1 - p) ** (w - i) for i in range(w + 1)]
+    return sum(pmf[k:]) if k / w > p else sum(pmf[:k + 1])
+
+
+def _shift_check(srv, eid: str, now: float) -> None:
+    """RUNG 5's noticing: are my last few looks at this thing both far from and
+    unlikely under my long memory of it? Then the world changed: record the
+    shift and re-learn from those looks."""
+    recs = _read(srv)
+    since = _last_shift_ts(recs, eid)
+    looks = [r["answer"] == "changed" for r in recs
+             if r.get("kind") == "reach" and r.get("eid") == eid and not r.get("audit")
+             and r.get("answer") in ("changed", "unchanged") and (since is None or r["ts"] > since)]
+    t = _tempo(srv).get(eid) or {}
+    C, A = float(t.get("changed", 0)), float(t.get("answered", 0))
+    for w in SHIFT_WINDOWS:
+        if len(looks) < w or A - w < 1:
+            continue
+        k = sum(looks[-w:])
+        p = (C - k + 0.5) / (A - w + 1.0)            # the long memory, without the window
+        if abs(k / w - p) > SHIFT_GAP and _tail(p, w, k) < SHIFT_P:
+            _append(srv, {"ts": now, "kind": "shift", "eid": eid, "was": round(p, 3),
+                          "now": round(k / w, 3), "looks": w})
+            t.update({"changed": k, "answered": w})  # re-learn from the looks that showed it
+            _save_json(srv, "tempo.json", _tempo(srv))
+            au = _rt(srv).get("audit")
+            if au and au.get("rung") == 5 and au["eid"] == eid:
+                au["shifts"].append({"phase": au["phase"], "down": k / w < p, "at": au["looks"]})
+            return
+
+
+def _audit5_tick(srv, now: float) -> None:
+    """RUNG 5'S BLIND AUDIT (stop the source, then restart it): a moving
+    thing's getter is paused while self looks at it AUDIT5_LOOKS times, then
+    restarted for AUDIT5_LOOKS more. Self isn't told -- and here it DOES learn
+    (re-learning is the point). It passes if self flagged "went still" during
+    the pause and "moves again" after it."""
+    from . import watch_agents as _WA
+    rt = _rt(srv)
+    au = rt.get("audit")
+    if au is not None:
+        if au.get("rung") != 5:
+            return
+        if au["phase"] == "pause" and (au["looks"] >= AUDIT5_LOOKS or time.time() >= au["until"]):
+            _WA.unpause_getter(au["eid"])
+            au.update({"phase": "resume", "paused_looks": au["looks"], "looks": 0,
+                       "until": time.time() + AUDIT5_RESUME_S})
+            _append(srv, {"ts": now, "kind": "audit", "rung": 5, "phase": "resume", "eid": au["eid"]})
+        elif au["phase"] == "resume":
+            again = any(not s["down"] for s in au["shifts"] if s["phase"] == "resume" and s["at"] <= AUDIT5_LOOKS)
+            if again or au["looks"] >= AUDIT5_LOOKS or time.time() >= au["until"]:
+                still = any(s["down"] for s in au["shifts"] if s["phase"] == "pause" and s["at"] <= AUDIT5_LOOKS)
+                full = au["paused_looks"] >= AUDIT5_LOOKS and (again or au["looks"] >= AUDIT5_LOOKS)
+                rt["audit"] = None
+                _append(srv, {"ts": now, "kind": "audit", "rung": 5, "phase": "end", "eid": au["eid"],
+                              "still": still, "again": again,
+                              "passed": (still and again) if full else None})
+        return
+    if not _available(srv, 5):
+        return
+    recs = _read(srv)
+    if any(r.get("kind") == "audit" and r.get("rung") == 5 and r.get("phase") == "end"
+           and r.get("passed") is True for r in recs):
+        return
+    if sum(1 for r in recs if r.get("watch5")) < RUNG5_LOOKS:
+        return
+    moving = [e for e, k in _kinds(recs).items() if k == "moving"]
+    if not moving:
+        return
+    eid = max(sorted(moving), key=lambda e: _p_changed(srv, e))   # the surest mover: its stop is unmistakable
+    until = time.time() + AUDIT5_PAUSE_S
+    _WA.pause_getter(eid, until)
+    rt["audit"] = {"rung": 5, "eid": eid, "phase": "pause", "looks": 0, "until": until, "shifts": []}
+    _append(srv, {"ts": now, "kind": "audit", "rung": 5, "phase": "pause", "eid": eid})
 
 
 def _due(srv, recs, targets, kinds, now, rng):
@@ -685,6 +789,8 @@ def _audit_tick(srv, now: float) -> None:
     from . import watch_agents as _WA
     rt = _rt(srv)
     au = rt.get("audit")
+    if au is not None and au.get("rung", 2) != 2:
+        return                             # another rung's audit holds the slot
     if au is not None:
         done = au["reaches"] >= AUDIT_REACHES
         if done or time.time() >= au["until"]:
@@ -864,7 +970,18 @@ def _rung4(recs: list[dict], tempo: dict | None = None) -> dict:
     return {"crit": crit, "skill": round(news, 4), "passed": all(v >= 1.0 for v in crit.values())}
 
 
-PROGRESS = {1: _rung1, 2: _rung2, 3: _rung3, 4: _rung4}       # rung -> its test over the record
+def _rung5(recs: list[dict], tempo: dict | None = None) -> dict:
+    """Notice the world changed: enough looks with noticing on, then the
+    blind audit (went still during the pause, moves again after it)."""
+    looks = sum(1 for r in recs if r.get("watch5"))
+    ends = [r for r in recs if r.get("kind") == "audit" and r.get("rung") == 5 and r.get("phase") == "end"]
+    ok = any(r.get("passed") is True for r in ends)
+    crit = {"looks": min(1.0, looks / RUNG5_LOOKS), "audit": 1.0 if ok else 0.0}
+    return {"crit": crit, "skill": float(len([r for r in recs if r.get("kind") == "shift"])),
+            "passed": all(v >= 1.0 for v in crit.values())}
+
+
+PROGRESS = {1: _rung1, 2: _rung2, 3: _rung3, 4: _rung4, 5: _rung5}       # rung -> its test over the record
 
 
 def _passed(recs: list[dict]) -> set:
