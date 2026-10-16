@@ -98,7 +98,7 @@ RUNG4_TIMED = 30            # timed looks before the test reads them
 RUNG4_CALIB = 0.1           # its predictions must match the outcomes within this
 WAIT_EVERY = 30             # a waiting stretch is recorded once per this many cycles
 SHIFT_WINDOWS = (3, 4, 5)   # recent looks read against the long memory
-SHIFT_P = 0.01              # ...a shift when they are this unlikely under it
+SHIFT_P = 0.02              # ...a shift when they are this unlikely under it
 SHIFT_GAP = 0.4             # ...and this far from it
 AUDIT5_LOOKS = 5            # self's looks at the thing in each phase of rung 5's audit
 AUDIT5_PAUSE_S = 3600.0     # the phases' caps (an audit that runs out is inconclusive)
@@ -805,7 +805,8 @@ def _lam(recs: list[dict], eid: str) -> float | None:
     looks (outside audits); None before it has any."""
     since = _last_shift_ts(recs, eid)
     obs = [(float(r["dt"]), r["answer"] == "changed") for r in recs
-           if r.get("kind") == "reach" and r.get("eid") == eid and not r.get("audit")
+           if r.get("kind") == "reach" and r.get("eid") == eid
+           and not r.get("audit") and not r.get("audit5")
            and r.get("answer") in ("changed", "unchanged") and r.get("dt")
            and (since is None or r["ts"] > since)][-LAM_LOOKS:]
     if not obs:
@@ -1055,7 +1056,7 @@ def _kinds(recs: list[dict], window: int = RUNG3_WINDOW) -> dict:
     unknown, before KIND_MIN looks."""
     by: dict[str, list] = {}
     for r in recs:
-        if r.get("kind") == "reach" and not r.get("audit"):
+        if r.get("kind") == "reach" and not r.get("audit") and not r.get("audit5"):
             by.setdefault(r["eid"], []).append(r["answer"])
     out = {}
     for eid, ans in by.items():
@@ -1079,7 +1080,7 @@ def _kind_rate(recs: list[dict], window: int = RUNG3_WINDOW) -> dict:
     what the two halves must agree on (a look's drift is not a new kind)."""
     by: dict[str, list] = {}
     for r in recs:
-        if r.get("kind") == "reach" and not r.get("audit"):
+        if r.get("kind") == "reach" and not r.get("audit") and not r.get("audit5"):
             by.setdefault(r["eid"], []).append(r["answer"])
     out = {}
     for eid, ans in by.items():

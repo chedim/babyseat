@@ -179,3 +179,48 @@ def test_the_limit_holds_rung_five(monkeypatch):
     _run(srv, 40, t0=t)
     assert not _kind(srv, "shift")
     assert not [a for a in _kind(srv, "audit") if a.get("rung") == 5]
+
+
+def test_a_stopped_mover_at_the_audits_floor_is_noticed():
+    # a mover at ~58% (the audit's own floor) that goes still: five unchanged
+    # looks must read as "went still", not be written off as ordinary noise.
+    # SHIFT_P was too strict for it -- the tail is 0.011, just past 0.01.
+    eid = MEMBRANE_NS + "Component:mover"
+    srv = _seat(("mover",), limit=4)
+    SL._tempo(srv)[eid] = {"changed": 165, "answered": 284}
+    for i in range(5):
+        SL._append(srv, {"ts": 2000.0 + i, "kind": "reach", "eid": eid,
+                         "answer": "unchanged", "p": 0.5, "why": "heard"})
+    SL._shift_check(srv, eid, 2005.0)
+    shifts = _kind(srv, "shift")
+    assert len(shifts) == 1 and shifts[0]["now"] < shifts[0]["was"]
+
+
+def test_the_rate_fit_ignores_the_blind_audits_staged_looks():
+    # rung 5's pause answers "unchanged" because the getter is paused, not
+    # because the thing slowed; feeding those into _lam collapsed the fit and
+    # paced self's looks out to PATIENCE_MAX_S, so the audit never finished.
+    eid = MEMBRANE_NS + "Component:mover"
+    recs = []
+    t = 1000.0
+    for _ in range(5):
+        recs.append({"ts": t, "kind": "reach", "eid": eid, "answer": "changed", "dt": 1.0})
+        t += 1.0
+    for _ in range(25):
+        recs.append({"ts": t, "kind": "reach", "eid": eid, "answer": "unchanged",
+                     "dt": 1.0, "audit5": "pause"})
+        t += 1.0
+    assert SL._lam(recs, eid) > 0.5
+
+
+def test_the_kind_survives_the_blind_audits_staged_looks():
+    # the pause's staged "unchanged" looks must not flip a mover's kind to
+    # intermittent, or the next audit has no mover to stop.
+    eid = MEMBRANE_NS + "Component:mover"
+    recs = []
+    for i in range(40):
+        recs.append({"ts": 1000.0 + i, "kind": "reach", "eid": eid, "answer": "changed"})
+    for i in range(40):
+        recs.append({"ts": 1040.0 + i, "kind": "reach", "eid": eid, "answer": "unchanged",
+                     "audit5": "pause"})
+    assert SL._kinds(recs)[eid] == "moving"
