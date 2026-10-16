@@ -93,7 +93,9 @@ class TestArgusRestarts(unittest.TestCase):
         with mock.patch("os.kill") as kill, mock.patch("membrane.seat_panel.note"):
             out = RS.do_restart(srv, "nothing of mine in flight", delay_s=0)
             import time
-            time.sleep(0.2)
+            end = time.time() + 10                   # never leave the patch before the
+            while not kill.called and time.time() < end:   # thread's SIGTERM lands in it
+                time.sleep(0.01)
         self.assertEqual(out["rc"], 0)
         kill.assert_called_once()
         self.assertIn("Argus restarted it (nothing of mine in flight); it loads the staged score.py",
@@ -142,8 +144,12 @@ class TestARestartRestarts(unittest.TestCase):
 
     def test_do_restart_marks_the_restart_requested(self):
         srv = _Srv()
-        with mock.patch("os.kill"), mock.patch("membrane.seat_panel.note"):
+        # no thread at all: its SIGTERM is aimed at THIS process -- a patch
+        # that ends before the thread fires killed pytest on CI (exit 143)
+        with mock.patch.object(RS.threading, "Thread") as th, \
+             mock.patch("membrane.seat_panel.note"):
             RS.do_restart(srv, "staged fixes", delay_s=0)
+        th.return_value.start.assert_called_once()
         self.assertTrue(RS.RESTART["requested"])
 
     def test_a_requested_restart_reexecs_the_same_command(self):
