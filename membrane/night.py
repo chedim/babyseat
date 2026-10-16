@@ -4200,9 +4200,21 @@ def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
     NO mutators (the authorship covenant: scripts analyze + return
     results; the engine applies)."""
 
-    class _FieldAPI:
+    class _Helper:
+        """THE HELPERS SAY WHAT THEY ARE (#152): a script that hands its
+        handle back in a result (state['me'] = membrane.me) stored the
+        raw '<..._Me object at 0x..>' repr -- a new address every fire,
+        so every read reported it 'changed'. The json-safe screen str()s
+        a stranger; a helper's str is a stable, readable name."""
+        _name = "membrane"
+        def __repr__(self):
+            return f"<{self._name}>"
+        __str__ = __repr__
+
+    class _FieldAPI(_Helper):
         """Reads over the live entity field (degrade to [] / {} on any
         failure -- a script can never wedge recall)."""
+        _name = "membrane.field"
         def __init__(self):
             self._fld = getattr(srv, "efield", None)
         def recall(self, vec, k: int = 5):
@@ -4216,8 +4228,13 @@ def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
             except Exception:
                 return {}
 
-    class _Me:
+    class _Me(_Helper):
         """THIS entity: reads + the derived-geometry methods."""
+        _name = "membrane.me"
+        def __repr__(self):
+            return f"<membrane.me {self.eid}>"
+        def __str__(self):
+            return str(self.eid)     # the handle's readable stand-in: the entity id
         def __init__(self, e):
             self.eid = e.eid
             self.cls = e.cls
@@ -4249,8 +4266,9 @@ def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
             except Exception:
                 return []
 
-    class _Entities:
+    class _Entities(_Helper):
         """The symbolic layer, read-only."""
+        _name = "membrane.entities"
         def get(self, spec, run=False, **_ignored):
             """The entity as it stands; its getter fires in the background.
             run=True: the getter runs NOW and the fresh values come back (it
@@ -4303,8 +4321,9 @@ def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
                 return len(est.docs)
             return sum(1 for e in est.docs.values() if e.cls == cls)
 
-    class _Intents:
+    class _Intents(_Helper):
         """The steering wheel (open intentions, read-only)."""
+        _name = "membrane.intents"
         def __init__(self, ib):
             self._ib = ib
         def open(self):
@@ -4319,11 +4338,12 @@ def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
             except Exception:
                 return None
 
-    class _Timeline:
+    class _Timeline(_Helper):
         """membrane.timeline.walk (advertised since 10-02, never built -- the
         scripts calling it errored every fire): walk(n) = the open dreamed
         branches, newest first [{eid, terminal, steps, status}]; walk("text",
         n) = the field's token walk continuing that text (a list of words)."""
+        _name = "membrane.timeline"
         def walk(self, *args, limit=None, depth=None, steps=None, start=None, text=None, **_ignored):
             n = next((a for a in args if isinstance(a, int)), None) or limit or depth or steps or 4
             n = max(1, min(int(n), 12))
@@ -4347,7 +4367,7 @@ def _script_membrane_api(ent, srv, est, trigger: str, timeout: float,
                 pass
             return out
 
-    class _Membrane:
+    class _Membrane(_Helper):
         """The assembled read-only interface (field/me/entities/
         intents) + speak (the planner-gated voice)."""
         def __init__(self):
