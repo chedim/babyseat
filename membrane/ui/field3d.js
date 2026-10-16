@@ -660,6 +660,7 @@ class Field3DView {
     this._stepRings(now);
     this._stepEdgePulses(now);
     this._stepAvatars(dt);
+    this._stepSelf(now);
     if (this.showLabels && now - this._lastLabels > 180) { this._lastLabels = now; this._paintLabels(); }
     this.renderer.render(this.scene, this.camera);
     this._gaugeFrame(performance.now() - now);
@@ -997,6 +998,8 @@ class Field3DView {
         const m = this.meta[s];
         if (m) m.act = { kind: c.kind || "", brief: c.brief || "", t0: now };
       }
+    } else if (t === "self.cycle" && p.pid === this.pid) {
+      this._selfCycle(p, now);
     } else if (t === "field.born") {
       for (const id of p.eids || []) {
         const s = this.slots.get(id);
@@ -1042,6 +1045,90 @@ class Field3DView {
   avatarPos(agent) {
     const a = this.avatars.get(agent);
     return a ? a.pos.slice() : null;
+  }
+
+  /** THE SELF LOOP (#161) -- an amoeba in the field's space. Each cycle the seat
+   *  sends five placed points: where it started (from), where it MEANT TO GO
+   *  (its own step), where it EXPECTED to end up (its step + the push it has
+   *  learned), where it ENDED UP (the world's current pushed it), and where it
+   *  has learned THE CURRENT PULLS. Green: its own push; orange: the world's;
+   *  red: the gap (what it did not see coming); violet: its model of the current. */
+  _selfCycle(p, now) {
+    const THREE = this.THREE, pts = p.points || {};
+    if (!pts.at || !pts.from) return;
+    let a = this.amoeba;
+    if (!a) {
+      const c = document.createElement("canvas"); c.width = c.height = 64;
+      const g = c.getContext("2d"), grd = g.createRadialGradient(32, 32, 2, 32, 32, 30);
+      grd.addColorStop(0, "#fff"); grd.addColorStop(0.3, "#7cf0c8"); grd.addColorStop(1, "rgba(0,0,0,0)");
+      g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
+      const line = (color, opacity) => new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+        new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false }));
+      a = this.amoeba = {
+        pos: cubeToWorld(pts.from), tw: null, trail: [], last: p,
+        sprite: new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false })),
+        own: line(0x5ad17a, 0.9), world: line(0xffa94d, 0.9), gap: line(0xff5d5d, 0.9), pull: line(0xb48cff, 0.35),
+        ghosts: new THREE.Points(new THREE.BufferGeometry()
+          .setAttribute("position", new THREE.BufferAttribute(new Float32Array(9), 3))
+          .setAttribute("color", new THREE.BufferAttribute(new Float32Array([0.35, 0.82, 0.48, 1, 0.36, 0.36, 0.7, 0.55, 1]), 3)),
+          new THREE.PointsMaterial({ size: 9, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.95, depthWrite: false })),
+        trailLine: new THREE.Line(new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(new Float32Array(32 * 3), 3)),
+          new THREE.LineBasicMaterial({ color: 0x7cf0c8, transparent: true, opacity: 0.3 })),
+        tag: document.createElement("div"),
+      };
+      a.sprite.scale.set(40, 40, 1);
+      a.tag.style.cssText = "position:absolute;font:600 11px system-ui,sans-serif;color:#7cf0c8;text-shadow:0 1px 2px #000;white-space:nowrap";
+      a.tag.title = "self (#161): green = where it meant to go (its own push) · orange = where it ended up (the world pushed it) · "
+        + "red = the gap from where it expected to end up · violet = where it has learned the current pulls";
+      this.labelLayer.appendChild(a.tag);
+      this.scene.add(a.sprite, a.own, a.world, a.gap, a.pull, a.ghosts, a.trailLine);
+    }
+    const W = (q) => (q ? cubeToWorld(q) : null);
+    a.pts = { from: W(pts.from), intent: W(pts.intent), expected: W(pts.expected), at: W(pts.at), pull: W(pts.pull) };
+    a.tw = { from: a.pos.slice(), to: a.pts.at, t0: now, dur: 1500 };
+    a.trail.push(a.pts.at); if (a.trail.length > 32) a.trail.shift();
+    a.last = p; a.t0 = now;
+  }
+
+  _stepSelf(now) {
+    const a = this.amoeba;
+    if (!a || !a.pts) return;
+    if (a.tw) {
+      const u = Math.min(1, (now - a.tw.t0) / a.tw.dur), e = u * u * (3 - 2 * u);
+      a.pos = a.tw.from.map((v, i) => v + (a.tw.to[i] - v) * e);
+      if (u >= 1) a.tw = null;
+    }
+    const wob = 1 + 0.08 * Math.sin(now / 260) + 0.05 * Math.sin(now / 97);      // it is alive
+    a.sprite.position.set(a.pos[0], a.pos[1], a.pos[2]);
+    a.sprite.scale.set(40 * wob, 40 / wob, 1);
+    const seg = (ln, p, q) => {
+      ln.visible = !!(p && q);
+      if (!ln.visible) return;
+      const g = ln.geometry.attributes.position;
+      g.setXYZ(0, p[0], p[1], p[2]); g.setXYZ(1, q[0], q[1], q[2]); g.needsUpdate = true;
+    };
+    const P = a.pts;
+    seg(a.own, P.from, P.intent);          // where it meant to go
+    seg(a.world, P.intent, P.at);          // where it ended up: the world's push
+    seg(a.gap, P.expected, P.at);          // what it did not see coming
+    seg(a.pull, P.at, P.pull);             // where it has learned the current pulls
+    const L = a.last || {};
+    a.gap.material.opacity = 0.35 + 0.65 * Math.min(1, (L.gap || 0) / Math.max(1e-9, L.naive || 1e-9));
+    const gp = a.ghosts.geometry.attributes.position;
+    for (const [i, q] of [[0, P.intent], [1, P.expected], [2, P.pull]]) {
+      const v = q || a.pos;
+      gp.setXYZ(i, v[0], v[1], v[2]);
+    }
+    gp.needsUpdate = true;
+    const tp = a.trailLine.geometry.attributes.position;
+    for (let i = 0; i < 32; i++) { const q = a.trail[Math.max(0, a.trail.length - 32 + i)] || a.pos; tp.setXYZ(i, q[0], q[1], q[2]); }
+    tp.needsUpdate = true;
+    const sc = this._project(a.pos);
+    a.tag.style.display = sc ? "" : "none";
+    if (sc) a.tag.style.transform = "translate(" + (sc[0] + 14).toFixed(0) + "px," + (sc[1] - 6).toFixed(0) + "px)";
+    const skill = L.skill == null ? "" : " · skill " + Number(L.skill).toFixed(2);
+    a.tag.textContent = "self · rung " + (L.rung || 0) + " · " + Math.round(100 * (L.bar || 0)) + "%" + skill
+      + (L.slipping ? " · slipping" : "") + (L.mode === "watch" ? " · watched" : "");
   }
 
   _avatar(agent) {

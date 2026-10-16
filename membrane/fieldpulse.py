@@ -18,6 +18,9 @@ hub, about once a second:
   mind.touch    {agent, eid, tool}   a tool call named an entity
   mind.thinker  {kind, about}        the thinker chewed something
   mind.dreamer  {goal}               the dreamer steers by a goal
+  self.cycle    {pid, points, ...}   the self loop's latest cycle (#161), its
+                                     points placed into each cached projection:
+                                     from / intent / expected / at / pull
 
 NO MESSAGE TEXT rides any frame (ids, kinds, tool names only): the HA relay
 shows them to admins whatever session they came from.
@@ -67,6 +70,7 @@ class FieldPulse:
         self._watch: list = []
         self._moved: dict[str, list] = {}
         self._mind: list = []
+        self._self: tuple | None = None        # (points {name: vec}, stats) -- the latest cycle
         self._slots: dict[str, str] = {}       # loop agent -> loop-N
         self._sids: dict[str, str] = {}        # loop-N -> its (last) session: membrane home opens it
         self._dreams = collections.deque(maxlen=40)   # the dreamer's picks (text stays off the frames)
@@ -113,6 +117,12 @@ class FieldPulse:
         with self._lock:
             if len(self._moved) < MAX_EIDS:
                 self._moved[eid] = vec
+
+    def self_cycle(self, points: dict, stats: dict) -> None:
+        """#161: the self loop's cycle (last write wins); the beat places
+        its points into every cached projection."""
+        with self._lock:
+            self._self = (dict(points), dict(stats))
 
     def changed(self, eid: str, kind: str, brief: str = "") -> None:
         """A script apply or edit changed an entity: pulse it on the graph
@@ -237,6 +247,7 @@ class FieldPulse:
             watch, self._watch = self._watch, []
             moved, self._moved = self._moved, {}
             mind, self._mind = self._mind, []
+            selfc, self._self = self._self, None
         out = []
         if applied:
             out.append({"type": "field.applied", "eids": sorted(applied),
@@ -261,6 +272,14 @@ class FieldPulse:
                             pass
                 if moves:
                     out.append({"type": "field.moved", "pid": pid, "moves": moves})
+        if selfc is not None:
+            pts, stats = selfc
+            for pid, proj in list((getattr(self.srv, "_field3d", None) or {}).items()):
+                try:
+                    placed = {k: proj.place(v) for k, v in pts.items() if v is not None}
+                except Exception:
+                    continue
+                out.append({"type": "self.cycle", "pid": pid, "points": placed, **stats})
         out += mind
         return out
 

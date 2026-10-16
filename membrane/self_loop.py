@@ -365,8 +365,39 @@ def cycle(srv, now: float | None = None) -> dict | None:
     _append(srv, rec)
     est.upsert(ent, embedder=None)
     _open_rungs(srv)
+    _show(srv, ent, pos, c, rec)
     rt["wake"].set()                      # my state changed: that is what wakes the next try
     return rec
+
+
+def _pull(ent, dim: int):
+    """Where it has learned the current pulls: the fixed point of
+    push ~ b - g*pos (b = mean push + g*mean position), or None."""
+    m = _model(ent, dim)
+    if m is None or float(m.get("var") or 0.0) <= 1e-9:
+        return None
+    g = -float(m["cov"]) / float(m["var"])
+    if g <= 1e-6:
+        return None
+    return _unit(np.asarray(m["mw"]) / g + np.asarray(m["mp"]))
+
+
+def _show(srv, ent, pos, c, rec) -> None:
+    """The cycle onto the viewer (fieldpulse.self_cycle): the points as
+    vectors for the beat to place, the rest as numbers -- never text."""
+    try:
+        from . import fieldpulse as _FP
+        fp = _FP.of(srv)
+        if fp is None:
+            return
+        st = status(srv)
+        fp.self_cycle({"from": pos, "intent": c["intent"], "expected": c["expected"],
+                       "at": c["observed"], "pull": _pull(ent, len(pos))},
+                      {"n": rec["n"], "gap": rec["gap"], "naive": rec["naive"], "push": rec["push"],
+                       "rung": st["rung"], "bar": st["bar"], "skill": st["skill"],
+                       "mode": st["mode"], "slipping": st["slipping"]})
+    except Exception:
+        pass
 
 
 # ---- the ladder and the exp bar ----------------------------------------------
