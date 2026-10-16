@@ -1215,6 +1215,7 @@ class EntityField:
         if np.linalg.norm(resid) > CTX_MIN_RESID:
             now = self._now.get(sess)
             self._now[sess] = unit(resid) if now is None else unit(0.5 * now + 0.5 * unit(resid))
+            self._now_last = sess         # the live current: the latest session's context
         for eid, sidx, surf in ev.get("mentions") or []:
             if sidx in skip or sidx >= len(sids):
                 continue
@@ -2140,6 +2141,12 @@ class EntityField:
 
     def now(self, session: str = "") -> np.ndarray | None:
         return self._now.get(session)
+
+    def current(self) -> np.ndarray | None:
+        """THE FIELD'S CURRENT (#161): the context of the session that spoke
+        last -- the push the world gives whatever moves on the field (RAM only,
+        like the contexts it is read from)."""
+        return self._now.get(getattr(self, "_now_last", None))
 
     # ---- sharing: disjoint writers, merged reads ------------------------------------
     DIVERGE_COS = 0.0          # displacements from the seed pointing apart

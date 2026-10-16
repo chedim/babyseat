@@ -23,6 +23,7 @@ broken, kept as history).
 | **Thinker** | 1 s heartbeat, duty-capped | digests the latest stimuli (their entities as tags, an observation as the fn stamp) and eats them into its working memory; in silence, extends open timeline branches |
 | **Dreamer** | 60 s idle waves | solution generation: proposes from the model's own recent sentences, vets a candidate by its **surprise** against the entity states (on topic, but not already said), commits quarantined `Timeline` entities under `session:now` |
 | **NightClock** | 15 min | the entity scripts; **births**; **junk**; activity; the coherence null (once a day); entity-doc materialization + the overlay consolidation |
+| **Self loop** (#161) | change-driven, ≥ 10 s apart, off by default | `self` (`self_loop.py`): try → expect → notice on its own position; the operator's switch; see [The self loop](#the-self-loop-161) |
 
 All cadenced organs use the idle local model for any model calls they
 make (`--idle-cortex-model`), so a wedged background seat can never burn
@@ -158,6 +159,52 @@ read-only), the field's states update **online** at mention time, and
 `rebuild()` replays the `entity_deltas` log to the same states without
 re-embedding. The night reads statistics, not the raw field.
 
+## The self loop (#161)
+
+`membrane::self` is an unnamed looped cliffhanger object, the seed of the
+evolving self in #161. It grows up a **skill ladder**: one rung per PR, each
+with a measured pass test; a rung opens by itself when its test passes. This
+section covers what is built (`membrane/self_loop.py`).
+
+- **Rung 0, sleep and wake.** A per-seat switch, off / on / watch, **off by
+  default**. Only the operator flips it: the panel's 🌱 button →
+  `POST /membrane/seat/control {"self": ...}` (`seat_panel.control`). Off runs
+  nothing and erases nothing. The mode (`<data dir>/self/mode.json`) and the
+  record survive a restart. `watch` runs like `on` until there is a
+  babysitter to keep quiet.
+- **Rung 1, feel itself (the amoeba's problem).** Its only act moves its own
+  position on the field, and the world pushes it while it moves: the field's
+  **current** (`EntityField.current()`, the context of the session that spoke
+  last), which self does not control. `expect` says beforehand where it will
+  end up: its own step plus the push it has learned to expect there. It
+  learns that push from its own moves as `push ≈ b − g·position`, kept in its
+  `script_data`. `notice` sees where it actually ended up. **The gap is the
+  signal:** it closes as self learns the current and reopens when the
+  conversation turns.
+  - The test: over the last 20 pushed cycles, `1 − gap/naive ≥ 0.5`, where
+    *naive* is the gap with no experience at all.
+  - In a quiet seat (no current) there is nothing to feel, and the bar says
+    it is waiting on the world.
+- **Its methods run only in its own loop.** `try` / `expect` / `notice` are
+  cliffhanger methods (`self::` no-shell dialect). `exec inspect` shows them;
+  any other caller, the model included, is refused. The LLM talks *to* self,
+  never *as* it. `entity_edit` can't write its `script_data`, and mentions
+  can't move it (a one-segment `m:` name never gets a field state).
+- **The record** is `<data dir>/self/record.jsonl`. It is append-only and
+  never truncated, and it starts at birth (the first switch-on): scalars per
+  cycle (step, push, gap, naive, the kind of change), errors, and each rung
+  opening. Nothing before its birth is on it.
+- **The runaway guard.** Each cycle's change wakes the next, at least
+  `PACE_S` apart (`MEMBRANE_SELF_PACE_S`, default 10 s, floor 1 s) and at
+  most 30 a minute. Three failed cycles in a row hold the loop until the
+  operator's next toggle. A paused seat runs nothing.
+- **The exp bar.** The panel shows the rung and a bar toward the next one.
+  - The bar is the **weakest** criterion of the next rung's test, named
+    ("waiting on: skill").
+  - It can go down: a passed rung stays on the record, and the bar shows it
+    slipping while its test fails.
+  - Only the cycles' recorded gaps feed it.
+
 ## Kill switches (one per organ)
 
 ```
@@ -166,6 +213,7 @@ re-embedding. The night reads statistics, not the raw field.
 MEMBRANE_EFIELD=shadow | off   # events-only capture / the field off
 MEMBRANE_LANE_GATE=0           # the flat tool surface (no operator/listener split)
 MEMBRANE_NERVE_PAUSE=0         # pause becomes a no-op
+(the self loop)                # off by default; the operator's 🌱 switch
 ```
 
 ## The goal loops' rhythm (2026-10-08)
