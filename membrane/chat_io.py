@@ -1,0 +1,187 @@
+"""CHAT OUT (0.6.1, the operator: "add the field to push chat out messages like
+it can do with voice ... both, and the same should be for voice").
+
+One entity per person, in the seat's own store, the twin of voice:out:
+
+  chat:out:<person>  on (default on) -- Argus WRITES to the person by setting
+                     its `say` property (an ordinary entity edit, no new
+                     tool): the line lands in their latest chat as an
+                     assistant message. `said` keeps what was posted.
+
+And the field's own way out: an entity's script may return `chat` and/or
+`voice` (with an optional `to`, a person) -- a watcher can tell you the garage
+is open with no model turn. The engine posts/speaks; the script never does.
+
+Where it lands: the person's newest chat (a session they own), else the
+session their voice last talked in, else -- a seat with no people, the
+operator's own -- the newest chat that is not a loop's.
+
+Guard rails: a line only goes out while chat:out is on; one line per
+CHAT_GAP_S per person; an entity's script pushes at most once per
+SCRIPT_PUSH_GAP_S and never the same line twice in a row (a tick fires every
+second)."""
+from __future__ import annotations
+
+import time
+
+from .voice_io import _ring, slug
+
+CHAT_GAP_S = 2.0
+CHAT_MAX = 2000
+SCRIPT_PUSH_GAP_S = 30.0
+OPERATOR = "operator"             # the seat with no people: its operator's chat:out
+
+
+def name_of(person: str) -> str:
+    return f"chat:out:{slug(person) or OPERATOR}"
+
+
+def entity(srv, person: str, create: bool = True):
+    from .entities import CLASS_CONFIG
+    est = getattr(srv, "entity_store", None)
+    if est is None:
+        return None
+    nm = name_of(person)
+    ent = est._resolve_spec(nm)
+    if ent is None and create:
+        r = est.add(cls=CLASS_CONFIG, name=nm,
+                    summary=(f"CHAT OUT for {person or 'the operator'}: write to them -- edit this "
+                             "entity's properties.say with the message; it lands in their latest "
+                             "chat (only while `on`). A script can do the same by returning "
+                             "{'chat': '...', 'to': '<person>'}."))
+        ent = est.docs.get(r.get("eid", "")) if isinstance(r, dict) else None
+        if ent is not None:
+            ent.properties.update({"person": "" if nm.endswith(":" + OPERATOR) else slug(person),
+                                   "on": True, "chat_io": "out"})
+    return ent
+
+
+def ensure(srv, spec: str) -> None:
+    """The edit route's first step: an edit of chat:out:<person> that does
+    not exist yet creates it (Argus can write to anyone the seat knows)."""
+    s = str(spec or "").strip()
+    if s.lower().startswith("membrane::"):
+        s = s[len("membrane::"):]
+    if s.lower().startswith("chat:out:") and s[len("chat:out:"):].strip():
+        entity(srv, s[len("chat:out:"):].strip())
+
+
+def _runner(srv):
+    return getattr(srv, "_loop_runner", None)
+
+
+def _is_loop(r, sid: str) -> bool:
+    from .jobs import _is_loop as _loop
+    return _loop(r, sid)
+
+
+def _chats(srv) -> list:
+    r = _runner(srv)
+    if r is None or getattr(r, "sessions", None) is None:
+        return []
+    rows = [s for s in r.sessions.list() if not _is_loop(r, s["id"])]
+    return sorted(rows, key=lambda s: int((s.get("time") or {}).get("updated") or 0))
+
+
+def latest_chat(srv, person: str) -> str:
+    """The person's newest chat (see the module doc for the fallbacks)."""
+    rows = _chats(srv)
+    p = slug(person)
+    if p:
+        own = [s for s in rows if slug(str(s.get("owner") or "")) == p]
+        if own:
+            return own[-1]["id"]
+        from . import voice_io as VIO
+        vin = VIO.entity(srv, "in", person, create=False)
+        return str(((vin.properties or {}) if vin is not None else {}).get("session") or "")
+    return rows[-1]["id"] if rows else ""
+
+
+def recent_person(srv) -> str:
+    """Whoever chatted last (the owner of the newest owned chat); '' = the operator."""
+    own = [s for s in _chats(srv) if s.get("owner")]
+    return str(own[-1]["owner"]) if own else ""
+
+
+def _post(srv, sid: str, text: str) -> None:
+    r = _runner(srv)
+    now = int(time.time() * 1000)
+    agent = str((r.sessions.get(sid) or {}).get("agent") or "build")
+    info = {"id": f"msg_push_{now}", "sessionID": sid, "role": "assistant", "parentID": "",
+            "modelID": "membrane", "providerID": "membrane", "mode": "build", "agent": agent,
+            "path": {"cwd": "", "root": ""}, "cost": 0.0,
+            "tokens": {"total": 0, "input": 0, "output": 0, "reasoning": 0,
+                       "cache": {"read": 0, "write": 0}},
+            "time": {"created": now, "completed": now}, "finish": "stop", "pushed": True}
+    part = {"id": f"prt_push_{now}", "sessionID": sid, "messageID": info["id"],
+            "type": "text", "text": text, "time": {"start": now, "end": now}}
+    r.messages.append(sid, info, [part])
+    r.hub.publish({"type": "message.updated", "sessionID": sid, "info": dict(info)})
+    r.hub.publish({"type": "message.part.updated", "part": dict(part), "time": now,
+                   "sessionID": sid})
+
+
+def on_edit(srv, ent) -> dict | None:
+    """An edit of a chat:out entity's `say`: post it (or say why not)."""
+    pp = (getattr(ent, "properties", None) or {})
+    if pp.get("chat_io") != "out" or not str(pp.get("say") or "").strip():
+        return None
+    text = str(pp.get("say") or "").strip()[:CHAT_MAX]
+    person = str(pp.get("person") or "")
+    pp["say"] = ""                              # consumed: the next edit is the next message
+
+    def _refuse(why: str, note: str) -> dict:
+        pp["say_refused"] = note
+        ent.properties = pp
+        return {"posted": False, "why": why}
+    if not pp.get("on", True):
+        return _refuse("off", f"{person or 'the operator'}'s chat:out is off -- not posted")
+    now = time.time()
+    if now - float(pp.get("said_ts") or 0) < CHAT_GAP_S:
+        return _refuse("gap", f"too soon after the last message ({CHAT_GAP_S:g}s apart)")
+    sid = latest_chat(srv, person)
+    if not sid or _runner(srv) is None:
+        return _refuse("no chat", f"{person or 'the operator'} has no chat to post into yet")
+    _post(srv, sid, text)
+    pp.pop("say_refused", None)
+    pp["said_ts"] = now
+    _ring(pp, "said", {"ts": now, "text": text, "session": sid})
+    ent.properties = pp
+    return {"posted": True, "session": sid}
+
+
+def script_push(srv, src, out: dict) -> dict:
+    """A script's `chat` / `voice` result: the engine posts / speaks for it.
+    Returns {channel: receipt} for the apply's summary."""
+    texts = {via: " ".join(str(out.get(via) or "").split()) for via in ("chat", "voice")}
+    texts = {via: t for via, t in texts.items() if t}
+    if not texts:
+        return {}
+    sp = src.properties if getattr(src, "properties", None) is not None else {}
+    now = time.time()
+    line = " | ".join(f"{k}:{v}" for k, v in sorted(texts.items()))
+    if now - float(sp.get("push_last_ts") or 0) < SCRIPT_PUSH_GAP_S:
+        return {via: {"posted": False, "why": "script gap"} for via in texts}
+    if line == sp.get("push_last_text"):
+        return {via: {"posted": False, "why": "repeat"} for via in texts}
+    person = str(out.get("to") or "") or recent_person(srv)
+    res = {}
+    if "chat" in texts:
+        ent = entity(srv, person)
+        if ent is None:
+            res["chat"] = {"posted": False, "why": "no store"}
+        else:
+            ent.properties["say"] = texts["chat"]
+            res["chat"] = on_edit(srv, ent) or {"posted": False, "why": "empty"}
+    if "voice" in texts:
+        from . import voice_io as VIO
+        v = VIO.entity(srv, "out", person) if slug(person) else None
+        if v is None:
+            res["voice"] = {"spoken": False, "why": "no person to speak to"}
+        else:
+            v.properties["say"] = texts["voice"][:VIO.SAY_MAX]
+            res["voice"] = VIO.on_edit(srv, v) or {"spoken": False, "why": "empty"}
+    if any(r.get("posted") or r.get("spoken") for r in res.values()):
+        sp["push_last_ts"] = now
+        sp["push_last_text"] = line
+    return res
