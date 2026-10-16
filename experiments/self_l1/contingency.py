@@ -24,11 +24,19 @@ BODY_LAT_MAD = 0.75   # ...at a steady delay: the median absolute deviation
                       # counted against this one must not unmake a body part)
 OTHER_DP = 0.10       # an other raises the change rate at least this much
 Z_MIN = 4.0           # and above chance by this many binomial sigmas
+MIN_KIND_ACTS = 20    # THE REAL SEAT'S LESSON (rung 2): its log has 48 act
+                      # kinds, most of them a handful of calls. Three calls of
+                      # one kind, one coincidence, and p_act=1.00 against a
+                      # zero baseline crowned a "body part" out of nothing. A
+                      # kind must be exercised this many times before it may
+                      # claim an entity.
 
 
 class Ledger:
-    def __init__(self, window: float = 2.0):
+    def __init__(self, window: float = 2.0, min_acts: int = MIN_KIND_ACTS):
         self.window = float(window)
+        self.min_acts = int(min_acts)
+        self.horizon = 1.0
         self.n_act: dict = defaultdict(int)                 # kind -> acts
         self.hits: dict = defaultdict(int)                  # (kind, eid) -> acts answered
         self.lat: dict = defaultdict(list)                  # (kind, eid) -> first-change delays
@@ -37,6 +45,7 @@ class Ledger:
 
     def observe(self, acts, changes, horizon: float) -> None:
         acts = sorted(acts)
+        self.horizon = max(1.0, float(horizon))
         by_e: dict = defaultdict(list)
         for t, e in sorted(changes):
             by_e[e].append(t)
@@ -79,16 +88,17 @@ class Ledger:
     def stats(self) -> dict:
         """Per entity: the act kind it answers best, and how."""
         out = {}
-        for e in self.eids:
-            pb = self.base.get(e, 0.0)
+        floor = 1.0 / self.horizon            # p_base=0 is not a licence to
+        for e in self.eids:                   # divide by zero: the smallest
+            pb = self.base.get(e, 0.0)        # rate the horizon can resolve
             best = None
             for k, n in self.n_act.items():
-                if not n:
+                if not n or n < self.min_acts:
                     continue
                 h = self.hits.get((k, e), 0)
                 p = h / n
-                z = (h - n * pb) / math.sqrt(max(1e-9, n * pb * (1 - pb))) if 0 < pb < 1 else (
-                    float("inf") if h and pb == 0 else 0.0)
+                pbf = max(pb, floor)
+                z = (h - n * pbf) / math.sqrt(max(1e-12, n * pbf * (1 - pbf)))
                 lat = self.lat.get((k, e)) or []
                 m = sum(lat) / len(lat) if lat else None
                 sd = (math.sqrt(sum((x - m) ** 2 for x in lat) / len(lat)) if lat else None)

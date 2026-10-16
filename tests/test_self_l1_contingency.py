@@ -60,3 +60,33 @@ def test_one_stray_late_answer_does_not_unmake_a_body_part():
     led = C.Ledger(window=12.0)
     led.observe(acts, changes, horizon=70 * 20.0 + 20)
     assert C.classify(led.stats())["body"] == ["b:part"]
+
+
+def test_a_kind_with_a_handful_of_acts_cannot_crown_a_body():
+    # the live seat's log has 48 act kinds, most of them a handful of calls:
+    # three acts of one kind, one coincidence, p_act=1.00 against a zero
+    # baseline -- and a "body part" out of nothing. A kind must be exercised
+    # before it may claim an entity.
+    acts = [(t * 10.0, "read") for t in range(40)] + [(500.0 + t, "rare") for t in range(3)]
+    changes = [(500.0 + t + 0.1, "x:happened") for t in range(3)]
+    led = C.Ledger(window=2.0)
+    led.observe(acts, changes, horizon=600.0)
+    assert C.classify(led.stats())["body"] == []
+    # the old ledger (every kind counts) called it body on three coincidences
+    loose = C.Ledger(window=2.0, min_acts=1)
+    loose.observe(acts, changes, horizon=600.0)
+    assert C.classify(loose.stats())["body"] == ["x:happened"]
+
+
+def test_a_zero_baseline_gives_a_finite_z():
+    # an entity never moves outside my act windows: p_base is 0 and z used to
+    # come back infinite. It still counts, but as a number -- so the thresholds
+    # mean the same thing on every history.
+    acts = [(t * 10.0, "write") for t in range(40)]
+    changes = [(t * 10.0 + 0.05, "b:slot") for t in range(40)]
+    led = C.Ledger(window=2.0)
+    led.observe(acts, changes, horizon=400.0)
+    s = led.stats()["b:slot"]
+    assert s["p_base"] == 0.0
+    assert 0.0 < s["z"] < 1e6
+    assert C.classify(led.stats())["body"] == ["b:slot"]
