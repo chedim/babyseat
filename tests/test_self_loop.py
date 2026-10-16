@@ -196,6 +196,39 @@ def test_a_change_in_the_world_reopens_the_gap_and_experience_closes_it_again():
     assert SL.status(srv)["skill"] >= SL.RUNG1_SKILL  # it learned the new current
 
 
+def test_what_it_learned_survives_a_restart_in_a_wide_world():
+    # the live seat (2026-10-16): entity properties cap lists at 128 items on
+    # save (entities.json_safe), so a 1024-d model kept in script_data came
+    # back cut to 128 and self threw away what it had learned
+    wide = 300
+    def wdir(seed):
+        v = np.random.default_rng(seed).normal(size=wide)
+        return v / np.linalg.norm(v)
+    d = tempfile.mkdtemp()
+    srv = _seat(d)
+    srv.efield = _World(wdir(1))
+    SL.set_mode(srv, "on")
+    t = _cycles(srv, 30)
+    srv.entity_store.flush()
+    srv2 = _seat(d)                                  # the restart
+    srv2.efield = _World(wdir(1))
+    SL.cycle(srv2, now=t)
+    last = _record(srv2)[-1]
+    assert last["kind"] == "cycle"
+    assert last["gap"] < 0.5 * last["naive"]         # it still knows its current
+
+
+def test_after_a_restart_it_says_it_waits_for_the_world():
+    d = tempfile.mkdtemp()
+    srv = _seat(d)
+    SL.set_mode(srv, "on")
+    _cycles(srv, 3)
+    srv2 = _seat(d)
+    srv2.efield = _World(None)                       # nobody has spoken since the boot
+    assert SL.mode(srv2) == "on"
+    assert SL.status(srv2)["waiting_on"] == "the world"
+
+
 def test_without_a_world_there_is_nothing_to_feel():
     srv = _seat()
     srv.efield = _World(None)
