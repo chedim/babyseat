@@ -2344,16 +2344,18 @@ class EntityStore(MultiParentOps, TimelineOps):
                     return {"ok": False, "error": f"{field} doesn't compile: {e.msg} (line {e.lineno}){hint}"}
             if not sval.strip():
                 ent.properties.pop(field, None)
-                ent.properties.pop("script_disabled", None)
-                ent.properties.pop("script_failures", None)
+                for k in ("script_disabled", "script_failures",
+                          "script_disabled_by", "script_retry_at"):
+                    ent.properties.pop(k, None)
             else:
                 ent.properties[field] = sval
                 # a rewrite is a fresh start (clear the disable state,
                 # the cooldowns -- the new script runs on the next try --
                 # AND the stale render from the previous script)
-                ent.properties.pop("script_disabled", None)
-                ent.properties.pop("script_failures", None)
-                ent.properties.pop("script_cooldowns", None)
+                for k in ("script_disabled", "script_failures",
+                          "script_disabled_by", "script_retry_at",
+                          "script_cooldowns"):
+                    ent.properties.pop(k, None)
                 if field == "nudge_script":
                     ent.properties.pop("script_render", None)
                 # SETTING IS ARMING (2026-10-11): thought/dreamed scripts set

@@ -6615,6 +6615,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # est's _srv wiring) -- the queue split rides with no args here
         val = executor_value(est, ent.eid)
         val["getter"] = fired
+        from .night import script_health
+        _sh = script_health(ent.properties)
+        if _sh:
+            val["script"] = _sh                      # #149: a failing script is part of the read
         self._json_out(val)
 
     def _entity_audit(self, op: str, res: dict) -> None:
