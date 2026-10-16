@@ -1047,6 +1047,12 @@ class Field3DView {
     return a && a.pts ? a.pos.slice() : null;
   }
 
+  /** Where self has been (world coordinates, oldest first) -- the chase cam's way back. */
+  selfTrail() {
+    const a = this.amoeba;
+    return a && a.trail ? a.trail.map((q) => q.slice()) : [];
+  }
+
   /** Where a mind's orb is now (world coordinates), or null. */
   avatarPos(agent) {
     const a = this.avatars.get(agent);

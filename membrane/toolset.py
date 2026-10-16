@@ -448,6 +448,43 @@ def _owned_by_one_family(inner: dict) -> str:
     return owners[0] if len(owners) == 1 else ""
 
 
+_PLACEHOLDER_NAME_KEYS = ("fn_name", "function_name", "tool_name", "name", "tool", "function")
+_PLACEHOLDER_ARG_KEYS = ("args_json", "arguments", "args", "params", "parameters", "input")
+
+
+def _placeholder_call(placeholder: str, args: dict) -> tuple[str, dict]:
+    """A call whose name is a template placeholder: the tool is named by one of
+    its fields (a family, or 'exec <command>'), its arguments by another (JSON);
+    else the honest refusal with a filled-in example."""
+    named = next((str(args[k]).strip() for k in _PLACEHOLDER_NAME_KEYS
+                  if isinstance(args.get(k), str) and args[k].strip()), "")
+    raw = next((args[k] for k in _PLACEHOLDER_ARG_KEYS if k in args), None)
+    inner = None
+    if isinstance(raw, dict):
+        inner = raw
+    elif isinstance(raw, str) and raw.strip()[:1] == "{":
+        try:
+            inner = json.loads(raw)
+        except ValueError:
+            inner = None
+    head, _, rest = named.partition(" ")
+    fam = canonical(head, {})[0] if head else ""
+    if fam in FAMILIES:
+        if inner is not None:
+            return resolve(fam, dict(inner))
+        text = rest.strip() or (raw.strip() if isinstance(raw, str) else "")
+        if fam == "exec" and text:
+            return resolve("exec", {"action": "link", "command": text})
+        if not text:
+            return resolve(fam, {})
+    raise ValueError(
+        f"the call's name {placeholder!r} is a template PLACEHOLDER from your call format, not a tool: "
+        f"write the real tool's name in its place -- one of {', '.join(sorted(FAMILIES))} -- and its "
+        "arguments as JSON. For example, to run a command: name exec, arguments "
+        '{"action": "link", "command": "ls -a"}; to read an entity: name entity, arguments '
+        '{"action": "read", "name": "presence"}')
+
+
 def resolve(name: str, args: dict) -> tuple[str, dict]:
     """(existing tool name, its args) for a family call; an existing tool's
     own name passes through; ValueError names the valid actions."""
@@ -484,6 +521,12 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
         raise ValueError(
             f"the call had no tool name ({str(name or '')!r}): name the tool -- one of "
             f"{', '.join(sorted(FAMILIES))} -- and put its JSON in the arguments")
+    # ISSUE #182 (Memo): after deploys the name was the literal '{function_name}'
+    # (params {fn_name} / {args_json}) -- the model copying the placeholders of
+    # its chat template's call format. A {placeholder} is a template variable,
+    # not arguments: route by the fields that name a tool, else say so plainly.
+    if re.fullmatch(r"\{\s*[A-Za-z_][\w\-]*\s*\}", _bare):
+        return _placeholder_call(_bare, dict(args or {}))
     if str(name or "").lstrip()[:1] in ("{", "["):
         _un = _call_in_name(name)
         if _un is not None:

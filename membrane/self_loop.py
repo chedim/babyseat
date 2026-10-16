@@ -87,6 +87,7 @@ KIND_MIN = 5                # looks before a thing has a kind
 RUNG3_WINDOW = 80           # reaches the kinds are read over (its two halves must agree)
 RUNG3_LOOKS = 40            # sorted reaches before the test reads the focus
 RUNG3_FOCUS = 0.25          # the no-answer share it must get under
+RUNG3_DRIFT = 0.25          # a kind's rate may drift this much across the halves and still agree
 SILENT_WEIGHT = 0.05        # a silent thing is still checked now and then (the world can change)
 LAM_LOOKS = 30              # answered looks a thing's rate is fitted over
 LAM_GRID = np.logspace(-5, 0, 61)   # candidate rates, per second
@@ -340,9 +341,15 @@ def _current(srv):
 
 
 def _p_changed(srv, eid: str) -> float:
-    """The tempo, at the pace I look: the smoothed share of my reaches that
-    found it changed (Jeffreys prior: 0.5 before I ever looked)."""
+    """The tempo, at the pace I look, with ONE BIT OF MEMORY: the world bursts,
+    so what I will see depends on what I saw last. Predict P(changed | last
+    answer) once I have one, else the smoothed share of my reaches that found
+    it changed (Jeffreys prior: 0.5 before I ever looked)."""
     t = _tempo(srv).get(eid) or {}
+    aft = t.get("after") or {}
+    prev = t.get("prev")
+    if prev in aft and aft[prev][1] > 0:
+        return (float(aft[prev][0]) + 0.5) / (float(aft[prev][1]) + 1.0)
     return (float(t.get("changed", 0)) + 0.5) / (float(t.get("answered", 0)) + 1.0)
 
 
@@ -447,8 +454,15 @@ def _notice(srv, seed: str) -> dict:
             if c["answer"] == "none":
                 t["none"] = int(t.get("none", 0)) + 1
             else:
+                prev = t.get("prev")                         # the answer before this look
                 t["answered"] += 1
                 t["changed"] += int(c["answer"] == "changed")
+                aft = t.setdefault("after", {})              # the one bit: what followed what
+                if prev in ("changed", "unchanged"):
+                    e = aft.setdefault(prev, [0, 0])
+                    e[0] += int(c["answer"] == "changed")
+                    e[1] += 1
+                t["prev"] = c["answer"]
                 t["last"] = c.get("now")
             _save_json(srv, "tempo.json", _tempo(srv))
         return {"rc": 0, "text": "noticed"}
@@ -737,6 +751,7 @@ def _shift_check(srv, eid: str, now: float) -> None:
             _append(srv, {"ts": now, "kind": "shift", "eid": eid, "was": round(p, 3),
                           "now": round(k / w, 3), "looks": w})
             t.update({"changed": k, "answered": w})  # re-learn from the looks that showed it
+            t.pop("after", None)                     # the one bit of memory restarts with the new world
             _save_json(srv, "tempo.json", _tempo(srv))
             au = _rt(srv).get("audit")
             if au and au.get("rung") == 5 and au["eid"] == eid:
@@ -957,18 +972,45 @@ def _kinds(recs: list[dict], window: int = RUNG3_WINDOW) -> dict:
     return out
 
 
+def _kind_rate(recs: list[dict], window: int = RUNG3_WINDOW) -> dict:
+    """Each thing's RATE over its last `window` reaches (outside audits): the
+    no-answer share and the change share among the answered (None before any
+    answer). {} before KIND_MIN looks. The kind label is `_kinds`; the rate is
+    what the two halves must agree on (a look's drift is not a new kind)."""
+    by: dict[str, list] = {}
+    for r in recs:
+        if r.get("kind") == "reach" and not r.get("audit"):
+            by.setdefault(r["eid"], []).append(r["answer"])
+    out = {}
+    for eid, ans in by.items():
+        ans = ans[-window:]
+        if len(ans) < KIND_MIN:
+            continue
+        none = sum(a == "none" for a in ans)
+        answered = len(ans) - none
+        out[eid] = {"none": none / len(ans),
+                    "p": (sum(a == "changed" for a in ans) / answered) if answered else None}
+    return out
+
+
+def _close(a: float | None, b: float | None) -> bool:
+    """Two rates agree within a look's drift; a silent half on both sides."""
+    return (abs(a - b) <= RUNG3_DRIFT) if (a is not None and b is not None) else (a is None and b is None)
+
+
 def _rung3(recs: list[dict], tempo: dict | None = None) -> dict:
-    """Tell things apart: sorted reaches (looks), kinds that agree across the
-    two halves of the last RUNG3_WINDOW reaches, the no-answer share under
+    """Tell things apart: sorted reaches (looks), kinds whose RATES agree across
+    the two halves of the last RUNG3_WINDOW reaches, the no-answer share under
     RUNG3_FOCUS (focus), and rung 2's skill still holding."""
     reaches = [r for r in recs if r.get("kind") == "reach" and not r.get("audit")]
     steered = [r for r in reaches if r.get("steer")]
     looks = min(1.0, len(steered) / RUNG3_LOOKS)
     last = reaches[-RUNG3_WINDOW:]
     half = len(last) // 2
-    a, b = _kinds(last[:half]), _kinds(last[half:])
-    both = [e for e in a if e in b and a[e] != "unknown" and b[e] != "unknown"]
-    agree = bool(both) and all(a[e] == b[e] for e in both) and len({b[e] for e in both}) >= 2
+    ra, rb = _kind_rate(last[:half]), _kind_rate(last[half:])
+    stable = [e for e in ra if e in rb and _close(ra[e]["p"], rb[e]["p"]) and abs(ra[e]["none"] - rb[e]["none"]) <= RUNG3_DRIFT]
+    kinds = _kinds(last)
+    agree = bool(stable) and len({kinds.get(e) for e in stable} - {None, "unknown"}) >= 2
     tail = steered[-RUNG3_LOOKS:]
     share = (sum(r["answer"] == "none" for r in tail) / len(tail)) if tail else 1.0
     focus = 1.0 if share < RUNG3_FOCUS else max(0.0, (1.0 - share) / (1.0 - RUNG3_FOCUS))
