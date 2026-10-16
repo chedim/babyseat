@@ -530,6 +530,8 @@ const HSTYLE = `
   @keyframes recpulse { 50% { box-shadow:0 0 0 8px color-mix(in srgb, var(--error-color,#c0392b) 30%, transparent); } }
   .card { bottom:76px !important; }
   .top .tilt[hidden] { display:none; }
+  .top .selfstat { font-size:12px; opacity:.85; white-space:nowrap; padding-right:6px; }
+  .view-chat .selfstat { display:none; }
   .top .selfpick { border:0; background:transparent; color:inherit; font:inherit; border-radius:999px; padding:6px 8px; max-width:12em; cursor:pointer; }
   /* THE WAVE (2026-10-10, the operator: "a wavy animation like Siri, but
      angly and graph-y"): a chain of nodes joined by straight edges -- a strip
@@ -621,8 +623,13 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const sel = this._selfPick, c = this._chat; if (!sel) return;
       if (!c || typeof c._selfView !== "function") return;
       const v = c._selfView();
+      // THE GUARD (live, 2026-10-16: 25 s after a restart the page sent "off"):
+      // rebuilding a focused <select>'s options can reset it to "off" and fire
+      // a change -- never while it has focus; disabled until the state loads
+      sel.disabled = !v.loaded;
+      if (sel.getRootNode().activeElement === sel) return;
       const sig = JSON.stringify(v.options);
-      if (sel._sig !== sig) {                  // rebuilt only on change: an open chooser stays open
+      if (sel._sig !== sig) {                  // rebuilt only on change
         sel.textContent = "";
         for (const o of v.options) {
           const el = document.createElement("option");
@@ -631,9 +638,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         }
         sel._sig = sig;
       }
-      if (document.activeElement !== sel && this.shadowRoot.activeElement !== sel) sel.value = String(v.limit);
+      sel.value = String(v.limit);
       sel.title = v.title;
       sel.style.opacity = v.limit ? "1" : ".6";
+      if (this._selfStat && !this._selfFlash) this._selfStat.textContent = v.status || "";
     }
 
     _paintAuto() {
@@ -738,6 +746,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <button class="chatbtn" title="Show / hide the chat">💬</button>
           <button class="autobtn" title="auto-chat" aria-label="auto-chat">▶</button>
           <select class="selfpick" title="self (#161): how far it may grow (the top rung; off = asleep)"><option value="0">🌱 off</option></select>
+          <span class="selfstat" title="where self is now: its rung, the bar toward the next, what it waits on"></span>
           <button class="tilt" hidden title="Turn the view by tilting the device">📱</button>
           <span class="sbox"><input class="q" placeholder="search entities…" autocomplete="off"><div class="hits glass"></div></span>
           <span class="status"></span>
@@ -842,10 +851,23 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       // may reach (off = asleep); below it self still earns each rung. Its
       // options and rung / bar come from the chat element (the panel owns the route).
       this._selfPick = $(".selfpick");
+      this._selfStat = $(".selfstat");
       this._selfPick.addEventListener("change", () => {
         const c = this._chat;
         if (!c || typeof c._setSelfLimit !== "function") return;
-        Promise.resolve(c._setSelfLimit(Number(this._selfPick.value))).catch(() => {}).then(() => this._paintSelf());
+        this._selfPick.disabled = true;                       // in flight
+        if (this._selfStat) this._selfStat.textContent = "…";
+        Promise.resolve(c._setSelfLimit(Number(this._selfPick.value))).catch(() => null).then((out) => {
+          // THE FEEDBACK: the seat's confirmed answer (or the error), held 4 s
+          if (out && !out.skipped) {
+            this._selfFlash = out.text;
+            if (this._selfStat) this._selfStat.textContent = out.text;
+            this._statusEl.textContent = "🌱 " + out.text;
+            clearTimeout(this._selfFlashT);
+            this._selfFlashT = setTimeout(() => { this._selfFlash = null; this._paintSelf(); }, 4000);
+          }
+          this._paintSelf();
+        });
       });
       this._paintSelf();
       this._selfT = setInterval(() => this._paintSelf(), 1500);
