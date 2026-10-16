@@ -1,4 +1,15 @@
-## Unreleased
+## v0.6.0 (2026-10-15) — the seat answers to you
+
+- **The serve has no login of its own** (#144): membrane baked in a basic-auth pair (`opencode:<password>`, `serve-auth.json`) nobody asked for. It's gone — the serve, the `--serve-user`/`--serve-pass` flags and the pair file. membrane is a personal, self-hosted service: if you need a login, put a reverse proxy with one in front. Home Assistant keeps its own login; the integration waits on the seat being *ready* (it used to read "has a password" as ready), and connecting it to a seat needs no password.
+- **Ctrl+C stops the seat, completely** (#145): `membrane standalone` / `serve` / `opencode` now *are* the seat process (exec), instead of a wrapper that SIGKILLed its seat child mid-teardown. `membrane stop` finds a seat that walked off its default ports and reads the seat's own pidfile.
+- **A self-restart restarts** (#151): `seat::restart` sent the seat SIGTERM and waited for a supervisor; a foreground seat just stopped. It now re-execs after its teardown — same process, same terminal.
+- **Goals survive a restart** (#147): the entity save dropped every entity's position, and the intent board lists only goals with one, so the board read "none held" after each boot. Positions are saved; a goal whose position was already lost is still held.
+- **Failing scripts don't go silent** (#149): three strikes disabled a script for good. A struck-out script now retries on a backoff (60 s doubling to 1 h); a passing retry re-enables it; an entity read carries a failing script's state. Your own kill switch is never retried.
+- **`entity_edit` says what it did with `properties`** (#150): it names the keys it set and refuses engine-owned / over-cap keys out loud, instead of answering rc 0 over a dropped patch.
+- **`code=$(...)` is a shell assignment, not a program** (#148): the platform gate refused such lines rc 127.
+- The doctrine tells seats to read back what they plant.
+
+### Also in this release
 
 - **`entity_read` reaches a ring-backed property's newest entries** (#105): voice keeps bounded rings (`voice:in:<person>.heard` / `voice:out:<person>.said`, 30 items of up to 600 chars) as entity properties, but the read-back clipped the whole-properties blob at ~800 chars, so only the first couple of items were visible and the newest entries — the tail an audit needs — were unreachable. `entity_read` now takes `prop=` to extract one property in full and `tail=N` to page a list-valued property from its newest end.
 
