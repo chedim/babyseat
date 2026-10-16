@@ -202,5 +202,38 @@ class TestMcpIntendRoute(unittest.TestCase):
         self.assertEqual(out.get("eid"), g.eid)
 
 
+class TestTheBoardSurvivesARestart(unittest.TestCase):
+    """#147: a planted goal read 'none held' after a seat restart -- the
+    side-index save dropped every entity's position, and the board's
+    active set ranks only goals with geometry."""
+
+    def test_goal_position_survives_save_and_reload(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as td:
+            path = str(Path(td) / "f.entities.json")
+            est = EntityStore(path=path, shared=False)
+            g = _goal(est, "ship the release", [1.0, 0.0, 0.0])
+            est.save()
+            est2 = EntityStore(path=path, shared=False)
+            self.assertEqual(est2.docs[g.eid].position, [1.0, 0.0, 0.0])
+
+    def test_board_lists_the_goal_after_restart(self):
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as td:
+            path = str(Path(td) / "f.entities.json")
+            est = EntityStore(path=path, shared=False)
+            g = _goal(est, "ship the release", [1.0, 0.0, 0.0])
+            b = IntentBoard(Path(td) / "intents.json")
+            b.attach_entity_store(est)
+            b.selection.pin(g.eid, 0.5)
+            est.save()
+            est2 = EntityStore(path=path, shared=False)
+            b2 = IntentBoard(Path(td) / "intents.json")
+            b2.attach_entity_store(est2)
+            self.assertIn("ship the release", b2.report())
+
+
 if __name__ == "__main__":
     unittest.main()

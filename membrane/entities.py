@@ -1424,13 +1424,18 @@ class EntityStore(MultiParentOps, TimelineOps):
             with self._store_lock:
                 # list(): the docs are added to by threads that don't take
                 # this lock (every module's _entity()) -- iterate a copy
+                # the geometry rides by reference (#147: dropping it wiped
+                # every goal off the board at the next boot) -- position
+                # is replaced wholesale, never mutated in place
                 flat = [(eid, dict(ent.properties or {}), ent.cls,
-                         list(ent.links), list(ent.derived_by))
+                         list(ent.links), list(ent.derived_by),
+                         getattr(ent, "position", None),
+                         list(getattr(ent, "position_history", None) or []))
                         for eid, ent in list(self.docs.items())
                         if not ((ent.properties or {}).get("ephemeral"))]
                 tracks = dict(self.tracks) if self.tracks else None
             snapshot: dict = {}
-            for eid, props, cls, links, derived_by in flat:
+            for eid, props, cls, links, derived_by, pos, hist in flat:
                 try:
                     # THE SCREEN at the save's other end: any poison
                     # that made it into properties BEFORE the screen
@@ -1438,7 +1443,7 @@ class EntityStore(MultiParentOps, TimelineOps):
                     # writes, the value stays inspectable.
                     props = sanitize_properties(props)
                     ent = self._snap_to_entity(eid, props, cls, links,
-                                               derived_by)
+                                               derived_by, pos, hist)
                     snapshot[eid] = ent.to_doc()   # the heavy build HERE
                 except Exception as e:
                     # THE POISON IS NAMED: a doc that can't serialize
@@ -1469,7 +1474,8 @@ class EntityStore(MultiParentOps, TimelineOps):
                   file=sys.stderr)
 
     def _snap_to_entity(self, eid: str, props: dict, cls: str,
-                        links: list, derived_by: list):
+                        links: list, derived_by: list,
+                        position=None, position_history=None):
         """The flat snapshot's doc builder: a QuantumEntity from the
         copied scalars (the embedding/position references ride -- they
         are read-only at save time)."""
@@ -1480,8 +1486,8 @@ class EntityStore(MultiParentOps, TimelineOps):
         ent.links = links
         ent.derived_by = derived_by
         ent.embedding = None              # re-embedded on load (cheap)
-        ent.position = None
-        ent.position_history = []
+        ent.position = position
+        ent.position_history = position_history or []
         return ent
 
     SAVE_DEBOUNCE_S = 10.0
