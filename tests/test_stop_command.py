@@ -172,5 +172,30 @@ class TestTheDiscoveryGate(unittest.TestCase):
         self.assertEqual(out["rc"], 1, out)
 
 
+def test_walked_ports_covers_a_walked_seat():
+    # a seat whose 4096 was taken boots on 4097 -- a stop that only asks
+    # 4096 misses it; the walk probes the seat's own tail
+    assert 4097 in SS.walked_ports([4096])
+    assert 11501 in SS.walked_ports([11500])
+
+
+def test_walked_ports_dedups_and_stays_ordered():
+    assert SS.walked_ports([4096]) == list(range(4096, 4096 + SS.PORT_WALK))
+
+
+def test_seat_pidfiles_reads_the_seats_own_pid(tmp_path):
+    # the seat writes ITS OWN pid to membrane.pid at every boot; opencode.pid
+    # is the launch-mode TUI child. stop must read both, not just the child's.
+    (tmp_path / "membrane.pid").write_text("123")
+    (tmp_path / "opencode.pid").write_text("456")
+    assert SS.seat_pidfiles(tmp_path) == [tmp_path / "membrane.pid",
+                                           tmp_path / "opencode.pid"]
+
+
+def test_seat_pidfiles_skips_missing(tmp_path):
+    (tmp_path / "opencode.pid").write_text("456")
+    assert SS.seat_pidfiles(tmp_path) == [tmp_path / "opencode.pid"]
+
+
 if __name__ == "__main__":
     unittest.main()

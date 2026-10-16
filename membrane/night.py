@@ -61,6 +61,8 @@ def _watch_tell_ok(eid: str) -> bool:
 
 SCRIPT_TIMEOUT_S = 2.0         # wall clock per run
 SCRIPT_MAX_FAILURES = 3        # consecutive failures -> auto-disable
+SCRIPT_RETRY_S = 60.0          # a struck-out script's first retry (#149) ...
+SCRIPT_RETRY_MAX_S = 3600.0    # ... doubling per failed probe, capped
 SCRIPT_MAX_PER_PASS = 20       # hard ceiling per consolidation tick
 SCRIPT_DEFAULT_EVERY_N = 4     # each entity's script samples every Nth
                                # pass (hot entities set 1)
@@ -591,7 +593,7 @@ def run_scripted_entities(fld, est, mem=None, now: float | None = None,
             stats["deferred"] = stats.get("deferred", 0) + 1
             continue
         props = ent.properties or {}
-        if props.get("script_disabled"):
+        if script_held(props, now):
             continue
         every = props.get("script_every_n") or SCRIPT_DEFAULT_EVERY_N
         try:
@@ -617,7 +619,7 @@ def run_scripted_entities(fld, est, mem=None, now: float | None = None,
                               timeout=SCRIPT_TIMEOUT_S)
         # 1. the DELETE script first: retirement precedes any nudge
         dcode = props.get("delete_script")
-        if dcode and not props.get("script_disabled"):
+        if dcode and not script_held(props, now):
             out = run_entity_script(dcode, state)
             if out.get("error"):
                 stats["errors"] += 1
@@ -645,8 +647,7 @@ def run_scripted_entities(fld, est, mem=None, now: float | None = None,
                 _script_record_fail(fld, est, ent, eid, "nudge",
                                     out["error"], mem=mem)
                 continue
-            ent.properties.pop("script_failures", None)
-            ent.properties.pop("script_last_error", None)
+            _script_clear_strikes(ent.properties)
             changed = False
             if out.get("render"):
                 ent.properties["script_render"] = str(out["render"])[:300]
@@ -679,12 +680,52 @@ def _script_fail(est, ent, fld=None) -> None:
     n = int((ent.properties or {}).get("script_failures") or 0) + 1
     ent.properties["script_failures"] = n
     if n >= SCRIPT_MAX_FAILURES:
+        # #149: struck out is HELD, not dead -- a probe retries on a
+        # doubling backoff, and every failed probe says so again
+        wait = min(SCRIPT_RETRY_MAX_S,
+                   SCRIPT_RETRY_S * (2 ** (n - SCRIPT_MAX_FAILURES)))
         ent.properties["script_disabled"] = True
+        ent.properties["script_disabled_by"] = "strikes"
+        ent.properties["script_retry_at"] = time.time() + wait
+        last = str(ent.properties.get("script_last_error") or "")[:120]
         _script_error_announce(est, ent.eid, "disabled",
-                               f"{n} consecutive failures -- script "
-                               f"auto-disabled (clear via "
-                               f"entity_edit)")
+                               f"script auto-disabled after repeated "
+                               f"failures, retrying every {wait:.0f}s "
+                               f"(fix via entity_edit): {last}")
     est.save()
+
+
+def script_held(props: dict, now: float) -> bool:
+    """A disabled script stays off -- except a STRUCK-OUT one whose retry
+    is due (#149); an operator's own kill switch is never auto-retried."""
+    if not props.get("script_disabled"):
+        return False
+    if props.get("script_disabled_by") != "strikes":
+        return True
+    return now < float(props.get("script_retry_at") or 0.0)
+
+
+def _script_clear_strikes(props: dict) -> None:
+    """A run that passed: the strikes and a strikes-disable fall away."""
+    props.pop("script_failures", None)
+    props.pop("script_last_error", None)
+    if props.get("script_disabled_by") == "strikes":
+        for k in ("script_disabled", "script_disabled_by", "script_retry_at"):
+            props.pop(k, None)
+
+
+def script_health(props: dict) -> dict | None:
+    """The failing-script state an entity read carries (#149); None when
+    its scripts are healthy."""
+    p = props or {}
+    if not (p.get("script_failures") or p.get("script_disabled")
+            or p.get("script_last_error")):
+        return None
+    return {"state": "disabled" if p.get("script_disabled") else "failing",
+            "failures": int(p.get("script_failures") or 0),
+            "last_error": str(p.get("script_last_error") or "")[:300],
+            "retry_at": (float(p.get("script_retry_at") or 0.0)
+                         if p.get("script_disabled_by") == "strikes" else None)}
 
 
 def _script_error_announce(est, eid: str, kind: str, error: str) -> None:
@@ -3955,8 +3996,12 @@ def run_entity_update_script(srv, ent, trigger: str,
     if not code:
         return {"error": "no script"}
     now = time.time()
-    if props.get("script_disabled"):
-        return {"error": "disabled (3 strikes)"}
+    if script_held(props, now):
+        why = str(props.get("script_last_error") or "")[:160]
+        nxt = props.get("script_retry_at")
+        return {"error": "disabled after repeated failures"
+                         + (f", retry in {max(0.0, float(nxt) - now):.0f}s" if nxt else "")
+                         + (f": {why}" if why else "")}
     # THE TWO KINDS (the operator's 2026-10-02 ask): cron = periodic
     # (blocking per-entity + the overrun covenant); watcher =
     # event-triggered (the arrival is the cadence; the same lock).
@@ -4109,10 +4154,7 @@ def _run_script_locked(srv, ent, trigger, code, props, now, is_cron,
         # The model's watchers decide what to watch; the engine's
         # lanes never leak into the model's event pool.
     else:
-        if ent.properties.get("script_failures"):
-            ent.properties.pop("script_failures", None)
-        if ent.properties.get("script_last_error"):
-            ent.properties.pop("script_last_error", None)
+        _script_clear_strikes(ent.properties)
     return out
 
 

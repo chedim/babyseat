@@ -1424,13 +1424,18 @@ class EntityStore(MultiParentOps, TimelineOps):
             with self._store_lock:
                 # list(): the docs are added to by threads that don't take
                 # this lock (every module's _entity()) -- iterate a copy
+                # the geometry rides by reference (#147: dropping it wiped
+                # every goal off the board at the next boot) -- position
+                # is replaced wholesale, never mutated in place
                 flat = [(eid, dict(ent.properties or {}), ent.cls,
-                         list(ent.links), list(ent.derived_by))
+                         list(ent.links), list(ent.derived_by),
+                         getattr(ent, "position", None),
+                         list(getattr(ent, "position_history", None) or []))
                         for eid, ent in list(self.docs.items())
                         if not ((ent.properties or {}).get("ephemeral"))]
                 tracks = dict(self.tracks) if self.tracks else None
             snapshot: dict = {}
-            for eid, props, cls, links, derived_by in flat:
+            for eid, props, cls, links, derived_by, pos, hist in flat:
                 try:
                     # THE SCREEN at the save's other end: any poison
                     # that made it into properties BEFORE the screen
@@ -1438,7 +1443,7 @@ class EntityStore(MultiParentOps, TimelineOps):
                     # writes, the value stays inspectable.
                     props = sanitize_properties(props)
                     ent = self._snap_to_entity(eid, props, cls, links,
-                                               derived_by)
+                                               derived_by, pos, hist)
                     snapshot[eid] = ent.to_doc()   # the heavy build HERE
                 except Exception as e:
                     # THE POISON IS NAMED: a doc that can't serialize
@@ -1469,7 +1474,8 @@ class EntityStore(MultiParentOps, TimelineOps):
                   file=sys.stderr)
 
     def _snap_to_entity(self, eid: str, props: dict, cls: str,
-                        links: list, derived_by: list):
+                        links: list, derived_by: list,
+                        position=None, position_history=None):
         """The flat snapshot's doc builder: a QuantumEntity from the
         copied scalars (the embedding/position references ride -- they
         are read-only at save time)."""
@@ -1480,8 +1486,8 @@ class EntityStore(MultiParentOps, TimelineOps):
         ent.links = links
         ent.derived_by = derived_by
         ent.embedding = None              # re-embedded on load (cheap)
-        ent.position = None
-        ent.position_history = []
+        ent.position = position
+        ent.position_history = position_history or []
         return ent
 
     SAVE_DEBOUNCE_S = 10.0
@@ -2338,16 +2344,18 @@ class EntityStore(MultiParentOps, TimelineOps):
                     return {"ok": False, "error": f"{field} doesn't compile: {e.msg} (line {e.lineno}){hint}"}
             if not sval.strip():
                 ent.properties.pop(field, None)
-                ent.properties.pop("script_disabled", None)
-                ent.properties.pop("script_failures", None)
+                for k in ("script_disabled", "script_failures",
+                          "script_disabled_by", "script_retry_at"):
+                    ent.properties.pop(k, None)
             else:
                 ent.properties[field] = sval
                 # a rewrite is a fresh start (clear the disable state,
                 # the cooldowns -- the new script runs on the next try --
                 # AND the stale render from the previous script)
-                ent.properties.pop("script_disabled", None)
-                ent.properties.pop("script_failures", None)
-                ent.properties.pop("script_cooldowns", None)
+                for k in ("script_disabled", "script_failures",
+                          "script_disabled_by", "script_retry_at",
+                          "script_cooldowns"):
+                    ent.properties.pop(k, None)
                 if field == "nudge_script":
                     ent.properties.pop("script_render", None)
                 # SETTING IS ARMING (2026-10-11): thought/dreamed scripts set
@@ -2420,7 +2428,13 @@ class EntityStore(MultiParentOps, TimelineOps):
         # untouchable. The goal's own status IS touchable (fulfill/drop
         # via the edit surface; audited).
         parents_patch = None
+        # #150: every key is either SET or REFUSED with its why -- a patch
+        # never vanishes behind an rc 0 that names only class/summary/links
+        props_set: list = []
+        props_refused: dict = {}
         if isinstance(properties, dict) and properties:
+            for k in list(properties)[16:]:
+                props_refused[str(k)[:80]] = "over the 16-key cap per edit"
             for k, v in list(properties.items())[:16]:
                 kk = str(k)[:80]
                 if kk in ("script_every_n", "script_cooldown_s"):
@@ -2430,10 +2444,13 @@ class EntityStore(MultiParentOps, TimelineOps):
                         num = float(v)
                         ent.properties[kk] = (int(min(96, max(1, num))) if kk == "script_every_n"
                                               else round(min(3600.0, max(0.0, num)), 1))
+                        props_set.append(kk)
                     except (TypeError, ValueError):
-                        pass
+                        props_refused[kk] = "not a number"
                     continue
                 if kk.startswith("script_"):
+                    props_refused[kk] = ("engine-owned (only script_every_n / "
+                                         "script_cooldown_s are settable)")
                     continue
                 if kk in ("parents", "parent"):
                     # ISA goes through set_parents (names resolved, cycles
@@ -2444,10 +2461,22 @@ class EntityStore(MultiParentOps, TimelineOps):
                         except ValueError:
                             v = [v]
                     parents_patch = [str(x) for x in (v or [])]
+                    props_set.append("parents")
                     continue
                 props2 = ent.properties or {}
                 props2[kk] = (v if not isinstance(v, str) else v[:2000])
                 ent.properties = props2
+                props_set.append(kk)
+            _only_props = (not publish and not unpublish and all(
+                x is None for x in (summary, links, cls, merged_into,
+                                    nudge_script, delete_script,
+                                    mention_script, thought_script,
+                                    dreamed_script, tick_script,
+                                    watch_script, watch, getter_script,
+                                    watch_ops, watch_fields)))
+            if _only_props and not props_set:
+                return {"ok": False, "error": "nothing set -- refused: " + "; ".join(
+                    f"{k} ({why})" for k, why in props_refused.items())}
         if parents_patch is not None:
             # a parents patch REPLACES the list, in exactly the given order --
             # the dispatch order is the author's (inherit only ADDS; the probe
@@ -2493,6 +2522,9 @@ class EntityStore(MultiParentOps, TimelineOps):
         res = {"ok": True, "eid": ent.eid, "class": ent.cls,
                "summary": ent.properties.get("summary", ""),
                "links": ent.links}
+        if props_set or props_refused:
+            res["properties_set"] = props_set
+            res["properties_refused"] = props_refused
         # THE PUBLISH VEHICLE (the seat-first field, the model's decision):
         # edit(spec, publish=True) exports to the global namespace;
         # edit(spec, unpublish=True) retracts this seat's export. A

@@ -7,12 +7,11 @@ and stops it with HA. A separate process, so a hang, a crash or the seat's
 memory (1-3 GB on a busy field) never takes HA down with it.
 
     <config>/membrane/
-      .membrane/      the seat's data dir (field, sessions, serve-auth.json, settings)
+      .membrane/      the seat's data dir (field, sessions, settings)
       home/           its HOME (nothing of the seat's lands in /root)
       seat.log        its output, rotated at 5 MB
 
-The child listens on loopback only: HA's relay (relay.py) is the one door, with
-the basic-auth pair the seat generates in serve-auth.json.
+The child listens on loopback only: HA's relay (relay.py) is the one door.
 """
 from __future__ import annotations
 
@@ -102,14 +101,6 @@ def read_name(data: Path) -> tuple[str, list]:
         return "Bob", []
 
 
-def read_auth(data: Path) -> tuple[str, str] | None:
-    try:
-        d = json.loads((data / "serve-auth.json").read_text())
-        return str(d.get("user") or "opencode"), str(d.get("password") or "")
-    except (OSError, ValueError):
-        return None
-
-
 class SeatSupervisor:
     """Start, watch, respawn and stop the seat. All on HA's loop; file work in
     the executor."""
@@ -156,23 +147,27 @@ class SeatSupervisor:
             stdout=self._log, stderr=self._log, start_new_session=True)
         self.started_at = time.time()
         self.comp["serve_url"] = f"http://127.0.0.1:{self.serve_port}"
-        self.comp["serve_pass"] = ""                 # the relay waits until the seat wrote its pair
+        self.comp["serve_user"] = ""                 # open surface: no pair
+        self.comp["serve_pass"] = ""
+        # serve_ready stays as it was: a respawn keeps the lanes open (they
+        # retry on their own); only the first boot and a stop gate them
 
-    async def _pair(self) -> None:
-        """The seat writes serve-auth.json at its first boot (kept after)."""
+    async def _ready(self, poll_s: float = 1.0) -> None:
+        """The seat is ready when it answers (#144: readiness used to be 'the
+        pair is known' -- an open seat has no pair). Every lane that talks to
+        the seat waits on comp['serve_ready']."""
         for _ in range(240):
-            got = await self.hass.async_add_executor_job(read_auth, self.data)
-            if got and got[1]:
-                self.comp["serve_user"], self.comp["serve_pass"] = got
+            if await self._healthy():
+                self.comp["serve_ready"] = True
                 return
-            await asyncio.sleep(1)
+            await asyncio.sleep(poll_s)
 
     async def _healthy(self) -> bool:
         try:
             async with aiohttp.ClientSession() as s:
                 async with s.get(self.comp["serve_url"] + "/global/health",
                                  timeout=aiohttp.ClientTimeout(total=15)) as r:
-                    return r.status in (200, 401)    # 401: up, it asks the pair
+                    return r.status == 200
         except Exception:                            # noqa: BLE001
             return False
 
@@ -186,7 +181,7 @@ class SeatSupervisor:
         self._stopping = False
         await self._spawn()
         self._tasks = [self.hass.async_create_background_task(self._watch(), "membrane seat"),
-                       self.hass.async_create_background_task(self._pair(), "membrane seat pair")]
+                       self.hass.async_create_background_task(self._ready(), "membrane seat ready")]
 
     async def _watch(self) -> None:
         fails = 0
@@ -222,7 +217,6 @@ class SeatSupervisor:
             if self._stopping:
                 return
             await self._spawn()
-            self.hass.async_create_background_task(self._pair(), "membrane seat pair")
 
     async def _terminate(self, proc) -> None:
         if proc.returncode is not None:
@@ -246,7 +240,7 @@ class SeatSupervisor:
             t.cancel()
         if self.proc is not None:
             await self._terminate(self.proc)
-        self.comp["serve_pass"] = ""
+        self.comp["serve_ready"] = False
         if self._log is not None:
             await self.hass.async_add_executor_job(self._log.close)
             self._log = None

@@ -446,11 +446,11 @@ class Thinker:
             return
         beat = self._beat
         fired, movers = [], []
-        from .night import effective_script
+        from .night import effective_script, script_held
         for ent in list(est.docs.values()):
             props = ent.properties or {}
-            if props.get("script_disabled"):
-                continue
+            if script_held(props, time.time()):
+                continue          # struck out: off until its retry is due (#149)
             if not props.get("tick_script") and not (
                     props.get("parents") and effective_script(est, ent, "tick")[0]):
                 continue          # no tick of its own, none inherited (opt-in classes)

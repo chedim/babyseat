@@ -38,6 +38,11 @@ jobs:
           [ "${tag#v}" = "$ver" ] || { echo "tag $tag is not the package version $ver: bump pyproject.toml before releasing"; exit 1; }
       - run: pip install build
       - run: python -m build
+      # PyPI FIRST, then the GitHub release (2026-10-15): HACS users update
+      # from the release, and their HA then pip-installs the pinned seat --
+      # the package must already be there. The release re-runs this lane on
+      # an upload that exists; skip it (the tag check above still guards).
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_TOKEN }}
+          skip-existing: true

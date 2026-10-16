@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 import time
 import urllib.request
@@ -412,10 +413,32 @@ def check_pending(srv, now: float | None = None) -> dict | None:
     return pp
 
 
+# #151: a restart the seat ASKED for -- main()'s teardown ends in a re-exec
+# instead of an exit (a foreground seat has no supervisor to respawn it)
+RESTART = {"requested": False}
+
+
+def restart_line() -> str | None:
+    """The log's word that this stop is a restart -- the teardown prints it
+    while the log file is still open (at exec time stderr is closed)."""
+    return "[seat] restarting (re-exec)" if RESTART["requested"] else None
+
+
+def reexec_if_requested() -> None:
+    """The last line of the seat's teardown: a requested restart re-execs the
+    same command (same pid, same terminal -- ctrl+c still stops it; a
+    supervisor waiting on the process just sees it continue)."""
+    if not RESTART["requested"]:
+        return
+    os.execv(sys.executable,
+             [sys.executable, "-m", "membrane.opencode"] + sys.argv[1:])
+
+
 def do_restart(srv, why: str, delay_s: float = 2.0) -> dict:
     """presence.restart: the reason for the next boot, then a clean SIGTERM
-    (the supervisor respawns the serve; the drain runs as on any stop)."""
+    (the drain runs as on any stop; the teardown's end re-execs, #151)."""
     import signal
+    RESTART["requested"] = True
     pend = _pending(srv) or {}
     files = ", ".join(pend.get("files") or [])
     why = " ".join(str(why or "").split())[:200] or "no reason given"

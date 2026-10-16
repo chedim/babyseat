@@ -101,7 +101,7 @@ async def push_token(hass: HomeAssistant, entry, comp: dict) -> bool:
         _LOGGER.warning("membrane: could not mint the seat's Home Assistant token (%r)", e)
         return False
     url = comp.get("serve_url") or ""
-    if not (url and comp.get("serve_pass")):
+    if not (url and comp.get("serve_ready")):
         return False
     body = {"url": str(comp.get("ha_base_url") or "") or routable_url(hass), "token": token}
     try:
@@ -124,7 +124,7 @@ async def seat_event(comp: dict, kind: str, timeout_s: float = 30.0) -> bool:
     """A word to the detached seat: {kind: ha-start|ha-stop} (restarts.py) -- its
     /membrane/seat/event answers {"ok": False, ...} for unknown kinds."""
     url = comp.get("serve_url") or ""
-    if not (url and comp.get("serve_pass")):
+    if not (url and comp.get("serve_ready")):
         return False
     try:
         async with aiohttp.ClientSession() as s:
@@ -145,7 +145,7 @@ def seat_event_sync(comp: dict, kind: str, timeout_s: float = 5.0) -> bool:
     import urllib.request
 
     url = (comp.get("serve_url") or "").rstrip("/")
-    if not (url and comp.get("serve_pass")):
+    if not (url and comp.get("serve_ready")):
         return False
     req = urllib.request.Request(
         url + "/membrane/seat/event", data=_json.dumps({"kind": kind}).encode(),
@@ -200,7 +200,7 @@ class StatePush:
     async def _subs_loop(self) -> None:
         while True:
             url = self.comp.get("serve_url")
-            if url and self.comp.get("serve_pass"):
+            if url and self.comp.get("serve_ready"):
                 try:
                     async with aiohttp.ClientSession() as s:
                         async with s.get(url + "/membrane/ha/subscriptions", auth=self._auth(),
@@ -219,7 +219,7 @@ class StatePush:
     async def _flush_loop(self) -> None:
         while True:
             await asyncio.sleep(FLUSH_S)
-            if not self.pending or not self.comp.get("serve_pass"):
+            if not self.pending or not self.comp.get("serve_ready"):
                 continue
             batch, self.pending = list(self.pending.values()), {}
             try:

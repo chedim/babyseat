@@ -156,8 +156,17 @@ def _ensure_data_dir(argv: list[str]) -> list[str]:
     return argv
 
 
-def _run_module(module: str, argv: list[str]) -> int:
+def _run_module(module: str, argv: list[str], *, exec_: bool = False) -> int:
     cmd = [sys.executable, "-m", module] + argv
+    if exec_:
+        # THE SEAT IS THE PROCESS (no wrapper -> child split): a seat
+        # command execs INTO the seat so a terminal's ctrl+c lands on the
+        # seat's OWN SIGINT handler and its graceful teardown runs fully. A
+        # subprocess child the wrapper SIGKILLs on its own KeyboardInterrupt
+        # would be cut mid-flush -- half-written field, a stray, a zombie.
+        # One process, no child to orphan or reap.
+        os.execvpe(sys.executable, cmd, os.environ)
+        raise AssertionError("unreachable")     # execvpe never returns
     return subprocess.call(cmd)
 
 
@@ -196,7 +205,7 @@ def _reset(argv: list[str]) -> int:
     else:
         print("[cli] reset: nothing on :%d, starting fresh" % port,
               file=sys.stderr)
-    return _run_module("membrane.opencode", _ensure_data_dir(argv))
+    return _run_module("membrane.opencode", _ensure_data_dir(argv), exec_=True)
 
 
 def _erase_field(argv: list[str]) -> int:
@@ -666,14 +675,14 @@ def main() -> None:
         raise SystemExit(2)
     if cmd == "opencode":
         argv2 = _ensure_data_dir(args.forwarded)
-        raise SystemExit(_run_module("membrane.opencode", argv2))
+        raise SystemExit(_run_module("membrane.opencode", argv2, exec_=True))
     if cmd == "serve":
         argv2 = _ensure_data_dir(["--serve"] + args.forwarded)
-        raise SystemExit(_run_module("membrane.opencode", argv2))
+        raise SystemExit(_run_module("membrane.opencode", argv2, exec_=True))
     if cmd == "standalone":
         # STANDALONE MODE: the serve + its own web UI, opened in the browser
         argv2 = _ensure_data_dir(["--standalone"] + args.forwarded)
-        raise SystemExit(_run_module("membrane.opencode", argv2))
+        raise SystemExit(_run_module("membrane.opencode", argv2, exec_=True))
     if cmd == "stop":
         # THE STOP COMMAND: find + stop the seat without depending on the
         # tty's ctrl+c (INT -> bounded TERM -> KILL, marker-checked)

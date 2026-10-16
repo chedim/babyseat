@@ -41,10 +41,7 @@ def test_the_child_listens_on_loopback_only(sup, tmp_path):
     assert a[a.index("--field") + 1] == str(tmp_path / "field.json")
 
 
-def test_pair_and_name(sup, tmp_path):
-    assert sup.read_auth(tmp_path) is None
-    (tmp_path / "serve-auth.json").write_text(json.dumps({"user": "opencode", "password": "pw"}))
-    assert sup.read_auth(tmp_path) == ("opencode", "pw")
+def test_name(sup, tmp_path):
     assert sup.read_name(tmp_path) == ("Bob", [])
     (tmp_path / "settings.json").write_text(json.dumps({"name": "Juniper", "aliases": ["juni"]}))
     assert sup.read_name(tmp_path) == ("Juniper", ["juni"])
@@ -55,3 +52,39 @@ def test_no_homeassistant_in_the_package():
     bad = [str(p) for p in pkg.rglob("*.py") if "import homeassistant" in p.read_text()
            or "from homeassistant" in p.read_text()]
     assert bad == []
+
+
+def test_the_seat_is_ready_when_it_answers(sup, tmp_path):
+    # #144: readiness was 'the pair is known'; an open seat has no pair --
+    # ready = its health answers
+    import asyncio
+    hass = types.SimpleNamespace(config=types.SimpleNamespace(path=lambda p: str(tmp_path / p)))
+    comp = {"serve_url": "http://127.0.0.1:1"}
+    s = sup.SeatSupervisor(hass, comp, "http://b", "m", "e")
+    answers = iter([False, False, True])
+
+    async def _healthy():
+        return next(answers)
+    s._healthy = _healthy
+    asyncio.run(s._ready(poll_s=0))
+    assert comp["serve_ready"] is True
+
+
+def test_no_gate_reads_the_password_as_readiness():
+    # every 'is the seat up?' gate keyed on serve_pass; with no pair they all
+    # stayed shut (sensors, chat relay, HA access) -- readiness is serve_ready
+    import re
+    bad = []
+    for f in sorted(ROOT.glob("*.py")):
+        for i, ln in enumerate(f.read_text().splitlines(), 1):
+            if re.search(r"""(\bif\b|\bnot\b|\band\b|\bbool\()[^#]*get\(["']serve_pass["']\)""", ln):
+                bad.append(f"{f.name}:{i}: {ln.strip()}")
+    assert not bad, "\n".join(bad)
+
+
+def test_connect_needs_no_password():
+    # #144: a seat has no login now -- the connect form must not demand one
+    # (only a reverse proxy in front may ask; then it is given)
+    src = (ROOT / "config_flow.py").read_text()
+    assert "vol.Required(CONF_SERVE_PASS)" not in src
+    assert "vol.Required(CONF_SERVE_USER" not in src

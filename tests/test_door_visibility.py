@@ -11,7 +11,6 @@ when its turn's inner reaches the announce. THE CONTRACT:
 4. no double announcement (the inner's announce is idempotent via
    the _announced flag).
 """
-import base64
 import json
 import os
 import shutil
@@ -61,8 +60,7 @@ def quiet_seat():
     env["MEMBRANE_EF_ANN"] = "0"
     env["MEMBRANE_NO_OPEN"] = "1"
     os.makedirs(SEAT_DIR, exist_ok=True)
-    for stale in ("serve-auth.json", "f.json", "f.json.seed.json",
-                  "seat.stdout", "seat.stderr"):
+    for stale in ("f.json", "f.json.seed.json", "seat.stdout", "seat.stderr"):
         p = os.path.join(SEAT_DIR, stale)
         if os.path.exists(p):
             os.unlink(p)
@@ -93,26 +91,15 @@ def quiet_seat():
         while time.time() < deadline and not cred:
             if proc.poll() is not None:
                 raise _boot_failure("the seat exited during boot")
-            p = os.path.join(SEAT_DIR, "serve-auth.json")
-            if os.path.exists(p):
-                try:
-                    cred = json.loads(open(p).read())
-                    tok = base64.b64encode(
-                        f"{cred['user']}:{cred['password']}".encode()).decode()
-                    probe = urllib.request.Request(
-                        f"http://127.0.0.1:{port}/agent",
-                        headers={"Authorization": "Basic " + tok})
-                    urllib.request.urlopen(probe, timeout=3)
-                    break
-                except Exception:
-                    cred = None
-            time.sleep(0.3)
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/agent", timeout=3)
+                cred = True                      # open surface: /agent answers, no auth
+                break
+            except Exception:
+                time.sleep(0.3)
         if not cred:
             raise _boot_failure("seat never became ready")
-        tok = base64.b64encode(
-            f"{cred['user']}:{cred['password']}".encode()).decode()
-        hdr = {"Authorization": "Basic " + tok,
-               "Content-Type": "application/json"}
+        hdr = {"Content-Type": "application/json"}
         _mk = {"url": f"http://127.0.0.1:{port}"}
 
         def _get(url):

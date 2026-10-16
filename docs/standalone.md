@@ -40,8 +40,9 @@ works for chat too).
 - **Your machine and your local network, no login**: loopback, private addresses
   (192.168.x, 10.x, 172.16–31.x) and Tailscale's 100.64.0.0/10.
 - **Anything else is refused** (403, never a login prompt): a public address, or a
-  request a reverse proxy forwarded (`X-Forwarded-For` / `Forwarded`). The serve's
-  basic-auth pair (`.membrane/serve-auth.json`) still opens it for scripts.
+  request a reverse proxy forwarded (`X-Forwarded-For` / `Forwarded`). That guard
+  covers the page; the serve's API itself has no login -- keep the seat on your
+  network, or put a reverse proxy with its own login in front.
 - `"ui_lan_open": false` in `.membrane/settings.json` closes the LAN door too.
 
 ## Voice

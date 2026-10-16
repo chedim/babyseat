@@ -231,13 +231,11 @@ def _attach_cmd(opencode: str, port: int, passthrough=(), cont: bool = False) ->
     return cmd + list(passthrough)
 
 
-def _attach_env(env: dict, su: str, sp: str) -> dict:
-    """The attach child's env: auth for membrane's serve server, and NO
-    OPENCODE_CONFIG/_CONTENT -- the provider/session config is the SERVER's
-    business; an attached TUI must not front its own /v1 lane."""
+def _attach_env(env: dict) -> dict:
+    """The attach child's env: NO OPENCODE_CONFIG/_CONTENT -- the
+    provider/session config is the SERVER's business; an attached TUI must
+    not front its own /v1 lane."""
     e = dict(env)
-    e["OPENCODE_SERVER_USERNAME"] = su
-    e["OPENCODE_SERVER_PASSWORD"] = sp
     e.pop("OPENCODE_CONFIG", None)
     e.pop("OPENCODE_CONFIG_CONTENT", None)
     return e
@@ -3460,62 +3458,12 @@ def _lan_ip() -> str:
     return "127.0.0.1"
 
 
-def _serve_credentials(path: str, user: str, password: str | None) -> tuple[str, str, bool]:
-    """The basic-auth pair the headless serve speaks (user, password, first_boot).
-
-    `opencode serve` reads OPENCODE_SERVER_USERNAME/_PASSWORD (a password
-    without a username serves under the default 'opencode' user) -- the same
-    pair the companion app types. A generated password is written ONCE
-    (0600, beside the field) and reused on every later boot so a device's
-    saved connection survives seat restarts; --serve-pass overrides both,
-    --serve-user overrides the user (also persisting it).
-    """
-    import secrets
-    if password:
-        return user or "opencode", password, False
-    import secrets
-    p = Path(path)
-    d = None
-    try:                     # a kept file wins -- corrupt or missing regenerates
-        if p.is_file():
-            d = json.loads(p.read_text())
-    except Exception:
-        d = None
-    try:
-        if not (d and d.get("user") and d.get("password")):
-            d = {"user": user or "opencode",
-                 "password": secrets.token_urlsafe(15)}
-            tmp = path + ".tmp"
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            try:
-                os.write(fd, json.dumps(d).encode())
-            finally:
-                os.close(fd)
-            os.replace(tmp, path)            # a reader never sees half a file
-            os.chmod(path, 0o600)
-            return d["user"], d["password"], True
-        return d["user"], d["password"], False
-    except Exception as e:
-        # no writable home for the file: ephemeral credentials (printed
-        # once, gone on restart -- never a silent all-open serve)
-        print(f"[opencode] serve auth NOT persisted ({_one_line(e)}); "
-              "this boot's pair is ephemeral", file=sys.stderr)
-        return user or "opencode", secrets.token_urlsafe(15), True
-
-
-def _serve_board(serve_port: int, serve_host: str, user: str, password: str,
-                 first_boot: bool, cred_path: str) -> None:
+def _serve_board(serve_port: int, serve_host: str) -> None:
     """One board line for the native serve surface: the URL a client
     connects to."""
     addr = "localhost" if serve_host in ("127.0.0.1", "localhost") else _lan_ip()
-    shown = password if first_boot else f"<saved in {cred_path}>"
-    print(f"[opencode] serve: http://{addr}:{serve_port}  (user {user}, "
-          f"password {shown}; basic auth -- clients type these, or the "
-          "companion app fills the URL + pair)",
+    print(f"[opencode] serve: http://{addr}:{serve_port}",
           file=sys.stderr)
-    if first_boot:
-        print(f"[opencode] serve: credentials persisted at {cred_path} "
-              "(0600); they survive restarts", file=sys.stderr)
 
 
 def _audit_count(path: str) -> int:
@@ -6667,6 +6615,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # est's _srv wiring) -- the queue split rides with no args here
         val = executor_value(est, ent.eid)
         val["getter"] = fired
+        from .night import script_health
+        _sh = script_health(ent.properties)
+        if _sh:
+            val["script"] = _sh                      # #149: a failing script is part of the read
         self._json_out(val)
 
     def _entity_audit(self, op: str, res: dict) -> None:

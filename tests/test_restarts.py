@@ -93,7 +93,9 @@ class TestArgusRestarts(unittest.TestCase):
         with mock.patch("os.kill") as kill, mock.patch("membrane.seat_panel.note"):
             out = RS.do_restart(srv, "nothing of mine in flight", delay_s=0)
             import time
-            time.sleep(0.2)
+            end = time.time() + 10                   # never leave the patch before the
+            while not kill.called and time.time() < end:   # thread's SIGTERM lands in it
+                time.sleep(0.01)
         self.assertEqual(out["rc"], 0)
         kill.assert_called_once()
         self.assertIn("Argus restarted it (nothing of mine in flight); it loads the staged score.py",
@@ -127,6 +129,51 @@ class TestArgusRestarts(unittest.TestCase):
         d = (Path(__file__).resolve().parent.parent / "doctrine.md").read_text()
         self.assertIn("RESTARTS:", d)
         self.assertIn("method='restart'", d)
+
+
+class TestARestartRestarts(unittest.TestCase):
+    """#151: a foreground seat has no supervisor -- its self-restart's SIGTERM
+    was a stop. A requested restart now re-execs the seat after teardown
+    (same pid: a supervisor waiting on it just sees it continue)."""
+
+    def setUp(self):
+        RS.RESTART["requested"] = False       # do_restart elsewhere sets it
+
+    def tearDown(self):
+        RS.RESTART["requested"] = False
+
+    def test_do_restart_marks_the_restart_requested(self):
+        srv = _Srv()
+        # no thread at all: its SIGTERM is aimed at THIS process -- a patch
+        # that ends before the thread fires killed pytest on CI (exit 143)
+        with mock.patch.object(RS.threading, "Thread") as th, \
+             mock.patch("membrane.seat_panel.note"):
+            RS.do_restart(srv, "staged fixes", delay_s=0)
+        th.return_value.start.assert_called_once()
+        self.assertTrue(RS.RESTART["requested"])
+
+    def test_a_requested_restart_reexecs_the_same_command(self):
+        RS.RESTART["requested"] = True
+        argv = ["/x/membrane/opencode.py", "--standalone", "--field", "f.json"]
+        with mock.patch.object(RS.os, "execv") as ex, \
+             mock.patch.object(RS.sys, "argv", argv):
+            RS.reexec_if_requested()
+        ex.assert_called_once_with(
+            RS.sys.executable,
+            [RS.sys.executable, "-m", "membrane.opencode",
+             "--standalone", "--field", "f.json"])
+
+    def test_the_restart_says_so_while_the_log_is_open(self):
+        # the teardown prints this BEFORE it closes the log file stderr
+        # rides; printed at exec time it went nowhere
+        self.assertIsNone(RS.restart_line())
+        RS.RESTART["requested"] = True
+        self.assertIn("re-exec", RS.restart_line())
+
+    def test_a_plain_stop_never_reexecs(self):
+        with mock.patch.object(RS.os, "execv") as ex:
+            RS.reexec_if_requested()
+        ex.assert_not_called()
 
 
 if __name__ == "__main__":

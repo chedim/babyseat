@@ -632,6 +632,21 @@ class TestEntityReadHints(unittest.TestCase):
         self.assertIn("Executor", msg)
         self.assertIn("tool:executor", msg)
 
+    def test_a_failing_script_rides_the_read(self):
+        """#149: the read carries a failing script's state (it said
+        nothing: a struck-out heartbeat read as a healthy entity)."""
+        ent = self.est.docs[MEMBRANE_NS + "tool:executor"]
+        code, out = self._get("/membrane/entity/read?spec=tool:executor&nofire=1")
+        self.assertEqual(code, 200, out)
+        self.assertNotIn("script", out)
+        ent.properties.update({"script_failures": 3, "script_disabled": True,
+                               "script_disabled_by": "strikes",
+                               "script_retry_at": 9e9,
+                               "script_last_error": "SyntaxError: boom"})
+        code, out = self._get("/membrane/entity/read?spec=tool:executor&nofire=1")
+        self.assertEqual(out["script"]["state"], "disabled")
+        self.assertIn("SyntaxError", out["script"]["last_error"])
+
     def test_field_id_resolves_to_the_store(self):
         """'s:?tick_every' (the FIELD's short id) resolves to the store's
         symbols:?tick_every directly (2026-10-08: it used to 404 with the
@@ -768,7 +783,7 @@ class TestTokenMend(unittest.TestCase):
         handler = make_handler(hub=hub, sessions=type("S", (), {
             "get": staticmethod(lambda sid: {"id": sid, "agent":
                                              "build"})})(),
-            messages=msgs, user="opencode", password="", config={},
+            messages=msgs, config={},
             runner=None, srv=None)
         hs = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         threading.Thread(target=hs.serve_forever, daemon=True).start()
@@ -828,7 +843,7 @@ class TestServePortReservation(unittest.TestCase):
                                system="", model="m")
         runner._serve_socket = s          # the pick's reservation
         runner.srv = None
-        httpd, th = MS.start(port, "127.0.0.1", "opencode", "", {}, runner,
+        httpd, th = MS.start(port, "127.0.0.1", {}, runner,
                              sessions, msgs)
         try:
             self.assertEqual(httpd.socket.getsockname()[1], port)
@@ -855,7 +870,7 @@ class TestServePortReservation(unittest.TestCase):
         runner = MS.TurnRunner(hub, sessions, msgs, lambda b: {}, None,
                                system="", model="m")
         runner._serve_socket = s
-        httpd, th = MS.start(port, "127.0.0.1", "opencode", "", {},
+        httpd, th = MS.start(port, "127.0.0.1", {},
                              runner, sessions, msgs)
         try:
             self.assertIsNone(runner._serve_socket,

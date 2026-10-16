@@ -371,7 +371,9 @@ TOOLS: list[dict] = [
             "delete: bool}. The nudge's render replaces the track's "
             "default banner line; the delete script retires the entity "
             "(tombstoned, announced). 3 consecutive failures auto-"
-            "disable; empty string clears. "
+            "disable, retried on a backoff (60s doubling to 1h; a "
+            "passing retry re-enables, entity_read shows the state); "
+            "empty string clears. "
             "thought_script/dreamed_script/tick_script: TRIGGER-"
             "TYPED policy scripts (the getter/setter organ) -- run "
             "off-turn at the thinker/dreamer hooks (mention fires when "
@@ -1166,8 +1168,14 @@ def tool_entity_edit(args: dict, port: int) -> str:
                 f".payload). Watchers may block but only 4 run at "
                 f"once, a >10s fire strikes (3 = auto-disabled). "
                 f"The seeded tool:filetree is the template.")
-    return (f"Entity {out['eid']} updated: class {out.get('class')}, "
-            f"summary {out.get('summary')!r}, links {out.get('links')}.")
+    msg = (f"Entity {out['eid']} updated: class {out.get('class')}, "
+           f"summary {out.get('summary')!r}, links {out.get('links')}.")
+    if out.get("properties_set"):
+        msg += f" Properties set: {', '.join(out['properties_set'])}."
+    if out.get("properties_refused"):
+        msg += " Properties REFUSED (not set): " + "; ".join(
+            f"{k} ({why})" for k, why in out["properties_refused"].items()) + "."
+    return msg
 
 
 def tool_entity_remove(args: dict, port: int) -> str:

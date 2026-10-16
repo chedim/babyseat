@@ -112,5 +112,5 @@ class ConfView(HomeAssistantView):
     async def get(self, request):
         comp = request.app[KEY_HASS].data.get(DOMAIN) or {}
         return self.json({"serve_url": "membrane (inside Home Assistant)" if comp.get("inside") else comp.get("serve_url", ""),
-                          "serve_ok": bool(comp.get("serve_url") and comp.get("serve_pass")),
+                          "serve_ok": bool(comp.get("serve_url") and comp.get("serve_ready")),
                           **_name(request.app[KEY_HASS])})

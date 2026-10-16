@@ -129,7 +129,8 @@ night.py::_script_membrane_api`):
 It returns `{delete?, render?, data?}` — **the engine applies**: the
 banner fragment, the entity's own properties (bounded, `script_*` keys
 untouchable), or retirement. Scripts analyze and return; the engine
-writes. Per-entity cooldown, 3-strikes auto-disable, every application
+writes. Per-entity cooldown, 3-strikes auto-disable (retried on a 60s→1h
+backoff; a passing retry re-enables; reads carry the failing state), every application
 audited. A script's change to an entity emits an event, so the normal-mode
 **state diff** (SINCE YOUR LAST MESSAGE) shows it next turn.
 

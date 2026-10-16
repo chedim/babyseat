@@ -129,7 +129,7 @@ class _Hass:
 
 
 def _comp(seat):
-    return {"serve_url": seat.url, "serve_user": "opencode", "serve_pass": "pw"}
+    return {"serve_url": seat.url, "serve_ready": True, "serve_user": "opencode", "serve_pass": "pw"}
 
 
 async def _fake_mint(hass, entry):
@@ -155,8 +155,8 @@ def test_a_seat_that_never_answered(serve, haa, monkeypatch):
     monkeypatch.setattr(haa, "mint_token", _fake_mint)
     run = lambda c: asyncio.get_event_loop_policy().get_event_loop().run_until_complete(
         haa.push_token(_Hass(), None, c))
-    assert run({"serve_url": "http://127.0.0.1:1", "serve_pass": "x"}) is False     # nothing answers there
-    assert run({"serve_url": serve.url}) is False                                   # no pair, no knock
+    assert run({"serve_url": "http://127.0.0.1:1", "serve_ready": True}) is False   # nothing answers there
+    assert run({"serve_url": serve.url}) is False                                   # not ready, no knock
     assert serve.token == []
 
 
@@ -202,3 +202,12 @@ def test_ha_urls_a_loopback_falls_back(haa):
     h.config = C()
     assert haa.routable_url(h).startswith("http://127.0.0.1")
     assert haa.routable_url(_Hass()) == "http://192.168.1.15:8123"
+
+def test_an_open_seat_gets_the_token(serve, haa, monkeypatch):
+    # #144's other half: the seat has no pair any more -- an HA-run seat's
+    # comp carries no password, and readiness is its own flag, not the pair
+    monkeypatch.setattr(haa, "mint_token", _fake_mint)
+    out = asyncio.get_event_loop_policy().get_event_loop().run_until_complete(
+        haa.push_token(_Hass(), None, {"serve_url": serve.url, "serve_ready": True,
+                                       "serve_user": "", "serve_pass": ""}))
+    assert out is True and serve.token[-1]["token"] == "fresh-tok"

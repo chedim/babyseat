@@ -21,7 +21,7 @@
       },
       "connect": {
         "title": "An existing seat",
-        "description": "The seat's serve address and the pair from its serve-auth.json.",
+        "description": "The seat's serve address. User and password only if a reverse proxy in front of it asks for them.",
         "data": { "serve_url": "Seat URL", "serve_user": "User", "serve_pass": "Password" }
       }
     },
