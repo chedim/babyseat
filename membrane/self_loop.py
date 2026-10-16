@@ -69,7 +69,10 @@ except ValueError:
     PACE_S = 10.0
 BURST_PER_MIN = 30
 HOLD_AFTER = 3              # failed cycles in a row
-STEP = 0.1                  # how far self pushes itself per try
+STEP = 0.1                  # how far self pushes itself per try (its babble)
+AIM_HOLD = 30               # cycles self holds an aim before choosing the next (steer, after rung 1)
+AIM_REACH = 0.3             # how far from where it is an aim lies
+STEP_MAX = 0.3              # its longest stride when it steers (leaning into a 0.2 pull needs more than 0.1)
 PUSH_GAIN = 0.2             # how hard the current pulls it toward itself
 LEARN = 0.2                 # how fast expect's model of the current follows what it observes
 CALM = 1e-6                 # a push under this is no push (a quiet world)
@@ -351,9 +354,23 @@ def _expect(srv, seed: str) -> dict:
         lam, dt = c.get("lam"), c.get("dt")
         c["p"] = (1.0 - float(np.exp(-lam * dt))) if (lam and dt is not None) else _p_changed(srv, c["eid"])
         return {"rc": 0, "text": "expected"}
-    c["intent"] = _unit(c["pos"] + STEP * _seed_dir(seed, len(c["pos"])))
-    c["expected"] = _unit(c["intent"] + _expected_push(srv, c["pos"]))
+    w = _expected_push(srv, c["pos"])
+    if c.get("aim") is not None:
+        # STEER: lean into the current by the push I expect, toward my aim
+        raw = c["aim"] - c["pos"]
+        c["naive_mine"] = _clip(raw, STEP_MAX)
+        c["mine"] = _clip(raw - w, STEP_MAX)
+        c["intent"] = _unit(c["pos"] + c["mine"])
+    else:
+        c["intent"] = _unit(c["pos"] + STEP * _seed_dir(seed, len(c["pos"])))
+    c["expected"] = _unit(c["intent"] + w)
     return {"rc": 0, "text": "expected"}
+
+
+def _clip(v, n: float) -> np.ndarray:
+    v = np.asarray(v, dtype=float)
+    m = float(np.linalg.norm(v))
+    return v * (n / m) if m > n else v
 
 
 def _model(srv, dim: int) -> dict | None:
@@ -380,7 +397,7 @@ def _try(srv, seed: str) -> dict:
     """Push myself one step; the world pushes too, while I move."""
     c = _ctx.cycle
     ent = _entity(srv)
-    mine = STEP * _seed_dir(seed, len(c["pos"]))
+    mine = c["mine"] if c.get("mine") is not None else STEP * _seed_dir(seed, len(c["pos"]))
     world = PUSH_GAIN * (c["current"] - c["pos"])
     ent.position = [float(x) for x in _unit(c["pos"] + mine + world)]
     return {"rc": 0, "text": "moved"}
@@ -516,8 +533,15 @@ def cycle(srv, now: float | None = None) -> dict | None:
     rt["burst"].append(now)
     n = sum(1 for r in _read(srv) if r.get("kind") == "cycle") + 1
     seed = f"{n}"
+    aim = None
+    if 1 in _passed(_read(srv)):            # steer: earned by feeling itself
+        if (rt.get("aim") is None or rt.get("aim_count", 0) >= AIM_HOLD
+                or len(rt["aim"]) != len(pos)):
+            rt["aim"], rt["aim_n"], rt["aim_count"] = _unit(pos + AIM_REACH * _seed_dir(f"aim:{n}", len(pos))), n, 0
+        rt["aim_count"] += 1
+        aim = rt["aim"]
     from .night import method_call
-    _ctx.cycle = {"srv": srv, "pos": pos, "current": cur}
+    _ctx.cycle = {"srv": srv, "pos": pos, "current": cur, "aim": aim}
     try:
         outs = []
         for m in ("expect", "try", "notice"):
@@ -539,9 +563,17 @@ def cycle(srv, now: float | None = None) -> dict | None:
     rt["fails"] = 0
     gap = float(np.linalg.norm(c["observed"] - c["expected"]))
     naive = float(np.linalg.norm(c["observed"] - c["intent"]))
-    rec = {"ts": now, "kind": "cycle", "n": n, "act": "move", "step": STEP,
+    rec = {"ts": now, "kind": "cycle", "n": n, "act": "move",
+           "step": round(float(np.linalg.norm(c["mine"])), 4) if c.get("mine") is not None else STEP,
            "push": c["push"], "gap": gap, "naive": naive,
            "change": "world" if c["push"] > CALM else "knowledge"}
+    if aim is not None:
+        # where it landed against its aim, and where the same stride would have
+        # landed without leaning into the current (the world's push is the same)
+        world = PUSH_GAIN * (cur - pos)
+        naive_land = _unit(pos + c["naive_mine"] + world)
+        rec.update({"aim_n": rt["aim_n"], "aim_err": float(np.linalg.norm(c["observed"] - aim)),
+                    "aim_naive": float(np.linalg.norm(naive_land - aim))})
     _append(srv, rec)
     est.upsert(ent, embedder=None)
     if _available(srv, 2):
@@ -837,12 +869,13 @@ def _show(srv, ent, pos, c, rec) -> None:
             return
         st = status(srv)
         fp.self_cycle({"from": pos, "intent": c["intent"], "expected": c["expected"],
-                       "at": c["observed"], "pull": _pull(srv, len(pos))},
+                       "at": c["observed"], "pull": _pull(srv, len(pos)), "aim": c.get("aim")},
                       {"n": rec["n"], "gap": rec["gap"], "naive": rec["naive"], "push": rec["push"],
                        "rung": st["rung"], "bar": st["bar"], "skill": st["skill"],
                        "mode": st["mode"], "slipping": st["slipping"], "waiting_on": st["waiting_on"],
                        "next": st["next"], "cycles": st["cycles"], "held": st["held"],
-                       "rung_name": st["rung_name"], "limit": st["limit"]})
+                       "rung_name": st["rung_name"], "limit": st["limit"],
+                       "steer": (st.get("steer") or {}).get("skill")})
     except Exception:
         pass
 
@@ -1064,7 +1097,20 @@ def status(srv) -> dict:
             "rung": rung, "rung_name": LADDER.get(rung), "next": nxt,
             "bar": round(bar, 4), "waiting_on": waiting, "skill": prog.get("skill", r1["skill"]),
             "slipping": slipping, "ladder": ladder,
-            "world": {e: k for e, k in _kinds(recs).items() if k != "unknown"}}
+            "world": {e: k for e, k in _kinds(recs).items() if k != "unknown"},
+            "steer": _steer_stats(recs)}
+
+
+def _steer_stats(recs: list[dict]) -> dict | None:
+    """How close it lands to its aim (last 20 steered cycles), against the
+    same stride without leaning into the current."""
+    rs = [r for r in recs if r.get("kind") == "cycle" and "aim_err" in r][-20:]
+    if not rs:
+        return None
+    err = sum(r["aim_err"] for r in rs) / len(rs)
+    naive = sum(r["aim_naive"] for r in rs) / len(rs)
+    return {"err": round(err, 4), "naive": round(naive, 4),
+            "skill": round(1.0 - err / naive, 4) if naive > 1e-9 else 0.0}
 
 
 # ---- the thread -----------------------------------------------------------

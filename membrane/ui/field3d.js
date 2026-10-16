@@ -1074,23 +1074,47 @@ class Field3DView {
         pos: cubeToWorld(pts.from), tw: null, trail: [], last: p,
         sprite: new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false })),
         own: line(0x5ad17a, 0.9), world: line(0xffa94d, 0.9), gap: line(0xff5d5d, 0.9), pull: line(0xb48cff, 0.35),
-        ghosts: new THREE.Points(new THREE.BufferGeometry()
-          .setAttribute("position", new THREE.BufferAttribute(new Float32Array(9), 3))
-          .setAttribute("color", new THREE.BufferAttribute(new Float32Array([0.35, 0.82, 0.48, 1, 0.36, 0.36, 0.7, 0.55, 1]), 3)),
-          new THREE.PointsMaterial({ size: 9, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: 0.95, depthWrite: false })),
+        aimLine: line(0xffffff, 0.25),
         trailLine: new THREE.Line(new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(new Float32Array(32 * 3), 3)),
           new THREE.LineBasicMaterial({ color: 0x7cf0c8, transparent: true, opacity: 0.3 })),
         tag: document.createElement("div"),
       };
       a.sprite.scale.set(40, 40, 1);
       a.tag.style.cssText = "position:absolute;font:600 11px system-ui,sans-serif;color:#7cf0c8;text-shadow:0 1px 2px #000;white-space:nowrap";
-      a.tag.title = "self (#161): green = where it meant to go (its own push) · orange = where it ended up (the world pushed it) · "
-        + "red = the gap from where it expected to end up · violet = where it has learned the current pulls";
+      a.tag.title = "self (#161): white ring = where it wants to be (its aim, once it steers) · green = where it pushes itself to · "
+        + "orange = where the current took it · red = the gap from where it expected to end up · violet = where it has learned the current pulls";
       this.labelLayer.appendChild(a.tag);
-      this.scene.add(a.sprite, a.own, a.world, a.gap, a.pull, a.ghosts, a.trailLine);
+      // THE MARKERS (the operator, twice: "what are the squary things?"): round
+      // and labelled, each hidden until it means something (no pull before a
+      // model of the current, no aim before it steers)
+      const marker = (color, ring) => {
+        const mc = document.createElement("canvas"); mc.width = mc.height = 32;
+        const mg = mc.getContext("2d");
+        mg.beginPath(); mg.arc(16, 16, ring ? 12 : 9, 0, 2 * Math.PI);
+        if (ring) { mg.lineWidth = 4; mg.strokeStyle = color; mg.stroke(); } else { mg.fillStyle = color; mg.fill(); }
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(mc), transparent: true,
+                                                                depthWrite: false, sizeAttenuation: false }));
+        sp.scale.set(ring ? 0.05 : 0.03, ring ? 0.05 : 0.03, 1);
+        return sp;
+      };
+      a.marks = [
+        { key: "aim", text: "wants", color: "#ffffff", ring: true },
+        { key: "intent", text: "pushes to", color: "#5ad17a" },
+        { key: "expected", text: "expects", color: "#ff5d5d" },
+        { key: "pull", text: "pull", color: "#b48cff" },
+      ].map((m) => {
+        const lab = document.createElement("div");
+        lab.style.cssText = "position:absolute;font:500 10px system-ui,sans-serif;color:" + m.color + ";opacity:.85;text-shadow:0 1px 2px #000;white-space:nowrap;pointer-events:none";
+        lab.textContent = m.text;
+        this.labelLayer.appendChild(lab);
+        const sp = marker(m.color, m.ring);
+        this.scene.add(sp);
+        return Object.assign({}, m, { sp, lab });
+      });
+      this.scene.add(a.sprite, a.own, a.world, a.gap, a.pull, a.aimLine, a.trailLine);
     }
     const W = (q) => (q ? cubeToWorld(q) : null);
-    a.pts = { from: W(pts.from), intent: W(pts.intent), expected: W(pts.expected), at: W(pts.at), pull: W(pts.pull) };
+    a.pts = { from: W(pts.from), intent: W(pts.intent), expected: W(pts.expected), at: W(pts.at), pull: W(pts.pull), aim: W(pts.aim) };
     a.tw = { from: a.pos.slice(), to: a.pts.at, t0: now, dur: 1500 };
     a.trail.push(a.pts.at); if (a.trail.length > 32) a.trail.shift();
     a.last = p; a.t0 = now;
@@ -1120,12 +1144,16 @@ class Field3DView {
     seg(a.pull, P.at, P.pull);             // where it has learned the current pulls
     const L = a.last || {};
     a.gap.material.opacity = 0.35 + 0.65 * Math.min(1, (L.gap || 0) / Math.max(1e-9, L.naive || 1e-9));
-    const gp = a.ghosts.geometry.attributes.position;
-    for (const [i, q] of [[0, P.intent], [1, P.expected], [2, P.pull]]) {
-      const v = q || a.pos;
-      gp.setXYZ(i, v[0], v[1], v[2]);
+    seg(a.aimLine, a.pos, P.aim);          // how far it is from what it wants
+    for (const m of a.marks) {
+      const q = P[m.key];
+      m.sp.visible = !!q;
+      const sq = q ? this._project(q) : null;
+      m.lab.style.display = sq ? "" : "none";
+      if (!q) continue;
+      m.sp.position.set(q[0], q[1], q[2]);
+      if (sq) m.lab.style.transform = "translate(" + (sq[0] + 8).toFixed(0) + "px," + (sq[1] - 5).toFixed(0) + "px)";
     }
-    gp.needsUpdate = true;
     const tp = a.trailLine.geometry.attributes.position;
     for (let i = 0; i < 32; i++) { const q = a.trail[Math.max(0, a.trail.length - 32 + i)] || a.pos; tp.setXYZ(i, q[0], q[1], q[2]); }
     tp.needsUpdate = true;
@@ -1134,6 +1162,7 @@ class Field3DView {
     if (sc) a.tag.style.transform = "translate(" + (sc[0] + 14).toFixed(0) + "px," + (sc[1] - 6).toFixed(0) + "px)";
     const skill = L.skill == null ? "" : " · skill " + Number(L.skill).toFixed(2);
     a.tag.textContent = "self · rung " + (L.rung || 0) + " · " + Math.round(100 * (L.bar || 0)) + "%" + skill
+      + (L.steer != null ? " · lands " + Math.round(100 * L.steer) + "% closer to its aim" : "")
       + (L.slipping ? " · slipping" : "") + (L.mode === "watch" ? " · watched" : "");
   }
 
