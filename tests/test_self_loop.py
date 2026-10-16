@@ -205,18 +205,55 @@ def test_without_a_world_there_is_nothing_to_feel():
     assert [r["kind"] for r in _record(srv)] == ["birth"]
 
 
+def _talk(f, session, text, ts):
+    f.write_events([ST.Event(stream="discourse", role="user", text=text, ts=ts)], session=session)
+    f.process()
+
+
+def _unit(v):
+    v = np.asarray(v, dtype=float)
+    return v / np.linalg.norm(v)
+
+
 def test_the_field_names_its_current():
     f = EntityField(MemBackend(), FakeEmbedder(), "seat@host")
     assert f.current() is None
-    f.write_events([ST.Event(stream="discourse", role="user", text="the boat needs a new battery",
-                             ts=1000.0)], session="s1")
-    f.process()
-    first = f.current()
-    assert first is not None
-    f.write_events([ST.Event(stream="discourse", role="user", text="what time does the ferry leave",
-                             ts=1001.0)], session="s2")
-    f.process()
-    assert np.allclose(f.current(), f.now("s2"))
+    _talk(f, "s1", "the boat needs a new battery", 1000.0)
+    assert np.allclose(f.current(), f.now("s1"))     # one stream: the current is its context
+
+
+def test_every_active_stream_pulls_at_once():
+    # the combined current: two live sessions pull together (their sum), not
+    # whichever wrote last -- a write no longer flips the world
+    f = EntityField(MemBackend(), FakeEmbedder(), "seat@host")
+    _talk(f, "s1", "the boat needs a new battery", 1000.0)
+    _talk(f, "s2", "what time does the ferry leave", 1001.0)
+    cur = f.current()
+    assert float(cur @ _unit(f.now("s1"))) > 0.3
+    assert float(cur @ _unit(f.now("s2"))) > 0.3
+    assert not np.allclose(cur, _unit(f.now("s2")))
+
+
+def test_a_quiet_stream_fades_out_of_the_current():
+    f = EntityField(MemBackend(), FakeEmbedder(), "seat@host")
+    _talk(f, "s1", "the boat needs a new battery", 1000.0)
+    _talk(f, "s2", "what time does the ferry leave", 1001.0)
+    t = f._now_ts["s2"]
+    f._now_ts["s1"] = t - 30 * 60                     # s1 went quiet half an hour ago
+    assert float(f.current(now=t) @ _unit(f.now("s2"))) > 0.99
+
+
+def test_one_machinery_event_cannot_flip_the_current():
+    # the live seat's flip (#161, 2026-10-16): a getter reading in its own
+    # session took the whole current. Now the busy conversation still leads.
+    f = EntityField(MemBackend(), FakeEmbedder(), "seat@host")
+    for i, line in enumerate(["the boat needs a new battery", "which battery fits the boat",
+                              "a lithium battery for the boat", "the boat battery is dying"]):
+        _talk(f, "chat", line, 1000.0 + i)
+    before = f.current()
+    _talk(f, "readings", "pump pressure 3.1 bar", 1005.0)
+    after = f.current()
+    assert float(after @ before) > float(after @ _unit(f.now("readings")))
 
 
 def test_its_methods_refuse_any_caller_but_its_loop():
