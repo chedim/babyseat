@@ -1,3 +1,10 @@
+## v0.6.1 (2026-10-15) — the field can talk
+
+- **The field writes to people** (#154): `chat:out:<person>` is the twin of `voice:out` -- edit its `say` and the line lands in that person's latest chat (made on first use; `chat:out:operator` on a seat with no people). An entity's own script can now chat or speak with no model turn: a result `{'chat': '...', 'voice': '...', 'to': '<person>'}` is posted / spoken by the engine (`to` defaults to whoever chatted last). Guard rails: one line per 2 s per person; a script pushes at most once per 30 s and never repeats its last line.
+- **A script set through `properties` goes through the script door** (#158): `entity_edit(properties={'tick_script': ...})` cut the script at 2000 chars and never compiled it, then answered ok. It is now compiled and capped (2048) like the `tick_script` argument, refused with the reason; any other value over 2000 chars is reported as truncated.
+- **`presence.exec` returns the job's value** (#153): the tab ran the code as a function body, so a final expression like `1+1` came back `undefined`. The final expression, an explicit `return` and an awaited Promise all come back; values JSON can't carry are rendered readably.
+- **No object reprs in job output** (#152): a getter returning its `me` handle stored the live helper object, and the refresh job printed `<..._Me object at 0x...>` on every read. Getter state is stored JSON-safe, and `membrane.me` reads as its entity id.
+
 ## v0.6.0 (2026-10-15) — the seat answers to you
 
 - **The serve has no login of its own** (#144): membrane baked in a basic-auth pair (`opencode:<password>`, `serve-auth.json`) nobody asked for. It's gone — the serve, the `--serve-user`/`--serve-pass` flags and the pair file. membrane is a personal, self-hosted service: if you need a login, put a reverse proxy with one in front. Home Assistant keeps its own login; the integration waits on the seat being *ready* (it used to read "has a password" as ready), and connecting it to a seat needs no password.
