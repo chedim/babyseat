@@ -25,6 +25,7 @@ writing; this module never opens the live one for writing.
 from __future__ import annotations
 
 import random
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -219,9 +220,10 @@ def report(store, windows=(2.0, 5.0, 20.0), top: int = 8) -> str:
     else:
         snap = Path(tempfile.mkdtemp(prefix="self_l1-snap-"))
         events, deltas = load(snapshot(store, snap))
+        shutil.rmtree(snap, ignore_errors=True)   # 360 MB is not a keepsake
     L = [f"# a real seat's history: {len(events)} events, {len(deltas)} change pulses", ""]
     if snap is not None:
-        L += [f"(read from a snapshot at `{snap}`: the live store was not opened)", ""]
+        L += ["(read from a throwaway snapshot: the live store was never opened)", ""]
     own = authors(events, deltas)
     tot = sum(n for _, n in own)
     L.append("| who owns the pulse | pulses | share |")
