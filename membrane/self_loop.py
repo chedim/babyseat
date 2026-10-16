@@ -1001,7 +1001,8 @@ def _close(a: float | None, b: float | None) -> bool:
 def _rung3(recs: list[dict], tempo: dict | None = None) -> dict:
     """Tell things apart: sorted reaches (looks), kinds whose RATES agree across
     the two halves of the last RUNG3_WINDOW reaches, the no-answer share under
-    RUNG3_FOCUS (focus), and rung 2's skill still holding."""
+    RUNG3_FOCUS (focus), and rung 2's skill still holding -- over the moving
+    (auditable) things only, so a still counter can't carry the bar."""
     reaches = [r for r in recs if r.get("kind") == "reach" and not r.get("audit")]
     steered = [r for r in reaches if r.get("steer")]
     looks = min(1.0, len(steered) / RUNG3_LOOKS)
@@ -1015,7 +1016,7 @@ def _rung3(recs: list[dict], tempo: dict | None = None) -> dict:
     share = (sum(r["answer"] == "none" for r in tail) / len(tail)) if tail else 1.0
     focus = 1.0 if share < RUNG3_FOCUS else max(0.0, (1.0 - share) / (1.0 - RUNG3_FOCUS))
     r2 = _rung2_stats(recs, tempo or {})
-    best = max((s["skill"] for s in r2.values()), default=0.0)
+    best = max((s["skill"] for s in r2.values() if s["auditable"]), default=0.0)
     crit = {"looks": looks, "kinds": 1.0 if agree else 0.0, "focus": focus,
             "skill": max(0.0, min(1.0, best / RUNG2_SKILL))}
     return {"crit": crit, "skill": round(best, 4), "passed": all(v >= 1.0 for v in crit.values())}
