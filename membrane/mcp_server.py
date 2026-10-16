@@ -1166,8 +1166,14 @@ def tool_entity_edit(args: dict, port: int) -> str:
                 f".payload). Watchers may block but only 4 run at "
                 f"once, a >10s fire strikes (3 = auto-disabled). "
                 f"The seeded tool:filetree is the template.")
-    return (f"Entity {out['eid']} updated: class {out.get('class')}, "
-            f"summary {out.get('summary')!r}, links {out.get('links')}.")
+    msg = (f"Entity {out['eid']} updated: class {out.get('class')}, "
+           f"summary {out.get('summary')!r}, links {out.get('links')}.")
+    if out.get("properties_set"):
+        msg += f" Properties set: {', '.join(out['properties_set'])}."
+    if out.get("properties_refused"):
+        msg += " Properties REFUSED (not set): " + "; ".join(
+            f"{k} ({why})" for k, why in out["properties_refused"].items()) + "."
+    return msg
 
 
 def tool_entity_remove(args: dict, port: int) -> str:
