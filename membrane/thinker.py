@@ -484,7 +484,8 @@ class Thinker:
             if out.get("error"):
                 _SC.note("error")
                 continue         # the error lanes already spoke (struck)
-            if out.get("render") or isinstance(out.get("patch"), dict):
+            if out.get("render") or isinstance(out.get("patch"), dict) \
+                    or out.get("chat") or out.get("voice"):     # the way out (chat_io)
                 apply_entity_update(self.srv, ent, out, "tick", silent=True)
                 fired.append(ent)
                 self.stats["ticks"] += 1

@@ -4679,6 +4679,17 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
                 except Exception:
                     pass
         changed += 1
+    # THE WAY OUT (0.6.1): `chat` / `voice` (+ `to`, a person) -- the entity
+    # tells someone, with no model turn; the engine posts / speaks for it
+    # (chat_io.py: the person's latest chat, the gaps that stop a tick flooding)
+    pushed = {}
+    if out.get("chat") or out.get("voice"):
+        try:
+            from . import chat_io as _CIO
+            pushed = _CIO.script_push(srv, ent, out)
+        except Exception as e:                       # noqa: BLE001
+            pushed = {"error": f"{type(e).__name__}: {e}"[:160]}
+        changed += 1
     if changed:
         # THE TICK-PERSIST GATE: a silent apply is a per-second RAM
         # perspective -- its properties land on the doc (in place, above)
@@ -4735,6 +4746,8 @@ def apply_entity_update(srv, ent, out: dict, trigger: str,
     _ret = {"applied": changed}
     if out.get("patch_refused"):
         _ret["patch_refused"] = out["patch_refused"]
+    if pushed:
+        _ret["pushed"] = pushed
     return _ret
 
 # ---- the thought / dreamed triggers (2026-10-11: settable since 10-02, never fired) ----

@@ -3830,6 +3830,17 @@ def _active_model_hook(srv, est, spec, res) -> None:
                 est.upsert(ent, embedder=None)
     except Exception as e:                              # noqa: BLE001
         res["voice_out"] = {"spoken": False, "why": f"{type(e).__name__}: {e}"[:160]}
+    # CHAT OUT (chat_io.py): an edit of a chat:out entity's `say` is posted
+    try:
+        from . import chat_io as CIO
+        ent = est._resolve_spec(str(spec or "")) if est is not None else None
+        if ent is not None and (ent.properties or {}).get("chat_io") == "out":
+            out = CIO.on_edit(srv, ent)
+            if out is not None:
+                res["chat_out"] = out
+                est.upsert(ent, embedder=None)
+    except Exception as e:                              # noqa: BLE001
+        res["chat_out"] = {"posted": False, "why": f"{type(e).__name__}: {e}"[:160]}
 
 
 class _Stages:
@@ -6426,6 +6437,11 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             self._json_err_raw(400, f"properties must be an object, e.g. {{\"say\": \"...\"}} -- "
                                     f"got {type(_props).__name__}; nothing was set"); return
         body["properties"] = _props
+        try:                                         # chat:out:<person> is made on first use
+            from . import chat_io as _CIO
+            _CIO.ensure(srv, spec)
+        except Exception:
+            pass
         res = est.edit(spec, summary=body.get("summary"),
                        links=body.get("links"), cls=body.get("class"),
                        merged_into=body.get("merged_into"),
