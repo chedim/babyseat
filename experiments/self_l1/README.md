@@ -45,10 +45,14 @@ move right after I move?*
    confirms what we asserted, and the shuffle control does not catch it.
 
 **The lesson.** The ledger cannot be the referee. **The recorder has to be.** A
-real motion-mark must be one that *could have failed to appear*: written only
-when something actually changed, and naming the act it answers. A file that was
-read but did not change gets no mark. Then a mark means something, and the
-ledger can go back to doing what it is good at.
+real mark must be one that *could have failed even though the act ran*: the
+file's bytes changed, the command exited non-zero, the job landed. And it has to
+say **which** change it is -- the world moved, or only my record of the world
+did. (A read is not nothing: it increments a counter, and records when, how much
+and from where. But it cannot fail, so it can never show that the file
+answered.) Today the two are written identically, which is why a read looks like
+the file answering. Then a mark means something, and the ledger can go back to
+doing what it is good at.
 
 **What that means to build**: [`docs/motor-channel.md`](../../docs/motor-channel.md).
 
@@ -297,9 +301,12 @@ history, in two obvious designs, and asks the ledger what it makes of them.
 ## what this means for the build
 
 **The ledger cannot be the rule; the recorder has to be.** A motion must be a
-pulse that *could have failed to happen* -- written only after a real state
-diff, and naming the act it answers. Then it is a body part because the world
-moved, not because we said so. `docs/motor-channel.md` is the design draft that
-follows from rungs 1-4.
+pulse that *could have failed even though the act ran* -- the file's bytes
+changed, the command exited non-zero, the job landed -- written with the diff
+and the act that caused it. And it must say **which** change it is: the world
+moved, or only my record of the world moved (`read_count` tells you the seat
+looked; it says nothing about the file). Today the two are written identically.
+Then a mark is a body part because the world moved, not because we said so.
+`docs/motor-channel.md` is the design draft that follows from rungs 1-4.
 
 
