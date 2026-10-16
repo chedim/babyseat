@@ -556,7 +556,65 @@ function replyToSpeak(rows) {
   return null;
 }
 
-const AiPanelLogic = { voiceLogItems, seatView, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
+// THE JOB'S VALUE (issue #153): a seat's JS job (jsexec.py) hands back what a
+// console would -- the final expression's value, or an explicit return; a
+// Promise awaited. The code used to be an async function BODY as written, so
+// a bare '1+1' was a statement whose value fell on the floor ('=> undefined').
+// Compiling only parses (nothing runs), so the shapes are tried in order:
+// the whole code as one expression; then the code with its last statement
+// returned (split at a ';' or line end, the part before it whole
+// statements on its own); then the body as written (its own return, or no value).
+const JS_ASYNC_FN = Object.getPrototypeOf(async function () {}).constructor;
+
+function jsCompile(code, names) {
+  const src = String(code == null ? "" : code);
+  const asWritten = new JS_ASYNC_FN(...names, src);   // a SyntaxError here is the honest answer
+  const make = (body) => { try { return new JS_ASYNC_FN(...names, body); } catch (e) { return null; } };
+  const lone = src.replace(/[\s;]+$/, "");
+  if (!lone.trim()) return asWritten;
+  const whole = make("return (\n" + lone + "\n);");
+  if (whole) return whole;
+  let tries = 0;
+  for (let i = lone.length - 1; i > 0 && tries < 400; i--) {
+    const c = lone[i - 1];
+    if (c !== ";" && c !== "\n") continue;
+    const head = lone.slice(0, i), tail = lone.slice(i);
+    if (!tail.trim()) continue;
+    tries++;
+    if (!make("return (\n" + tail + "\n);") || !make(head)) continue;   // the head a whole statement list
+    const fn = make(head + "\nreturn (\n" + tail + "\n);");
+    if (fn) return fn;
+  }
+  return asWritten;                                    // its own return, or no value
+}
+
+// a value as text: a string as itself, JSON when JSON can carry it, else
+// what the console would print (a function, a BigInt, a Symbol, a cycle, a
+// Map/Set, an element, an Error)
+function jsShow(v) {
+  if (typeof v === "string") return v;
+  if (typeof v === "function") return "[function " + (v.name || "anonymous") + "] " + String(v).slice(0, 400);
+  if (typeof v === "bigint") return String(v) + "n";
+  if (typeof v === "symbol") return v.toString();
+  if (v instanceof Error) return String(v.stack || v);
+  if (typeof Element !== "undefined" && v instanceof Element) return String(v.outerHTML || v).slice(0, 4000);
+  if (v instanceof Map) return "Map(" + v.size + ") " + jsShow(Object.fromEntries(v));
+  if (v instanceof Set) return "Set(" + v.size + ") " + jsShow([...v]);
+  try {
+    const seen = new WeakSet();
+    const j = JSON.stringify(v, (k, x) => {
+      if (typeof x === "bigint") return String(x) + "n";
+      if (typeof x === "function") return "[function " + (x.name || "anonymous") + "]";
+      if (typeof x === "symbol") return x.toString();
+      if (x && typeof x === "object") { if (seen.has(x)) return "[circular]"; seen.add(x); }
+      return x;
+    });
+    if (j !== undefined) return j;
+  } catch (e) { /* fall through */ }
+  return String(v);
+}
+
+const AiPanelLogic = { jsCompile, jsShow, voiceLogItems, seatView, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
@@ -1839,17 +1897,16 @@ function definePanel() {
       if (!this._jsOn || !job || job.tab !== this._jsTab) return;
       const ms = Math.max(500, Math.min(60000, (job.timeout || 15) * 1000));
       const logs = [];
-      const show = (v) => { try { return typeof v === "string" ? v : JSON.stringify(v); } catch (x) { return String(v); } };
       const con = {};
-      for (const k of ["log", "info", "warn", "error"]) con[k] = (...a) => { logs.push((k === "log" ? "" : k + ": ") + a.map(show).join(" ")); console[k](...a); };
+      for (const k of ["log", "info", "warn", "error"]) con[k] = (...a) => { logs.push((k === "log" ? "" : k + ": ") + a.map(jsShow).join(" ")); console[k](...a); };
       let out;
       try {
-        const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
-        const fn = new AsyncFunction("console", "hass", "panel", "home", String(job.code || ""));
+        // the final expression's value, or the code's own return (issue #153)
+        const fn = jsCompile(job.code, ["console", "hass", "panel", "home"]);
         const home = document.querySelector("membrane-home-panel") || (this.getRootNode && this.getRootNode().host) || null;
         const v = await Promise.race([fn(con, this._hass, this, home),
                                       new Promise((_, rej) => setTimeout(() => rej(new Error("timeout after " + ms + " ms")), ms))]);
-        out = { id: job.id, ok: true, value: v === undefined ? undefined : show(v).slice(0, 4000), logs: logs.slice(0, 200) };
+        out = { id: job.id, ok: true, value: v === undefined ? undefined : jsShow(v).slice(0, 4000), logs: logs.slice(0, 200) };
       } catch (err) {
         out = { id: job.id, ok: false, error: String((err && err.stack) || err).slice(0, 2000), logs: logs.slice(0, 200) };
       }
