@@ -62,3 +62,38 @@ def test_the_tool_reply_names_the_patch():
                                                               "script_failures": 0}}, 1)
     assert "host" in msg
     assert "script_failures" in msg and "refused" in msg.lower()
+
+
+# #158: a script set through `properties` went around the script door -- cut
+# at 2000 chars mid-string, never compiled, answered ok (the 'I' loop exhibit)
+
+def test_a_script_in_properties_is_validated_like_the_argument():
+    est, e = _est_with()
+    good = "result = {'render': 'beat'}\n"
+    res = est.edit(e.eid, properties={"tick_script": good, "tick_every": 1})
+    assert res["ok"], res
+    assert est.docs[e.eid].properties["tick_script"] == good
+    assert est.docs[e.eid].properties["tick_every"] == 1
+
+
+def test_a_script_in_properties_that_does_not_compile_is_refused():
+    est, e = _est_with()
+    res = est.edit(e.eid, properties={"tick_script": "x = 'unterminated\n"})
+    assert not res["ok"] and "doesn't compile" in res["error"]
+    assert "tick_script" not in est.docs[e.eid].properties
+
+
+def test_a_long_script_in_properties_is_refused_not_cut():
+    est, e = _est_with()
+    body = "x = 1\n" * 500                                 # 3000 chars, compiles
+    res = est.edit(e.eid, properties={"tick_script": body})
+    assert not res["ok"] and "too long" in res["error"]
+    assert "tick_script" not in est.docs[e.eid].properties
+
+
+def test_a_long_value_is_reported_truncated():
+    est, e = _est_with()
+    res = est.edit(e.eid, properties={"notes": "n" * 2500})
+    assert res["ok"]
+    assert len(est.docs[e.eid].properties["notes"]) == 2000
+    assert res["properties_truncated"] == ["notes"]

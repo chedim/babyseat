@@ -2272,6 +2272,23 @@ class EntityStore(MultiParentOps, TimelineOps):
                     " (list via related)")
             return {"ok": False,
                     "error": f"no entity matches {spec!r}{hint}"}
+        # #158: a script inside `properties` goes through the SCRIPT door --
+        # the generic patch cut it at 2000 chars and never compiled it (the
+        # 'I' loop died that way); the named argument wins when both are given
+        if isinstance(properties, dict):
+            properties = dict(properties)
+            _lift = {k: properties.pop(k) for k in list(properties)
+                     if k in ("nudge_script", "delete_script", "mention_script",
+                              "thought_script", "dreamed_script", "tick_script",
+                              "watch_script", "getter_script")}
+            nudge_script = nudge_script if nudge_script is not None else _lift.get("nudge_script")
+            delete_script = delete_script if delete_script is not None else _lift.get("delete_script")
+            mention_script = mention_script if mention_script is not None else _lift.get("mention_script")
+            thought_script = thought_script if thought_script is not None else _lift.get("thought_script")
+            dreamed_script = dreamed_script if dreamed_script is not None else _lift.get("dreamed_script")
+            tick_script = tick_script if tick_script is not None else _lift.get("tick_script")
+            watch_script = watch_script if watch_script is not None else _lift.get("watch_script")
+            getter_script = getter_script if getter_script is not None else _lift.get("getter_script")
         if summary is not None:
             ent.properties["summary"] = str(summary).strip()
         if links is not None:
@@ -2432,6 +2449,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         # never vanishes behind an rc 0 that names only class/summary/links
         props_set: list = []
         props_refused: dict = {}
+        props_truncated: list = []
         if isinstance(properties, dict) and properties:
             for k in list(properties)[16:]:
                 props_refused[str(k)[:80]] = "over the 16-key cap per edit"
@@ -2464,6 +2482,8 @@ class EntityStore(MultiParentOps, TimelineOps):
                     props_set.append("parents")
                     continue
                 props2 = ent.properties or {}
+                if isinstance(v, str) and len(v) > 2000:
+                    props_truncated.append(kk)      # said, never silent (#158)
                 props2[kk] = (v if not isinstance(v, str) else v[:2000])
                 ent.properties = props2
                 props_set.append(kk)
@@ -2525,6 +2545,8 @@ class EntityStore(MultiParentOps, TimelineOps):
         if props_set or props_refused:
             res["properties_set"] = props_set
             res["properties_refused"] = props_refused
+        if props_truncated:
+            res["properties_truncated"] = props_truncated
         # THE PUBLISH VEHICLE (the seat-first field, the model's decision):
         # edit(spec, publish=True) exports to the global namespace;
         # edit(spec, unpublish=True) retracts this seat's export. A
