@@ -714,6 +714,22 @@ def _open_rungs(srv) -> None:
             recs, done = _read(srv), done | {n}
 
 
+def _staged(crit: dict) -> tuple[float, str | None]:
+    """THE BAR, STAGED: a rung's criteria are stages, in order (rung 1:
+    pushes then skill; rung 2: reaches, skill, the audit). The bar fills
+    through them -- each stage one equal share -- and names the first one not
+    yet met; an earlier stage that slips takes the bar back with it. (The
+    weakest-criterion bar sat at 0% for ~20 minutes on the live seat while
+    reaches piled up: skill and audit can't move before enough reaches.)"""
+    if not crit:
+        return 1.0, None
+    k = len(crit)
+    for i, (name, v) in enumerate(crit.items()):
+        if v < 1.0:
+            return (i + max(0.0, v)) / k, name
+    return 1.0, None
+
+
 def status(srv) -> dict:
     rt = _rt(srv)
     recs = _read(srv)
@@ -729,13 +745,7 @@ def status(srv) -> dict:
     run_ = (lambda n: PROGRESS[n](recs, tempo))
     aim = nxt if (nxt in PROGRESS and nxt <= lim) else (rung if rung in PROGRESS else None)
     prog = run_(aim) if aim is not None else {"crit": {}, "skill": 0.0, "passed": True}
-    if prog["crit"]:
-        waiting = min(prog["crit"], key=prog["crit"].get)
-        bar = prog["crit"][waiting]
-        if bar >= 1.0:
-            waiting = None
-    else:
-        bar, waiting = 1.0, None
+    bar, waiting = _staged(prog["crit"])
     slipping = bool(rung >= 1 and rung in PROGRESS and not run_(rung)["passed"])
     if nxt is not None and nxt > lim and rt["mode"] != "off" and not slipping:
         waiting = "the limit"                    # it may be ready; the operator holds it here

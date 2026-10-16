@@ -258,3 +258,25 @@ def test_a_world_where_everything_changes_teaches_no_tempo():
     SL.set_limit(srv, 2)
     _run(srv, 80, t0=t)
     assert SL.status(srv)["rung"] == 1                    # nothing to tell apart: no skill over the base rate
+
+
+# ---- the staged bar (the live seat, 2026-10-16: "self is all zeroes") -------
+
+def test_the_bar_moves_with_the_first_stage_and_names_it():
+    # rung 2's skill and audit are 0 until enough reaches exist; a bar that is
+    # the weakest criterion sat at 0% for the first ~20 minutes. Staged: it
+    # fills through reaches, then skill, then the audit, naming the first unmet.
+    srv = _seat()
+    t = _with_rung1(srv)
+    SL.set_limit(srv, 2)
+    _run(srv, 12, t0=t)
+    st = SL.status(srv)
+    assert st["waiting_on"] == "reaches"
+    assert 0.0 < st["bar"] < 1.0 / 3 + 1e-9                 # inside the first of three stages
+
+
+def test_a_staged_bar_falls_back_when_an_earlier_stage_slips():
+    st = SL._staged({"pushes": 1.0, "skill": 0.4})
+    assert st == (pytest.approx(0.5 + 0.4 / 2), "skill")
+    assert SL._staged({"pushes": 0.5, "skill": 1.0}) == (pytest.approx(0.25), "pushes")
+    assert SL._staged({"pushes": 1.0, "skill": 1.0}) == (1.0, None)
