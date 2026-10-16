@@ -420,3 +420,13 @@ def test_the_panel_has_the_switch():
     assert 'class="btn icon selfbtn"' in js
     assert "JSON.stringify({ self: next })" in js
     assert '["selfbtn", "self: off"]' in js
+
+
+def test_a_cycle_writes_nothing_to_stderr(capsys):
+    # its method calls carry no audit log (mem=None): no "operator-audit
+    # write failed" line per call -- ~1000 junk lines an hour on a live seat
+    srv = _seat()
+    SL.set_mode(srv, "on")
+    capsys.readouterr()
+    assert SL.cycle(srv, now=1000.0) is not None
+    assert "operator-audit write failed" not in capsys.readouterr().err
