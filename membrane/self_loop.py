@@ -57,11 +57,12 @@ METHODS = {
     "expect": "self::expect {{seed}}",
     "notice": "self::notice {{seed}}",
     "reach": "self::reach {{target}}",
+    "meet": "self::meet {{to}}",
 }
 RUNG_NAMES = {0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart",
               4: "patience", 5: "notice the world changed", 6: "meet an other",
               7: "understand an other", 8: "recognize itself", 9: "change itself", 10: "speak"}
-LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4, 5)}          # the rungs built so far
+LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4, 5, 6)}          # the rungs built so far
 
 try:
     PACE_S = max(1.0, float(os.environ.get("MEMBRANE_SELF_PACE_S") or 10.0))
@@ -104,6 +105,10 @@ AUDIT5_PAUSE_S = 3600.0     # the phases' caps (an audit that runs out is inconc
 AUDIT5_RESUME_S = 3 * 3600.0
 RUNG5_LOOKS = 20            # looks with noticing on before the test reads the audit
 RUNG5_SHIFTS = 2            # the two shifts its audit probes (went still, moves again)
+RUNG6_PUSHES = 10           # pushes to chat:out before the test reads the split
+RUNG6_HEARD = 20            # answered looks at the other before the test reads the split
+BODY_SKILL = 0.9            # predict it this well and it is my body (zero gap), else an other
+MEET_EVERY = 30             # cycles between self's pushes to chat:out (not every try)
 
 _lock = threading.RLock()
 _ctx = threading.local()    # the cycle in flight: only the loop's own thread has one
@@ -418,6 +423,36 @@ def _read_entity(srv, ent, now):
     return _WA.entity_read_back(srv, ent, force=False, by="self")
 
 
+def _push_chat(srv, text: str):
+    """THE SEAM: self's outward act -- push a line to chat:out. Tests swap it."""
+    from . import chat_io as _CIO
+    ent = _CIO.entity(srv, _CIO.OPERATOR)
+    if ent is None:
+        return
+    ent.properties["say"] = text
+    _CIO.on_edit(srv, ent)
+
+
+def _meet(srv, seed: str, now: float | None = None) -> None:
+    """RUNG 6's act: push a line to chat:out (the other answers). Practised
+    from the cycle once rung 6 is available, paced at MEET_EVERY cycles so it
+    doesn't spam chat:out's gap guard."""
+    try:
+        n = int(seed or 0)
+    except (TypeError, ValueError):
+        return                                   # not a cycle's seed: only the loop meets
+    if n % MEET_EVERY != 1:
+        return
+    import time
+    from . import chat_io as _CIO
+    now = time.time() if now is None else now
+    resp = _CIO.entity_in(srv, _CIO.OPERATOR)              # the other, as a reach target
+    to = resp.eid if resp is not None else _CIO.name_in(_CIO.OPERATOR)
+    _push_chat(srv, "self is here")
+    _append(srv, {"ts": now, "kind": "push", "n": n,
+                  "eid": _CIO.name_of(_CIO.OPERATOR), "to": to})
+
+
 def _reach(srv, target: str) -> dict:
     """Read one thing: its getter fires (or answers that it can't)."""
     c = _ctx.cycle
@@ -505,7 +540,8 @@ def from_command(rest: str) -> dict:
         parts = rest.split()
     if not parts or parts[0] not in METHODS:
         return {"rc": 2, "text": f"self has no method {parts[0] if parts else ''!r}"}
-    fn = {"try": _try, "expect": _expect, "notice": _notice, "reach": _reach}[parts[0]]   # looked up per call
+    fn = {"try": _try, "expect": _expect, "notice": _notice, "reach": _reach,
+          "meet": _meet}[parts[0]]   # looked up per call
     srv = _ctx.cycle["srv"]
     return fn(srv, parts[1] if len(parts) > 1 else "0")
 
@@ -593,6 +629,8 @@ def cycle(srv, now: float | None = None) -> dict | None:
     est.upsert(ent, embedder=None)
     if _available(srv, 2):
         _reach_once(srv, est, ent, n, now)
+    if _available(srv, 6):
+        _meet(srv, str(n), now)
     _open_rungs(srv)
     _show(srv, ent, pos, c, rec)
     rt["wake"].set()                      # my state changed: that is what wakes the next try
@@ -680,6 +718,12 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
         pp = ent.properties or {}
         sd = dict(pp.get("script_data") or {})
         sd["kinds"] = {e: k for e, k in kinds.items() if k != "unknown"}
+        pp["script_data"] = sd
+        ent.properties = pp
+    if _available(srv, 6):
+        pp = ent.properties or {}
+        sd = dict(pp.get("script_data") or {})
+        sd["split"] = {e: s for e, s in _split(recs, _tempo(srv)).items() if s != "unknown"}
         pp["script_data"] = sd
         ent.properties = pp
     if inside:
@@ -891,6 +935,7 @@ def _show(srv, ent, pos, c, rec) -> None:
                        "mode": st["mode"], "slipping": st["slipping"], "waiting_on": st["waiting_on"],
                        "next": st["next"], "cycles": st["cycles"], "held": st["held"],
                        "rung_name": st["rung_name"], "limit": st["limit"],
+                       "split": st.get("split"), "meets": st.get("meets"),
                        "steer": (st.get("steer") or {}).get("skill")})
     except Exception:
         pass
@@ -999,6 +1044,20 @@ def _close(a: float | None, b: float | None) -> bool:
     return (abs(a - b) <= RUNG3_DRIFT) if (a is not None and b is not None) else (a is None and b is None)
 
 
+def _split(recs: list[dict], tempo: dict | None = None) -> dict:
+    """THE SELF/OTHER SPLIT (rung 6): each thing self predicts near-perfectly
+    (Brier skill >= BODY_SKILL -- zero gap, its own echo) is its BODY; what it
+    can't predict (answers variably or with delay -- a nonzero gap) is an OTHER;
+    fewer than KIND_MIN answered looks is unknown."""
+    out = {}
+    for eid, s in _rung2_stats(recs, tempo or {}).items():
+        if s["reaches"] < KIND_MIN:
+            out[eid] = "unknown"
+        else:
+            out[eid] = "body" if s["skill"] >= BODY_SKILL else "other"
+    return out
+
+
 def _rung3(recs: list[dict], tempo: dict | None = None) -> dict:
     """Tell things apart: sorted reaches (looks), kinds whose RATES agree across
     the two halves of the last RUNG3_WINDOW reaches, the no-answer share under
@@ -1060,7 +1119,23 @@ def _rung5(recs: list[dict], tempo: dict | None = None) -> dict:
             "passed": all(v >= 1.0 for v in crit.values())}
 
 
-PROGRESS = {1: _rung1, 2: _rung2, 3: _rung3, 4: _rung4, 5: _rung5}       # rung -> its test over the record
+def _rung6(recs: list[dict], tempo: dict | None = None) -> dict:
+    """Meet an other: enough pushes to chat:out, enough answered looks at the
+    answerer, and the answerer classed OTHER -- not body (a perfect echo is
+    self's own echo, so the split reads 0 and the rung stays shut)."""
+    pushes = [r for r in recs if r.get("kind") == "push"]
+    to = pushes[-1].get("to") if pushes else None
+    heard = sum(1 for r in recs if r.get("kind") == "reach" and r.get("eid") == to
+                and r.get("answer") in ("changed", "unchanged") and not r.get("audit"))
+    split = _split(recs, tempo or {}).get(to or "", "unknown")
+    crit = {"pushes": min(1.0, len(pushes) / RUNG6_PUSHES),
+            "heard": min(1.0, heard / RUNG6_HEARD),
+            "split": 1.0 if split == "other" else 0.0}
+    return {"crit": crit, "skill": 1.0 if split == "other" else 0.0,
+            "eid": to, "passed": all(v >= 1.0 for v in crit.values())}
+
+
+PROGRESS = {1: _rung1, 2: _rung2, 3: _rung3, 4: _rung4, 5: _rung5, 6: _rung6}   # rung -> its test over the record
 
 
 def _passed(recs: list[dict]) -> set:
@@ -1138,12 +1213,16 @@ def status(srv) -> dict:
             state = "current" if (n - 1) in done else "locked"
         ladder.append({"rung": n, "name": name, "state": state})
     r1 = _rung1(recs)
+    spl = _split(recs, tempo)
+    pushes = [r for r in recs if r.get("kind") == "push"]
     return {"mode": rt["mode"], "limit": lim, "born": born, "held": rt["held"],
             "cycles": sum(1 for r in recs if r.get("kind") == "cycle"),
             "rung": rung, "rung_name": LADDER.get(rung), "next": nxt,
             "bar": round(bar, 4), "waiting_on": waiting, "skill": prog.get("skill", r1["skill"]),
             "slipping": slipping, "ladder": ladder,
             "world": {e: k for e, k in _kinds(recs).items() if k != "unknown"},
+            "split": {e: s for e, s in spl.items() if s != "unknown"},
+            "meets": {"pushes": len(pushes), "other": pushes[-1].get("to") if pushes else None},
             "steer": _steer_stats(recs)}
 
 

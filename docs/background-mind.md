@@ -283,6 +283,20 @@ section covers what is built (`membrane/self_loop.py`).
   - **Pass:** "went still" during the pause and "moves again" after it. The
     phases are capped at 1 h and 3 h; a still thing is looked at rarely, by
     rung 4's patience.
+- **Rung 6, meet an other.** Self's first outward act: it pushes a line
+  ("self is here") to `chat:out:operator`, paced at every 30 cycles. The
+  thing that answers — imperfectly, variably, with delay — is an **other**;
+  what it predicts near-perfectly (zero gap, its own echo) is its **body**.
+  The answerer is a new reach target, `chat:in:<person>` (the twin of
+  `voice:in`): an ordinary message stamps its `heard_n`, and self's next
+  look reads that as news. The split is read off the Brier skill self
+  already computes per thing — skill ≥ 0.9 is a body, below (with enough
+  looks) an other. The test, in stages:
+  1. 10 pushes to `chat:out`;
+  2. 20 answered looks at the answerer;
+  3. the answerer is classed **other** — a perfect echo classes *body* and
+     the split reads 0, so the rung stays shut.
+  (`llm::call` prediction is rung 7's; rung 6 is only the bare split.)
 - **Its methods run only in its own loop.** `try` / `expect` / `notice` are
   cliffhanger methods (`self::` no-shell dialect), and so is `reach`. `exec inspect` shows them;
   any other caller, the model included, is refused. The LLM talks *to* self,
@@ -303,6 +317,10 @@ section covers what is built (`membrane/self_loop.py`).
     surprised);
   - **violet**: where it has learned the current pulls;
   - its trail.
+
+  Once rung 6 practises, the amoeba's tag also names what it has met ("meets
+  an other" / "meets its body"), and the exchanges' text lands in the chat
+  overlay.
 
   The seat places the points into the open projection (`fieldpulse`'s
   `self.cycle` frame: cube coordinates and numbers, never vectors or text).

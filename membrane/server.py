@@ -3316,6 +3316,17 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                         text = _VIO.stamp(_psrv, _who, text)
                 except Exception:
                     pass
+            else:
+                # CHAT IN (chat_io.py, rung 6's other): an ordinary message
+                # stamps chat:in:<owner> -- self's next look at it reads news.
+                try:
+                    from . import chat_io as _CIO
+                    _psrv = getattr(runner, "srv", None) if runner is not None else None
+                    if _psrv is not None:
+                        _owner = str((runner.sessions.get(sid) or {}).get("owner") or "")
+                        _CIO.heard(_psrv, _owner or _CIO.OPERATOR, text, sid)
+                except Exception:
+                    pass
             row = messages.append(sid, info, [{"id": _gen_id("prt"),
                                                "sessionID": sid,
                                                "messageID": info["id"],

@@ -56,6 +56,51 @@ def entity(srv, person: str, create: bool = True):
     return ent
 
 
+def name_in(person: str) -> str:
+    return f"chat:in:{slug(person) or OPERATOR}"
+
+
+_IN_GETTER = (
+    "result = {'state': {'heard_n': int(membrane.me.properties.get('heard_n') or 0)}}"
+)
+
+
+def entity_in(srv, person: str, create: bool = True):
+    """THE OTHER SELF MEETS (rung 6): chat:in:<person> -- a normal reach
+    target. Its getter reads `heard_n`, so a new heard since self's last
+    look reads as `changed` (an answer); nothing new reads `unchanged`."""
+    from .entities import CLASS_COMPONENT
+    est = getattr(srv, "entity_store", None)
+    if est is None:
+        return None
+    nm = name_in(person)
+    ent = est._resolve_spec(nm)
+    if ent is None and create:
+        r = est.add(cls=CLASS_COMPONENT, name=nm,
+                    summary=(f"CHAT IN for {person or 'the operator'}: what the other says "
+                             "reaches `heard`; self reaches this to read it back."))
+        ent = est.docs.get(r.get("eid", "")) if isinstance(r, dict) else None
+        if ent is not None:
+            ent.properties.update({"person": "" if nm.endswith(":" + OPERATOR) else slug(person),
+                                   "chat_io": "in", "heard_n": 0,
+                                   "getter_script": _IN_GETTER})
+    return ent
+
+
+def heard(srv, person: str, text: str, sid: str = "") -> None:
+    """The other answered (or spoke) -- self's next look reads it as news."""
+    ent = entity_in(srv, person)
+    if ent is None:
+        return
+    pp = ent.properties or {}
+    pp["heard_n"] = int(pp.get("heard_n") or 0) + 1
+    pp["heard_ts"] = time.time()
+    _ring(pp, "heard", {"ts": time.time(), "text": str(text or "")[:600], "session": sid})
+    if sid:
+        pp["session"] = sid
+    ent.properties = pp
+
+
 def ensure(srv, spec: str) -> None:
     """The edit route's first step: an edit of chat:out:<person> that does
     not exist yet creates it (Argus can write to anyone the seat knows)."""

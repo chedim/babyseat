@@ -1167,9 +1167,12 @@ class Field3DView {
     a.tag.style.display = sc ? "" : "none";
     if (sc) a.tag.style.transform = "translate(" + (sc[0] + 14).toFixed(0) + "px," + (sc[1] - 6).toFixed(0) + "px)";
     const skill = L.skill == null ? "" : " · skill " + Number(L.skill).toFixed(2);
+    const otherEid = (L.meets || {}).other;
+    const split = otherEid && L.split ? L.split[otherEid] : null;
+    const meet = split ? " · meets " + (split === "other" ? "an other" : "its body") : "";
     a.tag.textContent = "self · rung " + (L.rung || 0) + " · " + Math.round(100 * (L.bar || 0)) + "%" + skill
       + (L.steer != null ? " · lands " + Math.round(100 * L.steer) + "% closer to its aim" : "")
-      + (L.slipping ? " · slipping" : "") + (L.mode === "watch" ? " · watched" : "");
+      + (L.slipping ? " · slipping" : "") + (L.mode === "watch" ? " · watched" : "") + meet;
   }
 
   _avatar(agent) {
