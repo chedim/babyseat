@@ -1,0 +1,175 @@
+"""#161 RUNG 7: understand an other.
+
+Self consults the model coprocessor (`llm::call` inside `expect`) to predict
+the other's next answer, and passes when that prediction beats habit alone --
+the share of habit's Brier error the model removes, over paired looks at the
+other.
+"""
+import json
+import os
+import sys
+import tempfile
+import time
+import types
+from pathlib import Path
+
+import numpy as np
+import pytest
+
+os.environ.setdefault("MEMBRANE_STORE", "json")
+os.environ.setdefault("MEMBRANE_RUN", "0")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from membrane import chat_io as CIO  # noqa: E402
+from membrane import self_loop as SL  # noqa: E402
+from membrane import watch_agents as WA  # noqa: E402
+from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
+
+DIM = 16
+RESP = MEMBRANE_NS + "Component:chat:in:operator"    # the other self understands
+
+
+class _World:
+    def __init__(self, cur):
+        self.cur = cur
+
+    def current(self):
+        return np.array(self.cur, dtype=float)
+
+    def write_events(self, evs, session=""):
+        return []
+
+
+def _dir(seed):
+    v = np.random.default_rng(seed).normal(size=DIM)
+    return v / np.linalg.norm(v)
+
+
+class _Chatter:
+    """The other, on a period-4 (changed, changed, unchanged, unchanged, ...):
+    a pattern habit's one bit of memory can't catch (it settles on the 0.5 base
+    rate) but a full-history predictor can. p=0.5, so self classes it
+    intermittent -- no rung-5 audit pauses its getter mid-test."""
+    def __init__(self):
+        self.looks = {}
+
+    def __call__(self, srv, ent, now):
+        if WA._getter_paused.get(ent.eid, 0) > time.time():
+            return {"fired": True, "state": None, "changed": False, "paused": True}
+        name = ent.eid.split(":")[-1]
+        self.looks[name] = self.looks.get(name, 0) + 1
+        if "chat:in" in ent.eid:
+            changed = (self.looks[name] % 4) in (1, 2)     # C, C, U, U, C, C, ...
+            return {"fired": True, "state": {"heard": self.looks[name]}, "changed": changed}
+        return {"fired": True, "state": {"v": self.looks[name]}, "changed": False}
+
+
+def _llm_pred(chatter):
+    """The model stand-in: predicts the phase of the period-4 pattern, near-
+    perfectly, for the look that is about to happen."""
+    def pred(srv, eid):
+        name = eid.split(":")[-1]
+        next_look = chatter.looks.get(name, 0) + 1
+        return 0.9 if (next_look % 4) in (1, 2) else 0.1
+    return pred
+
+
+@pytest.fixture(autouse=True)
+def _clean():
+    WA._getter_paused.clear()
+
+
+def _seat(names=(), limit=6, passed=(1, 2, 3, 4, 5)):
+    d = Path(tempfile.mkdtemp())
+    srv = types.SimpleNamespace()
+    est = srv.entity_store = EntityStore(path=str(d / "entities.json"), shared=False)
+    srv._models_path = str(d / "models.json")
+    srv.paused = False
+    srv.events_pool = None
+    srv.membrane = None
+    srv.efield = _World(_dir(1))
+    est._srv = srv
+    for name in names:
+        e = QuantumEntity(eid=MEMBRANE_NS + "Component:" + name, cls="Component",
+                          properties={"name": name, "getter_script": "result = {'state': {'x': 1}}"})
+        est.docs[e.eid] = e
+    CIO.entity_in(srv, CIO.OPERATOR)                   # the other self understands (a real reach target)
+    SL.bind(srv)
+    SL.set_limit(srv, 1)
+    for r in passed:
+        SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9})
+    SL.set_limit(srv, limit)
+    return srv
+
+
+def _record(srv):
+    p = SL.record_path(srv)
+    return [json.loads(ln) for ln in p.read_text().splitlines() if ln.strip()] if p.exists() else []
+
+
+def _run(srv, n, t0=1000.0):
+    for i in range(n):
+        SL.cycle(srv, now=t0 + i * SL.PACE_S)
+    return t0 + n * SL.PACE_S
+
+
+def _kind(srv, k):
+    return [r for r in _record(srv) if r["kind"] == k]
+
+
+def test_a_reach_at_the_other_carries_the_models_prediction(monkeypatch):
+    chatter = _Chatter()
+    monkeypatch.setattr(SL, "_read_entity", chatter)
+    monkeypatch.setattr(SL, "_llm_pred", _llm_pred(chatter))
+    monkeypatch.setattr(SL, "_ask_llm", lambda srv, eid, prompt: None)
+    srv = _seat(limit=7, passed=(1, 2, 3, 4, 5, 6))
+    _run(srv, 60)
+    reaches = [r for r in _kind(srv, "reach") if r["eid"] == RESP]
+    assert reaches
+    with_llm = [r for r in reaches if "p_llm" in r]
+    assert with_llm
+    assert all("p" in r for r in reaches)                      # habit still there, same look
+    assert all(0.0 <= r["p_llm"] <= 1.0 for r in with_llm)
+
+
+def test_rung_seven_opens_when_the_model_beats_habit(monkeypatch):
+    chatter = _Chatter()
+    monkeypatch.setattr(SL, "_read_entity", chatter)
+    monkeypatch.setattr(SL, "_llm_pred", _llm_pred(chatter))
+    monkeypatch.setattr(SL, "_ask_llm", lambda srv, eid, prompt: None)
+    srv = _seat(limit=7, passed=(1, 2, 3, 4, 5, 6))
+    _run(srv, 400)
+    assert 7 in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
+    assert SL.status(srv)["rung"] == 7
+
+
+def test_a_phase_aware_model_beats_habit():
+    # habit predicts the flat rate; the model predicts the period-4 phase
+    recs = []
+    for i in range(20):
+        changed = (i % 4) in (0, 1)
+        recs.append({"kind": "reach", "eid": RESP,
+                     "answer": "changed" if changed else "unchanged",
+                     "p": 0.5, "p_llm": 0.9 if changed else 0.1})
+    out = SL._rung7(recs, {})
+    assert out["passed"] is True and out["skill"] > 0.5
+
+
+def test_a_base_rate_model_is_not_better_than_habit():
+    # habit predicts well; a flat model removes none of its error
+    recs = ([{"kind": "reach", "eid": RESP, "answer": "changed", "p": 0.9, "p_llm": 0.5}] * 15
+            + [{"kind": "reach", "eid": RESP, "answer": "unchanged", "p": 0.1, "p_llm": 0.5}] * 5)
+    out = SL._rung7(recs, {})
+    assert out["skill"] <= 0.0 and out["passed"] is False
+
+
+def test_the_limit_holds_rung_seven(monkeypatch):
+    chatter = _Chatter()
+    monkeypatch.setattr(SL, "_read_entity", chatter)
+    monkeypatch.setattr(SL, "_llm_pred", _llm_pred(chatter))
+    monkeypatch.setattr(SL, "_ask_llm", lambda srv, eid, prompt: None)
+    srv = _seat(limit=6)
+    _run(srv, 400)
+    assert not [r for r in _kind(srv, "reach") if r["eid"] == RESP and "p_llm" in r]
+    assert 7 not in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]

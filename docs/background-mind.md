@@ -297,6 +297,16 @@ section covers what is built (`membrane/self_loop.py`).
   3. the answerer is classed **other** — a perfect echo classes *body* and
      the split reads 0, so the rung stays shut.
   (`llm::call` prediction is rung 7's; rung 6 is only the bare split.)
+- **Rung 7, understand an other.** Self consults the model coprocessor inside
+  `expect`: when it is about to look at the thing it met (`chat:in:operator`),
+  it reads the last `llm::call` verdict — a one-line probability the next
+  answer is "changed" — as `p_llm` beside habit's `p`, and queues the next
+  `llm::call` (paced at 30 cycles; the call is read-only, so it answers in one
+  line). The test reads the **paired** looks — both predictions on the same
+  look — and the rung passes when the model removes ≥ 0.15 of habit's Brier
+  error over 20 such looks: predicting the operator's answers *better than
+  habit alone*. It is scoped to the other only; every other thing keeps
+  habit's prediction.
 - **Its methods run only in its own loop.** `try` / `expect` / `notice` are
   cliffhanger methods (`self::` no-shell dialect), and so is `reach`. `exec inspect` shows them;
   any other caller, the model included, is refused. The LLM talks *to* self,
