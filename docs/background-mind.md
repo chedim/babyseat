@@ -240,13 +240,27 @@ section covers what is built (`membrane/self_loop.py`).
   4. rung 2's skill still holds.
 
   Once rung 2 is earned, no more getters are paused for its audit.
+- **Rung 4, patience (choosing when to look).** Self fits each thing's rate of
+  change in time, by maximum likelihood over its last 30 looks:
+  `P(changed | dt) = 1 − exp(−λ·dt)`. It looks again once a change has
+  become 60% likely, waiting up to 30 min. When nothing is due it **waits**,
+  noted every 30 idle cycles; silent things are still checked now and then.
+  The test, in stages:
+  1. 30 timed looks;
+  2. they find news at least half the time, or 0.15 more often than its
+     fixed-pace looks at the same things did, whichever is easier;
+  3. its predictions are calibrated: the mean predicted chance is within 0.1
+     of the share that found news.
+
+  (A skill-against-the-average test can't work here: timed looks are, by
+  design, all predicted around 60%.)
 - **Its methods run only in its own loop.** `try` / `expect` / `notice` are
   cliffhanger methods (`self::` no-shell dialect), and so is `reach`. `exec inspect` shows them;
   any other caller, the model included, is refused. The LLM talks *to* self,
   never *as* it. `entity_edit` can't write its `script_data`, and mentions
   can't move it (a one-segment `m:` name never gets a field state).
-- **The record** is `<data dir>/self/record.jsonl`. It is append-only and
-  never truncated, and it starts at birth (the first switch-on): scalars per
+- **The record** is `<data dir>/self/record.jsonl`, read once and kept in
+  memory as it grows. It is append-only and never truncated, and it starts at birth (the first switch-on): scalars per
   cycle (step, push, gap, naive, the kind of change), errors, and each rung
   opening. Nothing before its birth is on it.
 - **The runaway guard.** Each cycle's change wakes the next, at least
