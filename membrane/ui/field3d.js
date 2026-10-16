@@ -1041,6 +1041,12 @@ class Field3DView {
     return best;
   }
 
+  /** Where self (#161) is now (world coordinates), or null before its first cycle. */
+  selfPos() {
+    const a = this.amoeba;
+    return a && a.pts ? a.pos.slice() : null;
+  }
+
   /** Where a mind's orb is now (world coordinates), or null. */
   avatarPos(agent) {
     const a = this.avatars.get(agent);

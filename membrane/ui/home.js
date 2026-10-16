@@ -26,7 +26,7 @@ const LS_FOLLOW = "membrane.home.follow";
 // what the camera follows (the operator, 2026-10-10: "the seat (the most
 // interesting entity) or thinker/chat, whoever's active, to show what Argus
 // is thinking/doing, or even just where stuff is changing")
-const FOLLOW_MODES = ["activity", "seat", "you"];
+const FOLLOW_MODES = ["activity", "seat", "you", "self"];
 const SEAT_IDS = ["seat:self", "seat"];
 const ACTIVITY_EVERY_MS = 1500;
 // THE VIEW (2026-10-13, the operator: the standalone burger menu "just with
@@ -723,7 +723,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         <div class="msg">finding you on the field…</div>
         <div class="top glass">
           <button class="ha" title="Home Assistant: its dashboards and pages" aria-haspopup="menu" aria-expanded="false" aria-label="Home Assistant menu">☰</button>
-          <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you">◎ activity</button>
+          <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you · self (the 🌱 loop)">◎ activity</button>
           <button class="chatbtn" title="Show / hide the chat">💬</button>
           <button class="autobtn" title="auto-chat" aria-label="auto-chat">▶</button>
           <button class="selfbtn" title="self (#161): the loop's switch -- off / on / watch">🌱</button>
@@ -953,6 +953,19 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const idle = performance.now() - this._lastTouch >= IDLE_BEFORE_FOLLOW_MS;
       if (!force && !idle) return;
       const now = performance.now();
+      if (this._mode === "self") {                          // #161: the amoeba (the glide keeps up with it)
+        const p = v.selfPos();
+        if (p) {
+          this._goal = { p, r: 420 };
+          this._msgEl.style.display = "none";
+          this._say("following self");
+          return;
+        }
+        this._msgEl.style.display = "";
+        this._msgEl.textContent = "self is not moving yet — switch 🌱 on and talk to the seat";
+        setTimeout(() => { if (this._msgEl.textContent.startsWith("self is not")) this._msgEl.style.display = "none"; }, 6000);
+        return;
+      }
       if (this._mode === "activity") {
         const a = v.activity();
         if (a) {
@@ -998,6 +1011,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         if (this._mindFollow) {                              // the selected orb moves: the camera goes with it
           const p = this._v3.avatarPos(this._mindFollow);
           if (p) this._goal = { p, r: this._goal && this._goal.sel ? this._goal.r : 420, sel: true };
+        }
+        if (this._mode === "self" && !this._mindFollow && !this._selFollow) {   // it moves every cycle: keep up
+          const sp = this._v3.selfPos();
+          if (sp) this._goal = { p: sp, r: this._goal && !this._goal.sel ? this._goal.r : 420 };
         }
         const v = this._v3, g = this._goal;
         const idle = performance.now() - this._lastTouch >= IDLE_BEFORE_FOLLOW_MS;
