@@ -110,7 +110,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         comp["inside"] = False
         comp["serve_url"] = str(data.get(CONF_SERVE_URL) or "").rstrip("/")
         comp["serve_user"] = str(data.get(CONF_SERVE_USER) or DEFAULT_SERVE_USER)
-        comp["serve_pass"] = str(data.get(CONF_SERVE_PASS) or "")
+        comp["serve_pass"] = str(data.get(CONF_SERVE_PASS) or "")   # only a proxy in front asks
+        comp["serve_ready"] = bool(comp["serve_url"])     # the operator's own seat: up as configured
         if opts.get(OPT_HA_ACCESS, True):
             # DETACHED HOME ASSISTANT ACCESS (ha_access.py): the same StatePush as
             # inside mode (its target is comp["serve_url"] either way), and the
@@ -176,7 +177,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         fe.async_remove_panel(hass, path)
     if comp.pop("landing", False):
         fe.remove_extra_js_url(hass, ENTRY + "panel.js")
-    for k in ("serve_url", "serve_pass"):
+    for k in ("serve_url", "serve_pass", "serve_ready"):
         comp.pop(k, None)
     sess = comp.pop("http_session", None)
     if sess is not None and not sess.closed:

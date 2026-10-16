@@ -364,7 +364,7 @@ class ServeProxyView(HomeAssistantView):
         if not allowed_path(rest):
             return web.Response(status=404, text="serve proxy: path not "
                                 "allowed")
-        if not comp.get("serve_url") or not comp.get("serve_pass"):
+        if not comp.get("serve_url") or not comp.get("serve_ready"):
             # the seat is HA's child: up a minute or so after HA starts (supervisor.py)
             return web.Response(status=503, text="the seat is starting -- try again in a minute")
         user = request.get("hass_user")

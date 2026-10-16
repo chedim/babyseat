@@ -149,6 +149,18 @@ class SeatSupervisor:
         self.comp["serve_url"] = f"http://127.0.0.1:{self.serve_port}"
         self.comp["serve_user"] = ""                 # open surface: no pair
         self.comp["serve_pass"] = ""
+        # serve_ready stays as it was: a respawn keeps the lanes open (they
+        # retry on their own); only the first boot and a stop gate them
+
+    async def _ready(self, poll_s: float = 1.0) -> None:
+        """The seat is ready when it answers (#144: readiness used to be 'the
+        pair is known' -- an open seat has no pair). Every lane that talks to
+        the seat waits on comp['serve_ready']."""
+        for _ in range(240):
+            if await self._healthy():
+                self.comp["serve_ready"] = True
+                return
+            await asyncio.sleep(poll_s)
 
     async def _healthy(self) -> bool:
         try:
@@ -168,7 +180,8 @@ class SeatSupervisor:
             return
         self._stopping = False
         await self._spawn()
-        self._tasks = [self.hass.async_create_background_task(self._watch(), "membrane seat")]
+        self._tasks = [self.hass.async_create_background_task(self._watch(), "membrane seat"),
+                       self.hass.async_create_background_task(self._ready(), "membrane seat ready")]
 
     async def _watch(self) -> None:
         fails = 0
@@ -227,7 +240,7 @@ class SeatSupervisor:
             t.cancel()
         if self.proc is not None:
             await self._terminate(self.proc)
-        self.comp["serve_pass"] = ""
+        self.comp["serve_ready"] = False
         if self._log is not None:
             await self.hass.async_add_executor_job(self._log.close)
             self._log = None

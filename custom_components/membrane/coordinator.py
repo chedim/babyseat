@@ -26,7 +26,7 @@ class FieldCoordinator(DataUpdateCoordinator):
 
     async def _get(self, path: str):
         c = self._comp
-        if not c.get("serve_url") or not c.get("serve_pass"):
+        if not c.get("serve_url") or not c.get("serve_ready"):
             raise UpdateFailed("the seat is starting")      # HA's child: up a minute after HA (supervisor.py)
         sess = async_get_clientsession(self.hass)
         async with sess.get(c["serve_url"].rstrip("/") + path,

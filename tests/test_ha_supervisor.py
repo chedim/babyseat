@@ -52,3 +52,31 @@ def test_no_homeassistant_in_the_package():
     bad = [str(p) for p in pkg.rglob("*.py") if "import homeassistant" in p.read_text()
            or "from homeassistant" in p.read_text()]
     assert bad == []
+
+
+def test_the_seat_is_ready_when_it_answers(sup, tmp_path):
+    # #144: readiness was 'the pair is known'; an open seat has no pair --
+    # ready = its health answers
+    import asyncio
+    hass = types.SimpleNamespace(config=types.SimpleNamespace(path=lambda p: str(tmp_path / p)))
+    comp = {"serve_url": "http://127.0.0.1:1"}
+    s = sup.SeatSupervisor(hass, comp, "http://b", "m", "e")
+    answers = iter([False, False, True])
+
+    async def _healthy():
+        return next(answers)
+    s._healthy = _healthy
+    asyncio.run(s._ready(poll_s=0))
+    assert comp["serve_ready"] is True
+
+
+def test_no_gate_reads_the_password_as_readiness():
+    # every 'is the seat up?' gate keyed on serve_pass; with no pair they all
+    # stayed shut (sensors, chat relay, HA access) -- readiness is serve_ready
+    import re
+    bad = []
+    for f in sorted(ROOT.glob("*.py")):
+        for i, ln in enumerate(f.read_text().splitlines(), 1):
+            if re.search(r"""(\bif\b|\bnot\b|\band\b|\bbool\()[^#]*get\(["']serve_pass["']\)""", ln):
+                bad.append(f"{f.name}:{i}: {ln.strip()}")
+    assert not bad, "\n".join(bad)
