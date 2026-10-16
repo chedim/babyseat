@@ -366,6 +366,24 @@ def _json_objects(args: dict) -> dict:
     return args
 
 
+def _unwrap_args(name: str, args: dict) -> dict:
+    """THE CALL WRAPPED IN `args` (issue #160: entity_edit {"args": "{\"spec\":
+    ..., \"summary\": ...}"} answered 'updated' echoing the OLD summary, and
+    entity_read {"args": "{..., \"run\": true}"} stayed 'deferred'): the spec
+    was dug out of the wrapper downstream (mcp_server._arg), every other
+    field was not -- the edit set nothing, jobs.dispatch never saw run. For a
+    tool whose family takes no `args` parameter, the wrapped object IS the
+    call: its fields join the arguments (a field sent beside it wins)."""
+    inner = args.get("args")
+    if not isinstance(inner, dict):
+        return args
+    fam = FAMILIES.get(name) or FAMILIES.get(_LEGACY_FAMILY.get(name) or "")
+    if fam is None or "args" in fam["params"]:
+        return args                               # exec's args are its {{param}} values
+    outer = {k: v for k, v in args.items() if k != "args"}
+    return _json_objects({**inner, **outer})
+
+
 def _call_in_name(name: str) -> tuple[str, dict] | None:
     """THE WHOLE CALL IN THE NAME SLOT (2026-10-15, serve-msgs: 70 live calls
     arrived with the entire call JSON riding the tool-name field -- the
@@ -475,7 +493,7 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
             f"one of {', '.join(sorted(FAMILIES))} -- in the name, and that JSON in the arguments, "
             "e.g. name='entity', arguments={\"action\": \"read\", \"name\": \"presence\"}")
     name, args = canonical(name, args)
-    args = _json_objects(dict(args or {}))
+    args = _unwrap_args(name, _json_objects(dict(args or {})))
     # THE NAMELESS CALL (2026-10-12, a seat inside Home Assistant: the backend's
     # parser lost the tool's name -- 'no_name_1' -- and wrapped the arguments as
     # {"input": "<json>"}; told "no tool is named 'no_name_1'", the model sent it
