@@ -32,7 +32,7 @@ REFRESH_S = 15.0
 EVENTS_KEEP = 20
 MEM_LOW_MB = 350             # the phone's MemAvailable under this: pressure
 RSS_HIGH_MB = 2300           # the seat itself over this: pressure
-CONTROLS = ("paused", "loops_max", "auto", "role", "self")
+CONTROLS = ("paused", "loops_max", "auto", "role", "self", "self_limit")
 
 
 def _est(srv):
@@ -261,6 +261,12 @@ def control(srv, body: dict, by: str = "operator") -> dict:
         if _SELF.set_mode(srv, m, by=by):
             done["self"] = m
             note(srv, "self", value=m, by=by)
+    if "self_limit" in body:                       # #161: the growth limit -- the top rung self may reach
+        from . import self_loop as _SELF
+        if _SELF.set_limit(srv, body["self_limit"], by=by):
+            n = _SELF.limit(srv)
+            done["self_limit"] = n
+            note(srv, "self", value=_SELF.mode(srv), limit=n, by=by)
     sid = str(body.get("session") or "")
     if sid and r is not None and r.sessions.get(sid) is not None:
         if body.get("role"):
