@@ -7,6 +7,7 @@ above chance but unreliably or late are **others**; the rest is **world**.
 
     python sandbox.py                 # 10 toy worlds: recovery, the null, stability, the learning curve
     python replay.py <store.cblite>   # rung 2: the same ledger over a real seat, read-only
+    python density.py <store.cblite>  # rung 3: how dense a motor channel has to be, read-only
 
 ## the sandbox (`sandbox.py`): a world with a planted answer
 
@@ -103,10 +104,11 @@ The ledger reads the seat's hand when there is a hand to read.
 
 ## the two things the real data forced into the ledger
 
-1. **`MIN_KIND_ACTS = 20`.** The live log has 48 act kinds, most of them a
-   handful of calls. Three calls of one kind, one coincidence, and p_act=1.00
-   against a zero baseline crowned a body part out of nothing. A kind must be
-   exercised before it may claim an entity.
+1. **`MIN_KIND_ACTS = 20`.** The live log carries some fifty kinds of act, most
+   of them a handful of calls (rung 3 counts the agent's own: 42 kinds, 8 of
+   them repeated often enough to read). Three calls of one kind, one
+   coincidence, and p_act=1.00 against a zero baseline crowned a body part out
+   of nothing. A kind must be exercised before it may claim an entity.
 2. **a floor under `p_base` (`1/horizon`).** An entity that never moves outside
    my act windows had p_base=0 and z=∞; the thresholds now mean the same thing
    on every history.
@@ -133,5 +135,77 @@ times, `m:field:vitals` 18, `m:memo:self` 8, and goals -- i.e. *the component
 that ordered the work moves when the work lands*. That is the shape L1's motor
 channel should record: 163 script pulses of 3682 events is not a body to find,
 it is a body to build.
+
+# rung 3: how much motor channel a body needs (#161, 2026-10-15)
+
+Rung 2 ended on a build instruction -- give L1 a motor channel -- without saying
+how big one has to be. `density.py` turns that into a number by measuring the
+**instrument's** sensitivity over the seat's REAL act stream (970 acts, 42
+kinds, 10.1 h): a script-authored pulse is planted 0.3 s after a fraction `q` of
+the acts, on an entity the live store never moves, and the ledger is asked where
+it crosses from nothing to *other* to body.
+
+    python density.py <project>/.membrane/field.cblite   # snapshots it, then reports
+
+**A power analysis, not a finding:** the answer is ours. The table says what the
+ledger can read, never what the seat is. (Two of this rung's own bugs are pinned
+by tests: planting on `m:component:field:vitals` made the `q=0.00` control row
+report an *other* -- the control was reading the job path, not the injection --
+and the curve's body/other columns first reported the whole map's others rather
+than the planted entity's class.)
+
+## the curve
+
+| answers per act | machinery events (10.1 h) | 5 s window | 20 s window | p_act at 5 s |
+|---|---|---|---|---|
+| 0.00 | 0 | -- | -- | -- |
+| 0.02 | 19 | -- | -- | 0.06 |
+| 0.05 | 67 | other | other | 0.23 |
+| 0.10 | 111 | other | other | 0.37 |
+| 0.20 | 196 | other | other | 0.47 |
+| 0.40 | 387 | other | **body** | 0.79 |
+| 0.60 | 582 | **body** | body | 0.95 |
+| 0.80 | 789 | body | body | 1.00 |
+| 0.95 | 926 | body | body | 1.00 |
+
+- The line is **q ≈ 0.6 at a 5 s window -- 582 machinery events on ONE entity
+  over 10.1 h, ≈58 an hour -- and q ≈ 0.4 at 20 s (≈38/h)**. A rate, not a
+  fraction: what the channel must deliver is motions per hour on one entity,
+  serving one act kind.
+- Below the line the entity is an *other* from ~5% on: the ledger sees that it
+  responds and refuses to call it part of me.
+- The shuffled null finds nothing at any density, at either window.
+- p_act runs above q (0.95 at q 0.60; 0.79 at q 0.40): the seat acts in bursts,
+  so an answer to a neighbouring act lands inside this act's window too -- the
+  stray rung 1's MAD exists for. The honest threshold is the one per hour.
+- Only **8 of the 42 act kinds are eligible** (`exec` 311, `entity_read` 262,
+  `entity_edit` 53, `entity` 39, `intents` 30, `fulfill` 28, `state` 24,
+  `entities_related` 20 -- 767 of the 970 acts). Motion serving any of the other
+  34 kinds is unreadable by construction, however reliably it fires.
+
+## where the live channel sits
+
+**Wide and shallow:** 1857 machinery-owned pulses across 663 entities (2.8 each)
+-- `tool:shell` 284, `c:head` 98, `tool:consequence` 80. The one entity rung 2's
+job path moves, `m:component:field:vitals`, reads as an **other** (answering
+`intents`: p_act 0.20 against a 0.0074 baseline, dp +0.19, z 12.3) with 52
+machinery pulses in 10.1 h = **5.2 an hour**, where the same 5 s window's curve
+wants ~58. The channel exists and is visible -- and it is an order of magnitude
+short. (Its contingency may be the job path or the session's own tempo: both are
+driven by the same turns, and the ledger cannot tell them apart.)
+
+## what this means for the build
+
+1. **Record motions, not mentions -- and record them often.** An entity must move
+   ~40-60 times an hour, in answer to *one* act kind, before L1 can read it as a
+   body part. A script's `result`, a job landing, a file changing on disk: each
+   is one motion, and the ledger wants them at that rate.
+2. **Serve the kinds the seat repeats.** `exec` and `entity_read` are two thirds
+   of its acts; a motor channel bolted onto a rare verb is invisible even if it
+   fires every single time.
+3. **The instrument is ready; the substrate is not.** This ledger already reads
+   the operator's hand off this data (rung 2's control) and reads a planted body
+   at these densities. Nothing in the ledger needs to change -- what the seat
+   writes down does.
 
 
