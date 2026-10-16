@@ -137,28 +137,51 @@ class TestTheBodyMapOverTheMiniHistory(unittest.TestCase):
 
 
 class TestTheSnapshotLeavesTheSeatAlone(unittest.TestCase):
+    def _store(self, tmp):
+        """A store of our own, in the CBLite layout: field.cblite/field.cblite2/db.sqlite3"""
+        import sqlite3
+        live = Path(tmp) / "field.cblite" / "field.cblite2"
+        live.mkdir(parents=True)
+        con = sqlite3.connect(live / "db.sqlite3")
+        con.execute("create table t (k text)")
+        con.execute("insert into t values ('a pulse')")
+        con.commit()
+        con.close()
+        return Path(tmp) / "field.cblite"
+
     def test_a_snapshot_copies_the_store_and_never_writes_to_it(self):
         # the live seat is writing into its store while the lab reads: the copy
         # must be a copy (SQLite's own backup) and the live bytes must not move
         import sqlite3
         import tempfile
-        tmp = Path(tempfile.mkdtemp())
-        live = tmp / "field.cblite" / "field.cblite2"
-        live.mkdir(parents=True)
-        db = live / "db.sqlite3"
-        con = sqlite3.connect(db)
-        con.execute("create table t (k text)")
-        con.execute("insert into t values ('a pulse')")
-        con.commit()
-        con.close()
+        tmp = tempfile.mkdtemp()
+        src = self._store(tmp)
+        db = src / "field.cblite2" / "db.sqlite3"
         before = db.read_bytes()
-        out = R.snapshot(tmp / "field.cblite", tmp / "snap")
+        out = R.snapshot(src, Path(tmp) / "snap")
         copy = out / "field.cblite2" / "db.sqlite3"
         self.assertTrue(copy.exists(), "the snapshot kept the store's layout")
         con = sqlite3.connect(copy)
         self.assertEqual(con.execute("select k from t").fetchall(), [("a pulse",)])
         con.close()
         self.assertEqual(db.read_bytes(), before, "the live store was not written to")
+
+    def test_the_report_snapshots_before_it_reads(self):
+        # report(a path) must never open the live store itself
+        import tempfile
+        from unittest import mock
+        src = self._store(tempfile.mkdtemp())
+        opened = []
+
+        def fake_load(p, *a, **kw):
+            opened.append(str(p))
+            return [], []
+
+        with mock.patch.object(R, "load", fake_load):
+            R.report(src, windows=())
+        self.assertEqual(len(opened), 1)
+        self.assertNotEqual(opened[0], str(src))
+        self.assertTrue(opened[0].endswith("field.cblite"), opened[0])
 
 
 if __name__ == "__main__":

@@ -27,6 +27,7 @@ from __future__ import annotations
 import random
 import sqlite3
 import sys
+import tempfile
 from collections import Counter
 from pathlib import Path
 
@@ -208,12 +209,19 @@ def load(path, lib_dir=None) -> tuple:
 
 
 def report(store, windows=(2.0, 5.0, 20.0), top: int = 8) -> str:
-    """The rung-2 write-up: who owns the pulses, and what each window finds."""
+    """The rung-2 write-up: who owns the pulses, and what each window finds.
+
+    Given a store's PATH it snapshots it first and reads the copy: the live
+    seat is never opened, and keeps writing while this runs."""
     if isinstance(store, tuple):
         events, deltas = store
+        snap = None
     else:
-        events, deltas = load(store)
+        snap = Path(tempfile.mkdtemp(prefix="self_l1-snap-"))
+        events, deltas = load(snapshot(store, snap))
     L = [f"# a real seat's history: {len(events)} events, {len(deltas)} change pulses", ""]
+    if snap is not None:
+        L += [f"(read from a snapshot at `{snap}`: the live store was not opened)", ""]
     own = authors(events, deltas)
     tot = sum(n for _, n in own)
     L.append("| who owns the pulse | pulses | share |")

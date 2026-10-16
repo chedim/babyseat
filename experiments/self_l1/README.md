@@ -45,12 +45,13 @@ map that emerges makes sense and stays stable.
 
 `replay.py` reads a live seat's own history instead of a toy: its event log
 (who spoke, which tool ran, when) and the field's change pulses
-(`entity_deltas`), 10.2 h of a working seat -- **3682 events, 28166 pulses**.
-It takes a read-only copy of the store first (`snapshot()`, SQLite's own
-backup: consistent while the seat keeps writing, 0.9 s for 360 MB) and never
-opens the live one.
+(`entity_deltas`), one 10.2 h stretch of a working seat -- **3682 events, 28166
+pulses** at the snapshot quoted below (the seat keeps writing; a later run read
+3684 and 28174). It takes a read-only copy of the store first (`snapshot()`,
+SQLite's own backup: consistent while the seat keeps writing, 0.9 s for 360 MB)
+and never opens the live one.
 
-    python replay.py ~/.membrane/field.cblite     # reads a snapshot of it
+    python replay.py <project>/.membrane/field.cblite     # snapshots it, then reports
 
 ## what the replay found
 
