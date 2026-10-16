@@ -418,13 +418,18 @@ def check_pending(srv, now: float | None = None) -> dict | None:
 RESTART = {"requested": False}
 
 
+def restart_line() -> str | None:
+    """The log's word that this stop is a restart -- the teardown prints it
+    while the log file is still open (at exec time stderr is closed)."""
+    return "[seat] restarting (re-exec)" if RESTART["requested"] else None
+
+
 def reexec_if_requested() -> None:
     """The last line of the seat's teardown: a requested restart re-execs the
     same command (same pid, same terminal -- ctrl+c still stops it; a
     supervisor waiting on the process just sees it continue)."""
     if not RESTART["requested"]:
         return
-    print("[seat] restarting (re-exec)", file=sys.stderr, flush=True)
     os.execv(sys.executable,
              [sys.executable, "-m", "membrane.opencode"] + sys.argv[1:])
 

@@ -157,6 +157,13 @@ class TestARestartRestarts(unittest.TestCase):
             [RS.sys.executable, "-m", "membrane.opencode",
              "--standalone", "--field", "f.json"])
 
+    def test_the_restart_says_so_while_the_log_is_open(self):
+        # the teardown prints this BEFORE it closes the log file stderr
+        # rides; printed at exec time it went nowhere
+        self.assertIsNone(RS.restart_line())
+        RS.RESTART["requested"] = True
+        self.assertIn("re-exec", RS.restart_line())
+
     def test_a_plain_stop_never_reexecs(self):
         with mock.patch.object(RS.os, "execv") as ex:
             RS.reexec_if_requested()

@@ -914,11 +914,11 @@ def main() -> None:
         print(f"[opencode] alert dial off ({_one_line(e)})", file=sys.stderr)
     srv._intent_board = None
     try:
+        # no count here: the goal layer mounts later in the boot ('the
+        # intent board is mounted (goals: N open)') -- a count now read the
+        # bare json board and said '0 open' over a full board
         srv._intent_board = IntentBoard(_wdir / "intents.json",
                                         embedder=srv.membrane.embedder)
-        _n_i = len(srv._intent_board.open_intents())
-        print(f"[opencode] intentions: {_n_i} open "
-              f"(cap {MAX_INTENTS})", file=sys.stderr)
     except Exception as e:
         print(f"[opencode] intent layer disabled ({_one_line(e)})",
               file=sys.stderr)
@@ -1119,7 +1119,8 @@ def main() -> None:
         # and no boot attached them -- every tool lane read the raw board
         # and hit 'no goal layer' (`_intents_board()`'s lazy attach was
         # reachable only from the frame lane). The attach is idempotent
-        # (attach_entity_store guards) -- one call here mounts the wheel;
+        # (attach_entity_store guards) -- one call below mounts the wheel
+        # (_intents_board, after the executor's seeding);
         # the boot also RE-DERIVES the wakes from the board (the durable
         # steering: open intents re-queue their lanes -- boot_wakes below,
         # after the pool lives).
@@ -2288,6 +2289,9 @@ def main() -> None:
                 pass
         srv.server_close()
         srv._gstop.set()               # the peer heartbeats stop
+        from .restarts import restart_line
+        if restart_line():
+            print(restart_line(), file=sys.stderr, flush=True)
         if _log_fh is not None:
             try:
                 _log_fh.close()
