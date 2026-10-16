@@ -8,6 +8,7 @@ above chance but unreliably or late are **others**; the rest is **world**.
     python sandbox.py                 # 10 toy worlds: recovery, the null, stability, the learning curve
     python replay.py <store.cblite>   # rung 2: the same ledger over a real seat, read-only
     python density.py <store.cblite>  # rung 3: how dense a motor channel has to be, read-only
+    python probe.py <store.cblite>    # rung 4: what a motion pulse should move, read-only
 
 ## the sandbox (`sandbox.py`): a world with a planted answer
 
@@ -207,5 +208,46 @@ driven by the same turns, and the ledger cannot tell them apart.)
    the operator's hand off this data (rung 2's control) and reads a planted body
    at these densities. Nothing in the ledger needs to change -- what the seat
    writes down does.
+
+# rung 4: what a motion pulse should move (#161, 2026-10-15)
+
+Rung 3 gave the motor channel a rate. This one asks the design question that
+follows: a motion pulse has to move *something* -- which entity? `probe.py`
+plants a machinery-authored pulse 0.3 s after every agent act over the same
+history, in two obvious designs, and asks the ledger what it makes of them.
+
+    python probe.py <project>/.membrane/field.cblite   # snapshots it, then reports
+
+**A design probe, not a claim about the seat: the channels are ours.**
+
+| channel | planted pulses (10.2 h) | body | other | shuffled null |
+|---|---|---|---|---|
+| the entity the act is **about** (its top `coords`) | 801 (~79/h) | **0** | 40 | 0 |
+| the **tool** the act ran (its own echo) | 982 (~96/h) | **8** | 25 | **0** |
+
+- **The argument is not a body.** The densest channel anyone could write -- one
+  pulse for every act, ~79/h -- reads as *no body at all*. Each entity answers
+  only its share of a kind's acts: `w:processing` 0.21 of the `entity_read`s,
+  `tool:exec` 0.17 of the `exec`s, `tool:entities_related` 0.65 of the 20
+  `entities_related`s. A body part answers **every** act of one kind: it is an
+  invariant of the action, not an argument of it. (Rung 3's line was ~58/h *on
+  one entity*; here the rate is spread across 40.)
+- **The tool is a tautology.** Pulsing `tool:<the act>` turns the tool entities
+  into body parts at p_act **1.00**, p_base 0.000, z up to 3433 -- because we
+  pulsed them. That is rung 2's act echo, rebuilt by hand: the ledger confirms
+  what the recorder asserted, and nothing more.
+- **The shuffled null does not catch it.** The null finds no body for either
+  channel -- *including the tautology*. The ledger cannot audit the recorder's
+  bookkeeping from the outside; a pulse we write unconditionally is a body part
+  by construction. Both of these are pinned by
+  `tests/test_self_l1_probe.py`.
+
+## what this means for the build
+
+**The ledger cannot be the rule; the recorder has to be.** A motion must be a
+pulse that *could have failed to happen* -- written only after a real state
+diff, and naming the act it answers. Then it is a body part because the world
+moved, not because we said so. `docs/motor-channel.md` is the design draft that
+follows from rungs 1-4.
 
 
