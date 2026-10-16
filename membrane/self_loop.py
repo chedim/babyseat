@@ -61,7 +61,7 @@ METHODS = {
 RUNG_NAMES = {0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart",
               4: "patience", 5: "notice the world changed", 6: "meet an other",
               7: "understand an other", 8: "recognize itself", 9: "change itself", 10: "speak"}
-LADDER = {0: RUNG_NAMES[0], 1: RUNG_NAMES[1], 2: RUNG_NAMES[2]}          # the rungs built so far
+LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3)}          # the rungs built so far
 
 try:
     PACE_S = max(1.0, float(os.environ.get("MEMBRANE_SELF_PACE_S") or 10.0))
@@ -80,6 +80,11 @@ RUNG2_SKILL = 0.2           # Brier skill against the seat-wide change rate
 AUDIT_P = 0.6               # an entity must move this often to be audited (a still one can't show a mark fail)
 AUDIT_REACHES = 3           # reaches of it while its getter is paused
 AUDIT_MAX_S = 600.0         # the pause's cap (an audit that runs out is inconclusive)
+KIND_MIN = 5                # looks before a thing has a kind
+RUNG3_WINDOW = 80           # reaches the kinds are read over (its two halves must agree)
+RUNG3_LOOKS = 40            # sorted reaches before the test reads the focus
+RUNG3_FOCUS = 0.25          # the no-answer share it must get under
+SILENT_WEIGHT = 0.05        # a silent thing is still checked now and then (the world can change)
 
 _lock = threading.RLock()
 _ctx = threading.local()    # the cycle in flight: only the loop's own thread has one
@@ -359,6 +364,13 @@ def _try(srv, seed: str) -> dict:
     return {"rc": 0, "text": "moved"}
 
 
+def _read_entity(srv, ent, now):
+    """THE SEAM: one look at a thing (its getter fires, or answers that it
+    can't). Tests swap it for a simulated world driven by the fake clock."""
+    from . import watch_agents as _WA
+    return _WA.entity_read_back(srv, ent, force=False, by="self")
+
+
 def _reach(srv, target: str) -> dict:
     """Read one thing: its getter fires (or answers that it can't)."""
     c = _ctx.cycle
@@ -366,9 +378,8 @@ def _reach(srv, target: str) -> dict:
     if ent is None:
         c["read"] = {"fired": False, "reason": "gone"}
         return {"rc": 0, "text": "nothing there"}
-    from . import watch_agents as _WA
     try:
-        c["read"] = _WA.entity_read_back(srv, ent, force=False, by="self")
+        c["read"] = _read_entity(srv, ent, c.get("now"))
     except Exception as e:                                  # noqa: BLE001
         c["read"] = {"fired": False, "reason": f"error: {e!r}"[:80]}
     return {"rc": 0, "text": "reached"}
@@ -392,10 +403,14 @@ def _notice(srv, seed: str) -> dict:
     c = _ctx.cycle
     if c.get("act") == "reach":
         c["answer"], c["why"] = _answer(c.get("read") or {})
-        if c["answer"] != "none" and not c.get("audit"):     # inside an audit it learns nothing
+        if not c.get("audit"):                               # inside an audit it learns nothing
             t = _tempo(srv).setdefault(c["eid"], {"changed": 0, "answered": 0})
-            t["answered"] += 1
-            t["changed"] += int(c["answer"] == "changed")
+            if c["answer"] == "none":
+                t["none"] = int(t.get("none", 0)) + 1
+            else:
+                t["answered"] += 1
+                t["changed"] += int(c["answer"] == "changed")
+                t["last"] = c.get("now")
             _save_json(srv, "tempo.json", _tempo(srv))
         return {"rc": 0, "text": "noticed"}
     ent = _entity(srv)
@@ -544,11 +559,18 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
     targets = _targets(srv)
     if not targets:
         return
-    eid = random.Random(f"reach:{n}").choice(targets)
+    steer = _available(srv, 3)
+    kinds = _kinds(_read(srv)) if steer else {}
+    if steer:                                      # rung 3: act on the sort -- silent things rarely
+        weights = [SILENT_WEIGHT if kinds.get(e) == "silent" else 1.0 for e in targets]
+        eid = random.Random(f"reach:{n}").choices(targets, weights=weights)[0]
+    else:
+        eid = random.Random(f"reach:{n}").choice(targets)
+    last = (_tempo(srv).get(eid) or {}).get("last")
     au = _rt(srv).get("audit")
     inside = bool(au and au["eid"] == eid)
     from .night import method_call
-    _ctx.cycle = {"srv": srv, "act": "reach", "eid": eid, "audit": inside}
+    _ctx.cycle = {"srv": srv, "act": "reach", "eid": eid, "audit": inside, "now": now}
     try:
         outs = []
         for m, args in (("expect", {"seed": str(n)}), ("reach", {"target": eid}), ("notice", {"seed": str(n)})):
@@ -564,7 +586,15 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
                                    if o.get("rc") != 0), "")[:200]})
         return
     rec = {"ts": now, "kind": "reach", "n": n, "eid": eid, "p": round(c["p"], 4),
-           "answer": c["answer"], "why": c["why"]}
+           "answer": c["answer"], "why": c["why"],
+           "dt": (round(now - float(last), 3) if last is not None else None)}
+    if steer:
+        rec["steer"] = True
+        pp = ent.properties or {}
+        sd = dict(pp.get("script_data") or {})
+        sd["kinds"] = {e: k for e, k in kinds.items() if k != "unknown"}
+        pp["script_data"] = sd
+        ent.properties = pp
     if inside:
         rec["audit"] = True
         if c["answer"] != "none":
@@ -592,6 +622,8 @@ def _audit_tick(srv, now: float) -> None:
                           "passed": (au["changes"] == 0) if done else None})
         return
     recs = _read(srv)
+    if 2 in _passed(recs):
+        return                             # rung 2 is earned: no more pausing getters for it
     audited = {r["eid"] for r in recs if r.get("kind") == "audit" and r.get("phase") == "end"
                and r.get("passed") is not None}
     for eid, st in _rung2_stats(recs, _tempo(srv)).items():
@@ -599,8 +631,8 @@ def _audit_tick(srv, now: float) -> None:
             continue
         until = time.time() + AUDIT_MAX_S
         _WA.pause_getter(eid, until)
-        rt["audit"] = {"eid": eid, "until": until, "reaches": 0, "changes": 0}
-        _append(srv, {"ts": now, "kind": "audit", "phase": "start", "eid": eid})
+        rt["audit"] = {"eid": eid, "until": until, "reaches": 0, "changes": 0, "rung": 2}
+        _append(srv, {"ts": now, "kind": "audit", "phase": "start", "eid": eid, "rung": 2})
         return
 
 
@@ -690,7 +722,52 @@ def _rung2(recs: list[dict], tempo: dict | None = None) -> dict:
             "passed": all(v >= 1.0 for v in crit.values())}
 
 
-PROGRESS = {1: _rung1, 2: _rung2}       # rung -> its test over the record
+def _kinds(recs: list[dict], window: int = RUNG3_WINDOW) -> dict:
+    """What each thing is, from my own looks (outside audits), over its last
+    `window` reaches: silent (no answer), moving, still, intermittent -- or
+    unknown, before KIND_MIN looks."""
+    by: dict[str, list] = {}
+    for r in recs:
+        if r.get("kind") == "reach" and not r.get("audit"):
+            by.setdefault(r["eid"], []).append(r["answer"])
+    out = {}
+    for eid, ans in by.items():
+        ans = ans[-window:]
+        none = sum(a == "none" for a in ans)
+        answered = len(ans) - none
+        if len(ans) >= KIND_MIN and none / len(ans) >= 0.8:
+            out[eid] = "silent"
+        elif answered >= KIND_MIN:
+            p = sum(a == "changed" for a in ans) / answered
+            out[eid] = "moving" if p >= 0.6 else ("still" if p <= 0.2 else "intermittent")
+        else:
+            out[eid] = "unknown"
+    return out
+
+
+def _rung3(recs: list[dict], tempo: dict | None = None) -> dict:
+    """Tell things apart: sorted reaches (looks), kinds that agree across the
+    two halves of the last RUNG3_WINDOW reaches, the no-answer share under
+    RUNG3_FOCUS (focus), and rung 2's skill still holding."""
+    reaches = [r for r in recs if r.get("kind") == "reach" and not r.get("audit")]
+    steered = [r for r in reaches if r.get("steer")]
+    looks = min(1.0, len(steered) / RUNG3_LOOKS)
+    last = reaches[-RUNG3_WINDOW:]
+    half = len(last) // 2
+    a, b = _kinds(last[:half]), _kinds(last[half:])
+    both = [e for e in a if e in b and a[e] != "unknown" and b[e] != "unknown"]
+    agree = bool(both) and all(a[e] == b[e] for e in both) and len({b[e] for e in both}) >= 2
+    tail = steered[-RUNG3_LOOKS:]
+    share = (sum(r["answer"] == "none" for r in tail) / len(tail)) if tail else 1.0
+    focus = 1.0 if share < RUNG3_FOCUS else max(0.0, (1.0 - share) / (1.0 - RUNG3_FOCUS))
+    r2 = _rung2_stats(recs, tempo or {})
+    best = max((s["skill"] for s in r2.values()), default=0.0)
+    crit = {"looks": looks, "kinds": 1.0 if agree else 0.0, "focus": focus,
+            "skill": max(0.0, min(1.0, best / RUNG2_SKILL))}
+    return {"crit": crit, "skill": round(best, 4), "passed": all(v >= 1.0 for v in crit.values())}
+
+
+PROGRESS = {1: _rung1, 2: _rung2, 3: _rung3}       # rung -> its test over the record
 
 
 def _passed(recs: list[dict]) -> set:
@@ -772,7 +849,8 @@ def status(srv) -> dict:
             "cycles": sum(1 for r in recs if r.get("kind") == "cycle"),
             "rung": rung, "rung_name": LADDER.get(rung), "next": nxt,
             "bar": round(bar, 4), "waiting_on": waiting, "skill": prog.get("skill", r1["skill"]),
-            "slipping": slipping, "ladder": ladder}
+            "slipping": slipping, "ladder": ladder,
+            "world": {e: k for e, k in _kinds(recs).items() if k != "unknown"}}
 
 
 # ---- the thread -----------------------------------------------------------

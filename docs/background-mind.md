@@ -222,6 +222,24 @@ section covers what is built (`membrane/self_loop.py`).
   - **What passing means:** "I can tell which things move on their own, and
     my marks of their moving are real." That is the world's tempo, not yet a
     body.
+- **Rung 3, tell things apart.** Self sorts its world into kinds from its own
+  looks (over the last 80 reaches per thing; `status()["world"]`, and
+  `script_data["kinds"]`):
+  - **silent:** no answer on ≥ 80% of looks;
+  - **moving:** changed on ≥ 60%;
+  - **still:** changed on ≤ 20%;
+  - **intermittent:** in between.
+
+  It acts on the sort: a silent thing is reached for with weight 0.05,
+  rarely but never never, since the world can change. On the live seat
+  silent things took 62% of its reaches. The test, in stages:
+  1. 40 sorted reaches;
+  2. the kinds agree across the two halves of its last 80 reaches, with at
+     least two kinds;
+  3. the no-answer share over its last 40 reaches is under 25%;
+  4. rung 2's skill still holds.
+
+  Once rung 2 is earned, no more getters are paused for its audit.
 - **Its methods run only in its own loop.** `try` / `expect` / `notice` are
   cliffhanger methods (`self::` no-shell dialect), and so is `reach`. `exec inspect` shows them;
   any other caller, the model included, is refused. The LLM talks *to* self,
