@@ -94,3 +94,35 @@ def test_the_failing_state_is_readable():
     _strike_out(srv, e)
     h = N.script_health(e.properties)
     assert h["state"] == "disabled" and h["retry_at"] > time.time()
+
+
+def test_the_thinker_retries_a_struck_out_heartbeat(tmp_path):
+    """The issue's own path: the THINKER's tick pass. A heartbeat failing
+    on a missing file strikes out, the beats skip it while held -- and once
+    the file is back and the retry is due, the next beat fires it again and
+    it is re-enabled (before: dead until someone edited it)."""
+    from unittest import mock
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from test_night_mode import _FakeSrv, _thinker
+    need = tmp_path / "sensor.txt"
+    est = EntityStore(path=None, shared=False)
+    e = QuantumEntity(eid=MEMBRANE_NS + "tool:heart", cls="tool",
+                      properties={"name": "heart", "tick_every": 1,
+                                  "tick_script": f"open({str(need)!r}).read()\n"
+                                                 "result = {'render': 'beat'}"})
+    est.docs[e.eid] = e
+    srv = _FakeSrv(store=est)
+    th = _thinker(srv, est)
+    for _ in range(N.SCRIPT_MAX_FAILURES):
+        th._tick_scripts()
+        th._beat += 1
+    assert e.properties.get("script_disabled")
+    started = e.properties.get("script_last_started")
+    th._tick_scripts()                                # held: the beat skips it
+    assert e.properties.get("script_last_started") == started
+    need.write_text("ok")                             # the cause heals ...
+    later = time.time() + N.SCRIPT_RETRY_S + 1
+    with mock.patch("time.time", return_value=later):
+        th._tick_scripts()                            # ... and the retry is due
+    assert not e.properties.get("script_disabled"), e.properties
+    assert th.stats["ticks"] == 1

@@ -632,6 +632,21 @@ class TestEntityReadHints(unittest.TestCase):
         self.assertIn("Executor", msg)
         self.assertIn("tool:executor", msg)
 
+    def test_a_failing_script_rides_the_read(self):
+        """#149: the read carries a failing script's state (it said
+        nothing: a struck-out heartbeat read as a healthy entity)."""
+        ent = self.est.docs[MEMBRANE_NS + "tool:executor"]
+        code, out = self._get("/membrane/entity/read?spec=tool:executor&nofire=1")
+        self.assertEqual(code, 200, out)
+        self.assertNotIn("script", out)
+        ent.properties.update({"script_failures": 3, "script_disabled": True,
+                               "script_disabled_by": "strikes",
+                               "script_retry_at": 9e9,
+                               "script_last_error": "SyntaxError: boom"})
+        code, out = self._get("/membrane/entity/read?spec=tool:executor&nofire=1")
+        self.assertEqual(out["script"]["state"], "disabled")
+        self.assertIn("SyntaxError", out["script"]["last_error"])
+
     def test_field_id_resolves_to_the_store(self):
         """'s:?tick_every' (the FIELD's short id) resolves to the store's
         symbols:?tick_every directly (2026-10-08: it used to 404 with the
