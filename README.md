@@ -273,8 +273,8 @@ embed, apply), `shadow` (capture events only — a lab ablation), `off`.
 
 `membrane serve` runs the seat with **no TUI and no opencode at all** —
 sessions, messages, turns, tool parts, aborts, the SSE event stream, served by
-membrane itself on :4096 (basic auth, the pair in `.membrane/serve-auth.json`,
-credentials survive restarts). Any opencode client connects unchanged: the
+membrane itself on :4096 (no login of its own: keep it on your network, or put a
+reverse proxy with its own login in front). Any opencode client connects unchanged: the
 [mobile companion app](https://opencode.app/), IDE plugins, a script. The turn
 loop calls the seat's OWN `/v1` on loopback — gate, injection, capture and
 routing run through the exact code path every other client's turn uses, so

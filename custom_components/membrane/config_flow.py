@@ -128,9 +128,11 @@ class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors = {}
         if user_input is not None:
             s = async_get_clientsession(self.hass)
+            pw = user_input.get(CONF_SERVE_PASS) or ""
             try:
                 async with s.get(user_input[CONF_SERVE_URL].rstrip("/") + "/global/health",
-                                 auth=aiohttp.BasicAuth(user_input[CONF_SERVE_USER], user_input[CONF_SERVE_PASS]),
+                                 auth=(aiohttp.BasicAuth(user_input.get(CONF_SERVE_USER) or DEFAULT_SERVE_USER, pw)
+                                       if pw else None),     # only a proxy in front asks (#144)
                                  timeout=aiohttp.ClientTimeout(total=10)) as r:
                     ok = r.status == 200
             except Exception:                            # noqa: BLE001
@@ -140,8 +142,8 @@ class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors["base"] = "cannot_connect"
         return self.async_show_form(step_id="connect", errors=errors, data_schema=vol.Schema({
             vol.Required(CONF_SERVE_URL): str,
-            vol.Required(CONF_SERVE_USER, default=DEFAULT_SERVE_USER): str,
-            vol.Required(CONF_SERVE_PASS): str}))
+            vol.Optional(CONF_SERVE_USER, default=DEFAULT_SERVE_USER): str,
+            vol.Optional(CONF_SERVE_PASS, default=""): str}))
 
     @staticmethod
     @callback

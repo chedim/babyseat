@@ -80,3 +80,11 @@ def test_no_gate_reads_the_password_as_readiness():
             if re.search(r"""(\bif\b|\bnot\b|\band\b|\bbool\()[^#]*get\(["']serve_pass["']\)""", ln):
                 bad.append(f"{f.name}:{i}: {ln.strip()}")
     assert not bad, "\n".join(bad)
+
+
+def test_connect_needs_no_password():
+    # #144: a seat has no login now -- the connect form must not demand one
+    # (only a reverse proxy in front may ask; then it is given)
+    src = (ROOT / "config_flow.py").read_text()
+    assert "vol.Required(CONF_SERVE_PASS)" not in src
+    assert "vol.Required(CONF_SERVE_USER" not in src

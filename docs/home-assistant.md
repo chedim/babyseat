@@ -14,7 +14,8 @@ built on.
      Ollama integration, that server is used (its agent's model offered first);
      otherwise give Ollama's address. Pick a chat model and an embedding model.
    - **Connect to a seat running elsewhere** — a seat on another machine
-     (`membrane serve` there): its URL and the pair from its `serve-auth.json`.
+     (`membrane serve` there): its URL (a user and password only if a reverse proxy
+     in front of it asks for them).
 
 Needs: an Ollama server with a chat model and an embedding model, and 1–3 GB of
 free RAM for the seat.
@@ -30,8 +31,8 @@ Assistant never restarts the seat** — its field and sessions keep running.
 What the integration still does for such a seat:
 
 - **Panels, chat and Assist** ride the seat through a proxy: your Home Assistant
-  login is the only credential the browser needs; the seat's own pair
-  (`serve-auth.json`) stays server-side. Sessions created from Home Assistant
+  login is the only credential the browser needs; the seat itself has no login
+  (a proxy's, if you put one in front, stays server-side). Sessions created from Home Assistant
   are owned by the HA user who made them.
 - **Let the seat use Home Assistant** (on by default) works in this mode too, in
   two halves:
@@ -107,7 +108,7 @@ Changing an option restarts the seat.
 
 | Path | What |
 |---|---|
-| `<config>/membrane/.membrane/` | the seat's data: field, sessions, `settings.json` (its name), `serve-auth.json` |
+| `<config>/membrane/.membrane/` | the seat's data: field, sessions, `settings.json` (its name) |
 | `<config>/membrane/seat.log` | the seat's output (rotated at 5 MB) |
 | `<config>/membrane/assets/` | the speech models, fetched on first use and checksum-verified |
 | `<config>/membrane/home/` | the seat's HOME |
