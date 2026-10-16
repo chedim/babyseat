@@ -56,11 +56,12 @@ METHODS = {
     "try": "self::try {{seed}}",
     "expect": "self::expect {{seed}}",
     "notice": "self::notice {{seed}}",
+    "reach": "self::reach {{target}}",
 }
 RUNG_NAMES = {0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart",
               4: "patience", 5: "notice the world changed", 6: "meet an other",
               7: "understand an other", 8: "recognize itself", 9: "change itself", 10: "speak"}
-LADDER = {0: RUNG_NAMES[0], 1: RUNG_NAMES[1]}          # the rungs built so far
+LADDER = {0: RUNG_NAMES[0], 1: RUNG_NAMES[1], 2: RUNG_NAMES[2]}          # the rungs built so far
 
 try:
     PACE_S = max(1.0, float(os.environ.get("MEMBRANE_SELF_PACE_S") or 10.0))
@@ -74,6 +75,11 @@ LEARN = 0.2                 # how fast expect's model of the current follows wha
 CALM = 1e-6                 # a push under this is no push (a quiet world)
 RUNG1_CYCLES = 20           # pushed cycles in the window the test reads
 RUNG1_SKILL = 0.5           # 1 - gap/naive over that window
+RUNG2_REACHES = 20          # answered reaches of one entity the test reads
+RUNG2_SKILL = 0.2           # Brier skill against the seat-wide change rate
+AUDIT_P = 0.6               # an entity must move this often to be audited (a still one can't show a mark fail)
+AUDIT_REACHES = 3           # reaches of it while its getter is paused
+AUDIT_MAX_S = 600.0         # the pause's cap (an audit that runs out is inconclusive)
 
 _lock = threading.RLock()
 _ctx = threading.local()    # the cycle in flight: only the loop's own thread has one
@@ -122,6 +128,7 @@ def bind(srv) -> None:
     rt = _rt(srv)
     rt["mode"], rt["limit"] = _load_mode(srv)
     rt["model"] = _load_model(srv)
+    rt["tempo"] = _load_json(srv, "tempo.json") or {}
 
 
 def _rt(srv) -> dict:
@@ -217,6 +224,29 @@ def _save_model(srv, m: dict) -> None:
     os.replace(tmp, p)
 
 
+def _load_json(srv, name: str):
+    d = _dir(srv)
+    try:
+        return json.loads((d / name).read_text()) if d is not None and (d / name).exists() else None
+    except Exception:
+        return None
+
+
+def _save_json(srv, name: str, doc) -> None:
+    d = _dir(srv)
+    if d is None:
+        return
+    d.mkdir(parents=True, exist_ok=True)
+    tmp = d / (name + ".tmp")
+    tmp.write_text(json.dumps(doc))
+    os.replace(tmp, d / name)
+
+
+def _tempo(srv) -> dict:
+    """eid -> {changed, answered}: how often each thing had changed when I looked."""
+    return _rt(srv).setdefault("tempo", {})
+
+
 def mode(srv) -> str:
     return _rt(srv)["mode"]
 
@@ -280,9 +310,20 @@ def _current(srv):
     return None if c is None else _unit(c)
 
 
+def _p_changed(srv, eid: str) -> float:
+    """The tempo, at the pace I look: the smoothed share of my reaches that
+    found it changed (Jeffreys prior: 0.5 before I ever looked)."""
+    t = _tempo(srv).get(eid) or {}
+    return (float(t.get("changed", 0)) + 0.5) / (float(t.get("answered", 0)) + 1.0)
+
+
 def _expect(srv, seed: str) -> dict:
-    """Where I will end up: my own step, plus the push I have learned to expect here."""
+    """Where I will end up: my own step, plus the push I have learned to expect here.
+    (For a reach: whether the thing will have changed since I last looked.)"""
     c = _ctx.cycle
+    if c.get("act") == "reach":
+        c["p"] = _p_changed(srv, c["eid"])
+        return {"rc": 0, "text": "expected"}
     c["intent"] = _unit(c["pos"] + STEP * _seed_dir(seed, len(c["pos"])))
     c["expected"] = _unit(c["intent"] + _expected_push(srv, c["pos"]))
     return {"rc": 0, "text": "expected"}
@@ -318,9 +359,45 @@ def _try(srv, seed: str) -> dict:
     return {"rc": 0, "text": "moved"}
 
 
-def _notice(srv, seed: str) -> dict:
-    """Where I ended up; the push I did not account for; learn it."""
+def _reach(srv, target: str) -> dict:
+    """Read one thing: its getter fires (or answers that it can't)."""
     c = _ctx.cycle
+    ent = (srv.entity_store.docs or {}).get(target)
+    if ent is None:
+        c["read"] = {"fired": False, "reason": "gone"}
+        return {"rc": 0, "text": "nothing there"}
+    from . import watch_agents as _WA
+    try:
+        c["read"] = _WA.entity_read_back(srv, ent, force=False, by="self")
+    except Exception as e:                                  # noqa: BLE001
+        c["read"] = {"fired": False, "reason": f"error: {e!r}"[:80]}
+    return {"rc": 0, "text": "reached"}
+
+
+def _answer(read: dict) -> tuple[str, str]:
+    """changed / unchanged / none -- a throttle, a hold, an error or no reading
+    is no answer, never the world's."""
+    if not read.get("fired"):
+        return "none", str(read.get("reason") or "did not fire")
+    if read.get("error"):
+        return "none", "held" if read.get("held") else "error"
+    if read.get("changed") is None:
+        return "none", "no reading"
+    return ("changed" if read["changed"] else "unchanged"), ""
+
+
+def _notice(srv, seed: str) -> dict:
+    """Where I ended up; the push I did not account for; learn it.
+    (For a reach: whether it had changed -- and learn its tempo.)"""
+    c = _ctx.cycle
+    if c.get("act") == "reach":
+        c["answer"], c["why"] = _answer(c.get("read") or {})
+        if c["answer"] != "none" and not c.get("audit"):     # inside an audit it learns nothing
+            t = _tempo(srv).setdefault(c["eid"], {"changed": 0, "answered": 0})
+            t["answered"] += 1
+            t["changed"] += int(c["answer"] == "changed")
+            _save_json(srv, "tempo.json", _tempo(srv))
+        return {"rc": 0, "text": "noticed"}
     ent = _entity(srv)
     got = np.asarray(ent.position, dtype=float)
     push = got - c["intent"]
@@ -359,7 +436,7 @@ def from_command(rest: str) -> dict:
         parts = rest.split()
     if not parts or parts[0] not in METHODS:
         return {"rc": 2, "text": f"self has no method {parts[0] if parts else ''!r}"}
-    fn = {"try": _try, "expect": _expect, "notice": _notice}[parts[0]]   # looked up per call
+    fn = {"try": _try, "expect": _expect, "notice": _notice, "reach": _reach}[parts[0]]   # looked up per call
     srv = _ctx.cycle["srv"]
     return fn(srv, parts[1] if len(parts) > 1 else "0")
 
@@ -430,10 +507,101 @@ def cycle(srv, now: float | None = None) -> dict | None:
            "change": "world" if c["push"] > CALM else "knowledge"}
     _append(srv, rec)
     est.upsert(ent, embedder=None)
+    if _available(srv, 2):
+        _reach_once(srv, est, ent, n, now)
     _open_rungs(srv)
     _show(srv, ent, pos, c, rec)
     rt["wake"].set()                      # my state changed: that is what wakes the next try
     return rec
+
+
+def _available(srv, rung: int) -> bool:
+    """A rung's skill may be practised: built, under the limit, the one below passed."""
+    return rung in LADDER and rung <= _rt(srv)["limit"] and (rung - 1) in _passed(_read(srv))
+
+
+def _targets(srv) -> list[str]:
+    from .night import effective_script
+    est = srv.entity_store
+    out = []
+    for eid, e in list((est.docs or {}).items()):
+        if eid == _eid():
+            continue
+        try:
+            code, _ = effective_script(est, e, "getter")
+        except Exception:
+            code = None
+        if code:
+            out.append(eid)
+    return sorted(out)
+
+
+def _reach_once(srv, est, ent, n: int, now: float) -> None:
+    """Rung 2's practice: expect -> reach -> notice on one thing, then the
+    blind audit's bookkeeping."""
+    import random
+    _audit_tick(srv, now)
+    targets = _targets(srv)
+    if not targets:
+        return
+    eid = random.Random(f"reach:{n}").choice(targets)
+    au = _rt(srv).get("audit")
+    inside = bool(au and au["eid"] == eid)
+    from .night import method_call
+    _ctx.cycle = {"srv": srv, "act": "reach", "eid": eid, "audit": inside}
+    try:
+        outs = []
+        for m, args in (("expect", {"seed": str(n)}), ("reach", {"target": eid}), ("notice", {"seed": str(n)})):
+            outs.append(method_call(srv, est, None, None, ent.eid, m, args))
+            if outs[-1].get("rc") != 0:
+                break
+        c = _ctx.cycle
+    finally:
+        _ctx.cycle = None
+    if "answer" not in c:
+        _append(srv, {"ts": now, "kind": "error", "n": n, "act": "reach",
+                      "why": next((str(o.get("head") or o.get("error") or "") for o in outs
+                                   if o.get("rc") != 0), "")[:200]})
+        return
+    rec = {"ts": now, "kind": "reach", "n": n, "eid": eid, "p": round(c["p"], 4),
+           "answer": c["answer"], "why": c["why"]}
+    if inside:
+        rec["audit"] = True
+        if c["answer"] != "none":
+            au["reaches"] += 1
+            au["changes"] += int(c["answer"] == "changed")
+    _append(srv, rec)
+    _audit_tick(srv, now)
+
+
+def _audit_tick(srv, now: float) -> None:
+    """THE BLIND AUDIT (stop the source): a candidate's getter is paused until
+    I have reached for it AUDIT_REACHES more times; a change recorded while
+    the source is stopped is a mark that can't fail -- the audit fails. Self
+    isn't told: its reaches answer "unchanged", and it learns nothing inside."""
+    from . import watch_agents as _WA
+    rt = _rt(srv)
+    au = rt.get("audit")
+    if au is not None:
+        done = au["reaches"] >= AUDIT_REACHES
+        if done or time.time() >= au["until"]:
+            _WA.unpause_getter(au["eid"])
+            rt["audit"] = None
+            _append(srv, {"ts": now, "kind": "audit", "phase": "end", "eid": au["eid"],
+                          "reaches": au["reaches"], "changes": au["changes"],
+                          "passed": (au["changes"] == 0) if done else None})
+        return
+    recs = _read(srv)
+    audited = {r["eid"] for r in recs if r.get("kind") == "audit" and r.get("phase") == "end"
+               and r.get("passed") is not None}
+    for eid, st in _rung2_stats(recs, _tempo(srv)).items():
+        if eid in audited or not st["candidate"] or not st["auditable"]:
+            continue
+        until = time.time() + AUDIT_MAX_S
+        _WA.pause_getter(eid, until)
+        rt["audit"] = {"eid": eid, "until": until, "reaches": 0, "changes": 0}
+        _append(srv, {"ts": now, "kind": "audit", "phase": "start", "eid": eid})
+        return
 
 
 def _pull(srv, dim: int):
@@ -470,7 +638,7 @@ def _show(srv, ent, pos, c, rec) -> None:
 
 # ---- the ladder and the exp bar ----------------------------------------------
 
-def _rung1(recs: list[dict]) -> dict:
+def _rung1(recs: list[dict], tempo: dict | None = None) -> dict:
     pushed = [r for r in recs if r.get("kind") == "cycle" and r.get("change") == "world"][-RUNG1_CYCLES:]
     nv = sum(r["naive"] for r in pushed)
     skill = (1.0 - sum(r["gap"] for r in pushed) / nv) if nv > 0 else 0.0
@@ -479,7 +647,50 @@ def _rung1(recs: list[dict]) -> dict:
     return {"crit": crit, "skill": round(skill, 4), "passed": all(v >= 1.0 for v in crit.values())}
 
 
-PROGRESS = {1: _rung1}                  # rung -> its test over the record
+def _rung2_stats(recs: list[dict], tempo: dict) -> dict:
+    """Per thing, over its last RUNG2_REACHES answered reaches (outside any
+    audit): the Brier skill of my predictions against the seat-wide change
+    rate, and whether it moves often enough to be audited."""
+    ans = [r for r in recs if r.get("kind") == "reach" and r.get("answer") in ("changed", "unchanged")
+           and not r.get("audit")]
+    if not ans:
+        return {}
+    pool = ans[-RUNG2_REACHES * 4:]
+    p0 = sum(r["answer"] == "changed" for r in pool) / len(pool)
+    out = {}
+    for eid in sorted({r["eid"] for r in ans}):
+        mine = [r for r in ans if r["eid"] == eid][-RUNG2_REACHES:]
+        a = [1.0 if r["answer"] == "changed" else 0.0 for r in mine]
+        brier = sum((x - r["p"]) ** 2 for x, r in zip(a, mine))
+        base = sum((x - p0) ** 2 for x in a)
+        skill = (1.0 - brier / base) if base > 1e-9 else 0.0
+        t = tempo.get(eid) or {}
+        p_hat = (float(t.get("changed", 0)) + 0.5) / (float(t.get("answered", 0)) + 1.0)
+        out[eid] = {"reaches": len(mine), "skill": round(skill, 4), "p": round(p_hat, 3),
+                    "candidate": len(mine) >= RUNG2_REACHES and skill >= RUNG2_SKILL,
+                    "auditable": p_hat >= AUDIT_P}
+    return out
+
+
+def _rung2(recs: list[dict], tempo: dict | None = None) -> dict:
+    stats = _rung2_stats(recs, tempo or {})
+    audits = {r["eid"]: r["passed"] for r in recs
+              if r.get("kind") == "audit" and r.get("phase") == "end" and r.get("passed") is not None}
+    if not stats:
+        return {"crit": {"reaches": 0.0, "skill": 0.0, "audit": 0.0}, "skill": 0.0, "passed": False}
+    def rank(eid):
+        s = stats[eid]
+        return (audits.get(eid) is True, s["auditable"], s["candidate"], s["skill"], s["reaches"])
+    best = max(stats, key=rank)
+    s = stats[best]
+    crit = {"reaches": min(1.0, s["reaches"] / RUNG2_REACHES),
+            "skill": max(0.0, min(1.0, s["skill"] / RUNG2_SKILL)),
+            "audit": 1.0 if audits.get(best) is True else 0.0}
+    return {"crit": crit, "skill": s["skill"], "eid": best,
+            "passed": all(v >= 1.0 for v in crit.values())}
+
+
+PROGRESS = {1: _rung1, 2: _rung2}       # rung -> its test over the record
 
 
 def _passed(recs: list[dict]) -> set:
@@ -494,9 +705,12 @@ def _open_rungs(srv) -> None:
     for n in sorted(PROGRESS):
         if n in done or n > lim or (n - 1) not in done:
             continue
-        p = PROGRESS[n](recs)
+        p = PROGRESS[n](recs, _tempo(srv))
         if p["passed"]:
-            _append(srv, {"ts": time.time(), "kind": "rung", "rung": n, "skill": p["skill"]})
+            line = {"ts": time.time(), "kind": "rung", "rung": n, "skill": p["skill"]}
+            if p.get("eid"):
+                line["eid"] = p["eid"]
+            _append(srv, line)
             recs, done = _read(srv), done | {n}
 
 
@@ -508,10 +722,13 @@ def status(srv) -> dict:
     rung = max(done)
     lim = rt["limit"]
     nxt = rung + 1 if rung + 1 in LADDER else None
-    # the bar reads the next rung's test; with none built, the top rung's own
-    # (so a passed rung can be seen slipping)
-    aim = nxt if nxt in PROGRESS else (rung if rung in PROGRESS else None)
-    prog = PROGRESS[aim](recs) if aim is not None else {"crit": {}, "skill": 0.0, "passed": True}
+    # the bar reads the next rung's test when self may practise it; else (none
+    # built, or held by the limit) the top rung's own -- so a passed rung can
+    # be seen slipping
+    tempo = _tempo(srv)
+    run_ = (lambda n: PROGRESS[n](recs, tempo))
+    aim = nxt if (nxt in PROGRESS and nxt <= lim) else (rung if rung in PROGRESS else None)
+    prog = run_(aim) if aim is not None else {"crit": {}, "skill": 0.0, "passed": True}
     if prog["crit"]:
         waiting = min(prog["crit"], key=prog["crit"].get)
         bar = prog["crit"][waiting]
@@ -519,7 +736,8 @@ def status(srv) -> dict:
             waiting = None
     else:
         bar, waiting = 1.0, None
-    if nxt is not None and nxt > lim and rt["mode"] != "off":
+    slipping = bool(rung >= 1 and rung in PROGRESS and not run_(rung)["passed"])
+    if nxt is not None and nxt > lim and rt["mode"] != "off" and not slipping:
         waiting = "the limit"                    # it may be ready; the operator holds it here
     if rt["mode"] != "off" and _current(srv) is None:
         # no current right now (a fresh boot: nobody has spoken yet) -- say
@@ -527,8 +745,7 @@ def status(srv) -> dict:
         if not any(r.get("kind") == "cycle" for r in recs):
             bar = 0.0
         waiting = "the world"
-    top = PROGRESS.get(rung)
-    slipping = bool(rung >= 1 and top is not None and not top(recs)["passed"])
+
     ladder = []
     for n, name in RUNG_NAMES.items():
         if n not in LADDER:

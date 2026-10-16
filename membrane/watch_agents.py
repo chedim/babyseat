@@ -1502,6 +1502,18 @@ def actor_on_event(est, role: str, text: str, vec=None,
 # ---- the ONE-EXEC lane (the run demolition's replacement) -------------------
 _GETTER_LRU_S = 5.0
 _getter_last_ts: dict = {}
+# THE AUDIT'S PAUSE (#161 rung 2): eid -> until. A paused getter does not run;
+# every read of it answers "unchanged" -- the source stopped, so a mark of its
+# change must stop too (in memory; it expires by itself)
+_getter_paused: dict = {}
+
+
+def pause_getter(eid: str, until: float) -> None:
+    _getter_paused[eid] = float(until)
+
+
+def unpause_getter(eid: str) -> None:
+    _getter_paused.pop(eid, None)
 
 
 _GETTER_KEYS = {"state", "render", "patch", "run", "veto", "delete", "data",
@@ -1549,6 +1561,9 @@ def entity_read_back(srv, ent, force: bool = False, by: str = "model") -> dict:
     if not code:
         return {"fired": False, "reason": "no getter_script"}
     now = time.time()
+    if _getter_paused.get(ent.eid, 0.0) > now:
+        return {"fired": True, "state": None, "changed": False, "paused": True}
+    _getter_paused.pop(ent.eid, None)
     if not force:
         last = _getter_last_ts.get(ent.eid, 0.0)
         if now - last < _GETTER_LRU_S:
@@ -1558,7 +1573,11 @@ def entity_read_back(srv, ent, force: bool = False, by: str = "model") -> dict:
     out = run_entity_update_script(srv, ent, "getter")     # its own reads fire nothing (night.py)
     if out.get("error"):
         _score("error")
-        return {"fired": True, "error": out.get("error")}
+        from .night import script_held
+        res = {"fired": True, "error": out.get("error")}
+        if script_held(ent.properties or {}, now):
+            res["held"] = True                          # it did not run: held, not broken now
+        return res
     # THE CONTRACT SAYS ITSELF (2026-10-08: six rewrites 'fired {}' for nine
     # minutes -- only result['state'] reads back, and nothing said so)
     note = ""
@@ -1577,6 +1596,7 @@ def entity_read_back(srv, ent, force: bool = False, by: str = "model") -> dict:
     # rides the banner -- ONE apply, every lane speaks
     applied = apply_entity_update(srv, ent, out, trigger="getter")
     state = out.get("state")
+    changed = None                                  # no reading: neither changed nor not
     if isinstance(state, dict):
         # THE READING IS DATA (#152): the getter's state lands in script_data
         # raw -- a helper handle (state['me'] = membrane.me) rode in as a live
@@ -1620,7 +1640,7 @@ def entity_read_back(srv, ent, force: bool = False, by: str = "model") -> dict:
                       "state": dict(list(state.items())[:8]),
                       "ts": now})
     out["applied"] = applied
-    res = {"fired": True, "state": state, "run_result": out.get("run_result")}
+    res = {"fired": True, "state": state, "run_result": out.get("run_result"), "changed": changed}
     if inherited_from:
         res["inherited_from"] = inherited_from
     if note:

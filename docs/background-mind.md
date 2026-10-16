@@ -198,8 +198,32 @@ section covers what is built (`membrane/self_loop.py`).
     *naive* is the gap with no experience at all.
   - In a quiet seat (no current) there is nothing to feel, and the bar says
     it is waiting on the world.
+- **Rung 2, first reach (the world's tempo).** Open once rung 1 has passed and
+  the limit is at least 2. Each cycle, self also reaches for one thing that
+  has a getter: reading it fires the getter (`watch_agents.entity_read_back`,
+  `by="self"`).
+  - **Before reaching**, self predicts whether the reading will have changed
+    since it last looked: its smoothed share of reaches that found the thing
+    changed. So it learns each thing's tempo at the pace it looks.
+  - **After reaching**, `notice` records changed, unchanged, or **no answer**
+    (throttled, held, errored, no reading). No-answers never count as the
+    world's.
+  - **The test:** for one thing, over its last 20 answered reaches, the Brier
+    skill against the seat-wide change rate is at least 0.2. Then a **blind
+    audit**:
+    - membrane pauses that thing's getter (`pause_getter`) until self has
+      reached for it 3 more times;
+    - self isn't told: its reaches answer "unchanged", and it learns nothing
+      inside the window;
+    - the audit passes only if no change was recorded while the source was
+      stopped.
+  - **A still thing can't be audited** (it must change on at least 60% of
+    looks), so it can't carry the rung: it can't show that a mark could fail.
+  - **What passing means:** "I can tell which things move on their own, and
+    my marks of their moving are real." That is the world's tempo, not yet a
+    body.
 - **Its methods run only in its own loop.** `try` / `expect` / `notice` are
-  cliffhanger methods (`self::` no-shell dialect). `exec inspect` shows them;
+  cliffhanger methods (`self::` no-shell dialect), and so is `reach`. `exec inspect` shows them;
   any other caller, the model included, is refused. The LLM talks *to* self,
   never *as* it. `entity_edit` can't write its `script_data`, and mentions
   can't move it (a one-segment `m:` name never gets a field state).
