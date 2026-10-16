@@ -41,10 +41,7 @@ def test_the_child_listens_on_loopback_only(sup, tmp_path):
     assert a[a.index("--field") + 1] == str(tmp_path / "field.json")
 
 
-def test_pair_and_name(sup, tmp_path):
-    assert sup.read_auth(tmp_path) is None
-    (tmp_path / "serve-auth.json").write_text(json.dumps({"user": "opencode", "password": "pw"}))
-    assert sup.read_auth(tmp_path) == ("opencode", "pw")
+def test_name(sup, tmp_path):
     assert sup.read_name(tmp_path) == ("Bob", [])
     (tmp_path / "settings.json").write_text(json.dumps({"name": "Juniper", "aliases": ["juni"]}))
     assert sup.read_name(tmp_path) == ("Juniper", ["juni"])

@@ -101,14 +101,6 @@ def read_name(data: Path) -> tuple[str, list]:
         return "Bob", []
 
 
-def read_auth(data: Path) -> tuple[str, str] | None:
-    try:
-        d = json.loads((data / "serve-auth.json").read_text())
-        return str(d.get("user") or "opencode"), str(d.get("password") or "")
-    except (OSError, ValueError):
-        return None
-
-
 class SeatSupervisor:
     """Start, watch, respawn and stop the seat. All on HA's loop; file work in
     the executor."""
