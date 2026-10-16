@@ -214,8 +214,11 @@ section covers what is built (`membrane/self_loop.py`).
   has a getter: reading it fires the getter (`watch_agents.entity_read_back`,
   `by="self"`).
   - **Before reaching**, self predicts whether the reading will have changed
-    since it last looked: its smoothed share of reaches that found the thing
-    changed. So it learns each thing's tempo at the pace it looks.
+    since it last looked. It keeps one bit of memory: the world bursts, so a
+    change usually follows a change and a quiet a quiet — it predicts from what
+    it saw last, and falls back to its smoothed share of reaches that found
+    the thing changed before it has that bit. So it learns each thing's tempo
+    at the pace it looks.
   - **After reaching**, `notice` records changed, unchanged, or **no answer**
     (throttled, held, errored, no reading). No-answers never count as the
     world's.
@@ -245,8 +248,9 @@ section covers what is built (`membrane/self_loop.py`).
   rarely but never never, since the world can change. On the live seat
   silent things took 62% of its reaches. The test, in stages:
   1. 40 sorted reaches;
-  2. the kinds agree across the two halves of its last 80 reaches, with at
-     least two kinds;
+  2. the kinds' rates agree across the two halves of its last 80 reaches — the
+     no-answer share and the change share each drift by at most 0.25 (a look's
+     drift is not a new kind) — with at least two kinds;
   3. the no-answer share over its last 40 reaches is under 25%;
   4. rung 2's skill still holds.
 

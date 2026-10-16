@@ -33,7 +33,7 @@ const ACTIVITY_EVERY_MS = 1500;
 // links to chat-only and graph-only interfaces"): the standalone page puts
 // ?view= in the URL (index.html) -- chat alone (no field) or the field
 // alone (no chat); anything else is everything.
-const VIEW = window.MEMBRANE_VIEW === "chat" || window.MEMBRANE_VIEW === "graph" ? window.MEMBRANE_VIEW : "";
+const VIEW = (typeof window !== "undefined" && (window.MEMBRANE_VIEW === "chat" || window.MEMBRANE_VIEW === "graph")) ? window.MEMBRANE_VIEW : "";
 
 /** The orbit angles that put the camera on the ray from the field's centre
  * through p (beyond it), so it looks at the centre THROUGH p -- the
@@ -43,6 +43,21 @@ function throughCenter(p) {
   if (n < 40) return null;
   const d = [p[0] / n, p[1] / n, p[2] / n];
   return { phi: Math.max(0.05, Math.min(Math.PI - 0.05, Math.acos(d[1]))), theta: Math.atan2(d[0], d[2]) };
+}
+
+/** THE CHASE CAM (#161, the operator: "follow self from behind, from its past
+ *  positions"): the orbit angles that put the camera behind self -- along the
+ *  way back to where it was K steps ago -- and a little above; null while its
+ *  trail is too short or it hasn't moved. */
+function chaseAngles(trail, k = 4) {
+  if (!trail || trail.length < 2) return null;
+  const a = trail[Math.max(0, trail.length - 1 - k)], b = trail[trail.length - 1];
+  const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const n = Math.hypot(d[0], d[1], d[2]);
+  if (n < 1e-6) return null;
+  const u = [-d[0] / n, -d[1] / n + 0.35, -d[2] / n];
+  const m = Math.hypot(u[0], u[1], u[2]);
+  return { phi: Math.max(0.05, Math.min(Math.PI - 0.05, Math.acos(u[1] / m))), theta: Math.atan2(u[0] / m, u[2] / m) };
 }
 
 /** a -> b the short way round (angles). */
@@ -450,7 +465,7 @@ function pickVoice(voices, lang = "en", chosen = "") {
 const LS_VOICE = "membrane.home.voice";
 const IS_CHROME = typeof navigator !== "undefined" && /Chrome\//.test(navigator.userAgent || "") && !/Firefox\//.test(navigator.userAgent || "");
 
-const HomeLogic = { cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, angleStep };
+const HomeLogic = { cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
 const HSTYLE = `
@@ -1057,7 +1072,9 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           for (let i = 0; i < 3; i++) v.orbit.target[i] += (g.p[i] - v.orbit.target[i]) * k;
           if (idle) {
             v.orbit.r += (g.r - v.orbit.r) * k * 0.6;
-            const a = this._tiltAng ? null : throughCenter(v.orbit.target);
+            const a = this._tiltAng ? null
+              : ((this._mode === "self" && chaseAngles(v.selfTrail ? v.selfTrail() : null))   // behind self
+                 || throughCenter(v.orbit.target));
             if (a) {
               const ka = 1 - Math.exp(-dt * 0.5);
               v.orbit.theta = angleStep(v.orbit.theta, a.theta, ka);

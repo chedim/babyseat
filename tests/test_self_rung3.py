@@ -177,6 +177,42 @@ def test_one_kind_is_not_telling_things_apart():
     assert out["crit"]["kinds"] == 0.0
 
 
+def _mix(changed_a, total_a, changed_b, total_b):
+    """One half's reaches: `changed_a` changed (the rest unchanged) looks at 'a',
+    then the same for 'b'."""
+    out = [("a", "changed")] * changed_a + [("a", "unchanged")] * (total_a - changed_a)
+    out += [("b", "changed")] * changed_b + [("b", "unchanged")] * (total_b - changed_b)
+    return _reach_recs(out)
+
+
+def test_a_small_rate_drift_within_a_kind_does_not_fail_the_test():
+    # Component:i live: its change rate drifted across the moving/intermittent
+    # line between the two halves (0.55 -> 0.65) -- the same kind, one look's
+    # worth of drift. Rate-based, a <=0.25 drift agrees; label-based it failed.
+    first = _mix(11, 20, 2, 20)     # a 0.55 changed, b 0.1 changed
+    second = _mix(13, 20, 3, 20)    # a 0.65, b 0.15
+    out = SL._rung3(first + second)
+    assert out["crit"]["kinds"] == 1.0
+
+
+def test_expect_remembers_what_it_saw_last(monkeypatch):
+    # ONE BIT OF MEMORY: the world bursts -- a change usually follows a change,
+    # a quiet a quiet. The "half" thing alternates, so the bit predicts the
+    # alternation where the flat share (0.5) would say nothing.
+    monkeypatch.setattr(SL, "_read_entity", _Things())
+    srv = _seat(names=("half",))
+    _run(srv, 50)
+    rs = [r for r in _reaches(srv) if r["answer"] in ("changed", "unchanged")]
+    assert len(rs) >= 6
+    for i in range(3, len(rs)):                     # once warmed up: predict what followed last
+        if rs[i - 1]["answer"] == "changed":
+            assert rs[i]["p"] < 0.5, (i, rs[i]["p"], rs[i - 1]["answer"])
+        else:
+            assert rs[i]["p"] > 0.5, (i, rs[i]["p"], rs[i - 1]["answer"])
+    t = SL._tempo(srv)[MEMBRANE_NS + "Component:half"]
+    assert t["prev"] in ("changed", "unchanged") and "after" in t
+
+
 def test_the_limit_holds_rung_three(monkeypatch):
     monkeypatch.setattr(SL, "_read_entity", _Things())
     srv = _seat(limit=2)
