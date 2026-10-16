@@ -234,6 +234,21 @@ class TestTheBoardSurvivesARestart(unittest.TestCase):
             b2.attach_entity_store(est2)
             self.assertIn("ship the release", b2.report())
 
+    def test_a_goal_without_geometry_is_still_held(self):
+        # the pre-fix save already stripped live seats' goal positions:
+        # a planted goal is a goal -- it ranks on recency/hits/pins,
+        # it just can't steer by similarity
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as td:
+            est = EntityStore(path=None, shared=False)
+            g = _goal(est, "ship the release", [1.0, 0.0, 0.0])
+            g.position = None
+            b = IntentBoard(Path(td) / "intents.json")
+            b.attach_entity_store(est)
+            self.assertIn("ship the release", b.report())
+            self.assertEqual([i.eid for i in b.open_intents()], [g.eid])
+
 
 if __name__ == "__main__":
     unittest.main()

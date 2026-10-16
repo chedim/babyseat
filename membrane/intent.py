@@ -438,10 +438,12 @@ class GoalSelection:
 
     # ---- the ranking ------------------------------------------------------
     def _open_goals(self) -> list:
+        # no geometry requirement (#147): a goal whose position was lost
+        # (the old save stripped it) is still held -- it ranks on recency,
+        # hits and pins; only the present-touch term needs a position
         return [e for e in self.est.docs.values()
                 if e.cls == CLASS_GOAL
-                and (e.properties or {}).get("status", "open") == "open"
-                and getattr(e, "position", None)]
+                and (e.properties or {}).get("status", "open") == "open"]
 
     def _urgency(self, ent, now: float, now_vec) -> float:
         import numpy as _np
