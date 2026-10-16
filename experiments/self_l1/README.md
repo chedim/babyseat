@@ -1,5 +1,57 @@
 # layer 1 in the lab: can a self find its body? (#161, 2026-10-15)
 
+## in plain words (start here)
+
+**The question.** #161 is about giving the seat a *self* -- something that can
+tell "this is me, this is my body, this is the world". Layer 1 is the bottom of
+that: **does the seat have a body at all?**
+
+**What a body is, operationally.** Tap below the knee and the leg kicks -- every
+time, a moment later, and only because you tapped. Something that answers
+*every* act, a fraction of a second later, is part of you. Something that
+answers sometimes, late, is another person or a coincidence. The rest is the
+world. That is the whole test; the code that runs it is `contingency.py`, and
+for every entity in the seat's field it asks: *how much more often does this
+move right after I move?*
+
+**What we found, in four steps.**
+
+1. **The test works** (`sandbox.py`). On a toy world where we know the answer,
+   it finds the planted body parts and invents none.
+2. **The real seat has no body in its own records** (`replay.py`; 10 hours,
+   3682 events, 28166 change-marks). The memory does not record what *moved*,
+   it records what was *mentioned*: three quarters of all its change-marks are
+   the seat's own words, and half are literally "this thing was named in that
+   sentence". So when the seat asks *what moved because I moved?*, the honest
+   answer is **my own shadow** -- and once the seat's words and its own tool
+   calls are taken out, the body is empty. The one thing left is `tool:shell`,
+   the tool it used: a mirror, not a body.
+   The control says the instrument itself is fine: ask it who answers the
+   **operator**, and it answers with behaviour (the seat reaches for shell,
+   exec, read). When there is a hand to read, it reads it.
+   And there is nothing else to find: in 10 hours the seat's own machinery
+   (ticks, watchers, jobs) wrote 53 events out of 3682.
+3. **How much would we have to write?** (`density.py`) About **40-60
+   motion-marks an hour on a single entity**, all answering one kind of act.
+   The busiest machinery entity today does **5** an hour -- an order of
+   magnitude short. And only **8 of the 42** kinds of act the seat performs are
+   performed often enough to be read at all.
+4. **What should a motion-mark move?** (`probe.py`) Two obvious designs, both
+   wrong. The thing the act was *about* (the file you read) still reads as no
+   body: a body part answers **every** act of a kind, and a file answers only
+   the acts that happen to be about it. The *tool* you used reads as a
+   **perfect** body (p_act 1.00) -- and it is cheating: we wrote a mark each
+   time the tool ran, so of course the mark always follows the tool. The test
+   confirms what we asserted, and the shuffle control does not catch it.
+
+**The lesson.** The ledger cannot be the referee. **The recorder has to be.** A
+real motion-mark must be one that *could have failed to appear*: written only
+when something actually changed, and naming the act it answers. A file that was
+read but did not change gets no mark. Then a mark means something, and the
+ledger can go back to doing what it is good at.
+
+**What that means to build**: [`docs/motor-channel.md`](../../docs/motor-channel.md).
+
 The contingency ledger (`contingency.py`) asks of every entity: how much more
 often does it change in the window after *my* act than on its own? Entities that
 answer nearly always, at a steady short delay, are **body**; ones that answer
