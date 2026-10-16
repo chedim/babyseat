@@ -36,7 +36,11 @@ _ARGS_ANY = re.compile(r"\s*\bargs:\s*\{[^\n]*")
 _INLINE_ANY = re.compile(r"\b\w+\(\{[^\n]*")
 _INLINE = re.compile(r"\b(\w+)\((\{.*)$", re.S)
 _PORT = re.compile(r"(?<![\w.\"]):(\d{4,5})\b|(?:localhost|127\.0\.0\.1|0\.0\.0\.0):(\d{4,5})\b")
-_SHELL_HEADS = re.compile(r"(?:^|;|&&|\|\||\||\$\(|\n)\s*([a-z][\w./-]*)")
+# a leading NAME=value word is an assignment, never a program (#148):
+# skip it, the head is the command after it (or none at all)
+_SHELL_HEADS = re.compile(r"(?:^|;|&&|\|\||\||\$\(|\n)\s*"
+                          r"(?:[A-Za-z_]\w*=[^\s;&|()]*\s+)*"
+                          r"([a-z][\w./-]*)(?![\w./-]|=)")
 _HEREDOC = re.compile(r"<<-?\s*['\"]?(\w+)['\"]?.*?\n.*?\n\s*\1\b", re.S)
 _QUOTED = re.compile(r"'[^']*'|\"(?:[^\"\\]|\\.)*\"")
 _WORD = re.compile(r"[A-Za-z][A-Za-z_]+")

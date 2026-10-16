@@ -75,5 +75,24 @@ class TestToolAvailability(unittest.TestCase):
         self.assertIsNone(N._missing_binary("unset FOO && echo ok"))
 
 
+class TestALeadingAssignmentIsNotAProgram(unittest.TestCase):
+    """#148: `code=$(curl ...)` opens a legal sh line -- the gate read the
+    assignment's name as the program and refused it rc 127."""
+
+    def test_an_assignment_is_not_a_head(self):
+        self.assertIsNone(N._missing_binary("code=$(echo hi); echo $code"))
+        self.assertIsNone(N._missing_binary("a=1 b=2 echo ok"))
+
+    def test_the_command_after_assignments_is_still_gated(self):
+        self.assertEqual(N._missing_binary(f"a=1 {MISSING} -x"), MISSING)
+
+    def test_a_leading_assignment_runs(self):
+        f, est = _world()
+        out = N.run_command_entity(f, est, None,
+                                   "code=$(echo hi) && echo got-$code")
+        self.assertTrue(out["ok"], out)
+        self.assertIn("got-hi", out.get("head") or "")
+
+
 if __name__ == "__main__":
     unittest.main()
