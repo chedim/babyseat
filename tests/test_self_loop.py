@@ -368,7 +368,7 @@ def test_the_bar_fills_with_pushed_cycles_and_names_what_it_waits_on():
     assert st["waiting_on"] in ("pushes", "skill")
 
 
-def test_rung_one_opens_once_and_says_the_next_is_not_built():
+def test_rung_one_opens_once_and_the_next_waits_on_the_limit():
     srv = _seat()
     SL.set_mode(srv, "on")
     t = _cycles(srv, SL.RUNG1_CYCLES * 2)
@@ -377,7 +377,7 @@ def test_rung_one_opens_once_and_says_the_next_is_not_built():
     assert st["rung"] == 1
     assert st["bar"] == pytest.approx(1.0)
     assert st["skill"] >= SL.RUNG1_SKILL
-    assert st["next"] is None
+    assert st["next"] == 2 and st["waiting_on"] == "the limit"   # rung 2 is built; the limit (1) holds it
     assert len([r for r in _record(srv) if r["kind"] == "rung"]) == 1
 
 
@@ -428,7 +428,7 @@ def test_the_panel_has_the_chooser():
 def _fake_rung2(monkeypatch, passes=True):
     """A built rung 2 whose test is under the test's control."""
     monkeypatch.setitem(SL.LADDER, 2, "first reach")
-    monkeypatch.setitem(SL.PROGRESS, 2, lambda recs: {"crit": {"reaches": 1.0 if passes else 0.4},
+    monkeypatch.setitem(SL.PROGRESS, 2, lambda recs, tempo=None: {"crit": {"reaches": 1.0 if passes else 0.4},
                                                        "skill": 0.9, "passed": passes})
 
 
