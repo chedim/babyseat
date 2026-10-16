@@ -1172,6 +1172,9 @@ def tool_entity_edit(args: dict, port: int) -> str:
            f"summary {out.get('summary')!r}, links {out.get('links')}.")
     if out.get("properties_set"):
         msg += f" Properties set: {', '.join(out['properties_set'])}."
+    if out.get("properties_truncated"):
+        msg += (" Properties TRUNCATED to 2000 chars: "
+                + ", ".join(out["properties_truncated"]) + ".")
     if out.get("properties_refused"):
         msg += " Properties REFUSED (not set): " + "; ".join(
             f"{k} ({why})" for k, why in out["properties_refused"].items()) + "."
