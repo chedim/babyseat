@@ -213,6 +213,23 @@ def test_expect_remembers_what_it_saw_last(monkeypatch):
     assert t["prev"] in ("changed", "unchanged") and "after" in t
 
 
+def test_rung3_skill_is_carried_by_moving_things_not_a_still_counter():
+    # A never-changing counter (like the live w:rung rung-pass counter) is
+    # trivially predictable: predicting "it won't change" scores ~1.0, but that
+    # is the zero-gap degenerate, not tempo mastery. The skill bar must read
+    # the moving thing's real skill instead. "mov" changes 13 of 20 (auditable,
+    # p_hat 0.64) yet its predictions only reach ~0.31 skill; "counter" never
+    # changes, predicted at p=0.01, so ~0.999 skill.
+    recs = ([{"kind": "reach", "eid": "mov", "answer": "changed", "p": 0.6, "steer": True}] * 13
+            + [{"kind": "reach", "eid": "mov", "answer": "unchanged", "p": 0.6, "steer": True}] * 7
+            + [{"kind": "reach", "eid": "counter", "answer": "unchanged", "p": 0.01, "steer": True}] * 20)
+    tempo = {"mov": {"changed": 13, "answered": 20},
+             "counter": {"changed": 0, "answered": 20}}
+    out = SL._rung3(recs, tempo)
+    assert out["skill"] == pytest.approx(0.3095, abs=0.03)   # the moving thing's skill
+    assert out["skill"] < 0.9                                # not the counter's ~0.999
+
+
 def test_the_limit_holds_rung_three(monkeypatch):
     monkeypatch.setattr(SL, "_read_entity", _Things())
     srv = _seat(limit=2)

@@ -252,7 +252,8 @@ section covers what is built (`membrane/self_loop.py`).
      no-answer share and the change share each drift by at most 0.25 (a look's
      drift is not a new kind) — with at least two kinds;
   3. the no-answer share over its last 40 reaches is under 25%;
-  4. rung 2's skill still holds.
+  4. rung 2's skill still holds — read over the moving (auditable) things
+     only, so a still counter can't carry the bar.
 
   Once rung 2 is earned, no more getters are paused for its audit.
 - **Rung 4, patience (choosing when to look).** Self fits each thing's rate of
