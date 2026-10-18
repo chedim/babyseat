@@ -30,7 +30,6 @@ Most memory projects give your agent a store to query.
 Membrane is built on different ground rules: a non-von-Neumann architecture — 
 no central fetch-execute CPU; computation is distributed across the field itself and 
 driven by a minimal write-read loop. 
-The store and the loop stay distinct; that separation is the point.
 
 ### 1. The memory has a shape, not just a bag of chunks
 
