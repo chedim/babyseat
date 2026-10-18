@@ -1,5 +1,6 @@
-Attention is not enough.
-> Complementary Learning Systems (McClelland, McNaughton & O'Reilly, 1995)
+Attention is not enough. 
+
+> (check out Complementary Learning Systems (McClelland, McNaughton & O'Reilly, 1995))
 
 # membrane
 
