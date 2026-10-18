@@ -31,9 +31,9 @@ next cycle. The runaway guard: PACE_S between cycles (MEMBRANE_SELF_PACE_S,
 floor 1 s), at most BURST_PER_MIN a minute, and three failed cycles in a row
 hold it until the operator's next toggle. A paused seat runs nothing.
 
-THE LADDER: a rung opens when its measured test passes; the bar is the
-weakest criterion and can go down (slipping) -- a passed rung stays on the
-record. Only rungs in LADDER are built; the status says when the next is not.
+THE LADDER: a rung opens when its measured test passes; the bar is staged
+(_staged: the criteria fill in order, the first unmet one is named) and can
+go down (slipping) -- a passed rung stays on the record. Only rungs in LADDER are built; the status says when the next is not.
 
 THE GROWTH LIMIT (the operator's chooser): the highest rung self may reach.
 Below it self still earns each rung by its test; above it nothing opens,
