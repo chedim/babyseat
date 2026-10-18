@@ -192,3 +192,31 @@ def test_dockerfile_env_bakes_in_nothing_site_specific():
     text = DOCKERFILE.read_text()
     for ip in _IP.findall(text):
         assert ip in ("0.0.0.0", "127.0.0.1"), f"stray IP {ip}"
+
+
+# ---- the release workflow ----
+
+WORKFLOW = ROOT / ".github" / "workflows" / "docker.yml"
+
+
+def _publish_job():
+    text = WORKFLOW.read_text()
+    return text[text.index("\n  publish:\n"):]
+
+
+def test_publish_builds_the_tag_source_with_the_workflow_recipe():
+    # a workflow_dispatch of an older tag (cut before the image existed)
+    # has no Dockerfile in its tree: the SOURCE is the tag, the RECIPE
+    # (Dockerfile, .dockerignore, docker/) is the workflow's own commit
+    job = _publish_job()
+    assert "inputs.tag || github.ref" in job
+    m = re.search(r"uses: actions/checkout@v\d+\s+with:\s+"
+                  r"ref: \$\{\{ github\.sha \}\}\s+path: _recipe\s+"
+                  r"sparse-checkout: \|\s+(.*?)\n\s+sparse-checkout-cone-mode: false",
+                  job, re.S)
+    assert m, "no sparse checkout of the recipe at github.sha into _recipe"
+    assert {"Dockerfile", ".dockerignore", "docker/"} <= set(m.group(1).split())
+    copy = job.index("cp -R _recipe/")
+    assert job.index("rm -rf _recipe", copy) < job.index("docker/build-push-action")
+    # the version check reads the TAG's pyproject, before the recipe lands
+    assert job.index("the tag is the package's version") < copy
