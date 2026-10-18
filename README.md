@@ -132,7 +132,9 @@ membrane standalone                # opens http://localhost:4096/ in your browse
 You get membrane home: the field in 3D, the chat, and voice ("Hey Bob" — a new
 membrane is Bob until you agree on a name together; it will ask). Other
 devices on your network reach it at `http://<this machine>:4096/`. No login on
-the local network; a public or proxied caller is refused. Voice needs a secure
+the local network; a public or proxied caller is refused — unless you turn on
+the optional JWT mode ([docs/auth.md](docs/auth.md)): then every caller needs a
+token, from the LAN or behind an ingress alike. Voice needs a secure
 origin, so the microphone works on `localhost` (the first voice use downloads
 ~65 MB of speech models, checked against their checksums).
 
@@ -267,6 +269,7 @@ model is grounded by what those entities hold —
 | `membrane ingest` | cold start: absorb docs/README into the field (DOC events; a second ingest is a no-op) |
 | `membrane codegraph` | stdlib-AST call graph (stats / impact / callers / callees) |
 | `membrane doctor` | what's installed/running + the field's vitals |
+| `membrane token mint` | `--sub ID [--name NAME] [--ttl 30d]`: a token for a seat running the optional JWT mode (`MEMBRANE_JWT_SECRET`); see [docs/auth.md](docs/auth.md) |
 | `membrane stats` | token/call accounting + the savings baseline (`--baseline` compares the bounded window against a naive full-history replay; reads `serve-msgs`, plus the background model calls from `bg-usage.json`; no model call) |
 | `membrane bench` | held-out recall benchmark (MRR + hit@k across the `worldline`/`mean`/`state` reads) — runs against a field **copy**, never the live store |
 
@@ -277,8 +280,9 @@ embed, apply), `shadow` (capture events only — a lab ablation), `off`.
 
 `membrane serve` runs the seat with **no TUI and no opencode at all** —
 sessions, messages, turns, tool parts, aborts, the SSE event stream, served by
-membrane itself on :4096 (no login of its own: keep it on your network, or put a
-reverse proxy with its own login in front). Any opencode client connects unchanged: the
+membrane itself on :4096 (no login of its own by default: keep it on your network,
+put a reverse proxy with its own login in front, or turn on the optional JWT mode —
+a token on every request to both ports, [docs/auth.md](docs/auth.md)). Any opencode client connects unchanged: the
 [mobile companion app](https://opencode.app/), IDE plugins, a script. The turn
 loop calls the seat's OWN `/v1` on loopback — gate, injection, capture and
 routing run through the exact code path every other client's turn uses, so
@@ -287,7 +291,8 @@ appear to the client as ordinary tool parts riding `message.part.updated`
 (pending → completed), so you can watch what it's doing from the room.
 `--serve-port` (default 4096, walks up if busy) and `--listen` (the proxy,
 never leaves 127.0.0.1) are independent. Exposure is LAN-only by design:
-reach the server only from a network you own.
+reach the server only from a network you own — or set `MEMBRANE_JWT_SECRET`
+and hand each client a token ([docs/auth.md](docs/auth.md)).
 
 - **The minds are visible.** `/agents` lists the ambient minds as agents —
   the three thinking-loop workers (each with its live claim and the event
@@ -403,6 +408,7 @@ lift "who 1,500 never-seen mentions were about" from MRR **0.210 → 0.539**
 | Doc | What's in it |
 |---|---|
 | [docs/standalone.md](docs/standalone.md) | **Standalone mode**: the web UI, the first run and the name, who can reach it, voice, `settings.json`, updates |
+| [docs/auth.md](docs/auth.md) | **JWT mode (optional, off by default).** Turning it on, minting tokens, giving a client its token, the cookie login, who-said-it from the token, the seat's internal token, rotation, the threat model |
 | [docs/home-assistant.md](docs/home-assistant.md) | **Membrane in Home Assistant** (HACS): setup, the UI takeover, the Assist agent and sensors, what the seat may do in the house |
 | [docs/entity-field.md](docs/entity-field.md) | **THE FIELD.** Events → entities → readers; the update rule; relations and claims; injection (full block / state diff); the gate + replay A/B; storage, sharing, the background mind; the operator/listener/plan tool lanes + the intent lane |
 | [docs/cliffhanger.md](docs/cliffhanger.md) | **The command language.** Entities as objects, ISA parents as classes, methods and calls, `{{self.*}}`/`{{name}}` binding — and the pointer to its own spec repo |

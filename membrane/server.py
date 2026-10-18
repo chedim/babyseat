@@ -42,6 +42,7 @@ from queue import Queue, Empty
 from pathlib import Path
 
 from . import mcp_server as _mcp
+from . import jwtauth as _JWT
 
 VERSION = "1.0"
 PROJECT_ID = "membrane"
@@ -2455,7 +2456,7 @@ def loopback_ladder(port: int, runner=None, cell=None):
         data = _json.dumps(body).encode()
         req = urllib.request.Request(
             url, data=data, method="POST",
-            headers={"Content-Type": "application/json"})
+            headers={"Content-Type": "application/json", **_JWT.internal_headers()})
         with urllib.request.urlopen(req, timeout=CLOUD_TIMEOUT_S) as resp:
             return _json.loads(resp.read())
 
@@ -2488,7 +2489,7 @@ def loopback_ladder(port: int, runner=None, cell=None):
     def _stream_once(body: dict, on_event):
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}/v1/chat/completions", data=_json.dumps(body).encode(),
-            method="POST", headers={"Content-Type": "application/json"})
+            method="POST", headers={"Content-Type": "application/json", **_JWT.internal_headers()})
         content, reasoning, tcs = [], [], {}
         usage, ext, finish = None, None, None
         done = False
@@ -2577,9 +2578,10 @@ def mcp_executor(port: int):
 # ---- the HTTP surface ----------------------------------------------------------
 
 # THE FIELD'S WINDOW (2026-10-08): the seat's READ surfaces the serve relays
-# onto the /v1 proxy -- that proxy binds 127.0.0.1 with no auth and has
-# write routes; the basic-authed serve passes exactly these, GET only (the
-# HA field dashboard + its sensors: state, the universe map, the drawer).
+# onto the /v1 proxy -- that proxy binds 127.0.0.1 and has write routes; the
+# serve passes exactly these, GET only (the HA field dashboard + its sensors:
+# state, the universe map, the drawer). In JWT mode (jwtauth.py) the relay
+# presents the seat's internal token, and the caller needed its own first.
 STREAM_RETRIES = 2
 _TRUNCATED_EMPTY = object()          # a dropped stream that gave nothing usable
 
@@ -2683,6 +2685,57 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
         def _notfound(self) -> None:
             self._json_err(404, "not found", close=True)
 
+        # -- JWT mode (jwtauth.py; off = every helper here is a no-op) ----------
+
+        def _jwt_door(self) -> bool:
+            """The token gate, first in every do_*: Bearer, Basic with the JWT
+            as the password (opencode attach, HA), or the UI's cookie. Only the
+            standalone page's shell (+ /ui/login) is public."""
+            return _JWT.gate(self, cookie=True, basic=True, public=_UI.public_path(self))
+
+        def _jwt_person(self):
+            """The token's person (None: open mode, or the seat's own token)."""
+            return _UI.token_person(self)
+
+        def _visible(self, sid: str) -> bool:
+            """May this caller see session `sid`? Open mode and the seat's own
+            token: every session. A person: theirs, and their sessions' children."""
+            who = self._jwt_person()
+            if who is None:
+                return True
+            cur, seen = sid, set()
+            while cur and cur not in seen and len(seen) < 16:
+                seen.add(cur)
+                row = (sessions.sessions or {}).get(cur)
+                if row is None:
+                    return False
+                if row.get("owner"):
+                    return row.get("owner") == who.sub
+                cur = row.get("parentID")
+            return False
+
+        def _session_hidden(self, path: str) -> bool:
+            """A /session/<id>[/...] path naming someone else's session (it
+            does not exist for this caller: 404, never a 403 that confirms it)."""
+            if self._jwt_person() is None or not path.startswith("/session/"):
+                return False
+            sid = path[len("/session/"):].split("/", 1)[0]
+            if not sid or sid == "status":
+                return False
+            return not self._visible(sid)
+
+        def _event_visible(self, ev: dict) -> bool:
+            """The /event filter: a session's events reach its owner only; the
+            seat's own news (no session) reaches everyone with a token."""
+            sid = ev.get("sessionID")
+            for k in ("info", "part", "properties"):
+                if sid:
+                    break
+                v = ev.get(k)
+                if isinstance(v, dict):
+                    sid = v.get("sessionID")
+            return not sid or self._visible(str(sid))
+
         def _seat_read(self) -> None:
             """GET relay of one SEAT_READ_PATHS read onto the local /v1
             proxy (the field dashboard's window; see seat_read_url)."""
@@ -2690,7 +2743,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
             if url is None:
                 return self._notfound()
             try:
-                with urllib.request.urlopen(url, timeout=45) as up:
+                with urllib.request.urlopen(urllib.request.Request(url, headers=_JWT.internal_headers()), timeout=45) as up:
                     body, status = up.read(), up.status
                     ctype = up.headers.get("Content-Type", "application/json")
             except urllib.error.HTTPError as e:
@@ -2716,6 +2769,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
         # -- SSE --------------------------------------------------------------
 
         def _sse(self, wrap: bool = False) -> None:
+            keep = self._event_visible if self._jwt_person() is not None else None
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
@@ -2723,12 +2777,12 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
             self.end_headers()
             q = hub.subscribe()
             try:
-                self._sse_flush(q, wrap=wrap)
+                self._sse_flush(q, wrap=wrap, keep=keep)
             finally:
                 hub.unsubscribe(q)
 
         def _sse_flush(self, q, keepalive_s: float = 15.0,
-                       wrap: bool = False):
+                       wrap: bool = False, keep=None):
             while True:
                 if getattr(q, "lost", False):
                     return                       # it fell behind: hang up, the client resyncs
@@ -2741,6 +2795,8 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     except (BrokenPipeError, ConnectionResetError, OSError):
                         return
                     continue
+                if keep is not None and not keep(ev):
+                    continue                     # JWT mode: another person's session
                 # the real serve's two SSE schemas: /event is the bare
                 # Event ({id, type, properties}); /global/event wraps
                 # every frame as GlobalEvent
@@ -2768,9 +2824,13 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
         # -- routing ----------------------------------------------------------
 
         def do_GET(self):
+            if not self._jwt_door():
+                return                       # JWT mode: no valid token, no answer
             if _UI.intercept(self):
                 return                       # standalone mode: the UI, its LAN door
             path = self.path.split("?", 1)[0]
+            if self._session_hidden(path):
+                return self._notfound()      # JWT mode: someone else's session
             if path in SEAT_READ_PATHS:
                 return self._seat_read()
             if path == "/global/health":
@@ -2786,7 +2846,10 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 self._json_out({"entity_ids": _HB.subscriptions(psrv) if psrv is not None else []})
             elif path == "/session":
                 _all = sessions.list()
-                if getattr(self, "_ui_relay", False):
+                if self._jwt_person() is not None:
+                    # JWT MODE: a person's own sessions (and theirs' children)
+                    _all = [x for x in _all if self._visible(str(x.get("id") or ""))]
+                elif getattr(self, "_ui_relay", False):
                     # STANDALONE'S PAGE (ui_serve.py): a person's own chats, never the
                     # loops' sessions (HA's proxy kept the same per-person list)
                     _me = str(getattr(self, "_ui_speaker", "") or "").lower()
@@ -2815,6 +2878,8 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 # the TUI/clients see {busy, queued, depth})
                 out = {}
                 for s in sessions.sessions:
+                    if not self._visible(s):
+                        continue
                     st = runner.status(s) if runner is not None \
                         else {"type": "idle"}
                     if isinstance(st, dict) and st.get("type") == "busy":
@@ -3004,9 +3069,15 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 self._notfound()
 
         def do_POST(self):
+            if not self._jwt_door():
+                return                       # JWT mode: no valid token, no answer
             if _UI.intercept(self):
                 return                       # standalone mode: the UI, its LAN door
             path = self.path.split("?", 1)[0]
+            if self._session_hidden(path):
+                return self._notfound()      # JWT mode: someone else's session
+            if not getattr(self, "_ui_relay", False) and not _UI.stamp(self):
+                return self._json_err(400, "body must be a JSON object")
             if path in ("/membrane/jsexec/register", "/membrane/jsexec/result"):
                 # THE SEAT'S JS (jsexec.py): an opted-in tab registers, answers its jobs
                 from . import jsexec as _JS
@@ -3097,10 +3168,12 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 b = self._read_body()
                 s = sessions.create(title=b.get("title"),
                                     parent_id=b.get("parentID"))
-                if getattr(self, "_ui_relay", False):   # standalone's page: the session is this person's
+                _who = self._jwt_person()
+                if _who is not None or getattr(self, "_ui_relay", False):   # the session is this person's
                     _row = sessions.sessions.get(s["id"])
                     if _row is not None:
-                        _row["owner"] = s["owner"] = str(getattr(self, "_ui_speaker", "") or "")
+                        _row["owner"] = s["owner"] = (_who.sub if _who is not None
+                                                      else str(getattr(self, "_ui_speaker", "") or ""))
                         sessions.flush()
                 # THE REQUESTER'S PICK WINS (the 'qwen3:8b by hash
                 # order' exhibit): the POST body's model (the TUI's
@@ -3332,9 +3405,13 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
             return info, row
 
         def do_PATCH(self):
+            if not self._jwt_door():
+                return                       # JWT mode: no valid token, no answer
             if _UI.intercept(self):
                 return                       # standalone mode: the UI, its LAN door
             path = self.path.split("?", 1)[0]
+            if self._session_hidden(path):
+                return self._notfound()      # JWT mode: someone else's session
             if path.startswith("/session/"):
                 segs = path[len("/session/"):].split("/")
                 if segments_len(segs) == 1:
@@ -3368,9 +3445,13 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
             self._notfound()
 
         def do_DELETE(self):
+            if not self._jwt_door():
+                return                       # JWT mode: no valid token, no answer
             if _UI.intercept(self):
                 return                       # standalone mode: the UI, its LAN door
             path = self.path.split("?", 1)[0]
+            if self._session_hidden(path):
+                return self._notfound()      # JWT mode: someone else's session
             if path.startswith("/session/"):
                 segs = path[len("/session/"):].split("/")
                 if segments_len(segs) == 1:

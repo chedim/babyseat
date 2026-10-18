@@ -16,9 +16,16 @@ THE LAN GUARD: standalone asks no password of a private, loopback or tailnet
 address -- on any route, the UI's or the seat's own (the operator: "no auth
 needed"; a person types their name in the page). Anything forwarded by a proxy
 (X-Forwarded-For, Forwarded) or from a public address gets a 403, never a login
-prompt (the basic-auth pair still opens it for scripts).
+prompt.
 
-THE SPEAKER LINE: the page sends the name it holds (X-Membrane-Speaker); every
+JWT MODE (jwtauth.py, docs/auth.md; off unless MEMBRANE_JWT_SECRET[_FILE] is
+set): the token replaces the LAN guard. The page's shell (/, /index.html,
+/ui/www/*, the favicon) is public so the token prompt can render; everything
+else needs a token (Bearer, Basic with the JWT as password, or the HttpOnly
+`membrane_jwt` cookie POST /ui/login sets) -- from the LAN or behind an
+ingress alike. The speaker line is the token's, never the page's name.
+
+THE SPEAKER LINE (open mode): the page sends the name it holds (X-Membrane-Speaker); every
 message posted through /ui/serve carries '[user: <name>]' as its first line
 (speakers.split_speaker), a page-sent line replaced, and the voice / JS routes
 get it as `person` -- serve_proxy's rule, without HA.
@@ -36,8 +43,9 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+from . import jwtauth as _JWT
 from . import settings as S
-from .speakers import STANDALONE_PREFIX
+from .speakers import STANDALONE_PREFIX, id_line, strip_speaker_lines
 
 UI_DIR = Path(__file__).resolve().parent / "ui"
 # a checkout's HA integration: the big models live there (git-ignored, not packaged)
@@ -55,6 +63,8 @@ _NAME_OK = re.compile(r"^[^\x00-\x1f\[\]]{1,60}$")
 MAX_STT = 15_400_000                       # 8 min of 16 kHz s16 mono + header (under HA's 16 MiB too)
 STT_TIMEOUT_S = 180                        # long audio takes the speech server a while
 TAILNET = ipaddress.ip_network("100.64.0.0/10")
+SHELL = ("/", "/membrane", "/index.html", "/favicon.ico")
+MAX_LOGIN = 16_384
 
 
 # -- the LAN guard ------------------------------------------------------------
@@ -81,6 +91,29 @@ def speaker_of(handler) -> str:
     raw = urllib.parse.unquote(handler.headers.get("X-Membrane-Speaker") or "")
     name = " ".join(raw.split())
     return name if _NAME_OK.match(name or "") else "guest"
+
+
+def token_person(handler):
+    """The token's identity in JWT mode (None: open mode, or the seat's own
+    internal token -- those keep whatever line they carry)."""
+    ident = getattr(handler, "_identity", None)
+    return ident if ident is not None and not ident.internal else None
+
+
+def with_identity(body: dict, ident) -> dict:
+    """JWT mode: the message body with the TOKEN's line as its first text
+    part; every speaker line a client put in any text part is cut."""
+    parts = []
+    for p in body.get("parts") or []:
+        if isinstance(p, dict) and p.get("type") == "text":
+            t = strip_speaker_lines(str(p.get("text") or ""))
+            if not t.strip():
+                continue
+            p = dict(p, text=t)
+        parts.append(p)
+    out = dict(body)
+    out["parts"] = [{"type": "text", "text": id_line(ident.sub, ident.name), "synthetic": True}] + parts
+    return out
 
 
 def with_speaker(body: dict, name: str) -> dict:
@@ -116,10 +149,22 @@ def _restamp(handler, path: str) -> bool:
         return False
     if not isinstance(body, dict):
         return False
-    name = speaker_of(handler)
-    body = {**body, "person": name} if voice else with_speaker(body, name)
+    ident = token_person(handler)
+    if ident is not None:
+        body = {**body, "person": ident.label} if voice else with_identity(body, ident)
+    else:
+        name = speaker_of(handler)
+        body = {**body, "person": name} if voice else with_speaker(body, name)
     _replace_body(handler, json.dumps(body).encode())
     return True
+
+
+def stamp(handler) -> bool:
+    """JWT mode, a direct (non-page) request: a message / voice body gets the
+    token's identity. False = bad JSON. Open mode / the seat's own: untouched."""
+    if token_person(handler) is None:
+        return True
+    return _restamp(handler, handler.path.partition("?")[0])
 
 
 # -- the files ----------------------------------------------------------------
@@ -235,6 +280,63 @@ def _page_log(handler) -> None:
 
 # -- the hook -----------------------------------------------------------------
 
+def public_path(handler) -> bool:
+    """JWT mode's open door: the page's static shell (so the token prompt can
+    render) and the login/logout pair. Standalone only."""
+    if not enabled():
+        return False
+    path = handler.path.partition("?")[0]
+    if handler.command in ("GET", "HEAD"):
+        return path in SHELL or path.startswith("/ui/www/")
+    return handler.command == "POST" and path in ("/ui/login", "/ui/logout")
+
+
+def _login(handler) -> None:
+    """POST /ui/login {"token": "<jwt>"}: a valid person's token becomes the
+    HttpOnly, SameSite=Strict cookie (Secure over https). JSON only -- a
+    cross-site form can't post it; the seat's internal token never logs in."""
+    ctype = str(handler.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+    n = int(handler.headers.get("Content-Length") or 0)
+    if ctype != "application/json":
+        handler.close_connection = True
+        return _json(handler, {"error": "send JSON: {\"token\": \"...\"}"}, 415)
+    if n > MAX_LOGIN:
+        handler.close_connection = True
+        return _json(handler, {"error": "too large"}, 413)
+    tok = None
+    try:
+        tok = json.loads(handler.rfile.read(n) if n else b"{}").get("token")
+        ident = _JWT.verify_configured(tok)
+    except (ValueError, AttributeError, _JWT.JWTConfigError):
+        ident = None
+    if ident is None or ident.internal or not isinstance(tok, str):
+        return _JWT.send_unauthorized(handler)
+    b = json.dumps({"ok": True, "who": {"sub": ident.sub, "name": ident.name}}).encode()
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Content-Length", str(len(b)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Set-Cookie", _JWT.login_cookie(tok, ident, _JWT.request_is_https(handler.headers)))
+    handler.end_headers()
+    handler.wfile.write(b)
+
+
+def _logout(handler) -> None:
+    n = int(handler.headers.get("Content-Length") or 0)
+    if n > MAX_LOGIN:
+        handler.close_connection = True
+    elif n:
+        handler.rfile.read(n)
+    b = b'{"ok": true}'
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/json")
+    handler.send_header("Content-Length", str(len(b)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Set-Cookie", _JWT.logout_cookie(_JWT.request_is_https(handler.headers)))
+    handler.end_headers()
+    handler.wfile.write(b)
+
+
 def enabled() -> bool:
     """Only a seat launched as standalone (`membrane standalone`, --standalone)
     serves the UI; a plain `membrane serve` (the boat's phone) never does."""
@@ -250,7 +352,10 @@ def intercept(handler) -> bool:
     if not enabled():
         return False
     path, _, qs = handler.path.partition("?")
-    lan = trusted(handler)
+    jwt = _JWT.enabled()
+    # JWT mode: the token (checked by the serve's gate, jwtauth.gate) is the
+    # door, not the address -- it works behind an ingress
+    lan = getattr(handler, "_identity", None) is not None if jwt else trusted(handler)
     if lan:
         handler._ui_trusted = True         # standalone: no password anywhere on the LAN (the operator's rule)
     # /membrane too: the page rewrote the bar to the HA panel's url_path
@@ -260,7 +365,13 @@ def intercept(handler) -> bool:
     if not (path in ("/", "/membrane", "/index.html") or path == "/favicon.ico"
             or path.startswith("/ui/")):
         return False
-    if not lan:
+    if jwt and handler.command == "POST" and path in ("/ui/login", "/ui/logout"):
+        _login(handler) if path == "/ui/login" else _logout(handler)
+        return True
+    if jwt and not lan and not public_path(handler):
+        _JWT.send_unauthorized(handler)        # the serve's gate answered first; a belt to its braces
+        return True
+    if not jwt and not lan:
         _json(handler, {"error": "membrane answers the local network only"}, 403)   # never a login prompt
         return True
     if path.startswith("/ui/serve/"):
@@ -269,9 +380,10 @@ def intercept(handler) -> bool:
             _json(handler, {"type": "error", "error": {"message": "body must be a JSON object"}}, 400)
             return True
         handler.path = rest + ("?" + qs if qs else "")
-        handler._ui_trusted = True         # lan, or the pair checked above
+        handler._ui_trusted = True         # lan, or the token checked above
         handler._ui_relay = True           # the page's request: its person's sessions (server.py)
-        handler._ui_speaker = speaker_of(handler)
+        _who = token_person(handler)
+        handler._ui_speaker = _who.sub if _who is not None else speaker_of(handler)
         return False
     if handler.command not in ("GET", "HEAD") and path not in ("/ui/stt", "/ui/log"):
         _json(handler, {"error": "method not allowed"}, 405)
@@ -281,7 +393,12 @@ def intercept(handler) -> bool:
     elif path == "/favicon.ico":
         _send_file(handler, UI_DIR / "favicon.svg")
     elif path == "/ui/conf":
-        _json(handler, conf())
+        c = conf()
+        if jwt:                            # JWT mode: who the token says you are (the page asks no name)
+            _id = getattr(handler, "_identity", None)
+            c["auth"] = "jwt"
+            c["who"] = {"sub": _id.sub, "name": _id.name} if _id is not None else None
+        _json(handler, c)
     elif path == "/ui/log":
         _page_log(handler)
     elif path == "/ui/stt":

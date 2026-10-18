@@ -3947,8 +3947,57 @@ class MembraneOpenAIHandler(RAGProxyHandler):
     /v1/embeddings (the field's own embedder), /membrane/state. Everything
     else forwards to Ollama."""
 
+    # ---- the door (JWT mode, jwtauth.py; off = always open) ----
+    def _auth_gate(self) -> bool:
+        """JWT MODE (issue #203): no valid Bearer token, no answer -- on every
+        verb, before any route (an unauthenticated knock never resets the idle
+        clock or reaches the backend). Off (no secret): always True. The
+        identity lives on THIS handler (self._identity), never on the shared
+        server."""
+        from . import jwtauth as _JWT
+        return _JWT.gate(self)
+
+    def _stamp_chat_identity(self) -> None:
+        """JWT mode: the /v1 turn's user messages carry the TOKEN's speaker
+        line -- a client's own '[user: X]' / '[HA user: X]' lines are cut
+        (the seat's own internal turns keep theirs)."""
+        ident = getattr(self, "_identity", None)
+        if ident is None or ident.internal:
+            return
+        import io as _io
+        from . import jwtauth as _JWT
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        raw = self.rfile.read(length) if length else b""
+        try:
+            body = json.loads(raw) if raw else {}
+            out = json.dumps(_JWT.stamp_chat_body(body, ident)).encode() \
+                if isinstance(body, dict) else raw
+        except ValueError:
+            out = raw
+        self.rfile = _io.BytesIO(out)
+        del self.headers["Content-Length"]
+        self.headers["Content-Length"] = str(len(out))
+
+    def do_PUT(self):
+        if self._auth_gate():
+            super().do_PUT()
+
+    def do_DELETE(self):
+        if self._auth_gate():
+            super().do_DELETE()
+
+    def do_PATCH(self):
+        if self._auth_gate():
+            super().do_PATCH()
+
+    def do_HEAD(self):
+        if self._auth_gate():
+            super().do_HEAD()
+
     # ---- routing ----
     def do_GET(self):
+        if not self._auth_gate():
+            return
         # THE IDLE CLOCK (the orphaned-proxy fix): every request resets
         # the idle-exit timer -- an active seat never trips it
         self.server._last_request_ts = time.time()
@@ -4027,9 +4076,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         super().do_GET()
 
     def do_POST(self):
+        if not self._auth_gate():
+            return
         self.server._last_request_ts = time.time()
         path = self.path.split("?")[0]
         if path == "/v1/chat/completions":
+            self._stamp_chat_identity()
             self._v1_chat(); return
         if path == "/v1/embeddings":
             self._v1_embeddings(); return

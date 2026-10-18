@@ -35,6 +35,8 @@ import threading
 import time
 import urllib.request
 
+from . import jwtauth as _JWT
+
 SIGN = "[membrane seat notice]"
 ALIVE_FILE = "alive.ts"
 REASON_FILE = "restart-reason"
@@ -143,7 +145,7 @@ def reply_to(srv, text: str, wait_s: float = WAIT_PROXY_S) -> str | None:
     while True:
         try:
             req = urllib.request.Request(url, data=json.dumps(body).encode(),
-                                         headers={"Content-Type": "application/json"})
+                                         headers={"Content-Type": "application/json", **_JWT.internal_headers()})
             out = json.loads(urllib.request.urlopen(req, timeout=POST_TIMEOUT_S).read() or b"{}")
             return str((((out.get("choices") or [{}])[0].get("message")) or {}).get("content") or "")
         except Exception:

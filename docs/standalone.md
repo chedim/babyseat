@@ -28,7 +28,8 @@ works for chat too).
 ## The first run
 
 1. The page asks **your** name once (kept in that browser). Every message you send
-   carries it, so the seat knows who is talking.
+   carries it, so the seat knows who is talking. (In [JWT mode](auth.md) it asks for
+   your token instead, and the token carries your name.)
 2. The seat is **Bob** ("Hey Bob") until you agree on a name. It asks for one in its
    first reply; when you've chosen, it adopts it itself (the `name` entity). A name
    must be one word of two or three syllables that the in-page speech recognizer
@@ -44,6 +45,10 @@ works for chat too).
   covers the page; the serve's API itself has no login -- keep the seat on your
   network, or put a reverse proxy with its own login in front.
 - `"ui_lan_open": false` in `.membrane/settings.json` closes the LAN door too.
+- **JWT mode** (optional, off by default: set `MEMBRANE_JWT_SECRET`) replaces all of
+  this with a token. Every request to the page's API and the seat's needs one, from
+  the LAN or behind an ingress alike. The page asks for the token instead of a name,
+  and the token says who you are. See [auth.md](auth.md).
 
 ## Voice
 
@@ -71,7 +76,7 @@ works for chat too).
 |---|---|
 | `name`, `aliases` | the seat's agreed name (written by the seat when you agree on one) and what speech hears for it |
 | `stt` | `"browser"` (default) or a whisper-server URL |
-| `ui_lan_open` | `true` (default): no login on the local network |
+| `ui_lan_open` | `true` (default): no login on the local network (ignored in [JWT mode](auth.md), where the token decides) |
 
 ## Updates
 
