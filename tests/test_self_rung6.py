@@ -117,7 +117,7 @@ def _push_recs(to, n=None):
 def test_meet_pushes_a_line_to_chat_out(monkeypatch):
     pushed = []
     monkeypatch.setattr(SL, "_read_entity", _Chatter())
-    monkeypatch.setattr(SL, "_push_chat", lambda srv, text: pushed.append(text))
+    monkeypatch.setattr(SL, "_push_chat", lambda srv, text, person="": pushed.append(text))
     srv = _seat()
     _run(srv, 40)
     pushes = _kind(srv, "push")
@@ -129,7 +129,7 @@ def test_meet_pushes_a_line_to_chat_out(monkeypatch):
 
 def test_it_reaches_the_other_and_counts_its_answers(monkeypatch):
     monkeypatch.setattr(SL, "_read_entity", _Chatter())
-    monkeypatch.setattr(SL, "_push_chat", lambda srv, text: None)
+    monkeypatch.setattr(SL, "_push_chat", lambda srv, text, person="": None)
     srv = _seat()
     _run(srv, 40)
     assert [r for r in _kind(srv, "reach") if "chat:in" in r["eid"]]
@@ -139,7 +139,7 @@ def test_it_reaches_the_other_and_counts_its_answers(monkeypatch):
 
 def test_it_classes_the_imperfect_answerer_as_other(monkeypatch):
     monkeypatch.setattr(SL, "_read_entity", _Chatter())
-    monkeypatch.setattr(SL, "_push_chat", lambda srv, text: None)
+    monkeypatch.setattr(SL, "_push_chat", lambda srv, text, person="": None)
     srv = _seat()
     _run(srv, 200)
     assert SL._split(_record(srv), SL._tempo(srv))[RESP] == "other"
@@ -168,7 +168,7 @@ def test_an_imperfect_answerer_is_an_other():
 
 def test_rung_six_opens_after_pushes_and_heard(monkeypatch):
     monkeypatch.setattr(SL, "_read_entity", _Chatter())
-    monkeypatch.setattr(SL, "_push_chat", lambda srv, text: None)
+    monkeypatch.setattr(SL, "_push_chat", lambda srv, text, person="": None)
     srv = _seat()
     _run(srv, 400)
     assert 6 in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
@@ -177,7 +177,7 @@ def test_rung_six_opens_after_pushes_and_heard(monkeypatch):
 
 def test_the_limit_holds_rung_six(monkeypatch):
     monkeypatch.setattr(SL, "_read_entity", _Chatter())
-    monkeypatch.setattr(SL, "_push_chat", lambda srv, text: None)
+    monkeypatch.setattr(SL, "_push_chat", lambda srv, text, person="": None)
     srv = _seat(limit=5)
     _run(srv, 400)
     assert not _kind(srv, "push")

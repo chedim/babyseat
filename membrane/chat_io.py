@@ -32,8 +32,14 @@ SCRIPT_PUSH_GAP_S = 30.0
 OPERATOR = "operator"             # the seat with no people: its operator's chat:out
 
 
+def _key(person: str) -> str:
+    """A person's slot name; a blank person is the operator's slot (slug('')
+    is 'unknown', never blank -- so `slug(p) or OPERATOR` never fell back)."""
+    return slug(person) if str(person or "").strip() else OPERATOR
+
+
 def name_of(person: str) -> str:
-    return f"chat:out:{slug(person) or OPERATOR}"
+    return f"chat:out:{_key(person)}"
 
 
 def entity(srv, person: str, create: bool = True):
@@ -57,7 +63,7 @@ def entity(srv, person: str, create: bool = True):
 
 
 def name_in(person: str) -> str:
-    return f"chat:in:{slug(person) or OPERATOR}"
+    return f"chat:in:{_key(person)}"
 
 
 _IN_GETTER = (
@@ -148,8 +154,16 @@ def recent_person(srv) -> str:
     return str(own[-1]["owner"]) if own else ""
 
 
-def _post(srv, sid: str, text: str) -> None:
+SELF_MARK = "\U0001F331"           # a sprout: a line self pushed (#208), not the seat's own
+
+
+def _post(srv, sid: str, text: str, by: str = "") -> None:
+    """Post an assistant line into a chat. `by="self"` marks it as self's
+    (#208): a sprout before the text, and `"from": "self"` on the message and
+    its part so a UI can name it -- the person can tell it apart and answer."""
     r = _runner(srv)
+    if by == "self" and not text.startswith(SELF_MARK):
+        text = f"{SELF_MARK} {text}"
     now = int(time.time() * 1000)
     agent = str((r.sessions.get(sid) or {}).get("agent") or "build")
     info = {"id": f"msg_push_{now}", "sessionID": sid, "role": "assistant", "parentID": "",
@@ -160,14 +174,17 @@ def _post(srv, sid: str, text: str) -> None:
             "time": {"created": now, "completed": now}, "finish": "stop", "pushed": True}
     part = {"id": f"prt_push_{now}", "sessionID": sid, "messageID": info["id"],
             "type": "text", "text": text, "time": {"start": now, "end": now}}
+    if by:
+        info["from"] = part["from"] = by
     r.messages.append(sid, info, [part])
     r.hub.publish({"type": "message.updated", "sessionID": sid, "info": dict(info)})
     r.hub.publish({"type": "message.part.updated", "part": dict(part), "time": now,
                    "sessionID": sid})
 
 
-def on_edit(srv, ent) -> dict | None:
-    """An edit of a chat:out entity's `say`: post it (or say why not)."""
+def on_edit(srv, ent, by: str = "") -> dict | None:
+    """An edit of a chat:out entity's `say`: post it (or say why not). `by`
+    names a non-seat author (self's pushes, #208) for _post to mark."""
     pp = (getattr(ent, "properties", None) or {})
     if pp.get("chat_io") != "out" or not str(pp.get("say") or "").strip():
         return None
@@ -187,7 +204,7 @@ def on_edit(srv, ent) -> dict | None:
     sid = latest_chat(srv, person)
     if not sid or _runner(srv) is None:
         return _refuse("no chat", f"{person or 'the operator'} has no chat to post into yet")
-    _post(srv, sid, text)
+    _post(srv, sid, text, by=by)
     pp.pop("say_refused", None)
     pp["said_ts"] = now
     _ring(pp, "said", {"ts": now, "text": text, "session": sid})

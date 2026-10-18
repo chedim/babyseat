@@ -284,7 +284,15 @@ section covers what is built (`membrane/self_loop.py`).
     phases are capped at 1 h and 3 h; a still thing is looked at rarely, by
     rung 4's patience.
 - **Rung 6, meet an other.** Self's first outward act: it pushes a line
-  ("self is here") to `chat:out:operator`, paced at every 30 cycles. The
+  ("self is here") to the chat of **the person who actually chats with the
+  seat** — `chat:out:<person>`, where the person is whoever chatted last
+  (chat_io's `recent_person`, the owner of the newest owned chat), and
+  `chat:out:operator` only on a seat with no people. It is paced at every 30
+  cycles, and the person is resolved afresh at each push, so when someone
+  else starts chatting self follows: the push target and the reach target
+  move together. The line is visibly self's: it starts with 🌱 and carries
+  `"from": "self"` on the message and its part (the panel names it "🌱 self"),
+  so the person can tell it from the seat and answer it knowingly. The
   thing that answers — imperfectly, variably, with delay — is an **other**;
   what it predicts near-perfectly (zero gap, its own echo) is its **body**.
   The answerer is a new reach target, `chat:in:<person>` (the twin of
@@ -296,17 +304,23 @@ section covers what is built (`membrane/self_loop.py`).
   2. 20 answered looks at the answerer;
   3. the answerer is classed **other** — a perfect echo classes *body* and
      the split reads 0, so the rung stays shut.
+  The test reads the **current** other only (the latest push's `to`): when
+  the person changes, pushes to and looks at the previous one stop counting.
+  A rung 6 passed against someone else stays on the record (history is not
+  rewritten), but its bar re-measures against the new person and reads
+  **slipping** until they earn it — no reset, no free pass.
   (`llm::call` prediction is rung 7's; rung 6 is only the bare split.)
 - **Rung 7, understand an other.** Self consults the model coprocessor inside
-  `expect`: when it is about to look at the thing it met (`chat:in:operator`),
+  `expect`: when it is about to look at the person it met (`chat:in:<person>`),
   it reads the last `llm::call` verdict — a one-line probability the next
   answer is "changed" — as `p_llm` beside habit's `p`, and queues the next
   `llm::call` (paced at 30 cycles; the call is read-only, so it answers in one
   line). The test reads the **paired** looks — both predictions on the same
   look — and the rung passes when the model removes ≥ 0.15 of habit's Brier
-  error over 20 such looks: predicting the operator's answers *better than
-  habit alone*. It is scoped to the other only; every other thing keeps
-  habit's prediction.
+  error over 20 such looks: predicting the person's answers *better than
+  habit alone*. It is scoped to the other only (the current one: paired
+  looks at a previous person don't count); every other thing keeps habit's
+  prediction.
 - **Its methods run only in its own loop.** `try` / `expect` / `notice` are
   cliffhanger methods (`self::` no-shell dialect), and so is `reach`. `exec inspect` shows them;
   any other caller, the model included, is refused. The LLM talks *to* self,
