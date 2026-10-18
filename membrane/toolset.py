@@ -493,7 +493,7 @@ def _placeholder_call(placeholder: str, args: dict) -> tuple[str, dict]:
         if not text:
             return resolve(fam, {})
     raise ValueError(
-        f"the call's name {placeholder!r} is a template PLACEHOLDER from your call format, not a tool: "
+        f"the call's name {placeholder!r} is a template placeholder from your call format, not a tool: "
         f"write the real tool's name in its place -- one of {', '.join(sorted(FAMILIES))} -- and its "
         "arguments as JSON. For example, to run a command: name exec, arguments "
         '{"action": "link", "command": "ls -a"}; to read an entity: name entity, arguments '
@@ -550,20 +550,12 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
         if _owner and any(k != "action" for k in (args or {})):
             return resolve(_owner, dict(args or {}))
         if _placeholder:
-            raise ValueError(
-                f"the call had no tool name -- its name slot held the template placeholder "
-                f"{_placeholder[:40]!r}, not a tool: name the tool -- one of "
-                f"{', '.join(sorted(FAMILIES))} -- and put its JSON in the arguments, "
-                "e.g. name='entity', arguments={\"action\": \"read\", \"spec\": \"presence\"}")
+            # nothing above named the call: 'exec <command>' in a name field,
+            # the arguments as a JSON string, else the refusal with an example
+            return _placeholder_call(_placeholder, dict(args or {}))
         raise ValueError(
             f"the call had no tool name ({str(name or '')!r}): name the tool -- one of "
             f"{', '.join(sorted(FAMILIES))} -- and put its JSON in the arguments")
-    # ISSUE #182 (Memo): after deploys the name was the literal '{function_name}'
-    # (params {fn_name} / {args_json}) -- the model copying the placeholders of
-    # its chat template's call format. A {placeholder} is a template variable,
-    # not arguments: route by the fields that name a tool, else say so plainly.
-    if re.fullmatch(r"\{\s*[A-Za-z_][\w\-]*\s*\}", _bare):
-        return _placeholder_call(_bare, dict(args or {}))
     if str(name or "").lstrip()[:1] in ("{", "["):
         _un = _call_in_name(name)
         if _un is not None:
