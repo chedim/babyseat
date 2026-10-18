@@ -3,7 +3,7 @@ Attention is not enough.
 
 # membrane
 
-![Membrane](membrane-home.gif)
+![Membrane](docs/comparison.png)
 
 > A **living entity-field memory for a resident AI seat** — hypervectors with
 > a readable geometry, a background mind that works while you're away, every
