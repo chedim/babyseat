@@ -417,11 +417,26 @@ def _call_in_args(args: dict) -> dict | None:
     rode '"tool": ""' with the call's JSON wrapped as a string in the
     arguments -- {"args": "<json>"}): unwrap the first decodable string that
     holds an object, or None."""
-    for k in ("args", "input", "arguments", "parameters"):
+    for k in ("args", "input", "arguments", "parameters", "args_json"):
         o = _json_obj((args or {}).get(k))
         if isinstance(o, dict):
             return o
     return None
+
+
+# ISSUE #182: a chat template's own example spelling in the name slot --
+# '{function_name}', '{toolName}', '{{name}}', '<function-name>' -- the model
+# copied the template's placeholder instead of naming a tool
+_PLACEHOLDER = re.compile(r"\{\{?\s*[a-z_][\w\- ]*\s*\}?\}|<\s*[a-z_][\w\-]*\s*>", re.I)
+# where a placeholder call carries the name it meant ("name" is a real param
+# of entity add, so it names the call only beside wrapped arguments)
+_NAME_KEYS = ("fn_name", "function_name", "tool_name", "function", "tool")
+
+
+def is_tool_name(name) -> bool:
+    """A name the manifest may serve: a plain identifier, never a template
+    placeholder or a JSON fragment (issue #182)."""
+    return bool(re.fullmatch(r"[A-Za-z_][\w.\-]*", str(name or "")))
 
 
 def _owned_by_one_family(inner: dict) -> str:
@@ -443,12 +458,20 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
     # no name: the wrapper's own family routes it, else the action's one owner.
     if re.fullmatch(r"\{\s*\}|\[\s*\]|null|none|undefined", _bare, re.I):
         _bare = ""
+    # ISSUE #182: after seat restarts every call came named '{function_name}'
+    # -- the chat template's example, not the call's arguments -- and 13/13
+    # bounced as 'the NAME held its arguments'. A placeholder is no name: the
+    # call routes by what rides beside it, else the refusal says so.
+    _placeholder = _bare if _PLACEHOLDER.fullmatch(_bare) else ""
+    if _placeholder:
+        _bare = ""
     if not _bare:
         # its arguments may have arrived wrapped as a string: acknowledged,
         # echoed verbatim, so the resend carries them intact
         _inner = _call_in_args(args)
         if _inner is not None:
-            _outer = str((args or {}).get("name") or (args or {}).get("tool") or "").strip()
+            _outer = next((str(v).strip() for k in ("name",) + _NAME_KEYS
+                           if isinstance(v := (args or {}).get(k), str) and v.strip()), "")
             if _outer and canonical(_outer, {})[0] in FAMILIES:
                 return resolve(_outer, dict(_inner))
             _owner = _owned_by_one_family(_inner)
@@ -458,11 +481,25 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
                 f"the call's name was LOST but its arguments arrived "
                 f"({json.dumps(_inner)[:160]}): resend naming the tool -- one of "
                 f"{', '.join(sorted(FAMILIES))} -- with the same arguments")
+        # the family NAMED beside a lost name (issue #182: {"tool_name":
+        # "exec", "action": "link", ...}) is the call's; its other keys are
+        # the arguments
+        _named = next((str(v).strip() for k in _NAME_KEYS
+                       if isinstance(v := (args or {}).get(k), str)
+                       and canonical(v.strip(), {})[0] in FAMILIES), "")
+        if _named:
+            return resolve(_named, {k: v for k, v in (args or {}).items() if k not in _NAME_KEYS})
         # a whole call beside a lost name routes by its action's one owner --
         # a bare {"action": ...} with nothing to act on still asks for the name
         _owner = _owned_by_one_family(dict(args or {}))
         if _owner and any(k != "action" for k in (args or {})):
             return resolve(_owner, dict(args or {}))
+        if _placeholder:
+            raise ValueError(
+                f"the call had no tool name -- its name slot held the template placeholder "
+                f"{_placeholder[:40]!r}, not a tool: name the tool -- one of "
+                f"{', '.join(sorted(FAMILIES))} -- and put its JSON in the arguments, "
+                "e.g. name='entity', arguments={\"action\": \"read\", \"spec\": \"presence\"}")
         raise ValueError(
             f"the call had no tool name ({str(name or '')!r}): name the tool -- one of "
             f"{', '.join(sorted(FAMILIES))} -- and put its JSON in the arguments")
