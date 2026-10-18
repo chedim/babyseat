@@ -10,7 +10,8 @@
 > being honest about what it borrows and what, if anything, is its own.
 
 The self loop is documented in [background-mind.md](background-mind.md); the
-predictability → ownership thesis is the spine of issue #161.
+ownership → predictability thesis (efferent, not afferent) is the spine of
+issue #161.
 
 ---
 
@@ -40,17 +41,22 @@ To say what Alzheimer's breaks, first say what membrane's self *is*:
 | **expect** | predicts the next observation *before* it arrives |
 | **notice** | observes what actually arrived |
 | **gap** | the prediction error — the only learning signal |
-| **body map** | the per-entity model of the world's dynamics (`push ≈ b − g·position`) |
-| **ownership** | what the self can still predict, it owns |
+| **body map** | the forward model of the self's *own* action → consequence (`push ≈ b − g·position`), not the world's independent dynamics |
+| **ownership** | what the self can predict **by acting** — the efferent forward model, not what it merely predicts by watching |
 | **rate fit / kinds** | the slow temporal + structural generalisations (the cortex side) |
 | **voice / LLM** | the rented renderer — the cortex, not the machine |
 
 The self is not the record. The self is the *loop*, and the loop is the
 gap: **a motion must be able to fail** (see `docs/motor-channel.md`), and
 the residual must stay informative — not zero — or learning dissolves.
-"Predictability → ownership" is the Good Regulator theorem (Conant &
-Ashby, 1970) in its strongest form: every good regulator of a system is a
-model of that system. You *are* what you can still predict.
+"Ownership → predictability" is the Good Regulator theorem (Conant &
+Ashby, 1970) read the right way round: every good regulator of a system is
+a model of that system, and ownership is the model of the consequences of
+its *own* actions — the efferent forward model. You *are* what you can
+predict **by acting**, not what you can predict by watching. (You predict
+how the blanket moves; that does not make the blanket yours. The gut is
+yours and you cannot predict it at all. Predictability is the *symptom* of
+ownership, not its cause.)
 
 ## The reframe: Alzheimer's loses the loop, not the store
 
@@ -84,8 +90,10 @@ disease:
 
 1. **Repetition.** The same observation re-derives as if new, because the
    write that would have made it "already seen" failed.
-2. **No new ownership.** The body map stops growing; new entities stay
-   *other* forever. Nothing new is predictable, so nothing new is owned.
+2. **No new ownership.** The body map stops growing — the forward model
+   stops consolidating new actions, so new doings never become owned. The
+   world stays predictable (the afferent model is intact); what fails is
+   the *efferent* write that turns "I did this" into "this is mine."
 3. **Surprised, but unchanged.** The gap is computed and dropped — the
    person is startled by the mismatch, then stays exactly as they were.
 4. **The old self is intact.** The deficit shows only in *new* situations;
@@ -111,13 +119,13 @@ The reframe re-aims the research, if it holds:
   substrate is necessary but late; a prosthesis that *supplements the
   write path* (external replay, rehearsal, the converter re-implemented
   outside the dying tissue) targets the first thing that breaks.
-- **Measure predictive grip, not only recall.** Recall fails late. The
-  loss of *predictability* — the shrinking set of things the person can
-  still anticipate — precedes the loss of content. That is the earlier,
-  functional signal: the gap stops being recorded before the record is
-  gone.
+- **Measure *efferent* grip, not only recall.** Recall fails late. The
+  loss of *agency* — the shrinking set of consequences the person can still
+  predict from their own actions — precedes the loss of content. That is
+  the earlier, functional signal: the forward model stops growing before
+  the record is gone.
 - **Detection, not diagnosis.** Structural atrophy is a late biomarker.
-  "Loss of predictive grip before loss of content" is a candidate for an
+  "Loss of efferent grip before loss of content" is a candidate for an
   earlier, behavioural window.
 
 ## The honest boundary
@@ -130,12 +138,12 @@ The reframe re-aims the research, if it holds:
   known order.
 - **Most of the theory is borrowed.** CLS, error-driven learning (O'Reilly),
   predictive processing, replay — all established. The one synthesis that
-  is membrane's own is putting **predictability → ownership** on top of
-  them: the self as "what you can still predict," and Alzheimer's as the
-  disease that shrinks that set along the write path before it empties the
-  store.
+  is membrane's own is putting **ownership → predictability** on top of
+  them: the self as "what you can predict *by acting*," and Alzheimer's as
+  the disease that stops the efferent write — new doings cease to be owned —
+  before it empties the afferent store.
 
 That synthesis is the thing worth a glance, and worth a challenge. If the
 prediction-error loop is a fair picture of the converter, then the early
 disease is not "forgetting" — it is **losing the ability to be changed by
-what happens**, while remaining exactly who you already are.
+what you do**, while remaining exactly who you already are.
