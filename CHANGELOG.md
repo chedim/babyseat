@@ -1,3 +1,19 @@
+## v0.6.2 (2026-10-18) — the seat in a box
+
+- **membrane in Docker** (#202): a public image, `chedim/membrane` on Docker Hub (amd64 + arm64), published by CI from each release. One `docker run` gives you the standalone seat: the web UI on :4096, the OpenAI-compatible proxy on :11500, and the memory on the `/data` volume. Configure it with `MEMBRANE_BACKEND`, `MEMBRANE_MODEL` and `MEMBRANE_EMBED_MODEL`. The image contains only the package: no state, no keys and no addresses are baked in. See [docs/docker.md](docs/docker.md). The README now covers Docker in Quick start and Installation, and fixes two stale claims: the proxy binds all interfaces by default, and re-embedding is `python -m membrane.reembed`.
+- **JWT mode** (#203), optional and off by default. Set `MEMBRANE_JWT_SECRET` (or `MEMBRANE_JWT_SECRET_FILE`) and every request on both ports needs an HS256 token; `membrane token mint --sub ID --name NAME` issues them.
+  - **Who is speaking:** the token's `sub` is who said a turn, so a client's own `[user: X]` line can no longer impersonate anyone.
+  - **Sessions:** each session on :4096 belongs to its owner, and nobody else's are visible.
+  - **Logging in:** the web UI asks for the token once and keeps it in an HttpOnly cookie, so it also works behind a reverse proxy. opencode and Home Assistant can pass the token as the Basic-auth password.
+  - **Upstream and internal calls:** the token never reaches the model server, and the seat's own loopback calls carry an internal token.
+  - See [docs/auth.md](docs/auth.md).
+
+### Fixes
+
+- **A template placeholder in the tool-name slot no longer burns the turn** (#182): after a restart the model could copy its chat template's example into the call's name (`{function_name}`, `<function-name>`), and membrane read any `{`-leading name as JSON arguments — every call bounced ("the call's NAME held its arguments"), and the refused call in history taught the model to repeat it. A placeholder name now counts as a missing name: the call is routed by what rides beside it (`fn_name`/`function_name`/… or the family owning the action), else refused naming the placeholder and the valid tools. The served tool manifest never carries a non-identifier name.
+- **A loop reading an entity no longer wakes loops on it** (#188): a goal loop's read of a ticking getter (e.g. the eye's `beats` counter) posted `getter-applied` and `job-done` on the read entity, so every read woke another model pass there — passes that looked like a dropped field_watch probe that would not die. A loop's own read now answers the loop that asked; the field's own reads still post the change.
+- **Background model calls are token-accounted** (#200): the thinker, the proxy-only watch degrade, the claim judge, the router's boot interview and `/delegate` spent tokens `membrane stats` never saw. Each now tallies its usage per lane and model into `<data dir>/bg-usage.json` (persisted across restarts), and `membrane stats` prints a `background model calls` section with its share of all tokens (`--json`: `background`).
+
 ## v0.6.1 (2026-10-15) — the field can talk
 
 - **The field writes to people** (#154): `chat:out:<person>` is the twin of `voice:out` -- edit its `say` and the line lands in that person's latest chat (made on first use; `chat:out:operator` on a seat with no people). An entity's own script can now chat or speak with no model turn: a result `{'chat': '...', 'voice': '...', 'to': '<person>'}` is posted / spoken by the engine (`to` defaults to whoever chatted last). Guard rails: one line per 2 s per person; a script pushes at most once per 30 s and never repeats its last line.
