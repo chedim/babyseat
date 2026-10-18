@@ -12,6 +12,9 @@ mkdir ~/bob && cd ~/bob                # the seat's data lives in ./.membrane
 membrane standalone                    # opens http://localhost:4096/
 ```
 
+In a container instead: the image `chedim/membrane` runs this same mode (UI on
+:4096, proxy on :11500, the data on a `/data` volume); see [docker.md](docker.md).
+
 | Flag | Default | What |
 |---|---|---|
 | `--backend URL` | `http://localhost:11434` | the Ollama server the seat thinks with |

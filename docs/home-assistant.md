@@ -24,8 +24,9 @@ free RAM for the seat.
 
 "Connect to a seat running elsewhere" is the mode when **you** own the seat:
 you run it on a machine you like (a Mac, a Linux box, even unrooted Android via
-Termux) with `membrane serve`, the integration only introduces itself over the
-network. Nothing is spawned inside Home Assistant, and **a restart of Home
+Termux) with `membrane serve`, or in a container from the public image
+(`chedim/membrane`, [docker.md](docker.md); its :4096 is the URL to give), the
+integration only introduces itself over the network. Nothing is spawned inside Home Assistant, and **a restart of Home
 Assistant never restarts the seat** — its field and sessions keep running.
 
 What the integration still does for such a seat:

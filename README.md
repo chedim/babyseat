@@ -116,10 +116,10 @@ use and keeps it out of paid products ([LICENSE](LICENSE)).
 
 ## Quick start
 
-Membrane runs two ways. Both need an [Ollama](https://ollama.com) server with
-one chat model and one embedding model (`ollama pull qwen3:8b && ollama pull
-mxbai-embed-large`, or any cloud model Ollama serves), and 1–3 GB of RAM for
-the seat.
+Membrane runs three ways: standalone, in Docker, or inside Home Assistant. All
+need an [Ollama](https://ollama.com) server with one chat model and one
+embedding model (`ollama pull qwen3:8b && ollama pull mxbai-embed-large`, or
+any cloud model Ollama serves), and 1–3 GB of RAM for the seat.
 
 ### Standalone: its own web UI
 
@@ -135,6 +135,25 @@ devices on your network reach it at `http://<this machine>:4096/`. No login on
 the local network; a public or proxied caller is refused. Voice needs a secure
 origin, so the microphone works on `localhost` (the first voice use downloads
 ~65 MB of speech models, checked against their checksums).
+
+### Docker
+
+```bash
+docker run -d --name membrane \
+  -p 4096:4096 -p 11500:11500 \
+  -v membrane-data:/data \
+  -e MEMBRANE_BACKEND=http://host.docker.internal:11434 \
+  -e MEMBRANE_EMBED_MODEL=mxbai-embed-large \
+  --stop-timeout 60 \
+  chedim/membrane:latest           # then open http://localhost:4096/
+```
+
+The same standalone seat in a container: the web UI on :4096 and the
+OpenAI-compatible proxy on :11500, the memory on the `membrane-data` volume.
+`MEMBRANE_BACKEND` is the Ollama server (the default shown is the Docker
+host); on Linux add `--add-host=host.docker.internal:host-gateway`. The
+ports have no login, so publish them only on a network you trust. Details:
+[docs/docker.md](docs/docker.md).
 
 ### Inside Home Assistant (HACS)
 
@@ -445,7 +464,8 @@ Source layout: `membrane/` (the field: `streams` → `efield`/`efstore` →
 `entity_block`/`efgate`/`night`; the seat's serve server (`server.py`,
 opencode-compatible); the MCP surface (`mcp_server.py`); the CLI),
 `experiments/` (the e-series rigs behind math-findings), `tests/` (unittest +
-pytest, plain-python runnable).
+pytest, plain-python runnable), `Dockerfile` + `docker/` (the public image;
+`docker build -t membrane:dev .`, see [docs/docker.md](docs/docker.md)).
 
 ```bash
 python -m unittest discover -s tests     # everything runs against in-process fakes, no server needed
