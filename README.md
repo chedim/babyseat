@@ -27,7 +27,7 @@ proxy, but that is the mechanism, not the point. The point is the field.
 ## What separates membrane from other agentic memory on GitHub
 
 Most memory projects give your agent a store to query.
-Membrane is built on different ground rules: a non-von-Neumann architecture — 
+Membrane is built on different ground rules: a non-von-Neumann architecture running on top of a von-Neumann machine — 
 no central fetch-execute CPU; computation is distributed across the field itself and 
 driven by a minimal write-read loop. 
 
