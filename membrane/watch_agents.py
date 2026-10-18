@@ -1534,12 +1534,15 @@ def reading_changed(before: dict, state: dict) -> bool:
     return False
 
 
-def entity_read_back(srv, ent, force: bool = False, by: str = "model") -> dict:
+def entity_read_back(srv, ent, force: bool = False, by: str = "model",
+                     notify: bool = True) -> dict:
     """THE READ-BACK TRIGGER: a READ of a dynamic entity fires its
     getter_script (the dict return patches script_data + the entity's
     state facts); the LRU (5s per entity) dedups a hammering loop --
     `force=True` (the explicit read tool) bypasses it (a re-run is the
-    caller's call); the getter's kind rides the engine's dispatch."""
+    caller's call); the getter's kind rides the engine's dispatch.
+    `notify=False`: the reader is answered with the values itself (a
+    job's event) -- no getter-applied for another loop (#188)."""
     props = ent.properties or {}
     est = getattr(srv, "entity_store", None)
     if est is None:
@@ -1614,7 +1617,11 @@ def entity_read_back(srv, ent, force: bool = False, by: str = "model") -> dict:
         props["script_data"] = merged
         ent.properties = props
         est.upsert(ent, embedder=None)
-        pool = getattr(srv, "events_pool", None)
+        # A READ IS NOT AN ECHO (#188): a goal's loop read the eye every
+        # pass, its job answered it the fresh values -- and this post woke a
+        # SECOND loop on the eye; a counter (beats) changes on every read, so
+        # the eye ran a pass per read. The reader's own answer is no news.
+        pool = getattr(srv, "events_pool", None) if notify else None
         if pool is not None and changed:
             pool.put({"kind": "getter-applied", "entity": ent.eid,
                       "state": dict(list(state.items())[:8]),

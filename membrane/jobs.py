@@ -16,7 +16,7 @@ such a task should be treated almost like an event").
 A FINISHED JOB IS AN EVENT: back to the chat session that started it as a
 continuation turn ("[membrane] job #N finished ..." -- visible, Argus answers;
 mid-turn it joins the next round like a queued message); a loop's job wakes a
-loop pass on its entity (kind 'job-done'). Depth: a job started inside a
+loop pass on the loop's own entity (kind 'job-done'). Depth: a job started inside a
 job-woken turn of depth >= MAX_DEPTH wakes nothing (no read -> reply -> read
 chains); its result still lands on the entity and in the field.
 """
@@ -133,7 +133,7 @@ def _read(runner, sid, args, call) -> str:
     def refresh():
         try:
             from .watch_agents import entity_read_back
-            res = entity_read_back(srv, ent, by="model")
+            res = entity_read_back(srv, ent, by="model", notify=False)   # the job answers the reader (#188)
         except Exception as e:                    # noqa: BLE001
             res = {"error": repr(e)}
         after = dict((ent.properties or {}).get("script_data") or {})
@@ -170,7 +170,8 @@ def _define(runner, sid, name, args, call) -> str:
         try:
             ent = est.resolve(spec)
             from .watch_agents import entity_read_back
-            res = entity_read_back(srv, ent, force=True, by="model") if ent is not None else {"error": "gone"}
+            res = entity_read_back(srv, ent, force=True, by="model", notify=False) \
+                if ent is not None else {"error": "gone"}           # the job answers the definer (#188)
         except Exception as e:                    # noqa: BLE001
             res = {"error": repr(e)}
         if res.get("error"):
@@ -208,6 +209,12 @@ def deliver(runner, sid: str, n: int, what: str, result: str, secs: float, depth
         pool = getattr(srv, "events_pool", None)
         if pool is None:
             return "no pool"
+        # BACK TO THE READER'S OWN PASS (#188): a goal's loop read the eye and
+        # the result woke a pass on the EYE -- the loop's agent names its
+        # entity ('watch: <eid>'); the job's subject rides only as `what`
+        agent = str((getattr(runner, "_agents", None) or {}).get(sid) or "")
+        own = agent.split(": ", 1)[1].strip() if ": " in agent else ""
+        entity = own or entity
         pool.put({"kind": "job-done", "entity": entity, "job": n, "what": what, "result": result,
                   "secs": secs, "job_depth": depth + 1, "event_id": f"job-{n}", "ts": time.time()})
         return "loop"
