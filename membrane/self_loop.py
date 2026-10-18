@@ -111,8 +111,8 @@ BODY_SKILL = 0.9            # predict it this well and it is my body (zero gap),
 MEET_EVERY = 30             # cycles between self's pushes to chat:out (not every try)
 RUNG7_LOOKS = 20            # paired looks (habit + model) at the other the test reads
 RUNG7_MARGIN = 0.15         # the model must remove this share of habit's Brier error to pass
-RUNG7_EVERY = 30            # cycles between self's llm::call consultations (the caps backstop)
-RUNG7_STALE_S = 600.0       # a model prediction this old no longer answers the next look
+RUNG7_CHECK_S = 120.0       # after a push self checks for the reply this long after (#215)
+RUNG7_STALE_S = 600.0       # a push this old without its reply check asks nothing any more
 CURIOSITY = True            # #212: tilt the reach choice by learning progress (tests switch it off for the base)
 CURIO_WINDOW = 30           # ordinary looks per window: progress = earlier window's error - recent window's
 CURIO_FLOOR = 0.1           # the tilt never goes under this: a mastered or "can't learn" thing is still retried
@@ -374,15 +374,9 @@ def _expect(srv, seed: str) -> dict:
     if c.get("act") == "reach":
         lam, dt = c.get("lam"), c.get("dt")
         c["p"] = (1.0 - float(np.exp(-lam * dt))) if (lam and dt is not None) else _p_changed(srv, c["eid"])
-        eid = c["eid"]
-        if _available(srv, 7) and eid == _rt(srv).get("other"):
-            c["p_llm"] = _llm_pred(srv, eid)            # the model's read of the next answer
-            try:
-                n = int(seed or 0)
-            except (TypeError, ValueError):
-                n = 0
-            if n % RUNG7_EVERY == 1:
-                _ask_llm(srv, eid, _rung7_prompt(srv, eid))   # ask for the next look
+        push = c.get("reply")                           # rung 7: this look answers a push's question
+        if push is not None and push.get("asked"):
+            c["p_llm"] = _llm_pred(srv, c["eid"], float(push["ts"]))   # the model's read, asked at the push
         return {"rc": 0, "text": "expected"}
     w = _expected_push(srv, c["pos"])
     if c.get("aim") is not None:
@@ -451,16 +445,17 @@ def _push_chat(srv, text: str, person: str = ""):
     _CIO.on_edit(srv, ent, by="self")
 
 
-def _llm_pred(srv, eid: str) -> float | None:
-    """THE SEAM (rung 7): the model's prediction of the next answer, already
-    landed on the entity as a one-line llm_answer. None when absent, stale or
-    not a number. Tests swap it for a deterministic stand-in."""
+def _llm_pred(srv, eid: str, since: float) -> float | None:
+    """THE SEAM (rung 7): the model's prediction for this look, landed on the
+    entity as a one-line llm_answer SINCE the push that asked it (an older
+    answer answered an older question). None when absent, older or not a
+    number. Tests swap it for a deterministic stand-in."""
     est = getattr(srv, "entity_store", None)
     doc = (est.docs or {}).get(eid) if est is not None else None
     ans = (doc.properties or {}).get("llm_answer") if doc is not None else None
     if not isinstance(ans, dict):
         return None
-    if time.time() - float(ans.get("ts") or 0) > RUNG7_STALE_S:   # stale: not this look
+    if float(ans.get("ts") or 0) < since:             # answered before this push: not this question
         return None
     import re
     m = re.search(r"(\d+(?:\.\d+)?)", str(ans.get("text") or ""))
@@ -469,24 +464,61 @@ def _llm_pred(srv, eid: str) -> float | None:
     return min(1.0, max(0.0, float(m.group(1))))
 
 
-def _ask_llm(srv, eid: str, prompt: str) -> None:
-    """THE SEAM (rung 7): ask the coprocessor to predict the next answer. The
-    real llm::call is async -- it queues and returns; the verdict lands on the
-    entity as llm_answer for the next look (read by _llm_pred)."""
+def _ask_llm(srv, eid: str, prompt: str) -> dict:
+    """THE SEAM (rung 7): ask the coprocessor to predict the reply check. The
+    real llm::call is async -- it queues and returns at once ({rc, text});
+    the verdict lands on the entity as llm_answer for the reply check (read
+    by _llm_pred). Its caps (per caller, per hour, the switch, the pause) are
+    llm.request's own."""
     from . import llm as _LLM
-    _LLM.request(srv, prompt, about=eid, caller="self", readonly=True)
+    return _LLM.request(srv, prompt, about=eid, caller="self", readonly=True)
 
 
-def _rung7_prompt(srv, eid: str) -> str:
-    """What to ask the coprocessor: predict the other's next answer from its
-    recent looks."""
-    recent = [r for r in _read(srv)
-              if r.get("kind") == "reach" and r.get("eid") == eid
-              and r.get("answer") in ("changed", "unchanged")][-10:]
-    hist = ", ".join(r["answer"] for r in recent) or "(no looks yet)"
-    return (f"You are predicting {eid}'s next answer. Its recent answers "
-            f"(oldest first): {hist}. Reply with ONE number, the probability "
-            "(0..1) the next answer is 'changed'.")
+def _queued(r) -> bool:
+    """A consult that really went out (an echo or a refusal asked nothing)."""
+    return isinstance(r, dict) and r.get("rc") == 0 and str(r.get("text") or "").startswith("queued")
+
+
+def _first_look_after(recs: list[dict], eid: str, ts: float):
+    return next((r for r in recs if r.get("kind") == "reach" and r.get("eid") == eid
+                 and float(r.get("ts") or 0) > ts), None)
+
+
+def _pending(recs: list[dict], now: float) -> dict | None:
+    """THE QUESTION IN FLIGHT (#215): the latest push, while self has not yet
+    looked at its other since and it is under RUNG7_STALE_S old -- read from
+    the record, so it survives a restart. None otherwise."""
+    push = next((r for r in reversed(recs) if r.get("kind") == "push"), None)
+    if push is None or not push.get("to"):
+        return None
+    if now - float(push.get("ts") or 0) > RUNG7_STALE_S:
+        return None
+    if _first_look_after(recs, push["to"], float(push.get("ts") or 0)) is not None:
+        return None
+    return push
+
+
+def _rung7_prompt(srv, eid: str, n: int, now: float) -> str:
+    """What to ask the coprocessor at a push: will the other have spoken by
+    self's reply check? Only facts self already holds in its record --
+    timings and changed/unchanged answers, never the chat's words."""
+    recs = _read(srv)
+    hist = []
+    for p in [r for r in recs if r.get("kind") == "push" and r.get("to") == eid][-10:]:
+        look = _first_look_after(recs, eid, float(p["ts"]))
+        if look is not None and look.get("answer") in ("changed", "unchanged"):
+            hist.append(f"look {round(float(look['ts']) - float(p['ts']))}s after: "
+                        + ("they had spoken" if look["answer"] == "changed" else "silent"))
+    looks = [r for r in recs if r.get("kind") == "reach" and r.get("eid") == eid
+             and r.get("answer") in ("changed", "unchanged")]
+    spoke = next((r for r in reversed(looks) if r["answer"] == "changed"), None)
+    last = (f"Self last saw them speak {round(now - float(spoke['ts']))}s ago. " if spoke
+            else "Self has not seen them speak yet. ")
+    return (f"You are predicting whether {eid} (the person self talks to) will have spoken by "
+            f"self's next look at them. Self just pushed a line to them (push {n}); its next look "
+            f"comes about {round(RUNG7_CHECK_S)}s from now. " + last
+            + "After self's earlier pushes (oldest first): " + ("; ".join(hist) or "(none yet)") + ". "
+            + "Reply with ONE number, the probability (0..1) that they will have spoken by that look.")
 
 
 def _meet(srv, seed: str, now: float | None = None) -> None:
@@ -497,7 +529,11 @@ def _meet(srv, seed: str, now: float | None = None) -> None:
     THE OTHER is the person who actually chats (#208): chat_io's own
     recent_person (the owner of the newest owned chat), the operator only on
     a seat with no people. It is resolved once per meet, so the push target
-    and the reach target move together when the person changes."""
+    and the reach target move together when the person changes.
+
+    RUNG 7 (#215): once rung 7 is available, each push asks the model once
+    (async, capped by llm.request) whether the other will have spoken by
+    self's reply check; the push line records whether it went out (`asked`)."""
     try:
         n = int(seed or 0)
     except (TypeError, ValueError):
@@ -512,8 +548,10 @@ def _meet(srv, seed: str, now: float | None = None) -> None:
     to = resp.eid if resp is not None else _CIO.name_in(person)
     _rt(srv)["other"] = to                                  # rung 7 predicts this one
     _push_chat(srv, "self is here", person)
-    _append(srv, {"ts": now, "kind": "push", "n": n,
-                  "eid": _CIO.name_of(person), "to": to})
+    rec = {"ts": now, "kind": "push", "n": n, "eid": _CIO.name_of(person), "to": to}
+    if _available(srv, 7):                                  # rung 7: ask the model AT the push (#215)
+        rec["asked"] = _queued(_ask_llm(srv, to, _rung7_prompt(srv, to, n, now)))
+    _append(srv, rec)
 
 
 def _reach(srv, target: str) -> dict:
@@ -735,7 +773,18 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
     kinds = _kinds(recs) if steer else {}
     rng = random.Random(f"reach:{n}")
     lam = None
-    if timed:                                      # rung 4: look when a change has become likely
+    reply = _pending(recs, now) if _available(srv, 7) else None
+    if reply is not None and reply["to"] not in targets:
+        reply = None
+    if reply is not None and now - float(reply["ts"]) < RUNG7_CHECK_S:
+        targets = [e for e in targets if e != reply["to"]]   # wait for the reply before looking
+        reply = None
+        if not targets:
+            return
+    if reply is not None:                          # rung 7: after I speak I check for the reply
+        eid = reply["to"]
+        lam = _lam(recs, eid) if timed else None
+    elif timed:                                    # rung 4: look when a change has become likely
         eid, lam = _due(srv, recs, targets, kinds, now, rng)
         if eid is None:
             rt = _rt(srv)
@@ -755,7 +804,7 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
     inside = bool(au and au.get("rung", 2) == 2 and au["eid"] == eid)
     in5 = bool(au and au.get("rung") == 5 and au["eid"] == eid)
     from .night import method_call
-    _ctx.cycle = {"srv": srv, "act": "reach", "eid": eid, "audit": inside, "now": now,
+    _ctx.cycle = {"srv": srv, "act": "reach", "eid": eid, "audit": inside, "now": now, "reply": reply,
                   "lam": lam, "dt": (now - float(last)) if last is not None else None}
     try:
         outs = []
@@ -774,9 +823,11 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
     rec = {"ts": now, "kind": "reach", "n": n, "eid": eid, "p": round(c["p"], 4),
            "answer": c["answer"], "why": c["why"],
            "dt": (round(now - float(last), 3) if last is not None else None)}
+    if reply is not None:                                # rung 7: the reply check after a push
+        rec["reply"] = True
     if c.get("p_llm") is not None:                       # rung 7: the model's read, same look
         rec["p_llm"] = round(c["p_llm"], 4)
-    if timed:
+    if timed and reply is None:                          # a reply check is not a patience-timed look
         rec["timed"] = True
         if lam:
             rec["lam"] = round(lam, 6)

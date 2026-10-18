@@ -166,7 +166,7 @@ has passed, it is under the limit, and its test passes on the record.
 | **4 · patience** | fits each thing's rate of change in time over its last 30 looks; looks again once a change is 60% likely (waits up to 30 min); idles when nothing is due | things with a steady rhythm | **timed**: 30 timed looks; **news**: of its last 40, they find a change ≥ half the time, or 0.15 more often than its fixed-pace looks did (whichever is easier); **calibration**: its mean predicted chance is within 0.1 of the share that found news | keep getters' rhythms honest; don't make a thing change only when self looks |
 | **5 · notice the world changed** | compares its last 3–5 looks at a thing with its long memory; a window far from it (> 0.4) and unlikely under it (binomial tail < 0.02) is a **shift** ("went still" / "moves again"), and it re-learns from there | a thing it already classes as moving | **looks**: 20 looks with noticing on; **audit**: membrane pauses the surest mover for 5 of self's looks (cap 1 h), then restarts it for 5 more (cap 3 h); self must flag "went still" during the pause and "moves again" after | nothing: the audit runs itself. Don't restart the seat mid-audit if you can help it |
 | **6 · meet an other** | every 30 cycles pushes the line "self is here" to chat, and reads `chat:in:<person>`, which ticks each time the person sends a message | **a person who chats** with the seat, irregularly | **pushes**: 10; **heard**: 20 answered looks at the other; **split**: the other is classed **other** (its Brier skill < 0.9: self can't predict it perfectly). A partner who never answers is predicted perfectly, classes as *body*, and the rung stays shut | chat with the seat — normally, whenever you like. Your messages are the answers |
-| **7 · understand an other** | when it looks at the other, also reads the seat model's one-line prediction (`llm::call`, read-only) of whether the other has answered, beside its own habit | the seat's model reachable for background calls; the other still chatting | **looks**: 20 paired looks (habit and model on the same look); **skill**: the model removes ≥ 15% of habit's Brier error over them | keep chatting; keep the seat's model up |
+| **7 · understand an other** | at each push it asks the seat's model (`llm::call`, read-only, one consult per push) how likely the other is to have spoken by its next look; it holds off looking at the other for 2 minutes, then checks for the reply, and that look pairs the model's prediction with its own habit | the seat's model reachable for background calls; the other answering its pushes | **looks**: 20 paired looks (one per push: habit and model on the reply check); **skill**: the model removes ≥ 15% of habit's Brier error over them | answer self's 🌱 lines (or just chat); keep the seat's model up |
 
 At the default pace, rung 6's ten pushes alone take ~50 minutes; rungs 2–5
 usually take hours, and the audits run on their own schedule.
@@ -285,12 +285,18 @@ real person earns it (10 pushes, 20 answered looks, classed `other`). The
 panel's `meets.other` names the person once self has pushed to them — at most
 one meet (~5 minutes) after a restart.
 
-**Rung 7 waits on `looks` for a long time.** A paired look needs the model's
-answer to be fresh (under 10 minutes) when self next looks at the other, and
-self asks the model at most once every 30 cycles, on a cycle where it looks at
-the other. A still or silent other is looked at rarely (rung 4's patience),
-so pairs accumulate slowly. A live, chatting other and a working background
-model are what move it.
+**Rung 7 waits on `looks` for a long time.** It earns at most one paired
+look per push, and self pushes once every 30 cycles (~5 minutes at the default
+pace), so 20 pairs take at least ~100 minutes of running. At each push self
+asks the model whether the other will have spoken by its next look, waits 2
+minutes, then checks for the reply: that look is the pair. A push yields no
+pair when the model was not asked (the push line's `asked` is `false`: the
+hourly `llm::call` budget is spent, the model is switched off, or the seat is
+paused), when the model's answer had not landed by the reply check, or when
+the check didn't happen within 10 minutes of the push. The pending question
+lives in the record, so a restart doesn't lose it. A working background model
+and an other who sometimes answers are what move it; an other who never
+answers can't be predicted *better* than habit, which already says "silent".
 
 **`held`.** Three cycles failed in a row (the record's `error` lines say why).
 Fix the cause, then re-choose the limit to clear it.

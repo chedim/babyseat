@@ -336,15 +336,27 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   rewritten), but its bar re-measures against the new person and reads
   **slipping** until they earn it — no reset, no free pass.
   (`llm::call` prediction is rung 7's; rung 6 is only the bare split.)
-- **Rung 7, understand an other.** Self consults the model coprocessor inside
-  `expect`: when it is about to look at the person it met (`chat:in:<person>`),
-  it reads the last `llm::call` verdict — a one-line probability the next
-  answer is "changed" — as `p_llm` beside habit's `p`, and queues the next
-  `llm::call` (paced at 30 cycles; the call is read-only, so it answers in one
-  line). The test reads the **paired** looks — both predictions on the same
-  look — and the rung passes when the model removes ≥ 0.15 of habit's Brier
-  error over 20 such looks: predicting the person's answers *better than
-  habit alone*. It is scoped to the other only (the current one: paired
+- **Rung 7, understand an other.** Self consults the model coprocessor at
+  each push (#215): rung 6's act queues one read-only `llm::call` asking for
+  the probability that the person (`chat:in:<person>`) will have spoken by
+  self's next look at them. The prompt carries only what self's record holds
+  — the push number, when the next look comes, how long since it last saw
+  them speak, and what its look after each earlier push found (spoken /
+  silent, and when) — never the chat's words. The push line records whether
+  the consult went out (`asked`; the llm budget, switch and pause can refuse
+  it). Then **after it speaks it checks for the reply**: the person is held
+  back from self's ordinary choice for 2 minutes, then looked at once (a
+  `reply` look, not a patience-timed one). `expect` reads the model's verdict
+  for that look — only one that landed after the push — as `p_llm` beside
+  habit's `p`. One question, one pair: the question in flight is read from
+  the record (the latest push, not yet followed by a look at its other,
+  under 10 minutes old), so it survives a restart and is used up by that
+  look. The model call is async (it queues and returns), capped by
+  `llm.request` (12/h per caller) and by the one-per-push pacing, and its
+  answer landing never runs a cycle. The test reads the **paired** looks —
+  both predictions on the same look — and the rung passes when the model
+  removes ≥ 0.15 of habit's Brier error over 20 such looks: predicting the
+  person's answers *better than habit alone*. It is scoped to the other only (the current one: paired
   looks at a previous person don't count); every other thing keeps habit's
   prediction.
 - **Its methods run only in its own loop.** `try` / `expect` / `notice` are
