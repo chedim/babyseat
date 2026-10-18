@@ -456,9 +456,16 @@ function selfView(st) {
   const goal = s.next == null ? "top built rung" : (s.next > lim ? "held at " + lim : "→ " + s.next);
   const status = s.held ? "🥀 held: re-choose to clear"
     : "rung " + (s.rung || 0) + " ✓ · " + pct + "% " + goal + (s.waiting_on ? " (" + s.waiting_on + ")" : "") + (s.slipping ? " · slipping" : "");
+  // #217: rung 7's diagnostics -- how many asked pushes became pairs, and the
+  // model's Brier against habit's (lower is better; the model must beat habit)
+  const r7 = s.rung7 || {};
+  const f2 = (x) => (x == null ? "–" : Number(x).toFixed(2));
+  const r7s = r7.asked ? " · rung 7: " + (r7.paired || 0) + " of " + (r7.checked || 0) + " asked pushes paired"
+    + (r7.brier_model != null ? ", Brier model " + f2(r7.brier_model) + " vs habit " + f2(r7.brier_habit) : "")
+    + (r7.base_rate != null ? ", base rate " + f2(r7.base_rate) : "") : "";
   return { loaded, limit: lim, options, status,
            title: "self (#161): " + s.mode + " · " + rung + " · " + pct + "% toward the next" + why + slip + nxt
-                  + " · may grow up to rung " + lim + " · " + (s.cycles || 0) + " cycles" };
+                  + " · may grow up to rung " + lim + " · " + (s.cycles || 0) + " cycles" + r7s };
 }
 
 /** Fill a <select> from selfView's options -- rebuilt only when they change

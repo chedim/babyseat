@@ -113,6 +113,8 @@ RUNG7_LOOKS = 20            # paired looks (habit + model) at the other the test
 RUNG7_MARGIN = 0.15         # the model must remove this share of habit's Brier error to pass
 RUNG7_CHECK_S = 120.0       # after a push self checks for the reply this long after (#215)
 RUNG7_STALE_S = 600.0       # a push this old without its reply check asks nothing any more
+RUNG7_GRACE_S = 60.0        # the reply check waits up to this much longer for an answer still in flight (#217)
+RUNG7_HISTORY = 8           # recent reply checks the question shows the model (#217)
 CURIOSITY = True            # #212: tilt the reach choice by learning progress (tests switch it off for the base)
 CURIO_WINDOW = 30           # ordinary looks per window: progress = earlier window's error - recent window's
 CURIO_FLOOR = 0.1           # the tilt never goes under this: a mastered or "can't learn" thing is still retried
@@ -376,7 +378,7 @@ def _expect(srv, seed: str) -> dict:
         c["p"] = (1.0 - float(np.exp(-lam * dt))) if (lam and dt is not None) else _p_changed(srv, c["eid"])
         push = c.get("reply")                           # rung 7: this look answers a push's question
         if push is not None and push.get("asked"):
-            c["p_llm"] = _llm_pred(srv, c["eid"], float(push["ts"]))   # the model's read, asked at the push
+            c["p_llm"] = _llm_pred(srv, c["eid"], float(push["ts"]), until=c.get("now"))   # landed by this look
         return {"rc": 0, "text": "expected"}
     w = _expected_push(srv, c["pos"])
     if c.get("aim") is not None:
@@ -445,23 +447,47 @@ def _push_chat(srv, text: str, person: str = ""):
     _CIO.on_edit(srv, ent, by="self")
 
 
-def _llm_pred(srv, eid: str, since: float) -> float | None:
+def _parse_p(text) -> float | None:
+    """A probability out of the model's one line (#217): the first decimal in
+    0..1 or percent, read after VERDICT when it says one. Prose is not a
+    probability -- a line with no VERDICT counts only when it is short (live:
+    "Membrane is a tool ...", "a living entity (#161)" -- off-task answers),
+    and a number above 1 that is no percent (120 s, #161) is skipped."""
+    t = str(text or "")
+    low = t.lower()
+    i = low.find("verdict")
+    if i >= 0:
+        t = t[i + len("verdict"):]
+    elif len(t.strip()) > 40:
+        return None
+    import re
+    for m in re.finditer(r"(?<![\w.#])(\d+(?:\.\d+)?|\.\d+)\s*(%|percent)?(?![\w.])", t):
+        x = float(m.group(1))
+        if m.group(2):
+            if x <= 100.0:
+                return x / 100.0
+        elif x <= 1.0:
+            return x
+    return None
+
+
+def _llm_pred(srv, eid: str, since: float, until: float | None = None) -> float | None:
     """THE SEAM (rung 7): the model's prediction for this look, landed on the
     entity as a one-line llm_answer SINCE the push that asked it (an older
-    answer answered an older question). None when absent, older or not a
-    number. Tests swap it for a deterministic stand-in."""
+    answer answered an older question) and by `until` (the look). None when
+    absent, older, later or not a probability. Tests swap it for a
+    deterministic stand-in."""
     est = getattr(srv, "entity_store", None)
     doc = (est.docs or {}).get(eid) if est is not None else None
     ans = (doc.properties or {}).get("llm_answer") if doc is not None else None
     if not isinstance(ans, dict):
         return None
-    if float(ans.get("ts") or 0) < since:             # answered before this push: not this question
+    ts = float(ans.get("ts") or 0)
+    if ts < since:                                     # answered before this push: not this question
         return None
-    import re
-    m = re.search(r"(\d+(?:\.\d+)?)", str(ans.get("text") or ""))
-    if m is None:
+    if until is not None and ts > until:               # not landed by the look (#217)
         return None
-    return min(1.0, max(0.0, float(m.group(1))))
+    return _parse_p(ans.get("text"))
 
 
 def _ask_llm(srv, eid: str, prompt: str) -> dict:
@@ -498,27 +524,71 @@ def _pending(recs: list[dict], now: float) -> dict | None:
     return push
 
 
+def _reply_checks(recs: list[dict], eid: str) -> list[dict]:
+    """Self's reply checks at `eid` that got an answer -- the looks a push's
+    question is about (one horizon: RUNG7_CHECK_S after the push)."""
+    return [r for r in recs if r.get("kind") == "reach" and r.get("eid") == eid and r.get("reply")
+            and not r.get("audit") and r.get("answer") in ("changed", "unchanged")]
+
+
+def _base_rate(recs: list[dict], eid: str) -> tuple[float, int, int]:
+    """How often the other had spoken by the reply check: (rate, k, n), with a
+    Jeffreys prior -- 0.5 before any check, never 0/0 (#217)."""
+    rc = _reply_checks(recs, eid)
+    k = sum(1 for r in rc if r["answer"] == "changed")
+    return (k + 0.5) / (len(rc) + 1.0), k, len(rc)
+
+
+def _hold_reply(srv, push: dict, now: float) -> bool:
+    """Not yet time for the reply check: under RUNG7_CHECK_S after the push --
+    or, when the push asked the model and no answer has landed, under
+    RUNG7_CHECK_S + RUNG7_GRACE_S (#217: a slow turn's answer still pairs).
+    Self only holds the other back; the cycle goes on with other targets."""
+    age = now - float(push.get("ts") or 0)
+    if age < RUNG7_CHECK_S:
+        return True
+    if push.get("asked") and age < RUNG7_CHECK_S + RUNG7_GRACE_S:
+        return _llm_pred(srv, push["to"], float(push["ts"]), until=now) is None
+    return False
+
+
 def _rung7_prompt(srv, eid: str, n: int, now: float) -> str:
     """What to ask the coprocessor at a push: will the other have spoken by
     self's reply check? Only facts self already holds in its record --
-    timings and changed/unchanged answers, never the chat's words."""
+    timings and changed/unchanged answers, never the chat's words.
+
+    CALIBRATED (#217): live, the model answered 0.98-0.99 to reply checks
+    that went 3 of 7. It now gets the BASE RATE (the share of reply checks
+    the other had answered, Jeffreys prior) and the recent reply checks only
+    -- looks long after a push are another horizon and read as "they always
+    answer" -- and is told a confident miss costs (the Brier score)."""
     recs = _read(srv)
-    hist = []
-    for p in [r for r in recs if r.get("kind") == "push" and r.get("to") == eid][-10:]:
-        look = _first_look_after(recs, eid, float(p["ts"]))
-        if look is not None and look.get("answer") in ("changed", "unchanged"):
-            hist.append(f"look {round(float(look['ts']) - float(p['ts']))}s after: "
-                        + ("they had spoken" if look["answer"] == "changed" else "silent"))
+    rate, k, m = _base_rate(recs, eid)
+    rc = _reply_checks(recs, eid)[-RUNG7_HISTORY:]
+    lines = []
+    for r in rc:
+        push = next((p for p in reversed(recs) if p.get("kind") == "push" and p.get("to") == eid
+                     and float(p.get("ts") or 0) < float(r["ts"])), None)
+        after = f"{round(float(r['ts']) - float(push['ts']))}s after" if push is not None else "after"
+        lines.append(f"{after}: " + ("they had spoken" if r["answer"] == "changed" else "silent"))
+    hist = "; ".join(lines) or "(none yet)"
     looks = [r for r in recs if r.get("kind") == "reach" and r.get("eid") == eid
              and r.get("answer") in ("changed", "unchanged")]
     spoke = next((r for r in reversed(looks) if r["answer"] == "changed"), None)
     last = (f"Self last saw them speak {round(now - float(spoke['ts']))}s ago. " if spoke
             else "Self has not seen them speak yet. ")
     return (f"You are predicting whether {eid} (the person self talks to) will have spoken by "
-            f"self's next look at them. Self just pushed a line to them (push {n}); its next look "
-            f"comes about {round(RUNG7_CHECK_S)}s from now. " + last
-            + "After self's earlier pushes (oldest first): " + ("; ".join(hist) or "(none yet)") + ". "
-            + "Reply with ONE number, the probability (0..1) that they will have spoken by that look.")
+            f"self's next look at them (its reply check). Self just pushed a line to them (push {n}); "
+            f"the reply check comes about {round(RUNG7_CHECK_S)}s from now "
+            f"(at most {round(RUNG7_CHECK_S + RUNG7_GRACE_S)}s). "
+            f"Base rate: they had spoken by the reply check after {k} of {m} earlier pushes -- "
+            f"base rate {rate:.2f} (with a small prior). "
+            f"Recent reply checks (oldest first): {hist}. " + last
+            + "Give ONE calibrated probability (0..1) that they will have spoken by that check. "
+            "You are scored by the Brier score, (p - outcome)^2: a confident wrong answer is penalized "
+            "heavily (0.98 that misses costs 0.96), so stay near the base rate unless these facts give "
+            "a real reason to move. Don't use tools -- everything you know is here. "
+            "Answer in one line: VERDICT: <probability>")
 
 
 def _meet(srv, seed: str, now: float | None = None) -> None:
@@ -776,7 +846,7 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
     reply = _pending(recs, now) if _available(srv, 7) else None
     if reply is not None and reply["to"] not in targets:
         reply = None
-    if reply is not None and now - float(reply["ts"]) < RUNG7_CHECK_S:
+    if reply is not None and _hold_reply(srv, reply, now):
         targets = [e for e in targets if e != reply["to"]]   # wait for the reply before looking
         reply = None
         if not targets:
@@ -1438,7 +1508,34 @@ def status(srv) -> dict:
             "split": {e: s for e, s in spl.items() if s != "unknown"},
             "meets": meets,
             "steer": _steer_stats(recs),
-            "curiosity": _curiosity_stats(recs)}
+            "curiosity": _curiosity_stats(recs),
+            "rung7": _rung7_stats(recs)}
+
+
+def _rung7_stats(recs: list[dict]) -> dict:
+    """For the operator (#217): rung 7 at the current other -- the pushes that
+    asked the model, those whose reply check came (`checked`), those that made
+    a pair (habit p and model p on that look), the pair rate per checked ask,
+    the model's and habit's Brier over the pairs rung 7 reads, and the base
+    rate the model is told."""
+    to = _other(recs)
+    asked = [r for r in recs if r.get("kind") == "push" and r.get("asked") and r.get("to") == to]
+    checked = paired = 0
+    for p in asked:
+        look = _first_look_after(recs, to, float(p.get("ts") or 0))
+        if look is None:
+            continue
+        checked += 1
+        paired += int(look.get("p_llm") is not None and look.get("answer") in ("changed", "unchanged"))
+    pairs = [r for r in recs if r.get("kind") == "reach" and not r.get("audit") and r.get("eid") == to
+             and r.get("answer") in ("changed", "unchanged") and r.get("p_llm") is not None][-RUNG7_LOOKS:]
+    a = [1.0 if r["answer"] == "changed" else 0.0 for r in pairs]
+    bh = round(sum((x - r["p"]) ** 2 for x, r in zip(a, pairs)) / len(pairs), 4) if pairs else None
+    bm = round(sum((x - r["p_llm"]) ** 2 for x, r in zip(a, pairs)) / len(pairs), 4) if pairs else None
+    return {"asked": len(asked), "checked": checked, "paired": paired,
+            "pair_rate": round(paired / checked, 4) if checked else None,
+            "brier_model": bm, "brier_habit": bh,
+            "base_rate": round(_base_rate(recs, to)[0], 4) if to else None}
 
 
 def _curiosity_stats(recs: list[dict], top: int = 3) -> list[dict]:

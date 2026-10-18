@@ -340,14 +340,22 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   each push (#215): rung 6's act queues one read-only `llm::call` asking for
   the probability that the person (`chat:in:<person>`) will have spoken by
   self's next look at them. The prompt carries only what self's record holds
-  — the push number, when the next look comes, how long since it last saw
-  them speak, and what its look after each earlier push found (spoken /
-  silent, and when) — never the chat's words. The push line records whether
+  — the push number, when the reply check comes, how long since it last saw
+  them speak, the **base rate** (the share of earlier reply checks that found
+  them spoken, `(k + ½)/(n + 1)`) and what the last 8 reply checks found —
+  never the chat's words. It asks for ONE calibrated probability, says the
+  Brier score penalizes a confident miss, says no tools, and wants
+  `VERDICT: <p>` (#217: live, without a base rate the model answered
+  0.85–0.99 to checks that went 3 of 7, and some answers were off-task prose).
+  The verdict is read as a decimal in 0..1 or a percent — a stray `#161` or
+  `120s` is not a probability. The push line records whether
   the consult went out (`asked`; the llm budget, switch and pause can refuse
   it). Then **after it speaks it checks for the reply**: the person is held
   back from self's ordinary choice for 2 minutes, then looked at once (a
-  `reply` look, not a patience-timed one). `expect` reads the model's verdict
-  for that look — only one that landed after the push — as `p_llm` beside
+  `reply` look, not a patience-timed one). While the push asked and no answer
+  has landed, it waits up to `RUNG7_GRACE_S` (60 s) more — the question rides
+  a full read-only loop turn, 2–75 s on the live seat. `expect` reads the model's verdict
+  for that look — only one that landed after the push and by the look — as `p_llm` beside
   habit's `p`. One question, one pair: the question in flight is read from
   the record (the latest push, not yet followed by a look at its other,
   under 10 minutes old), so it survives a restart and is used up by that
@@ -356,7 +364,9 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   answer landing never runs a cycle. The test reads the **paired** looks —
   both predictions on the same look — and the rung passes when the model
   removes ≥ 0.15 of habit's Brier error over 20 such looks: predicting the
-  person's answers *better than habit alone*. It is scoped to the other only (the current one: paired
+  person's answers *better than habit alone*. `status()['rung7']` shows the
+  operator `asked` / `checked` / `paired`, `pair_rate`, and the model's and
+  habit's Brier over the pairs (the 🌱 tooltip too). It is scoped to the other only (the current one: paired
   looks at a previous person don't count); every other thing keeps habit's
   prediction.
 - **Its methods run only in its own loop.** `try` / `expect` / `notice` are
