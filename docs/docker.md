@@ -77,6 +77,9 @@ proxy answers `GET /membrane/state` (the healthcheck allows a 90 s start period)
 | `MEMBRANE_BACKEND` | `--backend` | `http://host.docker.internal:11434` | the Ollama server the seat thinks with |
 | `MEMBRANE_MODEL` | `--model` | the best chat model Ollama lists | the chat model |
 | `MEMBRANE_EMBED_MODEL` | `--embed-model` | a known embedding model Ollama has | the field's embedder; chat fails without one. Keep it once the field has grown |
+| `MEMBRANE_JWT_SECRET` | | unset (JWT mode off) | turns on [JWT mode](auth.md): every request on both ports needs a token. At least 32 bytes |
+| `MEMBRANE_JWT_SECRET_FILE` | | unset | the secret read from a mounted file instead (a Docker / Kubernetes secret); set one or the other |
+| `MEMBRANE_JWT_ISSUER` / `MEMBRANE_JWT_AUDIENCE` | | unset | optional `iss` / `aud` every token must carry |
 
 Set in the image, all `1`: `MEMBRANE_NO_UPDATE_CHECK` (no boot-time update
 check; upgrade by pulling a newer tag), `MEMBRANE_NO_AUTOINSTALL` (no skills
@@ -108,12 +111,28 @@ use; a bind mount must be writable by uid 10001.
 Both are fixed inside the container (outside one the seat walks up to the next
 free port); remap them with `-p`, e.g. `-p 14096:4096`.
 
-**Neither port has authentication today.** The proxy's write and exec routes
-and the serve API answer anyone who can reach them. Publish the ports only on
-a network you trust, or put a reverse proxy with its own login in front (the
-web UI refuses requests a reverse proxy forwarded; see
-[standalone.md](standalone.md#who-can-reach-it)). An authenticated mode for
-the container is tracked in issue #203.
+**Out of the box neither port has authentication.** The proxy's write and
+exec routes and the serve API answer anyone who can reach them. Publish the
+ports only on a network you trust, or turn on JWT mode: give the container a
+secret and every request on both ports needs a token.
+
+```bash
+docker run -d --name membrane \
+  -p 4096:4096 -p 11500:11500 -v membrane-data:/data \
+  -e MEMBRANE_JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')" \
+  -e MEMBRANE_BACKEND=http://host.docker.internal:11434 \
+  --stop-timeout 60 chedim/membrane:latest
+
+# a token for a person (exec inherits the container's environment)
+docker exec membrane membrane token mint --sub alice --name Alice
+```
+
+Keep the secret somewhere you can find it again: a new secret invalidates
+every token. Prefer `MEMBRANE_JWT_SECRET_FILE` with a mounted secret over a
+plain `-e` in shared environments. An OpenAI-compatible client sends the token
+as its API key (`Authorization: Bearer <token>`); the web UI asks for it once
+and keeps it in a cookie. With a valid token the UI also works behind a
+reverse proxy. Details: [auth.md](auth.md).
 
 ## Commands
 
