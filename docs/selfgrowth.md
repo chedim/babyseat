@@ -241,14 +241,17 @@ showed rung 6 passed and slipping, rung 7's bar at 0% waiting on `looks`, 258
 pushes, and `heard_age` ≈ 159 000 s (44 h) for `chat:in:operator`, while
 `chat:in:roomata-estorsky`, the person actually chatting, was classed `other`.
 
-That is [#208](https://github.com/chedim/membrane/issues/208): **self should
-meet the most recently active person** — the owner of the newest chat — and
-follow when that changes, falling back to `operator` only on a seat with no
-people. *Until #208 lands*, rungs 6–7 push to `chat:out:operator` and listen
-on `chat:in:operator`: on a seat whose person has a name, nobody answers, and
-the line lands as an ordinary assistant message from model "membrane". The
-check is `meets.other` in the panel: once it names the person who chats, the
-fix is in.
+That was [#208](https://github.com/chedim/membrane/issues/208), fixed in
+#209: rungs 6–7 were hardcoded to `chat:out:operator` / `chat:in:operator`, so
+on a seat whose person has a name nobody ever answered. Self now meets **the
+most recently active person** (the owner of the newest chat), follows when
+that changes, and falls back to `operator` only on a seat with no people. Its
+line starts with 🌱 and the chat shows it as **🌱 self**, so you can tell it
+from the seat and answer it. Rungs 6–7 count only the current other, so a seat
+that "passed" rung 6 against the empty slot shows it **slipping** until the
+real person earns it (10 pushes, 20 answered looks, classed `other`). The
+panel's `meets.other` names the person once self has pushed to them — at most
+one meet (~5 minutes) after a restart.
 
 **Rung 7 waits on `looks` for a long time.** A paired look needs the model's
 answer to be fresh (under 10 minutes) when self next looks at the other, and
