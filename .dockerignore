@@ -1,0 +1,14 @@
+# ALLOWLIST build context (#202): the image is a public distribution, and a
+# dev tree's root holds .membrane/ (the field, audit logs, serve-auth.json),
+# field dumps and logs. Exclude everything, then re-include only what
+# `pip install .` and the entrypoint need. Add a path here only if the image
+# truly needs it -- never a root wildcard.
+*
+!pyproject.toml
+!README.md
+!LICENSE
+!membrane/**
+!docker/**
+# never ship bytecode caches from a dev tree
+**/__pycache__
+**/*.pyc

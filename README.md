@@ -225,6 +225,23 @@ MEMBRANE_REPO=/path/to/membrane bash install.sh
 - The **viewer** ships inside the package (three.js + both pixel fonts are
   vendored, served same-origin) — no CDN, no node, no browser install.
 
+### Docker
+
+```bash
+docker run -d -p 4096:4096 -p 11500:11500 -v membrane-data:/data \
+  -e MEMBRANE_EMBED_MODEL=mxbai-embed-large --stop-timeout 60 \
+  chedim/membrane:latest
+```
+
+The public image `chedim/membrane` (amd64 + arm64, pushed on every release)
+runs `membrane standalone`: the web UI and serve API on :4096, the
+OpenAI-compatible proxy on :11500, Ollama reached at
+`http://host.docker.internal:11434` by default (on Linux add
+`--add-host=host.docker.internal:host-gateway`). The field lives on the
+`/data` volume. The ports carry no authentication: publish them only on a
+network you trust. Recipes, env and volume details:
+[docs/docker.md](docs/docker.md).
+
 ### First run in a project
 
 ```bash
@@ -403,6 +420,7 @@ lift "who 1,500 never-seen mentions were about" from MRR **0.210 → 0.539**
 | Doc | What's in it |
 |---|---|
 | [docs/standalone.md](docs/standalone.md) | **Standalone mode**: the web UI, the first run and the name, who can reach it, voice, `settings.json`, updates |
+| [docs/docker.md](docs/docker.md) | **membrane in Docker**: the public image `chedim/membrane`, run recipes (Docker Desktop, Linux, Compose), env, the `/data` volume, ports, stopping |
 | [docs/home-assistant.md](docs/home-assistant.md) | **Membrane in Home Assistant** (HACS): setup, the UI takeover, the Assist agent and sensors, what the seat may do in the house |
 | [docs/entity-field.md](docs/entity-field.md) | **THE FIELD.** Events → entities → readers; the update rule; relations and claims; injection (full block / state diff); the gate + replay A/B; storage, sharing, the background mind; the operator/listener/plan tool lanes + the intent lane |
 | [docs/cliffhanger.md](docs/cliffhanger.md) | **The command language.** Entities as objects, ISA parents as classes, methods and calls, `{{self.*}}`/`{{name}}` binding — and the pointer to its own spec repo |
