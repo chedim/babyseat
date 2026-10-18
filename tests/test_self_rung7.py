@@ -1,9 +1,9 @@
 """#161 RUNG 7: understand an other.
 
-Self consults the model coprocessor (`llm::call` inside `expect`) to predict
-the other's next answer, and passes when that prediction beats habit alone --
-the share of habit's Brier error the model removes, over paired looks at the
-other.
+Self consults the model coprocessor (`llm::call`, asked at each push, read by
+`expect` at the reply check -- #215) to predict the other's next answer,
+and passes when that prediction beats habit alone -- the share of habit's
+Brier error the model removes, over paired looks at the other.
 """
 import json
 import os
@@ -68,11 +68,20 @@ class _Chatter:
 def _llm_pred(chatter):
     """The model stand-in: predicts the phase of the period-4 pattern, near-
     perfectly, for the look that is about to happen."""
-    def pred(srv, eid):
+    def pred(srv, eid, since=None):
         name = eid.split(":")[-1]
         next_look = chatter.looks.get(name, 0) + 1
         return 0.9 if (next_look % 4) in (1, 2) else 0.1
     return pred
+
+
+def _queued(srv, eid, prompt):
+    """The consult went out (its answer is the _llm_pred stand-in's)."""
+    return {"rc": 0, "text": f"queued: a loop takes it up on {eid}"}
+
+
+# the pairs come one per push (#215): enough pushes for RUNG7_LOOKS reply checks
+CYCLES = (SL.RUNG7_LOOKS + 5) * SL.MEET_EVERY
 
 
 @pytest.fixture(autouse=True)
@@ -122,7 +131,7 @@ def test_a_reach_at_the_other_carries_the_models_prediction(monkeypatch):
     chatter = _Chatter()
     monkeypatch.setattr(SL, "_read_entity", chatter)
     monkeypatch.setattr(SL, "_llm_pred", _llm_pred(chatter))
-    monkeypatch.setattr(SL, "_ask_llm", lambda srv, eid, prompt: None)
+    monkeypatch.setattr(SL, "_ask_llm", _queued)
     srv = _seat(limit=7, passed=(1, 2, 3, 4, 5, 6))
     _run(srv, 60)
     reaches = [r for r in _kind(srv, "reach") if r["eid"] == RESP]
@@ -137,9 +146,9 @@ def test_rung_seven_opens_when_the_model_beats_habit(monkeypatch):
     chatter = _Chatter()
     monkeypatch.setattr(SL, "_read_entity", chatter)
     monkeypatch.setattr(SL, "_llm_pred", _llm_pred(chatter))
-    monkeypatch.setattr(SL, "_ask_llm", lambda srv, eid, prompt: None)
+    monkeypatch.setattr(SL, "_ask_llm", _queued)
     srv = _seat(limit=7, passed=(1, 2, 3, 4, 5, 6))
-    _run(srv, 400)
+    _run(srv, CYCLES)
     assert 7 in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
     assert SL.status(srv)["rung"] == 7
 
@@ -168,7 +177,7 @@ def test_the_limit_holds_rung_seven(monkeypatch):
     chatter = _Chatter()
     monkeypatch.setattr(SL, "_read_entity", chatter)
     monkeypatch.setattr(SL, "_llm_pred", _llm_pred(chatter))
-    monkeypatch.setattr(SL, "_ask_llm", lambda srv, eid, prompt: None)
+    monkeypatch.setattr(SL, "_ask_llm", _queued)
     srv = _seat(limit=6)
     _run(srv, 400)
     assert not [r for r in _kind(srv, "reach") if r["eid"] == RESP and "p_llm" in r]
