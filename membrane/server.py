@@ -640,6 +640,7 @@ def _openai_tools(mcp_tools: list | None = None) -> list:
     Wire-shaped rows (a custom caller's explicit set) pass through -- the
     wrapper only shapes the MCP registry's own rows (2026-10-13: an
     explicit set used to die here on a bare KeyError('name'))."""
+    from . import toolset as _ts
     tools = _mcp.TOOLS if mcp_tools is None else mcp_tools
     return [t if isinstance(t, dict) and "function" in t else
             {"type": "function",
@@ -647,7 +648,11 @@ def _openai_tools(mcp_tools: list | None = None) -> list:
                           "description": t.get("description", ""),
                           "parameters": t.get("inputSchema") or
                           {"type": "object", "properties": {}}}}
-            for t in tools]
+            for t in tools
+            # ISSUE #182: a row named by a template placeholder
+            # ('{function_name}') is never served -- the model copies it
+            if not (isinstance(t, dict) and "function" not in t
+                    and not _ts.is_tool_name(t.get("name")))]
 
 
 # ---- THE LANE GATE (the division of hands, 2026-10-06) ----------------------
