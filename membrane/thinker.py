@@ -564,7 +564,7 @@ class Thinker:
             out = _model_chat(srv)(
                 getattr(srv, "backend", ""),
                 getattr(srv, "idle_cortex_model", "") or "",
-                messages, timeout=45)
+                messages, timeout=45, lane="thinker")
             self._model_ts.append(time.time())
             self.stats["model_calls"] += 1
             return out or ""

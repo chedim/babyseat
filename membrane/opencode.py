@@ -1504,7 +1504,8 @@ def main() -> None:
                                          "You are a membrane watch loop: "
                                          "decide, briefly."},
                                         {"role": "user",
-                                         "content": text}], timeout=45)
+                                         "content": text}], timeout=45,
+                                       lane="watch")
                 return {"verdict_text": (out or "")[:200]}
             return go
         srv.run_loop_turn = _run_loop_turn()

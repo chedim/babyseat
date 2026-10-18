@@ -176,8 +176,9 @@ def apply_think_dial(payload: dict, think: bool | None) -> dict:
 
 def _ollama_chat(backend: str, model: str, messages: list,
                  temperature: float = 0.2, timeout: int = 120,
-                 think: bool | None = None) -> str:
-    """One non-stream Ollama /api/chat call -> the assistant text (or "")."""
+                 think: bool | None = None, lane: str = "background") -> str:
+    """One non-stream Ollama /api/chat call -> the assistant text (or "").
+    Its usage lands on the background tally under `lane` (bgusage)."""
     body = {"model": model, "stream": False, "temperature": float(temperature),
             "messages": messages}
     if think is not None:
@@ -191,6 +192,8 @@ def _ollama_chat(backend: str, model: str, messages: list,
     except Exception as e:
         print(f"[bg] llm call failed ({e})", file=sys.stderr)
         return ""
+    from . import bgusage
+    bgusage.from_ollama(lane, model, resp)
     msg = resp.get("message") if isinstance(resp, dict) else None
     c = msg.get("content") if isinstance(msg, dict) else None
     return c.strip() if isinstance(c, str) else ""
@@ -198,7 +201,7 @@ def _ollama_chat(backend: str, model: str, messages: list,
 
 def _openai_chat(url: str, headers: dict, model: str, messages: list,
                  temperature: float = 0.2, timeout: int = 120,
-                 think: bool | None = None) -> str:
+                 think: bool | None = None, lane: str = "background") -> str:
     """One non-stream OpenAI-compatible chat call -> the assistant text
     (or ""). The cloud-lane twin of _ollama_chat: the same background
     prompts, a different wire shape (choices[0].message.content)."""
@@ -215,6 +218,8 @@ def _openai_chat(url: str, headers: dict, model: str, messages: list,
     except Exception as e:
         print(f"[bg] llm call failed ({e})", file=sys.stderr)
         return ""
+    from . import bgusage
+    bgusage.from_openai(lane, model, resp)
     ch = resp.get("choices") if isinstance(resp, dict) else None
     msg = (ch[0].get("message") if isinstance(ch, list) and ch
            and isinstance(ch[0], dict) else None)
@@ -228,12 +233,14 @@ def _model_chat(srv):
     model (srv.router.records[m].backend = a registered provider) rides
     that provider's OpenAI-compatible chat path with its memory-only
     auth headers -- the same wire the chat lane uses; a local model (or a
-    router-less srv) falls back to _ollama_chat."""
+    router-less srv) falls back to _ollama_chat. `lane` names the caller on
+    the background token tally."""
     router = getattr(srv, "router", None)
     backend = getattr(srv, "backend", "")
 
     def chat(bg: str, model: str, messages: list,
-             temperature: float = 0.2, timeout: int = 120) -> str:
+             temperature: float = 0.2, timeout: int = 120,
+             lane: str = "background") -> str:
         rec = router.records.get(model) if router is not None else None
         think = getattr(srv, "think", None)
         if rec is not None and rec.backend:
@@ -246,10 +253,10 @@ def _model_chat(srv):
             headers = _auth._headers(rec.backend, key) if key else {}
             return _openai_chat(url, headers, model, messages,
                                 temperature=temperature, timeout=timeout,
-                                think=think)
+                                think=think, lane=lane)
         return _ollama_chat(bg or backend, model, messages,
                             temperature=temperature, timeout=timeout,
-                            think=think)
+                            think=think, lane=lane)
 
     return chat
 

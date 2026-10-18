@@ -446,8 +446,10 @@ class Registry:
                     self.backend + "/api/chat", data=body,
                     headers={"Content-Type": "application/json"})
                 with urllib.request.urlopen(req, timeout=60) as r:
-                    txt = (json.loads(r.read()).get("message") or {}) \
-                        .get("content", "")
+                    resp = json.loads(r.read())
+                from . import bgusage
+                bgusage.from_ollama("router-interview", rec.name, resp)
+                txt = (resp.get("message") or {}).get("content", "")
             except Exception:
                 continue
             bullets = [ln.strip("-•* ").strip() for ln in txt.splitlines()

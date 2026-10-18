@@ -7,6 +7,9 @@ answers the operator's question with NUMBERS, not a hunch:
     (input, output, reasoning, cache-read) from the upstream usage the
     ladder persisted, tool-call parts, tool-loop rounds, models, and the
     size of the recall injection. Read-only; no model call.
+  * background  -- the model calls made OUTSIDE a serve turn (thinker,
+    watch degrade, claim judge, router interview, /delegate), tallied per
+    lane and model in `bg-usage.json` beside the store (`bgusage`, #200).
   * baseline    -- the "do we actually save tokens?" comparison. A naive
     client with no window and no memory replays the FULL transcript every
     turn (history grows O(n^2)); membrane replays only its bounded window
@@ -28,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import time
 from collections import Counter
 from pathlib import Path
 
@@ -235,6 +239,28 @@ def render_accounting(a: dict) -> str:
     return "\n".join(x for x in lines if x)
 
 
+def render_background(bg: dict | None, a: dict) -> str:
+    if not bg:
+        return ("background model calls: not recorded "
+                "(no bg-usage.json beside the store)")
+    from .bgusage import totals
+    t = totals(bg)
+    fg = a["input"] + a["output"]
+    share = (t["input"] + t["output"]) / ((t["input"] + t["output"] + fg) or 1)
+    since = time.strftime("%Y-%m-%d %H:%M", time.localtime(bg.get("since") or 0))
+    lines = [f"background model calls (bg-usage.json, since {since}):"]
+    for lane, models in sorted((bg.get("lanes") or {}).items()):
+        for m, r in sorted(models.items(), key=lambda kv: -kv[1].get("input", 0)):
+            lines.append(f"    {lane:16s} {m or '?':28s} {r.get('calls', 0):>6,} calls  "
+                         f"in {r.get('input', 0):,}  out {r.get('output', 0):,}  "
+                         f"reasoning {r.get('reasoning', 0):,}")
+    lines.append(f"  total: {t['calls']:,} calls · in {t['input']:,} · "
+                 f"out {t['output']:,} · reasoning {t['reasoning']:,}")
+    lines.append(f"  share of all in+out tokens: {share * 100:.1f}% "
+                 f"(the foreground store counts {fg:,})")
+    return "\n".join(lines)
+
+
 def render_baseline(b: dict) -> str:
     lines = [
         "savings baseline (naive full-history replay vs the seat):",
@@ -263,21 +289,27 @@ def main(argv: list[str] | None = None) -> int:
                                  description="token/call accounting + savings baseline")
     ap.add_argument("--store", default=".membrane/serve-msgs.json",
                     help="path to a serve-msgs.json (read-only; copy is fine)")
+    ap.add_argument("--bg", default=None,
+                    help="path to a bg-usage.json (default: beside --store)")
     ap.add_argument("--baseline", action="store_true",
                     help="also print the naive-full-history savings baseline")
     ap.add_argument("--json", action="store_true", help="print JSON")
     args = ap.parse_args(argv)
     store = load_store(args.store)
     a = accounting(store)
+    from .bgusage import FILE as _BG, load as _load_bg
+    bg = _load_bg(args.bg or Path(args.store).parent / _BG)
     if args.baseline:
         b = baseline(store)
     if args.json:
-        out = {"accounting": a}
+        out = {"accounting": a, "background": bg}
         if args.baseline:
             out["baseline"] = b
         print(json.dumps(out, indent=2))
         return 0
     print(render_accounting(a))
+    print()
+    print(render_background(bg, a))
     if args.baseline:
         print()
         print(render_baseline(b))

@@ -6147,6 +6147,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         try:
             with urllib.request.urlopen(rq, timeout=300) as resp:
                 ans = json.loads(resp.read())
+            from . import bgusage
+            bgusage.from_openai("delegate", model, ans)
         except Exception as e:
             router.note_outage(model, f"delegate: {str(e)[:120]}")
             srv._delegate_busy = False
