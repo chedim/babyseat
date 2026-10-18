@@ -27,7 +27,8 @@ proxy, but that is the mechanism, not the point. The point is the field.
 ## What separates membrane from other agentic memory on GitHub
 
 Most memory projects give your agent a store to query. Membrane is built on
-different ground rules; each one is checkable in the repo.
+different ground rules that build a different from Neumann computational architecture in which memory itself is the processor; 
+each one is checkable in the repo. 
 
 ### 1. The memory has a shape, not just a bag of chunks
 
