@@ -79,7 +79,8 @@ class TestTheJunkStillRefuses(unittest.TestCase):
                 T.resolve(junk, {})
             msg = str(cx.exception)
             self.assertTrue(
-                "NAME held its arguments" in msg or "no tool name" in msg,
+                "NAME held its arguments" in msg or "no tool name" in msg
+                or "placeholder" in msg.lower(),               # #182: '{toolName}' is a template variable
                 f"{junk!r}: {msg}")
 
     def test_an_empty_name_with_no_args_refuses_bare(self):

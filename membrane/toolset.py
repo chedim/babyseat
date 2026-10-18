@@ -366,6 +366,24 @@ def _json_objects(args: dict) -> dict:
     return args
 
 
+def _unwrap_args(name: str, args: dict) -> dict:
+    """THE CALL WRAPPED IN `args` (issue #160: entity_edit {"args": "{\"spec\":
+    ..., \"summary\": ...}"} answered 'updated' echoing the OLD summary, and
+    entity_read {"args": "{..., \"run\": true}"} stayed 'deferred'): the spec
+    was dug out of the wrapper downstream (mcp_server._arg), every other
+    field was not -- the edit set nothing, jobs.dispatch never saw run. For a
+    tool whose family takes no `args` parameter, the wrapped object IS the
+    call: its fields join the arguments (a field sent beside it wins)."""
+    inner = args.get("args")
+    if not isinstance(inner, dict):
+        return args
+    fam = FAMILIES.get(name) or FAMILIES.get(_LEGACY_FAMILY.get(name) or "")
+    if fam is None or "args" in fam["params"]:
+        return args                               # exec's args are its {{param}} values
+    outer = {k: v for k, v in args.items() if k != "args"}
+    return _json_objects({**inner, **outer})
+
+
 def _call_in_name(name: str) -> tuple[str, dict] | None:
     """THE WHOLE CALL IN THE NAME SLOT (2026-10-15, serve-msgs: 70 live calls
     arrived with the entire call JSON riding the tool-name field -- the
@@ -445,6 +463,43 @@ def _owned_by_one_family(inner: dict) -> str:
     return owners[0] if len(owners) == 1 else ""
 
 
+_PLACEHOLDER_NAME_KEYS = ("fn_name", "function_name", "tool_name", "name", "tool", "function")
+_PLACEHOLDER_ARG_KEYS = ("args_json", "arguments", "args", "params", "parameters", "input")
+
+
+def _placeholder_call(placeholder: str, args: dict) -> tuple[str, dict]:
+    """A call whose name is a template placeholder: the tool is named by one of
+    its fields (a family, or 'exec <command>'), its arguments by another (JSON);
+    else the honest refusal with a filled-in example."""
+    named = next((str(args[k]).strip() for k in _PLACEHOLDER_NAME_KEYS
+                  if isinstance(args.get(k), str) and args[k].strip()), "")
+    raw = next((args[k] for k in _PLACEHOLDER_ARG_KEYS if k in args), None)
+    inner = None
+    if isinstance(raw, dict):
+        inner = raw
+    elif isinstance(raw, str) and raw.strip()[:1] == "{":
+        try:
+            inner = json.loads(raw)
+        except ValueError:
+            inner = None
+    head, _, rest = named.partition(" ")
+    fam = canonical(head, {})[0] if head else ""
+    if fam in FAMILIES:
+        if inner is not None:
+            return resolve(fam, dict(inner))
+        text = rest.strip() or (raw.strip() if isinstance(raw, str) else "")
+        if fam == "exec" and text:
+            return resolve("exec", {"action": "link", "command": text})
+        if not text:
+            return resolve(fam, {})
+    raise ValueError(
+        f"the call's name {placeholder!r} is a template placeholder from your call format, not a tool: "
+        f"write the real tool's name in its place -- one of {', '.join(sorted(FAMILIES))} -- and its "
+        "arguments as JSON. For example, to run a command: name exec, arguments "
+        '{"action": "link", "command": "ls -a"}; to read an entity: name entity, arguments '
+        '{"action": "read", "name": "presence"}')
+
+
 def resolve(name: str, args: dict) -> tuple[str, dict]:
     """(existing tool name, its args) for a family call; an existing tool's
     own name passes through; ValueError names the valid actions."""
@@ -495,11 +550,9 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
         if _owner and any(k != "action" for k in (args or {})):
             return resolve(_owner, dict(args or {}))
         if _placeholder:
-            raise ValueError(
-                f"the call had no tool name -- its name slot held the template placeholder "
-                f"{_placeholder[:40]!r}, not a tool: name the tool -- one of "
-                f"{', '.join(sorted(FAMILIES))} -- and put its JSON in the arguments, "
-                "e.g. name='entity', arguments={\"action\": \"read\", \"spec\": \"presence\"}")
+            # nothing above named the call: 'exec <command>' in a name field,
+            # the arguments as a JSON string, else the refusal with an example
+            return _placeholder_call(_placeholder, dict(args or {}))
         raise ValueError(
             f"the call had no tool name ({str(name or '')!r}): name the tool -- one of "
             f"{', '.join(sorted(FAMILIES))} -- and put its JSON in the arguments")
@@ -512,7 +565,7 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
             f"one of {', '.join(sorted(FAMILIES))} -- in the name, and that JSON in the arguments, "
             "e.g. name='entity', arguments={\"action\": \"read\", \"name\": \"presence\"}")
     name, args = canonical(name, args)
-    args = _json_objects(dict(args or {}))
+    args = _unwrap_args(name, _json_objects(dict(args or {})))
     # THE NAMELESS CALL (2026-10-12, a seat inside Home Assistant: the backend's
     # parser lost the tool's name -- 'no_name_1' -- and wrapped the arguments as
     # {"input": "<json>"}; told "no tool is named 'no_name_1'", the model sent it
