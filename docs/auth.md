@@ -31,8 +31,9 @@ The boot log says `[auth] JWT mode ON`.
 ## Mint a token
 
 ```bash
-membrane token mint --sub dmitrii --name Dmitrii             # 30 days
+membrane token mint --sub alice --name Alice                 # 30 days
 membrane token mint --sub kitchen-tablet --ttl 12h
+# in Docker: docker exec membrane membrane token mint --sub alice --name Alice
 ```
 
 `--sub` is the person's stable id: their memory is keyed by it. `--name` is what the

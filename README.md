@@ -98,7 +98,7 @@ embeddings run on your Ollama (cloud models are routable rungs you add with
 `membrane auth`); the substrate is your Couchbase bucket — and with no cluster
 reachable the seat drops to a RAM field and **still boots** (degradation,
 never failure). The whole field is a substrate you own and can move
-(`membrane move` / `reembed`). The memory is for your data: the PolyForm
+(`membrane move` / `python -m membrane.reembed`). The memory is for your data: the PolyForm
 Noncommercial license covers personal, hobby, research and other noncommercial
 use and keeps it out of paid products ([LICENSE](LICENSE)).
 
@@ -116,10 +116,10 @@ use and keeps it out of paid products ([LICENSE](LICENSE)).
 
 ## Quick start
 
-Membrane runs two ways. Both need an [Ollama](https://ollama.com) server with
-one chat model and one embedding model (`ollama pull qwen3:8b && ollama pull
-mxbai-embed-large`, or any cloud model Ollama serves), and 1–3 GB of RAM for
-the seat.
+Membrane runs three ways: standalone, in Docker, or inside Home Assistant. All
+need an [Ollama](https://ollama.com) server with one chat model and one
+embedding model (`ollama pull qwen3:8b && ollama pull mxbai-embed-large`, or
+any cloud model Ollama serves), and 1–3 GB of RAM for the seat.
 
 ### Standalone: its own web UI
 
@@ -137,6 +137,26 @@ the optional JWT mode ([docs/auth.md](docs/auth.md)): then every caller needs a
 token, from the LAN or behind an ingress alike. Voice needs a secure
 origin, so the microphone works on `localhost` (the first voice use downloads
 ~65 MB of speech models, checked against their checksums).
+
+### Docker
+
+```bash
+docker run -d --name membrane \
+  -p 4096:4096 -p 11500:11500 \
+  -v membrane-data:/data \
+  -e MEMBRANE_BACKEND=http://host.docker.internal:11434 \
+  -e MEMBRANE_EMBED_MODEL=mxbai-embed-large \
+  --stop-timeout 60 \
+  chedim/membrane:latest           # then open http://localhost:4096/
+```
+
+The same standalone seat in a container: the web UI on :4096 and the
+OpenAI-compatible proxy on :11500, the memory on the `membrane-data` volume.
+`MEMBRANE_BACKEND` is the Ollama server (the default shown is the Docker
+host); on Linux add `--add-host=host.docker.internal:host-gateway`. The
+ports have no login unless you set `MEMBRANE_JWT_SECRET` ([JWT mode](docs/auth.md));
+without it, publish them only on a network you trust. Details:
+[docs/docker.md](docs/docker.md).
 
 ### Inside Home Assistant (HACS)
 
@@ -227,6 +247,23 @@ MEMBRANE_REPO=/path/to/membrane bash install.sh
 - The **viewer** ships inside the package (three.js + both pixel fonts are
   vendored, served same-origin) — no CDN, no node, no browser install.
 
+### Docker
+
+```bash
+docker run -d -p 4096:4096 -p 11500:11500 -v membrane-data:/data \
+  -e MEMBRANE_EMBED_MODEL=mxbai-embed-large --stop-timeout 60 \
+  chedim/membrane:latest
+```
+
+The public image `chedim/membrane` (amd64 + arm64, pushed on every release)
+runs `membrane standalone`: the web UI and serve API on :4096, the
+OpenAI-compatible proxy on :11500, Ollama reached at
+`http://host.docker.internal:11434` by default (on Linux add
+`--add-host=host.docker.internal:host-gateway`). The field lives on the
+`/data` volume. The ports carry no authentication: publish them only on a
+network you trust. Recipes, env and volume details:
+[docs/docker.md](docs/docker.md).
+
 ### First run in a project
 
 ```bash
@@ -264,7 +301,7 @@ model is grounded by what those entities hold —
 | `membrane install` | install `.opencode/skills/*` explicitly (+ `.gitignore` entry) |
 | `membrane auth` | store a cloud API key in `~/.membrane/auth.json` (600) — its models become routable rungs |
 | `membrane move` / `membrane migrate` | migrate the field between stores |
-| `membrane reembed` | move the field to another embedding model (re-embeds every live event, re-applies the log in order) |
+| `python -m membrane.reembed` | move the field to another embedding model (re-embeds every live event, re-applies the log in order) |
 | `membrane update` | check the install source, show what changed, apply and re-exec |
 | `membrane ingest` | cold start: absorb docs/README into the field (DOC events; a second ingest is a no-op) |
 | `membrane codegraph` | stdlib-AST call graph (stats / impact / callers / callees) |
@@ -290,7 +327,9 @@ the serve surface adds no separate memory, and the model's tool invocations
 appear to the client as ordinary tool parts riding `message.part.updated`
 (pending → completed), so you can watch what it's doing from the room.
 `--serve-port` (default 4096, walks up if busy) and `--listen` (the proxy,
-never leaves 127.0.0.1) are independent. Exposure is LAN-only by design:
+default 11500) are independent. The proxy binds all interfaces by default and
+its write/exec routes carry no auth; `--listen-host 127.0.0.1` (or
+`MEMBRANE_LISTEN_HOST=127.0.0.1`) keeps it on this machine. Exposure is LAN-only by design:
 reach the server only from a network you own — or set `MEMBRANE_JWT_SECRET`
 and hand each client a token ([docs/auth.md](docs/auth.md)).
 
@@ -396,10 +435,11 @@ lift "who 1,500 never-seen mentions were about" from MRR **0.210 → 0.539**
 - **Restart only from the shell** (`membrane reset` / `./run.sh restart`).
   Membrane never restarts itself while running, and a restart loses nothing:
   the field re-hydrates from its backend. The one way a restart CAN change
-  results is `membrane reembed` (moving to another embedding model).
+  results is a re-embed (`python -m membrane.reembed`, moving to another
+  embedding model).
 - **Field moves are first-class**: `membrane move` between stores,
-  `membrane migrate` as the interactive front door, `membrane reembed
-  --efield --embed-model M` pins the rebuilt field equal to a fresh one.
+  `membrane migrate` as the interactive front door, `python -m
+  membrane.reembed --embed-model M` pins the rebuilt field equal to a fresh one.
 
 ---
 
@@ -408,6 +448,7 @@ lift "who 1,500 never-seen mentions were about" from MRR **0.210 → 0.539**
 | Doc | What's in it |
 |---|---|
 | [docs/standalone.md](docs/standalone.md) | **Standalone mode**: the web UI, the first run and the name, who can reach it, voice, `settings.json`, updates |
+| [docs/docker.md](docs/docker.md) | **membrane in Docker**: the public image `chedim/membrane`, run recipes (Docker Desktop, Linux, Compose), env, the `/data` volume, ports, stopping |
 | [docs/auth.md](docs/auth.md) | **JWT mode (optional, off by default).** Turning it on, minting tokens, giving a client its token, the cookie login, who-said-it from the token, the seat's internal token, rotation, the threat model |
 | [docs/home-assistant.md](docs/home-assistant.md) | **Membrane in Home Assistant** (HACS): setup, the UI takeover, the Assist agent and sensors, what the seat may do in the house |
 | [docs/entity-field.md](docs/entity-field.md) | **THE FIELD.** Events → entities → readers; the update rule; relations and claims; injection (full block / state diff); the gate + replay A/B; storage, sharing, the background mind; the operator/listener/plan tool lanes + the intent lane |
@@ -433,7 +474,8 @@ Source layout: `membrane/` (the field: `streams` → `efield`/`efstore` →
 `entity_block`/`efgate`/`night`; the seat's serve server (`server.py`,
 opencode-compatible); the MCP surface (`mcp_server.py`); the CLI),
 `experiments/` (the e-series rigs behind math-findings), `tests/` (unittest +
-pytest, plain-python runnable).
+pytest, plain-python runnable), `Dockerfile` + `docker/` (the public image;
+`docker build -t membrane:dev .`, see [docs/docker.md](docs/docker.md)).
 
 ```bash
 python -m unittest discover -s tests     # everything runs against in-process fakes, no server needed

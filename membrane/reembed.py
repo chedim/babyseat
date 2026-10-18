@@ -13,7 +13,7 @@ on the new model.
 Run:
 
     python -m membrane.reembed --efield --embed-model mxbai-embed-large
-    # or via the CLI: membrane reembed --efield [--origin O]
+    # [--origin O] [--backend URL]; --efield is accepted and ignored
 
 The exemplar field's re-embed (field.json time-prefix migration) retired
 with the exemplar field; git history is the archive.
