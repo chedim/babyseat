@@ -271,6 +271,31 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
 
   (A skill-against-the-average test can't work here: timed looks are, by
   design, all predicted around 60%.)
+- **Curiosity: where to practise (#212).** The rungs above set the base
+  weights of the reach choice (rung 2 even, rung 3 silent ×0.05, rung 4 only
+  the due things). Learning progress tilts the choice on top of them; it never
+  replaces them (`_curiosity` multiplies the base weight, or picks among the
+  due things at rung 4):
+  - **progress** per thing (`_progress`) = its mean Brier error `(answer − p)²`
+    over the 30 ordinary looks before the latest 30, minus its mean over the
+    latest 30. The two windows are the smoothing. A thing with fewer than 60
+    ordinary looks has none yet;
+  - **the tilt:** the thing rising fastest gets 1; a flat or worsening one
+    (mastered, or unlearnable) gets the **exploration floor** 0.1, so it is still
+    retried now and then; a thing with no progress yet gets 1. With no
+    progress above 0.005 anywhere, every tilt is 1 and the base runs alone;
+  - **the audit stays blind:** only ordinary looks feed it. Answered reaches
+    outside every audit count; a look tagged `audit` (rung 2) or `audit5`
+    (either phase of rung 5's) does not;
+  - **seeing never drives the loop:** progress is computed from the record
+    when self chooses a reach. It is never stored, written, or put on the
+    record, so it can't wake a cycle or count as a body answer.
+    `status()["curiosity"]` shows the top three (`eid`, `progress`, `error`).
+  - **Measured** (`tests/test_self_curiosity_212.py`): one mastered thing, one
+    learnable thing still improving, and one pure coin. Over 900 cycles at rung
+    3, the curious chooser spends 0.43–0.47 of its reaches on the learnable
+    thing, against 0.31 for the kind-weighted chooser (mean margin +0.14 over
+    three seeds). The mastered and noise things still get their share.
 - **Rung 5, notice the world changed.** After each look, self reads its last
   3–5 looks at a thing against its long memory of it. When they are both far
   from it (by more than 0.4) and unlikely under it (binomial tail below 0.02),
