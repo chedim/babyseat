@@ -436,14 +436,15 @@ def _read_entity(srv, ent, now):
     return _WA.entity_read_back(srv, ent, force=False, by="self")
 
 
-def _push_chat(srv, text: str):
-    """THE SEAM: self's outward act -- push a line to chat:out. Tests swap it."""
+def _push_chat(srv, text: str, person: str = ""):
+    """THE SEAM: self's outward act -- push a line to the person's chat:out
+    ('' = the operator's), marked as self's (#208). Tests swap it."""
     from . import chat_io as _CIO
-    ent = _CIO.entity(srv, _CIO.OPERATOR)
+    ent = _CIO.entity(srv, person)
     if ent is None:
         return
     ent.properties["say"] = text
-    _CIO.on_edit(srv, ent)
+    _CIO.on_edit(srv, ent, by="self")
 
 
 def _llm_pred(srv, eid: str) -> float | None:
@@ -487,7 +488,12 @@ def _rung7_prompt(srv, eid: str) -> str:
 def _meet(srv, seed: str, now: float | None = None) -> None:
     """RUNG 6's act: push a line to chat:out (the other answers). Practised
     from the cycle once rung 6 is available, paced at MEET_EVERY cycles so it
-    doesn't spam chat:out's gap guard."""
+    doesn't spam chat:out's gap guard.
+
+    THE OTHER is the person who actually chats (#208): chat_io's own
+    recent_person (the owner of the newest owned chat), the operator only on
+    a seat with no people. It is resolved once per meet, so the push target
+    and the reach target move together when the person changes."""
     try:
         n = int(seed or 0)
     except (TypeError, ValueError):
@@ -497,12 +503,13 @@ def _meet(srv, seed: str, now: float | None = None) -> None:
     import time
     from . import chat_io as _CIO
     now = time.time() if now is None else now
-    resp = _CIO.entity_in(srv, _CIO.OPERATOR)              # the other, as a reach target
-    to = resp.eid if resp is not None else _CIO.name_in(_CIO.OPERATOR)
+    person = _CIO.recent_person(srv)                        # '' = the operator (no people)
+    resp = _CIO.entity_in(srv, person)                      # the other, as a reach target
+    to = resp.eid if resp is not None else _CIO.name_in(person)
     _rt(srv)["other"] = to                                  # rung 7 predicts this one
-    _push_chat(srv, "self is here")
+    _push_chat(srv, "self is here", person)
     _append(srv, {"ts": now, "kind": "push", "n": n,
-                  "eid": _CIO.name_of(_CIO.OPERATOR), "to": to})
+                  "eid": _CIO.name_of(person), "to": to})
 
 
 def _reach(srv, target: str) -> dict:
@@ -1174,12 +1181,21 @@ def _rung5(recs: list[dict], tempo: dict | None = None) -> dict:
             "passed": all(v >= 1.0 for v in crit.values())}
 
 
+def _other(recs: list[dict]) -> str | None:
+    """The other self is meeting now: the latest push's `to` (None before any)."""
+    return next((r.get("to") for r in reversed(recs) if r.get("kind") == "push"), None)
+
+
 def _rung6(recs: list[dict], tempo: dict | None = None) -> dict:
     """Meet an other: enough pushes to chat:out, enough answered looks at the
     answerer, and the answerer classed OTHER -- not body (a perfect echo is
-    self's own echo, so the split reads 0 and the rung stays shut)."""
-    pushes = [r for r in recs if r.get("kind") == "push"]
-    to = pushes[-1].get("to") if pushes else None
+    self's own echo, so the split reads 0 and the rung stays shut).
+
+    It reads the CURRENT other only -- the latest push's `to` (#208): when the
+    person changes, pushes to and looks at the previous one stop counting, so
+    a rung passed against someone else slips until this person earns it."""
+    to = _other(recs)
+    pushes = [r for r in recs if r.get("kind") == "push" and r.get("to") == to]
     heard = sum(1 for r in recs if r.get("kind") == "reach" and r.get("eid") == to
                 and r.get("answer") in ("changed", "unchanged") and not r.get("audit"))
     split = _split(recs, tempo or {}).get(to or "", "unknown")
@@ -1193,8 +1209,11 @@ def _rung6(recs: list[dict], tempo: dict | None = None) -> dict:
 def _rung7(recs: list[dict], tempo: dict | None = None) -> dict:
     """Understand an other: over paired looks at it (a habit `p` and a model
     `p_llm` on the same look), the model removes RUNG7_MARGIN of habit's Brier
-    error -- predicting the operator's answers better than habit alone."""
+    error -- predicting the other's answers better than habit alone. Only
+    looks at the CURRENT other count (#208, see _rung6)."""
+    to = _other(recs)
     pairs = [r for r in recs if r.get("kind") == "reach" and not r.get("audit")
+             and (to is None or r.get("eid") == to)
              and r.get("answer") in ("changed", "unchanged")
              and r.get("p_llm") is not None][-RUNG7_LOOKS:]
     crit = {"looks": min(1.0, len(pairs) / RUNG7_LOOKS)}

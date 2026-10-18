@@ -1858,7 +1858,9 @@ function definePanel() {
       }
       const live = this._busy() && !(info.time || {}).completed;
       el.className = "msg ai" + (live ? " live" : "");
-      const who = [info.agent || info.mode, info.modelID].filter(Boolean).join(" · ");
+      // a line self pushed (#208, "from": "self") is named as self's, not the seat's agent
+      const who = info.from === "self" ? "🌱 self"
+        : [info.agent || info.mode, info.modelID].filter(Boolean).join(" · ");
       let html = who ? '<div class="who">' + escText(who) + "</div>" : "";
       // PREDICT MODE: membrane's guess of each move, greyed, right before the move it guessed
       const ph = (this._chat && (this._chat.auto || {}).role === "predict" && (this._chat.phantoms || {})[info.id]) || null;
