@@ -635,6 +635,10 @@ def _build_ap():
 
 def main() -> None:
     args = _build_ap().parse_args()
+    # JWT MODE (jwtauth.py, docs/auth.md): off unless a secret is set; a bad
+    # secret (short, empty, unreadable) refuses the boot -- never half-open
+    from . import jwtauth as _JWT
+    _JWT.boot_check()
     # the data dir the UI routes and settings.json read (settings.py)
     os.environ.setdefault("MEMBRANE_DATA_DIR", str(Path(args.field).resolve().parent))
     if args.standalone:
@@ -1658,6 +1662,10 @@ def main() -> None:
             },
         },
     }
+    # JWT mode: the provider's key is the env placeholder opencode resolves
+    # (the child's MEMBRANE_JWT_TOKEN, jwtauth.child_env) -- no token on disk
+    cfg["provider"]["membrane"]["options"] = _JWT.provider_options(
+        cfg["provider"]["membrane"]["options"])
     # ---- doctrine split (P0b) -------------------------------------------------
     # The STATIC membrane doctrine ships ONCE as an instructions file (a
     # byte-stable member of the system prefix -- every provider's prompt cache
@@ -1780,7 +1788,9 @@ def main() -> None:
     fd, cfg_path = tempfile.mkstemp(prefix="membrane-opencode-", suffix=".json")
     with os.fdopen(fd, "w") as f:
         json.dump(cfg, f, indent=2)
-    env = dict(os.environ)
+    # JWT mode: the launched opencode child carries the seat's token in its
+    # env only (the config's apiKey reads it; attach speaks it as Basic)
+    env = _JWT.child_env(dict(os.environ))
     env["OPENCODE_CONFIG"] = cfg_path
 
     fld = getattr(srv, "efield", None)

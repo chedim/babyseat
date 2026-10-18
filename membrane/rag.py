@@ -309,6 +309,12 @@ class RAGProxyHandler(BaseHTTPRequestHandler):
         url = self.server.backend + self.path
         headers = {k: v for k, v in self.headers.items()
                    if k.lower() not in HOP_BY_HOP}
+        from . import jwtauth as _JWT
+        if _JWT.enabled():
+            # JWT MODE: the caller's token is the seat's business, never the
+            # model server's (Ollama / a provider) -- nor is its cookie
+            headers = {k: v for k, v in headers.items()
+                       if k.lower() not in ("authorization", "cookie")}
         req = urllib.request.Request(url, data=raw, method=self.command,
                                      headers=headers)
         try:

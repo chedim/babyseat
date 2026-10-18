@@ -760,6 +760,14 @@ class ProxyError(Exception):
         self.message = message
 
 
+def _jwt_headers() -> dict:
+    """JWT MODE (jwtauth.py): the relay presents a token -- an explicit
+    MEMBRANE_JWT_TOKEN, else the internal one minted from the secret this
+    child inherited from the seat; {} when the seat runs open."""
+    from membrane import jwtauth
+    return jwtauth.client_headers()
+
+
 def _http(port: int, method: str, path: str, body: dict | None = None,
           timeout: float | None = None) -> dict:
     """One relay call to the seat's proxy. THE TIMEOUT HEADROOM (the
@@ -775,7 +783,7 @@ def _http(port: int, method: str, path: str, body: dict | None = None,
     url = f"http://127.0.0.1:{int(port)}{path}"
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(url, data=data, method=method,
-                                 headers={"Content-Type": "application/json"})
+                                 headers={"Content-Type": "application/json", **_jwt_headers()})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read())

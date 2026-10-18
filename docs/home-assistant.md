@@ -69,6 +69,8 @@ of the seat's version.
 - **Sensors**: the field's readings (entities, events, the thinker, loops, paused).
 
 Each person's chats are their own; every message carries `[HA user: <name>]`.
+(A seat running the optional [JWT mode](auth.md) accepts a token as the serve
+password, but then attributes every relayed message to that token's one person.)
 
 ## What the seat may do in your house
 

@@ -36,10 +36,14 @@
 </head>
 <body>
 <script type="module">
-  import { makeHost, savedName, saveName } from "/ui/www/host.js";
+  import { makeHost, savedName, saveName, login } from "/ui/www/host.js";
 
   async function conf() {
-    try { const r = await fetch("/ui/conf", { credentials: "same-origin" }); return r.ok ? await r.json() : {}; }
+    try {
+      const r = await fetch("/ui/conf", { credentials: "same-origin" });
+      if (r.status === 401) return { auth: "jwt", locked: true };   // JWT mode: no token yet (docs/auth.md)
+      return r.ok ? await r.json() : {};
+    }
     catch (e) { return {}; }
   }
 
@@ -67,11 +71,15 @@
   // interfaces): ?view=chat -- the conversation alone; ?view=graph -- the
   // field alone; anything else is everything
   window.MEMBRANE_VIEW = new URLSearchParams(location.search).get("view") || "";
-  const c = await conf();
+  let c = await conf();
+  if (c.locked) { await login(); c = await conf(); }
+  window.MEMBRANE_AUTH = c.auth || "";
   if (c.name) { document.title = c.name; window.MEMBRANE_NAME = c.name; }   // home.js / panel.js read it on load
   window.MEMBRANE_ALIASES = c.aliases || [];
   window.MEMBRANE_STT = c.stt || "browser";                              // no speech server: the browser listens
-  const name = savedName() || await askName(c.name, !window.isSecureContext);
+  // JWT mode: the token says who you are -- no name to ask
+  const name = c.who ? (c.who.name || c.who.sub)
+    : (savedName() || await askName(c.name, !window.isSecureContext));
   await import("/ui/www/panel.js");          // the chat element defined first: home.js sets its hass at once
   await import("/ui/www/home.js");
   await customElements.whenDefined("membrane-home-panel");

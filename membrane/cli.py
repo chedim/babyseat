@@ -24,6 +24,7 @@
     membrane codegraph    stdlib-AST call graph of this repo (stats / impact /
                           callers / callees; no model call)
     membrane doctor       show what's installed/running (CLI, skills, Ollama)
+    membrane token mint   a token for a JWT-mode seat (docs/auth.md)
     membrane stats        token/call accounting + the savings baseline
                           (--baseline: bounded window vs a naive full-history
                           replay; reads serve-msgs, no model call)
@@ -556,7 +557,8 @@ def main() -> None:
         "\n"
         "  opencode   field-backed opencode (OpenAI-compatible proxy on :11500)\n"
         "  serve      the seat headless: membrane's own opencode-compatible\n"
-        "             REST/SSE server on :4096 (basic auth; sessions, turns on\n"
+        "             REST/SSE server on :4096 (no login unless JWT mode is on --\n"
+        "             docs/auth.md; sessions, turns on\n"
         "             the /v1 loopback) -- opencode replaced, no child process\n"
         "  standalone the serve + its own web UI (chat, membrane home, the field,\n"
         "             voice) on :4096, opened in the browser -- no Home Assistant\n"
@@ -582,6 +584,8 @@ def main() -> None:
         "  backfill   rebuild the entity field from the audit log + the codebase\n"
         "  codegraph  stdlib-AST call graph (stats | impact | callers | callees)\n"
         "  doctor     what's installed/running (CLI, skills, Ollama)\n"
+        "  token      `token mint --sub ID [--name NAME] [--ttl 30d]`: a token\n"
+        "             for a JWT-mode seat (MEMBRANE_JWT_SECRET; docs/auth.md)\n"
         "  stats      token/call accounting + the savings baseline\n"
         "             (--baseline compares the bounded window against a\n"
         "             naive full-history replay; reads serve-msgs, no model call)\n"
@@ -603,7 +607,7 @@ def main() -> None:
                    "demo", "reset", "install", "doctor", "connect",
                    "ingest", "backfill", "codegraph", "update", "move",
                    "migrate", "auth", "serve", "standalone", "stop",
-                   "stats", "bench", "erase-field"):
+                   "stats", "bench", "erase-field", "token"):
         if cmd is None and not argv:
             print(__doc__)
             return
@@ -614,6 +618,10 @@ def main() -> None:
                               force="--force" in forwarded)
     if cmd == "doctor":
         raise SystemExit(_doctor())
+    if cmd == "token":
+        # JWT MODE (jwtauth.py, docs/auth.md): mint a token with the seat's secret
+        from .jwtauth import cli_main as token_main
+        raise SystemExit(token_main(forwarded))
     if cmd == "update":
         raise SystemExit(update_main())
     if cmd == "install":
