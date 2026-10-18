@@ -318,7 +318,10 @@ class OllamaClaimJudge:
         rq = urllib.request.Request(self.base + "/api/chat", data=body.encode(),
                                     headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(rq, timeout=self.timeout) as r:
-            return json.load(r)["message"]["content"].strip()
+            resp = json.load(r)
+        from . import bgusage
+        bgusage.from_ollama("claim-judge", self.model, resp)
+        return resp["message"]["content"].strip()
 
     def judge(self, claim: str, evidence: list[str]) -> tuple[str, str]:
         text = self.ask(self.PROMPT.format(

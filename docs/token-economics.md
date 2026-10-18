@@ -33,6 +33,15 @@ window it is neutral and the recall + tool loop is the standing ~34M-token
 cost. The naive side uses the same ~4 chars/token estimate the seat's own
 fallback uses, so the −51% is conservative.
 
+**Background calls are counted separately.** The numbers above are serve
+turns only (chat, watch loops, `llm.call` wakes). Model calls the seat makes
+outside a serve turn — the thinker, the proxy-only watch degrade, the claim
+judge, the router's boot interview, `/delegate` — tally per lane and model
+into `.membrane/bg-usage.json` (persisted across restarts), and
+`membrane stats` prints them as a `background model calls` section with
+their share of all tokens (`--bg PATH` to point elsewhere). Tallying began
+with #200, so a seat's file starts empty and its `since` says from when.
+
 ## How it saves tokens
 
 Two honest facts up front. First: **in this architecture, learning is free** —

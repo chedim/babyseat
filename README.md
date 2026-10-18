@@ -267,7 +267,7 @@ model is grounded by what those entities hold —
 | `membrane ingest` | cold start: absorb docs/README into the field (DOC events; a second ingest is a no-op) |
 | `membrane codegraph` | stdlib-AST call graph (stats / impact / callers / callees) |
 | `membrane doctor` | what's installed/running + the field's vitals |
-| `membrane stats` | token/call accounting + the savings baseline (`--baseline` compares the bounded window against a naive full-history replay; reads `serve-msgs`, no model call) |
+| `membrane stats` | token/call accounting + the savings baseline (`--baseline` compares the bounded window against a naive full-history replay; reads `serve-msgs`, plus the background model calls from `bg-usage.json`; no model call) |
 | `membrane bench` | held-out recall benchmark (MRR + hit@k across the `worldline`/`mean`/`state` reads) — runs against a field **copy**, never the live store |
 
 `MEMBRANE_EFIELD` selects the field's mode: `on` (the default: capture,
