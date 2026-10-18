@@ -29,7 +29,7 @@ proxy, but that is the mechanism, not the point. The point is the field.
 Most memory projects give your agent a store to query.
 Membrane is built on different ground rules: a non-von-Neumann architecture running on top of a von-Neumann machine — 
 no central fetch-execute CPU; computation is distributed across the field itself and 
-driven by a minimal write-read loop that registers new data, compares it against prediction and uses 
+driven by a minimal register-correct-predict-act loop that registers new data, compares it against prediction and uses 
 surprise as signal that adjusts stored memory and makes a new prediction. 
 
 ### 1. The memory has a shape, not just a bag of chunks
