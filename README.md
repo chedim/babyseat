@@ -1,4 +1,5 @@
-> Surprise isn't failure in this seat: failures are its most familiar results, because they repeat.
+Attention is not enough.
+> Complementary Learning Systems (McClelland, McNaughton & O'Reilly, 1995)
 
 # membrane
 
