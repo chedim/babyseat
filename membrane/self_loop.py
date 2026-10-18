@@ -113,6 +113,10 @@ RUNG7_LOOKS = 20            # paired looks (habit + model) at the other the test
 RUNG7_MARGIN = 0.15         # the model must remove this share of habit's Brier error to pass
 RUNG7_EVERY = 30            # cycles between self's llm::call consultations (the caps backstop)
 RUNG7_STALE_S = 600.0       # a model prediction this old no longer answers the next look
+CURIOSITY = True            # #212: tilt the reach choice by learning progress (tests switch it off for the base)
+CURIO_WINDOW = 30           # ordinary looks per window: progress = earlier window's error - recent window's
+CURIO_FLOOR = 0.1           # the tilt never goes under this: a mastered or "can't learn" thing is still retried
+CURIO_MIN = 0.005           # progress under this anywhere is no frontier: the base chooser runs untilted
 
 _lock = threading.RLock()
 _ctx = threading.local()    # the cycle in flight: only the loop's own thread has one
@@ -739,11 +743,13 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
             if rt["waits"] % WAIT_EVERY == 1:
                 _append(srv, {"ts": now, "kind": "wait", "n": n})
             return
-    elif steer:                                    # rung 3: act on the sort -- silent things rarely
-        weights = [SILENT_WEIGHT if kinds.get(e) == "silent" else 1.0 for e in targets]
-        eid = rng.choices(targets, weights=weights)[0]
     else:
-        eid = rng.choice(targets)
+        tilt = _curiosity(recs, targets)           # #212: learning progress tilts the base weights
+        if steer:                                  # rung 3: act on the sort -- silent things rarely
+            weights = [(SILENT_WEIGHT if kinds.get(e) == "silent" else 1.0) * tilt[e] for e in targets]
+        else:
+            weights = [tilt[e] for e in targets]
+        eid = rng.choices(targets, weights=weights)[0]
     last = (_tempo(srv).get(eid) or {}).get("last")
     au = _rt(srv).get("audit")
     inside = bool(au and au.get("rung", 2) == 2 and au["eid"] == eid)
@@ -932,7 +938,60 @@ def _due(srv, recs, targets, kinds, now, rng):
         return rng.choice(silent), None
     if not due:
         return None, None
-    return rng.choice(due)
+    tilt = _curiosity(recs, [e for e, _ in due])   # #212: among the due, the frontier first
+    return rng.choices(due, weights=[tilt[e] for e, _ in due])[0]
+
+
+# ---- curiosity: where self practises (#212) ----------------------------------
+
+def _ordinary_errors(recs: list[dict]) -> dict:
+    """eid -> the Brier errors (answer - p)^2 of its ORDINARY looks, oldest
+    first: answered reaches outside every audit. A look inside a rung-2 audit
+    (`audit`) or either phase of a rung-5 audit (`audit5`: the paused source and
+    its restart) never counts -- self stays blind to its audits (#161 rule 2)."""
+    out: dict[str, list] = {}
+    for r in recs:
+        if (r.get("kind") == "reach" and r.get("answer") in ("changed", "unchanged")
+                and not r.get("audit") and not r.get("audit5") and r.get("p") is not None):
+            x = 1.0 if r["answer"] == "changed" else 0.0
+            out.setdefault(r["eid"], []).append((x - float(r["p"])) ** 2)
+    return out
+
+
+def _progress(recs: list[dict], detail: bool = False) -> dict:
+    """LEARNING PROGRESS per thing: its mean error over the CURIO_WINDOW
+    ordinary looks before the latest CURIO_WINDOW, minus its mean error over
+    the latest ones (positive: its prediction is getting better). The window
+    means are the smoothing. A thing with fewer than two windows of looks has
+    none yet. With `detail`, {eid: {progress, error}} (error: the recent mean).
+    Computed from the record at the moment it is read -- never stored."""
+    W = CURIO_WINDOW
+    out = {}
+    for eid, errs in _ordinary_errors(recs).items():
+        if len(errs) < 2 * W:
+            continue
+        early, late = sum(errs[-2 * W:-W]) / W, sum(errs[-W:]) / W
+        out[eid] = {"progress": early - late, "error": late} if detail else early - late
+    return out
+
+
+def _curiosity(recs: list[dict], targets: list[str]) -> dict:
+    """THE TILT on the base weights (kinds at rung 3, patience at rung 4):
+    each target's multiplier, by the RISE of its bar (#161 rule 1) -- the
+    fastest-improving thing gets 1, a flat one (mastered or unlearnable) or a
+    worsening one the floor CURIO_FLOOR, so it is still retried now and then; a
+    thing too young to have progress gets 1 (worth a look). With no progress
+    anywhere above CURIO_MIN, or CURIOSITY off, every multiplier is 1: the base
+    chooser runs as it did. Read only when self chooses (rule 3)."""
+    if not CURIOSITY:
+        return {e: 1.0 for e in targets}
+    lp = _progress(recs)
+    rise = {e: max(0.0, lp[e]) for e in targets if e in lp}
+    top = max(rise.values(), default=0.0)
+    if top < CURIO_MIN:
+        return {e: 1.0 for e in targets}
+    return {e: (CURIO_FLOOR + (1.0 - CURIO_FLOOR) * rise[e] / top) if e in rise else 1.0
+            for e in targets}
 
 
 def _audit_tick(srv, now: float) -> None:
@@ -1327,7 +1386,18 @@ def status(srv) -> dict:
             "world": {e: k for e, k in _kinds(recs).items() if k != "unknown"},
             "split": {e: s for e, s in spl.items() if s != "unknown"},
             "meets": meets,
-            "steer": _steer_stats(recs)}
+            "steer": _steer_stats(recs),
+            "curiosity": _curiosity_stats(recs)}
+
+
+def _curiosity_stats(recs: list[dict], top: int = 3) -> list[dict]:
+    """For the operator (#212): the things whose prediction is improving
+    fastest -- their learning progress and recent error, best first. Self's
+    choice reads the same numbers; nothing here is stored or fed back."""
+    lp = _progress(recs, detail=True)
+    best = sorted(lp.items(), key=lambda kv: (-kv[1]["progress"], kv[0]))[:top]
+    return [{"eid": e, "progress": round(d["progress"], 4), "error": round(d["error"], 4)}
+            for e, d in best]
 
 
 def _steer_stats(recs: list[dict]) -> dict | None:

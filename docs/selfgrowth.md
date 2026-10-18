@@ -120,6 +120,7 @@ curl -s http://127.0.0.1:4096/membrane/seat \
 | `split` | rung 6's split: `body` (it predicts it near-perfectly) or `other` (it can't) |
 | `meets` | rung 6's exchange: `pushes`, `other` (who it meets), `push_age`, `heard_age` (seconds since the other last answered) |
 | `steer` | after rung 1: how close it lands to its aim (`err`) against not leaning into the current (`naive`), and `skill = 1 − err/naive` |
+| `curiosity` | from rung 2 on: the (up to) three things whose prediction is improving fastest, best first, each with `progress` (its error over the 30 ordinary looks before the latest 30, minus its error over the latest 30) and `error` (the latest 30's mean Brier error). It is what self's curiosity reads when it chooses a reach (below); empty until a thing has 60 ordinary looks |
 
 **How the bar works.** A rung's criteria are stages, in order (rung 2:
 reaches, then skill, then the audit). Each stage is an equal share of the bar,
@@ -169,6 +170,37 @@ has passed, it is under the limit, and its test passes on the record.
 
 At the default pace, rung 6's ten pushes alone take ~50 minutes; rungs 2–5
 usually take hours, and the audits run on their own schedule.
+
+### How self chooses what to read
+
+From rung 2 on, each cycle self reads one thing. The rung it has reached sets
+the **base**: at rung 2 any thing with a getter, evenly; at rung 3 a silent
+thing with weight 0.05; at rung 4 only the things whose next change has become
+60% likely (or a silent one now and then), and nothing when none is due.
+
+On top of that base, **curiosity** ([#212](https://github.com/chedim/membrane/issues/212))
+tilts the choice toward the things it is **learning fastest**: where its
+prediction error has been falling. It works the frontier, not what it is
+best at. A thing it has mastered (error flat and low) and a thing it can't
+learn (error flat and high) both drop to a tenth of the weight. They are still
+retried now and then, in case the world changed. A thing too new to judge (fewer than 60
+ordinary looks) keeps its full weight, and when nothing is improving anywhere
+the base runs untilted. Curiosity never makes a thing due at rung 4 and never
+lifts a silent one: it only reweights what the base already allows.
+
+Three rules (#161) keep curiosity from breaking the measurement:
+
+- **The rise, not the level.** It reads the change in the error, never the
+  error itself, so it can't earn anything by staring at a thing that never
+  changes.
+- **The audit stays blind.** Only ordinary looks count. Looks inside a rung-2
+  or rung-5 audit (a paused source, and its restart) are left out, so self
+  can't learn when it is being audited.
+- **Seeing never drives the loop.** Curiosity is worked out from the record
+  only at the moment self chooses. It is not stored, never wakes a cycle, and
+  is never an answer (not on the record, not in `tempo.json`).
+
+`curiosity` in the panel status shows the numbers it reads.
 
 **Not built yet** (the chooser lists them, disabled):
 
