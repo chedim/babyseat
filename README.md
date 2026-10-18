@@ -466,6 +466,7 @@ lift "who 1,500 never-seen mentions were about" from MRR **0.210 → 0.539**
 | [docs/symbol-birth.md](docs/symbol-birth.md) | The symbol crystallization: how the hierarchy is born through language |
 | [docs/math-findings.md](docs/math-findings.md) | The measured math: the variety/gate experiments and the e-series evidence |
 | [docs/ab-critic-scorecard.md](docs/ab-critic-scorecard.md) | The A/B scorecard vs a plain cosine cache — six criticisms faced honestly |
+| [docs/the-guard-that-wasnt.md](docs/the-guard-that-wasnt.md) | An incident: a seat's model looped, invented a "loop guard", then explained and drafted a bug against it. Why the seat can't loop (cliffhanger) while the model it calls can |
 | [docs/fork-port-notes.md](docs/fork-port-notes.md) | Fork notes (what it took to port membrane's ideas into another project) |
 
 ---
