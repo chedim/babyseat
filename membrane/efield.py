@@ -113,6 +113,10 @@ RECENT = 8
 DISCOURSE_ROLES = ("user", "model", "reasoning", "note")
 
 
+CURRENT_TAU_S = 180.0      # #161: a session's pull on the current fades with this (e-fold, seconds)
+CURRENT_MIN_PULL = 0.01    # under this a session no longer pulls
+
+
 def unit(v) -> np.ndarray:
     # a packed vector (f16:/f32: base64) or a decimal list -- same
     # shape-family as the store's rows (the sentence vecs are packed
@@ -434,6 +438,8 @@ class EntityField:
         self._deltas: dict[str, dict] = {}
         self._deltas_index: dict | None = None
         self._now: dict[str, np.ndarray] = {}      # session -> context (RAM only)
+        self._now_w: dict[str, float] = {}         # session -> its pull on the current (activity, fading)
+        self._now_ts: dict[str, float] = {}        # session -> when it last spoke (wall clock)
         self._ostats = self.b.get("origin_stats", self._okey) or self._fresh_ostats()
 
     @property
@@ -1215,6 +1221,13 @@ class EntityField:
         if np.linalg.norm(resid) > CTX_MIN_RESID:
             now = self._now.get(sess)
             self._now[sess] = unit(resid) if now is None else unit(0.5 * now + 0.5 * unit(resid))
+            # THE CURRENT'S PULL (#161): each event adds one to its session's
+            # pull, which fades with CURRENT_TAU_S -- busier streams pull harder
+            t = time.time()
+            w = self._now_w.get(sess, 0.0)
+            if w:
+                w *= float(np.exp(-(t - self._now_ts.get(sess, t)) / CURRENT_TAU_S))
+            self._now_w[sess], self._now_ts[sess] = w + 1.0, t
         for eid, sidx, surf in ev.get("mentions") or []:
             if sidx in skip or sidx >= len(sids):
                 continue
@@ -1432,6 +1445,7 @@ class EntityField:
         self._ostats["seq_last"], self._ostats["null_coh"] = keep_seq, null
         self._ostats.update(fw)
         self._states, self._dirty, self._deltas, self._now = {}, set(), {}, {}
+        self._now_w, self._now_ts = {}, {}
         self._wgen += 1
         self._ep_index = None
         self._idiom_cache = None
@@ -1764,6 +1778,7 @@ class EntityField:
         self._ostats = self._fresh_ostats()
         self._ostats.update({k: v for k, v in keep.items() if v is not None})
         self._states, self._dirty, self._deltas, self._now = {}, set(), {}, {}
+        self._now_w, self._now_ts = {}, {}
         self._wgen += 1
         self._ep_index = None
         self._idiom_cache = None
@@ -2140,6 +2155,23 @@ class EntityField:
 
     def now(self, session: str = "") -> np.ndarray | None:
         return self._now.get(session)
+
+    def current(self, now: float | None = None) -> np.ndarray | None:
+        """THE FIELD'S CURRENT (#161): every session that spoke lately pulls at
+        once, toward its own context, by its activity fading with
+        CURRENT_TAU_S -- the push the world gives whatever moves on the field.
+        Their SUM, not whoever wrote last: a lone write (a getter reading, a
+        tick) nudges it and can't flip it (the live seat's 2026-10-16 flips).
+        RAM only, like the contexts it is read from; None before anyone spoke."""
+        t = time.time() if now is None else now
+        acc, any_ = None, False
+        for sess, ctx in list(self._now.items()):
+            w = self._now_w.get(sess, 0.0) * float(np.exp(-(t - self._now_ts.get(sess, t)) / CURRENT_TAU_S))
+            if w < CURRENT_MIN_PULL:
+                continue
+            acc = w * ctx if acc is None else acc + w * ctx
+            any_ = True
+        return unit(acc) if any_ else None
 
     # ---- sharing: disjoint writers, merged reads ------------------------------------
     DIVERGE_COS = 0.0          # displacements from the seed pointing apart

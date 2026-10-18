@@ -1950,6 +1950,9 @@ def main() -> None:
                 _serve_hub.on_lost = lambda: _SP.note(srv, "stream-cut")
                 from . import jsexec as _JS      # the seat is a remote_executor: JS in an opted-in tab
                 _JS.bind(srv)
+                from . import self_loop as _SELF  # #161: self -- born off, the operator's switch wakes it
+                _SELF.bind(srv)
+                _SELF.start(srv)
             except Exception as e:
                 print(f"[seat] seat panel not started ({e})", file=sys.stderr)
             print(f"[opencode] native serve up: session store "

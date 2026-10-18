@@ -660,6 +660,7 @@ class Field3DView {
     this._stepRings(now);
     this._stepEdgePulses(now);
     this._stepAvatars(dt);
+    this._stepSelf(now);
     if (this.showLabels && now - this._lastLabels > 180) { this._lastLabels = now; this._paintLabels(); }
     this.renderer.render(this.scene, this.camera);
     this._gaugeFrame(performance.now() - now);
@@ -997,6 +998,8 @@ class Field3DView {
         const m = this.meta[s];
         if (m) m.act = { kind: c.kind || "", brief: c.brief || "", t0: now };
       }
+    } else if (t === "self.cycle" && p.pid === this.pid) {
+      this._selfCycle(p, now);
     } else if (t === "field.born") {
       for (const id of p.eids || []) {
         const s = this.slots.get(id);
@@ -1038,10 +1041,165 @@ class Field3DView {
     return best;
   }
 
+  /** Where self (#161) is now (world coordinates), or null before its first cycle. */
+  selfPos() {
+    const a = this.amoeba;
+    return a && a.pts ? a.pos.slice() : null;
+  }
+
+  /** Where self has been (world coordinates, oldest first) -- the chase cam's way back. */
+  selfTrail() {
+    const a = this.amoeba;
+    return a && a.trail ? a.trail.map((q) => q.slice()) : [];
+  }
+
   /** Where a mind's orb is now (world coordinates), or null. */
   avatarPos(agent) {
     const a = this.avatars.get(agent);
     return a ? a.pos.slice() : null;
+  }
+
+  /** THE SELF LOOP (#161) -- an amoeba in the field's space. Each cycle the seat
+   *  sends five placed points: where it started (from), where it MEANT TO GO
+   *  (its own step), where it EXPECTED to end up (its step + the push it has
+   *  learned), where it ENDED UP (the world's current pushed it), and where it
+   *  has learned THE CURRENT PULLS. Green: its own push; orange: the world's;
+   *  red: the gap (what it did not see coming); violet: its model of the current. */
+  _selfCycle(p, now) {
+    const THREE = this.THREE, pts = p.points || {};
+    if (!pts.at || !pts.from) return;
+    let a = this.amoeba;
+    if (!a) {
+      const c = document.createElement("canvas"); c.width = c.height = 64;
+      const g = c.getContext("2d"), grd = g.createRadialGradient(32, 32, 2, 32, 32, 30);
+      grd.addColorStop(0, "#fff"); grd.addColorStop(0.3, "#7cf0c8"); grd.addColorStop(1, "rgba(0,0,0,0)");
+      g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
+      const oc = document.createElement("canvas"); oc.width = oc.height = 64;
+      const og = oc.getContext("2d"), ogrd = og.createRadialGradient(32, 32, 2, 32, 32, 30);
+      ogrd.addColorStop(0, "#fff"); ogrd.addColorStop(0.3, "#ffd27a"); ogrd.addColorStop(1, "rgba(0,0,0,0)");
+      og.fillStyle = ogrd; og.fillRect(0, 0, 64, 64);
+      const line = (color, opacity) => new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+        new THREE.LineBasicMaterial({ color, transparent: true, opacity, depthWrite: false }));
+      a = this.amoeba = {
+        pos: cubeToWorld(pts.from), tw: null, trail: [], last: p,
+        sprite: new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true, depthWrite: false })),
+        own: line(0x5ad17a, 0.9), world: line(0xffa94d, 0.9), gap: line(0xff5d5d, 0.9), pull: line(0xb48cff, 0.35),
+        aimLine: line(0xffffff, 0.25),
+        beam: line(0xffd27a, 0.9),
+        other: new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(oc), transparent: true, depthWrite: false })),
+        trailLine: new THREE.Line(new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(new Float32Array(32 * 3), 3)),
+          new THREE.LineBasicMaterial({ color: 0x7cf0c8, transparent: true, opacity: 0.3 })),
+        tag: document.createElement("div"),
+      };
+      a.sprite.scale.set(40, 40, 1);
+      a.other.scale.set(30, 30, 1);
+      a.other.position.set(F3_WORLD * 0.46, F3_WORLD * 0.30, F3_WORLD * 0.46);   // the other sits at the field's edge
+      a.other.visible = false;
+      a.tag.style.cssText = "position:absolute;font:600 11px system-ui,sans-serif;color:#7cf0c8;text-shadow:0 1px 2px #000;white-space:nowrap";
+      a.tag.title = "self (#161): white ring = where it wants to be (its aim, once it steers) · green = where it pushes itself to · "
+        + "orange = where the current took it · red = the gap from where it expected to end up · violet = where it has learned the current pulls";
+      this.labelLayer.appendChild(a.tag);
+      // THE MARKERS (the operator, twice: "what are the squary things?"): round
+      // and labelled, each hidden until it means something (no pull before a
+      // model of the current, no aim before it steers)
+      const marker = (color, ring) => {
+        const mc = document.createElement("canvas"); mc.width = mc.height = 32;
+        const mg = mc.getContext("2d");
+        mg.beginPath(); mg.arc(16, 16, ring ? 12 : 9, 0, 2 * Math.PI);
+        if (ring) { mg.lineWidth = 4; mg.strokeStyle = color; mg.stroke(); } else { mg.fillStyle = color; mg.fill(); }
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(mc), transparent: true,
+                                                                depthWrite: false, sizeAttenuation: false }));
+        sp.scale.set(ring ? 0.05 : 0.03, ring ? 0.05 : 0.03, 1);
+        return sp;
+      };
+      a.marks = [
+        { key: "aim", text: "wants", color: "#ffffff", ring: true },
+        { key: "intent", text: "pushes to", color: "#5ad17a" },
+        { key: "expected", text: "expects", color: "#ff5d5d" },
+        { key: "pull", text: "pull", color: "#b48cff" },
+      ].map((m) => {
+        const lab = document.createElement("div");
+        lab.style.cssText = "position:absolute;font:500 10px system-ui,sans-serif;color:" + m.color + ";opacity:.85;text-shadow:0 1px 2px #000;white-space:nowrap;pointer-events:none";
+        lab.textContent = m.text;
+        this.labelLayer.appendChild(lab);
+        const sp = marker(m.color, m.ring);
+        this.scene.add(sp);
+        return Object.assign({}, m, { sp, lab });
+      });
+      this.scene.add(a.sprite, a.own, a.world, a.gap, a.pull, a.aimLine, a.trailLine, a.beam, a.other);
+    }
+    const W = (q) => (q ? cubeToWorld(q) : null);
+    a.pts = { from: W(pts.from), intent: W(pts.intent), expected: W(pts.expected), at: W(pts.at), pull: W(pts.pull), aim: W(pts.aim) };
+    a.tw = { from: a.pos.slice(), to: a.pts.at, t0: now, dur: 1500 };
+    a.trail.push(a.pts.at); if (a.trail.length > 32) a.trail.shift();
+    a.last = p; a.t0 = now;
+    const meets0 = p.meets || {};                  // ages -> this viewer's clock: when the push/answer landed
+    a.pushAt = meets0.push_age != null ? now - meets0.push_age * 1000 : null;
+    a.heardAt = meets0.heard_age != null ? now - meets0.heard_age * 1000 : null;
+  }
+
+  _stepSelf(now) {
+    const a = this.amoeba;
+    if (!a || !a.pts) return;
+    if (a.tw) {
+      const u = Math.min(1, (now - a.tw.t0) / a.tw.dur), e = u * u * (3 - 2 * u);
+      a.pos = a.tw.from.map((v, i) => v + (a.tw.to[i] - v) * e);
+      if (u >= 1) a.tw = null;
+    }
+    const wob = 1 + 0.08 * Math.sin(now / 260) + 0.05 * Math.sin(now / 97);      // it is alive
+    a.sprite.position.set(a.pos[0], a.pos[1], a.pos[2]);
+    a.sprite.scale.set(40 * wob, 40 / wob, 1);
+    const seg = (ln, p, q) => {
+      ln.visible = !!(p && q);
+      if (!ln.visible) return;
+      const g = ln.geometry.attributes.position;
+      g.setXYZ(0, p[0], p[1], p[2]); g.setXYZ(1, q[0], q[1], q[2]); g.needsUpdate = true;
+    };
+    const P = a.pts;
+    seg(a.own, P.from, P.intent);          // where it meant to go
+    seg(a.world, P.intent, P.at);          // where it ended up: the world's push
+    seg(a.gap, P.expected, P.at);          // what it did not see coming
+    seg(a.pull, P.at, P.pull);             // where it has learned the current pulls
+    const L = a.last || {};
+    a.gap.material.opacity = 0.35 + 0.65 * Math.min(1, (L.gap || 0) / Math.max(1e-9, L.naive || 1e-9));
+    seg(a.aimLine, a.pos, P.aim);          // how far it is from what it wants
+    // the exchange (rung 6): on a push self beams out to the other (the amber
+    // orb at the field's edge); when the other answers, the orb flashes back
+    const pushed = a.pushAt != null && now - a.pushAt < 1400;
+    const answered = a.heardAt != null && now - a.heardAt < 1400;
+    if (a.other) {
+      a.other.visible = pushed || answered;
+      if (a.other.visible) {
+        const s = 1 + (answered ? 0.8 * Math.sin(now / 110) : 0.2 * Math.sin(now / 260));
+        a.other.scale.set(30 * s, 30 * s, 1);
+        a.other.material.opacity = pushed && !answered ? 0.9 : 0.5 + 0.5 * Math.abs(Math.sin(now / 110));
+      }
+      seg(a.beam, a.pos, a.other.position.toArray());
+      a.beam.visible = pushed;                       // the outbound half only
+      a.beam.material.opacity = answered ? 0.3 : 0.9;
+    }
+    for (const m of a.marks) {
+      const q = P[m.key];
+      m.sp.visible = !!q;
+      const sq = q ? this._project(q) : null;
+      m.lab.style.display = sq ? "" : "none";
+      if (!q) continue;
+      m.sp.position.set(q[0], q[1], q[2]);
+      if (sq) m.lab.style.transform = "translate(" + (sq[0] + 8).toFixed(0) + "px," + (sq[1] - 5).toFixed(0) + "px)";
+    }
+    const tp = a.trailLine.geometry.attributes.position;
+    for (let i = 0; i < 32; i++) { const q = a.trail[Math.max(0, a.trail.length - 32 + i)] || a.pos; tp.setXYZ(i, q[0], q[1], q[2]); }
+    tp.needsUpdate = true;
+    const sc = this._project(a.pos);
+    a.tag.style.display = sc ? "" : "none";
+    if (sc) a.tag.style.transform = "translate(" + (sc[0] + 14).toFixed(0) + "px," + (sc[1] - 6).toFixed(0) + "px)";
+    const skill = L.skill == null ? "" : " · skill " + Number(L.skill).toFixed(2);
+    const otherEid = (L.meets || {}).other;
+    const split = otherEid && L.split ? L.split[otherEid] : null;
+    const meet = split ? " · meets " + (split === "other" ? "an other" : "its body") : "";
+    a.tag.textContent = "self · rung " + (L.rung || 0) + " · " + Math.round(100 * (L.bar || 0)) + "%" + skill
+      + (L.steer != null ? " · lands " + Math.round(100 * L.steer) + "% closer to its aim" : "")
+      + (L.slipping ? " · slipping" : "") + (L.mode === "watch" ? " · watched" : "") + meet;
   }
 
   _avatar(agent) {

@@ -26,14 +26,14 @@ const LS_FOLLOW = "membrane.home.follow";
 // what the camera follows (the operator, 2026-10-10: "the seat (the most
 // interesting entity) or thinker/chat, whoever's active, to show what Argus
 // is thinking/doing, or even just where stuff is changing")
-const FOLLOW_MODES = ["activity", "seat", "you"];
+const FOLLOW_MODES = ["activity", "seat", "you", "self"];
 const SEAT_IDS = ["seat:self", "seat"];
 const ACTIVITY_EVERY_MS = 1500;
 // THE VIEW (2026-10-13, the operator: the standalone burger menu "just with
 // links to chat-only and graph-only interfaces"): the standalone page puts
 // ?view= in the URL (index.html) -- chat alone (no field) or the field
 // alone (no chat); anything else is everything.
-const VIEW = window.MEMBRANE_VIEW === "chat" || window.MEMBRANE_VIEW === "graph" ? window.MEMBRANE_VIEW : "";
+const VIEW = (typeof window !== "undefined" && (window.MEMBRANE_VIEW === "chat" || window.MEMBRANE_VIEW === "graph")) ? window.MEMBRANE_VIEW : "";
 
 /** The orbit angles that put the camera on the ray from the field's centre
  * through p (beyond it), so it looks at the centre THROUGH p -- the
@@ -43,6 +43,21 @@ function throughCenter(p) {
   if (n < 40) return null;
   const d = [p[0] / n, p[1] / n, p[2] / n];
   return { phi: Math.max(0.05, Math.min(Math.PI - 0.05, Math.acos(d[1]))), theta: Math.atan2(d[0], d[2]) };
+}
+
+/** THE CHASE CAM (#161, the operator: "follow self from behind, from its past
+ *  positions"): the orbit angles that put the camera behind self -- along the
+ *  way back to where it was K steps ago -- and a little above; null while its
+ *  trail is too short or it hasn't moved. */
+function chaseAngles(trail, k = 4) {
+  if (!trail || trail.length < 2) return null;
+  const a = trail[Math.max(0, trail.length - 1 - k)], b = trail[trail.length - 1];
+  const d = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+  const n = Math.hypot(d[0], d[1], d[2]);
+  if (n < 1e-6) return null;
+  const u = [-d[0] / n, -d[1] / n + 0.35, -d[2] / n];
+  const m = Math.hypot(u[0], u[1], u[2]);
+  return { phi: Math.max(0.05, Math.min(Math.PI - 0.05, Math.acos(u[1] / m))), theta: Math.atan2(u[0] / m, u[2] / m) };
 }
 
 /** a -> b the short way round (angles). */
@@ -450,7 +465,7 @@ function pickVoice(voices, lang = "en", chosen = "") {
 const LS_VOICE = "membrane.home.voice";
 const IS_CHROME = typeof navigator !== "undefined" && /Chrome\//.test(navigator.userAgent || "") && !/Firefox\//.test(navigator.userAgent || "");
 
-const HomeLogic = { cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, angleStep };
+const HomeLogic = { cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
 const HSTYLE = `
@@ -501,7 +516,7 @@ const HSTYLE = `
   /* THE VIEW (2026-10-13, the operator's burger-menu ask): chat-only fills
    * the screen with the conversation -- nothing but field chrome left */
   .view-chat .chat { left:12px; width:auto; }
-  .view-chat .sbox, .view-chat .me, .view-chat .start, .view-chat .chatbtn,
+  .view-chat .sbox, .view-chat .me, .view-chat .selfpick, .view-chat .chatbtn,
   .view-chat .card, .view-chat .tip, .view-chat .field { display:none; }
   .tip { position:absolute; z-index:4; pointer-events:none; display:none; padding:4px 8px; border-radius:8px;
          font-size:12px; max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -530,6 +545,9 @@ const HSTYLE = `
   @keyframes recpulse { 50% { box-shadow:0 0 0 8px color-mix(in srgb, var(--error-color,#c0392b) 30%, transparent); } }
   .card { bottom:76px !important; }
   .top .tilt[hidden] { display:none; }
+  .top .selfstat { font-size:12px; opacity:.85; white-space:nowrap; padding-right:6px; }
+  .view-chat .selfstat { display:none; }
+  .top .selfpick { border:0; background:transparent; color:inherit; font:inherit; border-radius:999px; padding:6px 8px; max-width:12em; cursor:pointer; }
   /* THE WAVE (2026-10-10, the operator: "a wavy animation like Siri, but
      angly and graph-y"): a chain of nodes joined by straight edges -- a strip
      of the field -- that moves with the voice: your mic level while
@@ -611,9 +629,34 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._hushTts(); this._tiltStop();
       this._listenKeys(false);
       clearInterval(this._follow);
-      clearInterval(this._autoT);
+      clearInterval(this._autoT); clearInterval(this._selfT);
       if (this._v3) { this._v3.stop(); this._v3 = null; }
       if (this._hidSidebar) this._dock("restore");
+    }
+
+    _paintSelf() {
+      const sel = this._selfPick, c = this._chat; if (!sel) return;
+      if (!c || typeof c._selfView !== "function") return;
+      const v = c._selfView();
+      // THE GUARD (live, 2026-10-16: 25 s after a restart the page sent "off"):
+      // rebuilding a focused <select>'s options can reset it to "off" and fire
+      // a change -- never while it has focus; disabled until the state loads
+      sel.disabled = !v.loaded;
+      if (sel.getRootNode().activeElement === sel) return;
+      const sig = JSON.stringify(v.options);
+      if (sel._sig !== sig) {                  // rebuilt only on change
+        sel.textContent = "";
+        for (const o of v.options) {
+          const el = document.createElement("option");
+          el.value = String(o.value); el.textContent = o.text; el.disabled = !!o.disabled;
+          sel.appendChild(el);
+        }
+        sel._sig = sig;
+      }
+      sel.value = String(v.limit);
+      sel.title = v.title;
+      sel.style.opacity = v.limit ? "1" : ".6";
+      if (this._selfStat && !this._selfFlash) this._selfStat.textContent = v.status || "";
     }
 
     _paintAuto() {
@@ -714,10 +757,11 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         <div class="msg">finding you on the field…</div>
         <div class="top glass">
           <button class="ha" title="Home Assistant: its dashboards and pages" aria-haspopup="menu" aria-expanded="false" aria-label="Home Assistant menu">☰</button>
-          <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you">◎ activity</button>
+          <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you · self (the 🌱 loop)">◎ activity</button>
           <button class="chatbtn" title="Show / hide the chat">💬</button>
           <button class="autobtn" title="auto-chat" aria-label="auto-chat">▶</button>
-          <button class="start" title="Open Home Assistant here (this browser)">☆</button>
+          <select class="selfpick" title="self (#161): how far it may grow (the top rung; off = asleep)"><option value="0">🌱 off</option></select>
+          <span class="selfstat" title="where self is now: its rung, the bar toward the next, what it waits on"></span>
           <button class="tilt" hidden title="Turn the view by tilting the device">📱</button>
           <span class="sbox"><input class="q" placeholder="search entities…" autocomplete="off"><div class="hits glass"></div></span>
           <span class="status"></span>
@@ -816,10 +860,32 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       });
       this._paintAuto();
       this._autoT = setInterval(() => this._paintAuto(), 1500);
-      $(".start").addEventListener("click", () => {
-        lsSet("defaultPanel", JSON.stringify((this._panel && this._panel.url_path) || "membrane"));
-        this._statusEl.textContent = "this browser opens here now (Profile → Dashboard changes it)";
+      // THE GROWTH LIMIT (#161, the operator's ask 2026-10-16): 🌱 where the
+      // ☆ was (that pinned HA's default dashboard to this page -- HA's own
+      // Profile -> Dashboard does the same). A chooser of the top rung self
+      // may reach (off = asleep); below it self still earns each rung. Its
+      // options and rung / bar come from the chat element (the panel owns the route).
+      this._selfPick = $(".selfpick");
+      this._selfStat = $(".selfstat");
+      this._selfPick.addEventListener("change", () => {
+        const c = this._chat;
+        if (!c || typeof c._setSelfLimit !== "function") return;
+        this._selfPick.disabled = true;                       // in flight
+        if (this._selfStat) this._selfStat.textContent = "…";
+        Promise.resolve(c._setSelfLimit(Number(this._selfPick.value))).catch(() => null).then((out) => {
+          // THE FEEDBACK: the seat's confirmed answer (or the error), held 4 s
+          if (out && !out.skipped) {
+            this._selfFlash = out.text;
+            if (this._selfStat) this._selfStat.textContent = out.text;
+            this._statusEl.textContent = "🌱 " + out.text;
+            clearTimeout(this._selfFlashT);
+            this._selfFlashT = setTimeout(() => { this._selfFlash = null; this._paintSelf(); }, 4000);
+          }
+          this._paintSelf();
+        });
       });
+      this._paintSelf();
+      this._selfT = setInterval(() => this._paintSelf(), 1500);
       $(".x").addEventListener("click", () => { this._card.classList.remove("open"); if (this._v3) this._v3.select(null); this._select(null); });
       $(".go").addEventListener("click", () => { if (this._v3 && this._sel) { this._lastTouch = performance.now(); this._v3.flyTo(this._sel.id); } });
       $(".ask").addEventListener("click", () => this._askAbout());
@@ -936,6 +1002,19 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const idle = performance.now() - this._lastTouch >= IDLE_BEFORE_FOLLOW_MS;
       if (!force && !idle) return;
       const now = performance.now();
+      if (this._mode === "self") {                          // #161: the amoeba (the glide keeps up with it)
+        const p = v.selfPos();
+        if (p) {
+          this._goal = { p, r: 420 };
+          this._msgEl.style.display = "none";
+          this._say("following self");
+          return;
+        }
+        this._msgEl.style.display = "";
+        this._msgEl.textContent = "self is not moving yet — switch 🌱 on and talk to the seat";
+        setTimeout(() => { if (this._msgEl.textContent.startsWith("self is not")) this._msgEl.style.display = "none"; }, 6000);
+        return;
+      }
       if (this._mode === "activity") {
         const a = v.activity();
         if (a) {
@@ -982,6 +1061,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           const p = this._v3.avatarPos(this._mindFollow);
           if (p) this._goal = { p, r: this._goal && this._goal.sel ? this._goal.r : 420, sel: true };
         }
+        if (this._mode === "self" && !this._mindFollow && !this._selFollow) {   // it moves every cycle: keep up
+          const sp = this._v3.selfPos();
+          if (sp) this._goal = { p: sp, r: this._goal && !this._goal.sel ? this._goal.r : 420 };
+        }
         const v = this._v3, g = this._goal;
         const idle = performance.now() - this._lastTouch >= IDLE_BEFORE_FOLLOW_MS;
         if (g && !v._flyAnim && (idle || g.sel)) {
@@ -989,7 +1072,9 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           for (let i = 0; i < 3; i++) v.orbit.target[i] += (g.p[i] - v.orbit.target[i]) * k;
           if (idle) {
             v.orbit.r += (g.r - v.orbit.r) * k * 0.6;
-            const a = this._tiltAng ? null : throughCenter(v.orbit.target);
+            const a = this._tiltAng ? null
+              : ((this._mode === "self" && chaseAngles(v.selfTrail ? v.selfTrail() : null))   // behind self
+                 || throughCenter(v.orbit.target));
             if (a) {
               const ka = 1 - Math.exp(-dt * 0.5);
               v.orbit.theta = angleStep(v.orbit.theta, a.theta, ka);

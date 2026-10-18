@@ -23,6 +23,7 @@ broken, kept as history).
 | **Thinker** | 1 s heartbeat, duty-capped | digests the latest stimuli (their entities as tags, an observation as the fn stamp) and eats them into its working memory; in silence, extends open timeline branches |
 | **Dreamer** | 60 s idle waves | solution generation: proposes from the model's own recent sentences, vets a candidate by its **surprise** against the entity states (on topic, but not already said), commits quarantined `Timeline` entities under `session:now` |
 | **NightClock** | 15 min | the entity scripts; **births**; **junk**; activity; the coherence null (once a day); entity-doc materialization + the overlay consolidation |
+| **Self loop** (#161) | change-driven, ≥ 10 s apart, off by default | `self` (`self_loop.py`): try → expect → notice on its own position; the operator's switch; see [The self loop](#the-self-loop-161) |
 
 All cadenced organs use the idle local model for any model calls they
 make (`--idle-cortex-model`), so a wedged background seat can never burn
@@ -158,6 +159,193 @@ read-only), the field's states update **online** at mention time, and
 `rebuild()` replays the `entity_deltas` log to the same states without
 re-embedding. The night reads statistics, not the raw field.
 
+## The self loop (#161)
+
+`membrane::self` is an unnamed looped cliffhanger object, the seed of the
+evolving self in #161. It grows up a **skill ladder**: one rung per PR, each
+with a measured pass test; a rung opens by itself when its test passes. This
+section covers what is built (`membrane/self_loop.py`).
+
+- **Rung 0, sleep and wake, and the growth limit.** A per-seat chooser, **off
+  by default**, set only by the operator: the 🌱 chooser (the home top bar,
+  and the chat's side menu) → `POST /membrane/seat/control {"self_limit": n}`
+  (`seat_panel.control`). The chooser picks **the top rung self may reach**:
+  - below the limit, self still earns each rung by its test, in order;
+  - above it, nothing opens however well it does: the chooser marks such a
+    rung "ready, held by the limit", and the bar says it waits on "the limit";
+  - `0` is off, and raising the limit never grants a rung.
+
+  `{"self": "on" | "off" | "watch"}` still works. A seat switched on before
+  the limit existed gets limit 1. Off runs
+  nothing and erases nothing. The mode (`<data dir>/self/mode.json`) and the
+  record survive a restart. `watch` runs like `on` until there is a
+  babysitter to keep quiet.
+- **Rung 1, feel itself (the amoeba's problem).** Its only act moves its own
+  position on the field, and the world pushes it while it moves: the field's
+  **current** (`EntityField.current()`), which self does not control. Every
+  session that spoke lately pulls at once toward its own context: one unit of
+  pull per event, fading with a 3-minute time constant (`CURRENT_TAU_S`). So
+  busy streams pull harder, quiet ones fade out, and a lone write (a getter
+  reading, a tick) nudges the current but can't flip it. `expect` says beforehand where it will
+  end up: its own step plus the push it has learned to expect there. It
+  learns that push from its own moves as `push ≈ b − g·position`, kept in its
+  own model file (`<data dir>/self/model.json`; its `script_data` shows the
+  learned pull strength only, because entity properties cap lists at 128 items
+  on save). `notice` sees where it actually ended up. **The gap is the
+  signal:** it closes as self learns the current and reopens when the
+  conversation turns.
+  - The test: over the last 20 pushed cycles, `1 − gap/naive ≥ 0.5`, where
+    *naive* is the gap with no experience at all.
+  - In a quiet seat (no current) there is nothing to feel, and the bar says
+    it is waiting on the world.
+- **Steer (after rung 1).** Rung 1 taught self to predict the current's push,
+  but it never used that. Once rung 1 has passed, self holds an **aim** for 30
+  cycles and leans into the current by the push it expects: its stride is
+  `aim − here − expected push`, up to 0.3 (its babble was 0.1, and a 0.2 pull
+  can't be beaten with that). Each cycle records how far it landed from its
+  aim (`aim_err`) against where the same stride would have landed without
+  leaning (`aim_naive`). `status()["steer"]` and the viewer's tag ("lands N%
+  closer to its aim") read that, measured and never claimed. The viewer draws
+  the aim as a white ring ("wants") with a faint line to it, and the other
+  markers as round, labelled dots: "pushes to", "expects", and "pull" (hidden
+  until self has a model of the current).
+- **Rung 2, first reach (the world's tempo).** Open once rung 1 has passed and
+  the limit is at least 2. Each cycle, self also reaches for one thing that
+  has a getter: reading it fires the getter (`watch_agents.entity_read_back`,
+  `by="self"`).
+  - **Before reaching**, self predicts whether the reading will have changed
+    since it last looked. It keeps one bit of memory: the world bursts, so a
+    change usually follows a change and a quiet a quiet — it predicts from what
+    it saw last, and falls back to its smoothed share of reaches that found
+    the thing changed before it has that bit. So it learns each thing's tempo
+    at the pace it looks.
+  - **After reaching**, `notice` records changed, unchanged, or **no answer**
+    (throttled, held, errored, no reading). No-answers never count as the
+    world's.
+  - **The test:** for one thing, over its last 20 answered reaches, the Brier
+    skill against the seat-wide change rate is at least 0.2. Then a **blind
+    audit**:
+    - membrane pauses that thing's getter (`pause_getter`) until self has
+      reached for it 3 more times;
+    - self isn't told: its reaches answer "unchanged", and it learns nothing
+      inside the window;
+    - the audit passes only if no change was recorded while the source was
+      stopped.
+  - **A still thing can't be audited** (it must change on at least 60% of
+    looks), so it can't carry the rung: it can't show that a mark could fail.
+  - **What passing means:** "I can tell which things move on their own, and
+    my marks of their moving are real." That is the world's tempo, not yet a
+    body.
+- **Rung 3, tell things apart.** Self sorts its world into kinds from its own
+  looks (over the last 80 reaches per thing; `status()["world"]`, and
+  `script_data["kinds"]`):
+  - **silent:** no answer on ≥ 80% of looks;
+  - **moving:** changed on ≥ 60%;
+  - **still:** changed on ≤ 20%;
+  - **intermittent:** in between.
+
+  It acts on the sort: a silent thing is reached for with weight 0.05,
+  rarely but never never, since the world can change. On the live seat
+  silent things took 62% of its reaches. The test, in stages:
+  1. 40 sorted reaches;
+  2. the kinds' rates agree across the two halves of its last 80 reaches — the
+     no-answer share and the change share each drift by at most 0.25 (a look's
+     drift is not a new kind) — with at least two kinds;
+  3. the no-answer share over its last 40 reaches is under 25%;
+  4. rung 2's skill still holds — read over the moving (auditable) things
+     only, so a still counter can't carry the bar.
+
+  Once rung 2 is earned, no more getters are paused for its audit.
+- **Rung 4, patience (choosing when to look).** Self fits each thing's rate of
+  change in time, by maximum likelihood over its last 30 looks:
+  `P(changed | dt) = 1 − exp(−λ·dt)`. It looks again once a change has
+  become 60% likely, waiting up to 30 min. When nothing is due it **waits**,
+  noted every 30 idle cycles; silent things are still checked now and then.
+  The test, in stages:
+  1. 30 timed looks;
+  2. they find news at least half the time, or 0.15 more often than its
+     fixed-pace looks at the same things did, whichever is easier;
+  3. its predictions are calibrated: the mean predicted chance is within 0.1
+     of the share that found news.
+
+  (A skill-against-the-average test can't work here: timed looks are, by
+  design, all predicted around 60%.)
+- **Rung 5, notice the world changed.** After each look, self reads its last
+  3–5 looks at a thing against its long memory of it. When they are both far
+  from it (by more than 0.4) and unlikely under it (binomial tail below 0.01),
+  the world changed: it records a **shift** ("went still" or "moves again")
+  and re-learns from those looks. Its patience refits from the shift on.
+  - A coin-flip thing never shifts: five in a row is p = 0.06.
+  - A mover going quiet is caught within 3 looks.
+  - **The blind audit:** membrane pauses the surest mover while self looks at
+    it 5 times, then restarts it for 5 more. Self isn't told, and here it
+    *does* learn, since re-learning is the point.
+  - **Pass:** "went still" during the pause and "moves again" after it. The
+    phases are capped at 1 h and 3 h; a still thing is looked at rarely, by
+    rung 4's patience.
+- **Rung 6, meet an other.** Self's first outward act: it pushes a line
+  ("self is here") to `chat:out:operator`, paced at every 30 cycles. The
+  thing that answers — imperfectly, variably, with delay — is an **other**;
+  what it predicts near-perfectly (zero gap, its own echo) is its **body**.
+  The answerer is a new reach target, `chat:in:<person>` (the twin of
+  `voice:in`): an ordinary message stamps its `heard_n`, and self's next
+  look reads that as news. The split is read off the Brier skill self
+  already computes per thing — skill ≥ 0.9 is a body, below (with enough
+  looks) an other. The test, in stages:
+  1. 10 pushes to `chat:out`;
+  2. 20 answered looks at the answerer;
+  3. the answerer is classed **other** — a perfect echo classes *body* and
+     the split reads 0, so the rung stays shut.
+  (`llm::call` prediction is rung 7's; rung 6 is only the bare split.)
+- **Rung 7, understand an other.** Self consults the model coprocessor inside
+  `expect`: when it is about to look at the thing it met (`chat:in:operator`),
+  it reads the last `llm::call` verdict — a one-line probability the next
+  answer is "changed" — as `p_llm` beside habit's `p`, and queues the next
+  `llm::call` (paced at 30 cycles; the call is read-only, so it answers in one
+  line). The test reads the **paired** looks — both predictions on the same
+  look — and the rung passes when the model removes ≥ 0.15 of habit's Brier
+  error over 20 such looks: predicting the operator's answers *better than
+  habit alone*. It is scoped to the other only; every other thing keeps
+  habit's prediction.
+- **Its methods run only in its own loop.** `try` / `expect` / `notice` are
+  cliffhanger methods (`self::` no-shell dialect), and so is `reach`. `exec inspect` shows them;
+  any other caller, the model included, is refused. The LLM talks *to* self,
+  never *as* it. `entity_edit` can't write its `script_data`, and mentions
+  can't move it (a one-segment `m:` name never gets a field state).
+- **The record** is `<data dir>/self/record.jsonl`, read once and kept in
+  memory as it grows. It is append-only and never truncated, and it starts at birth (the first switch-on): scalars per
+  cycle (step, push, gap, naive, the kind of change), errors, and each rung
+  opening. Nothing before its birth is on it.
+- **The runaway guard.** Each cycle's change wakes the next, at least
+  `PACE_S` apart (`MEMBRANE_SELF_PACE_S`, default 10 s, floor 1 s) and at
+  most 30 a minute. Three failed cycles in a row hold the loop until the
+  operator's next toggle. A paused seat runs nothing.
+- **On the viewer.** Each cycle is drawn in the 3D field viewer as an amoeba:
+  - **green**: from where it started to where it meant to go (its own push);
+  - **orange**: on to where it ended up (the world's push);
+  - **red**: the gap from where it expected to end up (brighter when it is
+    surprised);
+  - **violet**: where it has learned the current pulls;
+  - its trail.
+
+  Once rung 6 practises, the amoeba's tag also names what it has met ("meets
+  an other" / "meets its body"), and the exchanges' text lands in the chat
+  overlay.
+
+  The seat places the points into the open projection (`fieldpulse`'s
+  `self.cycle` frame: cube coordinates and numbers, never vectors or text).
+- **The exp bar.** The panel shows the rung and a bar toward the next one.
+  - The next rung's criteria are **stages, in order** (rung 1: pushes, then
+    skill; rung 2: reaches, skill, the audit). The bar fills through them,
+    each stage an equal share, and names the first one not yet met ("waiting
+    on: reaches"). A plain weakest-criterion bar sat at 0% on the live seat
+    while reaches piled up.
+  - It can go down: a passed rung stays on the record, and the bar shows it
+    slipping while its test fails.
+  - Only the recorded cycles, reaches and audits feed it.
+  - It moves with each cycle: every cycle's `self.cycle` frame carries the
+    numbers, viewer open or not.
+
 ## Kill switches (one per organ)
 
 ```
@@ -166,6 +354,7 @@ re-embedding. The night reads statistics, not the raw field.
 MEMBRANE_EFIELD=shadow | off   # events-only capture / the field off
 MEMBRANE_LANE_GATE=0           # the flat tool surface (no operator/listener split)
 MEMBRANE_NERVE_PAUSE=0         # pause becomes a no-op
+(the self loop)                # off by default; the operator's 🌱 switch
 ```
 
 ## The goal loops' rhythm (2026-10-08)

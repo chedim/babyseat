@@ -432,6 +432,59 @@ function seatView(st) {
     : { paused, icon: "⏸", label: "pause the seat", title: "pause the seat: every acting lane stands down (loops, dreamer, thinker, night)" + mem + bat };
 }
 
+/** #161: the growth limit -- the chooser of the top rung self may reach (0:
+ *  off) -- and its rung + exp bar. Below the limit self still earns each rung;
+ *  above it nothing opens. Unbuilt rungs are listed, disabled. */
+function selfView(st) {
+  const s = (st && st.self) || { mode: "off", limit: 0 };
+  const loaded = !!(st && st.self && Array.isArray(st.self.ladder));   // the seat's real state, not the placeholder
+  const lim = s.mode === "off" ? 0 : (s.limit || 1);
+  const mark = { passed: " ✓", current: " ◀", capped: " (ready, held by the limit)", locked: "", unbuilt: " (not built)" };
+  const options = [{ value: 0, text: "🌱 off", disabled: false, selected: lim === 0 }];
+  for (const r of (s.ladder || [])) {
+    if (r.rung === 0) continue;
+    options.push({ value: r.rung, text: "🌱 " + r.rung + " · " + r.name + (mark[r.state] || ""),
+                   disabled: r.state === "unbuilt", selected: r.rung === lim });
+  }
+  if (options.length === 1) options.push({ value: 1, text: "🌱 1 · feel itself", disabled: false, selected: lim === 1 });
+  if (s.mode === "off") return { loaded, limit: 0, options, status: "🌱 asleep", title: "self (#161) is asleep: nothing runs, nothing is erased -- choose how far it may grow" };
+  const pct = Math.round(100 * (s.bar || 0));
+  const rung = "rung " + (s.rung || 0) + (s.rung_name ? " (" + s.rung_name + ")" : "");
+  const why = s.held ? " · HELD (3 failed cycles; re-choose to clear)" : s.waiting_on ? " · waiting on: " + s.waiting_on : "";
+  const nxt = s.next == null && s.bar >= 1 ? " · the next rung is not built yet" : "";
+  const slip = s.slipping ? " · slipping" : "";
+  const goal = s.next == null ? "top built rung" : (s.next > lim ? "held at " + lim : "→ " + s.next);
+  const status = s.held ? "🥀 held: re-choose to clear"
+    : "rung " + (s.rung || 0) + " ✓ · " + pct + "% " + goal + (s.waiting_on ? " (" + s.waiting_on + ")" : "") + (s.slipping ? " · slipping" : "");
+  return { loaded, limit: lim, options, status,
+           title: "self (#161): " + s.mode + " · " + rung + " · " + pct + "% toward the next" + why + slip + nxt
+                  + " · may grow up to rung " + lim + " · " + (s.cycles || 0) + " cycles" };
+}
+
+/** Fill a <select> from selfView's options -- rebuilt only when they change
+ *  (an open chooser must not be yanked shut by the 1.5 s repaint). */
+function fillSelfPick(sel, v) {
+  if (!sel) return;
+  // THE GUARD (live, 2026-10-16: 25 s after a restart the page sent "off"):
+  // rebuilding an open / focused <select>'s options can reset it to its
+  // first option and fire a change -- so never while it has focus, and the
+  // chooser stays disabled until the seat's real state has loaded
+  sel.disabled = !v.loaded;
+  if (sel.getRootNode().activeElement === sel) return;
+  const sig = JSON.stringify(v.options);
+  if (sel._sig !== sig) {
+    sel.textContent = "";
+    for (const o of v.options) {
+      const el = document.createElement("option");
+      el.value = String(o.value); el.textContent = o.text; el.disabled = !!o.disabled;
+      sel.appendChild(el);
+    }
+    sel._sig = sig;
+  }
+  sel.value = String(v.limit);
+  sel.title = v.title;
+}
+
 function roleNext(auto) { return (auto && auto.role) === "predict" ? "babble" : "predict"; }
 function roleView(auto) {
   return (auto && auto.role) === "predict"
@@ -614,7 +667,7 @@ function jsShow(v) {
   return String(v);
 }
 
-const AiPanelLogic = { jsCompile, jsShow, voiceLogItems, seatView, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
+const AiPanelLogic = { jsCompile, jsShow, voiceLogItems, seatView, selfView, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
@@ -873,6 +926,8 @@ function definePanel() {
             <button class="btn icon llmbtn" title="the LLM (off: talk to membrane alone)">🤖</button>
             <button class="btn icon autobtn" title="auto-chat: membrane and the LLM talk; you can join any time">⟳</button>
             <button class="btn icon rolebtn" title="membrane's role: babble (it talks to the LLM) or predict (it guesses the LLM, unheard)">💬</button>
+            <select class="selfpick" title="self (#161): how far it may grow (the top rung; off = asleep)"><option value="0">🌱 off</option></select>
+            <span class="selfstat" title="where self is now: its rung, the bar toward the next, what it waits on"></span>
             <button class="btn icon thinkbtn" title="the think dial: the reasoning the cards do (auto = forward verbatim)">💭</button>
             <button class="btn icon jsbtn" title="allow JS scripting in this window -- the page runs it with your HA login -- off by default">🧩</button>
             <button class="btn icon vlogbtn" title="the voice log: what was said aloud (hidden from the chat)">🗒</button>
@@ -906,7 +961,7 @@ function definePanel() {
         // chat button as a ▶/⏸; the panel's own node stays (hidden --
         // never listed) so its listener and state keep working.
         for (const [cls, label] of [["agent", null], ["modelpick", null], ["voicebtn", "membrane's voice"], ["llmbtn", "LLM replies"],
-                                    ["rolebtn", "membrane babbles"], ["thinkbtn", "think"], ["jsbtn", "JS scripting: off"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
+                                    ["rolebtn", "membrane babbles"], ["selfpick", null], ["selfstat", null], ["thinkbtn", "think"], ["jsbtn", "JS scripting: off"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
           const el = app.querySelector("." + cls);
           if (!el) continue;
           if (label) {
@@ -966,6 +1021,9 @@ function definePanel() {
       this._vlogBtn.addEventListener("click", () => this._toggleVoiceLog().catch(() => {}));
       this._pauseBtn = $(".pausebtn");
       this._pauseBtn.addEventListener("click", () => this._togglePause().catch(() => {}));
+      this._selfPick = $(".selfpick");
+      this._selfStat = $(".selfstat");
+      this._selfPick.addEventListener("change", () => this._setSelfLimit(Number(this._selfPick.value)).catch(() => {}));
       this._llmBtn = $(".llmbtn");
       this._llmOn = true;                 // per page view
       this._llmBtn.addEventListener("click", () => {
@@ -1535,6 +1593,15 @@ function definePanel() {
         this._sesTimer = setTimeout(() => this._listSessions().catch(() => {}), 400);
       }
       if (ev.type === "membrane.seat") this._loadSeat();          // the seat's own events: its state moved
+      if (ev.type === "self.cycle" && this._seat) {               // #161: the bar moves with each cycle
+        const s = Object.assign({}, this._seat.self || {});
+        const moved = ("rung" in p && p.rung !== s.rung) || ("limit" in p && p.limit !== s.limit);
+        for (const k of ["rung", "rung_name", "bar", "skill", "mode", "slipping", "waiting_on", "next", "cycles", "held", "limit"]) if (k in p) s[k] = p[k];
+        s.born = true;
+        if (moved) this._loadSeat().catch(() => {});                 // a rung opened: the ladder's marks refresh
+        this._seat = Object.assign({}, this._seat, { self: s });
+        this._paintSeat();
+      }
       if (ev.type === "membrane.name") this._applySeatName(p.name);   // issue #6: the name was adopted
       if (ev.type === "membrane.jsexec") this._jsRun(p.job).catch(() => {});
       if (ev.type === "membrane.listen" && sid === (this._chat && this._chat.sid)) {
@@ -1941,6 +2008,34 @@ function definePanel() {
       else this._err(this._apiErr("pause failed (HA admins only)", r));
     }
 
+    /** The 🌱 chooser's face (home.js's top bar paints its own from here). */
+    _selfView() { return selfView(this._seat); }
+
+    /** The growth limit: the top rung self may reach (0: off). */
+    async _setSelfLimit(n) {
+      const v = selfView(this._seat);
+      if (!v.loaded || n === v.limit) return { ok: false, skipped: true };   // nothing before the state loads, nothing for no change
+      if (this._selfPick) this._selfPick.disabled = true;           // in flight
+      const r = await this._api(SERVE + "/membrane/seat/control", { method: "POST", body: JSON.stringify({ self_limit: n }) });
+      let out;
+      if (r.ok && r.data && r.data.state) {
+        this._seat = r.data.state;
+        const got = selfView(this._seat);                          // the seat's answer, not what was clicked
+        out = { ok: true, limit: got.limit, rung: (this._seat.self || {}).rung || 0,
+                text: got.limit ? "✓ may grow to rung " + got.limit + " (now at rung " + ((this._seat.self || {}).rung || 0) + ")"
+                                : "✓ self is asleep (nothing erased)" };
+      } else {
+        out = { ok: false, text: this._apiErr("the self chooser failed (HA admins only)", r) };
+        this._err(out.text);
+      }
+      this._selfFlash = out.text;
+      if (this._selfStat) this._selfStat.textContent = out.text;
+      clearTimeout(this._selfFlashT);
+      this._selfFlashT = setTimeout(() => { this._selfFlash = null; this._paintSeat(); }, 4000);
+      this._paintSeat();
+      return out;
+    }
+
     async _loadSeat() {
       const r = await this._api(SERVE + "/membrane/seat").catch(() => null);
       if (r && r.ok && r.data && r.data.state) { this._seat = r.data.state; this._paintSeat(); }
@@ -1954,6 +2049,8 @@ function definePanel() {
       if (lbl) lbl.textContent = v.label;
       this._pauseBtn.title = v.title;
       this._pauseBtn.style.opacity = v.paused ? "1" : ".6";
+      if (this._selfPick) fillSelfPick(this._selfPick, selfView(this._seat));
+      if (this._selfStat && !this._selfFlash) this._selfStat.textContent = selfView(this._seat).status;
     }
 
     async _toggleRole() {
