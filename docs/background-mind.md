@@ -164,7 +164,8 @@ re-embedding. The night reads statistics, not the raw field.
 `membrane::self` is an unnamed looped cliffhanger object, the seed of the
 evolving self in #161. It grows up a **skill ladder**: one rung per PR, each
 with a measured pass test; a rung opens by itself when its test passes. This
-section covers what is built (`membrane/self_loop.py`).
+section covers what is built (`membrane/self_loop.py`); the operator's guide
+to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
 
 - **Rung 0, sleep and wake, and the growth limit.** A per-seat chooser, **off
   by default**, set only by the operator: the 🌱 chooser (the home top bar,
@@ -272,7 +273,7 @@ section covers what is built (`membrane/self_loop.py`).
   design, all predicted around 60%.)
 - **Rung 5, notice the world changed.** After each look, self reads its last
   3–5 looks at a thing against its long memory of it. When they are both far
-  from it (by more than 0.4) and unlikely under it (binomial tail below 0.01),
+  from it (by more than 0.4) and unlikely under it (binomial tail below 0.02),
   the world changed: it records a **shift** ("went still" or "moves again")
   and re-learns from those looks. Its patience refits from the shift on.
   - A coin-flip thing never shifts: five in a row is p = 0.06.
