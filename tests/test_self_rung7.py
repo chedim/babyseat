@@ -68,7 +68,7 @@ class _Chatter:
 def _llm_pred(chatter):
     """The model stand-in: predicts the phase of the period-4 pattern, near-
     perfectly, for the look that is about to happen."""
-    def pred(srv, eid, since=None):
+    def pred(srv, eid, since=None, until=None):
         name = eid.split(":")[-1]
         next_look = chatter.looks.get(name, 0) + 1
         return 0.9 if (next_look % 4) in (1, 2) else 0.1

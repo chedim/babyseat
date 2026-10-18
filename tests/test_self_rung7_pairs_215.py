@@ -285,7 +285,10 @@ def test_a_real_consult_is_queued_capped_and_never_runs_a_cycle(monkeypatch):
     rt = SL._rt(srv)
     rt["wake"].clear()
     cycles = sum(1 for r in _record(srv) if r["kind"] == "cycle")
-    LLM.answered(srv, ev, "0.8")                        # the answer lands
+    # the answer lands -- on the test's clock: the reply check pairs only an
+    # answer that landed after the push and by the look (#217)
+    monkeypatch.setattr(LLM, "time", types.SimpleNamespace(time=lambda: person.t + 1.0))
+    LLM.answered(srv, ev, "0.8")
     assert not rt["wake"].is_set()                      # ...and wakes nothing
     assert sum(1 for r in _record(srv) if r["kind"] == "cycle") == cycles
     _run(srv, person, 20, t0=1000.0 + 2 * SL.PACE_S)

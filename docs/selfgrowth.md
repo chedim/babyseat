@@ -120,6 +120,7 @@ curl -s http://127.0.0.1:4096/membrane/seat \
 | `split` | rung 6's split: `body` (it predicts it near-perfectly) or `other` (it can't) |
 | `meets` | rung 6's exchange: `pushes`, `other` (who it meets), `push_age`, `heard_age` (seconds since the other last answered) |
 | `steer` | after rung 1: how close it lands to its aim (`err`) against not leaning into the current (`naive`), and `skill = 1 − err/naive` |
+| `rung7` | rung 7 at the current other: `asked` (pushes that asked the model), `checked` (those whose reply check came), `paired` (those whose check carried the model's answer), `pair_rate` = paired / checked, `brier_model` and `brier_habit` (mean Brier error over the pairs the test reads; the model passes by beating habit's by 15%), and `base_rate` (what the model is told). The 🌱 chooser's tooltip shows it as `rung 7: 5 of 8 asked pushes paired, Brier model 0.37 vs habit 0.39, base rate 0.55` |
 | `curiosity` | from rung 2 on: the (up to) three things whose prediction is improving fastest, best first, each with `progress` (its error over the 30 ordinary looks before the latest 30, minus its error over the latest 30) and `error` (the latest 30's mean Brier error). It is what self's curiosity reads when it chooses a reach (below); empty until a thing has 60 ordinary looks |
 
 **How the bar works.** A rung's criteria are stages, in order (rung 2:
@@ -166,7 +167,7 @@ has passed, it is under the limit, and its test passes on the record.
 | **4 · patience** | fits each thing's rate of change in time over its last 30 looks; looks again once a change is 60% likely (waits up to 30 min); idles when nothing is due | things with a steady rhythm | **timed**: 30 timed looks; **news**: of its last 40, they find a change ≥ half the time, or 0.15 more often than its fixed-pace looks did (whichever is easier); **calibration**: its mean predicted chance is within 0.1 of the share that found news | keep getters' rhythms honest; don't make a thing change only when self looks |
 | **5 · notice the world changed** | compares its last 3–5 looks at a thing with its long memory; a window far from it (> 0.4) and unlikely under it (binomial tail < 0.02) is a **shift** ("went still" / "moves again"), and it re-learns from there | a thing it already classes as moving | **looks**: 20 looks with noticing on; **audit**: membrane pauses the surest mover for 5 of self's looks (cap 1 h), then restarts it for 5 more (cap 3 h); self must flag "went still" during the pause and "moves again" after | nothing: the audit runs itself. Don't restart the seat mid-audit if you can help it |
 | **6 · meet an other** | every 30 cycles pushes the line "self is here" to chat, and reads `chat:in:<person>`, which ticks each time the person sends a message | **a person who chats** with the seat, irregularly | **pushes**: 10; **heard**: 20 answered looks at the other; **split**: the other is classed **other** (its Brier skill < 0.9: self can't predict it perfectly). A partner who never answers is predicted perfectly, classes as *body*, and the rung stays shut | chat with the seat — normally, whenever you like. Your messages are the answers |
-| **7 · understand an other** | at each push it asks the seat's model (`llm::call`, read-only, one consult per push) how likely the other is to have spoken by its next look; it holds off looking at the other for 2 minutes, then checks for the reply, and that look pairs the model's prediction with its own habit | the seat's model reachable for background calls; the other answering its pushes | **looks**: 20 paired looks (one per push: habit and model on the reply check); **skill**: the model removes ≥ 15% of habit's Brier error over them | answer self's 🌱 lines (or just chat); keep the seat's model up |
+| **7 · understand an other** | at each push it asks the seat's model (`llm::call`, read-only, one consult per push) for one calibrated probability that the other will have spoken by its next look, telling it the base rate (how often the other had answered by the reply check, with a small prior) and the recent reply checks; it holds off looking at the other for 2 minutes (up to 3 while the model's answer is still in flight), then checks for the reply, and that look pairs the model's prediction with its own habit | the seat's model reachable for background calls; the other answering its pushes | **looks**: 20 paired looks (one per push: habit and model on the reply check); **skill**: the model removes ≥ 15% of habit's Brier error over them | answer self's 🌱 lines (or just chat); keep the seat's model up |
 
 At the default pace, rung 6's ten pushes alone take ~50 minutes; rungs 2–5
 usually take hours, and the audits run on their own schedule.
@@ -297,6 +298,34 @@ the check didn't happen within 10 minutes of the push. The pending question
 lives in the record, so a restart doesn't lose it. A working background model
 and an other who sometimes answers are what move it; an other who never
 answers can't be predicted *better* than habit, which already says "silent".
+
+**Rung 7's model is overconfident, or its asks don't pair (#217).** Read
+`rung7` in the panel (or the 🌱 tooltip). On the live seat (2026-10-18) 7
+pushes asked and only 4 paired, and the model said 0.85–0.99 "will have
+spoken" to reply checks that went 3 of 7: its Brier error was worse than
+habit's ~0.2 guesses. Two causes, both fixed:
+
+- *The question gave no base rate.* Its history listed pre-#216 looks made
+  5–25 minutes after a push ("they had spoken" ×14), another horizon, and the
+  model read it as "they always answer". Now the prompt carries only reply
+  checks, the **base rate** (`k of n`, Jeffreys prior: 0.5 before any check),
+  and asks for one calibrated probability, saying a confident miss costs.
+- *Three answers weren't answers.* They landed 28–75 s after the push (the
+  question rides a full read-only loop turn: `mistral:7b` routed up to
+  `glm-5.3-flash:cloud`, 2.4–74 s per turn, 8–10 s push → answer when on
+  task), well before the 2-minute check, but were prose ("Membrane is a tool
+  …", "Good day! I am Memo …") with no number. The prompt now says no tools
+  and `VERDICT: <probability>`, and the parser takes a decimal in 0..1 or a
+  percent (after `VERDICT` when there is one), never a stray `#161` or
+  `120s`.
+
+The `[bg] llm call failed (timed out)` lines in the seat's log are the
+thinker's background lane (local `mistral:7b`, 120 s timeout), not self's
+question. If an answer is still in flight at the reply check, self now waits
+up to 60 s more (`RUNG7_GRACE_S`) before looking, and pairs only an answer
+that landed after the push and by the look; a `pair_rate` well under 1 with
+`checked` growing means the model's answers aren't parseable or arrive later
+than 3 minutes — look at the `field-call: chat:in:<person>` sessions.
 
 **`held`.** Three cycles failed in a row (the record's `error` lines say why).
 Fix the cause, then re-choose the limit to clear it.
