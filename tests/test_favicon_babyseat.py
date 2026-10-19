@@ -70,5 +70,24 @@ class FaviconJs(unittest.TestCase):
         self.assertNotIn("cube", line)
 
 
+class DarkTab(unittest.TestCase):
+    """On a dark tab strip (#202124) the slate seat vanished: the shell, handle
+    and rocker lighten under prefers-color-scheme: dark, in the SVG and in the
+    animated canvas alike."""
+
+    def test_svg_carries_the_dark_rule(self):
+        src = (UI / "favicon.svg").read_text()
+        self.assertIn("@media (prefers-color-scheme: dark)", src)
+        dark = src.split("@media (prefers-color-scheme: dark)", 1)[1].split("</style>", 1)[0]
+        for part in ("shell", "handle", "rocker"):
+            self.assertIn("." + part, dark)
+            self.assertIn('class="%s"' % part, src)
+
+    def test_js_reacts_to_the_scheme(self):
+        src = (UI / "favicon.js").read_text()
+        self.assertIn('matchMedia("(prefers-color-scheme: dark)")', src)
+        self.assertRegex(src, r"dark\w*\.addEventListener\(\s*\"change\"")
+
+
 if __name__ == "__main__":
     unittest.main()

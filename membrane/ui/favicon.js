@@ -5,7 +5,7 @@
  * teal amoeba, strapped into an infant car seat -- rasterised once into a
  * small canvas and set as the tab's icon, rocking a little on its base while
  * the amoeba's glow breathes. Still (the plain SVG) for prefers-reduced-motion;
- * asleep while the tab is hidden. */
+ * asleep while the tab is hidden; lighter on a dark tab strip. */
 const SIZE = 64, FPS = 10;
 const SRC = "/ui/www/favicon.svg";
 // favicon.svg's frame: viewBox "58 55 430 430" around a translate(0,-46) group
@@ -23,15 +23,30 @@ export function startFavicon() {
   if (!g) return;
   let link = document.querySelector('link[rel="icon"]');
   if (!link) { link = document.createElement("link"); link.rel = "icon"; document.head.appendChild(link); }
-  // the SVG has only a viewBox: give it a size, so every browser rasterises it at SIZE
-  fetch(SRC).then((r) => r.text()).then((svg) => {
+  // the SVG has only a viewBox: give it a size, so every browser rasterises it at SIZE.
+  // Its dark-tab palette (#269: the slate seat vanished on #202124) is a media rule
+  // the page's scheme decides here, since an SVG drawn as an image can't be trusted to
+  // see it: on, it becomes @media all; off, @media not all. Re-rasterised on a change.
+  const dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)");
+  const DARK_RULE = "@media (prefers-color-scheme: dark)";
+  let svg = "", seat = null, url = "", started = false;
+  const raster = () => {
     const img = new Image();
-    img.onload = () => run(img);
-    img.src = URL.createObjectURL(new Blob(
-      [svg.replace("<svg ", `<svg width="${SIZE}" height="${SIZE}" `)], { type: "image/svg+xml" }));
+    img.onload = () => {
+      if (url) URL.revokeObjectURL(url);
+      url = img.src; seat = img;
+      if (!started) { started = true; run(); }
+    };
+    img.src = URL.createObjectURL(new Blob([svg
+      .replace("<svg ", `<svg width="${SIZE}" height="${SIZE}" `)
+      .replace(DARK_RULE, dark && dark.matches ? "@media all" : "@media not all")], { type: "image/svg+xml" }));
+  };
+  fetch(SRC).then((r) => r.text()).then((text) => {
+    svg = text; raster();
+    if (dark && dark.addEventListener) dark.addEventListener("change", raster);
   }).catch(() => {});
 
-  function run(img) {
+  function run() {
     const t0 = performance.now();
     let timer = null;
     const draw = () => {
@@ -41,7 +56,7 @@ export function startFavicon() {
       g.clearRect(0, 0, SIZE, SIZE);
       g.save();
       g.translate(PIVOT[0], PIVOT[1]); g.rotate(tilt); g.translate(-PIVOT[0], -PIVOT[1]);
-      g.drawImage(img, 0, 0, SIZE, SIZE);
+      g.drawImage(seat, 0, 0, SIZE, SIZE);
       const halo = g.createRadialGradient(AMOEBA[0], AMOEBA[1], 0, AMOEBA[0], AMOEBA[1], AMOEBA_R);
       halo.addColorStop(0, "rgba(234,255,248," + (0.12 + 0.26 * breath) + ")");
       halo.addColorStop(0.5, "rgba(95,240,200," + (0.06 + 0.16 * breath) + ")");

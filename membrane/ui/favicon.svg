@@ -8,11 +8,15 @@
       <feGaussianBlur stdDeviation="9" result="b"/>
       <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
     </filter>
+    <style>
+      .handle{stroke:#5a6d8f}.rocker{stroke:#2b3850}.shell{fill:#3a4a63}
+      @media (prefers-color-scheme: dark){.handle{stroke:#a9bbdc}.rocker{stroke:#6f84a8}.shell{fill:#8fa3c7}}
+    </style>
   </defs>
   <g transform="translate(0,-46)">
-    <path d="M120 318A158 150 0 0 1 436 318" fill="none" stroke="#5a6d8f" stroke-width="28" stroke-linecap="round"/>
-    <path d="M110 452Q280 488 452 440" fill="none" stroke="#2b3850" stroke-width="22" stroke-linecap="round"/>
-    <path fill="#3a4a63" d="M92 168C104 160 128 166 134 182C150 260 170 340 232 372C300 404 380 392 440 330C452 318 470 326 466 344C446 418 360 452 262 446C170 440 104 380 86 270C82 236 80 196 92 168Z"/>
+    <path class="handle" d="M120 318A158 150 0 0 1 436 318" fill="none" stroke-width="28" stroke-linecap="round"/>
+    <path class="rocker" d="M110 452Q280 488 452 440" fill="none" stroke-width="22" stroke-linecap="round"/>
+    <path class="shell" d="M92 168C104 160 128 166 134 182C150 260 170 340 232 372C300 404 380 392 440 330C452 318 470 326 466 344C446 418 360 452 262 446C170 440 104 380 86 270C82 236 80 196 92 168Z"/>
     <ellipse filter="url(#glow)" fill="url(#amoeba)" cx="268" cy="318" rx="92" ry="66" transform="rotate(-18 268 318)"/>
     <path d="M196 322Q268 312 342 280" fill="none" stroke="#ffd166" stroke-width="14" stroke-linecap="round"/>
     <rect x="254" y="298" width="30" height="24" rx="6" fill="#ffd166" transform="rotate(-14 269 310)"/>
