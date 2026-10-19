@@ -145,12 +145,13 @@ class TestFraming(unittest.TestCase):
 
     def test_local_fiddling_is_close_far_reaching_is_wide(self):
         near = _js("H.frameDistance(20)")
-        far = _js("H.frameDistance(400)")
+        far = _js("H.frameDistance(200)")
         self.assertLess(near, 160)                      # much closer than the old fixed 420
         self.assertLess(_js("H.frameDistance(150)"), 420)   # a typical neighbourhood is still closer
         self.assertGreater(far, near)
         # the whole extent fits the field of view (55 deg), with a margin
-        self.assertGreaterEqual(far * math.tan(math.radians(27.5)), 400 * 1.1)
+        # (up to the close cap; the far reach is clamped since the camera-close fix)
+        self.assertGreaterEqual(far * math.tan(math.radians(27.5)), 200 * 1.1)
         self.assertEqual(_js("H.frameDistance(1e9)"), _js("H.frameDistance(1e10)"))   # clamped
         self.assertEqual(_js("H.frameDistance(0)"), _js("H.frameDistance(1)"))        # a floor
 
@@ -159,8 +160,8 @@ class TestFraming(unittest.TestCase):
         self.assertEqual(_js("H.dampTo(100, 200, 0.1, 1, true)"), 200)
         self.assertEqual(_js("H.dampTo(100, 200, 0, 1, false)"), 100)
 
-    def test_the_frame_includes_looks_steps_and_the_aim(self):
-        st = {"pos": [0, 0, 0], "looks": [[10, 0, 0], [0, 50, 0]], "aim": [0, 0, -80], "steps": [[5, 0, 0]]}
+    def test_the_frame_includes_the_look_steps_and_the_aim(self):
+        st = {"pos": [0, 0, 0], "look": {"p": [0, 50, 0], "age": 100}, "aim": [0, 0, -80], "steps": [[5, 0, 0]]}
         self.assertEqual(_js("H.selfFrame(%s).radius" % json.dumps(st)), 80)
 
 
@@ -347,7 +348,7 @@ class TestWiring(unittest.TestCase):
         self.assertIn("selfEyes", self.f3)
         self.assertIn("modeAfterTouch(", self.home)
         self.assertIn('this._mode === "eyes"', self.home)
-        self.assertIn("_frameHold", self.home)
+        self.assertIn("followsNow(", self.home)        # a touch holds ◎ self briefly
 
     def test_the_docs_describe_it(self):
         doc = (ROOT / "docs" / "selfgrowth.md").read_text()

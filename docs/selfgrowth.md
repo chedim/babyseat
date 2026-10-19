@@ -227,14 +227,18 @@ To follow it, set the camera button **◎** to `self`: the camera glides with th
 amoeba and chases it from behind its past positions. "self is not moving yet"
 means it is off, or nobody has spoken yet.
 
-**◎ self's framing** fits the camera to self's own neighbourhood rather than the
-whole field. The distance comes from the bounding radius of the amoeba, its
-last 4 steps, the points of the things in its trail of looks, and its aim, plus
-a margin: it moves in close while self fiddles nearby and eases out when self
-reaches far. The change is damped, so there are no jumps (with *reduce motion*
-on, the camera steps straight to the new distance). A manual drag, pinch or
-wheel keeps working and pauses the framing ("your framing") until you pick
-◎ self again.
+**◎ self's framing** keeps the camera close to self rather than showing the
+whole field. The distance comes from the bounding radius of the amoeba, what it
+looks at now (while that look is fresh, the same 8 s as 👁 self's eyes), its
+aim and its last 2 steps, plus a margin. Older looks in the trail don't count.
+The distance stays between 70 and 500, so the camera moves in close while self
+fiddles nearby and eases out a little when self reaches far. The camera tracks
+self at once, with no wait for idle. It sits behind self and a little above,
+looking along self toward what it looks at, so both are in view. With no fresh
+look it chases self from behind its past positions. The changes are damped, so
+there are no jumps (with *reduce motion* on, the camera steps straight to the
+new distance). A manual drag, pinch or wheel keeps working and holds the camera
+for a few seconds after the last touch, then ◎ self picks it up again on its own.
 
 **👁 self's eyes** is the next camera mode after ◎ self. The camera sits at the
 amoeba, which is hidden so it doesn't block the view, and looks toward what

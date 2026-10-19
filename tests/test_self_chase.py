@@ -37,4 +37,6 @@ class TestTheWiring(unittest.TestCase):
     def test_the_viewer_hands_out_its_trail_and_home_chases_it(self):
         self.assertIn("  selfTrail() {", (UI / "field3d.js").read_text())
         home = (UI / "home.js").read_text()
-        self.assertIn('this._mode === "self" && chaseAngles(', home)
+        # ◎ self: toward its fresh look, else the chase from behind
+        self.assertIn("selfCamAngles({ pos: sp, look, trail: tr })", home)
+        self.assertIn("|| chaseAngles(st && st.trail)", home)
