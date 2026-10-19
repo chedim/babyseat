@@ -518,6 +518,12 @@ function shortEid(eid) {
 
 /** The banner as a game's experience bar: the level is the rung, the bar
  *  fills toward the next from status().bar (the staged test, never effort). */
+/** A skill as the bars show it: its sign always written (−0.13, +0.15). */
+function skillSigned(v) {
+  v = Number(v);
+  return (v < 0 ? "−" : "+") + Math.abs(v).toFixed(2);
+}
+
 function selfExp(st) {
   const s = (st && st.self) || { mode: "off" };
   const n = s.rung || 0;
@@ -539,8 +545,13 @@ function selfExp(st) {
     : (state === "slipping" ? "slipping: rung " + n + "'s test fails now" + (s.waiting_on ? " · " : "") : "")
       + (s.waiting_on ? "waiting on: " + s.waiting_on : "");
   const label = state === "asleep" ? "asleep" : state === "held" ? "held" : state === "capped" ? "capped" : pct + "%";
-  return { state, rung: n, level: state === "asleep" ? "🌱 asleep" : level, goal, pct, fill, label, caption,
-           title: "self (#161): " + level + " · " + label + " " + goal + (caption ? " · " + caption : "") };
+  // #249 (the operator: "I don't see the skill level anywhere"): the skill
+  // the bar's test reads, against the line it has to beat
+  const sk = s.mode !== "off" && s.skill != null && isFinite(Number(s.skill))
+    ? "skill " + (s.skill_measured === false ? "not measured yet" : skillSigned(s.skill)) + (s.skill_pass != null ? " / " + skillSigned(s.skill_pass) : "") : "";
+  const cap = caption + (sk ? (caption ? " · " : "") + sk : "");
+  return { state, rung: n, level: state === "asleep" ? "🌱 asleep" : level, goal, pct, fill, label, caption: cap, skill: sk,
+           title: "self (#161): " + level + " · " + label + " " + goal + (cap ? " · " + cap : "") };
 }
 
 const XP_CSS = `
@@ -553,6 +564,8 @@ const XP_CSS = `
   .xp-fill { position:absolute; left:0; top:0; bottom:0; border-radius:inherit; transition:width .6s ease;
              background:linear-gradient(90deg, color-mix(in srgb, var(--primary-color,#3477d6) 65%, #2e9d5b), var(--primary-color,#3477d6)); }
   .xp-pct { font-variant-numeric:tabular-nums; opacity:.85; white-space:nowrap; }
+  .xp-sk { grid-column:1 / -1; font-size:11px; font-weight:600; font-variant-numeric:tabular-nums; white-space:nowrap; }
+  .xp-sk[hidden] { display:none; }
   .xp-sub { grid-column:1 / -1; font-size:10.5px; opacity:.7; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .xp-slipping .xp-fill { background:var(--warning-color,#ffa600); }
   .xp-slipping .xp-pct, .xp-slipping .xp-sub { color:var(--warning-color,#ffa600); opacity:1; }
@@ -588,7 +601,7 @@ function paintExp(el, x) {
     el.textContent = "";
     box = document.createElement("span");
     box.innerHTML = '<span class="xp-lv"></span><span class="xp-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">' +
-      '<span class="xp-fill"></span></span><span class="xp-pct"></span><span class="xp-sub"></span>';
+      '<span class="xp-fill"></span></span><span class="xp-pct"></span><span class="xp-sk"></span><span class="xp-sub"></span>';
     el.appendChild(box);
   }
   const prev = el._xpRung;
@@ -609,8 +622,11 @@ function paintExp(el, x) {
   tr.setAttribute("aria-label", x.state === "asleep" ? "self is asleep" : "toward " + x.goal.replace(/^→ /, "rung "));
   box.querySelector(".xp-fill").style.width = (x.state === "capped" ? 100 : x.pct) + "%";
   box.querySelector(".xp-pct").textContent = x.label;
+  const sk = box.querySelector(".xp-sk");                  // #249: the skill at a glance
+  if (sk) { sk.textContent = x.skill || ""; sk.hidden = !x.skill; }
+  const sub = x.skill ? x.caption.replace(new RegExp("( · )?" + x.skill.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$"), "") : x.caption;
   box.querySelector(".xp-sub").textContent = lvup ? "⬆ level up: " + x.level
-    : (x.state === "asleep" ? "" : x.goal + (x.caption ? " · " + x.caption : ""));
+    : (x.state === "asleep" ? "" : x.goal + (sub ? " · " + sub : ""));
 }
 
 const f2s = (x) => String(Math.round(Number(x) * 100) / 100);
@@ -725,6 +741,375 @@ function selfCardHtml(st) {
         (t.reads ? " · " + t.answered + " of last " + t.reads + " reads answered" : t.getter ? " · not read yet" : "") + "</span>" +
         toyButtonsHtml(t) + "</li>").join("") + "</ul>"
     : '<p class="muted">no toys (toy: / cradle: things, or words with a getter)</p>'));
+  return out.join("");
+}
+
+// ---- #249: SELF'S CHARACTER SHEET -- the 👶 panel laid out like an RPG
+// character's (the structure, not the styling): the nameplate, attributes, the
+// quest log, achievements, the growth curve, where the time went, the
+// inventory and the relationships. Every number comes from GET
+// /membrane/self/sheet (membrane/self_sheet.py); nothing here computes a
+// claim the record doesn't hold. No chart library: inline SVG and divs.
+const SHEET_SECTIONS = [
+  ["attributes", "Attributes"], ["quest", "Quest log"], ["achievements", "Achievements"],
+  ["growth", "Growth curve"], ["time", "Where the time went"], ["inventory", "Inventory"],
+  ["relationships", "Relationships"]];
+const SHEET_OPEN = { attributes: true, quest: true };     // the defaults; a remembered choice wins
+
+const r1 = (x) => Math.round(x * 10) / 10;
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
+const fixed2 = (v) => (v == null || !isFinite(Number(v)) ? "–" : Number(v).toFixed(2));
+const signed2 = (v) => (Number(v) < 0 ? "−" : "") + Math.abs(Number(v)).toFixed(2);
+
+/** One attribute's bar, as percents of its track: a skill can go negative
+ *  (its track is then −1..1 with a zero line), a share is 0..1, an error is
+ *  0..0.5 and lower is better. `mark` is the pass line. */
+function attrBar(a) {
+  a = a || {};
+  const v = a.value == null || !isFinite(Number(a.value)) ? null : Number(a.value);
+  const kind = a.kind || "skill";
+  const lo = kind === "error" ? 0 : kind === "skill" && v != null && v < 0 ? -1 : 0;
+  const hi = kind === "error" ? 0.5 : 1;
+  const pos = (x) => r1(100 * clamp01((x - lo) / (hi - lo)));
+  const better = a.better || (kind === "error" ? "lower" : "higher");
+  const pass = Number(a.pass);
+  const zero = pos(0);
+  if (v == null) return { lo, hi, zero, from: zero, to: zero, mark: pos(pass), met: false, neg: false, none: true, text: "not measured yet" };
+  const p = pos(v);
+  const met = a.met != null ? !!a.met : (better === "lower" ? v <= pass : v >= pass);
+  return { lo, hi, zero, from: Math.min(zero, p), to: Math.max(zero, p), mark: pos(pass), met, neg: v < 0, none: false,
+           text: v < 0 ? signed2(v) : v.toFixed(2) };
+}
+
+/** Hours as a person reads them. */
+function hoursText(h) {
+  if (h == null || !isFinite(Number(h))) return "–";
+  h = Number(h);
+  return h < 1 ? Math.round(h * 60) + " min" : h.toFixed(1) + " h";
+}
+
+const CURVE_TICKS = [0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 24, 48, 96, 168, 336, 720];
+
+/** The growth curve's geometry: x is hours on a log scale, y the rung.
+ *  Steps for the fastest possible (fast), working hours (work) and the wall
+ *  clock (wall); the child-scaled open points (kids); where it is now. */
+function curveGeom(g, W, H) {
+  g = g || {};
+  const rows = (g.rows || []).filter((r) => r && r.rung != null);
+  const m = { t: 12, r: 14, b: 24, l: 26 };
+  const vals = [g.now_working_h, g.now_wall_h];
+  for (const r of rows) vals.push(r.fastest_h, r.working_h, r.wall_h, r.child_h);
+  const pos = vals.filter((v) => v != null && isFinite(v) && v > 0).map(Number);
+  const lo = Math.min(0.03, pos.length ? Math.min(...pos) / 1.5 : 0.03);
+  const hi = Math.max(1, pos.length ? Math.max(...pos) * 1.15 : 1);
+  const top = Math.max(1, ...rows.map((r) => r.rung));
+  const L = Math.log10;
+  const x = (h) => r1(m.l + (W - m.l - m.r) * (L(Math.max(lo, Math.min(hi, h))) - L(lo)) / (L(hi) - L(lo)));
+  const y = (n) => r1(H - m.b - (H - m.t - m.b) * n / top);
+  const steps = (key, end) => {
+    let d = "M" + x(lo) + "," + y(0), last = 0;
+    for (const r of rows) {
+      if (r[key] == null) continue;
+      d += " L" + x(r[key]) + "," + y(r.rung - 1) + " L" + x(r[key]) + "," + y(r.rung);
+      last = r.rung;
+    }
+    if (end != null) d += " L" + x(end) + "," + y(last);
+    return { d, last };
+  };
+  const fast = steps("fastest_h", hi), work = steps("working_h", g.now_working_h || lo), wall = steps("wall_h", g.now_wall_h || lo);
+  const ticks = CURVE_TICKS.filter((h) => h >= lo && h <= hi).map((h) => ({ h, x: x(h), label: hoursText(h) }));
+  const xOf = {}, yOf = {};
+  for (const t of ticks) xOf[String(t.h)] = t.x;
+  for (let n = 0; n <= top; n++) yOf[String(n)] = y(n);
+  const kids = rows.filter((r) => r.child_h != null && r.child_h > 0)
+    .map((r) => ({ rung: r.rung, x: x(r.child_h), y: y(r.rung), h: r.child_h, months: r.child_months, what: r.child_milestone || "" }));
+  return { m, lo, hi, top, x0: x(lo), xOf, yOf, ticks, fast: fast.d, work: work.d, wall: wall.d, kids,
+           now: { x: x(g.now_working_h || lo), y: y(work.last), rung: work.last } };
+}
+
+function curveSvg(g, W, H) {
+  const c = curveGeom(g, W, H);
+  const grid = Object.keys(c.yOf).map((n) => '<line x1="' + c.m.l + '" x2="' + (W - c.m.r) + '" y1="' + c.yOf[n] + '" y2="' + c.yOf[n] +
+    '" class="cg"/><text x="' + (c.m.l - 6) + '" y="' + (c.yOf[n] + 3.5) + '" text-anchor="end" class="ct">' + n + "</text>").join("");
+  const ticks = c.ticks.filter((t, i) => W >= 420 || i % 2 === 0).map((t) => '<text x="' + t.x + '" y="' + (H - 6) +
+    '" text-anchor="middle" class="ct">' + escText(t.label) + "</text>").join("");
+  const kids = c.kids.map((k) => '<circle cx="' + k.x + '" cy="' + k.y + '" r="3.5" class="ck"><title>' +
+    escText("rung " + k.rung + ": a child at " + (k.months < 1 ? "birth" : k.months + " months") + " " + k.what +
+      " · scaled to " + hoursText(k.h)) + "</title></circle>").join("");
+  return '<svg class="curve" viewBox="0 0 ' + W + " " + H + '" width="100%" role="img" aria-label="' +
+    escAttr("rungs passed over working hours: rung " + c.now.rung + " at " + hoursText(g && g.now_working_h) +
+      " of working time; the dashed line is the fastest possible, the open points a child rescaled") + '">' +
+    grid + ticks +
+    '<path d="' + c.fast + '" class="cf" stroke-dasharray="5 4"/>' +
+    '<path d="' + c.wall + '" class="cw"/>' +
+    '<path d="' + c.work + '" class="cs"/>' + kids +
+    '<circle cx="' + c.now.x + '" cy="' + c.now.y + '" r="4" class="cn"><title>now</title></circle></svg>';
+}
+
+/** Where the time went: alive = working + blocked by a known bug + not running. */
+function timeParts(t) {
+  t = t || {};
+  const alive = Number(t.alive_h) || 0;
+  const part = (key, label, h) => ({ key, label, h: Number(h) || 0, pct: alive > 0 ? Math.round(100 * (Number(h) || 0) / alive) : 0 });
+  return [part("working", "working", t.working_h), part("bugs", "blocked by a known bug", t.bugs_h),
+          part("down", "not running (seat down, restarting or asleep)", t.down_h)];
+}
+
+const utcShort = (s) => {
+  const d = new Date(s);
+  if (isNaN(d)) return "";
+  const p2 = (n) => String(n).padStart(2, "0");
+  return ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getUTCMonth()] + " " + d.getUTCDate() +
+    " " + p2(d.getUTCHours()) + ":" + p2(d.getUTCMinutes());          // UTC (the headers say so)
+};
+const changesText = (c) => {
+  if (!c) return "–";
+  const order = ["self", "world", "model"].filter((k) => k in c).concat(Object.keys(c).filter((k) => !["self", "world", "model"].includes(k)).sort());
+  return order.map((k) => escText(k.replace(/^person:/, "")) + " " + c[k]).join(" · ") || "none yet";
+};
+const HEALTH_DOT = { ok: "ok", empty: "warn", unread: "idle", "no getter": "bad" };
+
+function sheetSection(key, title, open, body, hint) {
+  return '<details class="sec" data-sec="' + key + '" data-was="' + (open ? "1" : "0") + '"' + (open ? " open" : "") + "><summary>" +
+    '<span class="stt">' + title + "</span>" + (hint ? '<span class="sth">' + hint + "</span>" : "") +
+    '</summary><div class="secb">' + body + "</div></details>";
+}
+
+function sheetAttrs(s) {
+  const at = s.attributes || [];
+  if (!at.length) return '<p class="muted">nothing measured yet</p>';
+  const st = { passed: "✓ passed", current: "◀ working on it", capped: "held by the limit", locked: "locked", unbuilt: "not built" };
+  return '<div class="attrs">' + at.map((a) => {
+    const b = attrBar(a);
+    const state = a.slipping ? "⚠ slipping: rung " + a.rung + "'s test fails now" : (st[a.state] || a.state || "");
+    return '<div class="attr st-' + escAttr(a.slipping ? "slipping" : a.state) + (b.none ? " none" : "") + '">' +
+      '<div class="al"><b>' + escText(a.label) + '</b> <span class="rn">rung ' + a.rung + "</span></div>" +
+      '<div class="av' + (b.neg ? " neg" : "") + '">' + escText(b.text) + "</div>" +
+      '<div class="abar" role="meter" aria-label="' + escAttr(a.label + ": " + b.text + ", pass " + (a.better === "lower" ? "≤ " : "≥ ") + a.pass) +
+      '" aria-valuemin="' + b.lo + '" aria-valuemax="' + b.hi + '"' + (b.none ? "" : ' aria-valuenow="' + escAttr(a.value) + '"') + ">" +
+      (b.lo < 0 ? '<span class="zero" style="left:' + b.zero + '%"></span>' : "") +
+      '<span class="fill' + (b.neg ? " neg" : b.met ? " met" : "") + '" style="left:' + b.from + "%;width:" + r1(b.to - b.from) + '%"></span>' +
+      '<span class="pass" style="left:' + b.mark + '%" title="pass line ' + escAttr(String(a.pass)) + '"></span></div>' +
+      '<div class="an">' + escText(state) + " · pass " + (a.better === "lower" ? "≤ " : "≥ ") + escText(String(a.pass)) +
+      '<br><span class="what">' + escText(a.what || "") + "</span></div></div>";
+  }).join("") + "</div>";
+}
+
+function sheetQuest(s) {
+  const q = s.quest || {};
+  if (q.rung == null) return '<p class="muted">no quest: ' + (s.header && s.header.mode === "off" ? "self is asleep (🌱 wakes it)" : "nothing to practise") + "</p>";
+  return '<p class="qh">Rung ' + q.rung + " · " + escText(q.name || "") + (q.slipping ? ' <span class="warn">slipping</span>' : "") + "</p>" +
+    '<ul class="crit">' + (q.criteria || []).map((c) => '<li class="' + (c.met ? "met" : "open") + '"><span class="ck">' + (c.met ? "✓" : "○") + "</span> " +
+      escText(c.text) + (c.met || c.frac == null ? "" : ' <span class="muted">' + Math.round(100 * c.frac) + "%</span>") + "</li>").join("") + "</ul>" +
+    (q.waiting_on ? '<p class="muted">waiting on: ' + escText(q.waiting_on) + "</p>" : "");
+}
+
+function sheetAchievements(s) {
+  const a = s.achievements || [];
+  if (!a.length) return '<p class="muted">no rung passed yet</p>';
+  return '<table class="tbl"><thead><tr><th>rung</th><th>passed (UTC)</th><th class="num">working h</th><th class="num">skill</th></tr></thead><tbody>' +
+    a.map((x) => "<tr><td><b>" + x.rung + "</b> " + escText(x.name) + (x.note ? '<div class="note">' + escText(x.note) +
+      (x.earned_at ? " (earned " + escText(utcShort(x.earned_at)) + " UTC)" : "") + "</div>" : "") + "</td><td class=\"dt\">" + escText(utcShort(x.at)) +
+      '</td><td class="num">' + hoursText(x.working_h) + '</td><td class="num">' + fixed2(x.skill) + "</td></tr>").join("") + "</tbody></table>";
+}
+
+function sheetGrowth(s) {
+  const g = s.growth || {};
+  if (!(g.rows || []).some((r) => r.working_h != null)) return '<p class="muted">no rung passed yet: nothing to draw</p>';
+  return curveSvg(g, 340, 190) +
+    '<p class="legend"><span class="lg ls"></span>self (working hours) <span class="lg lw"></span>wall clock ' +
+    '<span class="lg lf"></span>fastest possible <span class="lg lk"></span>a child, rescaled</p>' +
+    '<p class="note">' + (g.hours_per_child_month != null ? "<b>" + fixed2(g.hours_per_child_month) + " h</b> of self per month of a child. " : "") +
+    escText(g.caveat || "") + "</p>";
+}
+
+function sheetTime(s) {
+  const t = s.time || {};
+  const parts = timeParts(t);
+  return '<div class="tbar" role="img" aria-label="' + escAttr(parts.map((p) => p.label + " " + hoursText(p.h)).join(", ")) + '">' +
+    parts.map((p) => '<span class="tp tp-' + p.key + '" style="width:' + p.pct + '%"></span>').join("") + "</div>" +
+    '<ul class="tl">' + parts.map((p) => '<li><span class="lg tp-' + p.key + '"></span>' + escText(p.label) + " <b>" + hoursText(p.h) + "</b> · " + p.pct + "%</li>").join("") +
+    "</ul>" + ((t.bugs || []).length ? '<p class="muted">the bugs that held a rung shut:</p><ul class="bugs">' + t.bugs.map((b) =>
+      "<li>#" + b.issue + " " + escText(b.what) + ' <span class="muted">' + escText(utcShort(b.from)) + " → " + escText(utcShort(b.to)) + " UTC" +
+      " · " + hoursText(b.running_h) + " running</span></li>").join("") + "</ul>" : "");
+}
+
+function sheetInventory(s) {
+  const inv = s.inventory || [];
+  if (!inv.length) return '<p class="muted">no toys (membrane toybox add &lt;kind&gt;)</p>';
+  return '<p class="note">play with them in the 🧸 dock under the 👶 tab</p><div class="wrap"><table class="tbl"><thead><tr><th>toy</th><th class="num">looks</th>' +
+    '<th class="num">error</th><th>changed by</th></tr></thead><tbody>' + inv.map((t) =>
+      '<tr><td><span class="dot ' + (HEALTH_DOT[t.health] || "idle") + '" title="' + escAttr(t.health) + '"></span>' + escText(t.name) +
+      ' <span class="muted">' + escText(t.kind || "") + (t.seen_as ? " · seen as " + escText(t.seen_as) : "") + "</span></td>" +
+      '<td class="num">' + (t.looks || 0) + '</td><td class="num">' + fixed2(t.error_early) + " → " + fixed2(t.error_late) + "</td>" +
+      "<td>" + changesText(t.changes) + "</td></tr>").join("") + "</tbody></table></div>";
+}
+
+function sheetRelationships(s) {
+  const r = s.relationships || {};
+  const os = r.others || [];
+  const out = [];
+  if (!os.length) out.push('<p class="muted">no one met yet</p>');
+  else out.push('<p class="note">Brier error: 0 is perfectly predictable, 0.25 a coin flip.</p><ul class="rel">' + os.map((o) => {
+    const bits = [];
+    if (o.chat) bits.push("chat: " + o.chat.lines + " lines, " + o.chat.looks + " looks" +
+      (o.chat.replied != null ? ", replied " + Math.round(100 * o.chat.replied) + "%" : "") +
+      (o.chat.brier != null ? ", Brier " + fixed2(o.chat.brier) : "") + (o.chat.seen_as ? ", seen as " + escText(o.chat.seen_as) : ""));
+    if (o.play) bits.push("play: changed toys " + o.play.changes + "×" + (o.play.looks ? ", Brier " + fixed2(o.play.brier) + " on " + o.play.looks + " looks after" : ""));
+    if (o.rung7) bits.push("rung 7's predictor: Brier " + fixed2(o.rung7.brier_model) + " vs habit " + fixed2(o.rung7.brier_habit) +
+      (o.rung7.pairs != null ? " over " + o.rung7.pairs + " pairs" : ""));
+    return "<li><b>" + escText(o.who) + "</b> " + '<span class="muted">' + escText(o.kind) + "</span>" + (o.current ? ' <span class="now">meeting now</span>' : "") +
+      '<div class="note">' + bits.join("<br>") + "</div></li>";
+  }).join("") + "</ul>");
+  out.push('<p><span class="muted">body (it predicts them near-perfectly):</span> ' + ((r.body || []).map(escText).join(", ") || "–") + "</p>");
+  out.push('<p><span class="muted">other:</span> ' + ((r.other || []).map(escText).join(", ") || "–") + "</p>");
+  return out.join("");
+}
+
+/** THE SKILL AT A GLANCE on the sheet: the number big, the line it has to
+ *  beat, its trend over the last hour, and a sparkline of the last hours. */
+function skillStatHtml(sk) {
+  if (!sk || sk.value == null) return "";
+  const v = Number(sk.value), pass = sk.pass == null ? null : Number(sk.pass);
+  const t = sk.trend_h == null ? null : Number(sk.trend_h);
+  const arrow = t == null ? "" : t > 0.005 ? "↗" : t < -0.005 ? "↘" : "→";
+  const pts = (sk.series || []).filter((p) => p.value != null);
+  let spark = "";
+  if (pts.length >= 2) {
+    const W = 120, Hh = 34, vs = pts.map((p) => Number(p.value)).concat(pass == null ? [] : [pass]);
+    const lo = Math.min(...vs), hi = Math.max(...vs), span = hi - lo || 1;
+    const maxAgo = Math.max(...(sk.series || []).map((p) => Number(p.ago_h) || 0)) || 1;
+    const X = (a) => r1(2 + (W - 4) * (1 - a / maxAgo)), Y = (y) => r1(Hh - 3 - (Hh - 6) * (y - lo) / span);
+    spark = '<svg class="skspark" viewBox="0 0 ' + W + " " + Hh + '" width="' + W + '" height="' + Hh + '" preserveAspectRatio="none" aria-hidden="true">' +
+      (pass == null ? "" : '<line x1="0" x2="' + W + '" y1="' + Y(pass) + '" y2="' + Y(pass) + '" class="skp" stroke-dasharray="3 3"/>') +
+      '<polyline points="' + pts.map((p) => X(Number(p.ago_h)) + "," + Y(Number(p.value))).join(" ") + '" class="skl"/></svg>';
+  }
+  const met = pass != null && v >= pass;
+  return '<div class="skill' + (met ? " met" : v < 0 ? " neg" : "") + '" role="group" aria-label="' +
+    escAttr("rung " + sk.rung + " " + (sk.label || "skill") + " " + skillSigned(v) + (pass != null ? ", to beat " + skillSigned(pass) : "") +
+      (t != null ? ", " + (t > 0.005 ? "rising" : t < -0.005 ? "falling" : "flat") + " over the last hour" : "")) + '">' +
+    '<div class="skv">' + skillSigned(v) + "</div>" +
+    '<div class="skm"><div class="skn">rung ' + sk.rung + " " + escText(sk.label || "skill") + "</div>" +
+    (pass != null ? '<div class="skb">to beat <b>' + skillSigned(pass) + "</b>" + (met ? " ✓" : "") + "</div>" : '<div class="skb muted">no fixed line to beat</div>') +
+    (t != null ? '<div class="skt">' + arrow + " " + skillSigned(t) + " in the last hour</div>" : "") + "</div>" + spark + "</div>";
+}
+
+/** The whole sheet: the nameplate, then the sections as <details> (open:
+ *  the remembered choice per section, else SHEET_OPEN). nowS: unused for
+ *  now (every age is the seat's). */
+function selfSheetHtml(s, open, nowS) {
+  if (!s || typeof s !== "object" || !s.header) return '<p class="muted">the sheet is not reachable right now</p>';
+  open = open || {};
+  const h = s.header;
+  const out = ['<div class="hdr"><div class="nm">' + escText(h.name || "self") + '</div><div class="lvb">Lv ' + (h.level || 0) + "</div>" +
+    '<div class="rnm">' + escText(h.rung_name || "") + (h.next != null ? ' <span class="muted">→ ' + h.next + " " + escText(h.next_name || "") + "</span>" : "") + "</div>" +
+    '<div class="xpslot"></div>' + skillStatHtml(h.skill) +
+    '<div class="facts"><span>age <b>' + hoursText(h.age_h) + '</b></span><span>working <b>' + hoursText(h.working_h) + "</b></span>" +
+    (h.cycles ? "<span>" + h.cycles + " cycles</span><span>" + (h.looks || 0) + " looks</span><span>" + (h.lines_sent || 0) + " lines sent</span>" : "") +
+    "</div></div>"];
+  if (s.empty) out.push('<p class="muted">self has not been switched on yet: choose a rung in 🌱 to wake it.</p>');
+  const body = { attributes: sheetAttrs, quest: sheetQuest, achievements: sheetAchievements, growth: sheetGrowth,
+                 time: sheetTime, inventory: sheetInventory, relationships: sheetRelationships };
+  const hint = { attributes: "", quest: s.quest && s.quest.rung != null ? "rung " + s.quest.rung : "",
+                 achievements: (s.achievements || []).length + " passed", time: hoursText((s.time || {}).working_h) + " working",
+                 inventory: (s.inventory || []).length + " toys", relationships: ((s.relationships || {}).others || []).length + " met" };
+  for (const [key, title] of SHEET_SECTIONS) {
+    const isOpen = key in open ? !!open[key] : !!SHEET_OPEN[key];
+    out.push(sheetSection(key, title, isOpen, body[key](s), escText(hint[key] || "")));
+  }
+  return out.join("");
+}
+
+// ---- #249: THE TOY DOCK -- one icon per toybox toy under the 👶 tab, live:
+// a glyph per kind, a badge naming who changed it last (fading), a health
+// dot, and a popover with its stats and the play actions (the one write,
+// POST /membrane/toybox/poke, through _toyPoke).
+const DIE_FACES = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
+const BADGE_S = 6;                                     // a change's badge shows this long
+
+function toyGlyph(t) {
+  t = t || {};
+  const r = t.reading || {}, v = r.value, nm = t.name || "toy", k = t.kind;
+  if (k === "tower") {
+    const b = Array.isArray(r.blocks) ? r.blocks : [];
+    const up = b.filter(Boolean).length;
+    const html = '<span class="tower">' + b.map((s, i) => i).reverse().map((i) => '<i class="blk' + (b[i] ? "" : " down") + '"></i>').join("") + "</span>";
+    return { html, label: nm + ", a tower: " + up + " of " + b.length + " blocks standing" };
+  }
+  if (k === "die") {
+    const n = Number(v);
+    return { html: Number.isInteger(n) && n >= 1 && n <= 6 ? DIE_FACES[n - 1] : escText(v), label: nm + ", a die showing " + v };
+  }
+  if (k === "drift") {
+    const p = t.params || {}, lo = p.lo != null ? Number(p.lo) : 0, hi = p.hi != null ? Number(p.hi) : 100;
+    const pct = Math.round(100 * clamp01((Number(v) - lo) / ((hi - lo) || 1)));
+    return { html: '<span class="gauge"><i style="height:' + pct + '%"></i></span>', label: nm + ", drifting: " + v + " (of " + lo + "–" + hi + ")" };
+  }
+  if (k === "burst") {
+    return { html: '<span class="burst ' + (t.active ? "on" : "off") + '">✦</span>',
+             label: nm + ", bursty: " + (t.active ? "active now" : "quiet now") + ", value " + v };
+  }
+  if (k === "body") return { html: escText(v), label: nm + ", self's body toy (self only): " + v };
+  if (k === "fast" || k === "slow") return { html: escText(v), label: nm + ", " + k + " clock: " + v };
+  return { html: "?", label: nm + (k ? ", " + k : "") };
+}
+
+/** Who changed it last, while fresh: self / world / M (the model) / a person's initial. */
+function toyBadge(t, s) {
+  const last = t && t.last;
+  if (!last) return null;
+  s = s == null ? BADGE_S : s;
+  const by = String(last.by || "?"), who = by.replace(/^person:/, "");
+  const text = by === "self" || by === "world" ? by : by === "model" ? "M" : (who.charAt(0) || "?").toUpperCase();
+  const age = Number(last.age_s) || 0;
+  return { text, who: by === "model" ? "the seat's model" : who, fresh: age < s, age,
+           title: "last change by " + (by === "model" ? "the seat's model" : who) + " " + agoText(age) + " ago" };
+}
+
+function toyDockItem(t) {
+  const g = toyGlyph(t);
+  return { name: (t && t.name) || "", kind: (t && t.kind) || "", glyph: g.html, health: HEALTH_DOT[t && t.health] || "idle",
+           label: g.label + " · health " + ((t && t.health) || "unknown"), badge: toyBadge(t) };
+}
+
+function toyDockHtml(toys) {
+  return (toys || []).map((t) => {
+    const it = toyDockItem(t);
+    return '<li class="dk" data-dock-li="' + escAttr(it.name) + '"><button type="button" class="dkb" data-dock-toy="' + escAttr(it.name) +
+      '" aria-label="' + escAttr(it.label) + '" aria-haspopup="dialog" aria-expanded="false">' +
+      '<span class="g g-' + escAttr(it.kind) + '">' + it.glyph + '</span><span class="hd ' + it.health + '"></span>' +
+      '<span class="bdg' + (it.badge && it.badge.fresh ? " fresh" : "") + '">' + escText(it.badge ? it.badge.text : "") + "</span></button></li>";
+  }).join("");
+}
+
+/** The popover: its stats and what you can do with it. res: the last poke's
+ *  {ok, text}, shown inline. */
+function toyPopoverHtml(t, res) {
+  t = t || {};
+  const g = toyGlyph(t), b = toyBadge(t);
+  const out = ['<div class="ph"><span class="dot ' + (HEALTH_DOT[t.health] || "idle") + '"></span><b>' + escText(t.name) + '</b> <span class="muted">' +
+    escText(t.kind || "") + " · " + escText(t.health || "") + "</span></div>",
+    '<p class="pg">' + escText(g.label) + "</p>",
+    "<p>" + (t.looks || 0) + " looks · error " + fixed2(t.error_early) + " → " + fixed2(t.error_late) + ' <span class="muted">(earlier → later half)</span></p>',
+    "<p>changes: " + changesText(t.changes) + "</p>",
+    "<p>" + (b ? "last change by " + escText(b.who) + " " + agoText(b.age) + " ago" + (t.last.what ? ' <span class="muted">(' + escText(t.last.what) + ")</span>" : "")
+      : '<span class="muted">no change yet</span>') + "</p>"];
+  let acts = [];
+  if (t.kind === "tower") {
+    const bl = (t.reading && t.reading.blocks) || [];
+    acts = bl.map((up, i) => ({ action: up ? "knock" : "rebuild", arg: i + 1, label: (up ? "knock " : "rebuild ") + (i + 1),
+                                title: up ? "knock block " + (i + 1) + " (and the ones above it) down" : "stand block " + (i + 1) + " back up" }));
+  } else {
+    acts = toyActions({ toy: t.name, kind: t.kind });
+  }
+  if (acts.length) {
+    out.push('<div class="pacts">' + acts.map((a) => '<button type="button" class="pk" data-poke-toy="' + escAttr(t.name) + '" data-poke-action="' +
+      escAttr(a.action) + '"' + (a.arg != null ? ' data-poke-arg="' + escAttr(a.arg) + '"' : "") + ' title="' + escAttr(a.title) + '">' +
+      escText(a.label) + "</button>").join("") + "</div>");
+  } else {
+    out.push('<p class="muted">' + (t.kind === "body" ? "self only: nobody else can change it" : "no actions: its own clock is the point") + "</p>");
+  }
+  out.push('<p class="pres' + (res && !res.ok ? " bad" : "") + '" aria-live="polite">' + escText(res ? res.text : "") + "</p>");
   return out.join("");
 }
 
@@ -935,6 +1320,8 @@ function jsShow(v) {
 }
 
 const AiPanelLogic = { jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
+                       attrBar, hoursText, curveGeom, curveSvg, timeParts, selfSheetHtml, SHEET_SECTIONS, SHEET_OPEN,
+                       toyGlyph, toyBadge, toyDockItem, toyDockHtml, toyPopoverHtml, BADGE_S, skillStatHtml, skillSigned,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
@@ -2412,6 +2799,21 @@ function definePanel() {
       const r = await this._api(SERVE + "/membrane/toybox/poke", { method: "POST", body: JSON.stringify(body) }).catch(() => null);
       if (!r) return { ok: false, error: "the seat is not reachable" };
       return r.data && typeof r.data === "object" ? r.data : { ok: false, error: "the poke failed (" + r.status + ")" };
+    }
+
+    // #249: the character sheet and the toy dock (read-only GETs; the dock's
+    // play actions post through _toyPoke above)
+    _selfSheetHtml(sheet, open) { return selfSheetHtml(sheet, open); }
+    _toyDockItem(t) { return toyDockItem(t); }
+    _toyDockHtml(toys) { return toyDockHtml(toys); }
+    _toyPopoverHtml(t, res) { return toyPopoverHtml(t, res); }
+    async _selfSheet() {
+      const r = await this._api(SERVE + "/membrane/self/sheet").catch(() => null);
+      return r && r.ok && r.data && typeof r.data === "object" && r.data.header ? r.data : null;
+    }
+    async _toyState() {
+      const r = await this._api(SERVE + "/membrane/toybox/state").catch(() => null);
+      return r && r.ok && r.data && Array.isArray(r.data.toys) ? r.data.toys : null;
     }
 
     async _selfRecent(n) {

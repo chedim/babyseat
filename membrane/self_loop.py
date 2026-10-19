@@ -1508,6 +1508,9 @@ def _rung7(recs: list[dict], tempo: dict | None = None) -> dict:
 
 
 PROGRESS = {1: _rung1, 2: _rung2, 3: _rung3, 4: _rung4, 5: _rung5, 6: _rung6, 7: _rung7}   # rung -> its test over the record
+# #249: the line each rung's headline skill has to reach (the number status()['skill'] reads);
+# rung 4's news share has a moving bar (its fixed-pace base + 0.15), so it has none here
+SKILL_PASS = {1: RUNG1_SKILL, 2: RUNG2_SKILL, 3: RUNG2_SKILL, 4: None, 5: 1.0, 6: 1.0, 7: RUNG7_MARGIN}
 
 
 def _passed(recs: list[dict]) -> set:
@@ -1602,6 +1605,8 @@ def status(srv) -> dict:
             "cycles": sum(1 for r in recs if r.get("kind") == "cycle"),
             "rung": rung, "rung_name": LADDER.get(rung), "next": nxt,
             "bar": round(bar, 4), "waiting_on": waiting, "skill": prog.get("skill", r1["skill"]),
+            "skill_rung": aim, "skill_pass": SKILL_PASS.get(aim),          # #249: the bar the skill has to beat
+            "skill_measured": any(v > 0 for v in (prog.get("crit") or {}).values()),   # ...and whether anything feeds it yet
             "slipping": slipping, "ladder": ladder,
             "world": {e: k for e, k in _kinds(recs).items() if k != "unknown"},
             "split": {e: s for e, s in spl.items() if s != "unknown"},

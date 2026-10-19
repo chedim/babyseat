@@ -76,7 +76,9 @@ READ_ONLY_EXACT = ("membrane/state", "membrane/map/field",
                    "membrane/map/locate", "v1/models",
                    "membrane/entity/read", "membrane/entity-related",
                    "membrane/predict", "membrane/minds",
-                   "membrane/self/recent")              # #230: self's record, the 👶 panel's feed
+                   "membrane/self/recent",              # #230: self's record, the 👶 panel's feed
+                   "membrane/self/sheet",               # #249: self's character sheet
+                   "membrane/toybox/state")             # #249: the toy dock's live toys
 # the minds' inner text (the thinker's log, the dreamer's goals): admins only
 ADMIN_READ_EXACT = ("membrane/minds",)
 EVENT_HELLO = "server.connected"

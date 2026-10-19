@@ -95,6 +95,12 @@ the status says it waits on "the world" until the first conversation.
 
 ## Watching it grow
 
+Everything below is in the seat itself: the exp bar, the 👶 panel laid out as
+a character sheet, and the toy dock (#249). The external "Self's record"
+dashboard that used to be rebuilt hourly by a script outside the seat is
+retired; its numbers (working hours, the bug windows, the growth curve
+against the fastest possible and a child) are computed by the seat now.
+
 ### The exp bar
 
 Next to the chooser, self's progress reads like a game's experience bar
@@ -118,50 +124,152 @@ Lv 6 · meet an other  [██████░░░░] 64%
   glows once, and the caption reads `⬆ level up` for a few seconds. With
   *reduce motion* on, the gold and the caption stay and nothing pulses.
 
+**The skill at a glance** (#249): under the bar, the number the bar's test
+reads against the line it has to beat, e.g. `skill −0.13 / +0.15` at rung 7
+(the model's Brier skill over habit, which must reach +0.15). Before anything
+feeds the test it reads `skill not measured yet / +0.15`, never a made-up 0.
+Rung 4's headline (the share of timed looks that find news) has a moving bar,
+so it shows the skill alone.
+
 The bar's tooltip still carries the long form (mode, limit, cycles, rung 7's
 pairs). On a phone the caption row is hidden to keep the top bar short.
 
-### The 👶 panel
+### The 👶 panel: self's character sheet
 
 A 👶 tab sits at the left edge of the home view (clear of a phone's notch).
 It opens self's side panel: a column beside the field on a wide screen, a
 full-screen overlay on a narrow one. Open or closed is remembered per browser.
 Esc or × closes it.
 
-- **What it is doing now:** self's last 15 record lines, newest first, with
-  how long ago: `reach w:fast → changed (p 0.98)`, `reach toy:dice → no answer
-  (throttled)`, `push → roomata-estorsky (asked the model)`, `shift noticed on
-  w:prime (0.8 → 0)`, `move (gap 0.031)`, `wait`, `rung 3 passed · tell things
-  apart`. It refreshes every 4 s, and only while the panel is open.
-- **The report card:** the ladder (passed / current / slipping / held by the
-  limit / locked / not built), rung 7's numbers (asked pushes paired, Brier
-  model vs habit, the base rate), curiosity's top three, the world's kinds
-  with their counts, the body/other split, and **the toys** with a health dot:
-  green (its last reads answered), amber (its last reads gave no answer), grey
-  (not read yet), red (no getter, so it can't be read). The card refreshes
-  every 15 s while open.
+The panel is laid out like an RPG character sheet: its structure, not its
+styling (membrane's own look, light and dark). Each section folds; the
+nameplate, Attributes and the Quest log start open, and which sections you
+open or close is remembered per browser.
 
-**It is read-only for self.** Nothing in the panel changes self; the 🌱
-chooser stays the only switch. Everything it shows is `status()` and self's
-own record: nothing is claimed about self that the record doesn't measure.
-The one write is the toys' **play buttons** (#244, see [Playing with
-self](#playing-with-self)): knock / rebuild on a tower block, roll on a die,
-nudge on a drift or burst toy. They change a toy in self's world, never self,
-and a short line under the card says what happened (`✓ knock toy:tower block
-3 → {"standing": false} (by alice)`).
+- **The nameplate:** the name (`self`, until the name ceremony), **Lv** (the
+  rung passed), the live exp bar, **the skill at a glance** (the number big,
+  the line it has to beat, its change over the last hour and a sparkline of
+  the last four hours: the same test run over the record as it stood every
+  half hour), its age (hours since it woke) and its **working hours**.
+- **Attributes:** one measured bar per built rung, with its rung number and
+  value; a pass line marks what the rung's test needs.
 
-The activity comes from a small read-only route (behind the JWT gate like
-every route; the HA relay forwards it on GET only):
+  | attribute | rung | the number |
+  |---|---|---|
+  | Feel | 1 | 1 − gap ÷ naive over its last pushed cycles (pass ≥ 0.5) |
+  | Reach | 2 | Brier skill of its looks at one thing against the seat-wide rate (≥ 0.2) |
+  | Sort | 3 | the answered share of its last 40 steered looks (≥ 0.75) |
+  | Patience | 4 | calibration error: \|mean predicted chance − share that found news\| over its last 40 timed looks (≤ 0.1; lower is better) |
+  | Notice | 5 | the shifts it noticed, of the two its blind audit probes (1) |
+  | Meet | 6 | rung 6's staged test: lines sent, answered looks, the other read as other (1) |
+  | Understand | 7 | the model's Brier skill over habit at predicting the other's replies (≥ 0.15) |
+
+  A skill can be negative: its bar then grows left of a zero line, in amber.
+  A passed rung whose test fails now says **slipping**. A number nothing
+  measures yet says "not measured yet", never 0.
+- **Quest log:** the current rung's staged criteria with their counts and
+  skill (`20/20 reply pairs ✓ · skill vs habit −0.34 → +0.15`), and what it
+  is waiting on.
+- **Achievements:** each rung passed, with its date, the working hour it
+  passed at, and the skill on its pass record. Rung 6 says it was first
+  passed against the empty operator slot (#208) and counts its hours from
+  when its test first held with the person who actually chats.
+- **Growth curve:** rungs over working hours (log scale; inline SVG). The
+  solid line is working hours, the faint one the wall clock, the dashed one
+  the fastest possible (each built rung's test minimum at the loop's pace,
+  from `self_loop`'s constants), and the open points a child: the age a child
+  typically shows the closest ability, rescaled by one factor (the median
+  hours of self per child month over the rungs passed past rung 1). **The
+  child scale is an analogy**, and the panel says so.
+- **Where the time went:** hours alive = working + blocked by a known bug +
+  not running (the seat down, restarting, or self asleep), as a stacked bar,
+  with the bugs listed.
+- **Inventory:** each toy with its health dot, kind, looks, its prediction
+  error on the earlier half of its looks against the later half (falling
+  means it is learning), and who changed it (the toybox's ground truth: self,
+  world, the model, people). Play happens in the dock (below).
+- **Relationships:** the others it has met: the people it sent lines to and
+  looked for answers from (lines, looks, how often they replied, its Brier
+  error on them: 0 is perfectly predictable, 0.25 a coin), the seat's model
+  (rung 7's predictor: its Brier against habit's) and the toy players (how
+  often they changed a toy, and self's error on the looks after); then the
+  body set and the others, from rung 6's split.
+- **Activity:** self's last 15 record lines, newest first, with how long ago:
+  `reach w:fast → changed (p 0.98)`, `push → roomata-estorsky (asked the
+  model)`, `shift noticed on w:prime (0.8 → 0)`, `rung 3 passed · tell things
+  apart`. Fetched every 4 s, only while its section is open.
+
+**Working hours.** Running time is the time self's record kept growing: a gap
+over 2 minutes between two lines, and the time since the last line, is time
+self was not running. From running time the windows a **known bug** held a
+rung shut are taken out. They are a small data list in `membrane/self_sheet.py`
+(`BUGS`), each with its fix time:
+
+| bug | window | ends |
+|---|---|---|
+| #191 | rung 4 passed (rung 5 could not notice a shift at the audit's floor) | 2026-10-16 21:43:37 UTC, the fix live |
+| #208 | rung 5 passed (rung 6 talked to the empty operator slot) | self's first line to a real person |
+
+A window applies only on a seat whose rung passed before the fix; a seat
+born later never had the bug and loses no hours to it.
+
+The sheet comes from one read-only route, computed from the record,
+`status()` and the toybox and cached for 30 s (behind the JWT gate like every
+route; the HA relay forwards it on GET only):
 
 ```bash
-curl -s 'http://127.0.0.1:4096/membrane/self/recent?n=30'   # {"lines": [...]}, newest first, at most 100
+curl -s http://127.0.0.1:4096/membrane/self/sheet | python3 -m json.tool | head -40
+# {"header": {...}, "attributes": [...], "quest": {...}, "achievements": [...],
+#  "growth": {...}, "time": {...}, "inventory": [...], "relationships": {...}}
+curl -s 'http://127.0.0.1:4096/membrane/self/recent?n=30'   # the activity: {"lines": [...]}, newest first, at most 100
 ```
 
-**Toys** are `toy:` and `cradle:` things (listed even without a getter, so a
-broken one shows red) and words (`w:`) that carry a getter; a plain word is not
-a toy. Built-in toys from the toybox (see [Toys](#toys)) are listed under any
-name, each with its `kind` (a script toy's kind is `script`). The list is
-rebuilt from the store at most every 15 s.
+**It is read-only for self.** Nothing in the panel changes self; the 🌱
+chooser stays the only switch. Everything it shows is `status()`, the toybox
+and self's own record: nothing is claimed about self that the record doesn't
+measure. On a seat too old to serve the sheet, the panel shows the old report
+card instead.
+
+### The toy dock
+
+Under the 👶 tab, one icon per toybox toy, live whether or not the panel is
+open (#249). This is where you play with self.
+
+- **Each icon shows its toy:** a tower as a small stack (fallen blocks
+  dimmed), a die its face (⚀…⚅), drift a gauge, burst ✦ (bright while its
+  window is active, dim while quiet), fast and slow their value, body its
+  count (self only).
+- **A badge** names who changed it last (`self`, `world`, `M` for the seat's
+  model, a person's initial) for a few seconds, then fades (no fade with
+  *reduce motion*).
+- **A dot** shows its health: green ok, amber empty reads, grey not read yet,
+  red no getter.
+- **Hover it, or tap it on a phone,** for a popover: its looks, its error
+  earlier → later, the changes by self / world / people, the last change (by
+  whom, how long ago), and the play actions: knock or rebuild per tower
+  block, roll a die, nudge a drift or burst toy (body has none). The result
+  shows in the popover (`✓ knock toy:tower block 3 → {"standing": false} (by
+  alice)`). Esc closes it.
+- **On a phone** the dock folds into one 🧸 button under the 👶 tab; tap it to
+  expand (remembered per browser).
+
+The icons are keyboard-reachable and labelled, and the field's labels keep
+clear of the dock. It polls a light route every 3 s while the page is
+visible (cached 2 s, read-only, JWT-gated, forwarded by the HA relay on GET):
+
+```bash
+curl -s http://127.0.0.1:4096/membrane/toybox/state
+# {"toys": [{"name": "toy:tower", "kind": "tower", "reading": {"blocks": [true, true, false, false, false]},
+#            "health": "ok", "looks": 48, "error_early": 0.1, "error_late": 0.34,
+#            "changes": {"self": 5, "world": 0, "alice": 2}, "last": {"by": "alice", "what": "topple", "age_s": 4.2}}, ...]}
+```
+
+**Toys** in the sheet's inventory are `toy:` and `cradle:` things (listed even
+without a getter, so a broken one shows red) and words (`w:`) that carry a
+getter; a plain word is not a toy. Built-in toys from the toybox (see
+[Toys](#toys)) are listed under any name, each with its `kind` (a script toy's
+kind is `script`). The list is rebuilt from the store at most every 15 s. The
+dock shows the toybox's toys only (the ones you can play with).
 
 ### The panel status
 
@@ -184,6 +292,7 @@ curl -s http://127.0.0.1:4096/membrane/seat \
 | `bar` | progress toward the next rung, 0..1 (see below) |
 | `waiting_on` | the first criterion not yet met, or `the limit`, or `the world` (no current) |
 | `skill` | the headline number of the test the bar reads |
+| `skill_rung`, `skill_pass`, `skill_measured` | #249: the rung that test belongs to, the line its skill has to reach (`null` for rung 4, whose bar moves), and whether anything feeds the test yet (before that, `skill` is a placeholder 0) |
 | `slipping` | the top passed rung's test fails *now* (it stays passed on the record) |
 | `ladder` | every rung: `passed`, `current`, `capped` (ready, held by the limit), `locked`, `unbuilt` |
 | `world` | rung 3's sort of the things it reads: `silent` / `moving` / `still` / `intermittent` |
@@ -505,10 +614,10 @@ membrane toybox poke toy:die roll --as alice    # by: alice
   A method call doesn't say who called it, and the toybox object is the
   model's surface (self's own reaches go through the getter), so every poke
   made there is tagged `model`.
-- **The 👶 panel's play buttons**: each toy row in the report card gets small
-  buttons (knock / rebuild on each tower block, roll on a die, nudge on a
-  drift or burst toy). They post to `POST /membrane/toybox/poke`
-  `{"toy": "toy:tower", "action": "knock", "arg": 3}`, the panel's only write.
+- **The toy dock's play actions** (#249; the report card's buttons before
+  it): each toy's popover under the 👶 tab offers knock / rebuild on each
+  tower block, roll on a die, nudge on a drift or burst toy. They post to `POST /membrane/toybox/poke`
+  `{"toy": "toy:tower", "action": "knock", "arg": 3}`, the page's only write to self's world.
   The route takes toybox actions only and sits behind the JWT gate like every
   route. The seat tags the poke with the page's person: the token's subject in
   JWT mode, else the standalone page's speaker line (the name you typed),

@@ -444,9 +444,7 @@ def tick(name: str, now: float | None = None) -> bool:
                 st["next_at"] += every * (math.floor((now - st["next_at"]) / every) + 1)
                 changed = True
         elif k == "burst":
-            w = math.floor(now / prm["window"])
-            live = random.Random(f"{st['seed']}:w{w}").random() < prm["active"]
-            if live and now >= st["next_at"]:
+            if burst_live(st["seed"], prm, now) and now >= st["next_at"]:
                 st["value"] = _other(st, 0, 99)
                 st["next_at"] = now + prm["every"]
                 changed = True
@@ -470,6 +468,34 @@ def tick(name: str, now: float | None = None) -> bool:
             _note(st, now, "world", "change", value=st["value"])
             _save(st)
         return changed
+
+
+def burst_live(seed, prm: dict, now: float) -> bool:
+    """A burst toy's window at `now` is active (it changes inside it) or
+    quiet -- the same seeded draw its clock uses (#249: the toy dock)."""
+    w = math.floor(float(now) / float(prm["window"]))
+    return random.Random(f"{seed}:w{w}").random() < float(prm["active"])
+
+
+def last_change(name: str) -> dict | None:
+    """The toy's latest change from its log ({ts, by, what, ...}), reading only
+    the log's tail (a fast toy's log grows all day). None before any change."""
+    try:
+        with open(_log_path(name), "rb") as fh:
+            fh.seek(0, os.SEEK_END)
+            size = fh.tell()
+            fh.seek(max(0, size - 4096))
+            tail = fh.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    for ln in reversed(tail.splitlines()):
+        try:
+            rec = json.loads(ln)
+        except ValueError:
+            continue
+        if isinstance(rec, dict) and "ts" in rec:
+            return rec
+    return None
 
 
 def state(name: str) -> dict:
