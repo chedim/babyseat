@@ -37,6 +37,7 @@ import ipaddress
 import json
 import os
 import re
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -207,11 +208,39 @@ def _json(handler, obj, code: int = 200) -> None:
     handler.wfile.write(b)
 
 
+def ui_build_id(root: Path = UI_DIR) -> str:
+    """#243: the page code's fingerprint -- a hash over every file under the
+    UI folder (name + bytes). A restart into new code changes it, and the
+    open tab (reused now, not reopened) reloads itself when it sees that."""
+    import hashlib
+    h = hashlib.sha256()
+    for p in sorted(root.rglob("*")):
+        if p.is_file():
+            h.update(p.relative_to(root).as_posix().encode() + b"\0")
+            h.update(p.read_bytes() + b"\0")
+    return h.hexdigest()[:16]
+
+
+_BUILD: list[str] = []
+_BUILD_LOCK = threading.Lock()
+
+
+def build_id() -> str:
+    """The build this boot serves (computed once: a re-exec is a new boot)."""
+    with _BUILD_LOCK:
+        if not _BUILD:
+            try:
+                _BUILD.append(ui_build_id(UI_DIR))
+            except OSError:
+                _BUILD.append("")
+        return _BUILD[0]
+
+
 def conf() -> dict:
     from . import naming as NM
     st = S.load()
     name = NM.current()
-    return {"serve_ok": True, "serve_url": "standalone", "standalone": True,
+    return {"serve_ok": True, "serve_url": "standalone", "standalone": True, "build": build_id(),
             "name": name, "named": bool(st.get("name")), "aliases": list(st.get("aliases") or []),
             "stt": "server" if str(st.get("stt") or "").startswith("http") else "browser",
             "voice_out": bool(st.get("voice_out")), "language": st.get("language") or "en"}
@@ -422,12 +451,32 @@ def browser_url(host: str, port: int) -> str:
     return f"http://{h}:{port}/"
 
 
-def open_when_up(port: int, url: str, timeout_s: float = 60.0) -> None:
-    """Open the UI in the default browser once the port answers (a thread)."""
+# #243 ONE TAB: a membrane page already open reconnects by itself after a
+# boot (its /event stream retries, then resyncs) -- the boot waits a short
+# window for that before opening a new tab. Set by the serve's SSE route
+# (server.py _sse) when a stream client connects; the seat's own hub
+# listeners subscribe directly and never count.
+_PAGE_SEEN = threading.Event()
+GRACE_S = 8.0
+
+
+def note_page() -> None:
+    """A page's live stream connected (an open tab is here)."""
+    _PAGE_SEEN.set()
+
+
+def open_when_up(port: int, url: str, timeout_s: float = 60.0,
+                 grace_s: float = GRACE_S, reexec: bool = False):
+    """Open the UI in the default browser once the port answers (a thread),
+    unless a page reconnects within `grace_s` of the port coming up (#243).
+    Never on a re-exec restart (`reexec`, restarts.was_reexec) or with
+    MEMBRANE_NO_BROWSER=1. Returns the thread (None when nothing will open)."""
     import socket
-    import threading
     import time
     import webbrowser
+
+    if reexec or os.environ.get("MEMBRANE_NO_BROWSER") == "1":
+        return None
 
     def _go():
         t0 = time.time()
@@ -439,10 +488,13 @@ def open_when_up(port: int, url: str, timeout_s: float = 60.0) -> None:
                 time.sleep(0.3)
         else:
             return
+        if _PAGE_SEEN.wait(grace_s):
+            return                         # an open tab came back: no new one
         try:
             webbrowser.open(url)
         except Exception:
             pass
 
-    if os.environ.get("MEMBRANE_NO_BROWSER") != "1":
-        threading.Thread(target=_go, name="ui-browser", daemon=True).start()
+    t = threading.Thread(target=_go, name="ui-browser", daemon=True)
+    t.start()
+    return t

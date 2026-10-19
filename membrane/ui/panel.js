@@ -216,6 +216,18 @@ function sortRows(st) {
  *  idle page is left alone; the seat's busy is adopted with the page's own
  *  clock kept (the elapsed timer runs on); the seat's idle -- or no entry --
  *  wins unless the page sent a moment ago (the seat may not have the turn yet). */
+/** #243: the page loaded with build `loaded`; the seat now serves `current`.
+ *  "none" (same, or either unknown: an older seat, HA's own conf), "reload",
+ *  or "chip" -- an unsent draft is never thrown away, and a reload already
+ *  made for this very build in the last minute is not made again (no loop). */
+const RELOAD_GUARD_MS = 60000;
+function reloadDecision(loaded, current, draft, tried, now) {
+  if (!loaded || !current || loaded === current) return "none";
+  if (tried && tried.build === current && now - (tried.at || 0) < RELOAD_GUARD_MS) return "chip";
+  if (String(draft || "").trim()) return "chip";
+  return "reload";
+}
+
 function reconcileStatus(local, seat, now) {
   if (!local || local.type !== "busy") return local;
   if (seat && seat.type === "busy") {
@@ -892,7 +904,7 @@ function jsShow(v) {
   return String(v);
 }
 
-const AiPanelLogic = { jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus,
+const AiPanelLogic = { jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
@@ -1027,6 +1039,8 @@ const STYLE = `
   .composer textarea { flex:1; resize:none; min-height:44px; max-height:40vh; border-radius:10px;
                        border:1px solid rgba(128,128,128,.35); background:var(--card-background-color,#111);
                        color:inherit; padding:10px 12px; font:inherit; }
+  .newver { max-width:920px; margin:0 auto 8px; text-align:center; }
+  .newver button { font-size:12px; padding:4px 12px; border-radius:999px; }
   .composer .hint { max-width:920px; margin:4px auto 0; font-size:11px; opacity:.45; }
   @keyframes spin { to { transform:rotate(360deg); } }
   @keyframes pulse { 50% { opacity:.35; } }
@@ -1166,6 +1180,7 @@ function definePanel() {
           <div class="scroller"><div class="msgs"></div><button class="jump">↓ latest</button></div>
           <div class="mindbar"></div>
           <div class="composer">
+            <div class="newver" hidden><button class="btn">new version · click to reload</button></div>
             <div class="box">
               <textarea rows="1" placeholder="Ask the brain…"></textarea>
               <button class="btn primary send">Send</button>
@@ -1214,6 +1229,8 @@ function definePanel() {
       this._msgs = $(".msgs");
       this._jump = $(".jump");
       this._ta = $("textarea");
+      this._newVer = $(".newver");
+      this._newVer.querySelector("button").addEventListener("click", () => this._reloadNow());
       this._sendBtn = $(".send");
       this._stopBtn = $(".stop");
       this._menuBtn = $(".menu");
@@ -1346,6 +1363,7 @@ function definePanel() {
         }
         this._foot.textContent = conf.data.serve_url;
         this._applySeatName(conf.data.name);      // issue #6: the conf carries it
+        this._build = conf.data.build || "";       // #243: the page code this tab runs
         const health = await this._api(SERVE + "/global/health");
         if (!health.ok) { this._err(this._apiErr("brain unreachable", health)); this._paintStatus(); return; }
         this._foot.textContent = "membrane " + ((health.data && health.data.version) || "") + " · " + conf.data.serve_url;
@@ -1353,7 +1371,11 @@ function definePanel() {
         this._loadModel();
         this._loadThink();                 // the THINK switch's state (one GET)
         await this._listSessions();
-        const sid = this._sessions.length ? this._sessions[0].id : await this._createSession();
+        // #243: the chat this tab had open comes back after a reload
+        let savedSid = "";
+        try { savedSid = localStorage.getItem("membrane.chat.sid") || ""; } catch (e) { /* private mode */ }
+        const sid = savedSid && this._sessions.some((s) => s.id === savedSid) ? savedSid
+          : this._sessions.length ? this._sessions[0].id : await this._createSession();
         await this._open(sid);
         this._openStream();
         this._takeAsk();
@@ -1574,6 +1596,7 @@ function definePanel() {
     async _open(sid) {
       this._stopPoll();
       this._sid = sid;
+      try { localStorage.setItem("membrane.chat.sid", sid); } catch (e) { /* private mode */ }
       this._loadSessionModel(sid);
       this._chat = chatState(sid);
       this._rowEls = null;
@@ -1695,6 +1718,30 @@ function definePanel() {
       this._listSessions().catch(() => {});
     }
 
+    // ---------------------------------------------------------- new page code
+    // #243: a restart reuses this tab (no new one opens), so on every
+    // reconnect the tab asks which build the seat serves and reloads into a
+    // new one -- the chat, the 👶 panel and the camera mode are remembered
+    // in localStorage; an unsent draft gets a chip instead of a reload.
+    async _checkBuild() {
+      if (!this._build) return;
+      let r = null;
+      try { r = await this._api("/ui/conf"); } catch (e) { return; }
+      const cur = r && r.ok && r.data ? r.data.build : null;
+      let tried = null;
+      try { tried = JSON.parse(sessionStorage.getItem("membrane.reload.tried") || "null"); } catch (e) { /* none */ }
+      const d = reloadDecision(this._build, cur, this._ta ? this._ta.value : "", tried, Date.now());
+      if (this._newVer) this._newVer.hidden = d !== "chip";
+      if (d !== "reload") return;
+      try { sessionStorage.setItem("membrane.reload.tried", JSON.stringify({ build: cur, at: Date.now() })); } catch (e) { /* guard lost: still one reload */ }
+      location.reload();
+    }
+
+    _reloadNow() {
+      try { sessionStorage.removeItem("membrane.reload.tried"); } catch (e) { /* none */ }
+      location.reload();
+    }
+
     // ---------------------------------------------------------- live stream
     async _openStream() {
       this._closeStream();
@@ -1713,6 +1760,7 @@ function definePanel() {
           this._stopPoll();
           this._paintStatus();
           await this._resync();                  // whatever happened while we were away
+          this._checkBuild();                    // #243: back on new page code? reload into it
           backoff = 1000;
           const reader = r.body.getReader();
           const dec = new TextDecoder();
@@ -1730,7 +1778,9 @@ function definePanel() {
         this._paintStatus();
         if (this._busy()) this._startPoll();
         await new Promise((res) => setTimeout(res, backoff));
-        backoff = Math.min(backoff * 2, 15000);
+        // capped at 5 s (#243): a booting seat waits 8 s for an open tab to
+        // reconnect before it opens a new one -- the retry must land inside that
+        backoff = Math.min(backoff * 2, 5000);
       }
     }
 
