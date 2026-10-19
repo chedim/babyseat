@@ -86,7 +86,7 @@ class TestRung7RestartMark(unittest.TestCase):
         S._put(srv, {"ts": fix, "kind": "rung7_restart", "issue": 254})
         s = S._sheet(srv, NOW)
         day = dt.datetime.fromtimestamp(fix, dt.timezone.utc).strftime("%Y-%m-%d")
-        note = f"restarted {day}: was grading the LLM, now grades self"
+        note = f"restarted {day}: was grading the LLM, now grades Blurp"
         self.assertEqual(s["quest"]["rung"], 7)                    # take turns (#258)...
         self.assertIsNone(s["quest"].get("note"))                  # ...which never graded the LLM
         a = {x["key"]: x for x in s["attributes"]}["understand"]

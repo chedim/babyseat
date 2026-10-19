@@ -42,7 +42,7 @@ import time
 
 from . import self_loop as SL
 
-NAME = "self"                 # until the name ceremony (#161 layer 3)
+NAME = "Blurp"                # the operator named it (2026-10-19, #277); the name ceremony (#161 layer 3) changes this one place
 GAP_S = 120.0                 # a record gap longer than this: self was not running
 CACHE_S = 30.0                # the sheet is recomputed at most this often
 DOCK_CACHE_S = 2.0            # ...the dock's toys this often
@@ -74,18 +74,18 @@ BUGS = (
      "opens_after": 4, "fixed": _utc(2026, 10, 16, 21, 43, 37), "until": "fixed"},   # PR #191 live on the seat
     {"issue": 208, "what": "rung 6 talked to the empty operator slot",
      "opens_after": 5, "fixed": _utc(2026, 10, 18, 18, 8, 44), "until": "first_person"},  # PR #209 merged
-    {"issue": 254, "what": "rung 7 (understand an other, now rung 8) graded the LLM's guess, not self's",
+    {"issue": 254, "what": "rung 7 (understand an other, now rung 8) graded the LLM's guess, not " + NAME + "'s",
      "opens_after": 6, "fixed": None, "until": "rung7_restart"},   # the fix's time is on each seat's record
     {"issue": 259, "what": "curiosity chased the heartbeat's restart glitches",
      "opens_after": 2, "opens_at": _utc(2026, 10, 18, 20, 17, 24), "fixed": None,
      "until": "fix_line", "share": 0.06},       # #212 merged; the fix's time is on each seat's record
 )
-RESTART7 = "restarted {day}: was grading the LLM, now grades self"
-VOIDED = "rung {rung} passed {at} under the #254 bug: graded the LLM, not self; doesn't count"
+RESTART7 = "restarted {day}: was grading the LLM, now grades " + NAME
+VOIDED = "rung {rung} passed {at} under the #254 bug: graded the LLM, not " + NAME + "; doesn't count"
 # #258: a pass above rung 6 from before the ladder flip was the old numbering's
 OLD_NAMES = {7: "understand an other"}
 VOIDED_OLD = ("the old rung {rung} ({name}, now rung {now}) passed {at} under the #254 bug: "
-              "graded the LLM, not self; doesn't count")
+              "graded the LLM, not " + NAME + "; doesn't count")
 FLIPPED = ("the old rung {rung} ({name}, now rung {now}) passed {at}, before the ladder flip (#258); "
            "doesn't count: rung {rung} is now '{new}'")
 
@@ -104,7 +104,7 @@ CHILD = {1: (0.1, "tells its own touch from another's (newborns, Rochat & Hespos
          10: (48.0, "revises what it knows about its own knowing (metacognition, Flavell)"),
          11: (48.0, "tells its own story from memory (autobiographical narrative, Nelson & Fivush)")}
 CAVEAT = ("The child scale is an analogy, not a measurement: each open point is the age a child "
-          "typically shows the closest ability, rescaled by one factor (hours of self per month of a "
+          "typically shows the closest ability, rescaled by one factor (hours of " + NAME + " per month of a "
           "child, the median over the rungs passed) so a child's proportions are kept.")
 
 
@@ -393,7 +393,7 @@ ATTRS = (("feel", "Feel", 1, "skill", "1 − gap ÷ naive: how well it predicts 
          ("notice", "Notice", 5, "share", "the shifts it noticed, of the two its blind audit probes"),
          ("meet", "Meet", 6, "share", "rung 6's staged test: lines sent, answered looks, the other read as other"),
          ("turns", "Turns", 7, "skill", "the reply rate its own timing gains over a timing-blind push (it learned when the other answers)"),
-         ("understand", "Understand", 8, "skill", "self's Brier skill over the running rate at predicting the other's replies (its own guess, the model's mixed in by its track record)"))
+         ("understand", "Understand", 8, "skill", NAME + "'s Brier skill over the running rate at predicting the other's replies (its own guess, the model's mixed in by its track record)"))
 PASS = {"feel": SL.RUNG1_SKILL, "reach": SL.RUNG2_SKILL, "sort": 1.0 - SL.RUNG3_FOCUS, "patience": SL.RUNG4_CALIB,
         "notice": 1.0, "meet": 1.0, "turns": SL.RUNG7_PAY_MARGIN, "understand": SL.RUNG8_MARGIN}
 
@@ -739,7 +739,7 @@ def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
     ago), its health and its stats. Cached DOCK_CACHE_S per seat."""
     now = time.time() if now is None else float(now)
     if srv is None:
-        return {"generated": now, "toys": [], "locked": []}
+        return {"generated": now, "name": NAME, "toys": [], "locked": []}
     rt = SL._rt(srv)
     hit = rt.get("dock")
     if not fresh and hit is not None and 0 <= now - hit[0] < DOCK_CACHE_S:
@@ -803,6 +803,6 @@ def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
                         if kind == "tower" else {}),
                      "unlock_rung": TU.rung_of(kind), "grandfathered": TU.grandfathered(recs, kind)})
     toys.sort(key=lambda t: t["kind"] != "ball")                 # #264: the ball first (locked rows follow the toys)
-    out = {"generated": now, "toys": toys, "locked": TU.locked_rows(recs, {r["kind"] for r in rows})}
+    out = {"generated": now, "name": NAME, "toys": toys, "locked": TU.locked_rows(recs, {r["kind"] for r in rows})}
     rt["dock"] = (now, out)
     return out

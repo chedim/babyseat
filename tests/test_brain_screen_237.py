@@ -63,47 +63,47 @@ class TestLabels(unittest.TestCase):
 class TestCaption(unittest.TestCase):
     def test_a_look(self):
         self.assertEqual(_cap({"kind": "reach", "eid": "w:burst", "answer": "changed", "p": 0.62}),
-                         "self looked at w:burst — it changed (it expected 0.62)")
+                         "Blurp looked at w:burst — it changed (it expected 0.62)")
         self.assertEqual(_cap({"kind": "reach", "eid": "i", "answer": "unchanged", "p": 0.1}),
-                         "self looked at the eye — no change (it expected 0.1)")
+                         "Blurp looked at the eye — no change (it expected 0.1)")
         self.assertEqual(_cap({"kind": "reach", "eid": "toy:dice", "answer": "none", "why": "throttled", "p": 0.4}),
-                         "self reached for dice — no answer (throttled)")
+                         "Blurp reached for dice — no answer (throttled)")
 
     def test_a_timed_look_says_so(self):
         self.assertEqual(_cap({"kind": "reach", "eid": "w:burst", "answer": "changed", "p": 0.7, "timed": True}),
-                         "self looked at w:burst when it judged a change likely — it changed (it expected 0.7)")
+                         "Blurp looked at w:burst when it judged a change likely — it changed (it expected 0.7)")
 
     def test_a_reply_check(self):
         self.assertEqual(_cap({"kind": "reach", "eid": "chat:in:dmitrii", "reply": True, "answer": "changed", "p": 0.4}),
-                         "self checked whether you answered — you did (it expected 0.4)")
+                         "Blurp checked whether you answered — you did (it expected 0.4)")
         self.assertEqual(_cap({"kind": "reach", "eid": "chat:in:bob", "reply": True, "answer": "unchanged", "p": 0.4}),
-                         "self checked whether bob answered — not yet (it expected 0.4)")
+                         "Blurp checked whether bob answered — not yet (it expected 0.4)")
 
     def test_a_push(self):
         self.assertEqual(_cap({"kind": "push", "to": "chat:in:dmitrii", "asked": True}),
-                         "self said hello to you and asked the model if you'll answer")
-        self.assertEqual(_cap({"kind": "push", "to": "chat:in:bob"}), "self said hello to bob")
+                         "Blurp said hello to you and asked the model if you'll answer")
+        self.assertEqual(_cap({"kind": "push", "to": "chat:in:bob"}), "Blurp said hello to bob")
         self.assertEqual(_cap({"kind": "push", "to": "chat:in:bob", "asked": True}),
-                         "self said hello to bob and asked the model if they'll answer")
+                         "Blurp said hello to bob and asked the model if they'll answer")
 
     def test_a_shift_a_wait_a_rung(self):
         self.assertEqual(_cap({"kind": "shift", "eid": "w:prime", "was": 0.8, "now": 0.0}),
-                         "self noticed w:prime stopped behaving like itself (it changed 0.8 of the time, now 0)")
-        self.assertEqual(_cap({"kind": "shift", "eid": "w:prime"}), "self noticed w:prime stopped behaving like itself")
-        self.assertEqual(_cap({"kind": "wait", "n": 3}), "self waited — nothing was due")
+                         "Blurp noticed w:prime stopped behaving like itself (it changed 0.8 of the time, now 0)")
+        self.assertEqual(_cap({"kind": "shift", "eid": "w:prime"}), "Blurp noticed w:prime stopped behaving like itself")
+        self.assertEqual(_cap({"kind": "wait", "n": 3}), "Blurp waited — nothing was due")
         self.assertEqual(_cap({"kind": "rung", "rung": 7}), "level up: rung 7 · take turns")   # #258: the ladder flip
         self.assertEqual(_cap({"kind": "rung", "rung": 8}), "level up: rung 8 · understand an other")
 
     def test_the_rest(self):
         self.assertEqual(_cap({"kind": "cycle", "act": "move", "gap": 0.0312}),
-                         "self moved — it landed 0.031 from where it expected")
-        self.assertEqual(_cap({"kind": "error", "act": "reach", "why": "boom"}), "self hit an error in reach: boom")
-        self.assertEqual(_cap({"kind": "birth"}), "self was born")
-        self.assertEqual(_cap({"kind": "audit", "phase": "start", "eid": "w:x"}), "self is auditing w:x (start)")
-        self.assertEqual(_cap({"kind": "zzz"}), "self: zzz")
+                         "Blurp moved — it landed 0.031 from where it expected")
+        self.assertEqual(_cap({"kind": "error", "act": "reach", "why": "boom"}), "Blurp hit an error in reach: boom")
+        self.assertEqual(_cap({"kind": "birth"}), "Blurp was born")
+        self.assertEqual(_cap({"kind": "audit", "phase": "start", "eid": "w:x"}), "Blurp is auditing w:x (start)")
+        self.assertEqual(_cap({"kind": "zzz"}), "Blurp: zzz")
 
     def test_it_never_claims_an_expectation_the_line_lacks(self):
-        self.assertEqual(_cap({"kind": "reach", "eid": "w:burst", "answer": "changed"}), "self looked at w:burst — it changed")
+        self.assertEqual(_cap({"kind": "reach", "eid": "w:burst", "answer": "changed"}), "Blurp looked at w:burst — it changed")
 
 
 # ---- the feed: deduped, oldest first; the trail: capped, fading -----------------
@@ -174,8 +174,8 @@ class TestEyes(unittest.TestCase):
         self.assertEqual(_js("H.FOLLOW_MODES"), ["activity", "seat", "you", "self", "eyes"])
         self.assertEqual(_js("H.nextMode('self')"), "eyes")
         self.assertEqual(_js("H.nextMode('eyes')"), "activity")
-        self.assertEqual(_js("H.followLabel('eyes')"), "👁 self's eyes")
-        self.assertEqual(_js("H.followLabel('self')"), "◎ self")
+        self.assertEqual(_js("H.followLabel('eyes')"), "👁 Blurp's eyes")       # #277: the name it goes by
+        self.assertEqual(_js("H.followLabel('self')"), "◎ Blurp")
 
     def test_a_manual_orbit_leaves_the_eyes(self):
         self.assertEqual(_js("H.modeAfterTouch('eyes')"), "self")
@@ -301,11 +301,11 @@ class TestSelfTag(unittest.TestCase):
     L = {"rung": 6, "bar": 0.64, "skill": 0.41, "split": {"chat:in:x": "other"}, "meets": {"other": "chat:in:x"}}
 
     def test_short_while_the_camera_follows_self(self):
-        self.assertEqual(_f3("F.selfTag(%s, true)" % json.dumps(self.L)), "self · Lv 6 · 64%")
+        self.assertEqual(_f3("F.selfTag(%s, true)" % json.dumps(self.L)), "Blurp · Lv 6 · 64%")
 
     def test_long_otherwise(self):
         t = _f3("F.selfTag(%s, false)" % json.dumps(self.L))
-        self.assertTrue(t.startswith("self · rung 6 · 64% · skill 0.41"), t)
+        self.assertTrue(t.startswith("Blurp · rung 6 · 64% · skill 0.41"), t)
         self.assertIn("meets an other", t)
 
 

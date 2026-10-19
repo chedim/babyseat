@@ -110,6 +110,6 @@ def test_the_sheet_lists_the_voided_pass():
     hm = dt.datetime.fromtimestamp(old, dt.timezone.utc).strftime("%Y-%m-%d %H:%MZ")
     assert s["quest"]["rung"] == 7                             # take turns (#258)
     assert s["quest"]["voided"] == [f"the old rung 7 (understand an other, now rung 8) passed {hm} under the "
-                                    "#254 bug: graded the LLM, not self; doesn't count"]
+                                    "#254 bug: graded the LLM, not Blurp; doesn't count"]
     assert 7 not in [a["rung"] for a in s["achievements"]]
     assert s["header"]["level"] == 6

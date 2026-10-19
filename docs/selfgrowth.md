@@ -2,7 +2,11 @@
 
 `self` is the seed of the evolving self in
 [#161](https://github.com/chedim/membrane/issues/161): a small loop that learns
-its world one skill at a time. This page tells you how to wake it, how to read
+its world one skill at a time. The operator named it **Blurp** (2026-10-19,
+[#277](https://github.com/chedim/membrane/issues/277)): the page shows that name
+wherever it shows self to you (the 👶 panel and its sheet, the toy dock, the
+activity lines, the amoeba's tag, ◎ and 👁 in the camera menu); its ids, its
+record and this guide keep `self`. This page tells you how to wake it, how to read
 its progress, what each rung asks of its world, and how to help it climb. The
 mechanics, rung by rung, are in [background-mind.md](background-mind.md#the-self-loop-161);
 the code is `membrane/self_loop.py`.
@@ -13,7 +17,7 @@ about self (you, the seat's LLM, self's own lines) moves the bar.
 
 ## What self is, and what it is not
 
-- **It is** `membrane::self`, an unnamed looped object with three methods:
+- **It is** `membrane::self`, a looped object (named Blurp) with three methods:
   `expect` says beforehand what will happen, `try` acts, `notice` sees what
   actually happened. The gap between `expect` and `notice` is what it learns
   from. Its acts are small and safe, field-only: move its own position, read a
@@ -157,7 +161,7 @@ styling (membrane's own look, light and dark). Each section folds; the
 nameplate, Attributes and the Quest log start open, and which sections you
 open or close is remembered per browser.
 
-- **The nameplate:** the name (`self`, until the name ceremony), **Lv** (the
+- **The nameplate:** the name (**Blurp**, the operator's; the seat carries it, so the name ceremony can change it), **Lv** (the
   rung passed), the live exp bar, **the skill at a glance** (the number big,
   the line it has to beat, its change over the last hour and a sparkline of
   the last four hours: the same test run over the record as it stood every

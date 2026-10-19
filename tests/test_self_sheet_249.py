@@ -428,7 +428,7 @@ class TestHeaderAndCache(unittest.TestCase):
     def test_the_header(self):
         s = _sheet(_lived(_seat()), T0 + 12 * H)
         h = s["header"]
-        self.assertEqual(h["name"], "self")
+        self.assertEqual(h["name"], "Blurp")
         self.assertEqual(h["level"], 6)
         self.assertEqual(h["rung_name"], "meet an other")
         self.assertEqual(h["next"], 7)
@@ -937,7 +937,7 @@ class TestDockGlyph(unittest.TestCase):
         self.assertEqual(self._g(kind="fast", reading={"value": 42})["html"], "42")
         b = self._g(kind="body", name="toy:body", reading={"value": 7})
         self.assertEqual(b["html"], "7")
-        self.assertIn("self only", b["label"])
+        self.assertIn("Blurp only", b["label"])
 
     def test_escaped(self):
         self.assertNotIn("<b>", self._g(kind="fast", reading={"value": "<b>"})["html"])
@@ -950,7 +950,7 @@ class TestDockBadge(unittest.TestCase):
 
     def test_the_last_author_while_fresh(self):
         self.assertEqual(self._b({"by": "alice", "age_s": 1})["text"], "A")
-        self.assertEqual(self._b({"by": "self", "age_s": 1})["text"], "self")
+        self.assertEqual(self._b({"by": "self", "age_s": 1})["text"], "Blurp")
         self.assertEqual(self._b({"by": "world", "age_s": 1})["text"], "world")
         self.assertEqual(self._b({"by": "model", "age_s": 1})["text"], "M")
         self.assertTrue(self._b({"by": "alice", "age_s": 1})["fresh"])
@@ -968,7 +968,7 @@ class TestDockPopover(unittest.TestCase):
 
     def test_the_stats(self):
         h = self._p()
-        for want in ("12 looks", "0.30 → 0.10", "self 4", "alice 2", "by alice", "2s ago"):
+        for want in ("12 looks", "0.30 → 0.10", "Blurp 4", "alice 2", "by alice", "2s ago"):
             self.assertIn(want, h, want)
 
     def test_the_tower_offers_knock_or_rebuild_per_block(self):
@@ -983,7 +983,7 @@ class TestDockPopover(unittest.TestCase):
         self.assertIn('data-poke-action="nudge"', self._p(kind="drift", name="toy:drift", reading={"value": 2}))
         body = self._p(kind="body", name="toy:body", reading={"value": 2})
         self.assertNotIn("data-poke-action", body)
-        self.assertIn("self only", body)
+        self.assertIn("Blurp only", body)
 
     def test_the_result_inline(self):
         self.assertIn("✓ knock", self._p(res={"ok": True, "text": "✓ knock"}))

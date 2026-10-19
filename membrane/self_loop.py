@@ -228,7 +228,7 @@ def _entity(srv):
     if ent is None:
         ent = QuantumEntity(eid=_eid(), cls=CLASS_COMPONENT, properties={
             "name": "self",
-            "summary": ("an unnamed loop (#161): try / expect / notice, run only by itself; "
+            "summary": ("a loop the operator named Blurp (#161, #277): try / expect / notice, run only by itself; "
                         "the operator switches it (off / on / watch)"),
             "silent_birth": True})
         est.upsert(ent, embedder=None)
