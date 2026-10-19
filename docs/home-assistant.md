@@ -69,6 +69,10 @@ one per seat, each grown from blank on its own code, toys and partners. Together
 they are a population, not yet a lineage — a new Blurp inherits nothing from
 another.
 
+*Field note (a joke, not a finding): the symbiont form of the earthling,
+Homo sapiens var. blurpophilus, is known by one call — when its human part
+thinks about Blurps, it says "Blurp".*
+
 - **Add a seat:** Settings → Devices & services → Membrane → *Configure* →
   **Add a seat**: its host (e.g. `192.168.1.107`), the serve port (4096), the
   proxy port (11500), its seat token (`membrane token seat` on that machine) and
