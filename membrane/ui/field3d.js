@@ -1774,6 +1774,20 @@ class Field3DView {
   /** A level-up: the exp bar's gold moment, echoed round the amoeba
    *  (extra: what it brought -- #267's "new toy: 🪞 mirror"). */
   selfLevelUp(rung, extra) { this._brainRing(null, 0xd4a017, "⬆ level up: rung " + rung + (extra ? " · " + extra : ""), true); }
+  /** #289: a rung passed, celebrated -- the whole body glows and hops three
+   *  times straight up (the same acts a level-up and an answer play). */
+  selfCelebrate() {
+    const a = this.amoeba;
+    if (!a || !a.pts || !a.acts) return;
+    const now = performance.now();
+    addAct(a.acts, { kind: "glow", t0: now, dir: null });
+    for (let i = 0; i < 3; i++) addAct(a.acts, { kind: "bounce", t0: now + i * 520, dir: [0, 1, 0] });
+  }
+  /** #289: where self is on the screen ([x, y] css px), or null (no self yet, behind the camera). */
+  selfScreen() {
+    const a = this.amoeba;
+    return a && a.pts ? this._project(a.pos) : null;
+  }
   /** The person self meets: their label and their place (null: the field's edge). */
   setSelfOther(label, p) { this.selfOther = label ? { label, p: p ? p.slice() : null } : null; }
 
