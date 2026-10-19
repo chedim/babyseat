@@ -419,6 +419,15 @@ def check_pending(srv, now: float | None = None) -> dict | None:
 # instead of an exit (a foreground seat has no supervisor to respawn it)
 RESTART = {"requested": False}
 
+# #243: the re-exec'd boot's word that it IS a restart (no new browser tab)
+REEXEC_ENV = "MEMBRANE_REEXEC"
+
+
+def was_reexec() -> bool:
+    """True once on the boot a requested restart re-exec'd; the marker is
+    cleared on read so nothing launched later inherits it."""
+    return os.environ.pop(REEXEC_ENV, None) == "1"
+
 
 def restart_line() -> str | None:
     """The log's word that this stop is a restart -- the teardown prints it
@@ -432,6 +441,7 @@ def reexec_if_requested() -> None:
     supervisor waiting on the process just sees it continue)."""
     if not RESTART["requested"]:
         return
+    os.environ[REEXEC_ENV] = "1"           # the next boot skips the browser (#243)
     os.execv(sys.executable,
              [sys.executable, "-m", "membrane.opencode"] + sys.argv[1:])
 

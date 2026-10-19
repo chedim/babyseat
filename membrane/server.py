@@ -2776,6 +2776,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
             self.close_connection = True
             self.end_headers()
             q = hub.subscribe()
+            _UI.note_page()                # an open page is here: no new tab (#243)
             try:
                 self._sse_flush(q, wrap=wrap, keep=keep)
             finally:
