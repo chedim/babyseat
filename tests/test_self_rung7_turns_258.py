@@ -509,3 +509,57 @@ def test_the_sheet_follows_the_numbering(monkeypatch):
     rows = {r["rung"]: r for r in s["growth"]["rows"]}
     assert rows[7]["name"] == "take turns" and rows[8]["name"] == "understand an other"
     assert rows[7]["built"] and rows[8]["built"] and not rows[9]["built"]
+
+
+# ---- 7. rung 8 scores the same outcome: a pre-push line is not a reply ----------------
+
+def test_rung_eight_scores_replied_not_changed():
+    # each check read `changed` (self had not looked since their line), but
+    # mostly the line came BEFORE the push: no reply, for rung 8 as for rung 7
+    recs = []
+    for i in range(120):
+        t = 1000.0 + i * 300.0
+        recs.append({"ts": t, "kind": "push", "to": RESP, "spoke_age": 20.0})
+        recs.append({"ts": t + 120.0, "kind": "reach", "eid": RESP, "reply": True, "p": 0.5,
+                     "answer": "changed", "replied": i % 3 == 0})
+    rows = SL._rung8_rows(recs, RESP)
+    assert [r["o"] for r in rows] == [1.0 if i % 3 == 0 else 0.0 for i in range(120)]
+    assert SL._base_rate(recs, RESP)[1] == 40                       # not 120: `changed` is not the outcome
+
+
+def test_a_check_from_before_the_flip_counts_for_neither_rung():
+    legacy = {"ts": 1120.0, "kind": "reach", "eid": RESP, "reply": True, "answer": "changed"}
+    assert SL._reply_o(legacy) is None
+    recs = [{"ts": 1000.0, "kind": "push", "to": RESP}, legacy]
+    assert SL._rung8_rows(recs, RESP) == [] and SL._reply_checks(recs, RESP) == []
+    assert SL._turn_rows(recs, RESP) == []
+
+
+def test_on_a_seat_a_line_before_the_push_is_no_reply_for_rung_eight(monkeypatch):
+    monkeypatch.setattr(SL, "TURNS", False)                         # the timer: the push lands at cycle 1
+    srv = _seat(passed=(1, 2, 3, 4, 5, 6, 7), limit=8)
+    t0 = 10_000.0
+    ent = CIO.entity_in(srv, CIO.OPERATOR)
+    ent.properties["heard_n"] = 0
+    seen, clock = {}, {"t": t0}
+
+    def read(srv_, e, now):
+        st = (e.properties or {}).get("heard_n")
+        last = seen.get(e.eid, 0)
+        seen[e.eid] = st
+        return {"fired": True, "state": {"n": st}, "changed": st != last}
+
+    def push(srv_, text, person=""):
+        # they spoke 30 s before this push, after self's last look at them
+        ent.properties["heard_n"] = 1
+        ent.properties["heard_ts"] = clock["t"] - 30.0
+    monkeypatch.setattr(SL, "_read_entity", read)
+    monkeypatch.setattr(SL, "_push_chat", push)
+    monkeypatch.setattr(SL, "_ask_llm", lambda *a, **k: {"rc": 1, "text": "off"})
+    for i in range(25):                                             # ...and never after it
+        clock["t"] = t0 + i * SL.PACE_S
+        SL.cycle(srv, now=clock["t"])
+    recs = SL._read(srv)
+    check = next(r for r in recs if r.get("kind") == "reach" and r.get("reply"))
+    assert check["answer"] == "changed" and check["replied"] is False
+    assert [r["o"] for r in SL._rung8_rows(recs, RESP)] == [0.0]

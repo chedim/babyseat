@@ -825,7 +825,12 @@ its own record, and the test scores self against the **running rate**. Since
 the ladder flip (#258) that test is rung 8's; the voided pass stays void and
 counts for neither rung 7 (take turns) nor rung 8, and a rung line above 6
 counts only when it carries the new ladder's tag (`"ladder": 2`), so no pass
-from before the flip is read under the new names.
+from before the flip is read under the new names. Rung 8 also scores the new
+outcome, `replied` (a line after the push), not the look's `changed`: a check
+from before #258 counts for neither rung. On the corrected outcome the live
+record's replay (`experiments/rung7_turns/rung8_outcome.py`, 114 checks)
+gives a reply rate of 0.41 (not 0.54) and self's skill +0.002, 95% CI
+−0.06..+0.07: still nothing to learn from timer pushes.
 **On this person the rung may not pass:** on a copy of the live record (108
 reply checks) the best of what self can learn scores −0.00 against the
 running rate, its 95% interval −0.05..+0.06 — their reply by the 2-minute

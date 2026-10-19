@@ -155,7 +155,11 @@ RUNG7_PAY_MARGIN = 0.05     # ...and be at least this
 # a binary series takes ~100+ symbols, so the window is 100 reply checks. The ruler's bar is
 # half the ceiling's lower CI on a replay -- but on the live record (108 checks, 2026-10-19)
 # p_self's ceiling against the running rate is -0.00, 95% CI -0.05..+0.06 (the other's reply
-# by the check is coin-like, E ~ 0), so no bar can be tied to it there. The bar is instead
+# by the check is coin-like, E ~ 0), so no bar can be tied to it there. (#258: that outcome was
+# the look's `changed`, which counts a line from before the push; rung 8 now scores `replied`, a
+# line after it. Replayed on the corrected outcome (experiments/rung7_turns/rung8_outcome.py,
+# 114 checks): the rate falls 0.54 -> 0.41 and p_self's skill is +0.002, 95% CI -0.06..+0.07,
+# or +0.012 had every push known heard_ts -- still nothing to learn from timer pushes.) The bar is instead
 # set above chance: over 100-check windows a structureless other's p_self reaches at most
 # +0.055..+0.065 (q99 of the best sliding window, rates 0.3/0.5/0.7, two seed sets) and a
 # humble always-0.5 +0.046..+0.054 (q95), while an other with session timing (answers in a
@@ -606,18 +610,30 @@ def _pending(recs: list[dict], now: float) -> dict | None:
     return push
 
 
+def _reply_o(r: dict) -> float | None:
+    """A reply check's outcome (#258): 1.0 when the other spoke AFTER the push
+    and by the check (`replied`), else 0.0; None for a check from before #258,
+    which recorded only whether the look read `changed` -- and a look reads
+    `changed` for a line from before the push too (on the live record, 97% of
+    the checks within 2 minutes of the other's last line), which is not a
+    reply. Rungs 7 and 8 both score this outcome; an old check counts for
+    neither."""
+    v = r.get("replied")
+    return (1.0 if v else 0.0) if isinstance(v, bool) else None
+
+
 def _reply_checks(recs: list[dict], eid: str) -> list[dict]:
-    """Self's reply checks at `eid` that got an answer -- the looks a push's
-    question is about (one horizon: RUNG8_CHECK_S after the push)."""
+    """Self's reply checks at `eid` that know their outcome -- the looks a
+    push's question is about (one horizon: RUNG8_CHECK_S after the push)."""
     return [r for r in recs if r.get("kind") == "reach" and r.get("eid") == eid and r.get("reply")
-            and not r.get("audit") and r.get("answer") in ("changed", "unchanged")]
+            and not r.get("audit") and _reply_o(r) is not None]
 
 
 def _base_rate(recs: list[dict], eid: str) -> tuple[float, int, int]:
-    """How often the other had spoken by the reply check: (rate, k, n), with a
+    """How often the other had replied by the reply check: (rate, k, n), with a
     Jeffreys prior -- 0.5 before any check, never 0/0 (#217)."""
     rc = _reply_checks(recs, eid)
-    k = sum(1 for r in rc if r["answer"] == "changed")
+    k = int(sum(_reply_o(r) for r in rc))
     return (k + 0.5) / (len(rc) + 1.0), k, len(rc)
 
 
@@ -626,7 +642,7 @@ def _recent_rate(recs: list[dict], eid: str) -> tuple[float, int, int]:
     (rate, k, n), the same Jeffreys prior as _base_rate -- 0.5 before any
     check, never 0 or 1 (#246: the person's rhythm now, not since birth)."""
     rc = _reply_checks(recs, eid)[-RUNG8_RECENT:]
-    k = sum(1 for r in rc if r["answer"] == "changed")
+    k = int(sum(_reply_o(r) for r in rc))
     return (k + 0.5) / (len(rc) + 1.0), k, len(rc)
 
 
@@ -649,21 +665,22 @@ def _push_gap(push: dict, last_changed: float | None) -> float | None:
 
 
 def _rung8_rows(recs: list[dict], eid: str) -> list[dict]:
-    """Self's answered reply checks at `eid`, oldest first, each with what self
-    knew at its push (the gap since the other last spoke), its outcome and
-    what the look recorded (p_self, the advisor's p_llm and model, w, p_mix)."""
+    """Self's reply checks at `eid` that know their outcome, oldest first, each
+    with what self knew at its push (the gap since the other last spoke), its
+    outcome (#258: `replied`, a line AFTER the push -- _reply_o) and what the
+    look recorded (p_self, the advisor's p_llm and model, w, p_mix)."""
     rows, last_ch, gap = [], None, None
     for r in sorted(recs, key=lambda x: float(x.get("ts") or 0)):     # time order (stable; the record already is)
         k = r.get("kind")
         if k == "push" and r.get("to") == eid:
             gap = _push_gap(r, last_ch)
-        elif k == "reach" and r.get("eid") == eid and not r.get("audit") \
-                and r.get("answer") in ("changed", "unchanged"):
-            if r.get("reply"):
-                rows.append({"ts": float(r.get("ts") or 0), "o": 1.0 if r["answer"] == "changed" else 0.0,
+        elif k == "reach" and r.get("eid") == eid and not r.get("audit"):
+            o = _reply_o(r) if r.get("reply") else None
+            if o is not None:
+                rows.append({"ts": float(r.get("ts") or 0), "o": o,
                              "gap": gap, "p_llm": r.get("p_llm"), "model": r.get("llm_model"),
                              "rec_p_self": r.get("p_self"), "rec_cal": r.get("llm_cal"), "rec_p": r.get("p_mix")})
-            if r["answer"] == "changed":
+            if r.get("answer") == "changed":
                 last_ch = float(r.get("ts") or 0)
     return rows
 
@@ -883,7 +900,7 @@ def _rung8_prompt(srv, eid: str, n: int, now: float) -> str:
         push = next((p for p in reversed(recs) if p.get("kind") == "push" and p.get("to") == eid
                      and float(p.get("ts") or 0) < float(r["ts"])), None)
         after = f"{round(float(r['ts']) - float(push['ts']))}s after" if push is not None else "after"
-        lines.append(f"{after}: " + ("they had spoken" if r["answer"] == "changed" else "silent"))
+        lines.append(f"{after}: " + ("they had replied" if _reply_o(r) else "silent"))
     hist = "; ".join(lines) or "(none yet)"
     spoke = _last_spoke(srv, recs, eid, now)
     last = (f"Self last saw them speak {round(now - spoke)}s ago. " if spoke is not None
@@ -892,9 +909,9 @@ def _rung8_prompt(srv, eid: str, n: int, now: float) -> str:
             f"self's next look at them (its reply check). Self just pushed a line to them (push {n}); "
             f"the reply check comes about {round(RUNG8_CHECK_S)}s from now "
             f"(at most {round(RUNG8_CHECK_S + RUNG8_GRACE_S)}s). "
-            f"All-time: they had spoken by the reply check after {k} of {m} earlier pushes -- "
+            f"All-time: they had replied (spoken after the push) by the reply check after {k} of {m} earlier pushes -- "
             f"all-time base rate {rate:.2f} (with a small prior). "
-            f"Recent: they had spoken after {kr} of the last {mr} -- "
+            f"Recent: they had replied after {kr} of the last {mr} -- "
             f"recent rate {rr:.2f} (same prior). " + last
             + f"Recent reply checks (oldest first): {hist}. "
             "People's rhythms change (a busy hour, a quiet evening): when the recent rate disagrees "
