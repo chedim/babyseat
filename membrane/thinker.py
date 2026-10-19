@@ -58,6 +58,8 @@ TICK_FIELD_EVERY = 60        # one field-move observation per clock, every
 PRESENCE_EVERY = 60          # the presence pulse: every 60 beats (~1/min)
                              # the slow seat-auto publish, the clock's
                              # 1Hz tick stays the heartbeat PRIMITIVE
+PULSE_IMPORT_LIMIT = 500     # the pulse's published pull (#226): one query,
+                             # capped (the boot read-through takes 2000)
 QUEUE_MAX = 5                # the 3-7 working memory (the covenant's 5)
 THINK_MODEL_CAP_PER_MIN = 4  # the cost dial: model calls per minute, max
 NOVELTY_SPEAK_BAR = 0.85     # a digest speaks only above this sim surprise
@@ -540,6 +542,15 @@ class Thinker:
                       "processed": self.stats["processed"]})
         self.stats["presence"] = est.update_presence(facts)
         self.srv._presence_roster = est.peers()
+        # THE PERIODIC PULL (#226): published entities import -- and a
+        # republished one UPGRADES the copy this seat holds -- on every
+        # pulse, not only at boot. One capped query; a down cluster
+        # pulls nothing and the hum hums on.
+        try:
+            self.stats["imported"] = est.import_published(
+                limit=PULSE_IMPORT_LIMIT)
+        except Exception:
+            self.stats["imported"] = 0
         if self.srv._presence_roster:
             names = ", ".join(p["origin"] for p in self.srv._presence_roster)
             self._log_mind({"kind": "presence", "note":

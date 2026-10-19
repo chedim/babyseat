@@ -160,7 +160,12 @@ class TestImport(unittest.TestCase):
     def test_foreign_published_imports_runs_locally(self):
         other = _Store(origin="laptop@mac")
         est = _Store(origin="esphome@mac")
-        est._entities_collection = lambda: self._foreign_rows(other)
+        # #226: the rows are built ONCE (this lambda used to call
+        # _foreign_rows -- i.e. REPUBLISH -- on every pull, and the test
+        # locked in that a newer version never reached the import; a
+        # republish now upgrades, see tests/test_republish_226.py)
+        rows = self._foreign_rows(other)
+        est._entities_collection = lambda: rows
         n = est.import_published()
         self.assertEqual(n, 1)
         imp = est.docs.get(f"{MEMBRANE_NS}files:gate.py")
@@ -171,8 +176,8 @@ class TestImport(unittest.TestCase):
                          "the request gate")
         # re-import is idempotent; nothing local is clobbered
         self.assertEqual(est.import_published(), 0)
-        est.docs[f"{MEMBRANE_NS}files:gate.py"].properties["summary"] = \
-            "the request gate (localized)"
+        est.edit(f"{MEMBRANE_NS}files:gate.py",
+                 summary="the request gate (localized)")
         est.import_published()
         self.assertEqual((imp.properties or {}).get("summary"),
                          "the request gate (localized)")

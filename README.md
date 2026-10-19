@@ -381,12 +381,18 @@ overwrite each other. Only the entity's **state** travels: every
 `*_script` and the script bookkeeping are stripped on publish, and again
 on import, so a teammate's code never runs on your seat. Publishing again
 bumps the version (`published_ver`); `unpublish: true` removes only your
-own key. Other seats pull published entities once per boot and keep them
-as guests stamped `imported_by`. The local copy always wins: a seat that
-already holds an entity, including an earlier import, does not overwrite
-it, so a teammate who already imported your entity does not get your
-later versions today. With the bucket down, publish fails softly and the
-seat carries on.
+own key. Other seats pull published entities at boot and again about once
+a minute (with the presence pulse), and keep them as guests stamped
+`imported_by` and `imported_ver`. When you republish, a seat that imported
+your entity takes the newer state on its next pull (state only; its own
+links, geometry and scripts on the copy stay). Two cases keep the local
+copy: an entity the seat made itself is never overwritten by anyone's
+publication, and an import the seat has since edited (summary, class or
+properties through `entity_edit`) keeps that edit; the newer version is
+recorded on the entity as `import_diverged` and announced once as a
+`diverged:` line, not applied. A seat never re-imports its own entities.
+With the bucket down, publish fails softly, the pull finds nothing, and
+the seat carries on.
 
 **3. Presence and the roster run on their own** whenever the bucket
 answers. Each seat publishes `membrane::presence` (branch, head, uptime,
