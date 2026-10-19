@@ -1,0 +1,2 @@
+# the live record copy (private, never committed)
+*.copy.jsonl

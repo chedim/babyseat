@@ -116,6 +116,7 @@ RUNG7_CHECK_S = 120.0       # after a push self checks for the reply this long a
 RUNG7_STALE_S = 600.0       # a push this old without its reply check asks nothing any more
 RUNG7_GRACE_S = 60.0        # the reply check waits up to this much longer for an answer still in flight (#217)
 RUNG7_HISTORY = 8           # recent reply checks the question shows the model (#217)
+RUNG7_RECENT = 6            # reply checks the RECENT rate is over, next to the all-time one (#246)
 CURIOSITY = True            # #212: tilt the reach choice by learning progress (tests switch it off for the base)
 CURIO_WINDOW = 30           # ordinary looks per window: progress = earlier window's error - recent window's
 CURIO_FLOOR = 0.1           # the tilt never goes under this: a mastered or "can't learn" thing is still retried
@@ -546,6 +547,29 @@ def _base_rate(recs: list[dict], eid: str) -> tuple[float, int, int]:
     return (k + 0.5) / (len(rc) + 1.0), k, len(rc)
 
 
+def _recent_rate(recs: list[dict], eid: str) -> tuple[float, int, int]:
+    """The share of the last RUNG7_RECENT reply checks the other answered:
+    (rate, k, n), the same Jeffreys prior as _base_rate -- 0.5 before any
+    check, never 0 or 1 (#246: the person's rhythm now, not since birth)."""
+    rc = _reply_checks(recs, eid)[-RUNG7_RECENT:]
+    k = sum(1 for r in rc if r["answer"] == "changed")
+    return (k + 0.5) / (len(rc) + 1.0), k, len(rc)
+
+
+def _last_spoke(srv, recs: list[dict], eid: str, now: float) -> float | None:
+    """When the other last spoke, as self knows it: chat:in's heard_ts (the
+    moment the line arrived) or self's last look that found them changed --
+    the later one, never after `now`. A time only, never the words."""
+    ts = [float(r["ts"]) for r in recs if r.get("kind") == "reach" and r.get("eid") == eid
+          and r.get("answer") == "changed" and float(r.get("ts") or 0) <= now]
+    est = getattr(srv, "entity_store", None)
+    doc = (est.docs or {}).get(eid) if est is not None else None
+    heard = (doc.properties or {}).get("heard_ts") if doc is not None else None
+    if isinstance(heard, (int, float)) and 0 < heard <= now:
+        ts.append(float(heard))
+    return max(ts) if ts else None
+
+
 def _hold_reply(srv, push: dict, now: float) -> bool:
     """Not yet time for the reply check: under RUNG7_CHECK_S after the push --
     or, when the push asked the model and no answer has landed, under
@@ -568,9 +592,16 @@ def _rung7_prompt(srv, eid: str, n: int, now: float) -> str:
     that went 3 of 7. It now gets the BASE RATE (the share of reply checks
     the other had answered, Jeffreys prior) and the recent reply checks only
     -- looks long after a push are another horizon and read as "they always
-    answer" -- and is told a confident miss costs (the Brier score)."""
+    answer" -- and is told a confident miss costs (the Brier score).
+
+    RECENT (#246): the all-time rate can't see a person who went busy; the
+    question also carries the share of the last RUNG7_RECENT reply checks
+    answered and the time since they last spoke, labelled `recent` vs
+    `all-time`, and says rhythms change. Input only: the test, the pairing,
+    the caps and the parsing are #217's."""
     recs = _read(srv)
     rate, k, m = _base_rate(recs, eid)
+    rr, kr, mr = _recent_rate(recs, eid)
     rc = _reply_checks(recs, eid)[-RUNG7_HISTORY:]
     lines = []
     for r in rc:
@@ -579,21 +610,23 @@ def _rung7_prompt(srv, eid: str, n: int, now: float) -> str:
         after = f"{round(float(r['ts']) - float(push['ts']))}s after" if push is not None else "after"
         lines.append(f"{after}: " + ("they had spoken" if r["answer"] == "changed" else "silent"))
     hist = "; ".join(lines) or "(none yet)"
-    looks = [r for r in recs if r.get("kind") == "reach" and r.get("eid") == eid
-             and r.get("answer") in ("changed", "unchanged")]
-    spoke = next((r for r in reversed(looks) if r["answer"] == "changed"), None)
-    last = (f"Self last saw them speak {round(now - float(spoke['ts']))}s ago. " if spoke
+    spoke = _last_spoke(srv, recs, eid, now)
+    last = (f"Self last saw them speak {round(now - spoke)}s ago. " if spoke is not None
             else "Self has not seen them speak yet. ")
     return (f"You are predicting whether {eid} (the person self talks to) will have spoken by "
             f"self's next look at them (its reply check). Self just pushed a line to them (push {n}); "
             f"the reply check comes about {round(RUNG7_CHECK_S)}s from now "
             f"(at most {round(RUNG7_CHECK_S + RUNG7_GRACE_S)}s). "
-            f"Base rate: they had spoken by the reply check after {k} of {m} earlier pushes -- "
-            f"base rate {rate:.2f} (with a small prior). "
-            f"Recent reply checks (oldest first): {hist}. " + last
-            + "Give ONE calibrated probability (0..1) that they will have spoken by that check. "
+            f"All-time: they had spoken by the reply check after {k} of {m} earlier pushes -- "
+            f"all-time base rate {rate:.2f} (with a small prior). "
+            f"Recent: they had spoken after {kr} of the last {mr} -- "
+            f"recent rate {rr:.2f} (same prior). " + last
+            + f"Recent reply checks (oldest first): {hist}. "
+            "People's rhythms change (a busy hour, a quiet evening): when the recent rate disagrees "
+            "with the all-time one, weigh the recent window more. "
+            "Give ONE calibrated probability (0..1) that they will have spoken by that check. "
             "You are scored by the Brier score, (p - outcome)^2: a confident wrong answer is penalized "
-            "heavily (0.98 that misses costs 0.96), so stay near the base rate unless these facts give "
+            "heavily (0.98 that misses costs 0.96), so stay near these rates unless these facts give "
             "a real reason to move. Don't use tools -- everything you know is here. "
             "Answer in one line: VERDICT: <probability>")
 
@@ -1605,7 +1638,7 @@ def _rung7_stats(recs: list[dict]) -> dict:
     asked the model, those whose reply check came (`checked`), those that made
     a pair (habit p and model p on that look), the pair rate per checked ask,
     the model's and habit's Brier over the pairs rung 7 reads, and the base
-    rate the model is told."""
+    (all-time) and recent rates the model is told (#246)."""
     to = _other(recs)
     asked = [r for r in recs if r.get("kind") == "push" and r.get("asked") and r.get("to") == to]
     checked = paired = 0
@@ -1623,7 +1656,8 @@ def _rung7_stats(recs: list[dict]) -> dict:
     return {"asked": len(asked), "checked": checked, "paired": paired,
             "pair_rate": round(paired / checked, 4) if checked else None,
             "brier_model": bm, "brier_habit": bh,
-            "base_rate": round(_base_rate(recs, to)[0], 4) if to else None}
+            "base_rate": round(_base_rate(recs, to)[0], 4) if to else None,
+            "recent_rate": round(_recent_rate(recs, to)[0], 4) if to else None}
 
 
 def _curiosity_stats(recs: list[dict], top: int = 3) -> list[dict]:

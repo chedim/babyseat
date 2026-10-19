@@ -185,7 +185,7 @@ curl -s http://127.0.0.1:4096/membrane/seat \
 | `split` | rung 6's split: `body` (it predicts it near-perfectly) or `other` (it can't) |
 | `meets` | rung 6's exchange: `pushes`, `other` (who it meets), `push_age`, `heard_age` (seconds since the other last answered) |
 | `steer` | after rung 1: how close it lands to its aim (`err`) against not leaning into the current (`naive`), and `skill = 1 − err/naive` |
-| `rung7` | rung 7 at the current other: `asked` (pushes that asked the model), `checked` (those whose reply check came), `paired` (those whose check carried the model's answer), `pair_rate` = paired / checked, `brier_model` and `brier_habit` (mean Brier error over the pairs the test reads; the model passes by beating habit's by 15%), and `base_rate` (what the model is told). The 🌱 chooser's tooltip shows it as `rung 7: 5 of 8 asked pushes paired, Brier model 0.37 vs habit 0.39, base rate 0.55` |
+| `rung7` | rung 7 at the current other: `asked` (pushes that asked the model), `checked` (those whose reply check came), `paired` (those whose check carried the model's answer), `pair_rate` = paired / checked, `brier_model` and `brier_habit` (mean Brier error over the pairs the test reads; the model passes by beating habit's by 15%), `base_rate` (the all-time rate the model is told) and `recent_rate` (the share of the last 6 reply checks answered, same prior, also told). The 🌱 chooser's tooltip shows it as `rung 7: 5 of 8 asked pushes paired, Brier model 0.37 vs habit 0.39, base rate 0.55` |
 | `toys` | #230: each toy (`toy:` / `cradle:` things, words with a getter) with `getter` (it has one), `reads` and `answered` (of its last 10 reaches), and `health`: `ok`, `empty` (no answer on its last reads), `unread`, or `no getter` |
 | `curiosity` | from rung 2 on: the (up to) three things whose prediction is improving fastest, best first, each with `progress` (its error over the 30 ordinary looks before the latest 30, minus its error over the latest 30) and `error` (the latest 30's mean Brier error). It is what self's curiosity reads when it chooses a reach (below); empty until a thing has 60 ordinary looks |
 
@@ -295,7 +295,7 @@ has passed, it is under the limit, and its test passes on the record.
 | **4 · patience** | fits each thing's rate of change in time over its last 30 looks (after a rung-5 shift, over the looks since it, with the old rate kept as a prior worth 3 looks, so a handful of looks can't swing it to never/always; #235); looks again once a change is 60% likely (waits up to 30 min); idles when nothing is due | things with a steady rhythm | **timed**: 30 timed looks; **news**: of its last 40, they find a change ≥ half the time, or 0.15 more often than its fixed-pace looks did (whichever is easier); **calibration**: its mean predicted chance is within 0.1 of the share that found news | keep getters' rhythms honest; don't make a thing change only when self looks |
 | **5 · notice the world changed** | compares its last 3–5 looks at a thing with its long memory; a window far from it (> 0.4) and unlikely under it (binomial tail < 0.02) is a **shift** ("went still" / "moves again"), and it re-learns from there (its rate starts from the old one and the new looks lead after ~10) | a thing it already classes as moving | **looks**: 20 looks with noticing on; **audit**: membrane pauses the surest mover for 5 of self's looks (cap 1 h), then restarts it for 5 more (cap 3 h); self must flag "went still" during the pause and "moves again" after | nothing: the audit runs itself. Don't restart the seat mid-audit if you can help it |
 | **6 · meet an other** | every 30 cycles pushes the line "self is here" to chat, and reads `chat:in:<person>`, which ticks each time the person sends a message | **a person who chats** with the seat, irregularly | **pushes**: 10; **heard**: 20 answered looks at the other; **split**: the other is classed **other** (its Brier skill < 0.9: self can't predict it perfectly). A partner who never answers is predicted perfectly, classes as *body*, and the rung stays shut | chat with the seat — normally, whenever you like. Your messages are the answers |
-| **7 · understand an other** | at each push it asks the seat's model (`llm::call`, read-only, one consult per push) for one calibrated probability that the other will have spoken by its next look, telling it the base rate (how often the other had answered by the reply check, with a small prior) and the recent reply checks; it holds off looking at the other for 2 minutes (up to 3 while the model's answer is still in flight), then checks for the reply, and that look pairs the model's prediction with its own habit | the seat's model reachable for background calls; the other answering its pushes | **looks**: 20 paired looks (one per push: habit and model on the reply check); **skill**: the model removes ≥ 15% of habit's Brier error over them | answer self's 🌱 lines (or just chat); keep the seat's model up |
+| **7 · understand an other** | at each push it asks the seat's model (`llm::call`, read-only, one consult per push) for one calibrated probability that the other will have spoken by its next look, telling it the all-time base rate (how often the other had answered by the reply check, with a small prior), the recent rate (the share of the last 6 reply checks answered, same prior), how long ago they last spoke, and the recent reply checks; it holds off looking at the other for 2 minutes (up to 3 while the model's answer is still in flight), then checks for the reply, and that look pairs the model's prediction with its own habit | the seat's model reachable for background calls; the other answering its pushes | **looks**: 20 paired looks (one per push: habit and model on the reply check); **skill**: the model removes ≥ 15% of habit's Brier error over them | answer self's 🌱 lines (or just chat); keep the seat's model up |
 
 At the default pace, rung 6's ten pushes alone take ~50 minutes; rungs 2–5
 usually take hours, and the audits run on their own schedule.
@@ -550,6 +550,23 @@ up to 60 s more (`RUNG7_GRACE_S`) before looking, and pairs only an answer
 that landed after the push and by the look; a `pair_rate` well under 1 with
 `checked` growing means the model's answers aren't parseable or arrive later
 than 3 minutes — look at the `field-call: chat:in:<person>` sessions.
+
+**Rung 7's skill is negative though the pairs are in (#246).** On the live
+seat (2026-10-19) rung 7 had its 20 pairs and skill −0.34. The question now
+carries the **recent** rate next to the **all-time** one (labelled so), how
+long ago the other last spoke (chat:in's `heard_ts`, or self's last look that
+found them changed — a time, never the words), and a sentence that rhythms
+change; `recent_rate` is in `rung7`. Only the input changed: 20 pairs, the
+15% margin, the pairing and the parsing are as before. Measured on a copy of
+that record (`experiments/rung7_recent/`): this person's reply by the
+2-minute check is close to a fair coin with no runs, so the recent rate is
+not what was missing (it is a hair better than the all-time one over the
+last 20 checks, worse over all 77 and over the pairs rung 7 read). Habit is
+beatable there — it scores worse than always saying 0.5 — but only by a
+model that answers near the rates it is told; the live model said 0.58–1.0
+to checks that went 8 of 20. If `brier_model` stays above `brier_habit`
+with `base_rate` / `recent_rate` near 0.5, the model's lean is the problem,
+not its information.
 
 **`held`.** Three cycles failed in a row (the record's `error` lines say why).
 Fix the cause, then re-choose the limit to clear it.
