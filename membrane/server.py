@@ -36,6 +36,7 @@ import threading
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from queue import Queue, Empty
@@ -3039,6 +3040,13 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     _ent = _SP._entity(psrv)
                     self._json_out({"state": _SP.state(psrv), "events": list(((_ent.properties or {}) if _ent else {}).get("events") or []),
                                     "controls": list(_SP.CONTROLS)})
+            elif path == "/membrane/self/recent":
+                # #230: self's record, newest first and capped -- the 👶
+                # panel's activity feed (read-only; the gate above ran first)
+                from . import self_loop as _SELF
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                _q = urllib.parse.parse_qs(self.path.partition("?")[2])
+                self._json_out({"lines": _SELF.recent(psrv, (_q.get("n") or [30])[0]) if psrv is not None else []})
             elif path == "/agent":
                 self._json_out(_agent_shapes(getattr(self, "seat", None)))
             elif path == "/command":

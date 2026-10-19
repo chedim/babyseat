@@ -119,6 +119,12 @@ CURIOSITY = True            # #212: tilt the reach choice by learning progress (
 CURIO_WINDOW = 30           # ordinary looks per window: progress = earlier window's error - recent window's
 CURIO_FLOOR = 0.1           # the tilt never goes under this: a mastered or "can't learn" thing is still retried
 CURIO_MIN = 0.005           # progress under this anywhere is no frontier: the base chooser runs untilted
+RECENT_MAX = 100            # #230: the most record lines the page's activity feed may ask for
+TOY_PREFIXES = ("toy:", "cradle:")   # #230: things made for self to play with (listed even without a getter)
+TOY_WORDS = "w:"            # ...and words that carry a getter (a plain word is not a toy)
+TOY_READS = 10              # the last reaches of a toy its health mark reads
+TOY_SCAN = 3000             # how far back in the record the toys' reads are looked for
+TOY_TTL_S = 15.0            # the toy list is recomputed at most this often (it walks the store)
 
 _lock = threading.RLock()
 _ctx = threading.local()    # the cycle in flight: only the loop's own thread has one
@@ -1509,7 +1515,72 @@ def status(srv) -> dict:
             "meets": meets,
             "steer": _steer_stats(recs),
             "curiosity": _curiosity_stats(recs),
-            "rung7": _rung7_stats(recs)}
+            "rung7": _rung7_stats(recs),
+            "toys": _toys(srv, recs)}
+
+
+def recent(srv, n=30) -> list[dict]:
+    """#230: the last n record lines, newest first, capped at RECENT_MAX --
+    for the page's activity feed (copies: the record is never edited)."""
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        n = 30
+    n = max(1, min(n, RECENT_MAX))
+    with _lock:
+        tail = _read(srv)[-n:]
+    return [dict(r) for r in reversed(tail)]
+
+
+def _short(eid: str) -> str:
+    """membrane::Component:toy:dice -> toy:dice (the name a toy goes by)."""
+    from .entities import MEMBRANE_NS
+    s = eid[len(MEMBRANE_NS):] if eid.startswith(MEMBRANE_NS) else eid
+    head, sep, rest = s.partition(":")
+    return rest if sep and head[:1].isupper() and rest else s
+
+
+def _toys(srv, recs: list[dict]) -> list[dict]:
+    """#230: the things made for self to play with -- toy: and cradle: things,
+    and words (w:) that carry a getter -- each with a health mark for the
+    operator: `no getter` (it can't be read), `unread` (self has not reached
+    it yet), `empty` (its last reads gave no answer), else `ok`. The store
+    walk is cached for TOY_TTL_S; the reads are recounted each call."""
+    rt = _rt(srv)
+    now = time.time()
+    cached = rt.get("toys")
+    if cached is None or now - cached[0] > TOY_TTL_S:
+        from .night import effective_script
+        est = getattr(srv, "entity_store", None)
+        found = []
+        for eid, e in list(((est.docs if est is not None else None) or {}).items()):
+            name = _short(eid)
+            word = name.startswith(TOY_WORDS)
+            if not (word or name.startswith(TOY_PREFIXES)):
+                continue
+            try:
+                getter = bool(effective_script(est, e, "getter")[0])
+            except Exception:
+                getter = False
+            if word and not getter:
+                continue
+            found.append((eid, getter))
+        cached = rt["toys"] = (now, sorted(found))
+    eids = {e for e, _ in cached[1]}
+    reads: dict[str, list] = {e: [] for e in eids}
+    for r in reversed(recs[-TOY_SCAN:]):
+        if r.get("kind") == "reach" and not r.get("audit") and r.get("eid") in eids:
+            got = reads[r["eid"]]
+            if len(got) < TOY_READS:
+                got.append(r.get("answer"))
+    out = []
+    for eid, getter in cached[1]:
+        got = reads[eid]
+        answered = sum(1 for a in got if a in ("changed", "unchanged"))
+        health = ("no getter" if not getter else "unread" if not got
+                  else "empty" if not answered else "ok")
+        out.append({"eid": eid, "getter": getter, "reads": len(got), "answered": answered, "health": health})
+    return out
 
 
 def _rung7_stats(recs: list[dict]) -> dict:
