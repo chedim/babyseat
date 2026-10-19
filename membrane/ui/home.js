@@ -1309,11 +1309,26 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     _setMode(m, byTouch) {
       this._mode = m; lsSet(LS_FOLLOW, m); this._tracked = null;
       this._modeBtn.textContent = followLabel(m);
-      if (this._v3) this._v3.selfEyes = m === "eyes";
+      if (this._v3) { this._v3.selfEyes = m === "eyes"; this._v3.selfFollow = m === "self" || m === "eyes"; }
       this._eyeDir = null;
       if (byTouch) { this._say("you took the camera: pick ◎ self again to let it frame self"); return; }
       this._frameHold = false;
       this._lastTouch = -1e9; this._goal = null; this._aim(true);   // idle at once (a fresh page too)
+    }
+
+    /** The panels over the field (#237): the chat and the 👶 panel when open,
+     *  the top bar, the voice row and the brain's caption -- rects in the
+     *  field's own coordinates. */
+    _occluders() {
+      const host = this._host3d, root = this.shadowRoot;
+      if (!host || !root) return [];
+      const h = host.getBoundingClientRect(), out = [];
+      for (const el of [this._chatBox, this._selfPanel, root.querySelector(".top"), root.querySelector(".voice"), this._brainEl]) {
+        if (!el || el.hidden || el.classList.contains("hidden")) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) out.push({ x: r.left - h.left, y: r.top - h.top, w: r.width, h: r.height });
+      }
+      return out;
     }
 
     async _get(path) {
@@ -1338,6 +1353,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           stream: (p, signal) => hass.fetchWithAuth(HSERVE + p, { signal, headers: { Accept: "text/event-stream" } }),
           // the live layer for every signed-in user (the proxy relays it to them all)
           kindColor: hKindColor, isAdmin: true, maxFps: 30, labelIds: () => this._labelIds(),
+          occluders: () => this._occluders(),          // #237: the labels round self keep out from under the panels
           snapshot: "membrane-home-" + ((hass.user && hass.user.id) || "anon"),   // IndexedDB: the last view at once
           onStatus: (t) => { this._v3Txt = t; this._paintStatus(); },
           onSelect: (m) => this._select(m),
@@ -1352,7 +1368,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         };
         const v = this._v3 = new window.MembraneField3D(this._host3d, api);
         if (window.matchMedia("(max-width: 760px)").matches) { v.maxBudget = 3000; v._applyBudget(3000); }
-        v.selfEyes = this._mode === "eyes";
+        v.selfEyes = this._mode === "eyes"; v.selfFollow = this._mode === "self" || this._mode === "eyes";
         await v.start();
         if (!this._started) { v.stop(); return; }
         await this._aim(true);

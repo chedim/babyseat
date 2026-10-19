@@ -62,6 +62,90 @@ function lookTarget(p, eid, apos) {
 }
 
 function lookLabel(label, ghost) { return ghost ? label + " (unplaced)" : label; }
+
+/** The look's chip text: 👁 name (unplaced for a ghost) + its answer. */
+function lookChip(label, answer, ghost) {
+  const mark = answer === "changed" ? " ✓ changed" : answer === "unchanged" ? " · unchanged" : " · no answer";
+  return "👁 " + lookLabel(label, ghost) + mark;
+}
+
+// ---- #237 (review of #241): the labels round self, readable on both themes ----
+// a chip on the theme's card colour with the theme's text colour; the label's
+// own colour is its left edge (set per label)
+const SELF_LABEL_CSS = "position:absolute;left:0;top:0;padding:1px 6px 1px 5px;border-radius:6px;white-space:nowrap;pointer-events:none;"
+  + "font:600 11px/16px system-ui,sans-serif;color:var(--primary-text-color,#e1e1e1);"
+  + "background:color-mix(in srgb, var(--card-background-color,#1c1c1c) 84%, transparent);"
+  + "box-shadow:0 0 0 1px color-mix(in srgb, var(--divider-color,#888) 45%, transparent);border-left:3px solid #888;";
+
+/** The visible field: the canvas (w x h) minus each panel over it (rects in
+ *  the canvas's own coordinates), each cut from the side that keeps the most. */
+function fieldArea(w, h, rects) {
+  let A = { x0: 0, y0: 0, x1: w, y1: h };
+  for (const r of rects || []) {
+    if (!r || !(r.w > 0) || !(r.h > 0)) continue;
+    const rx0 = r.x, ry0 = r.y, rx1 = r.x + r.w, ry1 = r.y + r.h;
+    if (rx1 <= A.x0 || rx0 >= A.x1 || ry1 <= A.y0 || ry0 >= A.y1) continue;     // not over what is left
+    const cuts = [Object.assign({}, A, { x0: Math.max(A.x0, rx1) }), Object.assign({}, A, { x1: Math.min(A.x1, rx0) }),
+                  Object.assign({}, A, { y0: Math.max(A.y0, ry1) }), Object.assign({}, A, { y1: Math.min(A.y1, ry0) })];
+    const size = (c) => Math.max(0, c.x1 - c.x0) * Math.max(0, c.y1 - c.y0);
+    A = cuts.reduce((best, c) => (size(c) > size(best) ? c : best), cuts[0]);
+  }
+  return A;
+}
+
+function inArea(x, y, A) { return !A || (x >= A.x0 && x <= A.x1 && y >= A.y0 && y <= A.y1); }
+
+/** An arrow from one screen point toward another. */
+function arrowFor(x0, y0, x1, y1) {
+  const ang = Math.atan2(y1 - y0, x1 - x0);
+  return ["→", "↘", "↓", "↙", "←", "↖", "↑", "↗"][((Math.round(ang / (Math.PI / 4)) % 8) + 8) % 8];
+}
+
+/** Lay labels out round their anchors: the most important first keep their
+ *  place (anchor + dx/dy), each next one steps down / up a row until it
+ *  overlaps none; every box stays inside the area; an anchor outside it (a
+ *  thing behind a panel) puts its label at the edge with an arrow toward it;
+ *  an optional label with no room hides instead of piling up.
+ *  items: [{key, ax, ay, w, h, dx?, dy?, prio?, optional?}] -> {key: {x, y, out, arrow, hidden}} */
+function layoutLabels(items, A) {
+  const out = {}, placed = [], GAP = 2;
+  const order = (items || []).map((it, i) => [it, i]).sort((p, q) => ((q[0].prio || 0) - (p[0].prio || 0)) || (p[1] - q[1]));
+  for (const [it] of order) {
+    const w = it.w || 0, h = it.h || 16;
+    const isOut = !inArea(it.ax, it.ay, A);
+    if (isOut && it.optional) { out[it.key] = { x: 0, y: 0, out: true, arrow: "", hidden: true }; continue; }   // a mark: only where it is seen
+    const ax = Math.min(Math.max(it.ax, A.x0), A.x1), ay = Math.min(Math.max(it.ay, A.y0), A.y1);
+    let x = ax + (it.dx == null ? 8 : it.dx), y = ay + (it.dy == null ? -8 : it.dy);
+    x = Math.max(A.x0, Math.min(x, A.x1 - w)); y = Math.max(A.y0, Math.min(y, A.y1 - h));
+    const hits = (yy) => placed.some((p) => x < p.x + p.w && p.x < x + w && yy < p.y + p.h && p.y < yy + h);
+    let at = null;
+    for (let k = 0; k <= 12 && at == null; k++) {
+      const s = (k % 2 ? 1 : -1) * Math.ceil(k / 2) * (h + GAP);
+      const yy = y + (k === 0 ? 0 : s);
+      if (yy < A.y0 || yy + h > A.y1) continue;
+      if (!hits(yy)) at = yy;
+    }
+    if (at == null && it.optional) { out[it.key] = { x, y, out: isOut, arrow: "", hidden: true }; continue; }
+    if (at == null) at = y;
+    placed.push({ x, y: at, w, h });
+    out[it.key] = { x, y: at, out: isOut, arrow: isOut ? arrowFor(ax, ay, it.ax, it.ay) : "", hidden: false };
+  }
+  return out;
+}
+
+/** self's tag: short while the camera follows self (the exp bar carries the rest). */
+function selfTag(L, short) {
+  L = L || {};
+  const pct = Math.round(100 * (L.bar || 0));
+  if (short) return "self · Lv " + (L.rung || 0) + " · " + pct + "%";
+  const skill = L.skill == null ? "" : " · skill " + Number(L.skill).toFixed(2);
+  const otherEid = (L.meets || {}).other;
+  const split = otherEid && L.split ? L.split[otherEid] : null;
+  const meet = split ? " · meets " + (split === "other" ? "an other" : "its body") : "";
+  return "self · rung " + (L.rung || 0) + " · " + pct + "%" + skill
+    + (L.steer != null ? " · lands " + Math.round(100 * L.steer) + "% closer to its aim" : "")
+    + (L.slipping ? " · slipping" : "") + (L.mode === "watch" ? " · watched" : "") + meet;
+}
 const F3_AGENTS = {
   chat: "#ffd166", phone: "#06d6a0", "loop-1": "#ef476f", "loop-2": "#f78c6b",
   "loop-3": "#c77dff", loop: "#ff8fab", thinker: "#4cc9f0", dreamer: "#b5e48c",
@@ -272,7 +356,8 @@ function snapshotOf(info, tiles, max = 400) {
   return { v: 1, ts: Date.now(), meta, tiles: out.slice(-max) };
 }
 
-const F3Logic = { ghostDir, lookTarget, lookLabel, GHOST_R, fnv32, snapshotOf, IDBCache, locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS };
+const F3Logic = { ghostDir, lookTarget, lookLabel, lookChip, GHOST_R, fnv32, snapshotOf, IDBCache, locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS,
+  fieldArea, inArea, arrowFor, layoutLabels, selfTag };
 if (typeof module !== "undefined" && module.exports) module.exports = F3Logic;
 
 // ------------------------------------------------------------ three.js
@@ -699,6 +784,7 @@ class Field3DView {
     this._stepAvatars(dt);
     this._stepSelf(now);
     this._stepBrain(now);
+    this._layoutSelfLabels(now);
     if (this.showLabels && now - this._lastLabels > 180) { this._lastLabels = now; this._paintLabels(); }
     this.renderer.render(this.scene, this.camera);
     this._gaugeFrame(performance.now() - now);
@@ -1133,7 +1219,7 @@ class Field3DView {
       a.other.scale.set(30, 30, 1);
       a.other.position.set(F3_WORLD * 0.46, F3_WORLD * 0.30, F3_WORLD * 0.46);   // the other sits at the field's edge
       a.other.visible = false;
-      a.tag.style.cssText = "position:absolute;font:600 11px system-ui,sans-serif;color:#7cf0c8;text-shadow:0 1px 2px #000;white-space:nowrap";
+      a.tag.style.cssText = SELF_LABEL_CSS + "border-left-color:#2ec4a0;display:none";
       a.tag.title = "self (#161): white ring = where it wants to be (its aim, once it steers) · green = where it pushes itself to · "
         + "orange = where the current took it · red = the gap from where it expected to end up · violet = where it has learned the current pulls";
       this.labelLayer.appendChild(a.tag);
@@ -1157,7 +1243,8 @@ class Field3DView {
         { key: "pull", text: "pull", color: "#b48cff" },
       ].map((m) => {
         const lab = document.createElement("div");
-        lab.style.cssText = "position:absolute;font:500 10px system-ui,sans-serif;color:" + m.color + ";opacity:.85;text-shadow:0 1px 2px #000;white-space:nowrap;pointer-events:none";
+        lab.style.cssText = SELF_LABEL_CSS + "font-weight:500;font-size:10px;opacity:.9;display:none;border-left-color:"
+          + (m.color === "#ffffff" ? "#9aa4b2" : m.color);
         lab.textContent = m.text;
         this.labelLayer.appendChild(lab);
         const sp = marker(m.color, m.ring);
@@ -1229,25 +1316,14 @@ class Field3DView {
     for (const m of a.marks) {
       const q = P[m.key];
       m.sp.visible = !!q;
-      const sq = q ? this._project(q) : null;
-      m.lab.style.display = sq ? "" : "none";
-      if (!q) continue;
-      m.sp.position.set(q[0], q[1], q[2]);
-      if (sq) m.lab.style.transform = "translate(" + (sq[0] + 8).toFixed(0) + "px," + (sq[1] - 5).toFixed(0) + "px)";
+      if (q) m.sp.position.set(q[0], q[1], q[2]);
     }
     const tp = a.trailLine.geometry.attributes.position;
     for (let i = 0; i < 32; i++) { const q = a.trail[Math.max(0, a.trail.length - 32 + i)] || a.pos; tp.setXYZ(i, q[0], q[1], q[2]); }
     tp.needsUpdate = true;
-    const sc = this._project(a.pos);
-    a.tag.style.display = sc && !this.selfEyes ? "" : "none";   // 👁: the camera is self
-    if (sc) a.tag.style.transform = "translate(" + (sc[0] + 14).toFixed(0) + "px," + (sc[1] - 6).toFixed(0) + "px)";
-    const skill = L.skill == null ? "" : " · skill " + Number(L.skill).toFixed(2);
-    const otherEid = (L.meets || {}).other;
-    const split = otherEid && L.split ? L.split[otherEid] : null;
-    const meet = split ? " · meets " + (split === "other" ? "an other" : "its body") : "";
-    a.tag.textContent = "self · rung " + (L.rung || 0) + " · " + Math.round(100 * (L.bar || 0)) + "%" + skill
-      + (L.steer != null ? " · lands " + Math.round(100 * L.steer) + "% closer to its aim" : "")
-      + (L.slipping ? " · slipping" : "") + (L.mode === "watch" ? " · watched" : "") + meet;
+    // the tag's and the marks' labels are placed by _layoutSelfLabels (no overlaps,
+    // inside the visible field); here only what the tag says
+    a.tagText = selfTag(L, !!this.selfFollow);
   }
 
   // ---------------------------------------------------------- #237: THE BRAIN ON THE SCREEN
@@ -1308,16 +1384,15 @@ class Field3DView {
       this.scene.add(sp, pl);
     }
     this.scene.add(b.beam);
-    const lab = (css) => {
+    const lab = (accent, css) => {
       const el = document.createElement("div");
-      el.style.cssText = "position:absolute;left:0;top:0;font:600 12px system-ui,sans-serif;text-shadow:0 1px 3px #000,0 0 2px #000;"
-        + "white-space:nowrap;pointer-events:none;display:none;" + css;
+      el.style.cssText = SELF_LABEL_CSS + "display:none;border-left-color:" + accent + ";" + (css || "");
       this.labelLayer.appendChild(el);
       return el;
     };
-    b.lookLab = lab("color:#ffe08a;padding:1px 6px;border-radius:8px;background:rgba(10,14,20,.55)");
-    b.ringLab = lab("color:#ffb347");
-    b.otherLab = lab("color:#ffd27a;font-size:13px");
+    b.lookLab = lab("#e0b030", "font-size:12px");
+    b.ringLab = lab("#ff9a3c");
+    b.otherLab = lab("#ffb347", "font-size:12px");
     b.trailDirty = true;
     return b;
   }
@@ -1380,6 +1455,8 @@ class Field3DView {
       g.setXYZ(0, a.pos[0], a.pos[1], a.pos[2]); g.setXYZ(1, tgt.p[0], tgt.p[1], tgt.p[2]); g.needsUpdate = true;
       b.ghostBeam.computeLineDistances();
       b.ghost.position.set(tgt.p[0], tgt.p[1], tgt.p[2]);
+      const gp = this._project(tgt.p);                        // like the rings: not drawn behind a panel
+      b.ghost.visible = !!(gp && inArea(gp[0], gp[1], this._area));
       const fade = rm ? 0.85 : 0.85 * Math.min(1, (LIVE - age) / 1500);
       b.ghostBeam.material.opacity = fade; b.ghost.material.opacity = fade;
     }
@@ -1416,8 +1493,11 @@ class Field3DView {
       const u = (now - o.t0) / HOLD;
       if (u >= 1) { this.scene.remove(o.m); o.m.geometry.dispose(); o.m.material.dispose(); return false; }
       const p = o.p || (on ? a.pos : null);
-      o.m.visible = !!p;
-      if (!p) return true;
+      // clamped to the visible field: a ring behind the chat / 👶 panel is not
+      // drawn there -- its label waits at the panel's edge with an arrow
+      const sp = p ? this._project(p) : null;
+      o.m.visible = !!(p && sp && inArea(sp[0], sp[1], this._area));
+      if (!o.m.visible) return true;
       o.m.position.set(p[0], p[1], p[2]);
       o.m.quaternion.copy(this.camera.quaternion);
       if (rm) { o.m.scale.setScalar(o.gold ? 46 : 34); o.m.material.opacity = 0.85; }
@@ -1427,37 +1507,74 @@ class Field3DView {
       }
       return true;
     });
-    // the labels: a handful of DOM nodes, moved ~8x a second, rewritten only on change
-    if (now - (b.labAt || 0) < 120) return;
-    b.labAt = now;
-    const put = (el, txt, xy) => {
-      if (!xy) { if (el.style.display !== "none") el.style.display = "none"; return; }
-      if (el._t !== txt) { el.textContent = txt; el._t = txt; }
-      el.style.display = "";
-      el.style.transform = "translate(" + xy[0].toFixed(0) + "px," + xy[1].toFixed(0) + "px)";
+  }
+
+  /** The visible field: the canvas minus the panels over it (api.occluders():
+   *  the chat, the 👶 panel, the top bar -- re-read twice a second). */
+  _fieldArea(now) {
+    if (!this._area || now - (this._areaAt || 0) > 500) {
+      this._areaAt = now;
+      let rects = [];
+      try { rects = this.api.occluders ? this.api.occluders() || [] : []; } catch (e) { rects = []; }
+      this._area = fieldArea(this._w || 0, this._h || 0, rects);
+    }
+    return this._area;
+  }
+
+  /** THE LABELS ROUND SELF (review of #241: "labels pile up at the amoeba"):
+   *  the tag, its marks, the look, the ring and the other -- laid out each
+   *  frame so they never overlap (the important ones keep their place, a mark
+   *  with no room hides), kept inside the visible field (a thing behind a
+   *  panel gets its label at the edge with an arrow). DOM writes only on change. */
+  _layoutSelfLabels(now) {
+    const a = this.amoeba, b = this.brain;
+    if (!a || !a.tag) return;
+    const area = this._fieldArea(now);
+    const on = !!a.pts, items = [], els = {};
+    const proj = (p) => (p ? this._project(p) : null);
+    const sa = on ? proj(a.pos) : null;
+    const add = (key, el, text, anchor, o) => {
+      els[key] = el;
+      if (!anchor || !text) return;
+      if (el._t !== text) { el.textContent = text; el._t = text; el.style.display = ""; el._w = el.offsetWidth || text.length * 6.5 + 14; }
+      items.push(Object.assign({ key, ax: anchor[0], ay: anchor[1], w: el._w, h: 18 }, o));
     };
-    const sa = on ? this._project(a.pos) : null;
-    const onScreen = (q) => q && q[0] >= 0 && q[1] >= 0 && q[0] <= this._w && q[1] <= this._h;
-    if (cur && age < LIVE && on) {
-      const mark = cur.answer === "changed" ? " ✓ changed" : cur.answer === "unchanged" ? " · unchanged" : " · no answer";
-      const sp = tgt.p ? this._project(tgt.p) : null;
-      const name = lookLabel(cur.label, tgt.ghost);
-      if (onScreen(sp)) put(b.lookLab, "👁 " + name + mark, [sp[0] + 10, sp[1] - 24]);
-      else if (sa) {
-        put(b.lookLab, "👁 " + (tgt.p ? this._arrowTo(sa, tgt.p) + " " : "") + name + mark, [sa[0] + 14, sa[1] + 16]);
-      } else put(b.lookLab, "", null);
-    } else put(b.lookLab, "", null);
-    const ring = b.rings.filter((o) => o.text).slice(-1)[0];
-    if (ring && on) {
-      const rp = ring.p ? this._project(ring.p) : null;
-      if (onScreen(rp)) put(b.ringLab, ring.text, [rp[0] + 12, rp[1] + 8]);
-      else if (sa) put(b.ringLab, (ring.p ? this._arrowTo(sa, ring.p) + " " : "") + ring.text, [sa[0] + 14, sa[1] + 40]);
-      else put(b.ringLab, "", null);
-      b.ringLab.style.color = ring.gold ? "#d4a017" : "#ffb347";
-    } else put(b.ringLab, "", null);
-    const who = this.selfOther;
-    const op = who && a && a.other && a.other.visible ? this._project(a.other.position.toArray()) : null;
-    put(b.otherLab, who ? who.label : "", onScreen(op) ? [op[0] + 14, op[1] - 8] : null);
+    add("tag", a.tag, a.tagText, !this.selfEyes ? sa : null, { prio: 9, dx: 14, dy: -9 });
+    for (const m of a.marks || []) add("mark:" + m.key, m.lab, m.text, on ? proj(a.pts[m.key]) : null, { prio: 1, dx: 8, dy: -9, optional: true });
+    if (b && b.lookLab) {
+      const cur = b.looks[b.looks.length - 1];
+      if (cur && on && now - cur.t0 < 6000) {
+        // its field point, or its ghost (#244): either way the chip goes
+        // through the layout like every other label (clamped, no overlaps)
+        const tgt = lookTarget(cur.p, cur.eid, a.pos);
+        const sp = proj(tgt.p), text = lookChip(cur.label, cur.answer, tgt.ghost);
+        if (sp) add("look", b.lookLab, text, sp, { prio: 8, dx: 10, dy: -24 });
+        else if (sa) add("look", b.lookLab, (tgt.p ? this._arrowTo(sa, tgt.p) + " " : "") + text, sa, { prio: 8, dx: 14, dy: 14 });
+        else els.look = b.lookLab;
+      } else els.look = b.lookLab;
+      const ring = b.rings.filter((o) => o.text).slice(-1)[0];
+      if (ring && on) {
+        const rp = ring.p ? proj(ring.p) : sa;
+        b.ringLab.style.borderLeftColor = ring.gold ? "#d4a017" : "#ff9a3c";
+        if (rp) add("ring", b.ringLab, ring.text, rp, { prio: 7, dx: 12, dy: 8 });
+        else if (sa) add("ring", b.ringLab, this._arrowTo(sa, ring.p) + " " + ring.text, sa, { prio: 7, dx: 14, dy: 34 });
+        else els.ring = b.ringLab;
+      } else els.ring = b.ringLab;
+      const who = this.selfOther;
+      add("other", b.otherLab, who ? who.label : "", who && a.other && a.other.visible ? proj(a.other.position.toArray()) : null,
+          { prio: 6, dx: 14, dy: -9 });
+    }
+    const out = layoutLabels(items, area);
+    for (const key of Object.keys(els)) {
+      const el = els[key], r = out[key];
+      if (!r || r.hidden) { if (el.style.display !== "none") el.style.display = "none"; continue; }
+      const base = el._t || "";
+      const txt = r.arrow ? r.arrow + " " + base.replace(/^[→↘↓↙←↖↑↗] /, "") : base;
+      if (el.textContent !== txt) el.textContent = txt;
+      if (el.style.display === "none") el.style.display = "";
+      const tf = "translate(" + Math.round(r.x) + "px," + Math.round(r.y) + "px)";
+      if (el._tf !== tf) { el.style.transform = tf; el._tf = tf; }
+    }
   }
 
   /** An arrow from a screen point toward a world point (it may be off-screen or behind). */
