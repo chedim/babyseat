@@ -123,6 +123,15 @@ function brainCaption(r, me) {
   return "self: " + String(k || "?");
 }
 
+/** #257: the amoeba acts out a fresh line only if it is of the last moments
+ *  (within ACT_FRESH_S of the newest line): a page back in view catches up on
+ *  the record without replaying the backlog on the body. */
+const ACT_FRESH_S = 30;
+function actableLine(r, newestTs) {
+  const t = r && Number(r.ts);
+  return !!(r && r.ts != null && isFinite(t) && t >= Number(newestTs) - ACT_FRESH_S);
+}
+
 /** A record line's identity (a shift line carries no n: its ts and eid do). */
 function brainKey(r) { return [r.kind, r.ts, r.n == null ? "" : r.n, r.eid || r.to || ""].join("|"); }
 
@@ -639,7 +648,7 @@ const LS_VOICE = "membrane.home.voice";
 const IS_CHROME = typeof navigator !== "undefined" && /Chrome\//.test(navigator.userAgent || "") && !/Firefox\//.test(navigator.userAgent || "");
 
 const HomeLogic = { cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep,
-  brainLabel, brainCaption, brainKey, brainFresh, brainTrail, trailAlpha, frameRadius, selfFrame, frameDistance, dampTo,
+  brainLabel, brainCaption, brainKey, brainFresh, actableLine, ACT_FRESH_S, brainTrail, trailAlpha, frameRadius, selfFrame, frameDistance, dampTo,
   freshLook, followsNow, followRates, SELF_HOLD_MS, lookAngles, selfCamAngles,
   followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
@@ -1339,12 +1348,16 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const me = this._brainMe();
         // a fresh page: the trail from the last looks, no replayed pulses
         const todo = first ? out.fresh.filter((r) => r.kind === "reach").slice(-8) : out.fresh;
+        const newest = lines.reduce((m, r) => Math.max(m, Number(r && r.ts) || 0), 0);
         for (const r of todo) {
           // r.fid (#244): the seat's own field id for the thing (field_id), tried first
-          if (r.kind === "reach") v.selfLook(r.eid, await v.placeOf(r.fid || r.eid).catch(() => null), brainLabel(r.eid, me), r.answer);
-          else if (r.kind === "shift") v.selfShift(r.eid, await v.placeOf(r.eid).catch(() => null), brainLabel(r.eid, me));
+          let at = null;
+          if (r.kind === "reach") v.selfLook(r.eid, at = await v.placeOf(r.fid || r.eid).catch(() => null), brainLabel(r.eid, me), r.answer);
+          else if (r.kind === "shift") v.selfShift(r.eid, at = await v.placeOf(r.eid).catch(() => null), brainLabel(r.eid, me));
           else if (r.kind === "wait") v.selfWait();
           else if (r.kind === "rung") v.selfLevelUp(r.rung);
+          // #257: the amoeba's body acts it out (fresh lines only, never on a page's first read)
+          if (!first && v.selfActs && actableLine(r, newest)) v.selfActs(r, at);
         }
         if (lines.length && (first || out.fresh.length)) this._paintBrain(lines[0]);
       } catch (e) { /* the next tick */ } finally { this._brainBusy = false; }

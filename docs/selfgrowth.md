@@ -433,6 +433,37 @@ embedder yet (the page shows a ghost meanwhile). `status().off_field` counts
 the looks that still land off the field. At most 8 trail marks, 4 rings and 3 labels exist at
 once, and the labels move about 8 times a second.
 
+### The amoeba acts it out
+
+The amoeba's body also acts out what self is doing (#257), on top of the
+marks above. Every motion comes from a real record line or the cycle frame,
+and nothing is scripted: when self isn't doing something, the body doesn't act
+it out and rests in its calm wobble.
+
+| what self did | what its body does |
+|---|---|
+| **moved** (a cycle) | stretches along its step, longer for a bigger stride; when it steers, it leans toward its aim |
+| **looked** at a thing (`reach`) | grows a pseudopod toward the thing (or toward its ghost), which snaps back when the answer lands. A near thing gets a short one |
+| **was surprised** (the answer went against its expectation `p`: \|outcome − p\| > 0.5) | a short jolt away from the thing, bigger for a bigger error |
+| **noticed a shift** (`shift`) | a startle: it puffs up, then settles |
+| **waited** (`wait`) | breathes slowly, a little smaller and curled |
+| **said hello** (`push`) | a ripple toward "you", then it holds still, leaning in and listening, until the reply check (at most 10 min) |
+| **checked for your reply** (rung 7) | bounces toward "you" when you answered; droops (sags, flattens, dims) when you didn't |
+| **changed a toy itself** (a look whose `by` includes `self`) | a wiggle toward the toy |
+| **levelled up** (`rung`) | a full-body gold glow, with the gold ring |
+
+Several motions can overlap and blend; each eases in and back to calm, within
+a few seconds (listening lasts longer). Only lines from the last 30 s are
+acted out, so a page coming back into view doesn't replay the backlog, and a
+fresh page acts out nothing until something new happens. The pose moves the
+drawn body only: self's position, its marks, the trail and ◎ self's framing
+stay where they were. ◎ self watches from behind, so a step or a look often
+points straight into the screen; a motion seen end-on keeps part of itself
+turned toward the screen (heading away reads as up the screen), so it stays
+readable. In 👁 self's eyes the amoeba is hidden, and so are its motions. With *reduce motion* on, each motion is a held shape for as long as
+it lasts (stretched, reaching, puffed, curled, leaning in, glowing), with no
+movement.
+
 ## The ladder
 
 Rung 0 is passed by being born. Every other rung opens only when the rung below
