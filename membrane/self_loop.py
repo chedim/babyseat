@@ -110,8 +110,26 @@ RUNG6_PUSHES = 10           # pushes to chat:out before the test reads the split
 RUNG6_HEARD = 20            # answered looks at the other before the test reads the split
 BODY_SKILL = 0.9            # predict it this well and it is my body (zero gap), else an other
 MEET_EVERY = 30             # cycles between self's pushes to chat:out (not every try)
-RUNG7_LOOKS = 20            # paired looks (habit + model) at the other the test reads
-RUNG7_MARGIN = 0.15         # the model must remove this share of habit's Brier error to pass
+# RUNG 7 (#254): SELF predicts the reply check (p_self, from its record only); the model is
+# an advisor it recalibrates on the advisor's own track record; the test scores self's p against
+# the RUNNING RATE (the other's prior-smoothed rate over the checks before: calibration alone
+# scores 0). Window and bar per the rung ruler (exp/rung-ruler): detecting order structure in
+# a binary series takes ~100+ symbols, so the window is 100 reply checks. The ruler's bar is
+# half the ceiling's lower CI on a replay -- but on the live record (108 checks, 2026-10-19)
+# p_self's ceiling against the running rate is -0.00, 95% CI -0.05..+0.06 (the other's reply
+# by the check is coin-like, E ~ 0), so no bar can be tied to it there. The bar is instead
+# set above chance: over 100-check windows a structureless other's p_self reaches at most
+# +0.055..+0.065 (q99 of the best sliding window, rates 0.3/0.5/0.7, two seed sets) and a
+# humble always-0.5 +0.046..+0.054 (q95), while an other with session timing (answers in a
+# session, rarely away) gives p_self a median +0.19..+0.21, lower 5% +0.11..+0.135. +0.08
+# clears chance with room and is about half of what a learnable rhythm yields at worst.
+RUNG7_LOOKS = 100           # reply checks at the other the test reads
+RUNG7_MARGIN = 0.08         # self's p must remove this share of the running rate's Brier error
+RUNG7_SPOKE_S = 600.0       # p_self's freshness term: exp(-(push - last spoke) / this)
+RUNG7_RIDGE = 10.0          # p_self's ridge penalty: no evidence -> it says the running rate
+RUNG7_FIT = 500             # p_self fits on at most this many earlier reply checks
+RUNG7_TRUST = 50            # the advisor's calibration reads its last this-many checks under one model
+RUNG7_TRUST_RIDGE = 5.0     # ...ridge-shrunk toward "ignore the advisor": trust is earned
 RUNG7_CHECK_S = 120.0       # after a push self checks for the reply this long after (#215)
 RUNG7_STALE_S = 600.0       # a push this old without its reply check asks nothing any more
 RUNG7_GRACE_S = 60.0        # the reply check waits up to this much longer for an answer still in flight (#217)
@@ -386,8 +404,15 @@ def _expect(srv, seed: str) -> dict:
         lam, dt = c.get("lam"), c.get("dt")
         c["p"] = (1.0 - float(np.exp(-lam * dt))) if (lam and dt is not None) else _p_changed(srv, c["eid"])
         push = c.get("reply")                           # rung 7: this look answers a push's question
-        if push is not None and push.get("asked"):
-            c["p_llm"] = _llm_pred(srv, c["eid"], float(push["ts"]), until=c.get("now"))   # landed by this look
+        if push is not None:
+            recs = _read(srv)
+            c["p_self"] = _p_self(recs, c["eid"], push)  # self's own prediction (#254)
+            if push.get("asked"):
+                c["p_llm"] = _llm_pred(srv, c["eid"], float(push["ts"]), until=c.get("now"))   # landed by this look
+            if c.get("p_llm") is not None:              # the advisor answered: weigh it by its record
+                c["llm_model"] = _llm_model(srv, c["eid"])
+                c["llm_cal"] = _advisor_cal(_rung7_series(recs, c["eid"]), c["llm_model"])
+                c["p_mix"] = _advise(c["p_self"], c["p_llm"], c["llm_cal"])
         return {"rc": 0, "text": "expected"}
     w = _expected_push(srv, c["pos"])
     if c.get("aim") is not None:
@@ -499,6 +524,16 @@ def _llm_pred(srv, eid: str, since: float, until: float | None = None) -> float 
     return _parse_p(ans.get("text"))
 
 
+def _llm_model(srv, eid: str) -> str | None:
+    """THE SEAM (rung 7, #254): which model gave the answer on the entity
+    (llm_answer's `model`, the turn's pick), None when it wasn't recorded."""
+    est = getattr(srv, "entity_store", None)
+    doc = (est.docs or {}).get(eid) if est is not None else None
+    ans = (doc.properties or {}).get("llm_answer") if doc is not None else None
+    m = ans.get("model") if isinstance(ans, dict) else None
+    return str(m) if m else None
+
+
 def _ask_llm(srv, eid: str, prompt: str) -> dict:
     """THE SEAM (rung 7): ask the coprocessor to predict the reply check. The
     real llm::call is async -- it queues and returns at once ({rc, text});
@@ -555,6 +590,199 @@ def _recent_rate(recs: list[dict], eid: str) -> tuple[float, int, int]:
     rc = _reply_checks(recs, eid)[-RUNG7_RECENT:]
     k = sum(1 for r in rc if r["answer"] == "changed")
     return (k + 0.5) / (len(rc) + 1.0), k, len(rc)
+
+
+# ---- rung 7 (#254): self's own prediction, the advisor, the running rate ----------
+
+def _logit(p: float) -> float:
+    p = min(max(float(p), 1e-4), 1.0 - 1e-4)
+    return float(np.log(p / (1.0 - p)))
+
+
+def _push_gap(push: dict, last_changed: float | None) -> float | None:
+    """How long before the push the other last spoke, as self knew AT the push:
+    the push's recorded `spoke_age` (chat:in's heard_ts or self's last look
+    that found them changed), else -- an older push -- from self's own looks."""
+    age = push.get("spoke_age")
+    if isinstance(age, (int, float)) and age >= 0:
+        return float(age)
+    ts = float(push.get("ts") or 0)
+    return (ts - last_changed) if last_changed is not None and last_changed <= ts else None
+
+
+def _rung7_rows(recs: list[dict], eid: str) -> list[dict]:
+    """Self's answered reply checks at `eid`, oldest first, each with what self
+    knew at its push (the gap since the other last spoke), its outcome and
+    what the look recorded (p_self, the advisor's p_llm and model, w, p_mix)."""
+    rows, last_ch, gap = [], None, None
+    for r in sorted(recs, key=lambda x: float(x.get("ts") or 0)):     # time order (stable; the record already is)
+        k = r.get("kind")
+        if k == "push" and r.get("to") == eid:
+            gap = _push_gap(r, last_ch)
+        elif k == "reach" and r.get("eid") == eid and not r.get("audit") \
+                and r.get("answer") in ("changed", "unchanged"):
+            if r.get("reply"):
+                rows.append({"ts": float(r.get("ts") or 0), "o": 1.0 if r["answer"] == "changed" else 0.0,
+                             "gap": gap, "p_llm": r.get("p_llm"), "model": r.get("llm_model"),
+                             "rec_p_self": r.get("p_self"), "rec_cal": r.get("llm_cal"), "rec_p": r.get("p_mix")})
+            if r["answer"] == "changed":
+                last_ch = float(r.get("ts") or 0)
+    return rows
+
+
+def _r7_design(rows: list[dict]):
+    """p_self's inputs per check, from the checks BEFORE it only: the offset is
+    the running (all-time) rate's logit; the features are an intercept, the
+    recent rate's lean from it, the last outcome (+1 / -1, 0 before any) and
+    how fresh the other's last words were at the push (exp(-gap/SPOKE_S))."""
+    off, X = np.zeros(len(rows)), np.zeros((len(rows), 4))
+    past: list[float] = []
+    k = 0.0
+    for i, r in enumerate(rows):
+        base = (k + 0.5) / (len(past) + 1.0)
+        w = past[-RUNG7_RECENT:]
+        rr = (sum(w) + 0.5) / (len(w) + 1.0)
+        last = (1.0 if past[-1] else -1.0) if past else 0.0
+        fresh = float(np.exp(-max(0.0, r["gap"]) / RUNG7_SPOKE_S)) if r.get("gap") is not None else 0.0
+        off[i] = _logit(base)
+        X[i] = (1.0, _logit(rr) - off[i], last, fresh)
+        if r.get("o") is not None:
+            past.append(r["o"])
+            k += r["o"]
+    return off, X
+
+
+def _r7_predict(off, X, y, i: int) -> float:
+    """p_self for check i: a ridge-penalised logistic (offset: the running
+    rate) fit by Newton on the checks before i, then read at i. No evidence
+    (or no structure) shrinks the coefficients to 0 -- the running rate."""
+    lo = max(0, i - RUNG7_FIT)
+    beta = _ridge_logit(off[lo:i], X[lo:i], y[lo:i], RUNG7_RIDGE) if i > lo else np.zeros(X.shape[1])
+    return float(1.0 / (1.0 + np.exp(-(off[i] + X[i] @ beta))))
+
+
+def _p_self(recs: list[dict], eid: str, push: dict) -> float:
+    """SELF'S PREDICTION (#254) that the other will have spoken by the reply
+    check after `push`: from self's record only -- no model call."""
+    rows = _rung7_rows(recs, eid)
+    t = float(push.get("ts") or 0)
+    last_ch = next((float(r["ts"]) for r in reversed(recs) if r.get("kind") == "reach" and r.get("eid") == eid
+                    and r.get("answer") == "changed" and float(r.get("ts") or 0) <= t), None)
+    rows = rows + [{"o": None, "gap": _push_gap(push, last_ch)}]
+    off, X = _r7_design(rows)
+    y = np.array([r["o"] for r in rows[:-1]], dtype=float)
+    return round(_r7_predict(off, X, y, len(rows) - 1), 4)
+
+
+def _ridge_logit(off, X, y, lam: float) -> np.ndarray:
+    """A ridge-penalised logistic regression with an offset, by Newton:
+    the coefficients that best turn `off` (logits) into the outcomes y,
+    shrunk toward 0 (= trust the offset) by `lam`."""
+    beta = np.zeros(X.shape[1])
+    eye = lam * np.eye(X.shape[1])
+    for _ in range(12):
+        p = 1.0 / (1.0 + np.exp(-(off + X @ beta)))
+        g = X.T @ (y - p) - lam * beta
+        h = (X * (p * (1.0 - p))[:, None]).T @ X + eye
+        step = np.linalg.solve(h, g)
+        beta = beta + step
+        if float(np.max(np.abs(step))) < 1e-8:
+            break
+    return beta
+
+
+def _advisor_cal(rows: list[dict], model) -> tuple[float, float]:
+    """THE ADVISOR, RECALIBRATED (#254). A model's stated probabilities carry
+    its own lean (label bias; one model leaned "yes", the next "no"), so self
+    doesn't take p_llm at face value: over the advisor's last RUNG7_TRUST
+    answered checks under the SAME model id it reads the advisor's own lean
+    m (the mean logit it states) and fits w in
+    p = sigmoid(logit p_self + w·(logit p_llm − m)) -- Platt scaling of the
+    advisor on top of self's own guess, with the advisor's average lean taken
+    to say nothing (only where it departs from its habit is news): a
+    constant answer, however biased, has no influence. w is ridge-shrunk
+    toward 0 = "ignore the advisor", so few pairs or a new model give
+    p = p_self; w >= 0: an advisor that tracks the outcome backwards is
+    ignored, not decoded. Returns (m, w)."""
+    rs = [r for r in rows if r.get("p_llm") is not None and r.get("model") == model][-RUNG7_TRUST:]
+    if not rs:
+        return 0.0, 0.0
+    z = np.array([_logit(float(r["p_llm"])) for r in rs])
+    m = float(z.mean())
+    off = np.array([_logit(r["p_self"]) for r in rs])
+    y = np.array([r["o"] for r in rs], dtype=float)
+    w = float(_ridge_logit(off, (z - m)[:, None], y, RUNG7_TRUST_RIDGE)[0])
+    return round(m, 4), round(max(0.0, w), 4)
+
+
+def _advise(p_self: float, p_llm: float, cal) -> float:
+    """Self's prediction with the recalibrated advisor heard."""
+    m, w = cal
+    return float(1.0 / (1.0 + np.exp(-(_logit(p_self) + w * (_logit(p_llm) - m)))))
+
+
+_P7_CACHE: dict = {}     # (eid, chain hash of the checks so far) -> a recomputed p_self
+
+
+def _rung7_series(recs: list[dict], eid: str) -> list[dict]:
+    """Every answered reply check at `eid`, oldest first, scored as rung 7
+    reads it: o, `rate` (the running rate: Jeffreys over the checks before,
+    no lookahead), `p_self` (recorded, or -- a check from before #254 --
+    recomputed from the record by the same function), `p_llm`, `model`, the
+    advisor's calibration `cal` = (a, w) from its checks before this one,
+    `w` (its slope: how much self listens) and `p`, self's prediction with
+    the advisor heard (_advise; p_self when the advisor said nothing)."""
+    rows = _rung7_rows(recs, eid)
+    off = X = y = None
+    h = 0
+    k = 0.0
+    for i, r in enumerate(rows):
+        r["rate"] = (k + 0.5) / (i + 1.0)
+        h = hash((h, r["ts"], r["o"], r["gap"]))
+        if r["rec_p_self"] is not None:
+            r["p_self"] = float(r["rec_p_self"])
+        else:
+            key = (eid, h)
+            if key not in _P7_CACHE:
+                if off is None:
+                    off, X = _r7_design(rows)
+                    y = np.array([x["o"] for x in rows], dtype=float)
+                if len(_P7_CACHE) > 20000:
+                    _P7_CACHE.clear()
+                _P7_CACHE[key] = round(_r7_predict(off, X, y, i), 4)
+            r["p_self"] = _P7_CACHE[key]
+        if r["p_llm"] is None:
+            r["cal"], r["w"], r["p"] = (0.0, 0.0), 0.0, r["p_self"]
+        else:
+            rc = r["rec_cal"]
+            r["cal"] = (float(rc[0]), float(rc[1])) if isinstance(rc, (list, tuple)) and len(rc) == 2 \
+                else _advisor_cal(rows[:i], r["model"])
+            r["w"] = r["cal"][1]
+            r["p"] = (float(r["rec_p"]) if r["rec_p"] is not None
+                      else _advise(r["p_self"], float(r["p_llm"]), r["cal"]))
+        k += r["o"]
+    return rows
+
+
+def _mark_rung7_restart(srv, now: float) -> None:
+    """#254: the moment the fixed rung 7 starts counting, on the record once --
+    the self sheet closes its 'rung 7 graded the LLM' bug window there. Only
+    a seat that has passed rung 6 has a rung 7 to restart. A rung 7 pass the
+    old scorer recorded was the model's, not self's: it gets a `rung_void`
+    line (the pass line stays), so rung 7 re-opens under the new scoring."""
+    rt = _rt(srv)
+    if rt.get("r7_marked"):
+        return
+    recs = _read(srv)
+    if any(r.get("kind") == "rung7_restart" for r in recs):
+        rt["r7_marked"] = True
+    elif 6 in _passed(recs):
+        for r in [x for x in _rung_lines(recs) if x.get("rung") == 7]:
+            _append(srv, {"ts": now, "kind": "rung_void", "rung": 7, "voids_ts": r.get("ts"),
+                          "why": "#254: rung 7 graded the LLM's guess, not self's"})
+        _append(srv, {"ts": now, "kind": "rung7_restart", "issue": 254,
+                      "why": "rung 7 now grades self's prediction, not the model's"})
+        rt["r7_marked"] = True
 
 
 def _last_spoke(srv, recs: list[dict], eid: str, now: float) -> float | None:
@@ -661,6 +889,9 @@ def _meet(srv, seed: str, now: float | None = None) -> None:
     _push_chat(srv, "self is here", person)
     rec = {"ts": now, "kind": "push", "n": n, "eid": _CIO.name_of(person), "to": to}
     if _available(srv, 7):                                  # rung 7: ask the model AT the push (#215)
+        spoke = _last_spoke(srv, _read(srv), to, now)       # p_self's freshness, as known now (#254)
+        if spoke is not None:
+            rec["spoke_age"] = round(now - spoke, 1)
         rec["asked"] = _queued(_ask_llm(srv, to, _rung7_prompt(srv, to, n, now)))
     _append(srv, rec)
 
@@ -871,6 +1102,7 @@ def cycle(srv, now: float | None = None) -> dict | None:
                     "aim_naive": float(np.linalg.norm(naive_land - aim))})
     _append(srv, rec)
     est.upsert(ent, embedder=None)
+    _mark_rung7_restart(srv, now)
     if _available(srv, 2):
         _reach_once(srv, est, ent, n, now)
     if _available(srv, 6):
@@ -979,8 +1211,14 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
             pass
     if reply is not None:                                # rung 7: the reply check after a push
         rec["reply"] = True
-    if c.get("p_llm") is not None:                       # rung 7: the model's read, same look
+    if c.get("p_self") is not None:                      # rung 7: self's own read (#254)
+        rec["p_self"] = round(c["p_self"], 4)
+    if c.get("p_llm") is not None:                       # rung 7: the advisor's read, same look
         rec["p_llm"] = round(c["p_llm"], 4)
+        if c.get("llm_model"):
+            rec["llm_model"] = c["llm_model"]
+        rec["llm_cal"] = list(c["llm_cal"])
+        rec["p_mix"] = round(c["p_mix"], 4)
     if timed and reply is None:                          # a reply check is not a patience-timed look
         rec["timed"] = True
         if lam:
@@ -1486,25 +1724,27 @@ def _rung6(recs: list[dict], tempo: dict | None = None) -> dict:
 
 
 def _rung7(recs: list[dict], tempo: dict | None = None) -> dict:
-    """Understand an other: over paired looks at it (a habit `p` and a model
-    `p_llm` on the same look), the model removes RUNG7_MARGIN of habit's Brier
-    error -- predicting the other's answers better than habit alone. Only
-    looks at the CURRENT other count (#208, see _rung6)."""
+    """Understand an other (#254): over the last RUNG7_LOOKS reply checks at it,
+    SELF's prediction p (its own p_self, mixed with the model's p_llm by the
+    advisor's earned weight when the model answered) removes RUNG7_MARGIN of
+    the RUNNING RATE's Brier error -- the other's prior-smoothed reply rate
+    over the checks before each one, no lookahead. Knowing the rate scores 0;
+    only what self learned beyond it (timing, runs) counts. Only checks at the
+    CURRENT other count (#208, see _rung6)."""
     to = _other(recs)
-    pairs = [r for r in recs if r.get("kind") == "reach" and not r.get("audit")
-             and (to is None or r.get("eid") == to)
-             and r.get("answer") in ("changed", "unchanged")
-             and r.get("p_llm") is not None][-RUNG7_LOOKS:]
-    crit = {"looks": min(1.0, len(pairs) / RUNG7_LOOKS)}
-    if not pairs:
+    if to is None:
+        rc = [r for r in recs if r.get("kind") == "reach" and r.get("reply") and not r.get("audit")]
+        to = rc[-1].get("eid") if rc else None
+    rows = _rung7_series(recs, to)[-RUNG7_LOOKS:] if to else []
+    crit = {"looks": min(1.0, len(rows) / RUNG7_LOOKS)}
+    if not rows:
         return {"crit": {**crit, "skill": 0.0}, "skill": 0.0, "passed": False}
-    a = [1.0 if r["answer"] == "changed" else 0.0 for r in pairs]
-    b_habit = sum((x - r["p"]) ** 2 for x, r in zip(a, pairs)) / len(pairs)
-    b_llm = sum((x - r["p_llm"]) ** 2 for x, r in zip(a, pairs)) / len(pairs)
-    skill = (b_habit - b_llm) / b_habit if b_habit > 1e-9 else 0.0
+    b_rate = sum((r["o"] - r["rate"]) ** 2 for r in rows) / len(rows)
+    b_p = sum((r["o"] - r["p"]) ** 2 for r in rows) / len(rows)
+    skill = (b_rate - b_p) / b_rate if b_rate > 1e-9 else 0.0
     crit["skill"] = max(0.0, min(1.0, skill / RUNG7_MARGIN))
     return {"crit": crit, "skill": round(skill, 4),
-            "eid": pairs[-1]["eid"], "passed": all(v >= 1.0 for v in crit.values())}
+            "eid": to, "passed": all(v >= 1.0 for v in crit.values())}
 
 
 PROGRESS = {1: _rung1, 2: _rung2, 3: _rung3, 4: _rung4, 5: _rung5, 6: _rung6, 7: _rung7}   # rung -> its test over the record
@@ -1513,8 +1753,20 @@ PROGRESS = {1: _rung1, 2: _rung2, 3: _rung3, 4: _rung4, 5: _rung5, 6: _rung6, 7:
 SKILL_PASS = {1: RUNG1_SKILL, 2: RUNG2_SKILL, 3: RUNG2_SKILL, 4: None, 5: 1.0, 6: 1.0, 7: RUNG7_MARGIN}
 
 
+def _rung_lines(recs: list[dict]) -> list[dict]:
+    """The rung passes that count: every `rung` line except one with a later
+    `rung_void` line for its rung (#254: a pass a broken test recorded stays
+    on the append-only record but doesn't count; a later pass does)."""
+    voids: dict = {}
+    for r in recs:
+        if r.get("kind") == "rung_void":
+            voids[r.get("rung")] = max(voids.get(r.get("rung"), 0.0), float(r.get("ts") or 0))
+    return [r for r in recs if r.get("kind") == "rung"
+            and not (r.get("rung") in voids and float(r.get("ts") or 0) < voids[r.get("rung")])]
+
+
 def _passed(recs: list[dict]) -> set:
-    return {0} | {r["rung"] for r in recs if r.get("kind") == "rung"}
+    return {0} | {r["rung"] for r in _rung_lines(recs)}
 
 
 def _open_rungs(srv) -> None:
@@ -1724,11 +1976,14 @@ def _toys(srv, recs: list[dict]) -> list[dict]:
 
 
 def _rung7_stats(recs: list[dict]) -> dict:
-    """For the operator (#217): rung 7 at the current other -- the pushes that
-    asked the model, those whose reply check came (`checked`), those that made
-    a pair (habit p and model p on that look), the pair rate per checked ask,
-    the model's and habit's Brier over the pairs rung 7 reads, and the base
-    (all-time) and recent rates the model is told (#246)."""
+    """For the operator (#217, #254): rung 7 at the current other -- the pushes
+    that asked the model, those whose reply check came (`checked`), those the
+    model answered in time (`paired`), the pair rate per checked ask; over
+    the reply checks rung 7 reads, the Brier error of self's own p_self, of
+    the mix self passes on (`brier_mix`), of the running rate it must beat,
+    and of the model alone on the checks it answered; the weight self gives
+    the current advisor's next answer and that advisor's model id; and the
+    base (all-time) and recent rates the model is told (#246)."""
     to = _other(recs)
     asked = [r for r in recs if r.get("kind") == "push" and r.get("asked") and r.get("to") == to]
     checked = paired = 0
@@ -1738,14 +1993,20 @@ def _rung7_stats(recs: list[dict]) -> dict:
             continue
         checked += 1
         paired += int(look.get("p_llm") is not None and look.get("answer") in ("changed", "unchanged"))
-    pairs = [r for r in recs if r.get("kind") == "reach" and not r.get("audit") and r.get("eid") == to
-             and r.get("answer") in ("changed", "unchanged") and r.get("p_llm") is not None][-RUNG7_LOOKS:]
-    a = [1.0 if r["answer"] == "changed" else 0.0 for r in pairs]
-    bh = round(sum((x - r["p"]) ** 2 for x, r in zip(a, pairs)) / len(pairs), 4) if pairs else None
-    bm = round(sum((x - r["p_llm"]) ** 2 for x, r in zip(a, pairs)) / len(pairs), 4) if pairs else None
+    allrows = _rung7_series(recs, to) if to else []
+    rows = allrows[-RUNG7_LOOKS:]
+    llm = [r for r in rows if r.get("p_llm") is not None]
+
+    def brier(rs, key):
+        return round(sum((r["o"] - float(r[key])) ** 2 for r in rs) / len(rs), 4) if rs else None
+    model = next((r["model"] for r in reversed(allrows) if r.get("p_llm") is not None), None)
     return {"asked": len(asked), "checked": checked, "paired": paired,
             "pair_rate": round(paired / checked, 4) if checked else None,
-            "brier_model": bm, "brier_habit": bh,
+            "checks": len(rows),
+            "brier_self": brier(rows, "p_self"), "brier_mix": brier(rows, "p"),
+            "brier_rate": brier(rows, "rate"), "brier_model": brier(llm, "p_llm"),
+            "advisor_weight": _advisor_cal(allrows, model)[1],
+            "advisor_model": model,
             "base_rate": round(_base_rate(recs, to)[0], 4) if to else None,
             "recent_rate": round(_recent_rate(recs, to)[0], 4) if to else None}
 

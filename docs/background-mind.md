@@ -354,21 +354,30 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   back from self's ordinary choice for 2 minutes, then looked at once (a
   `reply` look, not a patience-timed one). While the push asked and no answer
   has landed, it waits up to `RUNG7_GRACE_S` (60 s) more — the question rides
-  a full read-only loop turn, 2–75 s on the live seat. `expect` reads the model's verdict
-  for that look — only one that landed after the push and by the look — as `p_llm` beside
-  habit's `p`. One question, one pair: the question in flight is read from
-  the record (the latest push, not yet followed by a look at its other,
-  under 10 minutes old), so it survives a restart and is used up by that
-  look. The model call is async (it queues and returns), capped by
+  a full read-only loop turn, 2–75 s on the live seat. **Self makes the
+  prediction (#254)**: at the reply check `expect` computes `p_self` from
+  self's record alone (the person's all-time and recent reply rates, the last
+  check's outcome, how long before the push they last spoke; a small
+  ridge-penalised logistic fit on self's own earlier checks, no model call),
+  and reads the model's verdict — only one that landed after the push and by
+  the look — as `p_llm`, an **advisor**: self recalibrates it on the
+  advisor's own past answers under the same model id (its average lean says
+  nothing; a weight earned from its record, 0 for a new model) and records
+  the result as `p_mix`. One question, one check: the question in flight is
+  read from the record (the latest push, not yet followed by a look at its
+  other, under 10 minutes old), so it survives a restart and is used up by
+  that look. The model call is async (it queues and returns), capped by
   `llm.request` (12/h per caller) and by the one-per-push pacing, and its
-  answer landing never runs a cycle. The test reads the **paired** looks —
-  both predictions on the same look — and the rung passes when the model
-  removes ≥ 0.15 of habit's Brier error over 20 such looks: predicting the
-  person's answers *better than habit alone*. `status()['rung7']` shows the
-  operator `asked` / `checked` / `paired`, `pair_rate`, and the model's and
-  habit's Brier over the pairs (the 🌱 tooltip too). It is scoped to the other only (the current one: paired
-  looks at a previous person don't count); every other thing keeps habit's
-  prediction.
+  answer landing never runs a cycle. The test reads the last 100 reply
+  checks and passes when self's prediction removes ≥ 0.08 of the **running
+  rate's** Brier error (the person's prior-smoothed rate over the checks
+  before, no lookahead): knowing the rate scores 0, so calibration alone
+  can't pass. No model is needed to pass. `status()['rung7']` shows the
+  operator `asked` / `checked` / `paired`, `pair_rate`, the Brier errors of
+  self alone, of the mix, of the running rate and of the model alone, and
+  the advisor's weight and model id (the 🌱 tooltip too). It is scoped to the
+  other only (the current one: checks at a previous person don't count);
+  every other thing keeps habit's prediction.
 - **Its methods run only in its own loop.** `try` / `expect` / `notice` are
   cliffhanger methods (`self::` no-shell dialect), and so is `reach`. `exec inspect` shows them;
   any other caller, the model included, is refused. The LLM talks *to* self,

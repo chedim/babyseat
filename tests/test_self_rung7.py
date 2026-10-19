@@ -1,9 +1,11 @@
 """#161 RUNG 7: understand an other.
 
-Self consults the model coprocessor (`llm::call`, asked at each push, read by
-`expect` at the reply check -- #215) to predict the other's next answer,
-and passes when that prediction beats habit alone -- the share of habit's
-Brier error the model removes, over paired looks at the other.
+Self predicts the other's answer at the reply check from its own record
+(p_self, #254) and may consult the model coprocessor as an advisor
+(`llm::call`, asked at each push, read by `expect` at the reply check --
+#215), mixing its answer in by the advisor's own track record. It passes
+when its prediction removes RUNG7_MARGIN of the running rate's Brier error
+over the last RUNG7_LOOKS reply checks.
 """
 import json
 import os
@@ -142,7 +144,8 @@ def test_a_reach_at_the_other_carries_the_models_prediction(monkeypatch):
     assert all(0.0 <= r["p_llm"] <= 1.0 for r in with_llm)
 
 
-def test_rung_seven_opens_when_the_model_beats_habit(monkeypatch):
+def test_rung_seven_opens_with_an_advisor_that_knows_the_phase(monkeypatch):
+    # #254: the advisor earns its weight on the record and self's mix passes
     chatter = _Chatter()
     monkeypatch.setattr(SL, "_read_entity", chatter)
     monkeypatch.setattr(SL, "_llm_pred", _llm_pred(chatter))
@@ -151,26 +154,42 @@ def test_rung_seven_opens_when_the_model_beats_habit(monkeypatch):
     _run(srv, CYCLES)
     assert 7 in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
     assert SL.status(srv)["rung"] == 7
+    assert SL.status(srv)["rung7"]["advisor_weight"] > 0.5
 
 
-def test_a_phase_aware_model_beats_habit():
-    # habit predicts the flat rate; the model predicts the period-4 phase
-    recs = []
-    for i in range(20):
-        changed = (i % 4) in (0, 1)
-        recs.append({"kind": "reach", "eid": RESP,
-                     "answer": "changed" if changed else "unchanged",
-                     "p": 0.5, "p_llm": 0.9 if changed else 0.1})
-    out = SL._rung7(recs, {})
-    assert out["passed"] is True and out["skill"] > 0.5
+def _checks(outcomes, p_llm=None):
+    """A record of reply checks at the other: one push and its check each."""
+    recs, t = [], 1000.0
+    for i, o in enumerate(outcomes):
+        recs.append({"ts": t, "kind": "push", "to": RESP, "asked": p_llm is not None})
+        r = {"ts": t + 120.0, "kind": "reach", "eid": RESP, "reply": True, "p": 0.5,
+             "answer": "changed" if o else "unchanged"}
+        if p_llm is not None:
+            r["p_llm"], r["llm_model"] = p_llm[i], "m"
+        recs.append(r)
+        t += 300.0
+    return recs
 
 
-def test_a_base_rate_model_is_not_better_than_habit():
-    # habit predicts well; a flat model removes none of its error
-    recs = ([{"kind": "reach", "eid": RESP, "answer": "changed", "p": 0.9, "p_llm": 0.5}] * 15
-            + [{"kind": "reach", "eid": RESP, "answer": "unchanged", "p": 0.1, "p_llm": 0.5}] * 5)
-    out = SL._rung7(recs, {})
-    assert out["skill"] <= 0.0 and out["passed"] is False
+def test_a_phase_aware_advisor_lifts_self_over_the_running_rate():
+    # the other runs period-4 (C, C, U, U): self's own inputs (rates, the last
+    # bit) can't see the phase; an advisor that does earns its weight
+    outcomes = [1 if i % 4 in (0, 1) else 0 for i in range(SL.RUNG7_LOOKS + 20)]
+    out = SL._rung7(_checks(outcomes, [0.9 if o else 0.1 for o in outcomes]))
+    assert out["passed"] is True and out["skill"] > 0.3
+
+
+def test_an_advisor_that_echoes_the_rate_adds_nothing():
+    # an advisor that says the running rate removes none of its error
+    import random
+    rng = random.Random(5)
+    outcomes = [1 if rng.random() < 0.6 else 0 for _ in range(SL.RUNG7_LOOKS + 20)]
+    k, echo = 0, []
+    for i, o in enumerate(outcomes):
+        echo.append((k + 0.5) / (i + 1.0))
+        k += o
+    out = SL._rung7(_checks(outcomes, echo))
+    assert out["skill"] < SL.RUNG7_MARGIN and out["passed"] is False
 
 
 def test_the_limit_holds_rung_seven(monkeypatch):

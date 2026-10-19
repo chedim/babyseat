@@ -1498,7 +1498,9 @@ def main() -> None:
                                      f"{' '.join(res.split())[:60]}")
                     # the WHOLE text: the verdict is its last line
                     return {"text": txt[-4000:], "verdict_text": txt[:200],
-                            "trail": trail[-6:]}
+                            "trail": trail[-6:],
+                            # the turn's model (#254: self trusts an advisor per model)
+                            "model": ((out or {}).get("info") or {}).get("modelID")}
                 # the proxy-only degrade: ONE model call, no tools
                 from .rag import _model_chat
                 model = (getattr(srv, "idle_cortex_model", "") or "")
@@ -1510,7 +1512,7 @@ def main() -> None:
                                         {"role": "user",
                                          "content": text}], timeout=45,
                                        lane="watch")
-                return {"verdict_text": (out or "")[:200]}
+                return {"verdict_text": (out or "")[:200], "model": model or None}
             return go
         srv.run_loop_turn = _run_loop_turn()
         from .watch_agents import enabled_loops as _wa_on, start_goal_pulse

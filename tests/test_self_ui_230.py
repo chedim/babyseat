@@ -263,7 +263,7 @@ class TestReportCard(unittest.TestCase):
     def test_it_shows_what_the_status_measures(self):
         st = _st(slipping=True, limit=6,
                  rung7={"asked": 8, "checked": 6, "paired": 5, "pair_rate": 0.83,
-                        "brier_model": 0.37, "brier_habit": 0.39, "base_rate": 0.55},
+                        "brier_model": 0.37, "brier_self": 0.26, "brier_mix": 0.25, "brier_rate": 0.39, "advisor_weight": 0.0, "base_rate": 0.55},
                  curiosity=[{"eid": "w:fast", "progress": 0.05, "error": 0.12}],
                  world={"w:fast": "moving", "w:prime": "intermittent", "toy:mute": "silent"},
                  split={"chat:in:operator": "other", "w:fast": "body"},

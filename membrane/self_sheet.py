@@ -53,12 +53,18 @@ def _utc(*a) -> float:
 # pass opens the window (the next one was stuck); fixed: when the fix was
 # live; until: "fixed" (the window ends at the fix) or "first_person" (it ends
 # when self first sent a line to a real person, which the fix made possible)
+# or "rung7_restart" (#254: it opens at the HONEST rung 6 pass and ends at the
+# record's rung7_restart line, the fixed rung 7's first cycle; open until then)
 BUGS = (
     {"issue": 191, "what": "rung 5 could not notice a shift at the audit's floor",
      "opens_after": 4, "fixed": _utc(2026, 10, 16, 21, 43, 37), "until": "fixed"},   # PR #191 live on the seat
     {"issue": 208, "what": "rung 6 talked to the empty operator slot",
      "opens_after": 5, "fixed": _utc(2026, 10, 18, 18, 8, 44), "until": "first_person"},  # PR #209 merged
+    {"issue": 254, "what": "rung 7 graded the LLM's guess, not self's",
+     "opens_after": 6, "fixed": None, "until": "rung7_restart"},   # the fix's time is on each seat's record
 )
+RESTART7 = "restarted {day}: was grading the LLM, now grades self"
+VOIDED = "rung {rung} passed {at} under the #254 bug: graded the LLM, not self; doesn't count"
 
 # the closest human ability and the age (months) it typically shows up --
 # rough, from developmental psychology; the growth curve's child scale
@@ -92,7 +98,7 @@ def _needs() -> dict:
             4: f"{SL.RUNG4_TIMED} timed looks",
             5: f"{SL.RUNG5_LOOKS} looks with noticing on, both audit shifts caught",
             6: f"{SL.RUNG6_PUSHES} lines sent, {SL.MEET_EVERY} cycles apart",
-            7: f"{SL.RUNG7_LOOKS} reply pairs, one per line"}
+            7: f"{SL.RUNG7_LOOKS} reply checks, one per line"}
 
 
 def iso(t) -> str | None:
@@ -160,8 +166,8 @@ def _clocks(recs: list, now: float) -> dict:
     end = max(now, ts[-1] if ts else born)
     gs = gaps(ts + [end])
     first: dict[int, dict] = {}
-    for r in srt:
-        if r.get("kind") == "rung" and r.get("rung") not in first:
+    for r in SL._rung_lines(srt):                    # a voided pass (#254) is no achievement
+        if r.get("rung") not in first:
             first[r["rung"]] = r
     passed_at = {n: float(r["ts"]) for n, r in first.items()}
 
@@ -187,18 +193,29 @@ def _clocks(recs: list, now: float) -> dict:
             if n_push >= SL.RUNG6_PUSHES and n_look >= SL.RUNG6_HEARD:
                 real6 = float(r["ts"])
                 break
-    bugs = []
-    for b in BUGS:
-        start = passed_at.get(b["opens_after"])
-        if start is None or start >= b["fixed"]:
-            continue                                  # never had it
-        stop = b["fixed"] if b["until"] == "fixed" else (first_person or b["fixed"])
-        stop = min(stop, end)
-        if stop > start:
-            bugs.append((start, stop, b))
     honest = dict(passed_at)
     if real6 is not None:
         honest[6] = real6
+    restart7 = next((float(r["ts"]) for r in srt if r.get("kind") == "rung7_restart"), None)
+    bugs = []
+    for b in BUGS:
+        if b["until"] == "rung7_restart":
+            start = honest.get(b["opens_after"])
+            fixed = restart7
+        else:
+            start = passed_at.get(b["opens_after"])
+            fixed = b["fixed"]
+        if start is None or (fixed is not None and start >= fixed):
+            continue                                  # never had it
+        if b["until"] == "fixed":
+            stop = fixed
+        elif b["until"] == "first_person":
+            stop = first_person or fixed
+        else:
+            stop = fixed if fixed is not None else end   # still open: runs to the record's end
+        stop = min(stop, end)
+        if stop > start:
+            bugs.append((start, stop, {**b, "open": fixed is None}))
 
     def bug_s(t):
         return sum(running(gs, a, min(b, t)) for a, b, _ in bugs if a < t)
@@ -206,7 +223,7 @@ def _clocks(recs: list, now: float) -> dict:
     def working(t):
         return running(gs, born, t) - bug_s(t)
     return {"born": born, "end": end, "gaps": gs, "first": first, "passed_at": passed_at, "honest": honest,
-            "real6": real6, "first_person": first_person, "bugs": bugs, "bug_s": bug_s, "working": working,
+            "real6": real6, "first_person": first_person, "restart7": restart7, "bugs": bugs, "bug_s": bug_s, "working": working,
             "srt": srt}
 
 
@@ -221,6 +238,7 @@ def _time(c: dict) -> dict:
     return {"alive_h": _r((end - born) / H), "running_h": _r(run / H), "down_h": _r((end - born - run) / H),
             "bugs_h": _r(bug / H), "working_h": _r((run - bug) / H),
             "bugs": [{"issue": b["issue"], "what": b["what"], "from": iso(a), "to": iso(z),
+                      "open": bool(b.get("open")),
                       "running_h": _r(running(gs, a, z) / H)} for a, z, b in c["bugs"]]}
 
 
@@ -286,7 +304,7 @@ ATTRS = (("feel", "Feel", 1, "skill", "1 − gap ÷ naive: how well it predicts 
          ("patience", "Patience", 4, "error", "calibration: |mean predicted chance − share that found news| over its timed looks"),
          ("notice", "Notice", 5, "share", "the shifts it noticed, of the two its blind audit probes"),
          ("meet", "Meet", 6, "share", "rung 6's staged test: lines sent, answered looks, the other read as other"),
-         ("understand", "Understand", 7, "skill", "the model's Brier skill over habit at predicting the other's replies"))
+         ("understand", "Understand", 7, "skill", "self's Brier skill over the running rate at predicting the other's replies (its own guess, the model's mixed in by its track record)"))
 PASS = {"feel": SL.RUNG1_SKILL, "reach": SL.RUNG2_SKILL, "sort": 1.0 - SL.RUNG3_FOCUS, "patience": SL.RUNG4_CALIB,
         "notice": 1.0, "meet": 1.0, "understand": SL.RUNG7_MARGIN}
 
@@ -340,9 +358,9 @@ def _quest(recs: list, st: dict, progs: dict, attrs: dict) -> dict:
              4: {"timed": (SL.RUNG4_TIMED, "timed looks")},
              5: {"looks": (SL.RUNG5_LOOKS, "looks with noticing on")},
              6: {"pushes": (SL.RUNG6_PUSHES, "lines sent"), "heard": (SL.RUNG6_HEARD, "answered looks at the other")},
-             7: {"looks": (SL.RUNG7_LOOKS, "reply pairs")}}.get(aim, {})
+             7: {"looks": (SL.RUNG7_LOOKS, "reply checks")}}.get(aim, {})
     skill = {1: (SL.RUNG1_SKILL, "feel skill"), 2: (SL.RUNG2_SKILL, "reach skill"),
-             3: (SL.RUNG2_SKILL, "reach skill on a moving thing"), 7: (SL.RUNG7_MARGIN, "skill vs habit")}
+             3: (SL.RUNG2_SKILL, "reach skill on a moving thing"), 7: (SL.RUNG7_MARGIN, "skill vs running rate")}
     flags = {"audit": "both audit shifts caught" if aim == 5 else "blind audit passed",
              "kinds": "kinds agree across halves", "split": "the other reads as other"}
     crits = []
@@ -447,7 +465,8 @@ def _relationships(recs: list, tempo: dict, st: dict) -> dict:
         row = rows.setdefault(model_name, {"who": model_name, "kind": "model", "current": False,
                                            "chat": None, "play": None})
         row["rung7"] = {"asked": r7.get("asked"), "pairs": r7.get("paired"),
-                        "brier_model": r7.get("brier_model"), "brier_habit": r7.get("brier_habit")}
+                        "brier_model": r7.get("brier_model"), "brier_self": r7.get("brier_self"),
+                        "weight": r7.get("advisor_weight"), "model": r7.get("advisor_model")}
     others = sorted(rows.values(), key=lambda x: (not x["current"], x["kind"] == "model",
                                                   -((x.get("chat") or {}).get("looks") or 0), x["who"]))
     return {"others": others,
@@ -458,7 +477,7 @@ def _relationships(recs: list, tempo: dict, st: dict) -> dict:
 SKILL_STEP_S = 1800.0        # the skill's trend line: one point per half hour of the record
 SKILL_POINTS = 9             # ...over the last four hours
 SKILL_LABEL = {1: "feel skill", 2: "reach skill", 3: "reach skill on a moving thing", 4: "news share of timed looks",
-               5: "shifts noticed", 6: "the other read as other", 7: "skill vs habit"}
+               5: "shifts noticed", 6: "the other read as other", 7: "skill vs running rate"}
 
 
 def _skill_at(n: int, recs: list, tempo: dict):
@@ -518,8 +537,21 @@ def compute(srv, now: float | None = None) -> dict:
     t = _time(c)
     attrs = _attributes(recs, tempo, st, progs)
     ach = _achievements(c)
+    quest = _quest(recs, st, progs, {a["key"]: a for a in attrs})
+    if c.get("restart7") is not None:                     # #254: rung 7 restarted on the fix
+        note = RESTART7.format(day=dt.datetime.fromtimestamp(c["restart7"], dt.timezone.utc).strftime("%Y-%m-%d"))
+        for a in attrs:
+            if a["key"] == "understand":
+                a["note"] = note
+        if quest.get("rung") == 7:
+            quest["note"] = note
+    voided = [VOIDED.format(rung=r.get("rung"), at=dt.datetime.fromtimestamp(float(r["voids_ts"]), dt.timezone.utc)
+                            .strftime("%Y-%m-%d %H:%MZ"))
+              for r in recs if r.get("kind") == "rung_void" and isinstance(r.get("voids_ts"), (int, float))]
+    if voided:
+        quest["voided"] = voided
     return {"empty": not recs, "generated": now, "header": _header(st, recs, c, t, _skill(recs, tempo, st)), "attributes": attrs,
-            "quest": _quest(recs, st, progs, {a["key"]: a for a in attrs}), "achievements": ach,
+            "quest": quest, "achievements": ach,
             "growth": _growth(c, ach), "time": t, "inventory": _inventory(recs, st, now),
             "relationships": _relationships(recs, tempo, st)}
 

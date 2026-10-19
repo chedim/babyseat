@@ -281,7 +281,10 @@ def test_a_base_rate_model_beats_an_always_098_one_on_the_live_outcomes():
             SL._append(srv, {"ts": t + 120, "kind": "reach", "n": 2, "eid": RESP, "p": habit, "reply": True,
                              "answer": "changed" if o else "unchanged", "p_llm": p})
             t += 300
-        return SL.status(srv)["rung7"]["brier_model"], SL.status(srv)["rung7"]["brier_habit"]
+        # #254: status no longer carries habit (rung 7 doesn't read it): habit's
+        # Brier over the same checks is computed here, from what it said
+        b_habit = sum((o - h) ** 2 for o, h, _ in LIVE) / len(LIVE)
+        return SL.status(srv)["rung7"]["brier_model"], b_habit
 
     b_rate, b_habit = brier(_base_rate)
     b_conf, _ = brier(lambda prompt: 0.98)
@@ -308,9 +311,14 @@ def test_status_reports_pairs_per_asked_push_and_both_briers():
     assert r7["asked"] == 8 and r7["checked"] == 7 and r7["paired"] == 4
     assert r7["pair_rate"] == pytest.approx(4 / 7, abs=1e-3)
     pairs = [x for x in LIVE if x[2] is not None]
-    bh = sum((o - h) ** 2 for o, h, _ in pairs) / len(pairs)
     bm = sum((o - m) ** 2 for o, _, m in pairs) / len(pairs)
-    assert r7["brier_habit"] == pytest.approx(bh, abs=1e-3)
+    # #254: habit's Brier gave way to the running rate's -- the baseline rung 7 now beats
+    rates, k = [], 0
+    for i, (o, _, _) in enumerate(LIVE):
+        rates.append((k + 0.5) / (i + 1.0))
+        k += o
+    br = sum((o - r) ** 2 for (o, _, _), r in zip(LIVE, rates)) / len(LIVE)
+    assert r7["brier_rate"] == pytest.approx(br, abs=1e-3)
     assert r7["brier_model"] == pytest.approx(bm, abs=1e-3)
     assert r7["base_rate"] == pytest.approx(3.5 / 8, abs=1e-3)
 
@@ -319,7 +327,7 @@ def test_status_without_asks_is_quiet():
     srv = _seat()
     r7 = SL.status(srv)["rung7"]
     assert r7["asked"] == 0 and r7["paired"] == 0
-    assert r7["brier_model"] is None and r7["brier_habit"] is None
+    assert r7["brier_model"] is None and r7["brier_self"] is None
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
@@ -327,7 +335,7 @@ def test_the_panel_title_shows_rung_seven():
     st = {"self": {"mode": "on", "limit": 7, "rung": 6, "bar": 0.1, "next": 7,
                    "ladder": [{"rung": 7, "name": "understand an other", "state": "current"}],
                    "rung7": {"asked": 8, "checked": 7, "paired": 4, "pair_rate": 0.5714,
-                             "brier_model": 0.4366, "brier_habit": 0.3253, "base_rate": 0.4375}}}
+                             "brier_model": 0.4366, "brier_mix": 0.2511, "brier_rate": 0.3253, "advisor_weight": 0.0, "base_rate": 0.4375}}}
     js = ('const L=require(%r); process.stdout.write(JSON.stringify(L.selfView(%s)))'
           % (str(UI / "panel.js"), json.dumps(st)))
     v = json.loads(subprocess.check_output(["node", "-e", js]))

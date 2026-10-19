@@ -231,12 +231,19 @@ def test_a_model_that_knows_the_pattern_passes_rung_seven(monkeypatch):
     assert 7 in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
 
 
-def test_a_random_model_does_not_pass_rung_seven(monkeypatch):
+def test_a_random_model_earns_no_trust(monkeypatch):
+    # #254: rung 7 grades self, so a random model can neither pass it nor sink
+    # it: it was measured, earned (almost) no weight, and self's mix is self's
+    # own guess (this other alternates fast/slow replies, which self's last-
+    # outcome input learns on its own -- see test_self_rung7_self_predicts_254)
     person, model = _world(monkeypatch, knows=False, seed=3)
     srv = _seat()
     _run(srv, person, (SL.RUNG7_LOOKS + 5) * SL.MEET_EVERY)
     assert len(_pairs(srv)) >= SL.RUNG7_LOOKS            # it was measured...
-    assert 7 not in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]   # ...and failed
+    r7 = SL.status(srv)["rung7"]
+    assert r7["advisor_weight"] < 0.2                    # ...and not trusted
+    assert r7["brier_mix"] <= r7["brier_self"] + 0.01
+    assert r7["brier_model"] > r7["brier_self"]
 
 
 def test_at_most_one_consult_per_push(monkeypatch):
