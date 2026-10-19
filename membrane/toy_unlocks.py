@@ -27,6 +27,11 @@ refused with the rung that unlocks it (toybox.add: the CLI and the toybox
 object). Before self is born nothing is locked: the toybox is the operator's
 bench, and whatever is on it at birth is grandfathered.
 
+BUILT LATE (#264). A kind unlocked before it was built (the ball: its rung 6
+unlock line could be written while it was a name only) is provisioned once,
+the first time it is built, with one `unlock_built` line -- the same
+"never brought back" rule.
+
 PLACEHOLDERS. mirror, blocks and rattle are kinds with a name, an icon, an
 unlock rung and one line of what each will teach -- no mechanics yet (those
 are built with their rungs). They are never provisioned, never poked, and
@@ -180,12 +185,49 @@ def sync(srv, now: float | None = None) -> list[dict]:
         return []
 
 
+def _built_late(srv, recs: list[dict], now: float) -> list[dict]:
+    """A kind whose unlock line was written before it was BUILT (#264: the
+    ball, unlocked at rung 6 by #267 as a name only) is provisioned once,
+    the first time it is built: one `unlock_built` line per kind, so it is
+    never brought back after the operator removes it."""
+    from . import self_loop as SL
+    from . import toybox as TB
+    seen = set()
+    for r in recs:
+        if r.get("kind") == "unlock_built":
+            seen.update(r.get("toys") or [])
+    out = []
+    for r in recs:
+        if r.get("kind") != "unlock":
+            continue
+        added = [str(a) for a in r.get("added") or []]
+        for k in r.get("toys") or []:
+            if k not in TB.KINDS or k in seen or any(a == f"toy:{k}" for a in added):
+                continue
+            got = provision(srv, [k], now=now)
+            line = {"ts": now, "kind": "unlock_built", "rung": r.get("rung"), "toys": [k]}
+            if got:
+                line["added"] = got
+            SL._append(srv, line)
+            seen.add(k)
+            out.append(line)
+    return out
+
+
 def _sync(srv, now):
     from . import self_loop as SL
     recs = _recs(srv)
     if not born(recs):
         return []
     now = time.time() if now is None else float(now)
+    late = _built_late(srv, recs, now)
+    if late:
+        recs = _recs(srv)
+    return late + _sync_new(srv, recs, now)
+
+
+def _sync_new(srv, recs, now):
+    from . import self_loop as SL
     done = {r.get("rung") for r in recs if r.get("kind") == "unlock"}
     passed_ = SL._passed(recs)
     if all(UNLOCKS[k] in done for k in unlocked(passed_) if UNLOCKS[k] > 0):

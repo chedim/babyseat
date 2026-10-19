@@ -355,3 +355,10 @@ def test_a_legacy_check_gets_its_p_self_recomputed_from_the_record():
     assert [r["p_self"] for r in rows] == pytest.approx([r["p_self"] for r in recorded])
     assert all(0.0 < r["p_self"] < 1.0 for r in rows)
     assert not math.isnan(SL._rung8(_recs(checks))["skill"])
+
+
+@pytest.fixture(autouse=True)
+def _chat_medium(monkeypatch):
+    """These are the chat medium's tests (a line to chat:out is the turn): #264 moved
+    rung 7's turns to the ball by default, so they switch the toy medium off."""
+    monkeypatch.setattr(SL, "TOY_TURNS", False)

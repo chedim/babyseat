@@ -563,3 +563,10 @@ def test_on_a_seat_a_line_before_the_push_is_no_reply_for_rung_eight(monkeypatch
     check = next(r for r in recs if r.get("kind") == "reach" and r.get("reply"))
     assert check["answer"] == "changed" and check["replied"] is False
     assert [r["o"] for r in SL._rung8_rows(recs, RESP)] == [0.0]
+
+
+@pytest.fixture(autouse=True)
+def _chat_medium(monkeypatch):
+    """These are the chat medium's tests (a line to chat:out is the turn): #264 moved
+    rung 7's turns to the ball by default, so they switch the toy medium off."""
+    monkeypatch.setattr(SL, "TOY_TURNS", False)

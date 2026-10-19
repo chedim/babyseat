@@ -350,3 +350,10 @@ def test_the_panel_title_shows_rung_eight():
     v = json.loads(subprocess.check_output(["node", "-e", js]))
     assert "4 of 7" in v["title"] and "0.44" in v["title"] and "0.33" in v["title"]
     assert "rung 8: 4 of 7" in v["title"]
+
+
+@pytest.fixture(autouse=True)
+def _chat_medium(monkeypatch):
+    """These are the chat medium's tests (a line to chat:out is the turn): #264 moved
+    rung 7's turns to the ball by default, so they switch the toy medium off."""
+    monkeypatch.setattr(SL, "TOY_TURNS", False)

@@ -397,7 +397,12 @@ function amoebaActs(r) {
   if (k === "cycle") return r.act === "move" ? [{ kind: "move", stride: Math.max(0, Number(r.step) || 0), steer: r.aim_n != null || r.steer === true }] : [];
   if (k === "reach") {
     const ans = r.answer === "changed" ? 1 : r.answer === "unchanged" ? 0 : null;
-    if (r.reply) return ans == null ? [] : [{ kind: ans ? "bounce" : "droop" }];
+    if (r.reply) {
+      // the check's own outcome when it has one (#258: `replied`); #264: a look at
+      // the ball reads `changed` after self's own roll and `unchanged` after a roll back
+      const got = typeof r.replied === "boolean" ? (r.replied ? 1 : 0) : ans;
+      return got == null ? [] : [{ kind: got ? "bounce" : "droop" }];
+    }
     const out = [{ kind: "look", answer: r.answer }];
     const p = r.p == null ? NaN : Number(r.p);
     if (ans != null && isFinite(p)) {

@@ -58,6 +58,7 @@ METHODS = {
     "notice": "self::notice {{seed}}",
     "reach": "self::reach {{target}}",
     "meet": "self::meet {{to}}",
+    "roll": "self::roll {{toy}}",        # #264: its turn with the ball (rung 7 on), the shared ball only
 }
 RUNG_NAMES = {0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart",
               4: "patience", 5: "notice the world changed", 6: "meet an other",
@@ -138,6 +139,19 @@ MEET_MAX = 180              # rung 7: a push waits at most this many cycles for 
 # turn-taking other passes in 99 of 100 (median ~38 h), an other who answers late in 61, an
 # other with the live record's per-bin reply rates (0.62 / 0.36 / 0.35 / 0.02) in 39 (median
 # ~86 h). t >= 4.5 would cut the coin to 1 in 100 and the live-like other to 15.
+# THE TOY MEDIUM (#264): pre-verbal serve-and-return is with objects, not words. From rung 7 on,
+# self's turn is a roll of the shared ball to the other (toybox.roll_self through self::roll --
+# field-only: no chat line, no model, no shell), and the other's turn is a PERSON rolling it
+# back (never self, the world or the model). The moment self waits for is a bin of the time
+# since the other last ACTED -- a person's last poke on ANY toy (toybox.last_person_poke): any
+# play says they are at the dock, and with the ball alone the 0-2 min bin could never come
+# (turns are >= MEET_EVERY cycles apart, and a return lands within the check). A reply = their
+# roll after self's turn, by the check (the ball's other_at). Every turn records its `medium`
+# ("toy"; a line without one is "chat"), and rungs 7 and 8 read only the current medium's turns.
+# Chat goes quiet until rung SPEAK_RUNG (speak) opens; rung 6 reads its chat record as it stood
+# at the switch (_rung6), so the silence can't read as slipping. Pass rates in experiments/rung7_turns.
+TOY_TURNS = True            # #264: rung 7's turns with the ball (tests of the chat medium switch it off)
+SPEAK_RUNG = 11             # ...chat is quiet from rung 7 until this rung (speak) opens
 TURNS = True                # #258: rung 7's learned timing (tests switch it off to keep the timer's pace)
 TURN_BINS = (120.0, 600.0, 1800.0)       # spoke_age bin edges, s; the last bin: 30 min+ or never spoke
 TURN_NAMES = ("0-2m", "2-10m", "10-30m", "30m+")
@@ -626,11 +640,24 @@ def _reply_o(r: dict) -> float | None:
     return (1.0 if v else 0.0) if isinstance(v, bool) else None
 
 
-def _reply_checks(recs: list[dict], eid: str) -> list[dict]:
+def _medium(r: dict) -> str:
+    """A turn's medium (#264): "toy" (the ball) or "chat" (a line; every turn before #264)."""
+    return str(r.get("medium") or "chat")
+
+
+def _cur_medium(recs: list[dict], eid: str | None) -> str:
+    """The medium of the latest turn at `eid` (chat before any): the one rungs 7 and 8 read."""
+    last = next((r for r in reversed(recs) if r.get("kind") == "push" and r.get("to") == eid), None)
+    return _medium(last) if last is not None else "chat"
+
+
+def _reply_checks(recs: list[dict], eid: str, medium: str | None = None) -> list[dict]:
     """Self's reply checks at `eid` that know their outcome -- the looks a
-    push's question is about (one horizon: RUNG8_CHECK_S after the push)."""
+    push's question is about (one horizon: RUNG8_CHECK_S after the push) --
+    in one medium (#264: the current one by default; never mixed)."""
+    medium = medium or _cur_medium(recs, eid)
     return [r for r in recs if r.get("kind") == "reach" and r.get("eid") == eid and r.get("reply")
-            and not r.get("audit") and _reply_o(r) is not None]
+            and not r.get("audit") and _reply_o(r) is not None and _medium(r) == medium]
 
 
 def _base_rate(recs: list[dict], eid: str) -> tuple[float, int, int]:
@@ -664,22 +691,26 @@ def _push_gap(push: dict, last_changed: float | None) -> float | None:
     age = push.get("spoke_age")
     if isinstance(age, (int, float)) and age >= 0:
         return float(age)
+    if _medium(push) == "toy":
+        return None          # #264: self's own roll changes the ball -- a `changed` look is no act of the other's
     ts = float(push.get("ts") or 0)
     return (ts - last_changed) if last_changed is not None and last_changed <= ts else None
 
 
-def _rung8_rows(recs: list[dict], eid: str) -> list[dict]:
+def _rung8_rows(recs: list[dict], eid: str, medium: str | None = None) -> list[dict]:
     """Self's reply checks at `eid` that know their outcome, oldest first, each
     with what self knew at its push (the gap since the other last spoke), its
     outcome (#258: `replied`, a line AFTER the push -- _reply_o) and what the
-    look recorded (p_self, the advisor's p_llm and model, w, p_mix)."""
+    look recorded (p_self, the advisor's p_llm and model, w, p_mix). One
+    medium only (#264: the current one by default)."""
+    medium = medium or _cur_medium(recs, eid)
     rows, last_ch, gap = [], None, None
     for r in sorted(recs, key=lambda x: float(x.get("ts") or 0)):     # time order (stable; the record already is)
         k = r.get("kind")
         if k == "push" and r.get("to") == eid:
             gap = _push_gap(r, last_ch)
         elif k == "reach" and r.get("eid") == eid and not r.get("audit"):
-            o = _reply_o(r) if r.get("reply") else None
+            o = _reply_o(r) if r.get("reply") and _medium(r) == medium else None
             if o is not None:
                 rows.append({"ts": float(r.get("ts") or 0), "o": o,
                              "gap": gap, "p_llm": r.get("p_llm"), "model": r.get("llm_model"),
@@ -896,7 +927,7 @@ def _hold_reply(srv, push: dict, now: float) -> bool:
     return False
 
 
-def _rung8_prompt(srv, eid: str, n: int, now: float) -> str:
+def _rung8_prompt(srv, eid: str, n: int, now: float, medium: str = "chat") -> str:
     """What to ask the coprocessor at a push: will the other have spoken by
     self's reply check? Only facts self already holds in its record --
     timings and changed/unchanged answers, never the chat's words.
@@ -923,6 +954,26 @@ def _rung8_prompt(srv, eid: str, n: int, now: float) -> str:
         after = f"{round(float(r['ts']) - float(push['ts']))}s after" if push is not None else "after"
         lines.append(f"{after}: " + ("they had replied" if _reply_o(r) else "silent"))
     hist = "; ".join(lines) or "(none yet)"
+    if medium == "toy":                                     # #264: the turn was a roll of the ball
+        acted = _last_acted(srv, now)
+        last = (f"The person last played (a poke on any toy) {round(now - acted)}s ago. " if acted is not None
+                else "The person has not played yet. ")
+        return (f"You are predicting whether the person self plays ball with will roll the ball ({eid}) "
+                f"back to self by self's reply check. Self just rolled it to them (turn {n}); "
+                f"the reply check comes about {round(RUNG8_CHECK_S)}s from now "
+                f"(at most {round(RUNG8_CHECK_S + RUNG8_GRACE_S)}s). "
+                f"All-time: they had rolled it back by the reply check after {k} of {m} earlier turns -- "
+                f"all-time base rate {rate:.2f} (with a small prior). "
+                f"Recent: they had rolled it back after {kr} of the last {mr} -- "
+                f"recent rate {rr:.2f} (same prior). " + last
+                + f"Recent reply checks (oldest first): {hist}. "
+                "People's rhythms change (a busy hour, a quiet evening): when the recent rate disagrees "
+                "with the all-time one, weigh the recent window more. "
+                "Give ONE calibrated probability (0..1) that they will have rolled it back by that check. "
+                "You are scored by the Brier score, (p - outcome)^2: a confident wrong answer is penalized "
+                "heavily (0.98 that misses costs 0.96), so stay near these rates unless these facts give "
+                "a real reason to move. Don't use tools -- everything you know is here. "
+                "Answer in one line: VERDICT: <probability>")
     spoke = _last_spoke(srv, recs, eid, now)
     last = (f"Self last saw them speak {round(now - spoke)}s ago. " if spoke is not None
             else "Self has not seen them speak yet. ")
@@ -961,7 +1012,10 @@ def _meet(srv, seed: str, now: float | None = None) -> None:
     RUNG 8 (#215, rung 7 until #258): once rung 8 is available, each push
     asks the model once (async, capped by llm.request) whether the other will
     have spoken by self's reply check; the push line records whether it went
-    out (`asked`)."""
+    out (`asked`).
+
+    #264: from rung 7 until rung SPEAK_RUNG opens, the turn is a roll of the
+    shared ball (_ball_turn) and no line goes to chat."""
     try:
         n = int(seed or 0)
     except (TypeError, ValueError):
@@ -969,6 +1023,9 @@ def _meet(srv, seed: str, now: float | None = None) -> None:
     import time
     from . import chat_io as _CIO
     now = time.time() if now is None else now
+    if _toy_turns(srv):                                     # #264: turns with the ball; chat is quiet
+        _ball_turn(srv, n, now)
+        return
     turns = TURNS and _available(srv, 7)
     if not turns and n % MEET_EVERY != 1:                   # rung 6: the timer
         return
@@ -989,6 +1046,95 @@ def _meet(srv, seed: str, now: float | None = None) -> None:
         rec["spoke_age"] = round(now - spoke, 1)
     if _available(srv, 8):                                  # rung 8: ask the model AT the push (#215)
         rec["asked"] = _queued(_ask_llm(srv, to, _rung8_prompt(srv, to, n, now)))
+    _append(srv, rec)
+
+
+# ---- #264: the turns with the ball ---------------------------------------------------
+
+def _toy_turns(srv) -> bool:
+    """Self's turns are rolls of the ball, and chat is quiet: from rung 7 on,
+    until rung SPEAK_RUNG (speak) opens."""
+    return TOY_TURNS and _available(srv, 7) and not _available(srv, SPEAK_RUNG)
+
+
+def _ball(srv) -> tuple[str, str] | None:
+    """The shared ball: (its eid, its toy name) -- toybox.BALL when it is
+    there, else the first ball by name; None on a seat with no ball."""
+    from . import toybox as _TB
+    est = getattr(srv, "entity_store", None)
+    found = []
+    for eid, e in list(((est.docs if est is not None else None) or {}).items()):
+        tb = (e.properties or {}).get("toybox") or {}
+        if tb.get("kind") == "ball" and tb.get("name") and not tb.get("block"):
+            found.append((tb["name"] != _TB.BALL, tb["name"], eid))
+    if not found:
+        return None
+    _, name, eid = min(found)
+    return eid, name
+
+
+def _last_acted(srv, now: float) -> float | None:
+    """When the other last acted, as self knows it (#264): a person's last
+    poke on any toy (toybox.last_person_poke), never after `now`. A time only."""
+    from . import toybox as _TB
+    last = _TB.last_person_poke()
+    ts = float(last["ts"]) if last else None
+    return ts if ts is not None and 0 < ts <= now else None
+
+
+def _roll(srv, toy: str) -> dict:
+    """SELF'S TURN (#264), its own act: roll the shared ball to the other --
+    the ball only (any other toy is refused), from its own loop only."""
+    c = _ctx.cycle
+    ball = _ball(srv)
+    if ball is None or str(toy or "").strip().lower() != ball[1]:
+        return {"rc": 2, "text": f"self rolls the shared ball only, not {toy!r}"}
+    from . import toybox as _TB
+    out = _TB.roll_self(ball[1], now=c.get("now"))
+    if not out.get("ok"):
+        return {"rc": 1, "text": out.get("error") or "the roll failed"}
+    c["rolled"] = True
+    return {"rc": 0, "text": "rolled"}
+
+
+def _ball_turn(srv, n: int, now: float) -> None:
+    """RUNG 7 WITH THE BALL (#264): the bandit (_turn_push, unchanged: the
+    same bins, caps and draws) picks the moment over the time since the other
+    last acted; then self rolls the ball to them through its own method
+    (field-only: no chat line, no shell) and the turn goes on the record as a
+    `push` with medium "toy" (the page's ripple and the reply check read that
+    kind). Rung 8 may ask its advisor at the turn, as at a push."""
+    ball = _ball(srv)
+    if ball is None:
+        return                                              # no ball, no turn (and still no chat)
+    eid, name = ball
+    recs = _read(srv)
+    acted = _last_acted(srv, now)
+    age = None if acted is None else now - acted
+    when: dict = {}
+    if TURNS:
+        when = _turn_push(srv, recs, eid, n, age)
+        if when is None:
+            return
+    elif n % MEET_EVERY != 1:                               # the timer (tests of the bare medium)
+        return
+    from .night import method_call
+    _ctx.cycle = {"srv": srv, "act": "roll", "now": now}
+    try:
+        out = method_call(srv, srv.entity_store, None, None, _eid(), "roll", {"toy": name})
+        rolled = bool(_ctx.cycle.get("rolled"))
+    finally:
+        _ctx.cycle = None
+    if not rolled:
+        _append(srv, {"ts": now, "kind": "error", "n": n, "act": "roll",
+                      "why": str(out.get("text") or out.get("head") or out.get("error") or "")[:200]})
+        return
+    _rt(srv)["other"] = eid
+    rec = {"ts": now, "kind": "push", "n": n, "medium": "toy", "eid": _eid(), "to": eid, "toy": name, **when}
+    if age is not None:
+        rec["spoke_age"] = round(age, 1)                    # the other's last act, as known at the turn
+    if _available(srv, 8):                                  # rung 8: ask the advisor AT the turn (#215)
+        rec["asked"] = _queued(_ask_llm(srv, eid, _rung8_prompt(srv, eid, n, now, medium="toy")))
     _append(srv, rec)
 
 
@@ -1062,7 +1208,17 @@ def _replied(srv, push: dict, now: float, answer: str) -> bool:
     """The push's reward: did the other speak AFTER it, by this check?
     chat:in's heard_ts (the moment their latest line arrived) says so; a look
     can read `changed` for a line from before the push that self hadn't seen
-    yet, which is not a reply. Without a heard_ts, the look's answer."""
+    yet, which is not a reply. Without a heard_ts, the look's answer.
+
+    #264, a turn with the ball: did a PERSON roll it back after self's roll,
+    by this check? The ball's other_at says so (the model's roll, or self's
+    own, never sets it); the look's answer is not asked -- self's own roll
+    changed the ball too."""
+    if _medium(push) == "toy":
+        from . import toybox as _TB
+        st = _TB.peek(push.get("toy") or "") or {}
+        at = st.get("other_at")
+        return bool(isinstance(at, (int, float)) and float(push.get("ts") or 0) < at <= now)
     est = getattr(srv, "entity_store", None)
     doc = (est.docs or {}).get(push.get("to")) if est is not None else None
     heard = (doc.properties or {}).get("heard_ts") if doc is not None else None
@@ -1071,16 +1227,20 @@ def _replied(srv, push: dict, now: float, answer: str) -> bool:
     return answer == "changed"
 
 
-def _turn_rows(recs: list[dict], eid: str) -> list[dict]:
+def _turn_rows(recs: list[dict], eid: str, medium: str | None = None) -> list[dict]:
     """Rung 7's pushes at `eid`, oldest first: the policy's pushes (they carry
     an aim and their waiting time) whose reply check recorded `replied`.
-    Timer pushes don't count: they had no moment to choose."""
+    Timer pushes don't count: they had no moment to choose. One medium only
+    (#264: the current turn's by default -- chat turns and turns with the
+    ball never share a window)."""
+    medium = medium or _cur_medium(recs, eid)
     rows: list[dict] = []
     pend = None
     for r in recs:
         k = r.get("kind")
         if k == "push":
-            pend = r if (r.get("to") == eid and r.get("aim") is not None and r.get("dwell")) else None
+            pend = r if (r.get("to") == eid and r.get("aim") is not None and r.get("dwell")
+                         and _medium(r) == medium) else None
         elif k == "reach" and r.get("eid") == eid and pend is not None:
             if r.get("reply") and isinstance(r.get("replied"), bool):
                 rows.append({"ts": float(pend.get("ts") or 0), "bin": int(pend.get("bin", len(TURN_BINS))),
@@ -1257,7 +1417,7 @@ def from_command(rest: str) -> dict:
     if not parts or parts[0] not in METHODS:
         return {"rc": 2, "text": f"self has no method {parts[0] if parts else ''!r}"}
     fn = {"try": _try, "expect": _expect, "notice": _notice, "reach": _reach,
-          "meet": _meet}[parts[0]]   # looked up per call
+          "meet": _meet, "roll": _roll}[parts[0]]   # looked up per call
     srv = _ctx.cycle["srv"]
     return fn(srv, parts[1] if len(parts) > 1 else "0")
 
@@ -1462,6 +1622,8 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
     if reply is not None:                                # rung 7: the reply check after a push
         rec["reply"] = True
         rec["replied"] = _replied(srv, reply, now, c["answer"])   # #258: they spoke AFTER the push
+        if _medium(reply) != "chat":
+            rec["medium"] = _medium(reply)                       # #264: a check of a turn with the ball
     if c.get("p_self") is not None:                      # rung 8: self's own read (#254)
         rec["p_self"] = round(c["p_self"], 4)
     if c.get("p_llm") is not None:                       # rung 8: the advisor's read, same look
@@ -2039,7 +2201,18 @@ def _rung6(recs: list[dict], tempo: dict | None = None) -> dict:
 
     It reads the CURRENT other only -- the latest push's `to` (#208): when the
     person changes, pushes to and looks at the previous one stop counting, so
-    a rung passed against someone else slips until this person earns it."""
+    a rung passed against someone else slips until this person earns it.
+
+    #264, CHAT GOES QUIET: once self's turns are with the ball, rung 6 -- met
+    in chat -- reads its record AS IT STOOD AT THE SWITCH (the lines before
+    the first turn with the ball). Nothing after it can slip it: self sends
+    no more lines by design, and the person's chat may fall silent too, and a
+    silent chat:in is predicted near-perfectly -- it would read "body", not
+    "other", which is the silence, not a regression. A seat that was
+    slipping at the switch stays slipping (the record isn't rewritten)."""
+    first_toy = next((i for i, r in enumerate(recs) if r.get("kind") == "push" and _medium(r) == "toy"), None)
+    if first_toy is not None:
+        recs = recs[:first_toy]
     to = _other(recs)
     pushes = [r for r in recs if r.get("kind") == "push" and r.get("to") == to]
     heard = sum(1 for r in recs if r.get("kind") == "reach" and r.get("eid") == to
@@ -2208,9 +2381,13 @@ def status(srv) -> dict:
     answered = [r for r in recs
                 if r.get("kind") == "reach" and r.get("eid") == other
                 and r.get("answer") == "changed" and not r.get("audit")]
-    meets = {"pushes": len(pushes), "other": other,
+    medium = _medium(pushes[-1]) if pushes else "chat"
+    heard = answered[-1]["ts"] if answered else None
+    if medium == "toy":                          # #264: the other's last act, not a look that read a change
+        heard = _last_acted(srv, now)
+    meets = {"pushes": len(pushes), "other": other, "medium": medium,
              "push_age": round(now - pushes[-1]["ts"], 3) if pushes else None,
-             "heard_age": round(now - answered[-1]["ts"], 3) if answered else None}
+             "heard_age": round(now - heard, 3) if heard is not None else None}
     return {"mode": rt["mode"], "limit": lim, "born": born, "held": rt["held"],
             "cycles": sum(1 for r in recs if r.get("kind") == "cycle"),
             "rung": rung, "rung_name": LADDER.get(rung), "next": nxt,
@@ -2362,7 +2539,8 @@ def _rung7_stats(recs: list[dict]) -> dict:
 
     def r4(x):
         return None if x is None else round(float(x), 4)
-    return {"pushes": pushes, "checked": len(rows[-TURN_MEMORY:]), "bins": bins, "best": best,
+    return {"medium": _cur_medium(recs, to), "pushes": pushes, "checked": len(rows[-TURN_MEMORY:]),
+            "bins": bins, "best": best,
             "window": w["n"], "share": r4(w["share"]), "chance": r4(w["chance"]), "z": round(w["z"], 2),
             "payoff": r4(w["payoff"]), "payoff_z": round(w["payoff_z"], 2),
             "reply_rate": r4(w["reply_rate"]), "blind_rate": r4(w["blind_rate"])}

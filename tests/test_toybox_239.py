@@ -96,7 +96,7 @@ def _drive(name, t0, t1, step, reads=()):
 # ---- the kit -----------------------------------------------------------------
 
 def test_the_kit():
-    assert set(TB.KINDS) == {"fast", "slow", "burst", "drift", "die", "body", "tower"}
+    assert set(TB.KINDS) == {"fast", "slow", "burst", "drift", "die", "body", "tower", "ball"}   # ball: #264
     for kind, spec in TB.KINDS.items():
         assert isinstance(spec["params"], dict) and spec["about"]
 

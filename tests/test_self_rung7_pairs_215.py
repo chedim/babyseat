@@ -310,3 +310,10 @@ def test_a_real_consult_is_queued_capped_and_never_runs_a_cycle(monkeypatch):
     first = [r for r in _looks(srv) if r["ts"] > _pushes(srv)[0]["ts"]][0]
     assert abs(first["p_llm"] - 0.8) < 1e-6             # the real answer pairs at the reply check
     assert len(srv.events_pool.items) == 1              # still one consult for one push
+
+
+@pytest.fixture(autouse=True)
+def _chat_medium(monkeypatch):
+    """These are the chat medium's tests (a line to chat:out is the turn): #264 moved
+    rung 7's turns to the ball by default, so they switch the toy medium off."""
+    monkeypatch.setattr(SL, "TOY_TURNS", False)

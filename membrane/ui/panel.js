@@ -711,6 +711,7 @@ const TOY_PLAY = {
   die: [["roll", "🎲 roll", "roll the die: a fresh face, tagged as yours"]],
   drift: [["nudge", "↕ nudge", "nudge it one step, tagged as yours"]],
   burst: [["nudge", "✦ nudge", "nudge it to a fresh value, tagged as yours"]],
+  ball: [["roll", "roll it back", "roll the ball back to self: your turn (rung 7), tagged as yours"]],
 };
 function toyActions(t) {
   t = t || {};
@@ -748,12 +749,14 @@ function selfCardHtml(st) {
       ' <span class="rs">' + escText(lbl) + "</span></li>";
   }).join("") + "</ol>");
   const r7 = s.rung7 || {};
-  out.push("<h4>rung 7: taking turns</h4>" + (r7.checked
-    ? "<p><b>" + r7.checked + "</b> timed lines with a reply check" + (r7.best ? " · best window <b>" + escText(r7.best) + "</b> after they spoke" : "") +
+  const ball = r7.medium === "toy";                    // #264: the turns are with the ball
+  out.push("<h4>rung 7: taking turns" + (ball ? " with the ball" : "") + "</h4>" + (r7.checked
+    ? "<p><b>" + r7.checked + "</b> " + (ball ? "turns with the ball" : "timed lines") + " with a reply check" +
+      (r7.best ? " · best window <b>" + escText(r7.best) + "</b> after they " + (ball ? "played" : "spoke") : "") +
       "<br>" + (r7.bins || []).map((b) => escText(b.bin) + " " + (b.rate == null ? "–" : f2s(b.rate)) + ' <span class="muted">(' + b.replied + "/" + b.pushes + ")</span>").join(" · ") +
-      (r7.share != null ? "<br>lines in its window <b>" + f2s(r7.share) + "</b> vs chance " + f2s(r7.chance) + " (z " + Number(r7.z || 0).toFixed(1) + ")" +
+      (r7.share != null ? "<br>" + (ball ? "turns" : "lines") + " in its window <b>" + f2s(r7.share) + "</b> vs chance " + f2s(r7.chance) + " (z " + Number(r7.z || 0).toFixed(1) + ")" +
         "<br>replied <b>" + f2s(r7.reply_rate) + "</b> vs timing-blind " + f2s(r7.blind_rate) + " (t " + Number(r7.payoff_z || 0).toFixed(1) + ")" : "") + "</p>"
-    : '<p class="muted">no timed lines checked yet</p>'));
+    : '<p class="muted">' + (ball ? "no turns with the ball checked yet" : "no timed lines checked yet") + "</p>"));
   const r8 = s.rung8 || {};
   out.push("<h4>rung 8: the other</h4>" + (r8.asked || r8.brier_self != null
     ? "<p><b>" + (r8.paired || 0) + " of " + (r8.checked || 0) + "</b> asked pushes paired (" + (r8.asked || 0) + " asked)" +
@@ -1115,6 +1118,11 @@ function toyGlyph(t) {
     const html = '<span class="tower">' + b.map((s, i) => i).reverse().map((i) => '<i class="blk' + (b[i] ? "" : " down") + '"></i>').join("") + "</span>";
     return { html, label: nm + ", a tower: " + up + " of " + b.length + " blocks standing" };
   }
+  if (k === "ball") {                                  // #264: whose side it is on (self's left, yours right)
+    const yours = r.side === "other";
+    return { html: '<span class="ball side-' + (yours ? "other" : "self") + '"><i></i></span>',
+             label: nm + ", the ball: " + (yours ? "on your side, roll it back" : "with self, its turn next") };
+  }
   if (k === "die") {
     const n = Number(v);
     return { html: Number.isInteger(n) && n >= 1 && n <= 6 ? DIE_FACES[n - 1] : escText(v), label: nm + ", a die showing " + v };
@@ -1186,6 +1194,8 @@ function toyPopoverHtml(t, res) {
     const bl = (t.reading && t.reading.blocks) || [];
     acts = bl.map((up, i) => ({ action: up ? "knock" : "rebuild", arg: i + 1, label: (up ? "knock " : "rebuild ") + (i + 1),
                                 title: up ? "knock block " + (i + 1) + " (and the ones above it) down" : "stand block " + (i + 1) + " back up" }));
+  } else if (t.kind === "ball" && !(t.reading && t.reading.side === "other")) {
+    acts = [];                                         // #264: self has it -- its turn comes next
   } else {
     acts = toyActions({ toy: t.name, kind: t.kind });
   }
@@ -1194,7 +1204,8 @@ function toyPopoverHtml(t, res) {
       escAttr(a.action) + '"' + (a.arg != null ? ' data-poke-arg="' + escAttr(a.arg) + '"' : "") + ' title="' + escAttr(a.title) + '">' +
       escText(a.label) + "</button>").join("") + "</div>");
   } else {
-    out.push('<p class="muted">' + (t.kind === "body" ? "self only: nobody else can change it" : "no actions: its own clock is the point") + "</p>");
+    out.push('<p class="muted">' + (t.kind === "body" ? "self only: nobody else can change it"
+      : t.kind === "ball" ? "self has the ball: it rolls it to you on its turn" : "no actions: its own clock is the point") + "</p>");
   }
   out.push('<p class="pres' + (res && !res.ok ? " bad" : "") + '" aria-live="polite">' + escText(res ? res.text : "") + "</p>");
   return out.join("");

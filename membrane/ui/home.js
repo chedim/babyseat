@@ -963,6 +963,15 @@ const HSTYLE = `
   .toydock .gauge i { position:absolute; left:0; right:0; bottom:0; background:var(--primary-color,#3477d6); }
   .toydock .burst.on { color:var(--warning-color,#ffa600); }
   .toydock .burst.off { opacity:.3; }
+  /* #264: the ball -- a court split by a line, the ball on self's half (left) or yours (right) */
+  .toydock .ball { display:block; position:relative; width:26px; height:14px; border-radius:7px;
+                   background:color-mix(in srgb, var(--primary-text-color,#ddd) 12%, transparent); }
+  .toydock .ball::before { content:""; position:absolute; left:50%; top:2px; bottom:2px; width:1px;
+                           background:color-mix(in srgb, var(--primary-text-color,#ddd) 40%, transparent); }
+  .toydock .ball i { position:absolute; top:2px; width:10px; height:10px; border-radius:50%;
+                     background:var(--warning-color,#ffa600); transition:left .45s cubic-bezier(.3,1.4,.5,1); }
+  .toydock .ball.side-self i { left:2px; }
+  .toydock .ball.side-other i { left:14px; box-shadow:0 0 0 2px color-mix(in srgb, var(--warning-color,#ffa600) 35%, transparent); }
   .toydock .hd { position:absolute; top:4px; right:4px; width:7px; height:7px; border-radius:50%; }
   .toydock .hd.ok, .dkpop .dot.ok { background:#2e9d5b; }
   .toydock .hd.warn, .dkpop .dot.warn { background:var(--warning-color,#ffa600); }
@@ -999,7 +1008,7 @@ const HSTYLE = `
   .selfpanel .toys .ti { display:inline-block; width:1.6em; }
   .selfpanel .toys .tu.locked .ti { filter:grayscale(1); opacity:.5; }
   .selfpanel .toys .tu.locked b { opacity:.6; }
-  @media (prefers-reduced-motion: reduce) { .toydock .bdg { transition:none; } }
+  @media (prefers-reduced-motion: reduce) { .toydock .bdg, .toydock .ball i { transition:none; } }
   @media (max-width: 760px) {
     .toydock { top:calc(26vh + 56px); top:calc(26dvh + 56px); max-height:calc(74dvh - 140px); }
     .toydock .dockbtn { display:grid; }
