@@ -3959,7 +3959,13 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         identity lives on THIS handler (self._identity), never on the shared
         server."""
         from . import jwtauth as _JWT
-        return _JWT.gate(self)
+        from . import seatauth as _SA
+        if not _JWT.gate(self):
+            return False
+        # THE OWNER'S DOOR (#253, seatauth.py): JWT mode off, an OFF-BOX
+        # caller's writes (/v1 + /api/chat|generate turns included) need the
+        # seat token; reads and localhost stay open
+        return _SA.gate(self, _SA.proxy_is_write(self.command, self.path.split("?")[0]))
 
     def _stamp_chat_identity(self) -> None:
         """JWT mode: the /v1 turn's user messages carry the TOKEN's speaker
@@ -6526,6 +6532,12 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if est is None:
             self._json_err_raw(503, "entity layer unavailable"); return
         body = self._json_body()
+        # SCRIPTS ARE CODE (#253): a script field lands only from the owner
+        # (localhost or a token) -- a second check behind the route's door
+        from . import seatauth as _SA
+        if _SA.carries_code(body) and not _SA.owner(self):
+            from . import jwtauth as _JWT
+            _JWT.send_unauthorized(self); return
         spec = str(body.get("spec") or "").strip()
         if not spec:
             self._json_err_raw(400, "spec required (eid or name fragment)")
@@ -6602,6 +6614,10 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         est = getattr(srv, "entity_store", None)
         if est is None:
             self._json_err_raw(503, "entity layer unavailable"); return
+        from . import seatauth as _SA
+        if op != "inspect" and not _SA.owner(self):        # #253: a method's command is code
+            from . import jwtauth as _JWT
+            _JWT.send_unauthorized(self); return
         body = self._json_body()
         from .night import method_define, method_call, method_each, method_inspect
         if op == "inspect":

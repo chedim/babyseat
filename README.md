@@ -139,9 +139,11 @@ membrane standalone                # opens http://localhost:4096/ in your browse
 You get membrane home: the field in 3D, the chat, and voice ("Hey Bob" — a new
 membrane is Bob until you agree on a name together; it will ask). Other
 devices on your network reach it at `http://<this machine>:4096/`. No login on
-the local network; a public or proxied caller is refused — unless you turn on
-the optional JWT mode ([docs/auth.md](docs/auth.md)): then every caller needs a
-token, from the LAN or behind an ingress alike. Voice needs a secure
+this machine; from another device the page reads freely and asks once for the
+seat token before it writes (`membrane token seat` prints it). A public or
+proxied caller is refused — unless you turn on the optional JWT mode
+([docs/auth.md](docs/auth.md)): then every caller needs a token, from the LAN or
+behind an ingress alike. Voice needs a secure
 origin, so the microphone works on `localhost` (the first voice use downloads
 ~65 MB of speech models, checked against their checksums).
 
@@ -160,9 +162,11 @@ docker run -d --name membrane \
 The same standalone seat in a container: the web UI on :4096 and the
 OpenAI-compatible proxy on :11500, the memory on the `membrane-data` volume.
 `MEMBRANE_BACKEND` is the Ollama server (the default shown is the Docker
-host); on Linux add `--add-host=host.docker.internal:host-gateway`. The
-ports have no login unless you set `MEMBRANE_JWT_SECRET` ([JWT mode](docs/auth.md));
-without it, publish them only on a network you trust. Details:
+host); on Linux add `--add-host=host.docker.internal:host-gateway`. Reads are
+open; writes need the seat token, which the container prints at boot
+(`docker exec membrane membrane token seat` prints it again). Publish the ports
+only on a network you trust, or set `MEMBRANE_JWT_SECRET` ([JWT mode](docs/auth.md))
+for a token on every request. Details:
 [docs/docker.md](docs/docker.md).
 
 ### Inside Home Assistant (HACS)
@@ -269,8 +273,9 @@ runs `membrane standalone`: the web UI and serve API on :4096, the
 OpenAI-compatible proxy on :11500, Ollama reached at
 `http://host.docker.internal:11434` by default (on Linux add
 `--add-host=host.docker.internal:host-gateway`). The field lives on the
-`/data` volume. The ports carry no authentication: publish them only on a
-network you trust. Recipes, env and volume details:
+`/data` volume. Reads are open and writes need the seat token (printed at
+boot; [docs/auth.md](docs/auth.md)): publish the ports only on a network you
+trust. Recipes, env and volume details:
 [docs/docker.md](docs/docker.md).
 
 ### First run in a project
@@ -323,6 +328,7 @@ pass through to Ollama unchanged.
 | `membrane ingest` | cold start: absorb docs/README into the field (DOC events; a second ingest is a no-op) |
 | `membrane codegraph` | stdlib-AST call graph (stats / impact / callers / callees) |
 | `membrane doctor` | what's installed/running + the field's vitals |
+| `membrane token seat` | print the seat token (`--rotate` for a new one, `--path` for its file, `~/.membrane/seat-token`, 0600): from another machine, every write to either port needs it (Bearer, Basic's password, or the web UI's one-time prompt); reads and localhost need none; see [docs/auth.md](docs/auth.md) |
 | `membrane token mint` | `--sub ID [--name NAME] [--ttl 30d]`: a token for a seat running the optional JWT mode (`MEMBRANE_JWT_SECRET`); see [docs/auth.md](docs/auth.md) |
 | `membrane stats` | token/call accounting + the savings baseline (`--baseline` compares the bounded window against a naive full-history replay; reads `serve-msgs`, plus the background model calls from `bg-usage.json`; no model call) |
 | `membrane toybox` | self's toys, the built-in kit (fast / slow / burst / drift / die / body / tower): `list`, `add <kind> [--name N] [--param k=v]`, `remove`, `reset`, and `migrate --dry-run` / `--yes` to replace the model-written script toys, and `poke <toy> <action> [arg] [--as WHO]` to play with self (tower knock/rebuild, die roll, drift/burst nudge; each change tagged by who made it); also the seat's `toybox` object and the 👶 panel's play buttons. See [docs/selfgrowth.md](docs/selfgrowth.md#toys) |
@@ -335,9 +341,9 @@ embed, apply), `shadow` (capture events only — a lab ablation), `off`.
 
 `membrane serve` runs the seat with **no TUI and no opencode at all** —
 sessions, messages, turns, tool parts, aborts, the SSE event stream, served by
-membrane itself on :4096 (no login of its own by default: keep it on your network,
-put a reverse proxy with its own login in front, or turn on the optional JWT mode —
-a token on every request to both ports, [docs/auth.md](docs/auth.md)). Any opencode client connects unchanged: the
+membrane itself on :4096 (reads are open on your network; from another machine
+every write needs the seat token, `membrane token seat`; or turn on the optional
+JWT mode — a token on every request to both ports, [docs/auth.md](docs/auth.md)). Any opencode client connects unchanged: the
 [mobile companion app](https://opencode.app/), IDE plugins, a script. The turn
 loop calls the seat's OWN `/v1` on loopback — gate, injection, capture and
 routing run through the exact code path every other client's turn uses, so
@@ -345,8 +351,9 @@ the serve surface adds no separate memory, and the model's tool invocations
 appear to the client as ordinary tool parts riding `message.part.updated`
 (pending → completed), so you can watch what it's doing from the room.
 `--serve-port` (default 4096, walks up if busy) and `--listen` (the proxy,
-default 11500) are independent. The proxy binds all interfaces by default and
-its write/exec routes carry no auth; `--listen-host 127.0.0.1` (or
+default 11500) are independent. The proxy binds all interfaces by default:
+reads are open on the LAN, and an off-box caller's writes (chat turns included)
+need the seat token; `--listen-host 127.0.0.1` (or
 `MEMBRANE_LISTEN_HOST=127.0.0.1`) keeps it on this machine. Exposure is LAN-only by design:
 reach the server only from a network you own — or set `MEMBRANE_JWT_SECRET`
 and hand each client a token ([docs/auth.md](docs/auth.md)).

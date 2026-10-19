@@ -3,6 +3,11 @@ backend is a fake, and a 'walk' declared mid-test would fail its embeds."""
 import os
 
 os.environ.setdefault("MEMBRANE_OFFLINE_PROBE", "0")
+# the seat token (seatauth.py, #253): a test seat never writes the operator's
+# ~/.membrane/seat-token -- one throwaway file for the whole run (and its subprocesses)
+import tempfile as _tempfile
+os.environ.setdefault("MEMBRANE_SEAT_TOKEN_FILE",
+                      os.path.join(_tempfile.mkdtemp(prefix="membrane-seat-token-"), "seat-token"))
 
 _PY = os.path.join(os.path.dirname(__file__), "..", ".venv", "bin", "python")
 

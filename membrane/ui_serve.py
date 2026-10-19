@@ -12,11 +12,14 @@ serves the web UI built for HA -- the chat, membrane home, the 3D field, voice
     /ui/serve/<rest>  the seat's own routes (/session, /event, /membrane/...),
                       what HA's serve_proxy relayed -- in process
 
-THE LAN GUARD: standalone asks no password of a private, loopback or tailnet
-address -- on any route, the UI's or the seat's own (the operator: "no auth
-needed"; a person types their name in the page). Anything forwarded by a proxy
+THE LAN GUARD: standalone's pages answer a private, loopback or tailnet
+address (a person types their name in the page). Anything forwarded by a proxy
 (X-Forwarded-For, Forwarded) or from a public address gets a 403, never a login
-prompt.
+prompt -- unless it carries the seat token. THE OWNER'S DOOR (#253,
+seatauth.py) sits in front of every write: from another machine the page reads
+freely and asks once for the seat token (POST /ui/login sets the same HttpOnly
+cookie JWT mode uses); localhost needs nothing. /ui/conf says `auth: "seat"`
+and whether this caller is the `owner`.
 
 JWT MODE (jwtauth.py, docs/auth.md; off unless MEMBRANE_JWT_SECRET[_FILE] is
 set): the token replaces the LAN guard. The page's shell (/, /index.html,
@@ -45,6 +48,7 @@ import uuid
 from pathlib import Path
 
 from . import jwtauth as _JWT
+from . import seatauth as _SA
 from . import settings as S
 from .speakers import STANDALONE_PREFIX, id_line, strip_speaker_lines
 
@@ -323,7 +327,9 @@ def public_path(handler) -> bool:
 def _login(handler) -> None:
     """POST /ui/login {"token": "<jwt>"}: a valid person's token becomes the
     HttpOnly, SameSite=Strict cookie (Secure over https). JSON only -- a
-    cross-site form can't post it; the seat's internal token never logs in."""
+    cross-site form can't post it; the seat's internal token never logs in.
+    JWT mode off (#253): the SEAT token (seatauth.py) is the one accepted --
+    the cookie then opens the off-box writes."""
     ctype = str(handler.headers.get("Content-Type") or "").split(";")[0].strip().lower()
     n = int(handler.headers.get("Content-Length") or 0)
     if ctype != "application/json":
@@ -333,6 +339,22 @@ def _login(handler) -> None:
         handler.close_connection = True
         return _json(handler, {"error": "too large"}, 413)
     tok = None
+    if not _JWT.enabled():
+        try:
+            tok = json.loads(handler.rfile.read(n) if n else b"{}").get("token")
+        except (ValueError, AttributeError):
+            tok = None
+        if not _SA.matches(tok):
+            return _JWT.send_unauthorized(handler)
+        b = json.dumps({"ok": True, "who": None}).encode()
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Content-Length", str(len(b)))
+        handler.send_header("Cache-Control", "no-store")
+        handler.send_header("Set-Cookie", _SA.login_cookie(tok, _JWT.request_is_https(handler.headers)))
+        handler.end_headers()
+        handler.wfile.write(b)
+        return
     try:
         tok = json.loads(handler.rfile.read(n) if n else b"{}").get("token")
         ident = _JWT.verify_configured(tok)
@@ -384,7 +406,10 @@ def intercept(handler) -> bool:
     jwt = _JWT.enabled()
     # JWT mode: the token (checked by the serve's gate, jwtauth.gate) is the
     # door, not the address -- it works behind an ingress
-    lan = getattr(handler, "_identity", None) is not None if jwt else trusted(handler)
+    # ... off (#253): the LAN guard, or the seat token (a proxied page that
+    # logged in with it gets in too)
+    lan = getattr(handler, "_identity", None) is not None if jwt \
+        else (trusted(handler) or _SA.presented_seat_token(handler, cookie=True, basic=True))
     if lan:
         handler._ui_trusted = True         # standalone: no password anywhere on the LAN (the operator's rule)
     # /membrane too: the page rewrote the bar to the HA panel's url_path
@@ -394,7 +419,7 @@ def intercept(handler) -> bool:
     if not (path in ("/", "/membrane", "/index.html") or path == "/favicon.ico"
             or path.startswith("/ui/")):
         return False
-    if jwt and handler.command == "POST" and path in ("/ui/login", "/ui/logout"):
+    if handler.command == "POST" and path in ("/ui/login", "/ui/logout"):
         _login(handler) if path == "/ui/login" else _logout(handler)
         return True
     if jwt and not lan and not public_path(handler):
@@ -427,6 +452,9 @@ def intercept(handler) -> bool:
             _id = getattr(handler, "_identity", None)
             c["auth"] = "jwt"
             c["who"] = {"sub": _id.sub, "name": _id.name} if _id is not None else None
+        else:                              # #253: off-box writes need the seat token
+            c["auth"] = "seat"
+            c["owner"] = _SA.owner(handler, cookie=True, basic=True)
         _json(handler, c)
     elif path == "/ui/log":
         _page_log(handler)

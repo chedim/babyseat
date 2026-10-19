@@ -501,17 +501,28 @@ def stamp_chat_body(body: dict, ident: Identity | None) -> dict:
     return dict(body, messages=out)
 
 
-# -- the CLI: membrane token mint ----------------------------------------------
+# -- the CLI: membrane token mint | seat ---------------------------------------
 
 def cli_main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="membrane token",
-                                 description="mint a token for a JWT-mode seat (docs/auth.md)")
+                                 description="the seat's tokens: mint one for a JWT-mode seat, "
+                                             "or print the seat token off-box clients need (docs/auth.md)")
     sp = ap.add_subparsers(dest="cmd", required=True)
+    st = sp.add_parser("seat", help="print the seat token (off-box writes need it when JWT mode is off; "
+                                    "made on first use, 0600)")
+    st.add_argument("--rotate", action="store_true", help="replace it (every client needs the new one)")
+    st.add_argument("--path", action="store_true", help="print where it lives instead")
     m = sp.add_parser("mint", help="print a signed token (reads MEMBRANE_JWT_SECRET[_FILE])")
     m.add_argument("--sub", required=True, help="the person's stable id (their memory is keyed by it)")
     m.add_argument("--name", default=None, help="the name the seat calls them")
     m.add_argument("--ttl", default=DEFAULT_TTL, help="lifetime: 30d, 12h, 15m, 45s (default 30d)")
     a = ap.parse_args(argv)
+    if a.cmd == "seat":
+        from . import seatauth as _SA
+        if enabled():
+            print("membrane token: JWT mode is on -- off-box clients need a JWT "
+                  "(membrane token mint), not the seat token", file=sys.stderr)
+        return _SA.cli_seat(rotate=a.rotate, show_path=a.path)
     try:
         cfg = config()
     except JWTConfigError as e:

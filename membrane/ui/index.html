@@ -73,6 +73,8 @@
   window.MEMBRANE_VIEW = new URLSearchParams(location.search).get("view") || "";
   let c = await conf();
   if (c.locked) { await login(); c = await conf(); }
+  // #253: from another machine the seat token comes first (writes need it)
+  if (c.auth === "seat" && c.owner === false) { await login(c.name, "seat"); c = await conf(); }
   window.MEMBRANE_AUTH = c.auth || "";
   if (c.name) { document.title = c.name; window.MEMBRANE_NAME = c.name; }   // home.js / panel.js read it on load
   window.MEMBRANE_ALIASES = c.aliases || [];

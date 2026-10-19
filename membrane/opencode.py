@@ -343,8 +343,10 @@ def loop_session(srv, agent: str) -> str:
 def proxy_bind_host(args) -> str:
     """THE /v1 PORT ON THE LAN (2026-10-08, the operator's call): all
     interfaces by default (a wifi-only device: the LAN is the reach);
-    --listen-host / MEMBRANE_LISTEN_HOST bind it back to 127.0.0.1. The
-    proxy's write/exec routes carry no auth -- open is a deliberate choice."""
+    --listen-host / MEMBRANE_LISTEN_HOST bind it back to 127.0.0.1. Reads
+    are open on the LAN; an off-box caller's writes (the field, entities,
+    scripts, methods, models, /v1 and Ollama turns) need the seat token or,
+    in JWT mode, a JWT (#253, seatauth.py); localhost needs nothing."""
     return (getattr(args, "listen_host", None)
             or os.environ.get("MEMBRANE_LISTEN_HOST") or "0.0.0.0")
 
@@ -639,6 +641,10 @@ def main() -> None:
     # secret (short, empty, unreadable) refuses the boot -- never half-open
     from . import jwtauth as _JWT
     _JWT.boot_check()
+    # THE OWNER'S DOOR (#253, seatauth.py): JWT mode off, the seat token
+    # off-box writes need -- made on first boot, its path in the log
+    from . import seatauth as _SA
+    _SA.boot()
     # the data dir the UI routes and settings.json read (settings.py)
     os.environ.setdefault("MEMBRANE_DATA_DIR", str(Path(args.field).resolve().parent))
     if args.standalone:

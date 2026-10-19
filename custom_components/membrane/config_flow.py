@@ -132,7 +132,7 @@ class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             try:
                 async with s.get(user_input[CONF_SERVE_URL].rstrip("/") + "/global/health",
                                  auth=(aiohttp.BasicAuth(user_input.get(CONF_SERVE_USER) or DEFAULT_SERVE_USER, pw)
-                                       if pw else None),     # only a proxy in front asks (#144)
+                                       if pw else None),     # the seat token (#253), or a proxy's pair
                                  timeout=aiohttp.ClientTimeout(total=10)) as r:
                     ok = r.status == 200
             except Exception:                            # noqa: BLE001
@@ -181,6 +181,8 @@ class MembraneOptionsFlow(config_entries.OptionsFlow):
             # backend); what Home Assistant gives the seat is configurable here
             fields[vol.Required(OPT_HA_ACCESS, default=o.get(OPT_HA_ACCESS, True))] = bool
             fields[vol.Optional(OPT_HA_BASE_URL, default=o.get(OPT_HA_BASE_URL, ""))] = str
+            # #253: the seat token (`membrane token seat`), set or changed after setup
+            fields[vol.Optional(CONF_SERVE_PASS, default=o.get(CONF_SERVE_PASS, d.get(CONF_SERVE_PASS, "")))] = str
         return self.async_show_form(step_id="init", data_schema=vol.Schema({
             **fields,
             vol.Required(OPT_LANDING, default=o.get(OPT_LANDING, True)): bool,

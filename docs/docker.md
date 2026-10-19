@@ -79,6 +79,7 @@ proxy answers `GET /membrane/state` (the healthcheck allows a 90 s start period)
 | `MEMBRANE_BACKEND` | `--backend` | `http://host.docker.internal:11434` | the Ollama server the seat thinks with |
 | `MEMBRANE_MODEL` | `--model` | the best chat model Ollama lists | the chat model |
 | `MEMBRANE_EMBED_MODEL` | `--embed-model` | a known embedding model Ollama has | the field's embedder; chat fails without one. Keep it once the field has grown |
+| `MEMBRANE_SEAT_TOKEN_PRINT` | | `1` (the entrypoint sets it) | print the [seat token](auth.md#the-seat-token) to the log at boot |
 | `MEMBRANE_JWT_SECRET` | | unset (JWT mode off) | turns on [JWT mode](auth.md): every request on both ports needs a token. At least 32 bytes |
 | `MEMBRANE_JWT_SECRET_FILE` | | unset | the secret read from a mounted file instead (a Docker / Kubernetes secret); set one or the other |
 | `MEMBRANE_JWT_ISSUER` / `MEMBRANE_JWT_AUDIENCE` | | unset | optional `iss` / `aud` every token must carry |
@@ -96,8 +97,8 @@ Cloud models: run `membrane auth` once inside the container
 
 `/data` is the working directory **and** `HOME`, so one volume holds both the
 project field (`/data/.membrane/`: the field, the audit log, sessions,
-`settings.json`) and the per-user state under `~/.membrane` (`auth.json`, the
-global field, the project env), which here is the same directory.
+`settings.json`) and the per-user state under `~/.membrane` (`auth.json`,
+`seat-token`, the global field, the project env), which here is the same directory.
 Keep the volume to keep the memory.
 
 The container runs as uid 10001. A named volume takes that ownership on first
@@ -113,10 +114,24 @@ use; a bind mount must be writable by uid 10001.
 Both are fixed inside the container (outside one the seat walks up to the next
 free port); remap them with `-p`, e.g. `-p 14096:4096`.
 
-**Out of the box neither port has authentication.** The proxy's write and
-exec routes and the serve API answer anyone who can reach them. Publish the
-ports only on a network you trust, or turn on JWT mode: give the container a
-secret and every request on both ports needs a token.
+**Out of the box, reads are open and writes need the seat token.** Inside a
+container no caller is on loopback (Docker's port mapping arrives from the
+bridge), so everything that changes something (a chat turn, an entity, a
+script, a model, the seat's controls) needs the [seat token](auth.md#the-seat-token).
+The seat makes it on first boot at `/data/.membrane/seat-token` (on the volume,
+so it survives upgrades) and prints it to the log:
+
+```bash
+docker logs membrane 2>&1 | grep 'seat token:'
+docker exec membrane membrane token seat            # the same, any time
+docker exec membrane membrane token seat --rotate   # a new one
+```
+
+The web UI asks for it once per browser; an OpenAI-compatible client sends it
+as its API key (`Authorization: Bearer <seat token>`). Reads (the field, the
+UI's pages, `/v1/models`) need no token, so publish the ports only on a network
+you trust, or turn on JWT mode: give the container a secret and every request
+on both ports, reads included, needs a token.
 
 ```bash
 docker run -d --name membrane \
