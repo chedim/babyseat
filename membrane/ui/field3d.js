@@ -29,6 +29,39 @@ const LOCATE_CACHE_MAX = 500;      // every entity a mind touches is located: ca
 const BRAIN_TRAIL = 8;             // #237: self's last looks drawn (dots + paths), capped
 const BRAIN_RINGS = 4;             // #237: shift / level-up rings alive at once, capped
 function trailAlpha3(i, n) { return 0.15 + 0.75 * (i + 1) / Math.max(1, n); }   // = home.js trailAlpha
+// #244: a look at a thing with no field point is drawn as a GHOST -- a hollow
+// dashed ring at a stable spot a short fixed way from the amoeba (its
+// direction a hash of the eid), reached by a dashed beam, labelled
+// "(unplaced)"; never a filled dot, never on the trail, never where a real
+// field position could be mistaken for it
+const GHOST_R = 70;                // world units from the amoeba (the cube is F3_WORLD wide)
+const BRAIN_GHOST = 0x9aa7b8;      // the ghost's colour token: muted, never a look's answer colour
+
+/** FNV-1a, 32 bits: a stable number per string. */
+function fnv32(s) {
+  let h = 0x811c9dc5;
+  s = String(s == null ? "" : s);
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return h >>> 0;
+}
+
+/** A stable unit direction per eid (uniform on the sphere). */
+function ghostDir(eid) {
+  const u = fnv32(eid) / 4294967296, v = fnv32(String(eid) + "#ghost") / 4294967296;
+  const z = 1 - 2 * u, r = Math.sqrt(Math.max(0, 1 - z * z)), phi = 2 * Math.PI * v;
+  return [r * Math.cos(phi), r * Math.sin(phi), z];
+}
+
+/** Where a look's beam goes: the thing's field point, else a ghost GHOST_R
+ *  from the amoeba (apos) in the eid's direction; with no amoeba, nowhere. */
+function lookTarget(p, eid, apos) {
+  if (p) return { p: p.slice(), ghost: false };
+  if (!apos) return { p: null, ghost: false };
+  const d = ghostDir(eid);
+  return { p: [apos[0] + d[0] * GHOST_R, apos[1] + d[1] * GHOST_R, apos[2] + d[2] * GHOST_R], ghost: true };
+}
+
+function lookLabel(label, ghost) { return ghost ? label + " (unplaced)" : label; }
 const F3_AGENTS = {
   chat: "#ffd166", phone: "#06d6a0", "loop-1": "#ef476f", "loop-2": "#f78c6b",
   "loop-3": "#c77dff", loop: "#ff8fab", thinker: "#4cc9f0", dreamer: "#b5e48c",
@@ -160,6 +193,7 @@ function locateCandidates(eid) {
   if (m) out.push({ files: "f", symbols: "s", shell: "c", urls: "u", models: "m" }[m[1]] + ":" + m[2]);
   if (!/^[a-z]{1,4}:/.test(bare) || /^membrane::/.test(eid)) out.push("m:" + bare);
   else if (!m) out.push("m:" + bare);
+  if (!m && !/^[a-z]{1,4}:/.test(bare)) out.push("m:" + bare.toLowerCase());   // field_id lowercases the mirror (#244)
   return [...new Set(out)];
 }
 
@@ -238,7 +272,7 @@ function snapshotOf(info, tiles, max = 400) {
   return { v: 1, ts: Date.now(), meta, tiles: out.slice(-max) };
 }
 
-const F3Logic = { snapshotOf, IDBCache, locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS };
+const F3Logic = { ghostDir, lookTarget, lookLabel, GHOST_R, fnv32, snapshotOf, IDBCache, locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS };
 if (typeof module !== "undefined" && module.exports) module.exports = F3Logic;
 
 // ------------------------------------------------------------ three.js
@@ -1254,6 +1288,17 @@ class Field3DView {
     const dg = dc.getContext("2d"); dg.beginPath(); dg.arc(16, 16, 10, 0, 2 * Math.PI); dg.lineWidth = 4; dg.strokeStyle = "#fff"; dg.stroke();
     const dotTex = new THREE.CanvasTexture(dc);
     b.beam = line(0xffe08a); b.beam.renderOrder = 3; b.beam.visible = false;
+    // #244: the ghost -- a dashed beam and a hollow dashed ring (lookTarget)
+    b.ghostBeam = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+      new THREE.LineDashedMaterial({ color: BRAIN_GHOST, dashSize: 6, gapSize: 5, transparent: true, opacity: 0.85, depthWrite: false }));
+    b.ghostBeam.renderOrder = 3; b.ghostBeam.visible = false;
+    const gc = document.createElement("canvas"); gc.width = gc.height = 64;
+    const gg = gc.getContext("2d"); gg.setLineDash([7, 5]); gg.lineWidth = 4; gg.strokeStyle = "#fff";
+    gg.beginPath(); gg.arc(32, 32, 24, 0, 2 * Math.PI); gg.stroke();
+    b.ghost = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(gc), color: BRAIN_GHOST, transparent: true,
+      depthWrite: false, sizeAttenuation: false }));
+    b.ghost.scale.set(0.05, 0.05, 1); b.ghost.visible = false; b.ghost.renderOrder = 3;
+    this.scene.add(b.ghostBeam, b.ghost);
     b.dots = []; b.paths = [];
     for (let i = 0; i < BRAIN_TRAIL; i++) {
       const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTex, transparent: true, depthWrite: false, sizeAttenuation: false }));
@@ -1324,9 +1369,20 @@ class Field3DView {
     const cur = b.looks[b.looks.length - 1];
     const age = cur ? now - cur.t0 : Infinity;
     const LIVE = 6000;
-    // the beam to what it looks at now
+    // the beam to what it looks at now: its field point, or its ghost (#244)
+    const tgt = on && cur ? lookTarget(cur.p, cur.eid, a.pos) : { p: null, ghost: false };
     const beamOn = !!(on && cur && cur.p && age < LIVE);
     b.beam.visible = beamOn;
+    const ghostOn = !!(tgt.ghost && age < LIVE);
+    b.ghostBeam.visible = b.ghost.visible = ghostOn;
+    if (ghostOn) {
+      const g = b.ghostBeam.geometry.attributes.position;
+      g.setXYZ(0, a.pos[0], a.pos[1], a.pos[2]); g.setXYZ(1, tgt.p[0], tgt.p[1], tgt.p[2]); g.needsUpdate = true;
+      b.ghostBeam.computeLineDistances();
+      b.ghost.position.set(tgt.p[0], tgt.p[1], tgt.p[2]);
+      const fade = rm ? 0.85 : 0.85 * Math.min(1, (LIVE - age) / 1500);
+      b.ghostBeam.material.opacity = fade; b.ghost.material.opacity = fade;
+    }
     if (beamOn) {
       const g = b.beam.geometry.attributes.position;
       g.setXYZ(0, a.pos[0], a.pos[1], a.pos[2]); g.setXYZ(1, cur.p[0], cur.p[1], cur.p[2]); g.needsUpdate = true;
@@ -1384,11 +1440,11 @@ class Field3DView {
     const onScreen = (q) => q && q[0] >= 0 && q[1] >= 0 && q[0] <= this._w && q[1] <= this._h;
     if (cur && age < LIVE && on) {
       const mark = cur.answer === "changed" ? " ✓ changed" : cur.answer === "unchanged" ? " · unchanged" : " · no answer";
-      const sp = cur.p ? this._project(cur.p) : null;
-      if (onScreen(sp)) put(b.lookLab, "👁 " + cur.label + mark, [sp[0] + 10, sp[1] - 24]);
+      const sp = tgt.p ? this._project(tgt.p) : null;
+      const name = lookLabel(cur.label, tgt.ghost);
+      if (onScreen(sp)) put(b.lookLab, "👁 " + name + mark, [sp[0] + 10, sp[1] - 24]);
       else if (sa) {
-        put(b.lookLab, "👁 " + (cur.p ? this._arrowTo(sa, cur.p) + " " : "") + cur.label + mark
-          + (cur.p ? "" : " (not on the field)"), [sa[0] + 14, sa[1] + 16]);
+        put(b.lookLab, "👁 " + (tgt.p ? this._arrowTo(sa, tgt.p) + " " : "") + name + mark, [sa[0] + 14, sa[1] + 16]);
       } else put(b.lookLab, "", null);
     } else put(b.lookLab, "", null);
     const ring = b.rings.filter((o) => o.text).slice(-1)[0];

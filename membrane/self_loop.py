@@ -126,6 +126,7 @@ TOY_WORDS = "w:"            # ...and words that carry a getter (a plain word is 
 TOY_READS = 10              # the last reaches of a toy its health mark reads
 TOY_SCAN = 3000             # how far back in the record the toys' reads are looked for
 TOY_TTL_S = 15.0            # the toy list is recomputed at most this often (it walks the store)
+OFF_FIELD_LOOKS = 200       # #244: status() counts how many of the last looks land off the field
 
 _lock = threading.RLock()
 _ctx = threading.local()    # the cycle in flight: only the loop's own thread has one
@@ -638,11 +639,43 @@ def _reach(srv, target: str) -> dict:
     if ent is None:
         c["read"] = {"fired": False, "reason": "gone"}
         return {"rc": 0, "text": "nothing there"}
+    tb = (ent.properties or {}).get("toybox") or {}
+    if tb.get("name"):                                      # #244: the toy's log, before and after the look
+        from . import toybox as _TB
+        c["toy"] = {"name": tb["name"], "block": tb.get("block"), "at0": _TB.log_len(tb["name"])}
     try:
         c["read"] = _read_entity(srv, ent, c.get("now"))
     except Exception as e:                                  # noqa: BLE001
         c["read"] = {"fired": False, "reason": f"error: {e!r}"[:80]}
+    if c.get("toy"):
+        c["toy"]["at1"] = _TB.log_len(tb["name"])
     return {"rc": 0, "text": "reached"}
+
+
+def _toy_by(recs: list[dict], eid: str, toy: dict) -> list[str]:
+    """WHO CHANGED IT (#244), the ground truth on self's reach record: every
+    `by` on the toy's log (its block's lines, for a block) since self's last
+    look at this thing, through this look's own act. Kept beside the answer,
+    never in the reading -- self predicts from what it saw, not from who did it."""
+    from . import toybox as _TB
+    prev = next((r.get("log_at") for r in reversed(recs)
+                 if r.get("kind") == "reach" and r.get("eid") == eid and r.get("log_at") is not None), None)
+    start = toy["at0"] if prev is None or prev > toy["at0"] else prev   # a reset starts a fresh log
+    return _TB.causes(toy["name"], start, toy["at1"], toy.get("block"))
+
+
+def _place_once(srv, eid: str) -> None:
+    """THE FIRST LOOK PLACES (#244): a thing self reaches that has no field
+    point yet gets one (toybox.place: its summary, else its name, embedded) --
+    once per thing per run; quiet when the field or its embedder is missing."""
+    rt = _rt(srv)
+    done = rt.setdefault("placed", set())
+    if eid in done:
+        return
+    from . import toybox as _TB
+    if _TB.place(srv, eid) is not None:
+        done.add(eid)
+        rt.pop("off_field", None)
 
 
 def _answer(read: dict) -> tuple[str, str]:
@@ -900,6 +933,17 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
     rec = {"ts": now, "kind": "reach", "n": n, "eid": eid, "p": round(c["p"], 4),
            "answer": c["answer"], "why": c["why"],
            "dt": (round(now - float(last), 3) if last is not None else None)}
+    try:
+        from .eids import field_id
+        rec["fid"] = field_id(eid)                       # #244: where the page finds it on the field
+    except Exception:
+        pass
+    if c.get("toy") and c["toy"].get("at1") is not None:  # #244: who changed the toy (ground truth)
+        try:
+            rec["by"] = _toy_by(recs, eid, c["toy"])
+            rec["log_at"] = c["toy"]["at1"]
+        except Exception:
+            pass
     if reply is not None:                                # rung 7: the reply check after a push
         rec["reply"] = True
     if c.get("p_llm") is not None:                       # rung 7: the model's read, same look
@@ -934,6 +978,7 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
         if c["answer"] != "none":
             au["looks"] += 1
     _append(srv, rec)
+    _place_once(srv, eid)
     if watch and c["answer"] != "none" and not inside:
         _shift_check(srv, eid, now)
     _audit_tick(srv, now)
@@ -1531,7 +1576,41 @@ def status(srv) -> dict:
             "steer": _steer_stats(recs),
             "curiosity": _curiosity_stats(recs),
             "rung7": _rung7_stats(recs),
-            "toys": _toys(srv, recs)}
+            "toys": _toys(srv, recs),
+            "off_field": _off_field(srv, recs)}
+
+
+def _off_field(srv, recs: list[dict]) -> dict:
+    """#244: of self's last OFF_FIELD_LOOKS looks, how many land on a thing
+    with no live field point (the page then draws a ghost, not a beam to
+    it), and which things those are (most looked-at first). Cached for
+    TOY_TTL_S; None for `off` when the seat has no field to ask."""
+    rt = _rt(srv)
+    now = time.time()
+    hit = rt.get("off_field")
+    if hit is not None and now - hit[0] < TOY_TTL_S:
+        return hit[1]
+    looks = [r["eid"] for r in recs[-TOY_SCAN:] if r.get("kind") == "reach" and r.get("eid")][-OFF_FIELD_LOOKS:]
+    fld = getattr(srv, "efield", None)
+    get = getattr(fld, "get", None)
+    out = {"looks": len(looks), "off": None, "things": []}
+    if get is not None:
+        from .eids import field_id
+        on: dict[str, bool] = {}
+        for e in set(looks):
+            try:
+                st = get(field_id(e))
+                on[e] = bool(st is not None and st.tier == "live" and st.state is not None)
+            except Exception:
+                on[e] = False
+        off = [e for e in looks if not on[e]]
+        cnt: dict[str, int] = {}
+        for e in off:
+            cnt[e] = cnt.get(e, 0) + 1
+        out["off"] = len(off)
+        out["things"] = sorted(cnt, key=lambda e: (-cnt[e], e))[:12]
+    rt["off_field"] = (now, out)
+    return out
 
 
 def recent(srv, n=30) -> list[dict]:
@@ -1571,7 +1650,8 @@ def _toys(srv, recs: list[dict]) -> list[dict]:
         for eid, e in list(((est.docs if est is not None else None) or {}).items()):
             name = _short(eid)
             word = name.startswith(TOY_WORDS)
-            kind = ((e.properties or {}).get("toybox") or {}).get("kind")   # #239: a built-in toy, any name
+            tb = (e.properties or {}).get("toybox") or {}
+            kind = tb.get("kind")                              # #239: a built-in toy, any name
             if not (word or kind or name.startswith(TOY_PREFIXES)):
                 continue
             try:
@@ -1580,7 +1660,7 @@ def _toys(srv, recs: list[dict]) -> list[dict]:
                 getter = False
             if word and not getter and not kind:
                 continue
-            found.append((eid, getter, kind or "script"))
+            found.append((eid, getter, kind or "script", tb.get("name") or "", tb.get("block")))
         cached = rt["toys"] = (now, sorted(found))
     eids = {t[0] for t in cached[1]}
     reads: dict[str, list] = {e: [] for e in eids}
@@ -1590,13 +1670,18 @@ def _toys(srv, recs: list[dict]) -> list[dict]:
             if len(got) < TOY_READS:
                 got.append(r.get("answer"))
     out = []
-    for eid, getter, kind in cached[1]:
+    for eid, getter, kind, toy, block in cached[1]:
         got = reads[eid]
         answered = sum(1 for a in got if a in ("changed", "unchanged"))
         health = ("no getter" if not getter else "unread" if not got
                   else "empty" if not answered else "ok")
-        out.append({"eid": eid, "kind": kind, "getter": getter, "reads": len(got), "answered": answered,
-                    "health": health})
+        row = {"eid": eid, "kind": kind, "getter": getter, "reads": len(got), "answered": answered,
+               "health": health}
+        if toy:                                            # #244: the play buttons' target
+            row["toy"] = toy
+            if block:
+                row["block"] = block
+        out.append(row)
     return out
 
 

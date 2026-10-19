@@ -304,7 +304,8 @@ class TestWiring(unittest.TestCase):
         self.assertIn('"/membrane/self/recent?n=" + ', self.panel)
 
     def test_it_is_read_only(self):
-        # the panel posts nothing: the 🌱 chooser stays the only switch
+        # the panel posts nothing to self: the 🌱 chooser stays the only switch
+        # (the toys' play buttons, #244, post through the chat's _toyPoke)
         body = self.home.split("THE 👶 PANEL", 1)[1].split("// ---- end of the 👶 panel", 1)[0]
         self.assertNotIn("POST", body)
         self.assertNotIn("_setSelfLimit", body)

@@ -3085,6 +3085,26 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 return self._notfound()      # JWT mode: someone else's session
             if not getattr(self, "_ui_relay", False) and not _UI.stamp(self):
                 return self._json_err(400, "body must be a JSON object")
+            if path == "/membrane/toybox/poke":
+                # PLAY WITH SELF (#244): the 👶 panel's one write, toybox
+                # actions only (toybox.poke refuses anything else, and body).
+                # WHO: the token's person (JWT mode), else the page's speaker
+                # line (standalone's /ui/serve relay), else the HA relay's
+                # stamped `person`, else the operator -- never a name the
+                # page put in the body when a stronger line exists
+                from . import toybox as _TB
+                b = self._read_body()
+                if not isinstance(b, dict):
+                    return self._json_out({"ok": False, "error": "body must be a JSON object"}, code=400)
+                _tok = self._jwt_person()
+                if _tok is not None:
+                    _by = _tok.sub
+                elif getattr(self, "_ui_relay", False):
+                    _by = str(getattr(self, "_ui_speaker", "") or "guest")
+                else:
+                    _by = str(b.get("person") or "")
+                out = _TB.poke(str(b.get("toy") or ""), str(b.get("action") or ""), b.get("arg"), by=_by)
+                return self._json_out(out, code=200 if out.get("ok") else 400)
             if path in ("/membrane/jsexec/register", "/membrane/jsexec/result"):
                 # THE SEAT'S JS (jsexec.py): an opted-in tab registers, answers its jobs
                 from . import jsexec as _JS

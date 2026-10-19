@@ -18,17 +18,34 @@ EVERY TOY
   - draws from a SEEDED rng (the seed param, by default derived from its name;
     draw k is random.Random(f"{seed}:{k}")), so a run replays;
   - flags every change of its state with who caused it: `by: self` (self's own
-    look or reach -- the getter is told the reader, entity_read_back's `by`)
-    or `by: world` (its own clock or randomness). Rung 6's body/other split can
-    be checked against that ground truth.
+    look or reach -- the getter is told the reader, entity_read_back's `by`),
+    `by: world` (its own clock or randomness), `by: model` (the seat's model,
+    through the toybox object's poke) or `by: <person>` (the operator at the
+    CLI, `operator`; a person on the page, by their name or token -- #244).
+    Rung 6's body/other split can be checked against that ground truth, and
+    self's reach record carries it (`by` on each reach of a toy: who changed
+    it since self's last look -- never in the reading self predicts from);
+  - has a spot in the field from the moment it is switched on (place(): its
+    summary embedded by the seat's embedder; quietly none without one).
+
+PLAY (#244): others act on the toys -- poke(name, action, arg, by):
+    tower  knock <k> (k and every standing block above it fall)
+           rebuild <k> (block k alone stands again)
+    die    roll (a fresh face)
+    drift  nudge [up|down] (one step, bouncing off a wall; no direction: a coin)
+    burst  nudge (a fresh value)
+    body   nothing: it stays self-only, the control
+fast and slow take no pokes either (their clock is the point). A poke that
+changes nothing (knock a fallen block, rebuild a standing one) is refused.
 
 THE KIT (KINDS): fast / slow / burst / drift / die change on their own clock
 (the thinker's tick; a read never changes them), body changes only when self
 looks at it, and the tower changes only when self reaches one of its blocks.
 
-THE SURFACE: `membrane toybox list|add|remove|reset|migrate` (cli_main) and
-the `toybox` object's methods list / add(spec) / remove(name) / reset(name)
-(the `toybox::` no-shell dialect, night.run_command_entity).
+THE SURFACE: `membrane toybox list|add|remove|reset|migrate|poke` (cli_main),
+the `toybox` object's methods list / add(spec) / remove(name) / reset(name) /
+poke(toy, action) (the `toybox::` no-shell dialect, night.run_command_entity),
+and POST /membrane/toybox/poke (server.py: the 👶 panel's play buttons).
 """
 from __future__ import annotations
 
@@ -65,6 +82,8 @@ KINDS = {
     "tower": {"about": "n blocks: self topples a block (and the ones above it) by reaching it, and lifts a fallen one by reaching it; only self's reaches change it",
               "params": {"n": 5}, "clock": False},
 }
+ACTIONS = {"tower": ("knock", "rebuild"), "die": ("roll",), "drift": ("nudge",), "burst": ("nudge",)}
+RESERVED_BY = ("self", "world")         # only the toy itself and self's own looks write these
 MIGRATE_MAP = {"w:fast": "fast", "w:slow": "slow", "w:burst": "burst", "w:drift": "drift",
                "w:body": "body", "toy:die": "die"}
 NAME_RX = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,59}$")
@@ -137,7 +156,8 @@ def _save(st: dict) -> None:
 
 
 def _note(st: dict, ts: float, by: str, what: str, **kw) -> None:
-    """One change, flagged with who caused it (self | world), on the log."""
+    """One change, flagged with who caused it (self | world | model |
+    <person>), on the log."""
     st["counts"][by] = int(st["counts"].get(by, 0)) + 1
     rec = {"ts": ts, "by": by, "what": what, **kw}
     with open(_log_path(st["name"]), "a") as fh:
@@ -290,6 +310,125 @@ def read(name: str, by: str = "", now: float | None = None, block: int | None = 
         return _reading(st, block)
 
 
+def who(by) -> str:
+    """A poker's tag: the person's name as given (or `model`); '' is the
+    operator (chat_io's convention); a name that would pass for the toy's own
+    tags (self / world) is kept apart as person:<name>."""
+    b = " ".join(str(by or "").split())[:60]
+    if not b:
+        return "operator"
+    return f"person:{b}" if b.lower() in RESERVED_BY else b
+
+
+def _resolve(name: str, arg):
+    """`toy:tower:b3` names block 3 of toy:tower (when there's no toy by that name)."""
+    name = str(name or "").strip().lower()
+    if not _path(name).exists():
+        m = re.match(r"^(.+):b(\d+)$", name)
+        if m and _path(m.group(1)).exists() and arg in (None, ""):
+            return m.group(1), m.group(2)
+    return name, arg
+
+
+def poke(name: str, action: str, arg=None, by: str = "", now: float | None = None) -> dict:
+    """PLAY (#244): someone other than self acts on a toy -- tagged `by`
+    (who(): the model, the operator, a person). -> {ok, name, action, by,
+    reading} | {ok: False, error}."""
+    now = time.time() if now is None else float(now)
+    by = who(by)
+    action = str(action or "").strip().lower()
+    name, arg = _resolve(name, arg)
+    arg = None if arg is None or str(arg).strip() == "" else str(arg).strip().lower()
+    if not _path(name).exists():
+        return {"ok": False, "error": f"no toy named {name!r} (membrane toybox list)"}
+    with _locked(name):
+        st = _load(name)
+        k = st["kind"]
+        acts = ACTIONS.get(k, ())
+        if not acts:
+            why = ("body changes only on self's own look -- it is self's, the control"
+                   if k == "body" else f"{k} runs on its own clock; it takes no pokes")
+            return {"ok": False, "error": f"{name}: {why}"}
+        if action not in acts:
+            return {"ok": False, "error": f"{name} ({k}) answers to {' / '.join(acts)}, not {action!r}"}
+        block = None
+        if k == "tower":
+            n = len(st["blocks"])
+            try:
+                block = int(arg)
+            except (TypeError, ValueError):
+                return {"ok": False, "error": f"{action} which block? {name} has blocks 1..{n}"}
+            if not 1 <= block <= n:
+                return {"ok": False, "error": f"{name} has blocks 1..{n}, not {block}"}
+            bl = st["blocks"]
+            if action == "knock":
+                if not bl[block - 1]["standing"]:
+                    return {"ok": False, "error": f"block {block} of {name} is already down"}
+                fell = [i + 1 for i in range(block - 1, n) if bl[i]["standing"]]
+                for i in fell:
+                    bl[i - 1].update(standing=False, by=by, at=now, falls=int(bl[i - 1]["falls"]) + 1)
+                _note(st, now, by, "topple", block=block, blocks=fell)
+            else:
+                if bl[block - 1]["standing"]:
+                    return {"ok": False, "error": f"block {block} of {name} is standing"}
+                bl[block - 1].update(standing=True, by=by, at=now)
+                _note(st, now, by, "lift", block=block)
+        elif k == "die":
+            cur, faces = st["value"], int(st["params"]["faces"])
+            v = _rng(st).randint(1, faces - 1)
+            st["value"] = v + 1 if v >= cur else v
+            _note(st, now, by, "change", act="roll", value=st["value"])
+        elif k == "drift":
+            prm = st["params"]
+            if arg in ("up", "+", "1", "+1"):
+                step = prm["step"]
+            elif arg in ("down", "-", "-1"):
+                step = -prm["step"]
+            elif arg is None:
+                step = prm["step"] if _rng(st).random() < 0.5 else -prm["step"]
+            else:
+                return {"ok": False, "error": f"nudge {name} up or down, not {arg!r}"}
+            v = st["value"] + step
+            if not prm["lo"] <= v <= prm["hi"]:
+                v = st["value"] - step                       # a wall: it bounces
+            st["value"] = v
+            _note(st, now, by, "change", act="nudge", value=v)
+        else:                                                # burst
+            st["value"] = _other(st, 0, 99)
+            _note(st, now, by, "change", act="nudge", value=st["value"])
+        _save(st)
+        return {"ok": True, "name": name, "action": action, "by": by,
+                **({"block": block} if block else {}), "reading": _reading(st, block)}
+
+
+def log_len(name: str) -> int:
+    """How many changes the toy's log holds (self_loop marks its looks by it)."""
+    try:
+        with open(_log_path(name)) as fh:
+            return sum(1 for ln in fh if ln.strip())
+    except OSError:
+        return 0
+
+
+def causes(name: str, start: int, end: int, block: int | None = None) -> list[str]:
+    """Who changed the toy (or its block) between log lines start..end --
+    the ground truth self's reach record keeps (sorted, distinct)."""
+    out = set()
+    try:
+        lines = [ln for ln in _log_path(name).read_text().splitlines() if ln.strip()]
+    except OSError:
+        return []
+    for ln in lines[max(0, int(start)):max(0, int(end))]:
+        try:
+            e = json.loads(ln)
+        except ValueError:
+            continue
+        if block is not None and e.get("block") != block and block not in (e.get("blocks") or []):
+            continue
+        out.add(str(e.get("by") or "?"))
+    return sorted(out)
+
+
 def tick(name: str, now: float | None = None) -> bool:
     """The toy's own clock (the thinker's heartbeat): True when it changed.
     Every change here is the world's."""
@@ -389,6 +528,28 @@ def _put(est, name: str, kind: str, block: int | None = None, n: int = 0) -> str
     return eid
 
 
+def place(srv, eid: str, text: str | None = None):
+    """A spot in the field for an entity (#244): its summary (else its name)
+    embedded by the seat's embedder, through the field's place(). True placed,
+    False already there, None not possible here (no field, no embedder) --
+    never raises."""
+    fld = getattr(srv, "efield", None)
+    fn = getattr(fld, "place", None)
+    if fn is None or not eid:
+        return None
+    try:
+        from .eids import field_id
+        if text is None:
+            est = getattr(srv, "entity_store", None)
+            e = (est.docs or {}).get(eid) if est is not None else None
+            p = (e.properties or {}) if e is not None else {}
+            text = str(p.get("summary") or p.get("name") or _short(eid))
+        return fn(field_id(eid), text)
+    except Exception as e:                      # noqa: BLE001
+        print(f"[toybox] no field spot for {eid} ({e!r})", file=sys.stderr)
+        return None
+
+
 def add(srv, kind: str, name: str | None = None, params: dict | None = None,
         now: float | None = None) -> dict:
     """Switch a toy on: its state, then its entities (a tower: one per block too)."""
@@ -409,6 +570,8 @@ def add(srv, kind: str, name: str | None = None, params: dict | None = None,
     eids = [_put(est, name, kind, n=st["params"].get("n", 0))]
     if kind == "tower":
         eids += [_put(est, name, kind, block=b, n=st["params"]["n"]) for b in range(1, st["params"]["n"] + 1)]
+    for eid in eids:
+        place(srv, eid)
     return {"ok": True, "name": name, "kind": kind, "params": st["params"], "seed": st["seed"], "eids": eids}
 
 
@@ -483,8 +646,9 @@ def _fmt(rows: list[dict]) -> str:
     for r in rows:
         prm = " ".join(f"{k}={v:g}" if isinstance(v, float) else f"{k}={v}" for k, v in r["params"].items())
         c = r["counts"]
+        others = "".join(f" {k}={v}" for k, v in sorted(c.items()) if k not in RESERVED_BY)
         lines.append(f"{r['name']}  {r['kind']}  {prm}  seed={r['seed']}  now={r['reading']}  "
-                     f"changes self={c.get('self', 0)} world={c.get('world', 0)}")
+                     f"changes self={c.get('self', 0)} world={c.get('world', 0)}{others}")
     return "\n".join(lines)
 
 
@@ -507,7 +671,8 @@ def _parse_spec(tokens: list[str]) -> tuple[str, str | None, dict]:
 # ---- the toybox object (cliffhanger) ------------------------------------------------
 
 METHODS = {"list": "toybox::list", "add": "toybox::add {{spec}}",
-           "remove": "toybox::remove {{name}}", "reset": "toybox::reset {{name}}"}
+           "remove": "toybox::remove {{name}}", "reset": "toybox::reset {{name}}",
+           "poke": "toybox::poke {{toy}} {{action}}"}
 
 
 def _eid() -> str:
@@ -528,7 +693,9 @@ def bind(srv) -> None:
             ent = QuantumEntity(eid=_eid(), cls=CLASS_COMPONENT, properties={
                 "name": "toybox", "silent_birth": True,
                 "summary": ("self's toys, built in (#239): add(spec='<kind> [name=..] [param=value ..]') "
-                            "switches one on, list() shows them, remove(name) / reset(name). The kit: "
+                            "switches one on, list() shows them, remove(name) / reset(name); "
+                            "poke(toy, action) plays with one as the model (#244: tower 'knock <k>' / "
+                            "'rebuild <k>', die 'roll', drift / burst 'nudge'; body is self's alone). The kit: "
                             + ", ".join(KINDS) + ". Never write a toy script: add one here.")})
             est.upsert(ent, embedder=None)
         have = {(d.properties or {}).get("method_name") for d in list(est.docs.values())
@@ -553,6 +720,19 @@ def from_command(rest: str) -> dict:
                                  + ", ".join(METHODS)}
     srv = _SEAT["srv"]
     meth, args = parts[0], parts[1:]
+    if meth == "poke":
+        # THE MODEL'S HAND (#244): a method call carries no caller, and the
+        # toybox object is the seat's model's surface (self never calls it --
+        # its own reaches go through the getter), so every poke here is `model`
+        toks = [t for a in args for t in str(a).split()]
+        if len(toks) < 2:
+            return {"rc": 2, "text": "poke(toy, action): e.g. toy='toy:tower' action='knock 3'"}
+        out = poke(toks[0], toks[1], toks[2] if len(toks) > 2 else None, by="model")
+        if not out["ok"]:
+            return {"rc": 2, "text": out["error"]}
+        return {"rc": 0, "text": f"{out['action']} {out['name']}"
+                                 + (f" block {out['block']}" if out.get("block") else "")
+                                 + f": now {json.dumps(out['reading'])} (by model)"}
     if meth == "list":
         return {"rc": 0, "text": _fmt(list_toys())}
     if meth == "add":
@@ -695,7 +875,7 @@ def _offline_seat():
 
 def cli_main(argv: list[str]) -> int:
     """`membrane toybox list | add <kind> [--name N] [--param k=v ...] | remove <name> |
-    reset <name> | migrate [--dry-run | --yes]`."""
+    reset <name> | migrate [--dry-run | --yes] | poke <toy> <action> [arg] [--as WHO]`."""
     import argparse
     ap = argparse.ArgumentParser(prog="membrane toybox",
                                  description="self's toys: the built-in kit (" + ", ".join(KINDS) + ")")
@@ -712,7 +892,24 @@ def cli_main(argv: list[str]) -> int:
     m = sub.add_parser("migrate", help="list the model-written script toys and what they'd become")
     m.add_argument("--dry-run", action="store_true", help="only list (the default without --yes)")
     m.add_argument("--yes", action="store_true", help="replace them (each old doc is backed up first)")
+    p = sub.add_parser("poke", help="play with a toy as the operator: tower knock|rebuild <k>, die roll, "
+                                    "drift nudge [up|down], burst nudge (body is self's alone)")
+    p.add_argument("toy")
+    p.add_argument("action")
+    p.add_argument("arg", nargs="?", default=None)
+    p.add_argument("--as", dest="who", default="",
+                   help="who is playing (default: operator -- the seat's '' person, chat_io's convention)")
     args = ap.parse_args(argv)
+    if args.cmd == "poke":
+        # a poke writes the toy's own files under its lock, never the entity
+        # store: it is safe beside a live seat (whose next look sees it)
+        out = poke(args.toy, args.action, args.arg, by=args.who)
+        if not out["ok"]:
+            print(out["error"], file=sys.stderr)
+            return 2
+        print(f"{out['action']} {out['name']}" + (f" block {out['block']}" if out.get("block") else "")
+              + f": now {json.dumps(out['reading'])} (by {out['by']})")
+        return 0
     if args.cmd == "list":
         print(_fmt(list_toys()))
         return 0
