@@ -92,6 +92,7 @@ RUNG3_DRIFT = 0.25          # a kind's rate may drift this much across the halve
 SILENT_WEIGHT = 0.05        # a silent thing is still checked now and then (the world can change)
 LAM_LOOKS = 30              # answered looks a thing's rate is fitted over
 LAM_GRID = np.logspace(-5, 0, 61)   # candidate rates, per second
+LAM_PRIOR_LOOKS = 3.0       # after a shift, the old rate weighs this many looks (#235)
 PATIENCE_P = 0.6            # look again once a change is this likely
 PATIENCE_MAX_S = 1800.0     # never wait longer than this
 RUNG4_TIMED = 30            # timed looks before the test reads them
@@ -942,21 +943,35 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
 def _lam(recs: list[dict], eid: str) -> float | None:
     """A thing's rate of change in time: the maximum-likelihood lambda for
     P(changed | dt) = 1 - exp(-lambda dt) over its last LAM_LOOKS answered
-    looks (outside audits); None before it has any."""
+    looks (outside audits); None before it has any. After a rung-5 shift the
+    fit reads only the looks since it, but not from nothing (#235): the rate
+    before the shift -- the thing's own last LAM_LOOKS looks, or the seat's when
+    it has none -- is a prior worth LAM_PRIOR_LOOKS looks, so 3-5 looks alone can't
+    run lambda to the grid's edge and the new looks lead after ~10."""
     since = _last_shift_ts(recs, eid)
-    obs = [(float(r["dt"]), r["answer"] == "changed") for r in recs
-           if r.get("kind") == "reach" and r.get("eid") == eid
-           and not r.get("audit") and not r.get("audit5")
-           and r.get("answer") in ("changed", "unchanged") and r.get("dt")
-           and (since is None or r["ts"] > since)][-LAM_LOOKS:]
+    fit = [(r["eid"], r["ts"], float(r["dt"]), r["answer"] == "changed") for r in recs
+           if r.get("kind") == "reach" and not r.get("audit") and not r.get("audit5")
+           and r.get("answer") in ("changed", "unchanged") and r.get("dt")]
+    mine = [o for o in fit if o[0] == eid]
+    obs = [o for o in mine if since is None or o[1] > since][-LAM_LOOKS:]
     if not obs:
         return None
-    dt = np.array([o[0] for o in obs])[None, :]
-    ch = np.array([o[1] for o in obs], dtype=float)[None, :]
-    lam = LAM_GRID[:, None]
-    p = np.clip(1.0 - np.exp(-lam * dt), 1e-9, 1 - 1e-9)
-    ll = (ch * np.log(p) + (1 - ch) * np.log(1 - p)).sum(axis=1)
+    ll = _lam_ll(obs)
+    if since is not None:
+        prior = ([o for o in mine if o[1] <= since] or [o for o in fit if o[1] <= since])[-LAM_LOOKS:]
+        if prior:                                  # + half a look each way (Jeffreys): peaks inside the grid
+            mid = float(np.median([o[2] for o in prior]))
+            half = 0.5 * (_lam_ll([(eid, 0, mid, True)]) + _lam_ll([(eid, 0, mid, False)]))
+            ll = ll + LAM_PRIOR_LOOKS * (_lam_ll(prior) + half) / (len(prior) + 1)
     return float(LAM_GRID[int(np.argmax(ll))])
+
+
+def _lam_ll(obs: list[tuple]) -> np.ndarray:
+    """The log-likelihood of (eid, ts, dt, changed) looks at each LAM_GRID rate."""
+    dt = np.array([o[2] for o in obs])[None, :]
+    ch = np.array([o[3] for o in obs], dtype=float)[None, :]
+    p = np.clip(1.0 - np.exp(-LAM_GRID[:, None] * dt), 1e-9, 1 - 1e-9)
+    return (ch * np.log(p) + (1 - ch) * np.log(1 - p)).sum(axis=1)
 
 
 def _last_shift_ts(recs: list[dict], eid: str):
