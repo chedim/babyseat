@@ -1,0 +1,3 @@
+# read-only copies of a live seat's private record: never commit
+*
+!.gitignore
