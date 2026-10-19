@@ -461,8 +461,36 @@ def poke(name: str, action: str, arg=None, by: str = "", now: float | None = Non
             st["value"] = _other(st, 0, 99)
             _note(st, now, by, "change", act="nudge", value=st["value"])
         _save(st)
-        return {"ok": True, "name": name, "action": action, "by": by,
-                **({"block": block} if block else {}), "reading": _reading(st, block)}
+        out = {"ok": True, "name": name, "action": action, "by": by,
+               **({"block": block} if block else {}), "reading": _reading(st, block)}
+    if is_person(by):
+        _pull_field(name, block, by)
+    return out
+
+
+def _pull_field(name: str, block: int | None, by: str) -> None:
+    """PLAYING COUNTS AS SPEAKING (#282): a person's poke pulls the field's
+    current toward the toy they played with (its spot; a tower's block's own),
+    under their own session (toy:<person>), one event's worth -- as a chat
+    line would (efield.pull_current). Only a person's: self's rolls, the
+    world's changes and the model's pokes never come here. Never raises."""
+    srv = _SEAT.get("srv")
+    fld = getattr(srv, "efield", None) if srv is not None else None
+    if fld is None or not hasattr(fld, "pull_current"):
+        return
+    try:
+        from .eids import field_id
+        from .entities import CLASS_COMPONENT, entity_id
+        eid = entity_id(CLASS_COMPONENT, f"{name}:b{block}" if block else name)
+        st = fld.get(field_id(eid))
+        if st is None or st.state is None:
+            place(srv, eid)                          # a toy with no spot yet gets one
+            st = fld.get(field_id(eid))
+        if st is None or st.state is None:
+            return
+        fld.pull_current(f"toy:{by}", st.state)
+    except Exception as e:                      # noqa: BLE001
+        print(f"[toybox] {name}: the poke did not pull the field ({e!r})", file=sys.stderr)
 
 
 def roll_self(name: str, now: float | None = None) -> dict:

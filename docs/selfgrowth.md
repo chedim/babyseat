@@ -103,8 +103,18 @@ and is kept across a restart too.
 
 What a restart drops: a hold (cleared), its current aim (it picks a new one),
 and an audit in flight (the paused getter resumes; the audit is started again
-later). On a fresh boot nobody has spoken yet, so there is no current to feel:
-the status says it waits on "the world" until the first conversation.
+later). On a fresh boot nobody has spoken yet, so there is no current to feel.
+Self keeps cycling anyway (#282): in a still world the current is where it
+stands, so nothing pushes it, and it goes on looking, playing and taking turns
+with the ball. Those cycle lines carry `still: true` (`change: "still"`), teach
+its model of the current nothing, and are skipped by every stat that reads
+push / gap / naive (rung 1 and the steer stat), so a still spell neither passes
+nor fails a rung. Before rung 1 is passed the status says it waits on "the
+world", since feeling a push needs one. Playing counts as speaking: a person's
+poke on a toy pulls the current toward that toy under their own key
+(`toy:<person>`), one event's worth, exactly as a chat line does
+(`efield.pull_current`); self's rolls, the world's changes and the model's
+pokes never pull it.
 
 ## Watching it grow
 
@@ -915,8 +925,8 @@ What **not** to do:
 
 ## Troubleshooting (real cases)
 
-**The bar sits at 0% waiting on `the world`.** No current: nobody has spoken
-since the boot. Talk to the seat.
+**The bar sits at 0% waiting on `the world`.** No current before rung 1:
+nobody has spoken or played since the boot. Talk to the seat, or poke a toy.
 
 **The bar sits at 0% waiting on `reaches` (rung 2).** It has no entities with
 getters, or none answers. Check that some entity has a getter that runs
