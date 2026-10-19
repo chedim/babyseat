@@ -1763,8 +1763,9 @@ class Field3DView {
   selfShift(eid, p, label) { this._brainRing(p, 0xffa94d, "noticed: " + (label || eid) + " changed its behaviour", false); }
   /** A wait: the amoeba dims briefly. */
   selfWait() { this._brainObjs().dimUntil = performance.now() + 2200; }
-  /** A level-up: the exp bar's gold moment, echoed round the amoeba. */
-  selfLevelUp(rung) { this._brainRing(null, 0xd4a017, "⬆ level up: rung " + rung, true); }
+  /** A level-up: the exp bar's gold moment, echoed round the amoeba
+   *  (extra: what it brought -- #267's "new toy: 🪞 mirror"). */
+  selfLevelUp(rung, extra) { this._brainRing(null, 0xd4a017, "⬆ level up: rung " + rung + (extra ? " · " + extra : ""), true); }
   /** The person self meets: their label and their place (null: the field's edge). */
   setSelfOther(label, p) { this.selfOther = label ? { label, p: p ? p.slice() : null } : null; }
 

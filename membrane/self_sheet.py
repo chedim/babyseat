@@ -17,6 +17,8 @@ and the toybox -- read-only, cached CACHE_S, served at GET
                  changed them (the toybox's ground truth)
   relationships  the others it has met: people, the seat's model, toy
                  players -- how predictable each is -- and the body set
+  toys           #267: every toybox kind, unlocked or locked, the rung that
+                 unlocks it and what it will teach (toy_unlocks)
 
 WORKING HOURS. Running time is the time the record kept growing: a gap over
 GAP_S between two lines (and the tail since the last line) is time self was
@@ -595,6 +597,11 @@ def compute(srv, now: float | None = None) -> dict:
     t = _time(c)
     attrs = _attributes(recs, tempo, st, progs)
     ach = _achievements(c)
+    from . import toy_unlocks as TU                       # #267: each pass's new toys, on its achievement
+    unl = TU.by_rung(recs)
+    for a in ach:
+        if unl.get(a["rung"]):
+            a["toys"] = unl[a["rung"]]
     quest = _quest(recs, st, progs, {a["key"]: a for a in attrs})
     if c.get("restart7") is not None:                     # #254: rung 7 (rung 8 since #258) restarted on the fix
         note = RESTART7.format(day=dt.datetime.fromtimestamp(c["restart7"], dt.timezone.utc).strftime("%Y-%m-%d"))
@@ -609,7 +616,17 @@ def compute(srv, now: float | None = None) -> dict:
     return {"empty": not recs, "generated": now, "header": _header(st, recs, c, t, _skill(recs, tempo, st)), "attributes": attrs,
             "quest": quest, "achievements": ach,
             "growth": _growth(c, ach), "time": t, "inventory": _inventory(recs, st, now),
-            "relationships": _relationships(recs, tempo, st)}
+            "relationships": _relationships(recs, tempo, st), "toys": _toys_section(recs)}
+
+
+def _toys_section(recs: list) -> list:
+    """#267: every toybox kind, unlocked or locked (toy_unlocks.table)."""
+    from . import toy_unlocks as TU
+    have = {t["kind"] for t in _toybox_rows().values()}
+    rows = TU.table(recs, have)
+    for r in rows:
+        r["at"] = iso(r["at"]) if r["at"] is not None else None
+    return rows
 
 
 def _voided(recs: list) -> list:
@@ -646,7 +663,7 @@ def empty() -> dict:
                        "age_h": 0.0, "working_h": 0.0, "skill": None},
             "attributes": [], "quest": {"rung": None, "criteria": []}, "achievements": [],
             "growth": _growth(c, []), "time": _time(c), "inventory": [],
-            "relationships": {"others": [], "body": [], "other": []}}
+            "relationships": {"others": [], "body": [], "other": []}, "toys": []}
 
 
 def sheet(srv, now: float | None = None, fresh: bool = False) -> dict:
@@ -676,7 +693,7 @@ def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
     ago), its health and its stats. Cached DOCK_CACHE_S per seat."""
     now = time.time() if now is None else float(now)
     if srv is None:
-        return {"generated": now, "toys": []}
+        return {"generated": now, "toys": [], "locked": []}
     rt = SL._rt(srv)
     hit = rt.get("dock")
     if not fresh and hit is not None and 0 <= now - hit[0] < DOCK_CACHE_S:
@@ -701,6 +718,7 @@ def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
     for r in recs:
         if _answered(r) and r.get("eid") in want:
             looks.setdefault(want[r["eid"]], []).append(r)
+    from . import toy_unlocks as TU                      # #267: grandfathered toys, the next locked ones
     toys = []
     for row in rows:
         name, kind = row["name"], row["kind"]
@@ -725,7 +743,8 @@ def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
         toys.append({"name": name, "kind": kind, "params": row.get("params") or {}, "reading": reading,
                      "active": active, "health": health.get(name, "unread" if name in eids else "no getter"),
                      "looks": len(rs), "error_early": early, "error_late": late,
-                     "changes": dict(row.get("counts") or {}), "last": last})
-    out = {"generated": now, "toys": toys}
+                     "changes": dict(row.get("counts") or {}), "last": last,
+                     "unlock_rung": TU.rung_of(kind), "grandfathered": TU.grandfathered(recs, kind)})
+    out = {"generated": now, "toys": toys, "locked": TU.locked_rows(recs, {r["kind"] for r in rows})}
     rt["dock"] = (now, out)
     return out

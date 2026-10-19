@@ -560,8 +560,26 @@ function selfExp(st) {
   const sk = s.mode !== "off" && s.skill != null && isFinite(Number(s.skill))
     ? "skill " + (s.skill_measured === false ? "not measured yet" : skillSigned(s.skill)) + (s.skill_pass != null ? " / " + skillSigned(s.skill_pass) : "") : "";
   const cap = caption + (sk ? (caption ? " · " : "") + sk : "");
-  return { state, rung: n, level: state === "asleep" ? "🌱 asleep" : level, goal, pct, fill, label, caption: cap, skill: sk,
+  // #267: the rung just reached unlocked a toy -- the level-up says so
+  const u = s.unlock;
+  const newToy = u && u.rung === n && n > 0 && !u.late && Array.isArray(u.toys) && u.toys.length
+    ? unlockText({ toys: u.toys.map((t) => (t && t.kind) || t) }) : "";
+  return { state, rung: n, level: state === "asleep" ? "🌱 asleep" : level, goal, pct, fill, label, caption: cap, skill: sk, newToy,
            title: "self (#161): " + level + " · " + label + " " + goal + (cap ? " · " + cap : "") };
+}
+
+/** The level-up moment's caption (the exp bar's gold): the level, and the new toy it unlocked (#267). */
+function levelUpText(x) {
+  return "⬆ level up: " + ((x && x.level) || "") + (x && x.newToy ? " · " + x.newToy : "");
+}
+
+// #267: toys unlock as self grows (membrane/toy_unlocks.py ICONS)
+const TOY_ICONS = { body: "🫧", fast: "⚡", slow: "🐢", tower: "🗼", burst: "✦", die: "🎲", drift: "〰️",
+                    ball: "⚽", mirror: "🪞", blocks: "🧱", rattle: "🔊" };
+/** "new toy: 🪞 mirror" / "new toys: 🗼 tower, ⚽ ball" from an unlock line. */
+function unlockText(r) {
+  const ks = ((r && r.toys) || []).map(String);
+  return (ks.length === 1 ? "new toy: " : "new toys: ") + ks.map((k) => (TOY_ICONS[k] ? TOY_ICONS[k] + " " : "") + k).join(", ");
 }
 
 const XP_CSS = `
@@ -635,7 +653,7 @@ function paintExp(el, x) {
   const sk = box.querySelector(".xp-sk");                  // #249: the skill at a glance
   if (sk) { sk.textContent = x.skill || ""; sk.hidden = !x.skill; }
   const sub = x.skill ? x.caption.replace(new RegExp("( · )?" + x.skill.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$"), "") : x.caption;
-  box.querySelector(".xp-sub").textContent = lvup ? "⬆ level up: " + x.level
+  box.querySelector(".xp-sub").textContent = lvup ? levelUpText(x)
     : (x.state === "asleep" ? "" : x.goal + (sub ? " · " + sub : ""));
 }
 
@@ -664,6 +682,7 @@ function selfLine(r) {
   if (k === "rung") return "rung " + r.rung + " passed · " + (SELF_RUNGS[r.rung] || "");
   if (k === "error") return "error" + (r.act ? " in " + r.act : "") + (r.why ? ": " + r.why : "");
   if (k === "birth") return "born";
+  if (k === "unlock") return unlockText(r) + (r.rung ? " (rung " + r.rung + " passed)" : " (born with it)");
   if (k === "audit") return "audit " + (r.phase || "") + (r.eid ? " on " + shortEid(r.eid) : "");
   return String(k || "?");
 }
@@ -695,7 +714,7 @@ const TOY_PLAY = {
 };
 function toyActions(t) {
   t = t || {};
-  if (!t.toy) return [];
+  if (!t.toy || t.locked) return [];
   if (t.kind === "tower") {
     if (!t.block) return [];
     return [{ action: "knock", arg: t.block, label: "knock", title: "knock block " + t.block + " (and the ones above it) down" },
@@ -780,7 +799,7 @@ function selfCardHtml(st) {
 // claim the record doesn't hold. No chart library: inline SVG and divs.
 const SHEET_SECTIONS = [
   ["attributes", "Attributes"], ["quest", "Quest log"], ["achievements", "Achievements"],
-  ["growth", "Growth curve"], ["time", "Where the time went"], ["inventory", "Inventory"],
+  ["growth", "Growth curve"], ["time", "Where the time went"], ["inventory", "Inventory"], ["toys", "Toys"],
   ["relationships", "Relationships"]];
 const SHEET_OPEN = { attributes: true, quest: true };     // the defaults; a remembered choice wins
 
@@ -940,7 +959,22 @@ function sheetAchievements(s) {
   return '<table class="tbl"><thead><tr><th>rung</th><th>passed (UTC)</th><th class="num">working h</th><th class="num">skill</th></tr></thead><tbody>' +
     a.map((x) => "<tr><td><b>" + x.rung + "</b> " + escText(x.name) + (x.note ? '<div class="note">' + escText(x.note) +
       (x.earned_at ? " (earned " + escText(utcShort(x.earned_at)) + " UTC)" : "") + "</div>" : "") + "</td><td class=\"dt\">" + escText(utcShort(x.at)) +
+      (x.toys && x.toys.length ? '<div class="note">' + escText(unlockText(x)) + "</div>" : "") +
       '</td><td class="num">' + hoursText(x.working_h) + '</td><td class="num">' + fixed2(x.skill) + "</td></tr>").join("") + "</tbody></table>";
+}
+
+/** #267: every toybox kind -- unlocked (yours, or not added), kept from
+ *  before the unlocks, or locked: the rung that unlocks it and its lesson. */
+function sheetToys(s) {
+  const rows = s.toys || [];
+  if (!rows.length) return '<p class="muted">nothing yet</p>';
+  const st = (r) => r.state === "locked" ? "🔒 rung " + r.rung
+    : r.state === "grandfathered" ? "kept (unlocks at rung " + r.rung + ")"
+    : !r.built ? "unlocked · not built yet" : r.have ? "yours" : "unlocked · not added";
+  return '<p class="note">toys unlock as self passes rungs; each one is the next lesson</p><ul class="toys">' + rows.map((r) =>
+    '<li class="tu ' + escAttr(r.state) + '"><span class="ti" aria-hidden="true">' + escText(r.icon || "") + "</span><b>" + escText(r.kind) + "</b> " +
+    '<span class="muted">' + escText(st(r)) + (r.at && r.state === "unlocked" && r.rung ? " · " + escText(utcShort(r.at)) + " UTC" : "") + "</span>" +
+    '<div class="note">' + escText(r.teaches || "") + "</div></li>").join("") + "</ul>";
 }
 
 function sheetGrowth(s) {
@@ -1049,10 +1083,11 @@ function selfSheetHtml(s, open, nowS) {
     "</div></div>"];
   if (s.empty) out.push('<p class="muted">self has not been switched on yet: choose a rung in 🌱 to wake it.</p>');
   const body = { attributes: sheetAttrs, quest: sheetQuest, achievements: sheetAchievements, growth: sheetGrowth,
-                 time: sheetTime, inventory: sheetInventory, relationships: sheetRelationships };
+                 time: sheetTime, inventory: sheetInventory, toys: sheetToys, relationships: sheetRelationships };
   const hint = { attributes: "", quest: s.quest && s.quest.rung != null ? "rung " + s.quest.rung : "",
                  achievements: (s.achievements || []).length + " passed", time: hoursText((s.time || {}).working_h) + " working",
-                 inventory: (s.inventory || []).length + " toys", relationships: ((s.relationships || {}).others || []).length + " met" };
+                 inventory: (s.inventory || []).length + " toys",
+                 toys: (s.toys || []).filter((r) => r.state !== "locked").length + " of " + (s.toys || []).length + " unlocked", relationships: ((s.relationships || {}).others || []).length + " met" };
   for (const [key, title] of SHEET_SECTIONS) {
     const isOpen = key in open ? !!open[key] : !!SHEET_OPEN[key];
     out.push(sheetSection(key, title, isOpen, body[key](s), escText(hint[key] || "")));
@@ -1070,6 +1105,10 @@ const BADGE_S = 6;                                     // a change's badge shows
 function toyGlyph(t) {
   t = t || {};
   const r = t.reading || {}, v = r.value, nm = t.name || "toy", k = t.kind;
+  if (t.locked) {                                      // #267: a locked toy -- its icon, greyed by the dock
+    return { html: escText(t.icon || TOY_ICONS[k] || "?"),
+             label: k + ", locked: unlocks when self passes rung " + t.unlock_rung + (t.teaches ? ": " + t.teaches : "") };
+  }
   if (k === "tower") {
     const b = Array.isArray(r.blocks) ? r.blocks : [];
     const up = b.filter(Boolean).length;
@@ -1108,6 +1147,7 @@ function toyBadge(t, s) {
 
 function toyDockItem(t) {
   const g = toyGlyph(t);
+  if (t && t.locked) return { name: t.name || "", kind: t.kind || "", glyph: g.html, health: "locked", label: g.label, badge: null, locked: true };
   return { name: (t && t.name) || "", kind: (t && t.kind) || "", glyph: g.html, health: HEALTH_DOT[t && t.health] || "idle",
            label: g.label + " · health " + ((t && t.health) || "unknown"), badge: toyBadge(t) };
 }
@@ -1115,10 +1155,11 @@ function toyDockItem(t) {
 function toyDockHtml(toys) {
   return (toys || []).map((t) => {
     const it = toyDockItem(t);
-    return '<li class="dk" data-dock-li="' + escAttr(it.name) + '"><button type="button" class="dkb" data-dock-toy="' + escAttr(it.name) +
+    return '<li class="dk' + (it.locked ? " locked" : "") + '" data-dock-li="' + escAttr(it.name) + '"><button type="button" class="dkb" data-dock-toy="' + escAttr(it.name) +
       '" aria-label="' + escAttr(it.label) + '" aria-haspopup="dialog" aria-expanded="false">' +
       '<span class="g g-' + escAttr(it.kind) + '">' + it.glyph + '</span><span class="hd ' + it.health + '"></span>' +
-      '<span class="bdg' + (it.badge && it.badge.fresh ? " fresh" : "") + '">' + escText(it.badge ? it.badge.text : "") + "</span></button></li>";
+      '<span class="bdg' + (it.badge && it.badge.fresh ? " fresh" : "") + '">' + escText(it.badge ? it.badge.text : "") + "</span>" +
+      (it.locked ? '<span class="lk" aria-hidden="true">🔒</span>' : "") + "</button></li>";
   }).join("");
 }
 
@@ -1126,12 +1167,18 @@ function toyDockHtml(toys) {
  *  {ok, text}, shown inline. */
 function toyPopoverHtml(t, res) {
   t = t || {};
+  if (t.locked) {                                      // #267: what it is, when it comes, what it will teach
+    return '<div class="ph"><b>' + escText(t.icon || TOY_ICONS[t.kind] || "") + " " + escText(t.kind || "") + '</b> <span class="muted">🔒 locked</span></div>' +
+      "<p>unlocks when self passes rung " + escText(t.unlock_rung) + (t.rung_name ? " (" + escText(t.rung_name) + ")" : "") + "</p>" +
+      (t.teaches ? '<p class="pg">' + escText(t.teaches) + "</p>" : "");
+  }
   const g = toyGlyph(t), b = toyBadge(t);
   const out = ['<div class="ph"><span class="dot ' + (HEALTH_DOT[t.health] || "idle") + '"></span><b>' + escText(t.name) + '</b> <span class="muted">' +
     escText(t.kind || "") + " · " + escText(t.health || "") + "</span></div>",
     '<p class="pg">' + escText(g.label) + "</p>",
     "<p>" + (t.looks || 0) + " looks · error " + fixed2(t.error_early) + " → " + fixed2(t.error_late) + ' <span class="muted">(earlier → later half)</span></p>',
     "<p>changes: " + changesText(t.changes) + "</p>",
+    t.grandfathered ? '<p class="muted">kept from before the unlocks (its kind unlocks at rung ' + escText(t.unlock_rung) + ")</p>" : "",
     "<p>" + (b ? "last change by " + escText(b.who) + " " + agoText(b.age) + " ago" + (t.last.what ? ' <span class="muted">(' + escText(t.last.what) + ")</span>" : "")
       : '<span class="muted">no change yet</span>') + "</p>"];
   let acts = [];
@@ -1362,6 +1409,7 @@ function jsShow(v) {
 const AiPanelLogic = { jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
                        attrBar, hoursText, curveGeom, curveSvg, timeParts, selfSheetHtml, SHEET_SECTIONS, SHEET_OPEN,
                        toyGlyph, toyBadge, toyDockItem, toyDockHtml, toyPopoverHtml, BADGE_S, skillStatHtml, skillSigned,
+                       levelUpText, unlockText, sheetToys, TOY_ICONS,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
@@ -2853,7 +2901,8 @@ function definePanel() {
     }
     async _toyState() {
       const r = await this._api(SERVE + "/membrane/toybox/state").catch(() => null);
-      return r && r.ok && r.data && Array.isArray(r.data.toys) ? r.data.toys : null;
+      // #267: the next locked toys ride along, greyed (toyDockItem)
+      return r && r.ok && r.data && Array.isArray(r.data.toys) ? r.data.toys.concat(Array.isArray(r.data.locked) ? r.data.locked : []) : null;
     }
 
     async _selfRecent(n) {

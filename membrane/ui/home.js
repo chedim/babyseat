@@ -90,6 +90,14 @@ const BRAIN_RUNGS = { 0: "sleep and wake", 1: "feel itself", 2: "first reach", 3
   5: "notice the world changed", 6: "meet an other", 7: "take turns", 8: "understand an other",
   9: "recognize itself", 10: "change itself", 11: "speak" };   // #258: the ladder flip
 const bnum = (x) => String(Math.round(Number(x) * 100) / 100);
+// #267: toys unlock as self grows (membrane/toy_unlocks.py ICONS)
+const UNLOCK_ICONS = { body: "🫧", fast: "⚡", slow: "🐢", tower: "🗼", burst: "✦", die: "🎲", drift: "〰️",
+                       ball: "⚽", mirror: "🪞", blocks: "🧱", rattle: "🔊" };
+/** "new toy: 🪞 mirror" / "new toys: 🗼 tower, ⚽ ball" from an unlock line. */
+function unlockText(r) {
+  const ks = ((r && r.toys) || []).map(String);
+  return (ks.length === 1 ? "new toy: " : "new toys: ") + ks.map((k) => (UNLOCK_ICONS[k] ? UNLOCK_ICONS[k] + " " : "") + k).join(", ");
+}
 
 /** One record line as a plain sentence for a stranger. Measured, never
  *  narrated: a number appears only when the line carries it. */
@@ -119,6 +127,7 @@ function brainCaption(r, me) {
     + (r.gap != null ? " — it landed " + Number(r.gap).toFixed(3) + " from where it expected" : "");
   if (k === "error") return "self hit an error" + (r.act ? " in " + r.act : "") + (r.why ? ": " + r.why : "");
   if (k === "birth") return "self was born";
+  if (k === "unlock") return unlockText(r) + (r.rung ? " — self passed rung " + r.rung : " — self's first toys");
   if (k === "audit") return "self is auditing " + brainLabel(r.eid, me) + (r.phase ? " (" + r.phase + ")" : "");
   return "self: " + String(k || "?");
 }
@@ -648,7 +657,7 @@ const LS_VOICE = "membrane.home.voice";
 const IS_CHROME = typeof navigator !== "undefined" && /Chrome\//.test(navigator.userAgent || "") && !/Firefox\//.test(navigator.userAgent || "");
 
 const HomeLogic = { cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep,
-  brainLabel, brainCaption, brainKey, brainFresh, actableLine, ACT_FRESH_S, brainTrail, trailAlpha, frameRadius, selfFrame, frameDistance, dampTo,
+  brainLabel, brainCaption, unlockText, brainKey, brainFresh, actableLine, ACT_FRESH_S, brainTrail, trailAlpha, frameRadius, selfFrame, frameDistance, dampTo,
   freshLook, followsNow, followRates, SELF_HOLD_MS, lookAngles, selfCamAngles,
   followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
@@ -980,6 +989,16 @@ const HSTYLE = `
   .dkpop .pres { padding:3px 6px; border-radius:6px; overflow-wrap:anywhere; background:color-mix(in srgb, #2e9d5b 22%, transparent); }
   .dkpop .pres.bad { background:color-mix(in srgb, var(--error-color,#db4437) 22%, transparent); }
   .dkpop .pres:empty { display:none; }
+  /* #267: a locked toy -- greyed, a lock on it; its tooltip says when it unlocks */
+  .toydock .dk.locked .dkb { border-style:dashed; background:color-mix(in srgb, var(--card-background-color,#111) 55%, transparent); }
+  .toydock .dk.locked .g { filter:grayscale(1); opacity:.45; }
+  .toydock .lk { position:absolute; right:2px; bottom:1px; font-size:10px; line-height:1; pointer-events:none; }
+  .toydock .hd.locked { display:none; }
+  .selfpanel .toys { list-style:none; padding:0; margin:4px 0; }
+  .selfpanel .toys .tu { padding:3px 0; }
+  .selfpanel .toys .ti { display:inline-block; width:1.6em; }
+  .selfpanel .toys .tu.locked .ti { filter:grayscale(1); opacity:.5; }
+  .selfpanel .toys .tu.locked b { opacity:.6; }
   @media (prefers-reduced-motion: reduce) { .toydock .bdg { transition:none; } }
   @media (max-width: 760px) {
     .toydock { top:calc(26vh + 56px); top:calc(26dvh + 56px); max-height:calc(74dvh - 140px); }
@@ -1356,6 +1375,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           else if (r.kind === "shift") v.selfShift(r.eid, at = await v.placeOf(r.eid).catch(() => null), brainLabel(r.eid, me));
           else if (r.kind === "wait") v.selfWait();
           else if (r.kind === "rung") v.selfLevelUp(r.rung);
+          else if (r.kind === "unlock" && !r.late && r.rung && v.selfLevelUp) v.selfLevelUp(r.rung, unlockText(r));   // #267: the gold ring names the new toy
           // #257: the amoeba's body acts it out (fresh lines only, never on a page's first read)
           if (!first && v.selfActs && actableLine(r, newest)) v.selfActs(r, at);
         }
