@@ -1004,6 +1004,9 @@ const HSTYLE = `
   .dkpop .pres { padding:3px 6px; border-radius:6px; overflow-wrap:anywhere; background:color-mix(in srgb, #2e9d5b 22%, transparent); }
   .dkpop .pres.bad { background:color-mix(in srgb, var(--error-color,#db4437) 22%, transparent); }
   .dkpop .pres:empty { display:none; }
+  .dkpop .lv { font-weight:600; }                    /* #276: how well self has learned it */
+  .dkpop .lv.mastered { color:#2e9d5b; }
+  .dkpop .lv.worse, .dkpop .lv.lost { color:var(--error-color,#db4437); }
   /* #267: a locked toy -- greyed, a lock on it; its tooltip says when it unlocks */
   .toydock .dk.locked .dkb { border-style:dashed; background:color-mix(in srgb, var(--card-background-color,#111) 55%, transparent); }
   .toydock .dk.locked .g { filter:grayscale(1); opacity:.45; }

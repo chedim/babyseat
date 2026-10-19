@@ -1173,6 +1173,16 @@ function toyDockHtml(toys) {
 
 /** The popover: its stats and what you can do with it. res: the last poke's
  *  {ok, text}, shown inline. */
+// #276: how well self has learned the toy -- the seat's verdict (self_sheet.learning)
+const LEARN_SHORT = { new: "too new", mastered: "mastered", worse: "getting worse", learning: "learning", rate: "rate only", lost: "not understood" };
+function learningHtml(t) {
+  const l = t && t.learning;
+  if (!l || !l.verdict) return "";
+  const bl = Array.isArray(t.blocks) && t.blocks.length
+    ? '<p class="muted">blocks: ' + t.blocks.map((b) => escText(b.block) + " " + escText(LEARN_SHORT[b.verdict] || b.verdict)).join(" · ") + "</p>" : "";
+  return '<p class="lv ' + escAttr(l.verdict) + '">' + escText(l.text || LEARN_SHORT[l.verdict] || l.verdict) + "</p>" + bl;
+}
+
 function toyPopoverHtml(t, res) {
   t = t || {};
   if (t.locked) {                                      // #267: what it is, when it comes, what it will teach
@@ -1185,6 +1195,7 @@ function toyPopoverHtml(t, res) {
     escText(t.kind || "") + " · " + escText(t.health || "") + "</span></div>",
     '<p class="pg">' + escText(g.label) + "</p>",
     "<p>" + (t.looks || 0) + " looks · error " + fixed2(t.error_early) + " → " + fixed2(t.error_late) + ' <span class="muted">(earlier → later half)</span></p>',
+    learningHtml(t),
     "<p>changes: " + changesText(t.changes) + "</p>",
     t.grandfathered ? '<p class="muted">kept from before the unlocks (its kind unlocks at rung ' + escText(t.unlock_rung) + ")</p>" : "",
     "<p>" + (b ? "last change by " + escText(b.who) + " " + agoText(b.age) + " ago" + (t.last.what ? ' <span class="muted">(' + escText(t.last.what) + ")</span>" : "")
