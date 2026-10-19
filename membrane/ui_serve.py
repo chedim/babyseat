@@ -208,11 +208,39 @@ def _json(handler, obj, code: int = 200) -> None:
     handler.wfile.write(b)
 
 
+def ui_build_id(root: Path = UI_DIR) -> str:
+    """#243: the page code's fingerprint -- a hash over every file under the
+    UI folder (name + bytes). A restart into new code changes it, and the
+    open tab (reused now, not reopened) reloads itself when it sees that."""
+    import hashlib
+    h = hashlib.sha256()
+    for p in sorted(root.rglob("*")):
+        if p.is_file():
+            h.update(p.relative_to(root).as_posix().encode() + b"\0")
+            h.update(p.read_bytes() + b"\0")
+    return h.hexdigest()[:16]
+
+
+_BUILD: list[str] = []
+_BUILD_LOCK = threading.Lock()
+
+
+def build_id() -> str:
+    """The build this boot serves (computed once: a re-exec is a new boot)."""
+    with _BUILD_LOCK:
+        if not _BUILD:
+            try:
+                _BUILD.append(ui_build_id(UI_DIR))
+            except OSError:
+                _BUILD.append("")
+        return _BUILD[0]
+
+
 def conf() -> dict:
     from . import naming as NM
     st = S.load()
     name = NM.current()
-    return {"serve_ok": True, "serve_url": "standalone", "standalone": True,
+    return {"serve_ok": True, "serve_url": "standalone", "standalone": True, "build": build_id(),
             "name": name, "named": bool(st.get("name")), "aliases": list(st.get("aliases") or []),
             "stt": "server" if str(st.get("stt") or "").startswith("http") else "browser",
             "voice_out": bool(st.get("voice_out")), "language": st.get("language") or "en"}

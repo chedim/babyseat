@@ -1907,6 +1907,7 @@ def main() -> None:
             _reexec = _was_reexec()        # read + cleared on every boot (#243)
             if args.standalone:            # STANDALONE MODE: the UI on the serve port (ui_serve.py)
                 from . import ui_serve as _UIS
+                _UIS.build_id()            # the page code this boot serves, fixed now (#243)
                 _ui_url = _UIS.browser_url(surf_host, serve_port or 4096)
                 print(f"[seat] membrane UI: {_ui_url}", file=sys.stderr)
                 if (not _reexec and not args.no_browser

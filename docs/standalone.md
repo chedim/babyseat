@@ -31,6 +31,13 @@ A restart the seat asked for (`presence.restart`) re-execs with
 `MEMBRANE_REEXEC=1` and never opens a tab: the open page reconnects and resyncs on
 its own. `--no-browser` or `MEMBRANE_NO_BROWSER=1` turns it off entirely.
 
+**New page code after a restart.** `/ui/conf` carries `build`, a hash of the files
+under `membrane/ui/` taken at boot. On every reconnect the open tab compares it with
+the build it loaded and, if the seat came back with new code, reloads itself once
+(the open chat, the 👶 panel and the camera mode are remembered in the browser). With
+unsent text in the chat box it shows a "new version · click to reload" chip instead,
+and it never reloads twice for the same build within a minute.
+
 Ollama needs one chat model and one embedding model, e.g.
 `ollama pull qwen3:8b && ollama pull mxbai-embed-large` (a cloud model Ollama serves
 works for chat too).
