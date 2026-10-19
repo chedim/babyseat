@@ -753,7 +753,7 @@ class TestSheetHtml(unittest.TestCase):
 
     def test_the_sections_in_order_as_collapsibles(self):
         order = ["Attributes", "Quest log", "Achievements", "Growth curve", "Where the time went",
-                 "Inventory", "Relationships"]
+                 "Inventory", "Toys", "Relationships"]                          # #267: Toys
         at = [self.html.index(">" + t + "<") for t in order]
         self.assertEqual(at, sorted(at))
         self.assertEqual(self.html.count("<details"), len(order))

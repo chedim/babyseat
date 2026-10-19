@@ -207,6 +207,12 @@ open or close is remembered per browser.
   error on the earlier half of its looks against the later half (falling
   means it is learning), and who changed it (the toybox's ground truth: self,
   world, the model, people). Play happens in the dock (below).
+- **Toys:** every toybox kind, unlocked or locked (#267, see
+  [Toys unlock as self grows](#toys-unlock-as-self-grows)): its icon, the rung
+  that unlocks it, what it will teach, and whether the seat has one (`yours`,
+  `unlocked · not added`, `unlocked · not built yet`, `kept` for a toy from
+  before its unlock, `🔒 rung N`). Each achievement also names the toys its
+  pass unlocked.
 - **Relationships:** the others it has met: the people it sent lines to and
   looked for answers from (lines, looks, how often they replied, its Brier
   error on them: 0 is perfectly predictable, 0.25 a coin), the seat's model
@@ -245,7 +251,7 @@ route; the HA relay forwards it on GET only):
 ```bash
 curl -s http://127.0.0.1:4096/membrane/self/sheet | python3 -m json.tool | head -40
 # {"header": {...}, "attributes": [...], "quest": {...}, "achievements": [...],
-#  "growth": {...}, "time": {...}, "inventory": [...], "relationships": {...}}
+#  "growth": {...}, "time": {...}, "inventory": [...], "relationships": {...}, "toys": [...]}
 curl -s 'http://127.0.0.1:4096/membrane/self/recent?n=30'   # the activity: {"lines": [...]}, newest first, at most 100
 ```
 
@@ -277,6 +283,10 @@ open (#249). This is where you play with self.
   alice)`). Esc closes it.
 - **On a phone** the dock folds into one 🧸 button under the 👶 tab; tap it to
   expand (remembered per browser).
+- **Locked toys** (#267): below the toys, the next two locked ones, greyed
+  with a 🔒. The tooltip and the popover say `unlocks when self passes rung
+  N: <what it will teach>`. They offer no play. A toy kept from before its
+  unlock says so in its popover.
 
 The icons are keyboard-reachable and labelled, and the field's labels keep
 clear of the dock. It polls a light route every 3 s while the page is
@@ -286,7 +296,10 @@ visible (cached 2 s, read-only, JWT-gated, forwarded by the HA relay on GET):
 curl -s http://127.0.0.1:4096/membrane/toybox/state
 # {"toys": [{"name": "toy:tower", "kind": "tower", "reading": {"blocks": [true, true, false, false, false]},
 #            "health": "ok", "looks": 48, "error_early": 0.1, "error_late": 0.34,
-#            "changes": {"self": 5, "world": 0, "alice": 2}, "last": {"by": "alice", "what": "topple", "age_s": 4.2}}, ...]}
+#            "changes": {"self": 5, "world": 0, "alice": 2}, "last": {"by": "alice", "what": "topple", "age_s": 4.2},
+#            "unlock_rung": 3, "grandfathered": false}, ...],
+#  "locked": [{"name": "locked:burst", "kind": "burst", "locked": true, "icon": "✦", "unlock_rung": 4,
+#              "rung_name": "patience", "teaches": "busy windows and still ones: when to look"}, ...]}
 ```
 
 **Toys** in the sheet's inventory are `toy:` and `cradle:` things (listed even
@@ -327,6 +340,7 @@ curl -s http://127.0.0.1:4096/membrane/seat \
 | `rung7` | #258, rung 7 at the current other: `pushes` (its timed pushes), `checked` (those whose reply check came, over the last 100), `bins` (per `spoke_age` bin `0-2m` / `2-10m` / `10-30m` / `30m+`: `pushes`, `replied`, `rate`), `best` (the window it believes best); over the window the test reads (`window`, up to 100): `share` (pushes in the believed-best window) vs `chance` (the share of the waiting time the other spent there) and `z`; `reply_rate` vs `blind_rate` (what a timing-blind push would have got), `payoff` (the difference) and `payoff_z`. The 🌱 tooltip shows it as `rung 7: 24 timed lines checked, best window 0-2m, in it 0.42 vs chance 0.17, replies +0.12 over timing-blind` |
 | `rung8` | rung 8 (rung 7 until #258) at the current other: `asked` (pushes that asked the model), `checked` (those whose reply check came), `paired` (those whose check carried the model's answer), `pair_rate` = paired / checked; over the reply checks the test reads (`checks`, up to 100): `brier_self` (self's own `p_self`), `brier_mix` (what self passes on: `p_self` with the advisor heard), `brier_rate` (the running rate it must beat by 8%), `brier_model` (the model alone, on the checks it answered); `advisor_weight` (how much self listens to the current model, earned on its record, 0 for a new model) and `advisor_model` (its id); `base_rate` (the all-time rate the model is told) and `recent_rate` (the share of the last 6 reply checks answered, same prior, also told). The 🌱 chooser's tooltip shows it as `rung 8: 5 of 8 asked pushes paired, Brier self 0.25 vs rate 0.26, model alone 0.37 (weight 0.00), base rate 0.55` |
 | `toys` | #230: each toy (`toy:` / `cradle:` things, words with a getter) with `getter` (it has one), `reads` and `answered` (of its last 10 reaches), and `health`: `ok`, `empty` (no answer on its last reads), `unread`, or `no getter`; a built-in toy also carries `toy` (its toybox name) and, for a tower block, `block` (#244: the play buttons' target) |
+| `unlock` | #267: the newest unlock line, `{rung, ts, late, toys: [{kind, icon}]}` (or `null`); the exp bar's level-up caption names its toy when its rung is the one just reached |
 | `off_field` | #244: of self's last 200 looks, `looks` (how many), `off` (how many landed on a thing with no live field point; `null` when the seat has no field) and `things` (those things, most looked-at first). The home view draws those looks as ghosts |
 | `curiosity` | from rung 2 on: the (up to) three things whose prediction is improving fastest, best first, each with `progress` (its error over the 30 ordinary looks before the latest 30, minus its error over the latest 30) and `error` (the latest 30's Brier error); each window's error is the mean of its middle half, and a look spanning a restart or stall is left out (#259). It is what self's curiosity reads when it chooses a reach (below); empty until a thing has 60 ordinary looks |
 
@@ -648,6 +662,57 @@ leaves it as it is. Others change it by playing (below).
 game the getters" below warns against. It is deliberate, labelled, and its log
 says `by: self`, so it is a known test case, not a fake mark.
 
+### Toys unlock as self grows
+
+Toys are the operator's reward for growing self, and each unlock is also the
+next lesson (#267, `membrane/toy_unlocks.py`). Every kind has an unlock rung:
+
+| unlocks | kinds | what they teach |
+|---|---|---|
+| birth | 🫧 `body`, ⚡ `fast`, 🐢 `slow` | its own body; a world it doesn't cause; long runs of the same answer |
+| rung 3 | 🗼 `tower` | self's first act on the world |
+| rung 4 | ✦ `burst` | when to look |
+| rung 5 | 🎲 `die`, 〰️ `drift` | noticing the world changed |
+| rung 6 | ⚽ `ball` (#264) | taking turns |
+| rung 8 | 🪞 `mirror` | recognizing itself (rung 9) |
+| rung 9 | 🧱 `blocks` | changing itself (rung 10) |
+| rung 10 | 🔊 `rattle` | its first voice (rung 11, speak) |
+
+- **Passing a rung is the ladder's own rule** (`self_loop._passed`): a voided
+  pass (#254) unlocks nothing, and a pass above rung 6 counts only with
+  `"ladder": 2` (#258).
+- **On a pass that unlocks something** the loop writes one line to self's
+  record, once per rung, right after the rungs open:
+  `{"kind": "unlock", "rung": 8, "toys": ["mirror"]}` (`added`: the toys it
+  switched on; `late`: an upgraded seat catching up on an old pass, which the
+  page doesn't celebrate). Birth is no pass: body, fast and slow are open
+  from the start, with no line, and you add them as before. The unlocked built-in
+  kinds are switched on under their default names (`toy:<kind>`) once, when
+  the line is written. A kind the seat already has, by any name, is left
+  alone, and a toy you remove later is not brought back. Only the seat's own
+  toybox is provisioned (the record and the toybox in the same data dir).
+- **The level-up says so:** the exp bar's gold moment reads `⬆ level up: Lv 8
+  · understand an other · new toy: 🪞 mirror`, the home view's gold ring
+  round the amoeba names the toy too, and the activity feed and the brain's
+  caption show the line (`new toy: 🪞 mirror (rung 8 passed)`). The sheet's
+  Toys section and achievements keep it.
+- **No toy ever disappears.** A toy whose kind is still locked stays: it was
+  there before (grandfathered), and the dock and the sheet mark it kept.
+  Before self is born nothing is locked: the toybox is your bench, and
+  whatever is on it at birth is kept.
+- **Adding a locked kind is refused**, by the CLI and by the `toybox`
+  object, with the rung that unlocks it: `tower 🗼 is locked: it unlocks when
+  self passes rung 3 (tell things apart) -- self topples and lifts its
+  blocks: its first act on the world`. Any unlocked kind can still be added.
+  `migrate` replaces existing toys whatever their rung.
+- **`mirror`, `blocks` and `rattle` are placeholders:** a name, an icon, an
+  unlock rung and a line of what each will teach. Their mechanics are built
+  with their rungs, so they are never switched on, never poked, and adding
+  one is refused (`locked`, or `unlocked but not built yet`). Their unlock is
+  still announced.
+- **An unlock never affects grading.** No rung's test reads an unlock line
+  or a toy's unlock rung; each rung is passed by its own test.
+
 ### Adding one
 
 From the CLI (the project's data dir):
@@ -660,7 +725,8 @@ membrane toybox reset toy:tower      # same params and seed; the old run is arch
 membrane toybox remove toy:d6        # the entities go; the history is archived
 ```
 
-`add` and `remove` change the entity store, so the CLI refuses them while the
+`add` refuses a kind self hasn't unlocked yet (above). `add` and `remove`
+change the entity store, so the CLI refuses them while the
 seat is running. Use the seat's model then: the `toybox` object answers
 `add(spec)`, `list()`, `remove(name)` and `reset(name)`, for example
 `exec(action='call', object='toybox', method='add', args={'spec': 'tower n=5'})`.

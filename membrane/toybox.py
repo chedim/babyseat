@@ -340,7 +340,8 @@ def poke(name: str, action: str, arg=None, by: str = "", now: float | None = Non
     name, arg = _resolve(name, arg)
     arg = None if arg is None or str(arg).strip() == "" else str(arg).strip().lower()
     if not _path(name).exists():
-        return {"ok": False, "error": f"no toy named {name!r} (membrane toybox list)"}
+        from . import toy_unlocks as _TU                 # #267: a placeholder or a locked toy
+        return {"ok": False, "error": _TU.poke_refusal(name) or f"no toy named {name!r} (membrane toybox list)"}
     with _locked(name):
         st = _load(name)
         k = st["kind"]
@@ -577,13 +578,19 @@ def place(srv, eid: str, text: str | None = None):
 
 
 def add(srv, kind: str, name: str | None = None, params: dict | None = None,
-        now: float | None = None) -> dict:
-    """Switch a toy on: its state, then its entities (a tower: one per block too)."""
+        now: float | None = None, locked_ok: bool = False) -> dict:
+    """Switch a toy on: its state, then its entities (a tower: one per block too).
+    A kind self has not unlocked yet is refused (#267, toy_unlocks; migrate,
+    which only replaces toys the seat already has, passes locked_ok)."""
     from .entities import CLASS_COMPONENT, entity_id
     est = getattr(srv, "entity_store", None)
     if est is None:
         return {"ok": False, "error": "the entity layer is off"}
     kind = str(kind or "").strip().lower()
+    from . import toy_unlocks as _TU
+    why = None if locked_ok and kind not in _TU.PLACEHOLDERS else _TU.refusal(srv, kind)
+    if why:
+        return {"ok": False, "error": why}
     if kind not in KINDS:
         return {"ok": False, "error": f"no toy kind {kind!r}; the kit: {', '.join(KINDS)}"}
     name = str(name or f"toy:{kind}").strip().lower()
@@ -874,7 +881,7 @@ def migrate(srv, plan: list[dict]) -> list[str]:
     est.save()
     for r in plan:
         if r["action"] == "replace":
-            out = add(srv, r["kind"], name=r["name"], params=r["params"])
+            out = add(srv, r["kind"], name=r["name"], params=r["params"], locked_ok=True)
             done.append(f"{r['name']} -> {r['kind']}: " + ("ok" if out["ok"] else out["error"]))
     return done
 
@@ -896,6 +903,7 @@ def _offline_seat():
     from .settings import data_dir
     srv = types.SimpleNamespace()
     srv.entity_store = EntityStore(path=str(data_dir() / "entities.json"), shared=False)
+    srv._models_path = str(data_dir() / "models.json")    # #267: self's record (what is unlocked)
     return srv
 
 
@@ -908,7 +916,8 @@ def cli_main(argv: list[str]) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list", help="the toys, their params and their change counts")
     a = sub.add_parser("add", help="switch a toy on")
-    a.add_argument("kind", choices=sorted(KINDS))
+    from .toy_unlocks import PLACEHOLDERS
+    a.add_argument("kind", choices=sorted(set(KINDS) | set(PLACEHOLDERS)))  # a placeholder: refused by add, plainly
     a.add_argument("--name", default=None, help="its name (default toy:<kind>)")
     a.add_argument("--param", action="append", default=[], metavar="K=V", help="a param (repeatable); seed=N too")
     r = sub.add_parser("remove", help="switch a toy off (its history is archived, not deleted)")

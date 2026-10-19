@@ -291,8 +291,8 @@ def test_a_seat_restart_keeps_the_toys_and_their_state(_data):
 
 def test_tower_through_selfs_real_reach_path(monkeypatch):
     srv = _seat()
+    TB.add(srv, "tower", params={"n": 5})        # #267: on the bench before birth (it unlocks at rung 3)
     SL.set_limit(srv, 1)
-    TB.add(srv, "tower", params={"n": 5})
     t = 1000.0
     for i in range(SL.RUNG1_CYCLES * 2):                          # rung 1 first: the ladder is climbed in order
         SL.cycle(srv, now=t)

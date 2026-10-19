@@ -1350,9 +1350,17 @@ def cycle(srv, now: float | None = None) -> dict | None:
     if _available(srv, 6):
         _meet(srv, str(n), now)
     _open_rungs(srv)
+    _unlock_toys(srv)
     _show(srv, ent, pos, c, rec)
     rt["wake"].set()                      # my state changed: that is what wakes the next try
     return rec
+
+
+def _unlock_toys(srv) -> None:
+    """#267: a pass that unlocks toys writes its unlock line and switches them
+    on (toy_unlocks.sync -- after the rungs open; no rung's test reads it)."""
+    from . import toy_unlocks as _TU
+    _TU.sync(srv)
 
 
 def _available(srv, rung: int) -> bool:
@@ -2218,7 +2226,13 @@ def status(srv) -> dict:
             "rung7": _rung7_stats(recs),
             "rung8": _rung8_stats(recs),
             "toys": _toys(srv, recs),
+            "unlock": _latest_unlock(recs),                  # #267: the level-up's "new toy"
             "off_field": _off_field(srv, recs)}
+
+
+def _latest_unlock(recs: list[dict]) -> dict | None:
+    from . import toy_unlocks as _TU
+    return _TU.latest(recs)
 
 
 def _off_field(srv, recs: list[dict]) -> dict:
