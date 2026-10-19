@@ -1,10 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-    <stop offset="0" stop-color="#6f8cff"/><stop offset=".5" stop-color="#b07cff"/><stop offset="1" stop-color="#4fd1ff"/>
-  </linearGradient></defs>
-  <g fill="none" stroke="url(#g)" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M32 8 L54 20 L54 44 L32 56 L10 44 L10 20 Z"/>
-    <path d="M10 20 L32 32 L54 20 M32 32 L32 56" opacity=".95"/>
-    <path d="M32 8 L32 32" opacity=".35"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="58 55 430 430">
+  <!-- babyseat (formerly membrane): self, the glowing amoeba, strapped into an infant car seat -->
+  <defs>
+    <radialGradient id="amoeba" cx="42%" cy="38%" r="62%">
+      <stop offset="0" stop-color="#eafff8"/><stop offset=".35" stop-color="#5ff0c8"/><stop offset="1" stop-color="#12a884"/>
+    </radialGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="9" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <style>
+      .handle{stroke:#5a6d8f}.rocker{stroke:#2b3850}.shell{fill:#3a4a63}
+      @media (prefers-color-scheme: dark){.handle{stroke:#a9bbdc}.rocker{stroke:#6f84a8}.shell{fill:#8fa3c7}}
+    </style>
+  </defs>
+  <g transform="translate(0,-46)">
+    <path class="handle" d="M120 318A158 150 0 0 1 436 318" fill="none" stroke-width="28" stroke-linecap="round"/>
+    <path class="rocker" d="M110 452Q280 488 452 440" fill="none" stroke-width="22" stroke-linecap="round"/>
+    <path class="shell" d="M92 168C104 160 128 166 134 182C150 260 170 340 232 372C300 404 380 392 440 330C452 318 470 326 466 344C446 418 360 452 262 446C170 440 104 380 86 270C82 236 80 196 92 168Z"/>
+    <ellipse filter="url(#glow)" fill="url(#amoeba)" cx="268" cy="318" rx="92" ry="66" transform="rotate(-18 268 318)"/>
+    <path d="M196 322Q268 312 342 280" fill="none" stroke="#ffd166" stroke-width="14" stroke-linecap="round"/>
+    <rect x="254" y="298" width="30" height="24" rx="6" fill="#ffd166" transform="rotate(-14 269 310)"/>
   </g>
 </svg>
