@@ -683,7 +683,7 @@ class TestDockBall(unittest.TestCase):
         self.assertIn("on your side", g["label"])
         self.assertIn("side-other", g["html"])
         g = _js("L.toyGlyph(%s)" % json.dumps(_ball("self")))
-        self.assertIn("with self", g["label"])
+        self.assertIn("with Blurp", g["label"])
         self.assertIn("side-self", g["html"])
 
     def test_the_popover_offers_roll_it_back_only_on_your_side(self):
@@ -693,7 +693,7 @@ class TestDockBall(unittest.TestCase):
         self.assertIn('data-poke-toy="toy:ball"', h)
         h = _js("L.toyPopoverHtml(%s, null)" % json.dumps(_ball("self")))
         self.assertNotIn("data-poke-action", h)
-        self.assertIn("self has the ball", h)
+        self.assertIn("Blurp has the ball", h)
 
     def test_the_dock_html_draws_it_first_as_given(self):
         h = _js("L.toyDockHtml(%s)" % json.dumps([_ball(), {"name": "toy:die", "kind": "die", "reading": {"value": 2}}]))

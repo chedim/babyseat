@@ -46,22 +46,24 @@ import sys
 import time
 from pathlib import Path
 
+from .self_sheet import NAME as _NAME
+
 UNLOCKS = {"body": 0, "fast": 0, "slow": 0, "tower": 3, "burst": 4, "die": 5, "drift": 5,
            "ball": 6, "mirror": 8, "blocks": 9, "rattle": 10}
 ICONS = {"body": "🫧", "fast": "⚡", "slow": "🐢", "tower": "🗼", "burst": "✦", "die": "🎲", "drift": "〰️",
          "ball": "⚽", "mirror": "🪞", "blocks": "🧱", "rattle": "🔊"}
-TEACHES = {
-    "body": "changes only when self looks: its own body, the control",
-    "fast": "changes faster than self can look: none of it self's doing",
+TEACHES = {                 # read by people (the dock, the sheet): self goes by its name (#277)
+    "body": f"changes only when {_NAME} looks: its own body, the control",
+    "fast": f"changes faster than {_NAME} can look: none of it {_NAME}'s doing",
     "slow": "changes once an hour: long runs of the same answer",
-    "tower": "self topples and lifts its blocks: its first act on the world",
+    "tower": f"{_NAME} topples and lifts its blocks: its first act on the world",
     "burst": "busy windows and still ones: when to look",
     "die": "a memoryless change: surprise, and noticing the world changed",
     "drift": "a random walk on its own clock: noticing a slow change",
     "ball": "passed back and forth: taking turns",
-    "mirror": "shows self its own trace beside another's: recognizing itself (rung 9)",
-    "blocks": "pieces self can put together and take apart: changing itself (rung 10)",
-    "rattle": "makes a sound when self shakes it: its first voice (rung 11, speak)",
+    "mirror": f"shows {_NAME} its own trace beside another's: recognizing itself (rung 9)",
+    "blocks": f"pieces {_NAME} can put together and take apart: changing itself (rung 10)",
+    "rattle": f"makes a sound when {_NAME} shakes it: its first voice (rung 11, speak)",
 }
 PLACEHOLDERS = ("mirror", "blocks", "rattle")   # locked kinds with no mechanics yet
 NEXT_LOCKED = 2             # the dock shows this many locked toys (the next ones), so it stays tidy on a phone
@@ -110,7 +112,7 @@ def refusal(srv, kind: str) -> str | None:
     recs = _recs(srv)
     n = rung_of(kind)
     if born(recs) and kind in UNLOCKS and n not in SL._passed(recs):
-        return (f"{kind} {ICONS.get(kind, '')} is locked: it unlocks when self passes rung {n} "
+        return (f"{kind} {ICONS.get(kind, '')} is locked: it unlocks when {_NAME} passes rung {n} "
                 f"({SL.RUNG_NAMES.get(n, '')}) -- {TEACHES.get(kind, '')}").replace("  ", " ")
     if kind in PLACEHOLDERS:
         return (f"{kind} {ICONS[kind]} is unlocked but not built yet: its mechanics come with "

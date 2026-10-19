@@ -427,7 +427,7 @@ def test_the_dock_renders_a_locked_toy_greyed_with_a_lock():
     h = _js("L.toyDockHtml(%s)" % json.dumps([LOCKED]))
     assert 'class="dk locked"' in h and "🔒" in h and "🪞" in h
     it = _js("L.toyDockItem(%s)" % json.dumps(LOCKED))
-    assert it["label"] == "mirror, locked: unlocks when self passes rung 8: shows self its own trace beside another's"
+    assert it["label"] == "mirror, locked: unlocks when Blurp passes rung 8: shows self its own trace beside another's"
     assert it["badge"] is None
 
 
@@ -435,7 +435,7 @@ def test_the_dock_renders_a_locked_toy_greyed_with_a_lock():
 def test_a_locked_toy_offers_no_play():
     assert _js("L.toyActions(%s)" % json.dumps(dict(LOCKED, toy="locked:mirror"))) == []
     pop = _js("L.toyPopoverHtml(%s)" % json.dumps(LOCKED))
-    assert "unlocks when self passes rung 8" in pop and "data-poke-toy" not in pop
+    assert "unlocks when Blurp passes rung 8" in pop and "data-poke-toy" not in pop
 
 
 @NODE

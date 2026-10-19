@@ -462,6 +462,18 @@ function seatView(st) {
     : { paused, icon: "⏸", label: "pause the seat", title: "pause the seat: every acting lane stands down (loops, dreamer, thinker, night)" + mem + bat };
 }
 
+// #277: the operator named self Blurp. The seat owns the name (self_sheet.NAME:
+// the sheet's header, the dock state) and the page says it wherever it shows
+// self to a person; ids, record fields and the code's own words stay "self"
+let SELF_NAME = "Blurp";
+function selfName() { return SELF_NAME; }
+/** The seat's name for self (the sheet / dock carry it); an empty one changes nothing. */
+function setSelfName(n) {
+  n = String(n == null ? "" : n).trim();
+  if (n) SELF_NAME = n;
+  return SELF_NAME;
+}
+
 /** #161: the growth limit -- the chooser of the top rung self may reach (0:
  *  off) -- and its rung + exp bar. Below the limit self still earns each rung;
  *  above it nothing opens. Unbuilt rungs are listed, disabled. */
@@ -477,7 +489,7 @@ function selfView(st) {
                    disabled: r.state === "unbuilt", selected: r.rung === lim });
   }
   if (options.length === 1) options.push({ value: 1, text: "🌱 1 · feel itself", disabled: false, selected: lim === 1 });
-  if (s.mode === "off") return { loaded, limit: 0, options, status: "🌱 asleep", exp: selfExp(st), title:"self (#161) is asleep: nothing runs, nothing is erased -- choose how far it may grow" };
+  if (s.mode === "off") return { loaded, limit: 0, options, status: "🌱 asleep", exp: selfExp(st), title: SELF_NAME + " (#161) is asleep: nothing runs, nothing is erased -- choose how far it may grow" };
   const pct = Math.round(100 * (s.bar || 0));
   const rung = "rung " + (s.rung || 0) + (s.rung_name ? " (" + s.rung_name + ")" : "");
   const why = s.held ? " · HELD (3 failed cycles; re-choose to clear)" : s.waiting_on ? " · waiting on: " + s.waiting_on : "";
@@ -500,11 +512,11 @@ function selfView(st) {
   // the weight self gives it
   const r8 = s.rung8 || {};
   const r8s = (r8.asked || r8.brier_self != null) ? " · rung 8: " + (r8.paired || 0) + " of " + (r8.checked || 0) + " asked pushes paired"
-    + (r8.brier_mix != null ? ", Brier self " + f2(r8.brier_mix) + " vs rate " + f2(r8.brier_rate) : "")
+    + (r8.brier_mix != null ? ", Brier " + SELF_NAME + " " + f2(r8.brier_mix) + " vs rate " + f2(r8.brier_rate) : "")
     + (r8.brier_model != null ? ", model alone " + f2(r8.brier_model) + " (weight " + f2(r8.advisor_weight) + ")" : "")
     + (r8.base_rate != null ? ", base rate " + f2(r8.base_rate) : "") : "";
   return { loaded, limit: lim, options, status, exp: selfExp(st),
-           title: "self (#161): " + s.mode + " · " + rung + " · " + pct + "% toward the next" + why + slip + nxt
+           title: SELF_NAME + " (#161): " + s.mode + " · " + rung + " · " + pct + "% toward the next" + why + slip + nxt
                   + " · may grow up to rung " + lim + " · " + (s.cycles || 0) + " cycles" + r7s + r8s };
 }
 
@@ -565,7 +577,7 @@ function selfExp(st) {
   const newToy = u && u.rung === n && n > 0 && !u.late && Array.isArray(u.toys) && u.toys.length
     ? unlockText({ toys: u.toys.map((t) => (t && t.kind) || t) }) : "";
   return { state, rung: n, level: state === "asleep" ? "🌱 asleep" : level, goal, pct, fill, label, caption: cap, skill: sk, newToy,
-           title: "self (#161): " + level + " · " + label + " " + goal + (cap ? " · " + cap : "") };
+           title: SELF_NAME + " (#161): " + level + " · " + label + " " + goal + (cap ? " · " + cap : "") };
 }
 
 /** The level-up moment's caption (the exp bar's gold): the level, and the new toy it unlocked (#267). */
@@ -647,7 +659,7 @@ function paintExp(el, x) {
   box.querySelector(".xp-lv").textContent = x.level;
   const tr = box.querySelector(".xp-track");
   tr.setAttribute("aria-valuenow", String(x.pct));
-  tr.setAttribute("aria-label", x.state === "asleep" ? "self is asleep" : "toward " + x.goal.replace(/^→ /, "rung "));
+  tr.setAttribute("aria-label", x.state === "asleep" ? SELF_NAME + " is asleep" : "toward " + x.goal.replace(/^→ /, "rung "));
   box.querySelector(".xp-fill").style.width = (x.state === "capped" ? 100 : x.pct) + "%";
   box.querySelector(".xp-pct").textContent = x.label;
   const sk = box.querySelector(".xp-sk");                  // #249: the skill at a glance
@@ -668,11 +680,11 @@ function selfLine(r) {
     const tail = (r.audit ? " · audit" : "") + (r.reply ? " · reply check" : "") +
       (Array.isArray(r.by) && r.by.length ? " · by " + r.by.join(", ") : "");   // #244: who changed the toy (ground truth)
     if (r.answer !== "changed" && r.answer !== "unchanged") return t + "no answer" + (r.why ? " (" + r.why + ")" : "") + tail;
-    return t + r.answer + " (p " + f2s(r.p) + (r.p_self != null ? ", self " + f2s(r.p_mix != null ? r.p_mix : r.p_self) : "") +
+    return t + r.answer + " (p " + f2s(r.p) + (r.p_self != null ? ", " + SELF_NAME + " " + f2s(r.p_mix != null ? r.p_mix : r.p_self) : "") +
       (r.p_llm != null ? ", model " + f2s(r.p_llm) : "") + ")" + tail;
   }
   if (k === "rung_void") return "rung " + r.rung + "'s earlier pass voided (" + (r.why || "") + ")";
-  if (k === "rung7_restart") return "the old rung 7 (understand an other, now rung 8) restarted: now grades self, not the model";
+  if (k === "rung7_restart") return "the old rung 7 (understand an other, now rung 8) restarted: now grades " + SELF_NAME + ", not the model";
   if (k === "push") return "push → " + shortEid(r.to) +
     (r.aim != null ? (r.why === "overdue" ? " · its wait ran out" : " · its moment: " + (TURN_NAMES[r.bin] || r.bin) + " after they spoke") : "") +
     (r.asked ? " (asked the model)" : "");
@@ -711,7 +723,7 @@ const TOY_PLAY = {
   die: [["roll", "🎲 roll", "roll the die: a fresh face, tagged as yours"]],
   drift: [["nudge", "↕ nudge", "nudge it one step, tagged as yours"]],
   burst: [["nudge", "✦ nudge", "nudge it to a fresh value, tagged as yours"]],
-  ball: [["roll", "roll it back", "roll the ball back to self: your turn (rung 7), tagged as yours"]],
+  ball: [["roll", "roll it back", "roll the ball back to {self}: your turn (rung 7), tagged as yours"]],
 };
 function toyActions(t) {
   t = t || {};
@@ -721,7 +733,7 @@ function toyActions(t) {
     return [{ action: "knock", arg: t.block, label: "knock", title: "knock block " + t.block + " (and the ones above it) down" },
             { action: "rebuild", arg: t.block, label: "rebuild", title: "stand block " + t.block + " back up" }];
   }
-  return (TOY_PLAY[t.kind] || []).map(([action, label, title]) => ({ action, arg: null, label, title }));
+  return (TOY_PLAY[t.kind] || []).map(([action, label, title]) => ({ action, arg: null, label, title: title.replace("{self}", SELF_NAME) }));
 }
 
 function toyButtonsHtml(t) {
@@ -760,8 +772,8 @@ function selfCardHtml(st) {
   const r8 = s.rung8 || {};
   out.push("<h4>rung 8: the other</h4>" + (r8.asked || r8.brier_self != null
     ? "<p><b>" + (r8.paired || 0) + " of " + (r8.checked || 0) + "</b> asked pushes paired (" + (r8.asked || 0) + " asked)" +
-      (r8.brier_mix != null ? "<br>Brier self <b>" + f2s(r8.brier_mix) + "</b> vs running rate <b>" + f2s(r8.brier_rate) + "</b> (lower is better)" +
-        " · self alone " + f2s(r8.brier_self) : "") +
+      (r8.brier_mix != null ? "<br>Brier " + escText(SELF_NAME) + " <b>" + f2s(r8.brier_mix) + "</b> vs running rate <b>" + f2s(r8.brier_rate) + "</b> (lower is better)" +
+        " · " + escText(SELF_NAME) + " alone " + f2s(r8.brier_self) : "") +
       (r8.brier_model != null ? "<br>the model alone " + f2s(r8.brier_model) + " · its weight " + f2s(r8.advisor_weight) +
         (r8.advisor_model ? " (" + escText(r8.advisor_model) + ")" : "") : "") +
       (r8.base_rate != null ? "<br>base rate " + f2s(r8.base_rate) : "") + "</p>"
@@ -915,7 +927,7 @@ const utcShort = (s) => {
 const changesText = (c) => {
   if (!c) return "–";
   const order = ["self", "world", "model"].filter((k) => k in c).concat(Object.keys(c).filter((k) => !["self", "world", "model"].includes(k)).sort());
-  return order.map((k) => escText(k.replace(/^person:/, "")) + " " + c[k]).join(" · ") || "none yet";
+  return order.map((k) => escText(k === "self" ? SELF_NAME : k.replace(/^person:/, "")) + " " + c[k]).join(" · ") || "none yet";
 };
 const HEALTH_DOT = { ok: "ok", empty: "warn", unread: "idle", "no getter": "bad" };
 
@@ -947,7 +959,7 @@ function sheetAttrs(s) {
 
 function sheetQuest(s) {
   const q = s.quest || {};
-  if (q.rung == null) return '<p class="muted">no quest: ' + (s.header && s.header.mode === "off" ? "self is asleep (🌱 wakes it)" : "nothing to practise") + "</p>";
+  if (q.rung == null) return '<p class="muted">no quest: ' + (s.header && s.header.mode === "off" ? escText(SELF_NAME) + " is asleep (🌱 wakes it)" : "nothing to practise") + "</p>";
   return '<p class="qh">Rung ' + q.rung + " · " + escText(q.name || "") + (q.slipping ? ' <span class="warn">slipping</span>' : "") + "</p>" +
     '<ul class="crit">' + (q.criteria || []).map((c) => '<li class="' + (c.met ? "met" : "open") + '"><span class="ck">' + (c.met ? "✓" : "○") + "</span> " +
       escText(c.text) + (c.met || c.frac == null ? "" : ' <span class="muted">' + Math.round(100 * c.frac) + "%</span>") + "</li>").join("") + "</ul>" +
@@ -974,7 +986,7 @@ function sheetToys(s) {
   const st = (r) => r.state === "locked" ? "🔒 rung " + r.rung
     : r.state === "grandfathered" ? "kept (unlocks at rung " + r.rung + ")"
     : !r.built ? "unlocked · not built yet" : r.have ? "yours" : "unlocked · not added";
-  return '<p class="note">toys unlock as self passes rungs; each one is the next lesson</p><ul class="toys">' + rows.map((r) =>
+  return '<p class="note">toys unlock as ' + escText(SELF_NAME) + ' passes rungs; each one is the next lesson</p><ul class="toys">' + rows.map((r) =>
     '<li class="tu ' + escAttr(r.state) + '"><span class="ti" aria-hidden="true">' + escText(r.icon || "") + "</span><b>" + escText(r.kind) + "</b> " +
     '<span class="muted">' + escText(st(r)) + (r.at && r.state === "unlocked" && r.rung ? " · " + escText(utcShort(r.at)) + " UTC" : "") + "</span>" +
     '<div class="note">' + escText(r.teaches || "") + "</div></li>").join("") + "</ul>";
@@ -984,9 +996,9 @@ function sheetGrowth(s) {
   const g = s.growth || {};
   if (!(g.rows || []).some((r) => r.working_h != null)) return '<p class="muted">no rung passed yet: nothing to draw</p>';
   return curveSvg(g, 340, 190) +
-    '<p class="legend"><span class="lg ls"></span>self (working hours) <span class="lg lw"></span>wall clock ' +
+    '<p class="legend"><span class="lg ls"></span>' + escText(SELF_NAME) + ' (working hours) <span class="lg lw"></span>wall clock ' +
     '<span class="lg lf"></span>fastest possible <span class="lg lk"></span>a child, rescaled</p>' +
-    '<p class="note">' + (g.hours_per_child_month != null ? "<b>" + fixed2(g.hours_per_child_month) + " h</b> of self per month of a child. " : "") +
+    '<p class="note">' + (g.hours_per_child_month != null ? "<b>" + fixed2(g.hours_per_child_month) + " h</b> of " + escText(SELF_NAME) + " per month of a child. " : "") +
     escText(g.caveat || "") + "</p>";
 }
 
@@ -1005,7 +1017,7 @@ function sheetTime(s) {
   return '<div class="tbar" role="img" aria-label="' + escAttr(parts.map((p) => p.label + " " + hoursText(p.h)).join(", ")) + '">' +
     parts.map((p) => '<span class="tp tp-' + p.key + '" style="width:' + p.pct + '%"></span>').join("") + "</div>" +
     '<ul class="tl">' + parts.map((p) => '<li><span class="lg tp-' + p.key + '"></span>' + escText(p.label) + " <b>" + hoursText(p.h) + "</b> · " + p.pct + "%</li>").join("") +
-    "</ul>" + ((t.bugs || []).length ? '<p class="muted">the known bugs that cost self time:</p><ul class="bugs">' + t.bugs.map((b) =>
+    "</ul>" + ((t.bugs || []).length ? '<p class="muted">the known bugs that cost ' + escText(SELF_NAME) + ' time:</p><ul class="bugs">' + t.bugs.map((b) =>
       "<li>#" + b.issue + " " + escText(b.what) + ' <span class="muted">' + escText(utcShort(b.from)) + " → " + (b.open ? "now (open)" : escText(utcShort(b.to)) + " UTC") +
       " · " + bugCost(b) + "</span></li>").join("") + "</ul>" : "");
 }
@@ -1032,9 +1044,9 @@ function sheetRelationships(s) {
       (o.chat.replied != null ? ", replied " + Math.round(100 * o.chat.replied) + "%" : "") +
       (o.chat.brier != null ? ", Brier " + fixed2(o.chat.brier) : "") + (o.chat.seen_as ? ", seen as " + escText(o.chat.seen_as) : ""));
     if (o.play) bits.push("play: changed toys " + o.play.changes + "×" + (o.play.looks ? ", Brier " + fixed2(o.play.brier) + " on " + o.play.looks + " looks after" : ""));
-    if (o.rung8) bits.push("rung 8's advisor: Brier " + fixed2(o.rung8.brier_model) + " vs self's " + fixed2(o.rung8.brier_self) +
+    if (o.rung8) bits.push("rung 8's advisor: Brier " + fixed2(o.rung8.brier_model) + " vs " + escText(SELF_NAME) + "'s " + fixed2(o.rung8.brier_self) +
       (o.rung8.pairs != null ? " over " + o.rung8.pairs + " answers" : "") +
-      (o.rung8.weight != null ? ", self's weight on it " + fixed2(o.rung8.weight) : ""));
+      (o.rung8.weight != null ? ", " + escText(SELF_NAME) + "'s weight on it " + fixed2(o.rung8.weight) : ""));
     return "<li><b>" + escText(o.who) + "</b> " + '<span class="muted">' + escText(o.kind) + "</span>" + (o.current ? ' <span class="now">meeting now</span>' : "") +
       '<div class="note">' + bits.join("<br>") + "</div></li>";
   }).join("") + "</ul>");
@@ -1078,13 +1090,13 @@ function selfSheetHtml(s, open, nowS) {
   if (!s || typeof s !== "object" || !s.header) return '<p class="muted">the sheet is not reachable right now</p>';
   open = open || {};
   const h = s.header;
-  const out = ['<div class="hdr"><div class="nm">' + escText(h.name || "self") + '</div><div class="lvb">Lv ' + (h.level || 0) + "</div>" +
+  const out = ['<div class="hdr"><div class="nm">' + escText(h.name || SELF_NAME) + '</div><div class="lvb">Lv ' + (h.level || 0) + "</div>" +
     '<div class="rnm">' + escText(h.rung_name || "") + (h.next != null ? ' <span class="muted">→ ' + h.next + " " + escText(h.next_name || "") + "</span>" : "") + "</div>" +
     '<div class="xpslot"></div>' + skillStatHtml(h.skill) +
     '<div class="facts"><span>age <b>' + hoursText(h.age_h) + '</b></span><span>working <b>' + hoursText(h.working_h) + "</b></span>" +
     (h.cycles ? "<span>" + h.cycles + " cycles</span><span>" + (h.looks || 0) + " looks</span><span>" + (h.lines_sent || 0) + " lines sent</span>" : "") +
     "</div></div>"];
-  if (s.empty) out.push('<p class="muted">self has not been switched on yet: choose a rung in 🌱 to wake it.</p>');
+  if (s.empty) out.push('<p class="muted">' + escText(SELF_NAME) + ' has not been switched on yet: choose a rung in 🌱 to wake it.</p>');
   const body = { attributes: sheetAttrs, quest: sheetQuest, achievements: sheetAchievements, growth: sheetGrowth,
                  time: sheetTime, inventory: sheetInventory, toys: sheetToys, relationships: sheetRelationships };
   const hint = { attributes: "", quest: s.quest && s.quest.rung != null ? "rung " + s.quest.rung : "",
@@ -1110,7 +1122,7 @@ function toyGlyph(t) {
   const r = t.reading || {}, v = r.value, nm = t.name || "toy", k = t.kind;
   if (t.locked) {                                      // #267: a locked toy -- its icon, greyed by the dock
     return { html: escText(t.icon || TOY_ICONS[k] || "?"),
-             label: k + ", locked: unlocks when self passes rung " + t.unlock_rung + (t.teaches ? ": " + t.teaches : "") };
+             label: k + ", locked: unlocks when " + SELF_NAME + " passes rung " + t.unlock_rung + (t.teaches ? ": " + t.teaches : "") };
   }
   if (k === "tower") {
     const b = Array.isArray(r.blocks) ? r.blocks : [];
@@ -1121,7 +1133,7 @@ function toyGlyph(t) {
   if (k === "ball") {                                  // #264: whose side it is on (self's left, yours right)
     const yours = r.side === "other";
     return { html: '<span class="ball side-' + (yours ? "other" : "self") + '"><i></i></span>',
-             label: nm + ", the ball: " + (yours ? "on your side, roll it back" : "with self, its turn next") };
+             label: nm + ", the ball: " + (yours ? "on your side, roll it back" : "with " + SELF_NAME + ", its turn next") };
   }
   if (k === "die") {
     const n = Number(v);
@@ -1136,7 +1148,7 @@ function toyGlyph(t) {
     return { html: '<span class="burst ' + (t.active ? "on" : "off") + '">✦</span>',
              label: nm + ", bursty: " + (t.active ? "active now" : "quiet now") + ", value " + v };
   }
-  if (k === "body") return { html: escText(v), label: nm + ", self's body toy (self only): " + v };
+  if (k === "body") return { html: escText(v), label: nm + ", " + SELF_NAME + "'s body toy (" + SELF_NAME + " only): " + v };
   if (k === "fast" || k === "slow") return { html: escText(v), label: nm + ", " + k + " clock: " + v };
   return { html: "?", label: nm + (k ? ", " + k : "") };
 }
@@ -1146,8 +1158,8 @@ function toyBadge(t, s) {
   const last = t && t.last;
   if (!last) return null;
   s = s == null ? BADGE_S : s;
-  const by = String(last.by || "?"), who = by.replace(/^person:/, "");
-  const text = by === "self" || by === "world" ? by : by === "model" ? "M" : (who.charAt(0) || "?").toUpperCase();
+  const by = String(last.by || "?"), who = by === "self" ? SELF_NAME : by.replace(/^person:/, "");   // #277: self by its name
+  const text = by === "self" ? SELF_NAME : by === "world" ? by : by === "model" ? "M" : (who.charAt(0) || "?").toUpperCase();
   const age = Number(last.age_s) || 0;
   return { text, who: by === "model" ? "the seat's model" : who, fresh: age < s, age,
            title: "last change by " + (by === "model" ? "the seat's model" : who) + " " + agoText(age) + " ago" };
@@ -1177,7 +1189,7 @@ function toyPopoverHtml(t, res) {
   t = t || {};
   if (t.locked) {                                      // #267: what it is, when it comes, what it will teach
     return '<div class="ph"><b>' + escText(t.icon || TOY_ICONS[t.kind] || "") + " " + escText(t.kind || "") + '</b> <span class="muted">🔒 locked</span></div>' +
-      "<p>unlocks when self passes rung " + escText(t.unlock_rung) + (t.rung_name ? " (" + escText(t.rung_name) + ")" : "") + "</p>" +
+      "<p>unlocks when " + escText(SELF_NAME) + " passes rung " + escText(t.unlock_rung) + (t.rung_name ? " (" + escText(t.rung_name) + ")" : "") + "</p>" +
       (t.teaches ? '<p class="pg">' + escText(t.teaches) + "</p>" : "");
   }
   const g = toyGlyph(t), b = toyBadge(t);
@@ -1204,8 +1216,8 @@ function toyPopoverHtml(t, res) {
       escAttr(a.action) + '"' + (a.arg != null ? ' data-poke-arg="' + escAttr(a.arg) + '"' : "") + ' title="' + escAttr(a.title) + '">' +
       escText(a.label) + "</button>").join("") + "</div>");
   } else {
-    out.push('<p class="muted">' + (t.kind === "body" ? "self only: nobody else can change it"
-      : t.kind === "ball" ? "self has the ball: it rolls it to you on its turn" : "no actions: its own clock is the point") + "</p>");
+    out.push('<p class="muted">' + (t.kind === "body" ? escText(SELF_NAME) + " only: nobody else can change it"
+      : t.kind === "ball" ? escText(SELF_NAME) + " has the ball: it rolls it to you on its turn" : "no actions: its own clock is the point") + "</p>");
   }
   out.push('<p class="pres' + (res && !res.ok ? " bad" : "") + '" aria-live="polite">' + escText(res ? res.text : "") + "</p>");
   return out.join("");
@@ -1417,7 +1429,7 @@ function jsShow(v) {
   return String(v);
 }
 
-const AiPanelLogic = { jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
+const AiPanelLogic = { jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
                        attrBar, hoursText, curveGeom, curveSvg, timeParts, selfSheetHtml, SHEET_SECTIONS, SHEET_OPEN,
                        toyGlyph, toyBadge, toyDockItem, toyDockHtml, toyPopoverHtml, BADGE_S, skillStatHtml, skillSigned,
                        levelUpText, unlockText, sheetToys, TOY_ICONS,
@@ -1682,8 +1694,8 @@ function definePanel() {
             <button class="btn icon llmbtn" title="the LLM (off: talk to membrane alone)">🤖</button>
             <button class="btn icon autobtn" title="auto-chat: membrane and the LLM talk; you can join any time">⟳</button>
             <button class="btn icon rolebtn" title="membrane's role: babble (it talks to the LLM) or predict (it guesses the LLM, unheard)">💬</button>
-            <select class="selfpick" title="self (#161): how far it may grow (the top rung; off = asleep)"><option value="0">🌱 off</option></select>
-            <span class="selfstat" title="where self is now: its rung, the bar toward the next, what it waits on"></span>
+            <select class="selfpick" title="${escAttr(SELF_NAME)} (#161): how far it may grow (the top rung; off = asleep)"><option value="0">🌱 off</option></select>
+            <span class="selfstat" title="where ${escAttr(SELF_NAME)} is now: its rung, the bar toward the next, what it waits on"></span>
             <button class="btn icon thinkbtn" title="the think dial: the reasoning the cards do (auto = forward verbatim)">💭</button>
             <button class="btn icon jsbtn" title="allow JS scripting in this window -- the page runs it with your HA login -- off by default">🧩</button>
             <button class="btn icon vlogbtn" title="the voice log: what was said aloud (hidden from the chat)">🗒</button>
@@ -2688,7 +2700,7 @@ function definePanel() {
       const live = this._busy() && !(info.time || {}).completed;
       el.className = "msg ai" + (live ? " live" : "");
       // a line self pushed (#208, "from": "self") is named as self's, not the seat's agent
-      const who = info.from === "self" ? "🌱 self"
+      const who = info.from === "self" ? "🌱 " + SELF_NAME
         : [info.agent || info.mode, info.modelID].filter(Boolean).join(" · ");
       let html = who ? '<div class="who">' + escText(who) + "</div>" : "";
       // PREDICT MODE: membrane's guess of each move, greyed, right before the move it guessed
@@ -2854,9 +2866,9 @@ function definePanel() {
         const got = selfView(this._seat);                          // the seat's answer, not what was clicked
         out = { ok: true, limit: got.limit, rung: (this._seat.self || {}).rung || 0,
                 text: got.limit ? "✓ may grow to rung " + got.limit + " (now at rung " + ((this._seat.self || {}).rung || 0) + ")"
-                                : "✓ self is asleep (nothing erased)" };
+                                : "✓ " + SELF_NAME + " is asleep (nothing erased)" };
       } else {
-        out = { ok: false, text: this._apiErr("the self chooser failed (HA admins only)", r) };
+        out = { ok: false, text: this._apiErr("the " + SELF_NAME + " chooser failed (HA admins only)", r) };
         this._err(out.text);
       }
       this._selfFlash = out.text;
@@ -2906,12 +2918,15 @@ function definePanel() {
     _toyDockItem(t) { return toyDockItem(t); }
     _toyDockHtml(toys) { return toyDockHtml(toys); }
     _toyPopoverHtml(t, res) { return toyPopoverHtml(t, res); }
+    _selfName() { return selfName(); }                // #277: home.js reads the seat's name for self here
     async _selfSheet() {
       const r = await this._api(SERVE + "/membrane/self/sheet").catch(() => null);
+      if (r && r.ok && r.data && r.data.header) setSelfName(r.data.header.name);   // #277: the seat owns the name
       return r && r.ok && r.data && typeof r.data === "object" && r.data.header ? r.data : null;
     }
     async _toyState() {
       const r = await this._api(SERVE + "/membrane/toybox/state").catch(() => null);
+      if (r && r.ok && r.data) setSelfName(r.data.name);                          // #277
       // #267: the next locked toys ride along, greyed (toyDockItem)
       return r && r.ok && r.data && Array.isArray(r.data.toys) ? r.data.toys.concat(Array.isArray(r.data.locked) ? r.data.locked : []) : null;
     }

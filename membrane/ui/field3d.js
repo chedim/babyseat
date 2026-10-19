@@ -133,16 +133,19 @@ function layoutLabels(items, A) {
   return out;
 }
 
-/** self's tag: short while the camera follows self (the exp bar carries the rest). */
-function selfTag(L, short) {
+/** self's tag: short while the camera follows self (the exp bar carries the rest).
+ *  name: what self is called (#277: the operator named it Blurp; home.js passes
+ *  the seat's name in as the view's selfName). */
+function selfTag(L, short, name) {
   L = L || {};
+  name = name || "Blurp";
   const pct = Math.round(100 * (L.bar || 0));
-  if (short) return "self · Lv " + (L.rung || 0) + " · " + pct + "%";
+  if (short) return name + " · Lv " + (L.rung || 0) + " · " + pct + "%";
   const skill = L.skill == null ? "" : " · skill " + Number(L.skill).toFixed(2);
   const otherEid = (L.meets || {}).other;
   const split = otherEid && L.split ? L.split[otherEid] : null;
   const meet = split ? " · meets " + (split === "other" ? "an other" : "its body") : "";
-  return "self · rung " + (L.rung || 0) + " · " + pct + "%" + skill
+  return name + " · rung " + (L.rung || 0) + " · " + pct + "%" + skill
     + (L.steer != null ? " · lands " + Math.round(100 * L.steer) + "% closer to its aim" : "")
     + (L.slipping ? " · slipping" : "") + (L.mode === "watch" ? " · watched" : "") + meet;
 }
@@ -1452,7 +1455,7 @@ class Field3DView {
       a.other.position.set(F3_WORLD * 0.46, F3_WORLD * 0.30, F3_WORLD * 0.46);   // the other sits at the field's edge
       a.other.visible = false;
       a.tag.style.cssText = SELF_LABEL_CSS + "border-left-color:#2ec4a0;display:none";
-      a.tag.title = "self (#161): white ring = where it wants to be (its aim, once it steers) · green = where it pushes itself to · "
+      a.tag.title = (this.selfName || "Blurp") + " (#161): white ring = where it wants to be (its aim, once it steers) · green = where it pushes itself to · "
         + "orange = where the current took it · red = the gap from where it expected to end up · violet = where it has learned the current pulls";
       this.labelLayer.appendChild(a.tag);
       // THE MARKERS (the operator, twice: "what are the squary things?"): round
@@ -1659,7 +1662,7 @@ class Field3DView {
     tp.needsUpdate = true;
     // the tag's and the marks' labels are placed by _layoutSelfLabels (no overlaps,
     // inside the visible field); here only what the tag says
-    a.tagText = selfTag(L, !!this.selfFollow);
+    a.tagText = selfTag(L, !!this.selfFollow, this.selfName);
   }
 
   // ---------------------------------------------------------- #237: THE BRAIN ON THE SCREEN

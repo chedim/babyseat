@@ -161,8 +161,8 @@ re-embedding. The night reads statistics, not the raw field.
 
 ## The self loop (#161)
 
-`membrane::self` is an unnamed looped cliffhanger object, the seed of the
-evolving self in #161. It grows up a **skill ladder**: one rung per PR, each
+`membrane::self` is a looped cliffhanger object the operator named Blurp (#277;
+its ids stay `self`), the seed of the evolving self in #161. It grows up a **skill ladder**: one rung per PR, each
 with a measured pass test; a rung opens by itself when its test passes. This
 section covers what is built (`membrane/self_loop.py`); the operator's guide
 to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).

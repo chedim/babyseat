@@ -33,6 +33,16 @@ const LS_FOLLOW = "membrane.home.follow";
 // is thinking/doing, or even just where stuff is changing")
 const FOLLOW_MODES = ["activity", "seat", "you", "self", "eyes"];
 const SEAT_IDS = ["seat:self", "seat"];
+// #277: the operator named self Blurp -- the seat owns the name (the chat's
+// sheet / dock reads carry it); the page says it wherever a person reads about
+// self, while the ids and the follow mode value stay "self"
+let SELF_NAME = "Blurp";
+/** The seat's name for self; an empty one changes nothing. */
+function setSelfName(n) {
+  n = String(n == null ? "" : n).trim();
+  if (n) SELF_NAME = n;
+  return SELF_NAME;
+}
 const ACTIVITY_EVERY_MS = 1500;
 // THE VIEW (2026-10-13, the operator: the standalone burger menu "just with
 // links to chat-only and graph-only interfaces"): the standalone page puts
@@ -112,29 +122,29 @@ function brainCaption(r, me) {
   if (k === "reach") {
     const who = brainLabel(r.eid, me);
     const exp = r.p != null ? " (it expected " + bnum(r.p) + ")" : "";
-    if (r.answer !== "changed" && r.answer !== "unchanged") return "self reached for " + who + " — no answer" + (r.why ? " (" + r.why + ")" : "");
+    if (r.answer !== "changed" && r.answer !== "unchanged") return SELF_NAME + " reached for " + who + " — no answer" + (r.why ? " (" + r.why + ")" : "");
     if (r.reply) {
       const you = who === "you";
-      return "self checked whether " + who + " answered — " + (r.answer === "changed" ? (you ? "you did" : "they did") : "not yet") + exp;
+      return SELF_NAME + " checked whether " + who + " answered — " + (r.answer === "changed" ? (you ? "you did" : "they did") : "not yet") + exp;
     }
-    return "self looked at " + who + (r.timed ? " when it judged a change likely" : "") + " — "
+    return SELF_NAME + " looked at " + who + (r.timed ? " when it judged a change likely" : "") + " — "
       + (r.answer === "changed" ? "it changed" : "no change") + exp;
   }
   if (k === "push") {
     const who = brainLabel(r.to || r.eid, me);
-    return "self said hello to " + who + (r.asked ? " and asked the model if " + (who === "you" ? "you" : "they") + "'ll answer" : "");
+    return SELF_NAME + " said hello to " + who + (r.asked ? " and asked the model if " + (who === "you" ? "you" : "they") + "'ll answer" : "");
   }
-  if (k === "shift") return "self noticed " + brainLabel(r.eid, me) + " stopped behaving like itself"
+  if (k === "shift") return SELF_NAME + " noticed " + brainLabel(r.eid, me) + " stopped behaving like itself"
     + (r.was != null && r.now != null ? " (it changed " + bnum(r.was) + " of the time, now " + bnum(r.now) + ")" : "");
-  if (k === "wait") return "self waited — nothing was due";
+  if (k === "wait") return SELF_NAME + " waited — nothing was due";
   if (k === "rung") return "level up: rung " + r.rung + (BRAIN_RUNGS[r.rung] ? " · " + BRAIN_RUNGS[r.rung] : "");
-  if (k === "cycle") return "self " + (r.act === "move" || !r.act ? "moved" : r.act)
+  if (k === "cycle") return SELF_NAME + " " + (r.act === "move" || !r.act ? "moved" : r.act)
     + (r.gap != null ? " — it landed " + Number(r.gap).toFixed(3) + " from where it expected" : "");
-  if (k === "error") return "self hit an error" + (r.act ? " in " + r.act : "") + (r.why ? ": " + r.why : "");
-  if (k === "birth") return "self was born";
-  if (k === "unlock") return unlockText(r) + (r.rung ? " — self passed rung " + r.rung : " — self's first toys");
-  if (k === "audit") return "self is auditing " + brainLabel(r.eid, me) + (r.phase ? " (" + r.phase + ")" : "");
-  return "self: " + String(k || "?");
+  if (k === "error") return SELF_NAME + " hit an error" + (r.act ? " in " + r.act : "") + (r.why ? ": " + r.why : "");
+  if (k === "birth") return SELF_NAME + " was born";
+  if (k === "unlock") return unlockText(r) + (r.rung ? " — " + SELF_NAME + " passed rung " + r.rung : " — " + SELF_NAME + "'s first toys");
+  if (k === "audit") return SELF_NAME + " is auditing " + brainLabel(r.eid, me) + (r.phase ? " (" + r.phase + ")" : "");
+  return SELF_NAME + ": " + String(k || "?");
 }
 
 /** #257: the amoeba acts out a fresh line only if it is of the last moments
@@ -229,7 +239,7 @@ function dampTo(cur, goal, dt, rate, reduced) {
 }
 
 // 👁 self's eyes (#237, the operator: "PUT ME INTO self's WORLD!")
-function followLabel(m) { return m === "eyes" ? "👁 self's eyes" : "◎ " + m; }
+function followLabel(m) { return m === "eyes" ? "👁 " + SELF_NAME + "'s eyes" : "◎ " + (m === "self" ? SELF_NAME : m); }
 /** A manual orbit / zoom leaves the eyes (back to ◎ self); other modes stay. */
 function modeAfterTouch(m) { return m === "eyes" ? "self" : m; }
 const EYES_FRESH_MS = 8000;
@@ -662,7 +672,7 @@ const LS_VOICE = "membrane.home.voice";
 const IS_CHROME = typeof navigator !== "undefined" && /Chrome\//.test(navigator.userAgent || "") && !/Firefox\//.test(navigator.userAgent || "");
 
 const HomeLogic = { cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep,
-  brainLabel, brainCaption, unlockText, brainKey, brainFresh, actableLine, ACT_FRESH_S, brainTrail, trailAlpha, frameRadius, selfFrame, frameDistance, dampTo,
+  brainLabel, brainCaption, unlockText, setSelfName, brainKey, brainFresh, actableLine, ACT_FRESH_S, brainTrail, trailAlpha, frameRadius, selfFrame, frameDistance, dampTo,
   freshLook, followsNow, followRates, SELF_HOLD_MS, lookAngles, selfCamAngles,
   followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
@@ -1164,6 +1174,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const sh = await c._selfSheet().catch(() => null);
         if (sh) this._sheet = sh;
         else if (!this._sheet) this._spSheetAt = 0;        // not there yet: retry next tick
+        this._takeName(c);                                 // #277: the sheet carries the name
       }
       const card = this._sheet && typeof c._selfSheetHtml === "function"
         ? c._selfSheetHtml(this._sheet, this._sheetOpen) : "<h3>report card</h3>" + c._selfCardHtml();
@@ -1213,8 +1224,16 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._dockBusy = true;
       try {
         const toys = await c._toyState();
+        this._takeName(c);                                 // #277: so does the dock
         if (toys) this._paintDock(toys);
       } finally { this._dockBusy = false; }
+    }
+
+    /** #277: the seat's name for self, from the chat's last sheet / dock
+     *  read; the field's tag on the amoeba says it too. */
+    _takeName(c) {
+      if (c && typeof c._selfName === "function") setSelfName(c._selfName());
+      if (this._v3) this._v3.selfName = SELF_NAME;
     }
 
     _paintDock(toys) {
@@ -1420,7 +1439,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._brainText.textContent = text;
       this._brainCite.textContent = cite;
       const c = this._chat;
-      el.title = "from self's record: " + (c && typeof c._selfLine === "function" ? c._selfLine(r) : r.kind)
+      el.title = "from " + SELF_NAME + "'s record: " + (c && typeof c._selfLine === "function" ? c._selfLine(r) : r.kind)
         + (r.ts ? " · " + new Date(r.ts * 1000).toLocaleTimeString() : "");
       el.hidden = false;
       el.classList.remove("fresh"); void el.offsetWidth; el.classList.add("fresh");
@@ -1520,25 +1539,27 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const s = document.createElement("style");
       s.textContent = HSTYLE;
       const root = document.createElement("div");
+      const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+      const nm = esc(SELF_NAME);                    // #277: the name it goes by
       root.innerHTML = `
         <div class="field"></div>
         <div class="msg">finding you on the field…</div>
         <div class="top glass">
           <button class="ha" title="Home Assistant: its dashboards and pages" aria-haspopup="menu" aria-expanded="false" aria-label="Home Assistant menu"><img class="seat-logo" src="${SEAT_LOGO}" alt="" width="26" height="26"></button>
-          <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you · self (the 🌱 loop, framed to what it is doing) · 👁 self's eyes (looking out from it)">◎ activity</button>
+          <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you · ${nm} (the 🌱 loop, framed to what it is doing) · 👁 ${nm}'s eyes (looking out from it)">◎ activity</button>
           <button class="chatbtn" title="Show / hide the chat">💬</button>
           <button class="autobtn" title="auto-chat" aria-label="auto-chat">▶</button>
-          <select class="selfpick" title="self (#161): how far it may grow (the top rung; off = asleep)"><option value="0">🌱 off</option></select>
-          <span class="selfstat" title="where self is now: its rung, the bar toward the next, what it waits on"></span>
+          <select class="selfpick" title="${nm} (#161): how far it may grow (the top rung; off = asleep)"><option value="0">🌱 off</option></select>
+          <span class="selfstat" title="where ${nm} is now: its rung, the bar toward the next, what it waits on"></span>
           <button class="tilt" hidden title="Turn the view by tilting the device">📱</button>
           <span class="sbox"><input class="q" placeholder="search entities…" autocomplete="off"><div class="hits glass"></div></span>
           <span class="status"></span>
         </div>
         <nav class="hamenu glass" role="menu"></nav>
-        <button class="babybtn" aria-label="self: its character sheet and what it is doing" aria-expanded="false" aria-controls="selfpanel"
-                title="self (#161): its character sheet -- level, attributes, quest, growth, toys, the others it met -- and what it is doing now">👶</button>
-        <aside class="selfpanel glass" id="selfpanel" aria-label="self's character sheet" hidden>
-          <div class="sphead"><span class="sptitle">👶 self</span><button class="spx" aria-label="close self's panel" title="Close">×</button></div>
+        <button class="babybtn" aria-label="${nm}: its character sheet and what it is doing" aria-expanded="false" aria-controls="selfpanel"
+                title="${nm} (#161): its character sheet -- level, attributes, quest, growth, toys, the others it met -- and what it is doing now">👶</button>
+        <aside class="selfpanel glass" id="selfpanel" aria-label="${nm}'s character sheet" hidden>
+          <div class="sphead"><span class="sptitle">👶 ${nm}</span><button class="spx" aria-label="close ${nm}'s panel" title="Close">×</button></div>
           <div class="spxp"></div>
           <div class="sheet spcard"></div>
           <details class="sec" data-sec="activity" data-was="0"><summary><span class="stt">Activity</span><span class="sth">live</span></summary>
@@ -1546,8 +1567,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <p class="spplay" aria-live="polite" hidden></p>
         </aside>
         <div class="toydock" hidden>
-          <button type="button" class="dockbtn" aria-label="self's toys" aria-expanded="false" aria-controls="toydockl" title="self's toys">🧸</button>
-          <ul class="dkl" id="toydockl" aria-label="self's toys: hover or tap one to see it and play"></ul>
+          <button type="button" class="dockbtn" aria-label="${nm}'s toys" aria-expanded="false" aria-controls="toydockl" title="${nm}'s toys">🧸</button>
+          <ul class="dkl" id="toydockl" aria-label="${nm}'s toys: hover or tap one to see it and play"></ul>
         </div>
         <div class="dkpop glass" role="dialog" aria-label="a toy" hidden></div>
         <div class="chat glass"><ai-terminal-panel overlay></ai-terminal-panel></div>
@@ -1735,7 +1756,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._modeBtn.textContent = followLabel(m);
       if (this._v3) { this._v3.selfEyes = m === "eyes"; this._v3.selfFollow = m === "self" || m === "eyes"; }
       this._eyeDir = null;
-      if (byTouch) { this._say("you took the camera: ◎ self picks it up again in a few seconds"); return; }
+      if (byTouch) { this._say("you took the camera: ◎ " + SELF_NAME + " picks it up again in a few seconds"); return; }
       this._lastTouch = -1e9; this._goal = null; this._aim(true);   // idle at once (a fresh page too)
     }
 
@@ -1791,7 +1812,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         };
         const v = this._v3 = new window.MembraneField3D(this._host3d, api);
         if (window.matchMedia("(max-width: 760px)").matches) { v.maxBudget = 3000; v._applyBudget(3000); }
-        v.selfEyes = this._mode === "eyes"; v.selfFollow = this._mode === "self" || this._mode === "eyes";
+        v.selfEyes = this._mode === "eyes"; v.selfFollow = this._mode === "self" || this._mode === "eyes"; v.selfName = SELF_NAME;
         await v.start();
         if (!this._started) { v.stop(); return; }
         await this._aim(true);
@@ -1871,12 +1892,12 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         if (p) {
           this._goal = { p, r: this._goal && this._goal.r ? this._goal.r : 420, frame: this._mode === "self" };
           this._msgEl.style.display = "none";
-          this._say(this._mode === "eyes" ? "👁 through self's eyes" : "following self");
+          this._say(this._mode === "eyes" ? "👁 through " + SELF_NAME + "'s eyes" : "following " + SELF_NAME);
           return;
         }
         this._msgEl.style.display = "";
-        this._msgEl.textContent = "self is not moving yet — switch 🌱 on and talk to the seat";
-        setTimeout(() => { if (this._msgEl.textContent.startsWith("self is not")) this._msgEl.style.display = "none"; }, 6000);
+        this._msgEl.textContent = SELF_NAME + " is not moving yet — switch 🌱 on and talk to the seat";
+        setTimeout(() => { if (this._msgEl.textContent.startsWith(SELF_NAME + " is not")) this._msgEl.style.display = "none"; }, 6000);
         return;
       }
       if (this._mode === "activity") {

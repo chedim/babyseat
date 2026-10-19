@@ -300,7 +300,7 @@ class TestWiring(unittest.TestCase):
 
     def test_the_baby_button(self):
         self.assertIn('class="babybtn"', self.home)
-        self.assertIn('aria-label="self: its character sheet and what it is doing"', self.home)   # #249
+        self.assertIn('aria-label="${nm}: its character sheet and what it is doing"', self.home)   # #249
         self.assertIn("aria-expanded", self.home)
         self.assertIn("safe-area-inset-left", self.home)              # clear of the notch
         self.assertIn("👶", self.home)
