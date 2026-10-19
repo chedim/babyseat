@@ -243,7 +243,9 @@ MEMBRANE_REPO=/path/to/membrane bash install.sh
 - **Ollama** (`brew install ollama` / <https://ollama.com>) — NOT
   auto-installed; embeddings and local chat need it running on `:11434`.
 - **opencode** — optional; `membrane opencode` launches it if found on PATH,
-  otherwise point any OpenAI-compatible client at `http://127.0.0.1:11500/v1`.
+  otherwise point any OpenAI-compatible client at `http://127.0.0.1:11500/v1`,
+  or an Ollama client (Open WebUI, ollama-python, an Ollama provider) at
+  `http://127.0.0.1:11500`.
 - The **viewer** ships inside the package (three.js + both pixel fonts are
   vendored, served same-origin) — no CDN, no node, no browser install.
 
@@ -286,6 +288,14 @@ TUI is a thin client. Every turn is captured into the field (discourse and
 observations as events), entities move as the conversation names them, and the
 model is grounded by what those entities hold —
 [docs/entity-field.md](docs/entity-field.md) is the design doc.
+
+The proxy speaks both APIs through the same memory turn: OpenAI's
+`/v1/chat/completions` and Ollama's native `/api/chat` and `/api/generate`
+(translated to the OpenAI body on the way in and back to Ollama's JSON or
+NDJSON on the way out — gate, injection, capture and routing are the same
+code). Every other `/api/*` path (`/api/tags`, `/api/show`, `/api/embed`,
+`/api/pull`, …) and a model load/unload request (no prompt, no messages)
+pass through to Ollama unchanged.
 
 ### Surfaces
 
