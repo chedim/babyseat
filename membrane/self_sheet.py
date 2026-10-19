@@ -124,7 +124,7 @@ def _needs() -> dict:
             4: f"{SL.RUNG4_TIMED} timed looks",
             5: f"{SL.RUNG5_LOOKS} looks with noticing on, both audit shifts caught",
             6: f"{SL.RUNG6_PUSHES} lines sent, {SL.MEET_EVERY} cycles apart",
-            7: f"{SL.RUNG7_PUSHES} timed lines with a reply check, at least {SL.MEET_EVERY} cycles apart",
+            7: f"{SL.RUNG7_PUSHES} timed turns with the ball with a reply check, at least {SL.MEET_EVERY} cycles apart",
             8: f"{SL.RUNG8_LOOKS} reply checks, one per line"}
 
 
@@ -200,7 +200,7 @@ def _clocks(recs: list, now: float) -> dict:
 
     def to(r):
         return str(r.get("to") or r.get("eid") or "")
-    first_person = next((float(r["ts"]) for r in srt if r.get("kind") == "push"
+    first_person = next((float(r["ts"]) for r in srt if r.get("kind") == "push" and SL._medium(r) == "chat"
                          and to(r) and not to(r).endswith(":operator")), None)
     # rung 6's first pass against the empty operator slot (#208): the honest
     # pass is when its test first held against the person who actually chats
@@ -212,7 +212,7 @@ def _clocks(recs: list, now: float) -> dict:
             if float(r["ts"]) < first_person:
                 continue
             e = to(r)
-            if r.get("kind") == "push" and e and not e.endswith(":operator"):
+            if r.get("kind") == "push" and SL._medium(r) == "chat" and e and not e.endswith(":operator"):
                 n_push += 1
             if r.get("kind") == "reach" and "chat:in:" in e and not e.endswith(":operator") \
                     and r.get("answer") in ("changed", "unchanged"):
@@ -401,13 +401,15 @@ def _quest(recs: list, st: dict, progs: dict, attrs: dict) -> dict:
         return {"rung": None, "name": None, "criteria": [], "bar": st.get("bar"), "waiting_on": st.get("waiting_on"),
                 "summary": "", "mode": st.get("mode")}
     p = progs[aim]
+    ball = SL._cur_medium(recs, SL._other(recs)) == "toy"      # #264: rung 7 takes turns with the ball
     count = {1: {"pushes": (SL.RUNG1_CYCLES, "pushed cycles")},
              2: {"reaches": (SL.RUNG2_REACHES, "answered looks at one thing")},
              3: {"looks": (SL.RUNG3_LOOKS, "steered looks")},
              4: {"timed": (SL.RUNG4_TIMED, "timed looks")},
              5: {"looks": (SL.RUNG5_LOOKS, "looks with noticing on")},
              6: {"pushes": (SL.RUNG6_PUSHES, "lines sent"), "heard": (SL.RUNG6_HEARD, "answered looks at the other")},
-             7: {"pushes": (SL.RUNG7_PUSHES, "timed lines with a reply check")},
+             7: {"pushes": (SL.RUNG7_PUSHES, "turns with the ball with a reply check (you roll it back)" if ball
+                            else "timed lines with a reply check")},
              8: {"looks": (SL.RUNG8_LOOKS, "reply checks")}}.get(aim, {})
     skill = {1: (SL.RUNG1_SKILL, "feel skill"), 2: (SL.RUNG2_SKILL, "reach skill"),
              3: (SL.RUNG2_SKILL, "reach skill on a moving thing"), 8: (SL.RUNG8_MARGIN, "skill vs running rate")}
@@ -432,7 +434,7 @@ def _quest(recs: list, st: dict, progs: dict, attrs: dict) -> dict:
             text = f"timed looks find news ({round(100 * frac)}% of the way)"
         elif key == "contingency":
             sh, ch = p.get("share"), p.get("chance")
-            text = (f"lines in its window {'–' if sh is None else f'{sh:.2f}'} vs chance "
+            text = (f"{'turns' if ball else 'lines'} in its window {'–' if sh is None else f'{sh:.2f}'} vs chance "
                     f"{'–' if ch is None else f'{ch:.2f}'} (z {float(p.get('z') or 0):.1f} → {SL.RUNG7_CONT_Z:.1f}, "
                     f"+{SL.RUNG7_CONT_MARGIN:.2f})")
         elif key == "payoff":
@@ -484,7 +486,8 @@ def _relationships(recs: list, tempo: dict, st: dict) -> dict:
     stats = SL._rung2_stats(recs, tempo)
     split = st.get("split") or {}
     rows: dict[str, dict] = {}
-    chat_eids = {str(r.get("to")) for r in recs if r.get("kind") == "push" and r.get("to")}
+    chat_eids = {str(r.get("to")) for r in recs if r.get("kind") == "push" and r.get("to")
+                 and SL._medium(r) == "chat"}             # #264: a turn with the ball is no chat
     chat_eids |= {str(r.get("eid")) for r in recs if r.get("kind") == "reach" and "chat:in:" in str(r.get("eid") or "")}
     for e in sorted(chat_eids):
         rs = [r for r in recs if _answered(r) and r.get("eid") == e]
@@ -582,7 +585,8 @@ def _header(st: dict, recs: list, c: dict, t: dict, skill: dict | None = None) -
             "born": iso(c["born"]), "age_h": t["alive_h"], "working_h": t["working_h"], "running_h": t["running_h"],
             "cycles": st.get("cycles") or 0,
             "looks": sum(1 for r in recs if r.get("kind") == "reach"),
-            "lines_sent": sum(1 for r in recs if r.get("kind") == "push")}
+            "lines_sent": sum(1 for r in recs if r.get("kind") == "push" and SL._medium(r) == "chat"),
+            "turns": sum(1 for r in recs if r.get("kind") == "push" and SL._medium(r) == "toy")}
 
 
 def compute(srv, now: float | None = None) -> dict:
@@ -724,6 +728,8 @@ def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
         name, kind = row["name"], row["kind"]
         if kind == "tower":
             reading = {"blocks": [ch == "|" for ch in str(row.get("reading") or "")]}
+        elif kind == "ball":
+            reading = {"side": row.get("reading")}               # #264: whose side it is on
         else:
             reading = {"value": row.get("reading")}
         active = None
@@ -745,6 +751,7 @@ def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
                      "looks": len(rs), "error_early": early, "error_late": late,
                      "changes": dict(row.get("counts") or {}), "last": last,
                      "unlock_rung": TU.rung_of(kind), "grandfathered": TU.grandfathered(recs, kind)})
+    toys.sort(key=lambda t: t["kind"] != "ball")                 # #264: the ball first (locked rows follow the toys)
     out = {"generated": now, "toys": toys, "locked": TU.locked_rows(recs, {r["kind"] for r in rows})}
     rt["dock"] = (now, out)
     return out

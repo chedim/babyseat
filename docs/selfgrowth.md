@@ -17,14 +17,16 @@ about self (you, the seat's LLM, self's own lines) moves the bar.
   `expect` says beforehand what will happen, `try` acts, `notice` sees what
   actually happened. The gap between `expect` and `notice` is what it learns
   from. Its acts are small and safe, field-only: move its own position, read a
-  thing (fire its getter), push a line to chat. **There is no shell** in its
-  repertoire, and adding one is not on the ladder.
+  thing (fire its getter), push a line to chat (rung 6), roll the shared ball
+  to you (rung 7 on, #264). **There is no shell** in its repertoire, and
+  adding one is not on the ladder.
 - **It is not the LLM.** The seat's model never speaks *as* self and can't call
   its methods (they refuse any caller but self's own loop). The model talks
   *to* it and, at rung 8, is an advisor self consults: self makes the
   prediction and weighs the model's guess by the model's own track record
   (#254); rung 8 grades self's prediction, never the model's. Rung 7 (take
-  turns) has no model at all: self learns *when* to speak.
+  turns) has no model at all: self learns *when* to take its turn with the
+  ball.
 - **It is not a self-model** to be scored. It is a loop that builds up a body
   of measured predictions about its world.
 - **It is not `seat:self`.** That is only the speaker tag: every line the seat
@@ -178,7 +180,7 @@ open or close is remembered per browser.
   A passed rung whose test fails now says **slipping**. A number nothing
   measures yet says "not measured yet", never 0.
 - **Quest log:** the current rung's staged criteria with their counts and
-  skill (rung 7: `37/100 timed lines with a reply check · lines in its window
+  skill (rung 7, #264: `37/100 turns with the ball with a reply check (you roll it back) · turns in its window
   0.41 vs chance 0.22 (z 2.4 → 3.0, +0.10) · replies gained over
   timing-blind +0.08 (t 1.9 → 4.0, +0.05)`; rung 8: `100/100 reply checks ✓
   · skill vs running rate −0.00 → +0.08`), and what it is waiting on. At
@@ -266,6 +268,10 @@ card instead.
 Under the 👶 tab, one icon per toybox toy, live whether or not the panel is
 open (#249). This is where you play with self.
 
+- **The ball comes first** (#264): a small court split by a line, the ball on
+  self's half (left) or on yours (right, ringed). When it is on your side,
+  it's your turn: open it and **roll it back**. See
+  [Playing ball](#playing-ball-rung-7).
 - **Each icon shows its toy:** a tower as a small stack (fallen blocks
   dimmed), a die its face (⚀…⚅), drift a gauge, burst ✦ (bright while its
   window is active, dim while quiet), fast and slow their value, body its
@@ -277,8 +283,9 @@ open (#249). This is where you play with self.
   red no getter.
 - **Hover it, or tap it on a phone,** for a popover: its looks, its error
   earlier → later, the changes by self / world / people, the last change (by
-  whom, how long ago), and the play actions: knock or rebuild per tower
-  block, roll a die, nudge a drift or burst toy (body has none). The result
+  whom, how long ago), and the play actions: roll the ball back (only while it
+  is on your side; while self has it, the popover says so), knock or rebuild
+  per tower block, roll a die, nudge a drift or burst toy (body has none). The result
   shows in the popover (`✓ knock toy:tower block 3 → {"standing": false} (by
   alice)`). Esc closes it.
 - **On a phone** the dock folds into one 🧸 button under the 👶 tab; tap it to
@@ -335,9 +342,9 @@ curl -s http://127.0.0.1:4096/membrane/seat \
 | `ladder` | every rung: `passed`, `current`, `capped` (ready, held by the limit), `locked`, `unbuilt` |
 | `world` | rung 3's sort of the things it reads: `silent` / `moving` / `still` / `intermittent` |
 | `split` | rung 6's split: `body` (it predicts it near-perfectly) or `other` (it can't) |
-| `meets` | rung 6's exchange: `pushes`, `other` (who it meets), `push_age`, `heard_age` (seconds since the other last answered) |
+| `meets` | rung 6's exchange: `pushes`, `other` (who it meets), `push_age`, `heard_age` (seconds since the other last answered), `medium` (#264: `toy` once the turns are with the ball: `other` is then the ball, `heard_age` the other's last poke on any toy) |
 | `steer` | after rung 1: how close it lands to its aim (`err`) against not leaning into the current (`naive`), and `skill = 1 − err/naive` |
-| `rung7` | #258, rung 7 at the current other: `pushes` (its timed pushes), `checked` (those whose reply check came, over the last 100), `bins` (per `spoke_age` bin `0-2m` / `2-10m` / `10-30m` / `30m+`: `pushes`, `replied`, `rate`), `best` (the window it believes best); over the window the test reads (`window`, up to 100): `share` (pushes in the believed-best window) vs `chance` (the share of the waiting time the other spent there) and `z`; `reply_rate` vs `blind_rate` (what a timing-blind push would have got), `payoff` (the difference) and `payoff_z`. The 🌱 tooltip shows it as `rung 7: 24 timed lines checked, best window 0-2m, in it 0.42 vs chance 0.17, replies +0.12 over timing-blind` |
+| `rung7` | #258, rung 7 at the current other: `medium` (#264: `toy`, the turns with the ball; `chat` before), `pushes` (its timed pushes), `checked` (those whose reply check came, over the last 100), `bins` (per `spoke_age` bin `0-2m` / `2-10m` / `10-30m` / `30m+`: `pushes`, `replied`, `rate`), `best` (the window it believes best); over the window the test reads (`window`, up to 100): `share` (pushes in the believed-best window) vs `chance` (the share of the waiting time the other spent there) and `z`; `reply_rate` vs `blind_rate` (what a timing-blind push would have got), `payoff` (the difference) and `payoff_z`. The 🌱 tooltip shows it as `rung 7: 24 timed lines checked, best window 0-2m, in it 0.42 vs chance 0.17, replies +0.12 over timing-blind` |
 | `rung8` | rung 8 (rung 7 until #258) at the current other: `asked` (pushes that asked the model), `checked` (those whose reply check came), `paired` (those whose check carried the model's answer), `pair_rate` = paired / checked; over the reply checks the test reads (`checks`, up to 100): `brier_self` (self's own `p_self`), `brier_mix` (what self passes on: `p_self` with the advisor heard), `brier_rate` (the running rate it must beat by 8%), `brier_model` (the model alone, on the checks it answered); `advisor_weight` (how much self listens to the current model, earned on its record, 0 for a new model) and `advisor_model` (its id); `base_rate` (the all-time rate the model is told) and `recent_rate` (the share of the last 6 reply checks answered, same prior, also told). The 🌱 chooser's tooltip shows it as `rung 8: 5 of 8 asked pushes paired, Brier self 0.25 vs rate 0.26, model alone 0.37 (weight 0.00), base rate 0.55` |
 | `toys` | #230: each toy (`toy:` / `cradle:` things, words with a getter) with `getter` (it has one), `reads` and `answered` (of its last 10 reaches), and `health`: `ok`, `empty` (no answer on its last reads), `unread`, or `no getter`; a built-in toy also carries `toy` (its toybox name) and, for a tower block, `block` (#244: the play buttons' target) |
 | `unlock` | #267: the newest unlock line, `{rung, ts, late, toys: [{kind, icon}]}` (or `null`); the exp bar's level-up caption names its toy when its rung is the one just reached |
@@ -479,8 +486,8 @@ it out and rests in its calm wobble.
 | **was surprised** (the answer went against its expectation `p`: \|outcome − p\| > 0.5) | a short jolt away from the thing, bigger for a bigger error |
 | **noticed a shift** (`shift`) | a startle: it puffs up, then settles |
 | **waited** (`wait`) | breathes slowly, a little smaller and curled |
-| **said hello** (`push`) | a ripple toward "you", then it holds still, leaning in and listening, until the reply check (at most 10 min) |
-| **checked for your reply** (rung 7) | bounces toward "you" when you answered; droops (sags, flattens, dims) when you didn't |
+| **said hello** (`push`; from rung 7 on, its roll of the ball, a `push` line with `medium: "toy"`) | a ripple toward "you" (the ball), then it holds still, leaning in and listening, until the reply check (at most 10 min) |
+| **checked for your reply** (rung 7) | bounces toward "you" when you answered (rolled the ball back); droops (sags, flattens, dims) when you didn't. The check's `replied` decides, not whether the look read a change |
 | **changed a toy itself** (a look whose `by` includes `self`) | a wiggle toward the toy |
 | **levelled up** (`rung`) | a full-body gold glow, with the gold ring |
 
@@ -511,8 +518,8 @@ has passed, it is under the limit, and its test passes on the record.
 | **4 · patience** | fits each thing's rate of change in time over its last 30 looks (after a rung-5 shift, over the looks since it, with the old rate kept as a prior worth 3 looks, so a handful of looks can't swing it to never/always; #235); looks again once a change is 60% likely (waits up to 30 min), and among the due it prefers the looks whose answer is least certain (#266); idles when nothing is due | things with a steady rhythm | **timed**: 30 timed looks; **news**: of its last 40, they find a change ≥ half the time, or 0.15 more often than its fixed-pace looks did (whichever is easier); **calibration**: its mean predicted chance is within 0.1 of the share that found news | keep getters' rhythms honest; don't make a thing change only when self looks |
 | **5 · notice the world changed** | compares its last 3–5 looks at a thing with its long memory; a window far from it (> 0.4) and unlikely under it (binomial tail < 0.02) is a **shift** ("went still" / "moves again"; a window holding a look that spans a restart or stall in the record is none, #266), and it re-learns from there (its rate starts from the old one and the new looks lead after ~10) | a thing it already classes as moving | **looks**: 20 looks with noticing on; **audit**: membrane pauses the surest mover for 5 of self's looks (cap 1 h), then restarts it for 5 more (cap 3 h); self must flag "went still" during the pause and "moves again" after | nothing: the audit runs itself. Don't restart the seat mid-audit if you can help it |
 | **6 · meet an other** | every 30 cycles pushes the line "self is here" to chat, and reads `chat:in:<person>`, which ticks each time the person sends a message | **a person who chats** with the seat, irregularly | **pushes**: 10; **heard**: 20 answered looks at the other; **split**: the other is classed **other** (its Brier skill < 0.9: self can't predict it perfectly). A partner who never answers is predicted perfectly, classes as *body*, and the rung stays shut | chat with the seat — normally, whenever you like. Your messages are the answers |
-| **7 · take turns** (#258) | learns **when** to push: after each push it draws the moment it will wait for, a bin of how long since the other last spoke (`spoke_age`: 0–2 min, 2–10, 10–30, 30+ or never), by Thompson sampling on the reply rate each bin earned over its last 100 pushes (a random bin one push in ten, so the losing bins stay measured), and pushes when the other's `spoke_age` is in that bin; never sooner than 30 cycles after its last push (rung 6's timer is the cap), never later than 180 (`overdue`). Same words, no model. Nothing in it prefers "right after they speak": an other who answers late teaches it to wait | the other answering some pushes more than others, by when they come | **pushes**: 100 pushes with a reply check; **contingency**: the share of them in the window self believed best at the push beats the share of its waiting time the other spent in that window (where a push at a shuffled moment would land) by z ≥ 3 and +0.10; **payoff**: each push's outcome (the other spoke **after** it, by the check) minus what a timing-blind push in its interval would have expected (the bins' rates as known before it, weighted by the waiting time in each) averages ≥ +0.05 with t ≥ 4. Both prequential | chat in your own rhythm and answer its 🌱 lines when you're there; it learns when that is |
-| **8 · understand an other** (rung 7 until #258) | after each push it predicts whether the other will have spoken by its reply check, **itself** (#254): `p_self` from its own record (the other's all-time and recent reply rates, the last check's outcome, how long before the push they last spoke), fit on its own earlier checks, no model needed; at the push it may also ask the seat's model (`llm::call`, read-only, one consult per push) the same question (from rung 8 on), and hears the answer as an **advisor**, recalibrated on that model's own track record (its average lean says nothing; a new model starts unheard); it holds off looking at the other for 2 minutes (up to 3 while the model's answer is still in flight), then checks for the reply | the other answering its pushes (the model is optional) | **looks**: 100 reply checks (one per push); **skill**: self's prediction removes ≥ 8% of the running rate's Brier error over them (the other's prior-smoothed rate before each check: knowing the rate scores 0) | answer self's 🌱 lines (or just chat), in your own rhythm |
+| **7 · take turns** (#258; with the ball since #264) | learns **when** to take its turn: it rolls the shared ball to you (`self::roll`, field-only: no chat line, no model, no shell), and after each turn it draws the moment it will wait for, a bin of how long since the other last acted (`spoke_age`: their last poke on any toy, 0–2 min, 2–10, 10–30, 30+ or never), by Thompson sampling on the reply rate each bin earned over its last 100 turns (a random bin one turn in ten, so the losing bins stay measured), and rolls when the other's age is in that bin; never sooner than 30 cycles after its last turn (rung 6's timer is the cap), never later than 180 (`overdue`). Nothing in it prefers "right after they play": an other who returns it late teaches it to wait. (Before #264 the turn was the chat line "self is here", with `spoke_age` from the person's last line; those turns don't share a window with the ball's) | a person who rolls the ball back some times more than others, by when the turn comes | **pushes**: 100 turns with a reply check; **contingency**: the share of them in the window self believed best at the turn beats the share of its waiting time the other spent in that window (where a turn at a shuffled moment would land) by z ≥ 3 and +0.10; **payoff**: each turn's outcome (a person rolled it back **after** it, by the check) minus what a timing-blind turn in its interval would have expected (the bins' rates as known before it, weighted by the waiting time in each) averages ≥ +0.05 with t ≥ 4. Both prequential | [play ball](#playing-ball-rung-7): roll it back when you're around, not always; your natural rhythm is the signal |
+| **8 · understand an other** (rung 7 until #258) | after each push it predicts whether the other will have spoken by its reply check, **itself** (#254): `p_self` from its own record (the other's all-time and recent reply rates, the last check's outcome, how long before the push they last spoke), fit on its own earlier checks, no model needed; at the push it may also ask the seat's model (`llm::call`, read-only, one consult per push) the same question (from rung 8 on), and hears the answer as an **advisor**, recalibrated on that model's own track record (its average lean says nothing; a new model starts unheard); it holds off looking at the other for 2 minutes (up to 3 while the model's answer is still in flight), then checks for the reply | the other answering its pushes (the model is optional) | **looks**: 100 reply checks (one per push); **skill**: self's prediction removes ≥ 8% of the running rate's Brier error over them (the other's prior-smoothed rate before each check: knowing the rate scores 0) | play ball in your own rhythm (from #264 it predicts whether you will roll the ball back; before, whether you would have spoken) |
 
 At the default pace, rung 6's ten pushes alone take ~50 minutes; rungs 2–5
 usually take hours, and the audits run on their own schedule.
@@ -651,12 +658,24 @@ measure the bug.
 | `die` | memoryless: probability `p` per second, on its own clock, never on a read | `p` (1/60), `faces` (6) | rungs 3–5 |
 | `body` | only when **self** looks at it | none | the body/other test case (rung 6) |
 | `tower` | only when **self** reaches a block: a standing block topples with every block above it, and a fallen block is lifted back | `n` (5) | self's first act on the world |
+| `ball` | when **self** rolls it to you (its turn) or **you** roll it back (yours); its reading is whose side it is on, `{"side": "self"}` / `{"side": "other"}`; no clock, and a look never moves it | none | rung 7's turns (#264): serve and return |
 
 Every kind also takes `seed`. A tower is one entity for the whole (its reading
 counts the standing blocks) plus one per block, `<name>:b1` (the bottom)
 through `<name>:b<n>`. Each block remembers who toppled it and when. Of the
 reads, only self's reaches change the tower: a read by the model or the field
 leaves it as it is. Others change it by playing (below).
+
+The ball's state (`<data dir>/toybox/toy_ball.json`) is its `side`, its last
+mover `by` and when (`at`), and the last **person** who rolled it
+(`other_by`, `other_at`: what self's reply check reads). The ball unlocks at
+rung 6 (#267), and exactly one shared ball, `toy:ball`, is switched on then
+by the unlock. A seat that passed rung 6 before the ball was built gets it
+once, on its first cycle with #264 (an `unlock_built` line on the record).
+A seat that already has a ball keeps it, and if you remove the ball it stays
+removed (add it back with `membrane toybox add ball`). Every poke by a person on any toy also updates
+`toybox/.last-person.json` (`{ts, by, toy}`): the other's last act, which
+rung 7's timing reads.
 
 `body` is the one toy built to change exactly when self looks, which "Don't
 game the getters" below warns against. It is deliberate, labelled, and its log
@@ -746,11 +765,15 @@ who made it.
 | `die` | `roll` | a fresh face (never the same one) |
 | `drift` | `nudge [up\|down]` | one step (a coin picks the way when none is given); it bounces off a wall |
 | `burst` | `nudge` | a fresh value |
+| `ball` | `roll` | rolls it back to self (your turn). Only while it is on your side |
 | `body` | none | self's alone: the control. A poke is refused |
 
 `fast` and `slow` take no pokes either: their clock is the point. A poke that
-would change nothing (knocking a fallen block, rebuilding a standing one) is
-refused, so every logged poke is a real change. A tower block can be named
+would change nothing (knocking a fallen block, rebuilding a standing one,
+rolling a ball self already has) is refused, so every logged poke is a real
+change. Self's own roll is the one `by: self` on the ball; a poke that names
+itself `self` is written `person:self`. The model may roll the ball too
+(`by: model`), but that is never the other's turn. A tower block can be named
 directly: `toy:tower:b3 knock` is `toy:tower knock 3`.
 
 Three ways to play:
@@ -779,6 +802,49 @@ membrane toybox poke toy:die roll --as alice    # by: alice
   else the HA user (the HA relay stamps `person`), else `operator`. A `person`
   the page puts in the body is ignored whenever any of those exists.
 
+### Playing ball (rung 7)
+
+Babies take turns with objects (rolling a ball back and forth, peekaboo)
+long before they take turns with words, so from rung 7 on self takes its
+turns with the ball, not in chat (#264). Self rolls it to you; you roll it
+back. That's the whole game.
+
+- **Where:** the ball is the first icon in the 🧸 toy dock under the 👶 tab.
+  The ball sits on self's half of its little court (left) or on yours
+  (right, ringed). On your side it's your turn: hover it (tap on a phone)
+  and press **roll it back**. From a terminal:
+  `membrane toybox poke toy:ball roll` (tagged `operator`, or `--as <name>`).
+- **Roll it back when you're around, not always.** Self is learning *when*
+  you take your turn: after each roll it picks the moment it will wait for
+  (how long since you last played: a roll of the ball, or a poke on any toy)
+  and learns which moments get the ball back. If you always roll it back, at
+  once, every moment is as good as any other and there is nothing to learn:
+  the rung rightly stays shut (in the simulation a machine that always
+  returns it never passes). If you never do, the same.
+- **Your natural rhythm is the signal.** Play when you're at the screen, let
+  it lie when you're busy or away, and come back to it when you come back.
+  A person who plays in sessions is exactly what lets it pass (below).
+- **Only a person's roll is your turn.** The seat's model can roll the ball
+  (`by: model`), and nothing in the world rolls it on its own, but neither
+  counts: a reply is a person's roll after self's, by its reply check (2
+  minutes later, up to 3).
+- **Chat goes quiet.** From rung 7 until rung 11 (speak) opens, self sends no
+  more "self is here" lines. Rung 6 (meet an other) was met in chat and stays
+  passed: its holding check reads the chat record as it stood at the switch
+  (the lines before self's first turn with the ball), so the quiet chat can't
+  read as slipping. The seat's model still chats with you as before.
+- **A fresh window.** Rungs 7 and 8 read only the turns in the current
+  medium: the chat turns from before #264 never share a window with turns
+  with the ball, so rung 7's 100 turns start from zero with the ball.
+
+In the simulation (`experiments/rung7_turns/sim.py ... toy`, 100 week-long
+runs each, the same bar as in chat): a person who plays in sessions and
+rolls the ball back mostly right after their own play passes in 98 of 100
+(median ~36 h); one who rolls it back whenever they're there (presence,
+nothing finer) in 56; one who rolls it back 10–30 minutes after they last
+played in 56; a coin-flip person, self on a timer, a person on a timer
+(every 470 s) and a machine that always returns it in none.
+
 ### Migrating the model-written toys
 
 ```bash
@@ -805,10 +871,12 @@ though, and rung 5 may notice that shift.
   reading is the most useful thing you can give it. A getter that errors or is
   held reads as "no answer": self sorts it as silent and reaches for it rarely,
   and too many of them keep rung 3's focus stage down.
-- **Answer it in chat.** From rung 6 on, its "other" is the person who chats.
-  You don't have to answer its "self is here" line specifically; any message
-  you send is heard. Talk irregularly, like a person: an other that answers
-  like clockwork is predictable, and predictable is body.
+- **Answer it in chat (rung 6), then play ball (rung 7 on).** At rung 6 its
+  "other" is the person who chats. You don't have to answer its "self is
+  here" line specifically; any message you send is heard. Talk irregularly,
+  like a person: an other that answers like clockwork is predictable, and
+  predictable is body. From rung 7 on chat goes quiet and the turns are with
+  the ball: [roll it back](#playing-ball-rung-7) when you're around.
 - **Raise the limit one rung at a time.** Watch the new rung pass, then watch
   it hold for a while (not slipping) before raising again. The limit is how you
   keep a rung open long enough to see whether it is real.
@@ -873,7 +941,9 @@ panel's `meets.other` names the person once self has pushed to them — at most
 one meet (~5 minutes) after a restart.
 
 **Rung 7 waits on `pushes`, or its contingency or payoff stays low (#258).**
-Rung 7 earns one reply check per push, and its pushes wait for their moment
+Since #264 the turns are rolls of the ball (`rung7.medium` is `toy`), and the
+window started fresh with them: the chat turns from before don't count. Rung 7
+earns one reply check per turn, and its turns wait for their moment
 (30 to 180 cycles apart, ~5–30 minutes at the default pace), so 100 checks
 take a day or so of running. Read `rung7` in the panel: `bins` shows the
 reply rate per window; a window that gets clearly more replies than the

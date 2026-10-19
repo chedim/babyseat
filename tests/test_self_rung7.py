@@ -210,3 +210,10 @@ def test_the_limit_holds_rung_eight(monkeypatch):
     _run(srv, 400)
     assert not [r for r in _kind(srv, "reach") if r["eid"] == RESP and "p_llm" in r]
     assert 8 not in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
+
+
+@pytest.fixture(autouse=True)
+def _chat_medium(monkeypatch):
+    """These are the chat medium's tests (a line to chat:out is the turn): #264 moved
+    rung 7's turns to the ball by default, so they switch the toy medium off."""
+    monkeypatch.setattr(SL, "TOY_TURNS", False)

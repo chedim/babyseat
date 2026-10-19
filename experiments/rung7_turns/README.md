@@ -112,6 +112,47 @@ here or not; *late answerer* replies 0.8 to a push 10-30 min after their last
 line and 0.1 otherwise, and speaks every ~20 min while here; *coin flip*
 replies 0.5 whatever the timing.
 
+## the toy medium (#264): turns with a ball
+
+    python experiments/rung7_turns/sim.py 100 168 toy
+
+From #264 rung 7's turns are rolls of a ball, not chat lines: self rolls it
+to the other, and the other can roll it back only while it is on their
+side. The moment self waits for is the time since the other last **acted**
+(their last roll of the ball or poke on any toy). A reply is their roll
+after self's turn, by the check. Same policy, same caps, same bar; `drive_toy`
+in `sim.py`. 100 seeds × a week:
+
+| other | pusher | turns/h | passes within a week | median h to pass | best window's payoff t, q50 / q95 / q99 | reply rate vs timing-blind (last window) |
+|---|---|---|---|---|---|---|
+| rhythmic | policy | 4.1 | **0.98** | 36 | 5.47 / 6.57 / 7.16 | 0.56 vs 0.41 |
+| rhythmic | timer | 12.0 | 0.00 | | 0 | 0.20 vs 0.20 |
+| rhythmic | random delay | 6.1 | 0.00 | | 0 / 0 / 0.02 | 0.20 vs 0.19 |
+| present | policy | 3.2 | 0.56 | 90 | 4.18 / 5.59 / 6.48 | 0.52 vs 0.45 |
+| late | policy | 3.1 | 0.56 | 93 | 4.11 / 5.29 / 5.97 | 0.27 vs 0.19 |
+| coin flip | policy | 2.7 | **0.00** | | 1.46 / 2.73 / 3.28 | 0.50 vs 0.49 |
+| coin flip | timer | 12.0 | 0.00 | | 0 | 0.50 vs 0.50 |
+| a player on a timer | policy | 2.6 | **0.00** | | 0 / 1.35 / 1.99 | 0.31 vs 0.29 |
+| a machine that always returns it | policy | 5.4 | **0.00** | | 0 | 1.00 vs 1.00 |
+
+The others (here ~60 min, away ~90 min, as in chat): *rhythmic* is the chat's
+turn-taker with toys -- plays every ~4 min while here and rolls the ball
+back with 0.08 + 0.8·exp(−age/180 s), age = how long since their own last
+play; *present* rolls it back whenever here (0.85) and plays every ~15 min:
+presence and nothing finer; *late* rolls it back when self's turn comes
+10–30 min after their last play; *coin flip* half the time, whatever the
+timing; *a player on a timer* rolls it back every 470 s on the dot when it is
+on their side; *a machine* always rolls it back 60 s after self's turn
+(every window is equally good: nothing to learn, payoff 0). Rhythmic and
+present others, coming back to find the ball on their side, roll it back
+half the time.
+
+The chat's rhythm passes about as often with the ball (98 vs 99 of 100). Pure
+presence (*present*) passes in about half the weeks: the policy gains only
+at the moments the person comes back, since while they are here every
+moment gets the ball back. A coin, a timer on either side and a machine
+never pass.
+
 ## choosing the numbers
 
 - **Window: 100 pushes.** In the draft runs 80 and 100 gave about the same

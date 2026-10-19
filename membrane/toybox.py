@@ -34,13 +34,26 @@ PLAY (#244): others act on the toys -- poke(name, action, arg, by):
     die    roll (a fresh face)
     drift  nudge [up|down] (one step, bouncing off a wall; no direction: a coin)
     burst  nudge (a fresh value)
+    ball   roll (back to self: only while it is on your side)
     body   nothing: it stays self-only, the control
 fast and slow take no pokes either (their clock is the point). A poke that
-changes nothing (knock a fallen block, rebuild a standing one) is refused.
+changes nothing (knock a fallen block, rebuild a standing one, roll a ball
+self already has) is refused.
 
 THE KIT (KINDS): fast / slow / burst / drift / die change on their own clock
 (the thinker's tick; a read never changes them), body changes only when self
 looks at it, and the tower changes only when self reaches one of its blocks.
+
+THE BALL (#264): rung 7's turn toy -- serve and return with an object, before
+words. Its state is whose side it is on (`self` / `other`), its last mover
+(`by`) and when (`at`), and the last PERSON who rolled it (`other_by`,
+`other_at`: a reply's ground truth). Self rolls it to the other on its turn
+(roll_self, `by: self` -- the only way that tag lands on it); a person rolls
+it back (poke); the model may roll it too (`by: model`), which is never the
+other's turn. It has no clock, and a look never moves it. Exactly one shared
+ball (BALL) is provisioned once, by toy_unlocks when rung 6 passes (#267). The
+other's last act -- a person's poke on ANY toy -- is kept in one small file
+(last_person_poke): what rung 7's timing reads.
 
 THE SURFACE: `membrane toybox list|add|remove|reset|migrate|poke` (cli_main),
 the `toybox` object's methods list / add(spec) / remove(name) / reset(name) /
@@ -81,9 +94,16 @@ KINDS = {
              "params": {}, "clock": False},
     "tower": {"about": "n blocks: self topples a block (and the ones above it) by reaching it, and lifts a fallen one by reaching it; only self's reaches change it",
               "params": {"n": 5}, "clock": False},
+    "ball": {"about": "a ball self and the other roll back and forth (rung 7's turns, #264): self rolls it to "
+                      "you on its turn; roll it back when it is on your side",
+             "params": {}, "clock": False},
 }
-ACTIONS = {"tower": ("knock", "rebuild"), "die": ("roll",), "drift": ("nudge",), "burst": ("nudge",)}
+ACTIONS = {"tower": ("knock", "rebuild"), "die": ("roll",), "drift": ("nudge",), "burst": ("nudge",),
+           "ball": ("roll",)}
 RESERVED_BY = ("self", "world")         # only the toy itself and self's own looks write these
+NOT_PEOPLE = RESERVED_BY + ("model",)   # #264: every other tag is a person's
+BALL = "toy:ball"                       # #264: the one shared ball, provisioned once
+LAST_PERSON = ".last-person.json"       # #264: the other's last act, on any toy
 MIGRATE_MAP = {"w:fast": "fast", "w:slow": "slow", "w:burst": "burst", "w:drift": "drift",
                "w:body": "body", "toy:die": "die"}
 NAME_RX = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,59}$")
@@ -162,6 +182,38 @@ def _note(st: dict, ts: float, by: str, what: str, **kw) -> None:
     rec = {"ts": ts, "by": by, "what": what, **kw}
     with open(_log_path(st["name"]), "a") as fh:
         fh.write(json.dumps(rec, sort_keys=True) + "\n")
+    if is_person(by):
+        _mark_person(ts, by, st["name"])
+
+
+def is_person(by) -> bool:
+    """#264: a tag that is a person's -- anyone but self, the world and the model."""
+    return bool(by) and str(by) not in NOT_PEOPLE
+
+
+_person_guard = threading.Lock()
+
+
+def _mark_person(ts: float, by: str, name: str) -> None:
+    """Keep the latest person's poke on any toy (never an older one)."""
+    with _person_guard:
+        cur = last_person_poke()
+        if cur is not None and float(cur["ts"]) > float(ts):
+            return
+        p = root() / LAST_PERSON
+        tmp = p.with_name(p.name + f".{os.getpid()}.{threading.get_ident()}.tmp")
+        tmp.write_text(json.dumps({"ts": float(ts), "by": by, "toy": name}, sort_keys=True))
+        os.replace(tmp, p)
+
+
+def last_person_poke() -> dict | None:
+    """#264: the other's last act -- the latest poke on any toy by a person
+    ({ts, by, toy}); None before any. What rung 7's timing reads."""
+    try:
+        d = json.loads((root() / LAST_PERSON).read_text())
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) and isinstance(d.get("ts"), (int, float)) else None
 
 
 def _rng(st: dict) -> random.Random:
@@ -259,6 +311,8 @@ def create(kind: str, name: str, params: dict | None = None, now: float | None =
         st["next_at"] = now + _die_wait(st)
     elif kind == "tower":
         st["blocks"] = [{"standing": True, "by": None, "at": None, "falls": 0} for _ in range(prm["n"])]
+    elif kind == "ball":
+        st.update(side="self", by=None, at=None, other_by=None, other_at=None)   # self serves first
     with _locked(name):
         _save(st)
         lp = _log_path(name)
@@ -275,6 +329,8 @@ def _reading(st: dict, block: int | None = None) -> dict:
         return {"standing": bool(st["blocks"][block - 1]["standing"])}
     if k == "die":
         return {"face": st["value"]}
+    if k == "ball":
+        return {"side": st["side"]}
     return {"value": st["value"]}
 
 
@@ -374,6 +430,13 @@ def poke(name: str, action: str, arg=None, by: str = "", now: float | None = Non
                     return {"ok": False, "error": f"block {block} of {name} is standing"}
                 bl[block - 1].update(standing=True, by=by, at=now)
                 _note(st, now, by, "lift", block=block)
+        elif k == "ball":
+            if st["side"] == "self":
+                return {"ok": False, "error": f"{name} is on self's side: it rolls it to you on its turn"}
+            st.update(side="self", by=by, at=now)
+            if is_person(by):                                # the other's turn (a reply's ground truth)
+                st.update(other_by=by, other_at=now)
+            _note(st, now, by, "roll", side="self")
         elif k == "die":
             cur, faces = st["value"], int(st["params"]["faces"])
             v = _rng(st).randint(1, faces - 1)
@@ -400,6 +463,25 @@ def poke(name: str, action: str, arg=None, by: str = "", now: float | None = Non
         _save(st)
         return {"ok": True, "name": name, "action": action, "by": by,
                 **({"block": block} if block else {}), "reading": _reading(st, block)}
+
+
+def roll_self(name: str, now: float | None = None) -> dict:
+    """SELF'S TURN (#264): self rolls the ball to the other -- the one way
+    `by: self` lands on a ball (a poke tags a would-be `self` as a person).
+    Never refused for being on the other's side: an unreturned ball is
+    fetched and rolled again. -> {ok, name, by, reading} | {ok: False, error}."""
+    now = time.time() if now is None else float(now)
+    name = str(name or "").strip().lower()
+    if not _path(name).exists():
+        return {"ok": False, "error": f"no toy named {name!r}"}
+    with _locked(name):
+        st = _load(name)
+        if st["kind"] != "ball":
+            return {"ok": False, "error": f"{name} is a {st['kind']}, not a ball"}
+        st.update(side="other", by="self", at=now)
+        _note(st, now, "self", "roll", side="other")
+        _save(st)
+        return {"ok": True, "name": name, "by": "self", "reading": _reading(st)}
 
 
 def log_len(name: str) -> int:
@@ -497,6 +579,14 @@ def last_change(name: str) -> dict | None:
         if isinstance(rec, dict) and "ts" in rec:
             return rec
     return None
+
+
+def peek(name: str) -> dict | None:
+    """The toy's state without its log (cheap; None when there's no such toy)."""
+    try:
+        return _load(str(name or "").strip().lower())
+    except (KeyError, ValueError, OSError):
+        return None
 
 
 def state(name: str) -> dict:
@@ -658,14 +748,20 @@ def list_toys() -> list[dict]:
     if not d.exists():
         return out
     for p in sorted(d.glob("*.json")):
+        if p.name.startswith("."):
+            continue                                         # the toybox's own marks (#264), not toys
         try:
             st = json.loads(p.read_text())
         except ValueError:
+            continue
+        if not isinstance(st, dict) or "kind" not in st:
             continue
         row = {"name": st["name"], "kind": st["kind"], "params": st["params"], "seed": st["seed"],
                "counts": st.get("counts") or {}}
         if st["kind"] == "tower":
             row["reading"] = "".join("|" if b["standing"] else "_" for b in st["blocks"])
+        elif st["kind"] == "ball":
+            row["reading"] = st.get("side")                  # #264: whose side it is on
         else:
             row["reading"] = st.get("value")
         out.append(row)
@@ -728,7 +824,8 @@ def bind(srv) -> None:
                 "summary": ("self's toys, built in (#239): add(spec='<kind> [name=..] [param=value ..]') "
                             "switches one on, list() shows them, remove(name) / reset(name); "
                             "poke(toy, action) plays with one as the model (#244: tower 'knock <k>' / "
-                            "'rebuild <k>', die 'roll', drift / burst 'nudge'; body is self's alone). The kit: "
+                            "'rebuild <k>', die 'roll', drift / burst 'nudge', ball 'roll' -- a model's "
+                            "roll is never the other's turn; body is self's alone). The kit: "
                             + ", ".join(KINDS) + ". Never write a toy script: add one here.")})
             est.upsert(ent, embedder=None)
         have = {(d.properties or {}).get("method_name") for d in list(est.docs.values())
@@ -928,7 +1025,7 @@ def cli_main(argv: list[str]) -> int:
     m.add_argument("--dry-run", action="store_true", help="only list (the default without --yes)")
     m.add_argument("--yes", action="store_true", help="replace them (each old doc is backed up first)")
     p = sub.add_parser("poke", help="play with a toy as the operator: tower knock|rebuild <k>, die roll, "
-                                    "drift nudge [up|down], burst nudge (body is self's alone)")
+                                    "drift nudge [up|down], burst nudge, ball roll (back to self; body is self's alone)")
     p.add_argument("toy")
     p.add_argument("action")
     p.add_argument("arg", nargs="?", default=None)

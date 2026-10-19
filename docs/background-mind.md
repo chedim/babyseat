@@ -364,6 +364,25 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   pass (`experiments/rung7_turns`). `status()['rung7']` shows the bins, the
   best window, the in-window share against chance, and the reply rate
   against timing-blind.
+
+  **With the ball (#264).** Pre-verbal serve-and-return is with objects,
+  not words, so from rung 7 on the turn is not a chat line: self rolls the
+  shared toybox ball (`toy:ball`, switched on once by its rung 6 unlock, #267) to the person
+  through its own `self::roll` (field-only: `toybox.roll_self`, `by: self`;
+  no chat, no model, no shell), and the person's turn is rolling it back
+  from the toy dock or `membrane toybox poke toy:ball roll`. The policy,
+  the caps and the test are the ones above; `spoke_age` is now how long
+  since the person last **acted**, a person's last poke on any toy
+  (`toybox/.last-person.json`: any play says they are at the dock, and with
+  the ball alone the 0–2 min bin could never come). A reply is a person's
+  roll after self's, by the check (the ball's `other_at`; the model's roll
+  never counts). Each turn is a `push` line with `medium: "toy"`, `to` the
+  ball and `toy` its name; its reply check carries `medium: "toy"` too, and
+  rungs 7 and 8 read only the current medium's turns (chat turns from before
+  never share their window). Chat is quiet from rung 7 until rung 11
+  (speak) opens; rung 6 reads its record as it stood at the switch, so a
+  quiet chat can't read as slipping. Simulated pass rates are in
+  `experiments/rung7_turns` (`sim.py ... toy`).
 - **Rung 8, understand an other** (rung 7 until #258, unchanged but for
   its outcome: since #258 a check's outcome is `replied`, a line after the
   push, like rung 7's; a check from before #258 counts for neither). Once rung
