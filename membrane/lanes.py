@@ -163,6 +163,9 @@ def announce_line(a: dict) -> str:
     births keep their lane; merges keep theirs."""
     if a.get("kind") == "merged":
         return f"new entity: {a['eid']} — merged {a.get('extra', '')}"
+    if a.get("kind") == "diverged":
+        # #226: an imported copy this seat edited met a newer publication
+        return f"diverged: {a['eid']} — {a.get('extra', '')}"
     if str(a.get("kind") or "").startswith("script"):
         return (f"script: {a['eid']} {a.get('name') or '?'} → "
                 f"{(a.get('summary') or '')[:140]}")

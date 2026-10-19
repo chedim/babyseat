@@ -410,8 +410,9 @@ TOOLS: list[dict] = [
             "global tier holds only PUBLISHED entities. "
             "publish=True exports the entity under a per-origin key "
             "(pub:<origin>:<eid>) -- your decision, your version line "
-            "(republishing bumps it); imports elsewhere take the last "
-            "STATE, never your code. unpublish=True retracts YOUR "
+            "(republishing bumps it); seats that imported it take each "
+            "newer STATE within a minute (a seat that edited its copy "
+            "keeps its edit), never your code. unpublish=True retracts YOUR "
             "export (their import freezes at its last version). "
             "membrane::presence is published for you once a minute."),
         "inputSchema": {
@@ -1147,7 +1148,8 @@ def tool_entity_edit(args: dict, port: int) -> str:
             return (f"Entity {out['eid']} PUBLISHED to the global tier "
                     f"({out['published']['key']}, version "
                     f"{out['published']['ver']}) -- foreign seats import "
-                    f"its last STATE, never your code. Publish is "
+                    f"its STATE (and upgrade to each newer version), never "
+                    f"your code. Publish is "
                     f"per-origin (yours); republish to bump the version.")
         return (f"Publish failed: {out['published'].get('error')} "
                 f"(the local tier carries; publish again when up).")
