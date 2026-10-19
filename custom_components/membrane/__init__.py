@@ -12,6 +12,9 @@ Agatha").
 - The relay (relay.py): every call goes through HA's auth; the seat's pair stays
   server-side; each person sees their own chats; each message carries
   "[HA user: <name>]".
+- The zoo (zoo.py, #283): a list of seats in the options, one active for the
+  whole house (select.membrane_seat, membrane home's 🦠 cards); a switch is
+  applied live, no reload.
 """
 from __future__ import annotations
 
@@ -21,15 +24,16 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EVENT_HOMEASSISTANT_STARTED, EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import CoreState, HomeAssistant
 
-from .const import (CONF_BACKEND, CONF_EMBED_MODEL, CONF_MODE, CONF_MODEL, CONF_SERVE_PASS,
-                    CONF_SERVE_URL, CONF_SERVE_USER, DEFAULT_LOOPS, DEFAULT_SERVE_USER, DOMAIN,
+from . import zoo
+from .const import (CONF_BACKEND, CONF_EMBED_MODEL, CONF_MODE, CONF_MODEL, DEFAULT_LOOPS, DOMAIN,
                     MODE_INSIDE, OPT_HA_ACCESS, OPT_HA_BASE_URL, OPT_LANDING, OPT_LOOPS, OPT_STT_URL)
 
 _LOGGER = logging.getLogger(__name__)
 
 ENTRY = "/api/membrane/www/entry.js?m="
 # the seat as Assist's conversation agent + its field's readings (from the boat's membrane_ai)
-PLATFORMS = [Platform.CONVERSATION, Platform.SENSOR, Platform.BINARY_SENSOR]
+# + the house's active seat (#283: select.membrane_seat)
+PLATFORMS = [Platform.CONVERSATION, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SELECT]
 PANELS = (  # url path, sidebar title, icon, element, module, admin only
     ("membrane", "Membrane", "mdi:cube-scan", "membrane-home-panel", "home.js", False),
     ("membrane-chat", "Membrane chat", "mdi:brain", "ai-terminal-panel", "panel.js", True),
@@ -52,18 +56,39 @@ def _register_views(hass: HomeAssistant, comp: dict) -> None:
         return                                   # HA can't unregister a view: once per HA run
     from .relay import ServeProxyView
     from .stt import SttView
-    from .views import AssetView, ConfView, NameView
-    for v in (AssetView(), NameView(), ConfView(), ServeProxyView(), SttView()):
+    from .views import AssetView, ConfView, NameView, ZooActiveView, ZooView
+    for v in (AssetView(), NameView(), ConfView(), ServeProxyView(), SttView(), ZooView(), ZooActiveView()):
         hass.http.register_view(v)
     comp["views"] = True
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """1.1 -> 1.2 (#283): the one seat becomes a one-seat list, connecting exactly
+    as before (a minor bump: an older integration still loads the entry)."""
+    if entry.version == 1 and entry.minor_version < 2:
+        hass.config_entries.async_update_entry(entry, options=zoo.migrate(dict(entry.data), dict(entry.options)),
+                                               minor_version=2)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from homeassistant.components import frontend as fe
     comp = hass.data.setdefault(DOMAIN, {})
-    data, opts = entry.data, entry.options
-    comp["stt_url"] = str(opts.get(OPT_STT_URL) or "")
+    data = entry.data
+    opts = zoo.migrate(dict(data), dict(entry.options))
+    if opts != dict(entry.options):                   # a fresh entry: its first seat written down
+        hass.config_entries.async_update_entry(entry, options=opts)
+    comp["stt_default"] = str(opts.get(OPT_STT_URL) or "")
+    comp["stt_url"] = comp["stt_default"]
     comp.setdefault("name", "Bob")
+    # THE ZOO (#283): the seats, the active one; every reader of comp["serve_*"]
+    # follows the active seat (zoo.apply), a switch moves them live (zoo.switch)
+    comp["entry"] = entry
+    comp[zoo.SEATS] = list(opts[zoo.SEATS])
+    comp["applied_opts"] = zoo.settings_of(opts)
+    comp["on_switch"] = []
+    comp["inside_slot"] = slot = zoo.SeatSlot(comp)   # HA's own child writes here (supervisor.py)
+    zoo.apply(comp, zoo.active_of(comp[zoo.SEATS], opts.get(zoo.ACTIVE)))
     _register_views(hass, comp)
 
     for path, title, icon, element, module, admin in PANELS:
@@ -80,7 +105,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if data.get(CONF_MODE) == MODE_INSIDE:
         from .supervisor import SeatSupervisor
         comp["inside"] = True
-        sup = SeatSupervisor(hass, comp, data[CONF_BACKEND],
+        sup = SeatSupervisor(hass, slot, data[CONF_BACKEND],
                              opts.get(CONF_MODEL) or data.get(CONF_MODEL, ""),          # the options' pick wins
                              opts.get(CONF_EMBED_MODEL) or data.get(CONF_EMBED_MODEL, ""),
                              int(opts.get(OPT_LOOPS, DEFAULT_LOOPS)))
@@ -92,7 +117,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             async def _ha_env():
                 return {"HASS_URL": HA.local_url(hass), "HASS_TOKEN": await HA.mint_token(hass, entry)}
             sup.extra_env = _ha_env
-            push = HA.StatePush(hass, comp)
+            push = HA.StatePush(hass, slot)               # HA's child mirrors HA, active or not
             push.start()
             comp["state_push"] = push
 
@@ -108,13 +133,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STOP, _stop))
     else:
         comp["inside"] = False
-        comp["serve_url"] = str(data.get(CONF_SERVE_URL) or "").rstrip("/")
-        comp["serve_user"] = str(data.get(CONF_SERVE_USER) or DEFAULT_SERVE_USER)
-        # the seat token (#253: a seat on another machine refuses HA's writes
-        # without it; Basic's password); the options form may replace it
-        comp["serve_pass"] = str((opts[CONF_SERVE_PASS] if CONF_SERVE_PASS in opts
-                                  else data.get(CONF_SERVE_PASS)) or "")
-        comp["serve_ready"] = bool(comp["serve_url"])     # the operator's own seat: up as configured
+        # the active seat's url, user and token (#253: a seat on another machine
+        # refuses HA's writes without it; Basic's password) are comp's already
+        # (zoo.apply above); a seat elsewhere is up as configured
         if opts.get(OPT_HA_ACCESS, True):
             # DETACHED HOME ASSISTANT ACCESS (ha_access.py): the same StatePush as
             # inside mode (its target is comp["serve_url"] either way), and the
@@ -146,6 +167,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             if hass.state is CoreState.running:
                 hass.async_create_background_task(_announced(), "membrane ha-start")
+            # #283: a switched-to seat gets Home Assistant access at once
+            comp["on_switch"].append(lambda: hass.async_create_background_task(
+                HA.push_token(hass, entry, comp), "membrane ha token"))
             entry.async_on_unload(hass.bus.async_listen_once(EVENT_HOMEASSISTANT_STARTED, _announced))
             entry.async_on_unload(hass.bus.async_listen_once(
                 EVENT_HOMEASSISTANT_STOP, lambda _e: HA.seat_event_sync(comp, "ha-stop")))
@@ -160,6 +184,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _reload(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    comp = hass.data.get(DOMAIN) or {}
+    if comp.get("applied_opts") == zoo.settings_of(entry.options):
+        return                                       # #283: only the active seat moved -- applied live
     await hass.config_entries.async_reload(entry.entry_id)
 
 
@@ -180,7 +207,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         fe.async_remove_panel(hass, path)
     if comp.pop("landing", False):
         fe.remove_extra_js_url(hass, ENTRY + "panel.js")
-    for k in ("serve_url", "serve_pass", "serve_ready"):
+    for k in ("serve_url", "serve_pass", "serve_ready", "inside_slot", "entry", "on_switch", "applied_opts",
+              "active_seat", "seat_name", zoo.SEATS):
         comp.pop(k, None)
     sess = comp.pop("http_session", None)
     if sess is not None and not sess.closed:

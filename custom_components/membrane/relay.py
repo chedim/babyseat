@@ -78,6 +78,7 @@ READ_ONLY_EXACT = ("membrane/state", "membrane/map/field",
                    "membrane/predict", "membrane/minds",
                    "membrane/self/recent",              # #230: self's record, the 👶 panel's feed
                    "membrane/self/sheet",               # #249: self's character sheet
+                   "membrane/self/card",                # #283: the zoo's card: name, Lv, rung, awake
                    "membrane/toybox/state")             # #249: the toy dock's live toys
 # the minds' inner text (the thinker's log, the dreamer's goals): admins only
 ADMIN_READ_EXACT = ("membrane/minds",)
@@ -246,6 +247,24 @@ def basic_header(user: str, password: str) -> str:
     return "Basic " + base64.b64encode(raw).decode()
 
 
+def upstream_url(comp: dict, rest: str) -> str:
+    """The active seat's URL for a serve sub-path (#283: the house's seat,
+    zoo.apply keeps comp pointed at it)."""
+    return str(comp.get("serve_url") or "").rstrip("/") + "/" + (rest or "").lstrip("/")
+
+
+def upstream_headers(comp: dict) -> dict:
+    """The active seat's basic pair (the seat token is its password, #253)."""
+    return {"Authorization": basic_header(comp.get("serve_user"), comp.get("serve_pass"))}
+
+
+def offline_response(comp: dict, err) -> web.Response:
+    """#283: an unreachable seat answers in words ("<name> is offline") the page
+    turns into "switch to <another seat>?" -- never the raw exception."""
+    from .zoo import offline_body
+    return _json_response(502, offline_body(comp, err))
+
+
 def component_of(request) -> dict:
     """The integration's hass.data slot off a view request (HA keeps the
     instance at request.app[KEY_HASS]; there is no request.hass)."""
@@ -294,11 +313,10 @@ class ServeProxyView(HomeAssistantView):
     async def _upstream(self, request, comp, rest, body):
         """One call to the serve -> (status, payload bytes, content type)
         or a ready 502 Response."""
-        headers = {"Authorization": basic_header(comp.get("serve_user"),
-                                                 comp.get("serve_pass"))}
+        headers = upstream_headers(comp)
         if body is not None:
             headers["Content-Type"] = "application/json"
-        url = comp["serve_url"].rstrip("/") + "/" + rest
+        url = upstream_url(comp, rest)
         sess = await self._session_of(comp)
         try:
             async with sess.request(
@@ -309,11 +327,12 @@ class ServeProxyView(HomeAssistantView):
                 payload = await up.read()
                 return (up.status, payload,
                         up.headers.get("Content-Type", "application/json"))
-        except aiohttp.ClientError as e:
+        except (aiohttp.ClientError, TimeoutError) as e:
+            # #283: the seat is away (the laptop asleep, the phone off the
+            # WiFi): the page says so and offers another seat
             _LOGGER.warning("membrane: %s %s -> %r", request.method,
                             rest, e)
-            return web.Response(status=502,
-                                text=f"serve unreachable: {e!r}")
+            return offline_response(comp, e)
         except Exception as e:                          # noqa: BLE001
             _LOGGER.exception("membrane: %s %s failed", request.method,
                               rest)
@@ -330,10 +349,8 @@ class ServeProxyView(HomeAssistantView):
             "X-Accel-Buffering": "no",
         })
         await resp.prepare(request)
-        headers = {"Authorization": basic_header(comp.get("serve_user"),
-                                                 comp.get("serve_pass")),
-                   "Accept": "text/event-stream"}
-        url = comp["serve_url"].rstrip("/") + "/event"
+        headers = {**upstream_headers(comp), "Accept": "text/event-stream"}
+        url = upstream_url(comp, "event")
         sess = await self._session_of(comp)
         parser = SSEFrames()
         try:
