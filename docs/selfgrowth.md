@@ -269,6 +269,17 @@ line on the field (#237):
   the person self meets is "you" (or their name), `i` is "the eye", and a toy
   goes by its short name (`toy:dice` → "dice").
 
+The labels round self are small chips on the theme's card colour, with the
+label's own colour as their left edge, so they read on light and dark. They
+never pile up. Each frame they are laid out so none overlaps another: self's
+tag and the look keep their places first, and the marks (`wants`, `expects`,
+`pushes to`, `pull`) step aside or hide when there is no room. They also stay
+inside the visible field, which is the canvas minus the chat, the 👶 panel,
+the top bar, the voice row and the caption. A thing behind a panel gets its
+label at the panel's edge with an arrow toward it, and a ring whose thing sits
+behind a panel is not drawn there. While the camera follows self (◎ self or
+👁), self's tag shortens to `self · Lv 6 · 64%`; the exp bar carries the rest.
+
 A fresh page starts the trail from the record's last looks and replays no
 pulses. With *reduce motion* on, nothing pulses or wobbles: the rings hold
 still for a few seconds and the beam stays steady. It is read-only: nothing
