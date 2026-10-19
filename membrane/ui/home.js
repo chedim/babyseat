@@ -26,7 +26,7 @@ const LS_FOLLOW = "membrane.home.follow";
 // what the camera follows (the operator, 2026-10-10: "the seat (the most
 // interesting entity) or thinker/chat, whoever's active, to show what Argus
 // is thinking/doing, or even just where stuff is changing")
-const FOLLOW_MODES = ["activity", "seat", "you", "self"];
+const FOLLOW_MODES = ["activity", "seat", "you", "self", "eyes"];
 const SEAT_IDS = ["seat:self", "seat"];
 const ACTIVITY_EVERY_MS = 1500;
 // THE VIEW (2026-10-13, the operator: the standalone burger menu "just with
@@ -66,6 +66,146 @@ function angleStep(a, b, k) {
   while (d > Math.PI) d -= 2 * Math.PI;
   while (d < -Math.PI) d += 2 * Math.PI;
   return a + d * k;
+}
+
+// ---- #237: THE BRAIN ON THE SCREEN -- pure logic (node-tested) ---------------
+// Everything here reads self's record lines and says only what a line holds.
+
+/** membrane::Component:toy:dice -> toy:dice (as panel.js's shortEid). */
+function bShort(eid) { return String(eid == null ? "" : eid).replace(/^membrane::(?:[A-Z][A-Za-z]*:)?/, ""); }
+
+/** A thing's friendly name: the person self meets is "you" (or their name),
+ *  `i` is the eye, a toy goes by its short name, the rest by their eid. */
+function brainLabel(eid, me) {
+  if (eid == null || eid === "") return "?";
+  const s = bShort(eid);
+  const m = /^chat:(?:in|out):(.+)$/.exec(s);
+  if (m) return me && m[1] === me ? "you" : m[1] === "operator" ? "the operator" : m[1];
+  if (s === "i") return "the eye";
+  const t = /^(?:toy|cradle):(.+)$/.exec(s);
+  return t ? t[1] : s;
+}
+
+const BRAIN_RUNGS = { 0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart", 4: "patience",
+  5: "notice the world changed", 6: "meet an other", 7: "understand an other", 8: "recognize itself",
+  9: "change itself", 10: "speak" };
+const bnum = (x) => String(Math.round(Number(x) * 100) / 100);
+
+/** One record line as a plain sentence for a stranger. Measured, never
+ *  narrated: a number appears only when the line carries it. */
+function brainCaption(r, me) {
+  r = r || {};
+  const k = r.kind;
+  if (k === "reach") {
+    const who = brainLabel(r.eid, me);
+    const exp = r.p != null ? " (it expected " + bnum(r.p) + ")" : "";
+    if (r.answer !== "changed" && r.answer !== "unchanged") return "self reached for " + who + " — no answer" + (r.why ? " (" + r.why + ")" : "");
+    if (r.reply) {
+      const you = who === "you";
+      return "self checked whether " + who + " answered — " + (r.answer === "changed" ? (you ? "you did" : "they did") : "not yet") + exp;
+    }
+    return "self looked at " + who + (r.timed ? " when it judged a change likely" : "") + " — "
+      + (r.answer === "changed" ? "it changed" : "no change") + exp;
+  }
+  if (k === "push") {
+    const who = brainLabel(r.to || r.eid, me);
+    return "self said hello to " + who + (r.asked ? " and asked the model if " + (who === "you" ? "you" : "they") + "'ll answer" : "");
+  }
+  if (k === "shift") return "self noticed " + brainLabel(r.eid, me) + " stopped behaving like itself"
+    + (r.was != null && r.now != null ? " (it changed " + bnum(r.was) + " of the time, now " + bnum(r.now) + ")" : "");
+  if (k === "wait") return "self waited — nothing was due";
+  if (k === "rung") return "level up: rung " + r.rung + (BRAIN_RUNGS[r.rung] ? " · " + BRAIN_RUNGS[r.rung] : "");
+  if (k === "cycle") return "self " + (r.act === "move" || !r.act ? "moved" : r.act)
+    + (r.gap != null ? " — it landed " + Number(r.gap).toFixed(3) + " from where it expected" : "");
+  if (k === "error") return "self hit an error" + (r.act ? " in " + r.act : "") + (r.why ? ": " + r.why : "");
+  if (k === "birth") return "self was born";
+  if (k === "audit") return "self is auditing " + brainLabel(r.eid, me) + (r.phase ? " (" + r.phase + ")" : "");
+  return "self: " + String(k || "?");
+}
+
+/** A record line's identity (a shift line carries no n: its ts and eid do). */
+function brainKey(r) { return [r.kind, r.ts, r.n == null ? "" : r.n, r.eid || r.to || ""].join("|"); }
+
+/** The feed comes newest first: the lines not seen yet, oldest first, and the
+ *  seen keys to keep (capped). */
+function brainFresh(lines, seen) {
+  const known = new Set(seen || []), fresh = [];
+  for (const r of (lines || []).slice().reverse()) {
+    const key = brainKey(r || {});
+    if (known.has(key)) continue;
+    known.add(key); fresh.push(r);
+  }
+  return { fresh, seen: [...known].slice(-300) };
+}
+
+const BRAIN_TRAIL_N = 8;
+/** The trail of looks: a reach joins it, the oldest falls off past the cap. */
+function brainTrail(trail, r, cap = BRAIN_TRAIL_N) {
+  if (!r || r.kind !== "reach" || !r.eid) return trail || [];
+  return (trail || []).concat([{ eid: r.eid, answer: r.answer }]).slice(-cap);
+}
+/** Oldest faint, newest bright. */
+function trailAlpha(i, n) { return 0.15 + 0.75 * (i + 1) / Math.max(1, n); }
+
+// ◎ self's framing (#237, the operator: "much closer ... scale with what self is doing")
+const FRAME_FOV = 55, FRAME_PAD = 1.1, FRAME_MARGIN = 25, FRAME_MIN = 110, FRAME_MAX = 1400;
+const d3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+function frameRadius(pos, pts) {
+  let r = 0;
+  for (const q of pts || []) if (q && pos) r = Math.max(r, d3(pos, q));
+  return r;
+}
+/** The amoeba, its last steps, its look targets and its aim: how far they spread. */
+function selfFrame(st) {
+  const pts = [].concat(st.looks || [], st.steps || [], st.aim ? [st.aim] : []);
+  return { center: st.pos, radius: frameRadius(st.pos, pts) };
+}
+/** The camera distance that puts `radius` (padded 10%, plus a margin) inside
+ *  the vertical half-angle of the view -- clamped to [FRAME_MIN, FRAME_MAX]. */
+function frameDistance(radius, fovDeg = FRAME_FOV) {
+  const d = (Math.max(0, Number(radius) || 0) * FRAME_PAD + FRAME_MARGIN) / Math.tan((fovDeg / 2) * Math.PI / 180);
+  return Math.max(FRAME_MIN, Math.min(FRAME_MAX, d));
+}
+/** Critically damped step toward goal; reduced motion steps at once. */
+function dampTo(cur, goal, dt, rate, reduced) {
+  if (reduced) return goal;
+  return cur + (goal - cur) * (1 - Math.exp(-dt * rate));
+}
+
+// 👁 self's eyes (#237, the operator: "PUT ME INTO self's WORLD!")
+function followLabel(m) { return m === "eyes" ? "👁 self's eyes" : "◎ " + m; }
+/** A manual orbit / zoom leaves the eyes (back to ◎ self); other modes stay. */
+function modeAfterTouch(m) { return m === "eyes" ? "self" : m; }
+const EYES_FRESH_MS = 8000;
+/** Where the eyes look: the thing it reaches for now (while fresh and placed),
+ *  else its aim, else the way it is heading, else the field's centre. */
+function eyesTarget(st) {
+  const pos = st && st.pos;
+  if (!pos) return null;
+  const lk = st.look;
+  if (lk && lk.p && lk.age < EYES_FRESH_MS && d3(pos, lk.p) > 1) return { kind: "look", p: lk.p };
+  if (st.aim && d3(pos, st.aim) > 1) return { kind: "aim", p: st.aim };
+  const tr = st.trail || [];
+  if (tr.length >= 2) {
+    const a = tr[Math.max(0, tr.length - 5)], b = tr[tr.length - 1], n = d3(a, b);
+    if (n > 1e-6) return { kind: "heading", p: [0, 1, 2].map((i) => pos[i] + (b[i] - a[i]) / n * 200) };
+  }
+  if (Math.hypot(pos[0], pos[1], pos[2]) > 1) return { kind: "centre", p: [0, 0, 0] };
+  return null;
+}
+function norm3(v) { const n = Math.hypot(v[0], v[1], v[2]) || 1; return [v[0] / n, v[1] / n, v[2] / n]; }
+/** Turn a unit direction toward another (k: 0 stays, 1 arrives). */
+function turnToward(dir, want, k) {
+  const w = norm3(want), d = norm3(dir);
+  if (k >= 1) return w;
+  return norm3([0, 1, 2].map((i) => d[i] + (w[i] - d[i]) * k));
+}
+/** The orbit that puts the camera `back` behind pos, looking along dir. */
+function eyesOrbit(pos, dir, back = 6) {
+  const d = norm3(dir), R = 120;
+  const target = [0, 1, 2].map((i) => pos[i] + d[i] * R);
+  const u = [-d[0], -d[1], -d[2]];
+  return { target, r: R + back, phi: Math.max(1e-4, Math.min(Math.PI - 1e-4, Math.acos(u[1]))), theta: Math.atan2(u[0], u[2]) };
 }
 
 // HA's sidebar as a drop-down (2026-10-10, the operator: "replace the HA
@@ -465,7 +605,9 @@ function pickVoice(voices, lang = "en", chosen = "") {
 const LS_VOICE = "membrane.home.voice";
 const IS_CHROME = typeof navigator !== "undefined" && /Chrome\//.test(navigator.userAgent || "") && !/Firefox\//.test(navigator.userAgent || "");
 
-const HomeLogic = { cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep };
+const HomeLogic = { cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep,
+  brainLabel, brainCaption, brainKey, brainFresh, brainTrail, trailAlpha, frameRadius, selfFrame, frameDistance, dampTo,
+  followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
 const HSTYLE = `
@@ -643,7 +785,26 @@ const HSTYLE = `
   .selfpanel .dot.warn { background:var(--warning-color,#ffa600); }
   .selfpanel .dot.bad { background:var(--error-color,#db4437); }
   .selfpanel .dot.idle { background:color-mix(in srgb, var(--primary-text-color,#ddd) 35%, transparent); }
+  /* the brain's caption (#237): one plain line about self's newest record line,
+     at the bottom of the field (left of the chat on a wide screen) */
+  .brainline { position:absolute; z-index:3; left:calc((100% - min(460px, 44vw) - 24px) / 2); bottom:64px; transform:translateX(-50%);
+               width:max-content; max-width:calc(100% - min(460px, 44vw) - 56px); display:flex; align-items:baseline; gap:8px;
+               padding:5px 12px; border-radius:12px; font-size:13px; line-height:1.35; pointer-events:auto; }
+  .brainline[hidden], .view-chat .brainline { display:none; }
+  .chat.hidden ~ .brainline { left:50%; max-width:calc(100% - 32px); }
+  .brainline .bl-t { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+  .brainline .bl-c { flex:none; font:11px var(--code-font-family, ui-monospace, Menlo, monospace); opacity:.55; white-space:nowrap; }
+  @media (prefers-reduced-motion: no-preference) {
+    .brainline.fresh { animation:blin .5s ease-out; }
+    @keyframes blin { from { opacity:.25; } }
+  }
+  @media (max-width: 760px) {
+    .brainline { left:50%; bottom:calc(56dvh + 82px); max-width:calc(100% - 24px); font-size:12px; }
+    .chat.hidden ~ .brainline { bottom:64px; }
+    .brainline .bl-t { white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+  }
 `;
+const BRAIN_MS = 3000;                            // #237: the brain's record poll, only while the page is visible
 const LS_SELFPANEL = "membrane.home.selfpanel";   // #230: the 👶 panel open ("1") or closed, per browser
 const SELFPANEL_MS = 4000;                        // its activity refresh, only while open
 const SELFPANEL_SEAT_MS = 15000;                  // ...and its report card's (the whole status)
@@ -654,7 +815,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     constructor() {
       super();
       this.attachShadow({ mode: "open" });
-      this._v3 = null; this._me = null; this._lastTouch = 0; this._hidSidebar = false;
+      this._v3 = null; this._me = null; this._lastTouch = -1e9; this._hidSidebar = false;
     }
 
     set hass(h) {
@@ -693,6 +854,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._listenKeys(false);
       clearInterval(this._follow);
       clearInterval(this._autoT); clearInterval(this._selfT); clearInterval(this._selfPanelT);
+      clearInterval(this._brainT);
+      if (this._brainVis) { document.removeEventListener("visibilitychange", this._brainVis); this._brainVis = null; }
       if (this._v3) { this._v3.stop(); this._v3 = null; }
       if (this._hidSidebar) this._dock("restore");
     }
@@ -765,6 +928,79 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       } finally { this._spBusy = false; }
     }
     // ---- end of the 👶 panel
+
+    // THE BRAIN ON THE SCREEN (#237, the operator: a stranger opens membrane
+    // home and watches a mind at work). Self's record (the 👶 panel's feed,
+    // GET /membrane/self/recent) is polled every BRAIN_MS while the page is
+    // visible; each new line, oldest first, goes onto the field (field3d.js:
+    // the look's beam + label, the trail, a shift's pulse, a wait's dim, a
+    // level-up's gold) and the newest one into the caption, in plain words,
+    // citing its line. READ-ONLY: nothing here posts or changes self.
+    _brainStart() {
+      clearInterval(this._brainT);
+      this._brainSeen = null; this._brainOtherAt = 0;
+      this._brainT = setInterval(() => this._brainTick(), BRAIN_MS);
+      if (!this._brainVis) {
+        this._brainVis = () => { if (!document.hidden) this._brainTick(); };   // back in view: catch up at once
+        document.addEventListener("visibilitychange", this._brainVis);
+      }
+      this._brainTick();
+    }
+
+    _brainMe() { return String(this._me || "").replace(/^person:/, ""); }
+
+    async _brainTick() {
+      const c = this._chat, v = this._v3;
+      if (document.hidden || this._brainBusy || !v || !c || typeof c._selfRecent !== "function") return;
+      this._brainBusy = true;
+      try {
+        const lines = await c._selfRecent(30);
+        if (!lines || !this._v3) return;
+        const first = this._brainSeen == null;
+        const out = brainFresh(lines, this._brainSeen || []);
+        this._brainSeen = out.seen;
+        await this._brainOther(lines);
+        const me = this._brainMe();
+        // a fresh page: the trail from the last looks, no replayed pulses
+        const todo = first ? out.fresh.filter((r) => r.kind === "reach").slice(-8) : out.fresh;
+        for (const r of todo) {
+          if (r.kind === "reach") v.selfLook(r.eid, await v.placeOf(r.eid).catch(() => null), brainLabel(r.eid, me), r.answer);
+          else if (r.kind === "shift") v.selfShift(r.eid, await v.placeOf(r.eid).catch(() => null), brainLabel(r.eid, me));
+          else if (r.kind === "wait") v.selfWait();
+          else if (r.kind === "rung") v.selfLevelUp(r.rung);
+        }
+        if (lines.length && (first || out.fresh.length)) this._paintBrain(lines[0]);
+      } catch (e) { /* the next tick */ } finally { this._brainBusy = false; }
+    }
+
+    /** The person self meets: status().meets.other (via the cycle or the seat), else the last push's. */
+    async _brainOther(lines) {
+      const v = this._v3, c = this._chat;
+      const cyc = ((v.amoeba && v.amoeba.last) || {}).meets || {};
+      const seat = (((c && c._seat) || {}).self || {}).meets || {};
+      const push = (lines || []).find((r) => r.kind === "push");
+      const other = cyc.other || seat.other || (push && (push.to || push.eid)) || null;
+      if (!other) { v.setSelfOther(null); return; }
+      if (other === this._brainOtherId && Date.now() - this._brainOtherAt < 15000) return;
+      this._brainOtherId = other; this._brainOtherAt = Date.now();
+      v.setSelfOther(brainLabel(other, this._brainMe()), await v.placeOf(other).catch(() => null));
+    }
+
+    _paintBrain(r) {
+      const el = this._brainEl; if (!el || !r) return;
+      const text = brainCaption(r, this._brainMe());
+      const cite = (r.n != null ? "#" + r.n + " · " : "") + (r.kind || "?");
+      if (el._t === text + cite) return;
+      el._t = text + cite;
+      this._brainText.textContent = text;
+      this._brainCite.textContent = cite;
+      const c = this._chat;
+      el.title = "from self's record: " + (c && typeof c._selfLine === "function" ? c._selfLine(r) : r.kind)
+        + (r.ts ? " · " + new Date(r.ts * 1000).toLocaleTimeString() : "");
+      el.hidden = false;
+      el.classList.remove("fresh"); void el.offsetWidth; el.classList.add("fresh");
+    }
+    // ---- end of the brain on the screen
 
     _paintAuto() {
       const b = this._autoBtn; if (!b) return;
@@ -864,7 +1100,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         <div class="msg">finding you on the field…</div>
         <div class="top glass">
           <button class="ha" title="Home Assistant: its dashboards and pages" aria-haspopup="menu" aria-expanded="false" aria-label="Home Assistant menu">☰</button>
-          <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you · self (the 🌱 loop)">◎ activity</button>
+          <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you · self (the 🌱 loop, framed to what it is doing) · 👁 self's eyes (looking out from it)">◎ activity</button>
           <button class="chatbtn" title="Show / hide the chat">💬</button>
           <button class="autobtn" title="auto-chat" aria-label="auto-chat">▶</button>
           <select class="selfpick" title="self (#161): how far it may grow (the top rung; off = asleep)"><option value="0">🌱 off</option></select>
@@ -887,6 +1123,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         <div class="chat glass"><ai-terminal-panel overlay></ai-terminal-panel></div>
         <div class="orb" aria-hidden="true"><canvas class="wave" width="560" height="140"></canvas></div>
         <div class="orbtext" aria-live="polite"></div>
+        <div class="brainline glass" hidden><span class="bl-t"></span><span class="bl-c"></span></div>
         <div class="voice glass">
           <div class="vsay glass" role="status" aria-live="polite"></div>
           <button class="ptt" title="Hold to talk (or hold Space)" aria-label="Hold to talk">🎙</button>
@@ -904,6 +1141,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._host3d = $(".field"); this._msgEl = $(".msg"); this._statusEl = $(".status");
       this._chatBox = $(".chat"); this._chat = $("ai-terminal-panel");
       this._card = $(".card"); this._tip = $(".tip");
+      this._brainEl = $(".brainline"); this._brainText = $(".bl-t"); this._brainCite = $(".bl-c");
       this._q = $(".q"); this._hits = $(".hits");
       this._q.addEventListener("input", () => this._showHits());
       this._q.addEventListener("focus", () => this._showHits());
@@ -951,12 +1189,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       });
       root.addEventListener("keydown", (e) => { if (e.key === "Escape") this._toggleMenu(false); });
       this._mode = FOLLOW_MODES.includes(lsGet(LS_FOLLOW, "activity")) ? lsGet(LS_FOLLOW, "activity") : "activity";
-      this._modeBtn = $(".me"); this._modeBtn.textContent = "◎ " + this._mode;
-      this._modeBtn.addEventListener("click", () => {
-        this._mode = nextMode(this._mode); lsSet(LS_FOLLOW, this._mode); this._tracked = null;
-        this._modeBtn.textContent = "◎ " + this._mode;
-        this._lastTouch = 0; this._goal = null; this._aim(true);
-      });
+      this._modeBtn = $(".me"); this._modeBtn.textContent = followLabel(this._mode);
+      this._modeBtn.addEventListener("click", () => this._setMode(nextMode(this._mode)));
       $(".chatbtn").addEventListener("click", (e) => {
         const on = this._chatBox.classList.toggle("hidden") === false;
         e.currentTarget.classList.toggle("on", on);
@@ -1015,8 +1249,28 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       $(".x").addEventListener("click", () => { this._card.classList.remove("open"); if (this._v3) this._v3.select(null); this._select(null); });
       $(".go").addEventListener("click", () => { if (this._v3 && this._sel) { this._lastTouch = performance.now(); this._v3.flyTo(this._sel.id); } });
       $(".ask").addEventListener("click", () => this._askAbout());
-      this._host3d.addEventListener("pointerdown", () => { this._lastTouch = performance.now(); });
-      this._host3d.addEventListener("wheel", () => { this._lastTouch = performance.now(); }, { passive: true });
+      // a manual orbit / zoom: it holds ◎ self's framing until ◎ self is picked
+      // again, and leaves 👁 self's eyes (#237)
+      const touched = () => {
+        this._lastTouch = performance.now();
+        if (this._mode === "self" || this._mode === "eyes") this._frameHold = true;
+        const m = modeAfterTouch(this._mode);
+        if (m !== this._mode) this._setMode(m, true);
+      };
+      this._host3d.addEventListener("pointerdown", touched);
+      this._host3d.addEventListener("wheel", touched, { passive: true });
+    }
+
+    /** The camera's mode. byTouch: a manual orbit left 👁 self's eyes -- the
+     *  framing stays held; picking a mode by the button frees it. */
+    _setMode(m, byTouch) {
+      this._mode = m; lsSet(LS_FOLLOW, m); this._tracked = null;
+      this._modeBtn.textContent = followLabel(m);
+      if (this._v3) this._v3.selfEyes = m === "eyes";
+      this._eyeDir = null;
+      if (byTouch) { this._say("you took the camera: pick ◎ self again to let it frame self"); return; }
+      this._frameHold = false;
+      this._lastTouch = -1e9; this._goal = null; this._aim(true);   // idle at once (a fresh page too)
     }
 
     async _get(path) {
@@ -1055,10 +1309,12 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         };
         const v = this._v3 = new window.MembraneField3D(this._host3d, api);
         if (window.matchMedia("(max-width: 760px)").matches) { v.maxBudget = 3000; v._applyBudget(3000); }
+        v.selfEyes = this._mode === "eyes";
         await v.start();
         if (!this._started) { v.stop(); return; }
         await this._aim(true);
         this._glide();
+        this._brainStart();
       } catch (e) {
         this._msgEl.style.display = ""; this._msgEl.textContent = "the field is unavailable\n" + ((e && e.message) || e);
         return;
@@ -1128,12 +1384,12 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const idle = performance.now() - this._lastTouch >= IDLE_BEFORE_FOLLOW_MS;
       if (!force && !idle) return;
       const now = performance.now();
-      if (this._mode === "self") {                          // #161: the amoeba (the glide keeps up with it)
+      if (this._mode === "self" || this._mode === "eyes") {   // #161: the amoeba (the glide keeps up with it)
         const p = v.selfPos();
         if (p) {
-          this._goal = { p, r: 420 };
+          this._goal = { p, r: this._goal && this._goal.r ? this._goal.r : 420, frame: this._mode === "self" };
           this._msgEl.style.display = "none";
-          this._say("following self");
+          this._say(this._mode === "eyes" ? "👁 through self's eyes" : "following self" + (this._frameHold ? " (your framing)" : ""));
           return;
         }
         this._msgEl.style.display = "";
@@ -1187,17 +1443,44 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           const p = this._v3.avatarPos(this._mindFollow);
           if (p) this._goal = { p, r: this._goal && this._goal.sel ? this._goal.r : 420, sel: true };
         }
+        const rm = this._v3.reducedMotion ? this._v3.reducedMotion() : false;
+        if (this._mode === "eyes" && !this._mindFollow && !this._selFollow && !this._v3._flyAnim) {
+          // 👁 SELF'S EYES (#237, the operator: "PUT ME INTO self's WORLD!"): the
+          // camera sits at the amoeba and turns toward what it reaches for
+          // (else its aim, else the way it heads) -- smoothly; at once under
+          // reduced motion. A manual orbit leaves the mode (touched, above).
+          const v = this._v3, sp = v.selfPos();
+          const t = sp ? eyesTarget({ pos: sp, look: v.selfLookNow(), aim: v.selfAim(), trail: v.selfTrail() }) : null;
+          if (t) {
+            const want = [t.p[0] - sp[0], t.p[1] - sp[1], t.p[2] - sp[2]];
+            this._eyeDir = this._eyeDir ? turnToward(this._eyeDir, want, rm ? 1 : 1 - Math.exp(-dt * 1.6)) : turnToward(want, want, 1);
+            const o = eyesOrbit(sp, this._eyeDir, 6);
+            v.orbit.target = o.target; v.orbit.r = o.r; v.orbit.theta = o.theta; v.orbit.phi = o.phi;
+          }
+          requestAnimationFrame(step);
+          return;
+        }
         if (this._mode === "self" && !this._mindFollow && !this._selFollow) {   // it moves every cycle: keep up
-          const sp = this._v3.selfPos();
-          if (sp) this._goal = { p: sp, r: this._goal && !this._goal.sel ? this._goal.r : 420 };
+          // ◎ SELF'S FRAMING (#237, the operator: "much closer ... scale with what
+          // self is doing"): the distance fits the amoeba, its last steps, the
+          // things in its trail of looks and its aim -- in close while it
+          // fiddles locally, eased out when it reaches far
+          const v = this._v3, sp = v.selfPos();
+          if (sp) {
+            const fr = selfFrame({ pos: sp, looks: v.selfLookPoints(), aim: v.selfAim(), steps: v.selfTrail().slice(-4) });
+            this._goal = { p: sp, r: frameDistance(fr.radius), frame: true };
+          }
         }
         const v = this._v3, g = this._goal;
         const idle = performance.now() - this._lastTouch >= IDLE_BEFORE_FOLLOW_MS;
+        if (g && g.frame && !this._frameHold && !v._flyAnim) {          // the frame: damped, a step under reduced motion
+          v.orbit.r = dampTo(v.orbit.r, g.r, dt, 0.9, rm);
+        }
         if (g && !v._flyAnim && (idle || g.sel)) {
           const k = 1 - Math.exp(-dt * (g.sel ? 2.2 : 0.9));
           for (let i = 0; i < 3; i++) v.orbit.target[i] += (g.p[i] - v.orbit.target[i]) * k;
-          if (idle) {
-            v.orbit.r += (g.r - v.orbit.r) * k * 0.6;
+          if (idle && !(g.frame && this._frameHold)) {
+            if (!g.frame) v.orbit.r += (g.r - v.orbit.r) * k * 0.6;
             const a = this._tiltAng ? null
               : ((this._mode === "self" && chaseAngles(v.selfTrail ? v.selfTrail() : null))   // behind self
                  || throughCenter(v.orbit.target));

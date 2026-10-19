@@ -1,0 +1,251 @@
+"""#237 (part of #161): the brain on the screen -- membrane home shows self
+thinking. What it looks at now (a beam + a label + its answer), a fading trail
+of its last looks, a pulse when rung 5 notices a shift, its waits / pushes /
+level-ups, and a one-line caption that narrates the newest record line in
+plain words (citing the line, never a claim the record doesn't hold).
+
+Plus the camera: ◎ self frames self's own neighbourhood (its distance fitted
+to the amoeba + its recent look targets + its aim), and 👁 self's eyes looks
+out from the amoeba toward what it reaches for. The person self meets is a
+labelled presence ("you").
+
+The pure logic lives in home.js (HomeLogic) and is run here with node; the
+wiring is asserted on the source.
+"""
+import json
+import math
+import shutil
+import subprocess
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+UI = ROOT / "membrane" / "ui"
+
+
+def _js(expr):
+    js = ('const H=require(%r); process.stdout.write(JSON.stringify(%s))' % (str(UI / "home.js"), expr))
+    return json.loads(subprocess.check_output(["node", "-e", js]))
+
+
+def _cap(rec, me="dmitrii"):
+    return _js("H.brainCaption(%s, %s)" % (json.dumps(rec), json.dumps(me)))
+
+
+NODE = unittest.skipUnless(shutil.which("node"), "node not installed")
+
+
+# ---- the labels: friendly, never invented ----------------------------------------
+
+@NODE
+class TestLabels(unittest.TestCase):
+    def _l(self, eid, me="dmitrii"):
+        return _js("H.brainLabel(%s, %s)" % (json.dumps(eid), json.dumps(me)))
+
+    def test_the_person_self_meets(self):
+        self.assertEqual(self._l("chat:in:dmitrii"), "you")
+        self.assertEqual(self._l("chat:out:dmitrii"), "you")
+        self.assertEqual(self._l("chat:in:roomata-estorsky"), "roomata-estorsky")
+        self.assertEqual(self._l("chat:in:operator"), "the operator")
+
+    def test_the_eye_toys_and_words(self):
+        self.assertEqual(self._l("i"), "the eye")
+        self.assertEqual(self._l("membrane::Component:toy:dice"), "dice")
+        self.assertEqual(self._l("cradle:mobile"), "mobile")
+        self.assertEqual(self._l("w:burst"), "w:burst")
+        self.assertEqual(self._l("membrane::Component:w:prime"), "w:prime")
+        self.assertEqual(self._l(None), "?")
+
+
+# ---- the caption: plain words, true to the record line --------------------------
+
+@NODE
+class TestCaption(unittest.TestCase):
+    def test_a_look(self):
+        self.assertEqual(_cap({"kind": "reach", "eid": "w:burst", "answer": "changed", "p": 0.62}),
+                         "self looked at w:burst — it changed (it expected 0.62)")
+        self.assertEqual(_cap({"kind": "reach", "eid": "i", "answer": "unchanged", "p": 0.1}),
+                         "self looked at the eye — no change (it expected 0.1)")
+        self.assertEqual(_cap({"kind": "reach", "eid": "toy:dice", "answer": "none", "why": "throttled", "p": 0.4}),
+                         "self reached for dice — no answer (throttled)")
+
+    def test_a_timed_look_says_so(self):
+        self.assertEqual(_cap({"kind": "reach", "eid": "w:burst", "answer": "changed", "p": 0.7, "timed": True}),
+                         "self looked at w:burst when it judged a change likely — it changed (it expected 0.7)")
+
+    def test_a_reply_check(self):
+        self.assertEqual(_cap({"kind": "reach", "eid": "chat:in:dmitrii", "reply": True, "answer": "changed", "p": 0.4}),
+                         "self checked whether you answered — you did (it expected 0.4)")
+        self.assertEqual(_cap({"kind": "reach", "eid": "chat:in:bob", "reply": True, "answer": "unchanged", "p": 0.4}),
+                         "self checked whether bob answered — not yet (it expected 0.4)")
+
+    def test_a_push(self):
+        self.assertEqual(_cap({"kind": "push", "to": "chat:in:dmitrii", "asked": True}),
+                         "self said hello to you and asked the model if you'll answer")
+        self.assertEqual(_cap({"kind": "push", "to": "chat:in:bob"}), "self said hello to bob")
+        self.assertEqual(_cap({"kind": "push", "to": "chat:in:bob", "asked": True}),
+                         "self said hello to bob and asked the model if they'll answer")
+
+    def test_a_shift_a_wait_a_rung(self):
+        self.assertEqual(_cap({"kind": "shift", "eid": "w:prime", "was": 0.8, "now": 0.0}),
+                         "self noticed w:prime stopped behaving like itself (it changed 0.8 of the time, now 0)")
+        self.assertEqual(_cap({"kind": "shift", "eid": "w:prime"}), "self noticed w:prime stopped behaving like itself")
+        self.assertEqual(_cap({"kind": "wait", "n": 3}), "self waited — nothing was due")
+        self.assertEqual(_cap({"kind": "rung", "rung": 7}), "level up: rung 7 · understand an other")
+
+    def test_the_rest(self):
+        self.assertEqual(_cap({"kind": "cycle", "act": "move", "gap": 0.0312}),
+                         "self moved — it landed 0.031 from where it expected")
+        self.assertEqual(_cap({"kind": "error", "act": "reach", "why": "boom"}), "self hit an error in reach: boom")
+        self.assertEqual(_cap({"kind": "birth"}), "self was born")
+        self.assertEqual(_cap({"kind": "audit", "phase": "start", "eid": "w:x"}), "self is auditing w:x (start)")
+        self.assertEqual(_cap({"kind": "zzz"}), "self: zzz")
+
+    def test_it_never_claims_an_expectation_the_line_lacks(self):
+        self.assertEqual(_cap({"kind": "reach", "eid": "w:burst", "answer": "changed"}), "self looked at w:burst — it changed")
+
+
+# ---- the feed: deduped, oldest first; the trail: capped, fading -----------------
+
+@NODE
+class TestFeed(unittest.TestCase):
+    def test_new_lines_oldest_first_and_deduped(self):
+        lines = [{"kind": "reach", "ts": 3, "n": 3, "eid": "a"}, {"kind": "wait", "ts": 2, "n": 2},
+                 {"kind": "shift", "ts": 2, "eid": "a"}]
+        out = _js("H.brainFresh(%s, [])" % json.dumps(lines))
+        self.assertEqual([r["kind"] for r in out["fresh"]], ["shift", "wait", "reach"])
+        again = _js("H.brainFresh(%s, %s)" % (json.dumps(lines), json.dumps(out["seen"])))
+        self.assertEqual(again["fresh"], [])
+        more = [{"kind": "wait", "ts": 4, "n": 4}] + lines
+        self.assertEqual(len(_js("H.brainFresh(%s, %s)" % (json.dumps(more), json.dumps(out["seen"])))["fresh"]), 1)
+
+    def test_seen_is_capped(self):
+        lines = [{"kind": "wait", "ts": i, "n": i} for i in range(500)]
+        self.assertLessEqual(len(_js("H.brainFresh(%s, [])" % json.dumps(lines))["seen"]), 300)
+
+    def test_the_trail_keeps_the_last_8_looks(self):
+        t = _js("(() => { let t = []; for (let i = 0; i < 12; i++) t = H.brainTrail(t, {kind: 'reach', eid: 'w:' + i, answer: 'changed'});"
+                " return H.brainTrail(t, {kind: 'wait'}); })()")
+        self.assertEqual([x["eid"] for x in t], ["w:%d" % i for i in range(4, 12)])
+
+    def test_the_trail_fades_with_age(self):
+        a = [_js("H.trailAlpha(%d, 8)" % i) for i in range(8)]
+        self.assertEqual(a, sorted(a))
+        self.assertGreater(a[-1], 0.8)
+        self.assertLess(a[0], 0.3)
+
+
+# ---- ◎ self: the frame fits self's neighbourhood ---------------------------------
+
+@NODE
+class TestFraming(unittest.TestCase):
+    def test_the_radius_is_the_farthest_point(self):
+        self.assertEqual(_js("H.frameRadius([0,0,0], [[3,4,0], null, [1,0,0]])"), 5)
+        self.assertEqual(_js("H.frameRadius([0,0,0], [])"), 0)
+
+    def test_local_fiddling_is_close_far_reaching_is_wide(self):
+        near = _js("H.frameDistance(20)")
+        far = _js("H.frameDistance(400)")
+        self.assertLess(near, 160)                      # much closer than the old fixed 420
+        self.assertLess(_js("H.frameDistance(150)"), 420)   # a typical neighbourhood is still closer
+        self.assertGreater(far, near)
+        # the whole extent fits the field of view (55 deg), with a margin
+        self.assertGreaterEqual(far * math.tan(math.radians(27.5)), 400 * 1.1)
+        self.assertEqual(_js("H.frameDistance(1e9)"), _js("H.frameDistance(1e10)"))   # clamped
+        self.assertEqual(_js("H.frameDistance(0)"), _js("H.frameDistance(1)"))        # a floor
+
+    def test_damping_is_smooth_and_reduced_motion_steps(self):
+        self.assertAlmostEqual(_js("H.dampTo(100, 200, 0.1, 1, false)"), 100 + 100 * (1 - math.exp(-0.1)), places=6)
+        self.assertEqual(_js("H.dampTo(100, 200, 0.1, 1, true)"), 200)
+        self.assertEqual(_js("H.dampTo(100, 200, 0, 1, false)"), 100)
+
+    def test_the_frame_includes_looks_steps_and_the_aim(self):
+        st = {"pos": [0, 0, 0], "looks": [[10, 0, 0], [0, 50, 0]], "aim": [0, 0, -80], "steps": [[5, 0, 0]]}
+        self.assertEqual(_js("H.selfFrame(%s).radius" % json.dumps(st)), 80)
+
+
+# ---- 👁 self's eyes ---------------------------------------------------------------
+
+@NODE
+class TestEyes(unittest.TestCase):
+    def test_a_mode_beside_self(self):
+        self.assertEqual(_js("H.FOLLOW_MODES"), ["activity", "seat", "you", "self", "eyes"])
+        self.assertEqual(_js("H.nextMode('self')"), "eyes")
+        self.assertEqual(_js("H.nextMode('eyes')"), "activity")
+        self.assertEqual(_js("H.followLabel('eyes')"), "👁 self's eyes")
+        self.assertEqual(_js("H.followLabel('self')"), "◎ self")
+
+    def test_a_manual_orbit_leaves_the_eyes(self):
+        self.assertEqual(_js("H.modeAfterTouch('eyes')"), "self")
+        self.assertEqual(_js("H.modeAfterTouch('activity')"), "activity")
+
+    def test_what_the_eyes_look_at(self):
+        base = {"pos": [0, 0, 0], "aim": [0, 0, 100], "trail": [[-10, 0, 0], [0, 0, 0]]}
+        look = dict(base, look={"p": [100, 0, 0], "age": 1000})
+        self.assertEqual(_js("H.eyesTarget(%s).kind" % json.dumps(look)), "look")
+        stale = dict(base, look={"p": [100, 0, 0], "age": 60000})
+        self.assertEqual(_js("H.eyesTarget(%s).kind" % json.dumps(stale)), "aim")
+        unknown = dict(base, look={"p": None, "age": 10})
+        self.assertEqual(_js("H.eyesTarget(%s).kind" % json.dumps(unknown)), "aim")
+        heading = {"pos": [0, 0, 0], "trail": [[-10, 0, 0], [0, 0, 0]]}
+        h = _js("H.eyesTarget(%s)" % json.dumps(heading))
+        self.assertEqual(h["kind"], "heading")
+        self.assertGreater(h["p"][0], 0)
+        self.assertEqual(_js("H.eyesTarget(%s).kind" % json.dumps({"pos": [50, 0, 0], "trail": []})), "centre")
+        self.assertIsNone(_js("H.eyesTarget({pos: null})"))
+
+    def test_turning_is_smooth(self):
+        d = _js("H.turnToward([1,0,0], [0,1,0], 0.5)")
+        self.assertAlmostEqual(math.hypot(*d), 1, places=6)
+        self.assertAlmostEqual(d[0], d[1], places=6)
+        self.assertEqual(_js("H.turnToward([1,0,0], [0,2,0], 1)"), [0, 1, 0])
+
+    def test_the_camera_sits_at_the_amoeba_looking_along_dir(self):
+        o = _js("H.eyesOrbit([10,20,30], [0,0,1], 6)")
+        cam = [o["target"][0] + o["r"] * math.sin(o["phi"]) * math.sin(o["theta"]),
+               o["target"][1] + o["r"] * math.cos(o["phi"]),
+               o["target"][2] + o["r"] * math.sin(o["phi"]) * math.cos(o["theta"])]
+        for a, b in zip(cam, [10, 20, 24]):
+            self.assertAlmostEqual(a, b, places=4)
+        self.assertGreater(o["target"][2], 30)          # looking forward
+
+
+# ---- the wiring --------------------------------------------------------------------
+
+class TestWiring(unittest.TestCase):
+    def setUp(self):
+        self.home = (UI / "home.js").read_text()
+        self.f3 = (UI / "field3d.js").read_text()
+
+    def test_the_caption_is_on_the_page(self):
+        self.assertIn('class="brainline', self.home)
+        self.assertIn("_paintBrain(", self.home)
+
+    def test_it_polls_only_while_visible(self):
+        body = self.home.split("THE BRAIN ON THE SCREEN", 1)[1].split("// ---- end of the brain", 1)[0]
+        self.assertIn("document.hidden", body)
+        self.assertIn("clearInterval(this._brainT)", self.home)
+        self.assertIn("_selfRecent(", body)
+        self.assertNotIn("POST", body)                    # read-only
+        self.assertNotIn("_setSelfLimit", body)
+
+    def test_the_viewer_draws_looks_trail_pulse_and_the_other(self):
+        for hook in ("  selfLook(", "  selfShift(", "  selfWait(", "  selfLevelUp(", "  setSelfOther(",
+                     "BRAIN_TRAIL", "reducedMotion"):
+            self.assertIn(hook, self.f3, hook)
+        self.assertIn("prefers-reduced-motion", self.f3)
+
+    def test_the_eyes_mode_hides_the_amoeba_and_a_touch_leaves_it(self):
+        self.assertIn("selfEyes", self.f3)
+        self.assertIn("modeAfterTouch(", self.home)
+        self.assertIn('this._mode === "eyes"', self.home)
+        self.assertIn("_frameHold", self.home)
+
+    def test_the_docs_describe_it(self):
+        doc = (ROOT / "docs" / "selfgrowth.md").read_text()
+        for want in ("### The brain on the screen", "trail", "pulse", "caption", "👁 self's eyes", "framing"):
+            self.assertIn(want, doc, want)
+
+
+if __name__ == "__main__":
+    unittest.main()

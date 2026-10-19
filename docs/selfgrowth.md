@@ -206,12 +206,74 @@ The 3D home view draws self as an **amoeba**, moving every cycle:
 
 Its tag reads `self · rung N · bar% · skill`, plus "lands N% closer to its aim",
 "slipping", and from rung 6 "meets an other" or "meets its body". At rung 6 the
-exchange is drawn too: a **beam** to an amber orb at the field's edge when self
-pushes a line, and the orb **flashes** when the other answers.
+exchange is drawn too: the person self meets (`status().meets.other`, their
+`chat:in:<person>`) is an amber orb labelled **you** (or their name), at their
+own point on the field when it has one, else at the field's edge. A **beam**
+goes out to it when self pushes a line, and when the person replies the beam
+**flashes back** (green) from them to self.
 
 To follow it, set the camera button **◎** to `self`: the camera glides with the
 amoeba and chases it from behind its past positions. "self is not moving yet"
 means it is off, or nobody has spoken yet.
+
+**◎ self's framing** fits the camera to self's own neighbourhood rather than the
+whole field. The distance comes from the bounding radius of the amoeba, its
+last 4 steps, the points of the things in its trail of looks, and its aim, plus
+a margin: it moves in close while self fiddles nearby and eases out when self
+reaches far. The change is damped, so there are no jumps (with *reduce motion*
+on, the camera steps straight to the new distance). A manual drag, pinch or
+wheel keeps working and pauses the framing ("your framing") until you pick
+◎ self again.
+
+**👁 self's eyes** is the next camera mode after ◎ self. The camera sits at the
+amoeba, which is hidden so it doesn't block the view, and looks toward what
+self reaches for now. With no fresh look it faces self's aim, then the way it
+is heading, then the field's centre. When self reaches for something new, the
+view turns smoothly toward it (at once with *reduce motion*). The beam, the
+trail and the labels stay, so you see the field as self sees it. A manual
+orbit or zoom leaves the mode and goes back to ◎ self.
+
+### The brain on the screen
+
+While membrane home is open (and the tab is visible), it reads self's record
+every 3 s (the 👶 panel's feed, `GET /membrane/self/recent`) and shows each new
+line on the field (#237):
+
+- **what it looks at now**: a **beam** from the amoeba to the thing it reached,
+  with a label (`👁 w:burst ✓ changed`, `👁 the eye · unchanged`,
+  `👁 dice · no answer`). Green means changed, grey unchanged, orange no
+  answer. The beam fades after about 6 s. A thing goes where the field already
+  places it: its drawn point, else the seat's `locate`. If it is off screen,
+  its label sits beside the amoeba with an arrow toward it. If the field has
+  no place for it at all, the label says "(not on the field)" and no beam is
+  drawn; no position is ever made up;
+- **a trail** of the last 8 looks: a dot on each thing, joined in the order it
+  looked, fading with age. Curiosity's wandering and patience's returns show
+  up as a pattern;
+- **a pulse** when rung 5 notices a shift: an orange ring pulses three times on the
+  thing, captioned `noticed: w:prime changed its behaviour`;
+- **its other acts**: a **wait** dims the amoeba briefly; a **level-up** echoes
+  the exp bar's gold moment as a gold ring round the amoeba; a **push** is the
+  exchange's beam (above);
+- **the caption**: one line at the bottom of the view that narrates the newest
+  record line in plain words and cites it (`#412 · reach`; the tooltip holds
+  the line itself):
+  - "self looked at w:burst — it changed (it expected 0.62)";
+  - "self noticed w:prime stopped behaving like itself (it changed 0.8 of the
+    time, now 0)";
+  - "self said hello to you and asked the model if you'll answer";
+  - "self waited — nothing was due";
+  - "level up: rung 7 · understand an other".
+
+  A number appears only when the line carries it. Things go by friendly names:
+  the person self meets is "you" (or their name), `i` is "the eye", and a toy
+  goes by its short name (`toy:dice` → "dice").
+
+A fresh page starts the trail from the record's last looks and replays no
+pulses. With *reduce motion* on, nothing pulses or wobbles: the rings hold
+still for a few seconds and the beam stays steady. It is read-only: nothing
+here posts to the seat. At most 8 trail marks, 4 rings and 3 labels exist at
+once, and the labels move about 8 times a second.
 
 ## The ladder
 
