@@ -91,7 +91,8 @@ class TestCaption(unittest.TestCase):
                          "self noticed w:prime stopped behaving like itself (it changed 0.8 of the time, now 0)")
         self.assertEqual(_cap({"kind": "shift", "eid": "w:prime"}), "self noticed w:prime stopped behaving like itself")
         self.assertEqual(_cap({"kind": "wait", "n": 3}), "self waited — nothing was due")
-        self.assertEqual(_cap({"kind": "rung", "rung": 7}), "level up: rung 7 · understand an other")
+        self.assertEqual(_cap({"kind": "rung", "rung": 7}), "level up: rung 7 · take turns")   # #258: the ladder flip
+        self.assertEqual(_cap({"kind": "rung", "rung": 8}), "level up: rung 8 · understand an other")
 
     def test_the_rest(self):
         self.assertEqual(_cap({"kind": "cycle", "act": "move", "gap": 0.0312}),

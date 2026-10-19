@@ -17,6 +17,13 @@ unchanged. Now:
 - the test scores p against the RUNNING RATE (the other's prior-smoothed rate
   over the checks before, no lookahead), not habit, so calibration alone can't
   pass a rung that claims understanding.
+
+#258 (the ladder flip): this is rung 8's test now (rung 7 until the flip),
+unchanged and moved up one rung: the seats pass the new rung 7 (take turns,
+tagged with the new ladder) and may grow to 8, where the model is asked;
+RUNG7_* are RUNG8_*, status()['rung7'] is status()['rung8']. The pushes keep
+the timer's pace (SL.TURNS off): rung 7's learned timing changes only WHEN a
+push goes and has its own tests (test_self_rung7_turns_258).
 """
 import json
 import math
@@ -41,6 +48,11 @@ from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E
 RESP = MEMBRANE_NS + "Component:chat:in:operator"
 N = 300                       # reply checks in a synthetic record
 
+
+
+@pytest.fixture(autouse=True)
+def _timer(monkeypatch):
+    monkeypatch.setattr(SL, "TURNS", False)          # #258: the timer's pace (see the module doc)
 
 # ---- synthetic others --------------------------------------------------------------
 
@@ -147,9 +159,9 @@ def test_a_reply_check_records_p_self_without_a_model(monkeypatch):
 # ---- 2. no LLM: passable on structure, not on a coin ------------------------------
 
 def test_without_a_model_self_passes_on_an_other_with_timing_structure():
-    out = SL._rung7(_recs(_sessions(3)))
+    out = SL._rung8(_recs(_sessions(3)))
     assert out["passed"] is True, out
-    assert out["skill"] >= SL.RUNG7_MARGIN
+    assert out["skill"] >= SL.RUNG8_MARGIN
 
 
 @pytest.mark.parametrize("seed,rate", [(s, r) for s in range(4) for r in (0.3, 0.5, 0.7)])
@@ -157,8 +169,8 @@ def test_without_a_model_self_cant_pass_on_a_coin_flip_other(seed, rate):
     recs = _recs(_coin(seed, rate))
     # every window end the live test would have read, not just the last one
     ends = [i for i, r in enumerate(recs) if r.get("kind") == "reach"]
-    for e in ends[SL.RUNG7_LOOKS - 1::5]:
-        assert SL._rung7(recs[:e + 1])["passed"] is False
+    for e in ends[SL.RUNG8_LOOKS - 1::5]:
+        assert SL._rung8(recs[:e + 1])["passed"] is False
 
 
 # ---- 3. the advisor ----------------------------------------------------------------
@@ -166,9 +178,9 @@ def test_without_a_model_self_cant_pass_on_a_coin_flip_other(seed, rate):
 def test_an_always_wrong_advisor_gets_no_weight_and_does_not_sink_self():
     checks = _sessions(5)
     wrong = [0.95 if o == 0 else 0.05 for o, _ in checks]
-    alone = SL._rung7(_recs(checks))
-    mixed = SL._rung7(_recs(checks, p_llm=wrong, model="m1"))
-    rows = SL._rung7_series(_recs(checks, p_llm=wrong, model="m1"), RESP)
+    alone = SL._rung8(_recs(checks))
+    mixed = SL._rung8(_recs(checks, p_llm=wrong, model="m1"))
+    rows = SL._rung8_series(_recs(checks, p_llm=wrong, model="m1"), RESP)
     assert max(r["w"] for r in rows[30:]) < 0.05
     assert mixed["passed"] is True
     assert mixed["skill"] == pytest.approx(alone["skill"], abs=0.03)
@@ -177,11 +189,11 @@ def test_an_always_wrong_advisor_gets_no_weight_and_does_not_sink_self():
 def test_a_good_advisor_earns_weight():
     checks = _coin(7)                                         # self alone can't read a coin...
     good = [0.9 if o else 0.1 for o, _ in checks]             # ...an advisor who knows can
-    rows = SL._rung7_series(_recs(checks, p_llm=good, model="m1"), RESP)
+    rows = SL._rung8_series(_recs(checks, p_llm=good, model="m1"), RESP)
     assert rows[0]["w"] == 0.0 and rows[0]["p"] == rows[0]["p_self"]   # trust is earned, not given
     assert rows[-1]["w"] > 0.5
     assert rows[-1]["w"] > rows[5]["w"]                                 # it rises
-    out = SL._rung7(_recs(checks, p_llm=good, model="m1"))
+    out = SL._rung8(_recs(checks, p_llm=good, model="m1"))
     assert out["passed"] is True
 
 
@@ -190,21 +202,21 @@ def test_a_biased_but_informative_advisor_is_useful_after_calibration():
     checks = _coin(14)
     lean = [max(0.01, (0.8 if o else 0.35) - 0.3) for o, _ in checks]
     recs = _recs(checks, p_llm=lean, model="m1")
-    rows = SL._rung7_series(recs, RESP)[-SL.RUNG7_LOOKS:]
+    rows = SL._rung8_series(recs, RESP)[-SL.RUNG8_LOOKS:]
     os_ = [r["o"] for r in rows]
     assert _brier([r["p"] for r in rows], os_) < _brier([r["p_llm"] for r in rows], os_)
-    assert SL._rung7(recs)["passed"] is True
+    assert SL._rung8(recs)["passed"] is True
     assert rows[-1]["w"] > 0.3
 
 
 def test_an_uninformative_biased_advisor_has_no_influence():
     # a constant 0.2: nothing to learn from it, whatever its lean
     checks = _sessions(15)
-    rows = SL._rung7_series(_recs(checks, p_llm=[0.2] * len(checks), model="m1"), RESP)
+    rows = SL._rung8_series(_recs(checks, p_llm=[0.2] * len(checks), model="m1"), RESP)
     infl = sum(abs(r["p"] - r["p_self"]) for r in rows) / len(rows)
     assert infl < 0.03
-    alone = SL._rung7(_recs(checks))
-    assert SL._rung7(_recs(checks, p_llm=[0.2] * len(checks), model="m1"))["skill"] == \
+    alone = SL._rung8(_recs(checks))
+    assert SL._rung8(_recs(checks, p_llm=[0.2] * len(checks), model="m1"))["skill"] == \
         pytest.approx(alone["skill"], abs=0.03)
 
 
@@ -212,7 +224,7 @@ def test_a_model_id_change_resets_trust():
     checks = _coin(8, n=200)
     good = [0.9 if o else 0.1 for o, _ in checks]
     model = ["m1"] * 150 + ["m2"] * 50
-    rows = SL._rung7_series(_recs(checks, p_llm=good, model=model), RESP)
+    rows = SL._rung8_series(_recs(checks, p_llm=good, model=model), RESP)
     assert rows[149]["w"] > 0.5                               # m1 earned it
     assert rows[150]["w"] == 0.0                              # m2 starts from nothing
     assert rows[-1]["w"] > 0.5                                # ...and earns its own
@@ -221,7 +233,7 @@ def test_a_model_id_change_resets_trust():
 def test_self_passes_on_the_mix_never_on_p_llm_alone():
     checks = _coin(9)
     good = [0.9 if o else 0.1 for o, _ in checks]
-    rows = SL._rung7_series(_recs(checks, p_llm=good, model="m1"), RESP)
+    rows = SL._rung8_series(_recs(checks, p_llm=good, model="m1"), RESP)
     def lg(p):
         return math.log(p / (1 - p))
     for r in rows:
@@ -235,20 +247,20 @@ def test_self_passes_on_the_mix_never_on_p_llm_alone():
 
 def test_the_baseline_is_the_running_rate_with_no_lookahead():
     checks = _sessions(11, n=150)
-    rows = SL._rung7_series(_recs(checks), RESP)
+    rows = SL._rung8_series(_recs(checks), RESP)
     k = 0
     for i, (r, (o, _)) in enumerate(zip(rows, checks)):
         assert r["rate"] == pytest.approx((k + 0.5) / (i + 1.0))
         k += o
-    longer = SL._rung7_series(_recs(checks + _coin(12, n=50)), RESP)
+    longer = SL._rung8_series(_recs(checks + _coin(12, n=50)), RESP)
     for a, b in zip(rows, longer):                            # the future changes nothing past
         assert a["p_self"] == b["p_self"] and a["rate"] == b["rate"]
 
 
 def test_echoing_the_running_rate_scores_zero():
     checks = _sessions(13)
-    rows = SL._rung7_series(_recs(checks), RESP)
-    out = SL._rung7(_recs(checks, p_self=[r["rate"] for r in rows]))
+    rows = SL._rung8_series(_recs(checks), RESP)
+    out = SL._rung8(_recs(checks, p_self=[r["rate"] for r in rows]))
     assert out["skill"] == pytest.approx(0.0, abs=1e-9)
     assert out["passed"] is False
 
@@ -257,7 +269,7 @@ def test_echoing_the_running_rate_scores_zero():
                                  lambda: _sessions(4)])
 def test_always_saying_half_does_not_pass(gen):
     checks = gen()
-    out = SL._rung7(_recs(checks, p_self=[0.5] * len(checks)))
+    out = SL._rung8(_recs(checks, p_self=[0.5] * len(checks)))
     assert out["passed"] is False
 
 
@@ -265,8 +277,8 @@ def test_the_bar_and_window_follow_the_ruler():
     # a window big enough to detect order (the ruler: well over 100 symbols for
     # 0.1-0.2 bit; 100 is the floor), a bar above what a structureless other or
     # a humble 0.5 reaches by chance over it
-    assert SL.RUNG7_LOOKS >= 100
-    assert 0.05 < SL.RUNG7_MARGIN < 0.15
+    assert SL.RUNG8_LOOKS >= 100
+    assert 0.05 < SL.RUNG8_MARGIN < 0.15
 
 
 # ---- 5. status ---------------------------------------------------------------------
@@ -280,7 +292,7 @@ class _Field:
         return []
 
 
-def _seat():
+def _seat(passed=(1, 2, 3, 4, 5, 6, 7), limit=8):
     d = Path(tempfile.mkdtemp())
     srv = types.SimpleNamespace(paused=False, events_pool=None, membrane=None, efield=_Field())
     est = srv.entity_store = EntityStore(path=str(d / "entities.json"), shared=False)
@@ -292,10 +304,10 @@ def _seat():
     CIO.entity_in(srv, CIO.OPERATOR)
     SL.bind(srv)
     SL.set_limit(srv, 1)
-    for r in (1, 2, 3, 4, 5, 6):
-        SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9})
+    for r in passed:                                    # #258: rung 7 is take turns now
+        SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9, "ladder": SL.LADDER_V})
     SL._append(srv, {"ts": 1.0, "kind": "audit", "rung": 5, "phase": "end", "eid": "x", "passed": True})
-    SL.set_limit(srv, 7)
+    SL.set_limit(srv, limit)
     return srv
 
 
@@ -305,8 +317,8 @@ def test_status_reports_self_mix_rate_and_the_advisor():
     good = [0.9 if o else 0.1 for o, _ in checks]
     for r in _recs(checks, p_llm=good, model="qwen3"):
         SL._append(srv, r)
-    r7 = SL.status(srv)["rung7"]
-    rows = SL._rung7_series(SL._read(srv), RESP)[-SL.RUNG7_LOOKS:]
+    r7 = SL.status(srv)["rung8"]
+    rows = SL._rung8_series(SL._read(srv), RESP)[-SL.RUNG8_LOOKS:]
     os_ = [r["o"] for r in rows]
     assert r7["brier_self"] == pytest.approx(_brier([r["p_self"] for r in rows], os_), abs=1e-4)
     assert r7["brier_mix"] == pytest.approx(_brier([r["p"] for r in rows], os_), abs=1e-4)
@@ -314,12 +326,12 @@ def test_status_reports_self_mix_rate_and_the_advisor():
     assert r7["advisor_model"] == "qwen3"
     assert r7["advisor_weight"] > 0.5
     st = SL.status(srv)
-    assert st["skill_rung"] == 7
+    assert st["skill_rung"] == 8
     assert st["skill"] == pytest.approx(1 - r7["brier_mix"] / r7["brier_rate"], abs=1e-3)
 
 
 def test_status_without_checks_is_quiet():
-    r7 = SL.status(_seat())["rung7"]
+    r7 = SL.status(_seat())["rung8"]
     for k in ("brier_self", "brier_mix", "brier_rate", "advisor_model"):
         assert r7[k] is None
     assert r7["advisor_weight"] == 0.0
@@ -338,8 +350,8 @@ def test_the_answer_records_the_model_that_gave_it(monkeypatch):
 
 def test_a_legacy_check_gets_its_p_self_recomputed_from_the_record():
     checks = _sessions(17, n=120)
-    rows = SL._rung7_series(_recs(checks), RESP)
-    recorded = SL._rung7_series(_recs(checks, p_self=[r["p_self"] for r in rows]), RESP)
+    rows = SL._rung8_series(_recs(checks), RESP)
+    recorded = SL._rung8_series(_recs(checks, p_self=[r["p_self"] for r in rows]), RESP)
     assert [r["p_self"] for r in rows] == pytest.approx([r["p_self"] for r in recorded])
     assert all(0.0 < r["p_self"] < 1.0 for r in rows)
-    assert not math.isnan(SL._rung7(_recs(checks))["skill"])
+    assert not math.isnan(SL._rung8(_recs(checks))["skill"])

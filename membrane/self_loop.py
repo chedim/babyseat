@@ -61,8 +61,14 @@ METHODS = {
 }
 RUNG_NAMES = {0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart",
               4: "patience", 5: "notice the world changed", 6: "meet an other",
-              7: "understand an other", 8: "recognize itself", 9: "change itself", 10: "speak"}
-LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4, 5, 6, 7)}          # the rungs built so far
+              7: "take turns", 8: "understand an other", 9: "recognize itself", 10: "change itself",
+              11: "speak"}
+LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4, 5, 6, 7, 8)}          # the rungs built so far
+# THE LADDER FLIP (#258): rung 7 was "understand an other" until the turn-taking rung went in
+# below it. A rung line above 6 counts only when it carries "ladder": LADDER_V -- a pass
+# recorded before the flip was the old numbering's (the record is never rewritten).
+LADDER_V = 2
+FLIPPED_FROM = 7
 
 try:
     PACE_S = max(1.0, float(os.environ.get("MEMBRANE_SELF_PACE_S") or 10.0))
@@ -109,8 +115,40 @@ RUNG5_SHIFTS = 2            # the two shifts its audit probes (went still, moves
 RUNG6_PUSHES = 10           # pushes to chat:out before the test reads the split
 RUNG6_HEARD = 20            # answered looks at the other before the test reads the split
 BODY_SKILL = 0.9            # predict it this well and it is my body (zero gap), else an other
-MEET_EVERY = 30             # cycles between self's pushes to chat:out (not every try)
-# RUNG 7 (#254): SELF predicts the reply check (p_self, from its record only); the model is
+MEET_EVERY = 30             # cycles between self's pushes to chat:out: rung 6's timer, and the cap on every push after
+MEET_MAX = 180              # rung 7: a push waits at most this many cycles for its moment, then goes ('overdue')
+# RUNG 7 (#258), TAKE TURNS: self learns WHEN to push. After each push it draws the moment it
+# will wait for -- a bin of spoke_age (how long since the other last spoke) -- by Thompson
+# sampling on the reply rate each bin earned over its last TURN_MEMORY pushes (Beta(1, 1)
+# prior: no bin is favoured before evidence), a random bin with chance TURN_EXPLORE, and
+# pushes when the other's spoke_age is in that bin, never sooner than MEET_EVERY cycles after
+# the last push (the timer's own rate is the cap) and never later than MEET_MAX. A push's
+# reward is the reply check's `replied`: the other spoke AFTER the push, by the check.
+# THE TEST over the last RUNG7_PUSHES such pushes, prequential (each push scored with what
+# self knew before it): (a) contingency -- the share of pushes in the window self believed best
+# at the push beats the share of the eligible waiting time the other spent in it (where a push
+# at a shuffled moment would land): z >= RUNG7_CONT_Z and +RUNG7_CONT_MARGIN; (b) payoff --
+# each push's outcome minus what a timing-blind push in its interval would have expected (the
+# bins' rates as known then, weighted by the waiting time in each): mean >= RUNG7_PAY_MARGIN
+# with t >= RUNG7_PAY_Z. Window and bar per the rung ruler, from experiments/rung7_turns
+# (measured before they were fixed): a simulation at the cycle's pace, 100 seeds x a week, the
+# test read at EVERY push like the live loop. The bar is the chance line, as rung 8's is: a
+# coin-flip other's best window over a week reaches payoff t q99 ~4.1 (2 of 100 runs pass; a
+# presence-only other 2 of 100); a timer or a random delay never passes (no choice: z = 0). A
+# turn-taking other passes in 99 of 100 (median ~38 h), an other who answers late in 61, an
+# other with the live record's per-bin reply rates (0.62 / 0.36 / 0.35 / 0.02) in 39 (median
+# ~86 h). t >= 4.5 would cut the coin to 1 in 100 and the live-like other to 15.
+TURNS = True                # #258: rung 7's learned timing (tests switch it off to keep the timer's pace)
+TURN_BINS = (120.0, 600.0, 1800.0)       # spoke_age bin edges, s; the last bin: 30 min+ or never spoke
+TURN_NAMES = ("0-2m", "2-10m", "10-30m", "30m+")
+TURN_EXPLORE = 0.1          # a push aims at a random bin this often (the losing windows stay measured)
+TURN_MEMORY = 100           # pushes the reply rates per bin are read over (a rhythm can change)
+RUNG7_PUSHES = 100          # pushes with a reply check the test reads
+RUNG7_CONT_Z = 3.0          # (a) the in-window count must clear the shuffled share by this many SDs
+RUNG7_CONT_MARGIN = 0.10    # ...and by this share
+RUNG7_PAY_Z = 4.0           # (b) the reply rate gained over timing-blind must clear 0 by this t
+RUNG7_PAY_MARGIN = 0.05     # ...and be at least this
+# RUNG 8 (#254, rung 7 until #258): SELF predicts the reply check (p_self, from its record only); the model is
 # an advisor it recalibrates on the advisor's own track record; the test scores self's p against
 # the RUNNING RATE (the other's prior-smoothed rate over the checks before: calibration alone
 # scores 0). Window and bar per the rung ruler (exp/rung-ruler): detecting order structure in
@@ -123,18 +161,18 @@ MEET_EVERY = 30             # cycles between self's pushes to chat:out (not ever
 # humble always-0.5 +0.046..+0.054 (q95), while an other with session timing (answers in a
 # session, rarely away) gives p_self a median +0.19..+0.21, lower 5% +0.11..+0.135. +0.08
 # clears chance with room and is about half of what a learnable rhythm yields at worst.
-RUNG7_LOOKS = 100           # reply checks at the other the test reads
-RUNG7_MARGIN = 0.08         # self's p must remove this share of the running rate's Brier error
-RUNG7_SPOKE_S = 600.0       # p_self's freshness term: exp(-(push - last spoke) / this)
-RUNG7_RIDGE = 10.0          # p_self's ridge penalty: no evidence -> it says the running rate
-RUNG7_FIT = 500             # p_self fits on at most this many earlier reply checks
-RUNG7_TRUST = 50            # the advisor's calibration reads its last this-many checks under one model
-RUNG7_TRUST_RIDGE = 5.0     # ...ridge-shrunk toward "ignore the advisor": trust is earned
-RUNG7_CHECK_S = 120.0       # after a push self checks for the reply this long after (#215)
-RUNG7_STALE_S = 600.0       # a push this old without its reply check asks nothing any more
-RUNG7_GRACE_S = 60.0        # the reply check waits up to this much longer for an answer still in flight (#217)
-RUNG7_HISTORY = 8           # recent reply checks the question shows the model (#217)
-RUNG7_RECENT = 6            # reply checks the RECENT rate is over, next to the all-time one (#246)
+RUNG8_LOOKS = 100           # reply checks at the other the test reads (the RUNG8_* were RUNG7_* until #258)
+RUNG8_MARGIN = 0.08         # self's p must remove this share of the running rate's Brier error
+RUNG8_SPOKE_S = 600.0       # p_self's freshness term: exp(-(push - last spoke) / this)
+RUNG8_RIDGE = 10.0          # p_self's ridge penalty: no evidence -> it says the running rate
+RUNG8_FIT = 500             # p_self fits on at most this many earlier reply checks
+RUNG8_TRUST = 50            # the advisor's calibration reads its last this-many checks under one model
+RUNG8_TRUST_RIDGE = 5.0     # ...ridge-shrunk toward "ignore the advisor": trust is earned
+RUNG8_CHECK_S = 120.0       # after a push self checks for the reply this long after (#215; rung 7 reads it too)
+RUNG8_STALE_S = 600.0       # a push this old without its reply check asks nothing any more
+RUNG8_GRACE_S = 60.0        # the reply check waits up to this much longer for an answer still in flight (#217)
+RUNG8_HISTORY = 8           # recent reply checks the question shows the model (#217)
+RUNG8_RECENT = 6            # reply checks the RECENT rate is over, next to the all-time one (#246)
 CURIOSITY = True            # #212: tilt the reach choice by learning progress (tests switch it off for the base)
 CURIO_WINDOW = 30           # ordinary looks per window: progress = earlier window's error - recent window's
 CURIO_FLOOR = 0.1           # the tilt never goes under this: a mastered or "can't learn" thing is still retried
@@ -403,7 +441,7 @@ def _expect(srv, seed: str) -> dict:
     if c.get("act") == "reach":
         lam, dt = c.get("lam"), c.get("dt")
         c["p"] = (1.0 - float(np.exp(-lam * dt))) if (lam and dt is not None) else _p_changed(srv, c["eid"])
-        push = c.get("reply")                           # rung 7: this look answers a push's question
+        push = c.get("reply")                           # rung 7/8: this look answers a push's question
         if push is not None:
             recs = _read(srv)
             c["p_self"] = _p_self(recs, c["eid"], push)  # self's own prediction (#254)
@@ -411,7 +449,7 @@ def _expect(srv, seed: str) -> dict:
                 c["p_llm"] = _llm_pred(srv, c["eid"], float(push["ts"]), until=c.get("now"))   # landed by this look
             if c.get("p_llm") is not None:              # the advisor answered: weigh it by its record
                 c["llm_model"] = _llm_model(srv, c["eid"])
-                c["llm_cal"] = _advisor_cal(_rung7_series(recs, c["eid"]), c["llm_model"])
+                c["llm_cal"] = _advisor_cal(_rung8_series(recs, c["eid"]), c["llm_model"])
                 c["p_mix"] = _advise(c["p_self"], c["p_llm"], c["llm_cal"])
         return {"rc": 0, "text": "expected"}
     w = _expected_push(srv, c["pos"])
@@ -506,7 +544,7 @@ def _parse_p(text) -> float | None:
 
 
 def _llm_pred(srv, eid: str, since: float, until: float | None = None) -> float | None:
-    """THE SEAM (rung 7): the model's prediction for this look, landed on the
+    """THE SEAM (rung 8): the model's prediction for this look, landed on the
     entity as a one-line llm_answer SINCE the push that asked it (an older
     answer answered an older question) and by `until` (the look). None when
     absent, older, later or not a probability. Tests swap it for a
@@ -525,7 +563,7 @@ def _llm_pred(srv, eid: str, since: float, until: float | None = None) -> float 
 
 
 def _llm_model(srv, eid: str) -> str | None:
-    """THE SEAM (rung 7, #254): which model gave the answer on the entity
+    """THE SEAM (rung 8, #254): which model gave the answer on the entity
     (llm_answer's `model`, the turn's pick), None when it wasn't recorded."""
     est = getattr(srv, "entity_store", None)
     doc = (est.docs or {}).get(eid) if est is not None else None
@@ -535,7 +573,7 @@ def _llm_model(srv, eid: str) -> str | None:
 
 
 def _ask_llm(srv, eid: str, prompt: str) -> dict:
-    """THE SEAM (rung 7): ask the coprocessor to predict the reply check. The
+    """THE SEAM (rung 8): ask the coprocessor to predict the reply check. The
     real llm::call is async -- it queues and returns at once ({rc, text});
     the verdict lands on the entity as llm_answer for the reply check (read
     by _llm_pred). Its caps (per caller, per hour, the switch, the pause) are
@@ -556,12 +594,12 @@ def _first_look_after(recs: list[dict], eid: str, ts: float):
 
 def _pending(recs: list[dict], now: float) -> dict | None:
     """THE QUESTION IN FLIGHT (#215): the latest push, while self has not yet
-    looked at its other since and it is under RUNG7_STALE_S old -- read from
+    looked at its other since and it is under RUNG8_STALE_S old -- read from
     the record, so it survives a restart. None otherwise."""
     push = next((r for r in reversed(recs) if r.get("kind") == "push"), None)
     if push is None or not push.get("to"):
         return None
-    if now - float(push.get("ts") or 0) > RUNG7_STALE_S:
+    if now - float(push.get("ts") or 0) > RUNG8_STALE_S:
         return None
     if _first_look_after(recs, push["to"], float(push.get("ts") or 0)) is not None:
         return None
@@ -570,7 +608,7 @@ def _pending(recs: list[dict], now: float) -> dict | None:
 
 def _reply_checks(recs: list[dict], eid: str) -> list[dict]:
     """Self's reply checks at `eid` that got an answer -- the looks a push's
-    question is about (one horizon: RUNG7_CHECK_S after the push)."""
+    question is about (one horizon: RUNG8_CHECK_S after the push)."""
     return [r for r in recs if r.get("kind") == "reach" and r.get("eid") == eid and r.get("reply")
             and not r.get("audit") and r.get("answer") in ("changed", "unchanged")]
 
@@ -584,15 +622,15 @@ def _base_rate(recs: list[dict], eid: str) -> tuple[float, int, int]:
 
 
 def _recent_rate(recs: list[dict], eid: str) -> tuple[float, int, int]:
-    """The share of the last RUNG7_RECENT reply checks the other answered:
+    """The share of the last RUNG8_RECENT reply checks the other answered:
     (rate, k, n), the same Jeffreys prior as _base_rate -- 0.5 before any
     check, never 0 or 1 (#246: the person's rhythm now, not since birth)."""
-    rc = _reply_checks(recs, eid)[-RUNG7_RECENT:]
+    rc = _reply_checks(recs, eid)[-RUNG8_RECENT:]
     k = sum(1 for r in rc if r["answer"] == "changed")
     return (k + 0.5) / (len(rc) + 1.0), k, len(rc)
 
 
-# ---- rung 7 (#254): self's own prediction, the advisor, the running rate ----------
+# ---- rung 8 (#254; rung 7 until #258): self's own prediction, the advisor, the running rate ----------
 
 def _logit(p: float) -> float:
     p = min(max(float(p), 1e-4), 1.0 - 1e-4)
@@ -610,7 +648,7 @@ def _push_gap(push: dict, last_changed: float | None) -> float | None:
     return (ts - last_changed) if last_changed is not None and last_changed <= ts else None
 
 
-def _rung7_rows(recs: list[dict], eid: str) -> list[dict]:
+def _rung8_rows(recs: list[dict], eid: str) -> list[dict]:
     """Self's answered reply checks at `eid`, oldest first, each with what self
     knew at its push (the gap since the other last spoke), its outcome and
     what the look recorded (p_self, the advisor's p_llm and model, w, p_mix)."""
@@ -630,7 +668,7 @@ def _rung7_rows(recs: list[dict], eid: str) -> list[dict]:
     return rows
 
 
-def _r7_design(rows: list[dict]):
+def _r8_design(rows: list[dict]):
     """p_self's inputs per check, from the checks BEFORE it only: the offset is
     the running (all-time) rate's logit; the features are an intercept, the
     recent rate's lean from it, the last outcome (+1 / -1, 0 before any) and
@@ -640,10 +678,10 @@ def _r7_design(rows: list[dict]):
     k = 0.0
     for i, r in enumerate(rows):
         base = (k + 0.5) / (len(past) + 1.0)
-        w = past[-RUNG7_RECENT:]
+        w = past[-RUNG8_RECENT:]
         rr = (sum(w) + 0.5) / (len(w) + 1.0)
         last = (1.0 if past[-1] else -1.0) if past else 0.0
-        fresh = float(np.exp(-max(0.0, r["gap"]) / RUNG7_SPOKE_S)) if r.get("gap") is not None else 0.0
+        fresh = float(np.exp(-max(0.0, r["gap"]) / RUNG8_SPOKE_S)) if r.get("gap") is not None else 0.0
         off[i] = _logit(base)
         X[i] = (1.0, _logit(rr) - off[i], last, fresh)
         if r.get("o") is not None:
@@ -652,26 +690,26 @@ def _r7_design(rows: list[dict]):
     return off, X
 
 
-def _r7_predict(off, X, y, i: int) -> float:
+def _r8_predict(off, X, y, i: int) -> float:
     """p_self for check i: a ridge-penalised logistic (offset: the running
     rate) fit by Newton on the checks before i, then read at i. No evidence
     (or no structure) shrinks the coefficients to 0 -- the running rate."""
-    lo = max(0, i - RUNG7_FIT)
-    beta = _ridge_logit(off[lo:i], X[lo:i], y[lo:i], RUNG7_RIDGE) if i > lo else np.zeros(X.shape[1])
+    lo = max(0, i - RUNG8_FIT)
+    beta = _ridge_logit(off[lo:i], X[lo:i], y[lo:i], RUNG8_RIDGE) if i > lo else np.zeros(X.shape[1])
     return float(1.0 / (1.0 + np.exp(-(off[i] + X[i] @ beta))))
 
 
 def _p_self(recs: list[dict], eid: str, push: dict) -> float:
     """SELF'S PREDICTION (#254) that the other will have spoken by the reply
     check after `push`: from self's record only -- no model call."""
-    rows = _rung7_rows(recs, eid)
+    rows = _rung8_rows(recs, eid)
     t = float(push.get("ts") or 0)
     last_ch = next((float(r["ts"]) for r in reversed(recs) if r.get("kind") == "reach" and r.get("eid") == eid
                     and r.get("answer") == "changed" and float(r.get("ts") or 0) <= t), None)
     rows = rows + [{"o": None, "gap": _push_gap(push, last_ch)}]
-    off, X = _r7_design(rows)
+    off, X = _r8_design(rows)
     y = np.array([r["o"] for r in rows[:-1]], dtype=float)
-    return round(_r7_predict(off, X, y, len(rows) - 1), 4)
+    return round(_r8_predict(off, X, y, len(rows) - 1), 4)
 
 
 def _ridge_logit(off, X, y, lam: float) -> np.ndarray:
@@ -694,7 +732,7 @@ def _ridge_logit(off, X, y, lam: float) -> np.ndarray:
 def _advisor_cal(rows: list[dict], model) -> tuple[float, float]:
     """THE ADVISOR, RECALIBRATED (#254). A model's stated probabilities carry
     its own lean (label bias; one model leaned "yes", the next "no"), so self
-    doesn't take p_llm at face value: over the advisor's last RUNG7_TRUST
+    doesn't take p_llm at face value: over the advisor's last RUNG8_TRUST
     answered checks under the SAME model id it reads the advisor's own lean
     m (the mean logit it states) and fits w in
     p = sigmoid(logit p_self + w·(logit p_llm − m)) -- Platt scaling of the
@@ -704,14 +742,14 @@ def _advisor_cal(rows: list[dict], model) -> tuple[float, float]:
     toward 0 = "ignore the advisor", so few pairs or a new model give
     p = p_self; w >= 0: an advisor that tracks the outcome backwards is
     ignored, not decoded. Returns (m, w)."""
-    rs = [r for r in rows if r.get("p_llm") is not None and r.get("model") == model][-RUNG7_TRUST:]
+    rs = [r for r in rows if r.get("p_llm") is not None and r.get("model") == model][-RUNG8_TRUST:]
     if not rs:
         return 0.0, 0.0
     z = np.array([_logit(float(r["p_llm"])) for r in rs])
     m = float(z.mean())
     off = np.array([_logit(r["p_self"]) for r in rs])
     y = np.array([r["o"] for r in rs], dtype=float)
-    w = float(_ridge_logit(off, (z - m)[:, None], y, RUNG7_TRUST_RIDGE)[0])
+    w = float(_ridge_logit(off, (z - m)[:, None], y, RUNG8_TRUST_RIDGE)[0])
     return round(m, 4), round(max(0.0, w), 4)
 
 
@@ -721,18 +759,18 @@ def _advise(p_self: float, p_llm: float, cal) -> float:
     return float(1.0 / (1.0 + np.exp(-(_logit(p_self) + w * (_logit(p_llm) - m)))))
 
 
-_P7_CACHE: dict = {}     # (eid, chain hash of the checks so far) -> a recomputed p_self
+_P8_CACHE: dict = {}     # (eid, chain hash of the checks so far) -> a recomputed p_self
 
 
-def _rung7_series(recs: list[dict], eid: str) -> list[dict]:
-    """Every answered reply check at `eid`, oldest first, scored as rung 7
+def _rung8_series(recs: list[dict], eid: str) -> list[dict]:
+    """Every answered reply check at `eid`, oldest first, scored as rung 8
     reads it: o, `rate` (the running rate: Jeffreys over the checks before,
     no lookahead), `p_self` (recorded, or -- a check from before #254 --
     recomputed from the record by the same function), `p_llm`, `model`, the
     advisor's calibration `cal` = (a, w) from its checks before this one,
     `w` (its slope: how much self listens) and `p`, self's prediction with
     the advisor heard (_advise; p_self when the advisor said nothing)."""
-    rows = _rung7_rows(recs, eid)
+    rows = _rung8_rows(recs, eid)
     off = X = y = None
     h = 0
     k = 0.0
@@ -743,14 +781,14 @@ def _rung7_series(recs: list[dict], eid: str) -> list[dict]:
             r["p_self"] = float(r["rec_p_self"])
         else:
             key = (eid, h)
-            if key not in _P7_CACHE:
+            if key not in _P8_CACHE:
                 if off is None:
-                    off, X = _r7_design(rows)
+                    off, X = _r8_design(rows)
                     y = np.array([x["o"] for x in rows], dtype=float)
-                if len(_P7_CACHE) > 20000:
-                    _P7_CACHE.clear()
-                _P7_CACHE[key] = round(_r7_predict(off, X, y, i), 4)
-            r["p_self"] = _P7_CACHE[key]
+                if len(_P8_CACHE) > 20000:
+                    _P8_CACHE.clear()
+                _P8_CACHE[key] = round(_r8_predict(off, X, y, i), 4)
+            r["p_self"] = _P8_CACHE[key]
         if r["p_llm"] is None:
             r["cal"], r["w"], r["p"] = (0.0, 0.0), 0.0, r["p_self"]
         else:
@@ -769,7 +807,12 @@ def _mark_rung7_restart(srv, now: float) -> None:
     the self sheet closes its 'rung 7 graded the LLM' bug window there. Only
     a seat that has passed rung 6 has a rung 7 to restart. A rung 7 pass the
     old scorer recorded was the model's, not self's: it gets a `rung_void`
-    line (the pass line stays), so rung 7 re-opens under the new scoring."""
+    line (the pass line stays), so rung 7 re-opens under the new scoring.
+
+    #258: that rung 7 is rung 8 now (understand an other). The line's kind
+    and its text stay as they were (the sheet and the page read the kind);
+    a pass from before the flip would not count above rung 6 anyway
+    (_rung_lines)."""
     rt = _rt(srv)
     if rt.get("r7_marked"):
         return
@@ -777,7 +820,10 @@ def _mark_rung7_restart(srv, now: float) -> None:
     if any(r.get("kind") == "rung7_restart" for r in recs):
         rt["r7_marked"] = True
     elif 6 in _passed(recs):
-        for r in [x for x in _rung_lines(recs) if x.get("rung") == 7]:
+        old7 = [x for x in recs if x.get("kind") == "rung" and x.get("rung") == 7
+                and x.get("ladder") != LADDER_V]                # #258: a new ladder's rung 7 is take turns
+        voided = {float(x.get("voids_ts") or 0) for x in recs if x.get("kind") == "rung_void" and x.get("rung") == 7}
+        for r in [x for x in old7 if float(x.get("ts") or 0) not in voided]:
             _append(srv, {"ts": now, "kind": "rung_void", "rung": 7, "voids_ts": r.get("ts"),
                           "why": "#254: rung 7 graded the LLM's guess, not self's"})
         _append(srv, {"ts": now, "kind": "rung7_restart", "issue": 254,
@@ -800,19 +846,19 @@ def _last_spoke(srv, recs: list[dict], eid: str, now: float) -> float | None:
 
 
 def _hold_reply(srv, push: dict, now: float) -> bool:
-    """Not yet time for the reply check: under RUNG7_CHECK_S after the push --
+    """Not yet time for the reply check: under RUNG8_CHECK_S after the push --
     or, when the push asked the model and no answer has landed, under
-    RUNG7_CHECK_S + RUNG7_GRACE_S (#217: a slow turn's answer still pairs).
+    RUNG8_CHECK_S + RUNG8_GRACE_S (#217: a slow turn's answer still pairs).
     Self only holds the other back; the cycle goes on with other targets."""
     age = now - float(push.get("ts") or 0)
-    if age < RUNG7_CHECK_S:
+    if age < RUNG8_CHECK_S:
         return True
-    if push.get("asked") and age < RUNG7_CHECK_S + RUNG7_GRACE_S:
+    if push.get("asked") and age < RUNG8_CHECK_S + RUNG8_GRACE_S:
         return _llm_pred(srv, push["to"], float(push["ts"]), until=now) is None
     return False
 
 
-def _rung7_prompt(srv, eid: str, n: int, now: float) -> str:
+def _rung8_prompt(srv, eid: str, n: int, now: float) -> str:
     """What to ask the coprocessor at a push: will the other have spoken by
     self's reply check? Only facts self already holds in its record --
     timings and changed/unchanged answers, never the chat's words.
@@ -824,14 +870,14 @@ def _rung7_prompt(srv, eid: str, n: int, now: float) -> str:
     answer" -- and is told a confident miss costs (the Brier score).
 
     RECENT (#246): the all-time rate can't see a person who went busy; the
-    question also carries the share of the last RUNG7_RECENT reply checks
+    question also carries the share of the last RUNG8_RECENT reply checks
     answered and the time since they last spoke, labelled `recent` vs
     `all-time`, and says rhythms change. Input only: the test, the pairing,
     the caps and the parsing are #217's."""
     recs = _read(srv)
     rate, k, m = _base_rate(recs, eid)
     rr, kr, mr = _recent_rate(recs, eid)
-    rc = _reply_checks(recs, eid)[-RUNG7_HISTORY:]
+    rc = _reply_checks(recs, eid)[-RUNG8_HISTORY:]
     lines = []
     for r in rc:
         push = next((p for p in reversed(recs) if p.get("kind") == "push" and p.get("to") == eid
@@ -844,8 +890,8 @@ def _rung7_prompt(srv, eid: str, n: int, now: float) -> str:
             else "Self has not seen them speak yet. ")
     return (f"You are predicting whether {eid} (the person self talks to) will have spoken by "
             f"self's next look at them (its reply check). Self just pushed a line to them (push {n}); "
-            f"the reply check comes about {round(RUNG7_CHECK_S)}s from now "
-            f"(at most {round(RUNG7_CHECK_S + RUNG7_GRACE_S)}s). "
+            f"the reply check comes about {round(RUNG8_CHECK_S)}s from now "
+            f"(at most {round(RUNG8_CHECK_S + RUNG8_GRACE_S)}s). "
             f"All-time: they had spoken by the reply check after {k} of {m} earlier pushes -- "
             f"all-time base rate {rate:.2f} (with a small prior). "
             f"Recent: they had spoken after {kr} of the last {mr} -- "
@@ -870,30 +916,187 @@ def _meet(srv, seed: str, now: float | None = None) -> None:
     a seat with no people. It is resolved once per meet, so the push target
     and the reach target move together when the person changes.
 
-    RUNG 7 (#215): once rung 7 is available, each push asks the model once
-    (async, capped by llm.request) whether the other will have spoken by
-    self's reply check; the push line records whether it went out (`asked`)."""
+    RUNG 7 (#258): once rung 7 is available the timer gives way to self's
+    own TIMING (_turn_push): it waits for the moment it has learned gets
+    replies. Same words, same cap.
+
+    RUNG 8 (#215, rung 7 until #258): once rung 8 is available, each push
+    asks the model once (async, capped by llm.request) whether the other will
+    have spoken by self's reply check; the push line records whether it went
+    out (`asked`)."""
     try:
         n = int(seed or 0)
     except (TypeError, ValueError):
         return                                   # not a cycle's seed: only the loop meets
-    if n % MEET_EVERY != 1:
-        return
     import time
     from . import chat_io as _CIO
     now = time.time() if now is None else now
+    turns = TURNS and _available(srv, 7)
+    if not turns and n % MEET_EVERY != 1:                   # rung 6: the timer
+        return
     person = _CIO.recent_person(srv)                        # '' = the operator (no people)
     resp = _CIO.entity_in(srv, person)                      # the other, as a reach target
     to = resp.eid if resp is not None else _CIO.name_in(person)
-    _rt(srv)["other"] = to                                  # rung 7 predicts this one
-    _push_chat(srv, "self is here", person)
+    recs = _read(srv)
+    spoke = _last_spoke(srv, recs, to, now) if _available(srv, 7) else None   # as known now (#254)
     rec = {"ts": now, "kind": "push", "n": n, "eid": _CIO.name_of(person), "to": to}
-    if _available(srv, 7):                                  # rung 7: ask the model AT the push (#215)
-        spoke = _last_spoke(srv, _read(srv), to, now)       # p_self's freshness, as known now (#254)
-        if spoke is not None:
-            rec["spoke_age"] = round(now - spoke, 1)
-        rec["asked"] = _queued(_ask_llm(srv, to, _rung7_prompt(srv, to, n, now)))
+    if turns:                                               # rung 7: is this the moment? (#258)
+        when = _turn_push(srv, recs, to, n, None if spoke is None else now - spoke)
+        if when is None:
+            return
+        rec.update(when)
+    _rt(srv)["other"] = to                                  # rungs 7 and 8 read this one
+    _push_chat(srv, "self is here", person)
+    if spoke is not None:
+        rec["spoke_age"] = round(now - spoke, 1)
+    if _available(srv, 8):                                  # rung 8: ask the model AT the push (#215)
+        rec["asked"] = _queued(_ask_llm(srv, to, _rung8_prompt(srv, to, n, now)))
     _append(srv, rec)
+
+
+# ---- rung 7 (#258): take turns -- self's own timing --------------------------------
+
+def _turn_bin(age) -> int:
+    """The spoke_age bin: 0-2 min, 2-10, 10-30, 30+ (or the other never spoke)."""
+    if age is None:
+        return len(TURN_BINS)
+    for i, hi in enumerate(TURN_BINS):
+        if age < hi:
+            return i
+    return len(TURN_BINS)
+
+
+def _turn_post(rows: list[dict]):
+    """Replies (k) and pushes (n) per bin over the last TURN_MEMORY pushes
+    whose reply check came."""
+    k, n = np.zeros(len(TURN_BINS) + 1), np.zeros(len(TURN_BINS) + 1)
+    for r in [x for x in rows if x.get("replied") is not None][-TURN_MEMORY:]:
+        n[r["bin"]] += 1
+        k[r["bin"]] += 1.0 if r["replied"] else 0.0
+    return k, n
+
+
+def _turn_choose(rows: list[dict], rng) -> tuple[int, int | None]:
+    """THE POLICY: the moment the next push waits for, and the window self
+    believes best. aim: a Thompson draw from each bin's Beta(1 + replies,
+    1 + misses) -- the bin whose draw is highest -- or, with chance
+    TURN_EXPLORE, a random bin. best: the bin with the highest posterior mean
+    (ties: the one with more evidence), None before any evidence. Symmetric
+    in the bins: which one wins is the record's doing, never the code's."""
+    k, n = _turn_post(rows)
+    nb = len(k)
+    best = None
+    if n.sum() > 0:
+        mean = (k + 1.0) / (n + 2.0)
+        best = max(range(nb), key=lambda b: (mean[b], n[b], -b))
+    if rng.random() < TURN_EXPLORE:
+        return rng.randrange(nb), best
+    draws = [rng.betavariate(1.0 + k[b], 1.0 + n[b] - k[b]) for b in range(nb)]
+    return max(range(nb), key=lambda b: draws[b]), best
+
+
+def _turn_push(srv, recs: list[dict], to: str, n: int, age) -> dict | None:
+    """One cycle of rung 7's practice: count the moment (its bin) into this
+    interval's waiting time and say whether to push now -- the push's fields
+    (bin, aim, best, dwell, why) or None. Never sooner than MEET_EVERY cycles
+    after the last push; at MEET_MAX it goes anyway ('overdue')."""
+    import random
+    last = next((r for r in reversed(recs) if r.get("kind") == "push"), None)
+    if last is not None and n - int(last.get("n") or 0) < MEET_EVERY:
+        return None
+    rt = _rt(srv)
+    st = rt.get("turn")
+    key = (to, float(last["ts"]) if last is not None else None)
+    if st is None or st.get("key") != key:
+        aim, best = _turn_choose(_turn_rows(recs, to), random.Random(f"turn:{n}"))
+        st = rt["turn"] = {"key": key, "aim": aim, "best": best, "dwell": [0] * (len(TURN_BINS) + 1)}
+    b = _turn_bin(age)
+    st["dwell"][b] += 1
+    waited = (n - int(last.get("n") or 0)) if last is not None else MEET_EVERY - 1 + sum(st["dwell"])
+    if b != st["aim"] and waited < MEET_MAX:
+        return None
+    rt["turn"] = None
+    return {"bin": b, "aim": st["aim"], "best": st["best"], "dwell": list(st["dwell"]),
+            "why": "aim" if b == st["aim"] else "overdue"}
+
+
+def _replied(srv, push: dict, now: float, answer: str) -> bool:
+    """The push's reward: did the other speak AFTER it, by this check?
+    chat:in's heard_ts (the moment their latest line arrived) says so; a look
+    can read `changed` for a line from before the push that self hadn't seen
+    yet, which is not a reply. Without a heard_ts, the look's answer."""
+    est = getattr(srv, "entity_store", None)
+    doc = (est.docs or {}).get(push.get("to")) if est is not None else None
+    heard = (doc.properties or {}).get("heard_ts") if doc is not None else None
+    if isinstance(heard, (int, float)) and heard > 0:
+        return bool(float(push.get("ts") or 0) < heard <= now)
+    return answer == "changed"
+
+
+def _turn_rows(recs: list[dict], eid: str) -> list[dict]:
+    """Rung 7's pushes at `eid`, oldest first: the policy's pushes (they carry
+    an aim and their waiting time) whose reply check recorded `replied`.
+    Timer pushes don't count: they had no moment to choose."""
+    rows: list[dict] = []
+    pend = None
+    for r in recs:
+        k = r.get("kind")
+        if k == "push":
+            pend = r if (r.get("to") == eid and r.get("aim") is not None and r.get("dwell")) else None
+        elif k == "reach" and r.get("eid") == eid and pend is not None:
+            if r.get("reply") and isinstance(r.get("replied"), bool):
+                rows.append({"ts": float(pend.get("ts") or 0), "bin": int(pend.get("bin", len(TURN_BINS))),
+                             "best": pend.get("best"), "dwell": list(pend["dwell"]), "replied": r["replied"]})
+            pend = None                                     # only the first look after the push is its check
+    return rows
+
+
+def _turn_deltas(rows: list[dict]) -> list[tuple]:
+    """Per push, from what self knew BEFORE it (the last TURN_MEMORY pushes):
+    (in its believed-best window 0/1, the share of its waiting time the other
+    spent in that window, outcome - what a timing-blind push would expect,
+    outcome). The bins' rates are shrunk toward the overall one."""
+    out = []
+    for i, r in enumerate(rows):
+        k, n = _turn_post(rows[max(0, i - TURN_MEMORY):i])
+        tot = (k.sum() + 0.5) / (n.sum() + 1.0)
+        rate = (k + 2.0 * tot) / (n + 2.0)
+        dw = np.asarray(r["dwell"], dtype=float)
+        if dw.sum() <= 0:
+            continue
+        share = dw / dw.sum()
+        best = r.get("best")
+        inw = 1.0 if best is not None and r["bin"] == best else 0.0
+        p0 = float(share[best]) if best is not None else 0.0
+        y = 1.0 if r["replied"] else 0.0
+        out.append((inw, p0, y - float(share @ rate), y))
+    return out
+
+
+def _turn_window(d: list[tuple]) -> dict:
+    """Rung 7's test over one window of _turn_deltas: (a) contingency, (b) payoff."""
+    if not d:
+        return {"n": 0, "share": None, "chance": None, "z": 0.0, "payoff": None, "payoff_z": 0.0,
+                "reply_rate": None, "blind_rate": None, "passed": False}
+    a = np.asarray(d, dtype=float)
+    inw, p0, dl, y = a[:, 0], a[:, 1], a[:, 2], a[:, 3]
+    var = float((p0 * (1.0 - p0)).sum())
+    z = float((inw.sum() - p0.sum()) / np.sqrt(var)) if var > 1e-9 else 0.0
+    pay = float(dl.mean())
+    sd = float(dl.std(ddof=1)) if len(dl) > 1 else 0.0
+    t = pay / (sd / np.sqrt(len(dl))) if sd > 1e-12 else 0.0
+    share, chance = float(inw.mean()), float(p0.mean())
+    ok = (len(d) >= RUNG7_PUSHES and z >= RUNG7_CONT_Z and share - chance >= RUNG7_CONT_MARGIN
+          and t >= RUNG7_PAY_Z and pay >= RUNG7_PAY_MARGIN)
+    return {"n": len(d), "share": share, "chance": chance, "z": z, "payoff": pay, "payoff_z": float(t),
+            "reply_rate": float(y.mean()), "blind_rate": float(y.mean()) - pay, "passed": bool(ok)}
+
+
+def _turn_score(rows: list[dict]) -> dict:
+    """Rung 7's test over the last RUNG7_PUSHES of `rows` (each scored on the
+    TURN_MEMORY before it)."""
+    rows = rows[-(RUNG7_PUSHES + TURN_MEMORY):]
+    return _turn_window(_turn_deltas(rows)[-RUNG7_PUSHES:])
 
 
 def _reach(srv, target: str) -> dict:
@@ -1211,9 +1414,10 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
             pass
     if reply is not None:                                # rung 7: the reply check after a push
         rec["reply"] = True
-    if c.get("p_self") is not None:                      # rung 7: self's own read (#254)
+        rec["replied"] = _replied(srv, reply, now, c["answer"])   # #258: they spoke AFTER the push
+    if c.get("p_self") is not None:                      # rung 8: self's own read (#254)
         rec["p_self"] = round(c["p_self"], 4)
-    if c.get("p_llm") is not None:                       # rung 7: the advisor's read, same look
+    if c.get("p_llm") is not None:                       # rung 8: the advisor's read, same look
         rec["p_llm"] = round(c["p_llm"], 4)
         if c.get("llm_model"):
             rec["llm_model"] = c["llm_model"]
@@ -1724,9 +1928,32 @@ def _rung6(recs: list[dict], tempo: dict | None = None) -> dict:
 
 
 def _rung7(recs: list[dict], tempo: dict | None = None) -> dict:
-    """Understand an other (#254): over the last RUNG7_LOOKS reply checks at it,
+    """Take turns (#258): self's pushes land in the window it learned gets
+    replies (a) more often than a push at a shuffled moment would, and (b)
+    get more replies than a timing-blind push would -- over its last
+    RUNG7_PUSHES policy pushes at the CURRENT other with a reply check (see
+    the constants). Staged: pushes, contingency, payoff. The headline skill
+    is the payoff: the reply rate gained over timing-blind."""
+    to = _other(recs)
+    rows = _turn_rows(recs, to) if to else []
+    w = _turn_score(rows)
+    crit = {"pushes": min(1.0, w["n"] / RUNG7_PUSHES)}
+    if not w["n"]:
+        crit.update({"contingency": 0.0, "payoff": 0.0})
+        return {"crit": crit, "skill": 0.0, "passed": False, **{k: w[k] for k in w if k != "passed"}}
+    exc = w["share"] - w["chance"]
+    crit["contingency"] = max(0.0, min(1.0, w["z"] / RUNG7_CONT_Z, exc / RUNG7_CONT_MARGIN))
+    crit["payoff"] = max(0.0, min(1.0, w["payoff_z"] / RUNG7_PAY_Z, w["payoff"] / RUNG7_PAY_MARGIN))
+    out = {"crit": crit, "skill": round(w["payoff"], 4), "eid": to,
+           "passed": bool(w["passed"] and all(v >= 1.0 for v in crit.values()))}
+    out.update({k: (round(v, 4) if isinstance(v, float) else v) for k, v in w.items() if k != "passed"})
+    return out
+
+
+def _rung8(recs: list[dict], tempo: dict | None = None) -> dict:
+    """Understand an other (#254; rung 7 until #258, unchanged): over the last RUNG8_LOOKS reply checks at it,
     SELF's prediction p (its own p_self, mixed with the model's p_llm by the
-    advisor's earned weight when the model answered) removes RUNG7_MARGIN of
+    advisor's earned weight when the model answered) removes RUNG8_MARGIN of
     the RUNNING RATE's Brier error -- the other's prior-smoothed reply rate
     over the checks before each one, no lookahead. Knowing the rate scores 0;
     only what self learned beyond it (timing, runs) counts. Only checks at the
@@ -1735,34 +1962,40 @@ def _rung7(recs: list[dict], tempo: dict | None = None) -> dict:
     if to is None:
         rc = [r for r in recs if r.get("kind") == "reach" and r.get("reply") and not r.get("audit")]
         to = rc[-1].get("eid") if rc else None
-    rows = _rung7_series(recs, to)[-RUNG7_LOOKS:] if to else []
-    crit = {"looks": min(1.0, len(rows) / RUNG7_LOOKS)}
+    rows = _rung8_series(recs, to)[-RUNG8_LOOKS:] if to else []
+    crit = {"looks": min(1.0, len(rows) / RUNG8_LOOKS)}
     if not rows:
         return {"crit": {**crit, "skill": 0.0}, "skill": 0.0, "passed": False}
     b_rate = sum((r["o"] - r["rate"]) ** 2 for r in rows) / len(rows)
     b_p = sum((r["o"] - r["p"]) ** 2 for r in rows) / len(rows)
     skill = (b_rate - b_p) / b_rate if b_rate > 1e-9 else 0.0
-    crit["skill"] = max(0.0, min(1.0, skill / RUNG7_MARGIN))
+    crit["skill"] = max(0.0, min(1.0, skill / RUNG8_MARGIN))
     return {"crit": crit, "skill": round(skill, 4),
             "eid": to, "passed": all(v >= 1.0 for v in crit.values())}
 
 
-PROGRESS = {1: _rung1, 2: _rung2, 3: _rung3, 4: _rung4, 5: _rung5, 6: _rung6, 7: _rung7}   # rung -> its test over the record
+PROGRESS = {1: _rung1, 2: _rung2, 3: _rung3, 4: _rung4, 5: _rung5, 6: _rung6, 7: _rung7,
+            8: _rung8}   # rung -> its test over the record
 # #249: the line each rung's headline skill has to reach (the number status()['skill'] reads);
 # rung 4's news share has a moving bar (its fixed-pace base + 0.15), so it has none here
-SKILL_PASS = {1: RUNG1_SKILL, 2: RUNG2_SKILL, 3: RUNG2_SKILL, 4: None, 5: 1.0, 6: 1.0, 7: RUNG7_MARGIN}
+SKILL_PASS = {1: RUNG1_SKILL, 2: RUNG2_SKILL, 3: RUNG2_SKILL, 4: None, 5: 1.0, 6: 1.0,
+              7: RUNG7_PAY_MARGIN, 8: RUNG8_MARGIN}
 
 
 def _rung_lines(recs: list[dict]) -> list[dict]:
     """The rung passes that count: every `rung` line except one with a later
     `rung_void` line for its rung (#254: a pass a broken test recorded stays
-    on the append-only record but doesn't count; a later pass does)."""
+    on the append-only record but doesn't count; a later pass does), and --
+    #258, the ladder flip -- a pass above rung 6 only when it carries
+    "ladder": LADDER_V (before the flip rung 7 was "understand an other": an
+    old pass is neither the new rung 7 nor rung 8)."""
     voids: dict = {}
     for r in recs:
         if r.get("kind") == "rung_void":
             voids[r.get("rung")] = max(voids.get(r.get("rung"), 0.0), float(r.get("ts") or 0))
     return [r for r in recs if r.get("kind") == "rung"
-            and not (r.get("rung") in voids and float(r.get("ts") or 0) < voids[r.get("rung")])]
+            and not (r.get("rung") in voids and float(r.get("ts") or 0) < voids[r.get("rung")])
+            and (int(r.get("rung") or 0) < FLIPPED_FROM or r.get("ladder") == LADDER_V)]
 
 
 def _passed(recs: list[dict]) -> set:
@@ -1779,7 +2012,7 @@ def _open_rungs(srv) -> None:
             continue
         p = PROGRESS[n](recs, _tempo(srv))
         if p["passed"]:
-            line = {"ts": time.time(), "kind": "rung", "rung": n, "skill": p["skill"]}
+            line = {"ts": time.time(), "kind": "rung", "rung": n, "skill": p["skill"], "ladder": LADDER_V}
             if p.get("eid"):
                 line["eid"] = p["eid"]
             _append(srv, line)
@@ -1866,6 +2099,7 @@ def status(srv) -> dict:
             "steer": _steer_stats(recs),
             "curiosity": _curiosity_stats(recs),
             "rung7": _rung7_stats(recs),
+            "rung8": _rung8_stats(recs),
             "toys": _toys(srv, recs),
             "off_field": _off_field(srv, recs)}
 
@@ -1976,10 +2210,38 @@ def _toys(srv, recs: list[dict]) -> list[dict]:
 
 
 def _rung7_stats(recs: list[dict]) -> dict:
-    """For the operator (#217, #254): rung 7 at the current other -- the pushes
+    """For the operator (#258): rung 7 at the current other -- its policy
+    pushes (`pushes`) and those whose reply check came (`checked`); per
+    spoke_age bin the pushes, replies and reply rate over the last
+    TURN_MEMORY (what the policy reads) and the window it believes best;
+    over the window the test reads: the in-window share against chance and
+    its z (contingency), the reply rate against timing-blind's, the payoff
+    and its t."""
+    to = _other(recs)
+    pushes = sum(1 for r in recs if r.get("kind") == "push" and r.get("to") == to and r.get("aim") is not None)
+    rows = _turn_rows(recs, to) if to else []
+    k, n = _turn_post(rows)
+    best = None
+    if n.sum() > 0:
+        mean = (k + 1.0) / (n + 2.0)
+        best = TURN_NAMES[max(range(len(k)), key=lambda b: (mean[b], n[b], -b))]
+    bins = [{"bin": TURN_NAMES[b], "pushes": int(n[b]), "replied": int(k[b]),
+             "rate": round(float(k[b] / n[b]), 4) if n[b] else None} for b in range(len(k))]
+    w = _turn_score(rows)
+
+    def r4(x):
+        return None if x is None else round(float(x), 4)
+    return {"pushes": pushes, "checked": len(rows[-TURN_MEMORY:]), "bins": bins, "best": best,
+            "window": w["n"], "share": r4(w["share"]), "chance": r4(w["chance"]), "z": round(w["z"], 2),
+            "payoff": r4(w["payoff"]), "payoff_z": round(w["payoff_z"], 2),
+            "reply_rate": r4(w["reply_rate"]), "blind_rate": r4(w["blind_rate"])}
+
+
+def _rung8_stats(recs: list[dict]) -> dict:
+    """For the operator (#217, #254): rung 8 at the current other -- the pushes
     that asked the model, those whose reply check came (`checked`), those the
     model answered in time (`paired`), the pair rate per checked ask; over
-    the reply checks rung 7 reads, the Brier error of self's own p_self, of
+    the reply checks rung 8 reads, the Brier error of self's own p_self, of
     the mix self passes on (`brier_mix`), of the running rate it must beat,
     and of the model alone on the checks it answered; the weight self gives
     the current advisor's next answer and that advisor's model id; and the
@@ -1993,8 +2255,8 @@ def _rung7_stats(recs: list[dict]) -> dict:
             continue
         checked += 1
         paired += int(look.get("p_llm") is not None and look.get("answer") in ("changed", "unchanged"))
-    allrows = _rung7_series(recs, to) if to else []
-    rows = allrows[-RUNG7_LOOKS:]
+    allrows = _rung8_series(recs, to) if to else []
+    rows = allrows[-RUNG8_LOOKS:]
     llm = [r for r in rows if r.get("p_llm") is not None]
 
     def brier(rs, key):

@@ -12,6 +12,13 @@ not. status()['rung7'] carries `recent_rate` for the panel.
 
 The replay (experiments/rung7_recent/) is honest about what this buys on
 the live record: see test_the_replays_verdict_is_pinned.
+
+#258 (the ladder flip): this is rung 8's test now (rung 7 until the flip),
+unchanged and moved up one rung: the seats pass the new rung 7 (take turns,
+tagged with the new ladder) and may grow to 8, where the model is asked;
+RUNG7_* are RUNG8_*, status()['rung7'] is status()['rung8']. The pushes keep
+the timer's pace (SL.TURNS off): rung 7's learned timing changes only WHEN a
+push goes and has its own tests (test_self_rung7_turns_258).
 """
 import json
 import os
@@ -56,6 +63,7 @@ class _Field:
 
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
+    monkeypatch.setattr(SL, "TURNS", False)          # #258: the timer's pace (see the module doc)
     WA._getter_paused.clear()
     monkeypatch.setattr(LLM, "_calls", [])
     monkeypatch.setattr(LLM, "_echo", {})
@@ -73,10 +81,10 @@ def _seat():
     CIO.entity_in(srv, CIO.OPERATOR)
     SL.bind(srv)
     SL.set_limit(srv, 1)
-    for r in (1, 2, 3, 4, 5, 6):
-        SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9})
+    for r in (1, 2, 3, 4, 5, 6, 7):                     # #258: rung 7 is take turns now
+        SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9, "ladder": SL.LADDER_V})
     SL._append(srv, {"ts": 1.0, "kind": "audit", "rung": 5, "phase": "end", "eid": "x", "passed": True})
-    SL.set_limit(srv, 7)
+    SL.set_limit(srv, 8)
     return srv
 
 
@@ -102,11 +110,11 @@ def _rate(prompt, label):
 def test_the_prompt_labels_recent_and_all_time_rates():
     srv = _seat()
     now = _history(srv, [1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0])
-    p = SL._rung7_prompt(srv, RESP, 9, now)
+    p = SL._rung8_prompt(srv, RESP, 9, now)
     assert "all-time" in p and "recent" in p
     assert _rate(p, "all-time") == pytest.approx(6.5 / 13, abs=0.006)
     assert _rate(p, "recent") == pytest.approx(0.5 / 7, abs=0.006)        # 0 of the last 6
-    assert f"0 of the last {SL.RUNG7_RECENT}" in p
+    assert f"0 of the last {SL.RUNG8_RECENT}" in p
     assert "6 of 12" in p
     assert "rhythm" in p.lower() and "recent" in p.lower()               # rhythms change: weigh recent
     assert "base rate" in p                                              # #217's anchor kept
@@ -116,7 +124,7 @@ def test_the_prompt_says_how_long_since_they_last_spoke():
     srv = _seat()
     now = _history(srv, [1, 0, 0])                    # spoke at the first check only
     spoke = 10_000.0 + 120
-    p = SL._rung7_prompt(srv, RESP, 9, now)
+    p = SL._rung8_prompt(srv, RESP, 9, now)
     assert f"{round(now - spoke)}s ago" in p
 
 
@@ -127,14 +135,14 @@ def test_heard_ts_on_chat_in_is_the_last_time_they_spoke():
     pp = doc.properties or {}
     pp["heard_ts"] = now - 42.0
     doc.properties = pp
-    assert "42s ago" in SL._rung7_prompt(srv, RESP, 9, now)
+    assert "42s ago" in SL._rung8_prompt(srv, RESP, 9, now)
 
 
 def test_the_prompt_still_carries_no_chat_text():
     srv = _seat()
     now = _history(srv, [1, 0])
     CIO.heard(srv, CIO.OPERATOR, "my secret words")
-    p = SL._rung7_prompt(srv, RESP, 9, now)
+    p = SL._rung8_prompt(srv, RESP, 9, now)
     assert "secret" not in p and "self is here" not in p
 
 
@@ -149,12 +157,12 @@ def test_the_prompt_still_carries_no_chat_text():
     ([0] * 10 + [1, 0, 1, 0, 1, 0], 3.5 / 7),
 ])
 def test_the_recent_rate_uses_the_last_few_checks_with_a_prior(outcomes, rate):
-    assert SL.RUNG7_RECENT == 6
+    assert SL.RUNG8_RECENT == 6
     srv = _seat()
     _history(srv, outcomes)
     r, k, n = SL._recent_rate(SL._read(srv), RESP)
     assert r == pytest.approx(rate)
-    assert n == min(len(outcomes), SL.RUNG7_RECENT)
+    assert n == min(len(outcomes), SL.RUNG8_RECENT)
     assert 0.0 < r < 1.0
 
 
@@ -162,9 +170,9 @@ def test_the_recent_rate_uses_the_last_few_checks_with_a_prior(outcomes, rate):
 
 def test_status_exposes_recent_rate():
     srv = _seat()
-    assert "recent_rate" in SL.status(srv)["rung7"]
+    assert "recent_rate" in SL.status(srv)["rung8"]
     _history(srv, [1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0])
-    r7 = SL.status(srv)["rung7"]
+    r7 = SL.status(srv)["rung8"]
     assert r7["recent_rate"] == pytest.approx(0.5 / 7, abs=1e-3)
     assert r7["base_rate"] == pytest.approx(6.5 / 13, abs=1e-3)
 
@@ -180,13 +188,13 @@ def _replay(model):
     habit = [0.2] * (len(LIVE) - 20) + HABIT_LAST20
     for i, ch in enumerate(LIVE):
         SL._append(srv, {"ts": t, "kind": "push", "n": 1, "eid": "chat:out", "to": RESP, "asked": True})
-        p = model(SL._rung7_prompt(srv, RESP, 1, t))
+        p = model(SL._rung8_prompt(srv, RESP, 1, t))
         o = int(ch)
         SL._append(srv, {"ts": t + 120, "kind": "reach", "n": 2, "eid": RESP, "p": habit[i], "reply": True,
                          "answer": "changed" if o else "unchanged", "p_llm": p})
         out.append((o, p))
         t += 300
-    return out, SL._rung7(SL._read(srv))
+    return out, SL._rung8(SL._read(srv))
 
 
 def _all_time(prompt):
@@ -227,13 +235,13 @@ def test_the_replays_verdict_is_pinned():
 
 # ---- 5. the test itself did not move ---------------------------------------------
 
-def test_the_rung7_test_is_unchanged():
+def test_the_rung8_test_is_unchanged():   # rung 7 until #258
     # #246 changed only the question; #254 changed the test on purpose (self's
     # p against the running rate over 100 checks, bar +0.08 -- see self_loop):
     # these pin #254's values and the timing #246 left alone
-    assert SL.RUNG7_MARGIN == 0.08
-    assert SL.RUNG7_LOOKS == 100
-    assert SL.RUNG7_CHECK_S == 120.0
-    assert SL.RUNG7_GRACE_S == 60.0
-    assert SL.RUNG7_STALE_S == 600.0
+    assert SL.RUNG8_MARGIN == 0.08
+    assert SL.RUNG8_LOOKS == 100
+    assert SL.RUNG8_CHECK_S == 120.0
+    assert SL.RUNG8_GRACE_S == 60.0
+    assert SL.RUNG8_STALE_S == 600.0
     assert SL._parse_p("VERDICT: 0.3") == pytest.approx(0.3)

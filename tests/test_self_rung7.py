@@ -1,11 +1,18 @@
-"""#161 RUNG 7: understand an other.
+"""#161 RUNG 8 (rung 7 until the #258 ladder flip): understand an other.
+
+#258 moved this test up one rung, unchanged: the seats here have passed the
+new rung 7 (take turns) and may grow to 8; the model is asked only once
+rung 8 is available; RUNG7_* are RUNG8_*. These tests keep the timer's pace
+(SL.TURNS off) -- rung 7's learned timing has its own tests
+(test_self_rung7_turns_258) and only changes WHEN a push goes, not what a
+reply check reads.
 
 Self predicts the other's answer at the reply check from its own record
 (p_self, #254) and may consult the model coprocessor as an advisor
 (`llm::call`, asked at each push, read by `expect` at the reply check --
 #215), mixing its answer in by the advisor's own track record. It passes
-when its prediction removes RUNG7_MARGIN of the running rate's Brier error
-over the last RUNG7_LOOKS reply checks.
+when its prediction removes RUNG8_MARGIN of the running rate's Brier error
+over the last RUNG8_LOOKS reply checks.
 """
 import json
 import os
@@ -82,13 +89,14 @@ def _queued(srv, eid, prompt):
     return {"rc": 0, "text": f"queued: a loop takes it up on {eid}"}
 
 
-# the pairs come one per push (#215): enough pushes for RUNG7_LOOKS reply checks
-CYCLES = (SL.RUNG7_LOOKS + 5) * SL.MEET_EVERY
+# the pairs come one per push (#215): enough pushes for RUNG8_LOOKS reply checks
+CYCLES = (SL.RUNG8_LOOKS + 5) * SL.MEET_EVERY
 
 
 @pytest.fixture(autouse=True)
-def _clean():
+def _clean(monkeypatch):
     WA._getter_paused.clear()
+    monkeypatch.setattr(SL, "TURNS", False)          # #258: the timer's pace (see the module doc)
 
 
 def _seat(names=(), limit=6, passed=(1, 2, 3, 4, 5)):
@@ -109,7 +117,7 @@ def _seat(names=(), limit=6, passed=(1, 2, 3, 4, 5)):
     SL.bind(srv)
     SL.set_limit(srv, 1)
     for r in passed:
-        SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9})
+        SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9, "ladder": SL.LADDER_V})
     SL.set_limit(srv, limit)
     return srv
 
@@ -134,7 +142,7 @@ def test_a_reach_at_the_other_carries_the_models_prediction(monkeypatch):
     monkeypatch.setattr(SL, "_read_entity", chatter)
     monkeypatch.setattr(SL, "_llm_pred", _llm_pred(chatter))
     monkeypatch.setattr(SL, "_ask_llm", _queued)
-    srv = _seat(limit=7, passed=(1, 2, 3, 4, 5, 6))
+    srv = _seat(limit=8, passed=(1, 2, 3, 4, 5, 6, 7))
     _run(srv, 60)
     reaches = [r for r in _kind(srv, "reach") if r["eid"] == RESP]
     assert reaches
@@ -144,17 +152,17 @@ def test_a_reach_at_the_other_carries_the_models_prediction(monkeypatch):
     assert all(0.0 <= r["p_llm"] <= 1.0 for r in with_llm)
 
 
-def test_rung_seven_opens_with_an_advisor_that_knows_the_phase(monkeypatch):
+def test_rung_eight_opens_with_an_advisor_that_knows_the_phase(monkeypatch):
     # #254: the advisor earns its weight on the record and self's mix passes
     chatter = _Chatter()
     monkeypatch.setattr(SL, "_read_entity", chatter)
     monkeypatch.setattr(SL, "_llm_pred", _llm_pred(chatter))
     monkeypatch.setattr(SL, "_ask_llm", _queued)
-    srv = _seat(limit=7, passed=(1, 2, 3, 4, 5, 6))
+    srv = _seat(limit=8, passed=(1, 2, 3, 4, 5, 6, 7))
     _run(srv, CYCLES)
-    assert 7 in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
-    assert SL.status(srv)["rung"] == 7
-    assert SL.status(srv)["rung7"]["advisor_weight"] > 0.5
+    assert 8 in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
+    assert SL.status(srv)["rung"] == 8
+    assert SL.status(srv)["rung8"]["advisor_weight"] > 0.5
 
 
 def _checks(outcomes, p_llm=None):
@@ -174,8 +182,8 @@ def _checks(outcomes, p_llm=None):
 def test_a_phase_aware_advisor_lifts_self_over_the_running_rate():
     # the other runs period-4 (C, C, U, U): self's own inputs (rates, the last
     # bit) can't see the phase; an advisor that does earns its weight
-    outcomes = [1 if i % 4 in (0, 1) else 0 for i in range(SL.RUNG7_LOOKS + 20)]
-    out = SL._rung7(_checks(outcomes, [0.9 if o else 0.1 for o in outcomes]))
+    outcomes = [1 if i % 4 in (0, 1) else 0 for i in range(SL.RUNG8_LOOKS + 20)]
+    out = SL._rung8(_checks(outcomes, [0.9 if o else 0.1 for o in outcomes]))
     assert out["passed"] is True and out["skill"] > 0.3
 
 
@@ -183,21 +191,22 @@ def test_an_advisor_that_echoes_the_rate_adds_nothing():
     # an advisor that says the running rate removes none of its error
     import random
     rng = random.Random(5)
-    outcomes = [1 if rng.random() < 0.6 else 0 for _ in range(SL.RUNG7_LOOKS + 20)]
+    outcomes = [1 if rng.random() < 0.6 else 0 for _ in range(SL.RUNG8_LOOKS + 20)]
     k, echo = 0, []
     for i, o in enumerate(outcomes):
         echo.append((k + 0.5) / (i + 1.0))
         k += o
-    out = SL._rung7(_checks(outcomes, echo))
-    assert out["skill"] < SL.RUNG7_MARGIN and out["passed"] is False
+    out = SL._rung8(_checks(outcomes, echo))
+    assert out["skill"] < SL.RUNG8_MARGIN and out["passed"] is False
 
 
-def test_the_limit_holds_rung_seven(monkeypatch):
+def test_the_limit_holds_rung_eight(monkeypatch):
+    # one rung up from the old "limit 6 holds rung 7": rung 7 passed, limit 7
     chatter = _Chatter()
     monkeypatch.setattr(SL, "_read_entity", chatter)
     monkeypatch.setattr(SL, "_llm_pred", _llm_pred(chatter))
     monkeypatch.setattr(SL, "_ask_llm", _queued)
-    srv = _seat(limit=6)
+    srv = _seat(limit=7, passed=(1, 2, 3, 4, 5, 6, 7))
     _run(srv, 400)
     assert not [r for r in _kind(srv, "reach") if r["eid"] == RESP and "p_llm" in r]
-    assert 7 not in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
+    assert 8 not in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]

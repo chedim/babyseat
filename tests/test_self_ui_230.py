@@ -205,7 +205,7 @@ class TestExpBar(unittest.TestCase):
         x = self._x()
         self.assertEqual(x["state"], "growing")
         self.assertEqual(x["level"], "Lv 6 · meet an other")
-        self.assertEqual(x["goal"], "→ 7 · understand an other")
+        self.assertEqual(x["goal"], "→ 7 · take turns")              # #258: the ladder flip
         self.assertEqual((x["pct"], x["fill"]), (64, 0.64))
         self.assertEqual(x["caption"], "waiting on: pairs")
 
@@ -261,8 +261,16 @@ class TestActivityLines(unittest.TestCase):
 @unittest.skipUnless(shutil.which("node"), "node not installed")
 class TestReportCard(unittest.TestCase):
     def test_it_shows_what_the_status_measures(self):
+        # #258: the model's numbers are rung 8's block now; rung 7's is the timing
         st = _st(slipping=True, limit=6,
-                 rung7={"asked": 8, "checked": 6, "paired": 5, "pair_rate": 0.83,
+                 rung7={"pushes": 30, "checked": 24, "best": "0-2m",
+                        "bins": [{"bin": "0-2m", "pushes": 10, "replied": 7, "rate": 0.7},
+                                 {"bin": "2-10m", "pushes": 6, "replied": 2, "rate": 0.3333},
+                                 {"bin": "10-30m", "pushes": 4, "replied": 1, "rate": 0.25},
+                                 {"bin": "30m+", "pushes": 4, "replied": 0, "rate": 0.0}],
+                        "share": 0.42, "chance": 0.17, "z": 3.4, "payoff": 0.12, "payoff_z": 2.1,
+                        "reply_rate": 0.42, "blind_rate": 0.3},
+                 rung8={"asked": 8, "checked": 6, "paired": 5, "pair_rate": 0.83,
                         "brier_model": 0.37, "brier_self": 0.26, "brier_mix": 0.25, "brier_rate": 0.39, "advisor_weight": 0.0, "base_rate": 0.55},
                  curiosity=[{"eid": "w:fast", "progress": 0.05, "error": 0.12}],
                  world={"w:fast": "moving", "w:prime": "intermittent", "toy:mute": "silent"},
@@ -272,6 +280,8 @@ class TestReportCard(unittest.TestCase):
         st["self"]["ladder"][7]["state"] = "capped"
         html = _js("L.selfCardHtml(%s)" % json.dumps(st))
         for want in ("slipping", "held by the limit", "not built", "5 of 6", "0.37", "0.39", "0.55",
+                     "rung 7: taking turns", "best window <b>0-2m</b>", "0-2m 0.7 ", "vs chance 0.17",
+                     "vs timing-blind 0.3 ", "rung 8: the other",
                      "w:fast", "moving", "intermittent", "body", "other", "cradle:mobile",
                      'class="dot ok"', 'class="dot bad"'):
             self.assertIn(want, html, want)

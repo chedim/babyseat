@@ -21,9 +21,10 @@ about self (you, the seat's LLM, self's own lines) moves the bar.
   repertoire, and adding one is not on the ladder.
 - **It is not the LLM.** The seat's model never speaks *as* self and can't call
   its methods (they refuse any caller but self's own loop). The model talks
-  *to* it and, at rung 7, is an advisor self consults: self makes the
+  *to* it and, at rung 8, is an advisor self consults: self makes the
   prediction and weighs the model's guess by the model's own track record
-  (#254); rung 7 grades self's prediction, never the model's.
+  (#254); rung 8 grades self's prediction, never the model's. Rung 7 (take
+  turns) has no model at all: self learns *when* to speak.
 - **It is not a self-model** to be scored. It is a loop that builds up a body
   of measured predictions about its world.
 - **It is not `seat:self`.** That is only the speaker tag: every line the seat
@@ -42,8 +43,12 @@ the **growth limit**: the highest rung self may reach.
 | choice | what happens |
 |---|---|
 | 🌱 off | asleep: nothing runs, **nothing is erased** (record, model, tempo stay) |
-| 🌱 1 · feel itself … 🌱 7 · understand an other | awake; self may climb up to that rung |
-| rungs 8–10 | listed but disabled: "(not built)" |
+| 🌱 1 · feel itself … 🌱 8 · understand an other | awake; self may climb up to that rung |
+| rungs 9–11 | listed but disabled: "(not built)" |
+
+The ladder flipped in #258: rung 7 is **take turns** (serve and return) and
+**understand an other** moved up to rung 8, unchanged. A seat at rung 6
+reads rung 6 after the update and works on the new rung 7.
 
 - **Below the limit** self still earns each rung by its test, in order.
 - **Above the limit** nothing opens, however well it does. The chooser marks
@@ -110,7 +115,7 @@ Next to the chooser, self's progress reads like a game's experience bar
 
 ```
 Lv 6 · meet an other  [██████░░░░] 64%
-→ 7 · understand an other · waiting on: pairs
+→ 7 · take turns · waiting on: pushes
 ```
 
 - **the level** is the highest rung passed, with its name;
@@ -127,15 +132,16 @@ Lv 6 · meet an other  [██████░░░░] 64%
   *reduce motion* on, the gold and the caption stay and nothing pulses.
 
 **The skill at a glance** (#249): under the bar, the number the bar's test
-reads against the line it has to beat, e.g. `skill −0.00 / +0.08` at rung 7
-(self's Brier skill over the running rate, which must reach +0.08; #254).
-Before anything feeds the test it reads `skill not measured yet / +0.08`,
-never a made-up 0.
+reads against the line it has to beat, e.g. `skill +0.03 / +0.05` at rung 7
+(the reply rate its timing gains over a timing-blind push, which must reach
++0.05; #258) or `skill −0.00 / +0.08` at rung 8 (self's Brier skill over the
+running rate, which must reach +0.08; #254). Before anything feeds the test
+it reads `skill not measured yet / +0.05`, never a made-up 0.
 Rung 4's headline (the share of timed looks that find news) has a moving bar,
 so it shows the skill alone.
 
 The bar's tooltip still carries the long form (mode, limit, cycles, rung 7's
-pairs). On a phone the caption row is hidden to keep the top bar short.
+window and payoff, rung 8's pairs). On a phone the caption row is hidden to keep the top bar short.
 
 ### The 👶 panel: self's character sheet
 
@@ -165,17 +171,23 @@ open or close is remembered per browser.
   | Patience | 4 | calibration error: \|mean predicted chance − share that found news\| over its last 40 timed looks (≤ 0.1; lower is better) |
   | Notice | 5 | the shifts it noticed, of the two its blind audit probes (1) |
   | Meet | 6 | rung 6's staged test: lines sent, answered looks, the other read as other (1) |
-  | Understand | 7 | self's Brier skill over the running rate at predicting the other's replies (its own guess, the model's mixed in by its track record; ≥ 0.08) |
+  | Turns | 7 | the reply rate its own timing gains over a timing-blind push (≥ 0.05; the test also needs the contingency, below) |
+  | Understand | 8 | self's Brier skill over the running rate at predicting the other's replies (its own guess, the model's mixed in by its track record; ≥ 0.08) |
 
   A skill can be negative: its bar then grows left of a zero line, in amber.
   A passed rung whose test fails now says **slipping**. A number nothing
   measures yet says "not measured yet", never 0.
 - **Quest log:** the current rung's staged criteria with their counts and
-  skill (`100/100 reply checks ✓ · skill vs running rate −0.00 → +0.08`), and
-  what it is waiting on. At rung 7 it also says `restarted <date>: was
-  grading the LLM, now grades self` once the fixed rung 7 started counting
-  (#254), and lists a rung 7 pass the old scorer recorded as `rung 7 passed
-  <time> under the #254 bug: graded the LLM, not self; doesn't count`.
+  skill (rung 7: `37/100 timed lines with a reply check · lines in its window
+  0.41 vs chance 0.22 (z 2.4 → 3.0, +0.10) · replies gained over
+  timing-blind +0.08 (t 1.9 → 4.0, +0.05)`; rung 8: `100/100 reply checks ✓
+  · skill vs running rate −0.00 → +0.08`), and what it is waiting on. At
+  rung 8 it also says `restarted <date>: was grading the LLM, now grades
+  self` once the fixed scorer started counting (#254), and every quest lists
+  a pass that doesn't count: one the old scorer recorded as `the old rung 7
+  (understand an other, now rung 8) passed <time> under the #254 bug: graded
+  the LLM, not self; doesn't count`, and one from before the ladder flip as
+  `... before the ladder flip (#258); doesn't count`.
 - **Achievements:** each rung passed, with its date, the working hour it
   passed at, and the skill on its pass record. Rung 6 says it was first
   passed against the empty operator slot (#208) and counts its hours from
@@ -198,7 +210,7 @@ open or close is remembered per browser.
 - **Relationships:** the others it has met: the people it sent lines to and
   looked for answers from (lines, looks, how often they replied, its Brier
   error on them: 0 is perfectly predictable, 0.25 a coin), the seat's model
-  (rung 7's advisor: its Brier against self's, and the weight self gives it) and the toy players (how
+  (rung 8's advisor: its Brier against self's, and the weight self gives it) and the toy players (how
   often they changed a toy, and self's error on the looks after); then the
   body set and the others, from rung 6's split.
 - **Activity:** self's last 15 record lines, newest first, with how long ago:
@@ -216,7 +228,7 @@ rung shut are taken out. They are a small data list in `membrane/self_sheet.py`
 |---|---|---|
 | #191 | rung 4 passed (rung 5 could not notice a shift at the audit's floor) | 2026-10-16 21:43:37 UTC, the fix live |
 | #208 | rung 5 passed (rung 6 talked to the empty operator slot) | self's first line to a real person |
-| #254 | rung 6's honest pass (rung 7 graded the LLM's guess, not self's) | the record's `rung7_restart` line: the fixed rung 7's first cycle; **open** (to the record's end) until then |
+| #254 | rung 6's honest pass (rung 7, now rung 8, graded the LLM's guess, not self's) | the record's `rung7_restart` line: the fixed scorer's first cycle; **open** (to the record's end) until then |
 
 A window applies only on a seat whose rung passed before the fix; a seat
 born later never had the bug and loses no hours to it.
@@ -307,7 +319,8 @@ curl -s http://127.0.0.1:4096/membrane/seat \
 | `split` | rung 6's split: `body` (it predicts it near-perfectly) or `other` (it can't) |
 | `meets` | rung 6's exchange: `pushes`, `other` (who it meets), `push_age`, `heard_age` (seconds since the other last answered) |
 | `steer` | after rung 1: how close it lands to its aim (`err`) against not leaning into the current (`naive`), and `skill = 1 − err/naive` |
-| `rung7` | rung 7 at the current other: `asked` (pushes that asked the model), `checked` (those whose reply check came), `paired` (those whose check carried the model's answer), `pair_rate` = paired / checked; over the reply checks the test reads (`checks`, up to 100): `brier_self` (self's own `p_self`), `brier_mix` (what self passes on: `p_self` with the advisor heard), `brier_rate` (the running rate it must beat by 8%), `brier_model` (the model alone, on the checks it answered); `advisor_weight` (how much self listens to the current model, earned on its record, 0 for a new model) and `advisor_model` (its id); `base_rate` (the all-time rate the model is told) and `recent_rate` (the share of the last 6 reply checks answered, same prior, also told). The 🌱 chooser's tooltip shows it as `rung 7: 5 of 8 asked pushes paired, Brier self 0.25 vs rate 0.26, model alone 0.37 (weight 0.00), base rate 0.55` |
+| `rung7` | #258, rung 7 at the current other: `pushes` (its timed pushes), `checked` (those whose reply check came, over the last 100), `bins` (per `spoke_age` bin `0-2m` / `2-10m` / `10-30m` / `30m+`: `pushes`, `replied`, `rate`), `best` (the window it believes best); over the window the test reads (`window`, up to 100): `share` (pushes in the believed-best window) vs `chance` (the share of the waiting time the other spent there) and `z`; `reply_rate` vs `blind_rate` (what a timing-blind push would have got), `payoff` (the difference) and `payoff_z`. The 🌱 tooltip shows it as `rung 7: 24 timed lines checked, best window 0-2m, in it 0.42 vs chance 0.17, replies +0.12 over timing-blind` |
+| `rung8` | rung 8 (rung 7 until #258) at the current other: `asked` (pushes that asked the model), `checked` (those whose reply check came), `paired` (those whose check carried the model's answer), `pair_rate` = paired / checked; over the reply checks the test reads (`checks`, up to 100): `brier_self` (self's own `p_self`), `brier_mix` (what self passes on: `p_self` with the advisor heard), `brier_rate` (the running rate it must beat by 8%), `brier_model` (the model alone, on the checks it answered); `advisor_weight` (how much self listens to the current model, earned on its record, 0 for a new model) and `advisor_model` (its id); `base_rate` (the all-time rate the model is told) and `recent_rate` (the share of the last 6 reply checks answered, same prior, also told). The 🌱 chooser's tooltip shows it as `rung 8: 5 of 8 asked pushes paired, Brier self 0.25 vs rate 0.26, model alone 0.37 (weight 0.00), base rate 0.55` |
 | `toys` | #230: each toy (`toy:` / `cradle:` things, words with a getter) with `getter` (it has one), `reads` and `answered` (of its last 10 reaches), and `health`: `ok`, `empty` (no answer on its last reads), `unread`, or `no getter`; a built-in toy also carries `toy` (its toybox name) and, for a tower block, `block` (#244: the play buttons' target) |
 | `off_field` | #244: of self's last 200 looks, `looks` (how many), `off` (how many landed on a thing with no live field point; `null` when the seat has no field) and `things` (those things, most looked-at first). The home view draws those looks as ghosts |
 | `curiosity` | from rung 2 on: the (up to) three things whose prediction is improving fastest, best first, each with `progress` (its error over the 30 ordinary looks before the latest 30, minus its error over the latest 30) and `error` (the latest 30's mean Brier error). It is what self's curiosity reads when it chooses a reach (below); empty until a thing has 60 ordinary looks |
@@ -400,7 +413,7 @@ line on the field (#237):
     time, now 0)";
   - "self said hello to you and asked the model if you'll answer";
   - "self waited — nothing was due";
-  - "level up: rung 7 · understand an other".
+  - "level up: rung 7 · take turns".
 
   A number appears only when the line carries it. Things go by friendly names:
   the person self meets is "you" (or their name), `i` is "the eye", and a toy
@@ -448,7 +461,8 @@ has passed, it is under the limit, and its test passes on the record.
 | **4 · patience** | fits each thing's rate of change in time over its last 30 looks (after a rung-5 shift, over the looks since it, with the old rate kept as a prior worth 3 looks, so a handful of looks can't swing it to never/always; #235); looks again once a change is 60% likely (waits up to 30 min); idles when nothing is due | things with a steady rhythm | **timed**: 30 timed looks; **news**: of its last 40, they find a change ≥ half the time, or 0.15 more often than its fixed-pace looks did (whichever is easier); **calibration**: its mean predicted chance is within 0.1 of the share that found news | keep getters' rhythms honest; don't make a thing change only when self looks |
 | **5 · notice the world changed** | compares its last 3–5 looks at a thing with its long memory; a window far from it (> 0.4) and unlikely under it (binomial tail < 0.02) is a **shift** ("went still" / "moves again"), and it re-learns from there (its rate starts from the old one and the new looks lead after ~10) | a thing it already classes as moving | **looks**: 20 looks with noticing on; **audit**: membrane pauses the surest mover for 5 of self's looks (cap 1 h), then restarts it for 5 more (cap 3 h); self must flag "went still" during the pause and "moves again" after | nothing: the audit runs itself. Don't restart the seat mid-audit if you can help it |
 | **6 · meet an other** | every 30 cycles pushes the line "self is here" to chat, and reads `chat:in:<person>`, which ticks each time the person sends a message | **a person who chats** with the seat, irregularly | **pushes**: 10; **heard**: 20 answered looks at the other; **split**: the other is classed **other** (its Brier skill < 0.9: self can't predict it perfectly). A partner who never answers is predicted perfectly, classes as *body*, and the rung stays shut | chat with the seat — normally, whenever you like. Your messages are the answers |
-| **7 · understand an other** | after each push it predicts whether the other will have spoken by its reply check, **itself** (#254): `p_self` from its own record (the other's all-time and recent reply rates, the last check's outcome, how long before the push they last spoke), fit on its own earlier checks, no model needed; at the push it may also ask the seat's model (`llm::call`, read-only, one consult per push) the same question, and hears the answer as an **advisor**, recalibrated on that model's own track record (its average lean says nothing; a new model starts unheard); it holds off looking at the other for 2 minutes (up to 3 while the model's answer is still in flight), then checks for the reply | the other answering its pushes (the model is optional) | **looks**: 100 reply checks (one per push); **skill**: self's prediction removes ≥ 8% of the running rate's Brier error over them (the other's prior-smoothed rate before each check: knowing the rate scores 0) | answer self's 🌱 lines (or just chat), in your own rhythm |
+| **7 · take turns** (#258) | learns **when** to push: after each push it draws the moment it will wait for, a bin of how long since the other last spoke (`spoke_age`: 0–2 min, 2–10, 10–30, 30+ or never), by Thompson sampling on the reply rate each bin earned over its last 100 pushes (a random bin one push in ten, so the losing bins stay measured), and pushes when the other's `spoke_age` is in that bin; never sooner than 30 cycles after its last push (rung 6's timer is the cap), never later than 180 (`overdue`). Same words, no model. Nothing in it prefers "right after they speak": an other who answers late teaches it to wait | the other answering some pushes more than others, by when they come | **pushes**: 100 pushes with a reply check; **contingency**: the share of them in the window self believed best at the push beats the share of its waiting time the other spent in that window (where a push at a shuffled moment would land) by z ≥ 3 and +0.10; **payoff**: each push's outcome (the other spoke **after** it, by the check) minus what a timing-blind push in its interval would have expected (the bins' rates as known before it, weighted by the waiting time in each) averages ≥ +0.05 with t ≥ 4. Both prequential | chat in your own rhythm and answer its 🌱 lines when you're there; it learns when that is |
+| **8 · understand an other** (rung 7 until #258) | after each push it predicts whether the other will have spoken by its reply check, **itself** (#254): `p_self` from its own record (the other's all-time and recent reply rates, the last check's outcome, how long before the push they last spoke), fit on its own earlier checks, no model needed; at the push it may also ask the seat's model (`llm::call`, read-only, one consult per push) the same question (from rung 8 on), and hears the answer as an **advisor**, recalibrated on that model's own track record (its average lean says nothing; a new model starts unheard); it holds off looking at the other for 2 minutes (up to 3 while the model's answer is still in flight), then checks for the reply | the other answering its pushes (the model is optional) | **looks**: 100 reply checks (one per push); **skill**: self's prediction removes ≥ 8% of the running rate's Brier error over them (the other's prior-smoothed rate before each check: knowing the rate scores 0) | answer self's 🌱 lines (or just chat), in your own rhythm |
 
 At the default pace, rung 6's ten pushes alone take ~50 minutes; rungs 2–5
 usually take hours, and the audits run on their own schedule.
@@ -488,10 +502,10 @@ Three rules (#161) keep curiosity from breaking the measurement:
 
 | rung | skill | the test the design gives it |
 |---|---|---|
-| 8 · recognize itself | shown its own trace and another's | it predicts its own better (the mirror test); then the name ceremony, agreed with the operator |
-| 9 · change itself | `cliff::define` on its own methods | a revised method predicts better than the version it replaced, and reverts on strike-out |
-| 10 · speak | its voice | every line cites its ledger; no unbacked first-person claims |
-| 11 · invention ([#196](https://github.com/chedim/membrane/issues/196)) | the field fills a gap with a new entity in a new state | future; a design thread, not on the chooser |
+| 9 · recognize itself | shown its own trace and another's | it predicts its own better (the mirror test); then the name ceremony, agreed with the operator |
+| 10 · change itself | `cliff::define` on its own methods | a revised method predicts better than the version it replaced, and reverts on strike-out |
+| 11 · speak | its voice | every line cites its ledger; no unbacked first-person claims |
+| 12 · invention ([#196](https://github.com/chedim/membrane/issues/196)) | the field fills a gap with a new entity in a new state | future; a design thread, not on the chooser |
 
 ## Toys
 
@@ -719,15 +733,41 @@ on a seat whose person has a name nobody ever answered. Self now meets **the
 most recently active person** (the owner of the newest chat), follows when
 that changes, and falls back to `operator` only on a seat with no people. Its
 line starts with 🌱 and the chat shows it as **🌱 self**, so you can tell it
-from the seat and answer it. Rungs 6–7 count only the current other, so a seat
+from the seat and answer it. Rungs 6–8 count only the current other, so a seat
 that "passed" rung 6 against the empty slot shows it **slipping** until the
 real person earns it (10 pushes, 20 answered looks, classed `other`). The
 panel's `meets.other` names the person once self has pushed to them — at most
 one meet (~5 minutes) after a restart.
 
-**Rung 7 waits on `looks` for a long time.** It earns at most one reply
-check per push, and self pushes once every 30 cycles (~5 minutes at the
-default pace), so 100 checks take at least ~8 hours of running (a seat that
+**Rung 7 waits on `pushes`, or its contingency or payoff stays low (#258).**
+Rung 7 earns one reply check per push, and its pushes wait for their moment
+(30 to 180 cycles apart, ~5–30 minutes at the default pace), so 100 checks
+take a day or so of running. Read `rung7` in the panel: `bins` shows the
+reply rate per window; a window that gets clearly more replies than the
+others is what it learns to wait for. If every bin's rate is about the same
+(you answer whenever, or never), there is no timing to learn and the rung
+rightly stays shut. If `best` says `30m+` while you mostly chat in bursts,
+it has not seen enough pushes yet; the losing bins are still tried one push
+in ten. Before #258 the reply check counted a line from before the push as a
+reply (`changed`); now `replied` counts only a line after it.
+
+What the live record says (`experiments/rung7_turns/replay.py`, a copy of the
+live record, 2026-10-19; 142 timer pushes to the person over 12.3 h, 117 with
+a reply check): the timer landed within 2 minutes of the person's last line
+0.268 of the time against 0.271 for shuffled moments (q05..q95 0.21..0.33),
+so its timing had no contingency, as expected; but the person replied to
+0.62 of the pushes that came within 2 minutes of their last line (37 pushes),
+0.36 at 2–10 minutes (55), 0.35 at 10–30 (20) and 0 of 5 after that. A
+timing rhythm is there to learn. In the simulation (`experiments/rung7_turns/sim.py`)
+an other with those per-bin rates lets rung 7 pass within a week in 39 of
+100 runs (median ~86 h); a turn-taking other in 99 (median ~38 h); a timer
+and a random delay never; a coin-flip other in 2 (the bar, t >= 4, is that
+other's best weekly window at q99, the same chance line rung 8 uses).
+
+**Rung 8 waits on `looks` for a long time.** It earns at most one reply
+check per push, and self pushes at most once every 30 cycles (~5 minutes at
+the default pace; from rung 7 on, when its learned timing says), so 100
+checks take at least ~8 hours of running (a seat that
 had reply checks before #254 has them already: their `p_self` is recomputed
 from the record). At each push self may ask the model whether the other will
 have spoken by its next look, waits 2 minutes, then checks for the reply. A
@@ -740,7 +780,7 @@ the record, so a restart doesn't lose it. An other who sometimes answers is
 what moves it; an other who never answers is the running rate exactly, and
 nothing beats that.
 
-**Rung 7 graded the model, not self (#254).** Until #254 the test scored the
+**Rung 7 (now rung 8) graded the model, not self (#254).** Until #254 the test scored the
 model's `p_llm` against habit; self did nothing with the answer, and swapping
 the model moved the skill by 0.25 in an hour with self unchanged. A pass that
 scorer recorded (the live seat's, 2026-10-19 05:38 UTC, was the model saying
@@ -750,7 +790,11 @@ record) and a `rung7_restart` line, so the level reads 6 and rung 7 is worked
 on again. The sheet lists the void in the quest log, marks the restart, and
 counts the window from the honest rung 6 pass to the restart as blocked by
 #254. Now self predicts (`p_self`), the model is an advisor recalibrated on
-its own record, and the test scores self against the **running rate**.
+its own record, and the test scores self against the **running rate**. Since
+the ladder flip (#258) that test is rung 8's; the voided pass stays void and
+counts for neither rung 7 (take turns) nor rung 8, and a rung line above 6
+counts only when it carries the new ladder's tag (`"ladder": 2`), so no pass
+from before the flip is read under the new names.
 **On this person the rung may not pass:** on a copy of the live record (108
 reply checks) the best of what self can learn scores −0.00 against the
 running rate, its 95% interval −0.05..+0.06 — their reply by the 2-minute
@@ -759,8 +803,8 @@ at +0.08 (above what chance or a humble 0.5 reach over 100 checks); it is
 not loosened to fit this record. An other whose replies follow a rhythm (in
 a session they answer, away they don't) is passable without any model.
 
-**Rung 7's model is overconfident, or its asks don't pair (#217).** Read
-`rung7` in the panel (or the 🌱 tooltip). On the live seat (2026-10-18) 7
+**Rung 8's model is overconfident, or its asks don't pair (#217; rung 7
+then).** Read `rung8` in the panel (or the 🌱 tooltip). On the live seat (2026-10-18) 7
 pushes asked and only 4 paired, and the model said 0.85–0.99 "will have
 spoken" to reply checks that went 3 of 7: its Brier error was worse than
 habit's ~0.2 guesses. Two causes, both fixed:
@@ -782,17 +826,17 @@ habit's ~0.2 guesses. Two causes, both fixed:
 The `[bg] llm call failed (timed out)` lines in the seat's log are the
 thinker's background lane (local `mistral:7b`, 120 s timeout), not self's
 question. If an answer is still in flight at the reply check, self now waits
-up to 60 s more (`RUNG7_GRACE_S`) before looking, and pairs only an answer
+up to 60 s more (`RUNG8_GRACE_S`) before looking, and pairs only an answer
 that landed after the push and by the look; a `pair_rate` well under 1 with
 `checked` growing means the model's answers aren't parseable or arrive later
 than 3 minutes — look at the `field-call: chat:in:<person>` sessions.
 
-**Rung 7's skill is negative though the pairs are in (#246).** On the live
-seat (2026-10-19) rung 7 had its 20 pairs and skill −0.34. The question now
+**Rung 8's skill is negative though the pairs are in (#246; rung 7 then).**
+On the live seat (2026-10-19) rung 7 had its 20 pairs and skill −0.34. The question now
 carries the **recent** rate next to the **all-time** one (labelled so), how
 long ago the other last spoke (chat:in's `heard_ts`, or self's last look that
 found them changed — a time, never the words), and a sentence that rhythms
-change; `recent_rate` is in `rung7`. Only the input changed: 20 pairs, the
+change; `recent_rate` is in `rung8`. Only the input changed: 20 pairs, the
 15% margin, the pairing and the parsing are as before. Measured on a copy of
 that record (`experiments/rung7_recent/`): this person's reply by the
 2-minute check is close to a fair coin with no runs, so the recent rate is

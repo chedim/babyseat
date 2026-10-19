@@ -22,6 +22,13 @@ Now:
   push and before the look;
 - status() carries rung 7's diagnostics: pairs per asked push, the model's
   Brier against habit's.
+
+#258 (the ladder flip): this is rung 8's test now (rung 7 until the flip),
+unchanged and moved up one rung: the seats pass the new rung 7 (take turns,
+tagged with the new ladder) and may grow to 8, where the model is asked;
+RUNG7_* are RUNG8_*, status()['rung7'] is status()['rung8']. The pushes keep
+the timer's pace (SL.TURNS off): rung 7's learned timing changes only WHEN a
+push goes and has its own tests (test_self_rung7_turns_258).
 """
 import json
 import os
@@ -74,6 +81,7 @@ class _Field:
 
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
+    monkeypatch.setattr(SL, "TURNS", False)          # #258: the timer's pace (see the module doc)
     WA._getter_paused.clear()
     monkeypatch.setattr(LLM, "_calls", [])
     monkeypatch.setattr(LLM, "_echo", {})
@@ -91,10 +99,10 @@ def _seat():
     CIO.entity_in(srv, CIO.OPERATOR)
     SL.bind(srv)
     SL.set_limit(srv, 1)
-    for r in (1, 2, 3, 4, 5, 6):
-        SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9})
+    for r in (1, 2, 3, 4, 5, 6, 7):                     # #258: rung 7 is take turns now
+        SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9, "ladder": SL.LADDER_V})
     SL._append(srv, {"ts": 1.0, "kind": "audit", "rung": 5, "phase": "end", "eid": "x", "passed": True})
-    SL.set_limit(srv, 7)
+    SL.set_limit(srv, 8)
     return srv
 
 
@@ -135,10 +143,10 @@ def _history(srv, outcomes, t0=10_000.0, other_looks=()):
 
 def test_the_prompt_gives_the_base_rate_with_a_prior():
     srv = _seat()
-    p0 = SL._rung7_prompt(srv, RESP, 1, 5000.0)
+    p0 = SL._rung8_prompt(srv, RESP, 1, 5000.0)
     assert _base_rate(p0) == pytest.approx(0.5, abs=0.006)          # no checks yet: 0.5, not 0/0
     now = _history(srv, [0, 0, 1, 1, 0, 1, 0])
-    p = SL._rung7_prompt(srv, RESP, 9, now)
+    p = SL._rung8_prompt(srv, RESP, 9, now)
     assert _base_rate(p) == pytest.approx((3 + 0.5) / (7 + 1), abs=0.006)
     assert "3 of 7" in p
     assert "calibrated" in p.lower() and "probability" in p
@@ -150,7 +158,7 @@ def test_the_prompt_reads_reply_checks_only_not_late_looks():
     spoken' x14): a different horizon, and the reason it said 0.98."""
     srv = _seat()
     now = _history(srv, [0, 0], other_looks=[(1180, "changed"), (879, "changed"), (578, "changed")])
-    p = SL._rung7_prompt(srv, RESP, 9, now)
+    p = SL._rung8_prompt(srv, RESP, 9, now)
     assert "1180" not in p and "879" not in p
     assert _base_rate(p) == pytest.approx(0.5 / 3, abs=0.006)        # 0 of 2 reply checks
 
@@ -158,7 +166,7 @@ def test_the_prompt_reads_reply_checks_only_not_late_looks():
 def test_the_prompt_carries_no_chat_text():
     srv = _seat()
     now = _history(srv, [1, 0])
-    p = SL._rung7_prompt(srv, RESP, 9, now)
+    p = SL._rung8_prompt(srv, RESP, 9, now)
     assert "self is here" not in p
 
 
@@ -240,31 +248,31 @@ def _late_world(monkeypatch, lag):
 def test_an_early_answer_is_checked_at_the_usual_time(monkeypatch):
     pushes, looks = _late_world(monkeypatch, lag=10.0)
     assert len(pushes) == 1 and looks
-    assert looks[0]["ts"] - pushes[0] < SL.RUNG7_CHECK_S + 2 * SL.PACE_S    # no extra wait
+    assert looks[0]["ts"] - pushes[0] < SL.RUNG8_CHECK_S + 2 * SL.PACE_S    # no extra wait
     assert looks[0].get("p_llm") == pytest.approx(0.3)
 
 
 def test_an_answer_landing_within_the_grace_is_paired(monkeypatch):
-    lag = SL.RUNG7_CHECK_S + SL.RUNG7_GRACE_S / 2
+    lag = SL.RUNG8_CHECK_S + SL.RUNG8_GRACE_S / 2
     pushes, looks = _late_world(monkeypatch, lag=lag)
     assert looks and looks[0].get("reply") is True
     assert looks[0]["ts"] - pushes[0] >= lag                    # it waited for the answer...
-    assert looks[0]["ts"] - pushes[0] <= SL.RUNG7_CHECK_S + SL.RUNG7_GRACE_S + 2 * SL.PACE_S
+    assert looks[0]["ts"] - pushes[0] <= SL.RUNG8_CHECK_S + SL.RUNG8_GRACE_S + 2 * SL.PACE_S
     assert looks[0].get("p_llm") == pytest.approx(0.3)          # ...and paired it
 
 
 def test_an_answer_landing_after_the_grace_is_not_paired(monkeypatch):
-    lag = SL.RUNG7_CHECK_S + SL.RUNG7_GRACE_S + 60.0
+    lag = SL.RUNG8_CHECK_S + SL.RUNG8_GRACE_S + 60.0
     pushes, looks = _late_world(monkeypatch, lag=lag)
     assert looks and looks[0].get("reply") is True
-    assert looks[0]["ts"] - pushes[0] <= SL.RUNG7_CHECK_S + SL.RUNG7_GRACE_S + 2 * SL.PACE_S   # bounded
+    assert looks[0]["ts"] - pushes[0] <= SL.RUNG8_CHECK_S + SL.RUNG8_GRACE_S + 2 * SL.PACE_S   # bounded
     assert looks[0].get("p_llm") is None                       # it hadn't landed by the look
     assert not [r for r in looks if r.get("p_llm") is not None]  # and no later look pairs it
 
 
 def test_the_grace_stays_under_the_stale_bound():
-    assert SL.RUNG7_GRACE_S > 0
-    assert SL.RUNG7_CHECK_S + SL.RUNG7_GRACE_S < SL.RUNG7_STALE_S
+    assert SL.RUNG8_GRACE_S > 0
+    assert SL.RUNG8_CHECK_S + SL.RUNG8_GRACE_S < SL.RUNG8_STALE_S
 
 
 # ---- 3. fit to the live data -----------------------------------------------------
@@ -277,14 +285,14 @@ def test_a_base_rate_model_beats_an_always_098_one_on_the_live_outcomes():
         t = 10_000.0
         for o, habit, _ in LIVE:
             SL._append(srv, {"ts": t, "kind": "push", "n": 1, "eid": "chat:out", "to": RESP, "asked": True})
-            p = model(SL._rung7_prompt(srv, RESP, 1, t))
+            p = model(SL._rung8_prompt(srv, RESP, 1, t))
             SL._append(srv, {"ts": t + 120, "kind": "reach", "n": 2, "eid": RESP, "p": habit, "reply": True,
                              "answer": "changed" if o else "unchanged", "p_llm": p})
             t += 300
         # #254: status no longer carries habit (rung 7 doesn't read it): habit's
         # Brier over the same checks is computed here, from what it said
         b_habit = sum((o - h) ** 2 for o, h, _ in LIVE) / len(LIVE)
-        return SL.status(srv)["rung7"]["brier_model"], b_habit
+        return SL.status(srv)["rung8"]["brier_model"], b_habit
 
     b_rate, b_habit = brier(_base_rate)
     b_conf, _ = brier(lambda prompt: 0.98)
@@ -307,7 +315,7 @@ def test_status_reports_pairs_per_asked_push_and_both_briers():
         SL._append(srv, rec)
         t += 300
     SL._append(srv, {"ts": t, "kind": "push", "n": 1, "eid": "chat:out", "to": RESP, "asked": True})  # in flight
-    r7 = SL.status(srv)["rung7"]
+    r7 = SL.status(srv)["rung8"]
     assert r7["asked"] == 8 and r7["checked"] == 7 and r7["paired"] == 4
     assert r7["pair_rate"] == pytest.approx(4 / 7, abs=1e-3)
     pairs = [x for x in LIVE if x[2] is not None]
@@ -325,18 +333,20 @@ def test_status_reports_pairs_per_asked_push_and_both_briers():
 
 def test_status_without_asks_is_quiet():
     srv = _seat()
-    r7 = SL.status(srv)["rung7"]
+    r7 = SL.status(srv)["rung8"]
     assert r7["asked"] == 0 and r7["paired"] == 0
     assert r7["brier_model"] is None and r7["brier_self"] is None
 
 
 @pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
-def test_the_panel_title_shows_rung_seven():
-    st = {"self": {"mode": "on", "limit": 7, "rung": 6, "bar": 0.1, "next": 7,
-                   "ladder": [{"rung": 7, "name": "understand an other", "state": "current"}],
-                   "rung7": {"asked": 8, "checked": 7, "paired": 4, "pair_rate": 0.5714,
+def test_the_panel_title_shows_rung_eight():
+    # #258: the block is status()['rung8'] and the tooltip names rung 8
+    st = {"self": {"mode": "on", "limit": 8, "rung": 7, "bar": 0.1, "next": 8,
+                   "ladder": [{"rung": 8, "name": "understand an other", "state": "current"}],
+                   "rung8": {"asked": 8, "checked": 7, "paired": 4, "pair_rate": 0.5714,
                              "brier_model": 0.4366, "brier_mix": 0.2511, "brier_rate": 0.3253, "advisor_weight": 0.0, "base_rate": 0.4375}}}
     js = ('const L=require(%r); process.stdout.write(JSON.stringify(L.selfView(%s)))'
           % (str(UI / "panel.js"), json.dumps(st)))
     v = json.loads(subprocess.check_output(["node", "-e", js]))
     assert "4 of 7" in v["title"] and "0.44" in v["title"] and "0.33" in v["title"]
+    assert "rung 8: 4 of 7" in v["title"]
