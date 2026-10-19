@@ -599,6 +599,8 @@ def main() -> None:
         "  toybox     self's toys, the built-in kit: list | add <kind> [--name\n"
         "             N] [--param k=v] | remove <name> | reset <name> | migrate\n"
         "             | poke <toy> <action> [arg] [--as WHO] (play with self)\n"
+        "  self       self on this seat: name [NAME | --reset] (its name,\n"
+        "             default Blurp; MEMBRANE_SELF_NAME overrides)\n"
         "\n"
         "Everything after the subcommand is forwarded verbatim to the\n"
         "underlying module.\n"
@@ -613,7 +615,7 @@ def main() -> None:
                    "demo", "reset", "install", "doctor", "connect",
                    "ingest", "backfill", "codegraph", "update", "move",
                    "migrate", "auth", "serve", "standalone", "stop",
-                   "stats", "bench", "erase-field", "token", "toybox"):
+                   "stats", "bench", "erase-field", "token", "toybox", "self"):
         if cmd is None and not argv:
             print(__doc__)
             return
@@ -635,6 +637,11 @@ def main() -> None:
         os.environ.setdefault("MEMBRANE_DATA_DIR", str(DATA_DIR))
         from . import toybox as _TB
         raise SystemExit(_TB.cli_main(forwarded))
+    if cmd == "self":
+        # SELF'S NAME ON THIS SEAT (#283): `self name [NAME | --reset]`
+        os.environ.setdefault("MEMBRANE_DATA_DIR", str(DATA_DIR))
+        from . import self_name as _SN
+        raise SystemExit(_SN.cli_main(forwarded))
     if cmd == "install":
         if args.force:
             forwarded = [a for a in forwarded if a != "--force"]

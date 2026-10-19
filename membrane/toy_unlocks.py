@@ -112,8 +112,9 @@ def refusal(srv, kind: str) -> str | None:
     recs = _recs(srv)
     n = rung_of(kind)
     if born(recs) and kind in UNLOCKS and n not in SL._passed(recs):
-        return (f"{kind} {ICONS.get(kind, '')} is locked: it unlocks when {_NAME} passes rung {n} "
-                f"({SL.RUNG_NAMES.get(n, '')}) -- {TEACHES.get(kind, '')}").replace("  ", " ")
+        from . import self_name as _SN                 # #283: said with this seat's name
+        return _SN.say(f"{kind} {ICONS.get(kind, '')} is locked: it unlocks when {_NAME} passes rung {n} "
+                       f"({SL.RUNG_NAMES.get(n, '')}) -- {TEACHES.get(kind, '')}").replace("  ", " ")
     if kind in PLACEHOLDERS:
         return (f"{kind} {ICONS[kind]} is unlocked but not built yet: its mechanics come with "
                 f"rung {n + 1} ({SL.RUNG_NAMES.get(n + 1, '')})")

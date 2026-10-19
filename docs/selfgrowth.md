@@ -6,7 +6,12 @@ its world one skill at a time. The operator named it **Blurp** (2026-10-19,
 [#277](https://github.com/chedim/membrane/issues/277)): the page shows that name
 wherever it shows self to you (the 👶 panel and its sheet, the toy dock, the
 activity lines, the amoeba's tag, ◎ and 👁 in the camera menu); its ids, its
-record and this guide keep `self`. This page tells you how to wake it, how to read
+record and this guide keep `self`. The name is **per seat** (#283): Blurp is the
+default, and each seat can name its own so a house with several seats tells
+them apart -- `membrane self name Pip` (or `membrane self name` to show it,
+`--reset` for Blurp again), POST `/membrane/seat/control {"self_name": "Pip"}`,
+or `MEMBRANE_SELF_NAME` over both; it is stored as `self_name` in the seat's
+`settings.json`, trimmed, 1-24 printable characters. This page tells you how to wake it, how to read
 its progress, what each rung asks of its world, and how to help it climb. The
 mechanics, rung by rung, are in [background-mind.md](background-mind.md#the-self-loop-161);
 the code is `membrane/self_loop.py`.
@@ -161,7 +166,7 @@ styling (membrane's own look, light and dark). Each section folds; the
 nameplate, Attributes and the Quest log start open, and which sections you
 open or close is remembered per browser.
 
-- **The nameplate:** the name (**Blurp**, the operator's; the seat carries it, so the name ceremony can change it), **Lv** (the
+- **The nameplate:** the name (**Blurp** by default; the seat carries it, each seat its own -- #283), **Lv** (the
   rung passed), the live exp bar, **the skill at a glance** (the number big,
   the line it has to beat, its change over the last hour and a sparkline of
   the last four hours: the same test run over the record as it stood every
@@ -259,6 +264,9 @@ curl -s http://127.0.0.1:4096/membrane/self/sheet | python3 -m json.tool | head 
 # {"header": {...}, "attributes": [...], "quest": {...}, "achievements": [...],
 #  "growth": {...}, "time": {...}, "inventory": [...], "relationships": {...}, "toys": [...]}
 curl -s 'http://127.0.0.1:4096/membrane/self/recent?n=30'   # the activity: {"lines": [...]}, newest first, at most 100
+curl -s http://127.0.0.1:4096/membrane/self/card   # #283, the zoo's card per seat:
+# {"name": "Blurp", "level": 6, "rung_name": "...", "next": 7, "mode": "on", "awake": true,
+#  "last_activity": "2026-10-19T12:00:00+00:00", "generated": 1792...}
 ```
 
 **It is read-only for self.** Nothing in the panel changes self; the 🌱

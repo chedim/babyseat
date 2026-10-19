@@ -15,6 +15,7 @@ from pathlib import Path
 FILE = "settings.json"
 DEFAULTS = {
     "name": "",               # the seat's name (the name ceremony); "" = not picked yet
+    "self_name": "",          # self's name on this seat (#283, self_name.py); "" = the default, Blurp
     "aliases": [],            # what the STT hears for it
     "backend": "",            # the Ollama / OpenAI-compatible URL ("" = the CLI's)
     "chat_model": "",
