@@ -7184,12 +7184,10 @@ def boot_entity(est, root: str, field: str, pid: int, argv: list,
 
 
 def _inject_to_primary_impl(srv, runner, text):
-    """THE EVENT-THINKER INJECT (the operator's cosmetic-
-    busy design): a reacted loop's line lands in the
-    OPERATOR'S PRIMARY session (the newest user session on
-    the runner) as an ASSISTANT text part riding the
-    cosmetically-busy stream — the client sees it as part
-    of the ongoing 'thinking loop'. Never a new turn, never
+    """THE EVENT-THINKER INJECT: a reacted loop's line lands
+    in the OPERATOR'S PRIMARY session (the newest user session
+    on the runner) as an ASSISTANT text part on the session's
+    stream, busy or idle (the cosmetic busy is gone, #238). Never a new turn, never
     a model call: a message-in-the-room, part-streamed.
 
     THE CRASH FIX (2026-10-06, the 'K.tokens.output undefined' TUI

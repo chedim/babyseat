@@ -1346,7 +1346,9 @@ def babble_move(runner, sid: str, tool_calls, content: str = "") -> None:
             runner.messages.append(sid, info, parts)
             runner._announce_user(sid, info, parts)
             info["_announced"] = True
-            runner._enqueue(sid, text, info, parts, threading.Event())   # his next step takes it in
+            # his next step takes it in; a turn already over leaves it as a
+            # stored row the next turn's history reads (never a stuck queue, #238)
+            runner.interject(sid, text, info, parts)
         except Exception as e:
             print(f"[voice] move babble failed: {e!r}", file=sys.stderr)
 

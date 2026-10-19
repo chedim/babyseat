@@ -1000,7 +1000,6 @@ class TurnRunner:
         self.DRAIN_MAX = 128
         self.DRAIN_RESULT_MAX = 256
         self._agents: dict[str, str] = {}
-        self.cosmetic_busy = False
         self._turn_stops: dict[str, threading.Event] = {}
         self._aborting: set[str] = set()
         self._agents: dict[str, str] = {}
@@ -1026,8 +1025,8 @@ class TurnRunner:
         stopping"). A running turn: the flag (checked between rounds) AND
         the turn's model socket closed, so a round blocked in the model
         call fails now, not after its rung budget. Nothing running: an
-        honest idle (the cosmetic busy kept the button on with nothing to
-        stop) and a flag that only a turn starting within ABORT_PREARM_S
+        honest idle (a page still showing busy kept the button on with
+        nothing to stop) and a flag that only a turn starting within ABORT_PREARM_S
         honours (Stop right after Send still cancels; a stale press used to
         cut the NEXT turn's tools short whenever it came)."""
         self._aborting = getattr(self, "_aborting", None) or set()
@@ -1342,8 +1341,11 @@ class TurnRunner:
         self._current_turn_sid = sid    # THE ABORT'S ADDRESS (the loopback's
                                         # registration key: _turn_sockets)
         self._turn_sockets = getattr(self, "_turn_sockets", {}) or {}
+        ended = False
         try:
-            return self._run_inner(sid, text, user_info, user_parts)
+            out = self._run_inner(sid, text, user_info, user_parts)
+            ended = True
+            return out
         finally:
             self._turn_sockets.pop(sid, None)
             self._turn_activity.pop(sid, None)
@@ -1353,6 +1355,13 @@ class TurnRunner:
             guard.release()
             self._busy.pop(sid, None)
             (getattr(self, "_aborting", None) or set()).discard(sid)
+            # A TURN THAT RAISED ENDS IDLE TOO (#238): its body never reached
+            # the idle publish, and the page sat on "working" while
+            # /session/status said idle (a queued turn's own busy follows)
+            if not ended:
+                self.hub.publish({"type": "session.status",
+                                  "status": {"type": "idle"}, "sessionID": sid})
+                self.hub.publish({"type": "session.idle", "sessionID": sid})
             # THE DRAIN: the next queued turn runs NOW (own thread --
             # this thread is the synchronous lane returning a result).
             self._start_next(sid)
@@ -1373,6 +1382,23 @@ class TurnRunner:
                                      "depth": len(q)},
                           "sessionID": sid})
         return qid
+
+    def interject(self, sid: str, text: str, user_info, user_parts) -> bool:
+        """A word for the RUNNING turn (the voice's babble): queued for its
+        next round only while a turn runs. Nothing running: dropped, False
+        -- its enqueue used to publish busy·queued after the turn it meant
+        to join was over, and nothing ever drained it (#238)."""
+        if sid not in self._busy:
+            return False
+        self._enqueue(sid, text, user_info, user_parts, threading.Event())
+        if sid not in self._busy:
+            # the turn ended between the look and the enqueue: its drain
+            # may have run already -- this one runs as its own turn (idle after)
+            g = self._guard(sid)
+            if g.acquire(blocking=False):
+                g.release()
+                self._start_next(sid)
+        return True
 
     def _take_interjections(self, sid: str, aid: str) -> list:
         """Pop every queued message of this session for the RUNNING turn:
@@ -1640,23 +1666,6 @@ class TurnRunner:
                   f"{self.TOOL_DUMP_S}s; stack dump failed ({dump_e})",
                   file=sys.stderr)
 
-    def _cosmetic_busy(self, sid: str) -> bool:
-        """THE COSMETIC-BUSY DECIDER (the operator's design): the
-        operator's PRIMARY session (the main chat: agent build/plan)
-        never reports idle to the client — the thinking loop's end is
-        internal, the stream stays busy so a new message queues or
-        reopens a loop and the EVENT-THINKERS (the 3-loop pool) may
-        inject into this session at any moment, rendering as part of
-        the ongoing 'thinking loop'. The loop sessions' (watch:/_)
-        idle stays real (they're visible background work).
-        ``self.cosmetic_busy`` (the boot's flag) arms it — off by
-        default (the wire stays real for plain turns; the launch boot
-        arms it when the event-thinkers pool is live)."""
-        if not getattr(self, "cosmetic_busy", False):
-            return False
-        agent = (self._agents or {}).get(sid)
-        return agent in (None, "build", "plan")
-
     ABORT_PREARM_S = 10.0
 
     def _run_inner(self, sid: str, text: str, user_info: dict | None = None,
@@ -1701,8 +1710,7 @@ class TurnRunner:
                     except Exception:
                         pass
                 threading.Thread(target=_op_move, daemon=True, name="operator-move").start()
-        # THE AGENT REGISTRY (the cosmetic-busy decider's + the lane
-        # gate's input): THE TURN'S OWN AGENT WINS (the attached TUI
+        # THE AGENT REGISTRY (the lane gate's input): THE TURN'S OWN AGENT WINS (the attached TUI
         # sends the mode per message -- 'plan' rows stored build-era
         # sessions and every turn laned build: the 'everything is build
         # despite plan selected' exhibit); the session doc is the
@@ -2382,24 +2390,15 @@ class TurnRunner:
                   f"(model {turn_model[:24]})", file=sys.stderr)
         except Exception:
             pass
-        # THE COSMETIC-BUSY COVENANT (the operator's design, 2026-10-03):
-        # the operator's MAIN session never shows 'idle' to the client —
-        # the thinking loop's END is membrane's internal fact, not a
-        # reported one. The machinery IS free (the guard released, the
-        # turn closed); the STREAM stays cosmetically busy so:
-        # (1) a new operator message either queues (loop running) or
-        # opens a fresh thinking loop (free) — the client sees one
-        # continuous session either way;
-        # (2) the EVENT-THINKERS (the 3-loop pool) may inject their
-        # lines INTO THIS SESSION at any moment — riding the same
-        # stream, rendering to the client as part of the 'thinking
-        # loop' regardless of whether the operator's own turn is live.
-        # The client's 'busy' is cosmetic; the seat's mind is real.
-        if not self._cosmetic_busy(sid):
-            self.hub.publish({"type": "session.status",
-                              "status": {"type": "idle"},
-                              "sessionID": sid})
-            self.hub.publish({"type": "session.idle", "sessionID": sid})
+        # THE TURN ENDS IDLE (#238): the stream says what /session/status
+        # says. The cosmetic busy (2026-10-03: the main chat never reported
+        # idle, so the event-thinkers' lines read as one ongoing loop) left
+        # the web chat on "working" forever while the seat itself said idle;
+        # an inject lands as its own part whether the session shows busy or not.
+        self.hub.publish({"type": "session.status",
+                          "status": {"type": "idle"},
+                          "sessionID": sid})
+        self.hub.publish({"type": "session.idle", "sessionID": sid})
         self._touch_session(sid)
         # the voice's teachers: the operator's words and the LLM's reply
         try:
