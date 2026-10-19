@@ -1284,26 +1284,128 @@ def _cbl_wanted() -> bool:
         return False
 
 
-def probe_local_couchbase() -> bool:
-    """Cheap one-shot probe: does a local Couchbase answer at the default
-    (or env-provided) endpoint with default (or env-provided) creds?
+_PROBE_BUDGET_S = 2.0      # the whole probe, every host and fallback
 
-    Plain HTTP GET /pools with Basic auth -- no SDK import, ~1s cap. True
-    only when the server responds 200; auth failures, DNS failures,
-    timeouts, and every other refusal are all 'no' (a memory backend, as
-    always, the safe fallback). Env vars override defaults."""
+
+def _probe_targets(conn: str) -> tuple[bool, list[str]]:
+    """(tls, hosts) from a connection string. couchbases:// (and https://)
+    is TLS; couchbase://, http:// and a bare host are plain. A host's own
+    port is dropped (in a connstring it is the KV port, not management);
+    a path or ?params are ignored; IPv6 may be [bracketed]."""
+    scheme, sep, rest = conn.strip().partition("://")
+    if not sep:
+        scheme, rest = "couchbase", conn.strip()
+    tls = scheme.lower() in ("couchbases", "https")
+    hosts = []
+    for h in rest.split("/")[0].split("?")[0].split(","):
+        h = h.strip()
+        h = h[1:].split("]")[0] if h.startswith("[") else h.split(":")[0]
+        if h:
+            hosts.append(h)
+    return tls, hosts
+
+
+def _tls_context():
+    """The probe's trust: COUCHBASE_CERT_PATH (the SDK's own knob, see
+    substrate.connect) when set, else the system store (+ certifi when
+    installed). Always verifying: credentials never go out otherwise."""
+    import ssl
+    cert = os.environ.get("COUCHBASE_CERT_PATH", "").strip()
+    if cert:
+        return ssl.create_default_context(cafile=cert)
+    ctx = ssl.create_default_context()
+    try:
+        import certifi
+        ctx.load_verify_locations(certifi.where())
+    except Exception:
+        pass
+    return ctx
+
+
+def _cert_unverified(e: BaseException) -> bool:
+    import ssl
+    return isinstance(e, ssl.SSLCertVerificationError) or isinstance(
+        getattr(e, "reason", None), ssl.SSLCertVerificationError)
+
+
+def probe_local_couchbase() -> bool:
+    """Cheap one-shot probe: does the Couchbase named by
+    COUCHBASE_CONN_STRING (default couchbase://127.0.0.1) answer, with the
+    env (or default) credentials? It gates publish, presence, imports and
+    the peer roster; no SDK import, 2s cap for the whole probe.
+
+    The scheme decides the endpoint (#225):
+      couchbase://h  -> GET http://h:8091/pools with Basic auth; 200 only.
+      couchbases://h -> GET https://h:18091/pools with Basic auth over a
+                        VERIFIED channel (COUCHBASE_CERT_PATH, else the
+                        system store); 200 only, a 401 is 'no'.
+        * certificate not verifiable (self-signed, private CA): the
+          credentials are NOT sent; one unverified, credential-less GET --
+          any HTTP answer means a cluster is there, and the SDK, which
+          verifies with its own trust (COUCHBASE_CERT_PATH, the Capella CA
+          it bundles), decides the rest.
+        * management port closed (Capella may not expose it): a bare TCP
+          connect to the KV TLS port 11207 -- no bytes, no credentials.
+    Multi-host strings: each host in order until one answers (within the
+    same 2s budget). DNS failures, refusals, timeouts and garbage are all
+    'no' -- never raises; the local tier, as always, carries the seat."""
     import base64
+    import socket
+    import ssl
+    import time
+    import urllib.error
     import urllib.request
     conn = os.environ.get("COUCHBASE_CONN_STRING", "couchbase://127.0.0.1")
     user = os.environ.get("COUCHBASE_USER", "Administrator")
     pw = os.environ.get("COUCHBASE_PASSWORD", "password")
-    host = conn.replace("couchbase://", "").replace("http://", "") \
-               .split("/")[0].split(":")[0]
+    auth = "Basic " + base64.b64encode(f"{user}:{pw}".encode()).decode()
+    deadline = time.monotonic() + _PROBE_BUDGET_S
     try:
-        req = urllib.request.Request(f"http://{host}:8091/pools")
-        req.add_header("Authorization", "Basic " + base64.b64encode(
-            f"{user}:{pw}".encode()).decode())
-        with urllib.request.urlopen(req, timeout=2.0) as r:
-            return r.status == 200
+        tls, hosts = _probe_targets(conn)
     except Exception:
         return False
+
+    def left() -> float:
+        return deadline - time.monotonic()
+
+    for host in hosts:
+        if left() <= 0:
+            return False
+        url = (f"https://{host}:18091/pools" if tls
+               else f"http://{host}:8091/pools")
+        req = urllib.request.Request(url)
+        req.add_header("Authorization", auth)
+        try:
+            kw = {"context": _tls_context()} if tls else {}
+            with urllib.request.urlopen(req, timeout=min(2.0, left()),
+                                        **kw) as r:
+                return r.status == 200
+        except urllib.error.HTTPError:
+            return False                  # it answered: creds/perm say no
+        except Exception as e:
+            if not tls:
+                continue
+            if _cert_unverified(e):
+                if left() <= 0:
+                    return False
+                bare = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+                bare.check_hostname = False
+                bare.verify_mode = ssl.CERT_NONE
+                try:
+                    with urllib.request.urlopen(
+                            urllib.request.Request(url),
+                            timeout=min(2.0, left()), context=bare):
+                        return True
+                except urllib.error.HTTPError:
+                    return True           # 401 without creds: it is there
+                except Exception:
+                    continue
+        if not tls or left() <= 0:
+            continue
+        try:
+            socket.create_connection((host, 11207),
+                                     timeout=min(2.0, left())).close()
+            return True
+        except Exception:
+            continue
+    return False
