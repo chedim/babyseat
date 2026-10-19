@@ -203,14 +203,15 @@ def _brier(xs):
 
 
 def test_a_recent_reading_fake_beats_an_all_time_only_fake_on_the_rungs_window():
-    """Over the last RUNG7_LOOKS live reply checks -- the window rung 7 reads --
-    the fake that reads the recent rate scores better than the all-time one."""
-    rec, s_rec = _replay(_recent_reader)
-    alt, s_alt = _replay(_all_time)
-    w = SL.RUNG7_LOOKS
+    """Over the last 20 live reply checks -- the window rung 7 read at #246 --
+    the fake that reads the recent rate scores better than the all-time one.
+    (#254: rung 7 no longer grades the model against habit, so the old
+    skill-vs-habit asserts went with that metric; the model's Brier is the
+    advisor's track record now.)"""
+    rec, _ = _replay(_recent_reader)
+    alt, _ = _replay(_all_time)
+    w = 20
     assert _brier(rec[-w:]) < _brier(alt[-w:])
-    assert s_rec["skill"] > s_alt["skill"]
-    assert s_rec["skill"] >= SL.RUNG7_MARGIN            # habit there is worse than a coin
 
 
 def test_the_replays_verdict_is_pinned():
@@ -227,8 +228,11 @@ def test_the_replays_verdict_is_pinned():
 # ---- 5. the test itself did not move ---------------------------------------------
 
 def test_the_rung7_test_is_unchanged():
-    assert SL.RUNG7_MARGIN == 0.15
-    assert SL.RUNG7_LOOKS == 20
+    # #246 changed only the question; #254 changed the test on purpose (self's
+    # p against the running rate over 100 checks, bar +0.08 -- see self_loop):
+    # these pin #254's values and the timing #246 left alone
+    assert SL.RUNG7_MARGIN == 0.08
+    assert SL.RUNG7_LOOKS == 100
     assert SL.RUNG7_CHECK_S == 120.0
     assert SL.RUNG7_GRACE_S == 60.0
     assert SL.RUNG7_STALE_S == 600.0

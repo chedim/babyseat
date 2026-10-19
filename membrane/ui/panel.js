@@ -486,12 +486,14 @@ function selfView(st) {
   const goal = s.next == null ? "top built rung" : (s.next > lim ? "held at " + lim : "→ " + s.next);
   const status = s.held ? "🥀 held: re-choose to clear"
     : "rung " + (s.rung || 0) + " ✓ · " + pct + "% " + goal + (s.waiting_on ? " (" + s.waiting_on + ")" : "") + (s.slipping ? " · slipping" : "");
-  // #217: rung 7's diagnostics -- how many asked pushes became pairs, and the
-  // model's Brier against habit's (lower is better; the model must beat habit)
+  // #217 / #254: rung 7's diagnostics -- how many asked pushes the model
+  // answered, and self's Brier against the running rate's (lower is better;
+  // self must beat the rate), with the model's alone and the weight self gives it
   const r7 = s.rung7 || {};
   const f2 = (x) => (x == null ? "–" : Number(x).toFixed(2));
-  const r7s = r7.asked ? " · rung 7: " + (r7.paired || 0) + " of " + (r7.checked || 0) + " asked pushes paired"
-    + (r7.brier_model != null ? ", Brier model " + f2(r7.brier_model) + " vs habit " + f2(r7.brier_habit) : "")
+  const r7s = (r7.asked || r7.brier_self != null) ? " · rung 7: " + (r7.paired || 0) + " of " + (r7.checked || 0) + " asked pushes paired"
+    + (r7.brier_mix != null ? ", Brier self " + f2(r7.brier_mix) + " vs rate " + f2(r7.brier_rate) : "")
+    + (r7.brier_model != null ? ", model alone " + f2(r7.brier_model) + " (weight " + f2(r7.advisor_weight) + ")" : "")
     + (r7.base_rate != null ? ", base rate " + f2(r7.base_rate) : "") : "";
   return { loaded, limit: lim, options, status, exp: selfExp(st),
            title: "self (#161): " + s.mode + " · " + rung + " · " + pct + "% toward the next" + why + slip + nxt
@@ -640,8 +642,11 @@ function selfLine(r) {
     const tail = (r.audit ? " · audit" : "") + (r.reply ? " · reply check" : "") +
       (Array.isArray(r.by) && r.by.length ? " · by " + r.by.join(", ") : "");   // #244: who changed the toy (ground truth)
     if (r.answer !== "changed" && r.answer !== "unchanged") return t + "no answer" + (r.why ? " (" + r.why + ")" : "") + tail;
-    return t + r.answer + " (p " + f2s(r.p) + (r.p_llm != null ? ", model " + f2s(r.p_llm) : "") + ")" + tail;
+    return t + r.answer + " (p " + f2s(r.p) + (r.p_self != null ? ", self " + f2s(r.p_mix != null ? r.p_mix : r.p_self) : "") +
+      (r.p_llm != null ? ", model " + f2s(r.p_llm) : "") + ")" + tail;
   }
+  if (k === "rung_void") return "rung " + r.rung + "'s earlier pass voided (" + (r.why || "") + ")";
+  if (k === "rung7_restart") return "rung 7 restarted: now grades self, not the model";
   if (k === "push") return "push → " + shortEid(r.to) + (r.asked ? " (asked the model)" : "");
   if (k === "shift") return "shift noticed on " + shortEid(r.eid) + (r.was != null && r.now != null ? " (" + f2s(r.was) + " → " + f2s(r.now) + ")" : "");
   if (k === "wait") return "wait";
@@ -711,11 +716,14 @@ function selfCardHtml(st) {
       ' <span class="rs">' + escText(lbl) + "</span></li>";
   }).join("") + "</ol>");
   const r7 = s.rung7 || {};
-  out.push("<h4>rung 7: the other</h4>" + (r7.asked
-    ? "<p><b>" + (r7.paired || 0) + " of " + (r7.checked || 0) + "</b> asked pushes paired (" + r7.asked + " asked)" +
-      (r7.brier_model != null ? "<br>Brier model <b>" + f2s(r7.brier_model) + "</b> vs habit <b>" + f2s(r7.brier_habit) + "</b> (lower is better)" : "") +
+  out.push("<h4>rung 7: the other</h4>" + (r7.asked || r7.brier_self != null
+    ? "<p><b>" + (r7.paired || 0) + " of " + (r7.checked || 0) + "</b> asked pushes paired (" + (r7.asked || 0) + " asked)" +
+      (r7.brier_mix != null ? "<br>Brier self <b>" + f2s(r7.brier_mix) + "</b> vs running rate <b>" + f2s(r7.brier_rate) + "</b> (lower is better)" +
+        " · self alone " + f2s(r7.brier_self) : "") +
+      (r7.brier_model != null ? "<br>the model alone " + f2s(r7.brier_model) + " · its weight " + f2s(r7.advisor_weight) +
+        (r7.advisor_model ? " (" + escText(r7.advisor_model) + ")" : "") : "") +
       (r7.base_rate != null ? "<br>base rate " + f2s(r7.base_rate) : "") + "</p>"
-    : '<p class="muted">no asked pushes yet</p>'));
+    : '<p class="muted">no reply checks yet</p>'));
   const cur = s.curiosity || [];
   out.push("<h4>curiosity</h4>" + (cur.length
     ? "<ol>" + cur.map((c) => "<li>" + escText(shortEid(c.eid)) + ' <span class="muted">progress ' + f2s(c.progress) +
@@ -901,7 +909,9 @@ function sheetQuest(s) {
   return '<p class="qh">Rung ' + q.rung + " · " + escText(q.name || "") + (q.slipping ? ' <span class="warn">slipping</span>' : "") + "</p>" +
     '<ul class="crit">' + (q.criteria || []).map((c) => '<li class="' + (c.met ? "met" : "open") + '"><span class="ck">' + (c.met ? "✓" : "○") + "</span> " +
       escText(c.text) + (c.met || c.frac == null ? "" : ' <span class="muted">' + Math.round(100 * c.frac) + "%</span>") + "</li>").join("") + "</ul>" +
-    (q.waiting_on ? '<p class="muted">waiting on: ' + escText(q.waiting_on) + "</p>" : "");
+    (q.waiting_on ? '<p class="muted">waiting on: ' + escText(q.waiting_on) + "</p>" : "") +
+    (q.note ? '<p class="note">' + escText(q.note) + "</p>" : "") +
+    (q.voided || []).map((v) => '<p class="note warn">' + escText(v) + "</p>").join("");
 }
 
 function sheetAchievements(s) {
@@ -930,7 +940,7 @@ function sheetTime(s) {
     parts.map((p) => '<span class="tp tp-' + p.key + '" style="width:' + p.pct + '%"></span>').join("") + "</div>" +
     '<ul class="tl">' + parts.map((p) => '<li><span class="lg tp-' + p.key + '"></span>' + escText(p.label) + " <b>" + hoursText(p.h) + "</b> · " + p.pct + "%</li>").join("") +
     "</ul>" + ((t.bugs || []).length ? '<p class="muted">the bugs that held a rung shut:</p><ul class="bugs">' + t.bugs.map((b) =>
-      "<li>#" + b.issue + " " + escText(b.what) + ' <span class="muted">' + escText(utcShort(b.from)) + " → " + escText(utcShort(b.to)) + " UTC" +
+      "<li>#" + b.issue + " " + escText(b.what) + ' <span class="muted">' + escText(utcShort(b.from)) + " → " + (b.open ? "now (open)" : escText(utcShort(b.to)) + " UTC") +
       " · " + hoursText(b.running_h) + " running</span></li>").join("") + "</ul>" : "");
 }
 
@@ -956,8 +966,9 @@ function sheetRelationships(s) {
       (o.chat.replied != null ? ", replied " + Math.round(100 * o.chat.replied) + "%" : "") +
       (o.chat.brier != null ? ", Brier " + fixed2(o.chat.brier) : "") + (o.chat.seen_as ? ", seen as " + escText(o.chat.seen_as) : ""));
     if (o.play) bits.push("play: changed toys " + o.play.changes + "×" + (o.play.looks ? ", Brier " + fixed2(o.play.brier) + " on " + o.play.looks + " looks after" : ""));
-    if (o.rung7) bits.push("rung 7's predictor: Brier " + fixed2(o.rung7.brier_model) + " vs habit " + fixed2(o.rung7.brier_habit) +
-      (o.rung7.pairs != null ? " over " + o.rung7.pairs + " pairs" : ""));
+    if (o.rung7) bits.push("rung 7's advisor: Brier " + fixed2(o.rung7.brier_model) + " vs self's " + fixed2(o.rung7.brier_self) +
+      (o.rung7.pairs != null ? " over " + o.rung7.pairs + " answers" : "") +
+      (o.rung7.weight != null ? ", self's weight on it " + fixed2(o.rung7.weight) : ""));
     return "<li><b>" + escText(o.who) + "</b> " + '<span class="muted">' + escText(o.kind) + "</span>" + (o.current ? ' <span class="now">meeting now</span>' : "") +
       '<div class="note">' + bits.join("<br>") + "</div></li>";
   }).join("") + "</ul>");

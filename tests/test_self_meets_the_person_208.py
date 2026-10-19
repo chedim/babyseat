@@ -146,7 +146,7 @@ def _looks(eid, n, base=0.0):
     for i in range(n):
         out.append({"ts": base + i, "kind": "reach", "eid": eid, "n": i, "steer": True,
                     "answer": "changed" if i % 2 else "unchanged", "p": 0.5,
-                    "p_llm": 1.0 if i % 2 else 0.0})
+                    "reply": True, "p_self": 1.0 if i % 2 else 0.0})   # #254: rung 7 reads self's p on reply checks
     return out
 
 

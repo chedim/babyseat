@@ -95,7 +95,8 @@ def _lived(srv):
     for i in range(20):
         _put(srv, {"ts": t + 60 + i * 60, "kind": "reach", "eid": ALICE, "p": 0.5,
                    "answer": "changed" if i % 2 else "unchanged", "reply": True,
-                   "p_llm": 0.9 if i % 2 == 0 else 0.1})            # the model bets wrong every time
+                   "p_llm": 0.9 if i % 2 == 0 else 0.1,           # the model bets wrong every time
+                   "p_self": 0.9 if i % 2 == 0 else 0.1})          # ...and so does self (#254 grades self)
     srv._real6 = t + 60 + 19 * 60                                  # the 20th look: both counts met
     srv._first_person = t
     SL._RT.pop(id(srv), None)
@@ -144,7 +145,7 @@ class TestBugWindows(unittest.TestCase):
 
     def test_the_bug_list_is_data_with_fix_times(self):
         by = {b["issue"]: b for b in SH.BUGS}
-        self.assertEqual(set(by), {191, 208})
+        self.assertEqual(set(by), {191, 208, 254})
         self.assertEqual(by[191]["fixed"], FIX191)
         self.assertEqual(by[191]["opens_after"], 4)
         self.assertEqual(by[208]["opens_after"], 5)
@@ -308,12 +309,13 @@ class TestQuest(unittest.TestCase):
         self.assertEqual(q["name"], "understand an other")
         c = {x["key"]: x for x in q["criteria"]}
         self.assertEqual(list(c), ["looks", "skill"])
-        self.assertTrue(c["looks"]["met"])
-        self.assertEqual(c["looks"]["text"], "20/20 reply pairs")
+        # #254: rung 7 reads 100 reply checks and grades self against the running rate
+        self.assertFalse(c["looks"]["met"])
+        self.assertEqual(c["looks"]["text"], f"20/{SL.RUNG7_LOOKS} reply checks")
         self.assertFalse(c["skill"]["met"])
-        self.assertRegex(c["skill"]["text"], r"^skill vs habit −\d\.\d\d → \+0\.15$")
-        self.assertEqual(q["waiting_on"], "skill")
-        self.assertIn("20/20 reply pairs ✓ · skill vs habit −", q["summary"])
+        self.assertRegex(c["skill"]["text"], r"^skill vs running rate −\d\.\d\d → \+0\.08$")
+        self.assertEqual(q["waiting_on"], "looks")
+        self.assertIn(f"20/{SL.RUNG7_LOOKS} reply checks · skill vs running rate −", q["summary"])
 
     def test_asleep_before_birth(self):
         s = _sheet(_seat(), T0)
@@ -409,7 +411,7 @@ class TestHeaderAndCache(unittest.TestCase):
         self.assertAlmostEqual(sk["value"], st["skill"], places=4)
         self.assertLess(sk["value"], 0)
         self.assertEqual(sk["pass"], SL.RUNG7_MARGIN)
-        self.assertEqual(sk["label"], "skill vs habit")
+        self.assertEqual(sk["label"], "skill vs running rate")
         self.assertEqual(sk["trend_h"], 0.0)                         # the same 20 pairs an hour ago
         self.assertEqual([p["ago_h"] for p in sk["series"]], [4.0, 3.5, 3.0, 2.5, 2.0, 1.5, 1.0, 0.5, 0.0])
         self.assertIsNone(sk["series"][0]["value"])                  # 4 h ago: no pairs yet
@@ -699,7 +701,7 @@ def _demo():
                                                    "seen_as": "other"},
                                           "play": {"changes": 2, "looks": 2, "brier": 0.4, "toys": ["toy:die"]}},
                                          {"who": "the seat's model", "kind": "model", "current": False,
-                                          "rung7": {"pairs": 20, "brier_model": 0.40, "brier_habit": 0.30}}],
+                                          "rung7": {"pairs": 20, "brier_model": 0.40, "brier_self": 0.30, "weight": 0.0}}],
                               "body": ["w:body"], "other": ["chat:in:alice"]}}
 
 

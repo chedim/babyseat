@@ -240,8 +240,10 @@ def from_command(rest: str, caller: str = "method") -> dict:
     return request(seat(), prompt, about=about, caller=caller)
 
 
-def answered(srv, ev: dict, text: str) -> None:
-    """A called turn ended: its one line onto the entity (llm_answer) and the echo."""
+def answered(srv, ev: dict, text: str, model: str | None = None) -> None:
+    """A called turn ended: its one line onto the entity (llm_answer) and the echo,
+    with the model that answered when the turn knows it (#254: self weighs an
+    advisor by its own track record, per model)."""
     line = next((ln.strip() for ln in str(text or "").splitlines() if ln.strip()), "")[:300]
     with _lock:
         _e = _echo.get(ev.get("echo"))
@@ -253,6 +255,8 @@ def answered(srv, ev: dict, text: str) -> None:
         pp = doc.properties or {}
         pp["llm_answer"] = {"ts": round(time.time(), 1), "text": line, "prompt": str(ev.get("prompt") or "")[:160],
                             "caller": ev.get("caller")}
+        if model:
+            pp["llm_answer"]["model"] = str(model)[:120]
         doc.properties = pp
         try:
             est.upsert(doc, embedder=None)

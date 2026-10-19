@@ -754,7 +754,7 @@ class _LoopDrainer:
         text = str(out.get("text") or out.get("verdict_text") or "")
         if _called:
             try:
-                _LLM.answered(srv, ev, text)
+                _LLM.answered(srv, ev, text, model=out.get("model"))
             except Exception:
                 pass
         verdict, detail = parse_verdict(text)
