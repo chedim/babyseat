@@ -4,6 +4,13 @@ Status: CLOSED on branch `entity-field`. Built in `90d7a75` (the whole mechanism
 commit) and `5ed6e4e` (the field's file home + the roster fallback); `c0ba419` (the
 autonode) sits on top. This doc is the Q→A record the sessions never wrote down.
 
+What it means for an operator today: the field's home is the seat's own folder
+(`efstore.open_backend`: `.membrane/field/`, or `.membrane/field.cblite` with Couchbase
+Lite fetched); a connected bucket carries only published entities and presence; the
+fully merged team field ([multi-dev-field.md](multi-dev-field.md)) is opt-in with
+`MEMBRANE_FIELD_CLOUD=1`, and a cluster down at boot degrades it to the file home, never
+to RAM. The README's "Sharing with a team" has the operator steps.
+
 ## The seed questions (the operator, 2026-10-01)
 
 > like, for ALL of the field, 2-tier structure and it should be seat-first? and, obviously,
@@ -20,14 +27,22 @@ autonode) sits on top. This doc is the Q→A record the sessions never wrote dow
 Yes. Tier 1 is the seat's own entity store and it is AUTHORITATIVE: nothing auto-leaves
 it (upsert's couchbase write-through was removed outright; the RAM doc + a debounced
 local file are tier 1's writes). Tier 2 (the shared global field) holds only PUBLISHED
-things, and publication is always an explicit act: a model-chosen entity export, the
-automatic presence pulse, or an operator-promoted commons memory. Turns, events, dreams,
+things, and publication is always an explicit act: a model-chosen entity export or the
+automatic presence pulse. (An operator-promoted commons memory is shared only when the
+seats run the opt-in merged field; on the default local field it stays in the seat's own
+commons — see [global-field.md](global-field.md).) Turns, events, dreams,
 scripts, geometry — never leave without a decision.
 
 **Q2 — models read global entities and map them onto the local graph, running locally?**
-Yes, with one hard boundary. The import organ pulls every `pub:*` key and maps foreign
+Yes, with one hard boundary. The import organ pulls every `pub:*` key (at boot, on the
+first embedder resolution: `hydrate_from_couchbase`; then on the thinker's presence pulse,
+about once a minute — one query capped at 500 rows) and maps foreign
 origins onto the local graph under the shared-vocabulary eid, stamped
-`imported_by`/`imported_at`; a guest runs against the LOCAL tier's geometry and routing.
+`imported_by`/`imported_at`/`imported_ver`; a guest runs against the LOCAL tier's geometry
+and routing. A republish reaches it (#226): when the published `ver` is newer than the
+copy's `imported_ver`, the copy takes the publisher's properties, class and embedding and
+keeps what it grew here (links, geometry, local-only keys, any script this seat put on
+it); the same version is a no-op.
 What never crosses is code: published docs carry the entity's STATE only — every
 `*_script` plus its strike/enabled bookkeeping is stripped on publish AND on import
 (`_strip_code`, defense in depth; `script_render` survives as inert text). An import is
@@ -49,27 +64,35 @@ staleness past 10 minutes standing in for expiry.
   (model export / presence pulse / operator-promoted commons).
 - Per-origin keys `pub:<origin>:<eid>`: two seats may publish the same name without
   contention; the origin IS the namespace.
-- The local copy always wins: imports never clobber an entity that lives locally.
-- Republish bumps the version; unpublish retracts only THIS seat's key; every foreign
-  import freezes at its last version — retraction is degradation, not deletion-at-distance.
+- The local copy wins where it is local: an entity born on this seat is never clobbered by
+  a foreign publication, and an import this seat EDITED (summary, class, properties,
+  parents or a merge mark through `edit()`, stamped `edited_locally_at`) keeps the edit —
+  the newer version is recorded as `import_diverged` {by, ver, at} and announced once per
+  version (`diverged:`), never applied. A copy follows the origin it was imported from;
+  another seat publishing the same eid does not take it over. A seat never re-imports its
+  own exports, and presence rows are the roster's, never imports.
+- Republish bumps the version on the wire and unedited imports follow it on their next
+  pull; unpublish retracts only THIS seat's key and every foreign import stays at the last
+  version it took — retraction is degradation, not deletion-at-distance.
 - No code travels in either direction's bookkeeping (stripped on publish and on import);
   watchers are no exception — an autonode belongs to the seat that wrote it (`c0ba419`).
 - Degrade never raises: the shared tier unreachable → exports fail soft (`ok:error`) and
   tier 1 carries on; tier 1's durable home is FILES (`efstore.py` FileBackend) — the
   shared store is an upgrade, not a dependency — and the peer roster degrades to empty,
   never an exception.
-- Memories are NOT entities: cross-seat claims need two seats (commons) AND the
-  operator's explicit promotion — a two-model agreement is a proposal, never a write.
+- Memories are NOT entities: a claim reaches the commons only by the operator's explicit
+  promotion or by two seats making it independently (the night's consensus pass) — and
+  only the opt-in merged field lets two seats' claims meet.
 
 ## Where it lives
 
 - `membrane/entities.py` — the store, publish/unpublish, import organ, presence, `_strip_code`
 - `membrane/peers.py` — registry with the presence-roster fallback
 - `membrane/efstore.py` — FileBackend, the field's file home (packing, debounce, origin_stats)
-- `membrane/thinker.py` — PRESENCE_EVERY=60 pulse + roster anchor
+- `membrane/thinker.py` — PRESENCE_EVERY=60 pulse + roster anchor + the periodic published pull (#226)
 - `membrane/opencode.py` — origin tag, boot publish, autonode wiring
 - `membrane/mcp_server.py` — the model face: edit-tool publish/unpublish relay
-- `tests/test_publish.py`, `tests/test_peers_roster.py`, `tests/test_efstore_file.py`
+- `tests/test_publish.py`, `tests/test_republish_226.py`, `tests/test_peers_roster.py`, `tests/test_efstore_file.py`
 - Build-time suites per commit messages: 638→652 pytest rising through this work;
   713 pytest / 688 unittest at the autonode.
 

@@ -98,6 +98,17 @@ def _creds() -> tuple[str, str, str, str]:
             os.environ.get("COUCHBASE_BUCKET", "membrane"))
 
 
+def tls_auth_opts(conn: str) -> dict:
+    """PasswordAuthenticator kwargs for a connstring: TLS (couchbases://)
+    gets a root CA -- COUCHBASE_CERT_PATH, else a well-known system bundle;
+    COUCHBASE_CERT_PATH applies to any scheme. Every SDK connect uses it,
+    so the field, publish and the roster trust the same CA (#225)."""
+    cert = os.environ.get("COUCHBASE_CERT_PATH", "").strip()
+    if not cert and conn.startswith("couchbases"):
+        cert = next((c for c in _CA_BUNDLES if os.path.isfile(c)), "")
+    return {"cert_path": cert} if cert else {}
+
+
 def connect(conn: str, user: str, pw: str, wait_s: float = 10.0):
     """A ready cluster handle. TLS connstrings (couchbases://: Capella and
     secured clusters) get a root CA: COUCHBASE_CERT_PATH, else a well-known
@@ -105,13 +116,7 @@ def connect(conn: str, user: str, pw: str, wait_s: float = 10.0):
     from couchbase.auth import PasswordAuthenticator
     from couchbase.cluster import Cluster
     from couchbase.options import ClusterOptions
-    opts = {}
-    cert = os.environ.get("COUCHBASE_CERT_PATH", "").strip()
-    if not cert and conn.startswith("couchbases"):
-        cert = next((c for c in _CA_BUNDLES if os.path.isfile(c)), "")
-    if cert:
-        opts["cert_path"] = cert
-    cluster = Cluster(conn, ClusterOptions(PasswordAuthenticator(user, pw, **opts)))
+    cluster = Cluster(conn, ClusterOptions(PasswordAuthenticator(user, pw, **tls_auth_opts(conn))))
     cluster.wait_until_ready(timedelta(seconds=wait_s))
     return cluster
 
