@@ -147,18 +147,51 @@ function brainTrail(trail, r, cap = BRAIN_TRAIL_N) {
 /** Oldest faint, newest bright. */
 function trailAlpha(i, n) { return 0.15 + 0.75 * (i + 1) / Math.max(1, n); }
 
-// ◎ self's framing (#237, the operator: "much closer ... scale with what self is doing")
-const FRAME_FOV = 55, FRAME_PAD = 1.1, FRAME_MARGIN = 25, FRAME_MIN = 110, FRAME_MAX = 1400;
+// ◎ self's framing (#237, the operator: "much closer ... scale with what self is doing";
+// then "camera is too far and not really following/looking"): close, on what
+// self looks at NOW -- not the whole trail of looks, which spans the field
+const FRAME_FOV = 55, FRAME_PAD = 1.1, FRAME_MARGIN = 25, FRAME_MIN = 70, FRAME_MAX = 500;
+const SELF_FRAME_STEPS = 2;
 const d3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 function frameRadius(pos, pts) {
   let r = 0;
   for (const q of pts || []) if (q && pos) r = Math.max(r, d3(pos, q));
   return r;
 }
-/** The amoeba, its last steps, its look targets and its aim: how far they spread. */
+/** The look self has on now, while fresh (the same freshness as 👁 self's eyes). */
+function freshLook(lk) { return lk && lk.p && lk.age < EYES_FRESH_MS ? lk.p : null; }
+/** The amoeba, its current look (fresh), its aim and its last couple of
+ *  steps: how far they spread. The older looks of the trail don't count. */
 function selfFrame(st) {
-  const pts = [].concat(st.looks || [], st.steps || [], st.aim ? [st.aim] : []);
+  const lp = freshLook(st.look);
+  const pts = [].concat(lp ? [lp] : [], (st.steps || []).slice(-SELF_FRAME_STEPS), st.aim ? [st.aim] : []);
   return { center: st.pos, radius: frameRadius(st.pos, pts) };
+}
+// ◎ self follows at once: a touch holds it a few seconds, then it resumes on
+// its own; the other modes still wait IDLE_BEFORE_FOLLOW_MS after a touch
+const SELF_HOLD_MS = 4000;
+function followsNow(mode, sinceTouchMs) {
+  return sinceTouchMs >= (mode === "self" ? SELF_HOLD_MS : IDLE_BEFORE_FOLLOW_MS);
+}
+/** How fast the camera catches up (per second): the target, the angle, the distance. */
+function followRates(mode) {
+  return mode === "self" ? { target: 3.0, turn: 1.4, zoom: 1.8 } : { target: 0.9, turn: 0.5, zoom: 0.9 };
+}
+/** Orbit angles that put the camera behind self (and a little above), looking
+ *  along self -> what it looks at; null when the look sits on self. */
+function lookAngles(pos, look) {
+  if (!pos || !look) return null;
+  const d = [look[0] - pos[0], look[1] - pos[1], look[2] - pos[2]];
+  const n = Math.hypot(d[0], d[1], d[2]);
+  if (n < 1) return null;
+  const u = [-d[0] / n, -d[1] / n + 0.35, -d[2] / n];
+  const m = Math.hypot(u[0], u[1], u[2]);
+  return { phi: Math.max(0.05, Math.min(Math.PI - 0.05, Math.acos(u[1] / m))), theta: Math.atan2(u[0] / m, u[2] / m) };
+}
+/** ◎ self's view angle: toward its fresh look, else the chase from behind. */
+function selfCamAngles(st) {
+  const lp = st && st.pos ? freshLook(st.look) : null;
+  return (lp && lookAngles(st.pos, lp)) || chaseAngles(st && st.trail);
 }
 /** The camera distance that puts `radius` (padded 10%, plus a margin) inside
  *  the vertical half-angle of the view -- clamped to [FRAME_MIN, FRAME_MAX]. */
@@ -607,6 +640,7 @@ const IS_CHROME = typeof navigator !== "undefined" && /Chrome\//.test(navigator.
 
 const HomeLogic = { cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep,
   brainLabel, brainCaption, brainKey, brainFresh, brainTrail, trailAlpha, frameRadius, selfFrame, frameDistance, dampTo,
+  freshLook, followsNow, followRates, SELF_HOLD_MS, lookAngles, selfCamAngles,
   followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
@@ -1292,27 +1326,26 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       $(".x").addEventListener("click", () => { this._card.classList.remove("open"); if (this._v3) this._v3.select(null); this._select(null); });
       $(".go").addEventListener("click", () => { if (this._v3 && this._sel) { this._lastTouch = performance.now(); this._v3.flyTo(this._sel.id); } });
       $(".ask").addEventListener("click", () => this._askAbout());
-      // a manual orbit / zoom: it holds ◎ self's framing until ◎ self is picked
-      // again, and leaves 👁 self's eyes (#237)
+      // a manual orbit / zoom: ◎ self lets go for SELF_HOLD_MS after the last
+      // touch, then follows again on its own; it leaves 👁 self's eyes (#237)
       const touched = () => {
         this._lastTouch = performance.now();
-        if (this._mode === "self" || this._mode === "eyes") this._frameHold = true;
         const m = modeAfterTouch(this._mode);
         if (m !== this._mode) this._setMode(m, true);
       };
       this._host3d.addEventListener("pointerdown", touched);
+      this._host3d.addEventListener("pointermove", (e) => { if (e.buttons) touched(); });   // a long drag keeps the hold
       this._host3d.addEventListener("wheel", touched, { passive: true });
     }
 
-    /** The camera's mode. byTouch: a manual orbit left 👁 self's eyes -- the
-     *  framing stays held; picking a mode by the button frees it. */
+    /** The camera's mode. byTouch: a manual orbit left 👁 self's eyes -- ◎ self
+     *  resumes a few seconds after the last touch. */
     _setMode(m, byTouch) {
       this._mode = m; lsSet(LS_FOLLOW, m); this._tracked = null;
       this._modeBtn.textContent = followLabel(m);
       if (this._v3) { this._v3.selfEyes = m === "eyes"; this._v3.selfFollow = m === "self" || m === "eyes"; }
       this._eyeDir = null;
-      if (byTouch) { this._say("you took the camera: pick ◎ self again to let it frame self"); return; }
-      this._frameHold = false;
+      if (byTouch) { this._say("you took the camera: ◎ self picks it up again in a few seconds"); return; }
       this._lastTouch = -1e9; this._goal = null; this._aim(true);   // idle at once (a fresh page too)
     }
 
@@ -1440,7 +1473,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         }
         return;
       }
-      const idle = performance.now() - this._lastTouch >= IDLE_BEFORE_FOLLOW_MS;
+      const idle = followsNow(this._mode, performance.now() - this._lastTouch);
       if (!force && !idle) return;
       const now = performance.now();
       if (this._mode === "self" || this._mode === "eyes") {   // #161: the amoeba (the glide keeps up with it)
@@ -1448,7 +1481,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         if (p) {
           this._goal = { p, r: this._goal && this._goal.r ? this._goal.r : 420, frame: this._mode === "self" };
           this._msgEl.style.display = "none";
-          this._say(this._mode === "eyes" ? "👁 through self's eyes" : "following self" + (this._frameHold ? " (your framing)" : ""));
+          this._say(this._mode === "eyes" ? "👁 through self's eyes" : "following self");
           return;
         }
         this._msgEl.style.display = "";
@@ -1521,30 +1554,32 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         }
         if (this._mode === "self" && !this._mindFollow && !this._selFollow) {   // it moves every cycle: keep up
           // ◎ SELF'S FRAMING (#237, the operator: "much closer ... scale with what
-          // self is doing"): the distance fits the amoeba, its last steps, the
-          // things in its trail of looks and its aim -- in close while it
-          // fiddles locally, eased out when it reaches far
+          // self is doing", then "too far and not really following/looking"):
+          // the distance fits the amoeba, what it looks at NOW, its aim and its
+          // last couple of steps -- close; the camera sits behind self looking
+          // along self -> its look (the chase from behind when it looks at nothing)
           const v = this._v3, sp = v.selfPos();
           if (sp) {
-            const fr = selfFrame({ pos: sp, looks: v.selfLookPoints(), aim: v.selfAim(), steps: v.selfTrail().slice(-4) });
-            this._goal = { p: sp, r: frameDistance(fr.radius), frame: true };
+            const look = v.selfLookNow(), tr = v.selfTrail();
+            const fr = selfFrame({ pos: sp, look, aim: v.selfAim(), steps: tr });
+            this._goal = { p: sp, r: frameDistance(fr.radius), frame: true, ang: selfCamAngles({ pos: sp, look, trail: tr }) };
           }
         }
-        const v = this._v3, g = this._goal;
-        const idle = performance.now() - this._lastTouch >= IDLE_BEFORE_FOLLOW_MS;
-        if (g && g.frame && !this._frameHold && !v._flyAnim) {          // the frame: damped, a step under reduced motion
-          v.orbit.r = dampTo(v.orbit.r, g.r, dt, 0.9, rm);
+        const v = this._v3, g = this._goal, rate = followRates(this._mode);
+        const idle = followsNow(this._mode, performance.now() - this._lastTouch);
+        if (g && g.frame && idle && !v._flyAnim) {          // the frame: damped, a step under reduced motion
+          v.orbit.r = dampTo(v.orbit.r, g.r, dt, rate.zoom, rm);
         }
         if (g && !v._flyAnim && (idle || g.sel)) {
-          const k = 1 - Math.exp(-dt * (g.sel ? 2.2 : 0.9));
+          const k = 1 - Math.exp(-dt * (g.sel ? 2.2 : rate.target));
           for (let i = 0; i < 3; i++) v.orbit.target[i] += (g.p[i] - v.orbit.target[i]) * k;
-          if (idle && !(g.frame && this._frameHold)) {
+          if (idle) {
             if (!g.frame) v.orbit.r += (g.r - v.orbit.r) * k * 0.6;
             const a = this._tiltAng ? null
-              : ((this._mode === "self" && chaseAngles(v.selfTrail ? v.selfTrail() : null))   // behind self
+              : ((g.frame && g.ang)                          // ◎ self: behind self, toward its look
                  || throughCenter(v.orbit.target));
             if (a) {
-              const ka = 1 - Math.exp(-dt * 0.5);
+              const ka = 1 - Math.exp(-dt * rate.turn);
               v.orbit.theta = angleStep(v.orbit.theta, a.theta, ka);
               v.orbit.phi += (a.phi - v.orbit.phi) * ka;
             }
