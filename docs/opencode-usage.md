@@ -38,5 +38,7 @@ for remote clients — attach a TUI only where you want a display.
 ## Pointing clients at it
 
 Any OpenAI-compatible client can aim at the proxy (default
-`http://<seat-host>:11500/v1`). With `membrane opencode`, the TUI attaches on the
+`http://<seat-host>:11500/v1`); an Ollama client aims at `http://<seat-host>:11500`
+(its `/api/chat` and `/api/generate` run the same memory turn, the rest of `/api/*`
+passes through to Ollama). With `membrane opencode`, the TUI attaches on the
 loopback serve server; other machines use the LAN address (`--listen-host 0.0.0.0`).
