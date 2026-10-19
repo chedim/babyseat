@@ -110,7 +110,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         comp["inside"] = False
         comp["serve_url"] = str(data.get(CONF_SERVE_URL) or "").rstrip("/")
         comp["serve_user"] = str(data.get(CONF_SERVE_USER) or DEFAULT_SERVE_USER)
-        comp["serve_pass"] = str(data.get(CONF_SERVE_PASS) or "")   # only a proxy in front asks
+        # the seat token (#253: a seat on another machine refuses HA's writes
+        # without it; Basic's password); the options form may replace it
+        comp["serve_pass"] = str((opts[CONF_SERVE_PASS] if CONF_SERVE_PASS in opts
+                                  else data.get(CONF_SERVE_PASS)) or "")
         comp["serve_ready"] = bool(comp["serve_url"])     # the operator's own seat: up as configured
         if opts.get(OPT_HA_ACCESS, True):
             # DETACHED HOME ASSISTANT ACCESS (ha_access.py): the same StatePush as

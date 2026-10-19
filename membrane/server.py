@@ -44,6 +44,7 @@ from pathlib import Path
 
 from . import mcp_server as _mcp
 from . import jwtauth as _JWT
+from . import seatauth as _SA
 
 VERSION = "1.0"
 PROJECT_ID = "membrane"
@@ -2691,7 +2692,13 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
             """The token gate, first in every do_*: Bearer, Basic with the JWT
             as the password (opencode attach, HA), or the UI's cookie. Only the
             standalone page's shell (+ /ui/login) is public."""
-            return _JWT.gate(self, cookie=True, basic=True, public=_UI.public_path(self))
+            if not _JWT.gate(self, cookie=True, basic=True, public=_UI.public_path(self)):
+                return False
+            # THE OWNER'S DOOR (#253, seatauth.py): JWT mode off, an OFF-BOX
+            # caller's writes need the seat token (Bearer, Basic's password
+            # or the UI's cookie); reads and localhost stay open
+            return _SA.gate(self, _SA.serve_is_write(self.command, self.path.split("?", 1)[0]),
+                            cookie=True, basic=True)
 
         def _jwt_person(self):
             """The token's person (None: open mode, or the seat's own token)."""

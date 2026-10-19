@@ -55,12 +55,17 @@ works for chat too).
 
 ## Who can reach it
 
-- **Your machine and your local network, no login**: loopback, private addresses
-  (192.168.x, 10.x, 172.16–31.x) and Tailscale's 100.64.0.0/10.
+- **Your machine: no login.** On `localhost` the page reads and writes freely.
+- **Your local network reads freely and writes with the seat token**: private
+  addresses (192.168.x, 10.x, 172.16–31.x) and Tailscale's 100.64.0.0/10. A page
+  opened from another machine (your phone) asks once for the
+  [seat token](auth.md#the-seat-token): run `membrane token seat` on the seat's
+  machine and paste what it prints. The page keeps it in an HttpOnly cookie,
+  then asks your name as usual. The same goes for the serve's API: from another
+  machine, everything that changes something needs the token.
 - **Anything else is refused** (403, never a login prompt): a public address, or a
-  request a reverse proxy forwarded (`X-Forwarded-For` / `Forwarded`). That guard
-  covers the page; the serve's API itself has no login -- keep the seat on your
-  network, or put a reverse proxy with its own login in front.
+  request a reverse proxy forwarded (`X-Forwarded-For` / `Forwarded`). For a seat
+  behind a proxy, use JWT mode.
 - `"ui_lan_open": false` in `.membrane/settings.json` closes the LAN door too.
 - **JWT mode** (optional, off by default: set `MEMBRANE_JWT_SECRET`) replaces all of
   this with a token. Every request to the page's API and the seat's needs one, from
@@ -93,7 +98,7 @@ works for chat too).
 |---|---|
 | `name`, `aliases` | the seat's agreed name (written by the seat when you agree on one) and what speech hears for it |
 | `stt` | `"browser"` (default) or a whisper-server URL |
-| `ui_lan_open` | `true` (default): no login on the local network (ignored in [JWT mode](auth.md), where the token decides) |
+| `ui_lan_open` | `true` (default): the page reads without a login on the local network; writes from another machine need the [seat token](auth.md#the-seat-token) either way (ignored in [JWT mode](auth.md), where the token decides) |
 
 ## Updates
 

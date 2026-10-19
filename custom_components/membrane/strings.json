@@ -21,8 +21,8 @@
       },
       "connect": {
         "title": "An existing seat",
-        "description": "The seat's serve address. User and password only if a reverse proxy in front of it asks for them.",
-        "data": { "serve_url": "Seat URL", "serve_user": "User", "serve_pass": "Password" }
+        "description": "The seat's serve address. Password: the seat token (run `membrane token seat` on the seat); a seat on another machine needs it for everything that writes. Or the pair a reverse proxy in front of it asks for.",
+        "data": { "serve_url": "Seat URL", "serve_user": "User", "serve_pass": "Password (the seat token)" }
       }
     },
     "error": {
@@ -43,7 +43,8 @@
           "ha_base_url": "Home Assistant's address as the seat sees it (detached seats call this; empty: HA's own answer)",
           "landing": "Open on membrane home (folds HA's sidebar away, as on the boat)",
           "stt_url": "Speech server URL (whisper-server; empty: the browser listens itself)",
-          "loops": "Watch loops (1-3; fewer is lighter)"
+          "loops": "Watch loops (1-3; fewer is lighter)",
+          "serve_pass": "Seat token (`membrane token seat` on the seat): a seat on another machine needs it for everything that writes"
         }
       }
     }

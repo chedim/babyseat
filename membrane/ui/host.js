@@ -27,15 +27,20 @@ export function saveName(name) {
 /* JWT MODE (docs/auth.md): the seat answers 401 until the page holds a token.
  * The person pastes theirs once; POST /ui/login turns it into an HttpOnly
  * cookie the page can't read (the script never keeps the token itself), and
- * the request that hit the 401 is sent again. */
+ * the request that hit the 401 is sent again.
+ * SEAT TOKEN (#253, JWT mode off): a page opened from another machine (the
+ * phone on the Wi-Fi) reads freely but writes only with the seat token --
+ * the same prompt, once; `membrane token seat` prints it on the seat. */
 let _login = null;
 
-export function askToken(seat, failed) {
+export function askToken(seat, failed, mode) {
   return new Promise((done) => {
     const box = document.createElement("div");
     box.className = "who";
-    box.innerHTML = `<form><h1></h1><p>This seat asks for a token. Paste the one you were given
-      (<code>membrane token mint</code> makes them).</p>
+    const how = mode === "seat"
+      ? "This page is open from another machine. Paste the seat token (run <code>membrane token seat</code> on the seat)."
+      : "This seat asks for a token. Paste the one you were given (<code>membrane token mint</code> makes them).";
+    box.innerHTML = `<form><h1></h1><p>${how}</p>
       <input name="t" type="password" autocomplete="off" placeholder="Token" required>
       <button>Sign in</button><div class="note" hidden>That token was not accepted.</div></form>`;
     box.querySelector("h1").textContent = seat ? "Hi, I'm " + seat + "." : "Hi.";
@@ -51,13 +56,13 @@ export function askToken(seat, failed) {
   });
 }
 
-export function login(seat) {
+export function login(seat, mode) {
   // one prompt at a time, however many requests hit the 401 together
   if (!_login) {
     _login = (async () => {
       let failed = false;
       for (;;) {
-        const token = await askToken(seat || window.MEMBRANE_NAME, failed);
+        const token = await askToken(seat || window.MEMBRANE_NAME, failed, mode || window.MEMBRANE_AUTH);
         const r = await fetch("/ui/login", { method: "POST", credentials: "same-origin",
           headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token }) });
         if (r.ok) return (await r.json()).who;
@@ -79,7 +84,7 @@ export function makeHost(name) {
       const headers = new Headers(o.headers || {});
       headers.set("X-Membrane-Speaker", who);     // open mode's speaker; JWT mode ignores it
       const r = await fetch(url, { ...o, headers, credentials: "same-origin" });
-      if (r.status !== 401 || window.MEMBRANE_AUTH !== "jwt") return r;
+      if (r.status !== 401 || !window.MEMBRANE_AUTH) return r;   // "jwt" or "seat"
       await login();                              // the cookie expired or was cleared: ask, then once more
       return fetch(url, { ...o, headers, credentials: "same-origin" });
     },
