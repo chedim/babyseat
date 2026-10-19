@@ -1573,7 +1573,9 @@ def entity_read_back(srv, ent, force: bool = False, by: str = "model",
             return {"fired": False, "reason": "lru"}
     _getter_last_ts[ent.eid] = now
     from .night import run_entity_update_script, apply_entity_update
-    out = run_entity_update_script(srv, ent, "getter")     # its own reads fire nothing (night.py)
+    # THE READER IS TOLD (#239): the getter sees who reads (state.extra.by --
+    # self / model / field), so a toy can flag a change as self's own
+    out = run_entity_update_script(srv, ent, "getter", extra_state={"by": by})  # its own reads fire nothing
     if out.get("error"):
         _score("error")
         from .night import script_held

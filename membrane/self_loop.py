@@ -1571,17 +1571,18 @@ def _toys(srv, recs: list[dict]) -> list[dict]:
         for eid, e in list(((est.docs if est is not None else None) or {}).items()):
             name = _short(eid)
             word = name.startswith(TOY_WORDS)
-            if not (word or name.startswith(TOY_PREFIXES)):
+            kind = ((e.properties or {}).get("toybox") or {}).get("kind")   # #239: a built-in toy, any name
+            if not (word or kind or name.startswith(TOY_PREFIXES)):
                 continue
             try:
                 getter = bool(effective_script(est, e, "getter")[0])
             except Exception:
                 getter = False
-            if word and not getter:
+            if word and not getter and not kind:
                 continue
-            found.append((eid, getter))
+            found.append((eid, getter, kind or "script"))
         cached = rt["toys"] = (now, sorted(found))
-    eids = {e for e, _ in cached[1]}
+    eids = {t[0] for t in cached[1]}
     reads: dict[str, list] = {e: [] for e in eids}
     for r in reversed(recs[-TOY_SCAN:]):
         if r.get("kind") == "reach" and not r.get("audit") and r.get("eid") in eids:
@@ -1589,12 +1590,13 @@ def _toys(srv, recs: list[dict]) -> list[dict]:
             if len(got) < TOY_READS:
                 got.append(r.get("answer"))
     out = []
-    for eid, getter in cached[1]:
+    for eid, getter, kind in cached[1]:
         got = reads[eid]
         answered = sum(1 for a in got if a in ("changed", "unchanged"))
         health = ("no getter" if not getter else "unread" if not got
                   else "empty" if not answered else "ok")
-        out.append({"eid": eid, "getter": getter, "reads": len(got), "answered": answered, "health": health})
+        out.append({"eid": eid, "kind": kind, "getter": getter, "reads": len(got), "answered": answered,
+                    "health": health})
     return out
 
 

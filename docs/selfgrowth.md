@@ -85,6 +85,9 @@ Everything is in `<data dir>/self/` (`.membrane/self/` in a seat's directory):
 | `model.json` | rung 1's learned model of the current that pushes it | kept |
 | `tempo.json` | per thing it reads: how often it had changed when self looked | kept |
 
+Its toys' state lives next door, in `<data dir>/toybox/` (see [Toys](#toys)),
+and is kept across a restart too.
+
 What a restart drops: a hold (cleared), its current aim (it picks a new one),
 and an audit in flight (the paused getter resumes; the audit is started again
 later). On a fresh boot nobody has spoken yet, so there is no current to feel:
@@ -151,7 +154,9 @@ curl -s 'http://127.0.0.1:4096/membrane/self/recent?n=30'   # {"lines": [...]}, 
 
 **Toys** are `toy:` and `cradle:` things (listed even without a getter, so a
 broken one shows red) and words (`w:`) that carry a getter; a plain word is not
-a toy. The list is rebuilt from the store at most every 15 s.
+a toy. Built-in toys from the toybox (see [Toys](#toys)) are listed under any
+name, each with its `kind` (a script toy's kind is `script`). The list is
+rebuilt from the store at most every 15 s.
 
 ### The panel status
 
@@ -335,8 +340,104 @@ Three rules (#161) keep curiosity from breaking the measurement:
 | 10 · speak | its voice | every line cites its ledger; no unbacked first-person claims |
 | 11 · invention ([#196](https://github.com/chedim/membrane/issues/196)) | the field fills a gap with a new entity in a new state | future; a design thread, not on the chooser |
 
+## Toys
+
+Toys are the apparatus the ladder is measured with, so they ship with the seat
+as tested code (`membrane/toybox.py`). You and the seat's model only switch
+them on or off and set their parameters. Nobody writes toy code.
+
+### Why they are built in
+
+Before #239 the seat's model wrote every toy as an entity script, and nearly
+every one broke in a new way. One kept its state in `/tmp`. The tower's relay
+misparsed block ids, so 13 of self's reaches did nothing. One getter dumped the
+whole entity, position vector included. A die's getter clobbered its own tick
+state. A probe was never removed, and some scripts were refused at the length
+cap. A broken toy doesn't only waste self's looks: it makes the rung tests
+measure the bug.
+
+### What every toy guarantees
+
+- **An entity with a stub getter.** The getter is two lines that call into
+  `toybox.py`. A toy with a clock of its own also has a stub tick on the
+  thinker's heartbeat. Self reaches it like anything else that has a getter.
+- **A minimal reading.** Only the toy's own state (`{"value": 42}`,
+  `{"face": 3}`, `{"standing": false}`). Never the seed, the log or who caused
+  what.
+- **State in the data folder.** `<data dir>/toybox/<name>.json` holds the
+  state (atomic writes) and `<name>.log.jsonl` the change log (append-only).
+  Both survive a restart.
+- **A seeded RNG.** The `seed` parameter defaults to a number derived from the
+  name, and draw *k* is always the same for the same seed, so a run replays.
+- **A contingency flag on every change.** Each line of the log says `by: self`
+  (self's own look or reach caused it) or `by: world` (the toy's own clock or
+  randomness), with the time. The getter knows the reader because
+  `entity_read_back` hands it its `by` (`state.extra.by`: `self`, `model` or
+  `field`). This is the ground truth rung 6's body/other split can be checked
+  against later. Self never sees it.
+
+### The kit
+
+| kind | changes when | parameters (defaults) | for |
+|---|---|---|---|
+| `fast` | on its own clock, faster than self looks, so every look finds it changed | `every` (5 s) | rungs 3–5, curiosity |
+| `slow` | once a period | `period` (3600 s) | patience (rung 4) |
+| `burst` | every `every` s inside active windows; still the rest of the time | `window` (600 s), `active` (0.35), `every` (45 s) | rungs 3–5 |
+| `drift` | a ±`step` random walk at random intervals | `min_s` (45), `max_s` (600), `step` (5), `lo` (0), `hi` (100) | curiosity, rung 5 |
+| `die` | memoryless: probability `p` per second, on its own clock, never on a read | `p` (1/60), `faces` (6) | rungs 3–5 |
+| `body` | only when **self** looks at it | none | the body/other test case (rung 6) |
+| `tower` | only when **self** reaches a block: a standing block topples with every block above it, and a fallen block is lifted back | `n` (5) | self's first act on the world |
+
+Every kind also takes `seed`. A tower is one entity for the whole (its reading
+counts the standing blocks) plus one per block, `<name>:b1` (the bottom)
+through `<name>:b<n>`. Each block remembers who toppled it and when. Only
+self's reaches change the tower: a read by the model or the field leaves it
+as it is.
+
+`body` is the one toy built to change exactly when self looks, which "Don't
+game the getters" below warns against. It is deliberate, labelled, and its log
+says `by: self`, so it is a known test case, not a fake mark.
+
+### Adding one
+
+From the CLI (the project's data dir):
+
+```bash
+membrane toybox list
+membrane toybox add tower --param n=5
+membrane toybox add die --name toy:d6 --param p=0.02 --param seed=7
+membrane toybox reset toy:tower      # same params and seed; the old run is archived
+membrane toybox remove toy:d6        # the entities go; the history is archived
+```
+
+`add` and `remove` change the entity store, so the CLI refuses them while the
+seat is running. Use the seat's model then: the `toybox` object answers
+`add(spec)`, `list()`, `remove(name)` and `reset(name)`, for example
+`exec(action='call', object='toybox', method='add', args={'spec': 'tower n=5'})`.
+The default name is `toy:<kind>`. A removed or reset toy's state and log are
+moved to `toybox/archive/`, never deleted.
+
+### Migrating the model-written toys
+
+```bash
+membrane stop
+membrane toybox migrate --dry-run    # lists each script toy and what it would become
+membrane toybox migrate --yes        # replaces them (each old doc is backed up first)
+```
+
+`w:fast`, `w:slow`, `w:burst`, `w:drift`, `w:body` and `toy:die` become the
+built-in toy of that kind under the same name. `toy:tower` becomes a built-in
+tower with as many blocks as it had. Its helpers (`toy:tower:reach`, the
+`knock`/`raise` methods) are retired. Every doc that is replaced or retired is
+first written to `toybox/migrated/`. Script toys with no built-in match are
+listed and left as they are. Without `--yes` nothing changes. The names stay
+the same, so self's record of them continues. Their behaviour does change,
+though, and rung 5 may notice that shift.
+
 ## Helping it grow
 
+- **Give it toys from the toybox.** `membrane toybox add <kind>` (above) gives
+  it apparatus that is correct, replayable and honest about causation.
 - **Give it things with getters, and make them true.** From rung 2 on, self
   reads only entities that have a getter. A getter that returns a real, live
   reading is the most useful thing you can give it. A getter that errors or is
