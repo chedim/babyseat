@@ -158,6 +158,7 @@ class PeerSubstrate:
             return
         try:
             from couchbase.cluster import Cluster
+            from .substrate import tls_auth_opts
             from couchbase.auth import PasswordAuthenticator
             from couchbase.options import (ClusterOptions,
                                            ClusterTimeoutOptions)
@@ -167,7 +168,7 @@ class PeerSubstrate:
             pw = os.environ.get("COUCHBASE_PASSWORD", "password")
             bucket_name = os.environ.get("COUCHBASE_BUCKET", "cortex-core")
             self._cluster = Cluster(conn, ClusterOptions(
-                PasswordAuthenticator(user, pw),
+                PasswordAuthenticator(user, pw, **tls_auth_opts(conn)),
                 timeout_options=ClusterTimeoutOptions(**self._CB_TIMEOUTS)))
             try:
                 from datetime import timedelta

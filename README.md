@@ -442,8 +442,13 @@ wins over it. Plain env config works too:
 field anywhere; only `connect` and `membrane migrate` read it. Set
 `COUCHBASE_BUCKET`: without it, published entities and presence go to a
 bucket called `cortex-core`, not `membrane`. Before each publish, the seat
-checks that the cluster answers on `http://<host>:8091/pools`. A cluster
-that does not answer there gets no publishes, presence or roster, and the
+checks that the cluster answers: `couchbase://<host>` on
+`http://<host>:8091/pools`, `couchbases://<host>` (Capella, any TLS-only
+cluster) on `https://<host>:18091/pools`, else on the TLS data port 11207.
+Credentials go out only over a verified certificate; for a self-signed
+cluster set `COUCHBASE_CERT_PATH` to its CA (the SDK needs it too). With
+several hosts in the string, any one answering is enough. A cluster
+that does not answer gets no publishes, presence or roster, and the
 seat keeps working locally. A cluster at `127.0.0.1` with default
 credentials is found without any config.
 
