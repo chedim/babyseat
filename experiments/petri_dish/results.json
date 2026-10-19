@@ -1,0 +1,2018 @@
+{
+ "constants": {
+  "WARM": 0.3,
+  "FEW": 20,
+  "INIT": 10,
+  "GROW": 0.25,
+  "GROW_sweep": [
+   0.1,
+   0.25,
+   0.5,
+   1.0
+  ],
+  "TIE": 1e-09,
+  "FLOOR": 1,
+  "CAP": 1000,
+  "ETA_default": 2.0,
+  "ETA_sweep": [
+   0.5,
+   1,
+   2,
+   4,
+   8,
+   16,
+   32
+  ],
+  "SEED": 161,
+  "variants": [
+   "onebit",
+   "base",
+   "rate_w30",
+   "rate_h10",
+   "rate_h50",
+   "ema_h3",
+   "ema_h10",
+   "ema_h30",
+   "last3",
+   "last5"
+  ]
+ },
+ "data": {
+  "answered_looks": 4137,
+  "things": 22,
+  "scored_looks": 2887,
+  "scored_things": 22
+ },
+ "self_A_vs_B": {
+  "mean_abs_diff": 0.0252,
+  "share_within_0.01": 0.8845
+ },
+ "self_loss_by_rate_fit": {
+  "one bit (no rate)": {
+   "looks": 62,
+   "self_A": 0.2315,
+   "single:rate_w30": 0.1847
+  },
+  "rate over <10 looks": {
+   "looks": 328,
+   "self_A": 0.2672,
+   "single:rate_w30": 0.1518
+  },
+  "rate over >=10 looks": {
+   "looks": 2497,
+   "self_A": 0.097,
+   "single:rate_w30": 0.101
+  }
+ },
+ "overall": {
+  "self_A": {
+   "pooled": 0.1192,
+   "macro": 0.1324
+  },
+  "self_B": {
+   "pooled": 0.1193,
+   "macro": 0.1324
+  },
+  "static_mix": {
+   "pooled": 0.1043,
+   "macro": 0.1192
+  },
+  "hedge_eta0.5": {
+   "pooled": 0.104,
+   "macro": 0.118
+  },
+  "hedge_eta1": {
+   "pooled": 0.1044,
+   "macro": 0.1173
+  },
+  "hedge_eta2": {
+   "pooled": 0.1045,
+   "macro": 0.1161
+  },
+  "hedge_eta4": {
+   "pooled": 0.1046,
+   "macro": 0.1148
+  },
+  "hedge_eta8": {
+   "pooled": 0.1046,
+   "macro": 0.1139
+  },
+  "hedge_eta16": {
+   "pooled": 0.1046,
+   "macro": 0.1139
+  },
+  "hedge_eta32": {
+   "pooled": 0.1047,
+   "macro": 0.1147
+  },
+  "dish_mix_g0.1": {
+   "pooled": 0.0992,
+   "macro": 0.1161
+  },
+  "dish_sample_g0.1": {
+   "pooled": 0.1026,
+   "macro": 0.1191
+  },
+  "dish_fire_g0.1": {
+   "pooled": 0.1063,
+   "macro": 0.1203
+  },
+  "dish_mix_g0.25": {
+   "pooled": 0.1021,
+   "macro": 0.1147
+  },
+  "dish_sample_g0.25": {
+   "pooled": 0.1057,
+   "macro": 0.1202
+  },
+  "dish_fire_g0.25": {
+   "pooled": 0.1082,
+   "macro": 0.1198
+  },
+  "dish_mix_g0.5": {
+   "pooled": 0.1049,
+   "macro": 0.1151
+  },
+  "dish_sample_g0.5": {
+   "pooled": 0.1087,
+   "macro": 0.12
+  },
+  "dish_fire_g0.5": {
+   "pooled": 0.1117,
+   "macro": 0.1194
+  },
+  "dish_mix_g1": {
+   "pooled": 0.1036,
+   "macro": 0.1161
+  },
+  "dish_sample_g1": {
+   "pooled": 0.111,
+   "macro": 0.1279
+  },
+  "dish_fire_g1": {
+   "pooled": 0.1125,
+   "macro": 0.1243
+  },
+  "single:onebit": {
+   "pooled": 0.1156,
+   "macro": 0.1252
+  },
+  "single:base": {
+   "pooled": 0.1134,
+   "macro": 0.1257
+  },
+  "single:rate_w30": {
+   "pooled": 0.1085,
+   "macro": 0.1129
+  },
+  "single:rate_h10": {
+   "pooled": 0.1043,
+   "macro": 0.1121
+  },
+  "single:rate_h50": {
+   "pooled": 0.1242,
+   "macro": 0.1195
+  },
+  "single:ema_h3": {
+   "pooled": 0.1173,
+   "macro": 0.1429
+  },
+  "single:ema_h10": {
+   "pooled": 0.1128,
+   "macro": 0.158
+  },
+  "single:ema_h30": {
+   "pooled": 0.1137,
+   "macro": 0.1705
+  },
+  "single:last3": {
+   "pooled": 0.1295,
+   "macro": 0.134
+  },
+  "single:last5": {
+   "pooled": 0.124,
+   "macro": 0.1292
+  },
+  "best_single_per_thing(hindsight)": {
+   "pooled": 0.1,
+   "macro": 0.0879
+  },
+  "best_single_global(hindsight)": {
+   "pooled": 0.1043,
+   "macro": 0.1121
+  }
+ },
+ "by_kind": {
+  "chat:in": {
+   "things": 2,
+   "scored_looks": 139,
+   "brier": {
+    "self_A": {
+     "pooled": 0.1893,
+     "macro": 0.16
+    },
+    "self_B": {
+     "pooled": 0.1893,
+     "macro": 0.16
+    },
+    "static_mix": {
+     "pooled": 0.1754,
+     "macro": 0.1459
+    },
+    "hedge_eta0.5": {
+     "pooled": 0.1729,
+     "macro": 0.144
+    },
+    "hedge_eta1": {
+     "pooled": 0.175,
+     "macro": 0.1457
+    },
+    "hedge_eta2": {
+     "pooled": 0.1765,
+     "macro": 0.1472
+    },
+    "hedge_eta4": {
+     "pooled": 0.1781,
+     "macro": 0.1489
+    },
+    "hedge_eta8": {
+     "pooled": 0.1796,
+     "macro": 0.1505
+    },
+    "hedge_eta16": {
+     "pooled": 0.1804,
+     "macro": 0.1514
+    },
+    "hedge_eta32": {
+     "pooled": 0.1809,
+     "macro": 0.1519
+    },
+    "dish_mix_g0.1": {
+     "pooled": 0.1754,
+     "macro": 0.1458
+    },
+    "dish_sample_g0.1": {
+     "pooled": 0.1778,
+     "macro": 0.1481
+    },
+    "dish_fire_g0.1": {
+     "pooled": 0.1865,
+     "macro": 0.1569
+    },
+    "dish_mix_g0.25": {
+     "pooled": 0.1753,
+     "macro": 0.146
+    },
+    "dish_sample_g0.25": {
+     "pooled": 0.1765,
+     "macro": 0.1467
+    },
+    "dish_fire_g0.25": {
+     "pooled": 0.1807,
+     "macro": 0.1502
+    },
+    "dish_mix_g0.5": {
+     "pooled": 0.2002,
+     "macro": 0.1647
+    },
+    "dish_sample_g0.5": {
+     "pooled": 0.2086,
+     "macro": 0.1706
+    },
+    "dish_fire_g0.5": {
+     "pooled": 0.1859,
+     "macro": 0.1534
+    },
+    "dish_mix_g1": {
+     "pooled": 0.1811,
+     "macro": 0.1514
+    },
+    "dish_sample_g1": {
+     "pooled": 0.1914,
+     "macro": 0.1608
+    },
+    "dish_fire_g1": {
+     "pooled": 0.1968,
+     "macro": 0.1627
+    },
+    "single:onebit": {
+     "pooled": 0.1815,
+     "macro": 0.1513
+    },
+    "single:base": {
+     "pooled": 0.1841,
+     "macro": 0.1533
+    },
+    "single:rate_w30": {
+     "pooled": 0.2165,
+     "macro": 0.1781
+    },
+    "single:rate_h10": {
+     "pooled": 0.2119,
+     "macro": 0.174
+    },
+    "single:rate_h50": {
+     "pooled": 0.2698,
+     "macro": 0.2181
+    },
+    "single:ema_h3": {
+     "pooled": 0.1743,
+     "macro": 0.1444
+    },
+    "single:ema_h10": {
+     "pooled": 0.1722,
+     "macro": 0.1443
+    },
+    "single:ema_h30": {
+     "pooled": 0.1909,
+     "macro": 0.1662
+    },
+    "single:last3": {
+     "pooled": 0.1955,
+     "macro": 0.1645
+    },
+    "single:last5": {
+     "pooled": 0.172,
+     "macro": 0.1416
+    },
+    "best_single_per_thing(hindsight)": {
+     "pooled": 0.1689,
+     "macro": 0.1393
+    },
+    "best_single_global(hindsight)": {
+     "pooled": 0.2119,
+     "macro": 0.174
+    }
+   }
+  },
+  "intermittent": {
+   "things": 3,
+   "scored_looks": 32,
+   "brier": {
+    "self_A": {
+     "pooled": 0.3493,
+     "macro": 0.3473
+    },
+    "self_B": {
+     "pooled": 0.3493,
+     "macro": 0.3473
+    },
+    "static_mix": {
+     "pooled": 0.2326,
+     "macro": 0.2358
+    },
+    "hedge_eta0.5": {
+     "pooled": 0.2252,
+     "macro": 0.2291
+    },
+    "hedge_eta1": {
+     "pooled": 0.219,
+     "macro": 0.2236
+    },
+    "hedge_eta2": {
+     "pooled": 0.2115,
+     "macro": 0.2168
+    },
+    "hedge_eta4": {
+     "pooled": 0.2058,
+     "macro": 0.2117
+    },
+    "hedge_eta8": {
+     "pooled": 0.2038,
+     "macro": 0.2106
+    },
+    "hedge_eta16": {
+     "pooled": 0.2058,
+     "macro": 0.2135
+    },
+    "hedge_eta32": {
+     "pooled": 0.2085,
+     "macro": 0.2161
+    },
+    "dish_mix_g0.1": {
+     "pooled": 0.2153,
+     "macro": 0.2207
+    },
+    "dish_sample_g0.1": {
+     "pooled": 0.2424,
+     "macro": 0.246
+    },
+    "dish_fire_g0.1": {
+     "pooled": 0.2426,
+     "macro": 0.2288
+    },
+    "dish_mix_g0.25": {
+     "pooled": 0.2033,
+     "macro": 0.2103
+    },
+    "dish_sample_g0.25": {
+     "pooled": 0.2104,
+     "macro": 0.2194
+    },
+    "dish_fire_g0.25": {
+     "pooled": 0.2406,
+     "macro": 0.2275
+    },
+    "dish_mix_g0.5": {
+     "pooled": 0.2009,
+     "macro": 0.2075
+    },
+    "dish_sample_g0.5": {
+     "pooled": 0.186,
+     "macro": 0.19
+    },
+    "dish_fire_g0.5": {
+     "pooled": 0.2447,
+     "macro": 0.2332
+    },
+    "dish_mix_g1": {
+     "pooled": 0.2251,
+     "macro": 0.2333
+    },
+    "dish_sample_g1": {
+     "pooled": 0.2472,
+     "macro": 0.251
+    },
+    "dish_fire_g1": {
+     "pooled": 0.2343,
+     "macro": 0.2261
+    },
+    "single:onebit": {
+     "pooled": 0.2586,
+     "macro": 0.2554
+    },
+    "single:base": {
+     "pooled": 0.2694,
+     "macro": 0.2719
+    },
+    "single:rate_w30": {
+     "pooled": 0.1933,
+     "macro": 0.2069
+    },
+    "single:rate_h10": {
+     "pooled": 0.1946,
+     "macro": 0.2116
+    },
+    "single:rate_h50": {
+     "pooled": 0.1923,
+     "macro": 0.2104
+    },
+    "single:ema_h3": {
+     "pooled": 0.2943,
+     "macro": 0.2947
+    },
+    "single:ema_h10": {
+     "pooled": 0.2618,
+     "macro": 0.2618
+    },
+    "single:ema_h30": {
+     "pooled": 0.2535,
+     "macro": 0.2535
+    },
+    "single:last3": {
+     "pooled": 0.3125,
+     "macro": 0.3018
+    },
+    "single:last5": {
+     "pooled": 0.288,
+     "macro": 0.2842
+    },
+    "best_single_per_thing(hindsight)": {
+     "pooled": 0.1771,
+     "macro": 0.1788
+    },
+    "best_single_global(hindsight)": {
+     "pooled": 0.1946,
+     "macro": 0.2116
+    }
+   }
+  },
+  "moving": {
+   "things": 6,
+   "scored_looks": 2583,
+   "brier": {
+    "self_A": {
+     "pooled": 0.117,
+     "macro": 0.081
+    },
+    "self_B": {
+     "pooled": 0.1171,
+     "macro": 0.0811
+    },
+    "static_mix": {
+     "pooled": 0.1024,
+     "macro": 0.0698
+    },
+    "hedge_eta0.5": {
+     "pooled": 0.1023,
+     "macro": 0.0699
+    },
+    "hedge_eta1": {
+     "pooled": 0.1028,
+     "macro": 0.0701
+    },
+    "hedge_eta2": {
+     "pooled": 0.1029,
+     "macro": 0.0701
+    },
+    "hedge_eta4": {
+     "pooled": 0.103,
+     "macro": 0.0702
+    },
+    "hedge_eta8": {
+     "pooled": 0.103,
+     "macro": 0.0702
+    },
+    "hedge_eta16": {
+     "pooled": 0.103,
+     "macro": 0.0701
+    },
+    "hedge_eta32": {
+     "pooled": 0.103,
+     "macro": 0.0701
+    },
+    "dish_mix_g0.1": {
+     "pooled": 0.097,
+     "macro": 0.0675
+    },
+    "dish_sample_g0.1": {
+     "pooled": 0.1004,
+     "macro": 0.07
+    },
+    "dish_fire_g0.1": {
+     "pooled": 0.1037,
+     "macro": 0.0718
+    },
+    "dish_mix_g0.25": {
+     "pooled": 0.1004,
+     "macro": 0.0685
+    },
+    "dish_sample_g0.25": {
+     "pooled": 0.1042,
+     "macro": 0.0712
+    },
+    "dish_fire_g0.25": {
+     "pooled": 0.1063,
+     "macro": 0.0738
+    },
+    "dish_mix_g0.5": {
+     "pooled": 0.1023,
+     "macro": 0.0693
+    },
+    "dish_sample_g0.5": {
+     "pooled": 0.1062,
+     "macro": 0.0719
+    },
+    "dish_fire_g0.5": {
+     "pooled": 0.11,
+     "macro": 0.0758
+    },
+    "dish_mix_g1": {
+     "pooled": 0.1016,
+     "macro": 0.0689
+    },
+    "dish_sample_g1": {
+     "pooled": 0.1088,
+     "macro": 0.074
+    },
+    "dish_fire_g1": {
+     "pooled": 0.1102,
+     "macro": 0.0749
+    },
+    "single:onebit": {
+     "pooled": 0.1146,
+     "macro": 0.0774
+    },
+    "single:base": {
+     "pooled": 0.1119,
+     "macro": 0.0756
+    },
+    "single:rate_w30": {
+     "pooled": 0.1056,
+     "macro": 0.0744
+    },
+    "single:rate_h10": {
+     "pooled": 0.1011,
+     "macro": 0.0705
+    },
+    "single:rate_h50": {
+     "pooled": 0.1202,
+     "macro": 0.0835
+    },
+    "single:ema_h3": {
+     "pooled": 0.1161,
+     "macro": 0.0782
+    },
+    "single:ema_h10": {
+     "pooled": 0.1112,
+     "macro": 0.0751
+    },
+    "single:ema_h30": {
+     "pooled": 0.11,
+     "macro": 0.0746
+    },
+    "single:last3": {
+     "pooled": 0.128,
+     "macro": 0.0913
+    },
+    "single:last5": {
+     "pooled": 0.1237,
+     "macro": 0.0858
+    },
+    "best_single_per_thing(hindsight)": {
+     "pooled": 0.0991,
+     "macro": 0.0674
+    },
+    "best_single_global(hindsight)": {
+     "pooled": 0.1011,
+     "macro": 0.0705
+    }
+   }
+  },
+  "still": {
+   "things": 4,
+   "scored_looks": 118,
+   "brier": {
+    "self_A": {
+     "pooled": 0.0294,
+     "macro": 0.0853
+    },
+    "self_B": {
+     "pooled": 0.0294,
+     "macro": 0.0853
+    },
+    "static_mix": {
+     "pooled": 0.0277,
+     "macro": 0.0849
+    },
+    "hedge_eta0.5": {
+     "pooled": 0.0272,
+     "macro": 0.0859
+    },
+    "hedge_eta1": {
+     "pooled": 0.0271,
+     "macro": 0.0869
+    },
+    "hedge_eta2": {
+     "pooled": 0.0272,
+     "macro": 0.0882
+    },
+    "hedge_eta4": {
+     "pooled": 0.0273,
+     "macro": 0.0892
+    },
+    "hedge_eta8": {
+     "pooled": 0.0273,
+     "macro": 0.0898
+    },
+    "hedge_eta16": {
+     "pooled": 0.0275,
+     "macro": 0.0908
+    },
+    "hedge_eta32": {
+     "pooled": 0.0278,
+     "macro": 0.0921
+    },
+    "dish_mix_g0.1": {
+     "pooled": 0.0269,
+     "macro": 0.0873
+    },
+    "dish_sample_g0.1": {
+     "pooled": 0.0258,
+     "macro": 0.0784
+    },
+    "dish_fire_g0.1": {
+     "pooled": 0.0303,
+     "macro": 0.0807
+    },
+    "dish_mix_g0.25": {
+     "pooled": 0.0277,
+     "macro": 0.0908
+    },
+    "dish_sample_g0.25": {
+     "pooled": 0.0306,
+     "macro": 0.1124
+    },
+    "dish_fire_g0.25": {
+     "pooled": 0.0279,
+     "macro": 0.0795
+    },
+    "dish_mix_g0.5": {
+     "pooled": 0.0275,
+     "macro": 0.0926
+    },
+    "dish_sample_g0.5": {
+     "pooled": 0.0283,
+     "macro": 0.109
+    },
+    "dish_fire_g0.5": {
+     "pooled": 0.0258,
+     "macro": 0.0784
+    },
+    "dish_mix_g1": {
+     "pooled": 0.0269,
+     "macro": 0.0923
+    },
+    "dish_sample_g1": {
+     "pooled": 0.0288,
+     "macro": 0.1083
+    },
+    "dish_fire_g1": {
+     "pooled": 0.0314,
+     "macro": 0.1072
+    },
+    "single:onebit": {
+     "pooled": 0.0256,
+     "macro": 0.0792
+    },
+    "single:base": {
+     "pooled": 0.025,
+     "macro": 0.079
+    },
+    "single:rate_w30": {
+     "pooled": 0.0294,
+     "macro": 0.0853
+    },
+    "single:rate_h10": {
+     "pooled": 0.029,
+     "macro": 0.0851
+    },
+    "single:rate_h50": {
+     "pooled": 0.0293,
+     "macro": 0.0852
+    },
+    "single:ema_h3": {
+     "pooled": 0.0277,
+     "macro": 0.1034
+    },
+    "single:ema_h10": {
+     "pooled": 0.0274,
+     "macro": 0.1178
+    },
+    "single:ema_h30": {
+     "pooled": 0.0511,
+     "macro": 0.14
+    },
+    "single:last3": {
+     "pooled": 0.0414,
+     "macro": 0.0826
+    },
+    "single:last5": {
+     "pooled": 0.0334,
+     "macro": 0.0819
+    },
+    "best_single_per_thing(hindsight)": {
+     "pooled": 0.0243,
+     "macro": 0.0738
+    },
+    "best_single_global(hindsight)": {
+     "pooled": 0.029,
+     "macro": 0.0851
+    }
+   }
+  },
+  "toys": {
+   "things": 7,
+   "scored_looks": 15,
+   "brier": {
+    "self_A": {
+     "pooled": 0.0595,
+     "macro": 0.1034
+    },
+    "self_B": {
+     "pooled": 0.0595,
+     "macro": 0.1034
+    },
+    "static_mix": {
+     "pooled": 0.0897,
+     "macro": 0.1236
+    },
+    "hedge_eta0.5": {
+     "pooled": 0.0883,
+     "macro": 0.1225
+    },
+    "hedge_eta1": {
+     "pooled": 0.0869,
+     "macro": 0.1214
+    },
+    "hedge_eta2": {
+     "pooled": 0.0844,
+     "macro": 0.1195
+    },
+    "hedge_eta4": {
+     "pooled": 0.0805,
+     "macro": 0.1165
+    },
+    "hedge_eta8": {
+     "pooled": 0.0765,
+     "macro": 0.1131
+    },
+    "hedge_eta16": {
+     "pooled": 0.0748,
+     "macro": 0.1111
+    },
+    "hedge_eta32": {
+     "pooled": 0.0767,
+     "macro": 0.1117
+    },
+    "dish_mix_g0.1": {
+     "pooled": 0.0863,
+     "macro": 0.1209
+    },
+    "dish_sample_g0.1": {
+     "pooled": 0.1018,
+     "macro": 0.1217
+    },
+    "dish_fire_g0.1": {
+     "pooled": 0.1126,
+     "macro": 0.1275
+    },
+    "dish_mix_g0.25": {
+     "pooled": 0.0822,
+     "macro": 0.118
+    },
+    "dish_sample_g0.25": {
+     "pooled": 0.0923,
+     "macro": 0.1166
+    },
+    "dish_fire_g0.25": {
+     "pooled": 0.1126,
+     "macro": 0.1275
+    },
+    "dish_mix_g0.5": {
+     "pooled": 0.0768,
+     "macro": 0.1134
+    },
+    "dish_sample_g0.5": {
+     "pooled": 0.0954,
+     "macro": 0.1232
+    },
+    "dish_fire_g0.5": {
+     "pooled": 0.1018,
+     "macro": 0.1217
+    },
+    "dish_mix_g1": {
+     "pooled": 0.0731,
+     "macro": 0.1099
+    },
+    "dish_sample_g1": {
+     "pooled": 0.0954,
+     "macro": 0.1232
+    },
+    "dish_fire_g1": {
+     "pooled": 0.1018,
+     "macro": 0.1217
+    },
+    "single:onebit": {
+     "pooled": 0.0869,
+     "macro": 0.1291
+    },
+    "single:base": {
+     "pooled": 0.0902,
+     "macro": 0.1247
+    },
+    "single:rate_w30": {
+     "pooled": 0.0585,
+     "macro": 0.1028
+    },
+    "single:rate_h10": {
+     "pooled": 0.0585,
+     "macro": 0.1028
+    },
+    "single:rate_h50": {
+     "pooled": 0.0585,
+     "macro": 0.1028
+    },
+    "single:ema_h3": {
+     "pooled": 0.1317,
+     "macro": 0.1554
+    },
+    "single:ema_h10": {
+     "pooled": 0.202,
+     "macro": 0.2114
+    },
+    "single:ema_h30": {
+     "pooled": 0.2324,
+     "macro": 0.2358
+    },
+    "single:last3": {
+     "pooled": 0.0801,
+     "macro": 0.1193
+    },
+    "single:last5": {
+     "pooled": 0.0876,
+     "macro": 0.1233
+    },
+    "best_single_per_thing(hindsight)": {
+     "pooled": 0.0384,
+     "macro": 0.0598
+    },
+    "best_single_global(hindsight)": {
+     "pooled": 0.0585,
+     "macro": 0.1028
+    }
+   }
+  }
+ },
+ "paired_vs_dish": {
+  "dish_mix_g0.25 - self_A": {
+   "mean": -0.0171,
+   "ci95_thing_bootstrap": [
+    -0.0313,
+    -0.003
+   ]
+  },
+  "dish_mix_g0.25 - self_B": {
+   "mean": -0.0172,
+   "ci95_thing_bootstrap": [
+    -0.0313,
+    -0.0036
+   ]
+  },
+  "dish_mix_g0.25 - static_mix": {
+   "mean": -0.0022,
+   "ci95_thing_bootstrap": [
+    -0.0067,
+    0.0011
+   ]
+  },
+  "dish_mix_g0.25 - hedge_eta2": {
+   "mean": -0.0024,
+   "ci95_thing_bootstrap": [
+    -0.0141,
+    0.0071
+   ]
+  },
+  "dish_mix_g0.25 - dish_sample_g0.25": {
+   "mean": -0.0037,
+   "ci95_thing_bootstrap": [
+    -0.0067,
+    -0.0005
+   ]
+  },
+  "dish_mix_g0.25 - dish_fire_g0.25": {
+   "mean": -0.0061,
+   "ci95_thing_bootstrap": [
+    -0.0098,
+    -0.0018
+   ]
+  },
+  "dish_mix_g0.25 - best_single_global(hindsight)": {
+   "mean": -0.0022,
+   "ci95_thing_bootstrap": [
+    -0.0118,
+    0.0055
+   ]
+  },
+  "dish_mix_g0.25 - best_single_per_thing(hindsight)": {
+   "mean": 0.0021,
+   "ci95_thing_bootstrap": [
+    -0.0037,
+    0.0087
+   ]
+  }
+ },
+ "calibration": {
+  "self_A": {
+   "ece": 0.0377,
+   "bins": [
+    {
+     "bin": "0.0-0.1",
+     "n": 217,
+     "mean_p": 0.028,
+     "observed": 0.207
+    },
+    {
+     "bin": "0.1-0.2",
+     "n": 37,
+     "mean_p": 0.13,
+     "observed": 0.081
+    },
+    {
+     "bin": "0.2-0.3",
+     "n": 19,
+     "mean_p": 0.256,
+     "observed": 0.368
+    },
+    {
+     "bin": "0.3-0.4",
+     "n": 15,
+     "mean_p": 0.356,
+     "observed": 0.533
+    },
+    {
+     "bin": "0.4-0.5",
+     "n": 16,
+     "mean_p": 0.438,
+     "observed": 0.438
+    },
+    {
+     "bin": "0.5-0.6",
+     "n": 13,
+     "mean_p": 0.548,
+     "observed": 0.538
+    },
+    {
+     "bin": "0.6-0.7",
+     "n": 975,
+     "mean_p": 0.625,
+     "observed": 0.657
+    },
+    {
+     "bin": "0.7-0.8",
+     "n": 108,
+     "mean_p": 0.744,
+     "observed": 0.741
+    },
+    {
+     "bin": "0.8-0.9",
+     "n": 81,
+     "mean_p": 0.85,
+     "observed": 0.741
+    },
+    {
+     "bin": "0.9-1.0",
+     "n": 1406,
+     "mean_p": 0.997,
+     "observed": 0.981
+    }
+   ]
+  },
+  "self_B": {
+   "ece": 0.0379,
+   "bins": [
+    {
+     "bin": "0.0-0.1",
+     "n": 217,
+     "mean_p": 0.028,
+     "observed": 0.207
+    },
+    {
+     "bin": "0.1-0.2",
+     "n": 37,
+     "mean_p": 0.13,
+     "observed": 0.081
+    },
+    {
+     "bin": "0.2-0.3",
+     "n": 19,
+     "mean_p": 0.256,
+     "observed": 0.368
+    },
+    {
+     "bin": "0.3-0.4",
+     "n": 15,
+     "mean_p": 0.356,
+     "observed": 0.533
+    },
+    {
+     "bin": "0.4-0.5",
+     "n": 16,
+     "mean_p": 0.438,
+     "observed": 0.438
+    },
+    {
+     "bin": "0.5-0.6",
+     "n": 13,
+     "mean_p": 0.548,
+     "observed": 0.538
+    },
+    {
+     "bin": "0.6-0.7",
+     "n": 955,
+     "mean_p": 0.625,
+     "observed": 0.655
+    },
+    {
+     "bin": "0.7-0.8",
+     "n": 109,
+     "mean_p": 0.744,
+     "observed": 0.734
+    },
+    {
+     "bin": "0.8-0.9",
+     "n": 85,
+     "mean_p": 0.849,
+     "observed": 0.741
+    },
+    {
+     "bin": "0.9-1.0",
+     "n": 1421,
+     "mean_p": 0.996,
+     "observed": 0.979
+    }
+   ]
+  },
+  "static_mix": {
+   "ece": 0.0277,
+   "bins": [
+    {
+     "bin": "0.0-0.1",
+     "n": 140,
+     "mean_p": 0.058,
+     "observed": 0.029
+    },
+    {
+     "bin": "0.1-0.2",
+     "n": 37,
+     "mean_p": 0.139,
+     "observed": 0.108
+    },
+    {
+     "bin": "0.2-0.3",
+     "n": 34,
+     "mean_p": 0.247,
+     "observed": 0.235
+    },
+    {
+     "bin": "0.3-0.4",
+     "n": 37,
+     "mean_p": 0.348,
+     "observed": 0.297
+    },
+    {
+     "bin": "0.4-0.5",
+     "n": 56,
+     "mean_p": 0.456,
+     "observed": 0.304
+    },
+    {
+     "bin": "0.5-0.6",
+     "n": 266,
+     "mean_p": 0.563,
+     "observed": 0.602
+    },
+    {
+     "bin": "0.6-0.7",
+     "n": 492,
+     "mean_p": 0.653,
+     "observed": 0.652
+    },
+    {
+     "bin": "0.7-0.8",
+     "n": 413,
+     "mean_p": 0.742,
+     "observed": 0.775
+    },
+    {
+     "bin": "0.8-0.9",
+     "n": 187,
+     "mean_p": 0.845,
+     "observed": 0.909
+    },
+    {
+     "bin": "0.9-1.0",
+     "n": 1225,
+     "mean_p": 0.975,
+     "observed": 0.998
+    }
+   ]
+  },
+  "hedge_eta2": {
+   "ece": 0.0318,
+   "bins": [
+    {
+     "bin": "0.0-0.1",
+     "n": 185,
+     "mean_p": 0.044,
+     "observed": 0.038
+    },
+    {
+     "bin": "0.1-0.2",
+     "n": 71,
+     "mean_p": 0.157,
+     "observed": 0.254
+    },
+    {
+     "bin": "0.2-0.3",
+     "n": 47,
+     "mean_p": 0.248,
+     "observed": 0.574
+    },
+    {
+     "bin": "0.3-0.4",
+     "n": 87,
+     "mean_p": 0.364,
+     "observed": 0.598
+    },
+    {
+     "bin": "0.4-0.5",
+     "n": 49,
+     "mean_p": 0.46,
+     "observed": 0.551
+    },
+    {
+     "bin": "0.5-0.6",
+     "n": 138,
+     "mean_p": 0.555,
+     "observed": 0.522
+    },
+    {
+     "bin": "0.6-0.7",
+     "n": 436,
+     "mean_p": 0.637,
+     "observed": 0.612
+    },
+    {
+     "bin": "0.7-0.8",
+     "n": 135,
+     "mean_p": 0.744,
+     "observed": 0.793
+    },
+    {
+     "bin": "0.8-0.9",
+     "n": 353,
+     "mean_p": 0.874,
+     "observed": 0.813
+    },
+    {
+     "bin": "0.9-1.0",
+     "n": 1386,
+     "mean_p": 0.99,
+     "observed": 0.991
+    }
+   ]
+  },
+  "dish_mix_g0.25": {
+   "ece": 0.026,
+   "bins": [
+    {
+     "bin": "0.0-0.1",
+     "n": 167,
+     "mean_p": 0.028,
+     "observed": 0.042
+    },
+    {
+     "bin": "0.1-0.2",
+     "n": 48,
+     "mean_p": 0.144,
+     "observed": 0.062
+    },
+    {
+     "bin": "0.2-0.3",
+     "n": 20,
+     "mean_p": 0.246,
+     "observed": 0.4
+    },
+    {
+     "bin": "0.3-0.4",
+     "n": 43,
+     "mean_p": 0.354,
+     "observed": 0.326
+    },
+    {
+     "bin": "0.4-0.5",
+     "n": 73,
+     "mean_p": 0.457,
+     "observed": 0.534
+    },
+    {
+     "bin": "0.5-0.6",
+     "n": 131,
+     "mean_p": 0.552,
+     "observed": 0.565
+    },
+    {
+     "bin": "0.6-0.7",
+     "n": 362,
+     "mean_p": 0.65,
+     "observed": 0.599
+    },
+    {
+     "bin": "0.7-0.8",
+     "n": 310,
+     "mean_p": 0.752,
+     "observed": 0.719
+    },
+    {
+     "bin": "0.8-0.9",
+     "n": 274,
+     "mean_p": 0.849,
+     "observed": 0.796
+    },
+    {
+     "bin": "0.9-1.0",
+     "n": 1459,
+     "mean_p": 0.993,
+     "observed": 0.983
+    }
+   ]
+  },
+  "dish_sample_g0.25": {
+   "ece": 0.0363,
+   "bins": [
+    {
+     "bin": "0.0-0.1",
+     "n": 177,
+     "mean_p": 0.025,
+     "observed": 0.034
+    },
+    {
+     "bin": "0.1-0.2",
+     "n": 43,
+     "mean_p": 0.138,
+     "observed": 0.116
+    },
+    {
+     "bin": "0.2-0.3",
+     "n": 20,
+     "mean_p": 0.253,
+     "observed": 0.6
+    },
+    {
+     "bin": "0.3-0.4",
+     "n": 66,
+     "mean_p": 0.362,
+     "observed": 0.439
+    },
+    {
+     "bin": "0.4-0.5",
+     "n": 77,
+     "mean_p": 0.456,
+     "observed": 0.623
+    },
+    {
+     "bin": "0.5-0.6",
+     "n": 110,
+     "mean_p": 0.555,
+     "observed": 0.545
+    },
+    {
+     "bin": "0.6-0.7",
+     "n": 353,
+     "mean_p": 0.645,
+     "observed": 0.589
+    },
+    {
+     "bin": "0.7-0.8",
+     "n": 269,
+     "mean_p": 0.75,
+     "observed": 0.717
+    },
+    {
+     "bin": "0.8-0.9",
+     "n": 261,
+     "mean_p": 0.849,
+     "observed": 0.774
+    },
+    {
+     "bin": "0.9-1.0",
+     "n": 1511,
+     "mean_p": 0.994,
+     "observed": 0.976
+    }
+   ]
+  }
+ },
+ "toys_mean_p_vs_observed": {
+  "self_A": {
+   "mean_p": 0.151,
+   "observed": 0.0
+  },
+  "dish_mix_g0.25": {
+   "mean_p": 0.251,
+   "observed": 0.0
+  }
+ },
+ "best_single_global": "single:rate_h10",
+ "per_thing": {
+  "membrane::Component:chat:in:operator": {
+   "n": 66,
+   "scored": 46,
+   "kind": "chat:in",
+   "change_rate": 0.061,
+   "few": false,
+   "best_single": "single:last5",
+   "brier": {
+    "self_A": 0.0733,
+    "self_B": 0.0733,
+    "static_mix": 0.0589,
+    "hedge_eta2": 0.0605,
+    "dish_mix_g0.25": 0.0591,
+    "dish_sample_g0.25": 0.0586,
+    "best_single_per_thing(hindsight)": 0.0516
+   },
+   "dish_copies_end": {
+    "onebit": 9,
+    "base": 4,
+    "rate_w30": 5,
+    "rate_h10": 5,
+    "rate_h50": 5,
+    "ema_h3": 262,
+    "ema_h10": 4,
+    "ema_h30": 4,
+    "last3": 2,
+    "last5": 2
+   }
+  },
+  "membrane::Component:chat:in:roomata-estorsky": {
+   "n": 134,
+   "scored": 93,
+   "kind": "chat:in",
+   "change_rate": 0.403,
+   "few": false,
+   "best_single": "single:ema_h10",
+   "brier": {
+    "self_A": 0.2466,
+    "self_B": 0.2466,
+    "static_mix": 0.233,
+    "hedge_eta2": 0.2339,
+    "dish_mix_g0.25": 0.2328,
+    "dish_sample_g0.25": 0.2348,
+    "best_single_per_thing(hindsight)": 0.2269
+   },
+   "dish_copies_end": {
+    "onebit": 2,
+    "base": 5,
+    "rate_w30": 4,
+    "rate_h10": 4,
+    "rate_h50": 4,
+    "ema_h3": 44,
+    "ema_h10": 8,
+    "ema_h30": 8,
+    "last3": 2,
+    "last5": 3
+   }
+  },
+  "membrane::Component:cradle:for-self": {
+   "n": 7,
+   "scored": 4,
+   "kind": "still",
+   "change_rate": 0.143,
+   "few": true,
+   "best_single": "single:last3",
+   "brier": {
+    "self_A": 0.2414,
+    "self_B": 0.2414,
+    "static_mix": 0.2071,
+    "hedge_eta2": 0.2228,
+    "dish_mix_g0.25": 0.2328,
+    "dish_sample_g0.25": 0.2549,
+    "best_single_per_thing(hindsight)": 0.2031
+   },
+   "dish_copies_end": {
+    "onebit": 5,
+    "base": 12,
+    "rate_w30": 22,
+    "rate_h10": 22,
+    "rate_h50": 22,
+    "ema_h3": 3,
+    "ema_h10": 3,
+    "ema_h30": 3,
+    "last3": 12,
+    "last5": 12
+   }
+  },
+  "membrane::Component:field:vitals": {
+   "n": 998,
+   "scored": 698,
+   "kind": "moving",
+   "change_rate": 0.681,
+   "few": false,
+   "best_single": "single:rate_h10",
+   "brier": {
+    "self_A": 0.23,
+    "self_B": 0.23,
+    "static_mix": 0.1986,
+    "hedge_eta2": 0.1785,
+    "dish_mix_g0.25": 0.1894,
+    "dish_sample_g0.25": 0.1944,
+    "best_single_per_thing(hindsight)": 0.1785
+   },
+   "dish_copies_end": {
+    "onebit": 1,
+    "base": 1,
+    "rate_w30": 1,
+    "rate_h10": 989,
+    "rate_h50": 2,
+    "ema_h3": 1,
+    "ema_h10": 1,
+    "ema_h30": 1,
+    "last3": 1,
+    "last5": 1
+   }
+  },
+  "membrane::Component:i": {
+   "n": 908,
+   "scored": 635,
+   "kind": "moving",
+   "change_rate": 0.683,
+   "few": false,
+   "best_single": "single:ema_h30",
+   "brier": {
+    "self_A": 0.2112,
+    "self_B": 0.2115,
+    "static_mix": 0.1897,
+    "hedge_eta2": 0.215,
+    "dish_mix_g0.25": 0.1922,
+    "dish_sample_g0.25": 0.2014,
+    "best_single_per_thing(hindsight)": 0.2
+   },
+   "dish_copies_end": {
+    "onebit": 5,
+    "base": 1,
+    "rate_w30": 6,
+    "rate_h10": 42,
+    "rate_h50": 5,
+    "ema_h3": 5,
+    "ema_h10": 1,
+    "ema_h30": 1,
+    "last3": 8,
+    "last5": 3
+   }
+  },
+  "membrane::Component:knock:hello-from-memo-1449": {
+   "n": 66,
+   "scored": 46,
+   "kind": "still",
+   "change_rate": 0.0,
+   "few": false,
+   "best_single": "single:ema_h3",
+   "brier": {
+    "self_A": 0.0025,
+    "self_B": 0.0025,
+    "static_mix": 0.0035,
+    "hedge_eta2": 0.0015,
+    "dish_mix_g0.25": 0.0023,
+    "dish_sample_g0.25": 0.0024,
+    "best_single_per_thing(hindsight)": 0.0
+   },
+   "dish_copies_end": {
+    "onebit": 1,
+    "base": 1,
+    "rate_w30": 1,
+    "rate_h10": 1,
+    "rate_h50": 1,
+    "ema_h3": 991,
+    "ema_h10": 1,
+    "ema_h30": 1,
+    "last3": 1,
+    "last5": 1
+   }
+  },
+  "membrane::Component:probe:script-api": {
+   "n": 2,
+   "scored": 1,
+   "kind": "still",
+   "change_rate": 0.0,
+   "few": true,
+   "best_single": "single:onebit",
+   "brier": {
+    "self_A": 0.0625,
+    "self_B": 0.0625,
+    "static_mix": 0.0962,
+    "hedge_eta2": 0.0962,
+    "dish_mix_g0.25": 0.0962,
+    "dish_sample_g0.25": 0.1575,
+    "best_single_per_thing(hindsight)": 0.0625
+   },
+   "dish_copies_end": {
+    "onebit": 12,
+    "base": 12,
+    "rate_w30": 12,
+    "rate_h10": 12,
+    "rate_h50": 12,
+    "ema_h3": 8,
+    "ema_h10": 8,
+    "ema_h30": 8,
+    "last3": 12,
+    "last5": 12
+   }
+  },
+  "membrane::Component:test:re-149": {
+   "n": 1045,
+   "scored": 731,
+   "kind": "moving",
+   "change_rate": 1.0,
+   "few": false,
+   "best_single": "single:ema_h3",
+   "brier": {
+    "self_A": 0.0,
+    "self_B": 0.0,
+    "static_mix": 0.0004,
+    "hedge_eta2": 0.0,
+    "dish_mix_g0.25": 0.0,
+    "dish_sample_g0.25": 0.0,
+    "best_single_per_thing(hindsight)": 0.0
+   },
+   "dish_copies_end": {
+    "onebit": 1,
+    "base": 1,
+    "rate_w30": 330,
+    "rate_h10": 330,
+    "rate_h50": 330,
+    "ema_h3": 1,
+    "ema_h10": 1,
+    "ema_h30": 1,
+    "last3": 1,
+    "last5": 1
+   }
+  },
+  "membrane::Component:toy:die": {
+   "n": 7,
+   "scored": 4,
+   "kind": "toys",
+   "change_rate": 0.143,
+   "few": true,
+   "best_single": "single:rate_w30",
+   "brier": {
+    "self_A": 0.0042,
+    "self_B": 0.0042,
+    "static_mix": 0.0457,
+    "hedge_eta2": 0.0341,
+    "dish_mix_g0.25": 0.0286,
+    "dish_sample_g0.25": 0.0581,
+    "best_single_per_thing(hindsight)": 0.0002
+   },
+   "dish_copies_end": {
+    "onebit": 3,
+    "base": 1,
+    "rate_w30": 24,
+    "rate_h10": 24,
+    "rate_h50": 24,
+    "ema_h3": 3,
+    "ema_h10": 3,
+    "ema_h30": 3,
+    "last3": 3,
+    "last5": 1
+   }
+  },
+  "membrane::Component:toy:tower": {
+   "n": 2,
+   "scored": 1,
+   "kind": "toys",
+   "change_rate": 0.5,
+   "few": true,
+   "best_single": "single:ema_h30",
+   "brier": {
+    "self_A": 0.5625,
+    "self_B": 0.5625,
+    "static_mix": 0.4758,
+    "hedge_eta2": 0.4758,
+    "dish_mix_g0.25": 0.4758,
+    "dish_sample_g0.25": 0.3638,
+    "best_single_per_thing(hindsight)": 0.2616
+   },
+   "dish_copies_end": {
+    "onebit": 8,
+    "base": 8,
+    "rate_w30": 8,
+    "rate_h10": 8,
+    "rate_h50": 8,
+    "ema_h3": 12,
+    "ema_h10": 12,
+    "ema_h30": 12,
+    "last3": 8,
+    "last5": 8
+   }
+  },
+  "membrane::Component:toy:tower:b1": {
+   "n": 3,
+   "scored": 2,
+   "kind": "toys",
+   "change_rate": 0.0,
+   "few": true,
+   "best_single": "single:rate_w30",
+   "brier": {
+    "self_A": 0.0314,
+    "self_B": 0.0314,
+    "static_mix": 0.0687,
+    "hedge_eta2": 0.0653,
+    "dish_mix_g0.25": 0.0644,
+    "dish_sample_g0.25": 0.0789,
+    "best_single_per_thing(hindsight)": 0.0314
+   },
+   "dish_copies_end": {
+    "onebit": 9,
+    "base": 15,
+    "rate_w30": 15,
+    "rate_h10": 15,
+    "rate_h50": 15,
+    "ema_h3": 6,
+    "ema_h10": 6,
+    "ema_h30": 6,
+    "last3": 15,
+    "last5": 15
+   }
+  },
+  "membrane::Component:toy:tower:b2": {
+   "n": 3,
+   "scored": 2,
+   "kind": "toys",
+   "change_rate": 0.0,
+   "few": true,
+   "best_single": "single:rate_w30",
+   "brier": {
+    "self_A": 0.0314,
+    "self_B": 0.0314,
+    "static_mix": 0.0687,
+    "hedge_eta2": 0.0653,
+    "dish_mix_g0.25": 0.0644,
+    "dish_sample_g0.25": 0.0789,
+    "best_single_per_thing(hindsight)": 0.0314
+   },
+   "dish_copies_end": {
+    "onebit": 9,
+    "base": 15,
+    "rate_w30": 15,
+    "rate_h10": 15,
+    "rate_h50": 15,
+    "ema_h3": 6,
+    "ema_h10": 6,
+    "ema_h30": 6,
+    "last3": 15,
+    "last5": 15
+   }
+  },
+  "membrane::Component:toy:tower:b3": {
+   "n": 3,
+   "scored": 2,
+   "kind": "toys",
+   "change_rate": 0.0,
+   "few": true,
+   "best_single": "single:rate_w30",
+   "brier": {
+    "self_A": 0.0314,
+    "self_B": 0.0314,
+    "static_mix": 0.0687,
+    "hedge_eta2": 0.0653,
+    "dish_mix_g0.25": 0.0644,
+    "dish_sample_g0.25": 0.0789,
+    "best_single_per_thing(hindsight)": 0.0314
+   },
+   "dish_copies_end": {
+    "onebit": 9,
+    "base": 15,
+    "rate_w30": 15,
+    "rate_h10": 15,
+    "rate_h50": 15,
+    "ema_h3": 6,
+    "ema_h10": 6,
+    "ema_h30": 6,
+    "last3": 15,
+    "last5": 15
+   }
+  },
+  "membrane::Component:toy:tower:b4": {
+   "n": 3,
+   "scored": 2,
+   "kind": "toys",
+   "change_rate": 0.0,
+   "few": true,
+   "best_single": "single:rate_w30",
+   "brier": {
+    "self_A": 0.0314,
+    "self_B": 0.0314,
+    "static_mix": 0.0688,
+    "hedge_eta2": 0.0653,
+    "dish_mix_g0.25": 0.0644,
+    "dish_sample_g0.25": 0.0789,
+    "best_single_per_thing(hindsight)": 0.0314
+   },
+   "dish_copies_end": {
+    "onebit": 9,
+    "base": 15,
+    "rate_w30": 15,
+    "rate_h10": 15,
+    "rate_h50": 15,
+    "ema_h3": 6,
+    "ema_h10": 6,
+    "ema_h30": 6,
+    "last3": 15,
+    "last5": 15
+   }
+  },
+  "membrane::Component:toy:tower:b5": {
+   "n": 3,
+   "scored": 2,
+   "kind": "toys",
+   "change_rate": 0.0,
+   "few": true,
+   "best_single": "single:rate_w30",
+   "brier": {
+    "self_A": 0.0314,
+    "self_B": 0.0314,
+    "static_mix": 0.0688,
+    "hedge_eta2": 0.0653,
+    "dish_mix_g0.25": 0.0644,
+    "dish_sample_g0.25": 0.0789,
+    "best_single_per_thing(hindsight)": 0.0314
+   },
+   "dish_copies_end": {
+    "onebit": 9,
+    "base": 15,
+    "rate_w30": 15,
+    "rate_h10": 15,
+    "rate_h50": 15,
+    "ema_h3": 6,
+    "ema_h10": 6,
+    "ema_h30": 6,
+    "last3": 15,
+    "last5": 15
+   }
+  },
+  "membrane::Component:w:body": {
+   "n": 243,
+   "scored": 170,
+   "kind": "moving",
+   "change_rate": 1.0,
+   "few": false,
+   "best_single": "single:ema_h3",
+   "brier": {
+    "self_A": 0.0,
+    "self_B": 0.0,
+    "static_mix": 0.0006,
+    "hedge_eta2": 0.0,
+    "dish_mix_g0.25": 0.0,
+    "dish_sample_g0.25": 0.0,
+    "best_single_per_thing(hindsight)": 0.0
+   },
+   "dish_copies_end": {
+    "onebit": 1,
+    "base": 1,
+    "rate_w30": 330,
+    "rate_h10": 330,
+    "rate_h50": 330,
+    "ema_h3": 1,
+    "ema_h10": 1,
+    "ema_h30": 1,
+    "last3": 1,
+    "last5": 1
+   }
+  },
+  "membrane::Component:w:burst": {
+   "n": 23,
+   "scored": 16,
+   "kind": "intermittent",
+   "change_rate": 0.565,
+   "few": false,
+   "best_single": "single:rate_h50",
+   "brier": {
+    "self_A": 0.2955,
+    "self_B": 0.2955,
+    "static_mix": 0.2437,
+    "hedge_eta2": 0.2371,
+    "dish_mix_g0.25": 0.2324,
+    "dish_sample_g0.25": 0.2283,
+    "best_single_per_thing(hindsight)": 0.2157
+   },
+   "dish_copies_end": {
+    "onebit": 12,
+    "base": 3,
+    "rate_w30": 14,
+    "rate_h10": 25,
+    "rate_h50": 40,
+    "ema_h3": 1,
+    "ema_h10": 3,
+    "ema_h30": 2,
+    "last3": 1,
+    "last5": 2
+   }
+  },
+  "membrane::Component:w:drift": {
+   "n": 16,
+   "scored": 11,
+   "kind": "intermittent",
+   "change_rate": 0.562,
+   "few": true,
+   "best_single": "single:rate_h10",
+   "brier": {
+    "self_A": 0.4532,
+    "self_B": 0.4532,
+    "static_mix": 0.2043,
+    "hedge_eta2": 0.1512,
+    "dish_mix_g0.25": 0.1327,
+    "dish_sample_g0.25": 0.1551,
+    "best_single_per_thing(hindsight)": 0.1019
+   },
+   "dish_copies_end": {
+    "onebit": 1,
+    "base": 1,
+    "rate_w30": 58,
+    "rate_h10": 58,
+    "rate_h50": 58,
+    "ema_h3": 1,
+    "ema_h10": 1,
+    "ema_h30": 1,
+    "last3": 1,
+    "last5": 1
+   }
+  },
+  "membrane::Component:w:fast": {
+   "n": 228,
+   "scored": 159,
+   "kind": "moving",
+   "change_rate": 0.987,
+   "few": false,
+   "best_single": "single:base",
+   "brier": {
+    "self_A": 0.0292,
+    "self_B": 0.0292,
+    "static_mix": 0.0159,
+    "hedge_eta2": 0.0135,
+    "dish_mix_g0.25": 0.0163,
+    "dish_sample_g0.25": 0.0186,
+    "best_single_per_thing(hindsight)": 0.0126
+   },
+   "dish_copies_end": {
+    "onebit": 1,
+    "base": 1,
+    "rate_w30": 1,
+    "rate_h10": 1,
+    "rate_h50": 1,
+    "ema_h3": 991,
+    "ema_h10": 1,
+    "ema_h30": 1,
+    "last3": 1,
+    "last5": 1
+   }
+  },
+  "membrane::Component:w:rung": {
+   "n": 97,
+   "scored": 67,
+   "kind": "still",
+   "change_rate": 0.021,
+   "few": false,
+   "best_single": "single:base",
+   "brier": {
+    "self_A": 0.0348,
+    "self_B": 0.0348,
+    "static_mix": 0.0327,
+    "hedge_eta2": 0.0321,
+    "dish_mix_g0.25": 0.032,
+    "dish_sample_g0.25": 0.0347,
+    "best_single_per_thing(hindsight)": 0.0297
+   },
+   "dish_copies_end": {
+    "onebit": 1,
+    "base": 1,
+    "rate_w30": 1,
+    "rate_h10": 1,
+    "rate_h50": 1,
+    "ema_h3": 991,
+    "ema_h10": 1,
+    "ema_h30": 1,
+    "last3": 1,
+    "last5": 1
+   }
+  },
+  "membrane::Component:w:slow": {
+   "n": 8,
+   "scored": 5,
+   "kind": "intermittent",
+   "change_rate": 0.375,
+   "few": true,
+   "best_single": "single:onebit",
+   "brier": {
+    "self_A": 0.2931,
+    "self_B": 0.2931,
+    "static_mix": 0.2594,
+    "hedge_eta2": 0.2621,
+    "dish_mix_g0.25": 0.2656,
+    "dish_sample_g0.25": 0.2749,
+    "best_single_per_thing(hindsight)": 0.2188
+   },
+   "dish_copies_end": {
+    "onebit": 28,
+    "base": 9,
+    "rate_w30": 5,
+    "rate_h10": 5,
+    "rate_h50": 5,
+    "ema_h3": 6,
+    "ema_h10": 10,
+    "ema_h30": 8,
+    "last3": 16,
+    "last5": 9
+   }
+  },
+  "membrane::w:prime": {
+   "n": 272,
+   "scored": 190,
+   "kind": "moving",
+   "change_rate": 0.989,
+   "few": false,
+   "best_single": "single:rate_h10",
+   "brier": {
+    "self_A": 0.0156,
+    "self_B": 0.0156,
+    "static_mix": 0.0134,
+    "hedge_eta2": 0.0139,
+    "dish_mix_g0.25": 0.0131,
+    "dish_sample_g0.25": 0.013,
+    "best_single_per_thing(hindsight)": 0.0131
+   },
+   "dish_copies_end": {
+    "onebit": 1,
+    "base": 1,
+    "rate_w30": 284,
+    "rate_h10": 7,
+    "rate_h50": 1,
+    "ema_h3": 701,
+    "ema_h10": 1,
+    "ema_h30": 1,
+    "last3": 1,
+    "last5": 1
+   }
+  }
+ }
+}
