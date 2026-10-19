@@ -280,7 +280,7 @@ class _Player:
     self's turn when `back(age)` says so (age: how long since they last
     acted), through toybox.poke -- the same call the page makes."""
 
-    def __init__(self, back, by="alice", delay=40.0, seed=1, play_every=None):
+    def __init__(self, back, by="alice", delay=10.0, seed=1, play_every=None):   # #278: a return within TOY_CHECK_S
         self.back, self.by, self.delay, self.rng = back, by, delay, random.Random(seed)
         self.due = None
         self.play_every, self.next_play = play_every, None
@@ -367,13 +367,14 @@ def test_selfs_roll_refuses_anything_but_the_shared_ball(monkeypatch):
     assert TB.state("toy:die")["log"] == []
 
 
-def test_the_turns_keep_todays_pace(monkeypatch):
+def test_the_turns_keep_the_balls_pace(monkeypatch):
+    # #278: the ball's own clock (was the chat's MEET_EVERY..MEET_MAX)
     srv = _seat()
     _run(srv, 1500, player=_Player(lambda age: 0.7), monkeypatch=monkeypatch)
     ns = [p["n"] for p in _turns(srv)]
     assert len(ns) >= 6
-    assert all(b - a >= SL.MEET_EVERY for a, b in zip(ns, ns[1:]))      # never faster than the push cap
-    assert all(b - a <= SL.MEET_MAX for a, b in zip(ns, ns[1:]))
+    assert all(b - a >= SL.TOY_MEET_EVERY for a, b in zip(ns, ns[1:]))  # never faster than the roll cap
+    assert all(b - a <= SL.TOY_MEET_MAX for a, b in zip(ns, ns[1:]))
 
 
 def test_no_ball_no_turn_and_still_no_chat(monkeypatch):
@@ -449,9 +450,11 @@ def _share(rows, b, last=100):
 @pytest.mark.parametrize("seed", [1, 2])
 def test_the_policy_learns_to_roll_soon_after_a_rhythmic_player_acts(seed):
     rows = SIM.drive_toy("rhythm", "policy", 72, seed)
-    assert _best(rows) == 0                                             # within 2 min of their last play
-    assert _share(rows, 0) > 0.5
-    assert _share(rows, 0) > 2 * _share(SIM.drive_toy("rhythm", "timer", 72, seed), 0)
+    assert _best(rows) == 0                                             # within 20 s of their last act (#278)
+    # #278: on the ball's clock self rolls only once the ball is back, so its
+    # first moment after their roll back IS 0-20s -- a timer lands there too
+    # (the reason rung 7 can't credit this player: see experiments/rung7_turns)
+    assert _best(SIM.drive_toy("rhythm", "timer", 72, seed)) == 0
 
 
 @pytest.mark.parametrize("seed", [1, 2])
@@ -472,11 +475,12 @@ def test_on_a_seat_it_learns_the_window_from_real_rolls(monkeypatch, tmp_path):
         monkeypatch.setenv("MEMBRANE_DATA_DIR", str(tmp_path / f"seat{seed}"))   # a seat of its own
         srv = _seat()
         TB.add(srv, "die", name="toy:die")
-        _run(srv, 6000, player=_Player(back, seed=seed, play_every=1200.0), monkeypatch=monkeypatch)
+        _run(srv, 1500, player=_Player(back, seed=seed, play_every=1200.0), monkeypatch=monkeypatch)   # #278: ~4 h at the ball's pace
         rows = SL._turn_rows(SL._read(srv), BALL)
         return rows, _best(rows)
-    soon, b1 = learned(lambda age: 0.9 if age is not None and 120.0 <= age < 600.0 else 0.05, 3)
-    late, b2 = learned(lambda age: 0.9 if age is not None and 600.0 <= age < 1800.0 else 0.05, 4)
+    # #278: the ball's windows -- 20-60 s, or only 1-3 min, after their last act
+    soon, b1 = learned(lambda age: 0.9 if age is not None and 20.0 <= age < 60.0 else 0.05, 3)
+    late, b2 = learned(lambda age: 0.9 if age is not None and 60.0 <= age < 180.0 else 0.05, 4)
     assert len(soon) >= 25 and len(late) >= 25
     assert (b1, b2) == (1, 2)
 
@@ -488,8 +492,10 @@ def _ever_passes(rows):
 
 
 @pytest.mark.parametrize("seed", [1, 2, 3])
-def test_a_rhythmic_player_lets_the_policy_pass(seed):
-    assert _ever_passes(SIM.drive_toy("rhythm", "policy", 120, seed))
+def test_a_session_player_lets_the_policy_pass(seed):
+    # #278: on the ball's clock the rhythmic player's best moment is the first
+    # one (a timer's); a person who plays in sessions passes (experiments/rung7_turns)
+    assert _ever_passes(SIM.drive_toy("session", "policy", 168, seed))
 
 
 @pytest.mark.parametrize("seed", range(4))

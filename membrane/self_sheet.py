@@ -113,8 +113,14 @@ def fastest_cycles() -> dict:
     passed (self_loop's constants): the fastest-possible line."""
     r2 = SL.RUNG2_REACHES + SL.AUDIT_REACHES
     return {1: SL.RUNG1_CYCLES, 2: r2, 3: SL.RUNG3_WINDOW - r2, 4: SL.RUNG4_TIMED,
-            5: SL.RUNG5_LOOKS, 6: SL.RUNG6_PUSHES * SL.MEET_EVERY, 7: SL.RUNG7_PUSHES * SL.MEET_EVERY,
-            8: SL.RUNG8_LOOKS * SL.MEET_EVERY}
+            5: SL.RUNG5_LOOKS, 6: SL.RUNG6_PUSHES * SL.MEET_EVERY, 7: SL.RUNG7_PUSHES * _turn_every(),
+            8: SL.RUNG8_LOOKS * _turn_every()}
+
+
+def _turn_every() -> int:
+    """Cycles between self's turns from rung 7 on: the ball's clock (#278) while
+    the turns are with the ball, else the chat's."""
+    return SL.TOY_MEET_EVERY if SL.TOY_TURNS else SL.MEET_EVERY
 
 
 def _needs() -> dict:
@@ -124,7 +130,7 @@ def _needs() -> dict:
             4: f"{SL.RUNG4_TIMED} timed looks",
             5: f"{SL.RUNG5_LOOKS} looks with noticing on, both audit shifts caught",
             6: f"{SL.RUNG6_PUSHES} lines sent, {SL.MEET_EVERY} cycles apart",
-            7: f"{SL.RUNG7_PUSHES} timed turns with the ball with a reply check, at least {SL.MEET_EVERY} cycles apart",
+            7: f"{SL.RUNG7_PUSHES} timed turns with the ball with a reply check, at least {_turn_every()} cycles apart",
             8: f"{SL.RUNG8_LOOKS} reply checks, one per line"}
 
 
@@ -402,6 +408,7 @@ def _quest(recs: list, st: dict, progs: dict, attrs: dict) -> dict:
                 "summary": "", "mode": st.get("mode")}
     p = progs[aim]
     ball = SL._cur_medium(recs, SL._other(recs)) == "toy"      # #264: rung 7 takes turns with the ball
+    ck = SL._clock(int(p.get("clock") or 1)) if aim == 7 else SL._clock(1)   # #278: the bar of the turns' clock
     count = {1: {"pushes": (SL.RUNG1_CYCLES, "pushed cycles")},
              2: {"reaches": (SL.RUNG2_REACHES, "answered looks at one thing")},
              3: {"looks": (SL.RUNG3_LOOKS, "steered looks")},
@@ -435,12 +442,12 @@ def _quest(recs: list, st: dict, progs: dict, attrs: dict) -> dict:
         elif key == "contingency":
             sh, ch = p.get("share"), p.get("chance")
             text = (f"{'turns' if ball else 'lines'} in its window {'–' if sh is None else f'{sh:.2f}'} vs chance "
-                    f"{'–' if ch is None else f'{ch:.2f}'} (z {float(p.get('z') or 0):.1f} → {SL.RUNG7_CONT_Z:.1f}, "
-                    f"+{SL.RUNG7_CONT_MARGIN:.2f})")
+                    f"{'–' if ch is None else f'{ch:.2f}'} (z {float(p.get('z') or 0):.1f} → {ck['cont_z']:.1f}, "
+                    f"+{ck['cont_margin']:.2f})")
         elif key == "payoff":
             pay = p.get("payoff")
             text = (f"replies gained over timing-blind {'–' if pay is None else _sg(float(pay))} "
-                    f"(t {float(p.get('payoff_z') or 0):.1f} → {SL.RUNG7_PAY_Z:.1f}, {_sg(SL.RUNG7_PAY_MARGIN)})")
+                    f"(t {float(p.get('payoff_z') or 0):.1f} → {ck['pay_z']:.1f}, {_sg(ck['pay_margin'])})")
         else:
             text = flags.get(key, key)
         crits.append({"key": key, "text": text, "met": met, "frac": _r(frac, 4)})

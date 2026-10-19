@@ -245,8 +245,8 @@ class TestGrowth(unittest.TestCase):
         self.assertEqual(floors[4], SL.RUNG4_TIMED)
         self.assertEqual(floors[5], SL.RUNG5_LOOKS)
         self.assertEqual(floors[6], SL.RUNG6_PUSHES * SL.MEET_EVERY)
-        self.assertEqual(floors[7], SL.RUNG7_PUSHES * SL.MEET_EVERY)  # #258: take turns
-        self.assertEqual(floors[8], SL.RUNG8_LOOKS * SL.MEET_EVERY)   # understand an other, moved up
+        self.assertEqual(floors[7], SL.RUNG7_PUSHES * SL.TOY_MEET_EVERY)  # #258: take turns (#278: with the ball)
+        self.assertEqual(floors[8], SL.RUNG8_LOOKS * SL.TOY_MEET_EVERY)   # understand an other, moved up
         self.assertEqual(set(floors), set(SL.PROGRESS))             # every built rung has one
 
     def test_the_fastest_line_is_cumulative_at_the_pace(self):

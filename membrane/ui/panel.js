@@ -674,7 +674,7 @@ function selfLine(r) {
   if (k === "rung_void") return "rung " + r.rung + "'s earlier pass voided (" + (r.why || "") + ")";
   if (k === "rung7_restart") return "the old rung 7 (understand an other, now rung 8) restarted: now grades self, not the model";
   if (k === "push") return "push → " + shortEid(r.to) +
-    (r.aim != null ? (r.why === "overdue" ? " · its wait ran out" : " · its moment: " + (TURN_NAMES[r.bin] || r.bin) + " after they spoke") : "") +
+    (r.aim != null ? (r.why === "overdue" ? " · its wait ran out" : " · its moment: " + turnWindow(r)) : "") +
     (r.asked ? " (asked the model)" : "");
   if (k === "shift") return "shift noticed on " + shortEid(r.eid) + (r.was != null && r.now != null ? " (" + f2s(r.was) + " → " + f2s(r.now) + ")" : "");
   if (k === "wait") return "wait";
@@ -689,6 +689,14 @@ function selfLine(r) {
 
 // #258: rung 7's windows -- how long since the other last spoke (self_loop.TURN_NAMES)
 const TURN_NAMES = ["0-2m", "2-10m", "10-30m", "30m+"];
+// #278: the ball's own clock -- seconds since the other last played (self_loop.TOY_TURN_NAMES)
+const TOY_TURN_NAMES = ["0-20s", "20-60s", "1-3m", "3m+"];
+
+/** A timed turn's window, named on its own clock (#278: a turn with `clock: 2` is the ball's). */
+function turnWindow(r) {
+  if (r.medium === "toy" && r.clock === 2) return (TOY_TURN_NAMES[r.bin] || r.bin) + " after they played";
+  return (TURN_NAMES[r.bin] || r.bin) + " after they " + (r.medium === "toy" ? "played" : "spoke");
+}
 
 function agoText(s) {
   s = Math.max(0, Math.round(s));

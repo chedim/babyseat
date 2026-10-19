@@ -145,7 +145,8 @@ MEET_MAX = 180              # rung 7: a push waits at most this many cycles for 
 # back (never self, the world or the model). The moment self waits for is a bin of the time
 # since the other last ACTED -- a person's last poke on ANY toy (toybox.last_person_poke): any
 # play says they are at the dock, and with the ball alone the 0-2 min bin could never come
-# (turns are >= MEET_EVERY cycles apart, and a return lands within the check). A reply = their
+# (turns were >= MEET_EVERY cycles apart, and a return lands within the check; since #278 the
+# ball has its own clock, below, in seconds). A reply = their
 # roll after self's turn, by the check (the ball's other_at). Every turn records its `medium`
 # ("toy"; a line without one is "chat"), and rungs 7 and 8 read only the current medium's turns.
 # Chat goes quiet until rung SPEAK_RUNG (speak) opens; rung 6 reads its chat record as it stood
@@ -162,6 +163,51 @@ RUNG7_CONT_Z = 3.0          # (a) the in-window count must clear the shuffled sh
 RUNG7_CONT_MARGIN = 0.10    # ...and by this share
 RUNG7_PAY_Z = 4.0           # (b) the reply rate gained over timing-blind must clear 0 by this t
 RUNG7_PAY_MARGIN = 0.05     # ...and be at least this
+# THE BALL'S OWN CLOCK (#278): until #278 the turns with the ball ran on the chat's clock above
+# (>= 30 cycles apart, up to 180, bins of minutes), and a person who rolled the ball back waited
+# 5-30 min for self's next roll. Serve-and-return with an object is seconds, so a turn with the
+# ball runs on TOY_CLOCK: TOY_TURN_BINS of seconds since the other last acted, a turn at most
+# every TOY_MEET_EVERY cycles, overdue after TOY_MEET_MAX. The edges are what a 10 s cycle can
+# resolve: 0-20s spans two cycles (the cycle the ball is seen back and the next), 20-60s four,
+# 1-3m twelve, and 3m+ stays choosable under the 5 min cap (a returned ball can wait for it).
+# THE ORDER OF A TURN (TOY_CLOCK): self rolls; its reply check comes as soon as it sees the ball
+# back on its side (the next cycle) or TOY_CHECK_S after the roll, whichever is first; a reply
+# is a PERSON's roll within TOY_CHECK_S of self's (a later roll is none, whenever the check
+# comes -- an advisor's grace never stretches the horizon). Self never rolls again before its
+# last roll's check, and it waits for the ball to be back on its side: only those cycles are
+# moments it could have rolled in (its waiting time, `dwell`, and the shuffled chance the test
+# compares with). An unreturned ball is fetched at the cap ('overdue'), so a person away for
+# hours sees one roll every TOY_MEET_MAX cycles. The rule keeps the test honest: a reply is
+# always the person's roll after self's, and self's next roll answers theirs. Turns on this
+# clock carry `clock: 2` (their checks too), and rungs 7 and 8 read only the current clock's
+# turns: #264's toy turns (no `clock`) were timed in minutes, and their bins never mix in.
+# THE BAR, re-measured at this pace in experiments/rung7_turns (sim.py toy, 100 seeds x a week,
+# the test read at every turn like the live loop): ~15-30 turns an hour instead of ~3-5 means
+# ~6x more windows a week, so chance's best window climbs. At the chat's bar (payoff t >= 4) a
+# memoryless returner (rolls it back at random, ~1 a minute, whatever self does) passed in 25 of
+# 100 weeks and a coin in 2: payoff t is raised to 5 for the ball (TOY_RUNG7_PAY_Z; never
+# loosened), where the memoryless returner passes in 2, a coin, a timer (470 s) and a machine
+# that always returns it in 0. At t >= 5: a person who plays in 1-2 h sessions (rolls it back in
+# 5-20 s, 0.9 of the time, while there; away 4-10 h) passes in 99 (median ~31 h, ~6 h of play);
+# one there ~60 of every 150 min who rolls it back 0.85 while there in 80 (~38 h); one who rolls
+# it back only 1-3 min after their last act in 65 (~62 h). The chat's turn-taker (engaged right
+# after their own act, exp(-age/60 s)) passes in 0 (it was 98 on the chat's clock): its best
+# moment is the FIRST one after their roll back, and that is where any timer rolls too -- the
+# contingency can't credit "at once" (z <= 0 when the best bin opens every wait). A metronome
+# whose period sits next to the check (47 s or 90 s) passes in all: its tick really does come
+# back within the check when self rolls 20-60 s after it -- learnable phase, not chance (a
+# 240 s metronome passed 6 of 20 on the chat's clock too).
+TOY_CLOCK = 2               # the `clock` a turn with the ball records (#264's turns: none = the chat's, 1)
+TOY_TURN_BINS = (20.0, 60.0, 180.0)     # seconds since the other last acted; the last bin: 3 min+ or never
+TOY_TURN_NAMES = ("0-20s", "20-60s", "1-3m", "3m+")
+TOY_MEET_EVERY = 2          # cycles between self's rolls, at least
+TOY_MEET_MAX = 30           # a roll waits at most this many cycles (5 min) for its moment or the ball, then goes
+TOY_CHECK_S = 30.0          # a reply: the person's roll within this of self's; the check comes by then
+TOY_GRACE_S = 20.0          # rung 8: the check waits up to this much longer for the advisor's answer
+TOY_RUNG7_CONT_Z = RUNG7_CONT_Z         # the toy clock's bar (never looser than the chat's)
+TOY_RUNG7_CONT_MARGIN = RUNG7_CONT_MARGIN
+TOY_RUNG7_PAY_Z = 5.0       # raised from 4.0 (#278): see the measurements above
+TOY_RUNG7_PAY_MARGIN = RUNG7_PAY_MARGIN
 # RUNG 8 (#254, rung 7 until #258): SELF predicts the reply check (p_self, from its record only); the model is
 # an advisor it recalibrates on the advisor's own track record; the test scores self's p against
 # the RUNNING RATE (the other's prior-smoothed rate over the checks before: calibration alone
@@ -651,13 +697,45 @@ def _cur_medium(recs: list[dict], eid: str | None) -> str:
     return _medium(last) if last is not None else "chat"
 
 
+def _clock_of(r: dict | None) -> int:
+    """A turn's (or its check's) clock (#278): TOY_CLOCK for a turn with the
+    ball from #278 on; 1 -- the chat's -- for every other (#264's toy turns too)."""
+    try:
+        return int((r or {}).get("clock") or 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _clock(c: int) -> dict:
+    """A clock's numbers (#278): the bins and their names, the gap and the
+    cap (cycles), the reply horizon (s) and rung 7's bar."""
+    if c == TOY_CLOCK:
+        return {"bins": TOY_TURN_BINS, "names": TOY_TURN_NAMES, "every": TOY_MEET_EVERY, "max": TOY_MEET_MAX,
+                "check_s": TOY_CHECK_S, "cont_z": TOY_RUNG7_CONT_Z, "cont_margin": TOY_RUNG7_CONT_MARGIN,
+                "pay_z": TOY_RUNG7_PAY_Z, "pay_margin": TOY_RUNG7_PAY_MARGIN}
+    return {"bins": TURN_BINS, "names": TURN_NAMES, "every": MEET_EVERY, "max": MEET_MAX,
+            "check_s": RUNG8_CHECK_S, "cont_z": RUNG7_CONT_Z, "cont_margin": RUNG7_CONT_MARGIN,
+            "pay_z": RUNG7_PAY_Z, "pay_margin": RUNG7_PAY_MARGIN}
+
+
+def _cur_clock(recs: list[dict], eid: str | None, medium: str) -> int:
+    """The clock of the latest turn at `eid` in `medium` (#278): rungs 7 and 8
+    read that clock's turns only (old-clock bins never mix with new ones)."""
+    last = next((r for r in reversed(recs) if r.get("kind") == "push" and r.get("to") == eid
+                 and _medium(r) == medium), None)
+    return _clock_of(last)
+
+
 def _reply_checks(recs: list[dict], eid: str, medium: str | None = None) -> list[dict]:
     """Self's reply checks at `eid` that know their outcome -- the looks a
-    push's question is about (one horizon: RUNG8_CHECK_S after the push) --
-    in one medium (#264: the current one by default; never mixed)."""
+    push's question is about (one horizon: RUNG8_CHECK_S after the push; a
+    turn with the ball's: TOY_CHECK_S) -- in one medium (#264: the current
+    one by default; never mixed) and one clock (#278: the current one)."""
     medium = medium or _cur_medium(recs, eid)
+    clock = _cur_clock(recs, eid, medium)
     return [r for r in recs if r.get("kind") == "reach" and r.get("eid") == eid and r.get("reply")
-            and not r.get("audit") and _reply_o(r) is not None and _medium(r) == medium]
+            and not r.get("audit") and _reply_o(r) is not None and _medium(r) == medium
+            and _clock_of(r) == clock]
 
 
 def _base_rate(recs: list[dict], eid: str) -> tuple[float, int, int]:
@@ -704,13 +782,14 @@ def _rung8_rows(recs: list[dict], eid: str, medium: str | None = None) -> list[d
     look recorded (p_self, the advisor's p_llm and model, w, p_mix). One
     medium only (#264: the current one by default)."""
     medium = medium or _cur_medium(recs, eid)
+    clock = _cur_clock(recs, eid, medium)                             # #278: one clock only
     rows, last_ch, gap = [], None, None
     for r in sorted(recs, key=lambda x: float(x.get("ts") or 0)):     # time order (stable; the record already is)
         k = r.get("kind")
         if k == "push" and r.get("to") == eid:
             gap = _push_gap(r, last_ch)
         elif k == "reach" and r.get("eid") == eid and not r.get("audit"):
-            o = _reply_o(r) if r.get("reply") and _medium(r) == medium else None
+            o = _reply_o(r) if r.get("reply") and _medium(r) == medium and _clock_of(r) == clock else None
             if o is not None:
                 rows.append({"ts": float(r.get("ts") or 0), "o": o,
                              "gap": gap, "p_llm": r.get("p_llm"), "model": r.get("llm_model"),
@@ -918,8 +997,20 @@ def _hold_reply(srv, push: dict, now: float) -> bool:
     """Not yet time for the reply check: under RUNG8_CHECK_S after the push --
     or, when the push asked the model and no answer has landed, under
     RUNG8_CHECK_S + RUNG8_GRACE_S (#217: a slow turn's answer still pairs).
-    Self only holds the other back; the cycle goes on with other targets."""
+    Self only holds the other back; the cycle goes on with other targets.
+
+    #278, a turn on the ball's clock: the check comes as soon as self sees
+    the ball back on its side, or TOY_CHECK_S after the roll (a reply can't
+    come later); an advisor's answer may hold it up to TOY_GRACE_S more."""
     age = now - float(push.get("ts") or 0)
+    if _medium(push) == "toy" and _clock_of(push) == TOY_CLOCK:
+        if push.get("asked") and age < TOY_CHECK_S + TOY_GRACE_S \
+                and _llm_pred(srv, push["to"], float(push["ts"]), until=now) is None:
+            return True
+        if age >= TOY_CHECK_S:
+            return False
+        from . import toybox as _TB
+        return (_TB.peek(push.get("toy") or "") or {}).get("side") != "self"
     if age < RUNG8_CHECK_S:
         return True
     if push.get("asked") and age < RUNG8_CHECK_S + RUNG8_GRACE_S:
@@ -960,8 +1051,8 @@ def _rung8_prompt(srv, eid: str, n: int, now: float, medium: str = "chat") -> st
                 else "The person has not played yet. ")
         return (f"You are predicting whether the person self plays ball with will roll the ball ({eid}) "
                 f"back to self by self's reply check. Self just rolled it to them (turn {n}); "
-                f"the reply check comes about {round(RUNG8_CHECK_S)}s from now "
-                f"(at most {round(RUNG8_CHECK_S + RUNG8_GRACE_S)}s). "
+                f"the reply check comes once self sees the ball back, at most {round(TOY_CHECK_S)}s from now "
+                f"(a roll back later than that is no reply). "
                 f"All-time: they had rolled it back by the reply check after {k} of {m} earlier turns -- "
                 f"all-time base rate {rate:.2f} (with a small prior). "
                 f"Recent: they had rolled it back after {kr} of the last {mr} -- "
@@ -1098,25 +1189,37 @@ def _roll(srv, toy: str) -> dict:
 
 
 def _ball_turn(srv, n: int, now: float) -> None:
-    """RUNG 7 WITH THE BALL (#264): the bandit (_turn_push, unchanged: the
-    same bins, caps and draws) picks the moment over the time since the other
-    last acted; then self rolls the ball to them through its own method
-    (field-only: no chat line, no shell) and the turn goes on the record as a
-    `push` with medium "toy" (the page's ripple and the reply check read that
-    kind). Rung 8 may ask its advisor at the turn, as at a push."""
+    """RUNG 7 WITH THE BALL (#264): the bandit (_turn_push: the same draws)
+    picks the moment over the time since the other last acted; then self
+    rolls the ball to them through its own method (field-only: no chat line,
+    no shell) and the turn goes on the record as a `push` with medium "toy"
+    (the page's ripple and the reply check read that kind). Rung 8 may ask
+    its advisor at the turn, as at a push.
+
+    #278, on the ball's own clock (TOY_CLOCK): never before the last roll's
+    reply check came, and only with the ball back on self's side -- an
+    unreturned ball is fetched at the cap (TOY_MEET_MAX cycles after the
+    last turn). Only the cycles self could roll in count as its waiting time."""
     ball = _ball(srv)
     if ball is None:
         return                                              # no ball, no turn (and still no chat)
     eid, name = ball
     recs = _read(srv)
+    if _pending(recs, now) is not None:
+        return                                              # #278: its last roll's check hasn't come
+    last = next((r for r in reversed(recs) if r.get("kind") == "push"), None)
+    waited = n - int(last.get("n") or 0) if last is not None else TOY_MEET_MAX
+    from . import toybox as _TB
+    if (_TB.peek(name) or {}).get("side") != "self" and waited < TOY_MEET_MAX:
+        return                                              # #278: the ball is with them; the cap fetches it
     acted = _last_acted(srv, now)
     age = None if acted is None else now - acted
     when: dict = {}
     if TURNS:
-        when = _turn_push(srv, recs, eid, n, age)
+        when = _turn_push(srv, recs, eid, n, age, clock=TOY_CLOCK)
         if when is None:
             return
-    elif n % MEET_EVERY != 1:                               # the timer (tests of the bare medium)
+    elif waited < TOY_MEET_EVERY:                           # the timer (tests of the bare medium)
         return
     from .night import method_call
     _ctx.cycle = {"srv": srv, "act": "roll", "now": now}
@@ -1130,7 +1233,8 @@ def _ball_turn(srv, n: int, now: float) -> None:
                       "why": str(out.get("text") or out.get("head") or out.get("error") or "")[:200]})
         return
     _rt(srv)["other"] = eid
-    rec = {"ts": now, "kind": "push", "n": n, "medium": "toy", "eid": _eid(), "to": eid, "toy": name, **when}
+    rec = {"ts": now, "kind": "push", "n": n, "medium": "toy", "clock": TOY_CLOCK, "eid": _eid(), "to": eid,
+           "toy": name, **when}
     if age is not None:
         rec["spoke_age"] = round(age, 1)                    # the other's last act, as known at the turn
     if _available(srv, 8):                                  # rung 8: ask the advisor AT the turn (#215)
@@ -1140,14 +1244,16 @@ def _ball_turn(srv, n: int, now: float) -> None:
 
 # ---- rung 7 (#258): take turns -- self's own timing --------------------------------
 
-def _turn_bin(age) -> int:
-    """The spoke_age bin: 0-2 min, 2-10, 10-30, 30+ (or the other never spoke)."""
+def _turn_bin(age, bins=TURN_BINS) -> int:
+    """The spoke_age bin: 0-2 min, 2-10, 10-30, 30+ (or the other never
+    spoke); on the ball's clock (#278, bins=TOY_TURN_BINS) 0-20 s, 20-60,
+    1-3 min, 3+ (or never acted)."""
     if age is None:
-        return len(TURN_BINS)
-    for i, hi in enumerate(TURN_BINS):
+        return len(bins)
+    for i, hi in enumerate(bins):
         if age < hi:
             return i
-    return len(TURN_BINS)
+    return len(bins)
 
 
 def _turn_post(rows: list[dict]):
@@ -1179,25 +1285,28 @@ def _turn_choose(rows: list[dict], rng) -> tuple[int, int | None]:
     return max(range(nb), key=lambda b: draws[b]), best
 
 
-def _turn_push(srv, recs: list[dict], to: str, n: int, age) -> dict | None:
+def _turn_push(srv, recs: list[dict], to: str, n: int, age, clock: int = 1) -> dict | None:
     """One cycle of rung 7's practice: count the moment (its bin) into this
     interval's waiting time and say whether to push now -- the push's fields
     (bin, aim, best, dwell, why) or None. Never sooner than MEET_EVERY cycles
-    after the last push; at MEET_MAX it goes anyway ('overdue')."""
+    after the last push; at MEET_MAX it goes anyway ('overdue'). On the
+    ball's clock (#278) its bins, gap and cap are TOY_*."""
     import random
+    ck = _clock(clock)
     last = next((r for r in reversed(recs) if r.get("kind") == "push"), None)
-    if last is not None and n - int(last.get("n") or 0) < MEET_EVERY:
+    if last is not None and n - int(last.get("n") or 0) < ck["every"]:
         return None
     rt = _rt(srv)
     st = rt.get("turn")
-    key = (to, float(last["ts"]) if last is not None else None)
+    key = (to, float(last["ts"]) if last is not None else None, clock)
     if st is None or st.get("key") != key:
-        aim, best = _turn_choose(_turn_rows(recs, to), random.Random(f"turn:{n}"))
-        st = rt["turn"] = {"key": key, "aim": aim, "best": best, "dwell": [0] * (len(TURN_BINS) + 1)}
-    b = _turn_bin(age)
+        rows = _turn_rows(recs, to, "toy", clock) if clock == TOY_CLOCK else _turn_rows(recs, to)
+        aim, best = _turn_choose(rows, random.Random(f"turn:{n}"))
+        st = rt["turn"] = {"key": key, "aim": aim, "best": best, "dwell": [0] * (len(ck["bins"]) + 1)}
+    b = _turn_bin(age, ck["bins"])
     st["dwell"][b] += 1
-    waited = (n - int(last.get("n") or 0)) if last is not None else MEET_EVERY - 1 + sum(st["dwell"])
-    if b != st["aim"] and waited < MEET_MAX:
+    waited = (n - int(last.get("n") or 0)) if last is not None else ck["every"] - 1 + sum(st["dwell"])
+    if b != st["aim"] and waited < ck["max"]:
         return None
     rt["turn"] = None
     return {"bin": b, "aim": st["aim"], "best": st["best"], "dwell": list(st["dwell"]),
@@ -1213,12 +1322,16 @@ def _replied(srv, push: dict, now: float, answer: str) -> bool:
     #264, a turn with the ball: did a PERSON roll it back after self's roll,
     by this check? The ball's other_at says so (the model's roll, or self's
     own, never sets it); the look's answer is not asked -- self's own roll
-    changed the ball too."""
+    changed the ball too. #278, on the ball's clock: within TOY_CHECK_S of
+    the roll, whenever the check comes."""
     if _medium(push) == "toy":
         from . import toybox as _TB
         st = _TB.peek(push.get("toy") or "") or {}
         at = st.get("other_at")
-        return bool(isinstance(at, (int, float)) and float(push.get("ts") or 0) < at <= now)
+        ts = float(push.get("ts") or 0)
+        if _clock_of(push) == TOY_CLOCK:
+            now = min(now, ts + TOY_CHECK_S)
+        return bool(isinstance(at, (int, float)) and ts < at <= now)
     est = getattr(srv, "entity_store", None)
     doc = (est.docs or {}).get(push.get("to")) if est is not None else None
     heard = (doc.properties or {}).get("heard_ts") if doc is not None else None
@@ -1227,24 +1340,27 @@ def _replied(srv, push: dict, now: float, answer: str) -> bool:
     return answer == "changed"
 
 
-def _turn_rows(recs: list[dict], eid: str, medium: str | None = None) -> list[dict]:
+def _turn_rows(recs: list[dict], eid: str, medium: str | None = None, clock: int | None = None) -> list[dict]:
     """Rung 7's pushes at `eid`, oldest first: the policy's pushes (they carry
     an aim and their waiting time) whose reply check recorded `replied`.
     Timer pushes don't count: they had no moment to choose. One medium only
     (#264: the current turn's by default -- chat turns and turns with the
     ball never share a window)."""
     medium = medium or _cur_medium(recs, eid)
+    if clock is None:                                     # #278: one clock only -- its bins mean its windows
+        clock = _cur_clock(recs, eid, medium)
     rows: list[dict] = []
     pend = None
     for r in recs:
         k = r.get("kind")
         if k == "push":
             pend = r if (r.get("to") == eid and r.get("aim") is not None and r.get("dwell")
-                         and _medium(r) == medium) else None
+                         and _medium(r) == medium and _clock_of(r) == clock) else None
         elif k == "reach" and r.get("eid") == eid and pend is not None:
             if r.get("reply") and isinstance(r.get("replied"), bool):
                 rows.append({"ts": float(pend.get("ts") or 0), "bin": int(pend.get("bin", len(TURN_BINS))),
-                             "best": pend.get("best"), "dwell": list(pend["dwell"]), "replied": r["replied"]})
+                             "best": pend.get("best"), "dwell": list(pend["dwell"]), "replied": r["replied"],
+                             "clock": clock})
             pend = None                                     # only the first look after the push is its check
     return rows
 
@@ -1271,8 +1387,9 @@ def _turn_deltas(rows: list[dict]) -> list[tuple]:
     return out
 
 
-def _turn_window(d: list[tuple]) -> dict:
-    """Rung 7's test over one window of _turn_deltas: (a) contingency, (b) payoff."""
+def _turn_window(d: list[tuple], clock: int = 1) -> dict:
+    """Rung 7's test over one window of _turn_deltas: (a) contingency, (b)
+    payoff -- against the bar of the turns' clock (#278)."""
     if not d:
         return {"n": 0, "share": None, "chance": None, "z": 0.0, "payoff": None, "payoff_z": 0.0,
                 "reply_rate": None, "blind_rate": None, "passed": False}
@@ -1284,8 +1401,9 @@ def _turn_window(d: list[tuple]) -> dict:
     sd = float(dl.std(ddof=1)) if len(dl) > 1 else 0.0
     t = pay / (sd / np.sqrt(len(dl))) if sd > 1e-12 else 0.0
     share, chance = float(inw.mean()), float(p0.mean())
-    ok = (len(d) >= RUNG7_PUSHES and z >= RUNG7_CONT_Z and share - chance >= RUNG7_CONT_MARGIN
-          and t >= RUNG7_PAY_Z and pay >= RUNG7_PAY_MARGIN)
+    ck = _clock(clock)
+    ok = (len(d) >= RUNG7_PUSHES and z >= ck["cont_z"] and share - chance >= ck["cont_margin"]
+          and t >= ck["pay_z"] and pay >= ck["pay_margin"])
     return {"n": len(d), "share": share, "chance": chance, "z": z, "payoff": pay, "payoff_z": float(t),
             "reply_rate": float(y.mean()), "blind_rate": float(y.mean()) - pay, "passed": bool(ok)}
 
@@ -1294,7 +1412,7 @@ def _turn_score(rows: list[dict]) -> dict:
     """Rung 7's test over the last RUNG7_PUSHES of `rows` (each scored on the
     TURN_MEMORY before it)."""
     rows = rows[-(RUNG7_PUSHES + TURN_MEMORY):]
-    return _turn_window(_turn_deltas(rows)[-RUNG7_PUSHES:])
+    return _turn_window(_turn_deltas(rows)[-RUNG7_PUSHES:], rows[-1].get("clock", 1) if rows else 1)
 
 
 def _reach(srv, target: str) -> dict:
@@ -1624,6 +1742,8 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
         rec["replied"] = _replied(srv, reply, now, c["answer"])   # #258: they spoke AFTER the push
         if _medium(reply) != "chat":
             rec["medium"] = _medium(reply)                       # #264: a check of a turn with the ball
+        if _clock_of(reply) != 1:
+            rec["clock"] = _clock_of(reply)                      # #278: ...on the ball's own clock
     if c.get("p_self") is not None:                      # rung 8: self's own read (#254)
         rec["p_self"] = round(c["p_self"], 4)
     if c.get("p_llm") is not None:                       # rung 8: the advisor's read, same look
@@ -2235,14 +2355,15 @@ def _rung7(recs: list[dict], tempo: dict | None = None) -> dict:
     to = _other(recs)
     rows = _turn_rows(recs, to) if to else []
     w = _turn_score(rows)
+    ck = _clock(rows[-1].get("clock", 1) if rows else 1)   # #278: the bar of the turns' clock
     crit = {"pushes": min(1.0, w["n"] / RUNG7_PUSHES)}
     if not w["n"]:
         crit.update({"contingency": 0.0, "payoff": 0.0})
         return {"crit": crit, "skill": 0.0, "passed": False, **{k: w[k] for k in w if k != "passed"}}
     exc = w["share"] - w["chance"]
-    crit["contingency"] = max(0.0, min(1.0, w["z"] / RUNG7_CONT_Z, exc / RUNG7_CONT_MARGIN))
-    crit["payoff"] = max(0.0, min(1.0, w["payoff_z"] / RUNG7_PAY_Z, w["payoff"] / RUNG7_PAY_MARGIN))
-    out = {"crit": crit, "skill": round(w["payoff"], 4), "eid": to,
+    crit["contingency"] = max(0.0, min(1.0, w["z"] / ck["cont_z"], exc / ck["cont_margin"]))
+    crit["payoff"] = max(0.0, min(1.0, w["payoff_z"] / ck["pay_z"], w["payoff"] / ck["pay_margin"]))
+    out = {"crit": crit, "skill": round(w["payoff"], 4), "eid": to, "clock": rows[-1].get("clock", 1),
            "passed": bool(w["passed"] and all(v >= 1.0 for v in crit.values()))}
     out.update({k: (round(v, 4) if isinstance(v, float) else v) for k, v in w.items() if k != "passed"})
     return out
@@ -2528,18 +2649,21 @@ def _rung7_stats(recs: list[dict]) -> dict:
     to = _other(recs)
     pushes = sum(1 for r in recs if r.get("kind") == "push" and r.get("to") == to and r.get("aim") is not None)
     rows = _turn_rows(recs, to) if to else []
+    medium = _cur_medium(recs, to)
+    clock = _cur_clock(recs, to, medium)
+    names = _clock(clock)["names"]                      # #278: the windows of the turns' clock
     k, n = _turn_post(rows)
     best = None
     if n.sum() > 0:
         mean = (k + 1.0) / (n + 2.0)
-        best = TURN_NAMES[max(range(len(k)), key=lambda b: (mean[b], n[b], -b))]
-    bins = [{"bin": TURN_NAMES[b], "pushes": int(n[b]), "replied": int(k[b]),
+        best = names[max(range(len(k)), key=lambda b: (mean[b], n[b], -b))]
+    bins = [{"bin": names[b], "pushes": int(n[b]), "replied": int(k[b]),
              "rate": round(float(k[b] / n[b]), 4) if n[b] else None} for b in range(len(k))]
     w = _turn_score(rows)
 
     def r4(x):
         return None if x is None else round(float(x), 4)
-    return {"medium": _cur_medium(recs, to), "pushes": pushes, "checked": len(rows[-TURN_MEMORY:]),
+    return {"medium": medium, "clock": clock, "pushes": pushes, "checked": len(rows[-TURN_MEMORY:]),
             "bins": bins, "best": best,
             "window": w["n"], "share": r4(w["share"]), "chance": r4(w["chance"]), "z": round(w["z"], 2),
             "payoff": r4(w["payoff"]), "payoff_z": round(w["payoff_z"], 2),

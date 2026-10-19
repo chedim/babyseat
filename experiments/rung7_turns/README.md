@@ -121,7 +121,8 @@ to the other, and the other can roll it back only while it is on their
 side. The moment self waits for is the time since the other last **acted**
 (their last roll of the ball or poke on any toy). A reply is their roll
 after self's turn, by the check. Same policy, same caps, same bar; `drive_toy`
-in `sim.py`. 100 seeds × a week:
+in `sim.py` as it was at #264 (on the chat's clock; superseded by #278,
+below). 100 seeds × a week:
 
 | other | pusher | turns/h | passes within a week | median h to pass | best window's payoff t, q50 / q95 / q99 | reply rate vs timing-blind (last window) |
 |---|---|---|---|---|---|---|
@@ -152,6 +153,96 @@ presence (*present*) passes in about half the weeks: the policy gains only
 at the moments the person comes back, since while they are here every
 moment gets the ball back. A coin, a timer on either side and a machine
 never pass.
+
+## the ball's own clock (#278): turns in seconds
+
+    python experiments/rung7_turns/sim.py 100 168 toy jobs=11
+
+On the chat's clock a person who rolled the ball back waited 5-30 minutes for
+self's next roll. From #278 a turn with the ball runs on its own clock
+(`TOY_*` in `membrane/self_loop.py`, chat unchanged):
+
+- **bins** of seconds since the other last acted: 0-20 s, 20-60 s, 1-3 min,
+  3 min+ (or never). A 10 s cycle resolves them: the first spans two cycles
+  (the one that sees the ball back and the next), then 4, 12, and 3 min+ is
+  still choosable under the cap;
+- a turn at most every **2 cycles**, overdue (the ball fetched) after **30
+  cycles** (5 min);
+- **the order of a turn**: self rolls; its reply check comes the cycle it
+  sees the ball back, or 30 s after the roll; a **reply** is a person's roll
+  within 30 s (`TOY_CHECK_S`), whenever the check comes. Self never rolls
+  again before that check, and only with the ball back on its side (the cap
+  fetches an unreturned one). Only those cycles count as its waiting time
+  (`dwell`, where a shuffled roll could land);
+- turns on this clock carry `clock: 2` (their checks too); rungs 7 and 8 read
+  only the current clock's turns, so #264's minute-bins never mix in.
+
+`drive_toy` runs those rules. Partners (a roll back 5-20 s after self's):
+*rhythmic* is engaged right after their own act, 0.08 + 0.8·exp(−age/60 s);
+*present* 0.85 whenever here; *late* only 1-3 min after their last act;
+*session* plays 1-2 h then is away 4-10 h, rolls it back 0.9 while there;
+*memoryless* rolls it back at random (~1 a minute) whatever self does;
+*metronome* every 47 s on the dot; *clock* every 470 s; *machine* always 10 s
+after self's turn. 100 seeds × a week, the test read at every turn:
+
+**The bar had to rise.** ~15-30 turns an hour instead of ~3-5 is ~6× more
+windows a week, so chance's best window climbs. At the chat's bar (payoff
+t ≥ 4) the memoryless returner passed in **25** of 100 weeks (coin 2). Pass
+rates by payoff bar (contingency z ≥ 3 and +0.10, payoff ≥ +0.05 throughout;
+z ≥ 4 or 5 changes nothing):
+
+| other | t ≥ 4 | t ≥ 4.5 | **t ≥ 5** | t ≥ 5.5 | t ≥ 6 |
+|---|---|---|---|---|---|
+| memoryless returner | 25 | 8 | **2** | 1 | 0 |
+| coin flip | 2 | 1 | **0** | 0 | 0 |
+| session player | 100 | 99 | **99** | 98 | 89 |
+| present | 98 | 88 | **80** | 72 | 54 |
+| late | 96 | 85 | **65** | 41 | 23 |
+
+So the ball's bar is **payoff t ≥ 5** (`TOY_RUNG7_PAY_Z`; the chat keeps 4):
+chance back to 2 of 100. At that bar:
+
+| other | pusher | turns/h | passes within a week | median h to pass | median play-h to pass | best window's payoff t, q50 / q95 / q99 | reply rate vs timing-blind (last window) |
+|---|---|---|---|---|---|---|---|
+| session player | policy | 18.0 | **0.99** | 31 | **6.0** | 7.24 / 10.42 / 13.34 | 0.45 vs 0.43 |
+| present | policy | 23.6 | 0.80 | 38 | 16.1 | 6.10 / 7.92 / 8.97 | 0.53 vs 0.56 |
+| late | policy | 13.3 | 0.65 | 62 | 27.7 | 5.33 / 7.00 / 7.82 | 0.13 vs 0.08 |
+| rhythmic | policy | 16.1 | **0.00** | | | 0 / 3.11 / 3.65 | 0.26 vs 0.28 |
+| rhythmic | timer | 17.9 | 0.00 | | | 0 | 0.32 vs 0.32 |
+| rhythmic | random delay | 15.9 | 0.00 | | | 0 | 0.26 vs 0.26 |
+| coin flip | policy | 19.1 | **0.00** | | | 2.91 / 3.73 / 4.15 | 0.50 vs 0.49 |
+| coin flip | timer | 22.5 | 0.00 | | | 0 | 0.50 vs 0.50 |
+| memoryless returner | policy | 29.1 | **0.02** | 57 | 20.1 | 3.54 / 4.64 / 5.18 | 0.42 vs 0.40 |
+| a player on a timer (470 s) | policy | 13.4 | **0.00** | | | 2.40 / 2.86 / 3.03 | 0.17 vs 0.14 |
+| a machine that always returns it | policy | 45.8 | **0.00** | | | 0 | 1.00 vs 1.00 |
+| a metronome (47 s) | policy | 65.9 | 1.00 | 1.5 | 0.8 | 47 / 104 / 223 | 0.95 vs 0.66 |
+
+*Median play-h* is the hours the other had been at the dock by the pass (for
+the session player: about four sessions). Turns/h counts the whole week,
+away hours included (a roll every 5 min into the void). While a session
+player is there, self's next roll comes a median 40 s after its previous one
+(q25-q75 20-80 s; 67% within a minute, never over 5 min).
+
+**What changed, honestly:**
+
+- **The chat's turn-taker no longer passes (98 → 0).** Its best moment is
+  "at once", the first moment after their roll back. On the ball's clock
+  that moment opens every wait (self waits for the ball), and a timer rolls
+  there too: the contingency, which credits a choice a shuffled moment would
+  not have made, gets z ≤ 0 when the believed-best bin is the first one. The
+  policy does learn it (best = 0-20 s), and the timer gets as many replies
+  (0.32 vs 0.26). "Answer at once" is no learned timing, so rung 7 rightly
+  can't tell it from a timer.
+- **A session player passes**, in about 6 hours of play: rolling into an
+  empty room (3 min+) gets nothing, and the 0-3 min moments get the ball
+  back while they're there.
+- **A metronome next to the check passes.** Rolling 20-60 s after its tick
+  really does get the ball back within 30 s (0.95 vs 0.66 for a timing-blind
+  roll): that is learnable phase, not chance, and no payoff bar can exclude
+  it (t ~ 47) without excluding every real partner. Its period matters:
+  47 s and 90 s pass in 20 of 20 runs, 20, 30, 150 and 240 s in 0 of 20; on
+  the chat's clock a 240 s metronome passed 6 of 20 (#264's sim with the
+  period changed) and the 470 s one in 0, so it is not new with the ball.
 
 ## choosing the numbers
 
