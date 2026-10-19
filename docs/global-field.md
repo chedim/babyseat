@@ -4,6 +4,16 @@ Status: **commons on the entity field** (the `claims` collection, origin
 `commons`), consensus promotion at night, the old JSON commons converted
 once. The peers layer (registry + live ask) is unchanged.
 
+**Shared only on the merged field.** The commons rows live in whatever
+backend the seat's field uses. By default that is the seat's own local
+field (`.membrane/field/`, see [seat-first-2-tier.md](seat-first-2-tier.md)),
+so `remember globally` writes a commons claim only THIS seat reads, and
+the night's consensus pass never fires (it needs claims from two origins,
+and a local field holds one). The commons is a team commons only when the
+seats opt into the merged field with `MEMBRANE_FIELD_CLOUD=1`
+([multi-dev-field.md](multi-dev-field.md)). Publishing an entity
+(`entity_edit` `publish: true`) does not touch the commons.
+
 ## The principle
 
 Local fields are the actors ("no central router" — a single oracle is
@@ -42,8 +52,9 @@ the claim.
 
 ## Coordination (no election, no leader, by design)
 
-The commons rows live in the shared scope, an origin of their own
-(`commons`) inside the `claims` collection — every seat reads them, only
+The commons rows live in the shared scope (on the merged field), an origin
+of their own (`commons`) inside the `claims` collection — every seat reads
+them, only
 the night's consensus pass (or the operator) writes them. There is
 nothing to elect.
 
@@ -62,12 +73,15 @@ nothing to elect.
   `forget #N` never touches it.
 - Secrets: the commons is operator- or consensus-curated; promoting a
   secret is an explicit act, audited, forgettable.
-- Peer asks (`membrane/peers.py`) remain a separate lane: a live teammate
-  answers from THEIR field over `/membrane/ask` (read-only, bounded) —
-  any hit rides as `[membrane-intercept]` context, any failure degrades
-  to the model path silently.
+- Peer asks (`global_field.Peers`) remain a separate lane: a live sibling
+  membrane on the same machine (`~/.membrane/peers.jsonl`, asked at
+  `127.0.0.1`) answers from ITS field over `/membrane/ask` (read-only,
+  bounded) — any hit rides as `[membrane-intercept]` context, any failure
+  degrades to the model path silently.
 
 ## Test
 
-`python -m pytest tests/test_global_field.py -q` (the commons promotion +
-conversion on the MemBackend fake).
+`python -m pytest tests/test_sharing.py -q` (two origins on one
+MemBackend: the commons promotion + the one-time conversion, merged reads,
+divergence); `tests/test_global_field.py` covers the field id and the
+same-machine peer livelist + ask.

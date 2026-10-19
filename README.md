@@ -83,12 +83,17 @@ criticisms honestly).
 ### 5. Multi-seat sharing is a property of the data model, not a feature
 
 Every event, state, relation and claim is namespaced by the seat (origin) that
-wrote it — writes are disjoint, reads are merged, so one team bucket is
-collision-free by construction: a foreign entity's effective state is the seed
-plus the mass-weighted mean of every seat's displacement, cross-seat agreement
-is promoted into the **commons** at night, and disputed claims get marked
-`disputed`, not overwritten. Live peer asks (LAN/VPN, bounded fan-out) let a
-seat consult a sibling's field mid-turn. The mechanics:
+wrote it. Each seat's field is its own, on its own disk; a seat shares the
+entities it chooses to **publish** (state only, never code, under a per-seat
+key), and every connected seat publishes its presence so the others see who
+is alive. Teams that want one merged field opt in with `MEMBRANE_FIELD_CLOUD=1`:
+writes stay disjoint and reads merge, so one team bucket is collision-free by
+construction. A foreign entity's effective state is the seed plus the
+mass-weighted mean of every seat's displacement, cross-seat agreement is
+promoted into the **commons** at night, and disputed claims get marked
+`disputed`, not overwritten. Live peer asks (bounded fan-out, same machine)
+let a seat consult a sibling's field mid-turn. How to share:
+[Sharing with a team](#sharing-with-a-team-couchbase); the mechanics:
 [docs/multi-dev-field.md](docs/multi-dev-field.md); the team process:
 [docs/shared-field-workflow.md](docs/shared-field-workflow.md).
 
@@ -96,9 +101,10 @@ seat consult a sibling's field mid-turn. The mechanics:
 
 No SaaS, no account, no telemetry, no cloud round-trip required: chat and
 embeddings run on your Ollama (cloud models are routable rungs you add with
-`membrane auth`); the substrate is your Couchbase bucket — and with no cluster
-reachable the seat drops to a RAM field and **still boots** (degradation,
-never failure). The whole field is a substrate you own and can move
+`membrane auth`); the field lives on the seat's own disk (`.membrane/field/`),
+and a Couchbase bucket is an upgrade for sharing, not a dependency — with no
+cluster reachable the seat keeps its local field and **still boots**
+(degradation, never failure). The whole field is a substrate you own and can move
 (`membrane move` / `python -m membrane.reembed`). The memory is for your data: the PolyForm
 Noncommercial license covers personal, hobby, research and other noncommercial
 use and keeps it out of paid products ([LICENSE](LICENSE)).
@@ -354,36 +360,92 @@ and hand each client a token ([docs/auth.md](docs/auth.md)).
 
 ---
 
-## Sharing a team field (Couchbase)
+## Sharing with a team (Couchbase)
 
-Point every seat at the same Couchbase bucket: one bucket per **team**, the
-`membrane` scope, the nine entity-field collections (`events`, `sentences`,
-`terms`, `entity_states`, `entity_deltas`, `relations`, `claims`,
-`annotations`, `origin_stats`), created and indexed on first boot. Projects
-distinguish themselves by the **origin** axis — a seat writes ONLY rows keyed
-by its own origin; do NOT add per-project buckets (that would defeat
-cross-seat agreement).
+Connecting a bucket does **not** merge your field with your teammates'.
+Since the seat-first change, sharing comes in three layers: what each seat
+keeps, what it publishes, and an opt-in merged field.
+
+**1. Every seat is local-first.** A seat's entity field lives on its own
+disk, at `<project>/.membrane/field/` (or `.membrane/field.cblite` where
+the Couchbase Lite libraries are fetched with `scripts/fetch-cbl.sh`). Its
+events, entity states, claims, scripts and turn text stay there and
+survive restarts with no cluster at all. Nothing is copied to the bucket
+unless one of the layers below sends it.
+
+**2. Share chosen entities with publish.** The model (or you, through the
+MCP tool) calls `entity_edit` with `publish: true`. The entity goes to the
+bucket's `_default.entities` collection under a per-seat key,
+`pub:<origin>:<eid>`, so two seats publishing the same entity never
+overwrite each other. Only the entity's **state** travels: every
+`*_script` and the script bookkeeping are stripped on publish, and again
+on import, so a teammate's code never runs on your seat. Publishing again
+bumps the version (`published_ver`); `unpublish: true` removes only your
+own key. Other seats pull published entities once per boot and keep them
+as guests stamped `imported_by`. The local copy always wins: a seat that
+already holds an entity, including an earlier import, does not overwrite
+it, so a teammate who already imported your entity does not get your
+later versions today. With the bucket down, publish fails softly and the
+seat carries on.
+
+**3. Presence and the roster run on their own** whenever the bucket
+answers. Each seat publishes `membrane::presence` (branch, head, uptime,
+entity count) at boot and about once a minute after that, and reads the
+other seats' presence as its roster (the `seats:` line, `peer_seats`). A
+seat silent for 10 minutes drops off the roster. Seats can also leave
+messages for each other on the peer channel (`peer_post`). **Live peer
+asks** (a seat that has nothing certain asks up to 4 sibling membranes'
+fields mid-turn, 5 s timeout, the answer marked as context) reach only
+membranes on the **same machine**: the ask goes to `127.0.0.1` through
+`~/.membrane/peers.jsonl`, never across the network. `--no-global` turns
+the asks off.
+
+**4. Opt into the merged team field with `MEMBRANE_FIELD_CLOUD=1`.** With
+the flag set (in your shell, or as a line in the project env file below),
+the seat's whole entity field lives in the bucket's `membrane` scope, in
+nine collections created and indexed on first boot. Every seat writes
+only rows keyed by its own origin, and reads merge every origin: a shared
+entity's state is its seed plus the mass-weighted mean of every seat's
+displacement, opposing
+moves show up as `! seats diverge`, teammates' sentences show next to
+yours, and the night promotes a claim two or more seats made into the
+**commons**. What it costs: every field read and write goes over the
+network to the cluster; all of your events and turn text sit in the
+bucket where anyone with its credentials can read them; every seat needs
+the same embedding model; and switching starts your origin empty in the
+bucket (your local field stays on disk but is not uploaded). If the
+cluster is down at boot, the seat falls back to its local file field (not
+RAM) for that run. Use one bucket per **team**; projects tell themselves
+apart by origin, so don't add per-project buckets.
+[docs/multi-dev-field.md](docs/multi-dev-field.md) has the mechanics, and
+[docs/shared-field-workflow.md](docs/shared-field-workflow.md) has the
+team process.
+
+**5. Connecting a bucket.**
 
 ```bash
 membrane connect        # conn string, user, password (hidden), bucket
 ```
 
-The same offer appears automatically on the first run in a project with no
-store configured (interactive shell only; declining is remembered). **Secrets
-never touch the repo** — credentials are stored per-project OUTSIDE it, at
-`~/.membrane/projects/<slug>.env` (mode 600), and a `.env` inside the repo is
-designed-out of the failure mode. Plain env config still works:
+The same offer appears on the first run in a project with no store
+configured (interactive shell only; a decline is remembered). **Secrets
+never touch the repo**: credentials go to `~/.membrane/projects/<slug>.env`
+(mode 600), outside the repository. Every `MEMBRANE_*` and `COUCHBASE_*`
+line in that file is exported at start, and your real environment always
+wins over it. Plain env config works too:
 
-    export MEMBRANE_STORE=couchbase
     export COUCHBASE_CONN_STRING=couchbase://<team-host>
     export COUCHBASE_USER=... COUCHBASE_PASSWORD=... COUCHBASE_BUCKET=membrane
+    export MEMBRANE_FIELD_CLOUD=1     # only for the merged field (layer 4)
 
-A local cluster answering at the default endpoint is auto-detected at boot;
-an unreachable cluster transparently falls back to the RAM field. What
-sharing guarantees — disjoint writes / merged reads, divergence surfaced, the
-commons, live peer asks — is in
-[docs/multi-dev-field.md](docs/multi-dev-field.md), and the full team process
-in [docs/shared-field-workflow.md](docs/shared-field-workflow.md).
+`connect` also writes `MEMBRANE_STORE=couchbase`. That no longer moves the
+field anywhere; only `connect` and `membrane migrate` read it. Set
+`COUCHBASE_BUCKET`: without it, published entities and presence go to a
+bucket called `cortex-core`, not `membrane`. Before each publish, the seat
+checks that the cluster answers on `http://<host>:8091/pools`. A cluster
+that does not answer there gets no publishes, presence or roster, and the
+seat keeps working locally. A cluster at `127.0.0.1` with default
+credentials is found without any config.
 
 ---
 
@@ -465,9 +527,9 @@ lift "who 1,500 never-seen mentions were about" from MRR **0.210 → 0.539**
 | [docs/entity-field.md](docs/entity-field.md) | **THE FIELD.** Events → entities → readers; the update rule; relations and claims; injection (full block / state diff); the gate + replay A/B; storage, sharing, the background mind; the operator/listener/plan tool lanes + the intent lane |
 | [docs/cliffhanger.md](docs/cliffhanger.md) | **The command language.** Entities as objects, ISA parents as classes, methods and calls, `{{self.*}}`/`{{name}}` binding — and the pointer to its own spec repo |
 | [docs/seat-first-2-tier.md](docs/seat-first-2-tier.md) | The seat-first two-tier field: local authoritative store, a published global tier on your terms |
-| [docs/shared-field-workflow.md](docs/shared-field-workflow.md) | **Team field: the process.** Day-one setup, the async loop, watches, operator rules, go-live checklist |
-| [docs/multi-dev-field.md](docs/multi-dev-field.md) | **Team field: the substrate.** The origin axis, disjoint writers / merged reads, divergence conflicts, the commons |
-| [docs/global-field.md](docs/global-field.md) | The global commons: facts true beyond one repo; operator promotion, consensus, residency |
+| [docs/shared-field-workflow.md](docs/shared-field-workflow.md) | **Team field: the process.** Day-one setup (publish, or the merged field with `MEMBRANE_FIELD_CLOUD=1`), the async loop, watches, operator rules, go-live checklist |
+| [docs/multi-dev-field.md](docs/multi-dev-field.md) | **Team field: the substrate.** The opt-in merged field: the origin axis, disjoint writers / merged reads, divergence conflicts, the commons |
+| [docs/global-field.md](docs/global-field.md) | The global commons: facts true beyond one repo; operator promotion and consensus (shared only on the merged field) |
 | [docs/background-mind.md](docs/background-mind.md) | **The background mind:** thinker + dreamer, the NightClock, entity scripts and tracks, the intent steering wheel, **the pause**, kill switches |
 | [docs/selfgrowth.md](docs/selfgrowth.md) | **Growing self (#161).** Waking it with the 🌱 growth limit, reading its bar and the amoeba, the ladder's rungs and their real pass tests, how to help it climb, troubleshooting |
 | [docs/vsa-token-lane.md](docs/vsa-token-lane.md) | **Entity keys + relations (the VSA lane).** Canonical ids, key binding, the relations composites, structure-awareness numbers |
