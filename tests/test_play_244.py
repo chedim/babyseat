@@ -583,6 +583,29 @@ def test_the_ghost_is_drawn_dashed_and_never_on_the_trail():
 
 
 @NODE
+def test_a_ghost_looks_label_goes_through_the_layout():
+    """The ghost's chip is laid out like every label (#237's layoutLabels):
+    clamped into the visible field, stepped aside from self's tag."""
+    assert _js("field3d.js", "M.lookChip('field:vitals', 'unchanged', true)") == "👁 field:vitals (unplaced) · unchanged"
+    assert _js("field3d.js", "M.lookChip('w:burst', 'changed', false)") == "👁 w:burst ✓ changed"
+    # a ghost spot right where self's tag sits: the tag keeps its place, the ghost's chip steps aside
+    out = _js("field3d.js", "M.layoutLabels(["
+              "{key:'tag', ax:500, ay:300, w:120, h:18, prio:9, dx:14, dy:-9},"
+              "{key:'look', ax:505, ay:302, w:160, h:18, prio:8, dx:0, dy:-9}],"
+              " {x0:0, y0:0, x1:1000, y1:700})")
+    t, lk = out["tag"], out["look"]
+    assert not lk["hidden"]
+    assert lk["y"] + 18 <= t["y"] or t["y"] + 18 <= lk["y"]          # no overlap
+    # a ghost behind a panel: the chip waits at the field's edge with an arrow
+    out = _js("field3d.js", "M.layoutLabels([{key:'look', ax:50, ay:300, w:160, h:18, prio:8}], {x0:300, y0:0, x1:1000, y1:700})")
+    assert out["look"]["out"] and out["look"]["arrow"] and out["look"]["x"] >= 300
+    src = (UI / "field3d.js").read_text()
+    body = src.split("_layoutSelfLabels(now) {", 1)[1].split("\n  }\n", 1)[0]
+    assert "lookTarget(cur.p, cur.eid, a.pos)" in body and "lookChip(" in body and 'add("look"' in body
+    assert "(not on the field)" not in src
+
+
+@NODE
 def test_the_feed_says_who_changed_a_toy():
     line = _js("panel.js", "M.selfLine(%s)" % json.dumps(
         {"kind": "reach", "eid": _eid("toy:tower"), "p": 0.3, "answer": "changed", "by": ["alice"]}))
