@@ -26,6 +26,9 @@
  */
 const F3_WORLD = 1000;
 const LOCATE_CACHE_MAX = 500;      // every entity a mind touches is located: cap it
+const BRAIN_TRAIL = 8;             // #237: self's last looks drawn (dots + paths), capped
+const BRAIN_RINGS = 4;             // #237: shift / level-up rings alive at once, capped
+function trailAlpha3(i, n) { return 0.15 + 0.75 * (i + 1) / Math.max(1, n); }   // = home.js trailAlpha
 const F3_AGENTS = {
   chat: "#ffd166", phone: "#06d6a0", "loop-1": "#ef476f", "loop-2": "#f78c6b",
   "loop-3": "#c77dff", loop: "#ff8fab", thinker: "#4cc9f0", dreamer: "#b5e48c",
@@ -661,6 +664,7 @@ class Field3DView {
     this._stepEdgePulses(now);
     this._stepAvatars(dt);
     this._stepSelf(now);
+    this._stepBrain(now);
     if (this.showLabels && now - this._lastLabels > 180) { this._lastLabels = now; this._paintLabels(); }
     this.renderer.render(this.scene, this.camera);
     this._gaugeFrame(performance.now() - now);
@@ -1146,9 +1150,12 @@ class Field3DView {
       a.pos = a.tw.from.map((v, i) => v + (a.tw.to[i] - v) * e);
       if (u >= 1) a.tw = null;
     }
-    const wob = 1 + 0.08 * Math.sin(now / 260) + 0.05 * Math.sin(now / 97);      // it is alive
+    const rm = this.reducedMotion();
+    const wob = rm ? 1 : 1 + 0.08 * Math.sin(now / 260) + 0.05 * Math.sin(now / 97);      // it is alive
     a.sprite.position.set(a.pos[0], a.pos[1], a.pos[2]);
     a.sprite.scale.set(40 * wob, 40 / wob, 1);
+    a.sprite.visible = !this.selfEyes;             // 👁 self's eyes (#237): the camera IS the amoeba
+    a.sprite.material.opacity = (this.brain && this.brain.dimUntil > now) ? 0.3 : 1;   // a wait: it dims
     const seg = (ln, p, q) => {
       ln.visible = !!(p && q);
       if (!ln.visible) return;
@@ -1168,15 +1175,22 @@ class Field3DView {
     const pushed = a.pushAt != null && now - a.pushAt < 1400;
     const answered = a.heardAt != null && now - a.heardAt < 1400;
     if (a.other) {
-      a.other.visible = pushed || answered;
+      // THE PERSON SELF MEETS (#237): a labelled presence wherever their
+      // chat:in sits on the field (the field's edge until it is placed);
+      // a push beams out to them, their reply flashes back to self
+      const who = this.selfOther;
+      if (who && who.p) a.other.position.set(who.p[0], who.p[1], who.p[2]);
+      a.other.visible = pushed || answered || !!who;
       if (a.other.visible) {
-        const s = 1 + (answered ? 0.8 * Math.sin(now / 110) : 0.2 * Math.sin(now / 260));
+        const s = rm ? (pushed || answered ? 1.3 : 1)
+          : 1 + (answered ? 0.8 * Math.sin(now / 110) : pushed ? 0.2 * Math.sin(now / 260) : 0);
         a.other.scale.set(30 * s, 30 * s, 1);
-        a.other.material.opacity = pushed && !answered ? 0.9 : 0.5 + 0.5 * Math.abs(Math.sin(now / 110));
+        a.other.material.opacity = answered ? (rm ? 1 : 0.5 + 0.5 * Math.abs(Math.sin(now / 110))) : pushed ? 0.9 : 0.55;
       }
       seg(a.beam, a.pos, a.other.position.toArray());
-      a.beam.visible = pushed;                       // the outbound half only
-      a.beam.material.opacity = answered ? 0.3 : 0.9;
+      a.beam.visible = pushed || answered;           // out on a push, back on the reply
+      a.beam.material.opacity = answered ? (rm ? 0.8 : 0.35 + 0.6 * Math.abs(Math.sin(now / 90))) : 0.9;
+      a.beam.material.color.setHex(answered ? 0x7cf0c8 : 0xffd27a);
     }
     for (const m of a.marks) {
       const q = P[m.key];
@@ -1191,7 +1205,7 @@ class Field3DView {
     for (let i = 0; i < 32; i++) { const q = a.trail[Math.max(0, a.trail.length - 32 + i)] || a.pos; tp.setXYZ(i, q[0], q[1], q[2]); }
     tp.needsUpdate = true;
     const sc = this._project(a.pos);
-    a.tag.style.display = sc ? "" : "none";
+    a.tag.style.display = sc && !this.selfEyes ? "" : "none";   // 👁: the camera is self
     if (sc) a.tag.style.transform = "translate(" + (sc[0] + 14).toFixed(0) + "px," + (sc[1] - 6).toFixed(0) + "px)";
     const skill = L.skill == null ? "" : " · skill " + Number(L.skill).toFixed(2);
     const otherEid = (L.meets || {}).other;
@@ -1200,6 +1214,203 @@ class Field3DView {
     a.tag.textContent = "self · rung " + (L.rung || 0) + " · " + Math.round(100 * (L.bar || 0)) + "%" + skill
       + (L.steer != null ? " · lands " + Math.round(100 * L.steer) + "% closer to its aim" : "")
       + (L.slipping ? " · slipping" : "") + (L.mode === "watch" ? " · watched" : "") + meet;
+  }
+
+  // ---------------------------------------------------------- #237: THE BRAIN ON THE SCREEN
+  // What self looks at now (a beam + a label with its answer), the trail of
+  // its last BRAIN_TRAIL looks (fading with age), a pulse ring where rung 5
+  // noticed a shift, a dim on a wait, a gold ring on a level-up. home.js
+  // feeds it from self's record (read-only); positions are where the field
+  // already places a thing (its drawn point, else the seat's locate) -- a
+  // thing with neither gets its label beside the amoeba, never a made-up spot.
+  // Capped: BRAIN_TRAIL dots + paths, BRAIN_RINGS rings, three labels.
+
+  /** prefers-reduced-motion: no pulses, no glides -- static marks instead. */
+  reducedMotion() {
+    if (this._rmq === undefined) {
+      this._rmq = (typeof window !== "undefined" && window.matchMedia) ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+    }
+    return !!(this._rmq && this._rmq.matches);
+  }
+
+  /** Where a thing sits on the field now (world coordinates), or null. */
+  async placeOf(eid) {
+    if (!eid) return null;
+    const s = this.slots.get(eid);
+    if (s != null && this.sizeA[s]) return [this.posA[s * 3], this.posA[s * 3 + 1], this.posA[s * 3 + 2]];
+    if (!this.pid) return null;
+    const hit = await this._locate(eid);
+    return hit && hit.p ? cubeToWorld(hit.p) : null;
+  }
+
+  _brainObjs() {
+    if (this.brain && this.brain.beam) return this.brain;
+    const b = this.brain = this.brain || { looks: [], rings: [] };
+    const THREE = this.THREE;
+    if (!THREE || !this.scene) return b;
+    const line = (color) => new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+      new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9, depthWrite: false }));
+    const dc = document.createElement("canvas"); dc.width = dc.height = 32;
+    const dg = dc.getContext("2d"); dg.beginPath(); dg.arc(16, 16, 10, 0, 2 * Math.PI); dg.lineWidth = 4; dg.strokeStyle = "#fff"; dg.stroke();
+    const dotTex = new THREE.CanvasTexture(dc);
+    b.beam = line(0xffe08a); b.beam.renderOrder = 3; b.beam.visible = false;
+    b.dots = []; b.paths = [];
+    for (let i = 0; i < BRAIN_TRAIL; i++) {
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: dotTex, transparent: true, depthWrite: false, sizeAttenuation: false }));
+      sp.scale.set(0.035, 0.035, 1); sp.visible = false;
+      b.dots.push(sp);
+      const pl = line(0xf0a830); pl.visible = false; b.paths.push(pl);
+      this.scene.add(sp, pl);
+    }
+    this.scene.add(b.beam);
+    const lab = (css) => {
+      const el = document.createElement("div");
+      el.style.cssText = "position:absolute;left:0;top:0;font:600 12px system-ui,sans-serif;text-shadow:0 1px 3px #000,0 0 2px #000;"
+        + "white-space:nowrap;pointer-events:none;display:none;" + css;
+      this.labelLayer.appendChild(el);
+      return el;
+    };
+    b.lookLab = lab("color:#ffe08a;padding:1px 6px;border-radius:8px;background:rgba(10,14,20,.55)");
+    b.ringLab = lab("color:#ffb347");
+    b.otherLab = lab("color:#ffd27a;font-size:13px");
+    b.trailDirty = true;
+    return b;
+  }
+
+  /** self looked at a thing (p: where it sits, or null when the field has no place for it). */
+  selfLook(eid, p, label, answer) {
+    const b = this._brainObjs();
+    b.looks.push({ eid, p: p ? p.slice() : null, label: label || eid, answer, t0: performance.now() });
+    if (b.looks.length > BRAIN_TRAIL) b.looks.shift();
+    b.trailDirty = true;
+  }
+
+  /** The look self has on now (for 👁 self's eyes): {eid, p, age} or null. */
+  selfLookNow() {
+    const b = this.brain, l = b && b.looks[b.looks.length - 1];
+    return l ? { eid: l.eid, p: l.p, age: performance.now() - l.t0 } : null;
+  }
+
+  /** The points of the trail of looks that have a place (◎ self frames them). */
+  selfLookPoints() { return ((this.brain && this.brain.looks) || []).map((l) => l.p).filter(Boolean); }
+
+  /** self's aim (world coordinates), or null before it steers. */
+  selfAim() { const a = this.amoeba; return a && a.pts && a.pts.aim ? a.pts.aim.slice() : null; }
+
+  _brainRing(p, color, text, gold) {
+    const b = this._brainObjs(), THREE = this.THREE;
+    if (!THREE || !this.scene) return;
+    while (b.rings.length >= BRAIN_RINGS) { const o = b.rings.shift(); this.scene.remove(o.m); o.m.geometry.dispose(); o.m.material.dispose(); }
+    const m = new THREE.Mesh(new THREE.RingGeometry(0.82, 1, 48),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.9, side: THREE.DoubleSide, depthWrite: false }));
+    m.renderOrder = 3;
+    this.scene.add(m);
+    b.rings.push({ m, p: p ? p.slice() : null, t0: performance.now(), text, gold });
+  }
+
+  /** Rung 5 noticed a shift: a ring pulses on the thing (round self when it has no place). */
+  selfShift(eid, p, label) { this._brainRing(p, 0xffa94d, "noticed: " + (label || eid) + " changed its behaviour", false); }
+  /** A wait: the amoeba dims briefly. */
+  selfWait() { this._brainObjs().dimUntil = performance.now() + 2200; }
+  /** A level-up: the exp bar's gold moment, echoed round the amoeba. */
+  selfLevelUp(rung) { this._brainRing(null, 0xd4a017, "⬆ level up: rung " + rung, true); }
+  /** The person self meets: their label and their place (null: the field's edge). */
+  setSelfOther(label, p) { this.selfOther = label ? { label, p: p ? p.slice() : null } : null; }
+
+  _stepBrain(now) {
+    const a = this.amoeba, b = this.brain;
+    if (!b || !b.beam) return;
+    const on = !!(a && a.pts), rm = this.reducedMotion();
+    const cur = b.looks[b.looks.length - 1];
+    const age = cur ? now - cur.t0 : Infinity;
+    const LIVE = 6000;
+    // the beam to what it looks at now
+    const beamOn = !!(on && cur && cur.p && age < LIVE);
+    b.beam.visible = beamOn;
+    if (beamOn) {
+      const g = b.beam.geometry.attributes.position;
+      g.setXYZ(0, a.pos[0], a.pos[1], a.pos[2]); g.setXYZ(1, cur.p[0], cur.p[1], cur.p[2]); g.needsUpdate = true;
+      b.beam.material.color.setHex(cur.answer === "changed" ? 0x7cf0c8 : cur.answer === "unchanged" ? 0xc8d0dc : 0xff8a5d);
+      b.beam.material.opacity = rm ? 0.9 : 0.9 * Math.min(1, (LIVE - age) / 1500) * (age < 400 ? age / 400 : 1);
+    }
+    // the trail: a dot on each looked-at thing, the path between, oldest faint
+    if (b.trailDirty) {
+      b.trailDirty = false;
+      const n = b.looks.length;
+      for (let i = 0; i < BRAIN_TRAIL; i++) {
+        const l = b.looks[i], prev = b.looks[i - 1];
+        const dot = b.dots[i], pl = b.paths[i];
+        dot.visible = !!(l && l.p);
+        if (dot.visible) {
+          dot.position.set(l.p[0], l.p[1], l.p[2]);
+          dot.material.opacity = trailAlpha3(i, n);
+          dot.material.color.setHex(l.answer === "changed" ? 0x7cf0c8 : l.answer === "unchanged" ? 0xc8d0dc : 0xff8a5d);
+        }
+        pl.visible = !!(l && l.p && prev && prev.p);
+        if (pl.visible) {
+          const g = pl.geometry.attributes.position;
+          g.setXYZ(0, prev.p[0], prev.p[1], prev.p[2]); g.setXYZ(1, l.p[0], l.p[1], l.p[2]); g.needsUpdate = true;
+          pl.material.opacity = 0.55 * trailAlpha3(i, n);
+        }
+      }
+    }
+    // the rings: a shift's pulse on the thing, a level-up's gold round self
+    const HOLD = rm ? 7000 : 4500;
+    b.rings = b.rings.filter((o) => {
+      const u = (now - o.t0) / HOLD;
+      if (u >= 1) { this.scene.remove(o.m); o.m.geometry.dispose(); o.m.material.dispose(); return false; }
+      const p = o.p || (on ? a.pos : null);
+      o.m.visible = !!p;
+      if (!p) return true;
+      o.m.position.set(p[0], p[1], p[2]);
+      o.m.quaternion.copy(this.camera.quaternion);
+      if (rm) { o.m.scale.setScalar(o.gold ? 46 : 34); o.m.material.opacity = 0.85; }
+      else {
+        const w = (u * 3) % 1;                                   // three pulses
+        o.m.scale.setScalar((o.gold ? 26 : 12) + 70 * w); o.m.material.opacity = 0.9 * (1 - w) * (1 - 0.4 * u);
+      }
+      return true;
+    });
+    // the labels: a handful of DOM nodes, moved ~8x a second, rewritten only on change
+    if (now - (b.labAt || 0) < 120) return;
+    b.labAt = now;
+    const put = (el, txt, xy) => {
+      if (!xy) { if (el.style.display !== "none") el.style.display = "none"; return; }
+      if (el._t !== txt) { el.textContent = txt; el._t = txt; }
+      el.style.display = "";
+      el.style.transform = "translate(" + xy[0].toFixed(0) + "px," + xy[1].toFixed(0) + "px)";
+    };
+    const sa = on ? this._project(a.pos) : null;
+    const onScreen = (q) => q && q[0] >= 0 && q[1] >= 0 && q[0] <= this._w && q[1] <= this._h;
+    if (cur && age < LIVE && on) {
+      const mark = cur.answer === "changed" ? " ✓ changed" : cur.answer === "unchanged" ? " · unchanged" : " · no answer";
+      const sp = cur.p ? this._project(cur.p) : null;
+      if (onScreen(sp)) put(b.lookLab, "👁 " + cur.label + mark, [sp[0] + 10, sp[1] - 24]);
+      else if (sa) {
+        put(b.lookLab, "👁 " + (cur.p ? this._arrowTo(sa, cur.p) + " " : "") + cur.label + mark
+          + (cur.p ? "" : " (not on the field)"), [sa[0] + 14, sa[1] + 16]);
+      } else put(b.lookLab, "", null);
+    } else put(b.lookLab, "", null);
+    const ring = b.rings.filter((o) => o.text).slice(-1)[0];
+    if (ring && on) {
+      const rp = ring.p ? this._project(ring.p) : null;
+      if (onScreen(rp)) put(b.ringLab, ring.text, [rp[0] + 12, rp[1] + 8]);
+      else if (sa) put(b.ringLab, (ring.p ? this._arrowTo(sa, ring.p) + " " : "") + ring.text, [sa[0] + 14, sa[1] + 40]);
+      else put(b.ringLab, "", null);
+      b.ringLab.style.color = ring.gold ? "#d4a017" : "#ffb347";
+    } else put(b.ringLab, "", null);
+    const who = this.selfOther;
+    const op = who && a && a.other && a.other.visible ? this._project(a.other.position.toArray()) : null;
+    put(b.otherLab, who ? who.label : "", onScreen(op) ? [op[0] + 14, op[1] - 8] : null);
+  }
+
+  /** An arrow from a screen point toward a world point (it may be off-screen or behind). */
+  _arrowTo(from, p) {
+    const v = new this.THREE.Vector3(p[0], p[1], p[2]).project(this.camera);
+    let x = (v.x + 1) / 2 * this._w, y = (1 - v.y) / 2 * this._h;
+    if (v.z > 1) { x = this._w - x; y = this._h - y; }        // behind the camera: the other way
+    const ang = Math.atan2(y - from[1], x - from[0]);
+    return ["→", "↘", "↓", "↙", "←", "↖", "↑", "↗"][((Math.round(ang / (Math.PI / 4)) % 8) + 8) % 8];
   }
 
   _avatar(agent) {

@@ -2267,6 +2267,7 @@ function definePanel() {
     _paintExp(el) { paintExp(el, selfExp(this._seat)); }
     _selfCardHtml() { return selfCardHtml(this._seat); }
     _selfLinesHtml(lines) { return selfLinesHtml(lines); }
+    _selfLine(r) { return selfLine(r); }                        // #237: the brain caption's cite
     async _selfRecent(n) {
       const r = await this._api(SERVE + "/membrane/self/recent?n=" + encodeURIComponent(n || 15)).catch(() => null);
       return r && r.ok && r.data && Array.isArray(r.data.lines) ? r.data.lines : null;

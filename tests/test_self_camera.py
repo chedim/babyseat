@@ -6,7 +6,7 @@ UI = Path(__file__).resolve().parent.parent / "membrane" / "ui"
 
 def test_self_is_a_follow_mode():
     home = (UI / "home.js").read_text()
-    assert 'const FOLLOW_MODES = ["activity", "seat", "you", "self"];' in home
+    assert 'const FOLLOW_MODES = ["activity", "seat", "you", "self", "eyes"];' in home
 
 
 def test_the_camera_follows_the_amoeba_as_it_moves():

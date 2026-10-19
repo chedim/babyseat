@@ -392,7 +392,10 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
 
   Once rung 6 practises, the amoeba's tag also names what it has met ("meets
   an other" / "meets its body"), and the exchanges' text lands in the chat
-  overlay.
+  overlay. Membrane home also draws self's record as it runs: a beam to what it
+  looks at, a trail of its last looks, a pulse on a noticed shift, and a plain
+  caption of the newest line, with the ◎ self framing and the 👁 self's eyes
+  camera. See [selfgrowth.md, "The brain on the screen"](selfgrowth.md#the-brain-on-the-screen) (#237).
 
   The seat places the points into the open projection (`fieldpulse`'s
   `self.cycle` frame: cube coordinates and numbers, never vectors or text).
