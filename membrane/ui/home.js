@@ -20,6 +20,11 @@ const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const HSERVE = "/ui/serve";
 const FOLLOW_EVERY_MS = 15000;
 const IDLE_BEFORE_FOLLOW_MS = 30000;
+// the menu button wears the babyseat (the tab's icon; #161, the operator: "replace the
+// burger menu with our babyseat icon/logo") -- standalone serves it at /ui/www/, Home
+// Assistant at /api/membrane/www/ (a fixed path: the tests require() this file as a script)
+const SEAT_LOGO = (typeof window !== "undefined" && window.MEMBRANE_STANDALONE)
+  ? "/ui/www/favicon.svg" : "/api/membrane/www/favicon.svg";
 const LS_CHAT = "membrane.home.chat";
 const LS_IMMERSIVE = "membrane.home.immersive";
 const LS_FOLLOW = "membrane.home.follow";
@@ -680,7 +685,8 @@ const HSTYLE = `
   /* hover only where there is one: a phone keeps :hover on the last tapped
      button, which looked like 📱 stayed on after it was switched off */
   @media (hover: hover) { .top button:hover { background:color-mix(in srgb, var(--primary-color,#3477d6) 28%, transparent); } }
-  .top .ha { font-size:18px; line-height:1; padding:5px 11px; }
+  .top .ha { font-size:18px; line-height:1; padding:3px 7px; display:inline-flex; align-items:center; }
+  .top .ha .seat-logo { width:26px; height:26px; display:block; pointer-events:none; }
   .hamenu { position:absolute; z-index:6; top:58px; left:12px; min-width:220px; max-width:calc(100% - 24px);
             max-height:70vh; max-height:70dvh; overflow:auto; border-radius:14px; padding:6px; display:none; }
   .hamenu.open { display:block; }
@@ -1509,7 +1515,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         <div class="field"></div>
         <div class="msg">finding you on the field…</div>
         <div class="top glass">
-          <button class="ha" title="Home Assistant: its dashboards and pages" aria-haspopup="menu" aria-expanded="false" aria-label="Home Assistant menu">☰</button>
+          <button class="ha" title="Home Assistant: its dashboards and pages" aria-haspopup="menu" aria-expanded="false" aria-label="Home Assistant menu"><img class="seat-logo" src="${SEAT_LOGO}" alt="" width="26" height="26"></button>
           <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you · self (the 🌱 loop, framed to what it is doing) · 👁 self's eyes (looking out from it)">◎ activity</button>
           <button class="chatbtn" title="Show / hide the chat">💬</button>
           <button class="autobtn" title="auto-chat" aria-label="auto-chat">▶</button>
