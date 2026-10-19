@@ -1903,11 +1903,14 @@ def main() -> None:
                     _NM.plant(srv)
                 except Exception as e:
                     print(f"[seat] name entity not planted ({e})", file=sys.stderr)
+            from .restarts import was_reexec as _was_reexec
+            _reexec = _was_reexec()        # read + cleared on every boot (#243)
             if args.standalone:            # STANDALONE MODE: the UI on the serve port (ui_serve.py)
                 from . import ui_serve as _UIS
                 _ui_url = _UIS.browser_url(surf_host, serve_port or 4096)
                 print(f"[seat] membrane UI: {_ui_url}", file=sys.stderr)
-                if not args.no_browser and sys.stdin.isatty():
+                if (not _reexec and not args.no_browser
+                        and sys.stdin.isatty()):   # a restart's tab reconnects (#243)
                     _UIS.open_when_up(serve_port or 4096, _ui_url)
             try:                           # auto-chat + membrane's role survive the restart
                 from . import voice as _voice_boot

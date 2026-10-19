@@ -24,6 +24,13 @@ In a container instead: the image `chedim/membrane` runs this same mode (UI on
 | `--listen N` | 11500 (walks up if taken) | the seat's OpenAI-compatible `/v1` |
 | `--no-browser` | — | don't open the browser (it only opens on an interactive launch anyway) |
 
+**When a tab opens.** One tab, and only when none is open: on a cold boot the seat
+waits ~8 s after its port is up; if a membrane page reconnects in that window (an
+open tab's `/event` stream retries every ≤5 s), no new tab opens, otherwise one does.
+A restart the seat asked for (`presence.restart`) re-execs with
+`MEMBRANE_REEXEC=1` and never opens a tab: the open page reconnects and resyncs on
+its own. `--no-browser` or `MEMBRANE_NO_BROWSER=1` turns it off entirely.
+
 Ollama needs one chat model and one embedding model, e.g.
 `ollama pull qwen3:8b && ollama pull mxbai-embed-large` (a cloud model Ollama serves
 works for chat too).

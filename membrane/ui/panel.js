@@ -1730,7 +1730,9 @@ function definePanel() {
         this._paintStatus();
         if (this._busy()) this._startPoll();
         await new Promise((res) => setTimeout(res, backoff));
-        backoff = Math.min(backoff * 2, 15000);
+        // capped at 5 s (#243): a booting seat waits 8 s for an open tab to
+        // reconnect before it opens a new one -- the retry must land inside that
+        backoff = Math.min(backoff * 2, 5000);
       }
     }
 

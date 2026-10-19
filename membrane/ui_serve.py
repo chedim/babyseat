@@ -37,6 +37,7 @@ import ipaddress
 import json
 import os
 import re
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -422,12 +423,32 @@ def browser_url(host: str, port: int) -> str:
     return f"http://{h}:{port}/"
 
 
-def open_when_up(port: int, url: str, timeout_s: float = 60.0) -> None:
-    """Open the UI in the default browser once the port answers (a thread)."""
+# #243 ONE TAB: a membrane page already open reconnects by itself after a
+# boot (its /event stream retries, then resyncs) -- the boot waits a short
+# window for that before opening a new tab. Set by the serve's SSE route
+# (server.py _sse) when a stream client connects; the seat's own hub
+# listeners subscribe directly and never count.
+_PAGE_SEEN = threading.Event()
+GRACE_S = 8.0
+
+
+def note_page() -> None:
+    """A page's live stream connected (an open tab is here)."""
+    _PAGE_SEEN.set()
+
+
+def open_when_up(port: int, url: str, timeout_s: float = 60.0,
+                 grace_s: float = GRACE_S, reexec: bool = False):
+    """Open the UI in the default browser once the port answers (a thread),
+    unless a page reconnects within `grace_s` of the port coming up (#243).
+    Never on a re-exec restart (`reexec`, restarts.was_reexec) or with
+    MEMBRANE_NO_BROWSER=1. Returns the thread (None when nothing will open)."""
     import socket
-    import threading
     import time
     import webbrowser
+
+    if reexec or os.environ.get("MEMBRANE_NO_BROWSER") == "1":
+        return None
 
     def _go():
         t0 = time.time()
@@ -439,10 +460,13 @@ def open_when_up(port: int, url: str, timeout_s: float = 60.0) -> None:
                 time.sleep(0.3)
         else:
             return
+        if _PAGE_SEEN.wait(grace_s):
+            return                         # an open tab came back: no new one
         try:
             webbrowser.open(url)
         except Exception:
             pass
 
-    if os.environ.get("MEMBRANE_NO_BROWSER") != "1":
-        threading.Thread(target=_go, name="ui-browser", daemon=True).start()
+    t = threading.Thread(target=_go, name="ui-browser", daemon=True)
+    t.start()
+    return t
