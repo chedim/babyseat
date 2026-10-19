@@ -139,7 +139,7 @@ function brainCaption(r, me) {
   if (k === "wait") return SELF_NAME + " waited — nothing was due";
   if (k === "rung") return "level up: rung " + r.rung + (BRAIN_RUNGS[r.rung] ? " · " + BRAIN_RUNGS[r.rung] : "");
   if (k === "cycle") return SELF_NAME + " " + (r.act === "move" || !r.act ? "moved" : r.act)
-    + (r.gap != null ? " — it landed " + Number(r.gap).toFixed(3) + " from where it expected" : "");
+    + (r.still ? " — the world was still" : r.gap != null ? " — it landed " + Number(r.gap).toFixed(3) + " from where it expected" : "");
   if (k === "error") return SELF_NAME + " hit an error" + (r.act ? " in " + r.act : "") + (r.why ? ": " + r.why : "");
   if (k === "birth") return SELF_NAME + " was born";
   if (k === "unlock") return unlockText(r) + (r.rung ? " — " + SELF_NAME + " passed rung " + r.rung : " — " + SELF_NAME + "'s first toys");

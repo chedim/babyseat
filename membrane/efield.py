@@ -1219,15 +1219,7 @@ class EntityField:
             resid = x_msg
         sess = ev.get("session") or ""
         if np.linalg.norm(resid) > CTX_MIN_RESID:
-            now = self._now.get(sess)
-            self._now[sess] = unit(resid) if now is None else unit(0.5 * now + 0.5 * unit(resid))
-            # THE CURRENT'S PULL (#161): each event adds one to its session's
-            # pull, which fades with CURRENT_TAU_S -- busier streams pull harder
-            t = time.time()
-            w = self._now_w.get(sess, 0.0)
-            if w:
-                w *= float(np.exp(-(t - self._now_ts.get(sess, t)) / CURRENT_TAU_S))
-            self._now_w[sess], self._now_ts[sess] = w + 1.0, t
+            self.pull_current(sess, resid)
         for eid, sidx, surf in ev.get("mentions") or []:
             if sidx in skip or sidx >= len(sids):
                 continue
@@ -2184,6 +2176,21 @@ class EntityField:
 
     def now(self, session: str = "") -> np.ndarray | None:
         return self._now.get(session)
+
+    def pull_current(self, session: str, vec) -> None:
+        """One event of `session`'s activity, toward `vec`: its context moves
+        halfway there, and its pull on the current gains one (#161) -- which
+        fades with CURRENT_TAU_S, so busier streams pull harder. A chat
+        event's residual comes here (_apply), and so does a person's poke on
+        a toy, toward the toy's spot (#282: playing counts as speaking)."""
+        v = unit(np.asarray(vec, dtype=float))
+        now = self._now.get(session)
+        self._now[session] = v if now is None else unit(0.5 * now + 0.5 * v)
+        t = time.time()
+        w = self._now_w.get(session, 0.0)
+        if w:
+            w *= float(np.exp(-(t - self._now_ts.get(session, t)) / CURRENT_TAU_S))
+        self._now_w[session], self._now_ts[session] = w + 1.0, t
 
     def current(self, now: float | None = None) -> np.ndarray | None:
         """THE FIELD'S CURRENT (#161): every session that spoke lately pulls at

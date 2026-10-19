@@ -230,12 +230,19 @@ def test_after_a_restart_it_says_it_waits_for_the_world():
 
 
 def test_without_a_world_there_is_nothing_to_feel():
+    # #282: never born into a still world (no current, no position: nowhere to
+    # stand) -- but once placed, a still world still cycles, with no push
     srv = _seat()
     srv.efield = _World(None)
     SL.set_mode(srv, "on")
     assert SL.cycle(srv, now=1000.0) is None
     assert SL.status(srv)["waiting_on"] == "the world"
     assert [r["kind"] for r in _record(srv)] == ["birth"]
+    srv.entity_store.docs[EID].position = [float(x) for x in _dir(2)]
+    assert SL.cycle(srv, now=1000.0) is not None
+    rec = _record(srv)[-1]
+    assert rec["kind"] == "cycle" and rec["still"] is True and rec["change"] == "still"
+    assert SL.status(srv)["waiting_on"] == "the world"     # rung 1 still can't feel a push
 
 
 def _talk(f, session, text, ts):

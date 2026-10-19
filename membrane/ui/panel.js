@@ -690,7 +690,7 @@ function selfLine(r) {
     (r.asked ? " (asked the model)" : "");
   if (k === "shift") return "shift noticed on " + shortEid(r.eid) + (r.was != null && r.now != null ? " (" + f2s(r.was) + " → " + f2s(r.now) + ")" : "");
   if (k === "wait") return "wait";
-  if (k === "cycle") return (r.act || "move") + (r.gap != null ? " (gap " + Number(r.gap).toFixed(3) + ")" : "");
+  if (k === "cycle") return (r.act || "move") + (r.still ? " (still world)" : r.gap != null ? " (gap " + Number(r.gap).toFixed(3) + ")" : "");
   if (k === "rung") return "rung " + r.rung + " passed · " + (SELF_RUNGS[r.rung] || "");
   if (k === "error") return "error" + (r.act ? " in " + r.act : "") + (r.why ? ": " + r.why : "");
   if (k === "birth") return "born";

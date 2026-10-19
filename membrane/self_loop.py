@@ -520,7 +520,8 @@ def _expect(srv, seed: str) -> dict:
                 c["llm_cal"] = _advisor_cal(_rung8_series(recs, c["eid"]), c["llm_model"])
                 c["p_mix"] = _advise(c["p_self"], c["p_llm"], c["llm_cal"])
         return {"rc": 0, "text": "expected"}
-    w = _expected_push(srv, c["pos"])
+    # a still world (#282): self knows there is no current, so it expects no push
+    w = np.zeros_like(c["pos"]) if c.get("still") else _expected_push(srv, c["pos"])
     if c.get("aim") is not None:
         # STEER: lean into the current by the push I expect, toward my aim
         raw = c["aim"] - c["pos"]
@@ -1499,6 +1500,10 @@ def _notice(srv, seed: str) -> dict:
     ent = _entity(srv)
     got = np.asarray(ent.position, dtype=float)
     push = got - c["intent"]
+    if c.get("still"):                       # #282: a still world teaches nothing about the current
+        c["observed"] = got
+        c["push"] = float(np.linalg.norm(push))
+        return {"rc": 0, "text": "noticed"}
     p = c["pos"]
     pp = ent.properties or {}
     sd = dict(pp.get("script_data") or {})
@@ -1561,18 +1566,29 @@ def _guard_ok(rt: dict, now: float) -> bool:
 
 def cycle(srv, now: float | None = None) -> dict | None:
     """One try -> expect -> notice. None when nothing ran (off, paused, held,
-    the guard, or no world to feel)."""
+    the guard, or nowhere to stand: no current and no position yet).
+
+    A STILL WORLD (#282): with no current (a fresh boot, nobody has spoken
+    or played lately) self still cycles -- the current is where it stands,
+    so the world pushes nothing. It keeps looking, playing and taking turns;
+    the cycle line says `still: true` (change "still"), it learns nothing
+    about the current from it, and the rung stats that read push / gap /
+    naive skip it (rung 1 reads only change "world"; no aim lines)."""
     now = time.time() if now is None else now
     rt = _rt(srv)
     if not _runs(srv) or not _guard_ok(rt, now):
         return None
     cur = _current(srv)
-    if cur is None:
-        return None
     est = srv.entity_store
     ent = _entity(srv)
     pos = np.asarray(ent.position, dtype=float) if ent.position is not None else None
-    if pos is None or len(pos) != len(cur):
+    still = cur is None
+    if still:
+        if pos is None or not len(pos):
+            return None                                           # never born into a still world
+        pos = _unit(pos)
+        cur = pos                                                 # the world is still: no push
+    elif pos is None or len(pos) != len(cur):
         pos = _unit(cur + _seed_dir("birthplace", len(cur)))      # born near the current, not on it
     rt["last"] = now
     rt["burst"].append(now)
@@ -1586,7 +1602,7 @@ def cycle(srv, now: float | None = None) -> dict | None:
         rt["aim_count"] += 1
         aim = rt["aim"]
     from .night import method_call
-    _ctx.cycle = {"srv": srv, "pos": pos, "current": cur, "aim": aim}
+    _ctx.cycle = {"srv": srv, "pos": pos, "current": cur, "aim": aim, "still": still}
     try:
         outs = []
         for m in ("expect", "try", "notice"):
@@ -1611,8 +1627,10 @@ def cycle(srv, now: float | None = None) -> dict | None:
     rec = {"ts": now, "kind": "cycle", "n": n, "act": "move",
            "step": round(float(np.linalg.norm(c["mine"])), 4) if c.get("mine") is not None else STEP,
            "push": c["push"], "gap": gap, "naive": naive,
-           "change": "world" if c["push"] > CALM else "knowledge"}
-    if aim is not None:
+           "change": "still" if still else ("world" if c["push"] > CALM else "knowledge")}
+    if still:
+        rec["still"] = True                  # #282: no current -- the rung stats skip it
+    elif aim is not None:
         # where it landed against its aim, and where the same stride would have
         # landed without leaning into the current (the world's push is the same)
         world = PUSH_GAIN * (cur - pos)
@@ -2473,10 +2491,11 @@ def status(srv) -> dict:
     slipping = bool(rung >= 1 and rung in PROGRESS and not run_(rung)["passed"])
     if nxt is not None and nxt > lim and rt["mode"] != "off" and not slipping:
         waiting = "the limit"                    # it may be ready; the operator holds it here
-    if rt["mode"] != "off" and _current(srv) is None:
+    if rt["mode"] != "off" and 1 not in done and _current(srv) is None:
         # no current right now (a fresh boot: nobody has spoken yet) -- say
-        # so, or the switch reads "on" over a loop that is rightly idle
-        if not any(r.get("kind") == "cycle" for r in recs):
+        # so: self cycles in a still world (#282), but rung 1 (feel the
+        # push) can't move until the world does; past it nothing waits on it
+        if not any(r.get("kind") == "cycle" and not r.get("still") for r in recs):
             bar = 0.0
         waiting = "the world"
 
