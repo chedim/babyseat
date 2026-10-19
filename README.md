@@ -4,7 +4,7 @@ Hippocampus as cortex register-correct-predict-act head: real-time learning, emb
 An openapi-proxy and opencode-like agent seat with Alan's baby brain quest.
 
 ```
-* - under construction
+* - still learning
 ```
 
 ![Membrane](docs/comparison.png)
