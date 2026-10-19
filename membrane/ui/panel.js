@@ -621,7 +621,8 @@ function selfLine(r) {
   const k = r.kind;
   if (k === "reach") {
     const t = "reach " + shortEid(r.eid) + " → ";
-    const tail = (r.audit ? " · audit" : "") + (r.reply ? " · reply check" : "");
+    const tail = (r.audit ? " · audit" : "") + (r.reply ? " · reply check" : "") +
+      (Array.isArray(r.by) && r.by.length ? " · by " + r.by.join(", ") : "");   // #244: who changed the toy (ground truth)
     if (r.answer !== "changed" && r.answer !== "unchanged") return t + "no answer" + (r.why ? " (" + r.why + ")" : "") + tail;
     return t + r.answer + " (p " + f2s(r.p) + (r.p_llm != null ? ", model " + f2s(r.p_llm) : "") + ")" + tail;
   }
@@ -647,6 +648,34 @@ function selfLinesHtml(lines, nowS) {
   const now = nowS == null ? Date.now() / 1000 : nowS;
   return lines.map((r) => '<li class="sl k-' + escAttr(r.kind || "") + '"><span class="ago">' +
     (r.ts ? agoText(now - r.ts) : "") + "</span> " + escText(selfLine(r)) + "</li>").join("");
+}
+
+/** #244: the play buttons a toy row offers -- [{action, arg, label, title}].
+ *  A tower BLOCK: knock / rebuild (the whole tower takes none: its blocks do);
+ *  die: roll; drift / burst: nudge; body (self's alone), the clocks and the
+ *  script toys: none. */
+const TOY_PLAY = {
+  die: [["roll", "🎲 roll", "roll the die: a fresh face, tagged as yours"]],
+  drift: [["nudge", "↕ nudge", "nudge it one step, tagged as yours"]],
+  burst: [["nudge", "✦ nudge", "nudge it to a fresh value, tagged as yours"]],
+};
+function toyActions(t) {
+  t = t || {};
+  if (!t.toy) return [];
+  if (t.kind === "tower") {
+    if (!t.block) return [];
+    return [{ action: "knock", arg: t.block, label: "knock", title: "knock block " + t.block + " (and the ones above it) down" },
+            { action: "rebuild", arg: t.block, label: "rebuild", title: "stand block " + t.block + " back up" }];
+  }
+  return (TOY_PLAY[t.kind] || []).map(([action, label, title]) => ({ action, arg: null, label, title }));
+}
+
+function toyButtonsHtml(t) {
+  const acts = toyActions(t);
+  if (!acts.length) return "";
+  return ' <span class="play">' + acts.map((a) => '<button type="button" class="pk" data-poke-toy="' + escAttr(t.toy) +
+    '" data-poke-action="' + escAttr(a.action) + '"' + (a.arg != null ? ' data-poke-arg="' + escAttr(a.arg) + '"' : "") +
+    ' title="' + escAttr(a.title) + '">' + escText(a.label) + "</button>").join("") + "</span>";
 }
 
 /** The report card: the ladder, rung 7's numbers, curiosity, the world, the toys. */
@@ -693,7 +722,8 @@ function selfCardHtml(st) {
   out.push("<h4>toys</h4>" + (toys.length
     ? '<ul class="toys">' + toys.map((t) => '<li title="' + escAttr(t.health) + '"><span class="dot ' + (dot[t.health] || "idle") + '"></span>' +
         escText(shortEid(t.eid)) + ' <span class="muted">' + (t.getter ? "getter ✓" : "no getter") +
-        (t.reads ? " · " + t.answered + " of last " + t.reads + " reads answered" : t.getter ? " · not read yet" : "") + "</span></li>").join("") + "</ul>"
+        (t.reads ? " · " + t.answered + " of last " + t.reads + " reads answered" : t.getter ? " · not read yet" : "") + "</span>" +
+        toyButtonsHtml(t) + "</li>").join("") + "</ul>"
     : '<p class="muted">no toys (toy: / cradle: things, or words with a getter)</p>'));
   return out.join("");
 }
@@ -904,7 +934,7 @@ function jsShow(v) {
   return String(v);
 }
 
-const AiPanelLogic = { jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision,
+const AiPanelLogic = { jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
@@ -2374,6 +2404,16 @@ function definePanel() {
     _selfCardHtml() { return selfCardHtml(this._seat); }
     _selfLinesHtml(lines) { return selfLinesHtml(lines); }
     _selfLine(r) { return selfLine(r); }                        // #237: the brain caption's cite
+    /** #244: play with self -- the 👶 panel's one write: a toybox action, tagged
+     *  by the seat with this page's person (the speaker line / the token / the HA user). */
+    async _toyPoke(toy, action, arg) {
+      const body = { toy, action };
+      if (arg != null && arg !== "") body.arg = arg;
+      const r = await this._api(SERVE + "/membrane/toybox/poke", { method: "POST", body: JSON.stringify(body) }).catch(() => null);
+      if (!r) return { ok: false, error: "the seat is not reachable" };
+      return r.data && typeof r.data === "object" ? r.data : { ok: false, error: "the poke failed (" + r.status + ")" };
+    }
+
     async _selfRecent(n) {
       const r = await this._api(SERVE + "/membrane/self/recent?n=" + encodeURIComponent(n || 15)).catch(() => null);
       return r && r.ok && r.data && Array.isArray(r.data.lines) ? r.data.lines : null;

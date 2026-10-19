@@ -1139,8 +1139,8 @@ class EntityField:
             st.last_x = unpack_f16(pack_f16(x))      # the stored precision
         self._deltas[dkey] = row
 
-    def _materialize(self, st: EntityState) -> None:
-        st.seed = self._seed(st.surface or st.eid.split(":", 1)[-1])
+    def _materialize(self, st: EntityState, seed=None) -> None:
+        st.seed = self._seed(st.surface or st.eid.split(":", 1)[-1]) if seed is None else seed
         st.state = at_stored(st.seed)
         st.tier = "live"
         pend = sorted(st.pending, key=lambda p: (p[1], p[2]))
@@ -1910,6 +1910,35 @@ class EntityField:
             self._materialize(st)
         self._dirty.add(eid)
         return st
+
+    @_locked
+    def place(self, eid: str, text: str) -> bool | None:
+        """A FIELD SPOT ON DEMAND (#244): an entity with no live state yet --
+        a toy just switched on, a thing self reaches before anyone talked
+        about it -- is materialized here, seeded by the embedding of `text`
+        (its summary, else its name), instead of waiting for K_MAT mentions.
+        Its own mentions move it from there as usual. -> True placed, False
+        already live (nothing moves: idempotent), None could not (no id, no
+        text, no embedder, or the embedder failed -- quietly)."""
+        text = " ".join(str(text or "").split())[:400]
+        if not eid or not text or self.emb is None:
+            return None
+        st = self.get(eid)
+        if st is not None and st.tier == "live" and st.state is not None:
+            return False
+        try:
+            v = np.asarray(self.emb.embed([text])[0], dtype=float)
+        except Exception:
+            return None
+        if not v.size or not np.isfinite(v).all() or float(np.linalg.norm(v)) < 1e-12:
+            return None
+        if st is None:
+            st = EntityState(eid=eid, kind=eid.split(":", 1)[0], surface=eid.split(":", 1)[-1])
+            self._states[eid] = st
+        st.first_ts = st.first_ts if st.first_ts is not None else time.time()
+        self._materialize(st, seed=unpack_f16(pack_f16(unit(v))))
+        self.flush()
+        return True
 
     def event_by_number(self, n: int) -> tuple[str, dict] | None:
         for k, d in self.b.scan("events", {"origin": self.origin, "n": int(n)}, limit=1):

@@ -210,6 +210,114 @@ class TestEyes(unittest.TestCase):
         self.assertGreater(o["target"][2], 30)          # looking forward
 
 
+# ---- the labels round self: laid out, clamped, readable (review of #241) ---------
+
+def _f3(expr):
+    js = ('const F=require(%r); process.stdout.write(JSON.stringify(%s))' % (str(UI / "field3d.js"), expr))
+    return json.loads(subprocess.check_output(["node", "-e", js]))
+
+
+def _boxes_overlap(a, b):
+    return a["x"] < b["x"] + b["w"] and b["x"] < a["x"] + a["w"] and a["y"] < b["y"] + b["h"] and b["y"] < a["y"] + a["h"]
+
+
+@NODE
+class TestFieldArea(unittest.TestCase):
+    def test_nothing_open_is_the_whole_canvas(self):
+        self.assertEqual(_f3("F.fieldArea(1440, 900, [])"), {"x0": 0, "y0": 0, "x1": 1440, "y1": 900})
+
+    def test_a_chat_column_on_the_right_cuts_the_right(self):
+        a = _f3("F.fieldArea(1440, 900, [{x: 968, y: 12, w: 460, h: 876}])")
+        self.assertEqual((a["x0"], a["x1"], a["y0"], a["y1"]), (0, 968, 0, 900))
+
+    def test_the_baby_panel_cuts_the_left_and_the_phone_chat_the_bottom(self):
+        a = _f3("F.fieldArea(1280, 800, [{x: 48, y: 64, w: 360, h: 660}])")
+        self.assertEqual((a["x0"], a["x1"]), (408, 1280))
+        p = _f3("F.fieldArea(390, 844, [{x: 8, y: 364, w: 374, h: 472}])")
+        self.assertEqual((p["x0"], p["x1"], p["y0"], p["y1"]), (0, 390, 0, 364))
+
+    def test_a_top_bar_cuts_the_top(self):
+        a = _f3("F.fieldArea(1440, 900, [{x: 12, y: 12, w: 940, h: 66}, {x: 968, y: 12, w: 460, h: 876}])")
+        self.assertEqual((a["y0"], a["x1"]), (78, 968))
+
+
+@NODE
+class TestLabelLayout(unittest.TestCase):
+    AREA = {"x0": 0, "y0": 0, "x1": 1000, "y1": 800}
+
+    def _lay(self, items, area=None):
+        return _f3("F.layoutLabels(%s, %s)" % (json.dumps(items), json.dumps(area or self.AREA)))
+
+    def test_labels_on_one_spot_do_not_overlap(self):
+        items = [{"key": k, "ax": 500, "ay": 400, "w": 120, "h": 16, "prio": p}
+                 for k, p in (("tag", 5), ("expects", 1), ("pushes", 1), ("wants", 1), ("look", 4))]
+        out = self._lay(items)
+        boxes = [dict(out[i["key"]], w=i["w"], h=i["h"]) for i in items if not out[i["key"]]["hidden"]]
+        self.assertGreaterEqual(len(boxes), 4)
+        for i in range(len(boxes)):
+            for j in range(i + 1, len(boxes)):
+                self.assertFalse(_boxes_overlap(boxes[i], boxes[j]), (boxes[i], boxes[j]))
+
+    def test_the_most_important_keeps_its_place(self):
+        out = self._lay([{"key": "low", "ax": 500, "ay": 400, "w": 100, "h": 16, "prio": 0},
+                         {"key": "tag", "ax": 500, "ay": 400, "w": 100, "h": 16, "prio": 9, "dx": 14, "dy": -6}])
+        self.assertEqual((out["tag"]["x"], out["tag"]["y"]), (514, 394))
+        self.assertNotEqual(out["low"]["y"], 394)
+
+    def test_an_optional_label_with_no_room_is_hidden_not_piled(self):
+        items = [{"key": "k%d" % i, "ax": 50, "ay": 10, "w": 40, "h": 16, "prio": 1, "optional": True} for i in range(8)]
+        out = self._lay(items, {"x0": 0, "y0": 0, "x1": 120, "y1": 40})
+        self.assertTrue(any(v["hidden"] for v in out.values()))
+
+    def test_a_label_stays_inside_the_area(self):
+        out = self._lay([{"key": "noticed", "ax": 950, "ay": 300, "w": 260, "h": 16, "prio": 3}],
+                        {"x0": 0, "y0": 0, "x1": 968, "y1": 900})
+        self.assertLessEqual(out["noticed"]["x"] + 260, 968)
+        self.assertFalse(out["noticed"]["out"])                       # the anchor itself is visible
+
+    def test_an_anchor_behind_a_panel_goes_to_the_edge_with_an_arrow(self):
+        out = self._lay([{"key": "noticed", "ax": 1200, "ay": 300, "w": 200, "h": 16, "prio": 3}],
+                        {"x0": 0, "y0": 0, "x1": 968, "y1": 900})
+        n = out["noticed"]
+        self.assertTrue(n["out"])
+        self.assertEqual(n["arrow"], "→")
+        self.assertLessEqual(n["x"] + 200, 968)
+
+    def test_an_optional_label_whose_anchor_is_hidden_is_not_pinned_to_the_edge(self):
+        out = self._lay([{"key": "mark", "ax": 1200, "ay": 300, "w": 60, "h": 16, "prio": 1, "optional": True}],
+                        {"x0": 0, "y0": 0, "x1": 968, "y1": 900})
+        self.assertTrue(out["mark"]["hidden"])
+
+    def test_arrows(self):
+        self.assertEqual(_f3("F.arrowFor(0, 0, 10, 0)"), "→")
+        self.assertEqual(_f3("F.arrowFor(0, 0, 0, 10)"), "↓")
+        self.assertEqual(_f3("F.arrowFor(0, 0, -10, -10)"), "↖")
+
+
+@NODE
+class TestSelfTag(unittest.TestCase):
+    L = {"rung": 6, "bar": 0.64, "skill": 0.41, "split": {"chat:in:x": "other"}, "meets": {"other": "chat:in:x"}}
+
+    def test_short_while_the_camera_follows_self(self):
+        self.assertEqual(_f3("F.selfTag(%s, true)" % json.dumps(self.L)), "self · Lv 6 · 64%")
+
+    def test_long_otherwise(self):
+        t = _f3("F.selfTag(%s, false)" % json.dumps(self.L))
+        self.assertTrue(t.startswith("self · rung 6 · 64% · skill 0.41"), t)
+        self.assertIn("meets an other", t)
+
+
+class TestLabelLook(unittest.TestCase):
+    def test_labels_have_a_theme_token_backdrop(self):
+        f3 = (UI / "field3d.js").read_text()
+        self.assertIn("SELF_LABEL_CSS", f3)
+        self.assertIn("var(--card-background-color", f3.split("SELF_LABEL_CSS", 1)[1].split(";\n", 1)[0])
+        self.assertIn("var(--primary-text-color", f3.split("SELF_LABEL_CSS", 1)[1].split(";\n", 1)[0])
+        home = (UI / "home.js").read_text()
+        self.assertIn("occluders:", home)                           # the panels the labels keep out of
+        self.assertIn("selfFollow", home)
+
+
 # ---- the wiring --------------------------------------------------------------------
 
 class TestWiring(unittest.TestCase):

@@ -141,9 +141,14 @@ Esc or × closes it.
   (not read yet), red (no getter, so it can't be read). The card refreshes
   every 15 s while open.
 
-**It is read-only.** Nothing in the panel changes self; the 🌱 chooser stays
-the only switch. Everything it shows is `status()` and self's own record:
-nothing is claimed about self that the record doesn't measure.
+**It is read-only for self.** Nothing in the panel changes self; the 🌱
+chooser stays the only switch. Everything it shows is `status()` and self's
+own record: nothing is claimed about self that the record doesn't measure.
+The one write is the toys' **play buttons** (#244, see [Playing with
+self](#playing-with-self)): knock / rebuild on a tower block, roll on a die,
+nudge on a drift or burst toy. They change a toy in self's world, never self,
+and a short line under the card says what happened (`✓ knock toy:tower block
+3 → {"standing": false} (by alice)`).
 
 The activity comes from a small read-only route (behind the JWT gate like
 every route; the HA relay forwards it on GET only):
@@ -186,7 +191,8 @@ curl -s http://127.0.0.1:4096/membrane/seat \
 | `meets` | rung 6's exchange: `pushes`, `other` (who it meets), `push_age`, `heard_age` (seconds since the other last answered) |
 | `steer` | after rung 1: how close it lands to its aim (`err`) against not leaning into the current (`naive`), and `skill = 1 − err/naive` |
 | `rung7` | rung 7 at the current other: `asked` (pushes that asked the model), `checked` (those whose reply check came), `paired` (those whose check carried the model's answer), `pair_rate` = paired / checked, `brier_model` and `brier_habit` (mean Brier error over the pairs the test reads; the model passes by beating habit's by 15%), `base_rate` (the all-time rate the model is told) and `recent_rate` (the share of the last 6 reply checks answered, same prior, also told). The 🌱 chooser's tooltip shows it as `rung 7: 5 of 8 asked pushes paired, Brier model 0.37 vs habit 0.39, base rate 0.55` |
-| `toys` | #230: each toy (`toy:` / `cradle:` things, words with a getter) with `getter` (it has one), `reads` and `answered` (of its last 10 reaches), and `health`: `ok`, `empty` (no answer on its last reads), `unread`, or `no getter` |
+| `toys` | #230: each toy (`toy:` / `cradle:` things, words with a getter) with `getter` (it has one), `reads` and `answered` (of its last 10 reaches), and `health`: `ok`, `empty` (no answer on its last reads), `unread`, or `no getter`; a built-in toy also carries `toy` (its toybox name) and, for a tower block, `block` (#244: the play buttons' target) |
+| `off_field` | #244: of self's last 200 looks, `looks` (how many), `off` (how many landed on a thing with no live field point; `null` when the seat has no field) and `things` (those things, most looked-at first). The home view draws those looks as ghosts |
 | `curiosity` | from rung 2 on: the (up to) three things whose prediction is improving fastest, best first, each with `progress` (its error over the 30 ordinary looks before the latest 30, minus its error over the latest 30) and `error` (the latest 30's mean Brier error). It is what self's curiosity reads when it chooses a reach (below); empty until a thing has 60 ordinary looks |
 
 **How the bar works.** A rung's criteria are stages, in order (rung 2:
@@ -248,10 +254,15 @@ line on the field (#237):
   with a label (`👁 w:burst ✓ changed`, `👁 the eye · unchanged`,
   `👁 dice · no answer`). Green means changed, grey unchanged, orange no
   answer. The beam fades after about 6 s. A thing goes where the field already
-  places it: its drawn point, else the seat's `locate`. If it is off screen,
-  its label sits beside the amoeba with an arrow toward it. If the field has
-  no place for it at all, the label says "(not on the field)" and no beam is
-  drawn; no position is ever made up;
+  places it: its drawn point, else the seat's `locate` (the record's `fid`,
+  the seat's own field id for it, is tried first). If it is off screen, its
+  label sits beside the amoeba with an arrow toward it. If the field has no
+  place for it yet (#244), the look goes to a **ghost**: a hollow dashed ring
+  a short fixed way from the amoeba, in a direction derived from a hash of
+  the thing's id (so the same thing always ghosts to the same side), reached
+  by a dashed beam and labelled "`<name>` (unplaced)". A ghost is never a
+  filled dot, never on the trail and moves with the amoeba, so it can't be
+  mistaken for a field position;
 - **a trail** of the last 8 looks: a dot on each thing, joined in the order it
   looked, fading with age. Curiosity's wandering and patience's returns show
   up as a pattern;
@@ -274,10 +285,31 @@ line on the field (#237):
   the person self meets is "you" (or their name), `i` is "the eye", and a toy
   goes by its short name (`toy:dice` → "dice").
 
+The labels round self are small chips on the theme's card colour, with the
+label's own colour as their left edge, so they read on light and dark. They
+never pile up. Each frame they are laid out so none overlaps another: self's
+tag and the look keep their places first, and the marks (`wants`, `expects`,
+`pushes to`, `pull`) step aside or hide when there is no room. They also stay
+inside the visible field, which is the canvas minus the chat, the 👶 panel,
+the top bar, the voice row and the caption. A thing behind a panel gets its
+label at the panel's edge with an arrow toward it, and a ring whose thing sits
+behind a panel is not drawn there. While the camera follows self (◎ self or
+👁), self's tag shortens to `self · Lv 6 · 64%`; the exp bar carries the rest.
+
 A fresh page starts the trail from the record's last looks and replays no
 pulses. With *reduce motion* on, nothing pulses or wobbles: the rings hold
 still for a few seconds and the beam stays steady. It is read-only: nothing
-here posts to the seat. At most 8 trail marks, 4 rings and 3 labels exist at
+here posts to the seat.
+
+**Every looked-at thing gets a field point** (#244). The first time self
+reaches a thing that has no live point in the field (the eye `i`,
+`field:vitals`, `chat:in:<person>`, a word like `w:rung`), the seat places it:
+its summary, else its name, is embedded by the seat's embedder and becomes the
+thing's seed in the field (`EntityField.place`). Its own mentions move it from
+there as usual. It happens once per thing per run, never moves a thing that
+already has a point, and does nothing when the seat has no field or no
+embedder yet (the page shows a ghost meanwhile). `status().off_field` counts
+the looks that still land off the field. At most 8 trail marks, 4 rings and 3 labels exist at
 once, and the labels move about 8 times a second.
 
 ## The ladder
@@ -369,12 +401,28 @@ measure the bug.
   Both survive a restart.
 - **A seeded RNG.** The `seed` parameter defaults to a number derived from the
   name, and draw *k* is always the same for the same seed, so a run replays.
-- **A contingency flag on every change.** Each line of the log says `by: self`
-  (self's own look or reach caused it) or `by: world` (the toy's own clock or
-  randomness), with the time. The getter knows the reader because
-  `entity_read_back` hands it its `by` (`state.extra.by`: `self`, `model` or
-  `field`). This is the ground truth rung 6's body/other split can be checked
-  against later. Self never sees it.
+- **A contingency flag on every change.** Each line of the log says who caused
+  it, with the time:
+  - `by: self`: self's own look or reach;
+  - `by: world`: the toy's own clock or randomness;
+  - `by: model`: the seat's model, through `toybox.poke` (#244);
+  - `by: <person>`: a person playing (#244): `operator` from the CLI, or the
+    page's person (their name, or their token's subject in JWT mode). A
+    person whose name is `self` or `world` is written `person:self` /
+    `person:world`, so the toy's own tags keep their meaning.
+
+  The getter knows the reader because `entity_read_back` hands it its `by`
+  (`state.extra.by`: `self`, `model` or `field`). This is the ground truth
+  rung 6's body/other split can be checked against. Self never reads it: the
+  reading stays minimal. It goes on self's **record** instead: each reach of
+  a toy carries `by`, the distinct tags of every change to that thing (that
+  block, for a tower block) since self's previous look at it, through this
+  look's own act. A person's knock that self finds on its next look reads
+  `"answer": "changed", "by": ["alice"]`, a change self didn't cause.
+- **A spot in the field.** When a toy is added (or migrated), each of its
+  entities is placed in the field from its summary (#244), so the home view's
+  beams and trails have somewhere to go. With no embedder the toy still comes;
+  it gets its spot on self's first look once the embedder is up.
 
 ### The kit
 
@@ -390,9 +438,9 @@ measure the bug.
 
 Every kind also takes `seed`. A tower is one entity for the whole (its reading
 counts the standing blocks) plus one per block, `<name>:b1` (the bottom)
-through `<name>:b<n>`. Each block remembers who toppled it and when. Only
-self's reaches change the tower: a read by the model or the field leaves it
-as it is.
+through `<name>:b<n>`. Each block remembers who toppled it and when. Of the
+reads, only self's reaches change the tower: a read by the model or the field
+leaves it as it is. Others change it by playing (below).
 
 `body` is the one toy built to change exactly when self looks, which "Don't
 game the getters" below warns against. It is deliberate, labelled, and its log
@@ -416,6 +464,52 @@ seat is running. Use the seat's model then: the `toybox` object answers
 `exec(action='call', object='toybox', method='add', args={'spec': 'tower n=5'})`.
 The default name is `toy:<kind>`. A removed or reset toy's state and log are
 moved to `toybox/archive/`, never deleted.
+
+### Playing with self
+
+An other acting in self's world is what rungs 6 and 7 are about, so you and
+the seat's model can play with the toys (#244). Every change is tagged with
+who made it.
+
+| toy | action | what it does |
+|---|---|---|
+| `tower` | `knock <k>` | block k and every standing block above it fall |
+| `tower` | `rebuild <k>` | block k alone stands again |
+| `die` | `roll` | a fresh face (never the same one) |
+| `drift` | `nudge [up\|down]` | one step (a coin picks the way when none is given); it bounces off a wall |
+| `burst` | `nudge` | a fresh value |
+| `body` | none | self's alone: the control. A poke is refused |
+
+`fast` and `slow` take no pokes either: their clock is the point. A poke that
+would change nothing (knocking a fallen block, rebuilding a standing one) is
+refused, so every logged poke is a real change. A tower block can be named
+directly: `toy:tower:b3 knock` is `toy:tower knock 3`.
+
+Three ways to play:
+
+```bash
+membrane toybox poke toy:tower knock 3          # by: operator
+membrane toybox poke toy:die roll --as alice    # by: alice
+```
+
+- **The CLI** tags `operator` by default (the seat's `''` person: what
+  `chat_io.recent_person` means by "the operator"), or `--as <name>`. A poke
+  only touches the toy's own files, under the toy's lock, so it works while
+  the seat runs; self sees it on its next look.
+- **The seat's model** calls `toybox.poke(toy, action)`, for example
+  `exec(action='call', object='toybox', method='poke', args={'toy': 'toy:tower', 'action': 'knock 3'})`.
+  A method call doesn't say who called it, and the toybox object is the
+  model's surface (self's own reaches go through the getter), so every poke
+  made there is tagged `model`.
+- **The 👶 panel's play buttons**: each toy row in the report card gets small
+  buttons (knock / rebuild on each tower block, roll on a die, nudge on a
+  drift or burst toy). They post to `POST /membrane/toybox/poke`
+  `{"toy": "toy:tower", "action": "knock", "arg": 3}`, the panel's only write.
+  The route takes toybox actions only and sits behind the JWT gate like every
+  route. The seat tags the poke with the page's person: the token's subject in
+  JWT mode, else the standalone page's speaker line (the name you typed),
+  else the HA user (the HA relay stamps `person`), else `operator`. A `person`
+  the page puts in the body is ignored whenever any of those exists.
 
 ### Migrating the model-written toys
 

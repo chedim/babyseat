@@ -60,7 +60,10 @@ ALLOWED_PREFIXES = ("session", "config", "provider", "mcp")
 # thinker, dreamer); event: the per-user SSE relay (never global/event,
 # its unscoped twin)
 ALLOWED_EXACT = ("global/health", "agent", "event", "membrane/models", "membrane/seat", "membrane/seat/control",
-                 "membrane/voice", "membrane/voice/state", "membrane/jsexec/register", "membrane/jsexec/result")
+                 "membrane/voice", "membrane/voice/state", "membrane/jsexec/register", "membrane/jsexec/result",
+                 "membrane/toybox/poke")
+# #244: the 👶 panel's play buttons -- the poke is tagged with the HA user, stamped here
+PERSON_PATHS = ("membrane/toybox/poke",)
 # the voice + JS routes: the person is the HA user, stamped here, never the page's word
 VOICE_PATHS = ("membrane/voice", "membrane/voice/state", "membrane/jsexec/register", "membrane/jsexec/result")
 # the minds' models: everyone reads, only an HA ADMIN switches them
@@ -399,7 +402,7 @@ class ServeProxyView(HomeAssistantView):
                     and segs[2] in ("message", "prompt_async")
                     and isinstance(parsed, dict)):
                 parsed = with_speaker(parsed, getattr(user, "name", ""))
-            if rest in VOICE_PATHS and isinstance(parsed, dict):
+            if (rest in VOICE_PATHS or rest in PERSON_PATHS) and isinstance(parsed, dict):
                 parsed["person"] = str(getattr(user, "name", "") or "")
             body = json.dumps(parsed).encode()
 

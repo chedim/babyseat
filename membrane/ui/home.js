@@ -780,6 +780,18 @@ const HSTYLE = `
   .selfpanel .ladder .st-slipping .rs { color:var(--warning-color,#ffa600); opacity:1; }
   .selfpanel .ladder .st-locked, .selfpanel .ladder .st-unbuilt { opacity:.45; }
   .selfpanel .toys { list-style:none; padding:0; }
+  .selfpanel .toys li { padding:1px 0; }
+  .selfpanel .play { display:inline-flex; gap:4px; margin-left:4px; vertical-align:middle; }
+  .selfpanel .pk { font-size:11px; line-height:1.2; padding:2px 7px; border-radius:999px;
+                   border:1px solid color-mix(in srgb, var(--divider-color,#888) 70%, transparent);
+                   background:color-mix(in srgb, var(--primary-color,#3477d6) 14%, transparent); }
+  .selfpanel .pk:hover { background:color-mix(in srgb, var(--primary-color,#3477d6) 30%, transparent); }
+  .selfpanel .pk:disabled { opacity:.5; cursor:progress; }
+  .selfpanel .pk:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:1px; }
+  .selfpanel .spplay { position:sticky; bottom:-10px; z-index:1; margin:8px 0 0; font-size:12px; padding:4px 8px; border-radius:8px;
+                       box-shadow:0 2px 8px rgba(0,0,0,.25); overflow-wrap:anywhere;
+                       background:color-mix(in srgb, #2e9d5b 22%, var(--card-background-color,#111)); }
+  .selfpanel .spplay.bad { background:color-mix(in srgb, var(--error-color,#db4437) 22%, var(--card-background-color,#111)); }
   .selfpanel .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:middle; }
   .selfpanel .dot.ok { background:#2e9d5b; }
   .selfpanel .dot.warn { background:var(--warning-color,#ffa600); }
@@ -891,7 +903,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     // THE 👶 PANEL (#230, the operator's ask 2026-10-19): self's side panel --
     // what it is doing now (its record, newest first) and its report card.
     // READ-ONLY: nothing here changes self; the 🌱 chooser stays the only
-    // switch. Open or closed is remembered per browser; it refreshes only
+    // switch (the toys' play buttons, #244, are the one write -- they change
+    // a toy in self's world, never self; _onToyPoke below). Open or closed is remembered per browser; it refreshes only
     // while open.
     _toggleSelfPanel(on) {
       const p = this._selfPanel, b = this._babyBtn; if (!p || !b) return;
@@ -929,6 +942,33 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     }
     // ---- end of the 👶 panel
 
+    // PLAY WITH SELF (#244): a toy's play button (data-poke-toy / -action /
+    // -arg, panel.js toyButtonsHtml) -> the chat's _toyPoke, the panel's ONE
+    // write (toybox actions only; the seat tags it with this page's person).
+    // Self sees the change on its next look as one it did not cause.
+    async _onToyPoke(e) {
+      const btn = e.target && e.target.closest ? e.target.closest("button[data-poke-toy]") : null;
+      const c = this._chat;
+      if (!btn || btn.disabled || !c || typeof c._toyPoke !== "function") return;
+      const toy = btn.getAttribute("data-poke-toy"), action = btn.getAttribute("data-poke-action");
+      const arg = btn.getAttribute("data-poke-arg");
+      btn.disabled = true;
+      let out;
+      try { out = await c._toyPoke(toy, action, arg); } catch (err) { out = { ok: false, error: String(err) }; }
+      btn.disabled = false;
+      const el = this._spPlay;
+      if (el) {
+        el.hidden = false;
+        el.classList.toggle("bad", !out.ok);
+        el.textContent = out.ok
+          ? "✓ " + action + " " + toy + (out.block ? " block " + out.block : "") + " → " + JSON.stringify(out.reading || {}) + " (by " + out.by + ")"
+          : "✗ " + (out.error || "the poke failed");
+        clearTimeout(this._spPlayT);
+        this._spPlayT = setTimeout(() => { el.hidden = true; }, 6000);
+      }
+      if (out.ok) { this._spSeatAt = 0; this._paintSelfPanel(); }
+    }
+
     // THE BRAIN ON THE SCREEN (#237, the operator: a stranger opens membrane
     // home and watches a mind at work). Self's record (the 👶 panel's feed,
     // GET /membrane/self/recent) is polled every BRAIN_MS while the page is
@@ -964,7 +1004,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         // a fresh page: the trail from the last looks, no replayed pulses
         const todo = first ? out.fresh.filter((r) => r.kind === "reach").slice(-8) : out.fresh;
         for (const r of todo) {
-          if (r.kind === "reach") v.selfLook(r.eid, await v.placeOf(r.eid).catch(() => null), brainLabel(r.eid, me), r.answer);
+          // r.fid (#244): the seat's own field id for the thing (field_id), tried first
+          if (r.kind === "reach") v.selfLook(r.eid, await v.placeOf(r.fid || r.eid).catch(() => null), brainLabel(r.eid, me), r.answer);
           else if (r.kind === "shift") v.selfShift(r.eid, await v.placeOf(r.eid).catch(() => null), brainLabel(r.eid, me));
           else if (r.kind === "wait") v.selfWait();
           else if (r.kind === "rung") v.selfLevelUp(r.rung);
@@ -1111,7 +1152,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         </div>
         <nav class="hamenu glass" role="menu"></nav>
         <button class="babybtn" aria-label="self: what it is doing and its report card" aria-expanded="false" aria-controls="selfpanel"
-                title="self (#161): what it is doing now, and its report card (read-only)">👶</button>
+                title="self (#161): what it is doing now, its report card, and its toys to play with">👶</button>
         <aside class="selfpanel glass" id="selfpanel" aria-label="self" hidden>
           <div class="sphead"><span class="sptitle">👶 self</span><button class="spx" aria-label="close self's panel" title="Close">×</button></div>
           <div class="spxp"></div>
@@ -1119,6 +1160,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <ol class="spact"><li class="sl none">…</li></ol>
           <h3>report card</h3>
           <div class="spcard"></div>
+          <p class="spplay" aria-live="polite" hidden></p>
         </aside>
         <div class="chat glass"><ai-terminal-panel overlay></ai-terminal-panel></div>
         <div class="orb" aria-hidden="true"><canvas class="wave" width="560" height="140"></canvas></div>
@@ -1239,7 +1281,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._selfT = setInterval(() => this._paintSelf(), 1500);
       // the 👶 panel (#230): read-only, remembered per browser
       this._babyBtn = $(".babybtn"); this._selfPanel = $(".selfpanel");
-      this._spXp = $(".spxp"); this._spAct = $(".spact"); this._spCard = $(".spcard");
+      this._spXp = $(".spxp"); this._spAct = $(".spact"); this._spCard = $(".spcard"); this._spPlay = $(".spplay");
+      this._spCard.addEventListener("click", (e) => this._onToyPoke(e));     // #244: the toys' play buttons
       this._babyBtn.addEventListener("click", () => this._toggleSelfPanel());
       $(".spx").addEventListener("click", () => { this._toggleSelfPanel(false); this._babyBtn.focus(); });
       this._selfPanel.addEventListener("keydown", (e) => {
@@ -1266,11 +1309,26 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     _setMode(m, byTouch) {
       this._mode = m; lsSet(LS_FOLLOW, m); this._tracked = null;
       this._modeBtn.textContent = followLabel(m);
-      if (this._v3) this._v3.selfEyes = m === "eyes";
+      if (this._v3) { this._v3.selfEyes = m === "eyes"; this._v3.selfFollow = m === "self" || m === "eyes"; }
       this._eyeDir = null;
       if (byTouch) { this._say("you took the camera: pick ◎ self again to let it frame self"); return; }
       this._frameHold = false;
       this._lastTouch = -1e9; this._goal = null; this._aim(true);   // idle at once (a fresh page too)
+    }
+
+    /** The panels over the field (#237): the chat and the 👶 panel when open,
+     *  the top bar, the voice row and the brain's caption -- rects in the
+     *  field's own coordinates. */
+    _occluders() {
+      const host = this._host3d, root = this.shadowRoot;
+      if (!host || !root) return [];
+      const h = host.getBoundingClientRect(), out = [];
+      for (const el of [this._chatBox, this._selfPanel, root.querySelector(".top"), root.querySelector(".voice"), this._brainEl]) {
+        if (!el || el.hidden || el.classList.contains("hidden")) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) out.push({ x: r.left - h.left, y: r.top - h.top, w: r.width, h: r.height });
+      }
+      return out;
     }
 
     async _get(path) {
@@ -1295,6 +1353,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           stream: (p, signal) => hass.fetchWithAuth(HSERVE + p, { signal, headers: { Accept: "text/event-stream" } }),
           // the live layer for every signed-in user (the proxy relays it to them all)
           kindColor: hKindColor, isAdmin: true, maxFps: 30, labelIds: () => this._labelIds(),
+          occluders: () => this._occluders(),          // #237: the labels round self keep out from under the panels
           snapshot: "membrane-home-" + ((hass.user && hass.user.id) || "anon"),   // IndexedDB: the last view at once
           onStatus: (t) => { this._v3Txt = t; this._paintStatus(); },
           onSelect: (m) => this._select(m),
@@ -1309,7 +1368,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         };
         const v = this._v3 = new window.MembraneField3D(this._host3d, api);
         if (window.matchMedia("(max-width: 760px)").matches) { v.maxBudget = 3000; v._applyBudget(3000); }
-        v.selfEyes = this._mode === "eyes";
+        v.selfEyes = this._mode === "eyes"; v.selfFollow = this._mode === "self" || this._mode === "eyes";
         await v.start();
         if (!this._started) { v.stop(); return; }
         await this._aim(true);

@@ -34,6 +34,7 @@
                           side-index out of the way (--yes; recoverable)
     membrane toybox       self's toys, the built-in kit: list | add <kind>
                           | remove | reset | migrate (--dry-run / --yes)
+                          | poke <toy> <action> [arg] (play with self)
 
 Per-project DATA lives in ./.membrane/ (field, audit, review queue, logs) --
 auto-created on first run per directory. Skills are PROJECT-SCOPED on purpose
@@ -597,6 +598,7 @@ def main() -> None:
         "             out of the way (--yes; recoverable, timestamped)\n"
         "  toybox     self's toys, the built-in kit: list | add <kind> [--name\n"
         "             N] [--param k=v] | remove <name> | reset <name> | migrate\n"
+        "             | poke <toy> <action> [arg] [--as WHO] (play with self)\n"
         "\n"
         "Everything after the subcommand is forwarded verbatim to the\n"
         "underlying module.\n"
