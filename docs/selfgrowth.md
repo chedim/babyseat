@@ -229,9 +229,14 @@ rung shut are taken out. They are a small data list in `membrane/self_sheet.py`
 | #191 | rung 4 passed (rung 5 could not notice a shift at the audit's floor) | 2026-10-16 21:43:37 UTC, the fix live |
 | #208 | rung 5 passed (rung 6 talked to the empty operator slot) | self's first line to a real person |
 | #254 | rung 6's honest pass (rung 7, now rung 8, graded the LLM's guess, not self's) | the record's `rung7_restart` line: the fixed scorer's first cycle; **open** (to the record's end) until then |
+| #259 | 2026-10-18 20:17:24 UTC, the #212 merge, on a seat past rung 2 (curiosity chased the heartbeat's restart glitches); share **0.06** | the record's `fix` line (issue 259): the fixed loop's first cycle; **open** until then |
 
 A window applies only on a seat whose rung passed before the fix; a seat
-born later never had the bug and loses no hours to it.
+born later never had the bug and loses no hours to it. A bug that held no
+rung shut but cost part of self's time has a **share** (#259; every other
+window's is 1): working hours lose share × its running time, and where windows
+overlap only the costliest open one counts, never two. The panel lists each
+window's share and cost (`6% of 9.7 h running = 35 min`).
 
 The sheet comes from one read-only route, computed from the record,
 `status()` and the toybox and cached for 30 s (behind the JWT gate like every

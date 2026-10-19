@@ -24,7 +24,9 @@ not running (the seat down, restarting, or self asleep). From running time
 the windows a KNOWN BUG held a rung shut are taken out: BUGS, a small data
 list with each fix's time. A window opens when the rung below the stuck one
 passed and applies only on a seat whose rung passed before the fix (a seat
-born later never had the bug).
+born later never had the bug). A bug that cost only PART of self's time
+(#259) carries a share: working hours lose share x its running time, and
+where windows overlap the costliest open one's share applies, never two.
 
 THE DOCK (the operator's addition): dock() is the toys alone, light enough
 to poll every few seconds (GET /membrane/toybox/state, cached DOCK_CACHE_S):
@@ -57,6 +59,14 @@ def _utc(*a) -> float:
 # record's rung7_restart line, the fixed rung 7's first cycle; open until then).
 # #258: that rung 7 (understand an other) is rung 8 since the ladder flip; the
 # window and its line keep their names (the record is never rewritten)
+# share: the part of self's running time the bug cost (default 1.0: all of it).
+# #259 held no rung shut: curiosity spent a share of self's looks on the
+# heartbeat's restart glitches. It opens at opens_at (the #212 curiosity merge)
+# on a seat past rung opens_after; until "fix_line": it ends at the record's first
+# `fix` line naming its issue,
+# the fixed loop's first cycle; open until then. Its share is from the replay
+# of the live record: the tilt picked the heartbeat at 0.352 of its due looks
+# against 0.279 untilted, and it was due at ~91% of the timed looks.
 BUGS = (
     {"issue": 191, "what": "rung 5 could not notice a shift at the audit's floor",
      "opens_after": 4, "fixed": _utc(2026, 10, 16, 21, 43, 37), "until": "fixed"},   # PR #191 live on the seat
@@ -64,6 +74,9 @@ BUGS = (
      "opens_after": 5, "fixed": _utc(2026, 10, 18, 18, 8, 44), "until": "first_person"},  # PR #209 merged
     {"issue": 254, "what": "rung 7 (understand an other, now rung 8) graded the LLM's guess, not self's",
      "opens_after": 6, "fixed": None, "until": "rung7_restart"},   # the fix's time is on each seat's record
+    {"issue": 259, "what": "curiosity chased the heartbeat's restart glitches",
+     "opens_after": 2, "opens_at": _utc(2026, 10, 18, 20, 17, 24), "fixed": None,
+     "until": "fix_line", "share": 0.06},       # #212 merged; the fix's time is on each seat's record
 )
 RESTART7 = "restarted {day}: was grading the LLM, now grades self"
 VOIDED = "rung {rung} passed {at} under the #254 bug: graded the LLM, not self; doesn't count"
@@ -209,11 +222,19 @@ def _clocks(recs: list, now: float) -> dict:
     if real6 is not None:
         honest[6] = real6
     restart7 = next((float(r["ts"]) for r in srt if r.get("kind") == "rung7_restart"), None)
+    fix_lines = {}                                    # issue -> its first `fix` line (#259)
+    for r in srt:
+        if r.get("kind") == "fix":
+            fix_lines.setdefault(r.get("issue"), float(r["ts"]))
     bugs = []
     for b in BUGS:
         if b["until"] == "rung7_restart":
             start = honest.get(b["opens_after"])
             fixed = restart7
+        elif b["until"] == "fix_line":
+            start = passed_at.get(b["opens_after"])
+            start = None if start is None else max(start, b["opens_at"])
+            fixed = fix_lines.get(b["issue"])
         else:
             start = passed_at.get(b["opens_after"])
             fixed = b["fixed"]
@@ -227,10 +248,20 @@ def _clocks(recs: list, now: float) -> dict:
             stop = fixed if fixed is not None else end   # still open: runs to the record's end
         stop = min(stop, end)
         if stop > start:
-            bugs.append((start, stop, {**b, "open": fixed is None}))
+            bugs.append((start, stop, {**b, "open": fixed is None, "share": float(b.get("share", 1.0))}))
+    cuts = sorted({x for a, z, _ in bugs for x in (a, z)})
 
     def bug_s(t):
-        return sum(running(gs, a, min(b, t)) for a, b, _ in bugs if a < t)
+        """The running time the bugs cost up to t: on each stretch between the
+        windows' ends, the costliest open window's share -- never two (#259)."""
+        out = 0.0
+        for a, z in zip(cuts, cuts[1:]):
+            if a >= t:
+                break
+            share = max((w["share"] for x, y, w in bugs if x <= a and z <= y), default=0.0)
+            if share:
+                out += share * running(gs, a, min(z, t))
+        return out
 
     def working(t):
         return running(gs, born, t) - bug_s(t)
@@ -250,8 +281,9 @@ def _time(c: dict) -> dict:
     return {"alive_h": _r((end - born) / H), "running_h": _r(run / H), "down_h": _r((end - born - run) / H),
             "bugs_h": _r(bug / H), "working_h": _r((run - bug) / H),
             "bugs": [{"issue": b["issue"], "what": b["what"], "from": iso(a), "to": iso(z),
-                      "open": bool(b.get("open")),
-                      "running_h": _r(running(gs, a, z) / H)} for a, z, b in c["bugs"]]}
+                      "open": bool(b.get("open")), "share": b["share"],
+                      "running_h": _r(running(gs, a, z) / H),
+                      "cost_h": _r(b["share"] * running(gs, a, z) / H)} for a, z, b in c["bugs"]]}
 
 
 def _achievements(c: dict) -> list:

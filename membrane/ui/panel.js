@@ -953,15 +953,24 @@ function sheetGrowth(s) {
     escText(g.caveat || "") + "</p>";
 }
 
+/** A bug window's cost: its running time, or -- a bug that cost only part of
+ *  self's time (#259) -- its share of it. */
+function bugCost(b) {
+  const share = b.share == null ? 1 : Number(b.share);
+  if (!(share < 1)) return hoursText(b.running_h) + " running";
+  return Math.round(100 * share) + "% of " + hoursText(b.running_h) + " running = " +
+    hoursText(b.cost_h != null ? b.cost_h : share * (Number(b.running_h) || 0));
+}
+
 function sheetTime(s) {
   const t = s.time || {};
   const parts = timeParts(t);
   return '<div class="tbar" role="img" aria-label="' + escAttr(parts.map((p) => p.label + " " + hoursText(p.h)).join(", ")) + '">' +
     parts.map((p) => '<span class="tp tp-' + p.key + '" style="width:' + p.pct + '%"></span>').join("") + "</div>" +
     '<ul class="tl">' + parts.map((p) => '<li><span class="lg tp-' + p.key + '"></span>' + escText(p.label) + " <b>" + hoursText(p.h) + "</b> · " + p.pct + "%</li>").join("") +
-    "</ul>" + ((t.bugs || []).length ? '<p class="muted">the bugs that held a rung shut:</p><ul class="bugs">' + t.bugs.map((b) =>
+    "</ul>" + ((t.bugs || []).length ? '<p class="muted">the known bugs that cost self time:</p><ul class="bugs">' + t.bugs.map((b) =>
       "<li>#" + b.issue + " " + escText(b.what) + ' <span class="muted">' + escText(utcShort(b.from)) + " → " + (b.open ? "now (open)" : escText(utcShort(b.to)) + " UTC") +
-      " · " + hoursText(b.running_h) + " running</span></li>").join("") + "</ul>" : "");
+      " · " + bugCost(b) + "</span></li>").join("") + "</ul>" : "");
 }
 
 function sheetInventory(s) {
