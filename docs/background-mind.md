@@ -335,8 +335,32 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   A rung 6 passed against someone else stays on the record (history is not
   rewritten), but its bar re-measures against the new person and reads
   **slipping** until they earn it — no reset, no free pass.
-  (`llm::call` prediction is rung 7's; rung 6 is only the bare split.)
-- **Rung 7, understand an other.** Self consults the model coprocessor at
+  (`llm::call` prediction is rung 8's; rung 6 is only the bare split.)
+- **Rung 7, take turns (#258).** Rung 6 pushes on a timer (every 30
+  cycles), whatever the other is doing. From rung 7 on, self **learns when
+  to push**: after each push it draws the moment it will wait for, a bin of
+  `spoke_age` (how long since the person last spoke: 0–2 min, 2–10, 10–30,
+  30+ or never), by Thompson sampling on the reply rate each bin earned over
+  its last 100 pushes (one random bin in ten, so the losing bins stay
+  measured), and pushes when the person's `spoke_age` is in that bin. Never
+  sooner than 30 cycles after the last push (the timer's own rate is the
+  cap), never later than 180 (`overdue`). The words are the same and no
+  model is involved. A push's reward is the reply check's `replied`: the
+  person spoke **after** the push, by the check (`chat:in`'s `heard_ts`; a
+  look reads `changed` for a line from before the push too, which is not a
+  reply). Each push line records `bin`, `aim`, `best` (the window self
+  believed best), `dwell` (the eligible cycles it waited in each bin) and
+  `why` (`aim` / `overdue`). The test reads the last 100 such pushes:
+  (a) **contingency**, the share in the believed-best window beats the
+  share of the waiting time the person spent in it (z ≥ 3 and +0.10);
+  (b) **payoff**, each push's outcome minus what a timing-blind push in its
+  interval would have expected (the bins' rates as known before it) is
+  ≥ +0.05 with t ≥ 4. Both prequential. A timer or a coin-flip person can't
+  pass (`experiments/rung7_turns`). `status()['rung7']` shows the bins, the
+  best window, the in-window share against chance, and the reply rate
+  against timing-blind.
+- **Rung 8, understand an other** (rung 7 until #258, unchanged). Once rung
+  8 is available, self consults the model coprocessor at
   each push (#215): rung 6's act queues one read-only `llm::call` asking for
   the probability that the person (`chat:in:<person>`) will have spoken by
   self's next look at them. The prompt carries only what self's record holds
@@ -353,7 +377,7 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   it). Then **after it speaks it checks for the reply**: the person is held
   back from self's ordinary choice for 2 minutes, then looked at once (a
   `reply` look, not a patience-timed one). While the push asked and no answer
-  has landed, it waits up to `RUNG7_GRACE_S` (60 s) more — the question rides
+  has landed, it waits up to `RUNG8_GRACE_S` (60 s) more — the question rides
   a full read-only loop turn, 2–75 s on the live seat. **Self makes the
   prediction (#254)**: at the reply check `expect` computes `p_self` from
   self's record alone (the person's all-time and recent reply rates, the last
@@ -372,7 +396,7 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   checks and passes when self's prediction removes ≥ 0.08 of the **running
   rate's** Brier error (the person's prior-smoothed rate over the checks
   before, no lookahead): knowing the rate scores 0, so calibration alone
-  can't pass. No model is needed to pass. `status()['rung7']` shows the
+  can't pass. No model is needed to pass. `status()['rung8']` shows the
   operator `asked` / `checked` / `paired`, `pair_rate`, the Brier errors of
   self alone, of the mix, of the running rate and of the model alone, and
   the advisor's weight and model id (the 🌱 tooltip too). It is scoped to the

@@ -13,6 +13,13 @@ RUNG7_CHECK_S after the push, and that look pairs habit's p with the
 model's p. The other and the pending question come from the record, so a
 restart keeps them. Caps: one consult per push, llm.request's own budget,
 and a consult (or its answer landing) never runs a cycle.
+
+#258 (the ladder flip): this is rung 8's test now (rung 7 until the flip),
+unchanged and moved up one rung: the seats pass the new rung 7 (take turns,
+tagged with the new ladder) and may grow to 8, where the model is asked;
+RUNG7_* are RUNG8_*, status()['rung7'] is status()['rung8']. The pushes keep
+the timer's pace (SL.TURNS off): rung 7's learned timing changes only WHEN a
+push goes and has its own tests (test_self_rung7_turns_258).
 """
 import json
 import os
@@ -110,6 +117,7 @@ class _Model:
 
 @pytest.fixture(autouse=True)
 def _clean(monkeypatch):
+    monkeypatch.setattr(SL, "TURNS", False)          # #258: the timer's pace (see the module doc)
     WA._getter_paused.clear()
     monkeypatch.setattr(LLM, "_calls", [])
     monkeypatch.setattr(LLM, "_echo", {})
@@ -127,11 +135,11 @@ def _seat():
     CIO.entity_in(srv, CIO.OPERATOR)
     SL.bind(srv)
     SL.set_limit(srv, 1)
-    for r in (1, 2, 3, 4, 5, 6):
-        SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9})
+    for r in (1, 2, 3, 4, 5, 6, 7):                     # #258: rung 7 is take turns now
+        SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9, "ladder": SL.LADDER_V})
     # rung 5's audit is done: no getter pauses mid-test
     SL._append(srv, {"ts": 1.0, "kind": "audit", "rung": 5, "phase": "end", "eid": "x", "passed": True})
-    SL.set_limit(srv, 7)
+    SL.set_limit(srv, 8)
     return srv
 
 
@@ -191,8 +199,8 @@ def test_the_next_look_at_the_other_is_a_paired_look(monkeypatch):
     after = [r for r in _looks(srv) if r["ts"] > push["ts"]]
     assert after, "self checks for the reply after it speaks"
     first = after[0]
-    assert first["ts"] - push["ts"] >= SL.RUNG7_CHECK_S  # the reply check, not sooner
-    assert first["ts"] - push["ts"] <= SL.RUNG7_STALE_S
+    assert first["ts"] - push["ts"] >= SL.RUNG8_CHECK_S  # the reply check, not sooner
+    assert first["ts"] - push["ts"] <= SL.RUNG8_STALE_S
     assert first.get("reply") is True
     assert "p" in first and first.get("p_llm") is not None
     assert first["answer"] == "changed"                  # the FAST reply had landed
@@ -220,15 +228,15 @@ def test_a_restart_still_knows_the_other_from_the_record(monkeypatch):
 def test_a_learnable_reply_world_yields_enough_pairs(monkeypatch):
     person, model = _world(monkeypatch)
     srv = _seat()
-    _run(srv, person, (SL.RUNG7_LOOKS + 5) * SL.MEET_EVERY)
-    assert len(_pairs(srv)) >= SL.RUNG7_LOOKS
+    _run(srv, person, (SL.RUNG8_LOOKS + 5) * SL.MEET_EVERY)
+    assert len(_pairs(srv)) >= SL.RUNG8_LOOKS
 
 
-def test_a_model_that_knows_the_pattern_passes_rung_seven(monkeypatch):
+def test_a_model_that_knows_the_pattern_passes_rung_eight(monkeypatch):
     person, model = _world(monkeypatch)
     srv = _seat()
-    _run(srv, person, (SL.RUNG7_LOOKS + 5) * SL.MEET_EVERY)
-    assert 7 in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
+    _run(srv, person, (SL.RUNG8_LOOKS + 5) * SL.MEET_EVERY)
+    assert 8 in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
 
 
 def test_a_random_model_earns_no_trust(monkeypatch):
@@ -238,9 +246,9 @@ def test_a_random_model_earns_no_trust(monkeypatch):
     # outcome input learns on its own -- see test_self_rung7_self_predicts_254)
     person, model = _world(monkeypatch, knows=False, seed=3)
     srv = _seat()
-    _run(srv, person, (SL.RUNG7_LOOKS + 5) * SL.MEET_EVERY)
-    assert len(_pairs(srv)) >= SL.RUNG7_LOOKS            # it was measured...
-    r7 = SL.status(srv)["rung7"]
+    _run(srv, person, (SL.RUNG8_LOOKS + 5) * SL.MEET_EVERY)
+    assert len(_pairs(srv)) >= SL.RUNG8_LOOKS            # it was measured...
+    r7 = SL.status(srv)["rung8"]
     assert r7["advisor_weight"] < 0.2                    # ...and not trusted
     assert r7["brier_mix"] <= r7["brier_self"] + 0.01
     assert r7["brier_model"] > r7["brier_self"]

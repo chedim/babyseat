@@ -6,6 +6,11 @@ rung 7 starts counting -- the `rung7_restart` line self_loop writes once, at
 its first cycle running the fix on a seat past rung 6. Until that line is on
 the record the window is open and runs to the record's end. Working hours
 drop by its running time, and the sheet marks rung 7's restart.
+
+#258: that rung 7 is rung 8 (understand an other) since the ladder flip; the
+window and the `rung7_restart` line keep their names. The restart note sits
+on the Understand attribute (rung 8) and on rung 8's quest, not on the new
+rung 7's (take turns).
 """
 import datetime as dt
 import sys
@@ -82,9 +87,10 @@ class TestRung7RestartMark(unittest.TestCase):
         s = S._sheet(srv, NOW)
         day = dt.datetime.fromtimestamp(fix, dt.timezone.utc).strftime("%Y-%m-%d")
         note = f"restarted {day}: was grading the LLM, now grades self"
-        self.assertEqual(s["quest"]["rung"], 7)
-        self.assertEqual(s["quest"]["note"], note)
+        self.assertEqual(s["quest"]["rung"], 7)                    # take turns (#258)...
+        self.assertIsNone(s["quest"].get("note"))                  # ...which never graded the LLM
         a = {x["key"]: x for x in s["attributes"]}["understand"]
+        self.assertEqual(a["rung"], 8)
         self.assertEqual(a["note"], note)
 
     def test_no_mark_before_the_restart(self):

@@ -165,11 +165,11 @@ def test_rung6_reads_only_the_current_others_answers():
     assert out["crit"]["heard"] == 0.0 and out["passed"] is False
 
 
-def test_rung7_reads_only_the_current_others_pairs():
-    old = _push(OP_IN, 1) + _looks(OP_IN, SL.RUNG7_LOOKS)
-    assert SL._rung7(old)["passed"] is True
+def test_rung8_reads_only_the_current_others_pairs():   # rung 7 until #258
+    old = _push(OP_IN, 1) + _looks(OP_IN, SL.RUNG8_LOOKS)
+    assert SL._rung8(old)["passed"] is True
     now = old + _push(ROOM_IN, 1, base=100.0)
-    out = SL._rung7(now)
+    out = SL._rung8(now)
     assert out["crit"]["looks"] == 0.0 and out["passed"] is False
 
 

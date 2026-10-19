@@ -87,8 +87,8 @@ function brainLabel(eid, me) {
 }
 
 const BRAIN_RUNGS = { 0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart", 4: "patience",
-  5: "notice the world changed", 6: "meet an other", 7: "understand an other", 8: "recognize itself",
-  9: "change itself", 10: "speak" };
+  5: "notice the world changed", 6: "meet an other", 7: "take turns", 8: "understand an other",
+  9: "recognize itself", 10: "change itself", 11: "speak" };   // #258: the ladder flip
 const bnum = (x) => String(Math.round(Number(x) * 100) / 100);
 
 /** One record line as a plain sentence for a stranger. Measured, never

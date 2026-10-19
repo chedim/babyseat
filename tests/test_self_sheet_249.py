@@ -13,6 +13,11 @@ Working hours = running time (the record's gaps over GAP_S taken out) minus
 the windows a known bug held a rung shut (#191, #208 -- a small data list with
 their fix times; a window applies only on a seat whose rung passed before the
 fix). The page side (panel.js) is tested with node.
+
+#258 (the ladder flip): rung 7 is take turns and rung 8 understand an other
+(the #254 predictor, moved up unchanged). The seat that lived through the
+bugs is at rung 6 working on the new rung 7; its reply checks are rung 8's
+pairs, read where a seat has passed the new rung 7 (_lived8).
 """
 import datetime as dt
 import json
@@ -108,6 +113,18 @@ def _lived(srv):
 
 def _sheet(srv, now):
     return SH.sheet(srv, now=now, fresh=True)
+
+
+def _lived8(srv):
+    """#258: the lived seat one rung on -- it passed the new rung 7 (take
+    turns) before its pairs, and may grow to 8: rung 8 reads the pairs."""
+    _lived(srv)
+    _put(srv, {"ts": T0 + 9.7 * H, "kind": "rung", "rung": 7, "skill": 0.1, "eid": ALICE, "ladder": SL.LADDER_V})
+    SL._RT.pop(id(srv), None)
+    SL.bind(srv)
+    srv.efield = types.SimpleNamespace(current=lambda: [1.0, 0.0])
+    SL._rt(srv)["mode"], SL._rt(srv)["limit"] = "on", 8
+    return srv
 
 
 # ---- the clocks: running time, the record's gaps, the bugs ------------------------
@@ -227,24 +244,25 @@ class TestGrowth(unittest.TestCase):
         self.assertEqual(floors[4], SL.RUNG4_TIMED)
         self.assertEqual(floors[5], SL.RUNG5_LOOKS)
         self.assertEqual(floors[6], SL.RUNG6_PUSHES * SL.MEET_EVERY)
-        self.assertEqual(floors[7], SL.RUNG7_LOOKS * SL.MEET_EVERY)
+        self.assertEqual(floors[7], SL.RUNG7_PUSHES * SL.MEET_EVERY)  # #258: take turns
+        self.assertEqual(floors[8], SL.RUNG8_LOOKS * SL.MEET_EVERY)   # understand an other, moved up
         self.assertEqual(set(floors), set(SL.PROGRESS))             # every built rung has one
 
     def test_the_fastest_line_is_cumulative_at_the_pace(self):
         floors = SH.fastest_cycles()
         cum = 0
-        for n in range(1, 8):
+        for n in range(1, 9):                                       # #258: 8 rungs built
             cum += floors[n]
             self.assertAlmostEqual(self.rows[n]["fastest_h"], round(cum * SL.PACE_S / H, 3), places=3)
-        self.assertIsNone(self.rows[8]["fastest_h"])                # not built
-        self.assertFalse(self.rows[8]["built"])
+        self.assertIsNone(self.rows[9]["fastest_h"])                # not built
+        self.assertFalse(self.rows[9]["built"])
 
     def test_the_child_scale_is_one_factor_the_median_over_the_rungs_passed(self):
         g = self.s["growth"]
         ratios = sorted(self.rows[n]["working_h"] / SH.CHILD[n][0] for n in range(2, 7))
         k = ratios[len(ratios) // 2]
         self.assertAlmostEqual(g["hours_per_child_month"], k, places=3)
-        for n in range(1, 11):
+        for n in range(1, 12):                                      # #258: one more rung on the scale
             self.assertAlmostEqual(self.rows[n]["child_h"], SH.CHILD[n][0] * k, delta=0.01)
             self.assertTrue(self.rows[n]["child_milestone"])
         self.assertIn("analogy", g["caveat"])
@@ -272,25 +290,31 @@ class TestAttributes(unittest.TestCase):
         cls.s = _sheet(cls.srv, T0 + 12 * H)
         cls.a = {x["key"]: x for x in cls.s["attributes"]}
 
-    def test_seven_one_per_built_rung_in_order(self):
+    def test_one_per_built_rung_in_order(self):
+        # #258: Turns is rung 7, Understand moved up to 8
         self.assertEqual([x["label"] for x in self.s["attributes"]],
-                         ["Feel", "Reach", "Sort", "Patience", "Notice", "Meet", "Understand"])
-        self.assertEqual([x["rung"] for x in self.s["attributes"]], [1, 2, 3, 4, 5, 6, 7])
+                         ["Feel", "Reach", "Sort", "Patience", "Notice", "Meet", "Turns", "Understand"])
+        self.assertEqual([x["rung"] for x in self.s["attributes"]], [1, 2, 3, 4, 5, 6, 7, 8])
 
     def test_each_is_the_measured_number(self):
         recs = SL._read(self.srv)
         self.assertAlmostEqual(self.a["feel"]["value"], SL._rung1(recs)["skill"], places=4)
         self.assertAlmostEqual(self.a["feel"]["value"], 0.6, places=3)  # 1 - 0.04/0.1
         self.assertEqual(self.a["feel"]["pass"], SL.RUNG1_SKILL)
-        self.assertEqual(self.a["understand"]["pass"], SL.RUNG7_MARGIN)
+        self.assertEqual(self.a["understand"]["pass"], SL.RUNG8_MARGIN)
+        self.assertEqual(self.a["turns"]["pass"], SL.RUNG7_PAY_MARGIN)
+        self.assertIsNone(self.a["turns"]["value"])                 # no timed lines on this record
         self.assertEqual(self.a["patience"]["better"], "lower")
 
     def test_a_negative_skill_is_reported_negative(self):
         u = self.a["understand"]
         self.assertLess(u["value"], 0)                              # the model bets wrong every time
         self.assertFalse(u["met"])
-        self.assertEqual(u["state"], "current")
+        self.assertEqual(u["state"], "locked")                      # #258: rung 7 (take turns) comes first
         self.assertEqual(u["kind"], "skill")
+        u8 = {x["key"]: x for x in _sheet(_lived8(_seat()), T0 + 12 * H)["attributes"]}["understand"]
+        self.assertLess(u8["value"], 0)
+        self.assertEqual(u8["state"], "current")                    # ...and once it is passed, rung 8 is worked
 
     def test_a_passed_rung_whose_test_fails_now_is_slipping(self):
         self.assertEqual(self.a["reach"]["state"], "passed")
@@ -302,20 +326,33 @@ class TestAttributes(unittest.TestCase):
 
 
 class TestQuest(unittest.TestCase):
-    def test_rung_7_staged_with_its_counts_and_skill(self):
-        s = _sheet(_lived(_seat()), T0 + 12 * H)
-        q = s["quest"]
+    def test_rung_7_take_turns_staged(self):
+        # #258: the new rung 7 -- timed lines, then contingency, then payoff
+        q = _sheet(_lived(_seat()), T0 + 12 * H)["quest"]
         self.assertEqual(q["rung"], 7)
+        self.assertEqual(q["name"], "take turns")
+        c = {x["key"]: x for x in q["criteria"]}
+        self.assertEqual(list(c), ["pushes", "contingency", "payoff"])
+        self.assertEqual(c["pushes"]["text"], f"0/{SL.RUNG7_PUSHES} timed lines with a reply check")
+        self.assertRegex(c["contingency"]["text"], r"^lines in its window – vs chance – \(z 0\.0 → 3\.0, \+0\.10\)$")
+        self.assertRegex(c["payoff"]["text"], r"^replies gained over timing-blind – \(t 0\.0 → 4\.0, \+0\.05\)$")
+        self.assertEqual(q["waiting_on"], "pushes")
+
+    def test_rung_8_staged_with_its_counts_and_skill(self):
+        # the old rung 7 test, one rung up (#258)
+        s = _sheet(_lived8(_seat()), T0 + 12 * H)
+        q = s["quest"]
+        self.assertEqual(q["rung"], 8)
         self.assertEqual(q["name"], "understand an other")
         c = {x["key"]: x for x in q["criteria"]}
         self.assertEqual(list(c), ["looks", "skill"])
-        # #254: rung 7 reads 100 reply checks and grades self against the running rate
+        # #254: rung 8 (rung 7 until #258) reads 100 reply checks and grades self against the running rate
         self.assertFalse(c["looks"]["met"])
-        self.assertEqual(c["looks"]["text"], f"20/{SL.RUNG7_LOOKS} reply checks")
+        self.assertEqual(c["looks"]["text"], f"20/{SL.RUNG8_LOOKS} reply checks")
         self.assertFalse(c["skill"]["met"])
         self.assertRegex(c["skill"]["text"], r"^skill vs running rate −\d\.\d\d → \+0\.08$")
         self.assertEqual(q["waiting_on"], "looks")
-        self.assertIn(f"20/{SL.RUNG7_LOOKS} reply checks · skill vs running rate −", q["summary"])
+        self.assertIn(f"20/{SL.RUNG8_LOOKS} reply checks · skill vs running rate −", q["summary"])
 
     def test_asleep_before_birth(self):
         s = _sheet(_seat(), T0)
@@ -375,7 +412,7 @@ class TestToysAndOthers(unittest.TestCase):
         model = o["the seat's model"]
         self.assertEqual(model["kind"], "model")
         self.assertEqual(model["play"]["changes"], 1)
-        self.assertIsNotNone(model["rung7"]["brier_model"])
+        self.assertIsNotNone(model["rung8"]["brier_model"])         # #258: rung 8's advisor
 
     def test_the_body_set(self):
         r = self.s["relationships"]
@@ -402,15 +439,16 @@ class TestHeaderAndCache(unittest.TestCase):
     def test_the_skill_at_a_glance(self):
         # the operator: "I don't see the skill level anywhere" -- the skill the
         # bar reads, the line it has to beat, and where it is heading
-        srv = _lived(_seat())
+        # #258: on a seat past the new rung 7 the bar reads rung 8 (the old rung 7)
+        srv = _lived8(_seat())
         st = SL.status(srv)
-        self.assertEqual(st["skill_rung"], 7)
-        self.assertEqual(st["skill_pass"], SL.RUNG7_MARGIN)
+        self.assertEqual(st["skill_rung"], 8)
+        self.assertEqual(st["skill_pass"], SL.RUNG8_MARGIN)
         sk = _sheet(srv, T0 + 12 * H)["header"]["skill"]
-        self.assertEqual(sk["rung"], 7)
+        self.assertEqual(sk["rung"], 8)
         self.assertAlmostEqual(sk["value"], st["skill"], places=4)
         self.assertLess(sk["value"], 0)
-        self.assertEqual(sk["pass"], SL.RUNG7_MARGIN)
+        self.assertEqual(sk["pass"], SL.RUNG8_MARGIN)
         self.assertEqual(sk["label"], "skill vs running rate")
         self.assertEqual(sk["trend_h"], 0.0)                         # the same 20 pairs an hour ago
         self.assertEqual([p["ago_h"] for p in sk["series"]], [4.0, 3.5, 3.0, 2.5, 2.0, 1.5, 1.0, 0.5, 0.0])
@@ -428,7 +466,7 @@ class TestHeaderAndCache(unittest.TestCase):
         self.assertEqual(s["achievements"], [])
         self.assertEqual(s["header"]["level"], 0)
         self.assertEqual(s["time"]["alive_h"], 0.0)
-        self.assertEqual(len(s["attributes"]), 7)
+        self.assertEqual(len(s["attributes"]), 8)                   # #258: Turns joined
         self.assertTrue(all(a["value"] is None or a["value"] == 0 for a in s["attributes"]))
         json.dumps(s)                                               # it serialises
 
@@ -486,7 +524,7 @@ class TestRoute(unittest.TestCase):
         for key in ("header", "attributes", "quest", "achievements", "growth", "time", "inventory", "relationships"):
             self.assertIn(key, body)
         self.assertEqual(body["header"]["level"], 6)
-        self.assertEqual(len(body["attributes"]), 7)
+        self.assertEqual(len(body["attributes"]), 8)                # #258: Turns joined
 
     def test_behind_the_jwt_gate(self):
         from membrane import jwtauth as J
@@ -593,7 +631,8 @@ class TestSkillAtAGlance(unittest.TestCase):
         self.assertEqual(x["skill"], "skill not measured yet / +0.15")
 
     def test_status_says_whether_it_is_measured(self):
-        self.assertTrue(SL.status(_lived(_seat()))["skill_measured"])
+        self.assertFalse(SL.status(_lived(_seat()))["skill_measured"])   # #258: rung 7 has no timed lines yet
+        self.assertTrue(SL.status(_lived8(_seat()))["skill_measured"])   # rung 8 reads the pairs
         srv = _seat()
         SL._rt(srv)["mode"], SL._rt(srv)["limit"] = "on", 7
         self.assertFalse(SL.status(srv)["skill_measured"])
@@ -701,7 +740,7 @@ def _demo():
                                                    "seen_as": "other"},
                                           "play": {"changes": 2, "looks": 2, "brier": 0.4, "toys": ["toy:die"]}},
                                          {"who": "the seat's model", "kind": "model", "current": False,
-                                          "rung7": {"pairs": 20, "brier_model": 0.40, "brier_self": 0.30, "weight": 0.0}}],
+                                          "rung8": {"pairs": 20, "brier_model": 0.40, "brier_self": 0.30, "weight": 0.0}}],
                               "body": ["w:body"], "other": ["chat:in:alice"]}}
 
 

@@ -486,18 +486,26 @@ function selfView(st) {
   const goal = s.next == null ? "top built rung" : (s.next > lim ? "held at " + lim : "→ " + s.next);
   const status = s.held ? "🥀 held: re-choose to clear"
     : "rung " + (s.rung || 0) + " ✓ · " + pct + "% " + goal + (s.waiting_on ? " (" + s.waiting_on + ")" : "") + (s.slipping ? " · slipping" : "");
-  // #217 / #254: rung 7's diagnostics -- how many asked pushes the model
-  // answered, and self's Brier against the running rate's (lower is better;
-  // self must beat the rate), with the model's alone and the weight self gives it
-  const r7 = s.rung7 || {};
+  // #258: rung 7's numbers -- the window self learned, how often its lines
+  // land there against chance, and the replies its timing gains
   const f2 = (x) => (x == null ? "–" : Number(x).toFixed(2));
-  const r7s = (r7.asked || r7.brier_self != null) ? " · rung 7: " + (r7.paired || 0) + " of " + (r7.checked || 0) + " asked pushes paired"
-    + (r7.brier_mix != null ? ", Brier self " + f2(r7.brier_mix) + " vs rate " + f2(r7.brier_rate) : "")
-    + (r7.brier_model != null ? ", model alone " + f2(r7.brier_model) + " (weight " + f2(r7.advisor_weight) + ")" : "")
-    + (r7.base_rate != null ? ", base rate " + f2(r7.base_rate) : "") : "";
+  const r7 = s.rung7 || {};
+  const r7s = r7.checked ? " · rung 7: " + r7.checked + " timed lines checked"
+    + (r7.best ? ", best window " + r7.best : "")
+    + (r7.share != null ? ", in it " + f2(r7.share) + " vs chance " + f2(r7.chance) : "")
+    + (r7.payoff != null ? ", replies " + skillSigned(r7.payoff) + " over timing-blind" : "") : "";
+  // #217 / #254: rung 8's diagnostics (rung 7 until #258) -- how many asked
+  // pushes the model answered, and self's Brier against the running rate's
+  // (lower is better; self must beat the rate), with the model's alone and
+  // the weight self gives it
+  const r8 = s.rung8 || {};
+  const r8s = (r8.asked || r8.brier_self != null) ? " · rung 8: " + (r8.paired || 0) + " of " + (r8.checked || 0) + " asked pushes paired"
+    + (r8.brier_mix != null ? ", Brier self " + f2(r8.brier_mix) + " vs rate " + f2(r8.brier_rate) : "")
+    + (r8.brier_model != null ? ", model alone " + f2(r8.brier_model) + " (weight " + f2(r8.advisor_weight) + ")" : "")
+    + (r8.base_rate != null ? ", base rate " + f2(r8.base_rate) : "") : "";
   return { loaded, limit: lim, options, status, exp: selfExp(st),
            title: "self (#161): " + s.mode + " · " + rung + " · " + pct + "% toward the next" + why + slip + nxt
-                  + " · may grow up to rung " + lim + " · " + (s.cycles || 0) + " cycles" + r7s };
+                  + " · may grow up to rung " + lim + " · " + (s.cycles || 0) + " cycles" + r7s + r8s };
 }
 
 // ---- #230: SELF IN THE UI -- the exp bar, the activity lines, the report card.
@@ -505,8 +513,8 @@ function selfView(st) {
 // about self that the record doesn't measure, and nothing here changes it
 // (the 🌱 chooser stays the only switch).
 const SELF_RUNGS = { 0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart", 4: "patience",
-  5: "notice the world changed", 6: "meet an other", 7: "understand an other", 8: "recognize itself",
-  9: "change itself", 10: "speak" };
+  5: "notice the world changed", 6: "meet an other", 7: "take turns", 8: "understand an other",
+  9: "recognize itself", 10: "change itself", 11: "speak" };
 
 function rungName(s, n) {
   const r = ((s && s.ladder) || []).find((x) => x.rung === n);
@@ -646,8 +654,10 @@ function selfLine(r) {
       (r.p_llm != null ? ", model " + f2s(r.p_llm) : "") + ")" + tail;
   }
   if (k === "rung_void") return "rung " + r.rung + "'s earlier pass voided (" + (r.why || "") + ")";
-  if (k === "rung7_restart") return "rung 7 restarted: now grades self, not the model";
-  if (k === "push") return "push → " + shortEid(r.to) + (r.asked ? " (asked the model)" : "");
+  if (k === "rung7_restart") return "the old rung 7 (understand an other, now rung 8) restarted: now grades self, not the model";
+  if (k === "push") return "push → " + shortEid(r.to) +
+    (r.aim != null ? (r.why === "overdue" ? " · its wait ran out" : " · its moment: " + (TURN_NAMES[r.bin] || r.bin) + " after they spoke") : "") +
+    (r.asked ? " (asked the model)" : "");
   if (k === "shift") return "shift noticed on " + shortEid(r.eid) + (r.was != null && r.now != null ? " (" + f2s(r.was) + " → " + f2s(r.now) + ")" : "");
   if (k === "wait") return "wait";
   if (k === "cycle") return (r.act || "move") + (r.gap != null ? " (gap " + Number(r.gap).toFixed(3) + ")" : "");
@@ -657,6 +667,9 @@ function selfLine(r) {
   if (k === "audit") return "audit " + (r.phase || "") + (r.eid ? " on " + shortEid(r.eid) : "");
   return String(k || "?");
 }
+
+// #258: rung 7's windows -- how long since the other last spoke (self_loop.TURN_NAMES)
+const TURN_NAMES = ["0-2m", "2-10m", "10-30m", "30m+"];
 
 function agoText(s) {
   s = Math.max(0, Math.round(s));
@@ -699,7 +712,7 @@ function toyButtonsHtml(t) {
     ' title="' + escAttr(a.title) + '">' + escText(a.label) + "</button>").join("") + "</span>";
 }
 
-/** The report card: the ladder, rung 7's numbers, curiosity, the world, the toys. */
+/** The report card: the ladder, rungs 7 and 8's numbers, curiosity, the world, the toys. */
 function selfCardHtml(st) {
   const s = st && st.self;
   if (!s || !Array.isArray(s.ladder)) return '<p class="muted">no status yet</p>';
@@ -716,13 +729,20 @@ function selfCardHtml(st) {
       ' <span class="rs">' + escText(lbl) + "</span></li>";
   }).join("") + "</ol>");
   const r7 = s.rung7 || {};
-  out.push("<h4>rung 7: the other</h4>" + (r7.asked || r7.brier_self != null
-    ? "<p><b>" + (r7.paired || 0) + " of " + (r7.checked || 0) + "</b> asked pushes paired (" + (r7.asked || 0) + " asked)" +
-      (r7.brier_mix != null ? "<br>Brier self <b>" + f2s(r7.brier_mix) + "</b> vs running rate <b>" + f2s(r7.brier_rate) + "</b> (lower is better)" +
-        " · self alone " + f2s(r7.brier_self) : "") +
-      (r7.brier_model != null ? "<br>the model alone " + f2s(r7.brier_model) + " · its weight " + f2s(r7.advisor_weight) +
-        (r7.advisor_model ? " (" + escText(r7.advisor_model) + ")" : "") : "") +
-      (r7.base_rate != null ? "<br>base rate " + f2s(r7.base_rate) : "") + "</p>"
+  out.push("<h4>rung 7: taking turns</h4>" + (r7.checked
+    ? "<p><b>" + r7.checked + "</b> timed lines with a reply check" + (r7.best ? " · best window <b>" + escText(r7.best) + "</b> after they spoke" : "") +
+      "<br>" + (r7.bins || []).map((b) => escText(b.bin) + " " + (b.rate == null ? "–" : f2s(b.rate)) + ' <span class="muted">(' + b.replied + "/" + b.pushes + ")</span>").join(" · ") +
+      (r7.share != null ? "<br>lines in its window <b>" + f2s(r7.share) + "</b> vs chance " + f2s(r7.chance) + " (z " + Number(r7.z || 0).toFixed(1) + ")" +
+        "<br>replied <b>" + f2s(r7.reply_rate) + "</b> vs timing-blind " + f2s(r7.blind_rate) + " (t " + Number(r7.payoff_z || 0).toFixed(1) + ")" : "") + "</p>"
+    : '<p class="muted">no timed lines checked yet</p>'));
+  const r8 = s.rung8 || {};
+  out.push("<h4>rung 8: the other</h4>" + (r8.asked || r8.brier_self != null
+    ? "<p><b>" + (r8.paired || 0) + " of " + (r8.checked || 0) + "</b> asked pushes paired (" + (r8.asked || 0) + " asked)" +
+      (r8.brier_mix != null ? "<br>Brier self <b>" + f2s(r8.brier_mix) + "</b> vs running rate <b>" + f2s(r8.brier_rate) + "</b> (lower is better)" +
+        " · self alone " + f2s(r8.brier_self) : "") +
+      (r8.brier_model != null ? "<br>the model alone " + f2s(r8.brier_model) + " · its weight " + f2s(r8.advisor_weight) +
+        (r8.advisor_model ? " (" + escText(r8.advisor_model) + ")" : "") : "") +
+      (r8.base_rate != null ? "<br>base rate " + f2s(r8.base_rate) : "") + "</p>"
     : '<p class="muted">no reply checks yet</p>'));
   const cur = s.curiosity || [];
   out.push("<h4>curiosity</h4>" + (cur.length
@@ -966,9 +986,9 @@ function sheetRelationships(s) {
       (o.chat.replied != null ? ", replied " + Math.round(100 * o.chat.replied) + "%" : "") +
       (o.chat.brier != null ? ", Brier " + fixed2(o.chat.brier) : "") + (o.chat.seen_as ? ", seen as " + escText(o.chat.seen_as) : ""));
     if (o.play) bits.push("play: changed toys " + o.play.changes + "×" + (o.play.looks ? ", Brier " + fixed2(o.play.brier) + " on " + o.play.looks + " looks after" : ""));
-    if (o.rung7) bits.push("rung 7's advisor: Brier " + fixed2(o.rung7.brier_model) + " vs self's " + fixed2(o.rung7.brier_self) +
-      (o.rung7.pairs != null ? " over " + o.rung7.pairs + " answers" : "") +
-      (o.rung7.weight != null ? ", self's weight on it " + fixed2(o.rung7.weight) : ""));
+    if (o.rung8) bits.push("rung 8's advisor: Brier " + fixed2(o.rung8.brier_model) + " vs self's " + fixed2(o.rung8.brier_self) +
+      (o.rung8.pairs != null ? " over " + o.rung8.pairs + " answers" : "") +
+      (o.rung8.weight != null ? ", self's weight on it " + fixed2(o.rung8.weight) : ""));
     return "<li><b>" + escText(o.who) + "</b> " + '<span class="muted">' + escText(o.kind) + "</span>" + (o.current ? ' <span class="now">meeting now</span>' : "") +
       '<div class="note">' + bits.join("<br>") + "</div></li>";
   }).join("") + "</ul>");
