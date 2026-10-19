@@ -499,14 +499,16 @@ class TestCarriers(unittest.TestCase):
     def test_ha_sends_the_seat_token_and_can_change_it(self):
         # HA already speaks Basic with the connect form's password on every
         # call (relay, conversation, coordinator, ha_access); the seat reads
-        # the password as the token. The options form can set it after setup.
+        # the password as the token. #283: the token lives on its seat in the
+        # zoo's list -- the options' seat forms set or change it after setup,
+        # and the migration carries an options-set token onto the seat.
         cf = self._read("custom_components", "membrane", "config_flow.py")
-        init = self._read("custom_components", "membrane", "__init__.py")
-        self.assertIn("vol.Optional(CONF_SERVE_PASS, default=o.get(CONF_SERVE_PASS", cf)
-        self.assertIn("opts[CONF_SERVE_PASS] if CONF_SERVE_PASS in opts", init)
+        zoo = self._read("custom_components", "membrane", "zoo.py")
+        self.assertIn('vol.Optional("token", default=s.get("token", ""))', cf)
+        self.assertIn("opts[CONF_SERVE_PASS] if CONF_SERVE_PASS in opts", zoo)
         for fn in (("strings.json",), ("translations", "en.json")):
             s = json.loads(self._read("custom_components", "membrane", *fn))
-            self.assertIn("serve_pass", s["options"]["step"]["init"]["data"])
+            self.assertIn("token", s["options"]["step"]["edit_seat"]["data"])
             self.assertIn("membrane token seat", s["config"]["step"]["connect"]["description"])
 
     def test_the_doctrine_names_the_owner(self):

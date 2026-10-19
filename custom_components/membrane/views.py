@@ -21,7 +21,8 @@ from .const import DOMAIN, SEAT_DIR
 
 HERE = Path(__file__).resolve().parent / "www"          # the integration's own (entry.js)
 REWRITE = ((b'"/ui/www/', b'"/api/membrane/www/'), (b'"/ui/serve', b'"/api/membrane/serve'),
-           (b'"/ui/stt', b'"/api/membrane/stt'), (b'"/ui/conf', b'"/api/membrane/conf'))
+           (b'"/ui/stt', b'"/api/membrane/stt'), (b'"/ui/conf', b'"/api/membrane/conf'),
+           (b'"/ui/zoo', b'"/api/membrane/zoo'))            # #283: the seats of this house
 TYPES = {".js": "application/javascript", ".mjs": "application/javascript", ".css": "text/css",
          ".html": "text/html", ".map": "application/json", ".gz": "application/gzip",
          ".wasm": "application/wasm", ".svg": "image/svg+xml", ".json": "application/json"}
@@ -111,6 +112,52 @@ class ConfView(HomeAssistantView):
 
     async def get(self, request):
         comp = request.app[KEY_HASS].data.get(DOMAIN) or {}
-        return self.json({"serve_url": "membrane (inside Home Assistant)" if comp.get("inside") else comp.get("serve_url", ""),
+        inside = comp.get("inside") and comp.get("active_seat") in (None, "inside")
+        return self.json({"serve_url": "membrane (inside Home Assistant)" if inside else comp.get("serve_url", ""),
+                          "seat": comp.get("seat_name") or "",
                           "serve_ok": bool(comp.get("serve_url") and comp.get("serve_ready")),
                           **_name(request.app[KEY_HASS])})
+
+
+class ZooView(HomeAssistantView):
+    """#283: the zoo -- every seat of this house, its Blurp's card read live
+    (in parallel, a few seconds each): [{id, name, host, active, online,
+    card | error}]. Everyone signed in reads it."""
+
+    url = "/api/membrane/zoo"
+    name = "api:membrane:zoo"
+    requires_auth = True
+
+    async def get(self, request):
+        import aiohttp
+        from . import zoo
+        comp = request.app[KEY_HASS].data.get(DOMAIN) or {}
+        async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(force_close=True)) as sess:
+            rows = await zoo.fan_out(sess, comp, list(comp.get(zoo.SEATS) or []), comp.get("active_seat"))
+        return self.json(rows)
+
+
+class ZooActiveView(HomeAssistantView):
+    """#283: make a seat the house's (POST {id}) -- an HA admin's write; the
+    relay, the sensors, Assist and speech follow it at once (zoo.switch)."""
+
+    url = "/api/membrane/zoo/active"
+    name = "api:membrane:zoo:active"
+    requires_auth = True
+
+    async def post(self, request):
+        from . import zoo
+        user = request.get("hass_user")
+        if not getattr(user, "is_admin", False):
+            return self.json({"error": "only an admin switches the seat"}, status_code=403)
+        hass = request.app[KEY_HASS]
+        comp = hass.data.get(DOMAIN) or {}
+        try:
+            body = await request.json()
+        except ValueError:
+            body = None
+        sid = (body or {}).get("id") if isinstance(body, dict) else None
+        entry = comp.get("entry")
+        if entry is None or not zoo.switch(hass, entry, sid):
+            return self.json({"error": "no such seat"}, status_code=404)
+        return self.json({"ok": True, "active": sid, "name": comp.get("seat_name")})

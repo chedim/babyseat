@@ -57,6 +57,46 @@ code is a git clone of this repo, that's `git pull` (or `membrane update`)
 plus a seat restart the seat itself performs; the integration is independent
 of the seat's version.
 
+## The zoo: several seats
+
+One Home Assistant can know several seats — the one it runs itself, a laptop, a
+phone — each with its own Blurp. The house talks to **one at a time** (the
+active seat): the chat and membrane home, the field sensors, the Assist agent and
+speech all follow it.
+
+The zoo's residents are ***Blurpus seatensis*** (first described October 2026):
+one per seat, each grown from blank on its own code, toys and partners. Together
+they are a population, not yet a lineage — a new Blurp inherits nothing from
+another.
+
+*Field note (a joke, not a finding): the symbiont form of the earthling,
+Homo sapiens var. blurpophilus, is known by one call — when its human part
+thinks about Blurps, it says "Blurp". A large prediction error is announced as
+"what the blurp?".*
+
+- **Add a seat:** Settings → Devices & services → Membrane → *Configure* →
+  **Add a seat**: its host (e.g. `192.168.1.107`), the serve port (4096), the
+  proxy port (11500), its seat token (`membrane token seat` on that machine) and
+  a name (empty: its Blurp's own name, else the host). *Edit a seat* changes one
+  (Home Assistant's own seat takes a name only); *Remove a seat* drops one (never
+  the last one, never Home Assistant's own). An existing setup is a one-seat list
+  that works exactly as before.
+- **Switch:** the 🦠 button in membrane home's top bar opens the zoo — a card per
+  seat with its Blurp's name, Lv, rung, awake/asleep, a dot for reachable, its last
+  activity; tap a card to make that seat the house's (an admin's switch; the page
+  reloads onto it). Automations use the **`select.membrane_seat`** entity (one
+  option per seat). A switch takes effect at once — no restart, the seats keep
+  running.
+- **An unreachable seat** shows in the chat as "<name> is offline — switch to
+  <another seat>?" with a button, when another seat answers.
+- What the house gives a seat stays per mode: Home Assistant's own seat always
+  gets the state push; in connect mode the delivered token and the state push go
+  to the active seat (and to a seat as it becomes active).
+
+Behind it: `GET /api/membrane/zoo` (every seat's card, read in parallel, a few
+seconds each — `/membrane/self/card`, or `/membrane/self/sheet` on a seat
+without it) and `POST /api/membrane/zoo/active` `{id}` (admins only).
+
 ## What it changes
 
 - **Membrane home is the landing page** for everyone: opening Home Assistant goes to
@@ -96,6 +136,9 @@ chosen, not inherited.
 
 ## Options
 
+*Configure* opens a menu: **Settings** (below), **Add a seat**, **Edit a seat**,
+**Remove a seat** ([the zoo](#the-zoo-several-seats); a seat's token lives on it).
+
 | Option | What |
 |---|---|
 | Chat model / Embedding model | from the same Ollama server's list (keep the embedder once the field has grown) — inside mode only |
@@ -105,7 +148,8 @@ chosen, not inherited.
 | Speech server URL | a whisper-server; empty = the browser transcribes |
 | Watch loops (1–3) | the seat's background loops; fewer is lighter, more is livelier (inside mode only) |
 
-Changing an option restarts the seat.
+Changing an option or the seat list restarts the seat; switching the active seat
+does not.
 
 ## Where things are
 

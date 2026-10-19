@@ -671,10 +671,54 @@ function pickVoice(voices, lang = "en", chosen = "") {
 const LS_VOICE = "membrane.home.voice";
 const IS_CHROME = typeof navigator !== "undefined" && /Chrome\//.test(navigator.userAgent || "") && !/Firefox\//.test(navigator.userAgent || "");
 
+// THE BLURP ZOO (#283, the operator: "several seats in one Home Assistant, each
+// with its own Blurp"): the 🦠 button lists this house's seats -- a card per
+// seat from the integration's GET /api/membrane/zoo (every seat's Blurp read
+// live, a few seconds each); a tap makes that seat the house's (an admin's write to
+// .../zoo/active) and the page reloads onto it. Standalone is one seat:
+// no button there.
+const HZOO = "/ui/zoo";
+const ZOO_MS = 30000;
+const zooEsc = (t) => String(t == null ? "" : t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+/** "5 min ago" from a time (epoch seconds, or an ISO string); "" for none. */
+function zooAgo(ts, now) {
+  if (ts == null || ts === "") return "";
+  const t = typeof ts === "number" ? ts : Date.parse(ts) / 1000;
+  if (!isFinite(t)) return "";
+  const d = Math.max(0, (now == null ? Date.now() / 1000 : now) - t);
+  if (d < 60) return "just now";
+  if (d < 3600) return Math.round(d / 60) + " min ago";
+  if (d < 86400) return Math.round(d / 3600) + " h ago";
+  return Math.round(d / 86400) + " d ago";
+}
+
+/** One seat's card: its Blurp's name, Lv, rung, awake/asleep -- or offline --
+ * the reachability dot, the seat's own name and host, its last activity. */
+function zooCard(row, now) {
+  const r = row || {}, c = r.card || {};
+  const on = !!r.online;
+  const cls = "zcard" + (r.active ? " active" : "") + (on ? "" : " off");
+  const who = on && c.name ? c.name : r.name;
+  const lv = on && c.level != null ? `<span class="zlv">Lv ${zooEsc(c.level)}</span>` : "";
+  const sub = on ? [c.rung_name, c.state].filter(Boolean).map(zooEsc).join(" · ") : "offline";
+  const seat = [r.name, r.host && r.host !== r.name ? r.host : "", on ? zooAgo(c.last_activity, now) : ""].filter(Boolean).map(zooEsc).join(" · ");
+  const title = r.active ? "the house talks to this seat" : on ? "talk to this seat (the whole house switches)" : "offline -- the house can still switch to it";
+  return `<button type="button" class="${cls}" data-id="${zooEsc(r.id)}"${r.active ? ' aria-current="true"' : ""} title="${zooEsc(title)}">` +
+    `<span class="zrow"><span class="dot ${on ? "on" : "off"}" aria-hidden="true"></span><span class="zname">${zooEsc(who)}</span>${lv}</span>` +
+    `<span class="zsub">${sub}</span><span class="zseat">${seat}</span></button>`;
+}
+
+/** The zoo's list (rows from GET /api/membrane/zoo). */
+function zooCards(rows, now) {
+  return (rows || []).length ? rows.map((r) => zooCard(r, now)).join("")
+    : '<p class="znone">no seats yet -- add one in the integration\'s options</p>';
+}
+
 const HomeLogic = { cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep,
   brainLabel, brainCaption, unlockText, setSelfName, brainKey, brainFresh, actableLine, ACT_FRESH_S, brainTrail, trailAlpha, frameRadius, selfFrame, frameDistance, dampTo,
   freshLook, followsNow, followRates, SELF_HOLD_MS, lookAngles, selfCamAngles,
-  followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit };
+  followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit, zooAgo, zooCard, zooCards };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
 const HSTYLE = `
@@ -818,6 +862,35 @@ const HSTYLE = `
                          calc(16px + env(safe-area-inset-bottom)) calc(52px + env(safe-area-inset-left)); }
     .top .selfstat .xp-sub { display:none; }
     .top .selfstat .xp-lv { max-width:7em; }
+  }
+  /* the 🦠 zoo (#283): this house's seats, a card each, under the top bar */
+  .zoopanel { position:absolute; z-index:6; top:64px; left:12px; width:min(360px, calc(100% - 24px));
+              max-height:calc(100% - 150px); overflow:auto; overscroll-behavior:contain; border-radius:16px; padding:8px 10px 10px;
+              background:color-mix(in srgb, var(--card-background-color,#111) 95%, transparent); font-size:13px; }
+  .zoopanel[hidden], .top .zoobtn[hidden] { display:none; }
+  .zoopanel .zhead { display:flex; align-items:center; gap:8px; padding:2px 2px 6px; font-weight:600; }
+  .zoopanel .zx { margin-left:auto; border:0; background:transparent; font-size:20px; line-height:1; padding:2px 8px; border-radius:8px; }
+  .zoopanel .zcard { display:flex; flex-direction:column; gap:2px; width:100%; text-align:left; margin:0 0 6px; padding:8px 10px;
+                     border-radius:12px; border:1px solid color-mix(in srgb, var(--divider-color,#888) 40%, transparent);
+                     background:transparent; }
+  .zoopanel .zcard.active { border-color:var(--primary-color,#3477d6);
+                            background:color-mix(in srgb, var(--primary-color,#3477d6) 18%, transparent); cursor:default; }
+  .zoopanel .zcard.off { opacity:.65; }
+  @media (hover: hover) { .zoopanel .zcard:not(.active):hover { background:color-mix(in srgb, var(--primary-color,#3477d6) 12%, transparent); } }
+  .zoopanel .zcard:focus-visible, .zoopanel .zx:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:2px; }
+  .zoopanel .zrow { display:flex; align-items:center; gap:8px; }
+  .zoopanel .zname { font-weight:600; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .zoopanel .zlv { margin-left:auto; font-size:12px; opacity:.85; white-space:nowrap; }
+  .zoopanel .dot { width:8px; height:8px; border-radius:50%; flex:none; background:#8a8f98; }
+  .zoopanel .dot.on { background:#2e9d5b; }
+  .zoopanel .zsub, .zoopanel .zseat { font-size:12px; opacity:.8; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .zoopanel .zseat { opacity:.6; }
+  .zoopanel .zmsg { margin:4px 2px 0; font-size:12px; opacity:.8; }
+  .zoopanel .zmsg:empty, .zoopanel .znone:empty { display:none; }
+  @media (max-width: 760px) {
+    .zoopanel { z-index:7; inset:0; width:auto; max-height:none; border-radius:0; border:0; background:var(--card-background-color,#111);
+                padding:calc(12px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right))
+                        calc(16px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left)); }
   }
   .selfpanel .sphead { display:flex; align-items:center; gap:8px; position:sticky; top:-10px; padding:4px 0 6px;
                        background:inherit; z-index:1; }
@@ -1209,6 +1282,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     }
     // ---- end of the 👶 panel
 
+
     // THE TOY DOCK (#249, the operator: the toys' buttons out of the panel):
     // one icon per toybox toy stacked under the 👶 tab, live whether or not
     // the panel is open -- a glyph per kind, a fading badge naming who changed
@@ -1449,6 +1523,41 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     }
     // ---- end of the brain on the screen
 
+    // THE 🦠 ZOO (#283): the cards refresh only while it is open
+    _toggleZoo(on) {
+      const p = this._zoo, b = this._zooBtn; if (!p || !b) return;
+      on = on == null ? p.hidden : !!on;
+      p.hidden = !on;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-expanded", on ? "true" : "false");
+      clearInterval(this._zooT); this._zooT = null;
+      if (on) {
+        this._zooMsg.textContent = "";
+        this._paintZoo();
+        this._zooT = setInterval(() => this._paintZoo(), ZOO_MS);
+      }
+    }
+
+    async _paintZoo() {
+      if (!this._hass || !this._zoo || this._zoo.hidden) return;
+      try {
+        const r = await this._hass.fetchWithAuth(HZOO);
+        if (!r.ok) throw new Error(String(r.status));
+        this._zooList.innerHTML = zooCards(await r.json());
+      } catch (e) { this._zooMsg.textContent = "the zoo did not answer (" + (e && e.message || e) + ")"; }
+    }
+
+    /** Make seat `id` the house's: an admin's write; the page reloads onto it. */
+    async _zooSwitch(id) {
+      this._zooMsg.textContent = "switching…";
+      try {
+        const r = await this._hass.fetchWithAuth(HZOO + "/active", { method: "POST",
+          headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) });
+        if (r.ok) { location.reload(); return; }
+        this._zooMsg.textContent = r.status === 403 ? "only an admin switches the seat" : "the switch failed (" + r.status + ")";
+      } catch (e) { this._zooMsg.textContent = "the switch failed (" + (e && e.message || e) + ")"; }
+    }
+
     _paintAuto() {
       const b = this._autoBtn; if (!b) return;
       // the auto state lives in the panel element's chat-state object
@@ -1549,6 +1658,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         <div class="msg">finding you on the field…</div>
         <div class="top glass">
           <button class="ha" title="Home Assistant: its dashboards and pages" aria-haspopup="menu" aria-expanded="false" aria-label="Home Assistant menu"><img class="seat-logo" src="${SEAT_LOGO}" alt="" width="26" height="26"></button>
+          <button class="zoobtn" title="The zoo: this house's seats, each with its own ${nm} -- tap one to talk to it" aria-label="the zoo: this house's seats" aria-haspopup="dialog" aria-expanded="false" aria-controls="zoopanel">🦠</button>
           <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you · ${nm} (the 🌱 loop, framed to what it is doing) · 👁 ${nm}'s eyes (looking out from it)">◎ activity</button>
           <button class="chatbtn" title="Show / hide the chat">💬</button>
           <button class="autobtn" title="auto-chat" aria-label="auto-chat">▶</button>
@@ -1559,6 +1669,11 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <span class="status"></span>
         </div>
         <nav class="hamenu glass" role="menu"></nav>
+        <aside class="zoopanel glass" id="zoopanel" aria-label="the zoo: this house's seats" hidden>
+          <div class="zhead"><span>🦠 the zoo</span><button class="zx" aria-label="close the zoo" title="Close">×</button></div>
+          <div class="zlist"></div>
+          <p class="zmsg" aria-live="polite"></p>
+        </aside>
         <button class="babybtn" aria-label="${nm}: its character sheet and what it is doing" aria-expanded="false" aria-controls="selfpanel"
                 title="${nm} (#161): its character sheet -- level, attributes, quest, growth, toys, the others it met -- and what it is doing now">👶</button>
         <aside class="selfpanel glass" id="selfpanel" aria-label="${nm}'s character sheet" hidden>
@@ -1696,6 +1811,18 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._spXp = $(".spxp"); this._spAct = $(".spact"); this._spCard = $(".spcard"); this._spPlay = $(".spplay");
       this._spCard.addEventListener("click", (e) => this._onToyPoke(e));     // #244: the toys' play buttons
       this._babyBtn.addEventListener("click", () => this._toggleSelfPanel());
+      // the 🦠 zoo (#283): Home Assistant's seats; standalone is one seat
+      this._zooBtn = $(".zoobtn"); this._zoo = $(".zoopanel"); this._zooList = $(".zlist"); this._zooMsg = $(".zmsg");
+      if (window.MEMBRANE_STANDALONE) this._zooBtn.hidden = true;
+      this._zooBtn.addEventListener("click", () => this._toggleZoo());
+      $(".zx").addEventListener("click", () => { this._toggleZoo(false); this._zooBtn.focus(); });
+      this._zoo.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") { e.stopPropagation(); this._toggleZoo(false); this._zooBtn.focus(); }
+      });
+      this._zooList.addEventListener("click", (e) => {
+        const c = e.target.closest(".zcard");
+        if (c && !c.classList.contains("active")) this._zooSwitch(c.dataset.id);
+      });
       $(".spx").addEventListener("click", () => { this._toggleSelfPanel(false); this._babyBtn.focus(); });
       this._selfPanel.addEventListener("keydown", (e) => {
         if (e.key === "Escape") { e.stopPropagation(); this._toggleSelfPanel(false); this._babyBtn.focus(); }

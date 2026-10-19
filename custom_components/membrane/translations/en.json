@@ -36,6 +36,16 @@
     "step": {
       "init": {
         "title": "Membrane",
+        "description": "The house talks to one seat at a time; switch it from membrane home's 🦠 zoo or the Membrane seat entity.",
+        "menu_options": {
+          "settings": "Settings",
+          "add_seat": "Add a seat",
+          "pick_seat": "Edit a seat",
+          "remove_seat": "Remove a seat"
+        }
+      },
+      "settings": {
+        "title": "Membrane",
         "data": {
           "model": "Chat model",
           "embed_model": "Embedding model (best left as it is once the field has grown: its memories were embedded with it)",
@@ -43,10 +53,52 @@
           "ha_base_url": "Home Assistant's address as the seat sees it (detached seats call this; empty: HA's own answer)",
           "landing": "Open on membrane home (folds HA's sidebar away, as on the boat)",
           "stt_url": "Speech server URL (whisper-server; empty: the browser listens itself)",
-          "loops": "Watch loops (1-3; fewer is lighter)",
-          "serve_pass": "Seat token (`membrane token seat` on the seat): a seat on another machine needs it for everything that writes"
+          "loops": "Watch loops (1-3; fewer is lighter)"
+        }
+      },
+      "add_seat": {
+        "title": "Add a seat",
+        "description": "Another seat for the zoo -- a laptop, a phone, a server running `membrane`. Its token: run `membrane token seat` on that seat.",
+        "data": {
+          "host": "Host (the seat's address on your network, e.g. 192.168.1.107)",
+          "serve_port": "Serve port (4096: the seat's chat and field surface)",
+          "proxy_port": "Proxy port (11500: the seat's model proxy)",
+          "token": "Seat token (`membrane token seat` on the seat): a seat on another machine needs it for everything that writes",
+          "name": "Name (empty: its Blurp's own name, else the host)",
+          "stt_url": "Speech server for this seat (empty: the house's)"
+        }
+      },
+      "pick_seat": {
+        "title": "Edit a seat",
+        "data": {
+          "seat": "Seat"
+        }
+      },
+      "edit_seat": {
+        "title": "Edit {seat}",
+        "description": "The seat's address, ports and token (`membrane token seat` on the seat); Home Assistant's own seat takes a name only.",
+        "data": {
+          "host": "Host (the seat's address on your network, e.g. 192.168.1.107)",
+          "serve_port": "Serve port (4096: the seat's chat and field surface)",
+          "proxy_port": "Proxy port (11500: the seat's model proxy)",
+          "token": "Seat token (`membrane token seat` on the seat): a seat on another machine needs it for everything that writes",
+          "name": "Name (empty: its Blurp's own name, else the host)",
+          "stt_url": "Speech server for this seat (empty: the house's)"
+        }
+      },
+      "remove_seat": {
+        "title": "Remove a seat",
+        "description": "Home Assistant's own seat stays; the last seat stays.",
+        "data": {
+          "seat": "Seat"
         }
       }
+    },
+    "error": {
+      "no_host": "Give the seat's host."
+    },
+    "abort": {
+      "no_seat": "That seat is gone."
     }
   }
 }

@@ -1448,7 +1448,22 @@ function jsShow(v) {
   return String(v);
 }
 
-const AiPanelLogic = { jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
+// AN OFFLINE SEAT (#283, the zoo): the relay answers a seat it can't reach
+// with {error: "seat_offline", seat, message} -- words, never the raw
+// ClientConnectorError; the chat says "<name> is offline" and, when another
+// seat of the house answers (GET /api/membrane/zoo), offers to switch to it.
+const ZOO_URL = "/ui/zoo";
+
+/** {text, switchTo: {id, name} | null} for a relay error, null when it is not an offline seat. */
+function offlineNotice(data, zoo) {
+  if (!data || typeof data !== "object" || data.error !== "seat_offline") return null;
+  const name = data.seat || "the seat";
+  const other = (zoo || []).find((s) => s && s.online && !s.active && s.id !== data.seat_id);
+  return other ? { text: name + " is offline — switch to " + other.name + "?", switchTo: { id: other.id, name: other.name } }
+    : { text: name + " is offline", switchTo: null };
+}
+
+const AiPanelLogic = { offlineNotice, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
                        attrBar, hoursText, curveGeom, curveSvg, timeParts, selfSheetHtml, SHEET_SECTIONS, SHEET_OPEN,
                        toyGlyph, toyBadge, toyDockItem, toyDockHtml, toyPopoverHtml, BADGE_S, skillStatHtml, skillSigned,
                        levelUpText, unlockText, sheetToys, TOY_ICONS,
@@ -1505,6 +1520,8 @@ const STYLE = `
           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .mind b { font-weight:600; }
   .err { color:var(--error-color,#f66); font:13px monospace; white-space:pre-wrap; padding:0 12px; }
+  .err .zswitch { font:inherit; margin-left:6px; padding:2px 10px; border-radius:999px; cursor:pointer;
+                  border:1px solid currentColor; background:transparent; color:var(--primary-text-color,#ddd); }
   .err:not(:empty) { padding:8px 12px; }
   .scroller { flex:1; min-height:0; overflow-y:auto; position:relative; overscroll-behavior:contain; }
   .msgs { max-width:920px; margin:0 auto; padding:16px 18px 24px; }
@@ -1882,6 +1899,24 @@ function definePanel() {
 
     _err(msg) { this._errEl.textContent = msg || ""; }
 
+    /** #283: "<name> is offline — switch to <other>?" with the button that
+     * switches the house (an admin's write; the page reloads onto it). */
+    async _offline(data) {
+      let zoo = [];
+      try { const r = await this._api(ZOO_URL); if (r.ok && Array.isArray(r.data)) zoo = r.data; } catch (e) { /* no zoo: words only */ }
+      const n = offlineNotice(data, zoo);
+      this._err(n.text);
+      if (!n.switchTo) return;
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "zswitch"; b.textContent = "switch to " + n.switchTo.name;
+      b.addEventListener("click", async () => {
+        const r = await this._api(ZOO_URL + "/active", { method: "POST", body: JSON.stringify({ id: n.switchTo.id }) });
+        if (r.ok) location.reload();
+        else this._err(r.status === 403 ? n.text + " (only an admin switches the seat)" : n.text + " (the switch failed: " + r.status + ")");
+      });
+      this._errEl.append(" ", b);
+    }
+
     // ---------------------------------------------------------- api
     async _api(path, opts) {
       const o = Object.assign({}, opts || {});
@@ -1896,6 +1931,7 @@ function definePanel() {
     }
 
     _apiErr(what, r) {
+      if (r.data && r.data.error === "seat_offline") return r.data.message || "the seat is offline";   // #283
       return what + " (" + r.status + "): " + (typeof r.data === "string" ? r.data : JSON.stringify(r.data));
     }
 
@@ -1912,7 +1948,11 @@ function definePanel() {
         this._applySeatName(conf.data.name);      // issue #6: the conf carries it
         this._build = conf.data.build || "";       // #243: the page code this tab runs
         const health = await this._api(SERVE + "/global/health");
-        if (!health.ok) { this._err(this._apiErr("brain unreachable", health)); this._paintStatus(); return; }
+        if (!health.ok) {
+          if (health.data && health.data.error === "seat_offline") await this._offline(health.data);   // #283
+          else this._err(this._apiErr("brain unreachable", health));
+          this._paintStatus(); return;
+        }
         this._foot.textContent = "membrane " + ((health.data && health.data.version) || "") + " · " + conf.data.serve_url;
         this._loadAgents();
         this._loadModel();

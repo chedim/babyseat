@@ -41,7 +41,8 @@ off-box write gets `401` with `WWW-Authenticate: Bearer`.
 - **Home Assistant, opencode attach (:4096):** HTTP Basic with the token as the
   password (the user name is ignored). In the integration's *Connect to a seat
   running elsewhere* form, put it in **Password**; for an integration that is
-  already set up, use *Configure* → **Seat token**. A seat Home Assistant runs
+  already set up, use *Configure* → **Edit a seat** → **Seat token** (each seat of
+the [zoo](home-assistant.md#the-zoo-several-seats) carries its own). A seat Home Assistant runs
   itself listens on loopback and needs none.
   `OPENCODE_SERVER_PASSWORD=<seat token> opencode attach http://seat:4096`
 - **The web UI from another machine (:4096, standalone):** the page reads freely,

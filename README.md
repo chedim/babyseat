@@ -197,6 +197,12 @@ it only talks. It can't change Home Assistant's configuration or users.
 *Connect to a seat running elsewhere* is for a seat on another machine (the
 integration is then only its UI and agent).
 
+**Several seats, one house (the 🦠 zoo):** *Configure* → **Add a seat** (host,
+ports 4096 / 11500, its `membrane token seat`) adds a laptop or a phone; the
+house talks to one at a time — switch it from membrane home's 🦠 button (a
+card per seat, its Blurp's level and rung) or the `select.membrane_seat`
+entity ([docs/home-assistant.md](docs/home-assistant.md#the-zoo-several-seats)).
+
 ### The daily work: typed tools, guarded writes
 
 A seat hands its model the membrane MCP surface — `query`, `state`, `learn`,

@@ -1,7 +1,10 @@
 """The setup form: run the seat inside Home Assistant (it thinks with an
 Ollama server -- models picked from its list) or connect to a seat that runs
-elsewhere (the boat's way: a separate brain machine)."""
+elsewhere (the boat's way: a separate brain machine). The options add more
+seats to the house (#283, the zoo: zoo.py)."""
 from __future__ import annotations
+
+import asyncio
 
 import aiohttp
 import voluptuous as vol
@@ -11,6 +14,7 @@ from homeassistant.core import callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.selector import SelectSelector, SelectSelectorConfig, SelectSelectorMode
 
+from . import zoo
 from .const import (CONF_BACKEND, CONF_EMBED_MODEL, CONF_MODE, CONF_MODEL, CONF_SERVE_PASS,
                     CONF_SERVE_URL, CONF_SERVE_USER, DEFAULT_BACKEND, DEFAULT_LOOPS,
                     DEFAULT_SERVE_USER, DOMAIN, MODE_CONNECT, MODE_INSIDE, OPT_HA_ACCESS,
@@ -67,6 +71,7 @@ def split_models(names: list[str], first: str = "") -> tuple[list[str], list[str
 
 class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
+    MINOR_VERSION = 2               # #283: the seats list (async_migrate_entry)
 
     def __init__(self):
         self._backend = DEFAULT_BACKEND
@@ -75,7 +80,7 @@ class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._found = False
 
     async def async_step_user(self, user_input=None):
-        await self.async_set_unique_id(DOMAIN)          # one seat per Home Assistant
+        await self.async_set_unique_id(DOMAIN)          # one entry per Home Assistant; more seats: its options (#283)
         self._abort_if_unique_id_configured()
         return self.async_show_menu(step_id="user", menu_options=[MODE_INSIDE, MODE_CONNECT])
 
@@ -152,12 +157,31 @@ class MembraneConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 
 class MembraneOptionsFlow(config_entries.OptionsFlow):
-    """Change the models (from the same Ollama server's list), the landing page,
-    speech, the loops -- the seat restarts with them."""
+    """The settings (the models from the same Ollama server's list, the landing
+    page, speech, the loops -- the seat restarts with them) and THE ZOO's seats
+    (#283): add one (host, ports, its seat token, a name), edit, remove."""
+
+    def __init__(self):
+        self._edit = None
+
+    def _opts(self) -> dict:
+        return zoo.migrate(dict(self.config_entry.data), dict(self.config_entry.options))
+
+    def _pick(self, seats: list) -> SelectSelector:
+        return SelectSelector(SelectSelectorConfig(
+            options=[{"value": s["id"], "label": n} for s, n in zip(seats, zoo.names(seats))],
+            mode=SelectSelectorMode.DROPDOWN))
 
     async def async_step_init(self, user_input=None):
+        seats = self._opts()[zoo.SEATS]
+        menu = ["settings", "add_seat", "pick_seat"]
+        if len(seats) > 1:
+            menu.append("remove_seat")
+        return self.async_show_menu(step_id="init", menu_options=menu)
+
+    async def async_step_settings(self, user_input=None):
         if user_input is not None:
-            return self.async_create_entry(data=user_input)
+            return self.async_create_entry(data={**self._opts(), **user_input})
         o, d = self.config_entry.options, self.config_entry.data
         fields = {}
         if d.get(CONF_MODE) == MODE_INSIDE:
@@ -178,14 +202,88 @@ class MembraneOptionsFlow(config_entries.OptionsFlow):
             fields[vol.Required(OPT_HA_ACCESS, default=o.get(OPT_HA_ACCESS, True))] = bool
         else:
             # CONNECT (detached): no model pickers (the seat thinks with its own
-            # backend); what Home Assistant gives the seat is configurable here
+            # backend); what Home Assistant gives the seat is configurable here.
+            # The seat token (#253) is the seat's own now: Seats -> edit (#283)
             fields[vol.Required(OPT_HA_ACCESS, default=o.get(OPT_HA_ACCESS, True))] = bool
             fields[vol.Optional(OPT_HA_BASE_URL, default=o.get(OPT_HA_BASE_URL, ""))] = str
-            # #253: the seat token (`membrane token seat`), set or changed after setup
-            fields[vol.Optional(CONF_SERVE_PASS, default=o.get(CONF_SERVE_PASS, d.get(CONF_SERVE_PASS, "")))] = str
-        return self.async_show_form(step_id="init", data_schema=vol.Schema({
+        return self.async_show_form(step_id="settings", data_schema=vol.Schema({
             **fields,
             vol.Required(OPT_LANDING, default=o.get(OPT_LANDING, True)): bool,
             vol.Optional(OPT_STT_URL, default=o.get(OPT_STT_URL, "")): str,
             vol.Required(OPT_LOOPS, default=o.get(OPT_LOOPS, DEFAULT_LOOPS)): vol.All(int, vol.Range(min=1, max=3)),
         }))
+
+    async def _card_name(self, seat: dict) -> str:
+        """No name given: the seat's Blurp's own (its card or sheet), else its host."""
+        try:
+            card = await asyncio.wait_for(zoo.fetch_card(async_get_clientsession(self.hass),
+                                                         zoo.conn_of({}, seat)), zoo.CARD_TIMEOUT_S)
+        except Exception:                                # noqa: BLE001 (an offline seat can still be added)
+            card = {}
+        return str(card.get("name") or seat.get("host") or "")
+
+    def _seat_schema(self, seat: dict | None) -> vol.Schema:
+        s = seat or {}
+        if s.get("inside"):
+            return vol.Schema({vol.Optional("name", default=s.get("name", "")): str,
+                               vol.Optional(OPT_STT_URL, default=s.get(OPT_STT_URL, "")): str})
+        return vol.Schema({
+            vol.Required("host", default=s.get("host", "")): str,
+            vol.Required("serve_port", default=int(s.get("serve_port") or zoo.DEFAULT_SERVE_PORT)):
+                vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
+            vol.Required("proxy_port", default=int(s.get("proxy_port") or zoo.DEFAULT_PROXY_PORT)):
+                vol.All(vol.Coerce(int), vol.Range(min=1, max=65535)),
+            vol.Optional("token", default=s.get("token", "")): str,
+            vol.Optional("name", default=s.get("name", "")): str,
+            vol.Optional(OPT_STT_URL, default=s.get(OPT_STT_URL, "")): str})
+
+    async def async_step_add_seat(self, user_input=None):
+        errors = {}
+        if user_input is not None:
+            opts = self._opts()
+            seat = zoo.seat_from_form(user_input, opts[zoo.SEATS])
+            if not seat["host"]:
+                errors["host"] = "no_host"
+            else:
+                if not seat["name"]:
+                    seat["name"] = await self._card_name(seat)
+                opts[zoo.SEATS] = opts[zoo.SEATS] + [seat]
+                return self.async_create_entry(data=opts)
+        return self.async_show_form(step_id="add_seat", data_schema=self._seat_schema(None), errors=errors)
+
+    async def async_step_pick_seat(self, user_input=None):
+        seats = self._opts()[zoo.SEATS]
+        if user_input is not None:
+            self._edit = user_input["seat"]
+            return await self.async_step_edit_seat()
+        return self.async_show_form(step_id="pick_seat", data_schema=vol.Schema({
+            vol.Required("seat", default=seats[0]["id"]): self._pick(seats)}))
+
+    async def async_step_edit_seat(self, user_input=None):
+        opts = self._opts()
+        old = zoo.find(opts[zoo.SEATS], self._edit)
+        if old is None:
+            return self.async_abort(reason="no_seat")
+        if user_input is not None:
+            if old.get("inside"):
+                new = {**old, "name": str(user_input.get("name") or "").strip() or zoo.INSIDE_NAME}
+                if user_input.get(OPT_STT_URL):
+                    new[OPT_STT_URL] = user_input[OPT_STT_URL]
+                else:
+                    new.pop(OPT_STT_URL, None)
+            else:
+                new = zoo.seat_from_form(user_input, opts[zoo.SEATS], old)
+                if not new["name"]:
+                    new["name"] = await self._card_name(new)
+            opts[zoo.SEATS] = [new if s.get("id") == old.get("id") else s for s in opts[zoo.SEATS]]
+            return self.async_create_entry(data=opts)
+        return self.async_show_form(step_id="edit_seat", data_schema=self._seat_schema(old),
+                                    description_placeholders={"seat": zoo.display_name(old)})
+
+    async def async_step_remove_seat(self, user_input=None):
+        opts = self._opts()
+        gone = [s for s in opts[zoo.SEATS] if not s.get("inside")]
+        if user_input is not None:
+            return self.async_create_entry(data=zoo.remove(opts, user_input["seat"]))
+        return self.async_show_form(step_id="remove_seat", data_schema=vol.Schema({
+            vol.Required("seat"): self._pick(gone)}))
