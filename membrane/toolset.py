@@ -463,6 +463,18 @@ def _owned_by_one_family(inner: dict) -> str:
     return owners[0] if len(owners) == 1 else ""
 
 
+def _closest_family(args: dict) -> str:
+    """The family whose parameters share the most keys with a nameless call's
+    arguments (issue #274: '' with {"focus": "self"} was refused seven times,
+    no hint where to go); `state` -- how things are, no arguments -- when none
+    of them fits any tool."""
+    keys = {k for k in args if k != "action"}
+    scored = [(len(keys & set(d["params"])), f) for f, d in FAMILIES.items()]
+    best = max(scored, key=lambda t: t[0])[0] if scored else 0
+    hits = [f for n, f in scored if n == best]
+    return hits[0] if best and len(hits) == 1 else "state"
+
+
 _PLACEHOLDER_NAME_KEYS = ("fn_name", "function_name", "tool_name", "name", "tool", "function")
 _PLACEHOLDER_ARG_KEYS = ("args_json", "arguments", "args", "params", "parameters", "input")
 
@@ -555,7 +567,8 @@ def resolve(name: str, args: dict) -> tuple[str, dict]:
             return _placeholder_call(_placeholder, dict(args or {}))
         raise ValueError(
             f"the call had no tool name ({str(name or '')!r}): name the tool -- one of "
-            f"{', '.join(sorted(FAMILIES))} -- and put its JSON in the arguments")
+            f"{', '.join(sorted(FAMILIES))} -- and put its JSON in the arguments "
+            f"(closest: {_closest_family(dict(args or {}))})")
     if str(name or "").lstrip()[:1] in ("{", "["):
         _un = _call_in_name(name)
         if _un is not None:
