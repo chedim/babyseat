@@ -262,6 +262,13 @@ def _seat_card(srv, mcp_on: bool, serve: bool = False) -> str:
             "REST/SSE surface; an attached opencode client is display "
             "only, never a second surface with its own memory). "
             "Everything else is unchanged: same field, same lanes.")
+    try:                                   # #283: self's name is per seat (default Blurp)
+        from . import self_name as _SN
+        _sn = _SN.current()
+        L.append(f"- SELF'S NAME on this seat: {_sn} -- people call self (membrane::self) {_sn}; "
+                 "the doctrine's Blurp is the default name.")
+    except Exception:
+        pass
     if getattr(srv, "no_context", False):
         keep = int(getattr(srv, "tool_keep", 3))
         L.append(

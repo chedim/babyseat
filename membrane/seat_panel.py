@@ -15,8 +15,9 @@ uptime and a beat count, nothing else). The seat's presence entity
   controls  applied by the seat itself, operator-only (POST
             /membrane/seat/control, an HA admin through the relay):
             paused (the one switch every acting lane honours), loops_max,
-            auto-chat / role per session, and the self loop (off / on /
-            watch, #161; self_loop.py). Argus READS all of it; an
+            auto-chat / role per session, the self loop (off / on /
+            watch, #161; self_loop.py) and self's name on this seat
+            (#283; self_name.py). Argus READS all of it; an
             edit of these properties by a lane is not a control (the
             refresh writes the truth back) -- the stable point stays the
             operator's call, and he can never lift his own limits.
@@ -32,7 +33,7 @@ REFRESH_S = 15.0
 EVENTS_KEEP = 20
 MEM_LOW_MB = 350             # the phone's MemAvailable under this: pressure
 RSS_HIGH_MB = 2300           # the seat itself over this: pressure
-CONTROLS = ("paused", "loops_max", "auto", "role", "self", "self_limit")
+CONTROLS = ("paused", "loops_max", "auto", "role", "self", "self_limit", "self_name")
 
 
 def _est(srv):
@@ -165,8 +166,17 @@ def state(srv) -> dict:
         "failing_scripts": failing,
         "battery": battery(),
         "self": _self_status(srv),
+        "self_name": _self_name(),
         "ts": time.time(),
     }
+
+
+def _self_name() -> str:
+    try:
+        from . import self_name as _SN
+        return _SN.current()
+    except Exception:
+        return "Blurp"
 
 
 def _self_status(srv) -> dict:
@@ -267,6 +277,15 @@ def control(srv, body: dict, by: str = "operator") -> dict:
             n = _SELF.limit(srv)
             done["self_limit"] = n
             note(srv, "self", value=_SELF.mode(srv), limit=n, by=by)
+    if "self_name" in body:                        # #283: self's name on this seat (display only)
+        from . import self_name as _SN
+        try:
+            n = _SN.set_name(body["self_name"])
+        except ValueError:
+            n = None
+        if n is not None:
+            done["self_name"] = n
+            note(srv, "self-name", value=n, by=by)
     sid = str(body.get("session") or "")
     if sid and r is not None and r.sessions.get(sid) is not None:
         if body.get("role"):

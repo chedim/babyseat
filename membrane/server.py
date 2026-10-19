@@ -3073,6 +3073,12 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 # ~30 s (read-only; the gate above ran first)
                 from . import self_sheet as _SHEET
                 self._json_out(_SHEET.sheet(getattr(runner, "srv", None) if runner is not None else None))
+            elif path == "/membrane/self/card":
+                # #283: the zoo's card -- self's name (per seat), level, rung
+                # name, mode, last activity; cheap to poll across seats
+                # (read-only; the gate above ran first)
+                from . import self_sheet as _SHEET
+                self._json_out(_SHEET.card(getattr(runner, "srv", None) if runner is not None else None))
             elif path == "/membrane/toybox/state":
                 # #249: the toy dock's live source -- the toys alone, cheap
                 # enough to poll every few seconds (read-only, gated)

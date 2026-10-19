@@ -41,8 +41,10 @@ import datetime as dt
 import time
 
 from . import self_loop as SL
+from . import self_name as SN
 
-NAME = "Blurp"                # the operator named it (2026-10-19, #277); the name ceremony (#161 layer 3) changes this one place
+NAME = SN.DEFAULT             # the operator named it (2026-10-19, #277); since #283 the DEFAULT -- each seat
+                              # names its own (SN.current()), and the prose below is said with it (SN.say_all)
 GAP_S = 120.0                 # a record gap longer than this: self was not running
 CACHE_S = 30.0                # the sheet is recomputed at most this often
 DOCK_CACHE_S = 2.0            # ...the dock's toys this often
@@ -626,7 +628,7 @@ def _skill(recs: list, tempo: dict, st: dict) -> dict | None:
 
 def _header(st: dict, recs: list, c: dict, t: dict, skill: dict | None = None) -> dict:
     nxt = st.get("next")
-    return {"name": NAME, "level": st.get("rung") or 0, "rung_name": st.get("rung_name") or SL.RUNG_NAMES.get(st.get("rung") or 0),
+    return {"name": SN.current(), "level": st.get("rung") or 0, "rung_name": st.get("rung_name") or SL.RUNG_NAMES.get(st.get("rung") or 0),
             "next": nxt, "next_name": SL.RUNG_NAMES.get(nxt) if nxt is not None else None,
             "bar": st.get("bar"), "waiting_on": st.get("waiting_on"), "slipping": st.get("slipping"),
             "held": st.get("held"), "mode": st.get("mode"), "limit": st.get("limit"),
@@ -712,7 +714,7 @@ def empty() -> dict:
     """The sheet's shape with nothing in it (a seat without self)."""
     c = {"born": None, "srt": []}
     return {"empty": True, "generated": time.time(),
-            "header": {"name": NAME, "level": 0, "rung_name": SL.RUNG_NAMES[0], "next": None, "mode": "off",
+            "header": {"name": SN.current(), "level": 0, "rung_name": SL.RUNG_NAMES[0], "next": None, "mode": "off",
                        "age_h": 0.0, "working_h": 0.0, "skill": None},
             "attributes": [], "quest": {"rung": None, "criteria": []}, "achievements": [],
             "growth": _growth(c, []), "time": _time(c), "inventory": [],
@@ -722,15 +724,37 @@ def empty() -> dict:
 def sheet(srv, now: float | None = None, fresh: bool = False) -> dict:
     """The sheet, cached for CACHE_S per seat."""
     if srv is None:
-        return empty()
+        return SN.say_all(empty())
     now = time.time() if now is None else float(now)
+    name = SN.current()
     rt = SL._rt(srv)
     hit = rt.get("sheet")
-    if not fresh and hit is not None and 0 <= now - hit[0] < CACHE_S:
+    if not fresh and hit is not None and 0 <= now - hit[0] < CACHE_S and hit[2] == name:
         return hit[1]
-    out = compute(srv, now)
-    rt["sheet"] = (now, out)
+    out = SN.say_all(compute(srv, now), name)          # #283: the seat's name, in the prose too
+    rt["sheet"] = (now, out, name)
     return out
+
+
+def card(srv, now: float | None = None) -> dict:
+    """#283: the zoo's card -- self on this seat in a few fields, cheap
+    enough to poll across seats (GET /membrane/self/card): the name, the
+    level and its rung's name, the mode (awake = not off) and the record's
+    last line (its time, ISO; None before self's first line). The level is
+    the sheet's (cached CACHE_S); the mode and the last line are live."""
+    now = time.time() if now is None else float(now)
+    name = SN.current()
+    if srv is None:
+        return {"name": name, "level": 0, "rung_name": SL.RUNG_NAMES.get(0, ""), "next": None, "mode": "off",
+                "awake": False, "last_activity": None, "generated": now}
+    h = sheet(srv, now).get("header") or {}
+    mode = SL.mode(srv)
+    with SL._lock:
+        recs = SL._read(srv)
+        last = float(recs[-1].get("ts") or 0) if recs else None
+    return {"name": name, "level": h.get("level") or 0, "rung_name": h.get("rung_name") or "",
+            "next": h.get("next"), "mode": mode, "awake": mode != "off",
+            "last_activity": iso(last) if last else None, "generated": now}
 
 
 # ---- the dock: the toys alone, light enough to poll ---------------------------------
@@ -745,11 +769,12 @@ def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
     """Each toybox toy, live: its reading, its last change (who, how long
     ago), its health and its stats. Cached DOCK_CACHE_S per seat."""
     now = time.time() if now is None else float(now)
+    who = SN.current()                                   # #283: self's name ("name" is a toy's below)
     if srv is None:
-        return {"generated": now, "name": NAME, "toys": [], "locked": []}
+        return {"generated": now, "name": who, "toys": [], "locked": []}
     rt = SL._rt(srv)
     hit = rt.get("dock")
-    if not fresh and hit is not None and 0 <= now - hit[0] < DOCK_CACHE_S:
+    if not fresh and hit is not None and 0 <= now - hit[0] < DOCK_CACHE_S and hit[2] == who:
         return hit[1]
     from . import toybox as TB
     try:
@@ -810,6 +835,7 @@ def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
                         if kind == "tower" else {}),
                      "unlock_rung": TU.rung_of(kind), "grandfathered": TU.grandfathered(recs, kind)})
     toys.sort(key=lambda t: t["kind"] != "ball")                 # #264: the ball first (locked rows follow the toys)
-    out = {"generated": now, "name": NAME, "toys": toys, "locked": TU.locked_rows(recs, {r["kind"] for r in rows})}
-    rt["dock"] = (now, out)
+    out = SN.say_all({"generated": now, "name": who, "toys": toys,
+                      "locked": TU.locked_rows(recs, {r["kind"] for r in rows})}, who)
+    rt["dock"] = (now, out, who)
     return out
