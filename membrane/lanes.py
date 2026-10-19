@@ -3944,8 +3944,9 @@ def _entity_points(srv, fld, m: int = 400) -> list[dict]:
 class MembraneOpenAIHandler(RAGProxyHandler):
     """The RAG handler + the OpenAI-compatible surface: /v1/models,
     /v1/chat/completions (the RAG gate + the internal state/math intercept),
-    /v1/embeddings (the field's own embedder), /membrane/state. Everything
-    else forwards to Ollama."""
+    /v1/embeddings (the field's own embedder), /membrane/state, and Ollama's
+    native /api/chat + /api/generate (translated onto the same /v1 turn,
+    ollama_api.py). Everything else forwards to Ollama."""
 
     # ---- the door (JWT mode, jwtauth.py; off = always open) ----
     def _auth_gate(self) -> bool:
@@ -4083,6 +4084,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if path == "/v1/chat/completions":
             self._stamp_chat_identity()
             self._v1_chat(); return
+        if path in ("/api/chat", "/api/generate"):
+            self._ollama_native(path.rsplit("/", 1)[-1]); return
         if path == "/v1/embeddings":
             self._v1_embeddings(); return
         if path == "/membrane/delegate":
@@ -4148,6 +4151,51 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         if path.startswith("/membrane/"):
             self._json_out({"error": "read-only; GET /membrane/state"}); return
         super().do_POST()
+
+    # ---- Ollama's native chat (issue #221): the SAME /v1 memory turn ----
+    def _ollama_native(self, kind: str) -> None:
+        """/api/chat | /api/generate: the Ollama body becomes the OpenAI body,
+        the /v1 turn runs unchanged (gate, injection, capture, routing, the JWT
+        stamp) against an OllamaWire standing in for wfile, which writes
+        Ollama's shapes back (one JSON body, or NDJSON ending done:true). A
+        load/unload request (no prompt, no messages) passes through."""
+        import io as _io
+        from . import ollama_api as _OA
+        t0 = time.monotonic()
+        length = int(self.headers.get("Content-Length", 0) or 0)
+        raw = self.rfile.read(length) if length else b""
+        try:
+            body = json.loads(raw) if raw else {}
+        except ValueError:
+            body = None
+        if not isinstance(body, dict) or _OA.is_load_request(kind, body):
+            self._forward_raw(raw); return
+        up = json.dumps(_OA.to_openai(kind, body)).encode()
+        self.rfile = _io.BytesIO(up)
+        del self.headers["Content-Length"]
+        self.headers["Content-Length"] = str(len(up))
+        real, path = self.wfile, self.path
+        wire = _OA.OllamaWire(real, kind, str(body.get("model") or "membrane"), t0)
+        self.path = "/v1/chat/completions"      # a pass-through fallback reaches the /v1 surface
+        self.wfile = wire
+        try:
+            self._stamp_chat_identity()
+            self._v1_chat()
+        except Exception as e:
+            _OA.log(f"{kind} turn failed: {e}")
+            if wire.status is None:
+                wire._write_json(500, {"error": f"membrane: {e}"})
+                wire.finished = True
+            self.close_connection = True
+        finally:
+            self.wfile, self.path = real, path
+            try:
+                wire.finish()
+            except Exception as e:
+                _OA.log(f"{kind} answer failed: {e}")
+                self.close_connection = True
+            if wire.streaming:
+                self.close_connection = True
 
     def _json_err_raw(self, code: int, msg: str) -> None:
         out = json.dumps({"error": {"message": msg, "type": "membrane_error"}}
