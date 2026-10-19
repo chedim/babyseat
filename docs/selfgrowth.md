@@ -323,7 +323,7 @@ curl -s http://127.0.0.1:4096/membrane/seat \
 | `rung8` | rung 8 (rung 7 until #258) at the current other: `asked` (pushes that asked the model), `checked` (those whose reply check came), `paired` (those whose check carried the model's answer), `pair_rate` = paired / checked; over the reply checks the test reads (`checks`, up to 100): `brier_self` (self's own `p_self`), `brier_mix` (what self passes on: `p_self` with the advisor heard), `brier_rate` (the running rate it must beat by 8%), `brier_model` (the model alone, on the checks it answered); `advisor_weight` (how much self listens to the current model, earned on its record, 0 for a new model) and `advisor_model` (its id); `base_rate` (the all-time rate the model is told) and `recent_rate` (the share of the last 6 reply checks answered, same prior, also told). The 🌱 chooser's tooltip shows it as `rung 8: 5 of 8 asked pushes paired, Brier self 0.25 vs rate 0.26, model alone 0.37 (weight 0.00), base rate 0.55` |
 | `toys` | #230: each toy (`toy:` / `cradle:` things, words with a getter) with `getter` (it has one), `reads` and `answered` (of its last 10 reaches), and `health`: `ok`, `empty` (no answer on its last reads), `unread`, or `no getter`; a built-in toy also carries `toy` (its toybox name) and, for a tower block, `block` (#244: the play buttons' target) |
 | `off_field` | #244: of self's last 200 looks, `looks` (how many), `off` (how many landed on a thing with no live field point; `null` when the seat has no field) and `things` (those things, most looked-at first). The home view draws those looks as ghosts |
-| `curiosity` | from rung 2 on: the (up to) three things whose prediction is improving fastest, best first, each with `progress` (its error over the 30 ordinary looks before the latest 30, minus its error over the latest 30) and `error` (the latest 30's mean Brier error). It is what self's curiosity reads when it chooses a reach (below); empty until a thing has 60 ordinary looks |
+| `curiosity` | from rung 2 on: the (up to) three things whose prediction is improving fastest, best first, each with `progress` (its error over the 30 ordinary looks before the latest 30, minus its error over the latest 30) and `error` (the latest 30's Brier error); each window's error is the mean of its middle half, and a look spanning a restart or stall is left out (#259). It is what self's curiosity reads when it chooses a reach (below); empty until a thing has 60 ordinary looks |
 
 **How the bar works.** A rung's criteria are stages, in order (rung 2:
 reaches, then skill, then the audit). Each stage is an equal share of the bar,
@@ -526,6 +526,15 @@ Three rules (#161) keep curiosity from breaking the measurement:
 - **Seeing never drives the loop.** Curiosity is worked out from the record
   only at the moment self chooses. It is not stored, never wakes a cycle, and
   is never an answer (not on the record, not in `tempo.json`).
+
+A glitch is not progress ([#259](https://github.com/chedim/membrane/issues/259)).
+When the seat restarts or stalls, a thing it predicts perfectly (the heartbeat)
+can miss once, and that miss leaving the window used to look like learning. Two
+guards stop this. A look whose interval spans a gap in the record longer than
+`CURIO_GAP_S` (twice a recorded wait stretch, 600 s by default) is left out,
+and the gap is read from the record's timestamps only. Each window's error is
+also the mean of its middle half, so a miss in fewer than a quarter of the
+looks can't move it. A thing that is often wrong still counts in full.
 
 `curiosity` in the panel status shows the numbers it reads.
 

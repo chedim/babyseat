@@ -181,6 +181,8 @@ CURIOSITY = True            # #212: tilt the reach choice by learning progress (
 CURIO_WINDOW = 30           # ordinary looks per window: progress = earlier window's error - recent window's
 CURIO_FLOOR = 0.1           # the tilt never goes under this: a mastered or "can't learn" thing is still retried
 CURIO_MIN = 0.005           # progress under this anywhere is no frontier: the base chooser runs untilted
+CURIO_TRIM = 0.25           # #259: a window's error is its interquartile mean -- a rare outlier is no progress
+CURIO_GAP_S = 2 * WAIT_EVERY * PACE_S   # #259: a record gap this long is a restart/stall; a look spanning one is no error
 RECENT_MAX = 100            # #230: the most record lines the page's activity feed may ask for
 TOY_PREFIXES = ("toy:", "cradle:")   # #230: things made for self to play with (listed even without a getter)
 TOY_WORDS = "w:"            # ...and words that carry a getter (a plain word is not a toy)
@@ -1627,21 +1629,48 @@ def _ordinary_errors(recs: list[dict]) -> dict:
     """eid -> the Brier errors (answer - p)^2 of its ORDINARY looks, oldest
     first: answered reaches outside every audit. A look inside a rung-2 audit
     (`audit`) or either phase of a rung-5 audit (`audit5`: the paused source and
-    its restart) never counts -- self stays blind to its audits (#161 rule 2)."""
+    its restart) never counts -- self stays blind to its audits (#161 rule 2).
+    Nor does a look whose interval -- since the same thing's previous look --
+    spans a gap between consecutive record lines longer than CURIO_GAP_S: the
+    seat restarted or stalled, so the miss is the glitch's, not the thing's
+    (#259). Read from the record's timestamps only."""
     out: dict[str, list] = {}
+    stalls, seen, prev = 0, {}, None        # stalls so far; per thing, the count at its last look
     for r in recs:
+        ts = r.get("ts")
+        if ts is not None:
+            ts = float(ts)
+            if prev is not None and ts - prev > CURIO_GAP_S:
+                stalls += 1
+            prev = ts
         if (r.get("kind") == "reach" and r.get("answer") in ("changed", "unchanged")
                 and not r.get("audit") and not r.get("audit5") and r.get("p") is not None):
+            eid = r["eid"]
+            spans = eid in seen and seen[eid] != stalls
+            seen[eid] = stalls
+            if spans:
+                continue
             x = 1.0 if r["answer"] == "changed" else 0.0
-            out.setdefault(r["eid"], []).append((x - float(r["p"])) ** 2)
+            out.setdefault(eid, []).append((x - float(r["p"])) ** 2)
     return out
+
+
+def _window_error(errs: list) -> float:
+    """A window's error: the mean of its middle half (CURIO_TRIM off each end,
+    #259). A miss rarer than one look in four can't move it, so a mastered
+    thing's rare glitch ageing out is no progress; a thing that is often wrong
+    still is, and its learning still shows."""
+    s = sorted(errs)
+    k = int(len(s) * CURIO_TRIM)
+    mid = s[k:len(s) - k] or s
+    return sum(mid) / len(mid)
 
 
 def _progress(recs: list[dict], detail: bool = False) -> dict:
     """LEARNING PROGRESS per thing: its mean error over the CURIO_WINDOW
     ordinary looks before the latest CURIO_WINDOW, minus its mean error over
     the latest ones (positive: its prediction is getting better). The window
-    means are the smoothing. A thing with fewer than two windows of looks has
+    means are the smoothing; each is an interquartile mean (_window_error). A thing with fewer than two windows of looks has
     none yet. With `detail`, {eid: {progress, error}} (error: the recent mean).
     Computed from the record at the moment it is read -- never stored."""
     W = CURIO_WINDOW
@@ -1649,7 +1678,7 @@ def _progress(recs: list[dict], detail: bool = False) -> dict:
     for eid, errs in _ordinary_errors(recs).items():
         if len(errs) < 2 * W:
             continue
-        early, late = sum(errs[-2 * W:-W]) / W, sum(errs[-W:]) / W
+        early, late = _window_error(errs[-2 * W:-W]), _window_error(errs[-W:])
         out[eid] = {"progress": early - late, "error": late} if detail else early - late
     return out
 
