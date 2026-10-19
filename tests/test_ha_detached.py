@@ -192,6 +192,8 @@ def test_the_sync_word_reaches_the_seat_too(serve, haa):
         assert haa.seat_event_sync({"serve_url": "http://127.0.0.1:1", "serve_pass": "x"}, "ha-stop") is False
     finally:
         serve._loop.call_soon_threadsafe(serve._loop.stop)
+        pumper.join(10)                                     # #287: the fixture closes this loop next --
+        assert not pumper.is_alive()                        # still running there, teardown raised on CI
 
 
 def test_ha_urls_a_loopback_falls_back(haa):
