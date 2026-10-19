@@ -1,7 +1,8 @@
 # babyseat (formerly membrane)
 Hippocampus as cortex register-correct-predict-act head: real-time learning, embodiment, self-awareness, self-targeting, novelty creation*, response generation*, embedding-only*.
-
+```
 * - under construction
+```
 
 ![Membrane](docs/comparison.png)
 
