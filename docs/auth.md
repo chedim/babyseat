@@ -74,7 +74,8 @@ logs and browser history.
   too.
 - **The token's identity is who said it.** Any speaker line a client sends
   (`[user: …]`, `[HA user: …]`, the page's `X-Membrane-Speaker`) is dropped, and
-  the seat stamps `[user#<sub>: <name>]` itself. In the field the person is
+  the seat stamps `[user#<sub>: <name>]` itself, on `/v1/chat/completions` and on
+  Ollama's `/api/chat` and `/api/generate` alike. In the field the person is
   `person:<sub>` (slugged), labelled with the name.
 - **Sessions on :4096 belong to the token's `sub`.** `GET /session`,
   `/session/status`, every `/session/<id>/…` route and the `/event` stream show a

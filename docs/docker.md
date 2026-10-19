@@ -3,7 +3,9 @@
 The public image `chedim/membrane` runs `membrane standalone` in a container:
 the serve API and web UI on **:4096**, the OpenAI-compatible memory proxy on
 **:11500**. Point a browser at the first, or any OpenAI-compatible client (an
-agent, an IDE plugin, a pod in Kubernetes) at `http://<host>:11500/v1`.
+agent, an IDE plugin, a pod in Kubernetes) at `http://<host>:11500/v1`. Ollama
+clients aim at `http://<host>:11500`: `/api/chat` and `/api/generate` run the same
+memory turn, the rest of `/api/*` passes through to Ollama.
 
 Every published release pushes the tags `X.Y.Z`, `X.Y` and `latest` for
 `linux/amd64` and `linux/arm64` (`.github/workflows/docker.yml`).
@@ -106,7 +108,7 @@ use; a bind mount must be writable by uid 10001.
 | Port | What |
 |---|---|
 | 4096 | the serve API (opencode-compatible REST/SSE) and the web UI |
-| 11500 | the OpenAI-compatible proxy (`/v1`) and `/membrane/state` |
+| 11500 | the memory proxy: OpenAI's `/v1`, Ollama's `/api/chat` and `/api/generate` (other `/api/*` pass through), and `/membrane/state` |
 
 Both are fixed inside the container (outside one the seat walks up to the next
 free port); remap them with `-p`, e.g. `-p 14096:4096`.
