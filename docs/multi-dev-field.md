@@ -6,15 +6,31 @@ the `membrane` scope, the nine entity-field collections
 ([entity-field.md](entity-field.md) has the design). The substrate was
 built for this; what follows is the mechanics and the convention.
 
+**This is the opt-in mode.** By default every seat's field is local
+(`<project>/.membrane/field/`, `efstore.open_backend`) and a connected
+bucket carries only published entities and presence — see
+[seat-first-2-tier.md](seat-first-2-tier.md) and the README's
+"Sharing with a team". Everything below applies only to seats that set
+`MEMBRANE_FIELD_CLOUD=1`; a seat without it neither writes into nor reads
+from the merged field.
+
 ## What already works (no code needed)
 
-Set the same env on every dev machine:
+Set the same env on every dev machine (shell, or the project env file
+`membrane connect` writes at `~/.membrane/projects/<slug>.env`):
 
-    MEMBRANE_STORE=couchbase
+    MEMBRANE_FIELD_CLOUD=1
     COUCHBASE_CONN_STRING=couchbase://<team-host>
     COUCHBASE_USER=...
     COUCHBASE_PASSWORD=...
     COUCHBASE_BUCKET=membrane
+
+(`MEMBRANE_STORE=couchbase`, which `connect` also writes, no longer
+selects the field's home; `MEMBRANE_FIELD_CLOUD=1` does. A cluster that is
+down at boot drops the seat to its local file field for that run — its
+writes then stay on disk and never reach the bucket. Switching a seat to
+the merged field starts its origin empty there: nothing uploads the local
+file field.)
 
 Mechanics that make sharing collision-free (membrane/efstore.py,
 membrane/efield.py, membrane/efmind.py):
@@ -42,9 +58,14 @@ membrane/efield.py, membrane/efmind.py):
 - **Peer evidence**: a foreign entity's block carries what other seats
   said about it (`foreign_evidence` — the sentences other origins
   embedded that moved it or are nearest it).
-- **Live escalation via peers** (membrane/peers.py; `peers: N live` at
-  boot): at-rest sync is the store; live sync is the bounded fan-out peer
-  ask on escalations (5s timeout, marked context).
+- **Live escalation via peers** (`global_field.Peers`; `gpeers: N other
+  membrane(s) live` at boot): at-rest sync is the store; live sync is the
+  bounded fan-out peer ask on escalations (up to 4 peers, 5s timeout,
+  marked context). The ask registry is `~/.membrane/peers.jsonl` and the
+  ask goes to `127.0.0.1`, so it reaches other membranes on the SAME
+  machine only — teammates on other machines share through the bucket,
+  not live asks. (The couchbase registry/presence roster in
+  `membrane/peers.py` lists who is alive; it does not route asks.)
 
 ## What to add (the actual work)
 
