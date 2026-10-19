@@ -1583,6 +1583,7 @@ class EntityStore(MultiParentOps, TimelineOps):
             return None
         try:
             from couchbase.cluster import Cluster
+            from .substrate import tls_auth_opts
             from couchbase.auth import PasswordAuthenticator
             from couchbase.options import ClusterOptions
             conn = os.environ.get("COUCHBASE_CONN_STRING",
@@ -1591,7 +1592,7 @@ class EntityStore(MultiParentOps, TimelineOps):
             pw = os.environ.get("COUCHBASE_PASSWORD", "password")
             bucket = os.environ.get("COUCHBASE_BUCKET", self.bucket)
             cluster = Cluster(conn, ClusterOptions(
-                PasswordAuthenticator(user, pw)))
+                PasswordAuthenticator(user, pw, **tls_auth_opts(conn))))
             self._cluster_ref = cluster
             coll = cluster.bucket(bucket).scope("_default").collection(
                 "entities")

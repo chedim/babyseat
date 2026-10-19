@@ -49,7 +49,9 @@ wise.
    is missing or the cluster was down at boot (the seat fell back to its
    local field for this run) — and `[seat] presence published (<origin>;
    N peer(s) on the roster)`. `presence planted locally` means the seat
-   could not reach the cluster's `http://<host>:8091/pools`. The
+   could not reach the cluster (`http://<host>:8091/pools` for
+   `couchbase://`; `https://<host>:18091/pools`, then port 11207, for
+   `couchbases://` -- a self-signed cluster needs `COUCHBASE_CERT_PATH`). The
    `gpeers: N other membrane(s) live` line counts membranes on THIS
    machine only (live peer asks go to `127.0.0.1`); teammates on other
    machines reach you through the bucket, never through live asks.
