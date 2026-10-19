@@ -356,7 +356,234 @@ function snapshotOf(info, tiles, max = 400) {
   return { v: 1, ts: Date.now(), meta, tiles: out.slice(-max) };
 }
 
-const F3Logic = { ghostDir, lookTarget, lookLabel, lookChip, GHOST_R, fnv32, snapshotOf, IDBCache, locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS,
+// ---- #257: THE AMOEBA ACTS IT OUT -- pure pose logic (node-tested) ------------
+// The body acts out self's record, nothing scripted: each record line (and the
+// cycle frame) becomes zero or more ACTS ({kind, t0, dir, ...}); an act's pose
+// is a pure function of its age, eased in and out, and back to the calm
+// baseline when its life is over; the blender sums the live acts onto that
+// baseline (clamped) into one reused object -- no per-frame allocation.
+// A pose (all numbers, the calm baseline all 0):
+//   sx sy sz   a stretch (world direction x amount; 0.5 = half again as long)
+//   ox oy oz   an offset of the body (world direction x body radii)
+//   px py pz   the pseudopod (its direction x reach), reach 0..1 its length
+//   puff       a uniform swell (- smaller), squash (+ wide and flat: curled)
+//   glow       the level-up halo, still 0..1 (damps the idle wobble), dim 0..1
+// Reduced motion: an act holds one static shape for its life, no motion.
+const POSE_KEYS = ["sx", "sy", "sz", "ox", "oy", "oz", "px", "py", "pz", "reach", "puff", "squash", "glow", "still", "dim"];
+const ACT_CAP = 12;                  // live acts at once (the oldest goes first, listening last)
+const LISTEN_MS = 600000;            // a push's listening holds until the reply check, at most 10 min
+const SURPRISE_MIN = 0.5;            // |outcome - p| over this: the answer went against its lean
+const POD_LEN = 55;                  // world units: a pseudopod at full reach (the body's radius is ~20)
+const FACE_MIN = 0.75;               // a motion keeps at least this much of its direction on the screen (faceOn)
+// [attack, hold, decay] ms per act; the life is their sum
+const ACT_ENV = { move: [200, 600, 1000], look: [600, 1000, 250], surprise: [0, 0, 650], startle: [0, 0, 1800],
+  wait: [600, 6000, 2400], push: [0, 0, 1400], bounce: [0, 0, 1500], droop: [800, 2200, 1500], toy: [150, 700, 650],
+  glow: [300, 2500, 2200] };
+const LOOK_LANDS = ACT_ENV.look[0] + ACT_ENV.look[1];   // the answer lands: the pseudopod starts back (the jolt, the wiggle)
+
+/** The unit vector p -> q, or null when there is no way to tell (same spot, a missing end). */
+function unit3(p, q) {
+  if (!p || !q) return null;
+  const x = q[0] - p[0], y = q[1] - p[1], z = q[2] - p[2], n = Math.hypot(x, y, z);
+  return n > 1e-6 ? [x / n, y / n, z / n] : null;
+}
+
+function calmPose(out) { out = out || {}; for (const k of POSE_KEYS) out[k] = 0; return out; }
+
+/** One record line -> the acts it plays (no time, no direction yet). */
+function amoebaActs(r) {
+  if (!r || typeof r !== "object") return [];
+  const k = r.kind;
+  if (k === "cycle") return r.act === "move" ? [{ kind: "move", stride: Math.max(0, Number(r.step) || 0), steer: r.aim_n != null || r.steer === true }] : [];
+  if (k === "reach") {
+    const ans = r.answer === "changed" ? 1 : r.answer === "unchanged" ? 0 : null;
+    if (r.reply) return ans == null ? [] : [{ kind: ans ? "bounce" : "droop" }];
+    const out = [{ kind: "look", answer: r.answer }];
+    const p = r.p == null ? NaN : Number(r.p);
+    if (ans != null && isFinite(p)) {
+      const err = Math.abs(ans - p);
+      if (err > SURPRISE_MIN) out.push({ kind: "surprise", err, delay: LOOK_LANDS });
+    }
+    if (Array.isArray(r.by) && r.by.includes("self") && /(^|:)(toy|cradle):/.test(String(r.eid || ""))) out.push({ kind: "toy", delay: LOOK_LANDS });
+    return out;
+  }
+  if (k === "push") return [{ kind: "push" }, { kind: "listen" }];
+  if (k === "shift") return [{ kind: "startle" }];
+  if (k === "wait") return [{ kind: "wait" }];
+  if (k === "rung") return [{ kind: "glow" }];
+  return [];
+}
+
+function actLife(act) {
+  if (!act) return 0;
+  if (act.kind === "listen") return LISTEN_MS;
+  const e = ACT_ENV[act.kind];
+  return e ? e[0] + e[1] + e[2] : 0;
+}
+
+function actAlive(act, now) { const a = now - ((act && act.t0) || 0); return a >= 0 && a < actLife(act); }
+
+const sstep = (u) => (u <= 0 ? 0 : u >= 1 ? 1 : u * u * (3 - 2 * u));
+
+/** 0 -> 1 over the attack, 1 through the hold, 1 -> 0 over the decay (smooth). */
+function actEnv(act, a) {
+  const e = ACT_ENV[act.kind];
+  if (!e) return 0;
+  if (a < e[0]) return sstep(a / e[0]);
+  if (a < e[0] + e[1]) return 1;
+  return 1 - sstep((a - e[0] - e[1]) / Math.max(1, e[2]));
+}
+
+/** Add one act's pose at `now` onto `out` (in place). */
+function addPose(out, act, now, rm) {
+  if (!act || !actAlive(act, now)) return out;
+  const a = now - (act.t0 || 0), life = actLife(act), u = a / life;
+  const d = act.dir || null, dx = d ? d[0] : 0, dy = d ? d[1] : 0, dz = d ? d[2] : 0;
+  const TAU = 2 * Math.PI;
+  const e = rm ? 1 : actEnv(act, a);
+  switch (act.kind) {
+    case "move": {                      // stretch along the step, scaled by the stride; lean to its aim
+      const s = Math.min(0.8, 0.2 + 2 * (act.stride || 0)) * e;
+      out.sx += dx * s; out.sy += dy * s; out.sz += dz * s;
+      const m = act.aimDir;
+      if (m) { out.ox += m[0] * 0.3 * e; out.oy += m[1] * 0.3 * e; out.oz += m[2] * 0.3 * e; }
+      break;
+    }
+    case "look": {                      // a pseudopod to the thing, back when the answer lands
+      const r = Math.max(0, Math.min(1, act.reach == null ? 1 : act.reach)) * e;
+      if (d && r > out.reach) { out.reach = r; out.px = dx * r; out.py = dy * r; out.pz = dz * r; }
+      if (d) { out.sx += dx * 0.15 * r; out.sy += dy * 0.15 * r; out.sz += dz * 0.15 * r; }
+      break;
+    }
+    case "surprise": {                  // a jolt away from the thing, sized by the error
+      const amp = Math.max(0, Math.min(1, ((act.err || 0) - SURPRISE_MIN) / (1 - SURPRISE_MIN)));
+      const k = d ? 1 : 0, jx = d ? -dx : 0, jy = d ? -dy : 1, jz = d ? -dz : 0;
+      const j = rm ? 0.3 * amp : 0.5 * amp * Math.sin(TAU * a / 170) * (1 - u) * (1 - u);
+      out.ox += jx * j; out.oy += jy * j; out.oz += jz * j;
+      out.puff += (rm ? 0.12 : 0.18 * (1 - u)) * amp * (k || 1);
+      break;
+    }
+    case "startle": {                   // a shift noticed: puff up, then settle
+      if (rm) { out.puff += 0.3; break; }
+      out.puff += a < 120 ? 0.45 * sstep(a / 120) : 0.45 * Math.exp(-(a - 120) / 380) * Math.cos((a - 120) / 170);
+      break;
+    }
+    case "wait": {                      // slow breathing, a little curled
+      const b = rm ? 0 : 0.07 * Math.sin(TAU * a / 4200);
+      out.puff += (-0.1 + b) * e; out.squash += 0.12 * e; out.still += 0.6 * e;
+      break;
+    }
+    case "push": {                      // a ripple toward the other
+      const w = rm ? 0.25 : 0.45 * (0.5 - 0.5 * Math.cos(TAU * a / 450)) * Math.pow(1 - u, 1.5);
+      out.ox += dx * w; out.oy += dy * w; out.oz += dz * w;
+      const s = rm ? 0.2 : 0.2 * (1 - u);
+      out.sx += dx * s; out.sy += dy * s; out.sz += dz * s;
+      break;
+    }
+    case "listen": {                    // then still, leaning in, until the reply check
+      const l = rm ? 1 : sstep((a - 1000) / 800);
+      out.still += l; out.ox += dx * 0.08 * l; out.oy += dy * 0.08 * l; out.oz += dz * 0.08 * l;
+      break;
+    }
+    case "bounce": {                    // they answered: hops toward them
+      const h = rm ? 0.3 : 0.5 * Math.abs(Math.sin(Math.PI * a / 500)) * (1 - u);
+      out.ox += dx * h; out.oy += dy * h; out.oz += dz * h;
+      out.puff += rm ? 0.1 : 0.1 * (1 - u);
+      break;
+    }
+    case "droop": {                     // silence: it sags, flattens, dims
+      out.oy -= 0.3 * e; out.squash += 0.2 * e; out.dim += 0.3 * e; out.still += 0.5 * e;
+      break;
+    }
+    case "toy": {                       // a toy it changed: a wiggle toward it
+      const w = rm ? 0.1 : 0.15 * Math.sin(TAU * a / 260) * e;
+      out.ox += dx * w; out.oy += dy * w; out.oz += dz * w;
+      out.sx += dx * 0.22 * e; out.sy += dy * 0.22 * e; out.sz += dz * 0.22 * e;
+      break;
+    }
+    case "glow": {                      // a level-up: the whole body glows
+      out.glow += e; out.puff += (rm ? 0.1 : 0.1 * (0.6 + 0.4 * Math.sin(a / 240))) * e;
+      break;
+    }
+    default: break;
+  }
+  return out;
+}
+
+function clampLen3(o, kx, ky, kz, max) {
+  const n = Math.hypot(o[kx], o[ky], o[kz]);
+  if (n > max) { const f = max / n; o[kx] *= f; o[ky] *= f; o[kz] *= f; }
+}
+const clampTo = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
+
+/** THE BLENDER: the live acts' poses summed onto the calm baseline, clamped. */
+function posesAt(acts, now, rm, out) {
+  out = calmPose(out);
+  if (acts) for (let i = 0; i < acts.length; i++) addPose(out, acts[i], now, rm);
+  clampLen3(out, "sx", "sy", "sz", 0.8);
+  clampLen3(out, "ox", "oy", "oz", 0.6);
+  out.reach = clampTo(out.reach, 0, 1); out.puff = clampTo(out.puff, -0.4, 0.8);
+  out.squash = clampTo(out.squash, -0.4, 0.4); out.glow = clampTo(out.glow, 0, 1);
+  out.still = clampTo(out.still, 0, 1); out.dim = clampTo(out.dim, 0, 0.6);
+  return out;
+}
+
+/** One act's pose alone (a fresh object). */
+function poseFor(act, now, rm) { return posesAt(act ? [act] : [], now, rm); }
+
+/** A new act into the live list: a push restarts listening, a reply check ends it; capped. */
+function addAct(acts, act) {
+  const k = act && act.kind;
+  if (k === "bounce" || k === "droop" || k === "push" || k === "listen") {
+    for (let i = acts.length - 1; i >= 0; i--) if (acts[i].kind === "listen") acts.splice(i, 1);
+  }
+  acts.push(act);
+  while (acts.length > ACT_CAP) {
+    let i = acts.findIndex((x) => x.kind !== "listen");
+    acts.splice(i < 0 ? 0 : i, 1);
+  }
+  return acts;
+}
+
+/** Drop the finished acts, in place. */
+function pruneActs(acts, now) {
+  let w = 0;
+  for (let i = 0; i < acts.length; i++) if (now - (acts[i].t0 || 0) < actLife(acts[i])) acts[w++] = acts[i];   // a delayed act waits
+  acts.length = w;
+  return acts;
+}
+
+/** The body on the screen: a stretch `s` along the screen direction (ux, uy)
+ *  (area kept), then a squash `q` (+ wider and flatter), as an ellipse --
+ *  {rot, a, b}: the long axis's angle, the semi-axes (1 = calm). A 2x2 SVD. */
+function bodyShape(ux, uy, s, q, out) {
+  out = out || {};
+  const k = 1 / Math.sqrt(1 + s);
+  // M = diag(1+q, 1-q) (I + s u u^T) k
+  const m00 = (1 + q) * (1 + s * ux * ux) * k, m01 = (1 + q) * s * ux * uy * k;
+  const m10 = (1 - q) * s * ux * uy * k, m11 = (1 - q) * (1 + s * uy * uy) * k;
+  const E = (m00 + m11) / 2, F = (m00 - m11) / 2, G = (m10 + m01) / 2, H = (m10 - m01) / 2;
+  const Q = Math.hypot(E, H), R = Math.hypot(F, G);
+  out.a = Q + R; out.b = Math.abs(Q - R);
+  out.rot = (Math.atan2(H, E) + Math.atan2(G, F)) / 2;
+  return out;
+}
+
+/** A motion's direction seen from the camera (camera space, unit; z toward the
+ *  viewer): ◎ self chases from behind, so a step or a look points INTO the
+ *  screen and a stretch along it would vanish end-on. Keep at least `min` of
+ *  it in the screen plane, turned the way it leans on screen (straight away:
+ *  up the screen, toward the horizon), the depth's sign kept. Into `out`. */
+function faceOn(x, y, z, min, out) {
+  const r = Math.hypot(x, y);
+  if (r >= min) { out[0] = x; out[1] = y; out[2] = z; return out; }
+  const ux = r > 1e-6 ? x / r : 0, uy = r > 1e-6 ? y / r : 1;
+  out[0] = ux * min; out[1] = uy * min; out[2] = (z < 0 ? -1 : 1) * Math.sqrt(1 - min * min);
+  return out;
+}
+
+const F3Logic = { faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
+  ghostDir, lookTarget, lookLabel, lookChip, GHOST_R, fnv32, snapshotOf, IDBCache, locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS,
   fieldArea, inArea, arrowFor, layoutLabels, selfTag };
 if (typeof module !== "undefined" && module.exports) module.exports = F3Logic;
 
@@ -1252,6 +1479,23 @@ class Field3DView {
         return Object.assign({}, m, { sp, lab });
       });
       this.scene.add(a.sprite, a.own, a.world, a.gap, a.pull, a.aimLine, a.trailLine, a.beam, a.other);
+      // #257: THE BODY ACTS IT OUT -- the live acts, the blended pose (reused),
+      // a pseudopod of a few lobes (the body's own texture) and a gold halo
+      a.acts = []; a.pose = calmPose(); a.shape = { a: 1, b: 1, rot: 0 };
+      a.lobes = [0.8, 0.68, 0.57, 0.47, 0.38].map((sz, i) => {
+        const l = new THREE.Sprite(a.sprite.material.clone());
+        l.userData.sz = sz; l.userData.t = [0.2, 0.4, 0.6, 0.8, 1][i]; l.visible = false;
+        this.scene.add(l);
+        return l;
+      });
+      const hc = document.createElement("canvas"); hc.width = hc.height = 64;
+      const hg = hc.getContext("2d"), hgrd = hg.createRadialGradient(32, 32, 4, 32, 32, 31);
+      hgrd.addColorStop(0, "rgba(255,226,140,0.95)"); hgrd.addColorStop(0.45, "rgba(240,190,60,0.55)"); hgrd.addColorStop(1, "rgba(212,160,23,0)");
+      hg.fillStyle = hgrd; hg.fillRect(0, 0, 64, 64);
+      a.halo = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(hc), transparent: true, depthWrite: false }));
+      a.halo.renderOrder = -1; a.halo.visible = false;
+      this.scene.add(a.halo);
+      this._pv = new THREE.Vector3(); this._iq = new THREE.Quaternion(); this._fo = [0, 0, 0];
     }
     const W = (q) => (q ? cubeToWorld(q) : null);
     a.pts = { from: W(pts.from), intent: W(pts.intent), expected: W(pts.expected), at: W(pts.at), pull: W(pts.pull), aim: W(pts.aim) };
@@ -1261,7 +1505,55 @@ class Field3DView {
     const meets0 = p.meets || {};                  // ages -> this viewer's clock: when the push/answer landed
     a.pushAt = meets0.push_age != null ? now - meets0.push_age * 1000 : null;
     a.heardAt = meets0.heard_age != null ? now - meets0.heard_age * 1000 : null;
+    // #257: the move, acted out -- a stretch along its own step (from -> intent),
+    // scaled by the stride (the frame's push), a lean toward its aim when it steers
+    const P = a.pts, sd = unit3(P.from, P.intent);
+    const stride = p.push != null ? Number(p.push) : (P.intent ? Math.hypot(P.intent[0] - P.from[0], P.intent[1] - P.from[1], P.intent[2] - P.from[2]) / F3_WORLD : 0);
+    for (const act of amoebaActs({ kind: "cycle", act: "move", step: stride, steer: !!P.aim })) {
+      if (!sd) break;
+      act.t0 = now; act.dir = sd; act.aimDir = P.aim ? unit3(P.at, P.aim) : null;
+      addAct(a.acts, act);
+    }
   }
+
+  /** #257: a record line, acted out by the body (home.js feeds the fresh ones).
+   *  `at`: where the thing it is about sits (a look's, a shift's), or null --
+   *  a look with no place reaches toward its ghost (#244); a push and a reply
+   *  check go toward the other. A move comes from the cycle frame, not here. */
+  selfActs(r, at) {
+    const a = this.amoeba;
+    if (!a || !a.pts || !a.acts) return;
+    const now = performance.now();
+    for (const act of amoebaActs(r)) {
+      const k = act.kind;
+      if (k === "move") continue;
+      let to = null;
+      if (k === "look" || k === "surprise" || k === "toy") to = lookTarget(at, r.eid, a.pos).p;
+      else if (k === "push" || k === "listen" || k === "bounce" || k === "droop") {
+        to = this.selfOther && this.selfOther.p ? this.selfOther.p : a.other ? a.other.position.toArray() : null;
+      }
+      act.t0 = now + (act.delay || 0);             // a jolt / a wiggle: when the answer lands
+      act.dir = to ? unit3(a.pos, to) : null;
+      if (k === "look") {
+        if (!act.dir) continue;
+        act.reach = Math.min(1, Math.hypot(to[0] - a.pos[0], to[1] - a.pos[1], to[2] - a.pos[2]) / POD_LEN);
+      }
+      addAct(a.acts, act);
+    }
+  }
+
+  /** #257: a world vector -> this._fo (camera space, unit, faceOn'd); returns its length.
+   *  Expects this._iq = the camera's inverse rotation (set once per frame). */
+  _faceCam(x, y, z) {
+    const n = Math.hypot(x, y, z), fo = this._fo;
+    if (n < 1e-6) { fo[0] = fo[1] = fo[2] = 0; return 0; }
+    this._pv.set(x / n, y / n, z / n).applyQuaternion(this._iq);
+    faceOn(this._pv.x, this._pv.y, this._pv.z, FACE_MIN, fo);
+    return n;
+  }
+
+  /** #257: this._fo x n back to world space, into this._pv. */
+  _faceWorld(n) { const fo = this._fo; return this._pv.set(fo[0] * n, fo[1] * n, fo[2] * n).applyQuaternion(this.camera.quaternion); }
 
   _stepSelf(now) {
     const a = this.amoeba;
@@ -1272,11 +1564,50 @@ class Field3DView {
       if (u >= 1) a.tw = null;
     }
     const rm = this.reducedMotion();
-    const wob = rm ? 1 : 1 + 0.08 * Math.sin(now / 260) + 0.05 * Math.sin(now / 97);      // it is alive
-    a.sprite.position.set(a.pos[0], a.pos[1], a.pos[2]);
-    a.sprite.scale.set(40 * wob, 40 / wob, 1);
-    a.sprite.visible = !this.selfEyes;             // 👁 self's eyes (#237): the camera IS the amoeba
-    a.sprite.material.opacity = (this.brain && this.brain.dimUntil > now) ? 0.3 : 1;   // a wait: it dims
+    // #257: the body acts out what self is doing -- the live acts blended into
+    // one pose (calm when nothing is going on); a.pos itself never moves for
+    // it, so the marks, the trail and the camera's framing stay where self is
+    pruneActs(a.acts, now);
+    const pose = posesAt(a.acts, now, rm, a.pose);
+    const show = !this.selfEyes;                   // 👁 self's eyes (#237): the camera IS the amoeba
+    const wob = rm ? 1 : 1 + (0.08 * Math.sin(now / 260) + 0.05 * Math.sin(now / 97)) * (1 - pose.still);   // it is alive
+    const BR = 20;                                 // the body's radius in world units (the sprite is 40)
+    // every motion's direction is seen from the camera and kept partly in the
+    // screen plane (faceOn): ◎ self chases from behind, so a step or a look
+    // points into the screen and would otherwise vanish end-on
+    this._iq.copy(this.camera.quaternion).invert();
+    const v = this._pv, fo = this._fo;
+    this._faceWorld(this._faceCam(pose.ox, pose.oy, pose.oz));
+    const bx = a.pos[0] + v.x * BR, by = a.pos[1] + v.y * BR, bz = a.pos[2] + v.z * BR;
+    a.sprite.position.set(bx, by, bz);
+    // the stretch on the screen: its direction and length there
+    const sn = this._faceCam(pose.sx, pose.sy, pose.sz), sl = Math.hypot(fo[0], fo[1]);
+    const sh = bodyShape(sl > 1e-6 ? fo[0] / sl : 0, sl > 1e-6 ? fo[1] / sl : 0, sn * sl, pose.squash, a.shape);
+    const size = 40 * (1 + pose.puff);
+    a.sprite.scale.set(size * sh.a * wob, size * sh.b / wob, 1);
+    a.sprite.material.rotation = sh.rot;
+    a.sprite.visible = show;
+    a.sprite.material.opacity = ((this.brain && this.brain.dimUntil > now) ? 0.3 : 1) * (1 - pose.dim);   // a wait: it dims
+    // the pseudopod: lobes out along the look, shrinking toward the tip
+    const podOn = show && pose.reach > 0.03;
+    if (podOn) this._faceWorld(this._faceCam(pose.px, pose.py, pose.pz));   // v: the pod (direction x reach), faced
+    for (const l of a.lobes) {
+      l.visible = podOn;
+      if (!podOn) continue;
+      const d = POD_LEN * l.userData.t;
+      l.position.set(bx + v.x * d, by + v.y * d, bz + v.z * d);
+      const ls = 40 * l.userData.sz * (0.55 + 0.45 * pose.reach);
+      l.scale.set(ls, ls, 1);
+      l.material.opacity = a.sprite.material.opacity * Math.min(1, 0.4 + pose.reach);
+    }
+    // a level-up: the whole body glows (the gold ring is _stepBrain's)
+    a.halo.visible = show && pose.glow > 0.01;
+    if (a.halo.visible) {
+      a.halo.position.set(bx, by, bz);
+      const hs = size * (1.7 + 0.6 * pose.glow);
+      a.halo.scale.set(hs, hs, 1);
+      a.halo.material.opacity = 0.85 * pose.glow;
+    }
     const seg = (ln, p, q) => {
       ln.visible = !!(p && q);
       if (!ln.visible) return;
