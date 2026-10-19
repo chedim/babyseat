@@ -359,7 +359,9 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   pass (`experiments/rung7_turns`). `status()['rung7']` shows the bins, the
   best window, the in-window share against chance, and the reply rate
   against timing-blind.
-- **Rung 8, understand an other** (rung 7 until #258, unchanged). Once rung
+- **Rung 8, understand an other** (rung 7 until #258, unchanged but for
+  its outcome: since #258 a check's outcome is `replied`, a line after the
+  push, like rung 7's; a check from before #258 counts for neither). Once rung
   8 is available, self consults the model coprocessor at
   each push (#215): rung 6's act queues one read-only `llm::call` asking for
   the probability that the person (`chat:in:<person>`) will have spoken by

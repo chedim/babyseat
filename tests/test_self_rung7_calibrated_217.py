@@ -134,7 +134,7 @@ def _history(srv, outcomes, t0=10_000.0, other_looks=()):
     for o in outcomes:
         SL._append(srv, {"ts": t, "kind": "push", "n": 1, "eid": "chat:out", "to": RESP, "asked": True})
         SL._append(srv, {"ts": t + 120, "kind": "reach", "n": 2, "eid": RESP, "p": 0.2, "reply": True,
-                         "answer": "changed" if o else "unchanged"})
+                         "answer": "changed" if o else "unchanged", "replied": bool(o)})
         t += 300
     return t
 
@@ -287,7 +287,7 @@ def test_a_base_rate_model_beats_an_always_098_one_on_the_live_outcomes():
             SL._append(srv, {"ts": t, "kind": "push", "n": 1, "eid": "chat:out", "to": RESP, "asked": True})
             p = model(SL._rung8_prompt(srv, RESP, 1, t))
             SL._append(srv, {"ts": t + 120, "kind": "reach", "n": 2, "eid": RESP, "p": habit, "reply": True,
-                             "answer": "changed" if o else "unchanged", "p_llm": p})
+                             "answer": "changed" if o else "unchanged", "replied": bool(o), "p_llm": p})
             t += 300
         # #254: status no longer carries habit (rung 7 doesn't read it): habit's
         # Brier over the same checks is computed here, from what it said
@@ -309,7 +309,7 @@ def test_status_reports_pairs_per_asked_push_and_both_briers():
     for o, habit, p_llm in LIVE:
         SL._append(srv, {"ts": t, "kind": "push", "n": 1, "eid": "chat:out", "to": RESP, "asked": True})
         rec = {"ts": t + 120, "kind": "reach", "n": 2, "eid": RESP, "p": habit, "reply": True,
-               "answer": "changed" if o else "unchanged"}
+               "answer": "changed" if o else "unchanged", "replied": bool(o)}
         if p_llm is not None:
             rec["p_llm"] = p_llm
         SL._append(srv, rec)

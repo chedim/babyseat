@@ -57,6 +57,29 @@ whatever the person does next. Rung 7 rewards `replied` instead: the
 person's `heard_ts` (when their latest line arrived) is after the push and
 by the check. It is on every reply-check line from #258 on.
 
+## rung 8 on the corrected outcome (rung8_outcome.py)
+
+Rung 8 (the #256 predictor) scored the same `changed` until #258, so its
+outcome counted pre-push lines too. Since #258 both rungs score `replied`,
+and a check from before #258 (no `replied` on the record) counts for
+neither. Rung 8's own scoring (`_rung8_series`, self alone: `p_self`
+recomputed, the model's answers dropped), replayed on the same copy:
+
+    python -I experiments/rung7_turns/rung8_outcome.py $D
+
+| outcome | checks | outcome rate | Brier running rate | Brier p_self | skill [95% bootstrap] | passes |
+|---|---|---|---|---|---|---|
+| `changed` (what #256 measured) | 114 | 0.54 | 0.254 | 0.257 | −0.011 [−0.067, +0.044] | no |
+| `replied` (corrected) | 114 | 0.41 | 0.247 | 0.246 | +0.002 [−0.062, +0.066] | no |
+| `replied`, every push given its true spoke_age (heard_ts) | 114 | 0.41 | 0.247 | 0.244 | +0.012 [−0.052, +0.073] | no |
+
+Correcting the outcome drops the reply rate from 0.54 to 0.41 and leaves
+self's skill at zero. Even with the true time since the person spoke, a
+predictor over 100 timer pushes finds almost nothing: the rhythm (0.62 vs
+0.34) is in when the pushes land, and a timer lands them anywhere. Rung 8 is
+the one that becomes learnable once rung 7 times the pushes; its bar
+(+0.08) is unchanged.
+
 ## the simulation (sim.py)
 
     python experiments/rung7_turns/sim.py [seeds=100] [hours=168]

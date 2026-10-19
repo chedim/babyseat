@@ -171,7 +171,7 @@ def _checks(outcomes, p_llm=None):
     for i, o in enumerate(outcomes):
         recs.append({"ts": t, "kind": "push", "to": RESP, "asked": p_llm is not None})
         r = {"ts": t + 120.0, "kind": "reach", "eid": RESP, "reply": True, "p": 0.5,
-             "answer": "changed" if o else "unchanged"}
+             "answer": "changed" if o else "unchanged", "replied": bool(o)}
         if p_llm is not None:
             r["p_llm"], r["llm_model"] = p_llm[i], "m"
         recs.append(r)

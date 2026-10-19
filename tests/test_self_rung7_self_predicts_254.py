@@ -99,7 +99,7 @@ def _recs(checks, p_self=None, p_llm=None, model=None, eid=RESP):
             push["spoke_age"] = gap
         recs.append(push)
         r = {"ts": t + 120.0, "kind": "reach", "n": 2, "eid": eid, "p": 0.5, "reply": True,
-             "answer": "changed" if o else "unchanged"}
+             "answer": "changed" if o else "unchanged", "replied": bool(o)}
         if p_self is not None and p_self[i] is not None:
             r["p_self"] = p_self[i]
         if p_llm is not None and p_llm[i] is not None:

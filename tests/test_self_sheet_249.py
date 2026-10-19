@@ -99,7 +99,7 @@ def _lived(srv):
         _put(srv, {"ts": t + i * 120, "kind": "push", "eid": "chat:out:alice", "to": ALICE, "asked": True})
     for i in range(20):
         _put(srv, {"ts": t + 60 + i * 60, "kind": "reach", "eid": ALICE, "p": 0.5,
-                   "answer": "changed" if i % 2 else "unchanged", "reply": True,
+                   "answer": "changed" if i % 2 else "unchanged", "reply": True, "replied": bool(i % 2),
                    "p_llm": 0.9 if i % 2 == 0 else 0.1,           # the model bets wrong every time
                    "p_self": 0.9 if i % 2 == 0 else 0.1})          # ...and so does self (#254 grades self)
     srv._real6 = t + 60 + 19 * 60                                  # the 20th look: both counts met

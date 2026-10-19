@@ -94,7 +94,7 @@ def _history(srv, outcomes, t0=10_000.0, habit=None):
         SL._append(srv, {"ts": t, "kind": "push", "n": 1, "eid": "chat:out", "to": RESP, "asked": True})
         SL._append(srv, {"ts": t + 120, "kind": "reach", "n": 2, "eid": RESP,
                          "p": habit[i] if habit else 0.2, "reply": True,
-                         "answer": "changed" if o else "unchanged"})
+                         "answer": "changed" if o else "unchanged", "replied": bool(o)})
         t += 300
     return t
 
@@ -191,7 +191,7 @@ def _replay(model):
         p = model(SL._rung8_prompt(srv, RESP, 1, t))
         o = int(ch)
         SL._append(srv, {"ts": t + 120, "kind": "reach", "n": 2, "eid": RESP, "p": habit[i], "reply": True,
-                         "answer": "changed" if o else "unchanged", "p_llm": p})
+                         "answer": "changed" if o else "unchanged", "replied": bool(o), "p_llm": p})
         out.append((o, p))
         t += 300
     return out, SL._rung8(SL._read(srv))
