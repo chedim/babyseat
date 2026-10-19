@@ -850,6 +850,23 @@ def _mark_rung7_restart(srv, now: float) -> None:
         rt["r7_marked"] = True
 
 
+def _mark_glitch_fix(srv, now: float) -> None:
+    """#259: the moment curiosity stops reading restart glitches as progress,
+    on the record once -- the self sheet closes its 'curiosity chased the
+    heartbeat's restart glitches' window there. Only a seat past rung 2 (where
+    curiosity starts) had the bug to close."""
+    rt = _rt(srv)
+    if rt.get("curio_marked"):
+        return
+    recs = _read(srv)
+    if any(r.get("kind") == "fix" and r.get("issue") == 259 for r in recs):
+        rt["curio_marked"] = True
+    elif 2 in _passed(recs):
+        _append(srv, {"ts": now, "kind": "fix", "issue": 259,
+                      "why": "curiosity no longer counts a restart-spanning miss or a rare outlier as progress"})
+        rt["curio_marked"] = True
+
+
 def _last_spoke(srv, recs: list[dict], eid: str, now: float) -> float | None:
     """When the other last spoke, as self knows it: chat:in's heard_ts (the
     moment the line arrived) or self's last look that found them changed --
@@ -1325,6 +1342,7 @@ def cycle(srv, now: float | None = None) -> dict | None:
     _append(srv, rec)
     est.upsert(ent, embedder=None)
     _mark_rung7_restart(srv, now)
+    _mark_glitch_fix(srv, now)
     if _available(srv, 2):
         _reach_once(srv, est, ent, n, now)
     if _available(srv, 6):

@@ -162,7 +162,7 @@ class TestBugWindows(unittest.TestCase):
 
     def test_the_bug_list_is_data_with_fix_times(self):
         by = {b["issue"]: b for b in SH.BUGS}
-        self.assertEqual(set(by), {191, 208, 254})
+        self.assertEqual(set(by), {191, 208, 254, 259})
         self.assertEqual(by[191]["fixed"], FIX191)
         self.assertEqual(by[191]["opens_after"], 4)
         self.assertEqual(by[208]["opens_after"], 5)
@@ -191,6 +191,7 @@ class TestBugWindows(unittest.TestCase):
         t0 = dt.datetime(2026, 10, 20, 9, 0, tzinfo=dt.timezone.utc).timestamp()
         _put(srv, {"ts": t0, "kind": "birth"})
         _cycles(srv, t0 + 1, t0 + 3 * H)
+        _put(srv, {"ts": t0 + 0.1 * H, "kind": "fix", "issue": 259})   # runs the #259 fix
         for n, h in ((1, 0.2), (2, 0.5), (3, 0.6), (4, 0.7), (5, 1.0)):
             _put(srv, {"ts": t0 + h * H, "kind": "rung", "rung": n, "skill": 1.0})
         _put(srv, {"ts": t0 + 1.2 * H, "kind": "push", "to": ALICE})
