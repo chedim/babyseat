@@ -1319,6 +1319,7 @@ class EntityStore(MultiParentOps, TimelineOps):
         # materialization). Nursery activity (side-index tags, first-
         # sightings, read-through, reharvest) stays silent.
         self.announcements: list[dict] = []
+        self.last_import: dict = {}      # the last pull's breakdown (#226)
         self.junk_screen = JunkScreen(self)
         self._cb_warned = False
         self._dirty = False
@@ -1669,8 +1670,10 @@ class EntityStore(MultiParentOps, TimelineOps):
         doc under a PER-ORIGIN key (``pub:<origin>:<eid>`` -- two seats
         publishing the same eid never contend, there is no other seat's
         doc to fight) stamped {by, at, ver, eid}. Versioned: republishing
-        bumps ``published_ver`` (the import organ upgrades only on newer
-        versions). The model's decision -- the store NEVER publishes
+        bumps ``published_ver``, and every seat holding an imported copy
+        upgrades its state on its next pull (the presence pulse) -- unless
+        that seat edited its copy, which keeps the edit and records the
+        divergence (#226). The model's decision -- the store NEVER publishes
         alone (only the presence entity is seat-published, by the
         organ's design). Degrades when couchbase is down."""
         ent = self._resolve_spec(spec) if isinstance(spec, str) else spec
@@ -1753,71 +1756,176 @@ class EntityStore(MultiParentOps, TimelineOps):
             yield row.get("id", ""), {k: v for k, v in row.items()
                                       if k != "id"}
 
+    # the import's LOCAL bookkeeping on a copy: never the publisher's state,
+    # never overwritten by an upgrade (links/derived_by ride the wire inside
+    # properties via to_doc; the copy's own are local)
+    _IMPORT_LOCAL_KEYS = frozenset((
+        "imported_by", "imported_at", "imported_ver", "guest", "retired",
+        "retired_ts", "edited_locally_at", "import_diverged", "links",
+        "derived_by"))
+
+    @staticmethod
+    def _is_newer(local_props: dict, meta: dict) -> bool:
+        """Is a published row newer than the copy this seat holds (#226)?
+        The version this seat last imported decides; a copy imported
+        before #226 (no ``imported_ver``) falls back to the publisher's
+        ``at`` stamp it recorded as ``imported_at``."""
+        try:
+            ver = int(meta.get("ver") or 0)
+        except (TypeError, ValueError):
+            return False
+        have = local_props.get("imported_ver")
+        if have is not None:
+            try:
+                return ver > int(have)
+            except (TypeError, ValueError):
+                return ver > 0
+        try:
+            return float(meta.get("at") or 0) > \
+                float(local_props.get("imported_at") or 0)
+        except (TypeError, ValueError):
+            return False
+
+    def _upgrade_import(self, local: QuantumEntity, doc: dict,
+                        owner, meta: dict) -> str:
+        """One foreign row against a copy this seat already holds (#226).
+        Returns 'upgraded', 'diverged' or '' (nothing to do).
+        - an eid BORN here (no ``imported_by``), or a copy imported from
+          ANOTHER origin, is never touched (per-origin keys: a copy
+          follows the seat it came from);
+        - the same (or an older) version is a no-op;
+        - a copy this seat EDITED (``edited_locally_at``, stamped by
+          edit()) keeps the local edit: the newer version is recorded as
+          ``import_diverged`` {by, ver, at} and announced once per
+          version, never applied;
+        - otherwise the newer STATE lands: the publisher's properties
+          (code stripped -- never imported), class and embedding. What
+          the copy grew here stays: links, geometry, local-only keys and
+          any script this seat put on it."""
+        lp = local.properties or {}
+        if not lp.get("imported_by") or lp.get("imported_by") != owner:
+            return ""
+        if not self._is_newer(lp, meta):
+            return ""
+        if lp.get("edited_locally_at"):
+            prev = lp.get("import_diverged") or {}
+            if prev.get("ver") == meta.get("ver") and prev.get("by") == owner:
+                return ""          # already recorded and announced
+            lp["import_diverged"] = {"by": owner, "ver": meta.get("ver"),
+                                     "at": meta.get("at")}
+            local.properties = lp
+            self._announce("diverged", local,
+                           extra=f"{owner} published v{meta.get('ver')}; "
+                                 f"this seat's edit is kept")
+            return "diverged"
+        q = QuantumEntity.from_doc(local.eid, doc)
+        if q is None:
+            return ""
+        incoming = self._strip_code({
+            k: v for k, v in (q.properties or {}).items()
+            if k not in self._IMPORT_LOCAL_KEYS})
+        lp.update(incoming)
+        lp.pop("import_diverged", None)
+        self._stamp_import(local.eid, lp, owner, meta)
+        local.properties = lp
+        if q.cls:
+            local.cls = q.cls
+        if q.embedding:
+            local.embedding = list(q.embedding)
+        return "upgraded"
+
     def import_published(self, limit: int = 2000, skip_own: bool = True) -> int:
         """The MAPPING organ (tier 2 -> tier 1): pull every published
         entity, FOREIGN origins first-class -- each maps onto the local
         graph under its shared-vocabulary eid, stamped ``imported_by``
-        (the published owner), and from then on it RUNS LOCALLY (drift,
-        tracks, its own scripts). The local doc is ALWAYS the authority:
-        an existing local eid is never clobbered by a foreign snapshot
-        (the imported copy only lands when the entity doesn't live
-        here). Idempotent; returns the count imported this pull."""
+        (the published owner) and ``imported_ver`` (the version taken),
+        and from then on it RUNS LOCALLY (drift, tracks, its own scripts).
+        The local doc is the authority: an eid born here is never
+        clobbered; a copy already imported UPGRADES to a newer published
+        version's state unless this seat edited it (#226, see
+        _upgrade_import). This seat's own exports never re-import, and
+        presence rows are the roster's (peers()), never imports -- every
+        seat's presence shares one eid. Runs at boot and on the thinker's
+        presence pulse: one query, capped by ``limit``; a down cluster
+        pulls nothing. Idempotent; returns the count imported or
+        upgraded this pull (``last_import`` keeps the breakdown)."""
         n = 0
+        stats = {"imported": 0, "upgraded": 0, "diverged": 0}
         try:
             rows = list(self._pub_query(limit=limit))
         except Exception as e:
             print(f"[entities] published pull skipped ({str(e)[:80]})",
                   file=sys.stderr)
             return 0
+        presence_eid = f"{MEMBRANE_NS}presence"
         for doc_id, doc in rows:
             meta = doc.get("published") or {}
             owner = meta.get("by")
             eid = meta.get("eid") or doc_id
             if not eid or (skip_own and owner == self.origin):
                 continue
-            if eid in self.docs:
-                continue           # the local copy is the authority
+            if eid == presence_eid:
+                continue           # the roster's (peers), never an import
+            local = self.docs.get(eid)
+            if local is not None:
+                how = self._upgrade_import(local, doc, owner, meta)
+                if how:
+                    stats[how] += 1
+                    n += how == "upgraded"
+                continue
             q = QuantumEntity.from_doc(eid, doc)
             if q is None:
                 continue
             # DEFENSE IN DEPTH: old publishers (or a hostile row) may
             # carry code -- an imported doc never runs foreign scripts.
-            props = q.properties or {}
-            props.update(self._strip_code(props))
-            props["imported_by"] = owner
-            # THE GUEST GATE (the two-universes datum): an imported eid
-            # is a GUEST -- flagged explicitly so every query surface
-            # can partition the universes (the default scan hides
-            # guests; guest:true asks for them). The eid's own
-            # namespace (entity::<x>::, episodic::) flavors it too --
-            # the pull stamps ALL imports.
-            props["guest"] = True
-            # THE STALE-ROUTE RETIRE (the seat-root-move datum): an
-            # eid whose body names an absolute path OUTSIDE this
-            # seat's root is a dead route -- retired, not a ghost.
-            # The body's LEGACY HEAD strips first ('files:/abs' is an
-            # absolute body under its family's head, not a relative one).
-            try:
-                body = eid[len(MEMBRANE_NS):] \
-                    if eid.startswith(MEMBRANE_NS) else eid
-                _head, _sep, _rest = body.partition(":")
-                if _head in ("files", "symbols", "models", "shell",
-                             "urls") and _sep:
-                    body = _rest
-                _root = getattr(self, "root", "") or ""
-                if body.startswith("/") and _root \
-                        and not body.startswith(_root):
-                    props["retired"] = True
-                    props["retired_ts"] = _t.time()
-            except Exception:
-                pass
-            if meta.get("at"):
-                props["imported_at"] = meta["at"]
+            # (This used to be props.update(strip(props)) -- a no-op that
+            # removed nothing; the wire's own strip carried it.)
+            q.properties = self._strip_code(q.properties or {})
+            self._stamp_import(eid, q.properties, owner, meta)
             self.docs[eid] = q
+            stats["imported"] += 1
             n += 1
-        if n:
+        self.last_import = stats
+        if n or stats["diverged"]:
             self.save_soon()
         return n
+
+    def _stamp_import(self, eid: str, props: dict, owner, meta: dict) -> None:
+        """The import's stamps on a copy's properties: the owner, the
+        version taken, the guest flag, the stale-route retire."""
+        props["imported_by"] = owner
+        try:
+            props["imported_ver"] = int(meta.get("ver") or 0)
+        except (TypeError, ValueError):
+            props["imported_ver"] = 0
+        # THE GUEST GATE (the two-universes datum): an imported eid
+        # is a GUEST -- flagged explicitly so every query surface
+        # can partition the universes (the default scan hides
+        # guests; guest:true asks for them). The eid's own
+        # namespace (entity::<x>::, episodic::) flavors it too --
+        # the pull stamps ALL imports.
+        props["guest"] = True
+        # THE STALE-ROUTE RETIRE (the seat-root-move datum): an
+        # eid whose body names an absolute path OUTSIDE this
+        # seat's root is a dead route -- retired, not a ghost.
+        # The body's LEGACY HEAD strips first ('files:/abs' is an
+        # absolute body under its family's head, not a relative one).
+        try:
+            body = eid[len(MEMBRANE_NS):] \
+                if eid.startswith(MEMBRANE_NS) else eid
+            _head, _sep, _rest = body.partition(":")
+            if _head in ("files", "symbols", "models", "shell",
+                         "urls") and _sep:
+                body = _rest
+            _root = getattr(self, "root", "") or ""
+            if body.startswith("/") and _root \
+                    and not body.startswith(_root):
+                props["retired"] = True
+                props["retired_ts"] = _t.time()
+        except Exception:
+            pass
+        if meta.get("at"):
+            props["imported_at"] = meta["at"]
 
     def hydrate_from_couchbase(self, limit: int = 2000) -> int:
         """The read-through (SEAT-FIRST: the pull is pub-only now) --
@@ -2517,6 +2625,17 @@ class EntityStore(MultiParentOps, TimelineOps):
             if not pr.get("ok"):
                 return {"ok": False, "error": f"parents: {pr.get('error')}"}
             ent.properties["parents"] = [x for x in resolved if x in (ent.properties.get("parents") or resolved)]
+        # THE LOCAL-EDIT MARK (#226): a STATE edit of an imported copy
+        # (summary, class, a property patch, parents, a merge mark) wins
+        # over later republishes -- the import records the divergence
+        # instead of overwriting. Scripts/watches are this seat's own
+        # wiring (an upgrade never touches them), and a publish-only edit
+        # changes no state: neither marks.
+        if (ent.properties or {}).get("imported_by") and (
+                summary is not None or (cls and cls in CLASSES)
+                or props_set or parents_patch is not None or merged_into):
+            import time as _time   # (edit() binds _t locally above)
+            ent.properties["edited_locally_at"] = _time.time()
         if merged_into:
             dst = self._resolve_spec(str(merged_into))
             if dst is None or dst.eid == ent.eid:

@@ -34,10 +34,15 @@ commons — see [global-field.md](global-field.md).) Turns, events, dreams,
 scripts, geometry — never leave without a decision.
 
 **Q2 — models read global entities and map them onto the local graph, running locally?**
-Yes, with one hard boundary. The import organ pulls every `pub:*` key (once per boot, at
-the first embedder resolution: `hydrate_from_couchbase`) and maps foreign
+Yes, with one hard boundary. The import organ pulls every `pub:*` key (at boot, on the
+first embedder resolution: `hydrate_from_couchbase`; then on the thinker's presence pulse,
+about once a minute — one query capped at 500 rows) and maps foreign
 origins onto the local graph under the shared-vocabulary eid, stamped
-`imported_by`/`imported_at`; a guest runs against the LOCAL tier's geometry and routing.
+`imported_by`/`imported_at`/`imported_ver`; a guest runs against the LOCAL tier's geometry
+and routing. A republish reaches it (#226): when the published `ver` is newer than the
+copy's `imported_ver`, the copy takes the publisher's properties, class and embedding and
+keeps what it grew here (links, geometry, local-only keys, any script this seat put on
+it); the same version is a no-op.
 What never crosses is code: published docs carry the entity's STATE only — every
 `*_script` plus its strike/enabled bookkeeping is stripped on publish AND on import
 (`_strip_code`, defense in depth; `script_render` survives as inert text). An import is
@@ -59,12 +64,16 @@ staleness past 10 minutes standing in for expiry.
   (model export / presence pulse / operator-promoted commons).
 - Per-origin keys `pub:<origin>:<eid>`: two seats may publish the same name without
   contention; the origin IS the namespace.
-- The local copy always wins: imports never clobber an entity that lives locally —
-  including an earlier import, so as built a seat keeps the version it first imported and
-  a later republish does not reach it.
-- Republish bumps the version on the wire; unpublish retracts only THIS seat's key; every
-  foreign import stays at the version it imported — retraction is degradation, not
-  deletion-at-distance.
+- The local copy wins where it is local: an entity born on this seat is never clobbered by
+  a foreign publication, and an import this seat EDITED (summary, class, properties,
+  parents or a merge mark through `edit()`, stamped `edited_locally_at`) keeps the edit —
+  the newer version is recorded as `import_diverged` {by, ver, at} and announced once per
+  version (`diverged:`), never applied. A copy follows the origin it was imported from;
+  another seat publishing the same eid does not take it over. A seat never re-imports its
+  own exports, and presence rows are the roster's, never imports.
+- Republish bumps the version on the wire and unedited imports follow it on their next
+  pull; unpublish retracts only THIS seat's key and every foreign import stays at the last
+  version it took — retraction is degradation, not deletion-at-distance.
 - No code travels in either direction's bookkeeping (stripped on publish and on import);
   watchers are no exception — an autonode belongs to the seat that wrote it (`c0ba419`).
 - Degrade never raises: the shared tier unreachable → exports fail soft (`ok:error`) and
@@ -80,10 +89,10 @@ staleness past 10 minutes standing in for expiry.
 - `membrane/entities.py` — the store, publish/unpublish, import organ, presence, `_strip_code`
 - `membrane/peers.py` — registry with the presence-roster fallback
 - `membrane/efstore.py` — FileBackend, the field's file home (packing, debounce, origin_stats)
-- `membrane/thinker.py` — PRESENCE_EVERY=60 pulse + roster anchor
+- `membrane/thinker.py` — PRESENCE_EVERY=60 pulse + roster anchor + the periodic published pull (#226)
 - `membrane/opencode.py` — origin tag, boot publish, autonode wiring
 - `membrane/mcp_server.py` — the model face: edit-tool publish/unpublish relay
-- `tests/test_publish.py`, `tests/test_peers_roster.py`, `tests/test_efstore_file.py`
+- `tests/test_publish.py`, `tests/test_republish_226.py`, `tests/test_peers_roster.py`, `tests/test_efstore_file.py`
 - Build-time suites per commit messages: 638→652 pytest rising through this work;
   713 pytest / 688 unittest at the autonode.
 
