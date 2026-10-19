@@ -1,6 +1,5 @@
-Hippocampal pathway. Cortex as self-programming memory graph over an embedding field: continuity for your agents —[developing towards]—> Hippocampus as cortex register-correct-predict-act head: real-time learning, embodiment, self-awareness, novelty creation, response generation, done on embeddings only.
-
 # babyseat (formerly membrane)
+Hippocampus as cortex register-correct-predict-act head: real-time learning, embodiment, self-awareness, novelty creation, response generation, done on embeddings only.
 
 ![Membrane](docs/comparison.png)
 
