@@ -1893,11 +1893,6 @@ def main() -> None:
             runner.srv = srv               # /agent reads the live minds
             runner._audit_mem = srv.membrane   # the lane-refusal audits
             _ladder_cell["runner"] = runner   # the runner's late binding
-            # THE COSMETIC BUSY (the operator's design, armed): the
-            # event-thinkers' pool is live -- the operator's session's
-            # stream stays busy (their loop's end is internal; the
-            # thinkers' injects ride the stream).
-            runner.cosmetic_busy = True
 
             start(serve_port or 4096, surf_host, cfg, runner,
                   sess_store, msg_store)

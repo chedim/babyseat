@@ -827,7 +827,7 @@ class _LoopDrainer:
                                           "decision": decision, "session": sid})
                 except Exception:
                     pass
-        # THE INJECT (the operator's cosmetic-busy design): a pass that
+        # THE INJECT: a pass that
         # MOVED something speaks one line into the operator's own session
         if verdict in ("done", "step", "blocked", "reacted") and decision:
             try:

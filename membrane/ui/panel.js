@@ -37,6 +37,7 @@ const SPEAKER_RE = /\[(?:HA )?user: [^\]\n]{1,80}\]/;
 const NEW_TITLE = "New chat";
 const POLL_MS = 1500;
 const START_GRACE_MS = 8000;
+const RECONCILE_MS = 5000;                 // #238: a busy page asks the seat this often
 const OUTPUT_CLIP = 4000;
 
 // ------------------------------------------------------------ pure logic
@@ -208,6 +209,23 @@ function ensureRow(st, mid, role) {
 
 function sortRows(st) {
   st.rows.sort((a, b) => created(a) - created(b));
+}
+
+/** #238: the page's busy against the seat's /session/status answer for this
+ *  session (the seat is the truth; an idle can go missing on the stream). An
+ *  idle page is left alone; the seat's busy is adopted with the page's own
+ *  clock kept (the elapsed timer runs on); the seat's idle -- or no entry --
+ *  wins unless the page sent a moment ago (the seat may not have the turn yet). */
+function reconcileStatus(local, seat, now) {
+  if (!local || local.type !== "busy") return local;
+  if (seat && seat.type === "busy") {
+    const out = Object.assign({}, seat);
+    delete out.elapsed_ms;
+    out.since = local.since || (now - (seat.elapsed_ms || 0));
+    return out;
+  }
+  if (local.since && now - local.since < START_GRACE_MS) return local;
+  return { type: "idle" };
 }
 
 /** Apply one SSE frame; true when it touched this chat. */
@@ -874,7 +892,7 @@ function jsShow(v) {
   return String(v);
 }
 
-const AiPanelLogic = { jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
+const AiPanelLogic = { jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
@@ -1100,6 +1118,7 @@ function definePanel() {
       this._booted = false;
       this._closeStream();
       this._stopPoll();
+      this._stopReconcile();
       clearInterval(this._tick);
       clearInterval(this._mindsTimer);
     }
@@ -1869,6 +1888,42 @@ function definePanel() {
       } catch (e) { /* transient: keep polling */ } finally { this._polling = false; }
     }
 
+    // ---------------------------------------------------------- reconcile (#238)
+    // While the page believes its chat is busy it asks the seat every
+    // RECONCILE_MS and adopts the answer: a missed idle (a dropped frame, a
+    // path that never said it) no longer leaves "working" up forever. Only
+    // while busy; one request at a time; the fallback poll already resyncs.
+    _syncReconcile() {
+      if (this._busy() && !this._mind) {
+        if (!this._reconcileTimer) this._reconcileTimer = setInterval(() => this._reconcileOnce(), RECONCILE_MS);
+      } else this._stopReconcile();
+    }
+
+    _stopReconcile() {
+      if (this._reconcileTimer) { clearInterval(this._reconcileTimer); this._reconcileTimer = null; }
+    }
+
+    async _reconcileOnce() {
+      if (this._reconciling || this._pollTimer || !this._busy() || !this._chat) return;
+      this._reconciling = true;
+      try {
+        const sid = this._sid;
+        const r = await this._api(SERVE + "/session/status");
+        if (!r.ok || !r.data || typeof r.data !== "object" || sid !== this._sid || !this._busy()) return;
+        this._statusBy = r.data;
+        const next = reconcileStatus(this._chat.status, r.data[sid], Date.now());
+        if (next === this._chat.status) return;
+        if (next.type === "idle") {
+          await this._resync();                  // the idle's frames went missing: the rows may have too
+          if (!this._busy()) this.dispatchEvent(new CustomEvent("ai-idle", { bubbles: true, composed: true }));
+        } else {
+          this._chat.status = next;
+          this._paintStatus();
+        }
+        this._paintSessions();
+      } catch (e) { /* transient: the next tick asks again */ } finally { this._reconciling = false; }
+    }
+
     // ---------------------------------------------------------- turns
     _busy() { return !!(this._chat && this._chat.status && this._chat.status.type === "busy"); }
 
@@ -1966,6 +2021,7 @@ function definePanel() {
       this._pill.title = this._live ? "live (streaming)" : "not streaming: polling fallback";
       const w = this._msgs.querySelector(".working .lbl");
       if (w && busy) w.textContent = "working… " + fmtElapsed(Date.now() - (this._chat.status.since || Date.now()));
+      this._syncReconcile();
     }
 
     _schedule() {
