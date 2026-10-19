@@ -583,7 +583,70 @@ const HSTYLE = `
   }
   .top { max-width:calc(100% - min(460px, 44vw) - 36px); flex-wrap:wrap; }
   .top:has(~ .chat.hidden) { max-width:calc(100% - 24px); }
+  /* the 👶 panel (#230): a tab at the left edge (clear of the notch) opens
+     self's side panel -- a floating column on wide screens, an overlay on narrow */
+  .babybtn { position:absolute; z-index:8; left:max(0px, env(safe-area-inset-left)); top:calc(50% - 24px);
+             width:40px; height:48px; padding:0; font-size:22px; line-height:1; border-radius:0 14px 14px 0;
+             border:1px solid color-mix(in srgb, var(--divider-color,#888) 45%, transparent); border-left:0;
+             background:color-mix(in srgb, var(--card-background-color,#111) 80%, transparent); }
+  .babybtn.on { background:color-mix(in srgb, var(--primary-color,#3477d6) 35%, var(--card-background-color,#111)); }
+  @media (hover: hover) { .babybtn:hover { background:color-mix(in srgb, var(--primary-color,#3477d6) 28%, var(--card-background-color,#111)); } }
+  .babybtn:focus-visible, .selfpanel .spx:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:2px; }
+  .selfpanel { position:absolute; z-index:5; top:64px; bottom:76px; left:calc(max(0px, env(safe-area-inset-left)) + 48px);
+               width:min(360px, calc(100% - 72px)); border-radius:16px; padding:10px 14px 14px; overflow:auto;
+               overscroll-behavior:contain; font-size:13px; line-height:1.45;
+               background:color-mix(in srgb, var(--card-background-color,#111) 95%, transparent); }
+  .selfpanel[hidden], .view-chat .babybtn, .view-chat .selfpanel { display:none; }
+  @media (prefers-reduced-motion: no-preference) {
+    .selfpanel { animation:spin .18s ease-out; }
+    @keyframes spin { from { opacity:0; transform:translateX(-10px); } }
+  }
+  @media (max-width: 760px) {
+    .babybtn { top:26vh; top:26dvh; }
+    .selfpanel { z-index:7; inset:0; width:auto; border-radius:0; border:0; background:var(--card-background-color,#111);
+                 padding:calc(12px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right))
+                         calc(16px + env(safe-area-inset-bottom)) calc(52px + env(safe-area-inset-left)); }
+    .top .selfstat .xp-sub { display:none; }
+    .top .selfstat .xp-lv { max-width:7em; }
+  }
+  .selfpanel .sphead { display:flex; align-items:center; gap:8px; position:sticky; top:-10px; padding:4px 0 6px;
+                       background:inherit; z-index:1; }
+  .selfpanel .sptitle { font-weight:600; font-size:14px; }
+  .selfpanel .spx { margin-left:auto; border:0; background:transparent; font-size:20px; line-height:1; padding:2px 8px; border-radius:8px; }
+  .selfpanel .spxp .xp { display:grid; grid-template-columns:auto 1fr auto; width:100%; }
+  .selfpanel .spxp .xp-track { height:10px; }
+  .selfpanel .spxp .xp-lv { max-width:none; }
+  .selfpanel .spxp .xp-sub { white-space:normal; font-size:11.5px; }
+  .selfpanel h3 { font-size:11px; letter-spacing:.06em; text-transform:uppercase; opacity:.6; margin:16px 0 6px; font-weight:600; }
+  .selfpanel h4 { font-size:12px; margin:12px 0 4px; font-weight:600; opacity:.85; }
+  .selfpanel p { margin:0; }
+  .selfpanel .muted { opacity:.6; }
+  .selfpanel ol, .selfpanel ul { margin:0; padding:0 0 0 1.4em; }
+  .selfpanel .spact { list-style:none; padding:0; font:12px/1.45 var(--code-font-family, ui-monospace, Menlo, monospace); }
+  .selfpanel .spact .sl { padding:2px 0; border-bottom:1px solid color-mix(in srgb, var(--divider-color,#888) 35%, transparent); overflow-wrap:anywhere; }
+  .selfpanel .spact .ago { display:inline-block; min-width:3.2em; opacity:.5; }
+  .selfpanel .spact .k-rung { color:#d4a017; font-weight:600; }
+  .selfpanel .spact .k-error { color:var(--error-color,#db4437); }
+  .selfpanel .spact .k-shift { color:var(--warning-color,#ffa600); }
+  .selfpanel .spcard .head { opacity:.75; font-size:12px; }
+  .selfpanel .ladder { list-style:none; padding:0; }
+  .selfpanel .ladder li { display:flex; gap:8px; padding:1px 0; }
+  .selfpanel .ladder .rn { width:1.6em; text-align:right; opacity:.55; font-variant-numeric:tabular-nums; }
+  .selfpanel .ladder .rs { margin-left:auto; font-size:11px; opacity:.75; white-space:nowrap; }
+  .selfpanel .ladder .st-passed .rs { color:#2e9d5b; opacity:1; }
+  .selfpanel .ladder .st-current { font-weight:600; }
+  .selfpanel .ladder .st-slipping .rs { color:var(--warning-color,#ffa600); opacity:1; }
+  .selfpanel .ladder .st-locked, .selfpanel .ladder .st-unbuilt { opacity:.45; }
+  .selfpanel .toys { list-style:none; padding:0; }
+  .selfpanel .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:middle; }
+  .selfpanel .dot.ok { background:#2e9d5b; }
+  .selfpanel .dot.warn { background:var(--warning-color,#ffa600); }
+  .selfpanel .dot.bad { background:var(--error-color,#db4437); }
+  .selfpanel .dot.idle { background:color-mix(in srgb, var(--primary-text-color,#ddd) 35%, transparent); }
 `;
+const LS_SELFPANEL = "membrane.home.selfpanel";   // #230: the 👶 panel open ("1") or closed, per browser
+const SELFPANEL_MS = 4000;                        // its activity refresh, only while open
+const SELFPANEL_SEAT_MS = 15000;                  // ...and its report card's (the whole status)
 
 if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" &&
     !customElements.get("membrane-home-panel")) {
@@ -629,7 +692,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._hushTts(); this._tiltStop();
       this._listenKeys(false);
       clearInterval(this._follow);
-      clearInterval(this._autoT); clearInterval(this._selfT);
+      clearInterval(this._autoT); clearInterval(this._selfT); clearInterval(this._selfPanelT);
       if (this._v3) { this._v3.stop(); this._v3 = null; }
       if (this._hidSidebar) this._dock("restore");
     }
@@ -656,8 +719,52 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       sel.value = String(v.limit);
       sel.title = v.title;
       sel.style.opacity = v.limit ? "1" : ".6";
-      if (this._selfStat && !this._selfFlash) this._selfStat.textContent = v.status || "";
+      if (this._selfStat && !this._selfFlash) {
+        if (typeof c._paintExp === "function") c._paintExp(this._selfStat);   // #230: the exp bar
+        else this._selfStat.textContent = v.status || "";
+      }
     }
+
+    // THE 👶 PANEL (#230, the operator's ask 2026-10-19): self's side panel --
+    // what it is doing now (its record, newest first) and its report card.
+    // READ-ONLY: nothing here changes self; the 🌱 chooser stays the only
+    // switch. Open or closed is remembered per browser; it refreshes only
+    // while open.
+    _toggleSelfPanel(on) {
+      const p = this._selfPanel, b = this._babyBtn; if (!p || !b) return;
+      on = on == null ? p.hidden : !!on;
+      p.hidden = !on;
+      b.classList.toggle("on", on);
+      b.setAttribute("aria-expanded", on ? "true" : "false");
+      lsSet(LS_SELFPANEL, on ? "1" : "0");
+      clearInterval(this._selfPanelT); this._selfPanelT = null;
+      if (on) {
+        this._spSeatAt = 0;
+        this._paintSelfPanel();
+        this._selfPanelT = setInterval(() => this._paintSelfPanel(), SELFPANEL_MS);
+      }
+    }
+
+    async _paintSelfPanel() {
+      const c = this._chat, p = this._selfPanel;
+      if (!c || !p || p.hidden || typeof c._selfCardHtml !== "function") return;
+      if (Date.now() - (this._spSeatAt || 0) > SELFPANEL_SEAT_MS && typeof c._loadSeat === "function") {
+        this._spSeatAt = Date.now();                       // the card's numbers (the event stream moves only the bar)
+        await c._loadSeat().catch(() => {});
+        if (!c._seat) this._spSeatAt = 0;                  // not loaded yet (a fresh page): retry next tick
+      }
+      c._paintExp(this._spXp);
+      const card = c._selfCardHtml();
+      if (card !== this._spCardHtml) { this._spCard.innerHTML = card; this._spCardHtml = card; }
+      if (this._spBusy) return;
+      this._spBusy = true;
+      try {
+        const lines = await c._selfRecent(15);
+        if (lines && !p.hidden) this._spAct.innerHTML = c._selfLinesHtml(lines);
+        else if (!lines) this._spAct.innerHTML = '<li class="sl none">the record is not reachable right now</li>';
+      } finally { this._spBusy = false; }
+    }
+    // ---- end of the 👶 panel
 
     _paintAuto() {
       const b = this._autoBtn; if (!b) return;
@@ -767,6 +874,16 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <span class="status"></span>
         </div>
         <nav class="hamenu glass" role="menu"></nav>
+        <button class="babybtn" aria-label="self: what it is doing and its report card" aria-expanded="false" aria-controls="selfpanel"
+                title="self (#161): what it is doing now, and its report card (read-only)">👶</button>
+        <aside class="selfpanel glass" id="selfpanel" aria-label="self" hidden>
+          <div class="sphead"><span class="sptitle">👶 self</span><button class="spx" aria-label="close self's panel" title="Close">×</button></div>
+          <div class="spxp"></div>
+          <h3>what it is doing now</h3>
+          <ol class="spact"><li class="sl none">…</li></ol>
+          <h3>report card</h3>
+          <div class="spcard"></div>
+        </aside>
         <div class="chat glass"><ai-terminal-panel overlay></ai-terminal-panel></div>
         <div class="orb" aria-hidden="true"><canvas class="wave" width="560" height="140"></canvas></div>
         <div class="orbtext" aria-live="polite"></div>
@@ -886,6 +1003,15 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       });
       this._paintSelf();
       this._selfT = setInterval(() => this._paintSelf(), 1500);
+      // the 👶 panel (#230): read-only, remembered per browser
+      this._babyBtn = $(".babybtn"); this._selfPanel = $(".selfpanel");
+      this._spXp = $(".spxp"); this._spAct = $(".spact"); this._spCard = $(".spcard");
+      this._babyBtn.addEventListener("click", () => this._toggleSelfPanel());
+      $(".spx").addEventListener("click", () => { this._toggleSelfPanel(false); this._babyBtn.focus(); });
+      this._selfPanel.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") { e.stopPropagation(); this._toggleSelfPanel(false); this._babyBtn.focus(); }
+      });
+      this._toggleSelfPanel(lsGet(LS_SELFPANEL, "0") === "1");
       $(".x").addEventListener("click", () => { this._card.classList.remove("open"); if (this._v3) this._v3.select(null); this._select(null); });
       $(".go").addEventListener("click", () => { if (this._v3 && this._sel) { this._lastTouch = performance.now(); this._v3.flyTo(this._sel.id); } });
       $(".ask").addEventListener("click", () => this._askAbout());

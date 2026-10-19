@@ -447,7 +447,7 @@ function selfView(st) {
                    disabled: r.state === "unbuilt", selected: r.rung === lim });
   }
   if (options.length === 1) options.push({ value: 1, text: "🌱 1 · feel itself", disabled: false, selected: lim === 1 });
-  if (s.mode === "off") return { loaded, limit: 0, options, status: "🌱 asleep", title: "self (#161) is asleep: nothing runs, nothing is erased -- choose how far it may grow" };
+  if (s.mode === "off") return { loaded, limit: 0, options, status: "🌱 asleep", exp: selfExp(st), title:"self (#161) is asleep: nothing runs, nothing is erased -- choose how far it may grow" };
   const pct = Math.round(100 * (s.bar || 0));
   const rung = "rung " + (s.rung || 0) + (s.rung_name ? " (" + s.rung_name + ")" : "");
   const why = s.held ? " · HELD (3 failed cycles; re-choose to clear)" : s.waiting_on ? " · waiting on: " + s.waiting_on : "";
@@ -463,9 +463,209 @@ function selfView(st) {
   const r7s = r7.asked ? " · rung 7: " + (r7.paired || 0) + " of " + (r7.checked || 0) + " asked pushes paired"
     + (r7.brier_model != null ? ", Brier model " + f2(r7.brier_model) + " vs habit " + f2(r7.brier_habit) : "")
     + (r7.base_rate != null ? ", base rate " + f2(r7.base_rate) : "") : "";
-  return { loaded, limit: lim, options, status,
+  return { loaded, limit: lim, options, status, exp: selfExp(st),
            title: "self (#161): " + s.mode + " · " + rung + " · " + pct + "% toward the next" + why + slip + nxt
                   + " · may grow up to rung " + lim + " · " + (s.cycles || 0) + " cycles" + r7s };
+}
+
+// ---- #230: SELF IN THE UI -- the exp bar, the activity lines, the report card.
+// Everything here only reads status() and self's record: nothing is claimed
+// about self that the record doesn't measure, and nothing here changes it
+// (the 🌱 chooser stays the only switch).
+const SELF_RUNGS = { 0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart", 4: "patience",
+  5: "notice the world changed", 6: "meet an other", 7: "understand an other", 8: "recognize itself",
+  9: "change itself", 10: "speak" };
+
+function rungName(s, n) {
+  const r = ((s && s.ladder) || []).find((x) => x.rung === n);
+  return (r && r.name) || SELF_RUNGS[n] || "";
+}
+
+/** membrane::Component:toy:dice -> toy:dice (the name a thing goes by). */
+function shortEid(eid) {
+  return String(eid == null ? "" : eid).replace(/^membrane::(?:[A-Z][A-Za-z]*:)?/, "");
+}
+
+/** The banner as a game's experience bar: the level is the rung, the bar
+ *  fills toward the next from status().bar (the staged test, never effort). */
+function selfExp(st) {
+  const s = (st && st.self) || { mode: "off" };
+  const n = s.rung || 0;
+  const fill = Math.max(0, Math.min(1, Number(s.bar) || 0));
+  const pct = Math.round(100 * fill);
+  const level = "Lv " + n + " · " + (s.rung_name || rungName(s, n));
+  const nextName = s.next != null ? rungName(s, s.next) : "";
+  const goal = s.next == null ? "top built rung (the next is not built yet)" : "→ " + s.next + (nextName ? " · " + nextName : "");
+  const lim = s.limit || 0;
+  let state = "growing";
+  if (s.mode === "off") state = "asleep";
+  else if (s.held) state = "held";
+  else if (s.slipping) state = "slipping";
+  else if (s.next != null && (s.next > lim || s.waiting_on === "the limit")) state = "capped";
+  else if (s.next == null) state = "top";
+  const caption = state === "asleep" ? "asleep: nothing runs, nothing is erased"
+    : state === "held" ? "held: 3 failed cycles in a row (re-choose 🌱 to clear)"
+    : state === "capped" ? "capped at rung " + lim + ": raise 🌱 to let it try " + s.next
+    : (state === "slipping" ? "slipping: rung " + n + "'s test fails now" + (s.waiting_on ? " · " : "") : "")
+      + (s.waiting_on ? "waiting on: " + s.waiting_on : "");
+  const label = state === "asleep" ? "asleep" : state === "held" ? "held" : state === "capped" ? "capped" : pct + "%";
+  return { state, rung: n, level: state === "asleep" ? "🌱 asleep" : level, goal, pct, fill, label, caption,
+           title: "self (#161): " + level + " · " + label + " " + goal + (caption ? " · " + caption : "") };
+}
+
+const XP_CSS = `
+  .xp { --xp-gold:#d4a017; display:inline-grid; grid-template-columns:auto minmax(56px,110px) auto; column-gap:6px; row-gap:1px;
+        align-items:center; font-size:12px; line-height:1.2; vertical-align:middle; max-width:100%; }
+  .xp-lv { font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:14em; }
+  .xp-track { position:relative; height:8px; border-radius:999px; overflow:hidden;
+              background:color-mix(in srgb, var(--divider-color,#888) 70%, transparent);
+              box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--primary-text-color,#ddd) 15%, transparent); }
+  .xp-fill { position:absolute; left:0; top:0; bottom:0; border-radius:inherit; transition:width .6s ease;
+             background:linear-gradient(90deg, color-mix(in srgb, var(--primary-color,#3477d6) 65%, #2e9d5b), var(--primary-color,#3477d6)); }
+  .xp-pct { font-variant-numeric:tabular-nums; opacity:.85; white-space:nowrap; }
+  .xp-sub { grid-column:1 / -1; font-size:10.5px; opacity:.7; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .xp-slipping .xp-fill { background:var(--warning-color,#ffa600); }
+  .xp-slipping .xp-pct, .xp-slipping .xp-sub { color:var(--warning-color,#ffa600); opacity:1; }
+  .xp-held { opacity:.6; }
+  .xp-held .xp-fill { background:color-mix(in srgb, var(--primary-text-color,#888) 45%, transparent); }
+  .xp-capped .xp-fill { background:repeating-linear-gradient(45deg, color-mix(in srgb, var(--primary-color,#3477d6) 60%, transparent) 0 4px,
+                                    color-mix(in srgb, var(--primary-color,#3477d6) 25%, transparent) 4px 8px); }
+  .xp-asleep .xp-track, .xp-asleep .xp-pct { display:none; }
+  .xp.lvup .xp-lv { color:var(--xp-gold); }
+  .xp.lvup .xp-track { animation:xplvup 1.6s ease-out; }
+  @keyframes xplvup { 0% { box-shadow:0 0 0 0 color-mix(in srgb, var(--xp-gold) 80%, transparent); }
+                      40% { box-shadow:0 0 0 6px color-mix(in srgb, var(--xp-gold) 30%, transparent); }
+                      100% { box-shadow:0 0 0 0 transparent; } }
+  @media (prefers-reduced-motion: reduce) {
+    .xp-fill { transition:none; }
+    .xp.lvup .xp-track { animation:none; box-shadow:0 0 0 2px var(--xp-gold); }
+  }`;
+
+/** Paint the exp bar into el (built once, then updated in place so the fill
+ *  glides). A new rung gets a brief level-up moment (still under reduced motion:
+ *  the gold and the "level up" caption stay, the glow doesn't pulse). */
+function paintExp(el, x) {
+  if (!el || !x) return;
+  const root = el.getRootNode ? el.getRootNode() : null;
+  if (root && root.querySelector && !root.querySelector("style[data-xp]")) {
+    const st = document.createElement("style");
+    st.setAttribute("data-xp", "");
+    st.textContent = XP_CSS;
+    (root.head || root).appendChild(st);
+  }
+  let box = el.querySelector(":scope > .xp");
+  if (!box) {
+    el.textContent = "";
+    box = document.createElement("span");
+    box.innerHTML = '<span class="xp-lv"></span><span class="xp-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">' +
+      '<span class="xp-fill"></span></span><span class="xp-pct"></span><span class="xp-sub"></span>';
+    el.appendChild(box);
+  }
+  const prev = el._xpRung;
+  el._xpRung = x.state === "asleep" ? null : x.rung;
+  const up = prev != null && el._xpRung != null && el._xpRung > prev;
+  if (up) {
+    el._xpUpUntil = Date.now() + 2500;
+    clearTimeout(el._xpUpT);
+    el._xpUpT = setTimeout(() => { el._xpUpUntil = 0; box.classList.remove("lvup"); paintExp(el, el._xpLast); }, 2600);
+  }
+  el._xpLast = x;
+  const lvup = (el._xpUpUntil || 0) > Date.now();
+  box.className = "xp xp-" + x.state + (lvup ? " lvup" : "");
+  box.title = x.title;
+  box.querySelector(".xp-lv").textContent = x.level;
+  const tr = box.querySelector(".xp-track");
+  tr.setAttribute("aria-valuenow", String(x.pct));
+  tr.setAttribute("aria-label", x.state === "asleep" ? "self is asleep" : "toward " + x.goal.replace(/^→ /, "rung "));
+  box.querySelector(".xp-fill").style.width = (x.state === "capped" ? 100 : x.pct) + "%";
+  box.querySelector(".xp-pct").textContent = x.label;
+  box.querySelector(".xp-sub").textContent = lvup ? "⬆ level up: " + x.level
+    : (x.state === "asleep" ? "" : x.goal + (x.caption ? " · " + x.caption : ""));
+}
+
+const f2s = (x) => String(Math.round(Number(x) * 100) / 100);
+
+/** One record line, plainly: what self did and what came of it. */
+function selfLine(r) {
+  r = r || {};
+  const k = r.kind;
+  if (k === "reach") {
+    const t = "reach " + shortEid(r.eid) + " → ";
+    const tail = (r.audit ? " · audit" : "") + (r.reply ? " · reply check" : "");
+    if (r.answer !== "changed" && r.answer !== "unchanged") return t + "no answer" + (r.why ? " (" + r.why + ")" : "") + tail;
+    return t + r.answer + " (p " + f2s(r.p) + (r.p_llm != null ? ", model " + f2s(r.p_llm) : "") + ")" + tail;
+  }
+  if (k === "push") return "push → " + shortEid(r.to) + (r.asked ? " (asked the model)" : "");
+  if (k === "shift") return "shift noticed on " + shortEid(r.eid) + (r.was != null && r.now != null ? " (" + f2s(r.was) + " → " + f2s(r.now) + ")" : "");
+  if (k === "wait") return "wait";
+  if (k === "cycle") return (r.act || "move") + (r.gap != null ? " (gap " + Number(r.gap).toFixed(3) + ")" : "");
+  if (k === "rung") return "rung " + r.rung + " passed · " + (SELF_RUNGS[r.rung] || "");
+  if (k === "error") return "error" + (r.act ? " in " + r.act : "") + (r.why ? ": " + r.why : "");
+  if (k === "birth") return "born";
+  if (k === "audit") return "audit " + (r.phase || "") + (r.eid ? " on " + shortEid(r.eid) : "");
+  return String(k || "?");
+}
+
+function agoText(s) {
+  s = Math.max(0, Math.round(s));
+  return s < 60 ? s + "s" : s < 3600 ? Math.round(s / 60) + "m" : Math.round(s / 3600) + "h";
+}
+
+/** The activity feed (newest first), escaped. nowS: the page's clock, seconds. */
+function selfLinesHtml(lines, nowS) {
+  if (!lines || !lines.length) return '<li class="sl none">nothing on the record yet</li>';
+  const now = nowS == null ? Date.now() / 1000 : nowS;
+  return lines.map((r) => '<li class="sl k-' + escAttr(r.kind || "") + '"><span class="ago">' +
+    (r.ts ? agoText(now - r.ts) : "") + "</span> " + escText(selfLine(r)) + "</li>").join("");
+}
+
+/** The report card: the ladder, rung 7's numbers, curiosity, the world, the toys. */
+function selfCardHtml(st) {
+  const s = st && st.self;
+  if (!s || !Array.isArray(s.ladder)) return '<p class="muted">no status yet</p>';
+  const x = selfExp(st);
+  const out = [];
+  out.push('<p class="head">' + escText(x.level) + " · " + escText(x.label) +
+    (s.mode === "off" ? " · asleep: nothing runs (its record is kept)" : " · " + escText(s.mode) + " · up to rung " + (s.limit || 0)) +
+    " · " + (s.cycles || 0) + " cycles</p>");
+  const mark = { passed: "✓ passed", current: "◀ current", capped: "held by the limit", locked: "locked", unbuilt: "not built" };
+  out.push('<h4>the ladder</h4><ol class="ladder">' + s.ladder.map((r) => {
+    const st2 = r.state === "passed" && r.rung === s.rung && s.slipping ? "slipping" : r.state;
+    const lbl = st2 === "slipping" ? "⚠ slipping" : (mark[st2] || st2);
+    return '<li class="st-' + escAttr(st2) + '"><span class="rn">' + r.rung + "</span> " + escText(r.name) +
+      ' <span class="rs">' + escText(lbl) + "</span></li>";
+  }).join("") + "</ol>");
+  const r7 = s.rung7 || {};
+  out.push("<h4>rung 7: the other</h4>" + (r7.asked
+    ? "<p><b>" + (r7.paired || 0) + " of " + (r7.checked || 0) + "</b> asked pushes paired (" + r7.asked + " asked)" +
+      (r7.brier_model != null ? "<br>Brier model <b>" + f2s(r7.brier_model) + "</b> vs habit <b>" + f2s(r7.brier_habit) + "</b> (lower is better)" : "") +
+      (r7.base_rate != null ? "<br>base rate " + f2s(r7.base_rate) : "") + "</p>"
+    : '<p class="muted">no asked pushes yet</p>'));
+  const cur = s.curiosity || [];
+  out.push("<h4>curiosity</h4>" + (cur.length
+    ? "<ol>" + cur.map((c) => "<li>" + escText(shortEid(c.eid)) + ' <span class="muted">progress ' + f2s(c.progress) +
+        " · error " + f2s(c.error) + "</span></li>").join("") + "</ol>"
+    : '<p class="muted">nothing yet (a thing needs 60 looks)</p>'));
+  const world = s.world || {}, we = Object.keys(world).sort();
+  const counts = {};
+  for (const e of we) counts[world[e]] = (counts[world[e]] || 0) + 1;
+  out.push("<h4>the world</h4>" + (we.length
+    ? "<p>" + Object.keys(counts).sort().map((k) => escText(k) + " " + counts[k]).join(" · ") + "</p><ul>" +
+      we.map((e) => "<li>" + escText(shortEid(e)) + ' <span class="muted">' + escText(world[e]) + "</span></li>").join("") + "</ul>"
+    : '<p class="muted">not sorted yet</p>'));
+  const split = s.split || {}, se = Object.keys(split).sort();
+  const side = (k) => se.filter((e) => split[e] === k).map((e) => escText(shortEid(e))).join(", ") || "–";
+  out.push("<h4>body / other</h4>" + (se.length
+    ? '<p><span class="muted">body:</span> ' + side("body") + '<br><span class="muted">other:</span> ' + side("other") + "</p>"
+    : '<p class="muted">no split yet (rung 6)</p>'));
+  const toys = s.toys || [];
+  const dot = { ok: "ok", empty: "warn", unread: "idle", "no getter": "bad" };
+  out.push("<h4>toys</h4>" + (toys.length
+    ? '<ul class="toys">' + toys.map((t) => '<li title="' + escAttr(t.health) + '"><span class="dot ' + (dot[t.health] || "idle") + '"></span>' +
+        escText(shortEid(t.eid)) + ' <span class="muted">' + (t.getter ? "getter ✓" : "no getter") +
+        (t.reads ? " · " + t.answered + " of last " + t.reads + " reads answered" : t.getter ? " · not read yet" : "") + "</span></li>").join("") + "</ul>"
+    : '<p class="muted">no toys (toy: / cradle: things, or words with a getter)</p>'));
+  return out.join("");
 }
 
 /** Fill a <select> from selfView's options -- rebuilt only when they change
@@ -674,7 +874,7 @@ function jsShow(v) {
   return String(v);
 }
 
-const AiPanelLogic = { jsCompile, jsShow, voiceLogItems, seatView, selfView, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
+const AiPanelLogic = { jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
@@ -2059,7 +2259,17 @@ function definePanel() {
       this._pauseBtn.title = v.title;
       this._pauseBtn.style.opacity = v.paused ? "1" : ".6";
       if (this._selfPick) fillSelfPick(this._selfPick, selfView(this._seat));
-      if (this._selfStat && !this._selfFlash) this._selfStat.textContent = selfView(this._seat).status;
+      if (this._selfStat && !this._selfFlash) paintExp(this._selfStat, selfExp(this._seat));   // #230: the exp bar
+    }
+
+    // #230: self in the UI -- home.js's top bar and its 👶 panel paint from
+    // here (the panel owns the routes). All read-only.
+    _paintExp(el) { paintExp(el, selfExp(this._seat)); }
+    _selfCardHtml() { return selfCardHtml(this._seat); }
+    _selfLinesHtml(lines) { return selfLinesHtml(lines); }
+    async _selfRecent(n) {
+      const r = await this._api(SERVE + "/membrane/self/recent?n=" + encodeURIComponent(n || 15)).catch(() => null);
+      return r && r.ok && r.data && Array.isArray(r.data.lines) ? r.data.lines : null;
     }
 
     async _toggleRole() {

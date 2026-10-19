@@ -542,7 +542,7 @@ lift "who 1,500 never-seen mentions were about" from MRR **0.210 → 0.539**
 | [docs/multi-dev-field.md](docs/multi-dev-field.md) | **Team field: the substrate.** The opt-in merged field: the origin axis, disjoint writers / merged reads, divergence conflicts, the commons |
 | [docs/global-field.md](docs/global-field.md) | The global commons: facts true beyond one repo; operator promotion and consensus (shared only on the merged field) |
 | [docs/background-mind.md](docs/background-mind.md) | **The background mind:** thinker + dreamer, the NightClock, entity scripts and tracks, the intent steering wheel, **the pause**, kill switches |
-| [docs/selfgrowth.md](docs/selfgrowth.md) | **Growing self (#161).** Waking it with the 🌱 growth limit, reading its bar and the amoeba, the ladder's rungs and their real pass tests, how to help it climb, troubleshooting |
+| [docs/selfgrowth.md](docs/selfgrowth.md) | **Growing self (#161).** Waking it with the 🌱 growth limit, reading its exp bar, the 👶 panel (live activity + report card) and the amoeba, the ladder's rungs and their real pass tests, how to help it climb, troubleshooting |
 | [docs/vsa-token-lane.md](docs/vsa-token-lane.md) | **Entity keys + relations (the VSA lane).** Canonical ids, key binding, the relations composites, structure-awareness numbers |
 | [docs/token-economics.md](docs/token-economics.md) | Where the savings come from + the router: the ladder, the ceiling, the outage fallback |
 | [docs/monologue.md](docs/monologue.md) | The `[membrane]` thinking-channel banner: every line explained, `/monologue` toggle |

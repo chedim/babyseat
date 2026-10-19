@@ -92,10 +92,70 @@ the status says it waits on "the world" until the first conversation.
 
 ## Watching it grow
 
+### The exp bar
+
+Next to the chooser, self's progress reads like a game's experience bar
+(#230):
+
+```
+Lv 6 · meet an other  [██████░░░░] 64%
+→ 7 · understand an other · waiting on: pairs
+```
+
+- **the level** is the highest rung passed, with its name;
+- **the bar** fills toward the next rung from `bar` (the staged test, below),
+  with its percent; the caption under it names the next rung and what the bar
+  is `waiting on`;
+- **slipping** tints the bar amber (the top passed rung's test fails now);
+- **held** greys it ("re-choose 🌱 to clear");
+- **capped**: the next rung is above the growth limit, so the bar is hatched
+  and reads `capped` ("raise 🌱 to let it try 7");
+- **asleep** shows only `🌱 asleep`;
+- **a new rung** gets a short level-up moment: the level turns gold, the bar
+  glows once, and the caption reads `⬆ level up` for a few seconds. With
+  *reduce motion* on, the gold and the caption stay and nothing pulses.
+
+The bar's tooltip still carries the long form (mode, limit, cycles, rung 7's
+pairs). On a phone the caption row is hidden to keep the top bar short.
+
+### The 👶 panel
+
+A 👶 tab sits at the left edge of the home view (clear of a phone's notch).
+It opens self's side panel: a column beside the field on a wide screen, a
+full-screen overlay on a narrow one. Open or closed is remembered per browser.
+Esc or × closes it.
+
+- **What it is doing now:** self's last 15 record lines, newest first, with
+  how long ago: `reach w:fast → changed (p 0.98)`, `reach toy:dice → no answer
+  (throttled)`, `push → roomata-estorsky (asked the model)`, `shift noticed on
+  w:prime (0.8 → 0)`, `move (gap 0.031)`, `wait`, `rung 3 passed · tell things
+  apart`. It refreshes every 4 s, and only while the panel is open.
+- **The report card:** the ladder (passed / current / slipping / held by the
+  limit / locked / not built), rung 7's numbers (asked pushes paired, Brier
+  model vs habit, the base rate), curiosity's top three, the world's kinds
+  with their counts, the body/other split, and **the toys** with a health dot:
+  green (its last reads answered), amber (its last reads gave no answer), grey
+  (not read yet), red (no getter, so it can't be read). The card refreshes
+  every 15 s while open.
+
+**It is read-only.** Nothing in the panel changes self; the 🌱 chooser stays
+the only switch. Everything it shows is `status()` and self's own record:
+nothing is claimed about self that the record doesn't measure.
+
+The activity comes from a small read-only route (behind the JWT gate like
+every route; the HA relay forwards it on GET only):
+
+```bash
+curl -s 'http://127.0.0.1:4096/membrane/self/recent?n=30'   # {"lines": [...]}, newest first, at most 100
+```
+
+**Toys** are `toy:` and `cradle:` things (listed even without a getter, so a
+broken one shows red) and words (`w:`) that carry a getter; a plain word is not
+a toy. The list is rebuilt from the store at most every 15 s.
+
 ### The panel status
 
-Next to the chooser, the status line reads like
-`rung 6 ✓ · 0% → 7 (looks) · slipping`. The full state is in the seat's
+The full state is in the seat's
 panel (`GET /membrane/seat`, under `state.self`):
 
 ```bash
@@ -121,6 +181,7 @@ curl -s http://127.0.0.1:4096/membrane/seat \
 | `meets` | rung 6's exchange: `pushes`, `other` (who it meets), `push_age`, `heard_age` (seconds since the other last answered) |
 | `steer` | after rung 1: how close it lands to its aim (`err`) against not leaning into the current (`naive`), and `skill = 1 − err/naive` |
 | `rung7` | rung 7 at the current other: `asked` (pushes that asked the model), `checked` (those whose reply check came), `paired` (those whose check carried the model's answer), `pair_rate` = paired / checked, `brier_model` and `brier_habit` (mean Brier error over the pairs the test reads; the model passes by beating habit's by 15%), and `base_rate` (what the model is told). The 🌱 chooser's tooltip shows it as `rung 7: 5 of 8 asked pushes paired, Brier model 0.37 vs habit 0.39, base rate 0.55` |
+| `toys` | #230: each toy (`toy:` / `cradle:` things, words with a getter) with `getter` (it has one), `reads` and `answered` (of its last 10 reaches), and `health`: `ok`, `empty` (no answer on its last reads), `unread`, or `no getter` |
 | `curiosity` | from rung 2 on: the (up to) three things whose prediction is improving fastest, best first, each with `progress` (its error over the 30 ordinary looks before the latest 30, minus its error over the latest 30) and `error` (the latest 30's mean Brier error). It is what self's curiosity reads when it chooses a reach (below); empty until a thing has 60 ordinary looks |
 
 **How the bar works.** A rung's criteria are stages, in order (rung 2:
