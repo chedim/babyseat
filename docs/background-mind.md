@@ -262,6 +262,9 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   `P(changed | dt) = 1 − exp(−λ·dt)`. It looks again once a change has
   become 60% likely, waiting up to 30 min. When nothing is due it **waits**,
   noted every 30 idle cycles; silent things are still checked now and then.
+  Among the due things it prefers the looks whose answer is least certain
+  (the binary entropy of the predicted chance, floored at 0.1, times the
+  curiosity tilt; #266).
   The test, in stages:
   1. 30 timed looks;
   2. they find news at least half the time, or 0.15 more often than its
@@ -301,6 +304,8 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   from it (by more than 0.4) and unlikely under it (binomial tail below 0.02),
   the world changed: it records a **shift** ("went still" or "moves again")
   and re-learns from those looks. Its patience refits from the shift on.
+  A window holding a look that spans a restart or stall in the record (a gap
+  over 600 s, #259's detector) flags nothing (#266).
   - A coin-flip thing never shifts: five in a row is p = 0.06.
   - A mover going quiet is caught within 3 looks.
   - **The blind audit:** membrane pauses the surest mover while self looks at

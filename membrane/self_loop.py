@@ -183,6 +183,8 @@ CURIO_FLOOR = 0.1           # the tilt never goes under this: a mastered or "can
 CURIO_MIN = 0.005           # progress under this anywhere is no frontier: the base chooser runs untilted
 CURIO_TRIM = 0.25           # #259: a window's error is its interquartile mean -- a rare outlier is no progress
 CURIO_GAP_S = 2 * WAIT_EVERY * PACE_S   # #259: a record gap this long is a restart/stall; a look spanning one is no error
+ATTENTION = True            # #266: among the due, weigh a look by what it can teach (tests switch it off for the base)
+INFO_FLOOR = 0.1            # #266: a near-certain look still weighs this much: a mastered thing is re-checked now and then
 RECENT_MAX = 100            # #230: the most record lines the page's activity feed may ask for
 TOY_PREFIXES = ("toy:", "cradle:")   # #230: things made for self to play with (listed even without a getter)
 TOY_WORDS = "w:"            # ...and words that carry a getter (a plain word is not a toy)
@@ -1528,16 +1530,25 @@ def _tail(p: float, w: int, k: int) -> float:
 def _shift_check(srv, eid: str, now: float) -> None:
     """RUNG 5's noticing: are my last few looks at this thing both far from and
     unlikely under my long memory of it? Then the world changed: record the
-    shift and re-learn from those looks."""
+    shift and re-learn from those looks. A window holding a look whose
+    interval spans a record gap (_stalls: a restart or a stall) is no evidence
+    (#266): the skip is the glitch's, so no shift and no rate refit."""
     recs = _read(srv)
     since = _last_shift_ts(recs, eid)
-    looks = [r["answer"] == "changed" for r in recs
-             if r.get("kind") == "reach" and r.get("eid") == eid and not r.get("audit")
-             and r.get("answer") in ("changed", "unchanged") and (since is None or r["ts"] > since)]
+    looks, spans, at = [], [], None           # #266: does each look's interval span a record gap?
+    for r, st in zip(recs, _stalls(recs)):
+        if (r.get("kind") == "reach" and r.get("eid") == eid and not r.get("audit")
+                and r.get("answer") in ("changed", "unchanged")):
+            if since is None or r["ts"] > since:
+                looks.append(r["answer"] == "changed")
+                spans.append(at is not None and st != at)
+            at = st
     t = _tempo(srv).get(eid) or {}
     C, A = float(t.get("changed", 0)), float(t.get("answered", 0))
     for w in SHIFT_WINDOWS:
         if len(looks) < w or A - w < 1:
+            continue
+        if any(spans[-w:]):                      # a restart/stall in the window: the glitch's, no evidence
             continue
         k = sum(looks[-w:])
         p = (C - k + 0.5) / (A - w + 1.0)            # the long memory, without the window
@@ -1600,7 +1611,13 @@ def _audit5_tick(srv, now: float) -> None:
 
 def _due(srv, recs, targets, kinds, now, rng):
     """Rung 4's choice: the things whose next change has become likely
-    (PATIENCE_P), or a silent one now and then; (None, None) -- wait."""
+    (PATIENCE_P), or a silent one now and then; (None, None) -- wait. Among
+    the due (#266), each is weighed by what the look can teach -- the entropy
+    of the p self would predict for it (_info), floored at INFO_FLOOR -- times
+    the curiosity tilt. The two are separate questions: the entropy asks how
+    unsure the answer to THIS look is, the tilt whether looks at the thing have
+    lately been turning surprise into a better model. Their product is the
+    learning self expects from the look; either floor keeps a thing in play."""
     tempo = _tempo(srv)
     due = []
     for e in targets:
@@ -1620,7 +1637,31 @@ def _due(srv, recs, targets, kinds, now, rng):
     if not due:
         return None, None
     tilt = _curiosity(recs, [e for e, _ in due])   # #212: among the due, the frontier first
-    return rng.choices(due, weights=[tilt[e] for e, _ in due])[0]
+    if not ATTENTION:
+        return rng.choices(due, weights=[tilt[e] for e, _ in due])[0]
+    weights = [max(INFO_FLOOR, _info(_due_p(srv, tempo, e, lam, now))) * tilt[e] for e, lam in due]
+    return rng.choices(due, weights=weights)[0]   # #266: what the look can teach x the frontier
+
+
+def _due_p(srv, tempo, eid, lam, now) -> float:
+    """The p self would predict for a look at this thing now -- the same as
+    _expect's: the rate's 1 - exp(-lambda dt), or the tempo's share before a
+    rate (or a first look)."""
+    last = (tempo.get(eid) or {}).get("last")
+    if lam and last is not None:
+        return 1.0 - float(np.exp(-lam * (now - float(last))))
+    return _p_changed(srv, eid)
+
+
+def _info(p: float) -> float:
+    """WHAT A LOOK CAN TEACH (#266): the binary entropy of its predicted p, in
+    bits -- the surprise self expects from the answer when p is calibrated
+    (rung 4 checks it is). 1 at p = 0.5; ~0 at p ~ 0 or 1: a look whose answer
+    self already knows teaches nothing."""
+    p = min(1.0, max(0.0, float(p)))
+    if p <= 0.0 or p >= 1.0:
+        return 0.0
+    return float(-(p * np.log2(p) + (1.0 - p) * np.log2(1.0 - p)))
 
 
 # ---- curiosity: where self practises (#212) ----------------------------------
@@ -1635,14 +1676,8 @@ def _ordinary_errors(recs: list[dict]) -> dict:
     seat restarted or stalled, so the miss is the glitch's, not the thing's
     (#259). Read from the record's timestamps only."""
     out: dict[str, list] = {}
-    stalls, seen, prev = 0, {}, None        # stalls so far; per thing, the count at its last look
-    for r in recs:
-        ts = r.get("ts")
-        if ts is not None:
-            ts = float(ts)
-            if prev is not None and ts - prev > CURIO_GAP_S:
-                stalls += 1
-            prev = ts
+    seen = {}                               # per thing, the stall count at its last look
+    for r, stalls in zip(recs, _stalls(recs)):
         if (r.get("kind") == "reach" and r.get("answer") in ("changed", "unchanged")
                 and not r.get("audit") and not r.get("audit5") and r.get("p") is not None):
             eid = r["eid"]
@@ -1652,6 +1687,24 @@ def _ordinary_errors(recs: list[dict]) -> dict:
                 continue
             x = 1.0 if r["answer"] == "changed" else 0.0
             out.setdefault(eid, []).append((x - float(r["p"])) ** 2)
+    return out
+
+
+def _stalls(recs: list[dict]) -> list[int]:
+    """For each record line, how many gaps longer than CURIO_GAP_S between
+    consecutive timestamped lines came before it (#259): a look whose count
+    differs from its thing's previous look spans a restart or a stall. Read
+    from the record's timestamps only (no boot marker); shared by curiosity
+    and rung 5's noticing (#266)."""
+    out, n, prev = [], 0, None
+    for r in recs:
+        ts = r.get("ts")
+        if ts is not None:
+            ts = float(ts)
+            if prev is not None and ts - prev > CURIO_GAP_S:
+                n += 1
+            prev = ts
+        out.append(n)
     return out
 
 
