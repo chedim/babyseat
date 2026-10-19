@@ -173,6 +173,48 @@ def _halves(rs: list) -> tuple:
     return _r(sum(br[:h]) / h), _r(sum(br[h:]) / (len(br) - h))
 
 
+LEARN_MIN_LOOKS = 10          # #276: fewer answered looks than this: too new to say
+LEARN_MASTERED = 0.05         # ...a later-half error at most this: mastered
+LEARN_MARGIN = 0.03           # ...this far below the rate-only guess: learning; within it: the rate only
+LEARN_WORDS = {
+    "new": "too new to say",
+    "mastered": "mastered: self predicts it",
+    "worse": "getting worse: not understood",
+    "learning": "learning: predicts it better than its rate alone",
+    "rate": "knows how often it changes, nothing more yet",
+    "lost": "not understood: worse than guessing its rate",
+}
+
+
+def learning(rs: list) -> dict:
+    """How well self has learned a thing, from its answered looks (#276).
+    The yardstick is a RATE-ONLY guess -- always saying the thing's change
+    share q, over the later half of the looks -- which scores q(1-q)."""
+    rs = [r for r in rs if r.get("answer") in ("changed", "unchanged")]
+    early, late = _halves(rs)
+    out = {"looks": len(rs), "error_early": early, "error_late": late}
+    if len(rs) < LEARN_MIN_LOOKS or late is None:
+        v = "new"
+    else:
+        tail = rs[len(rs) // 2:]
+        q = sum(r["answer"] == "changed" for r in tail) / len(tail)
+        guess = q * (1 - q)
+        out["rate_guess"] = _r(guess)
+        if late <= LEARN_MASTERED:
+            v = "mastered"
+        elif late > early + LEARN_MARGIN and late > guess:
+            v = "worse"
+        elif late < guess - LEARN_MARGIN:
+            v = "learning"
+        elif late <= guess + LEARN_MARGIN:
+            v = "rate"
+        else:
+            v = "lost"
+    out["verdict"] = v
+    out["text"] = LEARN_WORDS[v] + (f" ({len(rs)} looks)" if v == "new" else "")
+    return out
+
+
 def _toybox_rows() -> dict:
     try:
         from . import toybox as TB
@@ -718,10 +760,14 @@ def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
             if not t.get("block"):
                 health[t["toy"]] = t["health"]
     want = {e: n for n, es in eids.items() for e in es}
+    block_of = {t["eid"]: t["block"] for t in ents if t.get("toy") and t.get("block")}
     looks: dict[str, list] = {}
+    by_block: dict[tuple, list] = {}
     for r in recs:
         if _answered(r) and r.get("eid") in want:
             looks.setdefault(want[r["eid"]], []).append(r)
+            if r["eid"] in block_of:
+                by_block.setdefault((want[r["eid"]], block_of[r["eid"]]), []).append(r)
     from . import toy_unlocks as TU                      # #267: grandfathered toys, the next locked ones
     toys = []
     for row in rows:
@@ -750,6 +796,11 @@ def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
                      "active": active, "health": health.get(name, "unread" if name in eids else "no getter"),
                      "looks": len(rs), "error_early": early, "error_late": late,
                      "changes": dict(row.get("counts") or {}), "last": last,
+                     "learning": learning(rs),                     # #276: the verdict from those numbers
+                     **({"blocks": [{"block": b, **{k: v for k, v in learning(by_block[(name, b)]).items()
+                                                    if k in ("verdict", "looks")}}
+                                    for b in sorted(b for (n, b) in by_block if n == name)]}
+                        if kind == "tower" else {}),
                      "unlock_rung": TU.rung_of(kind), "grandfathered": TU.grandfathered(recs, kind)})
     toys.sort(key=lambda t: t["kind"] != "ball")                 # #264: the ball first (locked rows follow the toys)
     out = {"generated": now, "toys": toys, "locked": TU.locked_rows(recs, {r["kind"] for r in rows})}
