@@ -71,7 +71,8 @@ another.
 
 *Field note (a joke, not a finding): the symbiont form of the earthling,
 Homo sapiens var. blurpophilus, is known by one call — when its human part
-thinks about Blurps, it says "Blurp".*
+thinks about Blurps, it says "Blurp". A large prediction error is announced as
+"what the blurp?".*
 
 - **Add a seat:** Settings → Devices & services → Membrane → *Configure* →
   **Add a seat**: its host (e.g. `192.168.1.107`), the serve port (4096), the
