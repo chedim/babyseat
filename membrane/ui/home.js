@@ -735,7 +735,7 @@ const HSTYLE = `
   @media (hover: hover) { .babybtn:hover { background:color-mix(in srgb, var(--primary-color,#3477d6) 28%, var(--card-background-color,#111)); } }
   .babybtn:focus-visible, .selfpanel .spx:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:2px; }
   .selfpanel { position:absolute; z-index:5; top:64px; bottom:76px; left:calc(max(0px, env(safe-area-inset-left)) + 48px);
-               width:min(360px, calc(100% - 72px)); border-radius:16px; padding:10px 14px 14px; overflow:auto;
+               width:min(420px, calc(100% - 72px)); border-radius:16px; padding:10px 14px 14px; overflow:auto;
                overscroll-behavior:contain; font-size:13px; line-height:1.45;
                background:color-mix(in srgb, var(--card-background-color,#111) 95%, transparent); }
   .selfpanel[hidden], .view-chat .babybtn, .view-chat .selfpanel { display:none; }
@@ -797,6 +797,152 @@ const HSTYLE = `
   .selfpanel .dot.warn { background:var(--warning-color,#ffa600); }
   .selfpanel .dot.bad { background:var(--error-color,#db4437); }
   .selfpanel .dot.idle { background:color-mix(in srgb, var(--primary-text-color,#ddd) 35%, transparent); }
+  /* the character sheet (#249): an RPG sheet's structure in membrane's own
+     look -- a nameplate, then collapsible sections */
+  .selfpanel { --sheet-child:#8e5bd6; --sheet-ok:#2e9d5b; }
+  .selfpanel .sheet .hdr { display:grid; grid-template-columns:1fr auto; align-items:center; gap:3px 10px; padding:10px 12px;
+                           margin:2px 0 8px; border-radius:12px;
+                           border:1px solid color-mix(in srgb, var(--divider-color,#888) 60%, transparent);
+                           background:color-mix(in srgb, var(--primary-color,#3477d6) 8%, transparent); }
+  .selfpanel .sheet .hdr .nm { font-size:20px; font-weight:650; }
+  .selfpanel .sheet .hdr .lvb { font-weight:700; font-variant-numeric:tabular-nums; padding:1px 10px; border-radius:999px;
+                                background:var(--primary-color,#3477d6); color:var(--text-primary-color,#fff); }
+  .selfpanel .sheet .hdr .rnm, .selfpanel .sheet .hdr .xpslot, .selfpanel .sheet .hdr .facts { grid-column:1 / -1; }
+  .selfpanel .sheet .hdr .rnm { font-size:12.5px; }
+  .selfpanel .sheet .hdr .xpslot .xp-lv, .selfpanel .sheet .hdr .xpslot .xp-sk { display:none; }   /* the nameplate says them */
+  .selfpanel .sheet .hdr .xpslot .xp { grid-template-columns:1fr auto; }
+  .selfpanel .sheet .hdr .facts { display:flex; flex-wrap:wrap; gap:2px 12px; font-size:12px; opacity:.85; font-variant-numeric:tabular-nums; }
+  .selfpanel .sheet .skill { grid-column:1 / -1; display:grid; grid-template-columns:auto 1fr auto; align-items:center; gap:2px 10px;
+                             padding:6px 8px; border-radius:10px; background:color-mix(in srgb, var(--primary-text-color,#ddd) 6%, transparent); }
+  .selfpanel .sheet .skill .skv { font-size:26px; font-weight:700; font-variant-numeric:tabular-nums; line-height:1.1; }
+  .selfpanel .sheet .skill.neg .skv { color:var(--warning-color,#ffa600); }
+  .selfpanel .sheet .skill.met .skv { color:var(--sheet-ok); }
+  .selfpanel .sheet .skill .skm { font-size:11.5px; line-height:1.35; min-width:0; }
+  .selfpanel .sheet .skill .skn { opacity:.7; }
+  .selfpanel .sheet .skill .skspark .skl { fill:none; stroke:var(--primary-color,#3477d6); stroke-width:1.8; stroke-linejoin:round; vector-effect:non-scaling-stroke; }
+  .selfpanel .sheet .skill .skspark .skp { stroke:currentColor; stroke-opacity:.55; vector-effect:non-scaling-stroke; }
+  @media (max-width: 560px) {
+    .selfpanel .sheet .skill { grid-template-columns:auto 1fr; }
+    .selfpanel .sheet .skill .skspark { grid-column:1 / -1; width:100%; height:30px; }
+  }
+  .selfpanel .sec { border-top:1px solid color-mix(in srgb, var(--divider-color,#888) 45%, transparent); }
+  .selfpanel .sec > summary { cursor:pointer; list-style:none; display:flex; align-items:baseline; gap:8px; padding:9px 2px;
+                              font-size:11.5px; letter-spacing:.06em; text-transform:uppercase; font-weight:650; }
+  .selfpanel .sec > summary::-webkit-details-marker { display:none; }
+  .selfpanel .sec > summary::before { content:"▸"; opacity:.6; display:inline-block; transition:transform .15s; }
+  .selfpanel .sec[open] > summary::before { transform:rotate(90deg); }
+  .selfpanel .sec > summary .sth { margin-left:auto; text-transform:none; letter-spacing:0; font-weight:400; opacity:.6; font-size:11.5px; }
+  .selfpanel .sec > summary:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:2px; border-radius:6px; }
+  .selfpanel .secb { padding:0 2px 12px; }
+  .selfpanel .note { font-size:11px; opacity:.72; margin:2px 0 6px; }
+  .selfpanel .attr { display:grid; grid-template-columns:1fr auto; gap:3px 8px; padding:5px 0; }
+  .selfpanel .attr .rn { font-size:11px; opacity:.55; }
+  .selfpanel .attr .av { font-variant-numeric:tabular-nums; font-weight:600; }
+  .selfpanel .attr .av.neg { color:var(--warning-color,#ffa600); }
+  .selfpanel .attr .abar { grid-column:1 / -1; position:relative; height:8px; border-radius:999px;
+                           background:color-mix(in srgb, var(--divider-color,#888) 55%, transparent); }
+  .selfpanel .abar .fill { position:absolute; top:0; bottom:0; border-radius:999px; background:color-mix(in srgb, var(--primary-color,#3477d6) 75%, transparent); }
+  .selfpanel .abar .fill.met { background:var(--sheet-ok); }
+  .selfpanel .abar .fill.neg { background:var(--warning-color,#ffa600); }
+  .selfpanel .abar .zero { position:absolute; top:-2px; bottom:-2px; width:1px; background:currentColor; opacity:.5; }
+  .selfpanel .abar .pass { position:absolute; top:-3px; bottom:-3px; width:2px; margin-left:-1px; border-radius:1px;
+                           background:var(--primary-text-color,#ddd); opacity:.8; }
+  .selfpanel .attr .an { grid-column:1 / -1; font-size:11px; opacity:.72; }
+  .selfpanel .attr.st-slipping .an { color:var(--warning-color,#ffa600); opacity:1; }
+  .selfpanel .attr.st-locked, .selfpanel .attr.none { opacity:.65; }
+  .selfpanel .qh { font-weight:600; margin-bottom:4px; }
+  .selfpanel .crit { list-style:none; padding:0; }
+  .selfpanel .crit li { padding:2px 0; }
+  .selfpanel .crit .met .ck { color:var(--sheet-ok); }
+  .selfpanel .warn { color:var(--warning-color,#ffa600); }
+  .selfpanel .wrap { overflow-x:auto; }
+  .selfpanel .tbl { width:100%; border-collapse:collapse; font-size:12px; font-variant-numeric:tabular-nums; }
+  .selfpanel .tbl th, .selfpanel .tbl td { padding:3px 4px; text-align:left; vertical-align:top;
+                                           border-bottom:1px solid color-mix(in srgb, var(--divider-color,#888) 35%, transparent); }
+  .selfpanel .tbl th { font-weight:600; font-size:11px; opacity:.65; }
+  .selfpanel .tbl .num, .selfpanel .tbl .dt { text-align:right; white-space:nowrap; }
+  .selfpanel .tbl .dt { text-align:left; }
+  .selfpanel .curve { display:block; max-width:100%; height:auto; }
+  .selfpanel .curve .cg { stroke:color-mix(in srgb, var(--divider-color,#888) 60%, transparent); }
+  .selfpanel .curve .ct { fill:currentColor; opacity:.6; font-size:10px; }
+  .selfpanel .curve .cf { fill:none; stroke:currentColor; stroke-opacity:.5; stroke-width:1.5; }
+  .selfpanel .curve .cw { fill:none; stroke:var(--primary-color,#3477d6); stroke-opacity:.3; stroke-width:1.5; }
+  .selfpanel .curve .cs { fill:none; stroke:var(--primary-color,#3477d6); stroke-width:2.2; stroke-linejoin:round; }
+  .selfpanel .curve .ck { fill:var(--card-background-color,#111); stroke:var(--sheet-child); stroke-width:1.5; }
+  .selfpanel .curve .cn { fill:var(--primary-color,#3477d6); }
+  .selfpanel .legend { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; font-size:11px; margin:4px 0; }
+  .selfpanel .lg { display:inline-block; width:14px; height:3px; margin-right:4px; vertical-align:middle; border-radius:2px; }
+  .selfpanel .lg.ls { background:var(--primary-color,#3477d6); }
+  .selfpanel .lg.lw { background:color-mix(in srgb, var(--primary-color,#3477d6) 35%, transparent); }
+  .selfpanel .lg.lf { background:repeating-linear-gradient(90deg, currentColor 0 4px, transparent 4px 7px); opacity:.6; }
+  .selfpanel .lg.lk { width:8px; height:8px; border-radius:50%; border:1.5px solid var(--sheet-child); }
+  .selfpanel .tbar { display:flex; gap:2px; height:14px; border-radius:7px; overflow:hidden; }
+  .selfpanel .tp-working { background:var(--primary-color,#3477d6); }
+  .selfpanel .tp-bugs { background:var(--error-color,#db4437); }
+  .selfpanel .tp-down { background:color-mix(in srgb, var(--primary-text-color,#ddd) 30%, transparent); }
+  .selfpanel .tl { list-style:none; padding:0; margin:6px 0; font-size:12px; }
+  .selfpanel .tl .lg { width:10px; height:10px; border-radius:3px; }
+  .selfpanel .bugs { font-size:12px; }
+  .selfpanel .rel { list-style:none; padding:0; }
+  .selfpanel .rel li { padding:4px 0; }
+  .selfpanel .now { font-size:10.5px; padding:0 6px; border-radius:999px; background:color-mix(in srgb, var(--sheet-ok) 25%, transparent); }
+  @media (prefers-reduced-motion: reduce) { .selfpanel .sec > summary::before { transition:none; } }
+  /* the toy dock (#249): self's toys as icons stacked under the 👶 tab,
+     live, whether or not the panel is open; hover or tap one to play */
+  .toydock { position:absolute; z-index:8; left:max(0px, env(safe-area-inset-left)); top:calc(50% + 32px);
+             display:flex; flex-direction:column; gap:4px; max-height:calc(50% - 120px); }
+  .toydock[hidden], .view-chat .toydock, .view-chat .dkpop { display:none; }
+  .toydock .dkl { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:4px; overflow-y:auto; overscroll-behavior:contain; }
+  .toydock .dkb, .toydock .dockbtn { position:relative; width:40px; height:40px; padding:0; display:grid; place-items:center;
+             font-size:20px; line-height:1; font-variant-numeric:tabular-nums; border-radius:0 12px 12px 0;
+             border:1px solid color-mix(in srgb, var(--divider-color,#888) 45%, transparent); border-left:0;
+             background:color-mix(in srgb, var(--card-background-color,#111) 80%, transparent); }
+  .toydock .dockbtn { display:none; }
+  .toydock .dkb[aria-expanded="true"], .toydock .dockbtn[aria-expanded="true"] {
+             background:color-mix(in srgb, var(--primary-color,#3477d6) 35%, var(--card-background-color,#111)); }
+  @media (hover: hover) { .toydock .dkb:hover { background:color-mix(in srgb, var(--primary-color,#3477d6) 25%, var(--card-background-color,#111)); } }
+  .toydock .dkb:focus-visible, .toydock .dockbtn:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:2px; }
+  .toydock .g-fast, .toydock .g-slow, .toydock .g-body { font-size:13px; font-weight:650; }
+  .toydock .tower { display:flex; flex-direction:column; gap:1px; }
+  .toydock .tower .blk { display:block; width:15px; height:4px; border-radius:1px; background:var(--primary-text-color,#ddd); opacity:.85; }
+  .toydock .tower .blk.down { opacity:.16; }
+  .toydock .gauge { display:block; position:relative; width:9px; height:24px; border-radius:3px; overflow:hidden;
+                    background:color-mix(in srgb, var(--primary-text-color,#ddd) 18%, transparent); }
+  .toydock .gauge i { position:absolute; left:0; right:0; bottom:0; background:var(--primary-color,#3477d6); }
+  .toydock .burst.on { color:var(--warning-color,#ffa600); }
+  .toydock .burst.off { opacity:.3; }
+  .toydock .hd { position:absolute; top:4px; right:4px; width:7px; height:7px; border-radius:50%; }
+  .toydock .hd.ok, .dkpop .dot.ok { background:#2e9d5b; }
+  .toydock .hd.warn, .dkpop .dot.warn { background:var(--warning-color,#ffa600); }
+  .toydock .hd.bad, .dkpop .dot.bad { background:var(--error-color,#db4437); }
+  .toydock .hd.idle, .dkpop .dot.idle { background:color-mix(in srgb, var(--primary-text-color,#ddd) 35%, transparent); }
+  .toydock .bdg { position:absolute; right:1px; bottom:1px; max-width:38px; overflow:hidden; padding:1px 3px; border-radius:6px;
+                  font-size:9px; line-height:1.1; font-weight:600; pointer-events:none;
+                  background:var(--primary-color,#3477d6); color:var(--text-primary-color,#fff); opacity:0; transition:opacity 2.5s ease-in; }
+  .toydock .bdg.fresh { opacity:1; transition:none; }
+  .dkpop { position:fixed; z-index:9; width:min(270px, calc(100vw - 64px)); padding:10px 12px; border-radius:12px;
+           font-size:12.5px; line-height:1.4; box-shadow:0 6px 24px rgba(0,0,0,.3);
+           background:color-mix(in srgb, var(--card-background-color,#111) 96%, transparent); }
+  .dkpop[hidden] { display:none; }
+  .dkpop p { margin:4px 0; }
+  .dkpop .muted, .dkpop .pg { opacity:.65; }
+  .dkpop .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:middle; }
+  .dkpop .pacts { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+  .dkpop .pk { font-size:11.5px; line-height:1.2; padding:3px 8px; border-radius:999px;
+               border:1px solid color-mix(in srgb, var(--divider-color,#888) 70%, transparent);
+               background:color-mix(in srgb, var(--primary-color,#3477d6) 14%, transparent); }
+  .dkpop .pk:hover { background:color-mix(in srgb, var(--primary-color,#3477d6) 30%, transparent); }
+  .dkpop .pk:disabled { opacity:.5; cursor:progress; }
+  .dkpop .pk:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:1px; }
+  .dkpop .pres { padding:3px 6px; border-radius:6px; overflow-wrap:anywhere; background:color-mix(in srgb, #2e9d5b 22%, transparent); }
+  .dkpop .pres.bad { background:color-mix(in srgb, var(--error-color,#db4437) 22%, transparent); }
+  .dkpop .pres:empty { display:none; }
+  @media (prefers-reduced-motion: reduce) { .toydock .bdg { transition:none; } }
+  @media (max-width: 760px) {
+    .toydock { top:calc(26vh + 56px); top:calc(26dvh + 56px); max-height:calc(74dvh - 140px); }
+    .toydock .dockbtn { display:grid; }
+    .toydock:not(.open) .dkl { display:none; }
+  }
   /* the brain's caption (#237): one plain line about self's newest record line,
      at the bottom of the field (left of the chat on a wide screen) */
   .brainline { position:absolute; z-index:3; left:calc((100% - min(460px, 44vw) - 24px) / 2); bottom:64px; transform:translateX(-50%);
@@ -819,7 +965,10 @@ const HSTYLE = `
 const BRAIN_MS = 3000;                            // #237: the brain's record poll, only while the page is visible
 const LS_SELFPANEL = "membrane.home.selfpanel";   // #230: the 👶 panel open ("1") or closed, per browser
 const SELFPANEL_MS = 4000;                        // its activity refresh, only while open
-const SELFPANEL_SEAT_MS = 15000;                  // ...and its report card's (the whole status)
+const SELFPANEL_SEAT_MS = 15000;                  // ...and its character sheet's (the whole status; the seat caches ~30 s)
+const LS_SELFSHEET = "membrane.home.selfsheet";   // #249: which sheet sections are open, per browser
+const DOCK_MS = 3000;                             // #249: the toy dock's poll, only while the page is visible
+const LS_DOCK = "membrane.home.toydock";          // the phone's 🧸: the dock expanded ("1") or not
 
 if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" &&
     !customElements.get("membrane-home-panel")) {
@@ -866,7 +1015,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._listenKeys(false);
       clearInterval(this._follow);
       clearInterval(this._autoT); clearInterval(this._selfT); clearInterval(this._selfPanelT);
-      clearInterval(this._brainT);
+      clearInterval(this._brainT); clearInterval(this._dockT);
       if (this._brainVis) { document.removeEventListener("visibilitychange", this._brainVis); this._brainVis = null; }
       if (this._v3) { this._v3.stop(); this._v3 = null; }
       if (this._hidSidebar) this._dock("restore");
@@ -930,9 +1079,23 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         if (!c._seat) this._spSeatAt = 0;                  // not loaded yet (a fresh page): retry next tick
       }
       c._paintExp(this._spXp);
-      const card = c._selfCardHtml();
-      if (card !== this._spCardHtml) { this._spCard.innerHTML = card; this._spCardHtml = card; }
-      if (this._spBusy) return;
+      // #249: the character sheet (GET /membrane/self/sheet, every
+      // SELFPANEL_SEAT_MS while open); an older seat without it gets the
+      // report card it had
+      if (typeof c._selfSheet === "function" && Date.now() - (this._spSheetAt || 0) > SELFPANEL_SEAT_MS) {
+        this._spSheetAt = Date.now();
+        const sh = await c._selfSheet().catch(() => null);
+        if (sh) this._sheet = sh;
+        else if (!this._sheet) this._spSheetAt = 0;        // not there yet: retry next tick
+      }
+      const card = this._sheet && typeof c._selfSheetHtml === "function"
+        ? c._selfSheetHtml(this._sheet, this._sheetOpen) : "<h3>report card</h3>" + c._selfCardHtml();
+      if (card !== this._spCardHtml) {
+        this._spCard.innerHTML = card; this._spCardHtml = card;
+        const slot = this._spCard.querySelector(".xpslot");   // the live exp bar sits in the nameplate
+        if (slot) slot.appendChild(this._spXp);
+      }
+      if (this._spBusy || !this._spActSec.open) return;     // the feed is fetched only while its section is open
       this._spBusy = true;
       try {
         const lines = await c._selfRecent(15);
@@ -940,7 +1103,135 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         else if (!lines) this._spAct.innerHTML = '<li class="sl none">the record is not reachable right now</li>';
       } finally { this._spBusy = false; }
     }
+    /** A sheet section opened or closed: remembered per browser. */
+    _onSheetToggle(e) {
+      const d = e.target;
+      if (!d || !d.matches || !d.matches("details[data-sec]")) return;
+      // a section inserted open also fires `toggle`: only a change from how it
+      // was rendered (data-was) is the person's choice
+      if (d.open === (d.getAttribute("data-was") === "1")) return;
+      d.setAttribute("data-was", d.open ? "1" : "0");
+      const key = d.getAttribute("data-sec");
+      this._sheetOpen[key] = d.open;
+      lsSet(LS_SELFSHEET, JSON.stringify(this._sheetOpen));
+      if (key === "activity" && d.open) this._paintSelfPanel();
+    }
     // ---- end of the 👶 panel
+
+    // THE TOY DOCK (#249, the operator: the toys' buttons out of the panel):
+    // one icon per toybox toy stacked under the 👶 tab, live whether or not
+    // the panel is open -- a glyph per kind, a fading badge naming who changed
+    // it last, a health dot -- and a popover (hover, or tap on a phone) with
+    // its stats and the play actions. GET /membrane/toybox/state every DOCK_MS
+    // while the page is visible; the actions go through _onToyPoke.
+    _dockStart() {
+      clearInterval(this._dockT);
+      this._dockT = setInterval(() => this._dockTick(), DOCK_MS);
+      this._dockTick();
+    }
+
+    async _dockTick() {
+      const c = this._chat;
+      if (document.hidden || this._dockBusy || !c || typeof c._toyState !== "function") return;
+      this._dockBusy = true;
+      try {
+        const toys = await c._toyState();
+        if (toys) this._paintDock(toys);
+      } finally { this._dockBusy = false; }
+    }
+
+    _paintDock(toys) {
+      const c = this._chat, d = this._toyDock, ul = this._toyDockL;
+      if (!d || !ul || typeof c._toyDockItem !== "function") return;
+      this._dockToys = toys;
+      d.hidden = !toys.length;
+      if (!toys.length) { this._dockClose(); return; }
+      const sig = toys.map((t) => t.name + "|" + t.kind).join("\n");
+      if (sig !== this._dockSig) { ul.innerHTML = c._toyDockHtml(toys); this._dockSig = sig; }
+      for (const t of toys) {
+        const btn = ul.querySelector('button[data-dock-toy="' + CSS.escape(t.name) + '"]');
+        if (!btn) continue;
+        const it = c._toyDockItem(t);
+        const g = btn.querySelector(".g");
+        if (g.innerHTML !== it.glyph) g.innerHTML = it.glyph;
+        btn.setAttribute("aria-label", it.label);
+        btn.title = it.label + (it.badge ? " · " + it.badge.title : "");
+        btn.querySelector(".hd").className = "hd " + it.health;
+        const b = btn.querySelector(".bdg");
+        if (it.badge && it.badge.fresh) b.textContent = it.badge.text;
+        b.classList.toggle("fresh", !!(it.badge && it.badge.fresh));
+      }
+      if (this._dockCur) this._dockPaintPop();
+    }
+
+    _dockToy(name) { return (this._dockToys || []).find((t) => t.name === name) || null; }
+
+    /** Open the popover on a toy (from its icon). */
+    _dockOpen(name, btn) {
+      if (!name || !btn) return;
+      clearTimeout(this._dockHideT);
+      if (this._dockCur !== name) {
+        for (const b of this._toyDockL.querySelectorAll("button[data-dock-toy]")) b.setAttribute("aria-expanded", "false");
+        this._dockCur = name;
+        this._dockPopHtml = null;
+      }
+      btn.setAttribute("aria-expanded", "true");
+      this._dockBtnEl = btn;
+      this._dockPop.hidden = false;
+      this._dockPaintPop();
+      this._dockPlace();
+    }
+
+    /** Beside its icon, kept on screen (its height changes with a poke's result). */
+    _dockPlace() {
+      const btn = this._dockBtnEl, p = this._dockPop;
+      if (!btn || !p || p.hidden) return;
+      const r = btn.getBoundingClientRect();
+      p.style.left = Math.round(r.right + 8) + "px";
+      p.style.top = Math.round(Math.max(8, Math.min(r.top - 6, innerHeight - p.offsetHeight - 8))) + "px";
+    }
+
+    _dockPaintPop() {
+      const t = this._dockToy(this._dockCur), p = this._dockPop, c = this._chat;
+      if (!t) { this._dockClose(); return; }
+      const html = c._toyPopoverHtml(t, (this._dockRes || {})[t.name]);
+      if (html === this._dockPopHtml) return;
+      const focused = this.shadowRoot.activeElement;
+      if (focused && p.contains(focused) && this._dockPopHtml) return;   // never yank a button from under the keyboard
+      p.innerHTML = html; this._dockPopHtml = html;
+      p.setAttribute("aria-label", t.name);
+      this._dockPlace();
+    }
+
+    _dockClose(focus) {
+      clearTimeout(this._dockHideT);
+      if (!this._dockPop || this._dockPop.hidden) { this._dockCur = null; return; }
+      this._dockPop.hidden = true;
+      if (this._dockBtnEl) {
+        this._dockBtnEl.setAttribute("aria-expanded", "false");
+        if (focus) this._dockBtnEl.focus();
+      }
+      this._dockCur = null; this._dockPopHtml = null;
+    }
+
+    _dockHideSoon() {
+      clearTimeout(this._dockHideT);
+      this._dockHideT = setTimeout(() => {
+        const a = this.shadowRoot.activeElement;
+        if (a && this._dockPop.contains(a)) return;          // the keyboard is in it
+        this._dockClose();
+      }, 350);
+    }
+
+    /** The phone's 🧸: expand or collapse the dock (remembered per browser). */
+    _toggleDock(on) {
+      const d = this._toyDock; if (!d) return;
+      on = on == null ? !d.classList.contains("open") : !!on;
+      d.classList.toggle("open", on);
+      this._dockBtn.setAttribute("aria-expanded", on ? "true" : "false");
+      lsSet(LS_DOCK, on ? "1" : "0");
+      if (!on) this._dockClose();
+    }
 
     // PLAY WITH SELF (#244): a toy's play button (data-poke-toy / -action /
     // -arg, panel.js toyButtonsHtml) -> the chat's _toyPoke, the panel's ONE
@@ -956,6 +1247,17 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       let out;
       try { out = await c._toyPoke(toy, action, arg); } catch (err) { out = { ok: false, error: String(err) }; }
       btn.disabled = false;
+      const say = out.ok
+        ? "✓ " + action + " " + toy + (out.block ? " block " + out.block : "") + " → " + JSON.stringify(out.reading || {}) + " (by " + out.by + ")"
+        : "✗ " + (out.error || "the poke failed");
+      if (this._dockPop && this._dockPop.contains(btn)) {   // #249: the dock's popover shows it inline
+        this._dockRes = this._dockRes || {};
+        this._dockRes[toy] = { ok: !!out.ok, text: say };
+        this._dockPopHtml = null;
+        this._dockPaintPop();
+        if (out.ok) this._dockTick();
+        return;
+      }
       const el = this._spPlay;
       if (el) {
         el.hidden = false;
@@ -1151,17 +1453,21 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <span class="status"></span>
         </div>
         <nav class="hamenu glass" role="menu"></nav>
-        <button class="babybtn" aria-label="self: what it is doing and its report card" aria-expanded="false" aria-controls="selfpanel"
-                title="self (#161): what it is doing now, its report card, and its toys to play with">👶</button>
-        <aside class="selfpanel glass" id="selfpanel" aria-label="self" hidden>
+        <button class="babybtn" aria-label="self: its character sheet and what it is doing" aria-expanded="false" aria-controls="selfpanel"
+                title="self (#161): its character sheet -- level, attributes, quest, growth, toys, the others it met -- and what it is doing now">👶</button>
+        <aside class="selfpanel glass" id="selfpanel" aria-label="self's character sheet" hidden>
           <div class="sphead"><span class="sptitle">👶 self</span><button class="spx" aria-label="close self's panel" title="Close">×</button></div>
           <div class="spxp"></div>
-          <h3>what it is doing now</h3>
-          <ol class="spact"><li class="sl none">…</li></ol>
-          <h3>report card</h3>
-          <div class="spcard"></div>
+          <div class="sheet spcard"></div>
+          <details class="sec" data-sec="activity" data-was="0"><summary><span class="stt">Activity</span><span class="sth">live</span></summary>
+            <div class="secb"><ol class="spact"><li class="sl none">…</li></ol></div></details>
           <p class="spplay" aria-live="polite" hidden></p>
         </aside>
+        <div class="toydock" hidden>
+          <button type="button" class="dockbtn" aria-label="self's toys" aria-expanded="false" aria-controls="toydockl" title="self's toys">🧸</button>
+          <ul class="dkl" id="toydockl" aria-label="self's toys: hover or tap one to see it and play"></ul>
+        </div>
+        <div class="dkpop glass" role="dialog" aria-label="a toy" hidden></div>
         <div class="chat glass"><ai-terminal-panel overlay></ai-terminal-panel></div>
         <div class="orb" aria-hidden="true"><canvas class="wave" width="560" height="140"></canvas></div>
         <div class="orbtext" aria-live="polite"></div>
@@ -1288,6 +1594,42 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._selfPanel.addEventListener("keydown", (e) => {
         if (e.key === "Escape") { e.stopPropagation(); this._toggleSelfPanel(false); this._babyBtn.focus(); }
       });
+      // #249: the sheet's sections (open or closed, remembered per browser)
+      try { this._sheetOpen = JSON.parse(lsGet(LS_SELFSHEET, "{}")) || {}; } catch (e) { this._sheetOpen = {}; }
+      if (typeof this._sheetOpen !== "object" || Array.isArray(this._sheetOpen)) this._sheetOpen = {};
+      this._spActSec = $('details[data-sec="activity"]');
+      if (this._sheetOpen.activity) { this._spActSec.setAttribute("data-was", "1"); this._spActSec.open = true; }
+      this._selfPanel.addEventListener("toggle", (e) => this._onSheetToggle(e), true);
+      // #249: the toy dock under the 👶 tab
+      this._toyDock = $(".toydock"); this._toyDockL = $(".dkl"); this._dockBtn = $(".dockbtn"); this._dockPop = $(".dkpop");
+      this._dockBtn.addEventListener("click", () => this._toggleDock());
+      if (lsGet(LS_DOCK, "0") === "1") this._toggleDock(true);
+      this._toyDockL.addEventListener("click", (e) => {
+        const b = e.target.closest("button[data-dock-toy]"); if (!b) return;
+        const name = b.getAttribute("data-dock-toy");
+        if (this._dockCur === name && !this._dockPop.hidden && !this._dockHover) this._dockClose();
+        else this._dockOpen(name, b);
+        this._dockHover = false;
+      });
+      if (window.matchMedia && matchMedia("(hover: hover)").matches) {
+        this._toyDockL.addEventListener("mouseover", (e) => {
+          const b = e.target.closest("button[data-dock-toy]");
+          if (b) { this._dockHover = true; this._dockOpen(b.getAttribute("data-dock-toy"), b); }
+        });
+        this._toyDockL.addEventListener("mouseleave", () => this._dockHideSoon());
+        this._dockPop.addEventListener("mouseenter", () => clearTimeout(this._dockHideT));
+        this._dockPop.addEventListener("mouseleave", () => this._dockHideSoon());
+      }
+      this._dockPop.addEventListener("click", (e) => this._onToyPoke(e));        // the play actions
+      for (const el of [this._toyDock, this._dockPop]) {
+        el.addEventListener("keydown", (e) => { if (e.key === "Escape" && this._dockCur) { e.stopPropagation(); this._dockClose(true); } });
+      }
+      root.addEventListener("pointerdown", (e) => {
+        if (!this._dockCur) return;
+        const path = e.composedPath();
+        if (!path.includes(this._toyDock) && !path.includes(this._dockPop)) this._dockClose();
+      });
+      this._dockStart();
       this._toggleSelfPanel(lsGet(LS_SELFPANEL, "0") === "1");
       $(".x").addEventListener("click", () => { this._card.classList.remove("open"); if (this._v3) this._v3.select(null); this._select(null); });
       $(".go").addEventListener("click", () => { if (this._v3 && this._sel) { this._lastTouch = performance.now(); this._v3.flyTo(this._sel.id); } });
@@ -1323,7 +1665,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const host = this._host3d, root = this.shadowRoot;
       if (!host || !root) return [];
       const h = host.getBoundingClientRect(), out = [];
-      for (const el of [this._chatBox, this._selfPanel, root.querySelector(".top"), root.querySelector(".voice"), this._brainEl]) {
+      for (const el of [this._chatBox, this._selfPanel, this._toyDock, this._dockPop, root.querySelector(".top"), root.querySelector(".voice"), this._brainEl]) {
         if (!el || el.hidden || el.classList.contains("hidden")) continue;
         const r = el.getBoundingClientRect();
         if (r.width > 0 && r.height > 0) out.push({ x: r.left - h.left, y: r.top - h.top, w: r.width, h: r.height });

@@ -3047,6 +3047,17 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 psrv = getattr(runner, "srv", None) if runner is not None else None
                 _q = urllib.parse.parse_qs(self.path.partition("?")[2])
                 self._json_out({"lines": _SELF.recent(psrv, (_q.get("n") or [30])[0]) if psrv is not None else []})
+            elif path == "/membrane/self/sheet":
+                # #249: self's character sheet -- the 👶 panel's numbers,
+                # computed from the record + status() + the toybox, cached
+                # ~30 s (read-only; the gate above ran first)
+                from . import self_sheet as _SHEET
+                self._json_out(_SHEET.sheet(getattr(runner, "srv", None) if runner is not None else None))
+            elif path == "/membrane/toybox/state":
+                # #249: the toy dock's live source -- the toys alone, cheap
+                # enough to poll every few seconds (read-only, gated)
+                from . import self_sheet as _SHEET
+                self._json_out(_SHEET.dock(getattr(runner, "srv", None) if runner is not None else None))
             elif path == "/agent":
                 self._json_out(_agent_shapes(getattr(self, "seat", None)))
             elif path == "/command":
@@ -3105,6 +3116,9 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 else:
                     _by = str(b.get("person") or "")
                 out = _TB.poke(str(b.get("toy") or ""), str(b.get("action") or ""), b.get("arg"), by=_by)
+                if out.get("ok"):
+                    from . import self_sheet as _SHEET           # #249: the dock shows the poke at once
+                    _SHEET.forget_dock(getattr(runner, "srv", None) if runner is not None else None)
                 return self._json_out(out, code=200 if out.get("ok") else 400)
             if path in ("/membrane/jsexec/register", "/membrane/jsexec/result"):
                 # THE SEAT'S JS (jsexec.py): an opted-in tab registers, answers its jobs
