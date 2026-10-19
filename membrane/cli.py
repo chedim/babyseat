@@ -32,6 +32,8 @@
                           (MRR + hit@k across read modes; a COPY of the field)
     membrane erase-field  stop the seat and move the field + entity
                           side-index out of the way (--yes; recoverable)
+    membrane toybox       self's toys, the built-in kit: list | add <kind>
+                          | remove | reset | migrate (--dry-run / --yes)
 
 Per-project DATA lives in ./.membrane/ (field, audit, review queue, logs) --
 auto-created on first run per directory. Skills are PROJECT-SCOPED on purpose
@@ -593,6 +595,8 @@ def main() -> None:
         "             modes); runs against a COPY of the field\n"
         "  erase-field  stop the seat and move the field + entity side-index\n"
         "             out of the way (--yes; recoverable, timestamped)\n"
+        "  toybox     self's toys, the built-in kit: list | add <kind> [--name\n"
+        "             N] [--param k=v] | remove <name> | reset <name> | migrate\n"
         "\n"
         "Everything after the subcommand is forwarded verbatim to the\n"
         "underlying module.\n"
@@ -607,7 +611,7 @@ def main() -> None:
                    "demo", "reset", "install", "doctor", "connect",
                    "ingest", "backfill", "codegraph", "update", "move",
                    "migrate", "auth", "serve", "standalone", "stop",
-                   "stats", "bench", "erase-field", "token"):
+                   "stats", "bench", "erase-field", "token", "toybox"):
         if cmd is None and not argv:
             print(__doc__)
             return
@@ -624,6 +628,11 @@ def main() -> None:
         raise SystemExit(token_main(forwarded))
     if cmd == "update":
         raise SystemExit(update_main())
+    if cmd == "toybox":
+        # SELF'S TOYS (#239): the built-in kit, in this project's data dir
+        os.environ.setdefault("MEMBRANE_DATA_DIR", str(DATA_DIR))
+        from . import toybox as _TB
+        raise SystemExit(_TB.cli_main(forwarded))
     if cmd == "install":
         if args.force:
             forwarded = [a for a in forwarded if a != "--force"]

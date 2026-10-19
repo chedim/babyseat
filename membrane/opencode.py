@@ -1952,6 +1952,8 @@ def main() -> None:
                 _JS.bind(srv)
                 from . import self_loop as _SELF  # #161: self -- born off, the operator's switch wakes it
                 _SELF.bind(srv)
+                from . import toybox as _TB       # #239: self's toys, the built-in kit (toybox.add/list/...)
+                _TB.bind(srv)
                 _SELF.start(srv)
             except Exception as e:
                 print(f"[seat] seat panel not started ({e})", file=sys.stderr)

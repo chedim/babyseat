@@ -927,6 +927,11 @@ def run_command_entity(fld, est, mem, command: str,
             from . import self_loop as _SELF
             _r = _SELF.from_command(cmd[len("self::"):].strip())
             rc, text = _r["rc"], _r["text"]
+        elif cmd.startswith("toybox::"):
+            # SELF'S TOYS (#239, toybox.py): the built-in kit, never a shell
+            from . import toybox as _TB
+            _r = _TB.from_command(cmd[len("toybox::"):].strip())
+            rc, text = _r["rc"], _r["text"]
         elif cmd.startswith("seat::restart"):
             # ARGUS RESTARTS THE SEAT (restarts.py): never a shell
             from . import restarts as _RS
@@ -2329,7 +2334,7 @@ def substitute_args(cmd: str, args: dict | None) -> str:
 
 
 _NO_SHELL = ("llm::unwake", "llm.unwake", "llm::wake", "llm.wake",
-             "llm::call", "seat::restart", "js::", "self::")
+             "llm::call", "seat::restart", "js::", "self::", "toybox::")
 
 def _is_no_shell(act: str) -> bool:
     """The no-shell builtin dialects (the elif chain above in
