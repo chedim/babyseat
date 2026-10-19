@@ -1861,6 +1861,12 @@ class TurnRunner:
 
         err_done = False
         rounds = 0
+        # THE REPEATED REFUSAL (issue #274): qwen3:14b sent the same nameless
+        # call seven rounds running, each refused the same way, and the person
+        # waited ten minutes for nothing. A call refused before in this turn is
+        # told so, and the next round goes out without tools: it can only answer.
+        _refused: set = set()
+        _text_only = False
         while not err_done and rounds < MAX_ROUNDS:
             rounds += 1
             self._turn_activity[sid] = time.time()   # THE ROUND'S TOUCH
@@ -1962,7 +1968,7 @@ class TurnRunner:
             else:
                 tools = _openai_tools_for((self._agents or {}).get(sid))
             lane = _lane_of((self._agents or {}).get(sid))
-            if tools:
+            if tools and not _text_only:
                 body["tools"] = tools
             mkpart({"type": "step-start"})
             live = {"text": None, "reasoning": None}
@@ -2214,6 +2220,13 @@ class TurnRunner:
                             output = _help
                         elif _bad is not None:
                             output = f"Error: {_bad}"
+                            _key = (name, json.dumps(args, sort_keys=True, default=str), _bad)
+                            if _key in _refused:
+                                output += (" -- this exact call already failed in this turn and was "
+                                           "not run again: answer the person now in plain text, from "
+                                           "what you already have")
+                                _text_only = True
+                            _refused.add(_key)
                         elif _refusal is not None:
                             output = f"Refused: {_refusal}"
                             try:
