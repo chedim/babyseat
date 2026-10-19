@@ -715,10 +715,92 @@ function zooCards(rows, now) {
     : '<p class="znone">no seats yet -- add one in the integration\'s options</p>';
 }
 
+// THE RUNG CELEBRATION (#289, the operator: "a rung is a milestone the
+// operator waits hours for; it should be unmissable"): a pass gets ~3 s over
+// the field (the amoeba bounces and glows, a burst in its colours, a caption;
+// a still banner under reduced motion), a short synthesized chime and a
+// browser notification -- once per rung per viewer. The 🔔 in the top bar
+// mutes both, remembered per viewer; its first tap asks for notifications.
+const LS_BELL = "membrane.home.bell";
+const CELEBRATE_MS = 3200;
+// the amoeba's own colours (field3d.js: its mint body, white core, gold halo)
+const BLURP_COLOURS = ["#7cf0c8", "#ffffff", "#d4a017", "#ffe28c", "#5ad17a"];
+
+/** Where this viewer remembers the last rung it celebrated: per seat, per self. */
+function rungKey(seat, self) { return "membrane.home.rung." + String(seat || "") + "." + String(self || ""); }
+
+/** A pass of rung n that a later rung_void line takes back (#254), by the record's own lines. */
+function rungVoided(lines, n) {
+  let pass = -Infinity, nul = -Infinity;
+  for (const r of lines || []) {
+    if (!r || Number(r.rung) !== n) continue;
+    const t = Number(r.ts) || 0;
+    if (r.kind === "rung") pass = Math.max(pass, t);
+    else if (r.kind === "rung_void") nul = Math.max(nul, t);
+  }
+  return nul > -Infinity && nul >= pass;
+}
+
+/** THE ONCE-PER-RUNG RULE: `level` is the seat's passed rung (status().rung,
+ *  void-aware), `last` the last one this viewer celebrated (null: never here).
+ *  A first visit remembers the level and celebrates no backlog; a higher level
+ *  celebrates once (the highest: a pass reached while away shows on the next
+ *  visit) unless the record voids it; a lower one (a void applied) is followed
+ *  down quietly, so a later real pass of that rung is news again. */
+function rungToCelebrate(level, last, lines) {
+  const prev = last == null || last === "" || !isFinite(Number(last)) ? null : Number(last);
+  if (level == null || level === "" || !isFinite(Number(level))) return { rung: null, last: prev };
+  const n = Number(level);
+  if (prev == null || n < prev) return { rung: null, last: n };
+  if (n === prev || rungVoided(lines, n)) return { rung: null, last: prev };
+  return { rung: n, last: n };
+}
+
+/** The celebration's caption. */
+function celebrateText(name, n, rungName) {
+  return rungNotifyText(name, n, rungName) + "!";
+}
+
+/** The notification's words. */
+function rungNotifyText(name, n, rungName) {
+  return (name || SELF_NAME) + " reached rung " + n + ": " + (rungName || BRAIN_RUNGS[n] || "");
+}
+
+/** The chime: the bell on, and the page has had a user gesture (autoplay rules). */
+function chimeOk(s) { return !!(s && s.on && s.gesture); }
+
+/** The chime's notes (seconds from its start, Hz): a rising major arpeggio, ~1.3 s. */
+function chimeNotes() {
+  return [{ t: 0, f: 784, dur: 0.5 }, { t: 0.11, f: 988, dur: 0.5 }, { t: 0.22, f: 1175, dur: 0.6 }, { t: 0.36, f: 1568, dur: 0.9 }];
+}
+
+/** A notification: the bell on, a secure context, the API, the person's permission. */
+function notifyReady(s) {
+  return !!(s && s.on && s.secure && s.api && s.permission === "granted");
+}
+
+/** The 🔔 toggle: its icon, its title (why notifications can't work here,
+ *  when they can't) and whether its next tap asks for permission instead of
+ *  muting (a tap is the user gesture the browser wants for asking) -- once:
+ *  after that a tap mutes. */
+function bellView(s) {
+  s = s || {};
+  if (!s.on) return { icon: "🔕", on: false, ask: false, title: "rung chime and notifications off · tap to turn on" };
+  const why = !s.api ? "this browser has no notifications"
+    : !s.secure ? "notifications need https or localhost"
+    : s.permission === "denied" ? "notifications are blocked for this site (the browser's site settings)"
+    : s.permission === "granted" ? "notifications on"
+    : s.asked ? "notifications not allowed (asked once: the browser's site settings allow them)" : "";
+  const ask = !why;
+  return { icon: "🔔", on: true, ask,
+           title: "rung chime on · " + (ask ? "tap to allow notifications too" : why + " · tap to mute") };
+}
+
 const HomeLogic = { cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep,
   brainLabel, brainCaption, unlockText, setSelfName, brainKey, brainFresh, actableLine, ACT_FRESH_S, brainTrail, trailAlpha, frameRadius, selfFrame, frameDistance, dampTo,
   freshLook, followsNow, followRates, SELF_HOLD_MS, lookAngles, selfCamAngles,
-  followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit, zooAgo, zooCard, zooCards };
+  followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit, zooAgo, zooCard, zooCards,
+  rungKey, rungVoided, rungToCelebrate, celebrateText, rungNotifyText, chimeOk, chimeNotes, notifyReady, bellView };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
 const HSTYLE = `
@@ -1124,6 +1206,22 @@ const HSTYLE = `
     .chat.hidden ~ .brainline { bottom:64px; }
     .brainline .bl-t { white-space:normal; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
   }
+  /* #289: a rung passed -- over everything, never in the way (a click anywhere dismisses it) */
+  .top .rungbell { padding:6px 8px; }
+  .top .rungbell.off { opacity:.55; }
+  .celebrate { position:absolute; inset:0; z-index:20; pointer-events:none; display:flex; align-items:flex-start; justify-content:center; }
+  .celebrate[hidden] { display:none; }
+  .celebrate canvas { position:absolute; inset:0; width:100%; height:100%; }
+  .celebrate .cb-t { position:relative; margin-top:18vh; max-width:calc(100% - 32px); padding:12px 22px; border-radius:16px;
+                     font-size:22px; font-weight:700; text-align:center; color:#1b1404;
+                     background:linear-gradient(135deg, #ffe28c, #d4a017 55%, #7cf0c8);
+                     box-shadow:0 0 0 2px rgba(255,255,255,.55), 0 8px 40px rgba(212,160,23,.55); }
+  @media (prefers-reduced-motion: no-preference) {
+    .celebrate:not(.still) .cb-t { animation:cbpop 3.2s ease-out both; }
+    @keyframes cbpop { 0% { opacity:0; transform:scale(.6); } 12% { opacity:1; transform:scale(1.08); }
+                       20% { transform:scale(1); } 85% { opacity:1; } 100% { opacity:0; transform:translateY(-12px); } }
+  }
+  @media (max-width: 760px) { .celebrate .cb-t { font-size:17px; margin-top:12vh; } }
 `;
 const BRAIN_MS = 3000;                            // #237: the brain's record poll, only while the page is visible
 const LS_SELFPANEL = "membrane.home.selfpanel";   // #230: the 👶 panel open ("1") or closed, per browser
@@ -1470,6 +1568,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._brainBusy = true;
       try {
         const lines = await c._selfRecent(30);
+        if (lines) this._brainLines = lines;               // #289: the rung rule reads its void lines
         if (!lines || !this._v3) return;
         const first = this._brainSeen == null;
         const out = brainFresh(lines, this._brainSeen || []);
@@ -1522,6 +1621,152 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       el.classList.remove("fresh"); void el.offsetWidth; el.classList.add("fresh");
     }
     // ---- end of the brain on the screen
+
+    // THE RUNG CELEBRATION (#289): the seat's passed rung (status().rung, the
+    // panel's seat state: void-aware, kept live by its self.cycle events)
+    // against the last one this viewer celebrated (localStorage, per seat and
+    // per self); rungToCelebrate decides. A hidden page notifies at once and
+    // keeps the overlay for when it is looked at again.
+    _rungTick() {
+      const c = this._chat, st = c && c._seat, s = st && st.self;
+      if (!s || typeof s.rung !== "number") return;
+      const key = rungKey(SEAT, st.self_name || "Blurp");
+      const out = rungToCelebrate(s.rung, lsGet(key, null), this._brainLines || []);
+      if (out.last != null) lsSet(key, String(out.last));
+      if (out.rung != null) {
+        const name = st.self_name || SELF_NAME, rn = s.rung === out.rung && s.rung_name ? s.rung_name : BRAIN_RUNGS[out.rung];
+        this._notifyRung(name, out.rung, rn, key);
+        this._cbPending = { name, rung: out.rung, rungName: rn };
+      }
+      if (this._cbPending && !document.hidden) {
+        const p = this._cbPending; this._cbPending = null;
+        this._celebrate(p.name, p.rung, p.rungName);
+      }
+    }
+
+    _notifyState() {
+      const api = typeof Notification !== "undefined";
+      return { on: !!this._bellOn, secure: !!window.isSecureContext, api, permission: api ? Notification.permission : "default",
+               asked: lsGet(LS_BELL + ".asked", "0") === "1",
+               gesture: !!(this._gesture || (navigator.userActivation && navigator.userActivation.hasBeenActive)) };
+    }
+
+    _paintBell() {
+      const b = this._bell; if (!b) return;
+      const v = bellView(this._notifyState());
+      b.textContent = v.icon;
+      b.title = SELF_NAME + "'s rungs: " + v.title;
+      b.classList.toggle("off", !v.on);
+      b.setAttribute("aria-pressed", v.on ? "true" : "false");
+    }
+
+    /** The 🔔: on with notifications still askable -> ask (this click is the
+     *  gesture the browser wants); otherwise mute / unmute. */
+    _onBell() {
+      this._gesture = true;
+      const v = bellView(this._notifyState());
+      if (v.ask) {
+        lsSet(LS_BELL + ".asked", "1");                     // once: a dismissed prompt is an answer too
+        Promise.resolve(Notification.requestPermission()).catch(() => null).then(() => this._paintBell());
+      } else {
+        this._bellOn = !this._bellOn;
+        lsSet(LS_BELL, this._bellOn ? "1" : "0");
+      }
+      if (this._bellOn) this._audio();                     // unlocked by this tap, for the chime later
+      this._paintBell();
+    }
+
+    _audio() {
+      try {
+        if (!this._actx) { const C = window.AudioContext || window.webkitAudioContext; if (!C) return null; this._actx = new C(); }
+        if (this._actx.state === "suspended") this._actx.resume().catch(() => {});
+        return this._actx;
+      } catch (e) { return null; }
+    }
+
+    /** A short chime, synthesized (no asset files): only with the bell on and after a gesture. */
+    _chime() {
+      if (!chimeOk(this._notifyState())) return;
+      const ctx = this._audio(); if (!ctx) return;
+      const t0 = ctx.currentTime + 0.03, out = ctx.createGain();
+      out.gain.value = 0.18; out.connect(ctx.destination);
+      for (const n of chimeNotes()) {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = "triangle"; o.frequency.value = n.f;
+        g.gain.setValueAtTime(0.0001, t0 + n.t);
+        g.gain.exponentialRampToValueAtTime(1, t0 + n.t + 0.015);
+        g.gain.exponentialRampToValueAtTime(0.0001, t0 + n.t + n.dur);
+        o.connect(g); g.connect(out);
+        o.start(t0 + n.t); o.stop(t0 + n.t + n.dur + 0.05);
+      }
+    }
+
+    _notifyRung(name, n, rungName, key) {
+      if (!notifyReady(this._notifyState())) return;
+      try {
+        // a tag per seat and rung: the browser shows one, however many tabs see it
+        new Notification(rungNotifyText(name, n, rungName), { tag: key + "." + n, icon: SEAT_LOGO,
+          body: "a new rung on the ladder -- open membrane home to see it" });
+      } catch (e) { /* a browser that only notifies from a service worker */ }
+    }
+
+    /** ~3 s over the field: the caption, a burst in the amoeba's colours, the
+     *  amoeba bouncing and glowing; a still banner under reduced motion. Never
+     *  in the way (pointer-events none); any click ends it. */
+    _celebrate(name, n, rungName) {
+      const el = this._cb; if (!el) return;
+      const still = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+      this._cbText.textContent = celebrateText(name, n, rungName);
+      el.classList.toggle("still", still);
+      el.hidden = false;
+      const t = this._cbText; t.style.animation = "none"; void t.offsetWidth; t.style.animation = "";   // restart the pop
+      this._chime();
+      if (!still && this._v3 && typeof this._v3.selfCelebrate === "function") this._v3.selfCelebrate();
+      if (!still) this._burst();
+      clearTimeout(this._cbT);
+      this._cbT = setTimeout(() => this._celebrateEnd(), still ? 6000 : CELEBRATE_MS);
+    }
+
+    _celebrateEnd() {
+      if (!this._cb || this._cb.hidden) return;
+      clearTimeout(this._cbT);
+      cancelAnimationFrame(this._cbRaf);
+      this._cb.hidden = true;
+    }
+
+    /** The particle burst: from the amoeba when it is on the screen, else the middle. */
+    _burst() {
+      const cv = this._cbCanvas; if (!cv) return;
+      const W = cv.clientWidth || innerWidth, H = cv.clientHeight || innerHeight, dpr = Math.min(2, window.devicePixelRatio || 1);
+      cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+      const g = cv.getContext("2d"); if (!g) return;
+      let ox = W / 2, oy = H * 0.45;
+      const v = this._v3, sp = v && typeof v.selfScreen === "function" ? v.selfScreen() : null;
+      if (sp && sp[0] >= 0 && sp[0] <= W && sp[1] >= 0 && sp[1] <= H) { ox = sp[0]; oy = sp[1]; }
+      const ps = [];
+      for (let i = 0; i < 140; i++) {
+        const a = Math.random() * 2 * Math.PI, sp2 = 2 + Math.random() * 7;
+        ps.push({ x: ox, y: oy, vx: Math.cos(a) * sp2, vy: Math.sin(a) * sp2 - 2.5, r: 2 + Math.random() * 3.5,
+                  c: BLURP_COLOURS[i % BLURP_COLOURS.length], spin: Math.random() * 6 });
+      }
+      const t0 = performance.now();
+      cancelAnimationFrame(this._cbRaf);
+      const step = (now) => {
+        const u = (now - t0) / CELEBRATE_MS;
+        g.setTransform(dpr, 0, 0, dpr, 0, 0);
+        g.clearRect(0, 0, W, H);
+        if (u >= 1 || this._cb.hidden) return;
+        g.globalAlpha = Math.max(0, 1 - u * u);
+        for (const p of ps) {
+          p.vy += 0.12; p.vx *= 0.99; p.x += p.vx; p.y += p.vy;
+          g.fillStyle = p.c;
+          g.beginPath(); g.arc(p.x, p.y, p.r * (1 + 0.25 * Math.sin(p.spin + now / 90)), 0, 2 * Math.PI); g.fill();
+        }
+        this._cbRaf = requestAnimationFrame(step);
+      };
+      this._cbRaf = requestAnimationFrame(step);
+    }
+    // ---- end of the rung celebration
 
     // THE 🦠 ZOO (#283): the cards refresh only while it is open
     _toggleZoo(on) {
@@ -1664,6 +1909,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <button class="autobtn" title="auto-chat" aria-label="auto-chat">▶</button>
           <select class="selfpick" title="${nm} (#161): how far it may grow (the top rung; off = asleep)"><option value="0">🌱 off</option></select>
           <span class="selfstat" title="where ${nm} is now: its rung, the bar toward the next, what it waits on"></span>
+          <button class="rungbell" aria-label="${nm}'s rungs: the chime and notifications" aria-pressed="true">🔔</button>
           <button class="tilt" hidden title="Turn the view by tilting the device">📱</button>
           <span class="sbox"><input class="q" placeholder="search entities…" autocomplete="off"><div class="hits glass"></div></span>
           <span class="status"></span>
@@ -1704,7 +1950,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         </div>
         <div class="card glass"><div class="t"></div><div class="k"></div>
           <div class="row"><button class="ask">Ask about it</button><button class="go">Fly there</button><button class="x">×</button></div></div>
-        <div class="tip glass"></div>`;
+        <div class="tip glass"></div>
+        <div class="celebrate" hidden aria-live="polite"><canvas class="cb-c"></canvas><div class="cb-t"></div></div>`;
       this.shadowRoot.append(s, root);
       const $ = (q) => root.querySelector(q);
       this._host3d = $(".field"); this._msgEl = $(".msg"); this._statusEl = $(".status");
@@ -1805,7 +2052,19 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         });
       });
       this._paintSelf();
-      this._selfT = setInterval(() => this._paintSelf(), 1500);
+      this._selfT = setInterval(() => { this._paintSelf(); this._rungTick(); }, 1500);
+      // #289: the 🔔 (the rung chime + notifications) and the celebration
+      this._bell = $(".rungbell"); this._cb = $(".celebrate"); this._cbText = $(".cb-t"); this._cbCanvas = $(".cb-c");
+      this._bellOn = lsGet(LS_BELL, "1") !== "0";
+      this._bell.addEventListener("click", () => this._onBell());
+      this._paintBell();
+      if (!this._gestureOn) {
+        // the chime waits for the page's first gesture (autoplay rules); any click dismisses the celebration
+        this._gestureOn = () => { this._gesture = true; };
+        window.addEventListener("pointerdown", this._gestureOn, { capture: true, passive: true });
+        window.addEventListener("keydown", this._gestureOn, { capture: true, passive: true });
+      }
+      root.addEventListener("pointerdown", () => this._celebrateEnd(), { capture: true, passive: true });
       // the 👶 panel (#230): read-only, remembered per browser
       this._babyBtn = $(".babybtn"); this._selfPanel = $(".selfpanel");
       this._spXp = $(".spxp"); this._spAct = $(".spact"); this._spCard = $(".spcard"); this._spPlay = $(".spplay");

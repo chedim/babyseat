@@ -152,6 +152,28 @@ Lv 6 · meet an other  [██████░░░░] 64%
   glows once, and the caption reads `⬆ level up` for a few seconds. With
   *reduce motion* on, the gold and the caption stay and nothing pulses.
 
+**A rung celebrated** (#289): on membrane home a pass is unmissable -- about
+3 s over the field (the amoeba glows and hops, a burst of particles in its
+mint and gold, the caption "Blurp reached rung 7: take turns!"), a short
+synthesized chime (WebAudio, no asset files) and a browser notification
+("Blurp reached rung 7: take turns", one per rung: tagged). With *reduce
+motion* on it is a still banner. It never blocks the page (a click anywhere
+ends it). The **🔔 / 🔕** in the top bar mutes the chime and the notifications,
+remembered per viewer; its first tap asks for notification permission (the
+browser wants a click for that) and later taps mute. The chime waits for the
+page's first click or key (autoplay rules). Notifications need a secure
+context -- https, or localhost: a laptop on `http://<lan-ip>:4096` gets the
+celebration and the chime but no notifications, and the 🔔's tooltip says so.
+
+**Once per rung per viewer**: the page compares the seat's passed rung
+(status's `rung`, which a voided pass never raises) with the last one this
+browser celebrated (localStorage, per seat and per self's name). A pass while
+the page is open celebrates; one reached while away celebrates once on the
+next visit (the highest, once); a reload never re-fires; a voided pass never
+celebrates; and a browser's first visit to a seat already past rungs 1-6
+only remembers where it is. A hidden tab notifies at once and saves the
+overlay for when it is looked at.
+
 **The skill at a glance** (#249): under the bar, the number the bar's test
 reads against the line it has to beat, e.g. `skill +0.03 / +0.05` at rung 7
 (the reply rate its timing gains over a timing-blind push, which must reach
