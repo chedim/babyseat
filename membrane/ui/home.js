@@ -102,7 +102,7 @@ function brainLabel(eid, me) {
 }
 
 const BRAIN_RUNGS = { 0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart", 4: "patience",
-  5: "notice the world changed", 6: "meet an other", 7: "take turns", 8: "understand an other",
+  5: "notice the world changed", 6: "meet an other", 7: "time its turn", 8: "expect a reply",
   9: "recognize itself", 10: "change itself", 11: "speak" };   // #258: the ladder flip
 // #295, THE SKILL TREE: each achievement's id and the rung number its test kept on the
 // record (membrane/self_loop.py ACHIEVEMENTS) -- names for its lines, and the old per-rung
@@ -1144,6 +1144,23 @@ const HSTYLE = `
   .selfpanel .attr .an { grid-column:1 / -1; font-size:11px; opacity:.72; }
   .selfpanel .attr.st-slipping .an { color:var(--warning-color,#ffa600); opacity:1; }
   .selfpanel .attr.st-locked, .selfpanel .attr.none { opacity:.65; }
+  /* #300: the traits' trend lines and the skills it is learning now, side by side */
+  .selfpanel .attr .trspark { grid-column:1 / -1; width:100%; height:22px; }
+  .selfpanel .trspark .skl { fill:none; stroke:var(--primary-color,#3477d6); stroke-width:1.5; stroke-linejoin:round; vector-effect:non-scaling-stroke; opacity:.8; }
+  .selfpanel .learn { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; }
+  .selfpanel .lskill { min-width:0; padding:8px 10px; border-radius:10px;
+                       border:1px solid color-mix(in srgb, var(--divider-color,#888) 55%, transparent); }
+  .selfpanel .lskill .abar { position:relative; height:8px; border-radius:999px; margin:2px 0 6px;
+                             background:color-mix(in srgb, var(--divider-color,#888) 55%, transparent); }
+  .selfpanel .lskill .skill { display:grid; grid-template-columns:auto 1fr; align-items:center; gap:2px 10px; margin-top:6px;
+                              padding:6px 8px; border-radius:10px; background:color-mix(in srgb, var(--primary-text-color,#ddd) 6%, transparent); }
+  .selfpanel .lskill .skill .skv { font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .selfpanel .lskill .skill.neg .skv { color:var(--warning-color,#ffa600); }
+  .selfpanel .lskill .skill.met .skv { color:var(--sheet-ok); }
+  .selfpanel .lskill .skill .skm { font-size:11.5px; line-height:1.35; min-width:0; }
+  .selfpanel .lskill .skill .skspark { grid-column:1 / -1; width:100%; height:28px; }
+  .selfpanel .lskill .skspark .skl { fill:none; stroke:var(--primary-color,#3477d6); stroke-width:1.8; stroke-linejoin:round; vector-effect:non-scaling-stroke; }
+  .selfpanel .lskill .skspark .skp { stroke:currentColor; stroke-opacity:.55; vector-effect:non-scaling-stroke; }
   .selfpanel .qh { font-weight:600; margin-bottom:4px; }
   .selfpanel .crit { list-style:none; padding:0; }
   .selfpanel .crit li { padding:2px 0; }

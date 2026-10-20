@@ -393,3 +393,20 @@ def test_the_docs_say_so():
     assert "### The 🌱 chooser" not in g
     d = (ROOT / "doctrine.md").read_text()
     assert "accept" in d.split("SELF (#161)", 1)[1].split("\n", 1)[0]
+
+
+@NODE
+def test_the_cards_learning_now_says_a_skill_waits_on_your_accept():
+    sheet = {"header": {"name": "Blurp", "level": 6, "mode": "on"}, "skills": [
+        {"id": "turns", "name": "time its <b>turn</b>", "bar": 0, "awaiting_accept": True,
+         "waiting_on": "your accept of meet an other", "criteria": []},
+        {"id": "shift", "name": "notice the world changed", "bar": 0.4, "waiting_on": "looks", "criteria": []}]}
+    html = _js(UI / "panel.js", "out = M.selfSheetHtml(%s, {quest: true})" % json.dumps(sheet))
+    assert "🎁 waiting on your accept of meet an other" in html
+    assert "time its &lt;b&gt;turn&lt;/b&gt;" in html                 # escaped
+    assert 'class="lskill awaiting"' in html and "waiting on: looks" in html
+
+
+def test_the_report_card_ladder_says_awaiting_your_accept():
+    js = (UI / "panel.js").read_text()
+    assert "held by the limit" not in js and 'capped: "awaiting your accept"' in js

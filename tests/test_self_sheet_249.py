@@ -285,45 +285,36 @@ class TestGrowth(unittest.TestCase):
 # ---- the attributes and the quest -----------------------------------------------
 
 class TestAttributes(unittest.TestCase):
+    """#300: the attributes are traits of self as a whole (tests/test_self_card_300.py
+    has their formulas); each skill's own score rides on its card while it is learned."""
     @classmethod
     def setUpClass(cls):
         cls.srv = _lived(_seat())
         cls.s = _sheet(cls.srv, T0 + 12 * H)
         cls.a = {x["key"]: x for x in cls.s["attributes"]}
 
-    def test_one_per_built_rung_in_order(self):
-        # #258: Turns is rung 7, Understand moved up to 8
+    def test_the_traits_in_order(self):
         self.assertEqual([x["label"] for x in self.s["attributes"]],
-                         ["Feel", "Reach", "Sort", "Patience", "Notice", "Meet", "Turns", "Understand"])
-        self.assertEqual([x["rung"] for x in self.s["attributes"]], [1, 2, 3, 4, 5, 6, 7, 8])
+                         ["Curiosity", "Insight", "Adaptability", "Focus", "Sociability"])
 
-    def test_each_is_the_measured_number(self):
-        recs = SL._read(self.srv)
-        self.assertAlmostEqual(self.a["feel"]["value"], SL._rung1(recs)["skill"], places=4)
-        self.assertAlmostEqual(self.a["feel"]["value"], 0.6, places=3)  # 1 - 0.04/0.1
-        self.assertEqual(self.a["feel"]["pass"], SL.RUNG1_SKILL)
-        self.assertEqual(self.a["understand"]["pass"], SL.RUNG8_MARGIN)
-        self.assertEqual(self.a["turns"]["pass"], SL.RUNG7_PAY_MARGIN)
-        self.assertIsNone(self.a["turns"]["value"])                 # no timed lines on this record
-        self.assertEqual(self.a["patience"]["better"], "lower")
+    def test_each_skills_number_is_on_its_card(self):
+        k = {x["id"]: x for x in self.s["skills"]}
+        self.assertEqual(list(k), ["turns"])                       # the one it is learning (limit 7)
+        self.assertEqual(k["turns"]["trend"]["pass"], SL.RUNG7_PAY_MARGIN)
+        self.assertIsNone(k["turns"]["trend"]["value"])           # no timed lines on this record
 
     def test_a_negative_skill_is_reported_negative(self):
-        u = self.a["understand"]
-        self.assertLess(u["value"], 0)                              # the model bets wrong every time
-        self.assertFalse(u["met"])
-        self.assertEqual(u["state"], "capped")                      # #295: open once meet is earned; the limit holds it
-        self.assertEqual(u["kind"], "skill")
-        u8 = {x["key"]: x for x in _sheet(_lived8(_seat()), T0 + 12 * H)["attributes"]}["understand"]
-        self.assertLess(u8["value"], 0)
-        self.assertEqual(u8["state"], "current")                    # ...and once it is passed, rung 8 is worked
+        k = {x["id"]: x for x in _sheet(_lived8(_seat()), T0 + 12 * H)["skills"]}["expect"]
+        self.assertLess(k["trend"]["value"], 0)                    # the model bets wrong every time
+        self.assertEqual(k["trend"]["pass"], SL.RUNG8_MARGIN)
 
     def test_a_passed_rung_whose_test_fails_now_is_slipping(self):
-        self.assertEqual(self.a["reach"]["state"], "passed")
-        self.assertTrue(self.a["reach"]["slipping"])                 # no looks at w:fast on this record
-        self.assertFalse(self.a["feel"]["slipping"])
+        sl = {x["id"] for x in self.s["slipping"]}
+        self.assertIn("reach", sl)                                 # no looks at w:fast on this record
+        self.assertNotIn("feel", sl)
 
     def test_nothing_measured_is_none_not_zero(self):
-        self.assertIsNone(self.a["patience"]["value"])              # no timed looks on this record
+        self.assertIsNone(self.a["adaptability"]["value"])        # no shift noticed on this record
 
 
 class TestQuest(unittest.TestCase):
@@ -331,7 +322,7 @@ class TestQuest(unittest.TestCase):
         # #258: the new rung 7 -- timed lines, then contingency, then payoff
         q = _sheet(_lived(_seat()), T0 + 12 * H)["quest"]
         self.assertEqual(q["rung"], 7)
-        self.assertEqual(q["name"], "take turns")
+        self.assertEqual(q["name"], "time its turn")                # #300
         c = {x["key"]: x for x in q["criteria"]}
         self.assertEqual(list(c), ["pushes", "contingency", "payoff"])
         self.assertEqual(c["pushes"]["text"], f"0/{SL.RUNG7_PUSHES} timed lines with a reply check")
@@ -344,7 +335,7 @@ class TestQuest(unittest.TestCase):
         s = _sheet(_lived8(_seat()), T0 + 12 * H)
         q = s["quest"]
         self.assertEqual(q["rung"], 8)
-        self.assertEqual(q["name"], "understand an other")
+        self.assertEqual(q["name"], "expect a reply")               # #300
         c = {x["key"]: x for x in q["criteria"]}
         self.assertEqual(list(c), ["looks", "skill"])
         # #254: rung 8 (rung 7 until #258) reads 100 reply checks and grades self against the running rate
@@ -467,7 +458,7 @@ class TestHeaderAndCache(unittest.TestCase):
         self.assertEqual(s["achievements"], [])
         self.assertEqual(s["header"]["level"], 0)
         self.assertEqual(s["time"]["alive_h"], 0.0)
-        self.assertEqual(len(s["attributes"]), 8)                   # #258: Turns joined
+        self.assertEqual(len(s["attributes"]), 5)                   # #300: the five traits
         self.assertTrue(all(a["value"] is None or a["value"] == 0 for a in s["attributes"]))
         json.dumps(s)                                               # it serialises
 
@@ -525,7 +516,7 @@ class TestRoute(unittest.TestCase):
         for key in ("header", "attributes", "quest", "achievements", "growth", "time", "inventory", "relationships"):
             self.assertIn(key, body)
         self.assertEqual(body["header"]["level"], 6)
-        self.assertEqual(len(body["attributes"]), 8)                # #258: Turns joined
+        self.assertEqual(len(body["attributes"]), 5)                # #300: the five traits
 
     def test_behind_the_jwt_gate(self):
         from membrane import jwtauth as J
@@ -654,7 +645,7 @@ class TestSkillAtAGlance(unittest.TestCase):
         self.assertIn("→", _js("L.skillStatHtml(%s)" % json.dumps(dict(sk, trend_h=0.0))))
         self.assertEqual(_js("L.skillStatHtml(null)"), "")
         sheet = _demo()
-        sheet["header"]["skill"] = sk
+        sheet["skills"][0]["trend"] = sk                             # #300: on the skill's own card
         self.assertIn("to beat", _js("L.selfSheetHtml(%s, {}, 0)" % json.dumps(sheet)))
 
 
@@ -710,15 +701,18 @@ def _demo():
                        "bar": 0.5, "waiting_on": "skill", "slipping": False, "mode": "on", "age_h": 61.4,
                        "working_h": 12.5, "running_h": 38.6, "born": "2026-10-16T13:55:57+00:00", "cycles": 13743,
                        "looks": 5731, "lines_sent": 367},
-            "attributes": [{"key": "feel", "label": "Feel", "rung": 1, "rung_name": "feel itself", "value": 0.57, "pass": 0.5,
-                            "kind": "skill", "better": "higher", "met": True, "state": "passed", "slipping": False,
-                            "what": "1 − gap ÷ naive"},
-                           {"key": "understand", "label": "Understand", "rung": 7, "rung_name": "understand an other",
-                            "value": -0.34, "pass": 0.15, "kind": "skill", "better": "higher", "met": False,
-                            "state": "current", "slipping": False, "what": "the model's skill over habit"},
-                           {"key": "reach", "label": "Reach", "rung": 2, "rung_name": "first reach", "value": 0.1,
-                            "pass": 0.2, "kind": "skill", "better": "higher", "met": False, "state": "passed",
-                            "slipping": True, "what": "<b>x</b>"}],
+            # #300: traits of self as a whole; the skills it is learning; a slipping line
+            "attributes": [{"key": "curiosity", "label": "Curiosity", "value": 0.57, "unit": "share", "better": "higher",
+                            "what": "share of its looks at things it is still learning", "series": [], "detail": {}},
+                           {"key": "insight", "label": "Insight", "value": -0.34, "unit": "skill", "better": "higher",
+                            "what": "Brier skill", "series": [], "detail": {}},
+                           {"key": "focus", "label": "Focus", "value": 0.1, "unit": "share", "better": "higher",
+                            "what": "<b>x</b>", "series": [], "detail": {}}],
+            "skills": [{"id": "expect", "name": "expect a reply", "bar": 0.5, "waiting_on": "skill",
+                        "criteria": [{"key": "looks", "text": "20/20 reply pairs", "met": True, "frac": 1},
+                                     {"key": "skill", "text": "skill vs habit −0.34 → +0.15", "met": False, "frac": 0}],
+                        "trend": None}],
+            "slipping": [{"id": "reach", "name": "first reach", "text": "first reach: its test no longer holds"}],
             "quest": {"rung": 7, "name": "understand an other", "waiting_on": "skill", "bar": 0.5,
                       "summary": "20/20 reply pairs ✓ · skill vs habit −0.34 → +0.15",
                       "criteria": [{"key": "looks", "text": "20/20 reply pairs", "met": True, "frac": 1},
@@ -752,8 +746,8 @@ class TestSheetHtml(unittest.TestCase):
         cls.html = _js("L.selfSheetHtml(%s, {}, 1100)" % json.dumps(_demo()))
 
     def test_the_sections_in_order_as_collapsibles(self):
-        order = ["Attributes", "Quest log", "Achievements", "Growth curve", "Where the time went",
-                 "Inventory", "Toys", "Relationships"]                          # #267: Toys
+        order = ["Attributes", "Learning now", "Growth curve", "Where the time went",
+                 "Inventory", "Toys", "Relationships"]                          # #267: Toys; #300: earned skills left
         at = [self.html.index(">" + t + "<") for t in order]
         self.assertEqual(at, sorted(at))
         self.assertEqual(self.html.count("<details"), len(order))
@@ -781,7 +775,7 @@ class TestSheetHtml(unittest.TestCase):
     def test_the_quest_and_achievements(self):
         self.assertIn("20/20 reply pairs", self.html)
         self.assertIn("waiting on", self.html)
-        self.assertIn("#208", self.html)
+        self.assertNotIn("#208", self.html)                          # #300: earned skills live in the Skill tree tab
 
     def test_the_growth_curve_is_inline_svg_with_its_caveat(self):
         self.assertIn("<svg", self.html)

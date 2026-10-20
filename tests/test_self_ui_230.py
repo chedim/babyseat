@@ -205,7 +205,7 @@ class TestExpBar(unittest.TestCase):
         x = self._x()
         self.assertEqual(x["state"], "growing")
         self.assertEqual(x["level"], "Lv 6 · meet an other")
-        self.assertEqual(x["goal"], "→ 7 · take turns")              # #258: the ladder flip
+        self.assertEqual(x["goal"], "→ 7 · time its turn")           # #258: the ladder flip; #300: the name
         self.assertEqual((x["pct"], x["fill"]), (64, 0.64))
         self.assertEqual(x["caption"], "waiting on: pairs")
 
@@ -279,7 +279,7 @@ class TestReportCard(unittest.TestCase):
                        {"eid": "cradle:mobile", "getter": False, "reads": 0, "answered": 0, "health": "no getter"}])
         st["self"]["ladder"][7]["state"] = "capped"
         html = _js("L.selfCardHtml(%s)" % json.dumps(st))
-        for want in ("slipping", "held by the limit", "not built", "5 of 6", "0.37", "0.39", "0.55",
+        for want in ("slipping", "awaiting your accept", "not built", "5 of 6", "0.37", "0.39", "0.55",
                      "rung 7: taking turns", "best window <b>0-2m</b>", "0-2m 0.7 ", "vs chance 0.17",
                      "vs timing-blind 0.3 ", "rung 8: the other",
                      "w:fast", "moving", "intermittent", "body", "other", "cradle:mobile",

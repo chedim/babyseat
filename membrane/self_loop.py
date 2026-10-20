@@ -81,7 +81,7 @@ METHODS = {
 }
 RUNG_NAMES = {0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart",
               4: "patience", 5: "notice the world changed", 6: "meet an other",
-              7: "take turns", 8: "understand an other", 9: "recognize itself", 10: "change itself",
+              7: "time its turn", 8: "expect a reply", 9: "recognize itself", 10: "change itself",
               11: "speak"}
 LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4, 5, 6, 7, 8)}          # the rungs built so far
 # THE LADDER FLIP (#258): rung 7 was "understand an other" until the turn-taking rung went in
@@ -129,18 +129,19 @@ ACHIEVEMENTS = {
              "why_prereqs": ("first reach: its answered looks at the other are reach's looks, and the "
                              "self/other split is reach's own prediction skill; nothing of the sort, "
                              "patience or noticing is read")},
-    "turns": {"rung": 7, "name": "take turns", "branch": "others", "prereqs": ("meet",), "built": True,
+    # #300: the two "others" skills are named for what their tests measure (ids stay)
+    "turns": {"rung": 7, "name": "time its turn", "branch": "others", "prereqs": ("meet",), "built": True,
               "child_age": "~3-5 mo",
-              "child_ability": ("takes turns: serve and return, the proto-conversation's timing "
+              "child_ability": ("times its turn in a proto-conversation: serve and return "
                                 "(Bateson 1975; Trevarthen 1979; Jaffe et al. 2001)"),
               "why_prereqs": ("meet an other: it times its pushes to the other meet found, through "
                               "meet's channel, and scores each by the reply check after it")},
-    "expect": {"rung": 8, "name": "understand an other", "branch": "others", "prereqs": ("meet",), "built": True,
+    "expect": {"rung": 8, "name": "expect a reply", "branch": "others", "prereqs": ("meet",), "built": True,
                "child_age": "~2-3 mo",
-               "child_ability": ("expects a response from the other: the still-face upset "
+               "child_ability": ("expects a caregiver's response: the still-face upset "
                                  "(Tronick et al. 1978)"),
                "why_prereqs": ("meet an other: it predicts whether the other meet found replies to a "
-                               "push, read at the reply check after it; it does not need take turns' "
+                               "push, read at the reply check after it; it does not need time its turn's "
                                "learned timing -- a push by the timer is checked and predicted the same")},
     "mirror": {"rung": 9, "name": "recognize itself", "branch": "later", "prereqs": ("feel", "meet"), "built": False,
                "child_age": "~18 mo",
@@ -154,8 +155,8 @@ ACHIEVEMENTS = {
     "speak": {"rung": 11, "name": "speak", "branch": "later", "prereqs": ("turns", "expect"), "built": False,
               "child_age": "~4 y",
               "child_ability": "tells its own story from memory (autobiographical narrative, Nelson & Fivush)",
-              "why_prereqs": ("not built yet; planned: words take turns (take turns) with an other it "
-                              "can predict (understand an other)")},
+              "why_prereqs": ("not built yet; planned: words take turns (time its turn) with an other it "
+                              "can predict (expect a reply)")},
     "invent": {"rung": 12, "name": "invent", "branch": "later", "prereqs": ("change", "speak"), "built": False,
                "child_age": "~5 y",
                "child_ability": "makes up games with its own rules",

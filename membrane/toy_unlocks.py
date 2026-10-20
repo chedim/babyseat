@@ -3,7 +3,7 @@
 #295, THE SKILL TREE: a kind unlocks when self EARNS an achievement (UNLOCK_IDS:
 the achievement whose test is the rung in UNLOCKS -- tower: tell things apart,
 burst: patience, die and drift: notice the world changed, ball: meet an other,
-mirror: understand an other, ...). Achievements are earned out of order, so the
+mirror: expect a reply, ...). Achievements are earned out of order, so the
 toys are too; the record's unlock line carries the achievement's `id` beside
 its `rung` (the test's number, as before).
 
