@@ -461,7 +461,7 @@ def test_the_numbering():
         "notice the world changed", "meet an other"]                  # rungs 0-6 unchanged
     assert SL.RUNG_NAMES[7] == "time its turn" and SL.RUNG_NAMES[8] == "expect a reply"   # #300: named for their tests
     assert SL.RUNG_NAMES[9] == "recognize itself"
-    assert sorted(SL.LADDER) == list(range(9))
+    assert sorted(SL.LADDER) == list(range(9)) + [11]             # #311: speak is built
     assert SL.PROGRESS[7] is SL._rung7 and SL.PROGRESS[8] is SL._rung8
     for n, fn in ((1, SL._rung1), (2, SL._rung2), (3, SL._rung3), (4, SL._rung4), (5, SL._rung5), (6, SL._rung6)):
         assert SL.PROGRESS[n] is fn
