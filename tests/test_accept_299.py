@@ -103,7 +103,7 @@ def test_the_live_record_migrates_once_and_everything_earned_is_accepted():
     st = SL.status(srv)
     assert st["level"] == 7
     assert st["accepted"] == LIVE7 and st["awaiting"] == []
-    assert st["next"] == ["turns"]                         # turns open, as it already was
+    assert st["next"] == ["turns", "mirror"]               # turns open, as it already was (#312: and the mirror)
     assert SL._available(srv, 7) and SL._available(srv, 8)
     # a restart: the migration is never written twice
     SL._RT.pop(id(srv), None)

@@ -241,7 +241,7 @@ def test_the_rung_six_unlock_switches_on_exactly_one_ball_once():
     SL.accept(srv, "meet")                                          # the operator's accept syncs the unlock
     TU.sync(srv)
     line = next(r for r in SL._read(srv) if r.get("kind") == "unlock" and r.get("rung") == 6)
-    assert line["toys"] == ["ball"] and line["added"] == [TB.BALL]
+    assert line["toys"] == ["ball", "mirror"] and line["added"] == [TB.BALL, "toy:mirror"]   # #312: the mirror too
     assert _ball_names() == [TB.BALL] and len(_balls(srv)) == 1
     TU.sync(srv)
     TU.sync(srv)

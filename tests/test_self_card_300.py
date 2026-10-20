@@ -187,7 +187,7 @@ class TestNoRungs(unittest.TestCase):
         c = SH.card(_lived(_seat()))
         self.assertEqual(c["level"], 6)
         self.assertEqual(c["rung_name"], "meet an other")              # the latest earned skill
-        self.assertEqual(c["next"], ["turns", "expect"])
+        self.assertEqual(c["next"], ["turns", "expect", "mirror"])   # #312: recognize itself opens with meet
 
 
 # ---- 4. the renames ----------------------------------------------------------------------

@@ -34,8 +34,8 @@ from membrane import toy_unlocks as TU  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
 
 OTHER = MEMBRANE_NS + "Component:chat:in:someone"
-BUILT = ["feel", "reach", "kinds", "patience", "shift", "meet", "turns", "expect"]
-LATER = ["mirror", "change", "speak", "invent"]
+BUILT = ["feel", "reach", "kinds", "patience", "shift", "meet", "turns", "expect", "mirror"]   # #312: mirror
+LATER = ["change", "speak", "invent"]
 CONTRACT = {"id", "name", "branch", "prereqs", "built", "state", "earned_at", "skill", "bar",
             "waiting_on", "child_age", "child_ability", "why_prereqs"}
 
@@ -90,7 +90,7 @@ def test_the_tree_has_stable_ids_branches_and_real_edges():
     assert br["feel"] == "self"
     assert {br[a] for a in ("reach", "kinds", "patience", "shift")} == {"world"}
     assert {br[a] for a in ("meet", "turns", "expect")} == {"others"}
-    assert {br[a] for a in LATER} == {"later"}
+    assert {br[a] for a in LATER} == {"later"} and br["mirror"] == "later"
     pre = {a: set(A[a]["prereqs"]) for a in A}
     assert pre["feel"] == set() and pre["reach"] == set()          # two roots: reaching never read feel's data
     assert pre["kinds"] == {"reach"}
@@ -132,7 +132,7 @@ def test_a_post_flip_rung_line_counts_and_an_achieve_line_counts():
     srv = _seat(rungs=(1, 2, 3, 4, 5, 6, 7))
     assert "turns" in SL._earned(SL._read(srv))
     SL._append(srv, {"ts": 99.0, "kind": "achieve", "id": "expect", "skill": 0.3})
-    assert SL._earned(SL._read(srv)) == set(BUILT)
+    assert SL._earned(SL._read(srv)) == set(BUILT) - {"mirror"}   # #312: the mirror is not earned here
     assert 8 in SL._passed(SL._read(srv))                          # the toys and the bug windows read rung numbers
 
 
@@ -149,11 +149,11 @@ def test_expect_is_earned_while_turns_stays_open():
     st = SL.status(srv)
     assert st["level"] == 7
     assert st["rung_name"] == "expect a reply"                     # #300
-    assert st["next"] == ["turns"]
+    assert st["next"] == ["turns", "mirror"]                       # #312: mirror opens with feel + meet
     assert [e["id"] for e in st["earned"]][-1] == "expect"
     tree = {t["id"]: t for t in SS.compute(srv)["tree"]}
     assert tree["expect"]["state"] == "earned" and tree["turns"]["state"] == "open"
-    assert tree["mirror"]["state"] == "unbuilt"
+    assert tree["change"]["state"] == "unbuilt"
 
 
 def test_a_root_needs_nothing_and_a_child_waits_for_its_parent():
@@ -189,7 +189,7 @@ def test_the_limit_accepts_an_achievement_and_its_closure():
     assert SL.set_limit(srv, "expect")                             # its closure: reach, meet, expect
     assert _accepts(srv) == ["reach", "meet"]                      # the earned ones in it, in tree order
     assert SL.set_limit(srv, "all") and _accepts(srv) == ["reach", "meet", "feel"]
-    assert not SL.set_limit(srv, "nonsense") and not SL.set_limit(srv, "mirror")   # unbuilt: nothing to accept
+    assert not SL.set_limit(srv, "nonsense") and not SL.set_limit(srv, "change")   # unbuilt: nothing to accept
     assert SL.set_limit(srv, 5) and SL.set_limit(srv, 8)           # nothing left to accept: no new lines
     assert len(_accepts(srv)) == 3
     assert SL.set_limit(srv, "off") and SL.mode(srv) == "off" and SL._allowed(srv) == set()
@@ -244,14 +244,14 @@ def test_the_card_counts_achievements():
     srv = _seat(rungs=(1, 2, 3, 4, 5, 6), limit="all", lines=_expect_passes_turns_not())
     SL._open_rungs(srv)
     c = SS.card(srv)
-    assert c["level"] == 7 and c["rung_name"] == "expect a reply" and c["next"] == ["turns"]   # #300
+    assert c["level"] == 7 and c["rung_name"] == "expect a reply" and c["next"] == ["turns", "mirror"]   # #300, #312
 
 
 # ---- 6. the toys unlock by achievement -------------------------------------------------------
 
 def test_toys_unlock_by_achievement():
     assert TU.UNLOCK_IDS["ball"] == "meet" and TU.UNLOCK_IDS["tower"] == "kinds"
-    assert TU.UNLOCK_IDS["mirror"] == "expect"
+    assert TU.UNLOCK_IDS["mirror"] == "meet"                       # #312: with its last prerequisite
     srv = _seat(rungs=(2,))
     why = TU.refusal(srv, "ball")
     assert why and "meet an other" in why

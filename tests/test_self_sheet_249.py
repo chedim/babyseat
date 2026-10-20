@@ -261,11 +261,11 @@ class TestGrowth(unittest.TestCase):
     def test_the_fastest_line_is_cumulative_at_the_pace(self):
         floors = SH.fastest_cycles()
         cum = 0
-        for n in range(1, 9):                                       # #258: 8 rungs built
+        for n in range(1, 10):                                      # #258: 8 rungs built; #312: 9
             cum += floors[n]
             self.assertAlmostEqual(self.rows[n]["fastest_h"], round(cum * SL.PACE_S / H, 3), places=3)
-        self.assertIsNone(self.rows[9]["fastest_h"])                # not built
-        self.assertFalse(self.rows[9]["built"])
+        self.assertIsNone(self.rows[10]["fastest_h"])               # not built
+        self.assertFalse(self.rows[10]["built"])
 
     def test_the_child_scale_is_one_factor_the_median_over_the_rungs_passed(self):
         g = self.s["growth"]
@@ -431,7 +431,7 @@ class TestHeaderAndCache(unittest.TestCase):
         self.assertEqual(h["name"], "Blurp")
         self.assertEqual(h["level"], 6)
         self.assertEqual(h["rung_name"], "meet an other")
-        self.assertEqual(h["next"], ["turns", "expect"])              # #295: the open achievements
+        self.assertEqual(h["next"], ["turns", "expect", "mirror"])    # #295: the open achievements (#312: mirror)
         self.assertAlmostEqual(h["age_h"], 12.0, places=2)
         self.assertEqual(h["born"], "2026-10-16T13:00:00+00:00")
         self.assertEqual(h["lines_sent"], 20)

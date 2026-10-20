@@ -83,7 +83,7 @@ RUNG_NAMES = {0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell 
               4: "patience", 5: "notice the world changed", 6: "meet an other",
               7: "time its turn", 8: "expect a reply", 9: "recognize itself", 10: "change itself",
               11: "speak"}
-LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4, 5, 6, 7, 8)}          # the rungs built so far
+LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9)}       # the rungs built so far
 # THE LADDER FLIP (#258): rung 7 was "understand an other" until the turn-taking rung went in
 # below it. A rung line above 6 counts only when it carries "ladder": LADDER_V -- a pass
 # recorded before the flip was the old numbering's (the record is never rewritten).
@@ -143,11 +143,12 @@ ACHIEVEMENTS = {
                "why_prereqs": ("meet an other: it predicts whether the other meet found replies to a "
                                "push, read at the reply check after it; it does not need time its turn's "
                                "learned timing -- a push by the timer is checked and predicted the same")},
-    "mirror": {"rung": 9, "name": "recognize itself", "branch": "later", "prereqs": ("feel", "meet"), "built": False,
+    "mirror": {"rung": 9, "name": "recognize itself", "branch": "later", "prereqs": ("feel", "meet"), "built": True,
                "child_age": "~18 mo",
                "child_ability": "passes the mirror test (Amsterdam 1972)",
-               "why_prereqs": ("not built yet; planned: its own trace (feel itself) beside another's "
-                               "(meet an other's split)")},
+               "why_prereqs": ("feel itself: what the mirror shows is its own moves -- the body whose steering "
+                               "feel's pass switches on; meet an other: it labels the glass and the stranger "
+                               "with meet's self/other split (BODY_SKILL: predicted this well, it is my body)")},
     "change": {"rung": 10, "name": "change itself", "branch": "later", "prereqs": ("mirror",), "built": False,
                "child_age": "~4 y",
                "child_ability": "revises what it knows about its own knowing (metacognition, Flavell)",
@@ -331,6 +332,31 @@ RUNG8_STALE_S = 600.0       # a push this old without its reply check asks nothi
 RUNG8_GRACE_S = 60.0        # the reply check waits up to this much longer for an answer still in flight (#217)
 RUNG8_HISTORY = 8           # recent reply checks the question shows the model (#217)
 RUNG8_RECENT = 6            # reply checks the RECENT rate is over, next to the all-time one (#246)
+# RUNG 9 (#312), RECOGNIZE ITSELF: the mirror test for a body that is a point moving in the field.
+# The 🪞 mirror toy (toybox) has two sides: the GLASS shows self's own move from one feed back,
+# the STRANGER its own move from MIRROR_LAG feeds back -- the same statistics, both with the same
+# seeded jitter, and only the glass depends on what self does now. A move is one scalar: the
+# DIRECTION of its displacement this cycle on a fixed seeded axis, x sqrt(dim) (~N(0, 1); its
+# size is left out -- an aim switch's long stride would swamp every other move; no move is 0).
+# Each cycle (_mirror_once) self predicts both sides with the same learner, before it reads them:
+# p_* is a ridge regression of the side on its own moves (lags 0..MIRROR_OWN-1) and the side's
+# last MIRROR_PAST values; b_*, the no-self baseline, the same without its own moves; both fitted
+# on the side's last MIRROR_FIT rows (prequential). THE TEST over the last MIRROR_LOOKS rows with
+# both predicted: on the glass, skill = 1 - SSE(p)/SSE(b) >= BODY_SKILL (meet's own self/other
+# line) and the sign-test z of "p closer than b" >= MIRROR_Z -- the glass reads as body; on the
+# stranger the same does not hold -- it reads as other. Measured on simulated moves from the real
+# loop (steering, a drifting current or a fixed one; issue #312): the glass's skill 0.90-0.99
+# (z 3-10, median 6-9), the stranger's best window +0.10 (z <= 4); a still self (no moves) never
+# reaches it. MIRROR_LAG is no multiple of AIM_HOLD: an aim switch every AIM_HOLD cycles is a
+# rhythm of self's own, and a lag in step with it would leak its timing into the stranger.
+MIRROR_LAG = 187            # the stranger's replay: feeds back (~31 min at the 10 s pace); toybox.MIRROR_LAG
+MIRROR_OWN = 3              # its own moves the prediction reads (this cycle's and the two before)
+MIRROR_PAST = 2             # ...and the side's own last values (the baseline reads only these)
+MIRROR_FIT = 200            # rows each prediction is fitted on (the side's latest)
+MIRROR_MIN_FIT = 20         # no prediction before this many rows to fit
+MIRROR_RIDGE = 1.0          # the fit's ridge penalty (not on the intercept)
+MIRROR_LOOKS = 100          # predicted rows the test reads
+MIRROR_Z = 5.0              # the glass's sign-test z (p closer than b) must reach this
 CURIOSITY = True            # #212: tilt the reach choice by learning progress (tests switch it off for the base)
 CURIO_WINDOW = 30           # ordinary looks per window: progress = earlier window's error - recent window's
 CURIO_FLOOR = 0.1           # the tilt never goes under this: a mastered or "can't learn" thing is still retried
@@ -1821,6 +1847,114 @@ def from_command(rest: str) -> dict:
     return fn(srv, parts[1] if len(parts) > 1 else "0")
 
 
+# ---- #312: the mirror ------------------------------------------------------------
+
+def _mirror_axis(dim: int) -> np.ndarray:
+    """The fixed axis a move is read on (seeded: the same on every seat and run)."""
+    v = np.random.default_rng(312).normal(size=dim)
+    return v / (np.linalg.norm(v) or 1.0)
+
+
+def _mirror_move(move) -> float:
+    """A move as one scalar: the direction of the displacement on the mirror's
+    axis, x sqrt(dim) (~N(0, 1) for a direction at random); no move is 0."""
+    m = np.asarray(move, dtype=float)
+    n = float(np.linalg.norm(m))
+    if not len(m) or n <= CALM:
+        return 0.0
+    return float(np.sqrt(len(m)) * (m / n) @ _mirror_axis(len(m)))
+
+
+def _mirror_toy(srv) -> str | None:
+    """The mirror self feeds: the first mirror toy by name; None without one."""
+    est = getattr(srv, "entity_store", None)
+    names = sorted({str(((e.properties or {}).get("toybox") or {}).get("name") or "")
+                    for e in list(((est.docs if est is not None else None) or {}).values())
+                    if ((e.properties or {}).get("toybox") or {}).get("kind") == "mirror"} - {""})
+    return names[0] if names else None
+
+
+def _mirror_rows(recs: list[dict], toy: str | None = None, n: int | None = None) -> list[dict]:
+    """The latest mirror lines (of one toy), oldest first; at most n."""
+    out = []
+    for r in reversed(recs):
+        if r.get("kind") == "mirror" and (toy is None or r.get("toy") == toy):
+            out.append(r)
+            if n is not None and len(out) >= n:
+                break
+    return out[::-1]
+
+
+def _ridge(X: np.ndarray, y: np.ndarray) -> np.ndarray:
+    P = MIRROR_RIDGE * np.eye(X.shape[1])
+    P[0, 0] = 0.0                                          # the intercept is free
+    return np.linalg.solve(X.T @ X + P, X.T @ y)
+
+
+def _mirror_predict(rows: list[dict], side: str, s_now: float):
+    """SELF'S PREDICTION of a side's next value, before it reads it, from the
+    rows before only (prequential): (p, b) -- p from its own moves (this one,
+    s_now, and the MIRROR_OWN-1 before) and the side's last MIRROR_PAST values,
+    b (the no-self baseline) from the side's values alone. The same learner
+    on both sides: nothing tells it which is the glass. None before
+    MIRROR_MIN_FIT rows to fit on."""
+    k = max(MIRROR_OWN - 1, MIRROR_PAST)
+    rows = rows[-(MIRROR_FIT + k):]
+
+    def feats(i, s_i):                                     # row i's features (its own move s_i)
+        past = [rows[i - j][side] for j in range(1, MIRROR_PAST + 1)]
+        own = [s_i] + [rows[i - j].get("s") for j in range(1, MIRROR_OWN)]
+        if any(v is None for v in past + own):
+            return None
+        return [1.0] + [float(v) for v in past] + [float(v) for v in own]
+
+    X, y = [], []
+    for i in range(k, len(rows)):
+        if rows[i].get(side) is None:
+            continue
+        f = feats(i, rows[i].get("s"))
+        if f is not None:
+            X.append(f)
+            y.append(float(rows[i][side]))
+    if len(X) < MIRROR_MIN_FIT or len(rows) < k:
+        return None
+    rows = rows + [{"s": s_now}]                            # the row being predicted
+    f = feats(len(rows) - 1, s_now)
+    if f is None:
+        return None
+    X, y, f = np.asarray(X), np.asarray(y), np.asarray(f)
+    nb = 1 + MIRROR_PAST
+    try:
+        return float(f @ _ridge(X, y)), float(f[:nb] @ _ridge(X[:, :nb], y))
+    except np.linalg.LinAlgError:
+        return None
+
+
+def _mirror_once(srv, n: int, now: float, move) -> None:
+    """RUNG 9'S PRACTICE (#312), each cycle while recognize itself is open:
+    predict both sides of the mirror, feed it this cycle's move, read both,
+    and write one `mirror` line: {s, glass, stranger, p_*, b_*} (scalars)."""
+    name = _mirror_toy(srv)
+    if name is None:
+        return
+    s = round(_mirror_move(move), 4)
+    rows = _mirror_rows(_read(srv), name, MIRROR_FIT + MIRROR_OWN + MIRROR_PAST)
+    pred = {side: _mirror_predict(rows, side, s) for side in ("glass", "stranger")}
+    from . import toybox as _TB
+    try:
+        out = _TB.mirror_feed(name, s, now=now)
+    except Exception as e:                                  # noqa: BLE001
+        out = {"ok": False, "error": repr(e)}
+    if not out.get("ok"):
+        return
+    rec = {"ts": now, "kind": "mirror", "n": n, "toy": name, "s": s,
+           "glass": out.get("glass"), "stranger": out.get("stranger")}
+    for side, pb in pred.items():
+        if pb is not None:
+            rec[f"p_{side}"], rec[f"b_{side}"] = round(pb[0], 4), round(pb[1], 4)
+    _append(srv, rec)
+
+
 # ---- the cycle and its guard --------------------------------------------------
 
 def _runs(srv) -> bool:
@@ -1921,6 +2055,8 @@ def cycle(srv, now: float | None = None) -> dict | None:
         _reach_once(srv, est, ent, n, now)
     if _available(srv, 6):
         _meet(srv, str(n), now)
+    if _available(srv, 9):
+        _mirror_once(srv, n, now, c["observed"] - pos)      # #312: its move, to the mirror
     _open_rungs(srv)
     _unlock_toys(srv)
     _show(srv, ent, pos, c, rec)
@@ -2698,12 +2834,51 @@ def _rung8(recs: list[dict], tempo: dict | None = None) -> dict:
             "eid": to, "passed": all(v >= 1.0 for v in crit.values())}
 
 
+def _mirror_side(rows: list[dict], side: str) -> dict:
+    """One side's score over rows: skill = 1 - SSE(p)/SSE(b) (its own moves
+    against the no-self baseline), the sign-test z of p landing closer than b
+    (a tie is no win), and the label meet's split would give it."""
+    e_p = [(r[side] - r[f"p_{side}"]) ** 2 for r in rows]
+    e_b = [(r[side] - r[f"b_{side}"]) ** 2 for r in rows]
+    sb = sum(e_b)
+    skill = (1.0 - sum(e_p) / sb) if sb > 1e-12 else 0.0
+    n = len(rows)
+    z = ((sum(a < b for a, b in zip(e_p, e_b)) - n / 2) / (np.sqrt(n) / 2)) if n else 0.0
+    body = skill >= BODY_SKILL and z >= MIRROR_Z
+    return {"skill": round(skill, 4), "z": round(float(z), 2), "label": "body" if body else "other"}
+
+
+def _rung9(recs: list[dict], tempo: dict | None = None) -> dict:
+    """Recognize itself (#312): over the last MIRROR_LOOKS mirror lines with
+    both sides read and predicted, its own moves predict the GLASS far beyond
+    the glass's own past (skill >= BODY_SKILL and sign-test z >= MIRROR_Z: it
+    reads as body, self) and do NOT so predict the STRANGER -- its own old
+    moves, the same statistics -- (it reads as other). Staged: looks, self,
+    other. The headline skill is the glass's. Reads the current mirror only
+    (the latest line's toy)."""
+    last = next((r for r in reversed(recs) if r.get("kind") == "mirror"), None)
+    keys = ("glass", "stranger", "p_glass", "b_glass", "p_stranger", "b_stranger")
+    rows = [r for r in _mirror_rows(recs, last.get("toy") if last else None)
+            if all(r.get(k) is not None for k in keys)][-MIRROR_LOOKS:]
+    crit = {"looks": min(1.0, len(rows) / MIRROR_LOOKS)}
+    if not rows:
+        crit.update({"self": 0.0, "other": 0.0})
+        return {"crit": crit, "skill": 0.0, "z": 0.0, "passed": False}
+    g, s = _mirror_side(rows, "glass"), _mirror_side(rows, "stranger")
+    crit["self"] = max(0.0, min(1.0, g["skill"] / BODY_SKILL, g["z"] / MIRROR_Z))
+    crit["other"] = 1.0 if s["label"] == "other" else 0.0
+    return {"crit": crit, "skill": g["skill"], "z": g["z"],
+            "stranger_skill": s["skill"], "stranger_z": s["z"],
+            "labels": {"glass": g["label"], "stranger": s["label"]},
+            "passed": all(v >= 1.0 for v in crit.values())}
+
+
 PROGRESS = {1: _rung1, 2: _rung2, 3: _rung3, 4: _rung4, 5: _rung5, 6: _rung6, 7: _rung7,
-            8: _rung8}   # rung -> its test over the record
+            8: _rung8, 9: _rung9}   # rung -> its test over the record
 # #249: the line each rung's headline skill has to reach (the number status()['skill'] reads);
 # rung 4's news share has a moving bar (its fixed-pace base + 0.15), so it has none here
 SKILL_PASS = {1: RUNG1_SKILL, 2: RUNG2_SKILL, 3: RUNG2_SKILL, 4: None, 5: 1.0, 6: 1.0,
-              7: RUNG7_PAY_MARGIN, 8: RUNG8_MARGIN}
+              7: RUNG7_PAY_MARGIN, 8: RUNG8_MARGIN, 9: BODY_SKILL}
 
 
 def _rung_lines(recs: list[dict]) -> list[dict]:
@@ -2991,12 +3166,15 @@ def _toys(srv, recs: list[dict]) -> list[dict]:
             got = reads[r["eid"]]
             if len(got) < TOY_READS:
                 got.append(r.get("answer"))
+    fed = {r.get("toy") for r in recs[-TOY_SCAN:] if r.get("kind") == "mirror"}   # #312: self's mirror
     out = []
     for eid, getter, kind, toy, block in cached[1]:
         got = reads[eid]
         answered = sum(1 for a in got if a in ("changed", "unchanged"))
         health = ("no getter" if not getter else "unread" if not got
                   else "empty" if not answered else "ok")
+        if kind == "mirror":                               # no getter by design: self sees it by feeding it
+            health = "ok" if toy in fed else "unread"
         row = {"eid": eid, "kind": kind, "getter": getter, "reads": len(got), "answered": answered,
                "health": health}
         if toy:                                            # #244: the play buttons' target

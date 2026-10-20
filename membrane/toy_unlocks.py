@@ -2,8 +2,8 @@
 
 #295, THE SKILL TREE: a kind unlocks when self EARNS an achievement (UNLOCK_IDS:
 the achievement whose test is the rung in UNLOCKS -- tower: tell things apart,
-burst: patience, die and drift: notice the world changed, ball: meet an other,
-mirror: expect a reply, ...). Achievements are earned out of order, so the
+burst: patience, die and drift: notice the world changed, ball and mirror:
+meet an other, ...). Achievements are earned out of order, so the
 toys are too; the record's unlock line carries the achievement's `id` beside
 its `rung` (the test's number, as before).
 
@@ -39,7 +39,17 @@ unlock line could be written while it was a name only) is provisioned once,
 the first time it is built, with one `unlock_built` line -- the same
 "never brought back" rule.
 
-PLACEHOLDERS. mirror, blocks and rattle are kinds with a name, an icon, an
+THE MIRROR (#312) is rung 9's apparatus (recognize itself, whose
+prerequisites are feel itself and meet an other): it unlocks with meet an
+other, the skill's last prerequisite (feel is a root), so it is there when
+the skill opens. It was a placeholder at rung 8 (expect a reply) until it was
+built; a seat whose rung 8 line already named it gets it once, as built late.
+
+A KIND ADDED TO A RUNG ALREADY UNLOCKED (#312: the mirror beside the ball) gets
+an unlock line of its own, once: a kind named on any unlock line is never
+unlocked again.
+
+PLACEHOLDERS. blocks and rattle are kinds with a name, an icon, an
 unlock rung and one line of what each will teach -- no mechanics yet (those
 are built with their rungs). They are never provisioned, never poked, and
 adding one is refused (locked, or unlocked but not built yet).
@@ -63,7 +73,7 @@ from . import self_loop as _SL
 from .self_sheet import NAME as _NAME
 
 UNLOCKS = {"body": 0, "fast": 0, "slow": 0, "tower": 3, "burst": 4, "die": 5, "drift": 5,
-           "ball": 6, "mirror": 8, "blocks": 9, "rattle": 10}
+           "ball": 6, "mirror": 6, "blocks": 9, "rattle": 10}
 ICONS = {"body": "🫧", "fast": "⚡", "slow": "🐢", "tower": "🗼", "burst": "✦", "die": "🎲", "drift": "〰️",
          "ball": "⚽", "mirror": "🪞", "blocks": "🧱", "rattle": "🔊"}
 TEACHES = {                 # read by people (the dock, the sheet): self goes by its name (#277)
@@ -80,7 +90,7 @@ TEACHES = {                 # read by people (the dock, the sheet): self goes by
     "rattle": f"makes a sound when {_NAME} shakes it: its first voice (rung 11, speak)",
 }
 UNLOCK_IDS = {k: _SL.RUNG_ID.get(n) for k, n in UNLOCKS.items()}   # #295: kind -> the achievement (None: birth)
-PLACEHOLDERS = ("mirror", "blocks", "rattle")   # locked kinds with no mechanics yet
+PLACEHOLDERS = ("blocks", "rattle")   # locked kinds with no mechanics yet (#312: the mirror is built)
 NEXT_LOCKED = 2             # the dock shows this many locked toys (the next ones), so it stays tidy on a phone
 LATE_S = 300.0              # an unlock written this long after its pass is a catch-up, not news
 LOCKED_PREFIX = "locked:"   # the dock's name for a locked toy (never a toybox name)
@@ -277,17 +287,17 @@ def _sync(srv, now):
 
 def _sync_new(srv, recs, now):
     from . import self_loop as SL
-    done = {r.get("rung") for r in recs if r.get("kind") == "unlock"}
+    named = {k for r in recs if r.get("kind") == "unlock" for k in r.get("toys") or []}
     passed_ = _opened(recs)                     # #299: earned and accepted
-    if all(UNLOCKS[k] in done for k in unlocked(passed_) if UNLOCKS[k] > 0):
+    if all(k in named for k in unlocked(passed_) if UNLOCKS[k] > 0):
         return []
     at = {r["rung"]: float(r.get("ts") or 0) for r in SL._rung_lines(recs)}
     for n, t in _accept_ts(recs).items():       # ...news from the later of the pass and the accept
         at[n] = max(at.get(n, t), t)
     out = []
     for n in sorted(passed_):
-        toys = [k for k in unlocked({n}) if UNLOCKS[k] == n]
-        if n == 0 or n in done or not toys:      # birth is no pass: its kinds are simply open
+        toys = [k for k in unlocked({n}) if UNLOCKS[k] == n and k not in named]   # #312: once per kind
+        if n == 0 or not toys:                   # birth is no pass: its kinds are simply open
             continue
         line = {"ts": now, "kind": "unlock", "rung": n, "id": _SL.RUNG_ID.get(n), "toys": toys}
         if now - at.get(n, now) > LATE_S:
@@ -354,9 +364,11 @@ def table(recs: list[dict], have: set) -> list[dict]:
 
 
 def by_rung(recs: list[dict]) -> dict:
-    """{rung: [kinds]} from the unlock lines (the achievements' marks)."""
+    """{rung: [kinds]} from the unlock lines (the achievements' marks; #312: a
+    kind added to a rung later has a line of its own, read too)."""
     out: dict = {}
     for r in recs:
-        if r.get("kind") == "unlock" and r.get("rung") not in out:
-            out[r.get("rung")] = list(r.get("toys") or [])
+        if r.get("kind") == "unlock":
+            got = out.setdefault(r.get("rung"), [])
+            got.extend(k for k in r.get("toys") or [] if k not in got)
     return out
