@@ -143,7 +143,7 @@ ACHIEVEMENTS = {
                "why_prereqs": ("meet an other: it predicts whether the other meet found replies to a "
                                "push, read at the reply check after it; it does not need time its turn's "
                                "learned timing -- a push by the timer is checked and predicted the same")},
-    "mirror": {"rung": 9, "name": "recognize itself", "branch": "later", "prereqs": ("feel", "meet"), "built": True,
+    "mirror": {"rung": 9, "name": "recognize itself", "branch": "self", "prereqs": ("feel", "meet"), "built": True,
                "child_age": "~18 mo",
                "child_ability": "passes the mirror test (Amsterdam 1972)",
                "why_prereqs": ("feel itself: what the mirror shows is its own moves -- the body whose steering "
@@ -151,7 +151,7 @@ ACHIEVEMENTS = {
                                "with meet's self/other split (BODY_SKILL: predicted this well, it is my body)")},
     # #320: the test measures choosing how it learns by its own track record, so the child is adaptive
     # strategy choice (~4-5 y), not metacognition in general
-    "change": {"rung": 10, "name": "change itself", "branch": "later", "prereqs": ("mirror", "patience"), "built": True,
+    "change": {"rung": 10, "name": "change itself", "branch": "self", "prereqs": ("mirror", "patience"), "built": True,
                "child_age": "~4-5 y",
                "child_ability": ("picks the way it learns by its own track record, and keeps a change only "
                                  "when it works better: adaptive strategy choice (Siegler & Shrager 1984)"),

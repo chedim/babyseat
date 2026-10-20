@@ -98,7 +98,7 @@ def _run(srv, n, t0=1000.0):
 def test_mirror_is_built_with_its_test():
     a = SL.ACHIEVEMENTS["mirror"]
     assert a["built"] is True and a["rung"] == 9 and a["name"] == "recognize itself"
-    assert set(a["prereqs"]) == {"feel", "meet"} and a["branch"] == "later"
+    assert set(a["prereqs"]) == {"feel", "meet"} and a["branch"] == "self"
     assert "not built" not in a["why_prereqs"]
     assert 9 in SL.LADDER and SL.RUNG_ID[9] == "mirror" and "mirror" in SL.BUILT
     assert SL.PROGRESS[9] is SL._rung9

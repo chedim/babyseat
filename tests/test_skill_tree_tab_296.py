@@ -82,7 +82,9 @@ def test_without_a_tree_the_ladder_is_read_as_a_tree():
     for k in ("meet", "turns", "expect"):
         assert by[k]["branch"] == "others"
     for k in ("mirror", "change", "speak", "invent"):
-        assert by[k]["branch"] == "later" and by[k]["state"] == "unbuilt" and by[k]["built"] is False
+        assert by[k]["state"] == "unbuilt" and by[k]["built"] is False
+    assert {k: by[k]["branch"] for k in ("mirror", "change", "speak", "invent")} == \
+        {"mirror": "self", "change": "self", "speak": "later", "invent": "later"}       # #329
     # the passed rungs are earned, with their dates and skills
     assert [by[k]["state"] for k in ("feel", "reach", "kinds")] == ["earned"] * 3
     assert by["reach"]["earned_at"] == "2026-10-16T10:00:00+00:00" and by["reach"]["skill"] == 0.31
@@ -293,3 +295,9 @@ def test_home_has_the_tab_bar_and_wires_the_tree():
 def test_the_guide_says_so():
     doc = (ROOT / "docs" / "selfgrowth.md").read_text()
     assert "Skill tree" in doc and "tab" in doc.split("Skill tree", 1)[1][:400]
+
+
+@NODE
+def test_the_ladder_fallback_draws_mirror_and_change_in_the_self_lane_329():
+    rows = _run("out = Object.fromEntries(P.TREE_LADDER.map((r) => [r[0], r[2]]))")
+    assert rows["mirror"] == "self" and rows["change"] == "self"

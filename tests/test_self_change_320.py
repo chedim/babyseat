@@ -97,7 +97,7 @@ def _world(seed=0, looks=3000, things=12, rate=(0.0005, 0.02), switch=None, t0=1
 def test_change_is_built_with_its_test():
     a = SL.ACHIEVEMENTS["change"]
     assert a["built"] is True and a["rung"] == 10 and a["name"] == "change itself"
-    assert a["prereqs"] == ("mirror", "patience") and a["branch"] == "later"   # patience: the looks it replays
+    assert a["prereqs"] == ("mirror", "patience") and a["branch"] == "self"   # patience: the looks it replays
     assert "not built" not in a["why_prereqs"]
     assert 10 in SL.LADDER and SL.RUNG_ID[10] == "change" and "change" in SL.BUILT
     assert SL.PROGRESS[10] is SL._rung10

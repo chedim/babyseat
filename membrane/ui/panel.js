@@ -1184,7 +1184,7 @@ const TREE_LADDER = [            // [id, name, branch, rung, prereqs]: the ladde
   ["kinds", "tell things apart", "world", 3, ["reach"]], ["patience", "patience", "world", 4, ["kinds"]],
   ["shift", "notice the world changed", "world", 5, ["reach"]], ["meet", "meet an other", "others", 6, ["kinds"]],
   ["turns", "time its turn", "others", 7, ["meet"]], ["expect", "expect a reply", "others", 8, ["meet"]],
-  ["mirror", "recognize itself", "later", 9, []], ["change", "change itself", "later", 10, []],
+  ["mirror", "recognize itself", "self", 9, []], ["change", "change itself", "self", 10, []],
   ["speak", "speak", "later", 11, []], ["invent", "invent", "later", null, []]];
 const TREE_STATE_TEXT = { earned: "earned", open: "open: its test is running", locked: "locked: its prerequisites first",
                           unbuilt: "not built yet", awaiting: "earned · awaiting your accept" };
