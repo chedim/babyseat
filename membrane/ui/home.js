@@ -844,7 +844,7 @@ function notifyReady(s) {
  *  after that a tap mutes. */
 function bellView(s) {
   s = s || {};
-  if (!s.on) return { icon: "🔕", on: false, ask: false, title: "rung chime and notifications off · tap to turn on" };
+  if (!s.on) return { icon: "🔕", on: false, ask: false, title: "chime and notifications (rungs, the ball) off · tap to turn on" };
   const why = !s.api ? "this browser has no notifications"
     : !s.secure ? "notifications need https or localhost"
     : s.permission === "denied" ? "notifications are blocked for this site (the browser's site settings)"
@@ -852,8 +852,51 @@ function bellView(s) {
     : s.asked ? "notifications not allowed (asked once: the browser's site settings allow them)" : "";
   const ask = !why;
   return { icon: "🔔", on: true, ask,
-           title: "rung chime on · " + (ask ? "tap to allow notifications too" : why + " · tap to mute") };
+           title: "chime on (rungs, the ball) · " + (ask ? "tap to allow notifications too" : why + " · tap to mute") };
 }
+
+// THE BALL'S ALERT (#331, the operator: "it's just really hard to notice the
+// ball move"): self rolling the ball to you raises a toast with a Roll it
+// back button, the dock's ball glowing while it is on your side, the bell's
+// chime (a short one of its own), the tab title flashing and an OS
+// notification while the tab is hidden -- once per roll of self's, never for
+// your own roll-back, never loudly for a ball already on your side when the
+// page opened (it only glows). Display-only: what self measures is untouched.
+
+/** THE ONCE-PER-ROLL RULE: `toys` the dock's toys, `prev` what this page saw
+ *  last ({name: {n, side}}; null: the page's first read). A roll of self's is
+ *  its change count on the ball (`changes.self`) going up with the ball on
+ *  your side and self its last mover -- so a fetch-and-re-roll of an overdue
+ *  ball is a new roll, and the dock's optimistic roll-back (#325: the counts
+ *  untouched) and its undo are none. A seat without counts: the side turning
+ *  to yours. -> {alert: [names to alert], yours: [names on your side], seen}. */
+function ballAlert(prev, toys) {
+  const out = { alert: [], yours: [], seen: {} };
+  for (const t of Array.isArray(toys) ? toys : []) {
+    if (!t || t.kind !== "ball" || t.locked || !t.name) continue;
+    const side = t.reading && typeof t.reading === "object" ? t.reading.side : t.reading;
+    const c = t.changes && t.changes.self, n = typeof c === "number" && isFinite(c) ? c : null;
+    const was = prev && prev[t.name], yours = side === "other";
+    out.seen[t.name] = { n, side: side == null ? null : String(side) };
+    if (!yours) continue;
+    out.yours.push(t.name);
+    if (!was || !(t.last && t.last.by === "self")) continue;
+    if (n != null && was.n != null ? n > was.n : was.side !== "other") out.alert.push(t.name);
+  }
+  return out;
+}
+
+/** The toast's, the title's and the notification's words. */
+function ballAlertText(name) { return "⚽ " + (name || SELF_NAME) + " rolled you the ball"; }
+function ballNotifyBody() { return "your turn: roll it back (membrane home)"; }
+
+/** The ball's chime: two quick notes, a bounce (the rung's arpeggio is longer). */
+function ballChimeNotes() {
+  return [{ t: 0, f: 1046.5, dur: 0.22 }, { t: 0.16, f: 1568, dur: 0.4 }];
+}
+
+/** The hidden tab's title, flashing: the alert on even ticks, the page's own title on odd. */
+function titleFlash(base, text, tick) { return (Number(tick) || 0) % 2 ? base : text; }
 
 /** The ▶/⏸ auto-chat toggle's title (#318: no role any more -- auto-chat is
  *  the LLM's turn going on by itself; the toggle drives the chat overlay's
@@ -869,7 +912,8 @@ const HomeLogic = { autoTitle, cubePoints, catchUp, personSlug, menuEntries, hot
   freshLook, followsNow, followRates, SELF_HOLD_MS, lookAngles, selfCamAngles,
   followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit, zooAgo, zooCard, zooCards,
   rungKey, rungVoided, rungToCelebrate, celebrateText, rungNotifyText, chimeOk, chimeNotes, notifyReady, bellView,
-  achieveKey, achievementsToCelebrate, achieveText, acceptAskText, acceptToAsk, achieveNotifyBody };
+  achieveKey, achievementsToCelebrate, achieveText, acceptAskText, acceptToAsk, achieveNotifyBody,
+  ballAlert, ballAlertText, ballNotifyBody, ballChimeNotes, titleFlash };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
 const HSTYLE = `
@@ -1387,6 +1431,32 @@ const HSTYLE = `
   .celebrate .cb-acc button:disabled { opacity:.6; cursor:default; }
   .celebrate .cb-acc .cb-msg { margin:8px 0 0; font-size:12px; opacity:.85; }
   .celebrate .cb-acc .cb-msg:empty { display:none; }
+  /* #331: the ball on your side -- its dock icon (and the phone's 🧸) glows; a pulse unless reduced motion */
+  .toydock .dkb.yours, .toydock .dockbtn.yours {
+    border-color:var(--warning-color,#ffa600);
+    box-shadow:0 0 0 2px var(--warning-color,#ffa600), 0 0 14px 2px color-mix(in srgb, var(--warning-color,#ffa600) 70%, transparent); }
+  @media (prefers-reduced-motion: no-preference) {
+    .toydock .dkb.yours, .toydock .dockbtn.yours { animation:ballglow 1.2s ease-in-out infinite; }
+    @keyframes ballglow { 50% { box-shadow:0 0 0 3px var(--warning-color,#ffa600), 0 0 26px 8px color-mix(in srgb, var(--warning-color,#ffa600) 55%, transparent); } }
+    .ballnote:not([hidden]) { animation:ballin .5s cubic-bezier(.3,1.4,.5,1) both; }
+    @keyframes ballin { from { opacity:0; transform:translate(-50%, -24px) scale(.9); } }
+  }
+  /* #331: self rolled you the ball -- a toast over everything, its button rolls it back */
+  .ballnote { position:absolute; z-index:21; left:50%; top:max(64px, calc(env(safe-area-inset-top) + 56px)); transform:translateX(-50%);
+              width:max-content; max-width:calc(100% - 32px); display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:center;
+              padding:12px 14px 12px 18px; border-radius:16px; color:#1b1404;
+              background:linear-gradient(135deg, #ffe28c, var(--warning-color,#ffa600));
+              box-shadow:0 0 0 2px rgba(255,255,255,.6), 0 8px 36px rgba(255,166,0,.55); }
+  .ballnote[hidden] { display:none; }
+  .ballnote .bn-t { font-size:18px; font-weight:700; overflow-wrap:anywhere; }
+  .ballnote .bn-roll { border:0; border-radius:999px; padding:9px 20px; font-size:16px; font-weight:700; cursor:pointer;
+                       color:#fff; background:#1b1404; }
+  .ballnote .bn-roll:disabled { opacity:.6; cursor:progress; }
+  .ballnote .bn-x { border:0; background:transparent; color:inherit; font-size:18px; line-height:1; padding:4px 6px; opacity:.7; }
+  .ballnote button:focus-visible { outline:2px solid #1b1404; outline-offset:2px; }
+  .ballnote .bn-msg { flex-basis:100%; margin:0; font-size:12.5px; text-align:center; }
+  .ballnote .bn-msg:empty { display:none; }
+  @media (max-width: 760px) { .ballnote .bn-t { font-size:15px; } }
 `;
 const BRAIN_MS = 3000;                            // #237: the brain's record poll, only while the page is visible
 const LS_SELFPANEL = "membrane.home.selfpanel";   // #230: the 👶 panel open ("1") or closed, per browser
@@ -1443,6 +1513,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       clearInterval(this._follow);
       clearInterval(this._autoT); clearInterval(this._selfT); clearInterval(this._selfPanelT);
       clearInterval(this._brainT); clearInterval(this._dockT);
+      clearTimeout(this._cycT); this._titleStop();                // #331
       if (this._brainVis) { document.removeEventListener("visibilitychange", this._brainVis); this._brainVis = null; }
       if (this._v3) { this._v3.stop(); this._v3 = null; }
       if (this._hidSidebar) this._dock("restore");
@@ -1612,9 +1683,9 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._dockTick();
     }
 
-    async _dockTick() {
+    async _dockTick(force) {
       const c = this._chat;
-      if (document.hidden || this._dockBusy || !c || typeof c._toyState !== "function") return;
+      if ((document.hidden && !force) || this._dockBusy || !c || typeof c._toyState !== "function") return;
       this._dockBusy = true;
       try {
         const toys = await c._toyState();
@@ -1634,8 +1705,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const c = this._chat, d = this._toyDock, ul = this._toyDockL;
       if (!d || !ul || typeof c._toyDockItem !== "function") return;
       this._dockToys = toys;
+      const ball = ballAlert(this._ballSeen || null, toys);      // #331: once per roll of self's
+      this._ballSeen = ball.seen;
       d.hidden = !toys.length;
-      if (!toys.length) { this._dockClose(); return; }
+      if (!toys.length) { this._dockClose(); this._ballTake(ball); return; }
       const sig = toys.map((t) => t.name + "|" + t.kind).join("\n");
       if (sig !== this._dockSig) { ul.innerHTML = c._toyDockHtml(toys); this._dockSig = sig; }
       for (const t of toys) {
@@ -1650,8 +1723,80 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const b = btn.querySelector(".bdg");
         if (it.badge && it.badge.fresh) b.textContent = it.badge.text;
         b.classList.toggle("fresh", !!(it.badge && it.badge.fresh));
+        btn.classList.toggle("yours", ball.yours.includes(t.name));   // #331: it glows while on your side
       }
+      if (this._dockBtn) this._dockBtn.classList.toggle("yours", ball.yours.length > 0);
       if (this._dockCur) this._dockPaintPop();
+      this._ballTake(ball);
+    }
+
+    // THE BALL'S ALERT (#331): ballAlert decides in _paintDock (every read of
+    // the toys, the optimistic roll-back's included); a roll of self's raises
+    // the toast, the chime, and -- with the tab hidden -- the notification and
+    // the flashing title; the ball leaving your side takes them all down.
+    _ballTake(ball) {
+      if (this._ballName && !ball.yours.includes(this._ballName)) this._ballHide();
+      if (!ball.alert.length) return;
+      const name = ball.alert[0], text = ballAlertText(SELF_NAME);
+      this._ballShow(name, text, "");
+      this._chime(ballChimeNotes());
+      if (document.hidden) {
+        this._notify(text, "membrane.home.ball." + SEAT + "." + name, ballNotifyBody());
+        this._titleStart(text);
+      }
+    }
+
+    _ballShow(name, text, msg) {
+      const el = this._ballNote; if (!el) return;
+      this._ballName = name;
+      this._ballNoteT.textContent = text;
+      this._ballNoteMsg.textContent = msg || "";
+      const b = el.querySelector(".bn-roll");
+      b.setAttribute("data-poke-toy", name); b.disabled = false;
+      b.title = "roll the ball back to " + SELF_NAME + ": your turn (rung 7), tagged as yours";
+      el.hidden = false;
+    }
+
+    _ballHide() {
+      this._ballName = null;
+      if (this._ballNote) this._ballNote.hidden = true;
+      this._titleStop();
+    }
+
+    /** The toast's buttons: Roll it back (the dock's own poke, painted at once), or ✕. */
+    async _onBallNote(e) {
+      const t = e.target && e.target.closest ? e.target.closest("button") : null;
+      if (!t) return;
+      if (t.classList.contains("bn-x")) { this._ballHide(); return; }
+      if (!t.classList.contains("bn-roll")) return;
+      const name = t.getAttribute("data-poke-toy"), text = this._ballNoteT.textContent;
+      const out = await this._onToyPoke(e);
+      if (out && !out.ok) this._ballShow(name, text, "✗ " + (out.error || "the roll failed"));
+    }
+
+    /** The hidden tab's title flashes until the page is looked at or the ball leaves your side. */
+    _titleStart(text) {
+      this._titleStop();
+      this._titleBase = document.title;
+      let tick = 0;
+      document.title = titleFlash(this._titleBase, text, tick);
+      this._titleT = setInterval(() => { document.title = titleFlash(this._titleBase, text, ++tick); }, 1000);
+    }
+
+    _titleStop() {
+      if (this._titleT == null) return;
+      clearInterval(this._titleT); this._titleT = null;
+      document.title = this._titleBase;
+    }
+
+    /** Self's cycle (the chat's event stream): its turn with the ball happens in
+     *  one, so read the toys now (at most once a second, hidden or not) and once
+     *  more after the seat's dock cache (2 s) has turned over. */
+    _onSelfCycle() {
+      const now = Date.now();
+      if (now - (this._cycAt || 0) >= 1000) { this._cycAt = now; this._dockTick(true); }
+      clearTimeout(this._cycT);
+      this._cycT = setTimeout(() => this._dockTick(true), 2300);
     }
 
     _dockToy(name) { return (this._dockToys || []).find((t) => t.name === name) || null; }
@@ -1751,7 +1896,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         this._dockPopHtml = null;
         this._dockPaintPop();
         if (out.ok) this._dockTick();
-        return;
+        return out;
       }
       const el = this._spPlay;
       if (el) {
@@ -1764,6 +1909,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         this._spPlayT = setTimeout(() => { el.hidden = true; }, 6000);
       }
       if (out.ok) { this._spSeatAt = 0; this._paintSelfPanel(); }
+      return out;
     }
 
     // THE BRAIN ON THE SCREEN (#237, the operator: a stranger opens membrane
@@ -1898,7 +2044,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const b = this._bell; if (!b) return;
       const v = bellView(this._notifyState());
       b.textContent = v.icon;
-      b.title = SELF_NAME + "'s rungs: " + v.title;
+      b.title = SELF_NAME + "'s rungs and ball: " + v.title;
       b.classList.toggle("off", !v.on);
       b.setAttribute("aria-pressed", v.on ? "true" : "false");
     }
@@ -1928,12 +2074,12 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     }
 
     /** A short chime, synthesized (no asset files): only with the bell on and after a gesture. */
-    _chime() {
+    _chime(notes) {
       if (!chimeOk(this._notifyState())) return;
       const ctx = this._audio(); if (!ctx) return;
       const t0 = ctx.currentTime + 0.03, out = ctx.createGain();
       out.gain.value = 0.18; out.connect(ctx.destination);
-      for (const n of chimeNotes()) {
+      for (const n of notes || chimeNotes()) {           // #331: the ball has its own
         const o = ctx.createOscillator(), g = ctx.createGain();
         o.type = "triangle"; o.frequency.value = n.f;
         g.gain.setValueAtTime(0.0001, t0 + n.t);
@@ -1948,7 +2094,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       if (!notifyReady(this._notifyState())) return;
       try {
         // a tag per seat and achievement: the browser shows one, however many tabs see it
-        new Notification(text, { tag: tag, icon: SEAT_LOGO, body: body });
+        const n = new Notification(text, { tag: tag, icon: SEAT_LOGO, body: body });
+        n.onclick = () => { try { window.focus(); n.close(); } catch (e) { /* gone */ } };   // #331: a click brings the page
       } catch (e) { /* a browser that only notifies from a service worker */ }
     }
 
@@ -2191,7 +2338,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <button class="chatbtn" title="Show / hide the chat">💬</button>
           <button class="autobtn" title="auto-chat" aria-label="auto-chat">▶</button>
           <span class="selfstat" title="where ${nm} is now: its rung, the bar toward the next, what it waits on"></span>
-          <button class="rungbell" aria-label="${nm}'s rungs: the chime and notifications" aria-pressed="true">🔔</button>
+          <button class="rungbell" aria-label="${nm}'s rungs and ball: the chime and notifications" aria-pressed="true">🔔</button>
           <button class="tilt" hidden title="Turn the view by tilting the device">📱</button>
           <span class="sbox"><input class="q" placeholder="search entities…" autocomplete="off"><div class="hits glass"></div></span>
           <span class="status"></span>
@@ -2243,7 +2390,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         <div class="celebrate" hidden aria-live="polite"><canvas class="cb-c"></canvas><div class="cb-t"></div>
           <div class="cb-acc" role="alertdialog" aria-modal="false" aria-labelledby="cbq" hidden><p class="cb-q" id="cbq"></p>
             <div class="cb-row"><button class="cb-yes" type="button">🏅 Accept</button><button class="cb-no" type="button">Later</button></div>
-            <p class="cb-msg" role="status"></p></div></div>`;
+            <p class="cb-msg" role="status"></p></div></div>
+        <div class="ballnote" role="alert" hidden><span class="bn-t"></span>
+          <button type="button" class="bn-roll" data-poke-action="roll">Roll it back</button>
+          <button type="button" class="bn-x" aria-label="dismiss">✕</button><p class="bn-msg" role="status"></p></div>`;
       this.shadowRoot.append(s, root);
       const $ = (q) => root.querySelector(q);
       this._host3d = $(".field"); this._msgEl = $(".msg"); this._statusEl = $(".status");
@@ -2413,6 +2563,16 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const path = e.composedPath();
         if (!path.includes(this._toyDock) && !path.includes(this._dockPop)) this._dockClose();
       });
+      // #331: self rolled you the ball -- the toast (its button: the dock's own poke), and
+      // self's cycles (the chat's event stream) check the toys at once, even with the tab hidden
+      this._ballNote = $(".ballnote"); this._ballNoteT = $(".bn-t"); this._ballNoteMsg = $(".bn-msg");
+      this._ballNote.addEventListener("click", (e) => this._onBallNote(e));
+      this._ballNote.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); this._ballHide(); } });
+      if (!this._cycOn) {
+        this._cycOn = () => this._onSelfCycle();
+        this._chat.addEventListener("ai-self-cycle", this._cycOn);
+        document.addEventListener("visibilitychange", () => { if (!document.hidden) this._titleStop(); });
+      }
       this._dockStart();
       this._toggleSelfPanel(lsGet(LS_SELFPANEL, "0") === "1");
       $(".x").addEventListener("click", () => { this._card.classList.remove("open"); if (this._v3) this._v3.select(null); this._select(null); });
@@ -3483,11 +3643,12 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._vsay(FOLLOW_ON ? "listening… (say it now)" : "heard my name — say it with the request, in one breath", 3000);
       this._orb("listening");
       h.muteUntil = performance.now() + 260;              // the mic never hears its own chime
-      this._chime();
+      this._wakeChime();
     }
 
-    /** Two soft notes, made on the device (WebAudio): nothing to download, nothing spoken. */
-    _chime() {
+    /** Two soft notes, made on the device (WebAudio): nothing to download, nothing spoken.
+     *  (#331: its own name -- as a second _chime it had replaced the bell's.) */
+    _wakeChime() {
       try {
         const C = window.AudioContext || window.webkitAudioContext; if (!C) return;
         const ac = this._chimeAc = this._chimeAc || new C();

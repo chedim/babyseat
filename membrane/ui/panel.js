@@ -2809,6 +2809,9 @@ function definePanel() {
         this._seat = Object.assign({}, this._seat, { self: s });
         this._paintSeat();
       }
+      // #331: a cycle is when self takes its turn with the ball -- membrane home
+      // checks the toys at once (even with its tab hidden) instead of on its next poll
+      if (ev.type === "self.cycle") this.dispatchEvent(new CustomEvent("ai-self-cycle", { detail: { n: p.n }, bubbles: true, composed: true }));
       if (ev.type === "membrane.name") this._applySeatName(p.name);   // issue #6: the name was adopted
       if (ev.type === "membrane.jsexec") this._jsRun(p.job).catch(() => {});
       if (ev.type === "membrane.listen" && sid === (this._chat && this._chat.sid)) {
