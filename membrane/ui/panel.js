@@ -1118,6 +1118,276 @@ function selfSheetHtml(s, open, nowS) {
   return out.join("");
 }
 
+// ---- #296: THE SKILL TREE TAB -- self's achievements as an RPG skill tree:
+// lanes by branch, each node below its prerequisites, edges from them. The
+// seat's sheet carries `tree` and `level` (#295); a seat from before that
+// sends only the ladder, and the tab reads the ladder as a tree with the
+// fixed mapping below (only the next rung is open: the strict ladder opens
+// nothing else). Pure helpers, then renderSkillTree: DOM calls only, every
+// data-derived string through textContent.
+const TREE_BRANCHES = [["self", "Self"], ["world", "World"], ["others", "Others"], ["later", "Later"]];
+const TREE_STATES = ["earned", "open", "locked", "unbuilt"];
+const TREE_LADDER = [            // [id, name, branch, rung, prereqs]: the ladder read as a tree
+  ["feel", "feel itself", "self", 1, []], ["reach", "first reach", "world", 2, []],
+  ["kinds", "tell things apart", "world", 3, ["reach"]], ["patience", "patience", "world", 4, ["kinds"]],
+  ["shift", "notice the world changed", "world", 5, ["reach"]], ["meet", "meet an other", "others", 6, ["kinds"]],
+  ["turns", "take turns", "others", 7, ["meet"]], ["expect", "understand an other", "others", 8, ["meet"]],
+  ["mirror", "recognize itself", "later", 9, []], ["change", "change itself", "later", 10, []],
+  ["speak", "speak", "later", 11, []], ["invent", "invent", "later", null, []]];
+const TREE_STATE_TEXT = { earned: "earned", open: "open: its test is running", locked: "locked: its prerequisites first",
+                          unbuilt: "not built yet" };
+const finiteOr = (v, d) => (v == null || v === "" || !isFinite(Number(v)) ? d : Number(v));
+
+/** A child's age as a person says it, from months. */
+function childAge(m) {
+  m = finiteOr(m, null);
+  if (m == null) return "";
+  if (m < 1) return "newborn";
+  if (m < 24) return r1(m) + " months";
+  return r1(m / 12) + " years";
+}
+
+/** The tab's model: {source: "seat"|"ladder", level, name, nodes}; null without a sheet. */
+function skillTree(s) {
+  if (!s || typeof s !== "object" || !s.header) return null;
+  const h = s.header || {};
+  const name = h.name || SELF_NAME;
+  if (Array.isArray(s.tree)) {
+    const nodes = s.tree.filter((n) => n && n.id != null).map((n) => {
+      const built = n.built !== false;
+      const state = !built ? "unbuilt" : TREE_STATES.includes(n.state) ? n.state : "locked";
+      const bar = finiteOr(n.bar, null);
+      return { id: String(n.id), name: String(n.name || n.id), branch: String(n.branch || "later"),
+               prereqs: (Array.isArray(n.prereqs) ? n.prereqs : []).map(String), built, state,
+               earned_at: n.earned_at || null, skill: finiteOr(n.skill, null), bar: bar == null ? null : clamp01(bar),
+               waiting_on: n.waiting_on || null, test: n.test || n.asks || null,
+               child_age: n.child_age || "", child_ability: n.child_ability || "", why_prereqs: n.why_prereqs || "" };
+    });
+    const level = finiteOr(s.level, nodes.filter((n) => n.state === "earned").length);
+    return { source: "seat", level, name, nodes };
+  }
+  const level = finiteOr(h.level, 0);
+  const q = s.quest || {};
+  const next = finiteOr(h.next, finiteOr(q.rung, null));
+  const ach = {}, rows = {};
+  for (const a of s.achievements || []) if (a && a.rung != null) ach[a.rung] = a;
+  for (const r of (s.growth || {}).rows || []) if (r && r.rung != null) rows[r.rung] = r;
+  const names = {};
+  for (const [id, nm] of TREE_LADDER) names[id] = nm;
+  const nodes = TREE_LADDER.map(([id, nm, branch, rung, prereqs]) => {
+    const built = rung != null && rung <= 8;
+    const row = rows[rung] || {}, a = ach[rung] || {};
+    const earned = built && rung <= level;
+    const open = built && !earned && rung === next;
+    const sk = h.skill && h.skill.rung === rung ? finiteOr(h.skill.value, null) : null;
+    return { id, name: nm, branch, prereqs: prereqs.slice(), built, rung,
+             state: !built ? "unbuilt" : earned ? "earned" : open ? "open" : "locked",
+             earned_at: earned ? a.earned_at || a.at || null : null,
+             skill: earned ? finiteOr(a.skill, null) : open ? sk : null,
+             bar: open ? (finiteOr(h.bar, finiteOr(q.bar, null)) == null ? null : clamp01(finiteOr(h.bar, finiteOr(q.bar, 0)))) : null,
+             waiting_on: open ? h.waiting_on || q.waiting_on || null : null,
+             test: row.needs && row.needs !== "not built yet" ? row.needs : null,
+             child_age: childAge(row.child_months), child_ability: row.child_milestone || "",
+             why_prereqs: prereqs.length ? "the ladder's order read as a tree: " + prereqs.map((p) => names[p]).join(", ") + " comes first" : "" };
+  });
+  return { source: "ladder", level, name, nodes };
+}
+
+const TREE_LANE_W = 84, TREE_NODE_W = 76, TREE_NODE_H = 64, TREE_ROW_H = 94, TREE_TOP = 24, TREE_PAD = 4;
+
+/** Lanes by branch (Self / World / Others / Later, then any other branch as
+ *  it comes), each node in its lane's next free row below all its
+ *  prerequisites; the edges from every known prerequisite. Centres in px. */
+function treeLayout(nodes) {
+  nodes = (nodes || []).filter((n) => n && n.id != null);
+  const byId = {};
+  for (const n of nodes) byId[n.id] = n;
+  const order = TREE_BRANCHES.map((b) => b[0]).filter((b) => nodes.some((n) => n.branch === b));
+  for (const n of nodes) if (!order.includes(n.branch)) order.push(n.branch);
+  const label = {};
+  for (const [b, l] of TREE_BRANCHES) label[b] = l;
+  const laneX = {}, lanes = order.map((b, i) => {
+    laneX[b] = TREE_PAD + i * TREE_LANE_W + TREE_LANE_W / 2;
+    return { branch: b, label: label[b] || b.charAt(0).toUpperCase() + b.slice(1), x: laneX[b] };
+  });
+  const known = (n) => (n.prereqs || []).filter((p) => p !== n.id && byId[p]);
+  const row = {}, laneNext = {}, left = nodes.slice();
+  while (left.length) {                  // ready nodes first, in order; a cycle takes the first left
+    let i = left.findIndex((n) => known(n).every((p) => p in row));
+    if (i < 0) i = 0;
+    const n = left.splice(i, 1)[0];
+    let r = laneNext[n.branch] || 0;
+    for (const p of known(n)) if (p in row) r = Math.max(r, row[p] + 1);
+    row[n.id] = r; laneNext[n.branch] = r + 1;
+  }
+  const yOf = (r) => TREE_TOP + r * TREE_ROW_H + TREE_NODE_H / 2;
+  const out = nodes.map((n) => Object.assign({}, n, { row: row[n.id], x: laneX[n.branch], y: yOf(row[n.id]) }));
+  const pos = {};
+  for (const n of out) pos[n.id] = n;
+  const edges = [];
+  for (const n of out) for (const p of known(n)) {
+    const a = pos[p], hh = TREE_NODE_H / 2, hw = TREE_NODE_W / 2;
+    let d;
+    if (a.x === n.x && n.row - a.row > 1) {            // around the nodes between, inside the lane
+      const ex = a.x + TREE_LANE_W / 2 - 1;
+      d = "M" + (a.x + hw) + "," + a.y + " C" + ex + "," + a.y + " " + ex + "," + n.y + " " + (n.x + hw) + "," + n.y;
+    } else {
+      const y1 = a.y + hh, y2 = n.y - hh, my = r1((y1 + y2) / 2);
+      d = "M" + a.x + "," + y1 + " C" + a.x + "," + my + " " + n.x + "," + my + " " + n.x + "," + y2;
+    }
+    edges.push({ from: p, to: n.id, d, earned: a.state === "earned" });
+  }
+  const rows = Math.max(0, ...out.map((n) => n.row));
+  return { W: TREE_PAD * 2 + lanes.length * TREE_LANE_W, H: TREE_TOP + rows * TREE_ROW_H + TREE_NODE_H + TREE_PAD,
+           nodeW: TREE_NODE_W, nodeH: TREE_NODE_H, lanes, nodes: out, edges };
+}
+
+const treeDate = (s) => (s && utcShort(s) ? utcShort(s) + " UTC" : "");
+const treePct = (b) => Math.round(100 * clamp01(Number(b))) + "%";
+
+/** A node's state in words (its aria label and its card say it). */
+function nodeStateText(n) {
+  let t = TREE_STATE_TEXT[n.state] || n.state;
+  if (n.state === "earned" && n.earned_at) t += " " + treeDate(n.earned_at);
+  if (n.state === "open" && n.bar != null) t += ", " + treePct(n.bar) + " of the way";
+  if (n.waiting_on && n.state !== "earned") t += " · waiting on " + n.waiting_on;
+  return t;
+}
+
+/** What a hover, focus or tap shows: {title, rows: [[label, text]]}. */
+function nodeCard(n, nodes) {
+  if (!n) return null;
+  const byId = {};
+  for (const x of nodes || []) byId[x.id] = x;
+  const rows = [["state", nodeStateText(n)]];
+  if (n.test) rows.push(["test", n.test]);
+  if (n.skill != null || n.bar != null)
+    rows.push(["skill vs bar", "skill " + (n.skill == null ? "–" : skillSigned(n.skill)) + (n.bar == null ? "" : " · bar " + treePct(n.bar))]);
+  if (n.earned_at) rows.push(["earned", treeDate(n.earned_at)]);
+  rows.push(["needs", (n.prereqs || []).map((p) => (byId[p] ? byId[p].name : p)).join(", ") || "nothing first"]);
+  if (n.why_prereqs) rows.push(["why", n.why_prereqs]);
+  if (n.child_ability) rows.push(["a child (an analogy)", "a child: " + n.child_ability + (n.child_age ? " (" + n.child_age + ")" : "")]);
+  return { title: n.name, rows };
+}
+
+/** The earned ones, newest first: {id, name, at, date, skill}. */
+function achievementsList(nodes) {
+  const t = (n) => { const v = Date.parse(n.earned_at || ""); return isNaN(v) ? -Infinity : v; };
+  return (nodes || []).filter((n) => n && n.state === "earned").sort((a, b) => t(b) - t(a))
+    .map((n) => ({ id: n.id, name: n.name, at: n.earned_at || null, date: treeDate(n.earned_at), skill: n.skill == null ? "–" : skillSigned(n.skill) }));
+}
+
+/** The open node's progress ring: circumference c and the drawn length `on`. */
+function ringDash(bar, r) {
+  if (bar == null || !isFinite(Number(bar))) return null;
+  const c = 2 * Math.PI * r;
+  return { c, on: c * clamp01(Number(bar)) };
+}
+
+const TREE_ICON = { earned: "🏅", locked: "🔒", unbuilt: "◌" };
+const SVGNS = "http://www.w3.org/2000/svg";
+
+/** The tab, built into `root` with DOM calls (no markup strings). `sel`
+ *  keeps the chosen node across repaints ({id}); the node that had focus
+ *  keeps it, and the tree's box keeps its scroll. */
+function renderSkillTree(doc, root, sheet, sel) {
+  sel = sel || {};
+  const el = (tag, cls, text) => {
+    const e = doc.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  };
+  const svgEl = (tag, attrs) => {
+    const e = doc.createElementNS(SVGNS, tag);
+    for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  };
+  const rn = root.getRootNode ? root.getRootNode() : null;         // the page's home lives in a shadow root
+  const act = (rn && rn.activeElement) || doc.activeElement;
+  const focusId = act && act.getAttribute && /\bsknode\b/.test(act.className || "") ? act.getAttribute("data-id") : null;
+  const scroll = sel._box ? { l: sel._box.scrollLeft || 0, t: sel._box.scrollTop || 0 } : null;
+  root.textContent = "";
+  const m = skillTree(sheet);
+  if (!m) { root.appendChild(el("p", "muted", "the skill tree is not reachable right now")); return; }
+  const L = treeLayout(m.nodes);
+  const hdr = root.appendChild(el("div", "skhdr"));
+  hdr.appendChild(el("span", "nm", m.name));
+  hdr.appendChild(el("span", "lvb", "Lv " + m.level));
+  root.appendChild(el("p", "note", m.source === "ladder"
+    ? "the ladder read as a tree: this seat doesn't send its skill tree yet, so only the next rung is open"
+    : "each skill is an achievement; its test runs once its prerequisites are earned. Hover, focus or tap one."));
+  const box = root.appendChild(el("div", "skbox"));
+  box.setAttribute("role", "group");
+  box.setAttribute("aria-label", m.name + "'s skill tree");
+  sel._box = box;
+  const cv = box.appendChild(el("div", "skcanvas"));
+  cv.setAttribute("style", "width:" + L.W + "px;height:" + L.H + "px");
+  const svg = cv.appendChild(svgEl("svg", { class: "skedges", width: L.W, height: L.H, viewBox: "0 0 " + L.W + " " + L.H, "aria-hidden": "true" }));
+  for (const ln of L.lanes) {
+    svg.appendChild(svgEl("line", { class: "sklane", x1: ln.x, x2: ln.x, y1: TREE_TOP - 4, y2: L.H - TREE_PAD }));
+    const lab = cv.appendChild(el("div", "sklanel", ln.label));
+    lab.setAttribute("style", "left:" + (ln.x - TREE_LANE_W / 2) + "px;width:" + TREE_LANE_W + "px");
+  }
+  for (const e of L.edges) svg.appendChild(svgEl("path", { class: "skedge" + (e.earned ? " earned" : ""), d: e.d }));
+  const btns = {};
+  for (const n of L.nodes) {
+    const b = cv.appendChild(el("button", "sknode " + n.state));
+    b.setAttribute("type", "button");
+    b.setAttribute("data-id", n.id);
+    b.setAttribute("aria-label", n.name + ": " + nodeStateText(n));
+    b.setAttribute("style", "left:" + (n.x - L.nodeW / 2) + "px;top:" + (n.y - L.nodeH / 2) + "px;width:" + L.nodeW + "px;height:" + L.nodeH + "px");
+    const ic = b.appendChild(el("span", "skic"));
+    ic.setAttribute("aria-hidden", "true");
+    const ring = n.state === "open" ? ringDash(n.bar, 7) : null;
+    if (n.state === "open") {
+      const rs = ic.appendChild(svgEl("svg", { class: "skring", width: 18, height: 18, viewBox: "0 0 18 18" }));
+      rs.appendChild(svgEl("circle", { class: "skrt", cx: 9, cy: 9, r: 7 }));
+      if (ring) rs.appendChild(svgEl("circle", { class: "skrf", cx: 9, cy: 9, r: 7, "stroke-dasharray": r1(ring.on) + " " + r1(ring.c),
+                                                  transform: "rotate(-90 9 9)" }));
+    } else ic.textContent = TREE_ICON[n.state] || "";
+    b.appendChild(el("span", "sknm", n.name));
+    const sub = n.state === "earned" ? (utcShort(n.earned_at || "").split(" ").slice(0, 2).join(" ") || "earned")
+      : n.state === "open" ? (n.bar == null ? "open" : treePct(n.bar)) : n.state === "locked" ? "locked" : "not built yet";
+    b.appendChild(el("span", "sksub", sub));
+    btns[n.id] = b;
+  }
+  const card = root.appendChild(el("div", "skcard"));
+  card.setAttribute("role", "region");
+  card.setAttribute("aria-label", "the chosen skill");
+  const paintCard = () => {
+    card.textContent = "";
+    for (const id in btns) btns[id].className = "sknode " + L.nodes.find((n) => n.id === id).state + (id === sel.id ? " sel" : "");
+    const c = nodeCard(L.nodes.find((n) => n.id === sel.id), m.nodes);
+    if (!c) { card.appendChild(el("p", "muted", "hover, focus or tap a skill to see it")); return; }
+    card.appendChild(el("p", "skct", c.title));
+    const dl = card.appendChild(el("dl", "skcd"));
+    for (const [k, v] of c.rows) { dl.appendChild(el("dt", null, k)); dl.appendChild(el("dd", null, v)); }
+  };
+  const idOf = (t) => {
+    for (let e = t; e && e !== box; e = e.parentNode || e.parent) if (e.getAttribute && e.getAttribute("data-id")) return e.getAttribute("data-id");
+    return null;
+  };
+  const pick = (ev) => { const id = idOf(ev.target); if (id && id !== sel.id) { sel.id = id; paintCard(); } };
+  box.addEventListener("click", pick);
+  box.addEventListener("focusin", pick);
+  box.addEventListener("mouseover", pick);
+  paintCard();
+  root.appendChild(el("h4", null, "Achievements"));
+  const ach = achievementsList(m.nodes);
+  if (!ach.length) root.appendChild(el("p", "muted", "none earned yet"));
+  else {
+    const ol = root.appendChild(el("ol", "skachl"));
+    for (const a of ach) {
+      const li = ol.appendChild(el("li", "skach"));
+      li.appendChild(el("b", null, a.name));
+      li.appendChild(el("span", "muted", " · 🏅 " + (a.date || "earned") + " · skill " + a.skill));
+    }
+  }
+  if (scroll) { box.scrollLeft = scroll.l; box.scrollTop = scroll.t; }
+  if (focusId && btns[focusId]) btns[focusId].focus();
+}
+
 // ---- #249: THE TOY DOCK -- one icon per toybox toy under the 👶 tab, live:
 // a glyph per kind, a badge naming who changed it last (fading), a health
 // dot, and a popover with its stats and the play actions (the one write,
@@ -1467,6 +1737,7 @@ const AiPanelLogic = { offlineNotice, jsCompile, jsShow, voiceLogItems, seatView
                        attrBar, hoursText, curveGeom, curveSvg, timeParts, selfSheetHtml, SHEET_SECTIONS, SHEET_OPEN,
                        toyGlyph, toyBadge, toyDockItem, toyDockHtml, toyPopoverHtml, BADGE_S, skillStatHtml, skillSigned,
                        levelUpText, unlockText, sheetToys, TOY_ICONS,
+                       skillTree, treeLayout, nodeCard, nodeStateText, achievementsList, ringDash, childAge, renderSkillTree, TREE_LADDER,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
@@ -2974,6 +3245,8 @@ function definePanel() {
     // #249: the character sheet and the toy dock (read-only GETs; the dock's
     // play actions post through _toyPoke above)
     _selfSheetHtml(sheet, open) { return selfSheetHtml(sheet, open); }
+    _skillTree(root, sheet, sel) { return renderSkillTree(document, root, sheet, sel); }   // #296: the 👶 panel's Skill tree tab
+    _skillTreeSig(sheet) { return JSON.stringify(skillTree(sheet)); }
     _toyDockItem(t) { return toyDockItem(t); }
     _toyDockHtml(toys) { return toyDockHtml(toys); }
     _toyPopoverHtml(t, res) { return toyPopoverHtml(t, res); }

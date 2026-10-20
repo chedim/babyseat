@@ -307,6 +307,37 @@ and self's own record: nothing is claimed about self that the record doesn't
 measure. On a seat too old to serve the sheet, the panel shows the old report
 card instead.
 
+### The Skill tree tab
+
+The panel has two tabs at its top: **Sheet** (everything above) and **Skill
+tree** (#296); the arrow keys move between them and the one you chose is
+remembered per browser. The Skill tree tab draws self's achievements the way an
+RPG draws a skill tree:
+
+- **lanes by branch** (Self, World, Others, Later), each skill below the ones
+  it needs, with a line from every prerequisite (solid gold once that one is
+  earned, dashed while it isn't);
+- **earned** skills are filled gold with a 🏅 badge and the date they were
+  earned; **open** ones (their test is running) glow, with a ring showing how
+  far along their bar is; **locked** ones are dim with a 🔒; **unbuilt** ones are
+  dashed and say "not built yet";
+- **hover, focus or tap a skill** for its card: what its test asks, its skill
+  against its bar, when it was earned, what it needs first and why, and the
+  closest child ability with the age it shows up -- labelled as an analogy, as
+  on the growth curve;
+- the header says **Lv** (the achievements earned) and self's name; below the
+  tree, **Achievements** lists the earned ones, newest first.
+
+Each skill is an achievement, as a rung was; the celebration when one is
+earned is home's (the glow, the burst, the chime and the notification), not
+this tab's. The tab reads the same `GET /membrane/self/sheet` as the rest of
+the panel: its `tree` and `level` when the seat sends them. A seat that sends
+only the ladder gets the ladder read as a tree, and the tab says so: rungs 1-8
+map to feel (Self); reach, kinds, patience, shift (World); meet, turns, expect
+(Others); with mirror, change, speak and invent under Later, not built yet.
+There only the next rung is open: the strict ladder opens nothing else. On a
+phone the tree scrolls inside its own box; the page never scrolls sideways.
+
 ### The toy dock
 
 Under the 👶 tab, one icon per toybox toy, live whether or not the panel is
