@@ -124,7 +124,7 @@ BUILT_AT = {
     # #262 scored the reply, #272 the ball's turns; #281 (#278): it reads only the current clock's checks
     "expect": {"pr": 281, "merged": _utc(2026, 10, 19, 15, 19, 43)},
     # speak (#311): its commit's time until the merge's is set here
-    "speak": {"pr": 313, "merged": _utc(2026, 10, 20, 12, 39, 55)},
+    "speak": {"pr": 313, "merged": _utc(2026, 10, 20, 12, 55, 39)},
 }
 RESTART_S = 3 * SL.PACE_S     # a record gap this long is a restart: the loop writes a line every PACE_S
 WALL_WHY = "no built skill to learn: {next} not built yet"
