@@ -1,4 +1,4 @@
-"""#291: the open-loops toy (experiments/open_loops/sim.py) -- a tracker that
+"""#291: potential symptoms of memory bandwidth imbalance, a toy (experiments/open_loops/sim.py) -- a tracker that
 closes an episode only when it recognizes its end, open episodes holding
 arousal up against rest pressure, holding costing capacity more the longer
 it lasts, and two gentle helps (writing it down, clear endings)."""

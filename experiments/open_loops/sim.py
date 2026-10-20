@@ -1,4 +1,4 @@
-"""#291: open loops, closure and rest -- a mechanism toy.
+"""#291: potential symptoms of memory bandwidth imbalance -- a mechanism toy.
 
 A tracker lives through days minute by minute. Episodes start and end while
 it is awake; at an episode's end it sees an ending cue (0..1) and closes the

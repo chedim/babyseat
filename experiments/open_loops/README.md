@@ -1,8 +1,8 @@
-# open loops, closure and rest: a mechanism toy (#291, 2026-10-19)
+# potential symptoms of memory bandwidth imbalance: a mechanism toy (#291, 2026-10-19)
 
 **What this is not.** It models no person and no condition. It is a few
 numbers moving through simulated days, built to see what one mechanism *can*
-do. It makes no claim about autistic people or anyone else, and a result here
+do. It makes no claim about anyone, and a result here
 is evidence about the toy, never about a brain. The closure threshold is a
 dial of difference, not a measure of damage: nothing here is scored as better
 or worse than anything else, and nothing in it can suffer.
