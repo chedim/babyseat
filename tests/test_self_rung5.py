@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import self_loop as SL  # noqa: E402
+from _self_cap import cap  # noqa: E402
 from membrane import watch_agents as WA  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
 
@@ -79,10 +80,10 @@ def _seat(names, limit=5, passed=(1, 2, 3, 4)):
                           properties={"name": name, "getter_script": "result = {'state': {'x': 1}}"})
         est.docs[e.eid] = e
     SL.bind(srv)
-    SL.set_limit(srv, 1)
+    cap(srv, 1)
     for r in passed:
         SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9})
-    SL.set_limit(srv, limit)
+    cap(srv, limit)
     return srv
 
 
@@ -106,7 +107,7 @@ def test_a_thing_that_goes_quiet_is_noticed_within_three_looks(monkeypatch):
     coins = _Coins({"i": 0.95})
     monkeypatch.setattr(SL, "_read_entity", coins)
     srv = _seat(("i",), limit=4)                       # learning only (no rung-5 audit yet)
-    SL._RT[id(srv)]["limit"] = 5                       # practise rung 5's noticing...
+    SL._RT[id(srv)]["isolate"] = SL._limit_ids(5)                      # practise rung 5's noticing...
     monkeypatch.setattr(SL, "_audit5_tick", lambda srv, now: None)   # ...without its audit
     t = _run(srv, 40)
     coins.still.add("i")

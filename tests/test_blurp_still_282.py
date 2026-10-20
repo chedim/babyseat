@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import chat_io as CIO  # noqa: E402
 from membrane import self_loop as SL  # noqa: E402
+from tests._self_cap import cap  # noqa: E402
 from membrane import self_sheet as SS  # noqa: E402
 from membrane import toy_unlocks as TU  # noqa: E402
 from membrane import toybox as TB  # noqa: E402
@@ -92,11 +93,11 @@ def _seat(limit=7, placed=True):
     CIO.entity_in(srv, CIO.OPERATOR)
     SL.bind(srv)
     TB.bind(srv)
-    SL.set_limit(srv, 1)
+    cap(srv, 1)
     for r in (1, 2, 3, 4, 5, 6):
         SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9})
     SL._append(srv, {"ts": 1.0, "kind": "audit", "rung": 5, "phase": "end", "eid": "x", "passed": True})
-    SL.set_limit(srv, limit)
+    cap(srv, limit)
     SL.set_mode(srv, "on")
     TU.sync(srv)                                  # the ball (and the toys before it)
     if placed:

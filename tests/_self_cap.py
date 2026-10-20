@@ -1,0 +1,23 @@
+"""#299: the 🌱 growth limit gave way to acceptance. The self tests that used
+the limit to run one rung's machinery alone use cap() instead: it wakes self
+(0: asleep), accepts what is earned in the closure -- as accept lines, the
+way the old limit opened it, without the toy sync a real accept runs (a test
+syncs the toys itself) -- and cuts the open skills to that closure (the
+runtime's `isolate`, which the seat never sets). A pass the loop earns during
+a test still waits for its accept, as on a seat."""
+import time
+
+from membrane import self_loop as SL
+
+
+def cap(srv, n) -> bool:
+    ids = SL._limit_ids(n)
+    rt = SL._rt(srv)
+    rt["isolate"] = ids
+    if not ids:
+        return SL.set_mode(srv, "off")
+    ok = SL.set_mode(srv, rt["mode"] if rt["mode"] != "off" else "on")
+    recs = SL._read(srv)
+    for i in [i for i in SL._earn_order(recs) if i in ids and i not in SL._accepted(recs)]:
+        SL._append(srv, {"ts": time.time(), "kind": "accept", "id": i, "by": "test"})
+    return ok

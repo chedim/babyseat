@@ -41,6 +41,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import chat_io as CIO  # noqa: E402
 from membrane import self_loop as SL  # noqa: E402
+from tests._self_cap import cap  # noqa: E402
 from membrane import self_sheet as SS  # noqa: E402
 from membrane import toy_unlocks as TU  # noqa: E402
 from membrane import toybox as TB  # noqa: E402
@@ -193,14 +194,14 @@ def _seat(passed=(1, 2, 3, 4, 5, 6), limit=7, ball=True):
     CIO.entity_in(srv, CIO.OPERATOR)
     SL.bind(srv)
     TB.bind(srv)
-    SL.set_limit(srv, 1)
+    cap(srv, 1)
     for r in passed:
         line = {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9}
         if r >= 7:
             line["ladder"] = SL.LADDER_V
         SL._append(srv, line)
     SL._append(srv, {"ts": 1.0, "kind": "audit", "rung": 5, "phase": "end", "eid": "x", "passed": True})
-    SL.set_limit(srv, limit)
+    cap(srv, limit)
     if ball:
         TU.sync(srv)                       # the unlocks of the rungs passed (#267): the ball at rung 6
     return srv
@@ -235,6 +236,9 @@ def test_the_rung_six_unlock_switches_on_exactly_one_ball_once():
     TU.sync(srv)
     assert _ball_names() == []                                      # locked before rung 6
     _rung(srv, 6)
+    TU.sync(srv)
+    assert _ball_names() == []                                      # #299: earned, not accepted yet: still locked
+    SL.accept(srv, "meet")                                          # the operator's accept syncs the unlock
     TU.sync(srv)
     line = next(r for r in SL._read(srv) if r.get("kind") == "unlock" and r.get("rung") == 6)
     assert line["toys"] == ["ball"] and line["added"] == [TB.BALL]
@@ -600,7 +604,7 @@ def test_chat_pushes_stop_and_rung_six_holds_through_the_silence(monkeypatch):
     t = _run(srv, 600, monkeypatch=monkeypatch, chat=lambda s, text, person="": lines.append(text))
     assert lines and 6 in SL._passed(SL._read(srv))                  # rung 6, met in chat as before
     pushed = len(lines)
-    SL.set_limit(srv, 7)                                             # rung 7: turns with the ball
+    cap(srv, 7)                                             # rung 7: turns with the ball
     chat.talking = False                                             # ...and the chat falls silent
     _run(srv, 1500, t0=t, monkeypatch=monkeypatch, chat=lambda s, text, person="": lines.append(text))
     assert len(lines) == pushed                                      # not one more chat line

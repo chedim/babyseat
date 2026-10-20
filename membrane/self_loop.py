@@ -42,11 +42,21 @@ as an `achieve` line; the old `rung` lines count as their achievements
 go down (slipping) -- an earned achievement stays on the record. The level
 is the number earned. Only built achievements are ever tried.
 
-THE GROWTH LIMIT (the operator's chooser): allow self up to an achievement
--- it and its prerequisite closure -- or all of them, or off. Inside it self
-still earns each achievement by its test; outside it nothing is earned,
-however well it does ("the limit"). A number is the old ladder's: rungs 1..N.
-Raising it never grants an achievement.
+ACCEPTANCE (#299; the 🌱 growth limit until then): earning stays automatic --
+a pass is an `achieve` line, the level counts it, the page celebrates it --
+but an earned achievement opens its children only once the operator ACCEPTS
+it (accept(): an `accept` line, {"kind": "accept", "id", "ts", "by"}). A skill
+is open -- its practice acts run, its test runs -- when every prerequisite is
+earned AND accepted; the roots are open from birth. An earned, unaccepted
+achievement counts for the level and opens nothing: no practice, no outward
+act (chat pushes, ball rolls, reply checks), no toy. Accepting never grants
+an achievement and never wakes self. THE MIGRATION: every achievement earned
+before this code first ran counts as accepted, recorded once as one
+{"kind": "accept_migrated", "ids": [...], "ts"} line (_migrate_accept); a
+record without that line has had no new pass yet, so all it earned counts.
+`self_limit` (set_limit) stays for older callers, deprecated: a number, an id
+or "all" bulk-accepts the earned achievements in that closure (and wakes
+self); 0 / "off" puts it to sleep.
 """
 from __future__ import annotations
 
@@ -338,6 +348,8 @@ OFF_FIELD_LOOKS = 200       # #244: status() counts how many of the last looks l
 
 _lock = threading.RLock()
 _ctx = threading.local()    # the cycle in flight: only the loop's own thread has one
+OPERATOR_KINDS = ("accept", "accept_migrated")   # #299: record lines the operator's acts write, not self's running
+_ACC_MEMO: dict = {}        # #299: _accepted's last answer: the record it read (held, so never mistaken) and its length
 _RT: dict[int, dict] = {}   # id(srv) -> runtime (mode, guard clocks, hold, the wake event)
 
 
@@ -381,7 +393,8 @@ def bind(srv) -> None:
         if meth not in have:
             method_define(srv, est, None, None, on=ent.eid, method=meth, command=cmd)
     rt = _rt(srv)
-    rt["mode"], rt["limit"] = _load_mode(srv)
+    rt["mode"] = _load_mode(srv)
+    _migrate_accept(srv)                    # #299: once -- what was earned before acceptance counts as accepted
     rt["model"] = _load_model(srv)
     rt["tempo"] = _load_json(srv, "tempo.json") or {}
 
@@ -390,7 +403,7 @@ def _rt(srv) -> dict:
     with _lock:
         rt = _RT.get(id(srv))
         if rt is None:
-            rt = _RT[id(srv)] = {"mode": "off", "limit": 0, "last": None, "burst": [], "fails": 0,
+            rt = _RT[id(srv)] = {"mode": "off", "last": None, "burst": [], "fails": 0,
                                  "held": False, "wake": threading.Event(), "srv": srv}
         return rt
 
@@ -407,39 +420,25 @@ def record_path(srv) -> Path | None:
     return d / "record.jsonl" if d is not None else None
 
 
-def _load_mode(srv) -> tuple[str, object]:
-    """(mode, limit). A seat switched on before the limit existed gets 1 --
-    what it had -- so nothing past feel itself opens until the operator raises
-    it. #295: the limit is saved as `allow` (an achievement id, "all", or a
-    list of ids); a seat saved before the tree has only a number N, which
-    migrates to the closure of the achievements rungs 1..N were (8: all)."""
+def _load_mode(srv) -> str:
+    """The saved mode (off / on / watch). #299: a growth limit saved by an
+    older seat (`limit`, `allow`) is ignored -- acceptance replaced it, and
+    the migration carries what was earned under it."""
     d = _dir(srv)
     try:
         doc = json.loads((d / "mode.json").read_text()) if d is not None else {}
     except Exception:
         doc = {}
-    m = doc.get("mode") if doc.get("mode") in MODES else "off"
-    if m == "off":
-        return m, 0
-    if "allow" in doc:
-        lim = _norm_limit(doc["allow"])
-        if lim is not None and lim != 0:
-            return m, lim
-    try:
-        n = int(doc["limit"]) if "limit" in doc else 1
-    except (TypeError, ValueError):
-        n = 1
-    return m, _norm_limit(max(1, n))
+    return doc.get("mode") if doc.get("mode") in MODES else "off"
 
 
-def _save_mode(srv, mode: str, limit) -> None:
+def _save_mode(srv, mode: str) -> None:
     d = _dir(srv)
     if d is None:
         return
     d.mkdir(parents=True, exist_ok=True)
     tmp = d / "mode.json.tmp"
-    allow = list(limit) if isinstance(limit, (list, tuple, set, frozenset)) else limit
-    tmp.write_text(json.dumps({"mode": mode, "limit": _limit_number(limit), "allow": allow, "ts": time.time()}))
+    tmp.write_text(json.dumps({"mode": mode, "ts": time.time()}))
     os.replace(tmp, d / "mode.json")
 
 
@@ -457,72 +456,102 @@ def _closure(ids) -> set:
     return out
 
 
-def _norm_limit(v):
-    """The growth limit as the operator may give it -> what self keeps: 0
-    (off), "all", a built achievement's id, or a sorted list of ids (a
-    migrated number under the top: the closure of rungs 1..N). None: not a
-    limit. A number N is the ladder's: the achievements rungs 1..N were,
-    with their prerequisites; N at or past the top built rung is all."""
+def _limit_ids(v) -> set | None:
+    """#299, the deprecated `self_limit`: the achievements a limit names --
+    an id and its prerequisite closure, "all" (every built one), a list's
+    closure, a ladder number N (rungs 1..N; the top built rung or more is
+    all). 0 / "off": set() (sleep). None: not a limit."""
     if isinstance(v, bool):
         return None
     if isinstance(v, str):
         s = v.strip().lower()
-        if s in ("off", "0", ""):
-            return 0 if s else None
+        if s in ("off", "0"):
+            return set()
         if s == "all":
-            return "all"
+            return set(BUILT)
         if s in ACHIEVEMENTS:
-            return s if ACHIEVEMENTS[s]["built"] else None
+            return {i for i in _closure([s]) if ACHIEVEMENTS[i]["built"]} if ACHIEVEMENTS[s]["built"] else None
         try:
             v = int(s)
         except ValueError:
             return None
     if isinstance(v, (list, tuple, set, frozenset)):
         ids = [i for i in v if i in ACHIEVEMENTS and ACHIEVEMENTS[i]["built"]]
-        if not ids:
-            return None
-        got = _closure(ids)
-        return "all" if got >= set(BUILT) else sorted(got, key=list(ACHIEVEMENTS).index)
+        return {i for i in _closure(ids) if ACHIEVEMENTS[i]["built"]} if ids else None
     try:
         n = int(v)
     except (TypeError, ValueError):
         return None
     if n <= 0:
-        return 0
-    top = max(ACHIEVEMENTS[i]["rung"] for i in BUILT)
-    if n >= top:
-        return "all"
-    return _norm_limit([i for i in BUILT if ACHIEVEMENTS[i]["rung"] <= n])
-
-
-def _limit_ids(lim) -> set:
-    """The achievements a limit allows: an id and its prerequisite closure,
-    "all" (every built one), a list's closure, a ladder number N (rungs
-    1..N); off allows nothing. Only built achievements are ever allowed."""
-    if lim in (None, 0, "off"):
         return set()
-    if lim == "all":
-        return set(BUILT)
-    if isinstance(lim, (int, float)) and not isinstance(lim, bool):
-        return {i for i in BUILT if ACHIEVEMENTS[i]["rung"] <= int(lim)}
-    if isinstance(lim, str):
-        return {i for i in _closure([lim]) if ACHIEVEMENTS[i]["built"]}
-    if isinstance(lim, (list, tuple, set, frozenset)):
-        return {i for i in _closure(lim) if ACHIEVEMENTS[i]["built"]}
-    return set()
+    return {i for i in BUILT if ACHIEVEMENTS[i]["rung"] <= n}
 
 
-def _limit_number(lim) -> int:
-    """The old ladder's number for a limit (kept on the API and in mode.json
-    for an older reader): the top rung among the allowed, 0 when off."""
-    ids = _limit_ids(lim)
-    return max((ACHIEVEMENTS[i]["rung"] for i in ids), default=0)
+def _accepted(recs: list[dict]) -> set:
+    """#299: the earned achievements the operator has accepted -- an `accept`
+    line, or the migration's `accept_migrated` line, naming it at or after
+    the pass that counts (a pass voided and earned again waits for a new
+    accept). A record without the migration line has had no pass since
+    acceptance began: all it earned counts as accepted."""
+    key = len(recs)
+    if _ACC_MEMO.get("recs") is recs and _ACC_MEMO.get("key") == key:   # read several times a cycle; it only grows
+        return set(_ACC_MEMO["val"])
+    times = _earn_times(recs)
+    if not any(r.get("kind") == "accept_migrated" for r in recs):
+        _ACC_MEMO.update(recs=recs, key=key, val=set(times))
+        return set(times)
+    at: dict = {}
+    for r in recs:
+        k = r.get("kind")
+        ids = r.get("ids") if k == "accept_migrated" else [r.get("id")] if k == "accept" else ()
+        for i in ids or ():
+            at[i] = max(at.get(i, float("-inf")), float(r.get("ts") or 0))
+    out = {i for i, r in times.items() if i in at and at[i] >= float(r.get("ts") or 0)}
+    _ACC_MEMO.update(recs=recs, key=key, val=out)
+    return set(out)
+
+
+def _awaiting(recs: list[dict]) -> list[str]:
+    """Earned, not accepted yet -- in tree order."""
+    acc = _accepted(recs)
+    return [i for i in _earn_order(recs) if i not in acc]
+
+
+def _earn_order(recs: list[dict]) -> list[str]:
+    return [i for i in ACHIEVEMENTS if i in _earn_times(recs)]
+
+
+def _opens(recs: list[dict]) -> set:
+    """The built achievements whose prerequisites are all earned AND accepted
+    (earned or not): the skills self may practise while awake."""
+    acc = _accepted(recs)
+    return {i for i in BUILT if all(p in acc for p in ACHIEVEMENTS[i]["prereqs"])}
 
 
 def _allowed(srv) -> set:
-    """The achievements the operator's growth limit allows on this seat now."""
+    """The skills open on this seat now (#299: by acceptance; asleep: none).
+    `isolate` in the runtime cuts them to a set of ids -- a test's way to run
+    one rung's machinery alone; the seat never sets it (the operator's door
+    is acceptance, and it is not on any API)."""
     rt = _rt(srv)
-    return set() if rt["mode"] == "off" else _limit_ids(rt["limit"])
+    if rt["mode"] == "off":
+        return set()
+    got = _opens(_read(srv))
+    cap = rt.get("isolate")
+    return got if cap is None else got & set(cap)
+
+
+def _migrate_accept(srv) -> None:
+    """#299, THE MIGRATION, once per seat: the first time this code meets a
+    record (at boot, at birth, or before the first new pass) it writes one
+    `accept_migrated` line naming every achievement earned so far -- they
+    count as accepted; nothing is written per achievement. A seat with no
+    record yet migrates at birth (set_mode), with nothing."""
+    with _lock:
+        recs = _read(srv)
+        if not recs or any(r.get("kind") == "accept_migrated" for r in recs):
+            return
+        _append(srv, {"ts": time.time(), "kind": "accept_migrated", "ids": _earn_order(recs)})
 
 
 def _earned(recs: list[dict]) -> set:
@@ -541,9 +570,11 @@ def _earn_times(recs: list[dict]) -> dict:
 
 
 def _open_ids(recs: list[dict]) -> list[str]:
-    """The built achievements not yet earned whose prerequisites all are."""
+    """The built achievements not yet earned whose prerequisites all are --
+    earned and accepted (#299)."""
     got = _earned(recs)
-    return [i for i in BUILT if i not in got and all(p in got for p in ACHIEVEMENTS[i]["prereqs"])]
+    acc = _accepted(recs)
+    return [i for i in BUILT if i not in got and all(p in acc for p in ACHIEVEMENTS[i]["prereqs"])]
 
 
 def _missing(i: str, got: set) -> list[str]:
@@ -631,53 +662,80 @@ def mode(srv) -> str:
 
 
 def limit(srv) -> int:
-    """The growth limit as the old ladder's number (the top rung allowed; 0: off)."""
-    return _limit_number(_rt(srv)["limit"]) if _rt(srv)["mode"] != "off" else 0
+    """Deprecated (#299): the old ladder's number for what is open now -- the
+    top rung among the open skills; 0 asleep."""
+    return max((ACHIEVEMENTS[i]["rung"] for i in _allowed(srv)), default=0)
 
 
 def allow(srv):
-    """The growth limit as the operator set it (#295): 0 (off), "all", an
-    achievement id, or a list of ids (a migrated ladder number)."""
-    rt = _rt(srv)
-    if rt["mode"] == "off":
+    """Deprecated (#299): the open skills as ids (tree order); 0 asleep."""
+    if _rt(srv)["mode"] == "off":
         return 0
-    lim = rt["limit"]
-    return _norm_limit(lim) if isinstance(lim, int) else lim
+    got = _allowed(srv)
+    return [i for i in BUILT if i in got]
+
+
+def accept(srv, i, by: str = "operator") -> dict:
+    """#299: the operator accepts an earned achievement, which opens what it
+    leads to. -> {"ok", "id", "name", "already"} or {"ok": False, "error"}.
+    An unknown or unearned id is refused; accepting twice writes nothing."""
+    i = str(i if i is not None else "").strip().lower()
+    if i not in ACHIEVEMENTS:
+        return {"ok": False, "error": f"unknown achievement {i!r}: one of " + ", ".join(ACHIEVEMENTS)}
+    a = ACHIEVEMENTS[i]
+    with _lock:
+        _migrate_accept(srv)
+        recs = _read(srv)
+        if i not in _earn_times(recs):
+            return {"ok": False, "id": i, "error": (f"'{a['name']}' is not earned yet: it is earned by its test, "
+                                                    "and only an earned achievement can be accepted")}
+        if i in _accepted(recs):
+            return {"ok": True, "id": i, "name": a["name"], "already": True}
+        _append(srv, {"ts": time.time(), "kind": "accept", "id": i, "by": str(by or "operator")})
+    _unlock_toys(srv)                       # its toys, at once
+    rt = _rt(srv)
+    rt.pop("sheet", None)                   # the panel's cached sheet and dock show it at once
+    rt.pop("dock", None)
+    rt["wake"].set()                        # what it leads to opens on the next cycle
+    return {"ok": True, "id": i, "name": a["name"], "already": False}
 
 
 def set_limit(srv, n, by: str = "operator") -> bool:
-    """The operator's chooser (#295): allow self up to an achievement -- it
-    and its prerequisite closure -- or "all" (every built one) or "off". A
-    number is the old ladder's (rungs 1..N, with their prerequisites; the top
-    built rung or more is all). Raising it grants nothing -- each achievement
-    it allows is still earned by its test."""
-    v = _norm_limit(n)
-    if v is None:
+    """DEPRECATED (#299; the 🌱 growth limit until then), kept for HA and
+    scripts: 0 / "off" puts self to sleep; a number (the old ladder's rungs
+    1..N), an achievement id (it and its prerequisites) or "all" ACCEPTS
+    every earned achievement in that closure that isn't yet (one accept line
+    each) and wakes self. It grants nothing and pre-accepts nothing: a later
+    pass still waits for its accept."""
+    ids = _limit_ids(n)
+    if ids is None:
         return False
-    rt = _rt(srv)
-    if v == 0:
+    if not ids:
         return set_mode(srv, "off", by)
-    keep = rt["mode"] if rt["mode"] != "off" else "on"
-    rt["limit"] = v
-    return set_mode(srv, keep, by)
+    keep = _rt(srv)["mode"] if _rt(srv)["mode"] != "off" else "on"
+    ok = set_mode(srv, keep, by)
+    with _lock:
+        recs = _read(srv)
+        todo = [i for i in _earn_order(recs) if i in ids and i not in _accepted(recs)]
+    for i in todo:
+        accept(srv, i, by=by)
+    return ok
 
 
 def set_mode(srv, m: str, by: str = "operator") -> bool:
-    """The operator's switch (seat_panel.control). The first switch-on is the
-    birth; a toggle clears a hold. Off is limit 0; on with no limit allows
-    feel itself (what the first rung was)."""
+    """The operator's switch (seat_panel.control): off / on / watch. The
+    first switch-on is the birth (and the acceptance migration, #299); a
+    toggle clears a hold. Off runs nothing and erases nothing."""
     if m not in MODES:
         return False
     rt = _rt(srv)
     with _lock:
         if m != "off" and not any(r.get("kind") == "birth" for r in _read(srv)):
             _append(srv, {"ts": time.time(), "kind": "birth", "by": by})
+        if m != "off":
+            _migrate_accept(srv)
         rt["mode"], rt["held"], rt["fails"] = m, False, 0
-        if m == "off":
-            rt["limit"] = 0
-        elif not _limit_ids(rt["limit"]):
-            rt["limit"] = _norm_limit(1)
-        _save_mode(srv, m, rt["limit"])
+        _save_mode(srv, m)
     if m != "off":
         rt["wake"].set()                    # switching on kicks the first cycle
     return True
@@ -1878,13 +1936,10 @@ def _unlock_toys(srv) -> None:
 
 def _available(srv, rung: int) -> bool:
     """An achievement's skill may be practised (#295; by its test's rung
-    number): built, allowed by the growth limit, and every prerequisite
-    earned -- not the rung below: siblings practise in any order."""
+    number): built, self awake, and every prerequisite earned AND accepted
+    (#299) -- not the rung below: siblings practise in any order."""
     i = RUNG_ID.get(rung)
-    if i is None or not ACHIEVEMENTS[i]["built"] or i not in _allowed(srv):
-        return False
-    got = _earned(_read(srv))
-    return all(p in got for p in ACHIEVEMENTS[i]["prereqs"])
+    return i is not None and ACHIEVEMENTS[i]["built"] and i in _allowed(srv)
 
 
 def _replies(srv) -> bool:
@@ -2373,7 +2428,7 @@ def _show(srv, ent, pos, c, rec) -> None:
                        "rung": st["rung"], "level": st["level"], "bar": st["bar"], "skill": st["skill"],
                        "mode": st["mode"], "slipping": st["slipping"], "waiting_on": st["waiting_on"],
                        "next": st["next"], "cycles": st["cycles"], "held": st["held"],
-                       "rung_name": st["rung_name"], "limit": st["limit"],
+                       "rung_name": st["rung_name"], "limit": st["limit"], "awaiting": st["awaiting"],
                        "split": st.get("split"), "meets": st.get("meets"),
                        "steer": (st.get("steer") or {}).get("skill")})
     except Exception:
@@ -2691,9 +2746,11 @@ def _passed(recs: list[dict]) -> set:
 
 
 def _open_rungs(srv) -> None:
-    """An achievement is earned when its test passes (#295) -- only when the
-    operator's limit allows it and every prerequisite is earned; siblings in
-    any order. The pass goes on the record as an `achieve` line."""
+    """An achievement is earned when its test passes (#295) -- only while
+    self is awake and every prerequisite is earned and accepted (#299);
+    siblings in any order. The pass goes on the record as an `achieve` line,
+    and waits for the operator's accept before it opens anything."""
+    _migrate_accept(srv)                     # a pass from here on is new: it needs an accept
     recs = _read(srv)
     allowed = _allowed(srv)
     progress = True
@@ -2710,6 +2767,7 @@ def _open_rungs(srv) -> None:
                     line["eid"] = p["eid"]
                 _append(srv, line)
                 recs, progress = _read(srv), True
+                allowed = _allowed(srv)
                 break
 
 
@@ -2741,10 +2799,11 @@ def status(srv) -> dict:
     """Self's state for the panel and the page. #295, the skill tree: `level`
     (= `rung`, kept for older readers) counts the achievements earned;
     `rung_name` is the latest one's name; `next` the open ones (built,
-    unearned, every prerequisite earned); `earned` the passes in order (the
-    page's celebration reads it). The bar reads the open achievement the
-    limit allows that is closest to passing; with none, the latest earned
-    one's own test -- so a pass can be seen slipping."""
+    unearned, every prerequisite earned and accepted); `earned` the passes in
+    order (the page's celebration reads it); #299: `accepted` the earned ones
+    the operator accepted, `awaiting` the earned ones not yet (tree order).
+    The bar reads the open achievement closest to passing; with none, the
+    latest earned one's own test -- so a pass can be seen slipping."""
     rt = _rt(srv)
     recs = _read(srv)
     born = any(r.get("kind") == "birth" for r in recs)
@@ -2770,8 +2829,10 @@ def status(srv) -> dict:
     aim = ACHIEVEMENTS[aim_id]["rung"] if aim_id is not None else None
     bar, waiting = _staged(prog["crit"])
     slipping = bool(late is not None and not late["passed"])
-    if opens and not progs and rt["mode"] != "off" and not slipping:
-        waiting = "the limit"                    # it may be ready; the operator holds it here
+    acc = _accepted(recs)
+    awaiting = [i for i in _earn_order(recs) if i not in acc]
+    if not progs and awaiting and rt["mode"] != "off" and not slipping:
+        waiting = "your accept"                  # #299: nothing open runs; an earned one waits to be accepted
     if rt["mode"] != "off" and 1 not in done and _current(srv) is None:
         # no current right now (a fresh boot: nobody has spoken yet) -- say
         # so: self cycles in a still world (#282), but feel itself (feel the
@@ -2817,6 +2878,7 @@ def status(srv) -> dict:
             "cycles": sum(1 for r in recs if r.get("kind") == "cycle"),
             "rung": level, "level": level, "rung_name": ACHIEVEMENTS[latest]["name"] if latest else RUNG_NAMES[0],
             "next": opens, "earned": [{k: e[k] for k in ("id", "name", "ts")} for e in earned],
+            "accepted": [i for i in ACHIEVEMENTS if i in acc], "awaiting": awaiting,          # #299
             "allow": allow(srv), "allowed": [i for i in BUILT if i in allowed], "aim": aim_id,
             "bar": round(bar, 4), "waiting_on": waiting, "skill": prog.get("skill", r1["skill"]),
             "skill_rung": aim, "skill_pass": SKILL_PASS.get(aim),          # #249: the bar the skill has to beat

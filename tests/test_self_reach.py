@@ -91,10 +91,9 @@ def _run(srv, n, t0=1000.0, step=None):
 
 
 def _with_rung1(srv):
-    """Earn rung 1 first (the ladder is climbed in order)."""
-    t = _run(srv, SL.RUNG1_CYCLES * 2)
-    assert SL.status(srv)["rung"] == 1
-    return t
+    """#299: first reach is a root, open from birth (the growth limit that
+    held it behind feel itself is gone): nothing to earn first -- the start."""
+    return 1000.0
 
 
 # ---- the answer: the getter path says whether the reading changed -----------
@@ -137,12 +136,14 @@ def test_reach_is_one_of_its_methods_and_refuses_outside_callers():
     assert "own loop" in str(out.get("head") or "") + str(out.get("tail") or "")
 
 
-def test_no_reaching_under_limit_one():
+def test_reach_is_a_root_it_reaches_from_birth_and_not_asleep():     # #299: no limit holds it
     srv = _seat()
-    _with_rung1(srv)
+    SL.set_mode(srv, "off")
     _run(srv, 10, t0=10_000.0)
     assert not [r for r in _record(srv) if r["kind"] == "reach"]
-    assert SL.status(srv)["waiting_on"] == "the limit"
+    SL.set_mode(srv, "on")
+    _run(srv, 3, t0=20_000.0)
+    assert len([r for r in _record(srv) if r["kind"] == "reach"]) == 3
 
 
 def test_with_limit_two_it_reaches_and_records_the_answer():
@@ -212,8 +213,8 @@ def test_rung_two_waits_for_the_audit_then_opens(monkeypatch):
     recs = _record(srv)
     ends = [r for r in recs if r["kind"] == "audit" and r.get("phase") == "end"]
     assert ends and ends[0]["passed"] is True and ends[0]["changes"] == 0 and ends[0]["reaches"] >= 3
-    assert [r["rung"] for r in recs if r["kind"] in ("rung", "achieve")] == [1, 2]
-    assert SL.status(srv)["rung"] == 2
+    assert 2 in [r["rung"] for r in recs if r["kind"] in ("rung", "achieve")]   # #299: feel and reach in any order
+    assert "reach" in SL._earned(SL._read(srv))
 
 
 def test_the_audit_is_blind_and_the_model_does_not_learn_inside_it():
@@ -257,7 +258,7 @@ def test_a_world_where_everything_changes_teaches_no_tempo():
     t = _with_rung1(srv)
     SL.set_limit(srv, 2)
     _run(srv, 80, t0=t)
-    assert SL.status(srv)["rung"] == 1                    # nothing to tell apart: no skill over the base rate
+    assert "reach" not in SL._earned(SL._read(srv))       # nothing to tell apart: no skill over the base rate
 
 
 # ---- the staged bar (the live seat, 2026-10-16: "self is all zeroes") -------
@@ -270,9 +271,9 @@ def test_the_bar_moves_with_the_first_stage_and_names_it():
     t = _with_rung1(srv)
     SL.set_limit(srv, 2)
     _run(srv, 12, t0=t)
-    st = SL.status(srv)
-    assert st["waiting_on"] == "reaches"
-    assert 0.0 < st["bar"] < 1.0 / 3 + 1e-9                 # inside the first of three stages
+    bar, waiting = SL._staged(SL.PROGRESS[2](SL._read(srv), SL._tempo(srv))["crit"])   # #299: reach's own bar
+    assert waiting == "reaches"                               # (the status bar may read feel, open beside it)
+    assert 0.0 < bar < 1.0 / 3 + 1e-9                       # inside the first of three stages
 
 
 def test_a_staged_bar_falls_back_when_an_earlier_stage_slips():

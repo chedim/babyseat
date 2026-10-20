@@ -212,9 +212,9 @@ class TestExpBar(unittest.TestCase):
     def test_slipping_held_capped_asleep_top(self):
         self.assertEqual(self._x(slipping=True)["state"], "slipping")
         self.assertEqual(self._x(held=True)["state"], "held")
-        cap = self._x(limit=6, waiting_on="the limit")
+        cap = self._x(waiting_on="your accept")                    # #299: an earned one waits for the operator's accept
         self.assertEqual(cap["state"], "capped")
-        self.assertEqual(cap["label"], "capped")
+        self.assertEqual(cap["label"], "accept?")
         self.assertEqual(self._x(mode="off")["state"], "asleep")
         top = self._x(rung=7, rung_name="understand an other", next=None, bar=1.0, waiting_on=None)
         self.assertEqual(top["state"], "top")

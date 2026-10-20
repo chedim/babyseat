@@ -52,21 +52,26 @@ rule.
   a `rung_void` still voids, and a pass above rung 6 from before the ladder
   flip still counts for neither (#258) -- the voided old rung 7 stays void.
 - **The level** is the number of achievements earned (sleep and wake is not
-  one). `rung_name` is the latest earned achievement's name; `next` lists the
-  open ones (built, unearned, every prerequisite earned).
+  one), accepted or not. `rung_name` is the latest earned achievement's name;
+  `next` lists the open ones (built, unearned, every prerequisite earned and
+  accepted).
+- **An earned achievement opens its children only once you accept it**
+  (#299, [Accepting what it earns](#accepting-what-it-earns-299)). Until then
+  it counts for the level and opens nothing.
 - **Practice follows the tree too.** Each achievement's machinery runs while
-  its prerequisites are earned and the limit allows it: reaching from birth
-  (when allowed), the sort after first reach, noticing after first reach, the
+  self is awake and its prerequisites are earned and accepted: reaching from
+  birth (a root), the sort after first reach, noticing after first reach, the
   pushes to the other after first reach, and the reply checks after each push
   while either *take turns* or *understand an other* may be practised. The
   ball's turns are take turns' practice. Acts with outside effects (the pushes,
-  the ball, the toy unlocks) stay behind their achievement's prerequisites and
-  the growth limit.
+  the ball, the reply checks, the toy unlocks) stay behind their achievement's
+  prerequisites and your accept of them.
 - **The data** for the 👶 panel's tree is `tree` (and `level`) in
   `GET /membrane/self/sheet` and in the dock (`GET /membrane/toybox/state`):
   one row per achievement, `{id, name, branch, prereqs, built, state
-  (locked / open / earned / unbuilt), earned_at, skill, bar, waiting_on,
-  child_age, child_ability, why_prereqs}`.
+  (locked / open / earned / unbuilt), accepted (#299), earned_at, skill, bar,
+  waiting_on, child_age, child_ability, why_prereqs}`, beside `accepted` (the
+  ids you accepted) and `awaiting` (earned, not accepted yet).
 
 ## What self is, and what it is not
 
@@ -94,59 +99,84 @@ rule.
 
 ## Waking it
 
-### The 🌱 chooser
+### Sleep and wake
 
-The 🌱 chooser sits in the home top bar (and in the chat's side menu). It picks
-the **growth limit**: since #295, an achievement self may grow up to -- it and
-every prerequisite under it -- or **all** (every built achievement), or off.
-A number still works and means the old ladder's rungs 1..N with their
-prerequisites (8, the top built rung, is all); a seat saved with a number
-migrates that way (`mode.json` keeps the number for an older reader and adds
-`allow`).
+Self is **off by default**. The 💤 / 🌱 toggle in the 👶 panel's header on
+membrane home (and in the chat's side menu) wakes it and puts it back to sleep:
 
-| choice | what happens |
+| state | what happens |
 |---|---|
-| 🌱 off | asleep: nothing runs, **nothing is erased** (record, model, tempo stay) |
-| 🌱 1 · feel itself … 🌱 8 · understand an other | awake; self may climb up to that rung |
-| rungs 9–11 | listed but disabled: "(not built)" |
+| 💤 asleep | nothing runs, **nothing is erased** (record, model, tempo stay) |
+| 🌱 awake | self cycles, practises every open skill and earns what its tests pass |
 
-The ladder flipped in #258: rung 7 is **take turns** (serve and return) and
-**understand an other** moved up to rung 8, unchanged. A seat at rung 6
-reads rung 6 after the update and works on the new rung 7.
+The same switch over HTTP is `{"self": "on" | "off" | "watch"}`. **`watch`
+currently runs exactly like `on`**; it exists for the babysitter the design
+calls for, which is not built yet, and the viewer only tags the amoeba
+"watched". The switch is the operator's alone (`POST /membrane/seat/control`:
+localhost, the seat token, or an HA admin through the relay). The seat's LLM
+can read self's state; it can't change it.
 
-- **Inside the limit** self still earns each achievement by its test,
-  whenever its prerequisites are earned.
-- **Outside the limit** nothing is earned, however well it does. The tree
-  marks such an open achievement as waiting on "the limit" (the old ladder
-  view says "capped").
-- **Raising the limit grants nothing.** It only lets self try.
-- The chooser is the operator's alone (`POST /membrane/seat/control`, an HA
-  admin through the relay). The seat's LLM can read self's state; it can't
-  change the limit.
+### Accepting what it earns (#299)
 
-The same switch over HTTP:
+Until #299 a 🌱 **growth limit** chooser decided how far self might grow. It
+is gone: **earning stays automatic, and growing on is yours to allow.**
+
+- **Earning.** A test passes on the record -> an `achieve` line, the level
+  counts it, membrane home celebrates it. Nobody has to do anything.
+- **Accepting.** An earned achievement opens what it leads to only once you
+  **accept** it. A skill is *open* -- its practice runs, its acts reach the
+  world, its test runs -- when every prerequisite is earned **and** accepted;
+  the roots (feel itself, first reach) are open from birth. An earned,
+  unaccepted achievement counts for the level and opens **nothing**: no
+  practice, no chat pushes, no ball rolls, no reply checks, no toys. Accepting
+  grants nothing either: what it opens must still earn its own test.
+- **Where.** The celebration on membrane home asks
+  "🏅 Blurp earned take turns -- accept, and open what it leads to?" with
+  **🏅 Accept** and **Later** buttons (the question stays until you answer it;
+  *Later* asks again on the next visit). The Skill tree tab marks an earned,
+  unaccepted skill **🎁 earned · awaiting your accept** (dashed gold), and its
+  card has the **🏅 Accept** button. The browser notification for a new
+  achievement says it awaits your accept.
+- **Over HTTP or the CLI:**
 
 ```bash
 curl -s -X POST http://127.0.0.1:4096/membrane/seat/control \
-  -H 'content-type: application/json' -d '{"self_limit": "expect"}'   # up to understand an other (+ reach, meet)
-curl -s -X POST http://127.0.0.1:4096/membrane/seat/control \
-  -H 'content-type: application/json' -d '{"self_limit": "all"}'      # every built achievement
-curl -s -X POST http://127.0.0.1:4096/membrane/seat/control \
-  -H 'content-type: application/json' -d '{"self_limit": 0}'   # asleep
+  -H 'content-type: application/json' -d '{"accept": "turns"}'
+# {"ok": true, "applied": {"accept": {"ok": true, "id": "turns", "name": "take turns", "already": false}}, "state": {...}}
+membrane self accept turns            # the same, through the running seat (--url, or $MEMBRANE_SERVE_URL; default :4096)
 ```
 
-(In [JWT mode](auth.md) add your token.) The older `{"self": "on" | "off" | "watch"}`
-still works: `on` with no limit set means feel itself only (limit 1). **`watch` currently runs
-exactly like `on`**; it exists for the babysitter the design calls for, which
-is not built yet, and the viewer only tags the amoeba "watched".
+  (In [JWT mode](auth.md) add your token; off-box, the seat token.) An unknown
+  id, or one self has not earned, is refused with the reason
+  (`"'recognize itself' is not earned yet: ..."`); accepting twice is a no-op
+  (`"already": true`) and writes nothing.
+- **The record says when it grew and when it was let grow.** Each accept is
+  one line, `{"kind": "accept", "id": "turns", "ts": ..., "by": "operator"}`;
+  `by` is who called (`operator` on localhost or the seat token, `ha:<name>`
+  for a Home Assistant admin through the relay, `user:<sub>` for a JWT
+  person, `ui:<name>` for the standalone page's speaker) -- never a secret.
+- **The migration.** Every achievement earned before this code first ran
+  counts as accepted. Nothing is written per achievement: the first boot
+  writes one line, `{"kind": "accept_migrated", "ids": [...], "ts": ...}`,
+  naming them (a seat never switched on writes it at birth, empty). A pass
+  that a `rung_void` voids and that is earned again needs a new accept.
+  On the live seat (Lv 7: feel, reach, kinds, patience, shift, meet, expect)
+  all seven count as accepted, so take turns stays open, as it was.
+- **`self_limit` is deprecated** but still accepted, so Home Assistant and
+  scripts don't break: `0` / `"off"` puts self to sleep; a number (the old
+  ladder's rungs 1..N), an achievement id (it and its prerequisites) or
+  `"all"` wakes it and **bulk-accepts** every earned achievement in that
+  closure (one accept line each). It pre-accepts nothing: a pass after it
+  still waits for its accept. A growth limit saved in `mode.json` by an
+  older seat is ignored.
 
 ### The runaway guard
 
 Each cycle's own change wakes the next, at most every 10 s
 (`MEMBRANE_SELF_PACE_S`, floor 1 s) and at most 30 a minute — so about 360
 cycles an hour at the default pace. Three failed cycles in a row **hold** the
-loop: the status reads "🥀 held: re-choose to clear", and picking any limit
-again clears it. **Pausing the seat pauses self** too.
+loop: the status reads "🥀 held: switch it off and on to clear", and any
+toggle clears it. **Pausing the seat pauses self** too.
 
 ### Where its state lives, and what a restart keeps
 
@@ -154,8 +184,8 @@ Everything is in `<data dir>/self/` (`.membrane/self/` in a seat's directory):
 
 | file | what | after a restart |
 |---|---|---|
-| `mode.json` | the mode and the growth limit | kept: a seat wakes with the self it was given, and only that |
-| `record.jsonl` | append-only, never truncated, from birth: every cycle, reach, push, wait, shift, audit, error, and each rung opening | kept: passed rungs stay passed |
+| `mode.json` | the mode (off / on / watch) | kept: a seat wakes with the self it was given, and only that |
+| `record.jsonl` | append-only, never truncated, from birth: every cycle, reach, push, wait, shift, audit, error, each achievement earned and each accept (#299) | kept: earned stays earned, accepted stays accepted |
 | `model.json` | rung 1's learned model of the current that pushes it | kept |
 | `tempo.json` | per thing it reads: how often it had changed when self looked | kept |
 
@@ -187,7 +217,7 @@ against the fastest possible and a child) are computed by the seat now.
 
 ### The exp bar
 
-Next to the chooser, self's progress reads like a game's experience bar
+In the top bar, self's progress reads like a game's experience bar
 (#230):
 
 ```
@@ -200,9 +230,9 @@ Lv 6 · meet an other  [██████░░░░] 64%
   with its percent; the caption under it names the next rung and what the bar
   is `waiting on`;
 - **slipping** tints the bar amber (the top passed rung's test fails now);
-- **held** greys it ("re-choose 🌱 to clear");
-- **capped**: the next rung is above the growth limit, so the bar is hatched
-  and reads `capped` ("raise 🌱 to let it try 7");
+- **held** greys it ("switch it off and on to clear");
+- **accept?** (#299): nothing open is running and an earned achievement
+  waits for your accept, so the bar is hatched and the caption says so;
 - **asleep** shows only `🌱 asleep`;
 - **a new rung** gets a short level-up moment: the level turns gold, the bar
   glows once, and the caption reads `⬆ level up` for a few seconds. With
@@ -244,7 +274,7 @@ it reads `skill not measured yet / +0.05`, never a made-up 0.
 Rung 4's headline (the share of timed looks that find news) has a moving bar,
 so it shows the skill alone.
 
-The bar's tooltip still carries the long form (mode, limit, cycles, rung 7's
+The bar's tooltip still carries the long form (mode, cycles, rung 7's
 window and payoff, rung 8's pairs). On a phone the caption row is hidden to keep the top bar short.
 
 ### The 👶 panel: self's character sheet
@@ -363,8 +393,8 @@ curl -s http://127.0.0.1:4096/membrane/self/card   # #283, the zoo's card per se
 #  "last_activity": "2026-10-19T12:00:00+00:00", "generated": 1792...}
 ```
 
-**It is read-only for self.** Nothing in the panel changes self; the 🌱
-chooser stays the only switch. Everything it shows is `status()`, the toybox
+**It is read-only for self**, but for your two switches: the 💤 / 🌱 sleep
+toggle in its header and the Skill tree's Accept (#299). Everything it shows is `status()`, the toybox
 and self's own record: nothing is claimed about self that the record doesn't
 measure. On a seat too old to serve the sheet, the panel shows the old report
 card instead.
@@ -380,7 +410,9 @@ RPG draws a skill tree:
   it needs, with a line from every prerequisite (solid gold once that one is
   earned, dashed while it isn't);
 - **earned** skills are filled gold with a 🏅 badge and the date they were
-  earned; **open** ones (their test is running) glow, with a ring showing how
+  earned; **earned, awaiting your accept** ones (#299) are dashed gold with a
+  🎁 and "accept?", and their card has a **🏅 Accept** button that opens what
+  they lead to; **open** ones (their test is running) glow, with a ring showing how
   far along their bar is; **locked** ones are dim with a 🔒; **unbuilt** ones are
   dashed and say "not built yet";
 - **hover, focus or tap a skill** for its card: what its test asks, its skill
@@ -388,7 +420,8 @@ RPG draws a skill tree:
   closest child ability with the age it shows up -- labelled as an analogy, as
   on the growth curve;
 - the header says **Lv** (the achievements earned) and self's name; below the
-  tree, **Achievements** lists the earned ones, newest first.
+  tree, **Achievements** lists the earned ones, newest first (an unaccepted
+  one says "awaiting your accept").
 
 Each skill is an achievement, as a rung was; the celebration when one is
 earned is home's (the glow, the burst, the chime and the notification), not
@@ -465,26 +498,28 @@ curl -s http://127.0.0.1:4096/membrane/seat \
 
 | field | meaning |
 |---|---|
-| `mode`, `limit` | the switch and the growth limit (`limit`: the old ladder's number, the top rung allowed) |
-| `allow`, `allowed` | #295: the growth limit as set (`"all"`, an achievement id, or a migrated list of ids; 0 off) and the achievement ids it allows |
+| `mode` | the switch: `off` / `on` / `watch` |
+| `accepted`, `awaiting` | #299: the earned achievements you accepted, and the earned ones waiting for your accept (ids, tree order) |
+| `allowed` | the open skills now (built, every prerequisite earned and accepted; none asleep) |
+| `limit`, `allow` | deprecated (#299): the top rung among the open skills, and the open ids (0 asleep) |
 | `level`, `earned` | #295: how many achievements are earned, and each one `{id, name, ts}` in the order earned (the celebration reads it) |
 | `born` | it has been switched on at least once (the record has a birth) |
-| `held` | three failed cycles in a row; re-choose to clear |
+| `held` | three failed cycles in a row; switch it off and on to clear |
 | `cycles` | move cycles on the record |
 | `rung`, `rung_name` | `rung` = the level (kept for older readers); the latest earned achievement's name |
-| `next` | #295: the open achievements' ids (built, unearned, prerequisites earned) |
-| `aim`, `bar` | the open achievement the bar reads (the allowed one closest to passing; with none, the latest earned one's own test) and its progress, 0..1 (see below) |
-| `waiting_on` | the first criterion not yet met, or `the limit`, or `the world` (no current) |
+| `next` | #295: the open achievements' ids (built, unearned, prerequisites earned and accepted) |
+| `aim`, `bar` | the open achievement the bar reads (the open one closest to passing; with none, the latest earned one's own test) and its progress, 0..1 (see below) |
+| `waiting_on` | the first criterion not yet met, or `your accept` (#299: nothing open runs, an earned one waits), or `the world` (no current) |
 | `skill` | the headline number of the test the bar reads |
 | `skill_rung`, `skill_pass`, `skill_measured` | #249: the rung that test belongs to, the line its skill has to reach (`null` for rung 4, whose bar moves), and whether anything feeds the test yet (before that, `skill` is a placeholder 0) |
 | `slipping` | the latest earned achievement's test fails *now* (it stays earned on the record) |
-| `ladder` | the tree by rung number, for older readers: `passed`, `current` (open), `capped` (open, held by the limit), `locked` (a prerequisite missing), `unbuilt`; each with its `id` |
+| `ladder` | the tree by rung number, for older readers: `passed`, `current` (open), `capped` (its prerequisites earned, one not accepted yet -- or self asleep), `locked` (a prerequisite missing), `unbuilt`; each with its `id` |
 | `world` | rung 3's sort of the things it reads: `silent` / `moving` / `still` / `intermittent` |
 | `split` | rung 6's split: `body` (it predicts it near-perfectly) or `other` (it can't) |
 | `meets` | rung 6's exchange: `pushes`, `other` (who it meets), `push_age`, `heard_age` (seconds since the other last answered), `medium` (#264: `toy` once the turns are with the ball: `other` is then the ball, `heard_age` the other's last poke on any toy) |
 | `steer` | after rung 1: how close it lands to its aim (`err`) against not leaning into the current (`naive`), and `skill = 1 − err/naive` |
-| `rung7` | #258, rung 7 at the current other: `medium` (#264: `toy`, the turns with the ball; `chat` before), `pushes` (its timed pushes), `checked` (those whose reply check came, over the last 100), `clock` (#278: `2`, the ball's own clock; `1`, the chat's), `bins` (per `spoke_age` bin `0-2m` / `2-10m` / `10-30m` / `30m+`; on the ball's clock `0-20s` / `20-60s` / `1-3m` / `3m+`: `pushes`, `replied`, `rate`), `best` (the window it believes best); over the window the test reads (`window`, up to 100): `share` (pushes in the believed-best window) vs `chance` (the share of the waiting time the other spent there) and `z`; `reply_rate` vs `blind_rate` (what a timing-blind push would have got), `payoff` (the difference) and `payoff_z`. The 🌱 tooltip shows it as `rung 7: 24 timed lines checked, best window 0-2m, in it 0.42 vs chance 0.17, replies +0.12 over timing-blind` |
-| `rung8` | rung 8 (rung 7 until #258) at the current other: `asked` (pushes that asked the model), `checked` (those whose reply check came), `paired` (those whose check carried the model's answer), `pair_rate` = paired / checked; over the reply checks the test reads (`checks`, up to 100): `brier_self` (self's own `p_self`), `brier_mix` (what self passes on: `p_self` with the advisor heard), `brier_rate` (the running rate it must beat by 8%), `brier_model` (the model alone, on the checks it answered); `advisor_weight` (how much self listens to the current model, earned on its record, 0 for a new model) and `advisor_model` (its id); `base_rate` (the all-time rate the model is told) and `recent_rate` (the share of the last 6 reply checks answered, same prior, also told). The 🌱 chooser's tooltip shows it as `rung 8: 5 of 8 asked pushes paired, Brier self 0.25 vs rate 0.26, model alone 0.37 (weight 0.00), base rate 0.55` |
+| `rung7` | #258, rung 7 at the current other: `medium` (#264: `toy`, the turns with the ball; `chat` before), `pushes` (its timed pushes), `checked` (those whose reply check came, over the last 100), `clock` (#278: `2`, the ball's own clock; `1`, the chat's), `bins` (per `spoke_age` bin `0-2m` / `2-10m` / `10-30m` / `30m+`; on the ball's clock `0-20s` / `20-60s` / `1-3m` / `3m+`: `pushes`, `replied`, `rate`), `best` (the window it believes best); over the window the test reads (`window`, up to 100): `share` (pushes in the believed-best window) vs `chance` (the share of the waiting time the other spent there) and `z`; `reply_rate` vs `blind_rate` (what a timing-blind push would have got), `payoff` (the difference) and `payoff_z`. The 🌱 toggle's tooltip shows it as `rung 7: 24 timed lines checked, best window 0-2m, in it 0.42 vs chance 0.17, replies +0.12 over timing-blind` |
+| `rung8` | rung 8 (rung 7 until #258) at the current other: `asked` (pushes that asked the model), `checked` (those whose reply check came), `paired` (those whose check carried the model's answer), `pair_rate` = paired / checked; over the reply checks the test reads (`checks`, up to 100): `brier_self` (self's own `p_self`), `brier_mix` (what self passes on: `p_self` with the advisor heard), `brier_rate` (the running rate it must beat by 8%), `brier_model` (the model alone, on the checks it answered); `advisor_weight` (how much self listens to the current model, earned on its record, 0 for a new model) and `advisor_model` (its id); `base_rate` (the all-time rate the model is told) and `recent_rate` (the share of the last 6 reply checks answered, same prior, also told). The 🌱 toggle's tooltip shows it as `rung 8: 5 of 8 asked pushes paired, Brier self 0.25 vs rate 0.26, model alone 0.37 (weight 0.00), base rate 0.55` |
 | `toys` | #230: each toy (`toy:` / `cradle:` things, words with a getter) with `getter` (it has one), `reads` and `answered` (of its last 10 reaches), and `health`: `ok`, `empty` (no answer on its last reads), `unread`, or `no getter`; a built-in toy also carries `toy` (its toybox name) and, for a tower block, `block` (#244: the play buttons' target) |
 | `unlock` | #267: the newest unlock line, `{rung, ts, late, toys: [{kind, icon}]}` (or `null`); the exp bar's level-up caption names its toy when its rung is the one just reached |
 | `off_field` | #244: of self's last 200 looks, `looks` (how many), `off` (how many landed on a thing with no live field point; `null` when the seat has no field) and `things` (those things, most looked-at first). The home view draws those looks as ghosts |
@@ -646,11 +681,11 @@ movement.
 
 Rung 0 is passed by being born. Every other rung is an achievement (#295,
 [the skill tree](#the-skill-tree-295)): it is earned when its prerequisites
-are earned, the limit allows it, and its test passes on the record.
+are earned and accepted (#299), self is awake, and its test passes on the record.
 
 | rung | what self does there | what it needs from its world | passes when (the stages, in order) | how you help |
 |---|---|---|---|---|
-| **0 · sleep and wake** | nothing; the switch | — | always passed | choose a limit ≥ 1 |
+| **0 · sleep and wake** | nothing; the switch | — | always passed | wake it (💤 -> 🌱) |
 | **1 · feel itself** | moves its own position while the field's **current** (the live conversation's context: every lately-active session pulling at once, fading over ~3 min) pushes it; learns the push | a conversation: no talk, no current, no cycles | **pushes**: 20 cycles where the world pushed it; **skill**: over those 20, `1 − gap/naive ≥ 0.5` | talk to the seat. A topic turn reopens the gap, and that's fine |
 | *steer* (after 1) | holds an aim for 30 cycles and leans into the current by the push it learned | — | not a rung; shown as `steer.skill` | — |
 | **2 · first reach** | each cycle reads one thing that has a getter, predicting first whether it will have changed since it last looked | **entities with getters** whose readings are true and live; at least one must change on ≥ 60% of looks to be auditable | **reaches**: 20 answered reaches of one thing; **skill**: Brier skill ≥ 0.2 there, against the seat-wide change rate; **audit**: membrane secretly pauses that thing's getter for 3 more looks (cap 10 min) and **no change** is marked | give it getters that read something real and moving (a sensor, a counter that ticks, `field:vitals`) |
@@ -726,14 +761,14 @@ restart is still flagged once the window has moved past that look. On the live
 record only 4 of 129 shifts span a gap, and none are the heartbeat's: its
 shifts are real stalls of 2 to 4 looks, while the record kept going.
 
-**Not built yet** (the chooser lists them, disabled):
+**Not built yet** (the Skill tree lists them, dashed):
 
 | rung | skill | the test the design gives it |
 |---|---|---|
 | 9 · recognize itself | shown its own trace and another's | it predicts its own better (the mirror test); then the name ceremony, agreed with the operator |
 | 10 · change itself | `cliff::define` on its own methods | a revised method predicts better than the version it replaced, and reverts on strike-out |
 | 11 · speak | its voice | every line cites its ledger; no unbacked first-person claims |
-| 12 · invention ([#196](https://github.com/chedim/membrane/issues/196)) | the field fills a gap with a new entity in a new state | future; a design thread, not on the chooser |
+| 12 · invention ([#196](https://github.com/chedim/membrane/issues/196)) | the field fills a gap with a new entity in a new state | future; a design thread, not on the tree |
 
 ## Toys
 
@@ -1030,9 +1065,9 @@ though, and rung 5 may notice that shift.
   like a person: an other that answers like clockwork is predictable, and
   predictable is body. From rung 7 on chat goes quiet and the turns are with
   the ball: [roll it back](#playing-ball-rung-7) when you're around.
-- **Raise the limit one achievement at a time.** Watch the new one earn, then
-  watch it hold for a while (not slipping) before raising again. The limit is
-  how you keep an achievement open long enough to see whether it is real.
+- **Accept one achievement at a time.** Watch the new one earn, then watch it
+  hold for a while (not slipping) before accepting it. Your accept is how you
+  keep an achievement on its own long enough to see whether it is real.
 - **Use the panel, not the narration.** Read `bar`, `waiting_on`, `slipping`
   and the record.
 
@@ -1166,7 +1201,7 @@ not loosened to fit this record. An other whose replies follow a rhythm (in
 a session they answer, away they don't) is passable without any model.
 
 **Rung 8's model is overconfident, or its asks don't pair (#217; rung 7
-then).** Read `rung8` in the panel (or the 🌱 tooltip). On the live seat (2026-10-18) 7
+then).** Read `rung8` in the panel (or the 🌱 toggle's tooltip). On the live seat (2026-10-18) 7
 pushes asked and only 4 paired, and the model said 0.85–0.99 "will have
 spoken" to reply checks that went 3 of 7: its Brier error was worse than
 habit's ~0.2 guesses. Two causes, both fixed:
@@ -1212,7 +1247,7 @@ problem to correct, not the test's: self recalibrates the advisor and
 `brier_self`.)
 
 **`held`.** Three cycles failed in a row (the record's `error` lines say why).
-Fix the cause, then re-choose the limit to clear it.
+Fix the cause, then switch it off and on to clear it.
 
 **Want to start over?** Off keeps everything; there is no reset switch. Moving
 `<data dir>/self/` aside with the seat stopped gives a newborn at the next

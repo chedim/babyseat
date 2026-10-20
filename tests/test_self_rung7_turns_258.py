@@ -43,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import chat_io as CIO  # noqa: E402
 from membrane import self_loop as SL  # noqa: E402
+from tests._self_cap import cap  # noqa: E402
 from membrane import self_sheet as SS  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
 
@@ -284,14 +285,14 @@ def _seat(passed=(1, 2, 3, 4, 5, 6), limit=7):
     est.docs[e.eid] = e
     CIO.entity_in(srv, CIO.OPERATOR)
     SL.bind(srv)
-    SL.set_limit(srv, 1)
+    cap(srv, 1)
     for r in passed:
         line = {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9}
         if r >= 7:
             line["ladder"] = SL.LADDER_V
         SL._append(srv, line)
     SL._append(srv, {"ts": 1.0, "kind": "audit", "rung": 5, "phase": "end", "eid": "x", "passed": True})
-    SL.set_limit(srv, limit)
+    cap(srv, limit)
     return srv
 
 

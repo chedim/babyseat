@@ -238,8 +238,9 @@ def _toybox_rows() -> dict:
 # ---- the clocks -------------------------------------------------------------
 
 def _clocks(recs: list, now: float) -> dict:
-    """Born, the gaps, the pass times (rung 6 honest), the bug windows."""
-    srt = sorted(recs, key=lambda r: float(r.get("ts") or 0))
+    """Born, the gaps, the pass times (rung 6 honest), the bug windows. The
+    operator's lines (#299: accepts) are not self running: left out."""
+    srt = sorted((r for r in recs if r.get("kind") not in SL.OPERATOR_KINDS), key=lambda r: float(r.get("ts") or 0))
     born = next((r["ts"] for r in srt if r.get("kind") == "birth"), srt[0]["ts"] if srt else None)
     if born is None:
         return {"born": None, "srt": srt}
@@ -616,7 +617,8 @@ def _skill(recs: list, tempo: dict, st: dict) -> dict | None:
     n = st.get("skill_rung")
     if n not in SL.PROGRESS or not recs:
         return None
-    srt = sorted(recs, key=lambda r: float(r.get("ts") or 0))
+    srt = sorted((r for r in recs if r.get("kind") not in SL.OPERATOR_KINDS),   # #299: an accept is not self's time
+                 key=lambda r: float(r.get("ts") or 0))
     ts = [float(r.get("ts") or 0) for r in srt]
     import bisect
     end = ts[-1]
@@ -674,6 +676,7 @@ def compute(srv, now: float | None = None) -> dict:
     if voided:
         quest["voided"] = voided
     return {"empty": not recs, "generated": now, "level": st.get("level") or 0, "tree": tree(recs, st, progs),
+            "accepted": list(st.get("accepted") or []), "awaiting": list(st.get("awaiting") or []),   # #299
             "header": _header(st, recs, c, t, _skill(recs, tempo, st)), "attributes": attrs,
             "quest": quest, "achievements": ach,
             "growth": _growth(c, ach), "time": t, "inventory": _inventory(recs, st, now),
@@ -683,17 +686,20 @@ def compute(srv, now: float | None = None) -> dict:
 def tree(recs: list, st: dict, progs: dict | None = None) -> list:
     """THE SKILL TREE (#295), the 👶 panel's data contract: every achievement
     in tree order, its branch, prerequisites (and why each is one), its state
-    (earned / open: built, unearned, every prerequisite earned / locked /
-    unbuilt), when it was earned and with what skill, its staged bar and what
-    it waits on, and the child's age and ability its test measures."""
+    (earned / open: built, unearned, every prerequisite earned and accepted /
+    locked / unbuilt), whether the operator accepted it (#299: `accepted`;
+    an earned one not yet is awaiting, and its children stay locked "on your
+    accept"), when it was earned and with what skill, its staged bar and
+    what it waits on, and the child's age and ability its test measures."""
     got = SL._earn_times(recs)
-    allowed = set(st.get("allowed") or ())
+    acc = SL._accepted(recs)
+    asleep = st.get("mode", "off") == "off"
     out = []
     for i, a in SL.ACHIEVEMENTS.items():
         row = {"id": i, "name": a["name"], "branch": a["branch"], "prereqs": list(a["prereqs"]),
                "built": a["built"], "earned_at": None, "skill": None, "bar": 0.0, "waiting_on": None,
                "child_age": a["child_age"], "child_ability": a["child_ability"], "why_prereqs": a["why_prereqs"],
-               "rung": a["rung"]}
+               "rung": a["rung"], "accepted": i in acc}
         if i in got:
             r = got[i]
             sk = r.get("skill")
@@ -704,13 +710,16 @@ def tree(recs: list, st: dict, progs: dict | None = None) -> list:
         elif any(p not in got for p in a["prereqs"]):
             row.update(state="locked", waiting_on=", ".join(SL.ACHIEVEMENTS[p]["name"] for p in a["prereqs"]
                                                             if p not in got))
+        elif any(p not in acc for p in a["prereqs"]):
+            row.update(state="locked", waiting_on="your accept of " + ", ".join(
+                SL.ACHIEVEMENTS[p]["name"] for p in a["prereqs"] if p not in acc))
         else:
             p = (progs or {}).get(a["rung"]) or SL.PROGRESS[a["rung"]](recs, {})
             bar, waiting = SL._staged(p.get("crit") or {})
             row.update(state="open", bar=_r(max(0.0, min(1.0, bar)), 4), waiting_on=waiting,
                        skill=_r(float(p.get("skill") or 0.0), 4))
-            if i not in allowed:
-                row["waiting_on"] = "the limit"
+            if asleep:
+                row["waiting_on"] = "sleep"
         out.append(row)
     return out
 
@@ -755,7 +764,7 @@ def empty() -> dict:
     """The sheet's shape with nothing in it (a seat without self)."""
     c = {"born": None, "srt": []}
     return {"empty": True, "generated": time.time(),
-            "level": 0, "tree": tree([], {}),
+            "level": 0, "tree": tree([], {}), "accepted": [], "awaiting": [],
             "header": {"name": SN.current(), "level": 0, "rung_name": SL.RUNG_NAMES[0], "next": [], "mode": "off",
                        "age_h": 0.0, "working_h": 0.0, "skill": None},
             "attributes": [], "quest": {"rung": None, "criteria": []}, "achievements": [],
@@ -793,7 +802,8 @@ def card(srv, now: float | None = None) -> dict:
     mode = SL.mode(srv)
     with SL._lock:
         recs = SL._read(srv)
-        last = float(recs[-1].get("ts") or 0) if recs else None
+        mine = next((r for r in reversed(recs) if r.get("kind") not in SL.OPERATOR_KINDS), None)   # #299: not an accept
+        last = float(mine.get("ts") or 0) if mine else None
     return {"name": name, "level": h.get("level") or 0, "rung_name": h.get("rung_name") or "",
             "next": list(h.get("next") or []), "mode": mode, "awake": mode != "off",
             "last_activity": iso(last) if last else None, "generated": now}
@@ -880,6 +890,7 @@ def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
     sh = sheet(srv, now)                                 # #295: the tree and the level, as the (cached) sheet has them
     out = SN.say_all({"generated": now, "name": who, "toys": toys,
                       "locked": TU.locked_rows(recs, {r["kind"] for r in rows}),
-                      "level": sh.get("level") or 0, "tree": sh.get("tree") or []}, who)
+                      "level": sh.get("level") or 0, "tree": sh.get("tree") or [],
+                      "accepted": sh.get("accepted") or [], "awaiting": sh.get("awaiting") or []}, who)
     rt["dock"] = (now, out, who)
     return out

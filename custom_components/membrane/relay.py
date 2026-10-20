@@ -62,8 +62,9 @@ ALLOWED_PREFIXES = ("session", "config", "provider", "mcp")
 ALLOWED_EXACT = ("global/health", "agent", "event", "membrane/models", "membrane/seat", "membrane/seat/control",
                  "membrane/voice", "membrane/voice/state", "membrane/jsexec/register", "membrane/jsexec/result",
                  "membrane/toybox/poke")
-# #244: the 👶 panel's play buttons -- the poke is tagged with the HA user, stamped here
-PERSON_PATHS = ("membrane/toybox/poke",)
+# #244: the 👶 panel's play buttons -- the poke is tagged with the HA user, stamped here;
+# #299: the seat's switches too (an admin's accept of self's achievement names them on its record)
+PERSON_PATHS = ("membrane/toybox/poke", "membrane/seat/control")
 # the voice + JS routes: the person is the HA user, stamped here, never the page's word
 VOICE_PATHS = ("membrane/voice", "membrane/voice/state", "membrane/jsexec/register", "membrane/jsexec/result")
 # the minds' models: everyone reads, only an HA ADMIN switches them

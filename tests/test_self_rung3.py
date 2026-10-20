@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import self_loop as SL  # noqa: E402
+from _self_cap import cap  # noqa: E402
 from membrane import watch_agents as WA  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
 
@@ -71,7 +72,7 @@ def _clean():
     WA._getter_paused.clear()
 
 
-def _seat(names=("always", "never", "half", "silent1", "silent2", "silent3"), limit=3):
+def _seat(names=("always", "never", "half", "silent1", "silent2", "silent3"), limit=3, accept=True):
     d = Path(tempfile.mkdtemp())
     srv = types.SimpleNamespace()
     est = srv.entity_store = EntityStore(path=str(d / "entities.json"), shared=False)
@@ -86,10 +87,11 @@ def _seat(names=("always", "never", "half", "silent1", "silent2", "silent3"), li
                           properties={"name": name, "getter_script": "result = {'state': {'x': 1}}"})
         est.docs[e.eid] = e
     SL.bind(srv)
-    SL.set_limit(srv, 1)
+    SL.set_mode(srv, "on")
     for r in (1, 2):                                   # rungs 1 and 2 already earned (their own tests pin them)
         SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9})
-    SL.set_limit(srv, limit)
+    if accept:
+        cap(srv, limit)                                # #299: accepted, and rungs 1..limit run alone
     return srv
 
 
@@ -230,12 +232,13 @@ def test_rung3_skill_is_carried_by_moving_things_not_a_still_counter():
     assert out["skill"] < 0.9                                # not the counter's ~0.999
 
 
-def test_the_limit_holds_rung_three(monkeypatch):
+def test_an_unaccepted_first_reach_holds_rung_three(monkeypatch):      # #299: the limit's job is the accept's
     monkeypatch.setattr(SL, "_read_entity", _Things())
-    srv = _seat(limit=2)
+    srv = _seat(accept=False)
+    assert SL.status(srv)["awaiting"] == ["feel", "reach"]
     _run(srv, 300)
     assert 3 not in [r["rung"] for r in _record(srv) if r["kind"] in ("rung", "achieve")]
-    assert not any(r.get("steer") for r in _reaches(srv))      # no sorting practised under limit 2
+    assert not any(r.get("steer") for r in _reaches(srv))      # no sorting practised before reach is accepted
 
 
 def test_no_new_rung_two_audit_once_rung_two_has_passed(monkeypatch):
