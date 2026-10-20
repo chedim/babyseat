@@ -1141,6 +1141,7 @@ const HSTYLE = `
   .selfpanel .tbar { display:flex; gap:2px; height:14px; border-radius:7px; overflow:hidden; }
   .selfpanel .tp-working { background:var(--primary-color,#3477d6); }
   .selfpanel .tp-bugs { background:var(--error-color,#db4437); }
+  .selfpanel .tp-walls { background:var(--warning-color,#f4b400); }
   .selfpanel .tp-down { background:color-mix(in srgb, var(--primary-text-color,#ddd) 30%, transparent); }
   .selfpanel .tl { list-style:none; padding:0; margin:6px 0; font-size:12px; }
   .selfpanel .tl .lg { width:10px; height:10px; border-radius:3px; }

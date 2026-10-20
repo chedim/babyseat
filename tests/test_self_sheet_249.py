@@ -115,6 +115,13 @@ def _sheet(srv, now):
     return SH.sheet(srv, now=now, fresh=True)
 
 
+# #305: every test built before birth -- no walls. The lived seat is born
+# 2026-10-16 13:00Z, before rung 1's test merged (13:07Z): where a test reads
+# only the downtime or a bug window, it runs with this (the walls are
+# test_growth_walls_305's)
+BUILT_FROM_BIRTH = {i: {**m, "merged": 0.0} for i, m in SH.BUILT_AT.items()}
+
+
 def _lived8(srv):
     """#258: the lived seat one rung on -- it passed the new rung 7 (take
     turns) before its pairs, and may grow to 8: rung 8 reads the pairs."""
@@ -182,8 +189,9 @@ class TestBugWindows(unittest.TestCase):
         self.assertAlmostEqual(t["down_h"], 1.0, places=1)
         self.assertAlmostEqual(t["running_h"], 11.0, places=1)
         self.assertAlmostEqual(t["bugs_h"], sum(b["running_h"] for b in t["bugs"]), places=1)
-        self.assertAlmostEqual(t["working_h"], t["running_h"] - t["bugs_h"], places=1)
-        self.assertAlmostEqual(t["alive_h"], t["down_h"] + t["bugs_h"] + t["working_h"], places=1)
+        # #305: and the walls -- the third exclusion, never counted twice with a bug
+        self.assertAlmostEqual(t["working_h"], t["running_h"] - t["bugs_h"] - t["walls_h"], places=1)
+        self.assertAlmostEqual(t["alive_h"], t["down_h"] + t["bugs_h"] + t["walls_h"] + t["working_h"], places=1)
         self.assertEqual(self.s["header"]["working_h"], t["working_h"])
 
     def test_a_seat_born_after_the_fixes_has_no_bug_time(self):
@@ -209,7 +217,8 @@ class TestAchievements(unittest.TestCase):
         cls.s = _sheet(cls.srv, T0 + 12 * H)
 
     def test_one_per_rung_passed_with_its_record(self):
-        a = {x["rung"]: x for x in self.s["achievements"]}
+        with mock.patch.object(SH, "BUILT_AT", BUILT_FROM_BIRTH):        # #305: the downtime alone
+            a = {x["rung"]: x for x in _sheet(self.srv, T0 + 12 * H)["achievements"]}
         self.assertEqual(sorted(a), [1, 2, 3, 4, 5, 6])
         self.assertEqual(a[2]["skill"], 0.3)
         self.assertEqual(a[2]["name"], "first reach")

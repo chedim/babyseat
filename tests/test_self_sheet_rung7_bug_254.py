@@ -59,10 +59,14 @@ class TestRung7BugWindow(unittest.TestCase):
 
     def test_working_hours_drop_by_its_running_time(self):
         srv = S._lived(S._seat())
-        with_bug = S._sheet(srv, NOW)
-        without = [b for b in SH.BUGS if b["issue"] != 254]
-        with mock.patch.object(SH, "BUGS", tuple(without)):
-            no_bug = S._sheet(srv, NOW)
+        # #305: every test built from birth, so no wall stands where the window is (on
+        # this seat, born 2026-10-16, rung 8's test reached the seat only on 2026-10-19:
+        # a wall would take the window's time once the bug is gone -- counted once)
+        with mock.patch.object(SH, "BUILT_AT", S.BUILT_FROM_BIRTH):
+            with_bug = S._sheet(srv, NOW)
+            without = [b for b in SH.BUGS if b["issue"] != 254]
+            with mock.patch.object(SH, "BUGS", tuple(without)):
+                no_bug = S._sheet(srv, NOW)
         drop = no_bug["time"]["working_h"] - with_bug["time"]["working_h"]
         self.assertAlmostEqual(drop, _bug(with_bug)["running_h"], places=2)
         self.assertGreater(drop, 1.0)

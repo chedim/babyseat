@@ -916,13 +916,16 @@ function curveSvg(g, W, H) {
     '<circle cx="' + c.now.x + '" cy="' + c.now.y + '" r="4" class="cn"><title>now</title></circle></svg>';
 }
 
-/** Where the time went: alive = working + blocked by a known bug + not running. */
+/** Where the time went: alive = working + blocked by a known bug + at a wall
+ *  (#305: no built skill to learn -- we hadn't built the next one; a seat
+ *  that sends no walls_h has none to show) + not running. */
 function timeParts(t) {
   t = t || {};
   const alive = Number(t.alive_h) || 0;
   const part = (key, label, h) => ({ key, label, h: Number(h) || 0, pct: alive > 0 ? Math.round(100 * (Number(h) || 0) / alive) : 0 });
-  return [part("working", "working", t.working_h), part("bugs", "blocked by a known bug", t.bugs_h),
-          part("down", "not running (seat down, restarting or asleep)", t.down_h)];
+  return [part("working", "working", t.working_h), part("bugs", "blocked by a known bug", t.bugs_h)]
+    .concat(t.walls_h == null ? [] : [part("walls", "at a wall: its next skill not built yet", t.walls_h)])
+    .concat([part("down", "not running (seat down, restarting or asleep)", t.down_h)]);
 }
 
 const utcShort = (s) => {
@@ -1006,6 +1009,11 @@ function sheetGrowth(s) {
   return curveSvg(g, 340, 190) +
     '<p class="legend"><span class="lg ls"></span>' + escText(SELF_NAME) + ' (working hours) <span class="lg lw"></span>wall clock ' +
     '<span class="lg lf"></span>fastest possible <span class="lg lk"></span>a child, rescaled</p>' +
+    '<p class="note">Working hours leave out three things (#305): the time ' + escText(SELF_NAME) + " was <b>down</b> (the seat " +
+    "off or restarting), the time a known <b>bug</b> held its skill shut, and the time it hit a <b>wall</b>: no built skill " +
+    "to learn, because we hadn't built the next one yet. At any moment only the costliest of them counts." +
+    (((s.time || {}).walls || []).length ? " Walls so far: " + hoursText((s.time || {}).walls_h != null ? s.time.walls_h
+      : s.time.walls.reduce((n, w) => n + (Number(w.cost_h) || 0), 0)) + "." : "") + "</p>" +
     '<p class="note">' + (g.hours_per_child_month != null ? "<b>" + fixed2(g.hours_per_child_month) + " h</b> of " + escText(SELF_NAME) + " per month of a child. " : "") +
     escText(g.caveat || "") + "</p>";
 }
@@ -1027,7 +1035,10 @@ function sheetTime(s) {
     '<ul class="tl">' + parts.map((p) => '<li><span class="lg tp-' + p.key + '"></span>' + escText(p.label) + " <b>" + hoursText(p.h) + "</b> · " + p.pct + "%</li>").join("") +
     "</ul>" + ((t.bugs || []).length ? '<p class="muted">the known bugs that cost ' + escText(SELF_NAME) + ' time:</p><ul class="bugs">' + t.bugs.map((b) =>
       "<li>#" + b.issue + " " + escText(b.what) + ' <span class="muted">' + escText(utcShort(b.from)) + " → " + (b.open ? "now (open)" : escText(utcShort(b.to)) + " UTC") +
-      " · " + bugCost(b) + "</span></li>").join("") + "</ul>" : "");
+      " · " + bugCost(b) + "</span></li>").join("") + "</ul>" : "") +
+    ((t.walls || []).length ? '<p class="muted">the walls -- ' + escText(SELF_NAME) + ' had no built skill to learn (#305):</p><ul class="bugs">' + t.walls.map((w) =>
+      "<li>" + escText(w.why) + ' <span class="muted">' + escText(utcShort(w.from)) + " → " + (w.open ? "now (open)" : escText(utcShort(w.to)) + " UTC") +
+      " · " + hoursText(w.cost_h != null ? w.cost_h : w.running_h) + "</span></li>").join("") + "</ul>" : "");
 }
 
 function sheetInventory(s) {
@@ -1734,7 +1745,7 @@ function offlineNotice(data, zoo) {
 }
 
 const AiPanelLogic = { offlineNotice, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
-                       attrBar, hoursText, curveGeom, curveSvg, timeParts, selfSheetHtml, SHEET_SECTIONS, SHEET_OPEN,
+                       attrBar, hoursText, curveGeom, curveSvg, timeParts, sheetGrowth, sheetTime, selfSheetHtml, SHEET_SECTIONS, SHEET_OPEN,
                        toyGlyph, toyBadge, toyDockItem, toyDockHtml, toyPopoverHtml, BADGE_S, skillStatHtml, skillSigned,
                        levelUpText, unlockText, sheetToys, TOY_ICONS,
                        skillTree, treeLayout, nodeCard, nodeStateText, achievementsList, ringDash, childAge, renderSkillTree, TREE_LADDER,

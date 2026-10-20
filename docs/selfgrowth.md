@@ -299,15 +299,18 @@ open or close is remembered per browser.
   when its test first held with the person who actually chats. A voided
   pass (a `rung_void` line after it, #254) is not an achievement.
 - **Growth curve:** rungs over working hours (log scale; inline SVG). The
-  solid line is working hours, the faint one the wall clock, the dashed one
+  solid line is working hours -- the wall clock less the three exclusions
+  below: **down**, **bugs** and **walls** (#305), and the panel says so --
+  the faint one the wall clock, the dashed one
   the fastest possible (each built rung's test minimum at the loop's pace,
   from `self_loop`'s constants), and the open points a child: the age a child
   typically shows the closest ability, rescaled by one factor (the median
   hours of self per child month over the rungs passed past rung 1). **The
   child scale is an analogy**, and the panel says so.
 - **Where the time went:** hours alive = working + blocked by a known bug +
-  not running (the seat down, restarting, or self asleep), as a stacked bar,
-  with the bugs listed.
+  at a wall (no built skill to learn, #305) + not running (the seat down,
+  restarting, or self asleep), as a stacked bar, with the bugs and the walls
+  listed.
 - **Inventory:** each toy with its health dot, kind, looks, its prediction
   error on the earlier half of its looks against the later half (falling
   means it is learning), and who changed it (the toybox's ground truth: self,
@@ -348,6 +351,51 @@ rung shut but cost part of self's time has a **share** (#259; every other
 window's is 1): working hours lose share × its running time, and where windows
 overlap only the costliest open one counts, never two. The panel lists each
 window's share and cost (`6% of 9.7 h running = 35 min`).
+
+**Walls (#305).** Running time is also taken out where self **hit a wall**:
+it had no built skill it could be learning -- every achievement whose
+prerequisites were earned was already earned, or the next ones weren't built
+(or not on the seat yet). One open, built skill is enough: with several open
+there is no wall. A skill whose test was there but broken is a bug window
+above, never a wall. When each test was built is a second small table in
+`membrane/self_sheet.py`, `BUILT_AT`: the merge of the PR that built the test
+the skill is (or was) earned by. A test that was there but broken counts as
+built (its bug window takes that time); a test *replaced* by one that reads
+other turns is built only when the version that counts merged:
+
+| achievement | built by | merged (UTC) | why that PR |
+|---|---|---|---|
+| feel itself | #164 | 2026-10-16 13:07:29 | rungs 0 + 1 |
+| first reach | #174 | 2026-10-16 14:55:23 | rung 2 with its blind audit |
+| tell things apart | #177 | 2026-10-16 16:23:05 | self passed under it before #184/#185 changed it |
+| patience | #180 | 2026-10-16 16:29:14 | rungs 4 + 5 together |
+| notice the world changed | #180 | 2026-10-16 16:29:14 | there but broken until #191 (a bug window) |
+| meet an other | #187 | 2026-10-16 19:24:02 | there but broken until #209 (#208's window) |
+| take turns | #281 | 2026-10-19 15:19:43 | #278, the ball's own clock: rung 7 reads only the current clock's turns |
+| understand an other | #281 | 2026-10-19 15:19:43 | #254's fix (#256) graded self; since #278 it reads only the ball clock's checks |
+
+The seat runs new code only after a restart, so a test is built on a seat at
+the end of the first record gap over 30 s (`RESTART_S`, three cycles at
+the loop's pace) after its merge -- from birth on a seat born after it. An
+achievement not in the table (recognize itself, change itself, speak,
+invent) is not built: a self that earned every built skill open to it is at
+a wall from that moment. At any moment only the costliest reason counts: a
+wall costs all of the time, a full bug window wins a tie (its test was
+there, broken), a partial one (#259's) gives way to the wall. The sheet's
+`time` carries `walls_h` and `walls` (from, to, `why`: `no built skill to
+learn: take turns, understand an other, ... not built yet`, its running time
+and its cost), and each growth row says when its skill became learnable
+(`available_at`: prerequisites earned and test on the seat), how long it
+waited on us before that (`waited_h`, running hours from its prerequisites'
+last pass) and the working hours from then to its earning (`learn_h`); the
+row's `working_h` stays self's working age at the pass, the curve's x.
+
+On the live seat's record (to 2026-10-20 03:08 UTC) the walls were the
+first reach's build after feel itself (50 min), the build of rungs 3, 5 and
+6 after first reach (68 min), and take turns and understand an other from
+rung 6's honest pass to #278 reaching the seat (2026-10-18 21:43 to
+2026-10-19 15:42 UTC; its first 8.4 h were already #254's bug window): 10.4
+of 61.1 running hours. Working hours went from 26.4 to 16.1.
 
 The sheet comes from one read-only route, computed from the record,
 `status()` and the toybox and cached for 30 s (behind the JWT gate like every

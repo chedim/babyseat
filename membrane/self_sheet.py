@@ -16,7 +16,7 @@ and the toybox -- read-only, cached CACHE_S, served at GET
   achievements   each rung's pass record (date, working hour, skill)
   growth         rungs over working hours, against the fastest possible and
                  a child's milestones rescaled (an analogy, said so)
-  time           alive = down + blocked by a known bug + working
+  time           alive = down + blocked by a known bug + at a wall + working
   inventory      the toys: kind, health, looks, error earlier -> later, who
                  changed them (the toybox's ground truth)
   relationships  the others it has met: people, the seat's model, toy
@@ -33,6 +33,10 @@ passed and applies only on a seat whose rung passed before the fix (a seat
 born later never had the bug). A bug that cost only PART of self's time
 (#259) carries a share: working hours lose share x its running time, and
 where windows overlap the costliest open one's share applies, never two.
+#305, THE WALLS: so are the stretches self had no BUILT skill it could be
+learning (BUILT_AT: each test's merge, on the seat from its next restart);
+at any moment the single costliest reason counts -- a wall all of it, a full
+bug wins a tie, a partial one gives way.
 
 THE DOCK (the operator's addition): dock() is the toys alone, light enough
 to poll every few seconds (GET /membrane/toybox/state, cached DOCK_CACHE_S):
@@ -86,6 +90,36 @@ BUGS = (
      "opens_after": 2, "opens_at": _utc(2026, 10, 18, 20, 17, 24), "fixed": None,
      "until": "fix_line", "share": 0.06},       # #212 merged; the fix's time is on each seat's record
 )
+# #305, THE WALLS: when each achievement's test was BUILT -- the merge of the PR
+# that built the test it is (or was) earned by. A test that was there but broken
+# counts as built (BUGS takes that time); a test REPLACED by one that reads other
+# turns (a pass under the old one would not count, or its turns are no longer
+# read) is built only when the version that counts merged. The seat runs new code
+# only after a restart, so on a seat it is built at the end of the first record
+# gap over RESTART_S after the merge (from birth on a seat born after it). An
+# achievement not listed (mirror, change, speak, invent) is not built.
+BUILT_AT = {
+    # rungs 0 + 1: born off, the switch, and it feels the current
+    "feel": {"pr": 164, "merged": _utc(2026, 10, 16, 13, 7, 29)},
+    # rung 2: the world's tempo, with a blind audit
+    "reach": {"pr": 174, "merged": _utc(2026, 10, 16, 14, 55, 23)},
+    # rung 3; #184 (rate-based kinds, 17:26Z) and #185 (its skill bar) merged after self's pass under #177
+    "kinds": {"pr": 177, "merged": _utc(2026, 10, 16, 16, 23, 5)},
+    # rungs 4 + 5 merged together (#178 went into a branch, not main); #184 came after patience's pass
+    "patience": {"pr": 180, "merged": _utc(2026, 10, 16, 16, 29, 14)},
+    # its first test was there but could not notice a shift at the audit's floor: BUGS #191's window
+    "shift": {"pr": 180, "merged": _utc(2026, 10, 16, 16, 29, 14)},
+    # rung 6; it talked to the empty operator slot until #209: BUGS #208's window
+    "meet": {"pr": 187, "merged": _utc(2026, 10, 16, 19, 24, 2)},
+    # take turns: #261 (#258, 07:26Z) timed chat pushes, #272 (#264, 12:53Z) moved the turns to the ball;
+    # #281 (#278) gave the ball its own clock and rung 7 reads only the current clock's turns
+    "turns": {"pr": 281, "merged": _utc(2026, 10, 19, 15, 19, 43)},
+    # understand an other: #256 (#254's fix, 06:11Z) graded self not the model, #261 moved it up to rung 8,
+    # #262 scored the reply, #272 the ball's turns; #281 (#278): it reads only the current clock's checks
+    "expect": {"pr": 281, "merged": _utc(2026, 10, 19, 15, 19, 43)},
+}
+RESTART_S = 3 * SL.PACE_S     # a record gap this long is a restart: the loop writes a line every PACE_S
+WALL_WHY = "no built skill to learn: {next} not built yet"
 RESTART7 = "restarted {day}: was grading the LLM, now grades " + NAME
 VOIDED = "rung {rung} passed {at} under the #254 bug: graded the LLM, not " + NAME + "; doesn't count"
 # #258: a pass above rung 6 from before the ladder flip was the old numbering's
@@ -305,41 +339,101 @@ def _clocks(recs: list, now: float) -> dict:
         stop = min(stop, end)
         if stop > start:
             bugs.append((start, stop, {**b, "open": fixed is None, "share": float(b.get("share", 1.0))}))
-    cuts = sorted({x for a, z, _ in bugs for x in (a, z)})
+    avail, ready, built_on, walls = _availability(born, end, ts, honest)
+    cuts = sorted({x for a, z, _ in bugs for x in (a, z)} | {x for a, z, _ in walls for x in (a, z)})
 
-    def bug_s(t):
-        """The running time the bugs cost up to t: on each stretch between the
-        windows' ends, the costliest open window's share -- never two (#259)."""
-        out = 0.0
+    def cost(t):
+        """The running time the bugs and the walls cost up to t, as (bugs,
+        walls): on each stretch between the windows' ends the single costliest
+        reason -- never two (#259, #305). A wall costs all of it; a full bug
+        wins a tie (its test was there, broken), a partial one gives way."""
+        bug = wall = 0.0
         for a, z in zip(cuts, cuts[1:]):
             if a >= t:
                 break
             share = max((w["share"] for x, y, w in bugs if x <= a and z <= y), default=0.0)
-            if share:
-                out += share * running(gs, a, min(z, t))
-        return out
+            if share < 1.0 and any(x <= a and z <= y for x, y, _ in walls):
+                wall += running(gs, a, min(z, t))
+            elif share:
+                bug += share * running(gs, a, min(z, t))
+        return bug, wall
+
+    def bug_s(t):
+        return cost(t)[0]
+
+    def wall_s(t):
+        return cost(t)[1]
 
     def working(t):
-        return running(gs, born, t) - bug_s(t)
+        return running(gs, born, t) - sum(cost(t))
     return {"born": born, "end": end, "gaps": gs, "first": first, "passed_at": passed_at, "honest": honest,
             "real6": real6, "first_person": first_person, "restart7": restart7, "bugs": bugs, "bug_s": bug_s, "working": working,
+            "walls": walls, "wall_s": wall_s, "cost": cost, "avail": avail, "ready": ready, "built_on": built_on,
             "srt": srt}
+
+
+def _availability(born: float, end: float, ts: list, honest: dict) -> tuple:
+    """#305: when each achievement became LEARNABLE on this seat -- its
+    prerequisites earned (ready) AND its test built (BUILT_AT, on the seat from
+    the first restart after the merge) -- and the walls: the stretches no
+    built achievement was learnable. One earned before its listed build (under
+    an earlier test that still counts) was learnable from when it was ready."""
+    restarts = [b for a, b in zip(ts, ts[1:]) if b - a > RESTART_S]
+    got = {SL.RUNG_ID[n]: t for n, t in honest.items() if n in SL.RUNG_ID}
+    built_on, ready, avail = {}, {}, {}
+    for i, a in SL.ACHIEVEMENTS.items():
+        m = BUILT_AT.get(i)
+        if m is not None:
+            built_on[i] = born if m["merged"] <= born else next((b for b in restarts if b > m["merged"]), None)
+        else:
+            built_on[i] = None
+        ready[i] = None if any(p not in got for p in a["prereqs"]) \
+            else max([born] + [got[p] for p in a["prereqs"]])
+        r, b = ready[i], built_on[i]
+        if r is None:
+            avail[i] = None
+        elif i in got and (b is None or got[i] < max(r, b)):
+            avail[i] = min(r, got[i])
+        else:
+            avail[i] = None if b is None else max(r, b)
+    pts = sorted({born, end} | {t for d in (got, ready, avail) for t in d.values()
+                                if t is not None and born < t < end})
+    walls: list = []
+    for a, z in zip(pts, pts[1:]):
+        if any(avail[i] is not None and avail[i] <= a < got.get(i, float("inf")) for i in SL.ACHIEVEMENTS):
+            continue
+        nxt = [x["name"] for i, x in SL.ACHIEVEMENTS.items()
+               if (i not in got or got[i] > a) and ready[i] is not None and ready[i] <= a]
+        why = WALL_WHY.format(next=", ".join(nxt) or "the next skill")
+        if walls and walls[-1][1] == a and walls[-1][2]["why"] == why:
+            walls[-1] = (walls[-1][0], z, walls[-1][2])
+        else:
+            walls.append((a, z, {"why": why}))
+    walls = [(a, z, {**w, "open": z >= end}) for a, z, w in walls]
+    return avail, ready, built_on, walls
 
 
 # ---- the sections -------------------------------------------------------------
 
 def _time(c: dict) -> dict:
     if c["born"] is None:
-        return {"alive_h": 0.0, "running_h": 0.0, "down_h": 0.0, "bugs_h": 0.0, "working_h": 0.0, "bugs": []}
+        return {"alive_h": 0.0, "running_h": 0.0, "down_h": 0.0, "bugs_h": 0.0, "walls_h": 0.0, "working_h": 0.0,
+                "bugs": [], "walls": []}
     born, end, gs = c["born"], c["end"], c["gaps"]
     run = running(gs, born, end)
-    bug = c["bug_s"](end)
+    bug, wall = c["cost"](end)
+
+    def wall_cost(a, z):                                  # the part of a wall no full bug already took
+        return c["wall_s"](z) - c["wall_s"](a)
     return {"alive_h": _r((end - born) / H), "running_h": _r(run / H), "down_h": _r((end - born - run) / H),
-            "bugs_h": _r(bug / H), "working_h": _r((run - bug) / H),
+            "bugs_h": _r(bug / H), "walls_h": _r(wall / H), "working_h": _r((run - bug - wall) / H),
             "bugs": [{"issue": b["issue"], "what": b["what"], "from": iso(a), "to": iso(z),
                       "open": bool(b.get("open")), "share": b["share"],
                       "running_h": _r(running(gs, a, z) / H),
-                      "cost_h": _r(b["share"] * running(gs, a, z) / H)} for a, z, b in c["bugs"]]}
+                      "cost_h": _r(b["share"] * running(gs, a, z) / H)} for a, z, b in c["bugs"]],
+            "walls": [{"from": iso(a), "to": iso(z), "why": w["why"], "open": w["open"],
+                       "running_h": _r(running(gs, a, z) / H), "cost_h": _r(wall_cost(a, z) / H)}
+                      for a, z, w in c["walls"]]}
 
 
 def _achievements(c: dict) -> list:
@@ -360,6 +454,25 @@ def _achievements(c: dict) -> list:
     return out
 
 
+def _learnable(c: dict, i) -> dict:
+    """#305: a skill's row -- when it became learnable (its prerequisites
+    earned and its test on the seat), how long it waited on us before that
+    (running hours from its prerequisites' last pass), and the working hours
+    from then to its earning (None until earned)."""
+    out = {"id": i, "available_at": None, "waited_h": None, "learn_h": None}
+    if c["born"] is None or i is None:
+        return out
+    r, av = c["ready"].get(i), c["avail"].get(i)
+    rid = {v: k for k, v in SL.RUNG_ID.items()}.get(i)
+    got = c["honest"].get(rid)
+    out["available_at"] = iso(av)
+    if r is not None:
+        out["waited_h"] = _r(running(c["gaps"], r, av if av is not None else c["end"]) / H)
+    if av is not None and got is not None:
+        out["learn_h"] = _r((c["working"](got) - c["working"](av)) / H)
+    return out
+
+
 def _growth(c: dict, ach: list) -> dict:
     floors, needs = fastest_cycles(), _needs()
     by = {a["rung"]: a for a in ach}
@@ -377,6 +490,7 @@ def _growth(c: dict, ach: list) -> dict:
                      "needs": needs.get(n, "not built yet"),
                      "fastest_h": round(cum * SL.PACE_S / H, 3) if built else None,
                      "working_h": a["working_h"] if a else None, "wall_h": a["wall_h"] if a else None,
+                     **_learnable(c, SL.RUNG_ID.get(n)),
                      "child_months": mo, "child_milestone": what,
                      "child_h": _r(mo * k, 4) if k else None})
     t = _time(c)
