@@ -27,7 +27,7 @@ passed. Since #295 they are **achievements** in a skill tree: each has a
 stable id, a branch and **real prerequisites** -- an edge only where its test
 reads data or machinery that another achievement's pass switches on. A test
 runs whenever its prerequisites are earned, so siblings unlock **in any
-order** (the live seat could earn *understand an other* before *take turns*).
+order** (the live seat could earn *expect a reply* before *time its turn*).
 Each test keeps its own bar, exactly as measured before; there is no new hold
 rule.
 
@@ -39,8 +39,8 @@ rule.
 | `patience` | patience (4) | world | kinds | its timed looks skip the things sorted silent; the sort is switched on by that pass | ~3.5 mo: anticipatory looking (Haith) |
 | `shift` | notice the world changed (5) | world | reach | its noticing reads the looks and each thing's long memory (the tempo); its audit pauses a moving thing self has looked at. It does not read patience's rates (patience reads its shifts) | ~3.5-5 mo: violation of expectation (Baillargeon) |
 | `meet` | meet an other (6) | others | reach | its answered looks at the other are reach's looks, and the self/other split is reach's own prediction skill | ~3-5 mo: self- vs social contingency (Bahrick & Watson) |
-| `turns` | take turns (7) | others | meet | it times its pushes to the other meet found, through meet's channel, scored by the reply check | ~3-5 mo: proto-conversation timing |
-| `expect` | understand an other (8) | others | meet | it predicts whether meet's other replies to a push, at the reply check; it does not need take turns' learned timing (a push by the timer is checked and predicted the same) | ~2-3 mo: expects a response (the still-face, Tronick 1978) |
+| `turns` | time its turn (7) | others | meet | it times its pushes to the other meet found, through meet's channel, scored by the reply check | ~3-5 mo: times its turn in a proto-conversation (Bateson; Trevarthen; Jaffe et al.) |
+| `expect` | expect a reply (8) | others | meet | it predicts whether meet's other replies to a push, at the reply check; it does not need time its turn's learned timing (a push by the timer is checked and predicted the same) | ~2-3 mo: expects a response (the still-face, Tronick 1978) |
 | `mirror` | recognize itself | later, not built | feel, meet | planned: its own trace beside another's | ~18 mo: the mirror test (Amsterdam 1972) |
 | `change` | change itself | later, not built | mirror | planned | ~4 y: metacognition |
 | `speak` | speak | later, not built | turns, expect | planned | ~4 y: autobiographical narrative |
@@ -58,10 +58,16 @@ rule.
   its prerequisites are earned and the limit allows it: reaching from birth
   (when allowed), the sort after first reach, noticing after first reach, the
   pushes to the other after first reach, and the reply checks after each push
-  while either *take turns* or *understand an other* may be practised. The
-  ball's turns are take turns' practice. Acts with outside effects (the pushes,
+  while either *time its turn* or *expect a reply* may be practised. The
+  ball's turns are time its turn's practice. Acts with outside effects (the pushes,
   the ball, the toy unlocks) stay behind their achievement's prerequisites and
   the growth limit.
+- **The names** (#300) say what each test measures: `turns` is *time its
+  turn* (it was "take turns") and `expect` is *expect a reply* (it was
+  "understand an other": its test checks that self expects the other's reply
+  better than the running rate, a 2-3-month ability -- the still-face upset --
+  not the nine-month reading of intentions). The ids, the record's lines and
+  the rung numbers are unchanged, so every old line keeps counting.
 - **The data** for the 👶 panel's tree is `tree` (and `level`) in
   `GET /membrane/self/sheet` and in the dock (`GET /membrane/toybox/state`):
   one row per achievement, `{id, name, branch, prereqs, built, state
@@ -111,8 +117,9 @@ migrates that way (`mode.json` keeps the number for an older reader and adds
 | rungs 9–11 | listed but disabled: "(not built)" |
 
 The ladder flipped in #258: rung 7 is **take turns** (serve and return) and
-**understand an other** moved up to rung 8, unchanged. A seat at rung 6
-reads rung 6 after the update and works on the new rung 7.
+**understand an other** moved up to rung 8, unchanged (since #300 they are
+named for what their tests measure: *time its turn* and *expect a reply*). A
+seat at rung 6 reads rung 6 after the update and works on the new rung 7.
 
 - **Inside the limit** self still earns each achievement by its test,
   whenever its prerequisites are earned.
@@ -192,7 +199,7 @@ Next to the chooser, self's progress reads like a game's experience bar
 
 ```
 Lv 6 · meet an other  [██████░░░░] 64%
-→ 7 · take turns · waiting on: pushes
+→ 7 · time its turn · waiting on: pushes
 ```
 
 - **the level** is the number of achievements earned (#295), with the latest one's name;
@@ -259,44 +266,54 @@ styling (membrane's own look, light and dark). Each section folds; the
 nameplate, Attributes and the Quest log start open, and which sections you
 open or close is remembered per browser.
 
-- **The nameplate:** the name (**Blurp** by default; the seat carries it, each seat its own -- #283), **Lv** (the
-  rung passed), the live exp bar, **the skill at a glance** (the number big,
-  the line it has to beat, its change over the last hour and a sparkline of
-  the last four hours: the same test run over the record as it stood every
-  half hour), its age (hours since it woke) and its **working hours**.
-- **Attributes:** one measured bar per built rung, with its rung number and
-  value; a pass line marks what the rung's test needs.
+- **The nameplate:** the name (**Blurp** by default; the seat carries it, each seat its own -- #283),
+  **Lv N · <the latest skill it earned>** (#300: the level is the number of
+  skills earned; never a rung), what it is **learning** now, the live exp bar,
+  its age (hours since it woke) and its **working hours**.
+- **Attributes** (#300): a few **traits of self as a whole**, each measured
+  from its own record -- never claimed, never a skill's test score, and they
+  **gate nothing** (no pass line; nothing reads them to decide). Each shows
+  its value, one line on what it measures, the numbers it came from, and a
+  sparkline of the last four hours (the same formula over the record as it
+  stood every half hour; `traits()` in `membrane/self_sheet.py`). An
+  *ordinary look* is an answered look with a prediction, outside every blind
+  audit; "recent" is its last 500 looks (about an hour of working time).
 
-  | attribute | rung | the number |
+  | trait | the formula | reads as |
   |---|---|---|
-  | Feel | 1 | 1 − gap ÷ naive over its last pushed cycles (pass ≥ 0.5) |
-  | Reach | 2 | Brier skill of its looks at one thing against the seat-wide rate (≥ 0.2) |
-  | Sort | 3 | the answered share of its last 40 steered looks (≥ 0.75) |
-  | Patience | 4 | calibration error: \|mean predicted chance − share that found news\| over its last 40 timed looks (≤ 0.1; lower is better) |
-  | Notice | 5 | the shifts it noticed, of the two its blind audit probes (1) |
-  | Meet | 6 | rung 6's staged test: lines sent, answered looks, the other read as other (1) |
-  | Turns | 7 | the reply rate its own timing gains over a timing-blind push (≥ 0.05; the test also needs the contingency, below) |
-  | Understand | 8 | self's Brier skill over the running rate at predicting the other's replies (its own guess, the model's mixed in by its track record; ≥ 0.08) |
+  | Curiosity | of its last 500 ordinary looks at things that have a learning-progress reading (`self_loop._progress`: a thing's error over its 30 looks before the latest 30, minus over the latest 30), the share at things whose progress is above curiosity's floor (`CURIO_MIN`, 0.005). A thing too new for a reading (under 60 looks) is left out | how much of its attention goes where it is still getting better |
+  | Insight | 1 − Brier(p) ÷ Brier(base) over its last 500 ordinary looks, the base being the share of those looks that found a change (the best constant guess); the detail adds the calibration error (ECE, ten bins of p) | 0: no better than knowing the overall rate; 1: every outcome called with certainty; negative: worse than the rate |
+  | Adaptability | over its last 15 noticed shifts (rung 5's `shift` lines): in the window of looks at that thing that showed the change (the shift's `looks`, since its previous shift), the looks from the first miss (a look its prediction put on the wrong side of even odds) to the shift, inclusive -- the whole window when none missed; the median | how many looks it takes to notice the world changed and re-learn (fewer is better; about 3) |
+  | Focus | 1 − H ÷ log K: H the entropy of which thing each of its last 500 looks went to, K the things it has ever looked at; the detail adds the repeat rate (the same thing as the look before) | 1: every look at one thing; 0: spread evenly over everything it knows |
+  | Sociability | pushes ÷ (pushes + looks) over its last 500 acts -- a push is an act aimed at an other (a line sent, the ball rolled); the detail adds how often they answer: the share of its last 50 reply checks that found a reply | how much of what it does is aimed at others, and how often they answer |
 
-  A skill can be negative: its bar then grows left of a zero line, in amber.
-  A passed rung whose test fails now says **slipping**. A number nothing
+  On a copy of the live record (2026-10-19, about 26 working hours):
+  Curiosity 18% (3 of the 12 things it looked at still being learned),
+  Insight +0.51 (Brier 0.077 against the rate's 0.156; ECE 0.03),
+  Adaptability 3 looks, Focus 0.36 (21 of 25 things), Sociability 4% (18 of
+  500 acts; 22% of its last 50 reply checks answered). A trait nothing
   measures yet says "not measured yet", never 0.
-- **Quest log:** the current rung's staged criteria with their counts and
-  skill (rung 7, #264: `37/100 turns with the ball with a reply check (you roll it back) · turns in its window
-  0.41 vs chance 0.22 (z 2.4 → 3.0, +0.10) · replies gained over
-  timing-blind +0.08 (t 1.9 → 5.0, +0.05)`; rung 8: `100/100 reply checks ✓
-  · skill vs running rate −0.00 → +0.08`), and what it is waiting on. At
-  rung 8 it also says `restarted <date>: was grading the LLM, now grades
-  self` once the fixed scorer started counting (#254), and every quest lists
-  a pass that doesn't count: one the old scorer recorded as `the old rung 7
-  (understand an other, now rung 8) passed <time> under the #254 bug: graded
-  the LLM, not self; doesn't count`, and one from before the ladder flip as
-  `... before the ladder flip (#258); doesn't count`.
-- **Achievements:** each rung passed, with its date, the working hour it
-  passed at, and the skill on its pass record. Rung 6 says it was first
-  passed against the empty operator slot (#208) and counts its hours from
-  when its test first held with the person who actually chats. A voided
-  pass (a `rung_void` line after it, #254) is not an achievement.
+- **Learning now** (#300; the section that was the Quest log): **only the
+  skills it is learning** -- open in the tree (built, unearned, prerequisites
+  earned) and allowed by the growth limit -- side by side, each with its
+  bar, its test's staged criteria with their counts (time its turn, #264:
+  `37/100 turns with the ball with a reply check (you roll it back) · turns
+  in its window 0.41 vs chance 0.22 (z 2.4 → 3.0, +0.10) · replies gained
+  over timing-blind +0.08 (t 1.9 → 5.0, +0.05)`; expect a reply: `100/100
+  reply checks ✓ · skill vs running rate −0.00 → +0.08`), what it is waiting
+  on (the first stage not met), and **its skill value at a glance**: the
+  number big, the line it has to beat, its change over the last hour and a
+  sparkline of the last four hours (the same test run over the record as it
+  stood every half hour). Expect a reply also says `restarted <date>: was
+  grading the LLM, now grades self` once the fixed scorer started counting
+  (#254). **Earned skills leave the card** -- they live in the Skill tree tab
+  and its Achievements list -- except one whose test no longer holds: a short
+  warning line, `⚠ tell things apart: its test no longer holds (kinds agree
+  across halves)` (still earned; the record keeps the pass). The section
+  also lists a pass that doesn't count: one the old scorer recorded as `the
+  old rung 7 (understand an other, now rung 8) passed <time> under the #254
+  bug: graded the LLM, not self; doesn't count`, and one from before the
+  ladder flip as `... before the ladder flip (#258); doesn't count`.
 - **Growth curve:** rungs over working hours (log scale; inline SVG). The
   solid line is working hours, the faint one the wall clock, the dashed one
   the fastest possible (each built rung's test minimum at the loop's pace,
@@ -355,11 +372,18 @@ route; the HA relay forwards it on GET only):
 ```bash
 curl -s http://127.0.0.1:4096/membrane/self/sheet | python3 -m json.tool | head -40
 # {"level": 6, "tree": [{"id": "expect", "state": "open", ...}, ...],   # #295
-#  "header": {...}, "attributes": [...], "quest": {...}, "achievements": [...],
+#  "header": {"level": 7, "rung_name": "expect a reply", "title": "Lv 7 · expect a reply", "learning": ["time its turn"], ...},
+#  "attributes": [{"key": "curiosity", "label": "Curiosity", "value": 0.18, "unit": "share", "better": "higher",
+#                  "what": "...", "detail": {...}, "trend_h": 0.1, "series": [{"ago_h": 4.0, "value": ...}, ...]}, ...],   # #300
+#  "skills": [{"id": "turns", "name": "time its turn", "bar": 0.33, "waiting_on": "contingency",
+#              "criteria": [...], "trend": {"label": ..., "value": ..., "pass": ..., "series": [...]}}],          # #300
+#  "slipping": [{"id": "kinds", "name": "tell things apart", "text": "..."}],                                    # #300
+#  "quest": {...}, "achievements": [...],      # kept for older readers (quest: the skill the exp bar reads)
 #  "growth": {...}, "time": {...}, "inventory": [...], "relationships": {...}, "toys": [...]}
 curl -s 'http://127.0.0.1:4096/membrane/self/recent?n=30'   # the activity: {"lines": [...]}, newest first, at most 100
 curl -s http://127.0.0.1:4096/membrane/self/card   # #283, the zoo's card per seat:
-# {"name": "Blurp", "level": 6, "rung_name": "...", "next": ["turns", "expect"], "mode": "on", "awake": true,
+# {"name": "Blurp", "level": 6, "rung_name": "meet an other", "next": ["turns", "expect"], "mode": "on", "awake": true,
+#  (#300: the keys stay; level = skills earned, rung_name = the latest one's name, next = the open ids)
 #  "last_activity": "2026-10-19T12:00:00+00:00", "generated": 1792...}
 ```
 
@@ -578,7 +602,7 @@ line on the field (#237):
     time, now 0)";
   - "self said hello to you and asked the model if you'll answer";
   - "self waited — nothing was due";
-  - "level up: rung 7 · take turns".
+  - "level up: rung 7 · time its turn".
 
   A number appears only when the line carries it. Things go by friendly names:
   the person self meets is "you" (or their name), `i` is "the eye", and a toy
@@ -658,8 +682,8 @@ are earned, the limit allows it, and its test passes on the record.
 | **4 · patience** | fits each thing's rate of change in time over its last 30 looks (after a rung-5 shift, over the looks since it, with the old rate kept as a prior worth 3 looks, so a handful of looks can't swing it to never/always; #235); looks again once a change is 60% likely (waits up to 30 min), and among the due it prefers the looks whose answer is least certain (#266); idles when nothing is due | things with a steady rhythm | **timed**: 30 timed looks; **news**: of its last 40, they find a change ≥ half the time, or 0.15 more often than its fixed-pace looks did (whichever is easier); **calibration**: its mean predicted chance is within 0.1 of the share that found news | keep getters' rhythms honest; don't make a thing change only when self looks |
 | **5 · notice the world changed** | compares its last 3–5 looks at a thing with its long memory; a window far from it (> 0.4) and unlikely under it (binomial tail < 0.02) is a **shift** ("went still" / "moves again"; a window holding a look that spans a restart or stall in the record is none, #266), and it re-learns from there (its rate starts from the old one and the new looks lead after ~10) | a thing it already classes as moving | **looks**: 20 looks with noticing on; **audit**: membrane pauses the surest mover for 5 of self's looks (cap 1 h), then restarts it for 5 more (cap 3 h); self must flag "went still" during the pause and "moves again" after | nothing: the audit runs itself. Don't restart the seat mid-audit if you can help it |
 | **6 · meet an other** | every 30 cycles pushes the line "self is here" to chat, and reads `chat:in:<person>`, which ticks each time the person sends a message | **a person who chats** with the seat, irregularly | **pushes**: 10; **heard**: 20 answered looks at the other; **split**: the other is classed **other** (its Brier skill < 0.9: self can't predict it perfectly). A partner who never answers is predicted perfectly, classes as *body*, and the rung stays shut | chat with the seat — normally, whenever you like. Your messages are the answers |
-| **7 · take turns** (#258; with the ball since #264) | learns **when** to take its turn: it rolls the shared ball to you (`self::roll`, field-only: no chat line, no model, no shell), and after each turn it draws the moment it will wait for, a bin of how long since the other last acted (`spoke_age`: their last poke on any toy; on the ball's own clock, #278: 0–20 s, 20–60 s, 1–3 min, 3+ or never), by Thompson sampling on the reply rate each bin earned over its last 100 turns (a random bin one turn in ten, so the losing bins stay measured), and rolls when the other's age is in that bin; only once its last roll's check came and the ball is back on its side, never sooner than 2 cycles after its last turn, never later than 30 (`overdue`: an unreturned ball is fetched). (Until #278 the ball ran on the chat's clock: bins of 0–2, 2–10, 10–30, 30+ min, 30 to 180 cycles apart; those turns don't share a window with the new clock's.) Nothing in it prefers "right after they play": an other who returns it late teaches it to wait. (Before #264 the turn was the chat line "self is here", with `spoke_age` from the person's last line; those turns don't share a window with the ball's) | a person who rolls the ball back some times more than others, by when the turn comes | **pushes**: 100 turns with a reply check; **contingency**: the share of them in the window self believed best at the turn beats the share of its waiting time the other spent in that window (where a turn at a shuffled moment would land) by z ≥ 3 and +0.10; **payoff**: each turn's outcome (a person rolled it back **after** it, by the check) minus what a timing-blind turn in its interval would have expected (the bins' rates as known before it, weighted by the waiting time in each) averages ≥ +0.05 with t ≥ 5 on the ball's clock (#278; t ≥ 4 in chat). Both prequential | [play ball](#playing-ball-rung-7): roll it back when you're around, not always; your natural rhythm is the signal |
-| **8 · understand an other** (rung 7 until #258) | after each push it predicts whether the other will have spoken by its reply check, **itself** (#254): `p_self` from its own record (the other's all-time and recent reply rates, the last check's outcome, how long before the push they last spoke), fit on its own earlier checks, no model needed; at the push it may also ask the seat's model (`llm::call`, read-only, one consult per push) the same question (from rung 8 on), and hears the answer as an **advisor**, recalibrated on that model's own track record (its average lean says nothing; a new model starts unheard); it holds off looking at the other for 2 minutes (up to 3 while the model's answer is still in flight), then checks for the reply; with the ball (#278) until it sees the ball back, at most 30 s (up to 50 s for the model's answer) | the other answering its pushes (the model is optional) | **looks**: 100 reply checks (one per push); **skill**: self's prediction removes ≥ 8% of the running rate's Brier error over them (the other's prior-smoothed rate before each check: knowing the rate scores 0) | play ball in your own rhythm (from #264 it predicts whether you will roll the ball back; before, whether you would have spoken) |
+| **7 · time its turn** (#258, named so since #300; with the ball since #264) | learns **when** to take its turn: it rolls the shared ball to you (`self::roll`, field-only: no chat line, no model, no shell), and after each turn it draws the moment it will wait for, a bin of how long since the other last acted (`spoke_age`: their last poke on any toy; on the ball's own clock, #278: 0–20 s, 20–60 s, 1–3 min, 3+ or never), by Thompson sampling on the reply rate each bin earned over its last 100 turns (a random bin one turn in ten, so the losing bins stay measured), and rolls when the other's age is in that bin; only once its last roll's check came and the ball is back on its side, never sooner than 2 cycles after its last turn, never later than 30 (`overdue`: an unreturned ball is fetched). (Until #278 the ball ran on the chat's clock: bins of 0–2, 2–10, 10–30, 30+ min, 30 to 180 cycles apart; those turns don't share a window with the new clock's.) Nothing in it prefers "right after they play": an other who returns it late teaches it to wait. (Before #264 the turn was the chat line "self is here", with `spoke_age` from the person's last line; those turns don't share a window with the ball's) | a person who rolls the ball back some times more than others, by when the turn comes | **pushes**: 100 turns with a reply check; **contingency**: the share of them in the window self believed best at the turn beats the share of its waiting time the other spent in that window (where a turn at a shuffled moment would land) by z ≥ 3 and +0.10; **payoff**: each turn's outcome (a person rolled it back **after** it, by the check) minus what a timing-blind turn in its interval would have expected (the bins' rates as known before it, weighted by the waiting time in each) averages ≥ +0.05 with t ≥ 5 on the ball's clock (#278; t ≥ 4 in chat). Both prequential | [play ball](#playing-ball-rung-7): roll it back when you're around, not always; your natural rhythm is the signal |
+| **8 · expect a reply** (rung 7 until #258; "understand an other" until #300) | after each push it predicts whether the other will have spoken by its reply check, **itself** (#254): `p_self` from its own record (the other's all-time and recent reply rates, the last check's outcome, how long before the push they last spoke), fit on its own earlier checks, no model needed; at the push it may also ask the seat's model (`llm::call`, read-only, one consult per push) the same question (from rung 8 on), and hears the answer as an **advisor**, recalibrated on that model's own track record (its average lean says nothing; a new model starts unheard); it holds off looking at the other for 2 minutes (up to 3 while the model's answer is still in flight), then checks for the reply; with the ball (#278) until it sees the ball back, at most 30 s (up to 50 s for the model's answer) | the other answering its pushes (the model is optional) | **looks**: 100 reply checks (one per push); **skill**: self's prediction removes ≥ 8% of the running rate's Brier error over them (the other's prior-smoothed rate before each check: knowing the rate scores 0) | play ball in your own rhythm (from #264 it predicts whether you will roll the ball back; before, whether you would have spoken) |
 
 At the default pace, rung 6's ten pushes alone take ~50 minutes; rungs 2–5
 usually take hours, and the audits run on their own schedule.
@@ -835,7 +859,7 @@ carries its `id` too):
 | patience (4) | ✦ `burst` | when to look |
 | notice the world changed (5) | 🎲 `die`, 〰️ `drift` | noticing the world changed |
 | meet an other (6) | ⚽ `ball` (#264) | taking turns |
-| understand an other (8) | 🪞 `mirror` | recognizing itself (rung 9) |
+| expect a reply (8) | 🪞 `mirror` | recognizing itself (rung 9) |
 | recognize itself (9) | 🧱 `blocks` | changing itself (rung 10) |
 | change itself (10) | 🔊 `rattle` | its first voice (rung 11, speak) |
 
@@ -853,7 +877,7 @@ carries its `id` too):
   alone, and a toy you remove later is not brought back. Only the seat's own
   toybox is provisioned (the record and the toybox in the same data dir).
 - **The level-up says so:** the exp bar's gold moment reads `⬆ level up: Lv 8
-  · understand an other · new toy: 🪞 mirror`, the home view's gold ring
+  · expect a reply · new toy: 🪞 mirror`, the home view's gold ring
   round the amoeba names the toy too, and the activity feed and the brain's
   caption show the line (`new toy: 🪞 mirror (rung 8 passed)`). The sheet's
   Toys section and achievements keep it.
@@ -1149,7 +1173,7 @@ counts the window from the honest rung 6 pass to the restart as blocked by
 #254. Now self predicts (`p_self`), the model is an advisor recalibrated on
 its own record, and the test scores self against the **running rate**. Since
 the ladder flip (#258) that test is rung 8's; the voided pass stays void and
-counts for neither rung 7 (take turns) nor rung 8, and a rung line above 6
+counts for neither rung 7 (time its turn) nor rung 8, and a rung line above 6
 counts only when it carries the new ladder's tag (`"ladder": 2`), so no pass
 from before the flip is read under the new names. Rung 8 also scores the new
 outcome, `replied` (a line after the push), not the look's `changed`: a check

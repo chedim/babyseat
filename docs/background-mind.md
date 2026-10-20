@@ -353,7 +353,7 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   rewritten), but its bar re-measures against the new person and reads
   **slipping** until they earn it — no reset, no free pass.
   (`llm::call` prediction is rung 8's; rung 6 is only the bare split.)
-- **Rung 7, take turns (#258).** Rung 6 pushes on a timer (every 30
+- **Rung 7, time its turn (#258; "take turns" until #300).** Rung 6 pushes on a timer (every 30
   cycles), whatever the other is doing. From rung 7 on, self **learns when
   to push**: after each push it draws the moment it will wait for, a bin of
   `spoke_age` (how long since the person last spoke: 0–2 min, 2–10, 10–30,
@@ -395,7 +395,7 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   (speak) opens; rung 6 reads its record as it stood at the switch, so a
   quiet chat can't read as slipping. Simulated pass rates are in
   `experiments/rung7_turns` (`sim.py ... toy`).
-- **Rung 8, understand an other** (rung 7 until #258, unchanged but for
+- **Rung 8, expect a reply** ("understand an other" until #300; rung 7 until #258, unchanged but for
   its outcome: since #258 a check's outcome is `replied`, a line after the
   push, like rung 7's; a check from before #258 counts for neither). Once rung
   8 is available, self consults the model coprocessor at
