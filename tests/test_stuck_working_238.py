@@ -158,7 +158,7 @@ class TestEveryPathEndsIdle(unittest.TestCase):
         def ladder(body):
             n.append(1)
             if len(n) == 1:
-                # the voice's babble lands mid-turn: the next round takes it in
+                # a word lands mid-turn: the next round takes it in
                 info, parts = _user(sid, "a word in between")
                 r_box["r"]._enqueue(sid, "a word in between", info, parts, threading.Event())
                 return {"choices": [{"message": {"content": "", "tool_calls": [
@@ -173,7 +173,7 @@ class TestEveryPathEndsIdle(unittest.TestCase):
         self.assertEqual(hub.last_state(sid), "idle")
 
     def test_an_interjection_after_the_turn_is_over_leaves_no_busy(self):
-        # the voice's babble thread can finish after the turn it meant to join:
+        # a word can arrive after the turn it meant to join:
         # its enqueue published busy·queued and nobody ever drained it
         r, hub, sid = _runner()
         r.run(sid, "hi", *_user(sid))

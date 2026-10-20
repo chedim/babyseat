@@ -1158,7 +1158,7 @@ class TurnRunner:
             out.append({"role": role, "content": text[:HISTORY_TEXT_CAP]})
         win = out[-HISTORY_MAX_MESSAGES:]
         # THE ANCHOR (2026-10-11, "why is auto-chat not auto-chatting?"): the
-        # predict role's continuations add only his own replies -- after 12 the
+        # auto-chat's continuations add only his own replies -- after 12 the
         # window held no user message at all, and the backend answered an
         # all-assistant conversation with nothing (done_reason 'load', 0
         # tokens), every round. The last user message always rides first.
@@ -1385,7 +1385,7 @@ class TurnRunner:
         return qid
 
     def interject(self, sid: str, text: str, user_info, user_parts) -> bool:
-        """A word for the RUNNING turn (the voice's babble): queued for its
+        """A word for the RUNNING turn: queued for its
         next round only while a turn runs. Nothing running: dropped, False
         -- its enqueue used to publish busy·queued after the turn it meant
         to join was over, and nothing ever drained it (#238)."""
@@ -1756,7 +1756,7 @@ class TurnRunner:
         history = self._prior_history(sid, str(user_info.get("id") or ""),
                                       anchor=bool(user_info.get("continueTurn"))) \
             if user_info else []
-        # A CONTINUATION (auto-chat, predict role -- 2026-10-11, the operator's
+        # A CONTINUATION (auto-chat -- 2026-10-11, the operator's
         # option 2: "the turn just keeps going"): no message at all; the next
         # round starts from the conversation as it stands, his own last reply last
         if not user_info.get("continueTurn"):
@@ -1766,7 +1766,7 @@ class TurnRunner:
             history.append({"role": "user", "content": str(user_info["jobText"])})
         # MEMBRANE'S OWN VOICE (the third participant): it speaks first,
         # in its own thread, outside the session's messages
-        # an auto self-turn (predict role) aims from Argus's own last reply,
+        # an auto-chat round aims from Argus's own last reply,
         # not from its boilerplate prompt
         _aim_text = text
         if user_info.get("autoTurn"):
@@ -1779,8 +1779,9 @@ class TurnRunner:
         except Exception:
             pass
 
-        # MEMBRANE ONLY (the chat's LLM switch off): the voice answers, the
-        # model is never called; the voice still hears the operator
+        # MEMBRANE ONLY (membrane_only: the legacy ai_terminal panel's LLM switch
+        # off -- the seat's own chat has no such switch since #318): the voice
+        # answers, the model is never called; the voice still hears the operator
         if user_info.get("membraneOnly"):
             # the field hears the operator either way (the replay path's
             # precedent: the message alone, no model prose -- and never
@@ -1876,10 +1877,6 @@ class TurnRunner:
                 # history -- the model's next step sees them (a 9-minute
                 # turn kept four of them waiting, the hint it needed among
                 # them); each is consumed, never replayed as its own turn
-                # BABBLE, EVERY MOVE: membrane's line on his last move lands first
-                _bth = (getattr(self, "_babble_threads", None) or {}).pop(sid, None)
-                if _bth is not None:
-                    _bth.join(5)
                 # A TURN BEING CUT TAKES NO ONE'S WORDS (2026-10-11, "I don't see the
                 # answer"): a person's message preempts the running turn AND sits in
                 # the queue -- the cut turn's next round used to absorb it as an
@@ -2077,11 +2074,6 @@ class TurnRunner:
             try:
                 from . import predict as _predict
                 _predict.step_end(self, sid, list(tcs or []), content, step=rounds, mid=aid)
-            except Exception:
-                pass
-            try:
-                from . import voice as _voice
-                _voice.babble_move(self, sid, list(tcs or []), content)
             except Exception:
                 pass
             if msg.get("reasoning") or msg.get("thinking"):
@@ -2422,7 +2414,6 @@ class TurnRunner:
                                "\n".join(p.get("text") or "" for p in parts
                                          if isinstance(p, dict) and p.get("type") == "text"),
                                _lane_end,
-                               voice_turn=bool((user_info or {}).get("voiceTurn")),
                                parts=parts, auto_turn=bool((user_info or {}).get("autoTurn")))
             if _lane_end not in _voice._CHAT_LANES:      # the chat's guess rides its voice line
                 from . import predict as _predict
@@ -3282,15 +3273,12 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 if segments_len(segs) == 2:
                     action = segs[1]
                     if action == "auto":
-                        # auto-chat: {on: bool} -- the voice and the model talk
+                        # auto-chat: {on: bool, mode} -- the LLM's turn keeps going by itself
+                        # (an old client's {role} is ignored: the babble role is gone, #318)
                         from . import voice as _voice
                         if runner is None or sessions.get(sid) is None:
                             return self._notfound()
                         b = self._read_body()
-                        # membrane's role (babble | predict) is its own switch: a
-                        # body with only {role} leaves auto-chat as it is
-                        if b.get("role"):
-                            _voice.role_set(runner, sid, str(b.get("role")))
                         if "on" not in b:
                             return self._json_out(_voice.auto_state(runner, sid))
                         return self._json_out(_voice.auto_set(runner, sid, bool(b.get("on")),
@@ -3445,7 +3433,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     "agent": body.get("agent") or "build",
                     "model": model,
                     "time": {"created": now}, "summary": {"diffs": []}}
-            # the chat's "membrane only" switch: the voice answers alone
+            # "membrane only" (the legacy ai_terminal panel's LLM switch): the voice answers alone
             if body.get("membrane_only") is True:
                 info["membraneOnly"] = True
             # VOICE IN (voice_io.py): a spoken message -- it starts the turn like

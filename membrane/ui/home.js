@@ -855,7 +855,16 @@ function bellView(s) {
            title: "rung chime on · " + (ask ? "tap to allow notifications too" : why + " · tap to mute") };
 }
 
-const HomeLogic = { cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep,
+/** The ▶/⏸ auto-chat toggle's title (#318: no role any more -- auto-chat is
+ *  the LLM's turn going on by itself; the toggle drives the chat overlay's
+ *  person's session, never a mind's read-only view). */
+function autoTitle(a) {
+  return a && a.on
+    ? "auto-chat ON: the LLM works on by itself (round " + (a.rounds || 0) + ") -- click to pause"
+    : "auto-chat paused -- click to play (the LLM works on by itself, round after round; you can join any time)";
+}
+
+const HomeLogic = { autoTitle, cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep,
   brainLabel, brainCaption, unlockText, setSelfName, brainKey, brainFresh, actableLine, ACT_FRESH_S, brainTrail, trailAlpha, frameRadius, selfFrame, frameDistance, dampTo,
   freshLook, followsNow, followRates, SELF_HOLD_MS, lookAngles, selfCamAngles,
   followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit, zooAgo, zooCard, zooCards,
@@ -2084,11 +2093,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const on = !!(a && a.on);
       b.textContent = on ? "⏸" : "▶";
       b.style.opacity = on ? "1" : ".5";
-      b.title = on
-        ? "auto-chat ON: " + (a.role === "predict" ? "the LLM works on by itself, membrane predicts"
-                             : (a.mode || "explore"))
-          + " (round " + (a.rounds || 0) + ") -- click to pause"
-        : "auto-chat paused -- click to play (membrane and the LLM talk; you can join any time; shift-click = teach mode)";
+      b.title = autoTitle(a);
     }
 
     // ---------------------------------------------------------- HA's own UI, one button away
