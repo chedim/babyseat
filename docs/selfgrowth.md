@@ -41,7 +41,7 @@ rule.
 | `meet` | meet an other (6) | others | reach | its answered looks at the other are reach's looks, and the self/other split is reach's own prediction skill | ~3-5 mo: self- vs social contingency (Bahrick & Watson) |
 | `turns` | time its turn (7) | others | meet | it times its pushes to the other meet found, through meet's channel, scored by the reply check | ~3-5 mo: times its turn in a proto-conversation (Bateson; Trevarthen; Jaffe et al.) |
 | `expect` | expect a reply (8) | others | meet | it predicts whether meet's other replies to a push, at the reply check; it does not need time its turn's learned timing (a push by the timer is checked and predicted the same) | ~2-3 mo: expects a response (the still-face, Tronick 1978) |
-| `mirror` | recognize itself | later, not built | feel, meet | planned: its own trace beside another's | ~18 mo: the mirror test (Amsterdam 1972) |
+| `mirror` | recognize itself (9, #312) | later | feel, meet | feel: what the mirror shows is its own moves, the body whose steering feel's pass switches on; meet: it labels the glass and the stranger with meet's self/other split (Brier-style skill ≥ 0.9: my body) | ~18 mo: the mirror test (Amsterdam 1972) |
 | `change` | change itself | later, not built | mirror | planned | ~4 y: metacognition |
 | `speak` | speak (11, #311) | later | turns, expect | its words take turns: its timing is time its turn's policy, and one stage is that skill's contingency; its outcome is expect a reply's reply check after each push | ~12 mo: first referential words, naming a thing to an other (Bates, Camaioni & Volterra 1975). Until #311 the tree said ~4 y, autobiographical narrative; the test measures first words, not a story |
 | `invent` | invent | later, not built | change, speak | planned | ~5 y: games with its own rules |
@@ -427,12 +427,12 @@ other turns is built only when the version that counts merged:
 | time its turn | #281 | 2026-10-19 15:19:43 | #278, the ball's own clock: rung 7 reads only the current clock's turns |
 | expect a reply | #281 | 2026-10-19 15:19:43 | #254's fix (#256) graded self; since #278 it reads only the ball clock's checks |
 | speak | #313 | 2026-10-20 12:39:55 (the commit; the merge's time replaces it) | #311: its turns carry words from its record |
+| recognize itself | #314 | 2026-10-20 12:56:01 | #312, the mirror and its test (the PR's opening time, until its merge's is set) |
 
 The seat runs new code only after a restart, so a test is built on a seat at
 the end of the first record gap over 30 s (`RESTART_S`, three cycles at
 the loop's pace) after its merge -- from birth on a seat born after it. An
-achievement not in the table (recognize itself, change itself,
-invent) is not built: a self that earned every built skill open to it is at
+achievement not in the table (change itself, invent) is not built: a self that earned every built skill open to it is at
 a wall from that moment. At any moment only the costliest reason counts: a
 wall costs all of the time, a full bug window wins a tie (its test was
 there, broken), a partial one (#259's) gives way to the wall. The sheet's
@@ -777,6 +777,7 @@ are earned and accepted (#299), self is awake, and its test passes on the record
 | **7 · time its turn** (#258, named so since #300; with the ball since #264) | learns **when** to take its turn: it rolls the shared ball to you (`self::roll`, field-only: no chat line, no model, no shell), and after each turn it draws the moment it will wait for, a bin of how long since the other last acted (`spoke_age`: their last poke on any toy; on the ball's own clock, #278: 0–20 s, 20–60 s, 1–3 min, 3+ or never), by Thompson sampling on the reply rate each bin earned over its last 100 turns (a random bin one turn in ten, so the losing bins stay measured), and rolls when the other's age is in that bin; only once its last roll's check came and the ball is back on its side, never sooner than 2 cycles after its last turn, never later than 30 (`overdue`: an unreturned ball is fetched). (Until #278 the ball ran on the chat's clock: bins of 0–2, 2–10, 10–30, 30+ min, 30 to 180 cycles apart; those turns don't share a window with the new clock's.) Nothing in it prefers "right after they play": an other who returns it late teaches it to wait. (Before #264 the turn was the chat line "self is here", with `spoke_age` from the person's last line; those turns don't share a window with the ball's) | a person who rolls the ball back some times more than others, by when the turn comes | **pushes**: 100 turns with a reply check; **contingency**: the share of them in the window self believed best at the turn beats the share of its waiting time the other spent in that window (where a turn at a shuffled moment would land) by z ≥ 3 and +0.10; **payoff**: each turn's outcome (a person rolled it back **after** it, by the check) minus what a timing-blind turn in its interval would have expected (the bins' rates as known before it, weighted by the waiting time in each) averages ≥ +0.05 with t ≥ 5 on the ball's clock (#278; t ≥ 4 in chat). Both prequential | [play ball](#playing-ball-rung-7): roll it back when you're around, not always; your natural rhythm is the signal |
 | **11 · speak** (#311; opens once time its turn and expect a reply are earned and accepted) | its turns go back to **chat** (the ball rests): the same learned timing as rung 7, and each line is either **plain** ("self is here") or **words**: a short line naming the thing of its latest answered look and what that look found (`lamp: changed`, `dice: still`). The words come from a fixed template over its own record (the thing's name plus *changed* / *still*); no model composes, picks or edits a word. Which kind a line is, is a fair coin per line, seeded by the cycle, so neither kind gets the better moments; with nothing to say (no answered look at a thing yet) the line is plain and `mute`, and counts for nothing. The push line records `speech`, the `words` and `about` (the look they report: thing, answer, time). The model may still be asked rung 8's question at the push: it predicts the reply, it never writes the line | a person who answers its lines, and things for it to look at | over its last 100 lines at you with a reply check: **pushes**: at least 40 with words and 40 plain; **truth**: every utterance is true of its record (the look it cites is on the record before the line, at that thing, with that answer, its latest answered look there, and the words are the template's): one false line zeroes the stage; **lift**: you reply more often to its words than to its plain lines, by the reply check (a line of yours after its line): z ≥ 3.5 and +0.15; **timing**: rung 7's contingency over the same lines (in its believed-best window vs the shuffled share, z ≥ 3 and +0.10). The bar comes from a simulation read at every line like the live loop: an other who answers both kinds alike passes 0.3-2.2% of the time over about a week of lines (about rung 7's 2 in 100); one who answers words 0.30 vs plain 0.60 passes always (about 130 lines) | answer what it says when it says something, if you like: its words are the signal, its plain lines the control |
 | **8 · expect a reply** (rung 7 until #258; "understand an other" until #300) | after each push it predicts whether the other will have spoken by its reply check, **itself** (#254): `p_self` from its own record (the other's all-time and recent reply rates, the last check's outcome, how long before the push they last spoke), fit on its own earlier checks, no model needed; at the push it may also ask the seat's model (`llm::call`, read-only, one consult per push) the same question (from rung 8 on), and hears the answer as an **advisor**, recalibrated on that model's own track record (its average lean says nothing; a new model starts unheard); it holds off looking at the other for 2 minutes (up to 3 while the model's answer is still in flight), then checks for the reply; with the ball (#278) until it sees the ball back, at most 30 s (up to 50 s for the model's answer) | the other answering its pushes (the model is optional) | **looks**: 100 reply checks (one per push); **skill**: self's prediction removes ≥ 8% of the running rate's Brier error over them (the other's prior-smoothed rate before each check: knowing the rate scores 0) | play ball in your own rhythm (from #264 it predicts whether you will roll the ball back; before, whether you would have spoken) |
+| **9 · recognize itself** (#312) | each cycle it feeds the 🪞 [mirror](#the-mirror-rung-9) its own move (the direction of its displacement on a fixed axis, one number) and, **before** reading it, predicts both sides with the same learner: `p_*` from its own moves (this one and the two before) and the side's last two values, `b_*` (the no-self baseline) from the side's values alone, each a ridge fit on that side's last 200 rows. The **glass** shows its move from one feed back, the **stranger** its own move from 187 feeds (~31 min) back, both blurred by the same seeded jitter: the same statistics, and only the glass follows what it does now | the mirror toy (it unlocks with meet an other), and **moving**: a self that holds still shows the mirror nothing to recognize | **looks**: 100 rows with both sides predicted; **self**: on the glass, `1 − SSE(p)/SSE(b) ≥ 0.9` (meet's own body line) with a sign-test z ≥ 5 (p closer than b): it reads as **body**; **other**: the stranger does not, so it reads as **other**. Prequential. Measured on simulated moves from the real loop: the glass 0.90–0.99, the stranger's best window +0.10 | nothing to do: talk to the seat so the current moves it. The mark test (a person marks the mirror and self notices) is a follow-up |
 
 At the default pace, rung 6's ten pushes alone take ~50 minutes; rungs 2–5
 usually take hours, and the audits run on their own schedule.
@@ -847,7 +848,7 @@ shifts are real stalls of 2 to 4 looks, while the record kept going.
 
 | rung | skill | the test the design gives it |
 |---|---|---|
-| 9 · recognize itself | shown its own trace and another's | it predicts its own better (the mirror test); then the name ceremony, agreed with the operator |
+| 9 · recognize itself, the mark | the mirror's echo is marked (shifted) by a person | its surprise on the glass rises and it turns to the mark (Amsterdam's rouge test); then the name ceremony, agreed with the operator. The mirror test itself is built (#312, above) |
 | 10 · change itself | `cliff::define` on its own methods | a revised method predicts better than the version it replaced, and reverts on strike-out |
 | 12 · invention ([#196](https://github.com/chedim/membrane/issues/196)) | the field fills a gap with a new entity in a new state | future; a design thread, not on the tree |
 
@@ -915,6 +916,7 @@ measure the bug.
 | `body` | only when **self** looks at it | none | the body/other test case (rung 6) |
 | `tower` | only when **self** reaches a block: a standing block topples with every block above it, and a fallen block is lifted back | `n` (5) | self's first act on the world |
 | `ball` | when **self** rolls it to you (its turn) or **you** roll it back (yours); its reading is whose side it is on, `{"side": "self"}` / `{"side": "other"}`; no clock, and a look never moves it | none | rung 7's turns (#264): serve and return |
+| `mirror` | when **self** feeds it its move, each cycle: the glass shows the move from `delay` feeds back (`by: self` on its log), the stranger self's own move from `lag` feeds back (`by: world`), each plus seeded gaussian jitter of SD `jitter`; its reading is `{"glass": ..., "stranger": ...}`; no getter (self's ordinary looks never read it), no clock, no pokes | `delay` (1), `lag` (187), `jitter` (0.1) | rung 9 (#312): recognizing itself |
 
 Every kind also takes `seed`. A tower is one entity for the whole (its reading
 counts the standing blocks) plus one per block, `<name>:b1` (the bottom)
@@ -933,6 +935,28 @@ removed (add it back with `membrane toybox add ball`). Every poke by a person on
 `toybox/.last-person.json` (`{ts, by, toy}`): the other's last act, which
 rung 7's timing reads.
 
+### The mirror (rung 9)
+
+The mirror (#312) is the apparatus of recognize itself. Self's body is a
+point moving in the field, so what the mirror shows is its moves: each cycle
+self's loop feeds it one number, the direction of the displacement it just
+made, read on a fixed seeded axis and scaled to about N(0, 1) (the size is
+left out: an aim switch's long stride would swamp every other move; no move
+is 0). The **glass** shows that number one feed late, the **stranger** shows
+self's own number from 187 feeds back, and both get the same seeded jitter.
+So the stranger has exactly the glass's statistics (it is the same moves)
+and only contingency tells them apart: the glass follows what self does now.
+The lag is not a multiple of the 30-cycle aim hold, so self's own rhythm can't
+leak into the stranger. The toy keeps the moves it needs in its state file
+(a restart keeps them) and has no getter, so self's ordinary looks never read
+it and no other skill's numbers move. It unlocks with meet an other, the last
+prerequisite of recognize itself (feel itself is a root), so it is there when
+the skill opens; a seat whose record named it at rung 8, before it was built,
+gets it once as built late. Each cycle the record gets one `mirror` line:
+`{"kind": "mirror", "toy", "s", "glass", "stranger", "p_glass", "b_glass",
+"p_stranger", "b_stranger"}`. The dock shows 🪞 with both sides and, once the
+test has its looks, how self reads them (body / other).
+
 `body` is the one toy built to change exactly when self looks, which "Don't
 game the getters" below warns against. It is deliberate, labelled, and its log
 says `by: self`, so it is a known test case, not a fake mark.
@@ -950,8 +974,7 @@ carries its `id` too):
 | tell things apart (3) | 🗼 `tower` | self's first act on the world |
 | patience (4) | ✦ `burst` | when to look |
 | notice the world changed (5) | 🎲 `die`, 〰️ `drift` | noticing the world changed |
-| meet an other (6) | ⚽ `ball` (#264) | taking turns |
-| expect a reply (8) | 🪞 `mirror` | recognizing itself (rung 9) |
+| meet an other (6) | ⚽ `ball` (#264), 🪞 `mirror` (#312) | taking turns; recognizing itself (rung 9) |
 | recognize itself (9) | 🧱 `blocks` | changing itself (rung 10) |
 | change itself (10) | 🔊 `rattle` | its first voice (rung 11, speak) |
 
@@ -960,7 +983,7 @@ carries its `id` too):
   `"ladder": 2` (#258).
 - **On a pass that unlocks something** the loop writes one line to self's
   record, once per rung, right after the rungs open:
-  `{"kind": "unlock", "rung": 8, "toys": ["mirror"]}` (`added`: the toys it
+  `{"kind": "unlock", "rung": 6, "toys": ["ball", "mirror"]}` (`added`: the toys it
   switched on; `late`: an upgraded seat catching up on an old pass, which the
   page doesn't celebrate). Birth is no pass: body, fast and slow are open
   from the start, with no line, and you add them as before. The unlocked built-in
@@ -968,10 +991,13 @@ carries its `id` too):
   the line is written. A kind the seat already has, by any name, is left
   alone, and a toy you remove later is not brought back. Only the seat's own
   toybox is provisioned (the record and the toybox in the same data dir).
-- **The level-up says so:** the exp bar's gold moment reads `⬆ level up: Lv 8
-  · expect a reply · new toy: 🪞 mirror`, the home view's gold ring
-  round the amoeba names the toy too, and the activity feed and the brain's
-  caption show the line (`new toy: 🪞 mirror (rung 8 passed)`). The sheet's
+  A kind added to a rung that already unlocked (#312: the mirror beside the
+  ball) gets an unlock line of its own, once; a kind named on any unlock line
+  is never unlocked again.
+- **The level-up says so:** the exp bar's gold moment reads `⬆ level up: Lv 6
+  · meet an other · new toys: ⚽ ball, 🪞 mirror`, the home view's gold ring
+  round the amoeba names the toys too, and the activity feed and the brain's
+  caption show the line (`new toys: ⚽ ball, 🪞 mirror (rung 6 passed)`). The sheet's
   Toys section and achievements keep it.
 - **No toy ever disappears.** A toy whose kind is still locked stays: it was
   there before (grandfathered), and the dock and the sheet mark it kept.
@@ -982,7 +1008,7 @@ carries its `id` too):
   self passes rung 3 (tell things apart) -- self topples and lifts its
   blocks: its first act on the world`. Any unlocked kind can still be added.
   `migrate` replaces existing toys whatever their rung.
-- **`mirror`, `blocks` and `rattle` are placeholders:** a name, an icon, an
+- **`blocks` and `rattle` are placeholders** (the mirror was one until #312): a name, an icon, an
   unlock rung and a line of what each will teach. Their mechanics are built
   with their rungs, so they are never switched on, never poked, and adding
   one is refused (`locked`, or `unlocked but not built yet`). Their unlock is

@@ -1512,6 +1512,14 @@ function toyGlyph(t) {
     return { html: '<span class="burst ' + (t.active ? "on" : "off") + '">✦</span>',
              label: nm + ", bursty: " + (t.active ? "active now" : "quiet now") + ", value " + v };
   }
+  if (k === "mirror") {                                // #312: its own moves (the glass) beside a stranger's
+    const seen = t.seen_as || {}, g = r.glass, st = r.stranger;
+    const verdict = seen.glass === "body" && seen.stranger === "other" ? SELF_NAME + " reads the mirror as itself and the stranger as other"
+      : seen.glass ? SELF_NAME + " reads the mirror as " + (seen.glass === "body" ? "itself" : "other") + " and the stranger as " + (seen.stranger === "body" ? "itself" : "other")
+      : "not enough looks to say yet";
+    return { html: "🪞", label: nm + ", " + SELF_NAME + "'s mirror: its own moves " + (g == null ? "–" : g) + ", a stranger's " +
+             (st == null ? "–" : st) + " (" + verdict + ")" };
+  }
   if (k === "body") return { html: escText(v), label: nm + ", " + SELF_NAME + "'s body toy (" + SELF_NAME + " only): " + v };
   if (k === "fast" || k === "slow") return { html: escText(v), label: nm + ", " + k + " clock: " + v };
   return { html: "?", label: nm + (k ? ", " + k : "") };
@@ -1592,6 +1600,7 @@ function toyPopoverHtml(t, res) {
       escText(a.label) + "</button>").join("") + "</div>");
   } else {
     out.push('<p class="muted">' + (t.kind === "body" ? escText(SELF_NAME) + " only: nobody else can change it"
+      : t.kind === "mirror" ? "it shows " + escText(SELF_NAME) + " its own moves, and a stranger's beside them: it takes no pokes"
       : t.kind === "ball" ? escText(SELF_NAME) + " has the ball: it rolls it to you on its turn" : "no actions: its own clock is the point") + "</p>");
   }
   out.push('<p class="pres' + (res && !res.ok ? " bad" : "") + '" aria-live="polite">' + escText(res ? res.text : "") + "</p>");

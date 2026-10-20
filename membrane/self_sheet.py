@@ -103,7 +103,7 @@ BUGS = (
 # read) is built only when the version that counts merged. The seat runs new code
 # only after a restart, so on a seat it is built at the end of the first record
 # gap over RESTART_S after the merge (from birth on a seat born after it). An
-# achievement not listed (mirror, change, speak, invent) is not built.
+# achievement not listed (change, speak, invent) is not built.
 BUILT_AT = {
     # rungs 0 + 1: born off, the switch, and it feels the current
     "feel": {"pr": 164, "merged": _utc(2026, 10, 16, 13, 7, 29)},
@@ -123,6 +123,8 @@ BUILT_AT = {
     # understand an other: #256 (#254's fix, 06:11Z) graded self not the model, #261 moved it up to rung 8,
     # #262 scored the reply, #272 the ball's turns; #281 (#278): it reads only the current clock's checks
     "expect": {"pr": 281, "merged": _utc(2026, 10, 19, 15, 19, 43)},
+    # recognize itself (#312): the mirror toy and its test -- the PR's opening time until its merge's is set
+    "mirror": {"pr": 314, "merged": _utc(2026, 10, 20, 12, 56, 1)},
     # speak (#311): its commit's time until the merge's is set here
     "speak": {"pr": 313, "merged": _utc(2026, 10, 20, 12, 39, 55)},
 }
@@ -163,7 +165,9 @@ def fastest_cycles() -> dict:
     r2 = SL.RUNG2_REACHES + SL.AUDIT_REACHES
     return {1: SL.RUNG1_CYCLES, 2: r2, 3: SL.RUNG3_WINDOW - r2, 4: SL.RUNG4_TIMED,
             5: SL.RUNG5_LOOKS, 6: SL.RUNG6_PUSHES * SL.MEET_EVERY, 7: SL.RUNG7_PUSHES * _turn_every(),
-            8: SL.RUNG8_LOOKS * _turn_every(), 11: SL.SPEAK_PUSHES * SL.MEET_EVERY}   # #311: speak is in chat
+            8: SL.RUNG8_LOOKS * _turn_every(),
+            9: SL.MIRROR_LAG + 3 + SL.MIRROR_MIN_FIT + SL.MIRROR_LOOKS,   # #312: the stranger's lag, the fit, the looks
+            11: SL.SPEAK_PUSHES * SL.MEET_EVERY}   # #311: speak is in chat
 
 
 def _turn_every() -> int:
@@ -181,6 +185,8 @@ def _needs() -> dict:
             6: f"{SL.RUNG6_PUSHES} lines sent, {SL.MEET_EVERY} cycles apart",
             7: f"{SL.RUNG7_PUSHES} timed turns with the ball with a reply check, at least {_turn_every()} cycles apart",
             8: f"{SL.RUNG8_LOOKS} reply checks, one per line",
+            9: f"{SL.MIRROR_LOOKS} looks at the mirror and the stranger, after the stranger's "
+               f"{SL.MIRROR_LAG}-move lag and {SL.MIRROR_MIN_FIT} to learn from",
             11: (f"{SL.SPEAK_PUSHES} timed lines with a reply check, at least {SL.SPEAK_EACH} with words "
                  f"and {SL.SPEAK_EACH} plain")}
 
@@ -733,6 +739,7 @@ def _criteria(aim: int, recs: list, progs: dict) -> list:
              7: {"pushes": (SL.RUNG7_PUSHES, "turns with the ball with a reply check (you roll it back)" if ball
                             else "timed lines with a reply check")},
              8: {"looks": (SL.RUNG8_LOOKS, "reply checks")},
+             9: {"looks": (SL.MIRROR_LOOKS, "looks at the mirror and the stranger")},
              11: {"pushes": (SL.SPEAK_PUSHES, "timed lines with a reply check")}}.get(aim, {})
     skill = {1: (SL.RUNG1_SKILL, "feel skill"), 2: (SL.RUNG2_SKILL, "reach skill"),
              3: (SL.RUNG2_SKILL, "reach skill on a moving thing"), 8: (SL.RUNG8_MARGIN, "skill vs running rate")}
@@ -777,6 +784,12 @@ def _criteria(aim: int, recs: list, progs: dict) -> list:
             text = (f"{'turns' if ball else 'lines'} in its window {'–' if sh is None else f'{sh:.2f}'} vs chance "
                     f"{'–' if ch is None else f'{ch:.2f}'} (z {float(p.get('z') or 0):.1f} → {ck['cont_z']:.1f}, "
                     f"+{ck['cont_margin']:.2f})")
+        elif key == "self" and aim == 9:              # #312: the glass, by its own moves
+            text = (f"its own moves predict the mirror {_sg(float(p.get('skill') or 0))} → {SL.BODY_SKILL:.2f} "
+                    f"(z {float(p.get('z') or 0):.1f} → {SL.MIRROR_Z:.1f}): the mirror reads as itself")
+        elif key == "other" and aim == 9:
+            text = (f"the stranger reads as other: its own moves predict it "
+                    f"{_sg(float(p.get('stranger_skill') or 0))}, under {SL.BODY_SKILL:.2f}")
         elif key == "payoff":
             pay = p.get("payoff")
             text = (f"replies gained over timing-blind {'–' if pay is None else _sg(float(pay))} "
@@ -933,7 +946,7 @@ SKILL_STEP_S = 1800.0        # the skill's trend line: one point per half hour o
 SKILL_POINTS = 9             # ...over the last four hours
 SKILL_LABEL = {1: "feel skill", 2: "reach skill", 3: "reach skill on a moving thing", 4: "news share of timed looks",
                5: "shifts noticed", 6: "the other read as other", 7: "replies gained by its timing",
-               8: "skill vs running rate", 11: "replies gained by its words"}
+               8: "skill vs running rate", 9: "its own moves predict the mirror", 11: "replies gained by its words"}
 
 
 def _skill_at(n: int, recs: list, tempo: dict):
@@ -1166,6 +1179,15 @@ def forget_dock(srv) -> None:
         SL._rt(srv).pop("dock", None)
 
 
+def _mirror_seen(recs: list) -> dict:
+    """#312: how self reads the mirror's two sides (body / other, by its test's
+    split) once it has its test's looks; None for both until then."""
+    p = SL._rung9(recs)
+    if p["crit"].get("looks", 0.0) < 1.0:
+        return {"glass": None, "stranger": None}
+    return dict(p.get("labels") or {})
+
+
 def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
     """Each toybox toy, live: its reading, its last change (who, how long
     ago), its health and its stats. Cached DOCK_CACHE_S per seat."""
@@ -1209,6 +1231,8 @@ def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
             reading = {"blocks": [ch == "|" for ch in str(row.get("reading") or "")]}
         elif kind == "ball":
             reading = {"side": row.get("reading")}               # #264: whose side it is on
+        elif kind == "mirror":
+            reading = dict(row.get("reading") or {})             # #312: the glass and the stranger
         else:
             reading = {"value": row.get("reading")}
         active = None
@@ -1234,6 +1258,7 @@ def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
                                                     if k in ("verdict", "looks")}}
                                     for b in sorted(b for (n, b) in by_block if n == name)]}
                         if kind == "tower" else {}),
+                     **({"seen_as": _mirror_seen(recs)} if kind == "mirror" else {}),
                      "unlock_rung": TU.rung_of(kind), "grandfathered": TU.grandfathered(recs, kind)})
     toys.sort(key=lambda t: t["kind"] != "ball")                 # #264: the ball first (locked rows follow the toys)
     sh = sheet(srv, now)                                 # #295: the tree and the level, as the (cached) sheet has them
