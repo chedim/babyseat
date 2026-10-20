@@ -1215,7 +1215,7 @@ const HSTYLE = `
   .sktree .skhdr .lvb { margin-left:auto; font-weight:700; font-variant-numeric:tabular-nums; padding:1px 10px; border-radius:999px;
                         background:color-mix(in srgb, var(--sk-earned) 30%, transparent); }
   .sktree .note { font-size:11.5px; opacity:.75; margin:0 0 6px; }
-  .sktree .skbox { max-width:100%; overflow:auto; overscroll-behavior:contain; border-radius:12px; margin:0 0 8px;
+  .sktree .skbox { max-width:100%; overflow:auto; overscroll-behavior:contain auto; border-radius:12px; margin:0 0 8px;
                    border:1px solid color-mix(in srgb, var(--divider-color,#888) 35%, transparent); }
   .sktree .skcanvas { position:relative; margin:0 auto; }
   .sktree .skedges { position:absolute; inset:0; overflow:visible; }
