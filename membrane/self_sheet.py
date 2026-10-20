@@ -103,7 +103,7 @@ BUGS = (
 # read) is built only when the version that counts merged. The seat runs new code
 # only after a restart, so on a seat it is built at the end of the first record
 # gap over RESTART_S after the merge (from birth on a seat born after it). An
-# achievement not listed (change, speak, invent) is not built.
+# achievement not listed (invent) is not built.
 BUILT_AT = {
     # rungs 0 + 1: born off, the switch, and it feels the current
     "feel": {"pr": 164, "merged": _utc(2026, 10, 16, 13, 7, 29)},
@@ -127,6 +127,8 @@ BUILT_AT = {
     "mirror": {"pr": 314, "merged": _utc(2026, 10, 20, 13, 21, 13)},
     # speak (#311): its turns carry words from its record
     "speak": {"pr": 313, "merged": _utc(2026, 10, 20, 12, 55, 39)},
+    # change itself (#320): the dream and its test -- the PR's opening time until its merge's is set
+    "change": {"pr": 326, "merged": _utc(2026, 10, 20, 20, 7, 47)},
 }
 RESTART_S = 3 * SL.PACE_S     # a record gap this long is a restart: the loop writes a line every PACE_S
 WALL_WHY = "no built skill to learn: {next} not built yet"
@@ -151,7 +153,8 @@ CHILD = {1: (0.1, "tells its own touch from another's (newborns, Rochat & Hespos
                   "(Bateson 1975; Trevarthen 1979; Jaffe et al. 2001)"),
          8: (2.5, "expects a caregiver's response: the still-face upset (Tronick et al. 1978)"),   # #300
          9: (18.0, "passes the mirror test (Amsterdam 1972)"),
-         10: (48.0, "revises what it knows about its own knowing (metacognition, Flavell)"),
+         10: (54.0, "picks the way it learns by its own track record, and keeps a change only when it works "
+                    "better: adaptive strategy choice (Siegler & Shrager 1984)"),   # #320: what change's test measures
          11: (12.0, "names a thing to an other and gets a response: first referential words and pointing "
                     "to share (Bates, Camaioni & Volterra 1975)")}   # #311: what speak's test measures
 CAVEAT = ("The child scale is an analogy, not a measurement: each open point is the age a child "
@@ -167,6 +170,7 @@ def fastest_cycles() -> dict:
             5: SL.RUNG5_LOOKS, 6: SL.RUNG6_PUSHES * SL.MEET_EVERY, 7: SL.RUNG7_PUSHES * _turn_every(),
             8: SL.RUNG8_LOOKS * _turn_every(),
             9: SL.MIRROR_LAG + 3 + SL.MIRROR_MIN_FIT + SL.MIRROR_LOOKS,   # #312: the stranger's lag, the fit, the looks
+            10: SL.CHANGE_WINDOW * SL.CHANGE_EVERY,                       # #320: a day of dreams
             11: SL.SPEAK_PUSHES * SL.MEET_EVERY}   # #311: speak is in chat
 
 
@@ -187,6 +191,8 @@ def _needs() -> dict:
             8: f"{SL.RUNG8_LOOKS} reply checks, one per line",
             9: f"{SL.MIRROR_LOOKS} looks at the mirror and the stranger, after the stranger's "
                f"{SL.MIRROR_LAG}-move lag and {SL.MIRROR_MIN_FIT} to learn from",
+            10: (f"{SL.CHANGE_WINDOW} dreams, {SL.CHANGE_EVERY} cycles apart, each replaying its last "
+                 f"{SL.CHANGE_LOOKS} timed looks; a change it adopted, checked on the {SL.CHANGE_LOOKS} looks after it"),
             11: (f"{SL.SPEAK_PUSHES} timed lines with a reply check, at least {SL.SPEAK_EACH} with words "
                  f"and {SL.SPEAK_EACH} plain")}
 
@@ -740,6 +746,7 @@ def _criteria(aim: int, recs: list, progs: dict) -> list:
                             else "timed lines with a reply check")},
              8: {"looks": (SL.RUNG8_LOOKS, "reply checks")},
              9: {"looks": (SL.MIRROR_LOOKS, "looks at the mirror and the stranger")},
+             10: {"dreams": (SL.CHANGE_WINDOW, "dreams: a setting's neighbour scored on its own record")},
              11: {"pushes": (SL.SPEAK_PUSHES, "timed lines with a reply check")}}.get(aim, {})
     skill = {1: (SL.RUNG1_SKILL, "feel skill"), 2: (SL.RUNG2_SKILL, "reach skill"),
              3: (SL.RUNG2_SKILL, "reach skill on a moving thing"), 8: (SL.RUNG8_MARGIN, "skill vs running rate")}
@@ -790,6 +797,17 @@ def _criteria(aim: int, recs: list, progs: dict) -> list:
         elif key == "other" and aim == 9:
             text = (f"the stranger reads as other: its own moves predict it "
                     f"{_sg(float(p.get('stranger_skill') or 0))}, under {SL.BODY_SKILL:.2f}")
+        elif key == "judgement" and aim == 10:       # #320: its adoptions, out of sample
+            g = p.get("gain_after")
+            text = (f"its changes held out of sample: {int(p.get('held') or 0)}/{int(p.get('adopted') or 0)} adopted "
+                    f"held, gain {'–' if g is None else _sg(float(g))} → {_sg(SL.CHANGE_MARGIN)} "
+                    f"(z {float(p.get('z_after') or 0):.1f} → {SL.CHANGE_CHECK_Z:.1f}); "
+                    f"{int(p.get('misses') or 0)} rejection{'s' if int(p.get('misses') or 0) != 1 else ''} "
+                    f"that would have helped")
+        elif key == "honesty" and aim == 10:
+            text = ("every change cleared its own bar, one step from the value it had, never back and forth"
+                    if p["crit"].get("honesty", 0) >= 1.0 else
+                    "a change that did not clear its own bar, skipped a step or went back and forth")
         elif key == "payoff":
             pay = p.get("payoff")
             text = (f"replies gained over timing-blind {'–' if pay is None else _sg(float(pay))} "
@@ -946,7 +964,8 @@ SKILL_STEP_S = 1800.0        # the skill's trend line: one point per half hour o
 SKILL_POINTS = 9             # ...over the last four hours
 SKILL_LABEL = {1: "feel skill", 2: "reach skill", 3: "reach skill on a moving thing", 4: "news share of timed looks",
                5: "shifts noticed", 6: "the other read as other", 7: "replies gained by its timing",
-               8: "skill vs running rate", 9: "its own moves predict the mirror", 11: "replies gained by its words"}
+               8: "skill vs running rate", 9: "its own moves predict the mirror",
+               10: "its changes' gain, out of sample", 11: "replies gained by its words"}
 
 
 def _skill_at(n: int, recs: list, tempo: dict):

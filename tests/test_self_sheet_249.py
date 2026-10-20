@@ -261,11 +261,10 @@ class TestGrowth(unittest.TestCase):
     def test_the_fastest_line_is_cumulative_at_the_pace(self):
         floors = SH.fastest_cycles()
         cum = 0
-        for n in range(1, 10):                                      # #258: 8 rungs built; #312: 9
+        for n in range(1, 12):                                      # #258: 8 rungs built; #312: 9; #320: all 11
             cum += floors[n]
             self.assertAlmostEqual(self.rows[n]["fastest_h"], round(cum * SL.PACE_S / H, 3), places=3)
-        self.assertIsNone(self.rows[10]["fastest_h"])               # not built
-        self.assertFalse(self.rows[10]["built"])
+            self.assertTrue(self.rows[n]["built"])
 
     def test_the_child_scale_is_one_factor_the_median_over_the_rungs_passed(self):
         g = self.s["growth"]

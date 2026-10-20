@@ -489,12 +489,15 @@ def test_a_deprecated_number_past_the_top_accepts_every_earned_one():
     assert SL.status(srv)["awaiting"] == [] and SL.mode(srv) == "on"
 
 
-def test_the_ladder_lists_every_rung_and_marks_the_unbuilt():
+def test_the_ladder_lists_every_rung_and_marks_the_unbuilt(monkeypatch):
     srv = _seat()
     SL.set_mode(srv, "on")
     lad = {x["rung"]: x["state"] for x in SL.status(srv)["ladder"]}
     assert lad[0] == "passed" and lad[1] == "current"
-    assert lad[10] == "unbuilt" and len(lad) == len(SL.RUNG_NAMES)
+    assert lad[10] == "locked" and len(lad) == len(SL.RUNG_NAMES)   # #320: change itself is built
+    monkeypatch.setitem(SL.ACHIEVEMENTS["change"], "built", False)
+    lad = {x["rung"]: x["state"] for x in SL.status(srv)["ladder"]}
+    assert lad[10] == "unbuilt"
 
 
 def test_acceptance_survives_a_restart():

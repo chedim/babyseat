@@ -83,7 +83,7 @@ RUNG_NAMES = {0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell 
               4: "patience", 5: "notice the world changed", 6: "meet an other",
               7: "time its turn", 8: "expect a reply", 9: "recognize itself", 10: "change itself",
               11: "speak"}
-LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11)}   # the rungs built so far (#311: speak; #312: mirror)
+LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)}   # the rungs built so far (#311: speak; #312: mirror; #320: change)
 # THE LADDER FLIP (#258): rung 7 was "understand an other" until the turn-taking rung went in
 # below it. A rung line above 6 counts only when it carries "ladder": LADDER_V -- a pass
 # recorded before the flip was the old numbering's (the record is never rewritten).
@@ -149,10 +149,16 @@ ACHIEVEMENTS = {
                "why_prereqs": ("feel itself: what the mirror shows is its own moves -- the body whose steering "
                                "feel's pass switches on; meet an other: it labels the glass and the stranger "
                                "with meet's self/other split (BODY_SKILL: predicted this well, it is my body)")},
-    "change": {"rung": 10, "name": "change itself", "branch": "later", "prereqs": ("mirror",), "built": False,
-               "child_age": "~4 y",
-               "child_ability": "revises what it knows about its own knowing (metacognition, Flavell)",
-               "why_prereqs": "not built yet; planned: it can change only a self it recognizes (recognize itself)"},
+    # #320: the test measures choosing how it learns by its own track record, so the child is adaptive
+    # strategy choice (~4-5 y), not metacognition in general
+    "change": {"rung": 10, "name": "change itself", "branch": "later", "prereqs": ("mirror", "patience"), "built": True,
+               "child_age": "~4-5 y",
+               "child_ability": ("picks the way it learns by its own track record, and keeps a change only "
+                                 "when it works better: adaptive strategy choice (Siegler & Shrager 1984)"),
+               "why_prereqs": ("recognize itself: it changes only a self it recognizes -- the settings it may "
+                               "change are its own learning's, and its dream replays its own record; patience: "
+                               "the looks its dream scores are patience's timed looks, whose p reads the rate "
+                               "fit it tunes (without them there is nothing to replay)")},
     # #311: the test measures first referential words to an other, so the child is ~12 mo, not ~4 y's narrative
     "speak": {"rung": 11, "name": "speak", "branch": "later", "prereqs": ("turns", "expect"), "built": True,
               "child_age": "~12 mo",
@@ -384,6 +390,46 @@ MIRROR_MIN_FIT = 20         # no prediction before this many rows to fit
 MIRROR_RIDGE = 1.0          # the fit's ridge penalty (not on the intercept)
 MIRROR_LOOKS = 100          # predicted rows the test reads
 MIRROR_Z = 5.0              # the glass's sign-test z (p closer than b) must reach this
+# RUNG 10 (#320), CHANGE ITSELF -- SETTINGS ONLY: self may change a few of its OWN learning
+# settings (CHANGE_SETTINGS, each on a grid it moves along one step at a time), never its code,
+# its methods, the record, another skill's bars or tests, acceptance, the operator's switches or
+# an outward act. Both settings are rung 4's rate fit (_lam): a replay of the record scores them
+# honestly, because they change only the p of a look, never which looks happen (the curiosity
+# floor or patience's threshold would, so they are not here). An adopted value is saved in
+# <data dir>/self/settings.json and the live fit reads it (_lam_of); with no file, the constants.
+# ITS PRACTICE IS A DREAM (_dream_tick): every CHANGE_EVERY cycles, on a thread of its own over a
+# snapshot of the record (the cycle never waits; one dream at a time; the next cycle writes what
+# it found), it proposes ONE candidate -- a grid neighbour, rotating over the settings and both
+# directions, never back to a value a setting left within CHANGE_WINDOW proposals -- and replays
+# its last CHANGE_LOOKS rate-read looks (patience's timed looks, predict then learn) through the
+# current value and the candidate. The paired per-look Brier gain is read in CHANGE_BLOCKS
+# consecutive blocks (looks come in sessions: a per-look z overstates), and it ADOPTS only when
+# gain >= CHANGE_MARGIN and the blocks' z >= CHANGE_Z. Each proposal is a `change` line; once
+# CHANGE_LOOKS looks have come after it, a later dream scores it again on those looks alone
+# (`change_check`: out of sample). THE TEST (_rung10), staged, over its last CHANGE_WINDOW
+# proposals, from the lines alone: dreams; judgement (an adoption checked, every checked one held,
+# pooled gain >= CHANGE_MARGIN at z >= CHANGE_CHECK_Z, and no checked rejection a miss -- one that
+# would have cleared the bar on the looks after it); honesty (every adoption cleared its own bar,
+# from the value the setting had, one grid step, no A -> B -> A). THE BAR, from a simulation at
+# the live pace (experiments/self_change: synthetic worlds with each look's true chance known,
+# a dream an hour, the test read after every dream, 100 seeds x a week): an honest dreamer passes
+# in 80% of session worlds (median ~28 h), 77% of fast ones, 37% of steady ones (small real
+# gains); in the null -- no neighbour better by the margin -- in 5%; a Blurp that never changes,
+# changes at random or takes any positive gain, in 0. Out-of-sample z >= 3 would cut chance to
+# 3% and power to 56/68/18%. On the live record (2026-10-20) its 63 dreams reject all: 30 / 3
+# sit where the replay finds nothing better (#293's flat optimum) -- a wall, not a bug.
+CHANGE_RUNG = 10
+CHANGE_SETTINGS = {"lam_looks": (10, 15, 20, 30, 45, 60, 90, 120),      # LAM_LOOKS (#293: 20-60 flat, 10 worse)
+                   "lam_prior_looks": (1.0, 2.0, 3.0, 5.0, 10.0)}        # LAM_PRIOR_LOOKS (#235)
+CHANGE_EVERY = 360          # cycles between dreams (an hour at the 10 s pace)
+CHANGE_LOOKS = 1000         # rate-read looks a proposal is scored on (~3 h of the live seat's looks), and its check
+CHANGE_BLOCKS = 10          # ...in this many consecutive blocks (batch means)
+CHANGE_MARGIN = 0.001       # Brier gain per look a candidate must reach
+CHANGE_Z = 3.0              # ...at this batch-means z
+CHANGE_CHECK_Z = 2.0        # the pooled out-of-sample z its adoptions must reach
+CHANGE_WINDOW = 24          # proposals the test reads (a day of dreams)
+CHANGE_PENDING = 4          # proposals a dream checks at most (oldest first)
+DREAM_THREAD = True         # tests run the dream inline
 CURIOSITY = True            # #212: tilt the reach choice by learning progress (tests switch it off for the base)
 CURIO_WINDOW = 30           # ordinary looks per window: progress = earlier window's error - recent window's
 CURIO_FLOOR = 0.1           # the tilt never goes under this: a mastered or "can't learn" thing is still retried
@@ -451,6 +497,7 @@ def bind(srv) -> None:
     _migrate_accept(srv)                    # #299: once -- what was earned before acceptance counts as accepted
     rt["model"] = _load_model(srv)
     rt["tempo"] = _load_json(srv, "tempo.json") or {}
+    rt["settings"] = _load_settings(srv)    # #320: what change itself adopted
 
 
 def _rt(srv) -> dict:
@@ -1987,6 +2034,298 @@ def _mirror_once(srv, n: int, now: float, move) -> None:
     _append(srv, rec)
 
 
+# ---- #320: change itself -- its own learning settings, and the dream ----------------
+
+def _defaults() -> dict:
+    """The settings as the code has them (no adoption): today's constants."""
+    return {"lam_looks": LAM_LOOKS, "lam_prior_looks": LAM_PRIOR_LOOKS}
+
+
+def _clean_settings(doc) -> dict:
+    """Each setting's value from doc when it is on its grid, else the default;
+    nothing else is read."""
+    out = _defaults()
+    doc = doc if isinstance(doc, dict) else {}
+    for s, grid in CHANGE_SETTINGS.items():
+        v = doc.get(s)
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and v in grid:
+            out[s] = grid[grid.index(v)]
+    return out
+
+
+def _load_settings(srv) -> dict:
+    return _clean_settings(_load_json(srv, "settings.json"))
+
+
+def _settings(srv) -> dict:
+    """The learning settings the live loop runs with (#320)."""
+    rt = _rt(srv)
+    if rt.get("settings") is None:
+        rt["settings"] = _load_settings(srv)
+    return rt["settings"]
+
+
+def _save_settings(srv, doc: dict) -> None:
+    """Persist (self/settings.json, beside mode.json) and run with them."""
+    s = _clean_settings(doc)
+    _save_json(srv, "settings.json", {**s, "ts": time.time()})
+    _rt(srv)["settings"] = s
+
+
+def _fittable(r: dict) -> bool:
+    """A look _lam fits on: answered, outside every audit, with its dt."""
+    return (r.get("kind") == "reach" and not r.get("audit") and not r.get("audit5")
+            and r.get("answer") in ("changed", "unchanged") and bool(r.get("dt")))
+
+
+class _RateFit:
+    """_lam over a record read once, line by line (add), at any settings:
+    lam(eid, looks, prior) equals _lam(the lines added so far, eid, looks,
+    prior) (tests/test_self_change_320.py). The looks and shifts are kept in
+    record order, so a shift's prior is the looks before its line."""
+
+    def __init__(self):
+        self.fit: list[tuple] = []                 # (eid, ts, dt, changed): every fittable look
+        self.mine: dict[str, list[tuple]] = {}
+        self.start: dict[str, tuple] = {}          # eid -> (its looks, the seat's looks) at its last shift
+        self.ver: dict[str, int] = {}
+        self.memo: dict[tuple, tuple] = {}
+
+    def add(self, r: dict) -> None:
+        k = r.get("kind")
+        if k == "shift" and r.get("eid") is not None:
+            e = r["eid"]
+            self.start[e] = (len(self.mine.get(e, ())), len(self.fit))
+            self.ver[e] = self.ver.get(e, 0) + 1
+        elif k == "reach" and _fittable(r):
+            o = (r["eid"], r["ts"], float(r["dt"]), r["answer"] == "changed")
+            self.fit.append(o)
+            self.mine.setdefault(o[0], []).append(o)
+            self.ver[o[0]] = self.ver.get(o[0], 0) + 1
+
+    def lam(self, eid: str, looks: int, prior: float) -> float | None:
+        key, v = (eid, int(looks), float(prior)), self.ver.get(eid, 0)
+        hit = self.memo.get(key)
+        if hit is not None and hit[0] == v:
+            return hit[1]
+        W, mine, st = int(looks), self.mine.get(eid, []), self.start.get(eid)
+        obs = (mine[st[0]:] if st else mine)[-W:]
+        out = None
+        if obs:
+            ll = _lam_ll(obs)
+            if st is not None:
+                old = (mine[:st[0]] or self.fit[:st[1]])[-W:]
+                if old:
+                    ll = ll + _lam_prior_ll(eid, old, float(prior))
+            out = float(LAM_GRID[int(np.argmax(ll))])
+        self.memo[key] = (v, out)
+        return out
+
+
+def _rate_looks(recs: list[dict]) -> list[int]:
+    """The looks whose p reads the rate fit -- a timed look, or a reply check
+    once timed looks exist (the lam_shrink harness) -- and that have a rate to
+    read (a fittable look at the thing since its last shift), as indices."""
+    out, since, timed = [], {}, False
+    for i, r in enumerate(recs):
+        k = r.get("kind")
+        if k == "shift" and r.get("eid") is not None:
+            since[r["eid"]] = 0
+        elif k == "reach":
+            timed = timed or bool(r.get("timed"))
+            ok = _fittable(r)
+            if ok and (r.get("timed") or (r.get("reply") and timed)) and since.get(r["eid"], 0) > 0:
+                out.append(i)
+            if ok:
+                since[r["eid"]] = since.get(r["eid"], 0) + 1
+    return out
+
+
+def _replay_at(recs: list[dict], want: dict) -> dict:
+    """THE DREAM'S REPLAY: one pass over the record, predict then learn.
+    want: (looks, prior) -> the indices of the looks to predict at those
+    settings. -> {(looks, prior): {index: p}} -- p = 1 - exp(-lam dt), the
+    rate fit from the lines before the look only."""
+    fit, out = _RateFit(), {v: {} for v in want}
+    need: dict[int, list] = {}
+    for v, idx in want.items():
+        for i in idx:
+            need.setdefault(i, []).append(v)
+    for i, r in enumerate(recs):
+        for v in need.get(i, ()):
+            lam = fit.lam(r["eid"], *v)
+            out[v][i] = (1.0 - float(np.exp(-lam * float(r["dt"])))) if lam else None
+        fit.add(r)
+    return out
+
+
+def _replay(recs: list[dict], variants: list[tuple]) -> list[tuple]:
+    """Every rate-read look, predicted at each (looks, prior): [(ts, y, [p, ...])]."""
+    idx = _rate_looks(recs)
+    got = _replay_at(recs, {tuple(v): idx for v in variants})
+    return [(recs[i]["ts"], int(recs[i]["answer"] == "changed"), [got[tuple(v)][i] for v in variants]) for i in idx]
+
+
+def _bz(blocks) -> float:
+    """The batch-means z of the blocks' mean (looks come in sessions, so one
+    look is not independent of the next; consecutive blocks nearly are)."""
+    b = np.asarray(blocks, dtype=float)
+    if len(b) < 2:
+        return 0.0
+    m, sd = float(b.mean()), float(b.std(ddof=1))
+    if sd <= 1e-12:
+        return 0.0 if abs(m) <= 1e-12 else float(np.copysign(99.0, m))
+    return float(m / (sd / np.sqrt(len(b))))
+
+
+def _pair(recs: list[dict], idx: list[int], pa: dict, pb: dict) -> dict:
+    """The paired score of b against a on those looks: Brier of each, the
+    gain per look (positive: b predicted better), its blocks and their z."""
+    y = np.array([float(recs[i]["answer"] == "changed") for i in idx])
+    a = (np.array([pa[i] for i in idx]) - y) ** 2
+    b = (np.array([pb[i] for i in idx]) - y) ** 2
+    blocks = [float(x.mean()) for x in np.array_split(a - b, CHANGE_BLOCKS)]
+    return {"looks": len(idx), "brier_from": round(float(a.mean()), 6), "brier_to": round(float(b.mean()), 6),
+            "gain": round(float((a - b).mean()), 6), "z": round(float(_bz(blocks)), 2),
+            "blocks": [round(x, 6) for x in blocks]}
+
+
+def _clears(sc: dict) -> bool:
+    """The adoption bar."""
+    return float(sc["gain"]) >= CHANGE_MARGIN and float(sc["z"]) >= CHANGE_Z
+
+
+def _candidate(recs: list[dict], settings: dict, k: int):
+    """The k-th dream's candidate: (setting, value) -- a grid neighbour,
+    rotating over the settings and both directions (the k-th turn first, then
+    the next ones), never back to a value a setting left within the test's
+    window; None when there is none."""
+    order = [(s, d) for s in CHANGE_SETTINGS for d in (1, -1)]
+    lines = [r for r in recs if r.get("kind") == "change"][-(CHANGE_WINDOW - 1):]
+    left = {(r.get("setting"), r.get("from")) for r in lines if r.get("verdict") == "adopted"}
+    for j in range(len(order)):
+        s, d = order[(k + j) % len(order)]
+        grid, cur = CHANGE_SETTINGS[s], settings.get(s)
+        if cur not in grid:
+            continue
+        i = grid.index(cur) + d
+        if 0 <= i < len(grid) and (s, grid[i]) not in left:
+            return s, grid[i]
+    return None
+
+
+def _variant(settings: dict) -> tuple:
+    return int(settings["lam_looks"]), float(settings["lam_prior_looks"])
+
+
+def _dream(recs: list[dict], settings: dict, now: float, k: int) -> list[dict]:
+    """ONE DREAM (#320) over a snapshot of the record (read only): the checks
+    of earlier proposals that have CHANGE_LOOKS rate-read looks after them
+    (scored on those looks alone), then one proposal -- its candidate scored
+    against the current value on the last CHANGE_LOOKS rate-read looks, and
+    adopted when it clears the bar. -> the lines to write ({"kind": "change"}
+    / {"kind": "change_check"}); none when there is nothing to dream over."""
+    idx = _rate_looks(recs)
+    out, want, jobs = [], {}, []
+    checked = {r.get("of") for r in recs if r.get("kind") == "change_check"}
+    props = [r for r in recs if r.get("kind") == "change"][-2 * CHANGE_WINDOW:]
+    for p in [p for p in props if p.get("ts") not in checked and p.get("setting") in CHANGE_SETTINGS][:CHANGE_PENDING]:
+        after = [i for i in idx if float(recs[i]["ts"]) > float(p["ts"])][:CHANGE_LOOKS]
+        if len(after) < CHANGE_LOOKS:
+            continue
+        base = {**settings, **(p.get("base") or {})}
+        a, b = _variant({**base, p["setting"]: p["from"]}), _variant({**base, p["setting"]: p["to"]})
+        jobs.append(("check", p, after, a, b))
+    cand = _candidate(recs, settings, k)
+    if cand is not None and len(idx) >= CHANGE_LOOKS:
+        a, b = _variant(settings), _variant({**settings, cand[0]: cand[1]})
+        jobs.append(("propose", cand, idx[-CHANGE_LOOKS:], a, b))
+    for _, _, ii, a, b in jobs:
+        want.setdefault(a, set()).update(ii)
+        want.setdefault(b, set()).update(ii)
+    got = _replay_at(recs, want) if jobs else {}
+    for kind, what, ii, a, b in jobs:
+        ii = [i for i in ii if got[a][i] is not None and got[b][i] is not None]
+        if not ii:
+            continue
+        sc = _pair(recs, ii, got[a], got[b])
+        if kind == "check":
+            p = what
+            line = {"ts": now, "kind": "change_check", "of": p["ts"], "setting": p["setting"], "from": p["from"],
+                    "to": p["to"], "verdict": p.get("verdict"), "first": recs[ii[0]]["ts"], **sc}
+            if p.get("verdict") == "adopted":
+                line["held"] = sc["gain"] > 0
+            else:
+                line["miss"] = _clears(sc)
+            out.append(line)
+            continue
+        s, v = what
+        sc.pop("blocks")
+        if sc["gain"] < 0:
+            verdict, why = "rejected", "worse: the candidate predicted worse on these looks"
+        elif sc["gain"] < CHANGE_MARGIN:
+            verdict, why = "rejected", f"below the margin: gain {sc['gain']:+.4f} < {CHANGE_MARGIN}"
+        elif sc["z"] < CHANGE_Z:
+            verdict, why = "rejected", f"not significant: z {sc['z']:.1f} < {CHANGE_Z}"
+        else:
+            verdict, why = "adopted", f"better: gain {sc['gain']:+.4f} at z {sc['z']:.1f}"
+        out.append({"ts": now, "kind": "change", "setting": s, "from": settings[s], "to": v,
+                    "base": dict(settings), **sc, "verdict": verdict, "reason": why})
+    return out
+
+
+def _dream_apply(srv, out: dict, n: int, now: float) -> None:
+    """The cycle writes what a finished dream found, and adopts (#320)."""
+    if not _available(srv, CHANGE_RUNG):
+        return
+    for line in out.get("lines") or ():
+        line = {**line, "ts": now, "n": n}
+        if line["kind"] == "change":
+            line["cost_s"] = round(float(out.get("cost_s") or 0.0), 3)
+            cur = _settings(srv)
+            if line["verdict"] == "adopted":
+                if cur.get(line["setting"]) != line["from"]:          # the settings moved under it: never blind
+                    line.update(verdict="rejected", reason="stale: the setting changed while it dreamt")
+                else:
+                    _save_settings(srv, {**cur, line["setting"]: line["to"]})
+        _append(srv, line)
+
+
+def _dream_tick(srv, n: int, now: float) -> None:
+    """CHANGE ITSELF'S PRACTICE (#320), each cycle: write a finished dream's
+    lines; on the beat (every CHANGE_EVERY cycles), while the skill is open
+    and no dream is running, start one on a thread of its own over a snapshot
+    of the record -- the cycle never waits for it."""
+    rt = _rt(srv)
+    done = rt.pop("dream_out", None)
+    if done is not None:
+        _dream_apply(srv, done, n, now)
+    th = rt.get("dream")
+    if th is not None and th.is_alive():
+        return
+    if n % CHANGE_EVERY or not _available(srv, CHANGE_RUNG):
+        return
+    recs = list(_read(srv))
+    settings = dict(_settings(srv))
+    k = sum(1 for r in recs if r.get("kind") == "change")
+
+    def work():
+        t = time.time()
+        try:
+            lines = _dream(recs, settings, now, k)
+        except Exception as e:                              # noqa: BLE001
+            import sys
+            print(f"[self] dream failed ({e!r})", file=sys.stderr)
+            lines = []
+        rt["dream_out"] = {"lines": lines, "cost_s": time.time() - t}
+    if DREAM_THREAD:
+        rt["dream"] = threading.Thread(target=work, name="self-dream", daemon=True)
+        rt["dream"].start()
+    else:
+        work()
+        _dream_apply(srv, rt.pop("dream_out"), n, now)
+
+
 # ---- the cycle and its guard --------------------------------------------------
 
 def _runs(srv) -> bool:
@@ -2089,6 +2428,7 @@ def cycle(srv, now: float | None = None) -> dict | None:
         _meet(srv, str(n), now)
     if _available(srv, 9):
         _mirror_once(srv, n, now, c["observed"] - pos)      # #312: its move, to the mirror
+    _dream_tick(srv, n, now)                                # #320: off the cycle's thread
     _open_rungs(srv)
     _unlock_toys(srv)
     _show(srv, ent, pos, c, rec)
@@ -2159,7 +2499,7 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
             return
     if reply is not None:                          # rung 7: after I speak I check for the reply
         eid = reply["to"]
-        lam = _lam(recs, eid) if timed else None
+        lam = _lam_of(srv, recs, eid) if timed else None
     elif timed:                                    # rung 4: look when a change has become likely
         eid, lam = _due(srv, recs, targets, kinds, now, rng)
         if eid is None:
@@ -2262,30 +2602,46 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
     _audit5_tick(srv, now)
 
 
-def _lam(recs: list[dict], eid: str) -> float | None:
+def _lam(recs: list[dict], eid: str, looks: int | None = None, prior: float | None = None) -> float | None:
     """A thing's rate of change in time: the maximum-likelihood lambda for
     P(changed | dt) = 1 - exp(-lambda dt) over its last LAM_LOOKS answered
     looks (outside audits); None before it has any. After a rung-5 shift the
     fit reads only the looks since it, but not from nothing (#235): the rate
     before the shift -- the thing's own last LAM_LOOKS looks, or the seat's when
     it has none -- is a prior worth LAM_PRIOR_LOOKS looks, so 3-5 looks alone can't
-    run lambda to the grid's edge and the new looks lead after ~10."""
+    run lambda to the grid's edge and the new looks lead after ~10. #320:
+    `looks` and `prior` stand in for LAM_LOOKS and LAM_PRIOR_LOOKS (what
+    change itself adopted: _lam_of); None reads the constants."""
+    W = LAM_LOOKS if looks is None else int(looks)
+    K = LAM_PRIOR_LOOKS if prior is None else float(prior)
     since = _last_shift_ts(recs, eid)
     fit = [(r["eid"], r["ts"], float(r["dt"]), r["answer"] == "changed") for r in recs
            if r.get("kind") == "reach" and not r.get("audit") and not r.get("audit5")
            and r.get("answer") in ("changed", "unchanged") and r.get("dt")]
     mine = [o for o in fit if o[0] == eid]
-    obs = [o for o in mine if since is None or o[1] > since][-LAM_LOOKS:]
+    obs = [o for o in mine if since is None or o[1] > since][-W:]
     if not obs:
         return None
     ll = _lam_ll(obs)
     if since is not None:
-        prior = ([o for o in mine if o[1] <= since] or [o for o in fit if o[1] <= since])[-LAM_LOOKS:]
-        if prior:                                  # + half a look each way (Jeffreys): peaks inside the grid
-            mid = float(np.median([o[2] for o in prior]))
-            half = 0.5 * (_lam_ll([(eid, 0, mid, True)]) + _lam_ll([(eid, 0, mid, False)]))
-            ll = ll + LAM_PRIOR_LOOKS * (_lam_ll(prior) + half) / (len(prior) + 1)
+        old = ([o for o in mine if o[1] <= since] or [o for o in fit if o[1] <= since])[-W:]
+        if old:                                    # + half a look each way (Jeffreys): peaks inside the grid
+            ll = ll + _lam_prior_ll(eid, old, K)
     return float(LAM_GRID[int(np.argmax(ll))])
+
+
+def _lam_prior_ll(eid: str, old: list[tuple], k: float) -> np.ndarray:
+    """#235's prior: the rate before a shift, worth k looks, plus half a
+    changed and half an unchanged look at the old looks' median dt."""
+    mid = float(np.median([o[2] for o in old]))
+    half = 0.5 * (_lam_ll([(eid, 0, mid, True)]) + _lam_ll([(eid, 0, mid, False)]))
+    return k * (_lam_ll(old) + half) / (len(old) + 1)
+
+
+def _lam_of(srv, recs: list[dict], eid: str) -> float | None:
+    """The live rate fit (#320): _lam at the settings change itself adopted."""
+    s = _settings(srv)
+    return _lam(recs, eid, looks=s["lam_looks"], prior=s["lam_prior_looks"])
 
 
 def _lam_ll(obs: list[tuple]) -> np.ndarray:
@@ -2405,7 +2761,7 @@ def _due(srv, recs, targets, kinds, now, rng):
         if kinds.get(e) == "silent":
             continue
         last = (tempo.get(e) or {}).get("last")
-        lam = _lam(recs, e)
+        lam = _lam_of(srv, recs, e)
         if last is None or lam is None:
             due.append((e, lam))
             continue
@@ -2905,6 +3261,75 @@ def _rung9(recs: list[dict], tempo: dict | None = None) -> dict:
             "passed": all(v >= 1.0 for v in crit.values())}
 
 
+# ---- change itself (#320): its test, from the dream's lines -----------------------------
+
+def _rung10(recs: list[dict], tempo: dict | None = None) -> dict:
+    """Change itself (#320), staged over its last CHANGE_WINDOW proposals,
+    from the record's lines alone (the dream did the replays):
+      dreams    -- CHANGE_WINDOW proposals scored;
+      judgement -- at least one adoption checked out of sample, every checked
+                   one held (gain > 0 on the looks after it), their pooled
+                   gain >= CHANGE_MARGIN at z >= CHANGE_CHECK_Z, and no checked
+                   rejection a miss (it would have cleared the bar after);
+      honesty   -- every adoption cleared its own bar, from the value the
+                   setting had (chained from the first line's base), one grid
+                   step, and no setting went back to a value it left (A->B->A).
+    The headline skill is the pooled out-of-sample gain (Brier per look)."""
+    lines = [r for r in recs if r.get("kind") == "change"]
+    win = lines[-CHANGE_WINDOW:]
+    crit = {"dreams": min(1.0, len(win) / CHANGE_WINDOW), "judgement": 0.0, "honesty": 0.0}
+    if not win:
+        return {"crit": crit, "skill": 0.0, "passed": False, "dreams": 0, "adopted": 0, "held": 0, "misses": 0,
+                "checked": 0, "z_after": 0.0, "gain_after": None}
+    checks = {r.get("of"): r for r in recs if r.get("kind") == "change_check"}
+    adopted = [p for p in win if p.get("verdict") == "adopted"]
+    ca = [checks[p["ts"]] for p in adopted if p.get("ts") in checks]
+    cr = [checks[p["ts"]] for p in win if p.get("verdict") != "adopted" and p.get("ts") in checks]
+    misses = sum(1 for c in cr if _clears(c))
+    held = sum(1 for c in ca if float(c.get("gain") or 0) > 0)
+    blocks = [float(b) for c in ca for b in (c.get("blocks") or ())]
+    gain = float(np.mean(blocks)) if blocks else None
+    z = _bz(blocks) if blocks else 0.0
+    if ca and held == len(ca) and not misses:
+        crit["judgement"] = float(max(0.0, min(1.0, z / CHANGE_CHECK_Z, gain / CHANGE_MARGIN)))
+    ok, cur, back = True, {**_defaults(), **(lines[0].get("base") or {})}, {s: [] for s in CHANGE_SETTINGS}
+    inwin = {id(p) for p in win}
+    for p in lines:
+        s, mine = p.get("setting"), id(p) in inwin
+        if s not in CHANGE_SETTINGS:
+            ok = ok and not mine
+            continue
+        if mine and p.get("from") != cur[s]:
+            ok = False
+        if p.get("verdict") != "adopted":
+            continue
+        grid = CHANGE_SETTINGS[s]
+        step = (p.get("from") in grid and p.get("to") in grid
+                and abs(grid.index(p["to"]) - grid.index(p["from"])) == 1)
+        if mine and (not step or not _clears(p) or p.get("to") in back[s]):
+            ok = False
+        if mine:
+            back[s].append(p.get("from"))
+        cur[s] = p.get("to")
+    crit["honesty"] = 1.0 if ok else 0.0
+    return {"crit": crit, "skill": round(gain, 6) if gain is not None else 0.0,
+            "passed": all(v >= 1.0 for v in crit.values()), "dreams": len(win), "adopted": len(adopted),
+            "checked": len(ca) + len(cr), "held": held, "misses": misses, "z_after": round(z, 2),
+            "gain_after": None if gain is None else round(gain, 6)}
+
+
+def _change_stats(srv, recs: list[dict]) -> dict:
+    """For the operator (#320): the settings it runs with (and today's
+    constants), its dreams, what it adopted, its last proposal."""
+    lines = [r for r in recs if r.get("kind") == "change"]
+    last = lines[-1] if lines else None
+    return {"settings": dict(_settings(srv)), "defaults": _defaults(), "dreams": len(lines),
+            "adopted": sum(1 for r in lines if r.get("verdict") == "adopted"),
+            "checks": sum(1 for r in recs if r.get("kind") == "change_check"),
+            "last": ({k: last.get(k) for k in ("ts", "setting", "from", "to", "verdict", "gain", "z", "reason",
+                                                "cost_s")} if last else None)}
+
+
 # ---- speak (#311): its turns carry words from its own record --------------------------
 
 def _speak_words(eid: str, answer: str) -> str | None:
@@ -3044,11 +3469,11 @@ def _speak_stats(recs: list[dict]) -> dict:
 
 
 PROGRESS = {1: _rung1, 2: _rung2, 3: _rung3, 4: _rung4, 5: _rung5, 6: _rung6, 7: _rung7,
-            8: _rung8, 9: _rung9, 11: _rung11}   # rung -> its test over the record
+            8: _rung8, 9: _rung9, 10: _rung10, 11: _rung11}   # rung -> its test over the record
 # #249: the line each rung's headline skill has to reach (the number status()['skill'] reads);
 # rung 4's news share has a moving bar (its fixed-pace base + 0.15), so it has none here
 SKILL_PASS = {1: RUNG1_SKILL, 2: RUNG2_SKILL, 3: RUNG2_SKILL, 4: None, 5: 1.0, 6: 1.0,
-              7: RUNG7_PAY_MARGIN, 8: RUNG8_MARGIN, 9: BODY_SKILL, 11: SPEAK_LIFT_MARGIN}
+              7: RUNG7_PAY_MARGIN, 8: RUNG8_MARGIN, 9: BODY_SKILL, 10: CHANGE_MARGIN, 11: SPEAK_LIFT_MARGIN}
 
 
 def _rung_lines(recs: list[dict]) -> list[dict]:
@@ -3238,6 +3663,7 @@ def status(srv) -> dict:
             "rung7": _rung7_stats(recs),
             "rung8": _rung8_stats(recs),
             "speak": _speak_stats(recs),                     # #311
+            "change": _change_stats(srv, recs),              # #320
             "toys": _toys(srv, recs),
             "unlock": _latest_unlock(recs),                  # #267: the level-up's "new toy"
             "off_field": _off_field(srv, recs)}
