@@ -104,7 +104,7 @@ def test_the_tree_has_stable_ids_branches_and_real_edges():
     # the rung numbers the record has always used map onto the ids
     assert [SL.RUNG_ID[n] for n in range(1, 9)] == ["feel", "reach", "kinds", "patience", "shift", "meet",
                                                      "turns", "expect"]
-    assert A["expect"]["name"] == "understand an other" and A["turns"]["name"] == "take turns"
+    assert A["expect"]["name"] == "expect a reply" and A["turns"]["name"] == "time its turn"   # #300
 
 
 def test_child_ages_follow_what_each_test_measures():
@@ -146,7 +146,7 @@ def test_expect_is_earned_while_turns_stays_open():
     assert got[0]["skill"] > SL.RUNG8_MARGIN and isinstance(got[0]["ts"], float)
     st = SL.status(srv)
     assert st["level"] == 7
-    assert st["rung_name"] == "understand an other"
+    assert st["rung_name"] == "expect a reply"                     # #300
     assert st["next"] == ["turns"]
     assert [e["id"] for e in st["earned"]][-1] == "expect"
     tree = {t["id"]: t for t in SS.compute(srv)["tree"]}
@@ -235,7 +235,7 @@ def test_the_card_counts_achievements():
     srv = _seat(rungs=(1, 2, 3, 4, 5, 6), limit="all", lines=_expect_passes_turns_not())
     SL._open_rungs(srv)
     c = SS.card(srv)
-    assert c["level"] == 7 and c["rung_name"] == "understand an other" and c["next"] == ["turns"]
+    assert c["level"] == 7 and c["rung_name"] == "expect a reply" and c["next"] == ["turns"]   # #300
 
 
 # ---- 6. the toys unlock by achievement -------------------------------------------------------

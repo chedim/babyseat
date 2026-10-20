@@ -525,7 +525,7 @@ function selfView(st) {
 // about self that the record doesn't measure, and nothing here changes it
 // (the 🌱 chooser stays the only switch).
 const SELF_RUNGS = { 0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart", 4: "patience",
-  5: "notice the world changed", 6: "meet an other", 7: "take turns", 8: "understand an other",
+  5: "notice the world changed", 6: "meet an other", 7: "time its turn", 8: "expect a reply",
   9: "recognize itself", 10: "change itself", 11: "speak" };
 
 function rungName(s, n) {
@@ -820,8 +820,12 @@ function selfCardHtml(st) {
 // inventory and the relationships. Every number comes from GET
 // /membrane/self/sheet (membrane/self_sheet.py); nothing here computes a
 // claim the record doesn't hold. No chart library: inline SVG and divs.
+// #300: the attributes are traits of self as a whole, measured from its record
+// (never a skill's test score, never a gate); "Learning now" is the skills it is
+// learning (open and allowed), side by side; earned skills live in the Skill
+// tree tab (the section key stays "quest" so a remembered open/closed holds).
 const SHEET_SECTIONS = [
-  ["attributes", "Attributes"], ["quest", "Quest log"], ["achievements", "Achievements"],
+  ["attributes", "Attributes"], ["quest", "Learning now"],
   ["growth", "Growth curve"], ["time", "Where the time went"], ["inventory", "Inventory"], ["toys", "Toys"],
   ["relationships", "Relationships"]];
 const SHEET_OPEN = { attributes: true, quest: true };     // the defaults; a remembered choice wins
@@ -945,45 +949,95 @@ function sheetSection(key, title, open, body, hint) {
     '</summary><div class="secb">' + body + "</div></details>";
 }
 
+/** A trait's value as a person reads it: a share in percent, a skill signed, looks counted. */
+function traitText(a) {
+  const v = a && a.value != null && isFinite(Number(a.value)) ? Number(a.value) : null;
+  if (v == null) return "not measured yet";
+  if (a.unit === "share") return Math.round(100 * v) + "%";
+  if (a.unit === "looks") return (Number.isInteger(v) ? String(v) : v.toFixed(1)) + (v === 1 ? " look" : " looks");
+  return skillSigned(v);
+}
+
+/** The line under a trait: the numbers its value came from (its detail). */
+function traitDetail(a) {
+  const d = (a && a.detail) || {};
+  const pct = (x) => Math.round(100 * Number(x)) + "%";
+  switch (a && a.key) {
+    case "curiosity": return d.things ? d.learning + " of " + d.things + " things it looked at are still being learned" : "";
+    case "insight": return d.looks ? "over " + d.looks + " looks · change rate " + pct(d.rate) + " · calibration error " + fixed2(d.ece) : "";
+    case "adaptability": return d.shifts ? "median over its last " + d.shifts + " noticed changes" : "";
+    case "focus": return d.looks ? d.things + " of the " + d.known + " things it knows · the same thing twice in a row " + pct(d.repeat) : "";
+    case "sociability": return (d.acts ? d.pushes + " of its last " + d.acts + " acts" : "") +
+      (d.checks ? " · answered " + pct(d.replied) + " of " + d.checks + " reply checks" : "");
+    default: return "";
+  }
+}
+
+/** A trend's sparkline: the series' points (oldest left), an optional dashed line. */
+function sparkSvg(series, cls, line) {
+  const pts = (series || []).filter((p) => p && p.value != null && isFinite(Number(p.value)));
+  if (pts.length < 2) return "";
+  const W = 120, Hh = 34, vs = pts.map((p) => Number(p.value)).concat(line == null ? [] : [Number(line)]);
+  const lo = Math.min(...vs), hi = Math.max(...vs), span = hi - lo || 1;
+  const maxAgo = Math.max(...(series || []).map((p) => Number(p && p.ago_h) || 0)) || 1;
+  const X = (a) => r1(2 + (W - 4) * (1 - a / maxAgo)), Y = (y) => r1(Hh - 3 - (Hh - 6) * (y - lo) / span);
+  return '<svg class="' + cls + '" viewBox="0 0 ' + W + " " + Hh + '" width="' + W + '" height="' + Hh + '" preserveAspectRatio="none" aria-hidden="true">' +
+    (line == null ? "" : '<line x1="0" x2="' + W + '" y1="' + Y(line) + '" y2="' + Y(line) + '" class="skp" stroke-dasharray="3 3"/>') +
+    '<polyline points="' + pts.map((p) => X(Number(p.ago_h)) + "," + Y(Number(p.value))).join(" ") + '" class="skl"/></svg>';
+}
+
+const trendWord = (t) => (t == null ? "" : t > 0.005 ? "↗ rising" : t < -0.005 ? "↘ falling" : "→ flat");
+
+/** #300: the attributes -- each trait, its value, what it measures, the numbers behind it, its trend. */
 function sheetAttrs(s) {
   const at = s.attributes || [];
   if (!at.length) return '<p class="muted">nothing measured yet</p>';
-  const st = { passed: "✓ passed", current: "◀ working on it", capped: "held by the limit", locked: "locked", unbuilt: "not built" };
-  return '<div class="attrs">' + at.map((a) => {
-    const b = attrBar(a);
-    const state = a.slipping ? "⚠ slipping: rung " + a.rung + "'s test fails now" : (st[a.state] || a.state || "");
-    return '<div class="attr st-' + escAttr(a.slipping ? "slipping" : a.state) + (b.none ? " none" : "") + '">' +
-      '<div class="al"><b>' + escText(a.label) + '</b> <span class="rn">rung ' + a.rung + "</span></div>" +
-      '<div class="av' + (b.neg ? " neg" : "") + '">' + escText(b.text) + "</div>" +
-      '<div class="abar" role="meter" aria-label="' + escAttr(a.label + ": " + b.text + ", pass " + (a.better === "lower" ? "≤ " : "≥ ") + a.pass) +
-      '" aria-valuemin="' + b.lo + '" aria-valuemax="' + b.hi + '"' + (b.none ? "" : ' aria-valuenow="' + escAttr(a.value) + '"') + ">" +
-      (b.lo < 0 ? '<span class="zero" style="left:' + b.zero + '%"></span>' : "") +
-      '<span class="fill' + (b.neg ? " neg" : b.met ? " met" : "") + '" style="left:' + b.from + "%;width:" + r1(b.to - b.from) + '%"></span>' +
-      '<span class="pass" style="left:' + b.mark + '%" title="pass line ' + escAttr(String(a.pass)) + '"></span></div>' +
-      '<div class="an">' + escText(state) + " · pass " + (a.better === "lower" ? "≤ " : "≥ ") + escText(String(a.pass)) +
-      '<br><span class="what">' + escText(a.what || "") + "</span></div></div>";
-  }).join("") + "</div>";
+  return '<p class="note">traits of ' + escText(SELF_NAME) + ' as a whole, each measured from its own record; they gate nothing</p>' +
+    '<div class="attrs">' + at.map((a) => {
+      const text = traitText(a);
+      const none = text === "not measured yet";
+      const bar = a.unit === "share" || a.unit === "skill" ? attrBar({ value: a.value, kind: a.unit }) : null;
+      const t = a.trend_h == null ? null : Number(a.trend_h) * (a.better === "lower" ? -1 : 1);
+      const det = traitDetail(a);
+      return '<div class="attr trait' + (none ? " none" : "") + '" data-key="' + escAttr(a.key) + '">' +
+        '<div class="al"><b>' + escText(a.label) + "</b>" + (t != null && !none ? ' <span class="rn">' + escText(trendWord(t)) + " over the last hour</span>" : "") + "</div>" +
+        '<div class="av' + (bar && bar.neg ? " neg" : "") + '">' + escText(text) + "</div>" +
+        (bar && !none ? '<div class="abar" role="meter" aria-label="' + escAttr(a.label + ": " + text) + '" aria-valuemin="' + bar.lo +
+          '" aria-valuemax="' + bar.hi + '" aria-valuenow="' + escAttr(a.value) + '">' +
+          (bar.lo < 0 ? '<span class="zero" style="left:' + bar.zero + '%"></span>' : "") +
+          '<span class="fill' + (bar.neg ? " neg" : "") + '" style="left:' + bar.from + "%;width:" + r1(bar.to - bar.from) + '%"></span></div>' : "") +
+        '<div class="an"><span class="what">' + escText(a.what || "") + (a.better === "lower" ? " (fewer is better)" : "") + "</span>" +
+        (det ? '<br><span class="muted">' + escText(det) + "</span>" : "") + "</div>" +
+        sparkSvg(a.series, "trspark") + "</div>";
+    }).join("") + "</div>";
 }
 
+/** #300: the skills it is learning now, side by side -- each one's test staged,
+ *  its bar, what it waits on and its skill's trend -- and a line for each earned
+ *  skill whose test no longer holds. */
 function sheetQuest(s) {
   const q = s.quest || {};
-  if (q.rung == null) return '<p class="muted">no quest: ' + (s.header && s.header.mode === "off" ? escText(SELF_NAME) + " is asleep (🌱 wakes it)" : "nothing to practise") + "</p>";
-  return '<p class="qh">Rung ' + q.rung + " · " + escText(q.name || "") + (q.slipping ? ' <span class="warn">slipping</span>' : "") + "</p>" +
-    '<ul class="crit">' + (q.criteria || []).map((c) => '<li class="' + (c.met ? "met" : "open") + '"><span class="ck">' + (c.met ? "✓" : "○") + "</span> " +
-      escText(c.text) + (c.met || c.frac == null ? "" : ' <span class="muted">' + Math.round(100 * c.frac) + "%</span>") + "</li>").join("") + "</ul>" +
-    (q.waiting_on ? '<p class="muted">waiting on: ' + escText(q.waiting_on) + "</p>" : "") +
-    (q.note ? '<p class="note">' + escText(q.note) + "</p>" : "") +
+  // a sheet from before #300 has no `skills`: its quest (the one skill the exp bar read) stands in
+  const ks = Array.isArray(s.skills) ? s.skills
+    : q.rung != null ? [{ id: q.id || "", name: q.name || "", bar: q.bar, waiting_on: q.waiting_on, criteria: q.criteria || [],
+                         note: q.note, trend: (s.header || {}).skill || null }] : [];
+  const slip = (Array.isArray(s.slipping) ? s.slipping : []).map((x) => '<p class="note warn">⚠ ' + escText(x.text || x.name || "") + "</p>").join("") +
     (q.voided || []).map((v) => '<p class="note warn">' + escText(v) + "</p>").join("");
-}
-
-function sheetAchievements(s) {
-  const a = s.achievements || [];
-  if (!a.length) return '<p class="muted">no rung passed yet</p>';
-  return '<table class="tbl"><thead><tr><th>rung</th><th>passed (UTC)</th><th class="num">working h</th><th class="num">skill</th></tr></thead><tbody>' +
-    a.map((x) => "<tr><td><b>" + x.rung + "</b> " + escText(x.name) + (x.note ? '<div class="note">' + escText(x.note) +
-      (x.earned_at ? " (earned " + escText(utcShort(x.earned_at)) + " UTC)" : "") + "</div>" : "") + "</td><td class=\"dt\">" + escText(utcShort(x.at)) +
-      (x.toys && x.toys.length ? '<div class="note">' + escText(unlockText(x)) + "</div>" : "") +
-      '</td><td class="num">' + hoursText(x.working_h) + '</td><td class="num">' + fixed2(x.skill) + "</td></tr>").join("") + "</tbody></table>";
+  if (!ks.length) {
+    const why = s.header && s.header.mode === "off" ? escText(SELF_NAME) + " is asleep (🌱 wakes it)" : "nothing open to practise right now";
+    return '<p class="muted">learning nothing new: ' + why + "</p>" + slip;
+  }
+  return '<div class="learn">' + ks.map((k) => {
+    const pct = Math.round(100 * clamp01(Number(k.bar) || 0));
+    return '<div class="lskill" data-id="' + escAttr(k.id) + '"><p class="qh">' + escText(k.name || k.id || "") + ' <span class="muted">' + pct + "%</span></p>" +
+      '<div class="abar" role="meter" aria-label="' + escAttr((k.name || k.id) + ": " + pct + "% of its test") + '" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '">' +
+      '<span class="fill" style="left:0%;width:' + pct + '%"></span></div>' +
+      '<ul class="crit">' + (k.criteria || []).map((c) => '<li class="' + (c.met ? "met" : "open") + '"><span class="ck">' + (c.met ? "✓" : "○") + "</span> " +
+        escText(c.text) + (c.met || c.frac == null ? "" : ' <span class="muted">' + Math.round(100 * c.frac) + "%</span>") + "</li>").join("") + "</ul>" +
+      (k.waiting_on ? '<p class="muted">waiting on: ' + escText(k.waiting_on) + "</p>" : "") +
+      skillStatHtml(k.trend) +
+      (k.note ? '<p class="note">' + escText(k.note) + "</p>" : "") + "</div>";
+  }).join("") + "</div>" + slip;
 }
 
 /** #267: every toybox kind -- unlocked (yours, or not added), kept from
@@ -1063,32 +1117,21 @@ function sheetRelationships(s) {
   return out.join("");
 }
 
-/** THE SKILL AT A GLANCE on the sheet: the number big, the line it has to
- *  beat, its trend over the last hour, and a sparkline of the last hours. */
+/** A skill's value at a glance: the number big, the line it has to beat, its
+ *  trend over the last hour, and a sparkline of the last hours. */
 function skillStatHtml(sk) {
   if (!sk || sk.value == null) return "";
   const v = Number(sk.value), pass = sk.pass == null ? null : Number(sk.pass);
   const t = sk.trend_h == null ? null : Number(sk.trend_h);
   const arrow = t == null ? "" : t > 0.005 ? "↗" : t < -0.005 ? "↘" : "→";
-  const pts = (sk.series || []).filter((p) => p.value != null);
-  let spark = "";
-  if (pts.length >= 2) {
-    const W = 120, Hh = 34, vs = pts.map((p) => Number(p.value)).concat(pass == null ? [] : [pass]);
-    const lo = Math.min(...vs), hi = Math.max(...vs), span = hi - lo || 1;
-    const maxAgo = Math.max(...(sk.series || []).map((p) => Number(p.ago_h) || 0)) || 1;
-    const X = (a) => r1(2 + (W - 4) * (1 - a / maxAgo)), Y = (y) => r1(Hh - 3 - (Hh - 6) * (y - lo) / span);
-    spark = '<svg class="skspark" viewBox="0 0 ' + W + " " + Hh + '" width="' + W + '" height="' + Hh + '" preserveAspectRatio="none" aria-hidden="true">' +
-      (pass == null ? "" : '<line x1="0" x2="' + W + '" y1="' + Y(pass) + '" y2="' + Y(pass) + '" class="skp" stroke-dasharray="3 3"/>') +
-      '<polyline points="' + pts.map((p) => X(Number(p.ago_h)) + "," + Y(Number(p.value))).join(" ") + '" class="skl"/></svg>';
-  }
   const met = pass != null && v >= pass;
   return '<div class="skill' + (met ? " met" : v < 0 ? " neg" : "") + '" role="group" aria-label="' +
-    escAttr("rung " + sk.rung + " " + (sk.label || "skill") + " " + skillSigned(v) + (pass != null ? ", to beat " + skillSigned(pass) : "") +
+    escAttr((sk.label || "skill") + " " + skillSigned(v) + (pass != null ? ", to beat " + skillSigned(pass) : "") +
       (t != null ? ", " + (t > 0.005 ? "rising" : t < -0.005 ? "falling" : "flat") + " over the last hour" : "")) + '">' +
     '<div class="skv">' + skillSigned(v) + "</div>" +
-    '<div class="skm"><div class="skn">rung ' + sk.rung + " " + escText(sk.label || "skill") + "</div>" +
+    '<div class="skm"><div class="skn">' + escText(sk.label || "skill") + "</div>" +
     (pass != null ? '<div class="skb">to beat <b>' + skillSigned(pass) + "</b>" + (met ? " ✓" : "") + "</div>" : '<div class="skb muted">no fixed line to beat</div>') +
-    (t != null ? '<div class="skt">' + arrow + " " + skillSigned(t) + " in the last hour</div>" : "") + "</div>" + spark + "</div>";
+    (t != null ? '<div class="skt">' + arrow + " " + skillSigned(t) + " in the last hour</div>" : "") + "</div>" + sparkSvg(sk.series, "skspark", pass) + "</div>";
 }
 
 /** The whole sheet: the nameplate, then the sections as <details> (open:
@@ -1098,17 +1141,21 @@ function selfSheetHtml(s, open, nowS) {
   if (!s || typeof s !== "object" || !s.header) return '<p class="muted">the sheet is not reachable right now</p>';
   open = open || {};
   const h = s.header;
-  const out = ['<div class="hdr"><div class="nm">' + escText(h.name || SELF_NAME) + '</div><div class="lvb">Lv ' + (h.level || 0) + "</div>" +
-    '<div class="rnm">' + escText(h.rung_name || "") + (h.next != null ? ' <span class="muted">→ ' + h.next + " " + escText(h.next_name || "") + "</span>" : "") + "</div>" +
-    '<div class="xpslot"></div>' + skillStatHtml(h.skill) +
+  // #300: "Lv N · <latest earned skill>" -- skills, never rungs; then what it is learning now
+  const title = h.title || "Lv " + (h.level || 0) + (h.rung_name ? " · " + h.rung_name : "");
+  const learning = Array.isArray(h.learning) ? h.learning : [];
+  const out = ['<div class="hdr"><div class="nm">' + escText(h.name || SELF_NAME) + '</div><div class="lvb">' + escText(title) + "</div>" +
+    '<div class="rnm">' + (learning.length ? '<span class="muted">learning:</span> ' + learning.map(escText).join(", ") : "") + "</div>" +
+    '<div class="xpslot"></div>' +
     '<div class="facts"><span>age <b>' + hoursText(h.age_h) + '</b></span><span>working <b>' + hoursText(h.working_h) + "</b></span>" +
     (h.cycles ? "<span>" + h.cycles + " cycles</span><span>" + (h.looks || 0) + " looks</span><span>" + (h.lines_sent || 0) + " lines sent</span>" : "") +
     "</div></div>"];
-  if (s.empty) out.push('<p class="muted">' + escText(SELF_NAME) + ' has not been switched on yet: choose a rung in 🌱 to wake it.</p>');
-  const body = { attributes: sheetAttrs, quest: sheetQuest, achievements: sheetAchievements, growth: sheetGrowth,
+  if (s.empty) out.push('<p class="muted">' + escText(SELF_NAME) + ' has not been switched on yet: wake it in 🌱.</p>');
+  const body = { attributes: sheetAttrs, quest: sheetQuest, growth: sheetGrowth,
                  time: sheetTime, inventory: sheetInventory, toys: sheetToys, relationships: sheetRelationships };
-  const hint = { attributes: "", quest: s.quest && s.quest.rung != null ? "rung " + s.quest.rung : "",
-                 achievements: (s.achievements || []).length + " passed", time: hoursText((s.time || {}).working_h) + " working",
+  const nLearn = Array.isArray(s.skills) ? s.skills.length : 0, nSlip = Array.isArray(s.slipping) ? s.slipping.length : 0;
+  const hint = { attributes: "", quest: (nLearn ? nLearn + (nLearn === 1 ? " skill" : " skills") : "") + (nSlip ? (nLearn ? " · " : "") + nSlip + " slipping" : ""),
+                 time: hoursText((s.time || {}).working_h) + " working",
                  inventory: (s.inventory || []).length + " toys",
                  toys: (s.toys || []).filter((r) => r.state !== "locked").length + " of " + (s.toys || []).length + " unlocked", relationships: ((s.relationships || {}).others || []).length + " met" };
   for (const [key, title] of SHEET_SECTIONS) {
@@ -1131,7 +1178,7 @@ const TREE_LADDER = [            // [id, name, branch, rung, prereqs]: the ladde
   ["feel", "feel itself", "self", 1, []], ["reach", "first reach", "world", 2, []],
   ["kinds", "tell things apart", "world", 3, ["reach"]], ["patience", "patience", "world", 4, ["kinds"]],
   ["shift", "notice the world changed", "world", 5, ["reach"]], ["meet", "meet an other", "others", 6, ["kinds"]],
-  ["turns", "take turns", "others", 7, ["meet"]], ["expect", "understand an other", "others", 8, ["meet"]],
+  ["turns", "time its turn", "others", 7, ["meet"]], ["expect", "expect a reply", "others", 8, ["meet"]],
   ["mirror", "recognize itself", "later", 9, []], ["change", "change itself", "later", 10, []],
   ["speak", "speak", "later", 11, []], ["invent", "invent", "later", null, []]];
 const TREE_STATE_TEXT = { earned: "earned", open: "open: its test is running", locked: "locked: its prerequisites first",

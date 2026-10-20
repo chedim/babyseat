@@ -205,7 +205,7 @@ class TestExpBar(unittest.TestCase):
         x = self._x()
         self.assertEqual(x["state"], "growing")
         self.assertEqual(x["level"], "Lv 6 · meet an other")
-        self.assertEqual(x["goal"], "→ 7 · take turns")              # #258: the ladder flip
+        self.assertEqual(x["goal"], "→ 7 · time its turn")           # #258: the ladder flip; #300: the name
         self.assertEqual((x["pct"], x["fill"]), (64, 0.64))
         self.assertEqual(x["caption"], "waiting on: pairs")
 
