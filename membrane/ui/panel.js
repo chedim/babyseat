@@ -1479,6 +1479,21 @@ function renderSkillTree(doc, root, sheet, sel) {
 const DIE_FACES = ["⚀", "⚁", "⚂", "⚃", "⚄", "⚅"];
 const BADGE_S = 6;                                     // a change's badge shows this long
 
+/** #325: the toys the dock paints around a play button's poke -- before the
+ *  seat answers (reading null), the expected result: a rolled-back ball is on
+ *  self's side; once it answers, the seat's own reading. Other toys and the
+ *  input are untouched. */
+const POKE_GUESS = { ball: { roll: { side: "self" } } };
+function toyAfterPoke(toys, name, action, reading) {
+  return (toys || []).map((t) => {
+    if (!t || t.name !== name) return t;
+    const r = reading != null ? reading : ((POKE_GUESS[t.kind] || {})[action] || null);
+    if (r == null) return t;
+    const base = t.reading && typeof t.reading === "object" ? t.reading : {};
+    return Object.assign({}, t, { reading: Object.assign({}, base, typeof r === "object" ? r : { value: r }) });
+  });
+}
+
 function toyGlyph(t) {
   t = t || {};
   const r = t.reading || {}, v = r.value, nm = t.name || "toy", k = t.kind;
@@ -1805,7 +1820,7 @@ function offlineNotice(data, zoo) {
 
 const AiPanelLogic = { offlineNotice, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, autoSid, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
                        attrBar, hoursText, curveGeom, curveSvg, timeParts, sheetGrowth, sheetTime, selfSheetHtml, SHEET_SECTIONS, SHEET_OPEN,
-                       toyGlyph, toyBadge, toyDockItem, toyDockHtml, toyPopoverHtml, BADGE_S, skillStatHtml, skillSigned,
+                       toyGlyph, toyAfterPoke, toyBadge, toyDockItem, toyDockHtml, toyPopoverHtml, BADGE_S, skillStatHtml, skillSigned,
                        levelUpText, unlockText, sheetToys, TOY_ICONS,
                        skillTree, treeLayout, nodeCard, nodeStateText, achievementsList, ringDash, childAge, renderSkillTree, TREE_LADDER,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
@@ -3332,6 +3347,7 @@ function definePanel() {
     _skillTree(root, sheet, sel) { return renderSkillTree(document, root, sheet, sel); }   // #296: the 👶 panel's Skill tree tab
     _skillTreeSig(sheet) { return JSON.stringify(skillTree(sheet)); }
     _toyDockItem(t) { return toyDockItem(t); }
+    _toyAfterPoke(toys, name, action, reading) { return toyAfterPoke(toys, name, action, reading); }   // #325
     _toyDockHtml(toys) { return toyDockHtml(toys); }
     _toyPopoverHtml(t, res) { return toyPopoverHtml(t, res); }
     _selfName() { return selfName(); }                // #277: home.js reads the seat's name for self here

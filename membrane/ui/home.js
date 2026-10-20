@@ -1734,9 +1734,14 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const toy = btn.getAttribute("data-poke-toy"), action = btn.getAttribute("data-poke-action");
       const arg = btn.getAttribute("data-poke-arg");
       btn.disabled = true;
+      // #325: paint the expected result at once; the seat's reading replaces it, a failure puts it back
+      const before = this._dockToys, guess = typeof c._toyAfterPoke === "function" && before;
+      if (guess) this._paintDock(c._toyAfterPoke(before, toy, action, null));
       let out;
       try { out = await c._toyPoke(toy, action, arg); } catch (err) { out = { ok: false, error: String(err) }; }
       btn.disabled = false;
+      if (guess && !out.ok) this._paintDock(before);
+      else if (guess && out.reading != null && this._dockToys) this._paintDock(c._toyAfterPoke(this._dockToys, toy, action, out.reading));
       const say = out.ok
         ? "✓ " + action + " " + toy + (out.block ? " block " + out.block : "") + " → " + JSON.stringify(out.reading || {}) + " (by " + out.by + ")"
         : "✗ " + (out.error || "the poke failed");
