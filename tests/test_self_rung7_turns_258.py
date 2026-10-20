@@ -428,7 +428,7 @@ def test_the_voided_old_rung_seven_pass_stays_void_and_counts_for_neither_rung()
     done = SL._passed(SL._read(srv))
     assert 7 not in done and 8 not in done
     st = SL.status(srv)
-    assert st["rung"] == 6 and st["next"] == 7 and st["rung_name"] == "meet an other"
+    assert st["rung"] == 6 and st["next"] == ["turns", "expect"] and st["rung_name"] == "meet an other"   # #295: siblings
     assert next(r for r in st["ladder"] if r["rung"] == 7)["name"] == "take turns"
 
 
@@ -442,14 +442,15 @@ def test_a_rung_line_from_before_the_flip_does_not_count_above_six():
     assert 7 in SL._passed(SL._read(srv))
 
 
-def test_a_new_pass_is_written_with_the_ladder_version(monkeypatch):
+def test_a_new_pass_is_written_as_its_achievement(monkeypatch):
+    # #295: a pass is an `achieve` line naming the achievement (no ladder numbering to tag)
     srv = _seat()
     monkeypatch.setattr(SL, "_rung7", lambda recs, tempo=None: {"crit": {"pushes": 1.0}, "skill": 0.2,
                                                                "passed": True, "eid": RESP})
     monkeypatch.setitem(SL.PROGRESS, 7, SL._rung7)
     SL._open_rungs(srv)
-    line = [r for r in SL._read(srv) if r.get("kind") == "rung" and r.get("rung") == 7][-1]
-    assert line["ladder"] == SL.LADDER_V
+    line = [r for r in SL._read(srv) if r.get("kind") == "achieve" and r.get("rung") == 7][-1]
+    assert line["id"] == "turns"
     assert 7 in SL._passed(SL._read(srv))
 
 
@@ -469,11 +470,12 @@ def test_the_numbering():
     assert not hasattr(SL, "RUNG7_LOOKS") and not hasattr(SL, "RUNG7_MARGIN")
 
 
-def test_rung_eight_needs_rung_seven():
+def test_rung_eight_needs_meet_not_rung_seven():
+    # #295, the skill tree: understand an other (8) and take turns (7) are siblings under meet (6)
     srv = _seat(limit=8)
-    assert SL._available(srv, 7) and not SL._available(srv, 8)
-    srv = _seat(passed=(1, 2, 3, 4, 5, 6, 7), limit=8)
-    assert SL._available(srv, 8)
+    assert SL._available(srv, 7) and SL._available(srv, 8)
+    srv = _seat(passed=(1, 2, 3, 4, 5), limit=8)
+    assert not SL._available(srv, 7) and not SL._available(srv, 8)
 
 
 # ---- 6. status and the sheet ---------------------------------------------------------

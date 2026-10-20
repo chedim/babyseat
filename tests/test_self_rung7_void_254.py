@@ -58,7 +58,7 @@ def test_the_old_scorers_pass_is_voided_not_deleted():
     assert [r["ts"] for r in _lines(srv, "rung") if r["rung"] == 7] == [OLD7]   # the line stays
     assert 7 not in SL._passed(SL._read(srv)) and 8 not in SL._passed(SL._read(srv))
     st = SL.status(srv)
-    assert st["rung"] == 6 and st["next"] == 7                 # working on rung 7 (take turns, #258)
+    assert st["rung"] == 6 and st["next"] == ["turns", "expect"]   # #295: take turns and understand an other, siblings
 
 
 def test_earlier_rungs_are_unaffected():
@@ -86,8 +86,8 @@ def test_the_new_scorer_can_pass_later():
     for r in P._recs(P._sessions(3)):                          # an other self can learn, after the fix
         SL._append(srv, {**r, "ts": r["ts"] + FIX})
     SL._open_rungs(srv)
-    new8 = [r for r in _lines(srv, "rung") if r["rung"] == 8 and r["ts"] > FIX]
-    assert len(new8) == 1 and new8[0]["ladder"] == SL.LADDER_V
+    new8 = [r for r in _lines(srv, "achieve") if r["rung"] == 8 and r["ts"] > FIX]   # #295: an achieve line
+    assert len(new8) == 1 and new8[0]["id"] == "expect"
     assert {7, 8} <= SL._passed(SL._read(srv))
     assert SL.status(srv)["rung"] == 8
 

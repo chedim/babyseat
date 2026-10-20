@@ -104,6 +104,11 @@ function brainLabel(eid, me) {
 const BRAIN_RUNGS = { 0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart", 4: "patience",
   5: "notice the world changed", 6: "meet an other", 7: "take turns", 8: "understand an other",
   9: "recognize itself", 10: "change itself", 11: "speak" };   // #258: the ladder flip
+// #295, THE SKILL TREE: each achievement's id and the rung number its test kept on the
+// record (membrane/self_loop.py ACHIEVEMENTS) -- names for its lines, and the old per-rung
+// celebration memory read as ids
+const ACH_RUNG = { feel: 1, reach: 2, kinds: 3, patience: 4, shift: 5, meet: 6, turns: 7, expect: 8,
+  mirror: 9, change: 10, speak: 11 };
 const bnum = (x) => String(Math.round(Number(x) * 100) / 100);
 // #267: toys unlock as self grows (membrane/toy_unlocks.py ICONS)
 const UNLOCK_ICONS = { body: "🫧", fast: "⚡", slow: "🐢", tower: "🗼", burst: "✦", die: "🎲", drift: "〰️",
@@ -138,6 +143,7 @@ function brainCaption(r, me) {
     + (r.was != null && r.now != null ? " (it changed " + bnum(r.was) + " of the time, now " + bnum(r.now) + ")" : "");
   if (k === "wait") return SELF_NAME + " waited — nothing was due";
   if (k === "rung") return "level up: rung " + r.rung + (BRAIN_RUNGS[r.rung] ? " · " + BRAIN_RUNGS[r.rung] : "");
+  if (k === "achieve") return "level up: " + SELF_NAME + " earned " + (BRAIN_RUNGS[ACH_RUNG[r.id]] || r.id || "?");
   if (k === "cycle") return SELF_NAME + " " + (r.act === "move" || !r.act ? "moved" : r.act)
     + (r.still ? " — the world was still" : r.gap != null ? " — it landed " + Number(r.gap).toFixed(3) + " from where it expected" : "");
   if (k === "error") return SELF_NAME + " hit an error" + (r.act ? " in " + r.act : "") + (r.why ? ": " + r.why : "");
@@ -756,6 +762,38 @@ function rungToCelebrate(level, last, lines) {
   return { rung: n, last: n };
 }
 
+/** Where this viewer remembers the achievements it has celebrated (#295): per seat, per self. */
+function achieveKey(seat, self) { return "membrane.home.achieve." + String(seat || "") + "." + String(self || ""); }
+
+/** THE ONCE-PER-ACHIEVEMENT RULE (#295): `earned` is the seat's earned list
+ *  (status().earned, void-aware; ids or {id}), `last` what this viewer
+ *  remembers (a JSON list of ids; null: never here), `oldLevel` the old
+ *  per-rung memory (rungToCelebrate's, under rungKey) for a viewer from
+ *  before the tree. Each id earned and not remembered celebrates once; a
+ *  first visit remembers the backlog and celebrates none -- and a viewer that
+ *  celebrated up to rung N before the switch remembers rungs 1..N as seen, so
+ *  the rungs it already celebrated never re-fire. An id that leaves the list
+ *  (a void) is dropped quietly, so earning it again is news. */
+function achievementsToCelebrate(earned, last, oldLevel) {
+  let prev = null;
+  if (Array.isArray(last)) prev = last.map(String);
+  else if (typeof last === "string" && last) {
+    try { const v = JSON.parse(last); if (Array.isArray(v)) prev = v.map(String); } catch (e) { prev = null; }
+  }
+  if (!Array.isArray(earned)) return { ids: [], last: prev };
+  const now = earned.filter((e) => e != null).map((e) => String(typeof e === "object" ? e.id : e));
+  if (prev == null) {
+    const n = oldLevel == null || oldLevel === "" ? NaN : Number(oldLevel);
+    if (!isFinite(n)) return { ids: [], last: now };
+    prev = Object.keys(ACH_RUNG).filter((k) => ACH_RUNG[k] <= n);
+  }
+  const seen = new Set(prev);
+  return { ids: now.filter((i) => !seen.has(i)), last: now };
+}
+
+/** An achievement's words: the notification's; the caption adds "!". */
+function achieveText(name, achName) { return (name || SELF_NAME) + " earned " + (achName || ""); }
+
 /** The celebration's caption. */
 function celebrateText(name, n, rungName) {
   return rungNotifyText(name, n, rungName) + "!";
@@ -800,7 +838,8 @@ const HomeLogic = { cubePoints, catchUp, personSlug, menuEntries, hotword, pickV
   brainLabel, brainCaption, unlockText, setSelfName, brainKey, brainFresh, actableLine, ACT_FRESH_S, brainTrail, trailAlpha, frameRadius, selfFrame, frameDistance, dampTo,
   freshLook, followsNow, followRates, SELF_HOLD_MS, lookAngles, selfCamAngles,
   followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit, zooAgo, zooCard, zooCards,
-  rungKey, rungVoided, rungToCelebrate, celebrateText, rungNotifyText, chimeOk, chimeNotes, notifyReady, bellView };
+  rungKey, rungVoided, rungToCelebrate, celebrateText, rungNotifyText, chimeOk, chimeNotes, notifyReady, bellView,
+  achieveKey, achievementsToCelebrate, achieveText };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
 const HSTYLE = `
@@ -1629,18 +1668,35 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     // keeps the overlay for when it is looked at again.
     _rungTick() {
       const c = this._chat, st = c && c._seat, s = st && st.self;
-      if (!s || typeof s.rung !== "number") return;
-      const key = rungKey(SEAT, st.self_name || "Blurp");
-      const out = rungToCelebrate(s.rung, lsGet(key, null), this._brainLines || []);
-      if (out.last != null) lsSet(key, String(out.last));
-      if (out.rung != null) {
-        const name = st.self_name || SELF_NAME, rn = s.rung === out.rung && s.rung_name ? s.rung_name : BRAIN_RUNGS[out.rung];
-        this._notifyRung(name, out.rung, rn, key);
-        this._cbPending = { name, rung: out.rung, rungName: rn };
+      if (!s) return;
+      const self = st.self_name || "Blurp", name = st.self_name || SELF_NAME;
+      if (Array.isArray(s.earned)) {
+        // #295: once per newly earned achievement (the seat's earned list,
+        // void-aware), remembered per seat and self; the old per-rung memory
+        // marks the rungs this viewer already celebrated as seen
+        const key = achieveKey(SEAT, self);
+        const out = achievementsToCelebrate(s.earned, lsGet(key, null), lsGet(rungKey(SEAT, self), null));
+        if (out.last != null) lsSet(key, JSON.stringify(out.last));
+        if (out.ids.length) {
+          const names = out.ids.map((i) => { const e = s.earned.find((x) => x && x.id === i); return (e && e.name) || i; });
+          out.ids.forEach((i, k) => this._notify(achieveText(name, names[k]), key + "." + i,
+            "a new achievement -- open membrane home to see it"));
+          this._cbPending = { text: achieveText(name, names.join(" and ")) + "!" };
+        }
+      } else if (typeof s.rung === "number") {             // a seat from before the tree
+        const key = rungKey(SEAT, self);
+        const out = rungToCelebrate(s.rung, lsGet(key, null), this._brainLines || []);
+        if (out.last != null) lsSet(key, String(out.last));
+        if (out.rung != null) {
+          const rn = s.rung === out.rung && s.rung_name ? s.rung_name : BRAIN_RUNGS[out.rung];
+          this._notify(rungNotifyText(name, out.rung, rn), key + "." + out.rung,
+            "a new rung on the ladder -- open membrane home to see it");
+          this._cbPending = { text: celebrateText(name, out.rung, rn) };
+        }
       }
       if (this._cbPending && !document.hidden) {
         const p = this._cbPending; this._cbPending = null;
-        this._celebrate(p.name, p.rung, p.rungName);
+        this._celebrate(p.text);
       }
     }
 
@@ -1701,22 +1757,21 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       }
     }
 
-    _notifyRung(name, n, rungName, key) {
+    _notify(text, tag, body) {
       if (!notifyReady(this._notifyState())) return;
       try {
-        // a tag per seat and rung: the browser shows one, however many tabs see it
-        new Notification(rungNotifyText(name, n, rungName), { tag: key + "." + n, icon: SEAT_LOGO,
-          body: "a new rung on the ladder -- open membrane home to see it" });
+        // a tag per seat and achievement: the browser shows one, however many tabs see it
+        new Notification(text, { tag: tag, icon: SEAT_LOGO, body: body });
       } catch (e) { /* a browser that only notifies from a service worker */ }
     }
 
     /** ~3 s over the field: the caption, a burst in the amoeba's colours, the
      *  amoeba bouncing and glowing; a still banner under reduced motion. Never
      *  in the way (pointer-events none); any click ends it. */
-    _celebrate(name, n, rungName) {
+    _celebrate(text) {
       const el = this._cb; if (!el) return;
       const still = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
-      this._cbText.textContent = celebrateText(name, n, rungName);
+      this._cbText.textContent = text;
       el.classList.toggle("still", still);
       el.hidden = false;
       const t = this._cbText; t.style.animation = "none"; void t.offsetWidth; t.style.animation = "";   // restart the pop

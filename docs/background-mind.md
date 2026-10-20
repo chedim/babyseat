@@ -162,19 +162,31 @@ re-embedding. The night reads statistics, not the raw field.
 ## The self loop (#161)
 
 `membrane::self` is a looped cliffhanger object the operator named Blurp (#277; per seat since #283, Blurp the default;
-its ids stay `self`), the seed of the evolving self in #161. It grows up a **skill ladder**: one rung per PR, each
-with a measured pass test; a rung opens by itself when its test passes. This
+its ids stay `self`), the seed of the evolving self in #161. It grows a **skill tree** (#295; a strict ladder of
+rungs until then): each skill is an achievement with a measured pass test, a stable id, a branch and real
+prerequisites -- an edge only where a test reads data or machinery another pass switches on
+(`ACHIEVEMENTS` in `self_loop.py`, each edge with its reason). An achievement is earned by itself, as an
+`achieve` line on the record, when its test passes and its prerequisites are earned -- siblings in any
+order (`turns` and `expect` both hang under `meet`; `shift` and `meet` under `reach`; `feel` and `reach` are
+roots). The old `rung` lines count as their achievements (voids and the #258 filter kept); the level is the
+number earned. The rungs below are the tests, by their numbers; "rung N passed" reads "its achievement
+earned", and "once rung N-1 has passed" reads "once its prerequisites are earned" (the tree in
+[selfgrowth.md](selfgrowth.md#the-skill-tree-295)). This
 section covers what is built (`membrane/self_loop.py`); the operator's guide
 to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
 
 - **Rung 0, sleep and wake, and the growth limit.** A per-seat chooser, **off
   by default**, set only by the operator: the 🌱 chooser (the home top bar,
-  and the chat's side menu) → `POST /membrane/seat/control {"self_limit": n}`
-  (`seat_panel.control`). The chooser picks **the top rung self may reach**:
-  - below the limit, self still earns each rung by its test, in order;
-  - above it, nothing opens however well it does: the chooser marks such a
-    rung "ready, held by the limit", and the bar says it waits on "the limit";
-  - `0` is off, and raising the limit never grants a rung.
+  and the chat's side menu) → `POST /membrane/seat/control {"self_limit": v}`
+  (`seat_panel.control`). The chooser picks **the achievement self may grow
+  up to** (#295: it and its prerequisite closure), or `"all"`, or `"off"`; a
+  number is the old ladder's rungs 1..N (8 is all), and a saved number
+  migrates that way:
+  - inside the limit, self still earns each achievement by its test,
+    whenever its prerequisites are earned;
+  - outside it, nothing is earned however well it does: the tree says it
+    waits on "the limit";
+  - off is off, and raising the limit never grants an achievement.
 
   `{"self": "on" | "off" | "watch"}` still works. A seat switched on before
   the limit existed gets limit 1. Off runs
@@ -210,8 +222,8 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   the aim as a white ring ("wants") with a faint line to it, and the other
   markers as round, labelled dots: "pushes to", "expects", and "pull" (hidden
   until self has a model of the current).
-- **Rung 2, first reach (the world's tempo).** Open once rung 1 has passed and
-  the limit is at least 2. Each cycle, self also reaches for one thing that
+- **Rung 2, first reach (the world's tempo).** A root of the tree (#295): open
+  from birth once the limit allows it -- it reads nothing of rung 1. Each cycle, self also reaches for one thing that
   has a getter: reading it fires the getter (`watch_agents.entity_read_back`,
   `by="self"`).
   - **Before reaching**, self predicts whether the reading will have changed
@@ -458,14 +470,15 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
 
   The seat places the points into the open projection (`fieldpulse`'s
   `self.cycle` frame: cube coordinates and numbers, never vectors or text).
-- **The exp bar.** The panel shows the rung and a bar toward the next one.
-  - The next rung's criteria are **stages, in order** (rung 1: pushes, then
+- **The exp bar.** The panel shows the level (achievements earned) and a bar
+  toward the open achievement closest to passing (#295).
+  - An achievement's criteria are **stages, in order** (rung 1: pushes, then
     skill; rung 2: reaches, skill, the audit). The bar fills through them,
     each stage an equal share, and names the first one not yet met ("waiting
     on: reaches"). A plain weakest-criterion bar sat at 0% on the live seat
     while reaches piled up.
-  - It can go down: a passed rung stays on the record, and the bar shows it
-    slipping while its test fails.
+  - It can go down: an earned achievement stays on the record, and the bar
+    shows the latest one slipping while its test fails.
   - Only the recorded cycles, reaches and audits feed it.
   - It moves with each cycle: every cycle's `self.cycle` frame carries the
     numbers, viewer open or not.

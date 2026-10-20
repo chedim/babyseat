@@ -1,4 +1,4 @@
-# Growing self — the operator's guide to the 0.7 ladder
+# Growing self — the operator's guide to the 0.7 skill tree
 
 `self` is the seed of the evolving self in
 [#161](https://github.com/chedim/membrane/issues/161): a small loop that learns
@@ -19,6 +19,54 @@ the code is `membrane/self_loop.py`.
 One rule runs through all of it: **every rung is measured, never claimed.** A
 rung opens when its test passes on self's own record, and nothing anyone *says*
 about self (you, the seat's LLM, self's own lines) moves the bar.
+
+## The skill tree (#295)
+
+The rungs used to be a strict ladder: rung N's test ran only after rung N-1
+passed. Since #295 they are **achievements** in a skill tree: each has a
+stable id, a branch and **real prerequisites** -- an edge only where its test
+reads data or machinery that another achievement's pass switches on. A test
+runs whenever its prerequisites are earned, so siblings unlock **in any
+order** (the live seat could earn *understand an other* before *take turns*).
+Each test keeps its own bar, exactly as measured before; there is no new hold
+rule.
+
+| id | achievement (its test's rung) | branch | prerequisites | why that edge | a child, by what the test measures |
+|---|---|---|---|---|---|
+| `feel` | feel itself (1) | self | — | a root: it reads only its own moves and the current's push | newborn: tells its own touch from another's (Rochat & Hespos) |
+| `reach` | first reach (2) | world | — | a root: its looks predict a thing from the thing's own tempo; nothing of feel (the current, the steering) is read | ~2-3 mo: its kicks move a mobile (Rovee-Collier) |
+| `kinds` | tell things apart (3) | world | reach | its looks are reach's looks, and one stage is reach's skill still holding on a moving thing | ~3-4 mo: perceptual categories (Quinn & Eimas) |
+| `patience` | patience (4) | world | kinds | its timed looks skip the things sorted silent; the sort is switched on by that pass | ~3.5 mo: anticipatory looking (Haith) |
+| `shift` | notice the world changed (5) | world | reach | its noticing reads the looks and each thing's long memory (the tempo); its audit pauses a moving thing self has looked at. It does not read patience's rates (patience reads its shifts) | ~3.5-5 mo: violation of expectation (Baillargeon) |
+| `meet` | meet an other (6) | others | reach | its answered looks at the other are reach's looks, and the self/other split is reach's own prediction skill | ~3-5 mo: self- vs social contingency (Bahrick & Watson) |
+| `turns` | take turns (7) | others | meet | it times its pushes to the other meet found, through meet's channel, scored by the reply check | ~3-5 mo: proto-conversation timing |
+| `expect` | understand an other (8) | others | meet | it predicts whether meet's other replies to a push, at the reply check; it does not need take turns' learned timing (a push by the timer is checked and predicted the same) | ~2-3 mo: expects a response (the still-face, Tronick 1978) |
+| `mirror` | recognize itself | later, not built | feel, meet | planned: its own trace beside another's | ~18 mo: the mirror test (Amsterdam 1972) |
+| `change` | change itself | later, not built | mirror | planned | ~4 y: metacognition |
+| `speak` | speak | later, not built | turns, expect | planned | ~4 y: autobiographical narrative |
+| `invent` | invent | later, not built | change, speak | planned | ~5 y: games with its own rules |
+
+- **Earning** appends `{"kind": "achieve", "id": "expect", "rung": 8, "ts": ...,
+  "skill": ...}` to the record. The record stays append-only: the old `rung`
+  lines count as their achievements (rung 1 = `feel` ... rung 8 = `expect`),
+  a `rung_void` still voids, and a pass above rung 6 from before the ladder
+  flip still counts for neither (#258) -- the voided old rung 7 stays void.
+- **The level** is the number of achievements earned (sleep and wake is not
+  one). `rung_name` is the latest earned achievement's name; `next` lists the
+  open ones (built, unearned, every prerequisite earned).
+- **Practice follows the tree too.** Each achievement's machinery runs while
+  its prerequisites are earned and the limit allows it: reaching from birth
+  (when allowed), the sort after first reach, noticing after first reach, the
+  pushes to the other after first reach, and the reply checks after each push
+  while either *take turns* or *understand an other* may be practised. The
+  ball's turns are take turns' practice. Acts with outside effects (the pushes,
+  the ball, the toy unlocks) stay behind their achievement's prerequisites and
+  the growth limit.
+- **The data** for the 👶 panel's tree is `tree` (and `level`) in
+  `GET /membrane/self/sheet` and in the dock (`GET /membrane/toybox/state`):
+  one row per achievement, `{id, name, branch, prereqs, built, state
+  (locked / open / earned / unbuilt), earned_at, skill, bar, waiting_on,
+  child_age, child_ability, why_prereqs}`.
 
 ## What self is, and what it is not
 
@@ -49,7 +97,12 @@ about self (you, the seat's LLM, self's own lines) moves the bar.
 ### The 🌱 chooser
 
 The 🌱 chooser sits in the home top bar (and in the chat's side menu). It picks
-the **growth limit**: the highest rung self may reach.
+the **growth limit**: since #295, an achievement self may grow up to -- it and
+every prerequisite under it -- or **all** (every built achievement), or off.
+A number still works and means the old ladder's rungs 1..N with their
+prerequisites (8, the top built rung, is all); a seat saved with a number
+migrates that way (`mode.json` keeps the number for an older reader and adds
+`allow`).
 
 | choice | what happens |
 |---|---|
@@ -61,10 +114,11 @@ The ladder flipped in #258: rung 7 is **take turns** (serve and return) and
 **understand an other** moved up to rung 8, unchanged. A seat at rung 6
 reads rung 6 after the update and works on the new rung 7.
 
-- **Below the limit** self still earns each rung by its test, in order.
-- **Above the limit** nothing opens, however well it does. The chooser marks
-  such a rung "(ready, held by the limit)" and the status says it waits on
-  "the limit".
+- **Inside the limit** self still earns each achievement by its test,
+  whenever its prerequisites are earned.
+- **Outside the limit** nothing is earned, however well it does. The tree
+  marks such an open achievement as waiting on "the limit" (the old ladder
+  view says "capped").
 - **Raising the limit grants nothing.** It only lets self try.
 - The chooser is the operator's alone (`POST /membrane/seat/control`, an HA
   admin through the relay). The seat's LLM can read self's state; it can't
@@ -74,13 +128,15 @@ The same switch over HTTP:
 
 ```bash
 curl -s -X POST http://127.0.0.1:4096/membrane/seat/control \
-  -H 'content-type: application/json' -d '{"self_limit": 3}'   # may grow to rung 3
+  -H 'content-type: application/json' -d '{"self_limit": "expect"}'   # up to understand an other (+ reach, meet)
+curl -s -X POST http://127.0.0.1:4096/membrane/seat/control \
+  -H 'content-type: application/json' -d '{"self_limit": "all"}'      # every built achievement
 curl -s -X POST http://127.0.0.1:4096/membrane/seat/control \
   -H 'content-type: application/json' -d '{"self_limit": 0}'   # asleep
 ```
 
 (In [JWT mode](auth.md) add your token.) The older `{"self": "on" | "off" | "watch"}`
-still works: `on` with no limit set means limit 1. **`watch` currently runs
+still works: `on` with no limit set means feel itself only (limit 1). **`watch` currently runs
 exactly like `on`**; it exists for the babysitter the design calls for, which
 is not built yet, and the viewer only tags the amoeba "watched".
 
@@ -139,7 +195,7 @@ Lv 6 · meet an other  [██████░░░░] 64%
 → 7 · take turns · waiting on: pushes
 ```
 
-- **the level** is the highest rung passed, with its name;
+- **the level** is the number of achievements earned (#295), with the latest one's name;
 - **the bar** fills toward the next rung from `bar` (the staged test, below),
   with its percent; the caption under it names the next rung and what the bar
   is `waiting on`;
@@ -152,11 +208,12 @@ Lv 6 · meet an other  [██████░░░░] 64%
   glows once, and the caption reads `⬆ level up` for a few seconds. With
   *reduce motion* on, the gold and the caption stay and nothing pulses.
 
-**A rung celebrated** (#289): on membrane home a pass is unmissable -- about
-3 s over the field (the amoeba glows and hops, a burst of particles in its
-mint and gold, the caption "Blurp reached rung 7: take turns!"), a short
-synthesized chime (WebAudio, no asset files) and a browser notification
-("Blurp reached rung 7: take turns", one per rung: tagged). With *reduce
+**An achievement celebrated** (#289; per achievement since #295): on membrane
+home each earned achievement is unmissable -- about 3 s over the field (the
+amoeba glows and hops, a burst of particles in its mint and gold, the caption
+"Blurp earned understand an other!"), a short synthesized chime (WebAudio, no
+asset files) and a browser notification ("Blurp earned understand an other",
+one per seat and achievement: tagged). With *reduce
 motion* on it is a still banner. It never blocks the page (a click anywhere
 ends it). The **🔔 / 🔕** in the top bar mutes the chime and the notifications,
 remembered per viewer; its first tap asks for notification permission (the
@@ -165,13 +222,17 @@ page's first click or key (autoplay rules). Notifications need a secure
 context -- https, or localhost: a laptop on `http://<lan-ip>:4096` gets the
 celebration and the chime but no notifications, and the 🔔's tooltip says so.
 
-**Once per rung per viewer**: the page compares the seat's passed rung
-(status's `rung`, which a voided pass never raises) with the last one this
-browser celebrated (localStorage, per seat and per self's name). A pass while
-the page is open celebrates; one reached while away celebrates once on the
-next visit (the highest, once); a reload never re-fires; a voided pass never
-celebrates; and a browser's first visit to a seat already past rungs 1-6
-only remembers where it is. A hidden tab notifies at once and saves the
+**Once per achievement per viewer**: the page compares the seat's earned
+list (status's `earned`, which a voided pass never enters) with the ids this
+browser has celebrated (localStorage `membrane.home.achieve.<seat>.<name>`).
+Each id earned while the page is open celebrates; those earned while away
+celebrate once on the next visit (one overlay naming them, a notification
+each); a reload never re-fires; a voided pass never celebrates (and leaves
+the memory quietly, so earning it again is news); a browser's first visit
+only remembers what is already earned. A browser that celebrated rungs under
+the old per-rung rule reads that memory once: rungs 1..N it celebrated count
+as seen, so the first visit after the upgrade never re-celebrates them (a
+seat without `earned` still gets the per-rung rule). A hidden tab notifies at once and saves the
 overlay for when it is looked at.
 
 **The skill at a glance** (#249): under the bar, the number the bar's test
@@ -293,11 +354,12 @@ route; the HA relay forwards it on GET only):
 
 ```bash
 curl -s http://127.0.0.1:4096/membrane/self/sheet | python3 -m json.tool | head -40
-# {"header": {...}, "attributes": [...], "quest": {...}, "achievements": [...],
+# {"level": 6, "tree": [{"id": "expect", "state": "open", ...}, ...],   # #295
+#  "header": {...}, "attributes": [...], "quest": {...}, "achievements": [...],
 #  "growth": {...}, "time": {...}, "inventory": [...], "relationships": {...}, "toys": [...]}
 curl -s 'http://127.0.0.1:4096/membrane/self/recent?n=30'   # the activity: {"lines": [...]}, newest first, at most 100
 curl -s http://127.0.0.1:4096/membrane/self/card   # #283, the zoo's card per seat:
-# {"name": "Blurp", "level": 6, "rung_name": "...", "next": 7, "mode": "on", "awake": true,
+# {"name": "Blurp", "level": 6, "rung_name": "...", "next": ["turns", "expect"], "mode": "on", "awake": true,
 #  "last_activity": "2026-10-19T12:00:00+00:00", "generated": 1792...}
 ```
 
@@ -372,18 +434,20 @@ curl -s http://127.0.0.1:4096/membrane/seat \
 
 | field | meaning |
 |---|---|
-| `mode`, `limit` | the switch and the growth limit |
+| `mode`, `limit` | the switch and the growth limit (`limit`: the old ladder's number, the top rung allowed) |
+| `allow`, `allowed` | #295: the growth limit as set (`"all"`, an achievement id, or a migrated list of ids; 0 off) and the achievement ids it allows |
+| `level`, `earned` | #295: how many achievements are earned, and each one `{id, name, ts}` in the order earned (the celebration reads it) |
 | `born` | it has been switched on at least once (the record has a birth) |
 | `held` | three failed cycles in a row; re-choose to clear |
 | `cycles` | move cycles on the record |
-| `rung`, `rung_name` | the highest rung passed |
-| `next` | the next built rung, or `null` when none is built |
-| `bar` | progress toward the next rung, 0..1 (see below) |
+| `rung`, `rung_name` | `rung` = the level (kept for older readers); the latest earned achievement's name |
+| `next` | #295: the open achievements' ids (built, unearned, prerequisites earned) |
+| `aim`, `bar` | the open achievement the bar reads (the allowed one closest to passing; with none, the latest earned one's own test) and its progress, 0..1 (see below) |
 | `waiting_on` | the first criterion not yet met, or `the limit`, or `the world` (no current) |
 | `skill` | the headline number of the test the bar reads |
 | `skill_rung`, `skill_pass`, `skill_measured` | #249: the rung that test belongs to, the line its skill has to reach (`null` for rung 4, whose bar moves), and whether anything feeds the test yet (before that, `skill` is a placeholder 0) |
-| `slipping` | the top passed rung's test fails *now* (it stays passed on the record) |
-| `ladder` | every rung: `passed`, `current`, `capped` (ready, held by the limit), `locked`, `unbuilt` |
+| `slipping` | the latest earned achievement's test fails *now* (it stays earned on the record) |
+| `ladder` | the tree by rung number, for older readers: `passed`, `current` (open), `capped` (open, held by the limit), `locked` (a prerequisite missing), `unbuilt`; each with its `id` |
 | `world` | rung 3's sort of the things it reads: `silent` / `moving` / `still` / `intermittent` |
 | `split` | rung 6's split: `body` (it predicts it near-perfectly) or `other` (it can't) |
 | `meets` | rung 6's exchange: `pushes`, `other` (who it meets), `push_age`, `heard_age` (seconds since the other last answered), `medium` (#264: `toy` once the turns are with the ball: `other` is then the ball, `heard_age` the other's last poke on any toy) |
@@ -549,8 +613,9 @@ movement.
 
 ## The ladder
 
-Rung 0 is passed by being born. Every other rung opens only when the rung below
-has passed, it is under the limit, and its test passes on the record.
+Rung 0 is passed by being born. Every other rung is an achievement (#295,
+[the skill tree](#the-skill-tree-295)): it is earned when its prerequisites
+are earned, the limit allows it, and its test passes on the record.
 
 | rung | what self does there | what it needs from its world | passes when (the stages, in order) | how you help |
 |---|---|---|---|---|
@@ -728,20 +793,22 @@ says `by: self`, so it is a known test case, not a fake mark.
 ### Toys unlock as self grows
 
 Toys are the operator's reward for growing self, and each unlock is also the
-next lesson (#267, `membrane/toy_unlocks.py`). Every kind has an unlock rung:
+next lesson (#267, `membrane/toy_unlocks.py`). Every kind has an unlock
+achievement (#295: by the rung number of its test; the record's unlock line
+carries its `id` too):
 
 | unlocks | kinds | what they teach |
 |---|---|---|
 | birth | 🫧 `body`, ⚡ `fast`, 🐢 `slow` | its own body; a world it doesn't cause; long runs of the same answer |
-| rung 3 | 🗼 `tower` | self's first act on the world |
-| rung 4 | ✦ `burst` | when to look |
-| rung 5 | 🎲 `die`, 〰️ `drift` | noticing the world changed |
-| rung 6 | ⚽ `ball` (#264) | taking turns |
-| rung 8 | 🪞 `mirror` | recognizing itself (rung 9) |
-| rung 9 | 🧱 `blocks` | changing itself (rung 10) |
-| rung 10 | 🔊 `rattle` | its first voice (rung 11, speak) |
+| tell things apart (3) | 🗼 `tower` | self's first act on the world |
+| patience (4) | ✦ `burst` | when to look |
+| notice the world changed (5) | 🎲 `die`, 〰️ `drift` | noticing the world changed |
+| meet an other (6) | ⚽ `ball` (#264) | taking turns |
+| understand an other (8) | 🪞 `mirror` | recognizing itself (rung 9) |
+| recognize itself (9) | 🧱 `blocks` | changing itself (rung 10) |
+| change itself (10) | 🔊 `rattle` | its first voice (rung 11, speak) |
 
-- **Passing a rung is the ladder's own rule** (`self_loop._passed`): a voided
+- **Earning it is the tree's own rule** (`self_loop._passed`): a voided
   pass (#254) unlocks nothing, and a pass above rung 6 counts only with
   `"ladder": 2` (#258).
 - **On a pass that unlocks something** the loop writes one line to self's
@@ -932,9 +999,9 @@ though, and rung 5 may notice that shift.
   like a person: an other that answers like clockwork is predictable, and
   predictable is body. From rung 7 on chat goes quiet and the turns are with
   the ball: [roll it back](#playing-ball-rung-7) when you're around.
-- **Raise the limit one rung at a time.** Watch the new rung pass, then watch
-  it hold for a while (not slipping) before raising again. The limit is how you
-  keep a rung open long enough to see whether it is real.
+- **Raise the limit one achievement at a time.** Watch the new one earn, then
+  watch it hold for a while (not slipping) before raising again. The limit is
+  how you keep an achievement open long enough to see whether it is real.
 - **Use the panel, not the narration.** Read `bar`, `waiting_on`, `slipping`
   and the record.
 

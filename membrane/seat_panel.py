@@ -271,12 +271,13 @@ def control(srv, body: dict, by: str = "operator") -> dict:
         if _SELF.set_mode(srv, m, by=by):
             done["self"] = m
             note(srv, "self", value=m, by=by)
-    if "self_limit" in body:                       # #161: the growth limit -- the top rung self may reach
-        from . import self_loop as _SELF
+    if "self_limit" in body:                       # #161: the growth limit; #295: up to an achievement
+        from . import self_loop as _SELF           # (an id, "all", "off"; a number is the old ladder's)
         if _SELF.set_limit(srv, body["self_limit"], by=by):
             n = _SELF.limit(srv)
             done["self_limit"] = n
-            note(srv, "self", value=_SELF.mode(srv), limit=n, by=by)
+            done["self_allow"] = _SELF.allow(srv)
+            note(srv, "self", value=_SELF.mode(srv), limit=n, allow=done["self_allow"], by=by)
     if "self_name" in body:                        # #283: self's name on this seat (display only)
         from . import self_name as _SN
         try:

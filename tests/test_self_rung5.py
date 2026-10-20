@@ -144,7 +144,7 @@ def test_rung_five_opens_after_the_blind_audit(monkeypatch):
     assert phases[:3] == ["pause", "resume", "end"]
     end = [a for a in audits if a.get("rung") == 5 and a["phase"] == "end"][0]
     assert end["eid"].endswith("mover") and end["still"] and end["again"] and end["passed"] is True
-    assert 5 in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
+    assert 5 in [r["rung"] for r in _record(srv) if r["kind"] in ("rung", "achieve")]
 
 
 def test_a_self_that_cannot_notice_fails_the_audit(monkeypatch):
@@ -155,7 +155,7 @@ def test_a_self_that_cannot_notice_fails_the_audit(monkeypatch):
     _run(srv, 600)
     ends = [a for a in _kind(srv, "audit") if a.get("rung") == 5 and a["phase"] == "end"]
     assert ends and ends[0]["passed"] is False
-    assert 5 not in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
+    assert 5 not in [r["rung"] for r in _record(srv) if r["kind"] in ("rung", "achieve")]
 
 
 def test_after_a_shift_it_relearns_the_new_tempo(monkeypatch):

@@ -214,7 +214,7 @@ def test_rung_four_still_passes_and_stays_calibrated_on_a_seat_with_a_heartbeat(
         g = SL._rung4(recs)
         assert g["crit"]["calibration"] == 1.0, (attention, g)
         assert g["passed"], (attention, g)
-        assert 4 in [r["rung"] for r in recs if r["kind"] == "rung"]
+        assert 4 in [r["rung"] for r in recs if r["kind"] in ("rung", "achieve")]
         out[attention] = sum(r["eid"] == NS + "beat" for r in timed) / len(timed)
     assert out[True] < 0.6 * out[False]                                # measured: 0.22 -> 0.09
 

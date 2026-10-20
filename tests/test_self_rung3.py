@@ -153,7 +153,7 @@ def test_rung_three_opens_by_its_test(monkeypatch):
     monkeypatch.setattr(SL, "_read_entity", _Things())
     srv = _seat()
     _run(srv, 300)
-    assert 3 in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
+    assert 3 in [r["rung"] for r in _record(srv) if r["kind"] in ("rung", "achieve")]
     assert SL.status(srv)["rung"] == 3
 
 
@@ -234,7 +234,7 @@ def test_the_limit_holds_rung_three(monkeypatch):
     monkeypatch.setattr(SL, "_read_entity", _Things())
     srv = _seat(limit=2)
     _run(srv, 300)
-    assert 3 not in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
+    assert 3 not in [r["rung"] for r in _record(srv) if r["kind"] in ("rung", "achieve")]
     assert not any(r.get("steer") for r in _reaches(srv))      # no sorting practised under limit 2
 
 

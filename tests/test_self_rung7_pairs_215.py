@@ -236,7 +236,7 @@ def test_a_model_that_knows_the_pattern_passes_rung_eight(monkeypatch):
     person, model = _world(monkeypatch)
     srv = _seat()
     _run(srv, person, (SL.RUNG8_LOOKS + 5) * SL.MEET_EVERY)
-    assert 8 in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
+    assert 8 in [r["rung"] for r in _record(srv) if r["kind"] in ("rung", "achieve")]
 
 
 def test_a_random_model_earns_no_trust(monkeypatch):

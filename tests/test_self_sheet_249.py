@@ -311,7 +311,7 @@ class TestAttributes(unittest.TestCase):
         u = self.a["understand"]
         self.assertLess(u["value"], 0)                              # the model bets wrong every time
         self.assertFalse(u["met"])
-        self.assertEqual(u["state"], "locked")                      # #258: rung 7 (take turns) comes first
+        self.assertEqual(u["state"], "capped")                      # #295: open once meet is earned; the limit holds it
         self.assertEqual(u["kind"], "skill")
         u8 = {x["key"]: x for x in _sheet(_lived8(_seat()), T0 + 12 * H)["attributes"]}["understand"]
         self.assertLess(u8["value"], 0)
@@ -431,7 +431,7 @@ class TestHeaderAndCache(unittest.TestCase):
         self.assertEqual(h["name"], "Blurp")
         self.assertEqual(h["level"], 6)
         self.assertEqual(h["rung_name"], "meet an other")
-        self.assertEqual(h["next"], 7)
+        self.assertEqual(h["next"], ["turns", "expect"])              # #295: the open achievements
         self.assertAlmostEqual(h["age_h"], 12.0, places=2)
         self.assertEqual(h["born"], "2026-10-16T13:00:00+00:00")
         self.assertEqual(h["lines_sent"], 20)

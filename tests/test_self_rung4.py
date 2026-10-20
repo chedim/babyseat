@@ -148,7 +148,7 @@ def test_rung_four_opens_by_its_test(monkeypatch):
     t = _run(srv, 200)
     SL.set_limit(srv, 4)
     _run(srv, 900, t0=t)
-    assert 4 in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
+    assert 4 in [r["rung"] for r in _record(srv) if r["kind"] in ("rung", "achieve")]
 
 
 def test_the_news_bar_for_a_thing_that_is_already_newsy():

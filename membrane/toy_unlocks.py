@@ -1,5 +1,12 @@
 """TOYS UNLOCK AS SELF GROWS (#267, part of #161): the operator's rewards.
 
+#295, THE SKILL TREE: a kind unlocks when self EARNS an achievement (UNLOCK_IDS:
+the achievement whose test is the rung in UNLOCKS -- tower: tell things apart,
+burst: patience, die and drift: notice the world changed, ball: meet an other,
+mirror: understand an other, ...). Achievements are earned out of order, so the
+toys are too; the record's unlock line carries the achievement's `id` beside
+its `rung` (the test's number, as before).
+
 Each toybox kind has an unlock rung (UNLOCKS). Body, fast and slow come with
 birth; the rest unlock when self passes a rung, and each unlock is also the
 next lesson (the mirror, unlocked at rung 8, is the apparatus of rung 9:
@@ -46,6 +53,7 @@ import sys
 import time
 from pathlib import Path
 
+from . import self_loop as _SL
 from .self_sheet import NAME as _NAME
 
 UNLOCKS = {"body": 0, "fast": 0, "slow": 0, "tower": 3, "burst": 4, "die": 5, "drift": 5,
@@ -65,10 +73,21 @@ TEACHES = {                 # read by people (the dock, the sheet): self goes by
     "blocks": f"pieces {_NAME} can put together and take apart: changing itself (rung 10)",
     "rattle": f"makes a sound when {_NAME} shakes it: its first voice (rung 11, speak)",
 }
+UNLOCK_IDS = {k: _SL.RUNG_ID.get(n) for k, n in UNLOCKS.items()}   # #295: kind -> the achievement (None: birth)
 PLACEHOLDERS = ("mirror", "blocks", "rattle")   # locked kinds with no mechanics yet
 NEXT_LOCKED = 2             # the dock shows this many locked toys (the next ones), so it stays tidy on a phone
 LATE_S = 300.0              # an unlock written this long after its pass is a catch-up, not news
 LOCKED_PREFIX = "locked:"   # the dock's name for a locked toy (never a toybox name)
+
+
+def achievement_of(kind: str) -> str | None:
+    """#295: the achievement whose pass unlocks a kind (None: birth)."""
+    return UNLOCK_IDS.get(str(kind or "").strip().lower())
+
+
+def _ach_name(n: int) -> str:
+    i = _SL.RUNG_ID.get(n)
+    return _SL.ACHIEVEMENTS[i]["name"] if i else _SL.RUNG_NAMES.get(n, "")
 
 
 def rung_of(kind: str) -> int:
@@ -113,11 +132,11 @@ def refusal(srv, kind: str) -> str | None:
     n = rung_of(kind)
     if born(recs) and kind in UNLOCKS and n not in SL._passed(recs):
         from . import self_name as _SN                 # #283: said with this seat's name
-        return _SN.say(f"{kind} {ICONS.get(kind, '')} is locked: it unlocks when {_NAME} passes rung {n} "
-                       f"({SL.RUNG_NAMES.get(n, '')}) -- {TEACHES.get(kind, '')}").replace("  ", " ")
+        return _SN.say(f"{kind} {ICONS.get(kind, '')} is locked: it unlocks when {_NAME} earns "
+                       f"'{_ach_name(n)}' -- {TEACHES.get(kind, '')}").replace("  ", " ")
     if kind in PLACEHOLDERS:
         return (f"{kind} {ICONS[kind]} is unlocked but not built yet: its mechanics come with "
-                f"rung {n + 1} ({SL.RUNG_NAMES.get(n + 1, '')})")
+                f"'{_ach_name(n + 1)}'")
     return None
 
 
@@ -241,7 +260,7 @@ def _sync_new(srv, recs, now):
         toys = [k for k in unlocked({n}) if UNLOCKS[k] == n]
         if n == 0 or n in done or not toys:      # birth is no pass: its kinds are simply open
             continue
-        line = {"ts": now, "kind": "unlock", "rung": n, "toys": toys}
+        line = {"ts": now, "kind": "unlock", "rung": n, "id": _SL.RUNG_ID.get(n), "toys": toys}
         if now - at.get(n, now) > LATE_S:
             line["late"] = True
         added = provision(srv, toys, now=now)
@@ -259,7 +278,7 @@ def latest(recs: list[dict]) -> dict | None:
     r = next((r for r in reversed(recs) if r.get("kind") == "unlock"), None)
     if r is None:
         return None
-    return {"rung": r.get("rung"), "ts": r.get("ts"), "late": bool(r.get("late")),
+    return {"rung": r.get("rung"), "id": _SL.RUNG_ID.get(r.get("rung")), "ts": r.get("ts"), "late": bool(r.get("late")),
             "toys": [{"kind": k, "icon": ICONS.get(k, "")} for k in r.get("toys") or []]}
 
 
@@ -272,7 +291,7 @@ def locked_rows(recs: list[dict], have=(), cap: int = NEXT_LOCKED) -> list[dict]
     open_ = set(unlocked(SL._passed(recs))) | set(have or ())
     rows = [k for k in sorted(UNLOCKS, key=lambda k: (UNLOCKS[k], list(UNLOCKS).index(k))) if k not in open_]
     return [{"name": LOCKED_PREFIX + k, "kind": k, "locked": True, "icon": ICONS.get(k, ""),
-             "unlock_rung": UNLOCKS[k], "rung_name": SL.RUNG_NAMES.get(UNLOCKS[k], ""),
+             "unlock_rung": UNLOCKS[k], "unlock_id": UNLOCK_IDS[k], "rung_name": _ach_name(UNLOCKS[k]),
              "teaches": TEACHES.get(k, "")} for k in rows[:max(0, int(cap))]]
 
 
@@ -298,8 +317,8 @@ def table(recs: list[dict], have: set) -> list[dict]:
     for k in sorted(UNLOCKS, key=lambda k: (UNLOCKS[k], list(UNLOCKS).index(k))):
         built = k in TB.KINDS
         state = ("unlocked" if k in open_ else "grandfathered" if k in have else "locked")
-        out.append({"kind": k, "icon": ICONS.get(k, ""), "rung": UNLOCKS[k],
-                    "rung_name": SL.RUNG_NAMES.get(UNLOCKS[k], ""), "teaches": TEACHES.get(k, ""),
+        out.append({"kind": k, "icon": ICONS.get(k, ""), "rung": UNLOCKS[k], "unlock_id": UNLOCK_IDS[k],
+                    "rung_name": _ach_name(UNLOCKS[k]), "teaches": TEACHES.get(k, ""),
                     "state": state, "built": built, "have": k in have,
                     "at": when.get(k)})
     return out

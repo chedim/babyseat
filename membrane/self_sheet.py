@@ -5,7 +5,11 @@ script outside the seat) computed in the seat, from self's record, status()
 and the toybox -- read-only, cached CACHE_S, served at GET
 /membrane/self/sheet. Laid out like an RPG character sheet:
 
-  header         name, Lv (the rung), the exp bar, age and WORKING hours
+  level, tree    #295: the achievements earned, and the skill tree -- each
+                 achievement's branch, prerequisites (and why), state,
+                 earned time and skill, staged bar, what it waits on, and
+                 the child's age and ability its test measures (tree())
+  header         name, Lv (achievements earned), the exp bar, age and WORKING hours
   attributes     one measured skill per built rung (Feel .. Understand);
                  None when nothing measures it yet, negative when it is
   quest          the current rung's staged criteria, with counts and skill
@@ -345,7 +349,7 @@ def _achievements(c: dict) -> list:
     for n in sorted(c["first"]):
         r = c["first"][n]
         t = c["honest"].get(n, float(r["ts"]))
-        row = {"rung": n, "name": SL.RUNG_NAMES.get(n, ""), "at": iso(float(r["ts"])),
+        row = {"rung": n, "id": SL.RUNG_ID.get(n), "name": SL.RUNG_NAMES.get(n, ""), "at": iso(float(r["ts"])),
                "working_h": _r(c["working"](t) / H), "wall_h": _r((t - c["born"]) / H),
                "skill": r.get("skill"), "eid": _short(r.get("eid")) if r.get("eid") else None}
         if n == 6 and c["real6"] is not None:
@@ -445,8 +449,8 @@ def _sg(v) -> str:
 
 
 def _quest(recs: list, st: dict, progs: dict, attrs: dict) -> dict:
-    rung, nxt, lim = st.get("rung") or 0, st.get("next"), st.get("limit") or 0
-    aim = nxt if (nxt in SL.PROGRESS and nxt <= lim) else (rung if rung in SL.PROGRESS else None)
+    aim = st.get("skill_rung")                     # #295: the achievement the exp bar reads (status)
+    aim = aim if aim in SL.PROGRESS else None
     if aim is None:
         return {"rung": None, "name": None, "criteria": [], "bar": st.get("bar"), "waiting_on": st.get("waiting_on"),
                 "summary": "", "mode": st.get("mode")}
@@ -495,7 +499,7 @@ def _quest(recs: list, st: dict, progs: dict, attrs: dict) -> dict:
         else:
             text = flags.get(key, key)
         crits.append({"key": key, "text": text, "met": met, "frac": _r(frac, 4)})
-    return {"rung": aim, "name": SL.RUNG_NAMES.get(aim, ""), "criteria": crits, "bar": st.get("bar"),
+    return {"rung": aim, "id": SL.RUNG_ID.get(aim), "name": SL.RUNG_NAMES.get(aim, ""), "criteria": crits, "bar": st.get("bar"),
             "waiting_on": st.get("waiting_on"), "slipping": st.get("slipping"), "mode": st.get("mode"),
             "summary": " · ".join(c["text"] + (" ✓" if c["met"] else "") for c in crits)}
 
@@ -627,9 +631,10 @@ def _skill(recs: list, tempo: dict, st: dict) -> dict | None:
 
 
 def _header(st: dict, recs: list, c: dict, t: dict, skill: dict | None = None) -> dict:
-    nxt = st.get("next")
-    return {"name": SN.current(), "level": st.get("rung") or 0, "rung_name": st.get("rung_name") or SL.RUNG_NAMES.get(st.get("rung") or 0),
-            "next": nxt, "next_name": SL.RUNG_NAMES.get(nxt) if nxt is not None else None,
+    nxt = list(st.get("next") or [])              # #295: the open achievements (ids)
+    return {"name": SN.current(), "level": st.get("level") or 0, "rung_name": st.get("rung_name") or SL.RUNG_NAMES[0],
+            "next": nxt, "next_name": ", ".join(SL.ACHIEVEMENTS[i]["name"] for i in nxt) or None,
+            "allow": st.get("allow"),
             "bar": st.get("bar"), "waiting_on": st.get("waiting_on"), "slipping": st.get("slipping"),
             "held": st.get("held"), "mode": st.get("mode"), "limit": st.get("limit"),
             "skill": skill,
@@ -668,10 +673,46 @@ def compute(srv, now: float | None = None) -> dict:
     voided = _voided(recs)
     if voided:
         quest["voided"] = voided
-    return {"empty": not recs, "generated": now, "header": _header(st, recs, c, t, _skill(recs, tempo, st)), "attributes": attrs,
+    return {"empty": not recs, "generated": now, "level": st.get("level") or 0, "tree": tree(recs, st, progs),
+            "header": _header(st, recs, c, t, _skill(recs, tempo, st)), "attributes": attrs,
             "quest": quest, "achievements": ach,
             "growth": _growth(c, ach), "time": t, "inventory": _inventory(recs, st, now),
             "relationships": _relationships(recs, tempo, st), "toys": _toys_section(recs)}
+
+
+def tree(recs: list, st: dict, progs: dict | None = None) -> list:
+    """THE SKILL TREE (#295), the 👶 panel's data contract: every achievement
+    in tree order, its branch, prerequisites (and why each is one), its state
+    (earned / open: built, unearned, every prerequisite earned / locked /
+    unbuilt), when it was earned and with what skill, its staged bar and what
+    it waits on, and the child's age and ability its test measures."""
+    got = SL._earn_times(recs)
+    allowed = set(st.get("allowed") or ())
+    out = []
+    for i, a in SL.ACHIEVEMENTS.items():
+        row = {"id": i, "name": a["name"], "branch": a["branch"], "prereqs": list(a["prereqs"]),
+               "built": a["built"], "earned_at": None, "skill": None, "bar": 0.0, "waiting_on": None,
+               "child_age": a["child_age"], "child_ability": a["child_ability"], "why_prereqs": a["why_prereqs"],
+               "rung": a["rung"]}
+        if i in got:
+            r = got[i]
+            sk = r.get("skill")
+            row.update(state="earned", earned_at=iso(float(r.get("ts") or 0)), bar=1.0,
+                       skill=_r(float(sk), 4) if isinstance(sk, (int, float)) else None)
+        elif not a["built"]:
+            row.update(state="unbuilt", waiting_on="not built yet")
+        elif any(p not in got for p in a["prereqs"]):
+            row.update(state="locked", waiting_on=", ".join(SL.ACHIEVEMENTS[p]["name"] for p in a["prereqs"]
+                                                            if p not in got))
+        else:
+            p = (progs or {}).get(a["rung"]) or SL.PROGRESS[a["rung"]](recs, {})
+            bar, waiting = SL._staged(p.get("crit") or {})
+            row.update(state="open", bar=_r(max(0.0, min(1.0, bar)), 4), waiting_on=waiting,
+                       skill=_r(float(p.get("skill") or 0.0), 4))
+            if i not in allowed:
+                row["waiting_on"] = "the limit"
+        out.append(row)
+    return out
 
 
 def _toys_section(recs: list) -> list:
@@ -714,7 +755,8 @@ def empty() -> dict:
     """The sheet's shape with nothing in it (a seat without self)."""
     c = {"born": None, "srt": []}
     return {"empty": True, "generated": time.time(),
-            "header": {"name": SN.current(), "level": 0, "rung_name": SL.RUNG_NAMES[0], "next": None, "mode": "off",
+            "level": 0, "tree": tree([], {}),
+            "header": {"name": SN.current(), "level": 0, "rung_name": SL.RUNG_NAMES[0], "next": [], "mode": "off",
                        "age_h": 0.0, "working_h": 0.0, "skill": None},
             "attributes": [], "quest": {"rung": None, "criteria": []}, "achievements": [],
             "growth": _growth(c, []), "time": _time(c), "inventory": [],
@@ -745,7 +787,7 @@ def card(srv, now: float | None = None) -> dict:
     now = time.time() if now is None else float(now)
     name = SN.current()
     if srv is None:
-        return {"name": name, "level": 0, "rung_name": SL.RUNG_NAMES.get(0, ""), "next": None, "mode": "off",
+        return {"name": name, "level": 0, "rung_name": SL.RUNG_NAMES.get(0, ""), "next": [], "mode": "off",
                 "awake": False, "last_activity": None, "generated": now}
     h = sheet(srv, now).get("header") or {}
     mode = SL.mode(srv)
@@ -753,7 +795,7 @@ def card(srv, now: float | None = None) -> dict:
         recs = SL._read(srv)
         last = float(recs[-1].get("ts") or 0) if recs else None
     return {"name": name, "level": h.get("level") or 0, "rung_name": h.get("rung_name") or "",
-            "next": h.get("next"), "mode": mode, "awake": mode != "off",
+            "next": list(h.get("next") or []), "mode": mode, "awake": mode != "off",
             "last_activity": iso(last) if last else None, "generated": now}
 
 
@@ -771,7 +813,7 @@ def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
     now = time.time() if now is None else float(now)
     who = SN.current()                                   # #283: self's name ("name" is a toy's below)
     if srv is None:
-        return {"generated": now, "name": who, "toys": [], "locked": []}
+        return {"generated": now, "name": who, "toys": [], "locked": [], "level": 0, "tree": tree([], {})}
     rt = SL._rt(srv)
     hit = rt.get("dock")
     if not fresh and hit is not None and 0 <= now - hit[0] < DOCK_CACHE_S and hit[2] == who:
@@ -835,7 +877,9 @@ def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
                         if kind == "tower" else {}),
                      "unlock_rung": TU.rung_of(kind), "grandfathered": TU.grandfathered(recs, kind)})
     toys.sort(key=lambda t: t["kind"] != "ball")                 # #264: the ball first (locked rows follow the toys)
+    sh = sheet(srv, now)                                 # #295: the tree and the level, as the (cached) sheet has them
     out = SN.say_all({"generated": now, "name": who, "toys": toys,
-                      "locked": TU.locked_rows(recs, {r["kind"] for r in rows})}, who)
+                      "locked": TU.locked_rows(recs, {r["kind"] for r in rows}),
+                      "level": sh.get("level") or 0, "tree": sh.get("tree") or []}, who)
     rt["dock"] = (now, out, who)
     return out

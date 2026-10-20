@@ -31,13 +31,22 @@ next cycle. The runaway guard: PACE_S between cycles (MEMBRANE_SELF_PACE_S,
 floor 1 s), at most BURST_PER_MIN a minute, and three failed cycles in a row
 hold it until the operator's next toggle. A paused seat runs nothing.
 
-THE LADDER: a rung opens when its measured test passes; the bar is staged
+THE SKILL TREE (#295; a strict ladder of rungs until then): each skill is an
+ACHIEVEMENT with a stable id, a branch and real prerequisites (ACHIEVEMENTS:
+an edge only where a test reads data or machinery another pass switches on).
+An achievement is earned when its measured test passes, whenever its
+prerequisites are earned -- siblings in any order -- and goes on the record
+as an `achieve` line; the old `rung` lines count as their achievements
+(_rung_lines: the voids and the #258 filter hold). The bar is staged
 (_staged: the criteria fill in order, the first unmet one is named) and can
-go down (slipping) -- a passed rung stays on the record. Only rungs in LADDER are built; the status says when the next is not.
+go down (slipping) -- an earned achievement stays on the record. The level
+is the number earned. Only built achievements are ever tried.
 
-THE GROWTH LIMIT (the operator's chooser): the highest rung self may reach.
-Below it self still earns each rung by its test; above it nothing opens,
-however well it does ("capped"). 0 is off. Raising it never grants a rung.
+THE GROWTH LIMIT (the operator's chooser): allow self up to an achievement
+-- it and its prerequisite closure -- or all of them, or off. Inside it self
+still earns each achievement by its test; outside it nothing is earned,
+however well it does ("the limit"). A number is the old ladder's: rungs 1..N.
+Raising it never grants an achievement.
 """
 from __future__ import annotations
 
@@ -70,6 +79,80 @@ LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4, 5, 6, 7, 8)}          # the 
 # recorded before the flip was the old numbering's (the record is never rewritten).
 LADDER_V = 2
 FLIPPED_FROM = 7
+
+# THE SKILL TREE (#295): the rungs are achievements with stable ids, a branch and REAL
+# prerequisites -- an edge only where a test reads data or machinery that another
+# achievement's pass switches on. A test runs whenever its prerequisites are earned, so
+# siblings unlock in any order. `rung` is the test's number: the record's `rung` lines,
+# PROGRESS, the toys' unlock table and the bug windows keep reading it (the record is never
+# rewritten). Child ages are those of WHAT EACH TEST MEASURES (an analogy, not a measurement).
+ACHIEVEMENTS = {
+    "feel": {"rung": 1, "name": "feel itself", "branch": "self", "prereqs": (), "built": True,
+             "child_age": "newborn",
+             "child_ability": "tells its own touch from another's (Rochat & Hespos 1997)",
+             "why_prereqs": "a root: its test reads only its own moves and the current's push"},
+    "reach": {"rung": 2, "name": "first reach", "branch": "world", "prereqs": (), "built": True,
+              "child_age": "~2-3 mo",
+              "child_ability": "learns its kicks move a mobile (Rovee-Collier, contingency learning)",
+              "why_prereqs": ("a root: its looks predict a thing from the thing's own tempo; nothing "
+                              "of feel itself (the current, the steering) is read")},
+    "kinds": {"rung": 3, "name": "tell things apart", "branch": "world", "prereqs": ("reach",), "built": True,
+              "child_age": "~3-4 mo",
+              "child_ability": "forms perceptual categories (Quinn & Eimas)",
+              "why_prereqs": ("reach: its looks are reach's looks (sorted by the kinds they show), and one "
+                              "of its stages is reach's skill still holding on a moving thing")},
+    "patience": {"rung": 4, "name": "patience", "branch": "world", "prereqs": ("kinds",), "built": True,
+                 "child_age": "~3.5 mo",
+                 "child_ability": "anticipates timed events (Haith, anticipatory looking)",
+                 "why_prereqs": ("tell things apart: its timed looks skip the things sorted silent -- the "
+                                 "sort is switched on by that pass")},
+    "shift": {"rung": 5, "name": "notice the world changed", "branch": "world", "prereqs": ("reach",),
+              "built": True, "child_age": "~3.5-5 mo",
+              "child_ability": "is surprised when the world breaks its expectation (Baillargeon, violation of expectation)",
+              "why_prereqs": ("first reach: its noticing reads the looks and each thing's long memory (the "
+                              "tempo), and its audit pauses a moving thing self has looked at; it does not "
+                              "read patience's rates (patience reads its shifts, not the other way)")},
+    "meet": {"rung": 6, "name": "meet an other", "branch": "others", "prereqs": ("reach",), "built": True,
+             "child_age": "~3-5 mo",
+             "child_ability": ("tells perfect self-contingency from imperfect social contingency "
+                               "(Bahrick & Watson)"),
+             "why_prereqs": ("first reach: its answered looks at the other are reach's looks, and the "
+                             "self/other split is reach's own prediction skill; nothing of the sort, "
+                             "patience or noticing is read")},
+    "turns": {"rung": 7, "name": "take turns", "branch": "others", "prereqs": ("meet",), "built": True,
+              "child_age": "~3-5 mo",
+              "child_ability": ("takes turns: serve and return, the proto-conversation's timing "
+                                "(Bateson 1975; Trevarthen 1979; Jaffe et al. 2001)"),
+              "why_prereqs": ("meet an other: it times its pushes to the other meet found, through "
+                              "meet's channel, and scores each by the reply check after it")},
+    "expect": {"rung": 8, "name": "understand an other", "branch": "others", "prereqs": ("meet",), "built": True,
+               "child_age": "~2-3 mo",
+               "child_ability": ("expects a response from the other: the still-face upset "
+                                 "(Tronick et al. 1978)"),
+               "why_prereqs": ("meet an other: it predicts whether the other meet found replies to a "
+                               "push, read at the reply check after it; it does not need take turns' "
+                               "learned timing -- a push by the timer is checked and predicted the same")},
+    "mirror": {"rung": 9, "name": "recognize itself", "branch": "later", "prereqs": ("feel", "meet"), "built": False,
+               "child_age": "~18 mo",
+               "child_ability": "passes the mirror test (Amsterdam 1972)",
+               "why_prereqs": ("not built yet; planned: its own trace (feel itself) beside another's "
+                               "(meet an other's split)")},
+    "change": {"rung": 10, "name": "change itself", "branch": "later", "prereqs": ("mirror",), "built": False,
+               "child_age": "~4 y",
+               "child_ability": "revises what it knows about its own knowing (metacognition, Flavell)",
+               "why_prereqs": "not built yet; planned: it can change only a self it recognizes (recognize itself)"},
+    "speak": {"rung": 11, "name": "speak", "branch": "later", "prereqs": ("turns", "expect"), "built": False,
+              "child_age": "~4 y",
+              "child_ability": "tells its own story from memory (autobiographical narrative, Nelson & Fivush)",
+              "why_prereqs": ("not built yet; planned: words take turns (take turns) with an other it "
+                              "can predict (understand an other)")},
+    "invent": {"rung": 12, "name": "invent", "branch": "later", "prereqs": ("change", "speak"), "built": False,
+               "child_age": "~5 y",
+               "child_ability": "makes up games with its own rules",
+               "why_prereqs": "not built yet; planned: rules of its own (change itself), said to others (speak)"},
+}
+RUNG_ID = {a["rung"]: i for i, a in ACHIEVEMENTS.items()}            # the record's rung numbers -> ids
+BUILT = [i for i, a in ACHIEVEMENTS.items() if a["built"]]
 
 try:
     PACE_S = max(1.0, float(os.environ.get("MEMBRANE_SELF_PACE_S") or 10.0))
@@ -324,30 +407,147 @@ def record_path(srv) -> Path | None:
     return d / "record.jsonl" if d is not None else None
 
 
-def _load_mode(srv) -> tuple[str, int]:
+def _load_mode(srv) -> tuple[str, object]:
     """(mode, limit). A seat switched on before the limit existed gets 1 --
-    what it had -- so no higher rung opens until the operator raises it."""
+    what it had -- so nothing past feel itself opens until the operator raises
+    it. #295: the limit is saved as `allow` (an achievement id, "all", or a
+    list of ids); a seat saved before the tree has only a number N, which
+    migrates to the closure of the achievements rungs 1..N were (8: all)."""
     d = _dir(srv)
     try:
         doc = json.loads((d / "mode.json").read_text()) if d is not None else {}
     except Exception:
         doc = {}
     m = doc.get("mode") if doc.get("mode") in MODES else "off"
+    if m == "off":
+        return m, 0
+    if "allow" in doc:
+        lim = _norm_limit(doc["allow"])
+        if lim is not None and lim != 0:
+            return m, lim
     try:
-        lim = int(doc["limit"]) if "limit" in doc else (1 if m != "off" else 0)
+        n = int(doc["limit"]) if "limit" in doc else 1
     except (TypeError, ValueError):
-        lim = 1 if m != "off" else 0
-    return m, (max(1, min(lim, max(LADDER))) if m != "off" else 0)
+        n = 1
+    return m, _norm_limit(max(1, n))
 
 
-def _save_mode(srv, mode: str, limit: int) -> None:
+def _save_mode(srv, mode: str, limit) -> None:
     d = _dir(srv)
     if d is None:
         return
     d.mkdir(parents=True, exist_ok=True)
     tmp = d / "mode.json.tmp"
-    tmp.write_text(json.dumps({"mode": mode, "limit": limit, "ts": time.time()}))
+    allow = list(limit) if isinstance(limit, (list, tuple, set, frozenset)) else limit
+    tmp.write_text(json.dumps({"mode": mode, "limit": _limit_number(limit), "allow": allow, "ts": time.time()}))
     os.replace(tmp, d / "mode.json")
+
+
+# ---- the skill tree (#295) ----------------------------------------------------
+
+def _closure(ids) -> set:
+    """The achievements and every prerequisite under them."""
+    out: set = set()
+    todo = [i for i in ids if i in ACHIEVEMENTS]
+    while todo:
+        i = todo.pop()
+        if i not in out:
+            out.add(i)
+            todo.extend(ACHIEVEMENTS[i]["prereqs"])
+    return out
+
+
+def _norm_limit(v):
+    """The growth limit as the operator may give it -> what self keeps: 0
+    (off), "all", a built achievement's id, or a sorted list of ids (a
+    migrated number under the top: the closure of rungs 1..N). None: not a
+    limit. A number N is the ladder's: the achievements rungs 1..N were,
+    with their prerequisites; N at or past the top built rung is all."""
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, str):
+        s = v.strip().lower()
+        if s in ("off", "0", ""):
+            return 0 if s else None
+        if s == "all":
+            return "all"
+        if s in ACHIEVEMENTS:
+            return s if ACHIEVEMENTS[s]["built"] else None
+        try:
+            v = int(s)
+        except ValueError:
+            return None
+    if isinstance(v, (list, tuple, set, frozenset)):
+        ids = [i for i in v if i in ACHIEVEMENTS and ACHIEVEMENTS[i]["built"]]
+        if not ids:
+            return None
+        got = _closure(ids)
+        return "all" if got >= set(BUILT) else sorted(got, key=list(ACHIEVEMENTS).index)
+    try:
+        n = int(v)
+    except (TypeError, ValueError):
+        return None
+    if n <= 0:
+        return 0
+    top = max(ACHIEVEMENTS[i]["rung"] for i in BUILT)
+    if n >= top:
+        return "all"
+    return _norm_limit([i for i in BUILT if ACHIEVEMENTS[i]["rung"] <= n])
+
+
+def _limit_ids(lim) -> set:
+    """The achievements a limit allows: an id and its prerequisite closure,
+    "all" (every built one), a list's closure, a ladder number N (rungs
+    1..N); off allows nothing. Only built achievements are ever allowed."""
+    if lim in (None, 0, "off"):
+        return set()
+    if lim == "all":
+        return set(BUILT)
+    if isinstance(lim, (int, float)) and not isinstance(lim, bool):
+        return {i for i in BUILT if ACHIEVEMENTS[i]["rung"] <= int(lim)}
+    if isinstance(lim, str):
+        return {i for i in _closure([lim]) if ACHIEVEMENTS[i]["built"]}
+    if isinstance(lim, (list, tuple, set, frozenset)):
+        return {i for i in _closure(lim) if ACHIEVEMENTS[i]["built"]}
+    return set()
+
+
+def _limit_number(lim) -> int:
+    """The old ladder's number for a limit (kept on the API and in mode.json
+    for an older reader): the top rung among the allowed, 0 when off."""
+    ids = _limit_ids(lim)
+    return max((ACHIEVEMENTS[i]["rung"] for i in ids), default=0)
+
+
+def _allowed(srv) -> set:
+    """The achievements the operator's growth limit allows on this seat now."""
+    rt = _rt(srv)
+    return set() if rt["mode"] == "off" else _limit_ids(rt["limit"])
+
+
+def _earned(recs: list[dict]) -> set:
+    """The achievements on the record (void-aware: _rung_lines)."""
+    return {RUNG_ID[n] for n in _passed(recs) if n in RUNG_ID}
+
+
+def _earn_times(recs: list[dict]) -> dict:
+    """id -> its first counting pass line (an old `rung` line or an `achieve` line)."""
+    out: dict = {}
+    for r in _rung_lines(recs):
+        i = RUNG_ID.get(r.get("rung"))
+        if i is not None and i not in out:
+            out[i] = r
+    return out
+
+
+def _open_ids(recs: list[dict]) -> list[str]:
+    """The built achievements not yet earned whose prerequisites all are."""
+    got = _earned(recs)
+    return [i for i in BUILT if i not in got and all(p in got for p in ACHIEVEMENTS[i]["prereqs"])]
+
+
+def _missing(i: str, got: set) -> list[str]:
+    return [ACHIEVEMENTS[p]["name"] for p in ACHIEVEMENTS[i]["prereqs"] if p not in got]
 
 
 def _append(srv, rec: dict) -> None:
@@ -431,28 +631,41 @@ def mode(srv) -> str:
 
 
 def limit(srv) -> int:
-    return _rt(srv)["limit"]
+    """The growth limit as the old ladder's number (the top rung allowed; 0: off)."""
+    return _limit_number(_rt(srv)["limit"]) if _rt(srv)["mode"] != "off" else 0
+
+
+def allow(srv):
+    """The growth limit as the operator set it (#295): 0 (off), "all", an
+    achievement id, or a list of ids (a migrated ladder number)."""
+    rt = _rt(srv)
+    if rt["mode"] == "off":
+        return 0
+    lim = rt["limit"]
+    return _norm_limit(lim) if isinstance(lim, int) else lim
 
 
 def set_limit(srv, n, by: str = "operator") -> bool:
-    """The operator's chooser: the highest rung self may reach (0: off),
-    clamped to the rungs built. Raising it grants nothing -- each rung under
-    it is still earned by its test."""
-    try:
-        n = max(0, min(int(n), max(LADDER)))
-    except (TypeError, ValueError):
+    """The operator's chooser (#295): allow self up to an achievement -- it
+    and its prerequisite closure -- or "all" (every built one) or "off". A
+    number is the old ladder's (rungs 1..N, with their prerequisites; the top
+    built rung or more is all). Raising it grants nothing -- each achievement
+    it allows is still earned by its test."""
+    v = _norm_limit(n)
+    if v is None:
         return False
     rt = _rt(srv)
-    if n == 0:
+    if v == 0:
         return set_mode(srv, "off", by)
     keep = rt["mode"] if rt["mode"] != "off" else "on"
-    rt["limit"] = n
+    rt["limit"] = v
     return set_mode(srv, keep, by)
 
 
 def set_mode(srv, m: str, by: str = "operator") -> bool:
     """The operator's switch (seat_panel.control). The first switch-on is the
-    birth; a toggle clears a hold. Off is limit 0; on with no limit is 1."""
+    birth; a toggle clears a hold. Off is limit 0; on with no limit allows
+    feel itself (what the first rung was)."""
     if m not in MODES:
         return False
     rt = _rt(srv)
@@ -460,7 +673,10 @@ def set_mode(srv, m: str, by: str = "operator") -> bool:
         if m != "off" and not any(r.get("kind") == "birth" for r in _read(srv)):
             _append(srv, {"ts": time.time(), "kind": "birth", "by": by})
         rt["mode"], rt["held"], rt["fails"] = m, False, 0
-        rt["limit"] = 0 if m == "off" else max(1, rt["limit"])
+        if m == "off":
+            rt["limit"] = 0
+        elif not _limit_ids(rt["limit"]):
+            rt["limit"] = _norm_limit(1)
         _save_mode(srv, m, rt["limit"])
     if m != "off":
         rt["wake"].set()                    # switching on kicks the first cycle
@@ -1125,7 +1341,7 @@ def _meet(srv, seed: str, now: float | None = None) -> None:
     resp = _CIO.entity_in(srv, person)                      # the other, as a reach target
     to = resp.eid if resp is not None else _CIO.name_in(person)
     recs = _read(srv)
-    spoke = _last_spoke(srv, recs, to, now) if _available(srv, 7) else None   # as known now (#254)
+    spoke = _last_spoke(srv, recs, to, now) if _replies(srv) else None    # as known now (#254)
     rec = {"ts": now, "kind": "push", "n": n, "eid": _CIO.name_of(person), "to": to}
     if turns:                                               # rung 7: is this the moment? (#258)
         when = _turn_push(srv, recs, to, n, None if spoke is None else now - spoke)
@@ -1144,8 +1360,9 @@ def _meet(srv, seed: str, now: float | None = None) -> None:
 # ---- #264: the turns with the ball ---------------------------------------------------
 
 def _toy_turns(srv) -> bool:
-    """Self's turns are rolls of the ball, and chat is quiet: from rung 7 on,
-    until rung SPEAK_RUNG (speak) opens."""
+    """Self's turns are rolls of the ball, and chat is quiet: while take turns
+    may be practised (the ball's turns are its practice), until speak
+    (SPEAK_RUNG) opens."""
     return TOY_TURNS and _available(srv, 7) and not _available(srv, SPEAK_RUNG)
 
 
@@ -1660,8 +1877,22 @@ def _unlock_toys(srv) -> None:
 
 
 def _available(srv, rung: int) -> bool:
-    """A rung's skill may be practised: built, under the limit, the one below passed."""
-    return rung in LADDER and rung <= _rt(srv)["limit"] and (rung - 1) in _passed(_read(srv))
+    """An achievement's skill may be practised (#295; by its test's rung
+    number): built, allowed by the growth limit, and every prerequisite
+    earned -- not the rung below: siblings practise in any order."""
+    i = RUNG_ID.get(rung)
+    if i is None or not ACHIEVEMENTS[i]["built"] or i not in _allowed(srv):
+        return False
+    got = _earned(_read(srv))
+    return all(p in got for p in ACHIEVEMENTS[i]["prereqs"])
+
+
+def _replies(srv) -> bool:
+    """THE REPLY CHECKS (#295): after a push self looks for the other's reply,
+    and a push records how long since the other last spoke -- the machinery
+    both take turns (its reward) and understand an other (its outcome) read,
+    so it runs while either may be practised."""
+    return _available(srv, 7) or _available(srv, 8)
 
 
 def _targets(srv) -> list[str]:
@@ -1694,7 +1925,7 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
     kinds = _kinds(recs) if steer else {}
     rng = random.Random(f"reach:{n}")
     lam = None
-    reply = _pending(recs, now) if _available(srv, 7) else None
+    reply = _pending(recs, now) if _replies(srv) else None    # #295: for turns or expect
     if reply is not None and reply["to"] not in targets:
         reply = None
     if reply is not None and _hold_reply(srv, reply, now):
@@ -2139,7 +2370,7 @@ def _show(srv, ent, pos, c, rec) -> None:
         fp.self_cycle({"from": pos, "intent": c["intent"], "expected": c["expected"],
                        "at": c["observed"], "pull": _pull(srv, len(pos)), "aim": c.get("aim")},
                       {"n": rec["n"], "gap": rec["gap"], "naive": rec["naive"], "push": rec["push"],
-                       "rung": st["rung"], "bar": st["bar"], "skill": st["skill"],
+                       "rung": st["rung"], "level": st["level"], "bar": st["bar"], "skill": st["skill"],
                        "mode": st["mode"], "slipping": st["slipping"], "waiting_on": st["waiting_on"],
                        "next": st["next"], "cycles": st["cycles"], "held": st["held"],
                        "rung_name": st["rung_name"], "limit": st["limit"],
@@ -2420,19 +2651,39 @@ SKILL_PASS = {1: RUNG1_SKILL, 2: RUNG2_SKILL, 3: RUNG2_SKILL, 4: None, 5: 1.0, 6
 
 
 def _rung_lines(recs: list[dict]) -> list[dict]:
-    """The rung passes that count: every `rung` line except one with a later
+    """The passes that count: every `rung` line except one with a later
     `rung_void` line for its rung (#254: a pass a broken test recorded stays
     on the append-only record but doesn't count; a later pass does), and --
     #258, the ladder flip -- a pass above rung 6 only when it carries
     "ladder": LADDER_V (before the flip rung 7 was "understand an other": an
-    old pass is neither the new rung 7 nor rung 8)."""
+    old pass is neither the new rung 7 nor rung 8).
+
+    #295: an `achieve` line (the skill tree's pass) counts too, as its test's
+    rung (it carries `rung`; its id names it otherwise), under the same voids."""
     voids: dict = {}
     for r in recs:
         if r.get("kind") == "rung_void":
-            voids[r.get("rung")] = max(voids.get(r.get("rung"), 0.0), float(r.get("ts") or 0))
-    return [r for r in recs if r.get("kind") == "rung"
-            and not (r.get("rung") in voids and float(r.get("ts") or 0) < voids[r.get("rung")])
-            and (int(r.get("rung") or 0) < FLIPPED_FROM or r.get("ladder") == LADDER_V)]
+            n = r.get("rung") if r.get("rung") is not None else ACHIEVEMENTS.get(r.get("id"), {}).get("rung")
+            voids[n] = max(voids.get(n, 0.0), float(r.get("ts") or 0))
+    out = []
+    for r in recs:
+        k = r.get("kind")
+        if k == "achieve":
+            n = ACHIEVEMENTS.get(r.get("id"), {}).get("rung")
+            if n is None:
+                continue
+            if r.get("rung") != n:
+                r = {**r, "rung": n}
+        elif k == "rung":
+            n = r.get("rung")
+            if not (int(n or 0) < FLIPPED_FROM or r.get("ladder") == LADDER_V):
+                continue
+        else:
+            continue
+        if n in voids and float(r.get("ts") or 0) < voids[n]:
+            continue
+        out.append(r)
+    return out
 
 
 def _passed(recs: list[dict]) -> set:
@@ -2440,20 +2691,26 @@ def _passed(recs: list[dict]) -> set:
 
 
 def _open_rungs(srv) -> None:
-    """A rung opens when its test passes -- only under the operator's limit,
-    and only above a rung already passed (the ladder is climbed in order)."""
+    """An achievement is earned when its test passes (#295) -- only when the
+    operator's limit allows it and every prerequisite is earned; siblings in
+    any order. The pass goes on the record as an `achieve` line."""
     recs = _read(srv)
-    done, lim = _passed(recs), _rt(srv)["limit"]
-    for n in sorted(PROGRESS):
-        if n in done or n > lim or (n - 1) not in done:
-            continue
-        p = PROGRESS[n](recs, _tempo(srv))
-        if p["passed"]:
-            line = {"ts": time.time(), "kind": "rung", "rung": n, "skill": p["skill"], "ladder": LADDER_V}
-            if p.get("eid"):
-                line["eid"] = p["eid"]
-            _append(srv, line)
-            recs, done = _read(srv), done | {n}
+    allowed = _allowed(srv)
+    progress = True
+    while progress:
+        progress = False
+        for i in _open_ids(recs):
+            if i not in allowed:
+                continue
+            n = ACHIEVEMENTS[i]["rung"]
+            p = PROGRESS[n](recs, _tempo(srv))
+            if p["passed"]:
+                line = {"ts": time.time(), "kind": "achieve", "id": i, "rung": n, "skill": p["skill"]}
+                if p.get("eid"):
+                    line["eid"] = p["eid"]
+                _append(srv, line)
+                recs, progress = _read(srv), True
+                break
 
 
 def _staged(crit: dict) -> tuple[float, str | None]:
@@ -2472,44 +2729,72 @@ def _staged(crit: dict) -> tuple[float, str | None]:
     return 1.0, None
 
 
+def _earned_rows(recs: list[dict]) -> list[dict]:
+    """The earned achievements, oldest pass first: {id, name, ts, skill}."""
+    times = _earn_times(recs)
+    rows = [{"id": i, "name": ACHIEVEMENTS[i]["name"], "ts": float(r.get("ts") or 0), "skill": r.get("skill")}
+            for i, r in times.items()]
+    return sorted(rows, key=lambda x: (x["ts"], list(ACHIEVEMENTS).index(x["id"])))
+
+
 def status(srv) -> dict:
+    """Self's state for the panel and the page. #295, the skill tree: `level`
+    (= `rung`, kept for older readers) counts the achievements earned;
+    `rung_name` is the latest one's name; `next` the open ones (built,
+    unearned, every prerequisite earned); `earned` the passes in order (the
+    page's celebration reads it). The bar reads the open achievement the
+    limit allows that is closest to passing; with none, the latest earned
+    one's own test -- so a pass can be seen slipping."""
     rt = _rt(srv)
     recs = _read(srv)
     born = any(r.get("kind") == "birth" for r in recs)
     done = _passed(recs)
-    rung = max(done)
-    lim = rt["limit"]
-    nxt = rung + 1 if rung + 1 in LADDER else None
-    # the bar reads the next rung's test when self may practise it; else (none
-    # built, or held by the limit) the top rung's own -- so a passed rung can
-    # be seen slipping
+    earned = _earned_rows(recs)
+    got = {e["id"] for e in earned}
+    level = len(got)
+    latest = earned[-1]["id"] if earned else None
+    lim = limit(srv)
+    allowed = _allowed(srv)
+    opens = _open_ids(recs)
     tempo = _tempo(srv)
     run_ = (lambda n: PROGRESS[n](recs, tempo))
-    aim = nxt if (nxt in PROGRESS and nxt <= lim) else (rung if rung in PROGRESS else None)
-    prog = run_(aim) if aim is not None else {"crit": {}, "skill": 0.0, "passed": True}
+    progs = {i: run_(ACHIEVEMENTS[i]["rung"]) for i in opens if i in allowed}
+    late = run_(ACHIEVEMENTS[latest]["rung"]) if latest is not None else None
+    if progs:
+        aim_id = max(progs, key=lambda i: (_staged(progs[i]["crit"])[0], -BUILT.index(i)))
+        prog = progs[aim_id]
+    elif latest is not None:
+        aim_id, prog = latest, late
+    else:
+        aim_id, prog = None, {"crit": {}, "skill": 0.0, "passed": True}
+    aim = ACHIEVEMENTS[aim_id]["rung"] if aim_id is not None else None
     bar, waiting = _staged(prog["crit"])
-    slipping = bool(rung >= 1 and rung in PROGRESS and not run_(rung)["passed"])
-    if nxt is not None and nxt > lim and rt["mode"] != "off" and not slipping:
+    slipping = bool(late is not None and not late["passed"])
+    if opens and not progs and rt["mode"] != "off" and not slipping:
         waiting = "the limit"                    # it may be ready; the operator holds it here
     if rt["mode"] != "off" and 1 not in done and _current(srv) is None:
         # no current right now (a fresh boot: nobody has spoken yet) -- say
-        # so: self cycles in a still world (#282), but rung 1 (feel the
+        # so: self cycles in a still world (#282), but feel itself (feel the
         # push) can't move until the world does; past it nothing waits on it
-        if not any(r.get("kind") == "cycle" and not r.get("still") for r in recs):
+        if aim == 1 and not any(r.get("kind") == "cycle" and not r.get("still") for r in recs):
             bar = 0.0
-        waiting = "the world"
+        if aim == 1:
+            waiting = "the world"
 
-    ladder = []
+    ladder = []                                  # the old ladder's view of the tree, by rung number
     for n, name in RUNG_NAMES.items():
-        if n not in LADDER:
-            state = "unbuilt"
-        elif n in done:
+        i = RUNG_ID.get(n)
+        if n == 0:
             state = "passed"
-        elif n > lim:
-            state = "capped" if (n - 1) in done else "locked"
+        elif i is None or not ACHIEVEMENTS[i]["built"]:
+            state = "unbuilt"
+        elif i in got:
+            state = "passed"
+        elif any(p not in got for p in ACHIEVEMENTS[i]["prereqs"]):
+            state = "locked"
         else:
-            state = "current" if (n - 1) in done else "locked"
-        ladder.append({"rung": n, "name": name, "state": state})
+            state = "current" if i in allowed else "capped"
+        ladder.append({"rung": n, "name": name, "state": state, "id": i})
     r1 = _rung1(recs)
     spl = _split(recs, tempo)
     pushes = [r for r in recs if r.get("kind") == "push"]
@@ -2530,7 +2815,9 @@ def status(srv) -> dict:
              "heard_age": round(now - heard, 3) if heard is not None else None}
     return {"mode": rt["mode"], "limit": lim, "born": born, "held": rt["held"],
             "cycles": sum(1 for r in recs if r.get("kind") == "cycle"),
-            "rung": rung, "rung_name": LADDER.get(rung), "next": nxt,
+            "rung": level, "level": level, "rung_name": ACHIEVEMENTS[latest]["name"] if latest else RUNG_NAMES[0],
+            "next": opens, "earned": [{k: e[k] for k in ("id", "name", "ts")} for e in earned],
+            "allow": allow(srv), "allowed": [i for i in BUILT if i in allowed], "aim": aim_id,
             "bar": round(bar, 4), "waiting_on": waiting, "skill": prog.get("skill", r1["skill"]),
             "skill_rung": aim, "skill_pass": SKILL_PASS.get(aim),          # #249: the bar the skill has to beat
             "skill_measured": any(v > 0 for v in (prog.get("crit") or {}).values()),   # ...and whether anything feeds it yet
