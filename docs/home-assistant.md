@@ -1,15 +1,15 @@
-# Membrane in Home Assistant
+# babyseat in Home Assistant
 
-The **Membrane** integration (HACS) installs the membrane package into Home
-Assistant, runs the seat as Home Assistant's own child process, and makes
+The **babyseat (membrane)** integration (HACS; babyseat was called membrane
+before 0.7) installs the babyseat package into Home Assistant, runs the seat as Home Assistant's own child process, and makes
 membrane home the face of Home Assistant — the way it runs on the boat it was
 built on.
 
 ## Install
 
 1. HACS → ⋮ → *Custom repositories* → `https://github.com/chedim/membrane`,
-   category *Integration*. Install **Membrane** and restart Home Assistant.
-2. *Settings → Devices & services → Add integration → Membrane*:
+   category *Integration*. Install **babyseat (membrane)** and restart Home Assistant.
+2. *Settings → Devices & services → Add integration → babyseat (membrane)*:
    - **Inside Home Assistant** — Home Assistant runs the seat. If it already has the
      Ollama integration, that server is used (its agent's model offered first);
      otherwise give Ollama's address. Pick a chat model and an embedding model.
@@ -25,7 +25,7 @@ free RAM for the seat.
 "Connect to a seat running elsewhere" is the mode when **you** own the seat:
 you run it on a machine you like (a Mac, a Linux box, even unrooted Android via
 Termux) with `membrane serve`, or in a container from the public image
-(`chedim/membrane`, [docker.md](docker.md); its :4096 is the URL to give), the
+(`chedim/babyseat`, [docker.md](docker.md); its :4096 is the URL to give), the
 integration only introduces itself over the network. Nothing is spawned inside Home Assistant, and **a restart of Home
 Assistant never restarts the seat** — its field and sessions keep running.
 
@@ -169,8 +169,11 @@ Home Assistant's own login is the only way in.
 - Restarted if it exits: at once after a run of 5 minutes or more (its own restart
   for new code), with a backoff (5 s, 30 s, 2 min) if it dies at boot; restarted if
   it stops answering for two minutes.
-- Updates come through HACS: a new integration version pins a new `membrane-seat`,
-  which Home Assistant installs.
+- Updates come through HACS: a new integration version pins a new `babyseat`
+  (`membrane-seat` before 0.7), which Home Assistant installs. The rename is
+  brand only: the integration's domain stays `membrane`, so its entities
+  (`select.membrane_seat`, `conversation.membrane_seat_<name>`, ...), panels,
+  automations and config entries are unchanged.
 
 ## Voice
 

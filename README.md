@@ -25,6 +25,14 @@ proxy, but that is the mechanism, not the point. The point is the field.
 > between lived memory (the inside) and the incoming world (the outside) that
 > absorbs what it has the variety for and escalates the rest. The measured
 > underpinnings are in [The math findings](docs/math-findings.md).
+>
+> **babyseat and membrane.** From 0.7 the whole project — the seat, its web UI,
+> self, the skill tree, the toybox, the Home Assistant integration, the Docker
+> image — is **babyseat** (`pip install babyseat`, `chedim/babyseat`).
+> **membrane** is its server part, the memory field + proxy, and keeps its name:
+> the `membrane` command, the `membrane` Python module, `MEMBRANE_*` variables,
+> `.membrane` directories and the Home Assistant domain are unchanged. The old
+> `membrane-seat` package and `chedim/membrane` image move over to babyseat.
 
 ---
 
@@ -126,7 +134,7 @@ use and keeps it out of paid products ([LICENSE](LICENSE)).
 
 ## Quick start
 
-Membrane runs three ways: standalone, in Docker, or inside Home Assistant. All
+babyseat runs three ways: standalone, in Docker, or inside Home Assistant. All
 need an [Ollama](https://ollama.com) server with one chat model and one
 embedding model (`ollama pull qwen3:8b && ollama pull mxbai-embed-large`, or
 any cloud model Ollama serves), and 1–3 GB of RAM for the seat.
@@ -134,9 +142,9 @@ any cloud model Ollama serves), and 1–3 GB of RAM for the seat.
 ### Standalone: its own web UI
 
 ```bash
-pip install membrane-seat          # or: uv tool install membrane-seat
+pip install babyseat               # or: uv tool install babyseat
 mkdir ~/bob && cd ~/bob
-membrane standalone                # opens http://localhost:4096/ in your browser
+babyseat                           # = membrane standalone; opens http://localhost:4096/
 ```
 
 You get membrane home: the field in 3D, the chat, and voice ("Hey Bob" — a new
@@ -159,7 +167,7 @@ docker run -d --name membrane \
   -e MEMBRANE_BACKEND=http://host.docker.internal:11434 \
   -e MEMBRANE_EMBED_MODEL=mxbai-embed-large \
   --stop-timeout 60 \
-  chedim/membrane:latest           # then open http://localhost:4096/
+  chedim/babyseat:latest           # then open http://localhost:4096/
 ```
 
 The same standalone seat in a container: the web UI on :4096 and the
@@ -274,10 +282,11 @@ MEMBRANE_REPO=/path/to/membrane bash install.sh
 ```bash
 docker run -d -p 4096:4096 -p 11500:11500 -v membrane-data:/data \
   -e MEMBRANE_EMBED_MODEL=mxbai-embed-large --stop-timeout 60 \
-  chedim/membrane:latest
+  chedim/babyseat:latest
 ```
 
-The public image `chedim/membrane` (amd64 + arm64, pushed on every release)
+The public image `chedim/babyseat` (amd64 + arm64, pushed on every release;
+`chedim/membrane` carries the same tags, its name before 0.7)
 runs `membrane standalone`: the web UI and serve API on :4096, the
 OpenAI-compatible proxy on :11500, Ollama reached at
 `http://host.docker.internal:11434` by default (on Linux add
@@ -549,9 +558,9 @@ lift "who 1,500 never-seen mentions were about" from MRR **0.210 → 0.539**
 | Doc | What's in it |
 |---|---|
 | [docs/standalone.md](docs/standalone.md) | **Standalone mode**: the web UI, the first run and the name, who can reach it, voice, `settings.json`, updates |
-| [docs/docker.md](docs/docker.md) | **membrane in Docker**: the public image `chedim/membrane`, run recipes (Docker Desktop, Linux, Compose), env, the `/data` volume, ports, stopping |
+| [docs/docker.md](docs/docker.md) | **babyseat in Docker**: the public image `chedim/babyseat`, run recipes (Docker Desktop, Linux, Compose), env, the `/data` volume, ports, stopping |
 | [docs/auth.md](docs/auth.md) | **JWT mode (optional, off by default).** Turning it on, minting tokens, giving a client its token, the cookie login, who-said-it from the token, the seat's internal token, rotation, the threat model |
-| [docs/home-assistant.md](docs/home-assistant.md) | **Membrane in Home Assistant** (HACS): setup, the UI takeover, the Assist agent and sensors, what the seat may do in the house |
+| [docs/home-assistant.md](docs/home-assistant.md) | **babyseat in Home Assistant** (HACS): setup, the UI takeover, the Assist agent and sensors, what the seat may do in the house |
 | [docs/entity-field.md](docs/entity-field.md) | **THE FIELD.** Events → entities → readers; the update rule; relations and claims; injection (full block / state diff); the gate + replay A/B; storage, sharing, the background mind; the operator/listener/plan tool lanes + the intent lane |
 | [docs/cliffhanger.md](docs/cliffhanger.md) | **The command language.** Entities as objects, ISA parents as classes, methods and calls, `{{self.*}}`/`{{name}}` binding — and the pointer to its own spec repo |
 | [docs/seat-first-2-tier.md](docs/seat-first-2-tier.md) | The seat-first two-tier field: local authoritative store, a published global tier on your terms |

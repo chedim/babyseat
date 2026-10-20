@@ -1,18 +1,19 @@
-# Standalone mode — membrane with its own web UI
+# Standalone mode — babyseat with its own web UI
 
-`membrane standalone` runs the seat with the web UI built in: membrane home (the
+`babyseat` (the same as `membrane standalone`; babyseat was called membrane
+before 0.7) runs the seat with the web UI built in: membrane home (the
 field in 3D, following you), the chat on glass over it, and voice. No Home
 Assistant, no opencode, no terminal UI — a browser is the client.
 
 ## Run it
 
 ```bash
-pip install membrane-seat              # or: uv tool install membrane-seat
+pip install babyseat                   # or: uv tool install babyseat
 mkdir ~/bob && cd ~/bob                # the seat's data lives in ./.membrane
-membrane standalone                    # opens http://localhost:4096/
+babyseat                               # = membrane standalone; opens http://localhost:4096/
 ```
 
-In a container instead: the image `chedim/membrane` runs this same mode (UI on
+In a container instead: the image `chedim/babyseat` runs this same mode (UI on
 :4096, proxy on :11500, the data on a `/data` volume); see [docker.md](docker.md).
 
 | Flag | Default | What |
@@ -102,10 +103,18 @@ works for chat too).
 
 ## Updates
 
-On an interactive launch, a PyPI install checks for a newer `membrane-seat`, shows
+On an interactive launch, a PyPI install checks for a newer `babyseat`, shows
 where the changes are listed, and asks before upgrading (then restarts into it).
 `membrane update` does the same by hand; `MEMBRANE_NO_UPDATE_CHECK=1` turns the
 check off. A git checkout updates with `git pull --ff-only` the same way.
+An install of the old `membrane-seat` (0.6 and before) moves over by itself: its
+updater finds the last `membrane-seat` release, which only installs `babyseat`
+(or by hand: `pip install -U membrane-seat`, or `pip install babyseat`). The
+`membrane` command, the `.membrane` data and the `MEMBRANE_*` variables stay.
+That last `membrane-seat` carries the same module as babyseat (pip installs
+babyseat first, then removes the old membrane-seat's files, so an empty package
+would take the module with it). Both stay installed; to drop the old name later:
+`pip uninstall membrane-seat && pip install --force-reinstall babyseat`.
 
 ## Bugs and ideas
 

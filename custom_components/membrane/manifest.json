@@ -1,6 +1,6 @@
 {
   "domain": "membrane",
-  "name": "Membrane",
+  "name": "babyseat (membrane)",
   "codeowners": [
     "@chedim"
   ],
@@ -15,7 +15,7 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/chedim/membrane/issues",
   "requirements": [
-    "membrane-seat==0.6.2"
+    "babyseat==0.6.2"
   ],
   "version": "0.6.2"
 }

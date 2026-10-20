@@ -1,0 +1,4 @@
+# the publish lane copies the repo's membrane/ here before building (#303)
+/membrane/
+/build/
+/*.egg-info/

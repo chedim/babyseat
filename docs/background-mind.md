@@ -192,7 +192,7 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   the limit existed gets limit 1. Off runs
   nothing and erases nothing. The mode (`<data dir>/self/mode.json`) and the
   record survive a restart. `watch` runs like `on` until there is a
-  babysitter to keep quiet.
+  nanny (the LLM that talks to self, never as it) to keep quiet.
 - **Rung 1, feel itself (the amoeba's problem).** Its only act moves its own
   position on the field, and the world pushes it while it moves: the field's
   **current** (`EntityField.current()`), which self does not control. Every

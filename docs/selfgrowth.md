@@ -138,7 +138,7 @@ curl -s -X POST http://127.0.0.1:4096/membrane/seat/control \
 
 (In [JWT mode](auth.md) add your token.) The older `{"self": "on" | "off" | "watch"}`
 still works: `on` with no limit set means feel itself only (limit 1). **`watch` currently runs
-exactly like `on`**; it exists for the babysitter the design calls for, which
+exactly like `on`**; it exists for the nanny the design calls for (the LLM that talks to self, never as it), which
 is not built yet, and the viewer only tags the amoeba "watched".
 
 ### The runaway guard

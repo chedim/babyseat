@@ -1,4 +1,5 @@
-# membrane seat image (chedim/membrane): `membrane standalone` -- the serve
+# babyseat image (chedim/babyseat; also pushed as chedim/membrane, the
+# project's name before 0.7): `membrane standalone` -- the serve
 # API + web UI on :4096 and the OpenAI-compatible memory proxy on :11500.
 #
 # A PUBLIC image: it holds the installed package and nothing else. Every
@@ -15,8 +16,8 @@
 FROM python:3.12-slim
 
 ARG VERSION=dev
-LABEL org.opencontainers.image.title="membrane" \
-      org.opencontainers.image.description="membrane: a memory proxy between AI clients and the model server" \
+LABEL org.opencontainers.image.title="babyseat" \
+      org.opencontainers.image.description="babyseat (formerly membrane): a seat for AI with its own web UI and membrane, its memory field + proxy" \
       org.opencontainers.image.source="https://github.com/chedim/membrane" \
       org.opencontainers.image.url="https://github.com/chedim/membrane" \
       org.opencontainers.image.documentation="https://github.com/chedim/membrane/blob/main/docs/docker.md" \

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# membrane installer -- curl | bash
+# babyseat (formerly membrane) installer -- curl | bash
 #
 #   curl -fsSL https://raw.githubusercontent.com/chedim/membrane/main/install.sh | bash
 #
-# Installs the `membrane` CLI globally (user-local, no sudo):
+# Installs the `membrane` and `babyseat` CLIs globally (user-local, no sudo):
 #   1. uv tool install  (preferred, if uv is on PATH)
 #   2. fallback: a managed venv at ~/.membrane/venv + `membrane` on PATH
 #
@@ -21,7 +21,7 @@ set -eo pipefail
 REPO_URL="${MEMBRANE_REPO:-https://github.com/chedim/membrane.git}"
 case "$REPO_URL" in
   /*) PIP_SPEC="$REPO_URL" ;;                    # local dir
-  *)  PIP_SPEC="membrane @ git+$REPO_URL" ;;
+  *)  PIP_SPEC="babyseat @ git+$REPO_URL" ;;   # the distribution's name (#303)
 esac
 
 BLUE='\033[1;34m'; GREEN='\033[1;32m'; YELLOW='\033[1;33m'; OFF='\033[0m'
@@ -53,6 +53,7 @@ install_with_venv() {
 
   mkdir -p "$BIN_DIR"
   ln -sfn "$VENV/bin/membrane" "$BIN_DIR/membrane"
+  ln -sfn "$VENV/bin/babyseat" "$BIN_DIR/babyseat"
   ok "membrane CLI installed -> $BIN_DIR/membrane"
 
   case ":$PATH:" in
@@ -74,6 +75,7 @@ if ! "$BIN_DIR/membrane" --help >/dev/null 2>&1 \
 fi
 
 ok "done. in any project directory:"
+ok "  babyseat            # the seat with its own web UI (= membrane standalone)"
 ok "  membrane opencode   # field-backed opencode; auto-installs skills + .membrane/ there on first run"
 ok "  membrane doctor     # what's installed/running"
 ok "  MEMBRANE_NO_AUTOINSTALL=1 membrane opencode   # never touch the project dir"

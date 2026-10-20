@@ -6,8 +6,10 @@ Assistant domain `membrane` keep their names, so nobody's setup breaks.
 
   - PyPI: the distribution is `babyseat`, with a `babyseat` console script that is
     `membrane standalone`; `membrane` stays.
-  - a last `membrane-seat` release is a SHIM (no code, depends on
-    babyseat==<same version>) so `pip install -U membrane-seat` moves people over;
+  - a last `membrane-seat` release is a SHIM (depends on babyseat==<same version>)
+    so `pip install -U membrane-seat` moves people over; it carries the same
+    module and `membrane` script so the upgrade's uninstall of the old
+    membrane-seat cannot take them away;
     the publish lane builds and uploads both, and refuses a shim whose version
     is not the package's.
   - Docker: the image lane pushes chedim/babyseat AND chedim/membrane.
@@ -57,17 +59,30 @@ class TestTheShim(unittest.TestCase):
     def test_it_depends_on_babyseat_at_exactly_that_version(self):
         self.assertEqual(self.proj["dependencies"], [f"babyseat=={_project()['version']}"])
 
-    def test_it_ships_no_code(self):
+    def test_it_carries_the_module_and_the_membrane_command(self):
+        # NOT an empty package: `pip install -U membrane-seat` over a 0.6 install
+        # installs babyseat FIRST, then uninstalls the old membrane-seat -- whose
+        # RECORD lists membrane/* and bin/membrane, so an empty shim leaves
+        # neither (seen in a fresh venv, #303). The shim re-writes the same
+        # module (the publish lane copies membrane/ in before building) and the
+        # `membrane` script; `babyseat` stays babyseat's alone.
         st = self.cfg["tool"]["setuptools"]
-        self.assertEqual(st.get("packages"), [])
-        self.assertEqual(st.get("py-modules"), [])
-        self.assertNotIn("scripts", self.proj)
+        main = tomllib.loads((ROOT / "pyproject.toml").read_text())["tool"]["setuptools"]
+        self.assertEqual(st["packages"], ["membrane"])
+        self.assertEqual(st["package-data"], main["package-data"])
+        self.assertEqual(self.proj["scripts"], {"membrane": "membrane.cli:main"})
+
+    def test_its_module_copy_is_never_committed(self):
+        gi = (ROOT / "shim" / "membrane-seat" / ".gitignore").read_text().split()
+        self.assertIn("/membrane/", gi)
 
     def test_its_readme_and_license_are_its_own_files(self):
         here = SHIM.parent
         self.assertTrue((here / self.proj["readme"]).is_file())
         for lf in self.proj["license-files"]:
             self.assertTrue((here / lf).is_file(), lf)
+        # the shim's LICENSE is the project's, byte for byte (test_license guards that one)
+        self.assertEqual((here / "LICENSE").read_bytes(), (ROOT / "LICENSE").read_bytes())
 
 
 class TestThePublishLane(unittest.TestCase):
@@ -77,6 +92,10 @@ class TestThePublishLane(unittest.TestCase):
     def test_it_builds_both_distributions_into_one_dist(self):
         self.assertIn("python -m build --outdir dist", self.wf)
         self.assertIn("python -m build shim/membrane-seat --outdir dist", self.wf)
+        # the module goes into the shim before it builds (and nothing else does)
+        self.assertIn("cp -R membrane shim/membrane-seat/membrane", self.wf)
+        self.assertLess(self.wf.index("cp -R membrane shim/membrane-seat/membrane"),
+                        self.wf.index("python -m build shim/membrane-seat"))
         self.assertIn("packages-dir: dist", self.wf)
 
     def test_it_refuses_a_shim_that_is_not_the_version(self):
