@@ -127,8 +127,8 @@ BUILT_AT = {
     "mirror": {"pr": 314, "merged": _utc(2026, 10, 20, 13, 21, 13)},
     # speak (#311): its turns carry words from its record
     "speak": {"pr": 313, "merged": _utc(2026, 10, 20, 12, 55, 39)},
-    # change itself (#320): the dream and its test -- the PR's opening time until its merge's is set
-    "change": {"pr": 326, "merged": _utc(2026, 10, 20, 20, 7, 47)},
+    # change itself (#320): the dream and its test
+    "change": {"pr": 326, "merged": _utc(2026, 10, 20, 20, 21, 28)},
 }
 RESTART_S = 3 * SL.PACE_S     # a record gap this long is a restart: the loop writes a line every PACE_S
 WALL_WHY = "no built skill to learn: {next} not built yet"
