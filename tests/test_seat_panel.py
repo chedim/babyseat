@@ -65,13 +65,12 @@ class TestSeatPanel(unittest.TestCase):
         srv, r, seen = _seat()
         sid = r.sessions.create(title="chat")["id"]
         r._busy = {sid: 1}                                       # no rounds fire here
-        out = SP.control(srv, {"paused": True, "loops_max": 2, "session": sid, "role": "predict", "auto": True})
+        out = SP.control(srv, {"paused": True, "loops_max": 2, "session": sid, "auto": True})
         self.assertTrue(srv.paused)
         self.assertEqual(srv.loops.max, 2)
-        self.assertEqual(V.role(r, sid), "predict")
         self.assertTrue(V.auto_on(r, sid))
         self.assertTrue(out["state"]["paused"])
-        self.assertEqual(out["state"]["auto"][sid]["role"], "predict")
+        self.assertTrue(out["state"]["auto"][sid]["on"])
         kinds = [e["kind"] for e in srv.entity_store.docs[MEMBRANE_NS + "presence"].properties["events"]]
         self.assertIn("paused", kinds)
         self.assertIn("auto-chat-on", kinds)
@@ -109,7 +108,6 @@ class TestSeatPanel(unittest.TestCase):
         srv, r, _ = _seat()
         sid = r.sessions.create(title="chat")["id"]
         r._auto = {sid: {"rounds": 1, "mode": "explore"}}
-        V.role_set(r, sid, "predict")
         from _ef_fakes import FakeEmbedder
         srv.membrane = types.SimpleNamespace(embedder=FakeEmbedder())
         old = V.AUTO_PAUSE_S

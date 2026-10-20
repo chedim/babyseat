@@ -4,7 +4,7 @@ uptime and a beat count, nothing else). The seat's presence entity
 (membrane::presence, the one the roster already reads) now carries:
 
   state     refreshed every REFRESH_S: paused, the loops (running / cap),
-            auto-chat and membrane's role per session, the active models,
+            auto-chat per session, the active models,
             the seat's memory and the phone's free memory, live stream
             clients, failing scripts
   events    the last EVENTS_KEEP things that happened to the seat -- a boot,
@@ -15,7 +15,7 @@ uptime and a beat count, nothing else). The seat's presence entity
   controls  applied by the seat itself, operator-only (POST
             /membrane/seat/control, an HA admin through the relay):
             paused (the one switch every acting lane honours), loops_max,
-            auto-chat / role per session, the self loop (off / on /
+            auto-chat per session (a {role} is ignored: #318), the self loop (off / on /
             watch, #161; self_loop.py), accepting an achievement self
             earned (#299: {"accept": id}, which opens what it leads to;
             the record says who, caller()) and self's name on this seat
@@ -35,7 +35,7 @@ REFRESH_S = 15.0
 EVENTS_KEEP = 20
 MEM_LOW_MB = 350             # the phone's MemAvailable under this: pressure
 RSS_HIGH_MB = 2300           # the seat itself over this: pressure
-CONTROLS = ("paused", "loops_max", "auto", "role", "self", "accept", "self_limit", "self_name")
+CONTROLS = ("paused", "loops_max", "auto", "self", "accept", "self_limit", "self_name")
 CALLER_MAX = 80              # #299: the longest caller name a record line keeps
 
 
@@ -143,10 +143,10 @@ def state(srv) -> dict:
     rss, avail = _mem()
     auto = {}
     if r is not None:
-        for sid in set((getattr(r, "_auto", None) or {})) | set((getattr(r, "_voice_role", None) or {})):
+        for sid in set((getattr(r, "_auto", None) or {})):
             s = V.auto_state(r, sid)
             title = str(((r.sessions.get(sid) or {}).get("title")) or sid)[:40] if getattr(r, "sessions", None) else sid
-            auto[sid] = {"title": title, "on": s["on"], "mode": s["mode"], "role": s["role"], "rounds": s["rounds"]}
+            auto[sid] = {"title": title, "on": s["on"], "mode": s["mode"], "rounds": s["rounds"]}
     failing = 0
     try:
         est = _est(srv)
@@ -315,8 +315,6 @@ def control(srv, body: dict, by: str = "operator") -> dict:
             note(srv, "self-name", value=n, by=by)
     sid = str(body.get("session") or "")
     if sid and r is not None and r.sessions.get(sid) is not None:
-        if body.get("role"):
-            done["role"] = V.role_set(r, sid, str(body["role"]))
         if "auto" in body:
             done["auto"] = V.auto_set(r, sid, bool(body["auto"]), str(body.get("mode") or "explore"))["on"]
     refresh(srv)

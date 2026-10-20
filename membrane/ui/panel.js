@@ -285,7 +285,7 @@ function applyEvent(st, ev) {
       st.status = { type: "idle" };
       return true;
     case "membrane.auto":
-      st.auto = { on: !!props.on, rounds: props.rounds || 0, mode: props.mode || "explore", role: props.role || "babble" };
+      st.auto = { on: !!props.on, rounds: props.rounds || 0, mode: props.mode || "explore" };
       return true;
     case "membrane.say": {
       // Argus speaking (voice:out): the voice log keeps it; the page says it
@@ -426,8 +426,6 @@ function connLabel(live, everLive, since, now, polling) {
   return polling ? "polling" : "offline";
 }
 
-/** Membrane's role, its own switch beside auto-chat: babble (its lines go to
- *  the LLM) or predict (the LLM never hears it; it guesses each turn). */
 /** The voice log: what was said aloud, oldest first -- the person's spoken
  *  messages (voiceIn rows), Argus's voice:out lines, membrane's own lines. */
 function voiceLogItems(rows, said, voiceLines) {
@@ -1607,11 +1605,12 @@ function toyPopoverHtml(t, res) {
   return out.join("");
 }
 
-function roleNext(auto) { return (auto && auto.role) === "predict" ? "babble" : "predict"; }
-function roleView(auto) {
-  return (auto && auto.role) === "predict"
-    ? { icon: "🔮", label: "membrane predicts", title: "membrane predicts: the LLM never hears it; in auto-chat the LLM works on by itself -- click: babble" }
-    : { icon: "💬", label: "membrane babbles", title: "membrane babbles: in auto-chat its lines go to the LLM -- click: predict (unheard)" };
+/** The session auto-chat acts on: the open chat, or -- while a mind's
+ *  read-only view is shown (sid "mind:<name>") -- the person's own chat
+ *  behind it (#318: membrane home's ▶/⏸ posted to /session/mind:…/auto). */
+function autoSid(sid, mindPrev) {
+  if (!sid) return null;
+  return String(sid).startsWith("mind:") ? (mindPrev || null) : sid;
 }
 
 /** Membrane's guess of what Argus would DO this turn (predict.py: virtual,
@@ -1804,7 +1803,7 @@ function offlineNotice(data, zoo) {
     : { text: name + " is offline", switchTo: null };
 }
 
-const AiPanelLogic = { offlineNotice, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, roleNext, roleView, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
+const AiPanelLogic = { offlineNotice, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, autoSid, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
                        attrBar, hoursText, curveGeom, curveSvg, timeParts, sheetGrowth, sheetTime, selfSheetHtml, SHEET_SECTIONS, SHEET_OPEN,
                        toyGlyph, toyBadge, toyDockItem, toyDockHtml, toyPopoverHtml, BADGE_S, skillStatHtml, skillSigned,
                        levelUpText, unlockText, sheetToys, TOY_ICONS,
@@ -2069,9 +2068,7 @@ function definePanel() {
             <select class="modelpick" title="Model (what membrane sees on Ollama)"><option value="">model…</option></select>
             <span class="pill state">…</span>
             <button class="btn icon voicebtn" title="membrane's own voice (show / hide)">🗣</button>
-            <button class="btn icon llmbtn" title="the LLM (off: talk to membrane alone)">🤖</button>
-            <button class="btn icon autobtn" title="auto-chat: membrane and the LLM talk; you can join any time">⟳</button>
-            <button class="btn icon rolebtn" title="membrane's role: babble (it talks to the LLM) or predict (it guesses the LLM, unheard)">💬</button>
+            <button class="btn icon autobtn" title="auto-chat: the LLM works on by itself; you can join any time">⟳</button>
             <button class="btn icon selfsleep" aria-pressed="false" title="${escAttr(SELF_NAME)} (#161): asleep or awake -- tap to switch">💤</button>
             <span class="selfstat" title="where ${escAttr(SELF_NAME)} is now: its rung, the bar toward the next, what it waits on"></span>
             <button class="btn icon thinkbtn" title="the think dial: the reasoning the cards do (auto = forward verbatim)">💭</button>
@@ -2107,8 +2104,8 @@ function definePanel() {
         // the operator's ask): home.js's top bar carries it beside the
         // chat button as a ▶/⏸; the panel's own node stays (hidden --
         // never listed) so its listener and state keep working.
-        for (const [cls, label] of [["agent", null], ["modelpick", null], ["voicebtn", "membrane's voice"], ["llmbtn", "LLM replies"],
-                                    ["rolebtn", "membrane babbles"], ["selfsleep", SELF_NAME + " asleep"], ["selfstat", null], ["thinkbtn", "think"], ["jsbtn", "JS scripting: off"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
+        for (const [cls, label] of [["agent", null], ["modelpick", null], ["voicebtn", "membrane's voice"],
+                                    ["selfsleep", SELF_NAME + " asleep"], ["selfstat", null], ["thinkbtn", "think"], ["jsbtn", "JS scripting: off"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
           const el = app.querySelector("." + cls);
           if (!el) continue;
           if (label) {
@@ -2159,8 +2156,6 @@ function definePanel() {
       });
       this._autoBtn = $(".autobtn");
       this._autoBtn.addEventListener("click", (ev) => this._toggleAuto(ev && ev.shiftKey ? "teach" : "explore").catch(() => {}));
-      this._roleBtn = $(".rolebtn");
-      this._roleBtn.addEventListener("click", () => this._toggleRole().catch(() => {}));
       this._jsBtn = $(".jsbtn");
       this._jsBtn.addEventListener("click", () => this._toggleJs().catch(() => {}));
       this._jsTab = "tab_" + Math.random().toString(36).slice(2, 10);
@@ -2173,15 +2168,6 @@ function definePanel() {
       this._selfSleep = $(".selfsleep");                           // #299: sleep / wake (the 🌱 chooser is gone)
       this._selfStat = $(".selfstat");
       this._selfSleep.addEventListener("click", () => this._setSelfMode(!selfView(this._seat).on).catch(() => {}));
-      this._llmBtn = $(".llmbtn");
-      this._llmOn = true;                 // per page view
-      this._llmBtn.addEventListener("click", () => {
-        this._llmOn = !this._llmOn;
-        this._llmBtn.style.opacity = this._llmOn ? "1" : ".4";
-        this._llmBtn.title = this._llmOn ? "the LLM (off: talk to membrane alone)" : "LLM off: membrane answers alone";
-        this._ta.placeholder = this._llmOn ? "Ask the brain…" : "Talk to membrane (no LLM)…";
-        if (!this._llmOn && !this._voiceOn) this._voiceBtn.click();
-      });
       this._thinkBtn = $(".thinkbtn");
       this._think = "";                   // the dial as the seat holds it ("" until the models GET)
       this._paintThink();
@@ -2916,8 +2902,7 @@ function definePanel() {
       if (!text || !this._sid) return;
       this.dispatchEvent(new CustomEvent("ai-sent", { bubbles: true, composed: true }));
       if (!this._busy()) { this._chat.status = { type: "busy", since: Date.now() }; this._paintStatus(); this._schedule(); }
-      const body = Object.assign({ agent: this._agent, voice: true, parts: [{ type: "text", text: "🎙 " + text }] },
-        this._llmOn ? {} : { membrane_only: true });
+      const body = { agent: this._agent, voice: true, parts: [{ type: "text", text: "🎙 " + text }] };
       if (opts.stream) { body.stream = opts.stream; body.final = !!opts.final; }
       const r = await this._api(SERVE + "/session/" + this._sid + "/prompt_async", {
         method: "POST", body: JSON.stringify(body),
@@ -2944,7 +2929,6 @@ function definePanel() {
       try {
         const r = await this._api(SERVE + "/session/" + this._sid + "/prompt_async", {
           method: "POST", body: JSON.stringify(Object.assign({ agent: this._agent, parts: [{ type: "text", text }] },
-            this._llmOn ? {} : { membrane_only: true },
             (() => { const mf = modelField(this._pick, this._sessionModel, this._seatModel());
                      if (mf) this._sessionModel = mf.modelID; return mf ? { model: mf } : {}; })())),
         });
@@ -3105,8 +3089,8 @@ function definePanel() {
       const who = info.from === "self" ? "🌱 " + SELF_NAME
         : [info.agent || info.mode, info.modelID].filter(Boolean).join(" · ");
       let html = who ? '<div class="who">' + escText(who) + "</div>" : "";
-      // PREDICT MODE: membrane's guess of each move, greyed, right before the move it guessed
-      const ph = (this._chat && (this._chat.auto || {}).role === "predict" && (this._chat.phantoms || {})[info.id]) || null;
+      // membrane's guess of each move (predict.py), greyed, right before the move it guessed
+      const ph = (this._chat && (this._chat.phantoms || {})[info.id]) || null;
       let k = 0;
       for (const p of row.parts) {
         if (!p || typeof p !== "object") continue;
@@ -3157,9 +3141,16 @@ function definePanel() {
     }
 
     async _toggleAuto(mode) {
-      if (!this._sid || !this._chat) return;
-      const on = !(this._chat.auto && this._chat.auto.on);
-      const r = await this._api(SERVE + "/session/" + this._sid + "/auto",
+      // the person's chat, even while a mind's read-only view is shown (#318)
+      const sid = autoSid(this._sid, this._mind ? this._mindPrev : null);
+      if (!sid || !this._chat) return;
+      let cur = sid === this._sid ? this._chat.auto : null;
+      if (sid !== this._sid) {
+        const g = await this._api(SERVE + "/session/" + sid + "/auto").catch(() => null);
+        cur = g && g.ok ? g.data : null;
+      }
+      const on = !(cur && cur.on);
+      const r = await this._api(SERVE + "/session/" + sid + "/auto",
         { method: "POST", body: JSON.stringify({ on, mode: mode || "explore" }) });
       if (r.ok && r.data) { this._chat.auto = r.data; this._paintAuto(); }
     }
@@ -3361,28 +3352,13 @@ function definePanel() {
       return r && r.ok && r.data && Array.isArray(r.data.lines) ? r.data.lines : null;
     }
 
-    async _toggleRole() {
-      if (!this._sid || !this._chat) return;
-      const role = roleNext(this._chat.auto);
-      const r = await this._api(SERVE + "/session/" + this._sid + "/auto",
-        { method: "POST", body: JSON.stringify({ role }) });
-      if (r.ok && r.data) { this._chat.auto = r.data; this._paintAuto(); }
-    }
-
     _paintAuto() {
       const a = (this._chat && this._chat.auto) || { on: false };
-      if (this._roleBtn) {
-        const v = roleView(a);
-        const ico = this._roleBtn.querySelector(".ico"), lbl = this._roleBtn.querySelector(".lbl");
-        if (ico) ico.textContent = v.icon; else this._roleBtn.textContent = v.icon;
-        if (lbl) lbl.textContent = v.label;
-        this._roleBtn.title = v.title;
-      }
       if (!this._autoBtn) return;
       this._autoBtn.style.opacity = a.on ? "1" : ".4";
       this._autoBtn.classList.toggle("spinning", !!a.on);
-      this._autoBtn.title = a.on ? "auto-chat ON: " + (a.role === "predict" ? "the LLM works on by itself, membrane predicts" : (a.mode || "explore")) + " (round " + (a.rounds || 0) + ") -- click or Stop to end"
-                                 : "auto-chat: click = explore together, shift-click = teach; you can join any time";
+      this._autoBtn.title = a.on ? "auto-chat ON: the LLM works on by itself (round " + (a.rounds || 0) + ") -- click or Stop to end"
+                                 : "auto-chat: the LLM works on by itself, round after round; you can join any time";
     }
 
     async _voiceTeach(vid, body) {

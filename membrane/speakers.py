@@ -36,7 +36,7 @@ ID_PREFIX = "[user#"
 _ID_LINE = re.compile(r"^\s*\[user#([a-z0-9][a-z0-9-]{0,79}): ([^\]\n]{1,80})\][ \t]*\n?")
 SEAT = ("seat:self", "seat")
 VOICE = ("seat:voice", "voice")
-VOICE_PREFIX = "[membrane voice] "         # voice.py's auto-chat turns
+VOICE_PREFIX = "[membrane voice] "         # old auto-chat voice rows (the babble role, gone in #318)
 OPERATOR = ("person:operator", "operator")
 
 
