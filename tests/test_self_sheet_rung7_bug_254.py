@@ -91,7 +91,7 @@ class TestRung7RestartMark(unittest.TestCase):
         self.assertIsNone(s["quest"].get("note"))                  # ...which never graded the LLM
         # #300: the note rides on the expect skill's card while it is being learned
         self.assertNotIn("expect", [k["id"] for k in s["skills"]])      # the limit (7) holds it: not on the card
-        SL._rt(srv)["limit"] = 8
+        SL._rt(srv)["isolate"] = SL._limit_ids(8)                    # #299: the limit is gone; rungs 1..8 run
         k = {x["id"]: x for x in S._sheet(srv, NOW)["skills"]}["expect"]
         self.assertEqual(k["note"], note)
 

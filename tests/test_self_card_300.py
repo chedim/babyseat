@@ -11,7 +11,8 @@ talking in rungs.
    no longer holds: a short slipping line.
 3. The header says "Lv N · <latest earned skill>", never "rung".
 4. `expect` displays as "expect a reply", `turns` as "time its turn" (ids stay).
-5. An allowed open skill in the sheet's tree never waits on "the limit".
+5. An allowed open skill in the sheet's tree never waits on "the limit" (#299:
+   the limit is gone; a skill only the operator's accept holds says so).
 """
 import json
 import shutil
@@ -222,11 +223,17 @@ class TestTreeLabel(unittest.TestCase):
             self.assertEqual(t["turns"]["state"], "open")
             self.assertEqual(t["turns"]["waiting_on"], "pushes", st)
 
-    def test_one_the_limit_holds_still_says_so(self):
-        srv = _tree_seat(rungs=(1, 2, 3, 4, 5, 6), limit="all")
+    def test_one_the_accept_holds_says_so(self):            # #299: the limit's job is the operator's accept
+        srv = _tree_seat(rungs=(1, 2, 3, 4, 5), lines=[{"ts": 9.5, "kind": "accept_migrated",
+                                                         "ids": ["feel", "reach", "kinds", "patience", "shift"]},
+                                                        {"ts": 9.6, "kind": "achieve", "id": "meet", "rung": 6, "skill": 1.0}])
         recs = SL._read(srv)
-        t = {n["id"]: n for n in SH.tree(recs, {"allow": "expect", "allowed": ["reach", "meet", "expect"], "mode": "on"})}
-        self.assertEqual(t["turns"]["waiting_on"], "the limit")
+        t = {n["id"]: n for n in SH.tree(recs, SL.status(srv))}
+        self.assertEqual(t["turns"]["state"], "locked")
+        self.assertEqual(t["turns"]["waiting_on"], "your accept of meet an other")
+        k = {x["id"]: x for x in SH.sheet(srv, fresh=True)["skills"]}
+        self.assertTrue(k["turns"]["awaiting_accept"] and k["expect"]["awaiting_accept"])   # on the card, saying so
+        self.assertEqual(k["turns"]["waiting_on"], "your accept of meet an other")
 
 
 # ---- the page --------------------------------------------------------------------------

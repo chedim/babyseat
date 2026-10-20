@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import chat_io as CIO  # noqa: E402
 from membrane import self_loop as SL  # noqa: E402
+from _self_cap import cap  # noqa: E402
 from membrane import watch_agents as WA  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
 
@@ -115,10 +116,10 @@ def _seat(names=(), limit=6, passed=(1, 2, 3, 4, 5)):
         est.docs[e.eid] = e
     CIO.entity_in(srv, CIO.OPERATOR)                   # the other self understands (a real reach target)
     SL.bind(srv)
-    SL.set_limit(srv, 1)
+    cap(srv, 1)
     for r in passed:
         SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9, "ladder": SL.LADDER_V})
-    SL.set_limit(srv, limit)
+    cap(srv, limit)
     return srv
 
 

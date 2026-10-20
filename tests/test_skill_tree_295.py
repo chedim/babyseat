@@ -7,8 +7,10 @@ achievement's pass switches on (each edge says why). A test runs whenever its
 prerequisites are earned; a pass appends {"kind": "achieve", "id": ...}.
 The record is never rewritten: old `rung` lines count as their achievements
 (rung_void and the #258 ladder filter as before). Level = achievements
-earned. The growth limit allows up to an achievement (it + its prerequisite
-closure), off or all; a numeric limit N is the closure of rungs 1..N.
+earned. #299: the growth limit gave way to acceptance (tests/test_accept_299.py);
+the deprecated limit -- an achievement (it + its prerequisite closure), off,
+all, or a number N (the closure of rungs 1..N) -- now bulk-accepts what is
+earned in that closure.
 """
 import json
 import os
@@ -164,47 +166,54 @@ def test_a_root_needs_nothing_and_a_child_waits_for_its_parent():
 
 
 def test_the_reply_checks_run_for_either_sibling():
-    srv = _seat(rungs=(2, 6), limit="expect")                       # expect allowed, turns not
-    assert SL._available(srv, 8) and not SL._available(srv, 7)
+    srv = _seat(rungs=(2, 6))                                       # meet earned and accepted: both siblings open
+    assert SL._available(srv, 8) and SL._available(srv, 7)
     assert SL._replies(srv)
-    assert not SL._toy_turns(srv)                                  # the ball's turns are take turns' practice
-    srv = _seat(rungs=(2, 6), limit="meet")
-    assert not SL._replies(srv)
+    assert SL._toy_turns(srv)                                      # the ball's turns are take turns' practice
+    srv = _seat(rungs=(2,), lines=[{"ts": 2.5, "kind": "accept_migrated", "ids": ["reach"]},
+                                   {"ts": 9.0, "kind": "achieve", "id": "meet", "rung": 6, "skill": 1.0}])
+    assert not SL._replies(srv)                                    # #299: meet earned, not accepted: no reply checks
+    SL.accept(srv, "meet")
+    assert SL._replies(srv)
 
 
-# ---- 4. the growth limit --------------------------------------------------------------------
+# ---- 4. the growth limit, deprecated (#299): a bulk accept of its closure -------------------
 
-def test_the_limit_is_an_achievement_and_its_closure():
-    srv = _seat()
-    assert SL.set_limit(srv, "expect")
-    assert SL._allowed(srv) == {"reach", "meet", "expect"}
-    assert SL.status(srv)["allow"] == "expect"
-    assert SL.set_limit(srv, "all") and SL._allowed(srv) == set(BUILT)
-    assert not SL.set_limit(srv, "nonsense") and not SL.set_limit(srv, "mirror")   # unbuilt: nothing to allow
-    assert SL.set_limit(srv, 5) and SL._allowed(srv) == {"feel", "reach", "kinds", "patience", "shift"}
-    assert SL.set_limit(srv, 8) and SL.allow(srv) == "all"         # today's seats: every built achievement
+def _accepts(srv):
+    return [r["id"] for r in SL._read(srv) if r.get("kind") == "accept"]
+
+
+def test_the_limit_accepts_an_achievement_and_its_closure():
+    srv = _seat(rungs=(1, 2, 6), lines=[{"ts": 9.5, "kind": "accept_migrated", "ids": []}])
+    assert SL.status(srv)["awaiting"] == ["feel", "reach", "meet"]
+    assert SL.set_limit(srv, "expect")                             # its closure: reach, meet, expect
+    assert _accepts(srv) == ["reach", "meet"]                      # the earned ones in it, in tree order
+    assert SL.set_limit(srv, "all") and _accepts(srv) == ["reach", "meet", "feel"]
+    assert not SL.set_limit(srv, "nonsense") and not SL.set_limit(srv, "mirror")   # unbuilt: nothing to accept
+    assert SL.set_limit(srv, 5) and SL.set_limit(srv, 8)           # nothing left to accept: no new lines
+    assert len(_accepts(srv)) == 3
     assert SL.set_limit(srv, "off") and SL.mode(srv) == "off" and SL._allowed(srv) == set()
 
 
-def test_a_saved_numeric_limit_migrates():
+def test_a_saved_limit_is_ignored_and_the_mode_kept():
     srv = _seat()
     d = SL._dir(srv)
-    (d / "mode.json").write_text(json.dumps({"mode": "on", "limit": 8}))
-    assert SL._load_mode(srv)[1] == "all"
-    (d / "mode.json").write_text(json.dumps({"mode": "on", "limit": 3}))
-    m, lim = SL._load_mode(srv)
-    assert set(lim) == {"feel", "reach", "kinds"}
-    SL.set_limit(srv, "expect")
-    doc = json.loads((d / "mode.json").read_text())
-    assert doc["allow"] == "expect" and doc["limit"] == 8          # the number stays for an older seat
+    (d / "mode.json").write_text(json.dumps({"mode": "on", "limit": 3, "allow": ["feel", "reach", "kinds"]}))
+    assert SL._load_mode(srv) == "on"
+    SL.set_mode(srv, "watch")
+    assert json.loads((d / "mode.json").read_text())["mode"] == "watch"
 
 
-def test_a_test_outside_the_limit_does_not_earn():
-    srv = _seat(rungs=(1, 2, 3, 4, 5, 6), limit=7, lines=_expect_passes_turns_not())
+def test_a_test_under_an_unaccepted_parent_does_not_earn():
+    srv = _seat(rungs=(1, 2, 3, 4, 5), lines=[{"ts": 9.5, "kind": "accept_migrated",
+                                               "ids": ["feel", "reach", "kinds", "patience", "shift"]},
+                                              {"ts": 9.6, "kind": "achieve", "id": "meet", "rung": 6, "skill": 1.0}]
+                + _expect_passes_turns_not())
     SL._open_rungs(srv)
-    assert not [r for r in SL._read(srv) if r.get("kind") == "achieve"]
+    assert not [r for r in SL._read(srv) if r.get("kind") == "achieve" and r.get("id") != "meet"]
     tree = {t["id"]: t for t in SS.compute(srv)["tree"]}
-    assert tree["expect"]["state"] == "open" and tree["expect"]["waiting_on"] == "the limit"
+    assert tree["expect"]["state"] == "locked" and tree["expect"]["waiting_on"] == "your accept of meet an other"
+    assert tree["meet"]["state"] == "earned" and tree["meet"]["accepted"] is False
 
 
 # ---- 5. the data contract ----------------------------------------------------------------------

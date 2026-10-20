@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import test_self_rung7_self_predicts_254 as P  # noqa: E402  (its synthetic others)
 import test_self_sheet_249 as S  # noqa: E402  (a seat that lived through the bugs)
 from membrane import self_loop as SL  # noqa: E402
+from _self_cap import cap  # noqa: E402
 
 OLD7 = 100.0                 # the old scorer's rung 7 pass
 FIX = 200.0                  # the fixed rung 7's first cycle
@@ -82,7 +83,7 @@ def test_the_new_scorer_can_pass_later():
     srv = _seat_with_old_pass()
     SL._mark_rung7_restart(srv, FIX)
     SL._append(srv, {"ts": FIX + 1, "kind": "rung", "rung": 7, "skill": 0.2, "ladder": SL.LADDER_V})
-    SL.set_limit(srv, 8)
+    cap(srv, 8)
     for r in P._recs(P._sessions(3)):                          # an other self can learn, after the fix
         SL._append(srv, {**r, "ts": r["ts"] + FIX})
     SL._open_rungs(srv)

@@ -474,29 +474,24 @@ function setSelfName(n) {
   return SELF_NAME;
 }
 
-/** #161: the growth limit -- the chooser of the top rung self may reach (0:
- *  off) -- and its rung + exp bar. Below the limit self still earns each rung;
- *  above it nothing opens. Unbuilt rungs are listed, disabled. */
+/** #161 / #299: self's sleep and wake -- a plain on/off toggle (the 🌱
+ *  growth-limit chooser it was gave way to acceptance: an earned achievement
+ *  opens what it leads to once the operator accepts it) -- and its rung +
+ *  exp bar. `on`: awake; `icon` / `label` / `title`: the toggle's face. */
 function selfView(st) {
-  const s = (st && st.self) || { mode: "off", limit: 0 };
+  const s = (st && st.self) || { mode: "off" };
   const loaded = !!(st && st.self && Array.isArray(st.self.ladder));   // the seat's real state, not the placeholder
-  const lim = s.mode === "off" ? 0 : (s.limit || 1);
-  const mark = { passed: " ✓", current: " ◀", capped: " (ready, held by the limit)", locked: "", unbuilt: " (not built)" };
-  const options = [{ value: 0, text: "🌱 off", disabled: false, selected: lim === 0 }];
-  for (const r of (s.ladder || [])) {
-    if (r.rung === 0) continue;
-    options.push({ value: r.rung, text: "🌱 " + r.rung + " · " + r.name + (mark[r.state] || ""),
-                   disabled: r.state === "unbuilt", selected: r.rung === lim });
-  }
-  if (options.length === 1) options.push({ value: 1, text: "🌱 1 · feel itself", disabled: false, selected: lim === 1 });
-  if (s.mode === "off") return { loaded, limit: 0, options, status: "🌱 asleep", exp: selfExp(st), title: SELF_NAME + " (#161) is asleep: nothing runs, nothing is erased -- choose how far it may grow" };
+  const wait = Array.isArray(s.awaiting) && s.awaiting.length ? " · awaiting your accept: " + s.awaiting.join(", ") : "";
+  if (s.mode === "off") return { loaded, on: false, icon: "💤", label: SELF_NAME + " asleep", status: "🌱 asleep", exp: selfExp(st),
+                                 title: SELF_NAME + " (#161) is asleep: nothing runs, nothing is erased -- tap to wake it" + wait };
   const pct = Math.round(100 * (s.bar || 0));
   const rung = "rung " + (s.rung || 0) + (s.rung_name ? " (" + s.rung_name + ")" : "");
-  const why = s.held ? " · HELD (3 failed cycles; re-choose to clear)" : s.waiting_on ? " · waiting on: " + s.waiting_on : "";
+  const why = s.held ? " · HELD (3 failed cycles; switch it off and on to clear)" : s.waiting_on ? " · waiting on: " + s.waiting_on : "";
   const nxt = s.next == null && s.bar >= 1 ? " · the next rung is not built yet" : "";
   const slip = s.slipping ? " · slipping" : "";
-  const goal = s.next == null ? "top built rung" : (s.next > lim ? "held at " + lim : "→ " + s.next);
-  const status = s.held ? "🥀 held: re-choose to clear"
+  const nx = Array.isArray(s.next) ? s.next.join(", ") : s.next;
+  const goal = s.next == null || nx === "" ? "top built rung" : "→ " + nx;
+  const status = s.held ? "🥀 held: switch it off and on to clear"
     : "rung " + (s.rung || 0) + " ✓ · " + pct + "% " + goal + (s.waiting_on ? " (" + s.waiting_on + ")" : "") + (s.slipping ? " · slipping" : "");
   // #258: rung 7's numbers -- the window self learned, how often its lines
   // land there against chance, and the replies its timing gains
@@ -515,15 +510,15 @@ function selfView(st) {
     + (r8.brier_mix != null ? ", Brier " + SELF_NAME + " " + f2(r8.brier_mix) + " vs rate " + f2(r8.brier_rate) : "")
     + (r8.brier_model != null ? ", model alone " + f2(r8.brier_model) + " (weight " + f2(r8.advisor_weight) + ")" : "")
     + (r8.base_rate != null ? ", base rate " + f2(r8.base_rate) : "") : "";
-  return { loaded, limit: lim, options, status, exp: selfExp(st),
-           title: SELF_NAME + " (#161): " + s.mode + " · " + rung + " · " + pct + "% toward the next" + why + slip + nxt
-                  + " · may grow up to rung " + lim + " · " + (s.cycles || 0) + " cycles" + r7s + r8s };
+  return { loaded, on: true, icon: "🌱", label: SELF_NAME + " awake", status, exp: selfExp(st),
+           title: SELF_NAME + " (#161): " + s.mode + " · tap to put it to sleep · " + rung + " · " + pct + "% toward the next" + why + slip + nxt
+                  + wait + " · " + (s.cycles || 0) + " cycles" + r7s + r8s };
 }
 
 // ---- #230: SELF IN THE UI -- the exp bar, the activity lines, the report card.
 // Everything here only reads status() and self's record: nothing is claimed
 // about self that the record doesn't measure, and nothing here changes it
-// (the 🌱 chooser stays the only switch).
+// (the 🌱 sleep toggle and the operator's accept, #299, are the only switches).
 const SELF_RUNGS = { 0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart", 4: "patience",
   5: "notice the world changed", 6: "meet an other", 7: "time its turn", 8: "expect a reply",
   9: "recognize itself", 10: "change itself", 11: "speak" };
@@ -554,19 +549,18 @@ function selfExp(st) {
   const level = "Lv " + n + " · " + (s.rung_name || rungName(s, n));
   const nextName = s.next != null ? rungName(s, s.next) : "";
   const goal = s.next == null ? "top built rung (the next is not built yet)" : "→ " + s.next + (nextName ? " · " + nextName : "");
-  const lim = s.limit || 0;
   let state = "growing";
   if (s.mode === "off") state = "asleep";
   else if (s.held) state = "held";
   else if (s.slipping) state = "slipping";
-  else if (s.next != null && (s.next > lim || s.waiting_on === "the limit")) state = "capped";
+  else if (s.waiting_on === "your accept") state = "capped";             // #299: an earned one waits for the operator
   else if (s.next == null) state = "top";
   const caption = state === "asleep" ? "asleep: nothing runs, nothing is erased"
-    : state === "held" ? "held: 3 failed cycles in a row (re-choose 🌱 to clear)"
-    : state === "capped" ? "capped at rung " + lim + ": raise 🌱 to let it try " + s.next
+    : state === "held" ? "held: 3 failed cycles in a row (switch it off and on to clear)"
+    : state === "capped" ? "earned, awaiting your accept: accept it to open what it leads to"
     : (state === "slipping" ? "slipping: rung " + n + "'s test fails now" + (s.waiting_on ? " · " : "") : "")
       + (s.waiting_on ? "waiting on: " + s.waiting_on : "");
-  const label = state === "asleep" ? "asleep" : state === "held" ? "held" : state === "capped" ? "capped" : pct + "%";
+  const label = state === "asleep" ? "asleep" : state === "held" ? "held" : state === "capped" ? "accept?" : pct + "%";
   // #249 (the operator: "I don't see the skill level anywhere"): the skill
   // the bar's test reads, against the line it has to beat
   const sk = s.mode !== "off" && s.skill != null && isFinite(Number(s.skill))
@@ -759,9 +753,10 @@ function selfCardHtml(st) {
   const x = selfExp(st);
   const out = [];
   out.push('<p class="head">' + escText(x.level) + " · " + escText(x.label) +
-    (s.mode === "off" ? " · asleep: nothing runs (its record is kept)" : " · " + escText(s.mode) + " · up to rung " + (s.limit || 0)) +
+    (s.mode === "off" ? " · asleep: nothing runs (its record is kept)" : " · " + escText(s.mode)) +
+    (Array.isArray(s.awaiting) && s.awaiting.length ? " · awaiting your accept: " + escText(s.awaiting.join(", ")) : "") +
     " · " + (s.cycles || 0) + " cycles</p>");
-  const mark = { passed: "✓ passed", current: "◀ current", capped: "held by the limit", locked: "locked", unbuilt: "not built" };
+  const mark = { passed: "✓ passed", current: "◀ current", capped: "awaiting your accept", locked: "locked", unbuilt: "not built" };
   out.push('<h4>the ladder</h4><ol class="ladder">' + s.ladder.map((r) => {
     const st2 = r.state === "passed" && r.rung === s.rung && s.slipping ? "slipping" : r.state;
     const lbl = st2 === "slipping" ? "⚠ slipping" : (mark[st2] || st2);
@@ -1024,17 +1019,18 @@ function sheetQuest(s) {
   const slip = (Array.isArray(s.slipping) ? s.slipping : []).map((x) => '<p class="note warn">⚠ ' + escText(x.text || x.name || "") + "</p>").join("") +
     (q.voided || []).map((v) => '<p class="note warn">' + escText(v) + "</p>").join("");
   if (!ks.length) {
-    const why = s.header && s.header.mode === "off" ? escText(SELF_NAME) + " is asleep (🌱 wakes it)" : "nothing open to practise right now";
+    const why = s.header && s.header.mode === "off" ? escText(SELF_NAME) + " is asleep (💤 wakes it)" : "nothing open to practise right now";
     return '<p class="muted">learning nothing new: ' + why + "</p>" + slip;
   }
   return '<div class="learn">' + ks.map((k) => {
     const pct = Math.round(100 * clamp01(Number(k.bar) || 0));
-    return '<div class="lskill" data-id="' + escAttr(k.id) + '"><p class="qh">' + escText(k.name || k.id || "") + ' <span class="muted">' + pct + "%</span></p>" +
+    return '<div class="lskill' + (k.awaiting_accept ? " awaiting" : "") + '" data-id="' + escAttr(k.id) + '"><p class="qh">' + escText(k.name || k.id || "") + ' <span class="muted">' + pct + "%</span></p>" +
       '<div class="abar" role="meter" aria-label="' + escAttr((k.name || k.id) + ": " + pct + "% of its test") + '" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + pct + '">' +
       '<span class="fill" style="left:0%;width:' + pct + '%"></span></div>' +
       '<ul class="crit">' + (k.criteria || []).map((c) => '<li class="' + (c.met ? "met" : "open") + '"><span class="ck">' + (c.met ? "✓" : "○") + "</span> " +
         escText(c.text) + (c.met || c.frac == null ? "" : ' <span class="muted">' + Math.round(100 * c.frac) + "%</span>") + "</li>").join("") + "</ul>" +
-      (k.waiting_on ? '<p class="muted">waiting on: ' + escText(k.waiting_on) + "</p>" : "") +
+      (k.awaiting_accept ? '<p class="note">🎁 waiting on ' + escText(k.waiting_on || "your accept") + ": it isn't practised until you accept it (the Skill tree)</p>"
+        : k.waiting_on ? '<p class="muted">waiting on: ' + escText(k.waiting_on) + "</p>" : "") +
       skillStatHtml(k.trend) +
       (k.note ? '<p class="note">' + escText(k.note) + "</p>" : "") + "</div>";
   }).join("") + "</div>" + slip;
@@ -1150,7 +1146,7 @@ function selfSheetHtml(s, open, nowS) {
     '<div class="facts"><span>age <b>' + hoursText(h.age_h) + '</b></span><span>working <b>' + hoursText(h.working_h) + "</b></span>" +
     (h.cycles ? "<span>" + h.cycles + " cycles</span><span>" + (h.looks || 0) + " looks</span><span>" + (h.lines_sent || 0) + " lines sent</span>" : "") +
     "</div></div>"];
-  if (s.empty) out.push('<p class="muted">' + escText(SELF_NAME) + ' has not been switched on yet: wake it in 🌱.</p>');
+  if (s.empty) out.push('<p class="muted">' + escText(SELF_NAME) + ' has not been switched on yet: tap 💤 to wake it.</p>');
   const body = { attributes: sheetAttrs, quest: sheetQuest, growth: sheetGrowth,
                  time: sheetTime, inventory: sheetInventory, toys: sheetToys, relationships: sheetRelationships };
   const nLearn = Array.isArray(s.skills) ? s.skills.length : 0, nSlip = Array.isArray(s.slipping) ? s.slipping.length : 0;
@@ -1173,7 +1169,7 @@ function selfSheetHtml(s, open, nowS) {
 // nothing else). Pure helpers, then renderSkillTree: DOM calls only, every
 // data-derived string through textContent.
 const TREE_BRANCHES = [["self", "Self"], ["world", "World"], ["others", "Others"], ["later", "Later"]];
-const TREE_STATES = ["earned", "open", "locked", "unbuilt"];
+const TREE_STATES = ["earned", "open", "locked", "unbuilt"];   // the seat's; "awaiting" (#299) is read from `accepted`
 const TREE_LADDER = [            // [id, name, branch, rung, prereqs]: the ladder read as a tree
   ["feel", "feel itself", "self", 1, []], ["reach", "first reach", "world", 2, []],
   ["kinds", "tell things apart", "world", 3, ["reach"]], ["patience", "patience", "world", 4, ["kinds"]],
@@ -1182,7 +1178,7 @@ const TREE_LADDER = [            // [id, name, branch, rung, prereqs]: the ladde
   ["mirror", "recognize itself", "later", 9, []], ["change", "change itself", "later", 10, []],
   ["speak", "speak", "later", 11, []], ["invent", "invent", "later", null, []]];
 const TREE_STATE_TEXT = { earned: "earned", open: "open: its test is running", locked: "locked: its prerequisites first",
-                          unbuilt: "not built yet" };
+                          unbuilt: "not built yet", awaiting: "earned · awaiting your accept" };
 const finiteOr = (v, d) => (v == null || v === "" || !isFinite(Number(v)) ? d : Number(v));
 
 /** A child's age as a person says it, from months. */
@@ -1202,15 +1198,17 @@ function skillTree(s) {
   if (Array.isArray(s.tree)) {
     const nodes = s.tree.filter((n) => n && n.id != null).map((n) => {
       const built = n.built !== false;
-      const state = !built ? "unbuilt" : TREE_STATES.includes(n.state) ? n.state : "locked";
+      let state = !built ? "unbuilt" : TREE_STATES.includes(n.state) ? n.state : "locked";
+      const accepted = n.accepted !== false;        // #299: a seat from before acceptance accepted everything
+      if (state === "earned" && !accepted) state = "awaiting";
       const bar = finiteOr(n.bar, null);
       return { id: String(n.id), name: String(n.name || n.id), branch: String(n.branch || "later"),
-               prereqs: (Array.isArray(n.prereqs) ? n.prereqs : []).map(String), built, state,
+               prereqs: (Array.isArray(n.prereqs) ? n.prereqs : []).map(String), built, state, accepted,
                earned_at: n.earned_at || null, skill: finiteOr(n.skill, null), bar: bar == null ? null : clamp01(bar),
                waiting_on: n.waiting_on || null, test: n.test || n.asks || null,
                child_age: n.child_age || "", child_ability: n.child_ability || "", why_prereqs: n.why_prereqs || "" };
     });
-    const level = finiteOr(s.level, nodes.filter((n) => n.state === "earned").length);
+    const level = finiteOr(s.level, nodes.filter((n) => n.state === "earned" || n.state === "awaiting").length);
     return { source: "seat", level, name, nodes };
   }
   const level = finiteOr(h.level, 0);
@@ -1296,12 +1294,14 @@ const treePct = (b) => Math.round(100 * clamp01(Number(b))) + "%";
 function nodeStateText(n) {
   let t = TREE_STATE_TEXT[n.state] || n.state;
   if (n.state === "earned" && n.earned_at) t += " " + treeDate(n.earned_at);
+  if (n.state === "awaiting" && n.earned_at) t += " (earned " + treeDate(n.earned_at) + ")";
   if (n.state === "open" && n.bar != null) t += ", " + treePct(n.bar) + " of the way";
-  if (n.waiting_on && n.state !== "earned") t += " · waiting on " + n.waiting_on;
+  if (n.waiting_on && n.state !== "earned" && n.state !== "awaiting") t += " · waiting on " + n.waiting_on;
   return t;
 }
 
-/** What a hover, focus or tap shows: {title, rows: [[label, text]]}. */
+/** What a hover, focus or tap shows: {title, rows: [[label, text]], accept}
+ *  -- `accept` (#299): the id an Accept button on the card would accept. */
 function nodeCard(n, nodes) {
   if (!n) return null;
   const byId = {};
@@ -1314,14 +1314,20 @@ function nodeCard(n, nodes) {
   rows.push(["needs", (n.prereqs || []).map((p) => (byId[p] ? byId[p].name : p)).join(", ") || "nothing first"]);
   if (n.why_prereqs) rows.push(["why", n.why_prereqs]);
   if (n.child_ability) rows.push(["a child (an analogy)", "a child: " + n.child_ability + (n.child_age ? " (" + n.child_age + ")" : "")]);
+  if (n.state === "awaiting") {
+    const kids = (nodes || []).filter((x) => (x.prereqs || []).includes(n.id)).map((x) => x.name);
+    rows.push(["your accept", "accepting it opens " + (kids.length ? kids.join(", ") : "what it leads to") + "; until then nothing it leads to runs"]);
+    return { title: n.name, rows, accept: n.id };
+  }
   return { title: n.name, rows };
 }
 
 /** The earned ones, newest first: {id, name, at, date, skill}. */
 function achievementsList(nodes) {
   const t = (n) => { const v = Date.parse(n.earned_at || ""); return isNaN(v) ? -Infinity : v; };
-  return (nodes || []).filter((n) => n && n.state === "earned").sort((a, b) => t(b) - t(a))
-    .map((n) => ({ id: n.id, name: n.name, at: n.earned_at || null, date: treeDate(n.earned_at), skill: n.skill == null ? "–" : skillSigned(n.skill) }));
+  return (nodes || []).filter((n) => n && (n.state === "earned" || n.state === "awaiting")).sort((a, b) => t(b) - t(a))
+    .map((n) => ({ id: n.id, name: n.name, at: n.earned_at || null, date: treeDate(n.earned_at), skill: n.skill == null ? "–" : skillSigned(n.skill),
+                   awaiting: n.state === "awaiting" }));
 }
 
 /** The open node's progress ring: circumference c and the drawn length `on`. */
@@ -1331,12 +1337,14 @@ function ringDash(bar, r) {
   return { c, on: c * clamp01(Number(bar)) };
 }
 
-const TREE_ICON = { earned: "🏅", locked: "🔒", unbuilt: "◌" };
+const TREE_ICON = { earned: "🏅", awaiting: "🎁", locked: "🔒", unbuilt: "◌" };
 const SVGNS = "http://www.w3.org/2000/svg";
 
 /** The tab, built into `root` with DOM calls (no markup strings). `sel`
  *  keeps the chosen node across repaints ({id}); the node that had focus
- *  keeps it, and the tree's box keeps its scroll. */
+ *  keeps it, and the tree's box keeps its scroll. #299: `sel.onAccept(id)`
+ *  (a promise of {ok, error}), when given, puts an Accept button on an
+ *  awaiting node's card. */
 function renderSkillTree(doc, root, sheet, sel) {
   sel = sel || {};
   const el = (tag, cls, text) => {
@@ -1363,7 +1371,7 @@ function renderSkillTree(doc, root, sheet, sel) {
   hdr.appendChild(el("span", "lvb", "Lv " + m.level));
   root.appendChild(el("p", "note", m.source === "ladder"
     ? "the ladder read as a tree: this seat doesn't send its skill tree yet, so only the next rung is open"
-    : "each skill is an achievement; its test runs once its prerequisites are earned. Hover, focus or tap one."));
+    : "each skill is an achievement; its test runs once its prerequisites are earned and you accepted them. Hover, focus or tap one."));
   const box = root.appendChild(el("div", "skbox"));
   box.setAttribute("role", "group");
   box.setAttribute("aria-label", m.name + "'s skill tree");
@@ -1395,6 +1403,7 @@ function renderSkillTree(doc, root, sheet, sel) {
     } else ic.textContent = TREE_ICON[n.state] || "";
     b.appendChild(el("span", "sknm", n.name));
     const sub = n.state === "earned" ? (utcShort(n.earned_at || "").split(" ").slice(0, 2).join(" ") || "earned")
+      : n.state === "awaiting" ? "accept?"
       : n.state === "open" ? (n.bar == null ? "open" : treePct(n.bar)) : n.state === "locked" ? "locked" : "not built yet";
     b.appendChild(el("span", "sksub", sub));
     btns[n.id] = b;
@@ -1410,6 +1419,25 @@ function renderSkillTree(doc, root, sheet, sel) {
     card.appendChild(el("p", "skct", c.title));
     const dl = card.appendChild(el("dl", "skcd"));
     for (const [k, v] of c.rows) { dl.appendChild(el("dt", null, k)); dl.appendChild(el("dd", null, v)); }
+    if (c.accept && typeof sel.onAccept === "function") {         // #299: the operator lets it grow
+      const id = c.accept;
+      const ab = card.appendChild(el("button", "skaccept", "🏅 Accept"));
+      ab.setAttribute("type", "button");
+      ab.setAttribute("aria-label", "Accept " + c.title + ": open what it leads to");
+      const msg = card.appendChild(el("p", "skamsg"));
+      msg.setAttribute("role", "status");
+      ab.addEventListener("click", () => {
+        ab.disabled = true;
+        msg.textContent = "accepting…";
+        let got;
+        try { got = sel.onAccept(id); } catch (e) { got = { ok: false, error: String((e && e.message) || e) }; }
+        Promise.resolve(got).catch((e) => ({ ok: false, error: String((e && e.message) || e) }))
+          .then((out) => {
+            if (out && out.ok) msg.textContent = "accepted ✓ -- what it leads to opens now";
+            else { ab.disabled = false; msg.textContent = "not accepted: " + ((out && out.error) || "the seat refused"); }
+          });
+      });
+    }
   };
   const idOf = (t) => {
     for (let e = t; e && e !== box; e = e.parentNode || e.parent) if (e.getAttribute && e.getAttribute("data-id")) return e.getAttribute("data-id");
@@ -1428,7 +1456,7 @@ function renderSkillTree(doc, root, sheet, sel) {
     for (const a of ach) {
       const li = ol.appendChild(el("li", "skach"));
       li.appendChild(el("b", null, a.name));
-      li.appendChild(el("span", "muted", " · 🏅 " + (a.date || "earned") + " · skill " + a.skill));
+      li.appendChild(el("span", "muted", " · 🏅 " + (a.date || "earned") + " · skill " + a.skill + (a.awaiting ? " · awaiting your accept" : "")));
     }
   }
   if (scroll) { box.scrollLeft = scroll.l; box.scrollTop = scroll.t; }
@@ -1557,30 +1585,6 @@ function toyPopoverHtml(t, res) {
   }
   out.push('<p class="pres' + (res && !res.ok ? " bad" : "") + '" aria-live="polite">' + escText(res ? res.text : "") + "</p>");
   return out.join("");
-}
-
-/** Fill a <select> from selfView's options -- rebuilt only when they change
- *  (an open chooser must not be yanked shut by the 1.5 s repaint). */
-function fillSelfPick(sel, v) {
-  if (!sel) return;
-  // THE GUARD (live, 2026-10-16: 25 s after a restart the page sent "off"):
-  // rebuilding an open / focused <select>'s options can reset it to its
-  // first option and fire a change -- so never while it has focus, and the
-  // chooser stays disabled until the seat's real state has loaded
-  sel.disabled = !v.loaded;
-  if (sel.getRootNode().activeElement === sel) return;
-  const sig = JSON.stringify(v.options);
-  if (sel._sig !== sig) {
-    sel.textContent = "";
-    for (const o of v.options) {
-      const el = document.createElement("option");
-      el.value = String(o.value); el.textContent = o.text; el.disabled = !!o.disabled;
-      sel.appendChild(el);
-    }
-    sel._sig = sig;
-  }
-  sel.value = String(v.limit);
-  sel.title = v.title;
 }
 
 function roleNext(auto) { return (auto && auto.role) === "predict" ? "babble" : "predict"; }
@@ -2048,7 +2052,7 @@ function definePanel() {
             <button class="btn icon llmbtn" title="the LLM (off: talk to membrane alone)">🤖</button>
             <button class="btn icon autobtn" title="auto-chat: membrane and the LLM talk; you can join any time">⟳</button>
             <button class="btn icon rolebtn" title="membrane's role: babble (it talks to the LLM) or predict (it guesses the LLM, unheard)">💬</button>
-            <select class="selfpick" title="${escAttr(SELF_NAME)} (#161): how far it may grow (the top rung; off = asleep)"><option value="0">🌱 off</option></select>
+            <button class="btn icon selfsleep" aria-pressed="false" title="${escAttr(SELF_NAME)} (#161): asleep or awake -- tap to switch">💤</button>
             <span class="selfstat" title="where ${escAttr(SELF_NAME)} is now: its rung, the bar toward the next, what it waits on"></span>
             <button class="btn icon thinkbtn" title="the think dial: the reasoning the cards do (auto = forward verbatim)">💭</button>
             <button class="btn icon jsbtn" title="allow JS scripting in this window -- the page runs it with your HA login -- off by default">🧩</button>
@@ -2084,7 +2088,7 @@ function definePanel() {
         // chat button as a ▶/⏸; the panel's own node stays (hidden --
         // never listed) so its listener and state keep working.
         for (const [cls, label] of [["agent", null], ["modelpick", null], ["voicebtn", "membrane's voice"], ["llmbtn", "LLM replies"],
-                                    ["rolebtn", "membrane babbles"], ["selfpick", null], ["selfstat", null], ["thinkbtn", "think"], ["jsbtn", "JS scripting: off"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
+                                    ["rolebtn", "membrane babbles"], ["selfsleep", SELF_NAME + " asleep"], ["selfstat", null], ["thinkbtn", "think"], ["jsbtn", "JS scripting: off"], ["vlogbtn", "voice log"], ["pausebtn", "pause the seat"], ["mindsbtn", "minds"]]) {
           const el = app.querySelector("." + cls);
           if (!el) continue;
           if (label) {
@@ -2146,9 +2150,9 @@ function definePanel() {
       this._vlogBtn.addEventListener("click", () => this._toggleVoiceLog().catch(() => {}));
       this._pauseBtn = $(".pausebtn");
       this._pauseBtn.addEventListener("click", () => this._togglePause().catch(() => {}));
-      this._selfPick = $(".selfpick");
+      this._selfSleep = $(".selfsleep");                           // #299: sleep / wake (the 🌱 chooser is gone)
       this._selfStat = $(".selfstat");
-      this._selfPick.addEventListener("change", () => this._setSelfLimit(Number(this._selfPick.value)).catch(() => {}));
+      this._selfSleep.addEventListener("click", () => this._setSelfMode(!selfView(this._seat).on).catch(() => {}));
       this._llmBtn = $(".llmbtn");
       this._llmOn = true;                 // per page view
       this._llmBtn.addEventListener("click", () => {
@@ -2776,8 +2780,9 @@ function definePanel() {
       if (ev.type === "membrane.seat") this._loadSeat();          // the seat's own events: its state moved
       if (ev.type === "self.cycle" && this._seat) {               // #161: the bar moves with each cycle
         const s = Object.assign({}, this._seat.self || {});
-        const moved = ("rung" in p && p.rung !== s.rung) || ("limit" in p && p.limit !== s.limit);
-        for (const k of ["rung", "rung_name", "bar", "skill", "mode", "slipping", "waiting_on", "next", "cycles", "held", "limit"]) if (k in p) s[k] = p[k];
+        const moved = ("rung" in p && p.rung !== s.rung) || ("limit" in p && p.limit !== s.limit)
+          || ("awaiting" in p && JSON.stringify(p.awaiting) !== JSON.stringify(s.awaiting));     // #299: an accept is news too
+        for (const k of ["rung", "rung_name", "bar", "skill", "mode", "slipping", "waiting_on", "next", "cycles", "held", "limit", "awaiting"]) if (k in p) s[k] = p[k];
         s.born = true;
         if (moved) this._loadSeat().catch(() => {});                 // a rung opened: the ladder's marks refresh
         this._seat = Object.assign({}, this._seat, { self: s });
@@ -3228,32 +3233,44 @@ function definePanel() {
       else this._err(this._apiErr("pause failed (HA admins only)", r));
     }
 
-    /** The 🌱 chooser's face (home.js's top bar paints its own from here). */
+    /** The 🌱 sleep toggle's face (home.js's 👶 panel paints its own from here). */
     _selfView() { return selfView(this._seat); }
 
-    /** The growth limit: the top rung self may reach (0: off). */
-    async _setSelfLimit(n) {
+    /** #299: sleep or wake -- the seat's mode, on or off (never before its state loads). */
+    async _setSelfMode(on) {
       const v = selfView(this._seat);
-      if (!v.loaded || n === v.limit) return { ok: false, skipped: true };   // nothing before the state loads, nothing for no change
-      if (this._selfPick) this._selfPick.disabled = true;           // in flight
-      const r = await this._api(SERVE + "/membrane/seat/control", { method: "POST", body: JSON.stringify({ self_limit: n }) });
+      if (!v.loaded || !!on === v.on) return { ok: false, skipped: true };   // nothing before the state loads, nothing for no change
+      if (this._selfSleep) this._selfSleep.disabled = true;           // in flight
+      const r = await this._api(SERVE + "/membrane/seat/control", { method: "POST", body: JSON.stringify({ self: on ? "on" : "off" }) });
       let out;
       if (r.ok && r.data && r.data.state) {
         this._seat = r.data.state;
         const got = selfView(this._seat);                          // the seat's answer, not what was clicked
-        out = { ok: true, limit: got.limit, rung: (this._seat.self || {}).rung || 0,
-                text: got.limit ? "✓ may grow to rung " + got.limit + " (now at rung " + ((this._seat.self || {}).rung || 0) + ")"
-                                : "✓ " + SELF_NAME + " is asleep (nothing erased)" };
+        out = { ok: true, on: got.on, text: got.on ? "✓ " + SELF_NAME + " is awake" : "✓ " + SELF_NAME + " is asleep (nothing erased)" };
       } else {
-        out = { ok: false, text: this._apiErr("the " + SELF_NAME + " chooser failed (HA admins only)", r) };
+        out = { ok: false, text: this._apiErr("switching " + SELF_NAME + " failed (HA admins only)", r) };
         this._err(out.text);
       }
-      this._selfFlash = out.text;
-      if (this._selfStat) this._selfStat.textContent = out.text;
+      this._flashSelf(out.text);
+      return out;
+    }
+
+    /** #299: accept an achievement self earned -- it opens what it leads to.
+     *  -> {ok, id, name, already} or {ok: false, error} (the seat's own words). */
+    async _acceptSelf(id) {
+      const r = await this._api(SERVE + "/membrane/seat/control", { method: "POST", body: JSON.stringify({ accept: id }) }).catch(() => null);
+      const got = r && r.ok && r.data && r.data.applied && r.data.applied.accept;
+      if (r && r.ok && r.data && r.data.state) { this._seat = r.data.state; this._paintSeat(); }
+      if (got && typeof got === "object") return got;
+      return { ok: false, error: r ? this._apiErr("accepting failed (HA admins only)", r) : "the seat is not reachable" };
+    }
+
+    _flashSelf(text) {
+      this._selfFlash = text;
+      if (this._selfStat) this._selfStat.textContent = text;
       clearTimeout(this._selfFlashT);
       this._selfFlashT = setTimeout(() => { this._selfFlash = null; this._paintSeat(); }, 4000);
       this._paintSeat();
-      return out;
     }
 
     async _loadSeat() {
@@ -3269,7 +3286,16 @@ function definePanel() {
       if (lbl) lbl.textContent = v.label;
       this._pauseBtn.title = v.title;
       this._pauseBtn.style.opacity = v.paused ? "1" : ".6";
-      if (this._selfPick) fillSelfPick(this._selfPick, selfView(this._seat));
+      if (this._selfSleep) {                                       // #299: the sleep toggle
+        const v = selfView(this._seat);
+        const sico = this._selfSleep.querySelector(".ico"), slbl = this._selfSleep.querySelector(".lbl");
+        if (sico) sico.textContent = v.icon; else this._selfSleep.textContent = v.icon;
+        if (slbl) slbl.textContent = v.label;
+        this._selfSleep.title = v.title;
+        this._selfSleep.setAttribute("aria-pressed", v.on ? "true" : "false");
+        this._selfSleep.setAttribute("aria-label", v.label + " -- tap to " + (v.on ? "put it to sleep" : "wake it"));
+        this._selfSleep.disabled = !v.loaded;
+      }
       if (this._selfStat && !this._selfFlash) paintExp(this._selfStat, selfExp(this._seat));   // #230: the exp bar
     }
 

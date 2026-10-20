@@ -136,9 +136,10 @@ def test_the_frame_tells_the_switch_what_the_bar_waits_on():
 def test_the_home_bar_has_the_self_switch_where_the_star_was():
     ui = Path(__file__).resolve().parent.parent / "membrane" / "ui"
     home = (ui / "home.js").read_text()
-    assert '<select class="selfpick"' in home         # the growth limit, where the star was
+    assert 'class="selfpick"' not in home             # #299: the growth limit's chooser gave way to acceptance
+    assert 'class="selfstat"' in home                  # where the star was: self's exp bar
     assert 'class="start"' not in home                 # the star (HA's default-dashboard pin) is gone
-    assert "_setSelfLimit(" in home and "_selfView()" in home
+    assert "_setSelfMode(" in home and "_selfView()" in home   # sleep / wake: the 👶 panel's toggle
     panel = (ui / "panel.js").read_text()
     assert "_selfView() {" in panel
     assert 'ev.type === "self.cycle"' in panel          # the bar moves with each cycle

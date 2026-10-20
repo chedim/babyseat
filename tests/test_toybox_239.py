@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import night as N  # noqa: E402
 from membrane import self_loop as SL  # noqa: E402
+from tests._self_cap import cap  # noqa: E402
 from membrane import toybox as TB  # noqa: E402
 from membrane import watch_agents as WA  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
@@ -292,13 +293,13 @@ def test_a_seat_restart_keeps_the_toys_and_their_state(_data):
 def test_tower_through_selfs_real_reach_path(monkeypatch):
     srv = _seat()
     TB.add(srv, "tower", params={"n": 5})        # #267: on the bench before birth (it unlocks at rung 3)
-    SL.set_limit(srv, 1)
+    cap(srv, 1)
     t = 1000.0
     for i in range(SL.RUNG1_CYCLES * 2):                          # rung 1 first: the ladder is climbed in order
         SL.cycle(srv, now=t)
         t += SL.PACE_S
     assert SL.status(srv)["rung"] == 1
-    SL.set_limit(srv, 2)
+    cap(srv, 2)
     b = {k: _eid(f"toy:tower:b{k}") for k in range(1, 6)}
     monkeypatch.setattr(SL, "_targets", lambda srv: [b[3]])
     SL.cycle(srv, now=t)

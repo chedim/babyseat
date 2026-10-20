@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import night as N  # noqa: E402
 from membrane import self_loop as SL  # noqa: E402
+from tests._self_cap import cap  # noqa: E402
 from membrane import toybox as TB  # noqa: E402
 from membrane import watch_agents as WA  # noqa: E402
 from membrane.efield import EntityField  # noqa: E402
@@ -371,12 +372,12 @@ def test_the_ha_relay_lets_the_poke_through_with_the_ha_user():
 # ---- self reads it as a change it didn't cause -------------------------------------
 
 def _climb(srv, t):
-    SL.set_limit(srv, 1)
+    cap(srv, 1)
     for _ in range(SL.RUNG1_CYCLES * 2):
         SL.cycle(srv, now=t)
         t += SL.PACE_S
     assert SL.status(srv)["rung"] == 1
-    SL.set_limit(srv, 2)
+    cap(srv, 2)
     return t
 
 

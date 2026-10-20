@@ -107,7 +107,7 @@ def _lived(srv):
     SL._RT.pop(id(srv), None)
     SL.bind(srv)
     srv.efield = types.SimpleNamespace(current=lambda: [1.0, 0.0])   # a live current: not "waiting on the world"
-    SL._rt(srv)["mode"], SL._rt(srv)["limit"] = "on", 7
+    SL._rt(srv)["mode"], SL._rt(srv)["isolate"] = "on", SL._limit_ids(7)   # #299: the limit is gone; rungs 1..7 run alone
     return srv
 
 
@@ -123,7 +123,7 @@ def _lived8(srv):
     SL._RT.pop(id(srv), None)
     SL.bind(srv)
     srv.efield = types.SimpleNamespace(current=lambda: [1.0, 0.0])
-    SL._rt(srv)["mode"], SL._rt(srv)["limit"] = "on", 8
+    SL._rt(srv)["mode"], SL._rt(srv)["isolate"] = "on", SL._limit_ids(8)   # #299: the limit is gone; rungs 1..8 run alone
     return srv
 
 
@@ -626,7 +626,7 @@ class TestSkillAtAGlance(unittest.TestCase):
         self.assertFalse(SL.status(_lived(_seat()))["skill_measured"])   # #258: rung 7 has no timed lines yet
         self.assertTrue(SL.status(_lived8(_seat()))["skill_measured"])   # rung 8 reads the pairs
         srv = _seat()
-        SL._rt(srv)["mode"], SL._rt(srv)["limit"] = "on", 7
+        SL._rt(srv)["mode"], SL._rt(srv)["isolate"] = "on", SL._limit_ids(7)   # #299: the limit is gone; rungs 1..7 run alone
         self.assertFalse(SL.status(srv)["skill_measured"])
 
     def test_the_markup_has_a_place_for_it(self):
