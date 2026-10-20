@@ -1,6 +1,8 @@
 # babyseat (formerly membrane)
 Hippocampus as cortex register-correct-predict-act head: real-time learning, embodiment, self-awareness, self-targeting, novelty creation*, response generation*, embedding-only*.
 
+![Membrane](screenshot.png)
+
 A token-saving openapi-proxy and opencode-like agent seat with Alan's baby brain quest easter seed (can't call an unexpected main project feature "an easter egg", can I?). 
 
 ```
