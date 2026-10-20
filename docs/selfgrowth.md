@@ -426,8 +426,8 @@ other turns is built only when the version that counts merged:
 | meet an other | #187 | 2026-10-16 19:24:02 | there but broken until #209 (#208's window) |
 | time its turn | #281 | 2026-10-19 15:19:43 | #278, the ball's own clock: rung 7 reads only the current clock's turns |
 | expect a reply | #281 | 2026-10-19 15:19:43 | #254's fix (#256) graded self; since #278 it reads only the ball clock's checks |
-| speak | #313 | 2026-10-20 12:39:55 (the commit; the merge's time replaces it) | #311: its turns carry words from its record |
-| recognize itself | #314 | 2026-10-20 12:56:01 | #312, the mirror and its test (the PR's opening time, until its merge's is set) |
+| speak | #313 | 2026-10-20 12:55:39 | #311: its turns carry words from its record |
+| recognize itself | #314 | 2026-10-20 13:21:13 | #312, the mirror and its test |
 
 The seat runs new code only after a restart, so a test is built on a seat at
 the end of the first record gap over 30 s (`RESTART_S`, three cycles at
