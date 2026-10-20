@@ -92,6 +92,7 @@ rule.
   ball.
 - **It is not a self-model** to be scored. It is a loop that builds up a body
   of measured predictions about its world.
+- **It doesn't sleep.** Off is not sleep: nothing runs. Why it hasn't needed sleep yet, and what would change that: [sleep.md](sleep.md).
 - **It is not `seat:self`.** That is only the speaker tag: every line the seat
   says moves it. `self` is a separate entity that only its own acts move;
   mentions of it in the conversation never do.
