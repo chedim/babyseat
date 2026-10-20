@@ -55,6 +55,16 @@ ball (BALL) is provisioned once, by toy_unlocks when rung 6 passes (#267). The
 other's last act -- a person's poke on ANY toy -- is kept in one small file
 (last_person_poke): what rung 7's timing reads.
 
+THE MIRROR (#312): rung 9's apparatus -- recognize itself. Self feeds it its
+own move each cycle (mirror_feed: one scalar, self_loop._mirror_move), and
+it has two sides: the GLASS shows the move from `delay` feeds back, the
+STRANGER self's own move from `lag` (MIRROR_LAG) feeds back -- the same
+statistics, nothing to do with what self does now -- each plus seeded
+gaussian jitter (SD `jitter`). Its state keeps the moves it needs (a restart
+keeps them); its log flags the glass's change `by: self` and the stranger's
+`by: world`. It has no getter (self's ordinary looks never read it: it sees
+it by feeding it), no clock, and takes no pokes yet.
+
 THE SURFACE: `membrane toybox list|add|remove|reset|migrate|poke` (cli_main),
 the `toybox` object's methods list / add(spec) / remove(name) / reset(name) /
 poke(toy, action) (the `toybox::` no-shell dialect, night.run_command_entity),
@@ -97,7 +107,12 @@ KINDS = {
     "ball": {"about": "a ball self and the other roll back and forth (rung 7's turns, #264): self rolls it to "
                       "you on its turn; roll it back when it is on your side",
              "params": {}, "clock": False},
+    "mirror": {"about": "self's mirror (rung 9, #312): the glass shows self's own moves a moment late, and a "
+                        "stranger beside it shows self's moves from half an hour ago -- the same moves, only "
+                        "the glass follows what self does now",
+               "params": {"delay": 1, "lag": 187, "jitter": 0.1}, "clock": False},
 }
+MIRROR_LAG = KINDS["mirror"]["params"]["lag"]   # #312: the stranger's replay, feeds back (self_loop.MIRROR_LAG)
 ACTIONS = {"tower": ("knock", "rebuild"), "die": ("roll",), "drift": ("nudge",), "burst": ("nudge",),
            "ball": ("roll",)}
 RESERVED_BY = ("self", "world")         # only the toy itself and self's own looks write these
@@ -260,6 +275,7 @@ def _params(kind: str, given: dict | None) -> tuple[dict, int | None]:
         "every": lambda v: v > 0, "period": lambda v: v > 0, "window": lambda v: v > 0,
         "active": lambda v: 0 <= v <= 1, "min_s": lambda v: v > 0, "step": lambda v: v > 0,
         "p": lambda v: 0 < v <= 1, "faces": lambda v: 2 <= v <= 1000, "n": lambda v: 1 <= v <= TOWER_MAX,
+        "delay": lambda v: 1 <= v <= 10, "lag": lambda v: 10 <= v <= 10000, "jitter": lambda v: 0 <= v <= 10,
     }
     for k, ok in checks.items():
         if k in out and not ok(out[k]):
@@ -313,6 +329,8 @@ def create(kind: str, name: str, params: dict | None = None, now: float | None =
         st["blocks"] = [{"standing": True, "by": None, "at": None, "falls": 0} for _ in range(prm["n"])]
     elif kind == "ball":
         st.update(side="self", by=None, at=None, other_by=None, other_at=None)   # self serves first
+    elif kind == "mirror":
+        st.update(moves=[], glass=None, stranger=None)
     with _locked(name):
         _save(st)
         lp = _log_path(name)
@@ -331,6 +349,8 @@ def _reading(st: dict, block: int | None = None) -> dict:
         return {"face": st["value"]}
     if k == "ball":
         return {"side": st["side"]}
+    if k == "mirror":
+        return {"glass": st.get("glass"), "stranger": st.get("stranger")}
     return {"value": st["value"]}
 
 
@@ -403,8 +423,9 @@ def poke(name: str, action: str, arg=None, by: str = "", now: float | None = Non
         k = st["kind"]
         acts = ACTIONS.get(k, ())
         if not acts:
-            why = ("body changes only on self's own look -- it is self's, the control"
-                   if k == "body" else f"{k} runs on its own clock; it takes no pokes")
+            why = ("body changes only on self's own look -- it is self's, the control" if k == "body" else
+                   "the mirror shows self's own moves (and a stranger's beside them); it takes no pokes"
+                   if k == "mirror" else f"{k} runs on its own clock; it takes no pokes")
             return {"ok": False, "error": f"{name}: {why}"}
         if action not in acts:
             return {"ok": False, "error": f"{name} ({k}) answers to {' / '.join(acts)}, not {action!r}"}
@@ -510,6 +531,34 @@ def roll_self(name: str, now: float | None = None) -> dict:
         _note(st, now, "self", "roll", side="other")
         _save(st)
         return {"ok": True, "name": name, "by": "self", "reading": _reading(st)}
+
+
+def mirror_feed(name: str, move: float, now: float | None = None) -> dict:
+    """#312: self feeds its mirror this cycle's move (one scalar); the glass
+    then shows the move from `delay` feeds back, the stranger the one from
+    `lag` back, each with seeded jitter (None until it has one that old).
+    Self's loop is the only caller. -> {ok, name, glass, stranger} | {ok: False, error}."""
+    now = time.time() if now is None else float(now)
+    name = str(name or "").strip().lower()
+    if not _path(name).exists():
+        return {"ok": False, "error": f"no toy named {name!r}"}
+    with _locked(name):
+        st = _load(name)
+        if st["kind"] != "mirror":
+            return {"ok": False, "error": f"{name} is a {st['kind']}, not a mirror"}
+        prm = st["params"]
+        d, lag, j = int(prm["delay"]), int(prm["lag"]), float(prm["jitter"])
+        moves = (list(st.get("moves") or []) + [float(move)])[-(d + lag + 1):]
+        st["moves"] = moves
+        for side, back, by in (("glass", d, "self"), ("stranger", d + lag, "world")):
+            if len(moves) > back:
+                v = round(moves[-1 - back] + j * _rng(st).gauss(0.0, 1.0), 4)
+                st[side] = v
+                _note(st, now, by, "show", side=side, value=v)
+            else:
+                st[side] = None
+        _save(st)
+        return {"ok": True, "name": name, **_reading(st)}
 
 
 def log_len(name: str) -> int:
@@ -664,8 +713,9 @@ def _put(est, name: str, kind: str, block: int | None = None, n: int = 0) -> str
     else:
         about = KINDS[kind]["about"]
     props = {"name": ename, "summary": f"toybox {kind}: {about}", "silent_birth": True,
-             "toybox": {"kind": kind, "name": name, **({"block": block} if block else {})},
-             "getter_script": STUB_GET}
+             "toybox": {"kind": kind, "name": name, **({"block": block} if block else {})}}
+    if kind != "mirror":                         # #312: self sees its mirror by feeding it, never by a look
+        props["getter_script"] = STUB_GET
     if KINDS[kind]["clock"] and not block:
         props.update(tick_script=STUB_TICK, tick_every=1)
     eid = entity_id(CLASS_COMPONENT, ename)
@@ -790,6 +840,8 @@ def list_toys() -> list[dict]:
             row["reading"] = "".join("|" if b["standing"] else "_" for b in st["blocks"])
         elif st["kind"] == "ball":
             row["reading"] = st.get("side")                  # #264: whose side it is on
+        elif st["kind"] == "mirror":
+            row["reading"] = {"glass": st.get("glass"), "stranger": st.get("stranger")}   # #312
         else:
             row["reading"] = st.get("value")
         out.append(row)

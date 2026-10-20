@@ -4,7 +4,7 @@ Each toybox kind has an unlock rung (membrane/toy_unlocks.py): body, fast and
 slow at birth; tower at rung 3; burst at 4; die and drift at 5; ball (#264)
 at 6; and three new kinds that land as LOCKED PLACEHOLDERS (a name, an icon,
 the rung and one line of what each will teach; no mechanics yet): mirror at
-8, blocks at 9, rattle at 10. "Passes rung N" is the ladder's own rule
+8 (#312: built, and moved to 6 beside the ball), blocks at 9, rattle at 10. "Passes rung N" is the ladder's own rule
 (self_loop._passed: void-aware, and a pass above rung 6 only with
 "ladder": 2).
 
@@ -88,7 +88,7 @@ def _kinds():
 
 def test_the_table():
     assert TU.UNLOCKS == {"body": 0, "fast": 0, "slow": 0, "tower": 3, "burst": 4, "die": 5, "drift": 5,
-                          "ball": 6, "mirror": 8, "blocks": 9, "rattle": 10}
+                          "ball": 6, "mirror": 6, "blocks": 9, "rattle": 10}   # #312: mirror with meet
 
 
 def test_every_built_kind_has_an_unlock_rung():
@@ -96,8 +96,8 @@ def test_every_built_kind_has_an_unlock_rung():
 
 
 def test_the_placeholders_have_a_name_an_icon_a_rung_and_a_lesson():
-    assert set(TU.PLACEHOLDERS) == {"mirror", "blocks", "rattle"}
-    assert {k: TU.ICONS[k] for k in TU.PLACEHOLDERS} == {"mirror": "🪞", "blocks": "🧱", "rattle": "🔊"}
+    assert set(TU.PLACEHOLDERS) == {"blocks", "rattle"}                    # #312: the mirror is built
+    assert {k: TU.ICONS[k] for k in TU.PLACEHOLDERS} == {"blocks": "🧱", "rattle": "🔊"}
     for k in TU.PLACEHOLDERS:
         assert TU.TEACHES[k] and "\n" not in TU.TEACHES[k]
         assert k not in TB.KINDS                       # no mechanics yet: never provisioned
@@ -131,9 +131,9 @@ def test_unlocked_honours_the_ladder_flip():
     _born(srv)
     _pass(srv, 1, 2, 3, 4, 5, 6, 7)
     _pass(srv, 8, ladder=False)                                   # an old numbering's line: not rung 8
-    assert "mirror" not in TU.unlocked(TU.passed(srv))
+    assert 8 not in TU.passed(srv)                                # (#312: no kind unlocks at 8 any more)
     _pass(srv, 8)
-    assert "mirror" in TU.unlocked(TU.passed(srv))
+    assert 8 in TU.passed(srv)
 
 
 # ---- the unlock line and provisioning ---------------------------------------------------
@@ -186,11 +186,11 @@ def test_a_removed_toy_is_not_brought_back():
 def test_a_placeholder_unlock_is_announced_but_provisions_nothing():
     srv = _seat()
     _born(srv)
-    _pass(srv, 1, 2, 3, 4, 5, 6, 7, 8)
+    _pass(srv, 1, 2, 3, 4, 5, 6, 7, 8, 9)
     TU.sync(srv, now=2001.0)
-    row = next(r for r in _unlocks(srv) if r["rung"] == 8)
-    assert row["toys"] == ["mirror"]
-    assert "mirror" not in _kinds()
+    row = next(r for r in _unlocks(srv) if r["rung"] == 9)
+    assert row["toys"] == ["blocks"]                              # #312: blocks (the mirror is built)
+    assert "blocks" not in _kinds()
 
 
 def test_ball_is_tolerated_when_its_kind_is_not_built():
@@ -199,7 +199,7 @@ def test_ball_is_tolerated_when_its_kind_is_not_built():
     _pass(srv, 1, 2, 3, 4, 5, 6)
     TU.sync(srv, now=2001.0)                                     # no error, whatever the kit holds
     row = next(r for r in _unlocks(srv) if r["rung"] == 6)
-    assert row["toys"] == ["ball"]
+    assert row["toys"] == ["ball", "mirror"]                      # #312: the mirror with meet
     assert ("ball" in _kinds()) == ("ball" in TB.KINDS)
 
 
@@ -264,10 +264,10 @@ def test_adding_a_locked_kind_is_refused_with_a_clear_message():
 def test_a_locked_placeholder_is_refused_and_an_unlocked_one_is_not_built_yet():
     srv = _seat()
     _born(srv)
-    out = TB.add(srv, "mirror")
-    assert not out["ok"] and "locked" in out["error"] and "'expect a reply'" in out["error"]   # #295, #300
-    _pass(srv, 1, 2, 3, 4, 5, 6, 7, 8)
-    out = TB.add(srv, "mirror")
+    out = TB.add(srv, "blocks")
+    assert not out["ok"] and "locked" in out["error"] and "'recognize itself'" in out["error"]   # #295, #312
+    _pass(srv, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+    out = TB.add(srv, "blocks")
     assert not out["ok"] and "not built yet" in out["error"]
 
 
@@ -303,10 +303,10 @@ def test_placeholders_are_unpokeable():
     _born(srv)
     _pass(srv, 1, 2, 3, 4, 5, 6, 7, 8)
     TU.sync(srv, now=2001.0)
-    for name in ("toy:mirror", "locked:mirror", "mirror", "locked:blocks"):
+    for name in ("toy:blocks", "locked:blocks", "blocks", "locked:rattle"):    # #312: the mirror is built
         out = TB.poke(name, "poke", by="alice")
         assert not out["ok"], name
-    assert "not built yet" in TB.poke("toy:mirror", "look")["error"]
+    assert "not built yet" in TB.poke("toy:blocks", "look")["error"]
 
 
 def test_migrate_keeps_its_toys_whatever_the_rung():
@@ -360,7 +360,7 @@ def test_the_sheet_has_a_toys_section_with_locked_and_unlocked():
     assert set(rows) == set(TU.UNLOCKS)
     assert rows["tower"]["state"] == "unlocked" and rows["tower"]["have"] is True
     assert rows["tower"]["at"]                                    # when it unlocked
-    assert rows["mirror"]["state"] == "locked" and rows["mirror"]["rung"] == 8 and rows["mirror"]["icon"] == "🪞"
+    assert rows["mirror"]["state"] == "locked" and rows["mirror"]["rung"] == 6 and rows["mirror"]["icon"] == "🪞"   # #312
     assert rows["mirror"]["teaches"]
 
 
