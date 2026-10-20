@@ -384,8 +384,8 @@ def test_rung_one_opens_once_and_the_next_waits_on_the_limit():
     assert st["rung"] == 1
     assert st["bar"] == pytest.approx(1.0)
     assert st["skill"] >= SL.RUNG1_SKILL
-    assert st["next"] == 2 and st["waiting_on"] == "the limit"   # rung 2 is built; the limit (1) holds it
-    assert len([r for r in _record(srv) if r["kind"] == "rung"]) == 1
+    assert st["next"] == ["reach"] and st["waiting_on"] == "the limit"   # #295: first reach is open (a root); the limit (1) holds it
+    assert len([r for r in _record(srv) if r["kind"] in ("rung", "achieve")]) == 1
 
 
 def test_a_passed_rung_can_slip_and_stays_on_the_record():
@@ -461,7 +461,7 @@ def test_a_rung_above_the_limit_stays_closed_however_well_it_does(monkeypatch):
     _cycles(srv, 1, now=t)
     st = SL.status(srv)
     assert st["rung"] == 2
-    assert [r["rung"] for r in _record(srv) if r["kind"] == "rung"] == [1, 2]
+    assert [r["rung"] for r in _record(srv) if r["kind"] in ("rung", "achieve")] == [1, 2]
 
 
 def test_raising_the_limit_never_grants_a_rung(monkeypatch):

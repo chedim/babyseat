@@ -171,7 +171,7 @@ def test_rung_six_opens_after_pushes_and_heard(monkeypatch):
     monkeypatch.setattr(SL, "_push_chat", lambda srv, text, person="": None)
     srv = _seat()
     _run(srv, 400)
-    assert 6 in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
+    assert 6 in [r["rung"] for r in _record(srv) if r["kind"] in ("rung", "achieve")]
     assert SL.status(srv)["rung"] == 6
 
 
@@ -181,7 +181,7 @@ def test_the_limit_holds_rung_six(monkeypatch):
     srv = _seat(limit=5)
     _run(srv, 400)
     assert not _kind(srv, "push")
-    assert 6 not in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
+    assert 6 not in [r["rung"] for r in _record(srv) if r["kind"] in ("rung", "achieve")]
 
 
 def test_chat_in_is_a_reachable_entity_that_hears():

@@ -212,7 +212,7 @@ def test_rung_two_waits_for_the_audit_then_opens(monkeypatch):
     recs = _record(srv)
     ends = [r for r in recs if r["kind"] == "audit" and r.get("phase") == "end"]
     assert ends and ends[0]["passed"] is True and ends[0]["changes"] == 0 and ends[0]["reaches"] >= 3
-    assert [r["rung"] for r in recs if r["kind"] == "rung"] == [1, 2]
+    assert [r["rung"] for r in recs if r["kind"] in ("rung", "achieve")] == [1, 2]
     assert SL.status(srv)["rung"] == 2
 
 
@@ -249,7 +249,7 @@ def test_a_tautological_recorder_fails_the_audit(monkeypatch):
     recs = _record(srv)
     ends = [r for r in recs if r["kind"] == "audit" and r.get("phase") == "end"]
     assert ends and ends[0]["passed"] is False
-    assert 2 not in [r["rung"] for r in recs if r["kind"] == "rung"]
+    assert 2 not in [r["rung"] for r in recs if r["kind"] in ("rung", "achieve")]
 
 
 def test_a_world_where_everything_changes_teaches_no_tempo():

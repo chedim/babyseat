@@ -160,7 +160,7 @@ def test_rung_eight_opens_with_an_advisor_that_knows_the_phase(monkeypatch):
     monkeypatch.setattr(SL, "_ask_llm", _queued)
     srv = _seat(limit=8, passed=(1, 2, 3, 4, 5, 6, 7))
     _run(srv, CYCLES)
-    assert 8 in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
+    assert 8 in [r["rung"] for r in _record(srv) if r["kind"] in ("rung", "achieve")]
     assert SL.status(srv)["rung"] == 8
     assert SL.status(srv)["rung8"]["advisor_weight"] > 0.5
 
@@ -209,7 +209,7 @@ def test_the_limit_holds_rung_eight(monkeypatch):
     srv = _seat(limit=7, passed=(1, 2, 3, 4, 5, 6, 7))
     _run(srv, 400)
     assert not [r for r in _kind(srv, "reach") if r["eid"] == RESP and "p_llm" in r]
-    assert 8 not in [r["rung"] for r in _record(srv) if r["kind"] == "rung"]
+    assert 8 not in [r["rung"] for r in _record(srv) if r["kind"] in ("rung", "achieve")]
 
 
 @pytest.fixture(autouse=True)

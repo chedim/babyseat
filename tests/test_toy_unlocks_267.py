@@ -257,7 +257,7 @@ def test_adding_a_locked_kind_is_refused_with_a_clear_message():
     _born(srv)
     out = TB.add(srv, "tower")
     assert not out["ok"]
-    assert "locked" in out["error"] and "rung 3" in out["error"]
+    assert "locked" in out["error"] and "'tell things apart'" in out["error"]   # #295: the achievement (rung 3's test)
     assert TB.add(srv, "fast", name="toy:f2")["ok"]               # an unlocked kind: fine
 
 
@@ -265,7 +265,7 @@ def test_a_locked_placeholder_is_refused_and_an_unlocked_one_is_not_built_yet():
     srv = _seat()
     _born(srv)
     out = TB.add(srv, "mirror")
-    assert not out["ok"] and "locked" in out["error"] and "rung 8" in out["error"]
+    assert not out["ok"] and "locked" in out["error"] and "'understand an other'" in out["error"]   # #295
     _pass(srv, 1, 2, 3, 4, 5, 6, 7, 8)
     out = TB.add(srv, "mirror")
     assert not out["ok"] and "not built yet" in out["error"]
@@ -284,7 +284,7 @@ def test_the_cli_refuses_a_locked_kind(capsys):
     _born(srv)
     SL._RT.pop(id(srv), None)
     assert TB.cli_main(["add", "tower"]) == 2
-    assert "rung 3" in capsys.readouterr().err
+    assert "'tell things apart'" in capsys.readouterr().err   # #295: the achievement that unlocks it
     assert TB.cli_main(["add", "mirror"]) == 2
     assert "locked" in capsys.readouterr().err
     assert TB.cli_main(["add", "slow"]) == 0
@@ -393,7 +393,7 @@ def test_the_dock_lists_the_next_locked_toys_capped():
     assert len(lk) == TU.NEXT_LOCKED == 2
     assert [x["kind"] for x in lk] == ["tower", "burst"]
     assert lk[0] == {"name": "locked:tower", "kind": "tower", "locked": True, "icon": TU.ICONS["tower"],
-                     "unlock_rung": 3, "rung_name": SL.RUNG_NAMES[3], "teaches": TU.TEACHES["tower"]}
+                     "unlock_rung": 3, "unlock_id": "kinds", "rung_name": SL.RUNG_NAMES[3], "teaches": TU.TEACHES["tower"]}
 
 
 def test_a_kept_toy_is_not_shown_again_as_locked():
