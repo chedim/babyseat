@@ -3209,7 +3209,15 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 psrv = getattr(runner, "srv", None) if runner is not None else None
                 if psrv is None:
                     self.send_response(503); self.send_header("Content-Length", "0"); self.end_headers(); return
-                return self._json_out(_SP.control(psrv, self._read_body() or {}, by="operator"))
+                b = self._read_body() or {}
+                b = b if isinstance(b, dict) else {}
+                # #299: who, for the record (an accept line says it): the token's
+                # person, the standalone page's speaker, the HA relay's admin
+                _tok = self._jwt_person()
+                _by = _SP.caller(token_sub=_tok.sub if _tok is not None else None,
+                                 relay_speaker=getattr(self, "_ui_speaker", "") if getattr(self, "_ui_relay", False) else None,
+                                 body=b)
+                return self._json_out(_SP.control(psrv, b, by=_by))
             if path == "/membrane/models":
                 # THE MINDS' MODELS: the watch loops' and the background
                 # cortex's models, live (the chat picker sets one session)

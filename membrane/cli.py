@@ -638,7 +638,7 @@ def main() -> None:
         from . import toybox as _TB
         raise SystemExit(_TB.cli_main(forwarded))
     if cmd == "self":
-        # SELF'S NAME ON THIS SEAT (#283): `self name [NAME | --reset]`
+        # SELF ON THIS SEAT: `self name [NAME | --reset]` (#283), `self accept <ID>` (#299)
         os.environ.setdefault("MEMBRANE_DATA_DIR", str(DATA_DIR))
         from . import self_name as _SN
         raise SystemExit(_SN.cli_main(forwarded))

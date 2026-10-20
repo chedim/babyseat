@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import self_loop as SL  # noqa: E402
+from _self_cap import cap  # noqa: E402
 from membrane import watch_agents as WA  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
 
@@ -83,10 +84,10 @@ def _seat(names, limit=4, passed=(1, 2, 3)):
                           properties={"name": name, "getter_script": "result = {'state': {'x': 1}}"})
         est.docs[e.eid] = e
     SL.bind(srv)
-    SL.set_limit(srv, 1)
+    cap(srv, 1)
     for r in passed:
         SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9})
-    SL.set_limit(srv, limit)
+    cap(srv, limit)
     return srv
 
 
@@ -122,7 +123,7 @@ def test_patience_finds_news_more_often_than_the_fixed_pace(monkeypatch):
     t = _run(srv, 200)                                    # rung-3 era: looks at a fixed pace
     fixed = _reaches(srv)
     fixed_news = sum(r["answer"] == "changed" for r in fixed[5:]) / len(fixed[5:])
-    SL.set_limit(srv, 4)
+    cap(srv, 4)
     _run(srv, 600, t0=t)
     timed = _reaches(srv, timed=True)
     assert len(timed) >= 30
@@ -134,7 +135,7 @@ def test_it_waits_when_nothing_is_due(monkeypatch):
     monkeypatch.setattr(SL, "_read_entity", _Clock({"slow1": 0.004}))
     srv = _seat(("slow1",), limit=3)
     t = _run(srv, 60)
-    SL.set_limit(srv, 4)
+    cap(srv, 4)
     n_before = len(_reaches(srv))
     _run(srv, 60, t0=t)
     looks = len(_reaches(srv)) - n_before
@@ -146,7 +147,7 @@ def test_rung_four_opens_by_its_test(monkeypatch):
     monkeypatch.setattr(SL, "_read_entity", _Clock({"fast": 0.03, "slow": 0.004}))
     srv = _seat(("fast", "slow"), limit=3)
     t = _run(srv, 200)
-    SL.set_limit(srv, 4)
+    cap(srv, 4)
     _run(srv, 900, t0=t)
     assert 4 in [r["rung"] for r in _record(srv) if r["kind"] in ("rung", "achieve")]
 

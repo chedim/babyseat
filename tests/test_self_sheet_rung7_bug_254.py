@@ -9,7 +9,7 @@ drop by its running time, and the sheet marks rung 7's restart.
 
 #258: that rung 7 is rung 8 (understand an other) since the ladder flip; the
 window and the `rung7_restart` line keep their names. The restart note sits
-on the Understand attribute (rung 8) and on rung 8's quest, not on the new
+on the expect skill's card (rung 8, #300) and on rung 8's quest, not on the new
 rung 7's (take turns).
 """
 import datetime as dt
@@ -89,9 +89,11 @@ class TestRung7RestartMark(unittest.TestCase):
         note = f"restarted {day}: was grading the LLM, now grades Blurp"
         self.assertEqual(s["quest"]["rung"], 7)                    # take turns (#258)...
         self.assertIsNone(s["quest"].get("note"))                  # ...which never graded the LLM
-        a = {x["key"]: x for x in s["attributes"]}["understand"]
-        self.assertEqual(a["rung"], 8)
-        self.assertEqual(a["note"], note)
+        # #300: the note rides on the expect skill's card while it is being learned
+        self.assertNotIn("expect", [k["id"] for k in s["skills"]])      # the limit (7) holds it: not on the card
+        SL._rt(srv)["isolate"] = SL._limit_ids(8)                    # #299: the limit is gone; rungs 1..8 run
+        k = {x["id"]: x for x in S._sheet(srv, NOW)["skills"]}["expect"]
+        self.assertEqual(k["note"], note)
 
     def test_no_mark_before_the_restart(self):
         s = S._sheet(S._lived(S._seat()), NOW)
@@ -121,7 +123,7 @@ class TestTheSheetShowsIt(unittest.TestCase):
     def test_the_page_renders_the_restart_the_void_and_the_open_window(self):
         import json
         d = S._demo()
-        d["quest"]["note"] = "restarted 2026-10-19: was grading the LLM, now grades self"
+        d["skills"][0]["note"] = "restarted 2026-10-19: was grading the LLM, now grades self"   # #300: on its skill's card
         d["quest"]["voided"] = ["rung 7 passed 2026-10-19 05:38Z under the #254 bug: graded the LLM, not self; "
                                 "doesn't count"]
         d["time"]["bugs"].append({"issue": 254, "what": "rung 7 graded the LLM's guess, not self's",

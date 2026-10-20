@@ -16,7 +16,9 @@ uptime and a beat count, nothing else). The seat's presence entity
             /membrane/seat/control, an HA admin through the relay):
             paused (the one switch every acting lane honours), loops_max,
             auto-chat / role per session, the self loop (off / on /
-            watch, #161; self_loop.py) and self's name on this seat
+            watch, #161; self_loop.py), accepting an achievement self
+            earned (#299: {"accept": id}, which opens what it leads to;
+            the record says who, caller()) and self's name on this seat
             (#283; self_name.py). Argus READS all of it; an
             edit of these properties by a lane is not a control (the
             refresh writes the truth back) -- the stable point stays the
@@ -33,7 +35,8 @@ REFRESH_S = 15.0
 EVENTS_KEEP = 20
 MEM_LOW_MB = 350             # the phone's MemAvailable under this: pressure
 RSS_HIGH_MB = 2300           # the seat itself over this: pressure
-CONTROLS = ("paused", "loops_max", "auto", "role", "self", "self_limit", "self_name")
+CONTROLS = ("paused", "loops_max", "auto", "role", "self", "accept", "self_limit", "self_name")
+CALLER_MAX = 80              # #299: the longest caller name a record line keeps
 
 
 def _est(srv):
@@ -242,6 +245,23 @@ def refresh(srv) -> dict:
     return st
 
 
+def caller(token_sub=None, relay_speaker=None, body=None) -> str:
+    """#299: who called the control route, as the record says it -- never a
+    secret: the JWT token's subject ("user:<sub>"), else the standalone
+    page's speaker ("ui:<name>"), else the HA relay's stamped admin
+    ("ha:<name>", custom_components relay PERSON_PATHS), else "operator"
+    (localhost or the seat token: the operator's own door)."""
+    def clean(v):
+        t = "".join(ch for ch in str(v or "") if ch.isprintable()).strip()
+        return t[:CALLER_MAX - 5]
+    if clean(token_sub):
+        return "user:" + clean(token_sub)
+    if clean(relay_speaker):
+        return "ui:" + clean(relay_speaker)
+    p = clean((body or {}).get("person")) if isinstance(body, dict) else ""
+    return "ha:" + p if p else "operator"
+
+
 def control(srv, body: dict, by: str = "operator") -> dict:
     """The operator's switches, applied by the seat (never by an edit)."""
     from . import voice as V
@@ -271,8 +291,14 @@ def control(srv, body: dict, by: str = "operator") -> dict:
         if _SELF.set_mode(srv, m, by=by):
             done["self"] = m
             note(srv, "self", value=m, by=by)
-    if "self_limit" in body:                       # #161: the growth limit; #295: up to an achievement
-        from . import self_loop as _SELF           # (an id, "all", "off"; a number is the old ladder's)
+    if "accept" in body:                           # #299: the operator accepts an earned achievement
+        from . import self_loop as _SELF
+        out = _SELF.accept(srv, body["accept"], by=by)
+        done["accept"] = out
+        if out.get("ok") and not out.get("already"):
+            note(srv, "self-accept", value=out["id"], by=by)
+    if "self_limit" in body:                       # DEPRECATED (#299): a bulk accept of the closure;
+        from . import self_loop as _SELF           # 0 / "off" sleeps (an id, "all"; a number is the old ladder's)
         if _SELF.set_limit(srv, body["self_limit"], by=by):
             n = _SELF.limit(srv)
             done["self_limit"] = n

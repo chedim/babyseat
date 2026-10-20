@@ -140,7 +140,7 @@ def test_a_restart_keeps_the_mode_and_the_record():
     srv.entity_store.flush()
     srv2 = _seat(d)
     assert SL.mode(srv2) == "watch"
-    assert [r["kind"] for r in _record(srv2)] == ["birth", "cycle", "cycle"]
+    assert [r["kind"] for r in _record(srv2)] == ["birth", "accept_migrated", "cycle", "cycle"]   # #299: migrated at birth
     SL.set_mode(srv2, "on")
     assert [r["kind"] for r in _record(srv2)].count("birth") == 1
 
@@ -150,7 +150,7 @@ def test_a_paused_seat_runs_nothing():
     SL.set_mode(srv, "on")
     srv.paused = True
     assert SL.cycle(srv, now=1000.0) is None
-    assert [r["kind"] for r in _record(srv)] == ["birth"]
+    assert [r["kind"] for r in _record(srv)] == ["birth", "accept_migrated"]   # #299: migrated at birth
 
 
 # ---- rung 1: feel itself (positional) ---------------------------------------
@@ -193,7 +193,7 @@ def test_a_change_in_the_world_reopens_the_gap_and_experience_closes_it_again():
     surprise = _record(srv)[-1]["gap"]
     assert surprise > 3 * (sum(settled) / len(settled))
     _cycles(srv, 40, now=t)
-    assert SL.status(srv)["skill"] >= SL.RUNG1_SKILL  # it learned the new current
+    assert SL._rung1(_record(srv))["skill"] >= SL.RUNG1_SKILL  # it learned the new current (#299: the bar reads reach, a root, now)
 
 
 def test_what_it_learned_survives_a_restart_in_a_wide_world():
@@ -237,7 +237,7 @@ def test_without_a_world_there_is_nothing_to_feel():
     SL.set_mode(srv, "on")
     assert SL.cycle(srv, now=1000.0) is None
     assert SL.status(srv)["waiting_on"] == "the world"
-    assert [r["kind"] for r in _record(srv)] == ["birth"]
+    assert [r["kind"] for r in _record(srv)] == ["birth", "accept_migrated"]
     srv.entity_store.docs[EID].position = [float(x) for x in _dir(2)]
     assert SL.cycle(srv, now=1000.0) is not None
     rec = _record(srv)[-1]
@@ -375,16 +375,18 @@ def test_the_bar_fills_with_pushed_cycles_and_names_what_it_waits_on():
     assert st["waiting_on"] in ("pushes", "skill")
 
 
-def test_rung_one_opens_once_and_the_next_waits_on_the_limit():
+def test_rung_one_opens_once_and_waits_for_the_operators_accept():
     srv = _seat()
     SL.set_mode(srv, "on")
     t = _cycles(srv, SL.RUNG1_CYCLES * 2)
     _cycles(srv, 3, now=t)
     st = SL.status(srv)
     assert st["rung"] == 1
-    assert st["bar"] == pytest.approx(1.0)
-    assert st["skill"] >= SL.RUNG1_SKILL
-    assert st["next"] == ["reach"] and st["waiting_on"] == "the limit"   # #295: first reach is open (a root); the limit (1) holds it
+    r1 = SL._rung1(_record(srv))                         # #299: the bar reads reach (a root, open), so rung 1's own test
+    assert SL._staged(r1["crit"])[0] == pytest.approx(1.0)
+    assert r1["skill"] >= SL.RUNG1_SKILL
+    assert st["next"] == ["reach"]                       # #295: first reach is open (a root)
+    assert st["awaiting"] == ["feel"]                    # #299: earned, waiting for the operator's accept
     assert len([r for r in _record(srv) if r["kind"] in ("rung", "achieve")]) == 1
 
 
@@ -400,7 +402,7 @@ def test_a_passed_rung_can_slip_and_stays_on_the_record():
     assert st["slipping"] is True
     assert st["bar"] < 1.0
     assert st["rung"] == 1
-    assert st["waiting_on"] == "skill"
+    assert SL._staged(SL._rung1(_record(srv))["crit"])[1] == "skill"   # #299: the bar reads reach now
 
 
 # ---- the operator's switch on the seat panel --------------------------------
@@ -422,15 +424,15 @@ def test_the_seat_panel_ignores_a_bad_value():
     assert SL.mode(srv) == "off"
 
 
-def test_the_panel_has_the_chooser():
+def test_the_panel_has_the_sleep_toggle_not_the_chooser():      # #299: the 🌱 chooser gave way to acceptance
     js = (Path(__file__).resolve().parent.parent / "membrane" / "ui" / "panel.js").read_text()
-    assert 'class="selfpick"' in js
-    assert "JSON.stringify({ self_limit: n })" in js
-    assert '["selfpick", null]' in js
+    assert 'class="selfpick"' not in js
+    assert 'class="btn icon selfsleep"' in js
+    assert '["selfsleep", SELF_NAME + " asleep"]' in js
     assert "selfbtn" not in js
 
 
-# ---- the growth limit (the operator's chooser) ------------------------------
+# ---- #299: acceptance (the growth limit until then) ---------------------------
 
 def _fake_rung2(monkeypatch, passes=True):
     """A built rung 2 whose test is under the test's control."""
@@ -439,76 +441,88 @@ def _fake_rung2(monkeypatch, passes=True):
                                                        "skill": 0.9, "passed": passes})
 
 
-def test_limit_zero_is_off_and_one_is_on():
+def test_the_deprecated_limit_zero_is_off_and_one_is_on():
     srv = _seat()
     assert SL.limit(srv) == 0
     SL.set_limit(srv, 1)
-    assert SL.mode(srv) == "on" and SL.limit(srv) == 1
+    assert SL.mode(srv) == "on" and SL.limit(srv) == 2   # the open skills now: the roots, feel (1) and reach (2)
     SL.set_limit(srv, 0)
     assert SL.mode(srv) == "off"
 
 
-def test_a_rung_above_the_limit_stays_closed_however_well_it_does(monkeypatch):
+def test_a_child_stays_closed_however_well_it_does_until_its_parent_is_accepted(monkeypatch):
     _fake_rung2(monkeypatch)
+    monkeypatch.setitem(SL.PROGRESS, 3, lambda recs, tempo=None: {"crit": {"looks": 1.0}, "skill": 0.9, "passed": True})
     srv = _seat()
-    SL.set_limit(srv, 1)
+    SL.set_mode(srv, "on")
     t = _cycles(srv, SL.RUNG1_CYCLES * 2)
     st = SL.status(srv)
-    assert st["rung"] == 1                               # rung 2's test passes, the limit holds it
-    assert st["waiting_on"] == "the limit"
-    assert [x["state"] for x in st["ladder"] if x["rung"] == 2] == ["capped"]
-    SL.set_limit(srv, 2)                                 # the operator widens it
+    assert st["rung"] == 2 and st["awaiting"] == ["feel", "reach"]   # earned, both: the level counts them
+    assert "kinds" not in st["next"]                     # kinds' test passes, but reach is not accepted
+    assert [x["state"] for x in st["ladder"] if x["rung"] == 3] == ["capped"]
+    assert SL.accept(srv, "reach")["ok"]                 # the operator lets it grow
     _cycles(srv, 1, now=t)
     st = SL.status(srv)
-    assert st["rung"] == 2
-    assert [r["rung"] for r in _record(srv) if r["kind"] in ("rung", "achieve")] == [1, 2]
+    assert st["rung"] == 3
+    assert [r.get("id") or SL.RUNG_ID.get(r.get("rung")) for r in _record(srv) if r["kind"] in ("rung", "achieve")] \
+        == ["reach", "feel", "kinds"]
 
 
-def test_raising_the_limit_never_grants_a_rung(monkeypatch):
+def test_accepting_never_grants_a_rung(monkeypatch):
     _fake_rung2(monkeypatch, passes=False)
     srv = _seat()
-    SL.set_limit(srv, 2)
+    SL.set_mode(srv, "on")
     _cycles(srv, SL.RUNG1_CYCLES * 2)
+    out = SL.accept(srv, "reach")                        # not earned: refused
+    assert not out["ok"] and "not earned" in out["error"]
     st = SL.status(srv)
     assert st["rung"] == 1                               # it must still earn it
     assert [x["state"] for x in st["ladder"] if x["rung"] == 2] == ["current"]
 
 
-def test_the_limit_is_clamped_to_the_built_rungs():
+def test_a_deprecated_number_past_the_top_accepts_every_earned_one():
     srv = _seat()
-    SL.set_limit(srv, 9)
-    assert SL.limit(srv) == max(SL.LADDER)
+    SL.set_mode(srv, "on")
+    SL._append(srv, {"ts": 2.0, "kind": "achieve", "id": "reach", "rung": 2, "skill": 0.5})
+    assert SL.status(srv)["awaiting"] == ["reach"]
+    assert SL.set_limit(srv, 9)
+    assert SL.status(srv)["awaiting"] == [] and SL.mode(srv) == "on"
 
 
 def test_the_ladder_lists_every_rung_and_marks_the_unbuilt():
     srv = _seat()
-    SL.set_limit(srv, 1)
+    SL.set_mode(srv, "on")
     lad = {x["rung"]: x["state"] for x in SL.status(srv)["ladder"]}
     assert lad[0] == "passed" and lad[1] == "current"
     assert lad[10] == "unbuilt" and len(lad) == len(SL.RUNG_NAMES)
 
 
-def test_the_limit_survives_a_restart():
+def test_acceptance_survives_a_restart():
     d = tempfile.mkdtemp()
     srv = _seat(d)
-    SL.set_limit(srv, 1)
-    assert SL.limit(_seat(d)) == 1
+    SL.set_mode(srv, "on")
+    SL._append(srv, {"ts": 2.0, "kind": "achieve", "id": "reach", "rung": 2, "skill": 0.5})
+    SL.accept(srv, "reach")
+    srv2 = _seat(d)
+    SL._rt(srv2)["recs"] = None
+    assert SL.mode(srv2) == "on" and SL.status(srv2)["accepted"] == ["reach"]
 
 
-def test_an_on_seat_from_before_the_limit_gets_limit_one():
+def test_an_on_seat_from_before_the_limit_stays_on_with_its_roots_open():
     d = Path(tempfile.mkdtemp())
     (d / "self").mkdir()
     (d / "self" / "mode.json").write_text(json.dumps({"mode": "on", "ts": 1.0}))
-    assert SL.limit(_seat(d)) == 1
+    srv = _seat(d)
+    assert SL.mode(srv) == "on" and SL._available(srv, 1) and SL._available(srv, 2)
 
 
-def test_the_seat_panel_sets_the_limit():
+def test_the_seat_panel_still_takes_the_deprecated_limit():
     srv = _seat()
     out = SP.control(srv, {"self_limit": 1})
-    assert out["applied"]["self_limit"] == 1 and SL.mode(srv) == "on"
+    assert out["applied"]["self_limit"] == 2 and SL.mode(srv) == "on"    # the top open rung: reach, a root
     ev = srv.entity_store.docs[MEMBRANE_NS + "presence"].properties["last_event"]
-    assert ev["kind"] == "self" and ev["limit"] == 1
-    assert SP.state(srv)["self"]["limit"] == 1
+    assert ev["kind"] == "self" and ev["limit"] == 2
+    assert SP.state(srv)["self"]["limit"] == 2
 
 
 def test_a_cycle_writes_nothing_to_stderr(capsys):
