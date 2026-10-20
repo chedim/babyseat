@@ -265,7 +265,7 @@ def test_a_locked_placeholder_is_refused_and_an_unlocked_one_is_not_built_yet():
     srv = _seat()
     _born(srv)
     out = TB.add(srv, "mirror")
-    assert not out["ok"] and "locked" in out["error"] and "'understand an other'" in out["error"]   # #295
+    assert not out["ok"] and "locked" in out["error"] and "'expect a reply'" in out["error"]   # #295, #300
     _pass(srv, 1, 2, 3, 4, 5, 6, 7, 8)
     out = TB.add(srv, "mirror")
     assert not out["ok"] and "not built yet" in out["error"]

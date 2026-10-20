@@ -175,23 +175,22 @@ earned", and "once rung N-1 has passed" reads "once its prerequisites are earned
 section covers what is built (`membrane/self_loop.py`); the operator's guide
 to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
 
-- **Rung 0, sleep and wake, and the growth limit.** A per-seat chooser, **off
-  by default**, set only by the operator: the 🌱 chooser (the home top bar,
-  and the chat's side menu) → `POST /membrane/seat/control {"self_limit": v}`
-  (`seat_panel.control`). The chooser picks **the achievement self may grow
-  up to** (#295: it and its prerequisite closure), or `"all"`, or `"off"`; a
-  number is the old ladder's rungs 1..N (8 is all), and a saved number
-  migrates that way:
-  - inside the limit, self still earns each achievement by its test,
-    whenever its prerequisites are earned;
-  - outside it, nothing is earned however well it does: the tree says it
-    waits on "the limit";
-  - off is off, and raising the limit never grants an achievement.
-
-  `{"self": "on" | "off" | "watch"}` still works. A seat switched on before
-  the limit existed gets limit 1. Off runs
-  nothing and erases nothing. The mode (`<data dir>/self/mode.json`) and the
-  record survive a restart. `watch` runs like `on` until there is a
+- **Rung 0, sleep and wake, and acceptance (#299).** A per-seat switch, **off
+  by default**, set only by the operator: the 💤 / 🌱 toggle (the 👶 panel's
+  header on membrane home, and the chat's side menu) → `POST
+  /membrane/seat/control {"self": "on" | "off" | "watch"}` (`seat_panel.control`).
+  Earning is automatic (a pass is an `achieve` line), but an earned
+  achievement opens its children only once the operator **accepts** it
+  (`{"accept": "<id>"}`, `membrane self accept <id>`, or the Accept buttons on
+  home's celebration and the Skill tree): a skill is open -- practised, its
+  outward acts on, its test running -- when every prerequisite is earned
+  and accepted. Each accept is a record line `{"kind": "accept", "id", "ts",
+  "by"}`; what was earned before #299 counts as accepted, recorded once as
+  `{"kind": "accept_migrated", "ids": [...]}`. The 🌱 growth limit it replaced
+  survives as the deprecated `{"self_limit": v}`: 0 / "off" sleeps, an id,
+  "all" or a number bulk-accepts the earned achievements in that closure.
+  Off runs nothing and erases nothing. The mode (`<data dir>/self/mode.json`)
+  and the record survive a restart. `watch` runs like `on` until there is a
   babysitter to keep quiet.
 - **Rung 1, feel itself (the amoeba's problem).** Its only act moves its own
   position on the field, and the world pushes it while it moves: the field's
@@ -353,7 +352,7 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   rewritten), but its bar re-measures against the new person and reads
   **slipping** until they earn it — no reset, no free pass.
   (`llm::call` prediction is rung 8's; rung 6 is only the bare split.)
-- **Rung 7, take turns (#258).** Rung 6 pushes on a timer (every 30
+- **Rung 7, time its turn (#258; "take turns" until #300).** Rung 6 pushes on a timer (every 30
   cycles), whatever the other is doing. From rung 7 on, self **learns when
   to push**: after each push it draws the moment it will wait for, a bin of
   `spoke_age` (how long since the person last spoke: 0–2 min, 2–10, 10–30,
@@ -395,7 +394,7 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   (speak) opens; rung 6 reads its record as it stood at the switch, so a
   quiet chat can't read as slipping. Simulated pass rates are in
   `experiments/rung7_turns` (`sim.py ... toy`).
-- **Rung 8, understand an other** (rung 7 until #258, unchanged but for
+- **Rung 8, expect a reply** ("understand an other" until #300; rung 7 until #258, unchanged but for
   its outcome: since #258 a check's outcome is `replied`, a line after the
   push, like rung 7's; a check from before #258 counts for neither). Once rung
   8 is available, self consults the model coprocessor at
@@ -437,7 +436,7 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   can't pass. No model is needed to pass. `status()['rung8']` shows the
   operator `asked` / `checked` / `paired`, `pair_rate`, the Brier errors of
   self alone, of the mix, of the running rate and of the model alone, and
-  the advisor's weight and model id (the 🌱 tooltip too). It is scoped to the
+  the advisor's weight and model id (the 🌱 toggle's tooltip too). It is scoped to the
   other only (the current one: checks at a previous person don't count);
   every other thing keeps habit's prediction.
 - **Its methods run only in its own loop.** `try` / `expect` / `notice` are
@@ -491,7 +490,7 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
 MEMBRANE_EFIELD=shadow | off   # events-only capture / the field off
 MEMBRANE_LANE_GATE=0           # the flat tool surface (no operator/listener split)
 MEMBRANE_NERVE_PAUSE=0         # pause becomes a no-op
-(the self loop)                # off by default; the operator's 🌱 switch
+(the self loop)                # off by default; the operator's 💤/🌱 switch and accepts (#299)
 ```
 
 ## The goal loops' rhythm (2026-10-08)

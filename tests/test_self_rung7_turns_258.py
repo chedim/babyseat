@@ -43,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from membrane import chat_io as CIO  # noqa: E402
 from membrane import self_loop as SL  # noqa: E402
+from tests._self_cap import cap  # noqa: E402
 from membrane import self_sheet as SS  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
 
@@ -284,14 +285,14 @@ def _seat(passed=(1, 2, 3, 4, 5, 6), limit=7):
     est.docs[e.eid] = e
     CIO.entity_in(srv, CIO.OPERATOR)
     SL.bind(srv)
-    SL.set_limit(srv, 1)
+    cap(srv, 1)
     for r in passed:
         line = {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9}
         if r >= 7:
             line["ladder"] = SL.LADDER_V
         SL._append(srv, line)
     SL._append(srv, {"ts": 1.0, "kind": "audit", "rung": 5, "phase": "end", "eid": "x", "passed": True})
-    SL.set_limit(srv, limit)
+    cap(srv, limit)
     return srv
 
 
@@ -429,7 +430,7 @@ def test_the_voided_old_rung_seven_pass_stays_void_and_counts_for_neither_rung()
     assert 7 not in done and 8 not in done
     st = SL.status(srv)
     assert st["rung"] == 6 and st["next"] == ["turns", "expect"] and st["rung_name"] == "meet an other"   # #295: siblings
-    assert next(r for r in st["ladder"] if r["rung"] == 7)["name"] == "take turns"
+    assert next(r for r in st["ladder"] if r["rung"] == 7)["name"] == "time its turn"     # #300
 
 
 def test_a_rung_line_from_before_the_flip_does_not_count_above_six():
@@ -458,7 +459,7 @@ def test_the_numbering():
     assert [SL.RUNG_NAMES[n] for n in range(7)] == [
         "sleep and wake", "feel itself", "first reach", "tell things apart", "patience",
         "notice the world changed", "meet an other"]                  # rungs 0-6 unchanged
-    assert SL.RUNG_NAMES[7] == "take turns" and SL.RUNG_NAMES[8] == "understand an other"
+    assert SL.RUNG_NAMES[7] == "time its turn" and SL.RUNG_NAMES[8] == "expect a reply"   # #300: named for their tests
     assert SL.RUNG_NAMES[9] == "recognize itself"
     assert sorted(SL.LADDER) == list(range(9))
     assert SL.PROGRESS[7] is SL._rung7 and SL.PROGRESS[8] is SL._rung8
@@ -499,17 +500,19 @@ def test_the_sheet_follows_the_numbering(monkeypatch):
     srv = _seat()
     _run(srv, _Talker(srv, every=600.0), 400, monkeypatch=monkeypatch)
     s = SS.sheet(srv, fresh=True)
-    attrs = {a["key"]: a for a in s["attributes"]}
-    assert attrs["turns"]["rung"] == 7 and attrs["turns"]["rung_name"] == "take turns"
-    assert attrs["understand"]["rung"] == 8 and attrs["understand"]["pass"] == SL.RUNG8_MARGIN
-    assert s["quest"]["rung"] == 7 and s["quest"]["name"] == "take turns"
+    # #300: the attributes are traits, not the skills' scores; each skill is on the card while learned
+    sk = {k["id"]: k for k in s["skills"]}
+    assert list(sk) == ["turns"] and sk["turns"]["name"] == "time its turn" and sk["turns"]["trend"]["rung"] == 7
+    assert sk["turns"]["trend"]["pass"] == SL.RUNG7_PAY_MARGIN
+    assert {n["id"]: n for n in s["tree"]}["expect"]["name"] == "expect a reply"   # the limit (7) holds it off the card
+    assert s["quest"]["rung"] == 7 and s["quest"]["name"] == "time its turn"
     assert [c["key"] for c in s["quest"]["criteria"]] == ["pushes", "contingency", "payoff"]
     assert "timed lines" in s["quest"]["criteria"][0]["text"]
     months7, what7 = SS.CHILD[7]
     assert 2.0 <= months7 <= 6.0 and "turn" in what7
-    assert SS.CHILD[8][0] == 9.0                                 # the nine-month shift: understanding comes later
+    assert SS.CHILD[8][0] == 2.5 and "still-face" in SS.CHILD[8][1]   # #300: expects a caregiver's reply (~2-3 mo)
     rows = {r["rung"]: r for r in s["growth"]["rows"]}
-    assert rows[7]["name"] == "take turns" and rows[8]["name"] == "understand an other"
+    assert rows[7]["name"] == "time its turn" and rows[8]["name"] == "expect a reply"   # #300
     assert rows[7]["built"] and rows[8]["built"] and not rows[9]["built"]
 
 

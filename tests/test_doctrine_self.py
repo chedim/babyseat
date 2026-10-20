@@ -4,7 +4,7 @@ A body is discovered by contingency, never declared (#161) -- so the doctrine
 gives the LLM the field as its memory and senses and its tools as its hands,
 not as its body; and it carries the guard: self is not the LLM, the LLM never
 speaks as it or claims its state beyond its record, its methods and its
-growth limit are not the LLM's, and the LLM builds the world self reaches for.
+acceptance are not the LLM's, and the LLM builds the world self reaches for.
 """
 import re
 import sys
@@ -28,7 +28,7 @@ def test_the_doctrine_carries_the_self_guard():
     assert "self (#161)" in d
     assert "never speak as it" in d
     assert "record.jsonl" in d                       # its state is its record, cite it
-    assert "growth limit" in d and "operator" in d
+    assert "accept" in d and "operator" in d         # #299: accepting what it earns is the operator's
     assert "build them true" in d                    # the getters it reaches for are the llm's work
 
 

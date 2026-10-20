@@ -3,7 +3,7 @@
 #295, THE SKILL TREE: a kind unlocks when self EARNS an achievement (UNLOCK_IDS:
 the achievement whose test is the rung in UNLOCKS -- tower: tell things apart,
 burst: patience, die and drift: notice the world changed, ball: meet an other,
-mirror: understand an other, ...). Achievements are earned out of order, so the
+mirror: expect a reply, ...). Achievements are earned out of order, so the
 toys are too; the record's unlock line carries the achievement's `id` beside
 its `rung` (the test's number, as before).
 
@@ -43,6 +43,12 @@ PLACEHOLDERS. mirror, blocks and rattle are kinds with a name, an icon, an
 unlock rung and one line of what each will teach -- no mechanics yet (those
 are built with their rungs). They are never provisioned, never poked, and
 adding one is refused (locked, or unlocked but not built yet).
+
+ACCEPTED, NOT ONLY EARNED (#299). A kind unlocks when its achievement is
+earned AND the operator has accepted it (_opened): an earned achievement
+waiting for its accept opens nothing, toys included. The unlock line is
+written when the accept lands (self_loop.accept syncs at once); `late` is
+measured from the later of the pass and the accept.
 
 GRADING. No rung's test reads an unlock line or a toy's unlock: an unlock
 never makes a rung easier to pass.
@@ -120,8 +126,26 @@ def born(recs: list[dict]) -> bool:
 
 
 def passed(srv) -> set:
+    return _opened(_recs(srv))
+
+
+def _opened(recs: list[dict]) -> set:
+    """#299: the rungs whose achievement is earned AND accepted (and 0, birth)
+    -- what unlocks toys; self_loop._passed is the earned ones alone."""
     from . import self_loop as SL
-    return SL._passed(_recs(srv))
+    return {0} | {SL.ACHIEVEMENTS[i]["rung"] for i in SL._accepted(recs)}
+
+
+def _accept_ts(recs: list[dict]) -> dict:
+    """rung -> when the operator's accept of its achievement landed (the
+    migration is no accept: a migrated achievement's news is its pass)."""
+    from . import self_loop as SL
+    out: dict = {}
+    for r in recs:
+        n = SL.ACHIEVEMENTS.get(r.get("id"), {}).get("rung") if r.get("kind") == "accept" else None
+        if n is not None:
+            out[n] = max(out.get(n, 0.0), float(r.get("ts") or 0))
+    return out
 
 
 def refusal(srv, kind: str) -> str | None:
@@ -130,10 +154,13 @@ def refusal(srv, kind: str) -> str | None:
     kind = str(kind or "").strip().lower()
     recs = _recs(srv)
     n = rung_of(kind)
-    if born(recs) and kind in UNLOCKS and n not in SL._passed(recs):
+    if born(recs) and kind in UNLOCKS and n not in _opened(recs):
         from . import self_name as _SN                 # #283: said with this seat's name
+        if n in SL._passed(recs):                      # #299: earned, waiting for the operator's accept
+            return _SN.say(f"{kind} {ICONS.get(kind, '')} is locked: {_NAME} earned '{_ach_name(n)}', and it "
+                           f"unlocks once the operator accepts that -- {TEACHES.get(kind, '')}").replace("  ", " ")
         return _SN.say(f"{kind} {ICONS.get(kind, '')} is locked: it unlocks when {_NAME} earns "
-                       f"'{_ach_name(n)}' -- {TEACHES.get(kind, '')}").replace("  ", " ")
+                       f"'{_ach_name(n)}' and the operator accepts it -- {TEACHES.get(kind, '')}").replace("  ", " ")
     if kind in PLACEHOLDERS:
         return (f"{kind} {ICONS[kind]} is unlocked but not built yet: its mechanics come with "
                 f"'{_ach_name(n + 1)}'")
@@ -251,10 +278,12 @@ def _sync(srv, now):
 def _sync_new(srv, recs, now):
     from . import self_loop as SL
     done = {r.get("rung") for r in recs if r.get("kind") == "unlock"}
-    passed_ = SL._passed(recs)
+    passed_ = _opened(recs)                     # #299: earned and accepted
     if all(UNLOCKS[k] in done for k in unlocked(passed_) if UNLOCKS[k] > 0):
         return []
     at = {r["rung"]: float(r.get("ts") or 0) for r in SL._rung_lines(recs)}
+    for n, t in _accept_ts(recs).items():       # ...news from the later of the pass and the accept
+        at[n] = max(at.get(n, t), t)
     out = []
     for n in sorted(passed_):
         toys = [k for k in unlocked({n}) if UNLOCKS[k] == n]
@@ -288,7 +317,7 @@ def locked_rows(recs: list[dict], have=(), cap: int = NEXT_LOCKED) -> list[dict]
     from . import self_loop as SL
     if not born(recs):
         return []
-    open_ = set(unlocked(SL._passed(recs))) | set(have or ())
+    open_ = set(unlocked(_opened(recs))) | set(have or ())
     rows = [k for k in sorted(UNLOCKS, key=lambda k: (UNLOCKS[k], list(UNLOCKS).index(k))) if k not in open_]
     return [{"name": LOCKED_PREFIX + k, "kind": k, "locked": True, "icon": ICONS.get(k, ""),
              "unlock_rung": UNLOCKS[k], "unlock_id": UNLOCK_IDS[k], "rung_name": _ach_name(UNLOCKS[k]),
@@ -298,7 +327,7 @@ def locked_rows(recs: list[dict], have=(), cap: int = NEXT_LOCKED) -> list[dict]
 def grandfathered(recs: list[dict], kind: str) -> bool:
     """A toy kept from before its kind unlocked (no toy ever disappears)."""
     from . import self_loop as SL
-    return born(recs) and kind in UNLOCKS and UNLOCKS[kind] not in SL._passed(recs)
+    return born(recs) and kind in UNLOCKS and UNLOCKS[kind] not in _opened(recs)
 
 
 def table(recs: list[dict], have: set) -> list[dict]:
@@ -307,7 +336,7 @@ def table(recs: list[dict], have: set) -> list[dict]:
     from . import self_loop as SL
     from . import toybox as TB
     is_born = born(recs)
-    open_ = set(unlocked(SL._passed(recs))) if is_born else set(UNLOCKS)
+    open_ = set(unlocked(_opened(recs))) if is_born else set(UNLOCKS)
     when = {}
     for r in recs:
         if r.get("kind") == "unlock":

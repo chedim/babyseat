@@ -9,10 +9,16 @@ and the toybox -- read-only, cached CACHE_S, served at GET
                  achievement's branch, prerequisites (and why), state,
                  earned time and skill, staged bar, what it waits on, and
                  the child's age and ability its test measures (tree())
-  header         name, Lv (achievements earned), the exp bar, age and WORKING hours
-  attributes     one measured skill per built rung (Feel .. Understand);
-                 None when nothing measures it yet, negative when it is
-  quest          the current rung's staged criteria, with counts and skill
+  header         name, "Lv N · <latest earned skill>" (#300: never a rung), what
+                 it is learning, the exp bar, age and WORKING hours
+  attributes     #300: traits of self as a whole, measured from its record --
+                 Curiosity, Insight, Adaptability, Focus, Sociability (traits());
+                 each a value, what it measures and a trend; they gate nothing
+  skills         #300: only the skills it is learning now (open; #299: and
+                 the ones waiting on the operator's accept, `awaiting_accept`),
+                 each with its staged criteria, bar, what it waits on, trend
+  slipping       #300: the earned skills whose test no longer holds
+  quest          the skill the exp bar reads, staged (kept for older readers)
   achievements   each rung's pass record (date, working hour, skill)
   growth         rungs over working hours, against the fastest possible and
                  a child's milestones rescaled (an analogy, said so)
@@ -137,9 +143,9 @@ CHILD = {1: (0.1, "tells its own touch from another's (newborns, Rochat & Hespos
          4: (3.5, "anticipates timed events (Haith, anticipatory looking)"),
          5: (5.0, "is surprised when the world breaks its expectation (Baillargeon)"),
          6: (3.0, "tells perfect self-contingency from imperfect social contingency (Bahrick & Watson)"),
-         7: (4.0, "takes turns: serve and return, the proto-conversation of 2-6 months "
+         7: (4.0, "times its turn in a proto-conversation: serve and return, 2-6 months "
                   "(Bateson 1975; Trevarthen 1979; Jaffe et al. 2001)"),
-         8: (9.0, "predicts what others will do (the nine-month shift, Tomasello)"),
+         8: (2.5, "expects a caregiver's response: the still-face upset (Tronick et al. 1978)"),   # #300
          9: (18.0, "passes the mirror test (Amsterdam 1972)"),
          10: (48.0, "revises what it knows about its own knowing (metacognition, Flavell)"),
          11: (48.0, "tells its own story from memory (autobiographical narrative, Nelson & Fivush)")}
@@ -272,8 +278,9 @@ def _toybox_rows() -> dict:
 # ---- the clocks -------------------------------------------------------------
 
 def _clocks(recs: list, now: float) -> dict:
-    """Born, the gaps, the pass times (rung 6 honest), the bug windows."""
-    srt = sorted(recs, key=lambda r: float(r.get("ts") or 0))
+    """Born, the gaps, the pass times (rung 6 honest), the bug windows. The
+    operator's lines (#299: accepts) are not self running: left out."""
+    srt = sorted((r for r in recs if r.get("kind") not in SL.OPERATOR_KINDS), key=lambda r: float(r.get("ts") or 0))
     born = next((r["ts"] for r in srt if r.get("kind") == "birth"), srt[0]["ts"] if srt else None)
     if born is None:
         return {"born": None, "srt": srt}
@@ -512,49 +519,180 @@ def _calibration(recs: list):
     return abs(sum(float(r["p"]) for r in timed) / len(timed) - news)
 
 
-ATTRS = (("feel", "Feel", 1, "skill", "1 − gap ÷ naive: how well it predicts the current's push on its own moves"),
-         ("reach", "Reach", 2, "skill", "Brier skill of its looks at one thing against the seat-wide change rate"),
-         ("sort", "Sort", 3, "share", "the answered share of its last steered looks (it stops reaching for silent things)"),
-         ("patience", "Patience", 4, "error", "calibration: |mean predicted chance − share that found news| over its timed looks"),
-         ("notice", "Notice", 5, "share", "the shifts it noticed, of the two its blind audit probes"),
-         ("meet", "Meet", 6, "share", "rung 6's staged test: lines sent, answered looks, the other read as other"),
-         ("turns", "Turns", 7, "skill", "the reply rate its own timing gains over a timing-blind push (it learned when the other answers)"),
-         ("understand", "Understand", 8, "skill", NAME + "'s Brier skill over the running rate at predicting the other's replies (its own guess, the model's mixed in by its track record)"))
-PASS = {"feel": SL.RUNG1_SKILL, "reach": SL.RUNG2_SKILL, "sort": 1.0 - SL.RUNG3_FOCUS, "patience": SL.RUNG4_CALIB,
-        "notice": 1.0, "meet": 1.0, "turns": SL.RUNG7_PAY_MARGIN, "understand": SL.RUNG8_MARGIN}
+# ---- the attributes (#300): traits of self as a whole, measured from its record --------
+#
+# Not the skills' test scores (those live with each skill), and never a gate: no
+# pass line, nothing reads them to decide anything. Each is computed from the record
+# alone, over its most recent stretch, and the same formula over the record as it
+# stood every SKILL_STEP_S back gives its trend.
+#
+# A LOOK is a reach line; an ORDINARY look is one answered ("changed"/"unchanged"),
+# with a prediction p, outside every blind audit (rung 2's `audit`, rung 5's `audit5`).
+
+TRAIT_LOOKS = 500            # the recent stretch: its last 500 looks (about an hour of working time)
+TRAIT_SHIFTS = 15            # Adaptability reads its last 15 noticed shifts
+TRAIT_REPLIES = 50           # Sociability's reply rate reads its last 50 reply checks
+TRAITS = (
+    ("curiosity", "Curiosity", "share", "higher",
+     "the share of its recent looks spent on things it is still learning (learning progress above "
+     "curiosity's floor)"),
+    ("insight", "Insight", "skill", "higher",
+     "how well its predictions match what it finds, across everything it looks at: Brier skill "
+     "against the recent change rate"),
+    ("adaptability", "Adaptability", "looks", "lower",
+     "how many looks it takes to notice the world changed: from the first miss to the shift it "
+     "records (median of recent shifts)"),
+    ("focus", "Focus", "share", "higher",
+     "how narrow its attention is: 1 − the spread (entropy) of its recent looks over everything it "
+     "has looked at"),
+    ("sociability", "Sociability", "share", "higher",
+     "the share of its recent acts aimed at others (lines sent, ball rolled), and how often they answer"),
+)
 
 
-def _attributes(recs: list, tempo: dict, st: dict, progs: dict) -> list:
-    ladder = {r["rung"]: r["state"] for r in st.get("ladder") or []}
-    has = {
-        "feel": any(r.get("kind") == "cycle" and r.get("change") == "world" for r in recs),
-        "reach": bool(SL._rung2_stats(recs, tempo)),
-        "notice": any(r.get("watch5") for r in recs) or any(r.get("kind") == "shift" for r in recs),
-        "meet": any(r.get("kind") == "push" for r in recs),
-    }
+def _ordinary(r) -> bool:
+    return (r.get("kind") == "reach" and r.get("answer") in ("changed", "unchanged") and r.get("p") is not None
+            and not r.get("audit") and not r.get("audit5"))
+
+
+def _miss(r) -> bool:
+    """A look its prediction got wrong: it put the outcome below even odds."""
+    return (float(r["p"]) < 0.5) == (r["answer"] == "changed")
+
+
+def _curiosity_v(recs: list):
+    """CURIOSITY = (its last TRAIT_LOOKS ordinary looks at things whose learning
+    progress -- self_loop._progress, the machinery its curiosity tilt reads -- is
+    above CURIO_MIN) / (those looks at things that have a progress reading). A
+    thing too new to have one (under 2 x CURIO_WINDOW looks) is left out."""
+    lp = SL._progress(recs)
+    win = [r["eid"] for r in recs if _ordinary(r)][-TRAIT_LOOKS:]
+    judged = [e for e in win if e in lp]
+    if not judged:
+        return None, {"looks": 0}
+    learning = sum(lp[e] > SL.CURIO_MIN for e in judged)
+    return learning / len(judged), {"looks": len(judged), "things": len(set(judged)),
+                                    "learning": len({e for e in judged if lp[e] > SL.CURIO_MIN})}
+
+
+def _insight_v(recs: list):
+    """INSIGHT = 1 − Brier(p) / Brier(base) over its last TRAIT_LOOKS ordinary
+    looks, base = the share of those looks that found a change (the best
+    constant guess over the stretch). 0: no better than knowing the overall
+    rate; 1: every outcome called with certainty; negative: worse than the rate.
+    The detail adds the calibration error (ECE over ten bins of p)."""
+    win = [r for r in recs if _ordinary(r)][-TRAIT_LOOKS:]
+    if len(win) < 2:
+        return None, {"looks": len(win)}
+    xs = [1.0 if r["answer"] == "changed" else 0.0 for r in win]
+    ps = [float(r["p"]) for r in win]
+    rate = sum(xs) / len(xs)
+    base = rate * (1.0 - rate)
+    brier = sum((x - p) ** 2 for x, p in zip(xs, ps)) / len(xs)
+    bins: dict = {}
+    for x, p in zip(xs, ps):
+        bins.setdefault(min(9, int(p * 10)), []).append((x, p))
+    ece = sum(abs(sum(x for x, _ in b) - sum(p for _, p in b)) for b in bins.values()) / len(xs)
+    det = {"looks": len(win), "brier": _r(brier, 4), "base": _r(base, 4), "rate": _r(rate, 4), "ece": _r(ece, 4)}
+    if base <= 0:
+        return None, det
+    return 1.0 - brier / base, det
+
+
+def _adaptability_v(recs: list):
+    """ADAPTABILITY = the median, over its last TRAIT_SHIFTS `shift` lines (rung
+    5's noticing), of the looks from the first miss to the shift: of the window
+    of `looks` ordinary looks at that thing that showed the change (since its
+    previous shift), the looks from the first one its prediction got wrong
+    (_miss) to the last, inclusive; the whole window when none was a miss."""
+    shifts = [r for r in recs if r.get("kind") == "shift"][-TRAIT_SHIFTS:]
+    if not shifts:
+        return None, {"shifts": 0}
+    want = {id(r) for r in shifts}
+    looks: dict = {}
     out = []
-    for key, label, n, kind, what in ATTRS:
-        p = progs[n]
-        if key == "sort":
-            v = _sort_value(recs)
-        elif key == "patience":
-            v = _calibration(recs)
-        elif key == "meet":
-            v = SL._staged(p["crit"])[0] if has["meet"] else None
-        elif key == "understand":
-            v = p["skill"] if p["crit"].get("looks", 0) > 0 else None
-        elif key == "turns":
-            v = p["skill"] if p["crit"].get("pushes", 0) > 0 else None
-        else:
-            v = p["skill"] if has[key] else None
-        better = "lower" if kind == "error" else "higher"
-        ps = PASS[key]
-        met = v is not None and (v <= ps if better == "lower" else v >= ps)
-        state = ladder.get(n, "locked")
-        out.append({"key": key, "label": label, "rung": n, "rung_name": SL.RUNG_NAMES.get(n, ""),
-                    "value": _r(v, 4), "pass": ps, "kind": kind, "better": better, "met": met,
-                    "state": state, "holding": bool(p["passed"]),
-                    "slipping": state == "passed" and not p["passed"], "what": what})
+    for r in recs:
+        if _ordinary(r):
+            looks.setdefault(r["eid"], []).append(r)
+        elif r.get("kind") == "shift":
+            seen = looks.pop(r.get("eid"), [])
+            if id(r) in want:
+                w = seen[-max(1, int(r.get("looks") or 1)):]
+                if w:
+                    first = next((i for i, x in enumerate(w) if _miss(x)), 0)
+                    out.append(len(w) - first)
+    if not out:
+        return None, {"shifts": 0}
+    s = sorted(out)
+    m = len(s) // 2
+    med = float(s[m]) if len(s) % 2 else (s[m - 1] + s[m]) / 2.0
+    return med, {"shifts": len(s)}
+
+
+def _focus_v(recs: list):
+    """FOCUS = 1 − H / log(K): H the entropy of which thing each of its last
+    TRAIT_LOOKS looks went to, K the things it has ever looked at (2 or more;
+    one thing known is full focus). 1: every look at one thing; 0: spread
+    evenly over everything it knows. The detail adds the repeat rate (a look at
+    the same thing as the look before) and the most-looked-at thing's share."""
+    import math
+    eids = [r.get("eid") for r in recs if r.get("kind") == "reach" and not r.get("audit") and not r.get("audit5")]
+    if not eids:
+        return None, {"looks": 0}
+    win = eids[-TRAIT_LOOKS:]
+    known = len(set(eids))
+    n: dict = {}
+    for e in win:
+        n[e] = n.get(e, 0) + 1
+    h = -sum(c / len(win) * math.log(c / len(win)) for c in n.values())
+    v = 1.0 if known < 2 else max(0.0, 1.0 - h / math.log(known))
+    rep = sum(a == b for a, b in zip(win, win[1:])) / (len(win) - 1) if len(win) > 1 else None
+    return v, {"looks": len(win), "things": len(n), "known": known, "repeat": _r(rep, 4),
+               "top_share": _r(max(n.values()) / len(win), 4)}
+
+
+def _sociability_v(recs: list):
+    """SOCIABILITY = pushes / (pushes + looks) over its last TRAIT_LOOKS acts --
+    a push is an act aimed at an other (a line sent, the ball rolled); a look
+    is its attention on the world. The detail adds how often they answer: the
+    share of its last TRAIT_REPLIES reply checks that found a reply."""
+    acts = [r for r in recs if r.get("kind") == "push"
+            or (r.get("kind") == "reach" and not r.get("audit") and not r.get("audit5"))][-TRAIT_LOOKS:]
+    if not acts:
+        return None, {"acts": 0}
+    pushes = sum(r.get("kind") == "push" for r in acts)
+    checks = [r for r in recs if r.get("kind") == "reach" and r.get("reply")
+              and r.get("answer") in ("changed", "unchanged")][-TRAIT_REPLIES:]
+    replied = sum(r["answer"] == "changed" for r in checks) / len(checks) if checks else None
+    return pushes / len(acts), {"acts": len(acts), "pushes": pushes, "checks": len(checks),
+                                "replied": _r(replied, 4)}
+
+
+TRAIT_FN = {"curiosity": _curiosity_v, "insight": _insight_v, "adaptability": _adaptability_v,
+            "focus": _focus_v, "sociability": _sociability_v}
+
+
+def traits(recs: list) -> list:
+    """THE ATTRIBUTES (#300): each trait's value now (its formula over the
+    whole record), what it measures, its detail, and its trend: the same
+    formula over the record as it stood every SKILL_STEP_S back (SKILL_POINTS
+    points, like the skills' sparklines). None where nothing measures it yet."""
+    import bisect
+    srt = sorted(recs, key=lambda r: float(r.get("ts") or 0))
+    ts = [float(r.get("ts") or 0) for r in srt]
+    end = ts[-1] if ts else 0.0
+    cuts = [(k * SKILL_STEP_S / H, bisect.bisect_right(ts, end - k * SKILL_STEP_S) if ts else 0)
+            for k in range(SKILL_POINTS - 1, -1, -1)]
+    out = []
+    for key, label, unit, better, what in TRAITS:
+        fn = TRAIT_FN[key]
+        v, det = fn(srt)
+        series = [{"ago_h": ago, "value": _r(fn(srt[:cut])[0], 4) if cut else None} for ago, cut in cuts[:-1]]
+        series.append({"ago_h": 0.0, "value": _r(v, 4)})
+        hour = next((p["value"] for p in series if p["ago_h"] == 1.0), None)
+        out.append({"key": key, "label": label, "value": _r(v, 4), "unit": unit, "better": better, "what": what,
+                    "detail": det, "trend_h": _r(v - hour, 4) if v is not None and hour is not None else None,
+                    "series": series})
     return out
 
 
@@ -562,12 +700,22 @@ def _sg(v) -> str:
     return ("−" if v < 0 else "+") + f"{abs(v):.2f}"
 
 
-def _quest(recs: list, st: dict, progs: dict, attrs: dict) -> dict:
+def _quest(recs: list, st: dict, progs: dict) -> dict:
+    """The quest log (kept for older readers; #300's card shows `skills`): the
+    achievement the exp bar reads (status's aim), its criteria staged."""
     aim = st.get("skill_rung")                     # #295: the achievement the exp bar reads (status)
     aim = aim if aim in SL.PROGRESS else None
     if aim is None:
         return {"rung": None, "name": None, "criteria": [], "bar": st.get("bar"), "waiting_on": st.get("waiting_on"),
                 "summary": "", "mode": st.get("mode")}
+    crits = _criteria(aim, recs, progs)
+    return {"rung": aim, "id": SL.RUNG_ID.get(aim), "name": SL.RUNG_NAMES.get(aim, ""), "criteria": crits, "bar": st.get("bar"),
+            "waiting_on": st.get("waiting_on"), "slipping": st.get("slipping"), "mode": st.get("mode"),
+            "summary": " · ".join(c["text"] + (" ✓" if c["met"] else "") for c in crits)}
+
+
+def _criteria(aim: int, recs: list, progs: dict) -> list:
+    """An achievement's test (by its rung number) as staged criteria, each in words."""
     p = progs[aim]
     ball = SL._cur_medium(recs, SL._other(recs)) == "toy"      # #264: rung 7 takes turns with the ball
     ck = SL._clock(int(p.get("clock") or 1)) if aim == 7 else SL._clock(1)   # #278: the bar of the turns' clock
@@ -594,10 +742,10 @@ def _quest(recs: list, st: dict, progs: dict, attrs: dict) -> dict:
             tgt, label = skill[aim]
             text = f"{label} {_sg(float(p['skill']))} → {_sg(tgt)}"
         elif key == "focus":
-            v = attrs["sort"]["value"]
+            v = _sort_value(recs)
             text = f"answered share {'–' if v is None else f'{v:.2f}'} → over {1 - SL.RUNG3_FOCUS:.2f}"
         elif key == "calibration":
-            v = attrs["patience"]["value"]
+            v = _calibration(recs)
             text = f"calibration error {'–' if v is None else f'{v:.2f}'} → ≤ {SL.RUNG4_CALIB:.2f}"
         elif key == "news":
             text = f"timed looks find news ({round(100 * frac)}% of the way)"
@@ -613,9 +761,62 @@ def _quest(recs: list, st: dict, progs: dict, attrs: dict) -> dict:
         else:
             text = flags.get(key, key)
         crits.append({"key": key, "text": text, "met": met, "frac": _r(frac, 4)})
-    return {"rung": aim, "id": SL.RUNG_ID.get(aim), "name": SL.RUNG_NAMES.get(aim, ""), "criteria": crits, "bar": st.get("bar"),
-            "waiting_on": st.get("waiting_on"), "slipping": st.get("slipping"), "mode": st.get("mode"),
-            "summary": " · ".join(c["text"] + (" ✓" if c["met"] else "") for c in crits)}
+    return crits
+
+
+def _learning_ids(tr: list, allowed=None) -> list:
+    """The skills on the card's "Learning now" (#300): open in the tree and
+    practised now (in status's `allowed`: none asleep) -- and (#299) the
+    ones only the operator's accept holds back (every prerequisite earned,
+    one not accepted yet), which say so."""
+    return [n["id"] for n in tr if (n["state"] == "open" and (allowed is None or n["id"] in allowed))
+            or _accept_held(n)]
+
+
+def _accept_held(n: dict) -> bool:
+    return n["state"] == "locked" and str(n.get("waiting_on") or "").startswith("your accept of ")
+
+
+def _skills(recs: list, tempo: dict, st: dict, progs: dict, tr: list) -> list:
+    """THE SKILLS ON THE CARD (#300): each skill it is learning now -- its
+    test's staged criteria, its bar, what it waits on (the first stage not
+    met; status's word for the one the exp bar reads, e.g. "the world"), and
+    its skill value's trend. Earned skills are not here (the Skill tree tab
+    has them); one that slips is in `slipping`."""
+    out = []
+    nodes = {nd["id"]: nd for nd in tr}
+    for i in _learning_ids(tr, set(st.get("allowed") or ())):
+        n = SL.ACHIEVEMENTS[i]["rung"]
+        p = progs[n]
+        bar, waiting = SL._staged(p.get("crit") or {})
+        held = _accept_held(nodes[i])                    # #299: not practised until the operator accepts
+        if held:
+            waiting = nodes[i]["waiting_on"]
+        elif st.get("aim") == i and st.get("waiting_on"):
+            waiting = st["waiting_on"]
+        out.append({"id": i, "name": SL.ACHIEVEMENTS[i]["name"], "branch": SL.ACHIEVEMENTS[i]["branch"],
+                    "awaiting_accept": held,
+                    "bar": _r(max(0.0, min(1.0, bar)), 4), "waiting_on": waiting,
+                    "criteria": _criteria(n, recs, progs), "trend": _skill_trend(n, recs, tempo, SL.SKILL_PASS.get(n))})
+    return out
+
+
+def _slipping(tr: list, progs: dict, recs: list) -> list:
+    """The earned skills whose test no longer holds (#300): a short line each,
+    naming the first criterion that fails now. Still earned (the record keeps
+    the pass); nothing is taken away."""
+    out = []
+    for nd in tr:
+        if nd["state"] != "earned" or not nd["built"]:
+            continue
+        n = SL.ACHIEVEMENTS[nd["id"]]["rung"]
+        p = progs.get(n)
+        if p is not None and not p.get("passed"):
+            _, waiting = SL._staged(p.get("crit") or {})
+            why = next((c["text"] for c in _criteria(n, recs, progs) if not c["met"]), None)
+            out.append({"id": nd["id"], "name": nd["name"], "waiting_on": waiting,
+                        "text": nd["name"] + ": its test no longer holds" + (f" ({why})" if why else "")})
+    return out
 
 
 def _inventory(recs: list, st: dict, now: float) -> list:
@@ -726,11 +927,15 @@ def _skill(recs: list, tempo: dict, st: dict) -> dict | None:
     anywhere"): the number the exp bar's test reads, the line it has to beat,
     and its trend -- the same test over the record as it stood every
     SKILL_STEP_S back (the per-thing tempo is today's: an approximation for
-    rungs 2-3)."""
-    n = st.get("skill_rung")
+    rungs 2-3). #300: each skill on the card carries its own (_skill_trend)."""
+    return _skill_trend(st.get("skill_rung"), recs, tempo, st.get("skill_pass"))
+
+
+def _skill_trend(n, recs: list, tempo: dict, pass_=None) -> dict | None:
     if n not in SL.PROGRESS or not recs:
         return None
-    srt = sorted(recs, key=lambda r: float(r.get("ts") or 0))
+    srt = sorted((r for r in recs if r.get("kind") not in SL.OPERATOR_KINDS),   # #299: an accept is not self's time
+                 key=lambda r: float(r.get("ts") or 0))
     ts = [float(r.get("ts") or 0) for r in srt]
     import bisect
     end = ts[-1]
@@ -740,13 +945,17 @@ def _skill(recs: list, tempo: dict, st: dict) -> dict | None:
         series.append({"ago_h": k * SKILL_STEP_S / H, "value": _r(_skill_at(n, srt[:cut], tempo), 4) if cut else None})
     now_v = series[-1]["value"]
     hour = next((p["value"] for p in series if p["ago_h"] == 1.0), None)
-    return {"rung": n, "label": SKILL_LABEL.get(n, "skill"), "value": now_v, "pass": st.get("skill_pass"),
+    return {"rung": n, "label": SKILL_LABEL.get(n, "skill"), "value": now_v, "pass": pass_,
             "trend_h": _r(now_v - hour, 4) if now_v is not None and hour is not None else None, "series": series}
 
 
-def _header(st: dict, recs: list, c: dict, t: dict, skill: dict | None = None) -> dict:
+def _header(st: dict, recs: list, c: dict, t: dict, skill: dict | None = None, learning: list | None = None) -> dict:
     nxt = list(st.get("next") or [])              # #295: the open achievements (ids)
-    return {"name": SN.current(), "level": st.get("level") or 0, "rung_name": st.get("rung_name") or SL.RUNG_NAMES[0],
+    level = st.get("level") or 0
+    latest = st.get("rung_name") or SL.RUNG_NAMES[0]    # #295: the latest earned achievement's name (key kept)
+    return {"name": SN.current(), "level": level, "rung_name": latest,
+            "title": f"Lv {level} · {latest}",           # #300: the card's headline -- skills, never rungs
+            "learning": [SL.ACHIEVEMENTS[i]["name"] for i in (learning or [])],
             "next": nxt, "next_name": ", ".join(SL.ACHIEVEMENTS[i]["name"] for i in nxt) or None,
             "allow": st.get("allow"),
             "bar": st.get("bar"), "waiting_on": st.get("waiting_on"), "slipping": st.get("slipping"),
@@ -769,26 +978,30 @@ def compute(srv, now: float | None = None) -> dict:
     progs = {n: fn(recs, tempo) for n, fn in SL.PROGRESS.items()}
     c = _clocks(recs, now)
     t = _time(c)
-    attrs = _attributes(recs, tempo, st, progs)
+    attrs = traits(recs)                                  # #300: traits of self as a whole, not test scores
+    tr = tree(recs, st, progs)
     ach = _achievements(c)
     from . import toy_unlocks as TU                       # #267: each pass's new toys, on its achievement
     unl = TU.by_rung(recs)
     for a in ach:
         if unl.get(a["rung"]):
             a["toys"] = unl[a["rung"]]
-    quest = _quest(recs, st, progs, {a["key"]: a for a in attrs})
+    quest = _quest(recs, st, progs)
+    skills = _skills(recs, tempo, st, progs, tr)
     if c.get("restart7") is not None:                     # #254: rung 7 (rung 8 since #258) restarted on the fix
         note = RESTART7.format(day=dt.datetime.fromtimestamp(c["restart7"], dt.timezone.utc).strftime("%Y-%m-%d"))
-        for a in attrs:
-            if a["key"] == "understand":
-                a["note"] = note
+        for k in skills:
+            if k["id"] == "expect":
+                k["note"] = note
         if quest.get("rung") == 8:
             quest["note"] = note
     voided = _voided(recs)
     if voided:
         quest["voided"] = voided
-    return {"empty": not recs, "generated": now, "level": st.get("level") or 0, "tree": tree(recs, st, progs),
-            "header": _header(st, recs, c, t, _skill(recs, tempo, st)), "attributes": attrs,
+    return {"empty": not recs, "generated": now, "level": st.get("level") or 0, "tree": tr,
+            "accepted": list(st.get("accepted") or []), "awaiting": list(st.get("awaiting") or []),   # #299
+            "header": _header(st, recs, c, t, _skill(recs, tempo, st), [k["id"] for k in skills if not k.get("awaiting_accept")]), "attributes": attrs,
+            "skills": skills, "slipping": _slipping(tr, progs, recs),
             "quest": quest, "achievements": ach,
             "growth": _growth(c, ach), "time": t, "inventory": _inventory(recs, st, now),
             "relationships": _relationships(recs, tempo, st), "toys": _toys_section(recs)}
@@ -797,17 +1010,20 @@ def compute(srv, now: float | None = None) -> dict:
 def tree(recs: list, st: dict, progs: dict | None = None) -> list:
     """THE SKILL TREE (#295), the 👶 panel's data contract: every achievement
     in tree order, its branch, prerequisites (and why each is one), its state
-    (earned / open: built, unearned, every prerequisite earned / locked /
-    unbuilt), when it was earned and with what skill, its staged bar and what
-    it waits on, and the child's age and ability its test measures."""
+    (earned / open: built, unearned, every prerequisite earned and accepted /
+    locked / unbuilt), whether the operator accepted it (#299: `accepted`;
+    an earned one not yet is awaiting, and its children stay locked "on your
+    accept"), when it was earned and with what skill, its staged bar and
+    what it waits on, and the child's age and ability its test measures."""
     got = SL._earn_times(recs)
-    allowed = set(st.get("allowed") or ())
+    acc = SL._accepted(recs)
+    asleep = st.get("mode", "off") == "off"
     out = []
     for i, a in SL.ACHIEVEMENTS.items():
         row = {"id": i, "name": a["name"], "branch": a["branch"], "prereqs": list(a["prereqs"]),
                "built": a["built"], "earned_at": None, "skill": None, "bar": 0.0, "waiting_on": None,
                "child_age": a["child_age"], "child_ability": a["child_ability"], "why_prereqs": a["why_prereqs"],
-               "rung": a["rung"]}
+               "rung": a["rung"], "accepted": i in acc}
         if i in got:
             r = got[i]
             sk = r.get("skill")
@@ -818,13 +1034,16 @@ def tree(recs: list, st: dict, progs: dict | None = None) -> list:
         elif any(p not in got for p in a["prereqs"]):
             row.update(state="locked", waiting_on=", ".join(SL.ACHIEVEMENTS[p]["name"] for p in a["prereqs"]
                                                             if p not in got))
+        elif any(p not in acc for p in a["prereqs"]):
+            row.update(state="locked", waiting_on="your accept of " + ", ".join(
+                SL.ACHIEVEMENTS[p]["name"] for p in a["prereqs"] if p not in acc))
         else:
             p = (progs or {}).get(a["rung"]) or SL.PROGRESS[a["rung"]](recs, {})
             bar, waiting = SL._staged(p.get("crit") or {})
             row.update(state="open", bar=_r(max(0.0, min(1.0, bar)), 4), waiting_on=waiting,
                        skill=_r(float(p.get("skill") or 0.0), 4))
-            if i not in allowed:
-                row["waiting_on"] = "the limit"
+            if asleep:
+                row["waiting_on"] = "sleep"
         out.append(row)
     return out
 
@@ -869,10 +1088,12 @@ def empty() -> dict:
     """The sheet's shape with nothing in it (a seat without self)."""
     c = {"born": None, "srt": []}
     return {"empty": True, "generated": time.time(),
-            "level": 0, "tree": tree([], {}),
-            "header": {"name": SN.current(), "level": 0, "rung_name": SL.RUNG_NAMES[0], "next": [], "mode": "off",
+            "level": 0, "tree": tree([], {}), "accepted": [], "awaiting": [],
+            "header": {"name": SN.current(), "level": 0, "rung_name": SL.RUNG_NAMES[0],
+                       "title": "Lv 0 · " + SL.RUNG_NAMES[0], "learning": [], "next": [], "mode": "off",
                        "age_h": 0.0, "working_h": 0.0, "skill": None},
-            "attributes": [], "quest": {"rung": None, "criteria": []}, "achievements": [],
+            "attributes": traits([]), "skills": [], "slipping": [],
+            "quest": {"rung": None, "criteria": []}, "achievements": [],
             "growth": _growth(c, []), "time": _time(c), "inventory": [],
             "relationships": {"others": [], "body": [], "other": []}, "toys": []}
 
@@ -907,7 +1128,8 @@ def card(srv, now: float | None = None) -> dict:
     mode = SL.mode(srv)
     with SL._lock:
         recs = SL._read(srv)
-        last = float(recs[-1].get("ts") or 0) if recs else None
+        mine = next((r for r in reversed(recs) if r.get("kind") not in SL.OPERATOR_KINDS), None)   # #299: not an accept
+        last = float(mine.get("ts") or 0) if mine else None
     return {"name": name, "level": h.get("level") or 0, "rung_name": h.get("rung_name") or "",
             "next": list(h.get("next") or []), "mode": mode, "awake": mode != "off",
             "last_activity": iso(last) if last else None, "generated": now}
@@ -994,6 +1216,7 @@ def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
     sh = sheet(srv, now)                                 # #295: the tree and the level, as the (cached) sheet has them
     out = SN.say_all({"generated": now, "name": who, "toys": toys,
                       "locked": TU.locked_rows(recs, {r["kind"] for r in rows}),
-                      "level": sh.get("level") or 0, "tree": sh.get("tree") or []}, who)
+                      "level": sh.get("level") or 0, "tree": sh.get("tree") or [],
+                      "accepted": sh.get("accepted") or [], "awaiting": sh.get("awaiting") or []}, who)
     rt["dock"] = (now, out, who)
     return out

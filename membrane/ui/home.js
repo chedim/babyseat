@@ -102,7 +102,7 @@ function brainLabel(eid, me) {
 }
 
 const BRAIN_RUNGS = { 0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart", 4: "patience",
-  5: "notice the world changed", 6: "meet an other", 7: "take turns", 8: "understand an other",
+  5: "notice the world changed", 6: "meet an other", 7: "time its turn", 8: "expect a reply",
   9: "recognize itself", 10: "change itself", 11: "speak" };   // #258: the ladder flip
 // #295, THE SKILL TREE: each achievement's id and the rung number its test kept on the
 // record (membrane/self_loop.py ACHIEVEMENTS) -- names for its lines, and the old per-rung
@@ -794,6 +794,27 @@ function achievementsToCelebrate(earned, last, oldLevel) {
 /** An achievement's words: the notification's; the caption adds "!". */
 function achieveText(name, achName) { return (name || SELF_NAME) + " earned " + (achName || ""); }
 
+/** #299: the celebration's question -- an earned achievement opens what it
+ *  leads to only once the operator accepts it. */
+function acceptAskText(name, achName) {
+  return "🏅 " + (name || SELF_NAME) + " earned " + (achName || "") + " -- accept, and open what it leads to?";
+}
+
+/** #299: which awaiting achievement to ask about now: the first one this page
+ *  was not told "later" about (null: none). */
+function acceptToAsk(awaiting, dismissed) {
+  if (!Array.isArray(awaiting)) return null;
+  const no = new Set((dismissed || []).map(String));
+  const id = awaiting.map(String).find((i) => !no.has(i));
+  return id == null ? null : id;
+}
+
+/** #299: the notification's body for a newly earned achievement. */
+function achieveNotifyBody(awaiting) {
+  return awaiting ? "it awaits your accept -- open membrane home to accept it and open what it leads to"
+                  : "a new achievement -- open membrane home to see it";
+}
+
 /** The celebration's caption. */
 function celebrateText(name, n, rungName) {
   return rungNotifyText(name, n, rungName) + "!";
@@ -839,7 +860,7 @@ const HomeLogic = { cubePoints, catchUp, personSlug, menuEntries, hotword, pickV
   freshLook, followsNow, followRates, SELF_HOLD_MS, lookAngles, selfCamAngles,
   followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit, zooAgo, zooCard, zooCards,
   rungKey, rungVoided, rungToCelebrate, celebrateText, rungNotifyText, chimeOk, chimeNotes, notifyReady, bellView,
-  achieveKey, achievementsToCelebrate, achieveText };
+  achieveKey, achievementsToCelebrate, achieveText, acceptAskText, acceptToAsk, achieveNotifyBody };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
 const HSTYLE = `
@@ -891,7 +912,7 @@ const HSTYLE = `
   /* THE VIEW (2026-10-13, the operator's burger-menu ask): chat-only fills
    * the screen with the conversation -- nothing but field chrome left */
   .view-chat .chat { left:12px; width:auto; }
-  .view-chat .sbox, .view-chat .me, .view-chat .selfpick, .view-chat .chatbtn,
+  .view-chat .sbox, .view-chat .me, .view-chat .chatbtn,
   .view-chat .card, .view-chat .tip, .view-chat .field { display:none; }
   .tip { position:absolute; z-index:4; pointer-events:none; display:none; padding:4px 8px; border-radius:8px;
          font-size:12px; max-width:320px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -922,7 +943,6 @@ const HSTYLE = `
   .top .tilt[hidden] { display:none; }
   .top .selfstat { font-size:12px; opacity:.85; white-space:nowrap; padding-right:6px; }
   .view-chat .selfstat { display:none; }
-  .top .selfpick { border:0; background:transparent; color:inherit; font:inherit; border-radius:999px; padding:6px 8px; max-width:12em; cursor:pointer; }
   /* THE WAVE (2026-10-10, the operator: "a wavy animation like Siri, but
      angly and graph-y"): a chain of nodes joined by straight edges -- a strip
      of the field -- that moves with the voice: your mic level while
@@ -1017,6 +1037,18 @@ const HSTYLE = `
                        background:inherit; z-index:1; }
   .selfpanel .sptitle { font-weight:600; font-size:14px; }
   .selfpanel .spx { margin-left:auto; border:0; background:transparent; font-size:20px; line-height:1; padding:2px 8px; border-radius:8px; }
+  /* #299: sleep / wake, a plain toggle (the 🌱 growth-limit chooser gave way to acceptance) */
+  .selfpanel .spsleep { border:1px solid color-mix(in srgb, var(--divider-color,#888) 60%, transparent); background:transparent; color:inherit;
+                        font:inherit; font-size:12px; border-radius:999px; padding:3px 10px; cursor:pointer; white-space:nowrap; }
+  .selfpanel .spsleep[aria-pressed="true"] { border-color:#5ad17a; }
+  .selfpanel .spsleep:disabled { opacity:.5; cursor:default; }
+  .selfpanel .spsleep:focus-visible, .celebrate .cb-acc button:focus-visible, .sktree .skaccept:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:2px; }
+  .sktree .sknode.awaiting { border-color:var(--sk-earned); border-style:dashed;
+                             background:color-mix(in srgb, var(--sk-earned) 12%, var(--card-background-color,#111)); }
+  .sktree .skaccept { margin-top:8px; border:0; border-radius:999px; padding:6px 14px; font:inherit; font-weight:600; cursor:pointer;
+                      color:#1b1404; background:linear-gradient(135deg, #ffe28c, #d4a017); }
+  .sktree .skaccept:disabled { opacity:.6; cursor:default; }
+  .sktree .skamsg { margin-top:4px; font-size:12px; }
   .selfpanel .spxp .xp { display:grid; grid-template-columns:auto 1fr auto; width:100%; }
   .selfpanel .spxp .xp-track { height:10px; }
   .selfpanel .spxp .xp-lv { max-width:none; }
@@ -1112,6 +1144,23 @@ const HSTYLE = `
   .selfpanel .attr .an { grid-column:1 / -1; font-size:11px; opacity:.72; }
   .selfpanel .attr.st-slipping .an { color:var(--warning-color,#ffa600); opacity:1; }
   .selfpanel .attr.st-locked, .selfpanel .attr.none { opacity:.65; }
+  /* #300: the traits' trend lines and the skills it is learning now, side by side */
+  .selfpanel .attr .trspark { grid-column:1 / -1; width:100%; height:22px; }
+  .selfpanel .trspark .skl { fill:none; stroke:var(--primary-color,#3477d6); stroke-width:1.5; stroke-linejoin:round; vector-effect:non-scaling-stroke; opacity:.8; }
+  .selfpanel .learn { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; }
+  .selfpanel .lskill { min-width:0; padding:8px 10px; border-radius:10px;
+                       border:1px solid color-mix(in srgb, var(--divider-color,#888) 55%, transparent); }
+  .selfpanel .lskill .abar { position:relative; height:8px; border-radius:999px; margin:2px 0 6px;
+                             background:color-mix(in srgb, var(--divider-color,#888) 55%, transparent); }
+  .selfpanel .lskill .skill { display:grid; grid-template-columns:auto 1fr; align-items:center; gap:2px 10px; margin-top:6px;
+                              padding:6px 8px; border-radius:10px; background:color-mix(in srgb, var(--primary-text-color,#ddd) 6%, transparent); }
+  .selfpanel .lskill .skill .skv { font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .selfpanel .lskill .skill.neg .skv { color:var(--warning-color,#ffa600); }
+  .selfpanel .lskill .skill.met .skv { color:var(--sheet-ok); }
+  .selfpanel .lskill .skill .skm { font-size:11.5px; line-height:1.35; min-width:0; }
+  .selfpanel .lskill .skill .skspark { grid-column:1 / -1; width:100%; height:28px; }
+  .selfpanel .lskill .skspark .skl { fill:none; stroke:var(--primary-color,#3477d6); stroke-width:1.8; stroke-linejoin:round; vector-effect:non-scaling-stroke; }
+  .selfpanel .lskill .skspark .skp { stroke:currentColor; stroke-opacity:.55; vector-effect:non-scaling-stroke; }
   .selfpanel .qh { font-weight:600; margin-bottom:4px; }
   .selfpanel .crit { list-style:none; padding:0; }
   .selfpanel .crit li { padding:2px 0; }
@@ -1315,6 +1364,20 @@ const HSTYLE = `
                        20% { transform:scale(1); } 85% { opacity:1; } 100% { opacity:0; transform:translateY(-12px); } }
   }
   @media (max-width: 760px) { .celebrate .cb-t { font-size:17px; margin-top:12vh; } }
+  /* #299: the celebration asks the operator to accept -- the overlay's one clickable part, kept until answered */
+  .celebrate .cb-acc { position:absolute; left:50%; bottom:max(24px, env(safe-area-inset-bottom)); transform:translateX(-50%);
+                       pointer-events:auto; width:min(440px, calc(100% - 32px)); box-sizing:border-box; padding:12px 14px; border-radius:16px;
+                       background:var(--card-background-color,#111); color:var(--primary-text-color,#ddd);
+                       box-shadow:0 0 0 2px #d4a017, 0 8px 32px rgba(0,0,0,.45); text-align:center; }
+  .celebrate .cb-acc[hidden] { display:none; }
+  .celebrate .cb-acc .cb-q { margin:0 0 10px; font-size:14px; font-weight:600; overflow-wrap:anywhere; }
+  .celebrate .cb-acc .cb-row { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
+  .celebrate .cb-acc button { border:0; border-radius:999px; padding:7px 16px; font:inherit; font-weight:600; cursor:pointer; }
+  .celebrate .cb-acc .cb-yes { color:#1b1404; background:linear-gradient(135deg, #ffe28c, #d4a017); }
+  .celebrate .cb-acc .cb-no { background:transparent; color:inherit; border:1px solid color-mix(in srgb, var(--divider-color,#888) 70%, transparent); }
+  .celebrate .cb-acc button:disabled { opacity:.6; cursor:default; }
+  .celebrate .cb-acc .cb-msg { margin:8px 0 0; font-size:12px; opacity:.85; }
+  .celebrate .cb-acc .cb-msg:empty { display:none; }
 `;
 const BRAIN_MS = 3000;                            // #237: the brain's record poll, only while the page is visible
 const LS_SELFPANEL = "membrane.home.selfpanel";   // #230: the 👶 panel open ("1") or closed, per browser
@@ -1377,37 +1440,65 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
     }
 
     _paintSelf() {
-      const sel = this._selfPick, c = this._chat; if (!sel) return;
+      const c = this._chat;
       if (!c || typeof c._selfView !== "function") return;
       const v = c._selfView();
-      // THE GUARD (live, 2026-10-16: 25 s after a restart the page sent "off"):
-      // rebuilding a focused <select>'s options can reset it to "off" and fire
-      // a change -- never while it has focus; disabled until the state loads
-      sel.disabled = !v.loaded;
-      if (sel.getRootNode().activeElement === sel) return;
-      const sig = JSON.stringify(v.options);
-      if (sel._sig !== sig) {                  // rebuilt only on change
-        sel.textContent = "";
-        for (const o of v.options) {
-          const el = document.createElement("option");
-          el.value = String(o.value); el.textContent = o.text; el.disabled = !!o.disabled;
-          sel.appendChild(el);
-        }
-        sel._sig = sig;
+      // #299: the 👶 panel's sleep / wake toggle (the 🌱 growth-limit chooser is gone:
+      // an earned achievement opens what it leads to once the operator accepts it)
+      const b = this._spSleep;
+      if (b) {
+        b.disabled = !v.loaded || !!this._sleepBusy;          // nothing before the seat's state loads
+        b.textContent = v.icon + " " + (v.on ? "awake" : "asleep");
+        b.title = v.title;
+        b.setAttribute("aria-pressed", v.on ? "true" : "false");
+        b.setAttribute("aria-label", v.label + " -- tap to " + (v.on ? "put it to sleep" : "wake it"));
       }
-      sel.value = String(v.limit);
-      sel.title = v.title;
-      sel.style.opacity = v.limit ? "1" : ".6";
       if (this._selfStat && !this._selfFlash) {
         if (typeof c._paintExp === "function") c._paintExp(this._selfStat);   // #230: the exp bar
         else this._selfStat.textContent = v.status || "";
       }
     }
 
+    /** #299: sleep or wake, from the 👶 panel's toggle; the seat's answer is shown 4 s. */
+    _onSleep() {
+      const c = this._chat;
+      if (!c || typeof c._setSelfMode !== "function" || typeof c._selfView !== "function") return;
+      const v = c._selfView();
+      if (!v.loaded) return;
+      this._sleepBusy = true; this._paintSelf();
+      Promise.resolve(c._setSelfMode(!v.on)).catch(() => null).then((out) => {
+        this._sleepBusy = false;
+        if (out && !out.skipped) this._flashSelf(out.text);
+        this._paintSelf();
+      });
+    }
+
+    _flashSelf(text) {
+      this._selfFlash = text;
+      if (this._selfStat) this._selfStat.textContent = text;
+      this._statusEl.textContent = "🌱 " + text;
+      clearTimeout(this._selfFlashT);
+      this._selfFlashT = setTimeout(() => { this._selfFlash = null; this._paintSelf(); }, 4000);
+    }
+
+    /** #299: accept an earned achievement through the seat (the panel owns the
+     *  route); the sheet and the tree refresh with the answer. */
+    async _acceptSelf(id) {
+      const c = this._chat;
+      if (!c || typeof c._acceptSelf !== "function") return { ok: false, error: "accepting is not available on this page" };
+      const out = await Promise.resolve(c._acceptSelf(id)).catch((e) => ({ ok: false, error: String((e && e.message) || e) }));
+      if (out && out.ok) {
+        this._flashSelf("✓ accepted " + (out.name || id) + ": what it leads to opens now");
+        this._spSheetAt = 0;                                    // the sheet and the tree show it at once
+        if (this._selfPanel && !this._selfPanel.hidden) this._paintSelfPanel();
+      }
+      return out || { ok: false, error: "no answer" };
+    }
+
     // THE 👶 PANEL (#230, the operator's ask 2026-10-19): self's side panel --
     // what it is doing now (its record, newest first) and its report card.
-    // READ-ONLY: nothing here changes self; the 🌱 chooser stays the only
-    // switch (the toys' play buttons, #244, are the one write -- they change
+    // READ-ONLY but for the operator's switches: the 💤/🌱 sleep toggle in its
+    // header and the Skill tree's Accept (#299) -- nothing else here changes self (the toys' play buttons, #244, are the one write -- they change
     // a toy in self's world, never self; _onToyPoke below). Open or closed is remembered per browser; it refreshes only
     // while open.
     _toggleSelfPanel(on) {
@@ -1759,10 +1850,12 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         if (out.last != null) lsSet(key, JSON.stringify(out.last));
         if (out.ids.length) {
           const names = out.ids.map((i) => { const e = s.earned.find((x) => x && x.id === i); return (e && e.name) || i; });
+          const wait = Array.isArray(s.awaiting) ? s.awaiting.map(String) : [];
           out.ids.forEach((i, k) => this._notify(achieveText(name, names[k]), key + "." + i,
-            "a new achievement -- open membrane home to see it"));
+            achieveNotifyBody(wait.includes(i))));                // #299: it awaits the operator's accept
           this._cbPending = { text: achieveText(name, names.join(" and ")) + "!" };
         }
+        this._askTick(s, name);                                   // #299: an earned one awaits the accept
       } else if (typeof s.rung === "number") {             // a seat from before the tree
         const key = rungKey(SEAT, self);
         const out = rungToCelebrate(s.rung, lsGet(key, null), this._brainLines || []);
@@ -1852,6 +1945,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const el = this._cb; if (!el) return;
       const still = !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
       this._cbText.textContent = text;
+      this._cbText.hidden = false;
       el.classList.toggle("still", still);
       el.hidden = false;
       const t = this._cbText; t.style.animation = "none"; void t.offsetWidth; t.style.animation = "";   // restart the pop
@@ -1866,7 +1960,51 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       if (!this._cb || this._cb.hidden) return;
       clearTimeout(this._cbT);
       cancelAnimationFrame(this._cbRaf);
+      if (this._askId) {                                       // #299: the question stays until it is answered
+        this._cbText.hidden = true;
+        const g = this._cbCanvas && this._cbCanvas.getContext && this._cbCanvas.getContext("2d");
+        if (g) g.clearRect(0, 0, this._cbCanvas.width, this._cbCanvas.height);
+        return;
+      }
       this._cb.hidden = true;
+    }
+
+    /** #299: ask the operator to accept the first awaiting achievement this
+     *  page was not told "later" about -- with the burst when it is new, alone
+     *  (over the field, no burst) when it was earned while away. */
+    _askTick(s, name) {
+      if (this._askId || document.hidden || !this._cbAcc) return;
+      const id = acceptToAsk(s.awaiting, this._askNo);
+      if (id == null) return;
+      const e = (s.earned || []).find((x) => x && x.id === id);
+      this._askId = id;
+      this._cbQ.textContent = acceptAskText(name, (e && e.name) || id);
+      this._cbMsg.textContent = "";
+      this._cbYes.disabled = false; this._cbNo.disabled = false;
+      this._cbAcc.hidden = false;
+      if (this._cb.hidden) { this._cbText.hidden = true; this._cb.classList.add("still"); this._cb.hidden = false; }
+    }
+
+    _onAskYes() {
+      const id = this._askId; if (!id) return;
+      this._cbYes.disabled = true; this._cbNo.disabled = true;
+      this._cbMsg.textContent = "accepting…";
+      this._acceptSelf(id).then((out) => {
+        if (out && out.ok) { this._askDone(false); return; }
+        this._cbYes.disabled = false; this._cbNo.disabled = false;
+        this._cbMsg.textContent = "not accepted: " + ((out && out.error) || "the seat refused");
+      });
+    }
+
+    /** The question answered (accepted, or "later": not asked again on this page view). */
+    _askDone(later) {
+      if (later && this._askId) this._askNo.push(this._askId);
+      this._askId = null;
+      if (this._cbAcc) this._cbAcc.hidden = true;
+      if (this._cbText) this._cbText.hidden = false;
+      if (this._cb) { this._cb.hidden = true; this._cb.classList.remove("still"); }
+      clearTimeout(this._cbT);
+      cancelAnimationFrame(this._cbRaf);
     }
 
     /** The particle burst: from the amoeba when it is on the screen, else the middle. */
@@ -2042,7 +2180,6 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you · ${nm} (the 🌱 loop, framed to what it is doing) · 👁 ${nm}'s eyes (looking out from it)">◎ activity</button>
           <button class="chatbtn" title="Show / hide the chat">💬</button>
           <button class="autobtn" title="auto-chat" aria-label="auto-chat">▶</button>
-          <select class="selfpick" title="${nm} (#161): how far it may grow (the top rung; off = asleep)"><option value="0">🌱 off</option></select>
           <span class="selfstat" title="where ${nm} is now: its rung, the bar toward the next, what it waits on"></span>
           <button class="rungbell" aria-label="${nm}'s rungs: the chime and notifications" aria-pressed="true">🔔</button>
           <button class="tilt" hidden title="Turn the view by tilting the device">📱</button>
@@ -2058,7 +2195,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         <button class="babybtn" aria-label="${nm}: its character sheet and what it is doing" aria-expanded="false" aria-controls="selfpanel"
                 title="${nm} (#161): its character sheet -- level, attributes, quest, growth, toys, the others it met -- and what it is doing now">👶</button>
         <aside class="selfpanel glass" id="selfpanel" aria-label="${nm}'s character sheet" hidden>
-          <div class="sphead"><span class="sptitle">👶 ${nm}</span><button class="spx" aria-label="close ${nm}'s panel" title="Close">×</button></div>
+          <div class="sphead"><span class="sptitle">👶 ${nm}</span><button class="spsleep" type="button" aria-pressed="false" disabled title="${nm} (#161): asleep or awake -- tap to switch">💤 asleep</button><button class="spx" aria-label="close ${nm}'s panel" title="Close">×</button></div>
           <div class="sptabs" role="tablist" aria-label="${nm}'s panel">
             <button type="button" class="sptab" role="tab" id="sptab-sheet" data-tab="sheet" aria-selected="true" aria-controls="sppane-sheet">Sheet</button>
             <button type="button" class="sptab" role="tab" id="sptab-tree" data-tab="tree" aria-selected="false" aria-controls="sppane-tree" tabindex="-1">Skill tree</button>
@@ -2093,7 +2230,10 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         <div class="card glass"><div class="t"></div><div class="k"></div>
           <div class="row"><button class="ask">Ask about it</button><button class="go">Fly there</button><button class="x">×</button></div></div>
         <div class="tip glass"></div>
-        <div class="celebrate" hidden aria-live="polite"><canvas class="cb-c"></canvas><div class="cb-t"></div></div>`;
+        <div class="celebrate" hidden aria-live="polite"><canvas class="cb-c"></canvas><div class="cb-t"></div>
+          <div class="cb-acc" role="alertdialog" aria-modal="false" aria-labelledby="cbq" hidden><p class="cb-q" id="cbq"></p>
+            <div class="cb-row"><button class="cb-yes" type="button">🏅 Accept</button><button class="cb-no" type="button">Later</button></div>
+            <p class="cb-msg" role="status"></p></div></div>`;
       this.shadowRoot.append(s, root);
       const $ = (q) => root.querySelector(q);
       this._host3d = $(".field"); this._msgEl = $(".msg"); this._statusEl = $(".status");
@@ -2169,34 +2309,19 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       });
       this._paintAuto();
       this._autoT = setInterval(() => this._paintAuto(), 1500);
-      // THE GROWTH LIMIT (#161, the operator's ask 2026-10-16): 🌱 where the
-      // ☆ was (that pinned HA's default dashboard to this page -- HA's own
-      // Profile -> Dashboard does the same). A chooser of the top rung self
-      // may reach (off = asleep); below it self still earns each rung. Its
-      // options and rung / bar come from the chat element (the panel owns the route).
-      this._selfPick = $(".selfpick");
+      // #161 / #299: where self is (the exp bar); the 🌱 growth-limit chooser that
+      // sat here gave way to acceptance -- sleep / wake is the 👶 panel's toggle
       this._selfStat = $(".selfstat");
-      this._selfPick.addEventListener("change", () => {
-        const c = this._chat;
-        if (!c || typeof c._setSelfLimit !== "function") return;
-        this._selfPick.disabled = true;                       // in flight
-        if (this._selfStat) this._selfStat.textContent = "…";
-        Promise.resolve(c._setSelfLimit(Number(this._selfPick.value))).catch(() => null).then((out) => {
-          // THE FEEDBACK: the seat's confirmed answer (or the error), held 4 s
-          if (out && !out.skipped) {
-            this._selfFlash = out.text;
-            if (this._selfStat) this._selfStat.textContent = out.text;
-            this._statusEl.textContent = "🌱 " + out.text;
-            clearTimeout(this._selfFlashT);
-            this._selfFlashT = setTimeout(() => { this._selfFlash = null; this._paintSelf(); }, 4000);
-          }
-          this._paintSelf();
-        });
-      });
       this._paintSelf();
       this._selfT = setInterval(() => { this._paintSelf(); this._rungTick(); }, 1500);
       // #289: the 🔔 (the rung chime + notifications) and the celebration
       this._bell = $(".rungbell"); this._cb = $(".celebrate"); this._cbText = $(".cb-t"); this._cbCanvas = $(".cb-c");
+      // #299: the celebration's Accept -- real buttons, the one clickable part of the overlay
+      this._cbAcc = $(".cb-acc"); this._cbQ = $(".cb-q"); this._cbYes = $(".cb-yes"); this._cbNo = $(".cb-no"); this._cbMsg = $(".cb-msg");
+      this._askNo = [];                                        // "later" for these, this page view
+      this._cbYes.addEventListener("click", () => this._onAskYes());
+      this._cbNo.addEventListener("click", () => this._askDone(true));
+      this._cbAcc.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.stopPropagation(); this._askDone(true); } });
       this._bellOn = lsGet(LS_BELL, "1") !== "0";
       this._bell.addEventListener("click", () => this._onBell());
       this._paintBell();
@@ -2214,7 +2339,9 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       // #296: the panel's tabs (the sheet, the Skill tree): arrows move between them
       this._spTabs = Array.from(root.querySelectorAll(".sptab"));
       this._spPaneSheet = $("#sppane-sheet"); this._spPaneTree = $("#sppane-tree"); this._spTree = $(".sktree");
-      this._spTreeSel = {};
+      this._spTreeSel = { onAccept: (id) => this._acceptSelf(id) };   // #299: the tree card's Accept
+      this._spSleep = $(".spsleep");
+      this._spSleep.addEventListener("click", () => this._onSleep());
       for (const b of this._spTabs) {
         b.addEventListener("click", () => this._selfTab(b.dataset.tab));
         b.addEventListener("keydown", (e) => {
@@ -2440,7 +2567,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           return;
         }
         this._msgEl.style.display = "";
-        this._msgEl.textContent = SELF_NAME + " is not moving yet — switch 🌱 on and talk to the seat";
+        this._msgEl.textContent = SELF_NAME + " is not moving yet — wake it (💤 in its 👶 panel) and talk to the seat";
         setTimeout(() => { if (this._msgEl.textContent.startsWith(SELF_NAME + " is not")) this._msgEl.style.display = "none"; }, 6000);
         return;
       }
