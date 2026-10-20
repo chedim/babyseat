@@ -1110,6 +1110,59 @@ const HSTYLE = `
   .selfpanel .rel li { padding:4px 0; }
   .selfpanel .now { font-size:10.5px; padding:0 6px; border-radius:999px; background:color-mix(in srgb, var(--sheet-ok) 25%, transparent); }
   @media (prefers-reduced-motion: reduce) { .selfpanel .sec > summary::before { transition:none; } }
+  /* the Skill tree tab (#296): the panel's tabs, then self's achievements as
+     an RPG skill tree -- lanes by branch, edges from the prerequisites */
+  .selfpanel .sptabs { display:flex; gap:4px; margin:0 0 8px; border-bottom:1px solid color-mix(in srgb, var(--divider-color,#888) 45%, transparent); }
+  .selfpanel .sptab { border:0; background:transparent; color:inherit; font:inherit; font-weight:600; padding:6px 10px;
+                      border-bottom:2px solid transparent; margin-bottom:-1px; opacity:.65; cursor:pointer; }
+  .selfpanel .sptab[aria-selected="true"] { opacity:1; border-bottom-color:var(--primary-color,#3477d6); }
+  .selfpanel .sptab:focus-visible, .sktree .sknode:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:2px; }
+  .selfpanel .sppane[hidden] { display:none; }
+  .sktree { --sk-earned:#d4a017; }
+  .sktree .skhdr { display:flex; align-items:center; gap:10px; padding:8px 12px; margin:2px 0 6px; border-radius:12px;
+                   border:1px solid color-mix(in srgb, var(--divider-color,#888) 60%, transparent);
+                   background:color-mix(in srgb, var(--primary-color,#3477d6) 8%, transparent); }
+  .sktree .skhdr .nm { font-size:18px; font-weight:650; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sktree .skhdr .lvb { margin-left:auto; font-weight:700; font-variant-numeric:tabular-nums; padding:1px 10px; border-radius:999px;
+                        background:color-mix(in srgb, var(--sk-earned) 30%, transparent); }
+  .sktree .note { font-size:11.5px; opacity:.75; margin:0 0 6px; }
+  .sktree .skbox { max-width:100%; overflow:auto; overscroll-behavior:contain; border-radius:12px; margin:0 0 8px;
+                   border:1px solid color-mix(in srgb, var(--divider-color,#888) 35%, transparent); }
+  .sktree .skcanvas { position:relative; margin:0 auto; }
+  .sktree .skedges { position:absolute; inset:0; overflow:visible; }
+  .sktree .sklane { stroke:color-mix(in srgb, var(--divider-color,#888) 25%, transparent); stroke-width:1; }
+  .sktree .sklanel { position:absolute; top:4px; text-align:center; font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; opacity:.6; }
+  .sktree .skedge { fill:none; stroke:color-mix(in srgb, var(--primary-text-color,#ddd) 35%, transparent); stroke-width:1.5; stroke-dasharray:4 4; }
+  .sktree .skedge.earned { stroke:var(--sk-earned); stroke-dasharray:none; opacity:.85; }
+  .sktree .sknode { position:absolute; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
+                    padding:3px 4px; border-radius:12px; font:inherit; font-size:11px; line-height:1.15; color:inherit; text-align:center;
+                    cursor:pointer; overflow:hidden; border:1.5px solid color-mix(in srgb, var(--divider-color,#888) 60%, transparent);
+                    background:var(--card-background-color,#111); }
+  .sktree .sknode .skic { font-size:14px; line-height:1; height:18px; display:grid; place-items:center; }
+  .sktree .sknode .sknm { font-weight:600; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .sktree .sknode .sksub { font-size:10px; opacity:.75; font-variant-numeric:tabular-nums; }
+  .sktree .sknode.earned { border-color:var(--sk-earned); background:color-mix(in srgb, var(--sk-earned) 26%, var(--card-background-color,#111)); }
+  .sktree .sknode.open { border-color:var(--primary-color,#3477d6);
+                         box-shadow:0 0 0 2px color-mix(in srgb, var(--primary-color,#3477d6) 30%, transparent),
+                                    0 0 12px color-mix(in srgb, var(--primary-color,#3477d6) 45%, transparent); }
+  .sktree .sknode.locked { opacity:.5; }
+  .sktree .sknode.unbuilt { opacity:.55; border-style:dashed; background:transparent; }
+  .sktree .sknode.sel { outline:2px solid color-mix(in srgb, var(--primary-text-color,#ddd) 60%, transparent); outline-offset:1px; }
+  .sktree .skring .skrt { fill:none; stroke:color-mix(in srgb, var(--primary-text-color,#ddd) 20%, transparent); stroke-width:2.5; }
+  .sktree .skring .skrf { fill:none; stroke:var(--primary-color,#3477d6); stroke-width:2.5; stroke-linecap:round; }
+  @media (prefers-reduced-motion: no-preference) {
+    .sktree .sknode.open { animation:skglow 2.6s ease-in-out infinite alternate; }
+    @keyframes skglow { to { box-shadow:0 0 0 2px color-mix(in srgb, var(--primary-color,#3477d6) 45%, transparent),
+                                       0 0 18px color-mix(in srgb, var(--primary-color,#3477d6) 60%, transparent); } }
+  }
+  .sktree .skcard { padding:8px 10px; border-radius:12px; margin:0 0 8px; font-size:12px;
+                    background:color-mix(in srgb, var(--primary-color,#3477d6) 6%, transparent); }
+  .sktree .skct { font-weight:650; font-size:13px; margin:0 0 4px; overflow-wrap:anywhere; }
+  .sktree .skcd { display:grid; grid-template-columns:auto 1fr; gap:2px 10px; margin:0; }
+  .sktree .skcd dt { opacity:.6; }
+  .sktree .skcd dd { margin:0; overflow-wrap:anywhere; }
+  .sktree .skachl { list-style:none; padding:0; margin:0; font-size:12px; }
+  .sktree .skach { padding:3px 0; border-bottom:1px solid color-mix(in srgb, var(--divider-color,#888) 30%, transparent); overflow-wrap:anywhere; }
   /* the toy dock (#249): self's toys as icons stacked under the 👶 tab,
      live, whether or not the panel is open; hover or tap one to play */
   .toydock { position:absolute; z-index:8; left:max(0px, env(safe-area-inset-left)); top:calc(50% + 32px);
@@ -1228,6 +1281,7 @@ const LS_SELFPANEL = "membrane.home.selfpanel";   // #230: the 👶 panel open (
 const SELFPANEL_MS = 4000;                        // its activity refresh, only while open
 const SELFPANEL_SEAT_MS = 15000;                  // ...and its character sheet's (the whole status; the seat caches ~30 s)
 const LS_SELFSHEET = "membrane.home.selfsheet";   // #249: which sheet sections are open, per browser
+const LS_SELFTAB = "membrane.home.selftab";       // #296: the 👶 panel's tab (sheet or tree), per browser
 const DOCK_MS = 3000;                             // #249: the toy dock's poll, only while the page is visible
 const LS_DOCK = "membrane.home.toydock";          // the phone's 🧸: the dock expanded ("1") or not
 
@@ -1350,6 +1404,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         else if (!this._sheet) this._spSheetAt = 0;        // not there yet: retry next tick
         this._takeName(c);                                 // #277: the sheet carries the name
       }
+      this._paintTree();                                   // #296: the Skill tree tab, when it shows
       const card = this._sheet && typeof c._selfSheetHtml === "function"
         ? c._selfSheetHtml(this._sheet, this._sheetOpen) : "<h3>report card</h3>" + c._selfCardHtml();
       if (card !== this._spCardHtml) {
@@ -1364,6 +1419,30 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         if (lines && !p.hidden) this._spAct.innerHTML = c._selfLinesHtml(lines);
         else if (!lines) this._spAct.innerHTML = '<li class="sl none">the record is not reachable right now</li>';
       } finally { this._spBusy = false; }
+    }
+    /** #296: the panel's tabs -- the sheet or the Skill tree; remembered per browser. */
+    _selfTab(tab, focus) {
+      tab = tab === "tree" ? "tree" : "sheet";
+      this._spTabNow = tab;
+      for (const b of this._spTabs) {
+        const on = b.dataset.tab === tab;
+        b.setAttribute("aria-selected", on ? "true" : "false");
+        b.tabIndex = on ? 0 : -1;
+        if (on && focus) b.focus();
+      }
+      this._spPaneSheet.hidden = tab !== "sheet";
+      this._spPaneTree.hidden = tab !== "tree";
+      lsSet(LS_SELFTAB, tab);
+      this._paintTree();
+    }
+    /** #296: the Skill tree, from the sheet the panel already read; rebuilt only when it changed. */
+    _paintTree() {
+      const c = this._chat;
+      if (!this._spTree || this._spPaneTree.hidden || !c || typeof c._skillTree !== "function") return;
+      const sig = this._sheet ? c._skillTreeSig(this._sheet) : "";
+      if (sig === this._spTreeSig && this._spTree.firstChild) return;
+      this._spTreeSig = sig;
+      c._skillTree(this._spTree, this._sheet, this._spTreeSel);
     }
     /** A sheet section opened or closed: remembered per browser. */
     _onSheetToggle(e) {
@@ -1924,10 +2003,17 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
                 title="${nm} (#161): its character sheet -- level, attributes, quest, growth, toys, the others it met -- and what it is doing now">👶</button>
         <aside class="selfpanel glass" id="selfpanel" aria-label="${nm}'s character sheet" hidden>
           <div class="sphead"><span class="sptitle">👶 ${nm}</span><button class="spx" aria-label="close ${nm}'s panel" title="Close">×</button></div>
-          <div class="spxp"></div>
-          <div class="sheet spcard"></div>
-          <details class="sec" data-sec="activity" data-was="0"><summary><span class="stt">Activity</span><span class="sth">live</span></summary>
-            <div class="secb"><ol class="spact"><li class="sl none">…</li></ol></div></details>
+          <div class="sptabs" role="tablist" aria-label="${nm}'s panel">
+            <button type="button" class="sptab" role="tab" id="sptab-sheet" data-tab="sheet" aria-selected="true" aria-controls="sppane-sheet">Sheet</button>
+            <button type="button" class="sptab" role="tab" id="sptab-tree" data-tab="tree" aria-selected="false" aria-controls="sppane-tree" tabindex="-1">Skill tree</button>
+          </div>
+          <div class="sppane" role="tabpanel" id="sppane-sheet" aria-labelledby="sptab-sheet">
+            <div class="spxp"></div>
+            <div class="sheet spcard"></div>
+            <details class="sec" data-sec="activity" data-was="0"><summary><span class="stt">Activity</span><span class="sth">live</span></summary>
+              <div class="secb"><ol class="spact"><li class="sl none">…</li></ol></div></details>
+          </div>
+          <div class="sppane" role="tabpanel" id="sppane-tree" aria-labelledby="sptab-tree" hidden><div class="sktree"></div></div>
           <p class="spplay" aria-live="polite" hidden></p>
         </aside>
         <div class="toydock" hidden>
@@ -2069,6 +2155,19 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._babyBtn = $(".babybtn"); this._selfPanel = $(".selfpanel");
       this._spXp = $(".spxp"); this._spAct = $(".spact"); this._spCard = $(".spcard"); this._spPlay = $(".spplay");
       this._spCard.addEventListener("click", (e) => this._onToyPoke(e));     // #244: the toys' play buttons
+      // #296: the panel's tabs (the sheet, the Skill tree): arrows move between them
+      this._spTabs = Array.from(root.querySelectorAll(".sptab"));
+      this._spPaneSheet = $("#sppane-sheet"); this._spPaneTree = $("#sppane-tree"); this._spTree = $(".sktree");
+      this._spTreeSel = {};
+      for (const b of this._spTabs) {
+        b.addEventListener("click", () => this._selfTab(b.dataset.tab));
+        b.addEventListener("keydown", (e) => {
+          if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "Home" && e.key !== "End") return;
+          e.preventDefault();
+          this._selfTab(this._spTabNow === "tree" ? "sheet" : "tree", true);
+        });
+      }
+      this._selfTab(lsGet(LS_SELFTAB, "sheet"));
       this._babyBtn.addEventListener("click", () => this._toggleSelfPanel());
       // the 🦠 zoo (#283): Home Assistant's seats; standalone is one seat
       this._zooBtn = $(".zoobtn"); this._zoo = $(".zoopanel"); this._zooList = $(".zlist"); this._zooMsg = $(".zmsg");
