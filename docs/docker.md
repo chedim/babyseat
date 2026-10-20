@@ -1,6 +1,7 @@
-# membrane in Docker
+# babyseat in Docker
 
-The public image `chedim/membrane` runs `membrane standalone` in a container:
+The public image `chedim/babyseat` (babyseat, formerly membrane) runs
+`membrane standalone` in a container:
 the serve API and web UI on **:4096**, the OpenAI-compatible memory proxy on
 **:11500**. Point a browser at the first, or any OpenAI-compatible client (an
 agent, an IDE plugin, a pod in Kubernetes) at `http://<host>:11500/v1`. Ollama
@@ -8,7 +9,12 @@ clients aim at `http://<host>:11500`: `/api/chat` and `/api/generate` run the sa
 memory turn, the rest of `/api/*` passes through to Ollama.
 
 Every published release pushes the tags `X.Y.Z`, `X.Y` and `latest` for
-`linux/amd64` and `linux/arm64` (`.github/workflows/docker.yml`).
+`linux/amd64` and `linux/arm64` (`.github/workflows/docker.yml`). The same
+tags go to `chedim/membrane`, the image's name before 0.7, so an existing
+`docker pull chedim/membrane` keeps updating; new setups use `chedim/babyseat`.
+Inside the image nothing was renamed: the `membrane` command, the `MEMBRANE_*`
+variables and the `/data/.membrane` state are the same, so a container (and its
+volume) moves to the new image by changing only the image name.
 
 The image holds the installed package and nothing else. It has no baked-in
 backend address, model, key or name: everything specific to your setup comes
@@ -30,7 +36,7 @@ docker run -d --name membrane \
   -v membrane-data:/data \
   -e MEMBRANE_EMBED_MODEL=mxbai-embed-large \
   --stop-timeout 60 \
-  chedim/membrane:latest
+  chedim/babyseat:latest
 ```
 
 **Linux:** add the host-gateway mapping so `host.docker.internal` reaches the
@@ -43,7 +49,7 @@ docker run -d --name membrane \
   -v membrane-data:/data \
   -e MEMBRANE_EMBED_MODEL=mxbai-embed-large \
   --stop-timeout 60 \
-  chedim/membrane:latest
+  chedim/babyseat:latest
 ```
 
 Ollama in another container on the same network: set
@@ -54,7 +60,7 @@ Ollama in another container on the same network: set
 ```yaml
 services:
   membrane:
-    image: chedim/membrane:latest
+    image: chedim/babyseat:latest
     ports: ["4096:4096", "11500:11500"]
     volumes: ["membrane-data:/data"]
     environment:
@@ -138,7 +144,7 @@ docker run -d --name membrane \
   -p 4096:4096 -p 11500:11500 -v membrane-data:/data \
   -e MEMBRANE_JWT_SECRET="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')" \
   -e MEMBRANE_BACKEND=http://host.docker.internal:11434 \
-  --stop-timeout 60 chedim/membrane:latest
+  --stop-timeout 60 chedim/babyseat:latest
 
 # a token for a person (exec inherits the container's environment)
 docker exec membrane membrane token mint --sub alice --name Alice
@@ -158,9 +164,9 @@ seat commands (`standalone`, `serve`, `opencode`) get the env flags and the
 fixed ports, the rest run as given:
 
 ```bash
-docker run ... chedim/membrane serve --no-dreamer     # headless, no web UI
+docker run ... chedim/babyseat serve --no-dreamer     # headless, no web UI
 docker exec membrane membrane doctor                   # in a running seat
-docker run --rm chedim/membrane --help
+docker run --rm chedim/babyseat --help
 ```
 
 Extra seat flags follow the command; anything after `--` passes through.

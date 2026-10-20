@@ -26,7 +26,7 @@ class TestTheVersionIsOneVersion(unittest.TestCase):
         v = _pyproject_version()
         man = json.loads((ROOT / "custom_components" / "membrane" / "manifest.json").read_text())
         self.assertEqual(man["version"], v)
-        self.assertIn(f"membrane-seat=={v}", man["requirements"])
+        self.assertIn(f"babyseat=={v}", man["requirements"])   # #303: the dist is babyseat
 
     def test_the_readme_says_it(self):
         m = re.search(r"Version \*\*([0-9.]+)\*\*", (ROOT / "README.md").read_text())

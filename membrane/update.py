@@ -7,10 +7,10 @@ Sources handled (in order of detection):
                    branch NEVER force-merges -- it skips with instructions).
   2. PIP DIRECT -- an install recorded with a direct_url (pip/uv from a git
                    URL): `pip install --upgrade` of the same URL.
-  3. PYPI       -- a release install from PyPI (dist membrane-seat): compare
-                   with PyPI's latest; update = `pip install --upgrade
-                   membrane-seat==<latest>` (2026-10-12: release installs
-                   were skipped -- every new user's).
+  3. PYPI       -- a release install from PyPI (dist babyseat; membrane-seat
+                   before 0.7, #303): compare with PyPI's latest; update =
+                   `pip install --upgrade babyseat==<latest>` (2026-10-12:
+                   release installs were skipped -- every new user's).
   4. NONE       -- anything else: not checking.
 
 Contract:
@@ -38,8 +38,9 @@ from pathlib import Path
 
 _CHECK_TIMEOUT = 6          # network ops: seconds (boot must not hang)
 _COMMIT_LIMIT = 12          # changelog lines shown in the prompt
-DIST = "membrane-seat"      # the PyPI name (pyproject.toml)
-PYPI_JSON = "https://pypi.org/pypi/membrane-seat/json"
+DIST = "babyseat"           # the PyPI name (pyproject.toml; #303)
+OLD_DISTS = ("membrane-seat", "membrane")   # its names before: 0.3.0-0.6, before 0.3.0
+PYPI_JSON = "https://pypi.org/pypi/babyseat/json"
 CHANGES_URL = "https://github.com/chedim/membrane/blob/main/CHANGELOG.md"
 
 
@@ -48,12 +49,20 @@ def _vtuple(v: str) -> tuple:
     return tuple(int(x) for x in re.findall(r"\d+", str(v or ""))[:4])
 
 
+def installed_version() -> str | None:
+    """The installed distribution's version, under its name or a former one
+    (#303: babyseat; a 0.7 install also carries the membrane-seat shim)."""
+    from importlib.metadata import version
+    for dist in (DIST, OLD_DISTS[0]):
+        try:
+            return version(dist)
+        except Exception:
+            continue
+    return None
+
+
 def _pypi_installed() -> str | None:
-    try:
-        from importlib.metadata import version
-        return version(DIST)
-    except Exception:
-        return None
+    return installed_version()
 
 
 def _pypi_latest(timeout: float = _CHECK_TIMEOUT) -> str | None:
@@ -93,7 +102,7 @@ def _pip_direct_url() -> str | None:
     """A git URL this package was pip/uv-installed from, if any."""
     import importlib.metadata as md
     import json
-    for dist in ("membrane-seat", "membrane"):        # the PyPI name since 0.3.0, the old one before
+    for dist in (DIST, *OLD_DISTS):                   # the PyPI name, then its former ones
         try:
             files = md.distribution(dist).files or []
         except Exception:

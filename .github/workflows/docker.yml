@@ -1,13 +1,15 @@
 name: docker
 
 # THE IMAGE LANE (#202): a published release builds the public image
-# chedim/membrane for amd64 + arm64 and pushes X.Y.Z, X.Y and latest.
+# chedim/babyseat for amd64 + arm64 and pushes X.Y.Z, X.Y and latest.
+# The same image goes to chedim/membrane with the same tags (#303: the
+# project's name before 0.7) so existing pulls keep updating.
 # It builds from a CLEAN checkout of the release tag (never a dev tree),
 # and the allowlist .dockerignore sends only the package. A pull request
 # that touches the Docker files gets a build-only run: smoke + privacy check.
 #
 # Repo secrets: DOCKERHUB_USERNAME, DOCKERHUB_TOKEN (a Docker Hub access
-# token with write access to chedim/membrane).
+# token with write access to BOTH chedim/babyseat and chedim/membrane).
 
 on:
   release:
@@ -25,9 +27,6 @@ on:
       - .github/workflows/docker.yml
       - pyproject.toml
 
-env:
-  IMAGE: chedim/membrane
-
 jobs:
   check:
     if: github.event_name == 'pull_request'
@@ -41,14 +40,16 @@ jobs:
           platforms: linux/amd64
           load: true
           push: false
-          tags: membrane:ci
+          tags: babyseat:ci
       - name: smoke (the CLI runs without booting a seat)
-        run: docker run --rm --entrypoint membrane membrane:ci --help
+        run: docker run --rm --entrypoint membrane babyseat:ci --help
+      - name: smoke (the babyseat command is in the image too)
+        run: docker run --rm --entrypoint babyseat babyseat:ci --help
       - name: smoke (the entrypoint passes non-seat commands through)
-        run: docker run --rm membrane:ci --help
+        run: docker run --rm babyseat:ci --help
       - name: privacy (no runtime state in the image)
         run: |
-          found=$(docker run --rm --entrypoint sh membrane:ci -c \
+          found=$(docker run --rm --entrypoint sh babyseat:ci -c \
             'find / -xdev \( -name ".membrane" -o -name "*.jsonl" -o -name "field*.json" -o -name "serve-auth.json" \) -not -path "*/site-packages/*" 2>/dev/null' || true)
           if [ -n "$found" ]; then
             echo "runtime state found in the image:"; echo "$found"; exit 1
@@ -102,7 +103,9 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.IMAGE }}
+          images: |
+            chedim/babyseat
+            chedim/membrane
           tags: |
             type=semver,pattern={{version}},value=${{ steps.ver.outputs.version }}
             type=semver,pattern={{major}}.{{minor}},value=${{ steps.ver.outputs.version }}

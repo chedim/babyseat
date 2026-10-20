@@ -72,7 +72,7 @@ def main() -> int:
             z.write(WWW / n, n)
     # the standalone installer: the wheel (pure python, no build step for the
     # tester) + the voice files, unzipped anywhere pip-installable
-    wheel = next(DIST.glob(f"membrane_seat-{v}-*.whl"), None)
+    wheel = next(DIST.glob(f"babyseat-{v}-*.whl"), None)
     if wheel is None:
         print(f"building the wheel into {DIST} ...")
         import subprocess
@@ -82,12 +82,12 @@ def main() -> int:
         py = str(venv) if venv.is_file() else sys.executable
         cmd = [py, "-m", "build", "--wheel", "--outdir", str(DIST)]
         r = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
-        wheel = next(DIST.glob(f"membrane_seat-{v}-*.whl"), None)
+        wheel = next(DIST.glob(f"babyseat-{v}-*.whl"), None)
         if wheel is None:                       # no `build`: pip wheel works the same
             r = subprocess.run([py, "-m", "pip", "wheel", "--no-deps", "--no-build-isolation",
                                 "--wheel-dir", str(DIST), str(ROOT)],
                                cwd=ROOT, capture_output=True, text=True)
-            wheel = next(DIST.glob(f"membrane_seat-{v}-*.whl"), None)
+            wheel = next(DIST.glob(f"babyseat-{v}-*.whl"), None)
         if wheel is None:
             print((r.stdout or "")[-1500:], file=sys.stderr)
             print((r.stderr or "")[-1500:], file=sys.stderr)

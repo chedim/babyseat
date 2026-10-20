@@ -27,11 +27,8 @@ _guard = threading.Lock()
 
 
 def _version() -> str:
-    try:
-        from importlib.metadata import version
-        return version("membrane-seat")
-    except Exception:
-        return "0.3.0"
+    from .update import installed_version      # babyseat, or membrane-seat before 0.7 (#303)
+    return installed_version() or "0.3.0"
 
 
 def base_url() -> str:

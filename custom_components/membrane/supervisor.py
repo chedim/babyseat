@@ -176,7 +176,7 @@ class SeatSupervisor:
     async def start(self) -> None:
         if not await self.hass.async_add_executor_job(package_found):
             _LOGGER.error("membrane: the membrane package isn't installed (and this copy of the "
-                          "integration carries none) -- install the release zip, or pip install membrane-seat")
+                          "integration carries none) -- install the release zip, or pip install babyseat")
             return
         self._stopping = False
         await self._spawn()

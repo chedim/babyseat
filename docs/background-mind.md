@@ -191,7 +191,7 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   "all" or a number bulk-accepts the earned achievements in that closure.
   Off runs nothing and erases nothing. The mode (`<data dir>/self/mode.json`)
   and the record survive a restart. `watch` runs like `on` until there is a
-  babysitter to keep quiet.
+  nanny to keep quiet.
 - **Rung 1, feel itself (the amoeba's problem).** Its only act moves its own
   position on the field, and the world pushes it while it moves: the field's
   **current** (`EntityField.current()`), which self does not control. Every

@@ -722,5 +722,28 @@ def main() -> None:
     raise SystemExit(_run_module("membrane." + cmd, args.forwarded))
 
 
+
+BABYSEAT_HELP = """babyseat -- the seat with its own web UI (chat, membrane home, the
+field, voice) on :4096, opened in the browser.
+
+    babyseat [options]      the same as `membrane standalone [options]`
+
+babyseat is the project (formerly membrane); membrane is its server part,
+the memory field + proxy, and its CLI stays: `membrane --help` lists every
+command, `membrane standalone --help` every option.
+"""
+
+
+def babyseat_main() -> None:
+    """THE BRAND'S DOOR (#303): `babyseat [args]` is `membrane standalone [args]`.
+    sys.argv is rewritten, not copied: the updater re-execs `python -m
+    membrane.cli` with sys.argv[1:], which then says `standalone ...`."""
+    argv = sys.argv[1:]
+    if argv[:1] in (["-h"], ["--help"], ["help"]):
+        print(BABYSEAT_HELP, end="")
+        return
+    sys.argv = [sys.argv[0], "standalone", *argv]
+    main()
+
 if __name__ == "__main__":
     main()

@@ -117,7 +117,7 @@ membrane home (and in the chat's side menu) wakes it and puts it back to sleep:
 | 🌱 awake | self cycles, practises every open skill and earns what its tests pass |
 
 The same switch over HTTP is `{"self": "on" | "off" | "watch"}`. **`watch`
-currently runs exactly like `on`**; it exists for the babysitter the design
+currently runs exactly like `on`**; it exists for the nanny the design
 calls for, which is not built yet, and the viewer only tags the amoeba
 "watched". The switch is the operator's alone (`POST /membrane/seat/control`:
 localhost, the seat token, or an HA admin through the relay). The seat's LLM

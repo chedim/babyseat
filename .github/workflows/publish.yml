@@ -36,8 +36,25 @@ jobs:
           tag="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
           ver=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
           [ "${tag#v}" = "$ver" ] || { echo "tag $tag is not the package version $ver: bump pyproject.toml before releasing"; exit 1; }
+          # the shim is the same version and pins exactly it (#303); a tag cut
+          # before the shim existed (a catch-up dispatch) has none to check
+          if [ -f shim/membrane-seat/pyproject.toml ]; then
+            shim=$(python -c "import tomllib; print(tomllib.load(open('shim/membrane-seat/pyproject.toml', 'rb'))['project']['version'])")
+            [ "$shim" = "$ver" ] || { echo "shim/membrane-seat is $shim, not $ver: bump it with pyproject.toml"; exit 1; }
+            deps=$(python -c "import tomllib; print(' '.join(tomllib.load(open('shim/membrane-seat/pyproject.toml', 'rb'))['project']['dependencies']))")
+            [ "$deps" = "babyseat==$ver" ] || { echo "the shim depends on '$deps', not babyseat==$ver"; exit 1; }
+          fi
       - run: pip install build
-      - run: python -m build
+      - run: python -m build --outdir dist
+      # the membrane-seat shim, while shim/ carries it (delete the directory
+      # to stop publishing it). It ships the same module as babyseat (see
+      # shim/membrane-seat/pyproject.toml for why), copied in here.
+      - run: |
+          if [ -d shim/membrane-seat ]; then
+            cp -R membrane shim/membrane-seat/membrane
+            python -m build shim/membrane-seat --outdir dist
+          fi
+      - run: ls -l dist
       # PyPI FIRST, then the GitHub release (2026-10-15): HACS users update
       # from the release, and their HA then pip-installs the pinned seat --
       # the package must already be there. The release re-runs this lane on
@@ -45,4 +62,5 @@ jobs:
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_TOKEN }}
+          packages-dir: dist
           skip-existing: true
