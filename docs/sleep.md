@@ -44,10 +44,30 @@ Flat. The record is kept in memory (#178), so its growth costs nothing yet.
 |---|---|---|
 | **Record growth** (most likely first) | Some tests and the sheet read the whole record. At some size, summarizing the past to make room becomes necessary, and that is consolidation. | The cycle's median or 90th percentile rising above 10 s, or the sheet's build time growing with the record. |
 | **Generalization** | Once Blurp learns shared structure (kinds of things, people in general), new learning *will* interfere with old. Offline replay over the record is the known cure. | A shared model's error on old things rising while new things are learned. |
-| **Changing itself** (a later skill) | Rewriting its own methods should happen offline: replay the record through the candidate, and switch only if it predicts better. That is a dream with a test attached. | The skill itself: "change itself" needs a replay harness before it can be built. |
+| **Changing itself** (built for settings, #320) | Rewriting its own methods should happen offline: replay the record through the candidate, and switch only if it predicts better. That is a dream with a test attached. | Built for two learning settings (below); changing its methods is still a later step. |
 
 When one of these arrives, sleep becomes a real feature: a scheduled
 offline phase with its own measured gain, not a metaphor.
+
+## Its first dream (#320)
+
+*Change itself* (rung 10) is the first offline process Blurp has. It
+changes settings only. Once an hour a thread of its own takes a snapshot of
+the record and makes one proposal: one neighbour of one of two learning
+settings, rung 4's rate window or the post-shift prior. It replays the last
+1000 timed looks through both the current value and the neighbour, predicting
+each look before learning from it, and keeps the change only if it predicts
+better by a margin with a significance check. Later it checks the change on
+the looks that came after it. The cycle never waits for it.
+
+On the live record's size (46k lines, 11 MB) one dream costs about 0.3 s, at
+most 0.54 s, once an hour. The record still isn't sleep pressure: the
+dream is cheap because the cycle already holds the record in memory.
+
+On the live record its 63 replayed dreams rejected every candidate. Today's
+settings are already the best its replay finds. Numbers and the bar's
+simulation are in
+[experiments/self_change](../experiments/self_change/README.md).
 
 ## The seat already has a night
 

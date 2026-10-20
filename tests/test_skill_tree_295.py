@@ -34,7 +34,8 @@ from membrane import toy_unlocks as TU  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
 
 OTHER = MEMBRANE_NS + "Component:chat:in:someone"
-BUILT = ["feel", "reach", "kinds", "patience", "shift", "meet", "turns", "expect", "mirror", "speak"]   # #311, #312
+BUILT = ["feel", "reach", "kinds", "patience", "shift", "meet", "turns", "expect", "mirror", "change",
+         "speak"]   # #311, #312, #320
 LATER = ["mirror", "change", "speak", "invent"]
 ORDER = ["feel", "reach", "kinds", "patience", "shift", "meet", "turns", "expect"] + LATER   # the tree's order
 CONTRACT = {"id", "name", "branch", "prereqs", "built", "state", "earned_at", "skill", "bar",
@@ -99,6 +100,7 @@ def test_the_tree_has_stable_ids_branches_and_real_edges():
     assert pre["shift"] == {"reach"}                               # its noticing reads the tempo, not patience's rates
     assert pre["meet"] == {"reach"}                                # the split is reach's own skill
     assert pre["turns"] == {"meet"} and pre["expect"] == {"meet"}  # siblings: either can come first
+    assert pre["change"] == {"mirror", "patience"}                 # #320: its dream replays patience's timed looks
     for a in A:
         for p in A[a]["prereqs"]:
             assert p in A and list(A).index(p) < list(A).index(a)   # acyclic, prerequisites listed first
@@ -133,7 +135,7 @@ def test_a_post_flip_rung_line_counts_and_an_achieve_line_counts():
     srv = _seat(rungs=(1, 2, 3, 4, 5, 6, 7))
     assert "turns" in SL._earned(SL._read(srv))
     SL._append(srv, {"ts": 99.0, "kind": "achieve", "id": "expect", "skill": 0.3})
-    assert SL._earned(SL._read(srv)) == set(BUILT) - {"speak", "mirror"}
+    assert SL._earned(SL._read(srv)) == set(BUILT) - {"speak", "mirror", "change"}
     assert 8 in SL._passed(SL._read(srv))                          # the toys and the bug windows read rung numbers
 
 
@@ -154,7 +156,7 @@ def test_expect_is_earned_while_turns_stays_open():
     assert [e["id"] for e in st["earned"]][-1] == "expect"
     tree = {t["id"]: t for t in SS.compute(srv)["tree"]}
     assert tree["expect"]["state"] == "earned" and tree["turns"]["state"] == "open"
-    assert tree["change"]["state"] == "unbuilt"
+    assert tree["change"]["state"] == "locked" and tree["invent"]["state"] == "unbuilt"   # #320: change is built
 
 
 def test_a_root_needs_nothing_and_a_child_waits_for_its_parent():
@@ -190,7 +192,7 @@ def test_the_limit_accepts_an_achievement_and_its_closure():
     assert SL.set_limit(srv, "expect")                             # its closure: reach, meet, expect
     assert _accepts(srv) == ["reach", "meet"]                      # the earned ones in it, in tree order
     assert SL.set_limit(srv, "all") and _accepts(srv) == ["reach", "meet", "feel"]
-    assert not SL.set_limit(srv, "nonsense") and not SL.set_limit(srv, "change")   # unbuilt: nothing to accept
+    assert not SL.set_limit(srv, "nonsense") and not SL.set_limit(srv, "invent")   # unbuilt: nothing to accept
     assert SL.set_limit(srv, 5) and SL.set_limit(srv, 8)           # nothing left to accept: no new lines
     assert len(_accepts(srv)) == 3
     assert SL.set_limit(srv, "off") and SL.mode(srv) == "off" and SL._allowed(srv) == set()
