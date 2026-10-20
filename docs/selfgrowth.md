@@ -424,8 +424,8 @@ other turns is built only when the version that counts merged:
 | patience | #180 | 2026-10-16 16:29:14 | rungs 4 + 5 together |
 | notice the world changed | #180 | 2026-10-16 16:29:14 | there but broken until #191 (a bug window) |
 | meet an other | #187 | 2026-10-16 19:24:02 | there but broken until #209 (#208's window) |
-| take turns | #281 | 2026-10-19 15:19:43 | #278, the ball's own clock: rung 7 reads only the current clock's turns |
-| understand an other | #281 | 2026-10-19 15:19:43 | #254's fix (#256) graded self; since #278 it reads only the ball clock's checks |
+| time its turn | #281 | 2026-10-19 15:19:43 | #278, the ball's own clock: rung 7 reads only the current clock's turns |
+| expect a reply | #281 | 2026-10-19 15:19:43 | #254's fix (#256) graded self; since #278 it reads only the ball clock's checks |
 
 The seat runs new code only after a restart, so a test is built on a seat at
 the end of the first record gap over 30 s (`RESTART_S`, three cycles at
@@ -436,7 +436,7 @@ a wall from that moment. At any moment only the costliest reason counts: a
 wall costs all of the time, a full bug window wins a tie (its test was
 there, broken), a partial one (#259's) gives way to the wall. The sheet's
 `time` carries `walls_h` and `walls` (from, to, `why`: `no built skill to
-learn: take turns, understand an other, ... not built yet`, its running time
+learn: time its turn, expect a reply, ... not built yet`, its running time
 and its cost), and each growth row says when its skill became learnable
 (`available_at`: prerequisites earned and test on the seat), how long it
 waited on us before that (`waited_h`, running hours from its prerequisites'
@@ -445,7 +445,7 @@ row's `working_h` stays self's working age at the pass, the curve's x.
 
 On the live seat's record (to 2026-10-20 03:08 UTC) the walls were the
 first reach's build after feel itself (50 min), the build of rungs 3, 5 and
-6 after first reach (68 min), and take turns and understand an other from
+6 after first reach (68 min), and time its turn and expect a reply from
 rung 6's honest pass to #278 reaching the seat (2026-10-18 21:43 to
 2026-10-19 15:42 UTC; its first 8.4 h were already #254's bug window): 10.4
 of 61.1 running hours. Working hours went from 26.4 to 16.1.
