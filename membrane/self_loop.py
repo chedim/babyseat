@@ -83,7 +83,7 @@ RUNG_NAMES = {0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell 
               4: "patience", 5: "notice the world changed", 6: "meet an other",
               7: "time its turn", 8: "expect a reply", 9: "recognize itself", 10: "change itself",
               11: "speak"}
-LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9)}       # the rungs built so far
+LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11)}   # the rungs built so far (#311: speak; #312: mirror)
 # THE LADDER FLIP (#258): rung 7 was "understand an other" until the turn-taking rung went in
 # below it. A rung line above 6 counts only when it carries "ladder": LADDER_V -- a pass
 # recorded before the flip was the old numbering's (the record is never rewritten).
@@ -153,11 +153,14 @@ ACHIEVEMENTS = {
                "child_age": "~4 y",
                "child_ability": "revises what it knows about its own knowing (metacognition, Flavell)",
                "why_prereqs": "not built yet; planned: it can change only a self it recognizes (recognize itself)"},
-    "speak": {"rung": 11, "name": "speak", "branch": "later", "prereqs": ("turns", "expect"), "built": False,
-              "child_age": "~4 y",
-              "child_ability": "tells its own story from memory (autobiographical narrative, Nelson & Fivush)",
-              "why_prereqs": ("not built yet; planned: words take turns (time its turn) with an other it "
-                              "can predict (expect a reply)")},
+    # #311: the test measures first referential words to an other, so the child is ~12 mo, not ~4 y's narrative
+    "speak": {"rung": 11, "name": "speak", "branch": "later", "prereqs": ("turns", "expect"), "built": True,
+              "child_age": "~12 mo",
+              "child_ability": ("names a thing to an other and gets a response: first referential words "
+                                "and pointing to share (Bates, Camaioni & Volterra 1975)"),
+              "why_prereqs": ("its words take turns (time its turn: its timing is that skill's policy, and one "
+                              "stage is that skill's contingency) with an other it can predict (expect a reply: "
+                              "its outcome is the reply check after each push)")},
     "invent": {"rung": 12, "name": "invent", "branch": "later", "prereqs": ("change", "speak"), "built": False,
                "child_age": "~5 y",
                "child_ability": "makes up games with its own rules",
@@ -248,6 +251,30 @@ MEET_MAX = 180              # rung 7: a push waits at most this many cycles for 
 # at the switch (_rung6), so the silence can't read as slipping. Pass rates in experiments/rung7_turns.
 TOY_TURNS = True            # #264: rung 7's turns with the ball (tests of the chat medium switch it off)
 SPEAK_RUNG = 11             # ...chat is quiet from rung 7 until this rung (speak) opens
+# SPEAK (#311): once speak opens, self's turns go back to chat (the switch above) and each push
+# is PLAIN (SPEAK_PLAIN, the content-free line it always pushed) or WORDS: a short referential
+# utterance naming the thing of its latest answered look and what that look found ("lamp:
+# changed", "lamp: still") -- a fixed template over its own record (_speak_words, SPEAK_SAY), no
+# model: the model talks TO self, never AS it (#161). The kind is a fair coin per push, seeded
+# by the cycle, drawn only when self has something to say (else the push is plain, "mute", and
+# counts for nothing). The push line records `speech`, and for words the `words` and `about`
+# (the look they report: eid, answer, ts). THE TEST (_rung11), staged, over the last
+# SPEAK_PUSHES pushes at the current other in chat with a reply check: pushes (SPEAK_EACH of each
+# kind), truth (every utterance true of the record: the cited look is there, before the push,
+# the latest answered look at that thing, and the words are the template's -- one false one
+# zeroes it), lift (words get replies more often than plain pushes: two-proportion z >=
+# SPEAK_LIFT_Z and >= SPEAK_LIFT_MARGIN), timing (rung 7's contingency over the same pushes, at
+# rung 7's bar). The bar, simulated read at every push like the live loop (100-push window,
+# ~1000 pushes, a week of chat turns): an other who replies alike to both kinds (rates
+# 0.1/0.3/0.5/0.7) passes 0.3/1.4/1.8/2.2% of the time (rung 7's chance line is 2 in 100); one who
+# answers words 0.30 -> 0.60 passes always (median ~130 pushes), 0.35 -> 0.55 in 91% (~310).
+# z >= 4 would cut chance to ~0.2% and the 0.35 -> 0.55 other to 62%.
+SPEAK_PLAIN = "self is here"
+SPEAK_SAY = {"changed": "changed", "unchanged": "still"}   # what a look found, in its words
+SPEAK_PUSHES = 100          # pushes with a reply check the test reads
+SPEAK_EACH = 40             # ...at least this many of each kind
+SPEAK_LIFT_Z = 3.5          # words' reply rate over plain's: two-proportion z
+SPEAK_LIFT_MARGIN = 0.15    # ...and at least this lift
 TURNS = True                # #258: rung 7's learned timing (tests switch it off to keep the timer's pace)
 TURN_BINS = (120.0, 600.0, 1800.0)       # spoke_age bin edges, s; the last bin: 30 min+ or never spoke
 TURN_NAMES = ("0-2m", "2-10m", "10-30m", "30m+")
@@ -1434,7 +1461,12 @@ def _meet(srv, seed: str, now: float | None = None) -> None:
             return
         rec.update(when)
     _rt(srv)["other"] = to                                  # rungs 7 and 8 read this one
-    _push_chat(srv, "self is here", person)
+    text = SPEAK_PLAIN
+    if _available(srv, SPEAK_RUNG):                         # #311: its words, from its own record
+        said = _speak(recs, to, n)
+        text = said.pop("text")
+        rec.update(said)
+    _push_chat(srv, text, person)
     if spoke is not None:
         rec["spoke_age"] = round(now - spoke, 1)
     if _available(srv, 8):                                  # rung 8: ask the model AT the push (#215)
@@ -2084,7 +2116,7 @@ def _replies(srv) -> bool:
     and a push records how long since the other last spoke -- the machinery
     both take turns (its reward) and understand an other (its outcome) read,
     so it runs while either may be practised."""
-    return _available(srv, 7) or _available(srv, 8)
+    return _available(srv, 7) or _available(srv, 8) or _available(srv, SPEAK_RUNG)   # #311: speak reads them too
 
 
 def _targets(srv) -> list[str]:
@@ -2873,12 +2905,150 @@ def _rung9(recs: list[dict], tempo: dict | None = None) -> dict:
             "passed": all(v >= 1.0 for v in crit.values())}
 
 
+# ---- speak (#311): its turns carry words from its own record --------------------------
+
+def _speak_words(eid: str, answer: str) -> str | None:
+    """THE TEMPLATE: a thing's name (the last part of its short name:
+    toy:dice -> dice) and what a look at it found, in self's two words for
+    it (SPEAK_SAY) -- None for a look with no answer. Nothing else goes into
+    a line: no model, no chat words."""
+    say = SPEAK_SAY.get(answer)
+    return f"{_short(eid).rsplit(':', 1)[-1]}: {say}" if say and eid else None
+
+
+def _speak_about(recs: list[dict], to: str | None) -> dict | None:
+    """What self has to say: its latest answered look at a thing -- not at the
+    other it speaks to, not at itself, not inside a blind audit -- as
+    {eid, answer, ts}; None when there is none."""
+    me = _eid()
+    for r in reversed(recs):
+        if (r.get("kind") == "reach" and r.get("answer") in SPEAK_SAY and not r.get("audit")
+                and r.get("eid") and r.get("eid") not in (to, me)):
+            return {"eid": r["eid"], "answer": r["answer"], "ts": r.get("ts")}
+    return None
+
+
+def _speak(recs: list[dict], to: str | None, n: int) -> dict:
+    """One push's speech: {text, speech, [words, about]}. A fair coin, seeded
+    by the cycle, picks words or plain when self has something to say; with
+    nothing to say the push is plain and "mute" (it counts for neither)."""
+    import random
+    about = _speak_about(recs, to)
+    words = _speak_words(about["eid"], about["answer"]) if about is not None else None
+    if words is None:
+        return {"text": SPEAK_PLAIN, "speech": "mute"}
+    if random.Random(f"speak:{n}").random() < 0.5:
+        return {"text": words, "speech": "words", "words": words, "about": about}
+    return {"text": SPEAK_PLAIN, "speech": "plain"}
+
+
+def _speak_rows(recs: list[dict], eid: str | None) -> list[dict]:
+    """Speak's pushes at `eid` in chat, oldest first, each with its reply
+    check's `replied` and -- for words -- whether they were TRUE of the record
+    at the push: the look they cite is on the record before the push, at that
+    thing, with that answer, the latest answered look at it (no audit), and
+    the words are the template's. Mute pushes, turns with the ball and pushes
+    from before speak (no `speech`) count for nothing."""
+    rows: list[dict] = []
+    last: dict = {}                                       # eid -> its latest answered look so far
+    pend = None
+    for r in recs:
+        k = r.get("kind")
+        if k == "push":
+            pend = None
+            if r.get("to") == eid and eid and _medium(r) == "chat" and r.get("speech") in ("words", "plain"):
+                ok = None
+                if r["speech"] == "words":
+                    a = r.get("about") or {}
+                    seen = last.get(a.get("eid"))
+                    ok = bool(seen is not None and a.get("eid") != eid and seen.get("ts") == a.get("ts")
+                              and seen.get("answer") == a.get("answer")
+                              and r.get("words") == _speak_words(a.get("eid"), a.get("answer")))
+                pend = {"ts": float(r.get("ts") or 0), "speech": r["speech"], "true": ok, "n": r.get("n")}
+        elif k == "reach":
+            if pend is not None and r.get("eid") == eid:
+                if r.get("reply") and isinstance(r.get("replied"), bool):
+                    rows.append({**pend, "replied": r["replied"]})
+                pend = None                               # only the first look after the push is its check
+            if r.get("answer") in SPEAK_SAY and not r.get("audit") and r.get("eid"):
+                last[r["eid"]] = r
+    return rows
+
+
+def _speak_lift(rows: list[dict]) -> dict:
+    """Words' reply rate against plain's over `rows`: the counts, the rates,
+    the lift and its pooled two-proportion z; `passed` when both kinds have
+    SPEAK_EACH and the lift clears SPEAK_LIFT_Z and SPEAK_LIFT_MARGIN."""
+    w = [r["replied"] for r in rows if r["speech"] == "words"]
+    p = [r["replied"] for r in rows if r["speech"] == "plain"]
+    nw, np_ = len(w), len(p)
+    rw = sum(w) / nw if nw else None
+    rp = sum(p) / np_ if np_ else None
+    lift = (rw - rp) if nw and np_ else 0.0
+    z = 0.0
+    if nw and np_:
+        pool = (sum(w) + sum(p)) / (nw + np_)
+        se = float(np.sqrt(pool * (1.0 - pool) * (1.0 / nw + 1.0 / np_)))
+        z = lift / se if se > 1e-12 else 0.0
+    ok = min(nw, np_) >= SPEAK_EACH and z >= SPEAK_LIFT_Z and lift >= SPEAK_LIFT_MARGIN
+    return {"n_words": nw, "n_plain": np_, "rate_words": rw, "rate_plain": rp, "lift": float(lift),
+            "z": float(z), "passed": bool(ok)}
+
+
+def _rung11(recs: list[dict], tempo: dict | None = None) -> dict:
+    """Speak (#311): over its last SPEAK_PUSHES pushes at the CURRENT other in
+    chat with a reply check -- staged: pushes (SPEAK_EACH of each kind), truth
+    (every utterance true of the record), lift (words earn more replies than
+    plain pushes), timing (rung 7's contingency over the same pushes, at rung
+    7's bar). The headline skill is the lift."""
+    to = _other(recs)
+    rows = _speak_rows(recs, to)[-SPEAK_PUSHES:] if to else []
+    s = _speak_lift(rows)
+    said = [r for r in rows if r["speech"] == "words"]
+    false = sum(1 for r in said if not r["true"])
+    crit = {"pushes": max(0.0, min(1.0, len(rows) / SPEAK_PUSHES, min(s["n_words"], s["n_plain"]) / SPEAK_EACH)),
+            "truth": 1.0 if said and not false else 0.0,
+            "lift": max(0.0, min(1.0, s["z"] / SPEAK_LIFT_Z, s["lift"] / SPEAK_LIFT_MARGIN)),
+            "timing": 0.0}
+    tw = {"n": 0, "share": None, "chance": None, "z": 0.0}
+    if rows:
+        at = {r["ts"] for r in rows}
+        trows = [r for r in _turn_rows(recs, to, "chat", 1) if sum(r["dwell"]) > 0]
+        d = [x for r, x in zip(trows, _turn_deltas(trows)) if r["ts"] in at]
+        tw = _turn_window(d, 1)
+        if tw["n"]:
+            crit["timing"] = max(0.0, min(1.0, tw["z"] / RUNG7_CONT_Z, (tw["share"] - tw["chance"]) / RUNG7_CONT_MARGIN))
+
+    def r4(x):
+        return None if x is None else round(float(x), 4)
+    return {"crit": crit, "skill": round(s["lift"], 4), "eid": to, "passed": all(v >= 1.0 for v in crit.values()),
+            "n": len(rows), "n_words": s["n_words"], "n_plain": s["n_plain"], "rate_words": r4(s["rate_words"]),
+            "rate_plain": r4(s["rate_plain"]), "z": round(s["z"], 2), "false": false,
+            "timing_share": r4(tw["share"]), "timing_chance": r4(tw["chance"]), "timing_z": round(tw["z"], 2)}
+
+
+def _speak_stats(recs: list[dict]) -> dict:
+    """For the operator (#311): speak at the current other -- its pushes by
+    kind (all time), its last words, and the test's window: counts, reply
+    rates, lift and z, false utterances, and its timing's in-window share
+    against chance."""
+    to = _other(recs)
+    ps = [r for r in recs if r.get("kind") == "push" and r.get("to") == to and r.get("speech")]
+    p = _rung11(recs)
+    last = next((r for r in reversed(ps) if r.get("speech") == "words"), None)
+    return {"words": sum(1 for r in ps if r["speech"] == "words"), "plain": sum(1 for r in ps if r["speech"] == "plain"),
+            "mute": sum(1 for r in ps if r["speech"] == "mute"), "last_words": last.get("words") if last else None,
+            "window": p["n"], "n_words": p["n_words"], "n_plain": p["n_plain"], "rate_words": p["rate_words"],
+            "rate_plain": p["rate_plain"], "lift": p["skill"], "z": p["z"], "false": p["false"],
+            "timing_share": p["timing_share"], "timing_chance": p["timing_chance"], "timing_z": p["timing_z"]}
+
+
 PROGRESS = {1: _rung1, 2: _rung2, 3: _rung3, 4: _rung4, 5: _rung5, 6: _rung6, 7: _rung7,
-            8: _rung8, 9: _rung9}   # rung -> its test over the record
+            8: _rung8, 9: _rung9, 11: _rung11}   # rung -> its test over the record
 # #249: the line each rung's headline skill has to reach (the number status()['skill'] reads);
 # rung 4's news share has a moving bar (its fixed-pace base + 0.15), so it has none here
 SKILL_PASS = {1: RUNG1_SKILL, 2: RUNG2_SKILL, 3: RUNG2_SKILL, 4: None, 5: 1.0, 6: 1.0,
-              7: RUNG7_PAY_MARGIN, 8: RUNG8_MARGIN, 9: BODY_SKILL}
+              7: RUNG7_PAY_MARGIN, 8: RUNG8_MARGIN, 9: BODY_SKILL, 11: SPEAK_LIFT_MARGIN}
 
 
 def _rung_lines(recs: list[dict]) -> list[dict]:
@@ -3067,6 +3237,7 @@ def status(srv) -> dict:
             "curiosity": _curiosity_stats(recs),
             "rung7": _rung7_stats(recs),
             "rung8": _rung8_stats(recs),
+            "speak": _speak_stats(recs),                     # #311
             "toys": _toys(srv, recs),
             "unlock": _latest_unlock(recs),                  # #267: the level-up's "new toy"
             "off_field": _off_field(srv, recs)}

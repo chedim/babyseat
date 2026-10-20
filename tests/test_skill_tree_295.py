@@ -34,8 +34,9 @@ from membrane import toy_unlocks as TU  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
 
 OTHER = MEMBRANE_NS + "Component:chat:in:someone"
-BUILT = ["feel", "reach", "kinds", "patience", "shift", "meet", "turns", "expect", "mirror"]   # #312: mirror
-LATER = ["change", "speak", "invent"]
+BUILT = ["feel", "reach", "kinds", "patience", "shift", "meet", "turns", "expect", "mirror", "speak"]   # #311, #312
+LATER = ["mirror", "change", "speak", "invent"]
+ORDER = ["feel", "reach", "kinds", "patience", "shift", "meet", "turns", "expect"] + LATER   # the tree's order
 CONTRACT = {"id", "name", "branch", "prereqs", "built", "state", "earned_at", "skill", "bar",
             "waiting_on", "child_age", "child_ability", "why_prereqs"}
 
@@ -84,7 +85,7 @@ def _expect_passes_turns_not(t0=1000.0, n=110):
 
 def test_the_tree_has_stable_ids_branches_and_real_edges():
     A = SL.ACHIEVEMENTS
-    assert list(A) == BUILT + LATER
+    assert list(A) == ORDER
     assert [a for a in A if A[a]["built"]] == BUILT
     br = {a: A[a]["branch"] for a in A}
     assert br["feel"] == "self"
@@ -132,7 +133,7 @@ def test_a_post_flip_rung_line_counts_and_an_achieve_line_counts():
     srv = _seat(rungs=(1, 2, 3, 4, 5, 6, 7))
     assert "turns" in SL._earned(SL._read(srv))
     SL._append(srv, {"ts": 99.0, "kind": "achieve", "id": "expect", "skill": 0.3})
-    assert SL._earned(SL._read(srv)) == set(BUILT) - {"mirror"}   # #312: the mirror is not earned here
+    assert SL._earned(SL._read(srv)) == set(BUILT) - {"speak", "mirror"}
     assert 8 in SL._passed(SL._read(srv))                          # the toys and the bug windows read rung numbers
 
 
@@ -223,7 +224,7 @@ def test_the_sheet_and_the_dock_carry_the_tree_and_the_level():
     sh = SS.compute(srv)
     assert sh["level"] == 3 and sh["header"]["level"] == 3
     rows = sh["tree"]
-    assert [r["id"] for r in rows] == BUILT + LATER
+    assert [r["id"] for r in rows] == ORDER
     for r in rows:
         assert set(r) >= CONTRACT, set(CONTRACT) - set(r)
         assert r["state"] in ("locked", "open", "earned", "unbuilt")
@@ -237,7 +238,7 @@ def test_the_sheet_and_the_dock_carry_the_tree_and_the_level():
     assert "meet an other" in by["turns"]["waiting_on"]
     assert by["patience"]["why_prereqs"]
     dock = SS.dock(srv, fresh=True)
-    assert dock["level"] == 3 and [r["id"] for r in dock["tree"]] == BUILT + LATER
+    assert dock["level"] == 3 and [r["id"] for r in dock["tree"]] == ORDER
 
 
 def test_the_card_counts_achievements():

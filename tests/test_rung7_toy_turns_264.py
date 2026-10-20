@@ -628,7 +628,7 @@ def test_chat_pushes_stop_and_rung_six_holds_through_the_silence(monkeypatch):
 
 def test_until_rung_eleven_opens():
     assert SL.SPEAK_RUNG == 11 and SL.RUNG_NAMES[11] == "speak"
-    assert SL.SPEAK_RUNG not in SL.LADDER                             # not built: chat stays quiet
+    assert SL.SPEAK_RUNG in SL.LADDER                                 # #311: built -- chat stays quiet until it OPENS
 
 
 def test_a_seat_below_rung_seven_still_meets_in_chat(monkeypatch):

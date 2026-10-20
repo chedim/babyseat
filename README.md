@@ -1,6 +1,8 @@
 # babyseat (formerly membrane)
 Hippocampus as cortex register-correct-predict-act head: real-time learning, embodiment, self-awareness, self-targeting, novelty creation*, response generation*, embedding-only*.
 
+![Membrane](screenshot.png)
+
 A token-saving openapi-proxy and opencode-like agent seat with Alan's baby brain quest easter seed (can't call an unexpected main project feature "an easter egg", can I?). 
 
 ```
@@ -601,7 +603,7 @@ python experiments/variety_toy.py        # the variety toy: the gate's calibrati
 
 Working lab, in daily use on its own development (dogfooded: this repo's own
 field holds ~14k live entities and its background mind digests, dreams, and
-speaks about its own work). Version **0.6.2**; API and flag surfaces may still
+speaks about its own work). Version **0.7.0**; API and flag surfaces may still
 move. Licensing: **PolyForm Noncommercial 1.0.0** (see [LICENSE](LICENSE)) —
 free to use, modify and share for any noncommercial purpose (personal, hobby,
 research, education, charities and public institutions); commercial use needs
