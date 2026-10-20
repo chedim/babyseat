@@ -123,6 +123,8 @@ BUILT_AT = {
     # understand an other: #256 (#254's fix, 06:11Z) graded self not the model, #261 moved it up to rung 8,
     # #262 scored the reply, #272 the ball's turns; #281 (#278): it reads only the current clock's checks
     "expect": {"pr": 281, "merged": _utc(2026, 10, 19, 15, 19, 43)},
+    # speak (#311): its commit's time until the merge's is set here
+    "speak": {"pr": 313, "merged": _utc(2026, 10, 20, 12, 39, 55)},
 }
 RESTART_S = 3 * SL.PACE_S     # a record gap this long is a restart: the loop writes a line every PACE_S
 WALL_WHY = "no built skill to learn: {next} not built yet"
@@ -148,7 +150,8 @@ CHILD = {1: (0.1, "tells its own touch from another's (newborns, Rochat & Hespos
          8: (2.5, "expects a caregiver's response: the still-face upset (Tronick et al. 1978)"),   # #300
          9: (18.0, "passes the mirror test (Amsterdam 1972)"),
          10: (48.0, "revises what it knows about its own knowing (metacognition, Flavell)"),
-         11: (48.0, "tells its own story from memory (autobiographical narrative, Nelson & Fivush)")}
+         11: (12.0, "names a thing to an other and gets a response: first referential words and pointing "
+                    "to share (Bates, Camaioni & Volterra 1975)")}   # #311: what speak's test measures
 CAVEAT = ("The child scale is an analogy, not a measurement: each open point is the age a child "
           "typically shows the closest ability, rescaled by one factor (hours of " + NAME + " per month of a "
           "child, the median over the rungs passed) so a child's proportions are kept.")
@@ -160,7 +163,7 @@ def fastest_cycles() -> dict:
     r2 = SL.RUNG2_REACHES + SL.AUDIT_REACHES
     return {1: SL.RUNG1_CYCLES, 2: r2, 3: SL.RUNG3_WINDOW - r2, 4: SL.RUNG4_TIMED,
             5: SL.RUNG5_LOOKS, 6: SL.RUNG6_PUSHES * SL.MEET_EVERY, 7: SL.RUNG7_PUSHES * _turn_every(),
-            8: SL.RUNG8_LOOKS * _turn_every()}
+            8: SL.RUNG8_LOOKS * _turn_every(), 11: SL.SPEAK_PUSHES * SL.MEET_EVERY}   # #311: speak is in chat
 
 
 def _turn_every() -> int:
@@ -177,7 +180,9 @@ def _needs() -> dict:
             5: f"{SL.RUNG5_LOOKS} looks with noticing on, both audit shifts caught",
             6: f"{SL.RUNG6_PUSHES} lines sent, {SL.MEET_EVERY} cycles apart",
             7: f"{SL.RUNG7_PUSHES} timed turns with the ball with a reply check, at least {_turn_every()} cycles apart",
-            8: f"{SL.RUNG8_LOOKS} reply checks, one per line"}
+            8: f"{SL.RUNG8_LOOKS} reply checks, one per line",
+            11: (f"{SL.SPEAK_PUSHES} timed lines with a reply check, at least {SL.SPEAK_EACH} with words "
+                 f"and {SL.SPEAK_EACH} plain")}
 
 
 def iso(t) -> str | None:
@@ -727,7 +732,8 @@ def _criteria(aim: int, recs: list, progs: dict) -> list:
              6: {"pushes": (SL.RUNG6_PUSHES, "lines sent"), "heard": (SL.RUNG6_HEARD, "answered looks at the other")},
              7: {"pushes": (SL.RUNG7_PUSHES, "turns with the ball with a reply check (you roll it back)" if ball
                             else "timed lines with a reply check")},
-             8: {"looks": (SL.RUNG8_LOOKS, "reply checks")}}.get(aim, {})
+             8: {"looks": (SL.RUNG8_LOOKS, "reply checks")},
+             11: {"pushes": (SL.SPEAK_PUSHES, "timed lines with a reply check")}}.get(aim, {})
     skill = {1: (SL.RUNG1_SKILL, "feel skill"), 2: (SL.RUNG2_SKILL, "reach skill"),
              3: (SL.RUNG2_SKILL, "reach skill on a moving thing"), 8: (SL.RUNG8_MARGIN, "skill vs running rate")}
     flags = {"audit": "both audit shifts caught" if aim == 5 else "blind audit passed",
@@ -735,9 +741,26 @@ def _criteria(aim: int, recs: list, progs: dict) -> list:
     crits = []
     for key, frac in p["crit"].items():
         met = frac >= 1.0
-        if key in count:
+        if key in count and aim == 11:                 # #311: both kinds, each at least SPEAK_EACH
+            need, label = count[key]
+            text = (f"{min(need, int(p.get('n') or 0))}/{need} {label} ({int(p.get('n_words') or 0)} with words, "
+                    f"{int(p.get('n_plain') or 0)} plain; {SL.SPEAK_EACH} of each)")
+        elif key in count:
             need, label = count[key]
             text = f"{min(need, round(frac * need))}/{need} {label}"
+        elif key == "truth":
+            fl = int(p.get("false") or 0)
+            text = ("every utterance true of its record" if not fl
+                    else f"{fl} utterance{'s' if fl != 1 else ''} not true of its record")
+        elif key == "lift":
+            rw, rp = p.get("rate_words"), p.get("rate_plain")
+            text = (f"replies to words {'–' if rw is None else f'{rw:.2f}'} vs plain {'–' if rp is None else f'{rp:.2f}'} "
+                    f"(z {float(p.get('z') or 0):.1f} → {SL.SPEAK_LIFT_Z:.1f}, {_sg(SL.SPEAK_LIFT_MARGIN)})")
+        elif key == "timing":
+            sh, ch = p.get("timing_share"), p.get("timing_chance")
+            text = (f"lines in its window {'–' if sh is None else f'{sh:.2f}'} vs chance "
+                    f"{'–' if ch is None else f'{ch:.2f}'} (z {float(p.get('timing_z') or 0):.1f} → "
+                    f"{SL.RUNG7_CONT_Z:.1f}, +{SL.RUNG7_CONT_MARGIN:.2f})")
         elif key == "skill" and aim in skill:
             tgt, label = skill[aim]
             text = f"{label} {_sg(float(p['skill']))} → {_sg(tgt)}"
@@ -910,7 +933,7 @@ SKILL_STEP_S = 1800.0        # the skill's trend line: one point per half hour o
 SKILL_POINTS = 9             # ...over the last four hours
 SKILL_LABEL = {1: "feel skill", 2: "reach skill", 3: "reach skill on a moving thing", 4: "news share of timed looks",
                5: "shifts noticed", 6: "the other read as other", 7: "replies gained by its timing",
-               8: "skill vs running rate"}
+               8: "skill vs running rate", 11: "replies gained by its words"}
 
 
 def _skill_at(n: int, recs: list, tempo: dict):
