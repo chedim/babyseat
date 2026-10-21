@@ -141,19 +141,51 @@ def f32(v) -> np.ndarray:
     return np.asarray(v, dtype=np.float32).astype(np.float64)
 
 
+def _nnls(M, x, tol: float = 1e-10) -> np.ndarray:
+    """Non-negative least squares, min |M w - x| with w >= 0 (Lawson-Hanson
+    active set): the residual ends orthogonal to every column with a positive
+    weight, and no zero-weight column points along it. A message mentions a
+    few things, so the loop is short."""
+    n = M.shape[1]
+    w = np.zeros(n)
+    on = np.zeros(n, dtype=bool)
+    for _ in range(3 * n + 10):
+        g = M.T @ (x - M @ w)
+        if on.all() or g[~on].max() <= tol:
+            break
+        on[np.flatnonzero(~on)[np.argmax(g[~on])]] = True
+        while True:
+            z = np.zeros(n)
+            z[on], *_ = np.linalg.lstsq(M[:, on], x, rcond=None)
+            if z[on].min() > 0:
+                w = z
+                break
+            neg = on & (z <= 0)
+            alpha = np.min(w[neg] / (w[neg] - z[neg]))
+            w = w + alpha * (z - w)
+            on &= w > tol
+            w[~on] = 0.0
+    return w
+
+
 def fit_weights(x, A):
-    """Non-negative-clipped least squares of x on the rows of A (E18): the
-    reconstruction AND its weights (the event's coordinates in entity terms)."""
+    """Non-negative least squares of x on the rows of A (E18): the
+    reconstruction AND its weights (the event's coordinates in entity terms).
+
+    #335: a TRUE non-negative solve. Clipping an unconstrained solve's negative
+    weights overshot the message whenever the mentioned states resembled each
+    other (live: |fit| > |x| in 73% of events), and the residual -- the news
+    that pulls the current -- pointed back against the message's own subjects."""
     A = np.asarray(A, dtype=float)
-    w, *_ = np.linalg.lstsq(A.T, x, rcond=None)
-    w = np.clip(w, 0.0, None)
+    x = np.asarray(x, dtype=float)
+    w = _nnls(A.T, x)
     if w.sum() <= 1e-12:
         w = np.ones(len(A)) / len(A)
     return A.T @ w, w
 
 
 def fit(x, A) -> np.ndarray:
-    """Non-negative-clipped least squares of x on the rows of A (E18)."""
+    """Non-negative least squares of x on the rows of A (E18, #335)."""
     return fit_weights(x, A)[0]
 
 
