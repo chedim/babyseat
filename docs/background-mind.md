@@ -101,6 +101,8 @@ the seat's ACTING lanes down — the stable point from which the operator
   executor's queue is part of the pause: owed work keeps its pending
   edges and runs on resume (the executor mechanics:
   [entity-field.md](entity-field.md) — the queue + the ISA pipeline).
+  One method call goes through the pause: `presence.restart` (#388) — a
+  staged deploy never waits for a resume.
 - **RAM-only**: a restart unpauses (a persisted pause is a stuck seat —
   a paused-looking seat the roster can't wake is the failure mode this
   avoids). `membrane: pause` is honored only from the operator's chat

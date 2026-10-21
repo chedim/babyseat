@@ -469,4 +469,7 @@ def do_restart(srv, why: str, delay_s: float = 2.0) -> dict:
         time.sleep(delay_s)
         os.kill(os.getpid(), signal.SIGTERM)
     threading.Thread(target=bye, daemon=True, name="restart").start()
-    return {"rc": 0, "text": f"restarting in {delay_s:g}s -- you'll get a notice when the seat is back"}
+    text = f"restarting in {delay_s:g}s -- you'll get a notice when the seat is back"
+    if getattr(srv, "paused", False):           # #388: the pause is RAM-only
+        text += " (the seat is paused now; the pause is not carried over -- it comes back unpaused)"
+    return {"rc": 0, "text": text}
