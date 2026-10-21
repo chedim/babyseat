@@ -29,8 +29,8 @@ def _js(expr, f="home.js", name="H"):
     return json.loads(subprocess.check_output(["node", "-e", js]))
 
 
-def ball(side, n_self, by="self", name="toy:ball", locked=False):
-    t = {"name": name, "kind": "ball", "reading": {"side": side}, "changes": {"self": n_self},
+def ball(side, n_self, by="self", name="toy:ball", locked=False, n_alice=0):
+    t = {"name": name, "kind": "ball", "reading": {"side": side}, "changes": {"self": n_self, "alice": n_alice},
          "last": {"by": by, "what": "roll", "age_s": 1.0} if by else None}
     if locked:
         t = {"name": name, "kind": "ball", "locked": True}
@@ -80,11 +80,32 @@ def test_the_optimistic_paint_and_its_undo_never_alert():
 
 
 @NODE
-def test_an_overdue_fetch_and_re_roll_is_a_new_roll():
+def test_an_overdue_fetch_and_re_roll_stays_quiet():
+    """#340: a re-roll of a ball you never rolled back alerts nothing more: it
+    keeps glowing (the person was getting the toast again and again)."""
     seen = _alert(None, [ball("self", 5)])["seen"]
     seen = _alert(seen, [ball("other", 6)])["seen"]
     out = _alert(seen, [ball("other", 7)])
+    assert out["alert"] == [] and out["yours"] == ["toy:ball"]
+
+
+@NODE
+def test_your_roll_back_and_selfs_next_roll_between_two_reads_alerts():
+    """#340: a real exchange between two polls -- you rolled it back, self rolled
+    again -- is a new roll: your own change count on the ball went up."""
+    seen = _alert(None, [ball("self", 5)])["seen"]
+    seen = _alert(seen, [ball("other", 6)])["seen"]
+    out = _alert(seen, [ball("other", 7, n_alice=1)])
     assert out["alert"] == ["toy:ball"]
+
+
+@NODE
+def test_the_model_or_the_world_moving_it_is_not_you_playing():
+    seen = _alert(None, [ball("self", 5)])["seen"]
+    seen = _alert(seen, [ball("other", 6)])["seen"]
+    t = ball("other", 7)
+    t["changes"].update({"model": 3, "world": 2})
+    assert _alert(seen, [t])["alert"] == []
 
 
 @NODE
