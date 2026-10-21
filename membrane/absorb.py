@@ -4,11 +4,16 @@ OpenCode (~/.local/share/opencode/opencode.db) -- for sessions that ran
 since the seat's last run, imports them (chat rows into the serve
 stores, events into the entity field) and auto-continues the newest.
 
-THE HARD FILTER (the operator's rule, fail-closed): sessions answered
-by Anthropic's commercial models are ignored WHOLESALE -- one claude-*
-(or unknown/absent) assistant model poisons the entire session. Only
-Ollama-backed traffic is eligible (providerID 'ollama'; `ollama launch
-claude` transcripts carry local model ids and survive).
+WHO ANSWERED DOES NOT GATE (issue #396): a session answered by an
+Anthropic model is imported and learned like any other -- the operator
+reversed the older "don't remix Claude's answers" rule on 2026-10-21.
+Provenance stays: the session doc and every assistant row keep the model
+id and provider that answered (`anthropic` for claude-*/anthropic model
+ids, `ollama` for local ones, `unknown` when a Claude Code line names no
+model), and a claude-agent row keeps its `madeBy` mark. OpenCode sessions
+are eligible on ABSORB_PROVIDERS only (other providers, and membrane
+itself, stay out). Sessions the old rule skipped are rescanned ONCE past
+the watermark (marker version 2; see absorb()).
 
 Conventions: opencode session/message ids are kept verbatim; claude ids
 are namespaced `xcl_` (their uuids are unique per line). Import marks
@@ -69,6 +74,8 @@ class TurnRow:
     thought: str = ""
     calls: list = field(default_factory=list)   # list[ToolCall]
     model_id: str = ""
+    provider_id: str = ""     # who answered this row (provenance)
+    made_by: str = ""         # the claude-agent mark, carried verbatim
 
 
 @dataclass
@@ -81,13 +88,20 @@ class AbsorbSession:
     model_id: str = ""
     provider_id: str = ""
     rows: list = field(default_factory=list)    # list[TurnRow], in order
+    old_rule_skipped: bool = False   # the pre-#396 Anthropic filter
+                                     # would have dropped it (the rescan)
 
 
-# ---- the hard filter ---------------------------------------------------------
+# ---- provenance (no longer a filter, issue #396) -------------------------------
+
+ABSORB_PROVIDERS = ("ollama", "anthropic")   # opencode providers absorbed
+MARKER_VERSION = 2       # 2 = the old-rule rescan is done (issue #396)
+
 
 def _is_anthropic_model(model_id: str | None) -> bool:
-    """THE FAIL-CLOSED RULE: no model id, or a claude-/anthropic one --
-    we cannot prove the session was NOT Anthropic's -> it is."""
+    """The pre-#396 fail-closed classifier: no model id, or a claude-/
+    anthropic one, counts as Anthropic's. Now it only says which sessions
+    the old rule skipped (the one-time rescan); it gates nothing."""
     m = str(model_id or "").strip().lower()
     if not m:
         return True
@@ -98,10 +112,10 @@ def _is_anthropic_model(model_id: str | None) -> bool:
 
 
 def is_claude_made_row(info: dict | None) -> bool:
-    """THE RULE BY PROVIDER (issue #384): a row the claude-agent rung made
-    -- the transcript's Claude-made mark, the provider id, or a model id in
-    the rung namespace membrane mints -- is never absorbed (fail-closed:
-    its whole session is skipped)."""
+    """A row the claude-agent rung made (issue #384) -- the transcript's
+    Claude-made mark, the provider id, or a model id in the rung namespace
+    membrane mints. Provenance only since #396: such a row is absorbed and
+    keeps its mark."""
     from .claude_agent import is_claude_made, is_rung_name
     if not isinstance(info, dict):
         return False
@@ -109,6 +123,13 @@ def is_claude_made_row(info: dict | None) -> bool:
 
 
 # ---- collector: Claude Code transcripts -------------------------------------
+
+def _claude_provider(model: str | None) -> str:
+    """Who answered a Claude Code line, read off its model id."""
+    if not str(model or "").strip():
+        return "unknown"
+    return "anthropic" if _is_anthropic_model(model) else "ollama"
+
 
 def _project_slug(cwd: str) -> str:
     return str(cwd).replace("/", "-")
@@ -143,10 +164,10 @@ def _res_content(r) -> str:
 
 def claude_sessions(cwd: str, since_s: float,
                     home: Path | None = None) -> list[AbsorbSession]:
-    """Parse ~/.claude/projects/<slug(cwd)>/*.jsonl for eligible (non-
-    Anthropic, Ollama-backed) sessions whose last activity is newer than
+    """Parse ~/.claude/projects/<slug(cwd)>/*.jsonl for sessions (any
+    model, issue #396) whose last activity is newer than
     `since_s`. Sidechains, subagent dirs, compact/meta lines and noise
-    line types are skipped; ONE bad assistant model drops the session."""
+    line types are skipped."""
     base = home if home is not None else Path.home() / ".claude" / "projects"
     proj = base / _project_slug(cwd)
     if not proj.is_dir():
@@ -168,6 +189,7 @@ def _parse_claude_file(fp: Path) -> AbsorbSession | None:
     title = ""
     updated_s = 0.0
     pending: dict = {}                      # tool_use_id -> (name, args)
+    old_rule = False                        # pre-#396 filter would drop
     try:
         lines = [json.loads(ln) for ln in
                  fp.read_text(errors="replace").splitlines() if ln.strip()]
@@ -189,8 +211,7 @@ def _parse_claude_file(fp: Path) -> AbsorbSession | None:
         msg = ln.get("message") or {}
         if typ == "assistant":
             model = msg.get("model")
-            if _is_anthropic_model(model):
-                return None                   # THE HARD FILTER, fail-closed
+            old_rule = old_rule or _is_anthropic_model(model)
             ts_ms = _claude_ts_ms(ln)
             updated_s = max(updated_s, _iso_s(ln.get("timestamp") or ""))
             text, thought, calls = [], [], []
@@ -215,7 +236,7 @@ def _parse_claude_file(fp: Path) -> AbsorbSession | None:
                                _h16(f"{fp.name}:{ts_ms}"))
             rows.append(TurnRow(mid, "assistant", ts_ms,
                                 "".join(text), "".join(thought), calls,
-                                str(model)))
+                                str(model or ""), _claude_provider(model)))
         else:                                 # user
             ts_ms = _claude_ts_ms(ln)
             updated_s = max(updated_s, _iso_s(ln.get("timestamp") or ""))
@@ -244,10 +265,13 @@ def _parse_claude_file(fp: Path) -> AbsorbSession | None:
         return None
     if not any(r.role == "assistant" and r.text.strip() for r in rows):
         return None                             # nothing to continue/learn
+    last = next((r for r in reversed(rows) if r.role == "assistant"), None)
     return AbsorbSession("claude", _sid_of(fp), title,
                          int(rows[0].ts_ms), int(updated_s * 1000),
                          next((r.model_id for r in reversed(rows)
-                               if r.model_id), ""), "ollama", rows)
+                               if r.model_id), ""),
+                         last.provider_id if last else "unknown", rows,
+                         old_rule_skipped=old_rule)
 
 
 def _sid_of(fp: Path) -> str:
@@ -263,8 +287,9 @@ def opencode_sessions(cwd: str, since_s: float,
                       db: Path | None = None) -> list[AbsorbSession]:
     """Read ~/.local/share/opencode/opencode.db READ-ONLY (a live WAL
     db; a missing/locked db degrades to zero sessions, never a raise).
-    Eligible: session.directory == cwd, model.providerID == 'ollama'
-    (both on the session and EVERY assistant message -- fail-closed).
+    Eligible: session.directory == cwd, model.providerID in
+    ABSORB_PROVIDERS (both on the session and EVERY assistant message).
+    Anthropic-answered sessions are absorbed like any other (#396).
     """
     path = Path(db) if db is not None else (
         Path.home() / ".local/share/opencode" / "opencode.db")
@@ -288,17 +313,24 @@ def opencode_sessions(cwd: str, since_s: float,
                     sm = {}
                 prov = str(sm.get("providerID") or "")
                 mid = str(sm.get("modelID") or "")
-                if prov != "ollama" or _is_anthropic_model(mid):
-                    continue                     # THE HARD FILTER
+                if prov not in ABSORB_PROVIDERS:
+                    continue
                 rows = _opencode_rows(conn, sid, prov)
                 if not rows:
                     continue
                 if not any(r.role == "assistant" and r.text.strip()
                            for r in rows):
                     continue
-                a = AbsorbSession("opencode", str(sid), str(title or ""),
-                                  int(created or 0), int(updated or 0),
-                                  mid, prov, rows)
+                a = AbsorbSession(
+                    "opencode", str(sid), str(title or ""),
+                    int(created or 0), int(updated or 0), mid, prov, rows,
+                    old_rule_skipped=(prov != "ollama"
+                                      or _is_anthropic_model(mid)
+                                      or any(r.role == "assistant" and (
+                                          r.provider_id != "ollama"
+                                          or _is_anthropic_model(r.model_id)
+                                          or r.made_by)
+                                          for r in rows)))
                 if a.updated_ms / 1000.0 > since_s:
                     out.append(a)
         finally:
@@ -327,9 +359,8 @@ def _opencode_rows(conn, sid: str, prov: str) -> list[TurnRow]:
         if role == "assistant":
             mprov = str(d.get("providerID") or "")
             mmid = str(d.get("modelID") or "")
-            if mprov != prov or _is_anthropic_model(mmid) \
-                    or is_claude_made_row(d):
-                return []                        # fail-closed, whole sid
+            if mprov not in ABSORB_PROVIDERS:
+                return []                        # unknown provider, whole sid
         parts = conn.execute(
             "SELECT data FROM part WHERE message_id = ?"
             " ORDER BY time_created, id", (mid,)).fetchall()
@@ -351,13 +382,20 @@ def _opencode_rows(conn, sid: str, prov: str) -> list[TurnRow]:
                     str(p.get("callID") or ""), str(p.get("tool") or ""),
                     args if isinstance(args, str)
                     else json.dumps(args or {}), st.get("output")))
+        asst = role == "assistant"
         rows.append(TurnRow(str(mid), role, ts_ms, "".join(text),
                             "".join(thought), calls,
-                            str(d.get("modelID") or "")
-                            if role == "assistant" else ""))
+                            str(d.get("modelID") or "") if asst else "",
+                            str(d.get("providerID") or "") if asst else "",
+                            _made_by(d) if asst else ""))
         if len(rows) >= ABSORB_MAX_ROWS:
             break
     return rows
+
+
+def _made_by(d: dict) -> str:
+    from .claude_agent import PROVIDER
+    return PROVIDER if is_claude_made_row(d) else ""
 
 
 # ---- the importer ---------------------------------------------------------------
@@ -452,7 +490,7 @@ def _assistant_info_row(r: TurnRow, a: AbsorbSession, sid: str,
     d = os.path.realpath(str(cwd or os.getcwd()))
     info = {"id": r.msg_id, "sessionID": sid, "role": "assistant",
             "parentID": parent_id or None,
-            "providerID": a.provider_id,
+            "providerID": r.provider_id or a.provider_id,
             "modelID": r.model_id or a.model_id,
             "mode": "build", "agent": "build",
             "path": {"cwd": d, "root": d},
@@ -461,6 +499,9 @@ def _assistant_info_row(r: TurnRow, a: AbsorbSession, sid: str,
                        "cache": {"read": 0, "write": 0}},
             "time": {"created": r.ts_ms, "start": r.ts_ms,
                      "completed": r.ts_ms}}
+    if r.made_by:
+        from .claude_agent import MARK_KEY
+        info[MARK_KEY] = r.made_by               # provenance (#384/#396)
     parts = [{"id": _xprt(r.msg_id, -1), "sessionID": sid,
               "messageID": r.msg_id, "type": "step-start"}]
     i = 0
@@ -566,7 +607,7 @@ def stamp_marker(path: str, rep: dict) -> None:
             sessions[f"{imp['source']}:{imp['sid']}"] = {
                 "last_ts_s": imp.get("last_ts_s") or rep.get("last_run_ts"),
                 "n_msgs": imp.get("n_msgs", 0)}
-        doc = {"version": 1, "last_run_ts": rep.get("last_run_ts") or
+        doc = {"version": int(rep.get("version") or 1), "last_run_ts": rep.get("last_run_ts") or
                time.time(), "sessions": sessions}
         tmp = path + ".tmp"
         with open(tmp, "w") as f:
@@ -591,9 +632,15 @@ def absorb(sessions, messages, efield, cwd: str, marker_path: str,
         # (An explicit home/db is synthetic by construction -- tests.)
         print("[absorb] lab path -- absorption refused", file=sys.stderr)
         return rep
-    since = float(load_marker(marker_path).get("last_run_ts") or 0.0)
-    known = (
-        load_marker(marker_path).get("sessions") or {})
+    mk = load_marker(marker_path)
+    since = float(mk.get("last_run_ts") or 0.0)
+    known = mk.get("sessions") or {}
+    # THE ONE-TIME RESCAN (#396): a marker older than MARKER_VERSION was
+    # stamped by a seat that skipped Anthropic-answered sessions, so the
+    # watermark hides them. Until the rescan drains, such a session that
+    # the marker does not know is eligible whatever its age; known
+    # sessions keep their per-session watermark (no re-import).
+    rescan = bool(mk) and int(mk.get("version") or 1) < MARKER_VERSION
     cands = []
     try:
         cands += claude_sessions(cwd, 0.0, home=home)
@@ -614,13 +661,23 @@ def absorb(sessions, messages, efield, cwd: str, marker_path: str,
         if upd > since:
             return True
         m = known.get(f"{a.source}:{a.sid}")
-        return bool(m and upd > float(m.get("last_ts_s") or 0.0))
+        if m is None:
+            return rescan and a.old_rule_skipped
+        return upd > float(m.get("last_ts_s") or 0.0)
     cands = [a for a in cands if _fresh(a)]
     # newest first, so the cap falls on the OLDEST
     cands.sort(key=lambda a: a.updated_ms, reverse=True)
+    rescan_pending = False
     if len(cands) > max_sessions:
         skipped_n = len(cands) - max_sessions
+        cut = cands[max(1, max_sessions):]
         cands = cands[:max(1, max_sessions)]
+        # a rescan whose backlog fell past the cap stays pending: the
+        # next boot takes the next newest (version is stamped only once
+        # the backlog is drained)
+        rescan_pending = rescan and any(
+            a.old_rule_skipped and f"{a.source}:{a.sid}" not in known
+            for a in cut)
         rep["skipped"].append({"source": "absorb", "sid": "-",
                                "reason": f"{skipped_n} older session(s) "
                                          "past the cap"})
@@ -644,6 +701,7 @@ def absorb(sessions, messages, efield, cwd: str, marker_path: str,
             r["sid"] = a.sid
             r["last_ts_s"] = a.updated_ms / 1000.0
             rep["imported"].append(r)
+    rep["version"] = 1 if rescan_pending else MARKER_VERSION
     stamp_marker(marker_path, rep)
     return rep
 
