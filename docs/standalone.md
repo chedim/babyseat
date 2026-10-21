@@ -132,7 +132,7 @@ sphere it was the distance to it).
 ## The options window (⚙)
 
 The ⚙ in membrane home's top bar opens the seat's long-term settings (#344).
-The 🔔 and ▶ stay in the top bar. The window reads `GET /membrane/options` when
+The 🔔 and the pause (⏸) stay in the top bar. The window reads `GET /membrane/options` when
 it opens and saves each change with `POST /membrane/options` at once; the seat
 validates it, and a bad value is refused (400) with the reason, which the
 window shows. They live in `settings.json`, so a restart keeps them. Per-device
@@ -150,18 +150,19 @@ machine they need the [seat token](auth.md#the-seat-token). Home Assistant's
 relay doesn't forward `/membrane/options` yet, so the window works in
 standalone mode.
 
-## The pause (▶ / ⏸)
+## The pause (⏸ / ▶)
 
-The ▶ beside 💬 in membrane home's top bar is the seat's pause (#348): ▶ while
-the seat runs, ⏸ while it is paused. Pressing ▶ stands the seat's acting lanes
+The ⏸ beside 💬 in membrane home's top bar is the seat's pause (#348). Like a
+media player's button, it shows what a click does (#382): ⏸ while the seat
+runs, ▶ while it is paused. Pressing ⏸ stands the seat's acting lanes
 down — the loops, the dreamer, the thinker's ticks, the night pass, the
 autonode, the idle judges, speech, Blurp's cycle and the scripts' model calls —
 and the LLM's entity and file writes are refused; reads, memory, `intend` and
-your chat stay. Pressing ⏸ resumes, and what the lanes held runs. It is the
+your chat stay. Pressing ▶ resumes, and what the lanes held runs. It is the
 same pause as typing `membrane: pause` / `membrane: resume` in the chat, with
 the same audit line. The page reads the seat's real state on load, every 15 s
 and after each press. The pause is not remembered: a restart resumes, and the
-button shows ▶ again. Pressing it from another machine needs the
+button shows ⏸ again. Pressing it from another machine needs the
 [seat token](auth.md#the-seat-token); through Home Assistant, an admin.
 What exactly stops: [background-mind.md](background-mind.md#the-pause-the-operators-stable-point-2026-10-06).
 The button drove auto-chat before #348; auto-chat is gone.

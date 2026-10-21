@@ -74,7 +74,7 @@ the `membrane-intents` skill.
 
 ## The pause (the operator's stable point, 2026-10-06)
 
-`membrane: pause` — or the ▶ in membrane home's top bar (#348) — stands
+`membrane: pause` — or the ⏸ in membrane home's top bar (#348) — stands
 the seat's ACTING lanes down — the stable point from which the operator
 (and the model, read-only) can look around and plan:
 
@@ -106,8 +106,8 @@ the seat's ACTING lanes down — the stable point from which the operator
   avoids). `membrane: pause` is honored only from the operator's chat
   (a listener loop can never pause the seat). Kill switch:
   `MEMBRANE_NERVE_PAUSE=0` (pause becomes a no-op).
-- **The button** (#348): membrane home's top bar shows ▶ while the seat
-  runs and ⏸ while it is paused; a press pauses or resumes. It reads
+- **The button** (#348): membrane home's top bar shows what a press does
+  (#382): ⏸ while the seat runs, ▶ while it is paused. It reads
   `GET /membrane/seat/pause` (`{paused, enabled}`; `enabled` is false under
   the kill switch) on load, every 15 s while the page is visible, and after
   every press, which sends `POST /membrane/seat/pause {"paused": true|false}`.
@@ -116,7 +116,7 @@ the seat's ACTING lanes down — the stable point from which the operator
   Assistant: an admin), and it writes the same audit line as the typed
   frames (`{"event": "nerve", "op": "pause"|"resume"}`, plus `by`: who
   pressed it) and a `paused` / `resumed` event on the seat panel. It is
-  the same RAM-only flag, so after a restart the button shows ▶. The button
+  the same RAM-only flag, so after a restart the button shows ⏸. The button
   drove auto-chat until #348; auto-chat is gone (the LLM acts unprompted
   through its own field scripts, #338).
 
