@@ -30,7 +30,10 @@ camera can see and drops the rest (Android's recycled lists, in space):
   * THE SPREAD: 0.8 x rank + 0.2 x robust z (median/MAD, clipped) -- the
     2D layout's recipe (the cube's per-axis rule before #362), done once
     server-side over the whole field, now on the radius; the rank counts
-    from 1/n so the radius is in (0, 1] and nobody sits AT the centre.
+    from 1/n so the radius is in (0, 1] and nobody sits AT the centre. The
+    radius is the CUBE ROOT of that spread: a ball's volume grows as r^3, so
+    a spread that is even in r would crowd the core (density ~ 1/r^2); the
+    cube root fills the ball evenly by volume and keeps the order.
   * THE OCTREE LOD: entities in mass order claim a slot at the coarsest
     level whose cell still has room (K per cell); each entity lives in
     exactly ONE tile, so the client shows levels 0..L of the cells in view
@@ -120,7 +123,7 @@ def _spread(r: float, srt, med: float, mad: float) -> float:
     n = len(srt)
     rank = min(1.0, (float(np.searchsorted(srt, r)) + 1.0) / max(1, n))
     z = 0.0 if mad < 1e-12 else max(-3.0, min(3.0, (r - med) / mad))
-    return 0.8 * rank + 0.2 * (z + 3.0) / 6.0
+    return (0.8 * rank + 0.2 * (z + 3.0) / 6.0) ** (1.0 / 3.0)     # the cube root: even by volume
 
 
 class Projection:
@@ -346,7 +349,7 @@ def build(rows_factory, unpack, axes_spec: str = "", ref_vec=None, rels=(),
     med = float(np.median(frac))
     mad = float(np.median(np.abs(frac - med))) * 1.4826
     z = np.zeros(n) if mad < 1e-12 else np.clip((frac - med) / mad, -3, 3)
-    radius = 0.8 * rank + 0.2 * (z + 3.0) / 6.0
+    radius = (0.8 * rank + 0.2 * (z + 3.0) / 6.0) ** (1.0 / 3.0)   # even by VOLUME, not by radius
     dirs = _directions(P, frac, ids)
     coords = np.clip(0.5 + 0.5 * radius[:, None] * dirs, 0.0, 1.0).astype(np.float32)
     scale = (np.sort(frac), med, mad)

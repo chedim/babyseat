@@ -55,8 +55,9 @@ membrane home draws every entity in one ball, nested like Russian dolls (#362):
   the share of the entity's vector (measured from the field's average) that
   the three axes capture. The outer shell is what the axes explain well; the
   core is what they barely see — pick other axes to bring it out. The share is
-  spread by rank, so the shells are evenly used instead of everyone crowding
-  near the centre.
+  spread by rank and its cube root taken, so the ball fills evenly by volume
+  instead of everyone crowding near the centre: the inner third of the radius
+  holds about 1/27 of the entities, the inner two thirds about 8/27.
 
 The faint rings are the shells (the whole ball, two thirds, one third); the far
 side of the ball is dimmer; the heaviest entities on the near side carry

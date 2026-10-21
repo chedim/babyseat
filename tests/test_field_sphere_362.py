@@ -94,12 +94,22 @@ class TestTheBall(unittest.TestCase):
         self.assertTrue((r > 0).all())                     # radius in (0, 1]: nobody AT the centre
         self.assertEqual(p.meta().get("shape"), "sphere")
 
+    def test_the_ball_is_filled_evenly_by_volume(self):
+        # radius = cube root of the spread rank: a uniform rank fills the ball's VOLUME
+        # evenly (a uniform radius would crowd the core, density ~ 1/r^2)
+        p = _build(_rows(3000))
+        r = np.linalg.norm(p.coords.astype(float) - 0.5, axis=1) / 0.5
+        inner = float((r <= 0.5).mean())                    # the inner half-radius holds 1/8 of the volume
+        self.assertGreater(inner, 0.08)
+        self.assertLess(inner, 0.2)
+
     def test_in_span_sits_on_the_outer_shell_orthogonal_near_the_centre(self):
         rows = _span_rows()
         p = _build(rows, "e:ref:0:toward,e:ref:1:toward,e:ref:2:toward")
         rin, rout = _r(p.locate("x:e0")["p"]), _r(p.locate("x:e1")["p"])
         self.assertGreater(rin, 0.49)                       # the outer shell
-        self.assertLess(rout, 0.05)                         # near the centre
+        others = [_r(p.locate(r["eid"])["p"]) for r in rows if r["eid"].startswith("x:") and r["eid"] != "x:e1"]
+        self.assertLess(rout, min(others))                  # the innermost of them all
         # the order of the captured fraction survives the rank spread
         X = np.asarray([r["state"] for r in rows if r["eid"].startswith("x:")])
         mu, A = _axes_of(rows)
@@ -155,7 +165,8 @@ class TestTheBall(unittest.TestCase):
         a, b = p.place(v.tolist(), "w:zero"), p.place(v.tolist(), "w:zero")
         self.assertEqual(a, b)
         self.assertTrue(all(np.isfinite(a)))
-        self.assertLess(_r(a), 0.05)
+        built = [_r(p.locate(r["eid"])["p"]) for r in rows if r["eid"].startswith("x:")]
+        self.assertLessEqual(_r(a), min(built) + 1e-4)     # as deep as the innermost built entity
 
     def test_each_entity_still_lives_in_exactly_one_tile(self):
         rows = _rows(3000)
