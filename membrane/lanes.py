@@ -1322,6 +1322,24 @@ def nerve_paused(srv) -> bool:
     return bool(getattr(srv, "paused", False))
 
 
+def _is_restart_call(est, op: str, body) -> bool:
+    """True for a method call of presence.restart (#388): the one method
+    the pause lets through. The object may be named or given as its eid."""
+    if op != "call" or not isinstance(body, dict):
+        return False
+    if str(body.get("method") or "").strip() != "restart":
+        return False
+    obj = str(body.get("object") or "").strip()
+    pres = MEMBRANE_NS + "presence"
+    if obj in ("presence", pres):
+        return True
+    try:
+        ent = est._resolve_spec(obj) if (est is not None and obj) else None
+    except Exception:                           # noqa: BLE001
+        ent = None
+    return getattr(ent, "eid", None) == pres
+
+
 def _is_pause_query(q: str) -> bool:
     """The operator's pause/resume frame, pre-gate like every operator
     write (LOOPS cannot pause the seat -- the stable point is the
@@ -1427,7 +1445,6 @@ def _goal_spec(spec: str) -> tuple[str, bool]:
 
 
 def _goal_id(e) -> str:
-    from .entities import MEMBRANE_NS
     eid = e.eid.lower()
     if eid.startswith(MEMBRANE_NS.lower()):
         eid = eid[len(MEMBRANE_NS):]
@@ -6670,18 +6687,23 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
         self._json_out({"removed": n})
 
     def _method(self, op: str) -> None:
-        """POST /membrane/method/define|call: Cliffhanger's two verbs."""
-        if self._paused_write_refused():
-            return
+        """POST /membrane/method/define|call: Cliffhanger's two verbs.
+
+        RESTARTS WHILE PAUSED (#388): the pause's write gate lets exactly
+        one call through -- presence.restart (a staged deploy must not
+        wait for a resume). The pause stays RAM-only, so the seat comes
+        back running; every other method still answers 423."""
+        body = self._json_body()
         srv = self.server
         est = getattr(srv, "entity_store", None)
+        if not _is_restart_call(est, op, body) and self._paused_write_refused():
+            return
         if est is None:
             self._json_err_raw(503, "entity layer unavailable"); return
         from . import seatauth as _SA
         if op != "inspect" and not _SA.owner(self):        # #253: a method's command is code
             from . import jwtauth as _JWT
             _JWT.send_unauthorized(self); return
-        body = self._json_body()
         from .night import method_define, method_call, method_each, method_inspect
         if op == "inspect":
             a = body.get("args")
