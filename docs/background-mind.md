@@ -445,7 +445,9 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   never *as* it. `entity_edit` can't write its `script_data`, and mentions
   can't move it (a one-segment `m:` name never gets a field state).
 - **The record** is `<data dir>/self/record.jsonl`, read once and kept in
-  memory as it grows. It is append-only and never truncated, and it starts at birth (the first switch-on): scalars per
+  memory as it grows. It is append-only while self is awake; at sleep (#345)
+  its raw lines move to dated archives behind one summary line
+  ([sleep.md](sleep.md)). It starts at birth (the first switch-on): scalars per
   cycle (step, push, gap, naive, the kind of change), errors, and each rung
   opening. Nothing before its birth is on it.
 - **The runaway guard.** Each cycle's change wakes the next, at least

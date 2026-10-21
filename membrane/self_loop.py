@@ -22,9 +22,17 @@ other caller is refused: the LLM talks TO self, never AS it).
           topic shift). Rung 1 passes when experience measurably shrinks the
           gap against not accounting for the push at all.
 
-THE RECORD: <data dir>/self/record.jsonl, append-only, never truncated,
+THE RECORD: <data dir>/self/record.jsonl, append-only while Blurp is awake,
 starting at birth (the infancy rule: nothing before it is "mine"). Scalars
-only -- the vectors stay on the entity.
+only -- the vectors stay on the entity. #345 part 2, CONSOLIDATION: when
+Blurp falls asleep every raw line of the day moves, unchanged, to its dated
+archive (self/archive/record-<UTC date>.jsonl), and the working record is
+emptied down to one `summary` line: the windows its tests read (copies of
+archived lines) and the counts no window can give back (consolidate(),
+below). Readers see the summary's lines plus the new ones exactly as they
+saw the whole record within their windows. No line is ever edited or lost:
+history() is the archive plus the working record, for the sheet and the
+dock; nothing on the cycle path reads the archive.
 
 THE LOOP is change-driven: each notice changes self's state and wakes the
 next cycle. The runaway guard: PACE_S between cycles (MEMBRANE_SELF_PACE_S,
@@ -448,6 +456,8 @@ TOY_PREFIXES = ("toy:", "cradle:")   # #230: things made for self to play with (
 TOY_WORDS = "w:"            # ...and words that carry a getter (a plain word is not a toy)
 TOY_READS = 10              # the last reaches of a toy its health mark reads
 TOY_SCAN = 3000             # how far back in the record the toys' reads are looked for
+STEER_LAST = 20             # the steered cycles _steer_stats reads (its own number, named for #345's summary)
+RUNG4_LAST = 40             # the timed looks rung 4's news and calibration read (likewise)
 TOY_TTL_S = 15.0            # the toy list is recomputed at most this often (it walks the store)
 OFF_FIELD_LOOKS = 200       # #244: status() counts how many of the last looks land off the field
 
@@ -456,6 +466,10 @@ _ctx = threading.local()    # the cycle in flight: only the loop's own thread ha
 OPERATOR_KINDS = ("accept", "accept_migrated")   # #299: record lines the operator's acts write, not self's running
 _ACC_MEMO: dict = {}        # #299: _accepted's last answer: the record it read (held, so never mistaken) and its length
 _RT: dict[int, dict] = {}   # id(srv) -> runtime (mode, guard clocks, hold, the wake event)
+SUMMARY = "summary"         # #345: the consolidated record's first line
+ARCHIVE = "archive"         # ...the dated archives' folder under self/
+MANIFEST = "manifest.jsonl"     # ...the order the archived lines were written in (one line per sleep)
+CONSOLIDATING = "consolidating.json"   # ...the journal of a consolidation under way
 
 
 # ---- the entity and its methods ----------------------------------------------
@@ -706,21 +720,97 @@ def _append(srv, rec: dict) -> None:
 
 def _read(srv) -> list[dict]:
     """The record, read from disk once and kept in memory as it grows (it was
-    re-read several times a cycle -- quadratic in its length)."""
+    re-read several times a cycle -- quadratic in its length). #345: a
+    consolidated record's first line is its summary: read as the summary
+    (its counts) followed by the window lines it carries, then the lines
+    since. A consolidation the seat died in is finished first (_recover)."""
     rt = _rt(srv)
     if rt.get("recs") is None:
-        p = record_path(srv)
-        out = []
-        size = 0
-        if p is not None and p.exists():
-            for ln in p.read_text().splitlines():
-                try:
-                    out.append(json.loads(ln))
-                    size += len(ln) + 1
-                except ValueError:
-                    pass
-        rt["recs"], rt["recs_bytes"] = out, size
+        with _lock:
+            if rt.get("recs") is None:
+                redo = _recover(srv)
+                rt["recs"], rt["recs_bytes"] = _load_record(record_path(srv))
+                if redo is not None:
+                    consolidate(srv, redo)          # it was cut off before the swap: do it whole
     return rt["recs"]
+
+
+def _load_record(p) -> tuple[list, int]:
+    out: list = []
+    size = 0
+    if p is not None and p.exists():
+        for i, ln in enumerate(p.read_text().splitlines()):
+            try:
+                r = json.loads(ln)
+            except ValueError:
+                continue
+            size += len(ln) + 1
+            if i == 0 and isinstance(r, dict) and r.get("kind") == SUMMARY:
+                lines = r.pop("lines", None) or []
+                r["n"] = len(lines)
+                out.append(r)
+                out.extend(lines)
+            else:
+                out.append(r)
+    return out, size
+
+
+def _head(recs: list) -> int:
+    """#345: how many entries at the start of the record are the summary's
+    (itself and the window lines it carries): 0 for a record never consolidated."""
+    if recs and isinstance(recs[0], dict) and recs[0].get("kind") == SUMMARY:
+        return 1 + int(recs[0].get("n") or 0)
+    return 0
+
+
+def _carry(recs: list) -> dict:
+    """#345: the summary's counts -- what the archived lines it no longer
+    carries add to the all-time counts readers show ({} before any sleep)."""
+    if recs and isinstance(recs[0], dict) and recs[0].get("kind") == SUMMARY:
+        return recs[0].get("carry") or {}
+    return {}
+
+
+def _cycles(recs: list) -> int:
+    """The cycles Blurp has run (its next cycle's number is this + 1)."""
+    return sum(1 for r in recs if r.get("kind") == "cycle") + int(_carry(recs).get("cycle", 0))
+
+
+def _dreams(recs: list) -> int:
+    """The proposals change itself has made (the next dream's turn)."""
+    return sum(1 for r in recs if r.get("kind") == "change") + int(_carry(recs).get("change", 0))
+
+
+def _to_carry(recs: list, to) -> dict:
+    """#345: the archived counts of the pushes to one other (policy pushes,
+    asks and their checks, words / plain / mute)."""
+    return (_carry(recs).get("to") or {}).get(str(to), {}) if to is not None else {}
+
+
+def _r8_key(eid, medium: str, clock: int) -> str:
+    return json.dumps([eid, medium, int(clock)])
+
+
+def _r8_carry(recs: list, eid, medium: str | None = None) -> tuple[int, int]:
+    """#345: (checks, replies) archived before the summary's window, in the
+    medium and clock rung 8 reads now -- the running rate's start."""
+    c = _carry(recs).get("r8") or {}
+    if not c:
+        return 0, 0
+    medium = medium or _cur_medium(recs, eid)
+    n, k = c.get(_r8_key(eid, medium, _cur_clock(recs, eid, medium))) or (0, 0)
+    return int(n), int(k)
+
+
+def _dropped(recs: list) -> set:
+    """#345: the turns dropped at sleep (their pushes' ts), from the sleep lines."""
+    out = set()
+    for r in recs:
+        if r.get("kind") == "sleep":
+            d = r.get("dropped")
+            if isinstance(d, dict) and d.get("turn") is not None:
+                out.add(float(d["turn"]))
+    return out
 
 
 def record_bytes(srv) -> int:
@@ -1059,8 +1149,17 @@ def _first_look_after(recs: list[dict], eid: str, ts: float):
 def _pending(recs: list[dict], now: float) -> dict | None:
     """THE QUESTION IN FLIGHT (#215): the latest push, while self has not yet
     looked at its other since and it is under RUNG8_STALE_S old -- read from
-    the record, so it survives a restart. None otherwise."""
-    push = next((r for r in reversed(recs) if r.get("kind") == "push"), None)
+    the record, so it survives a restart. None otherwise, and (#345) None
+    once Blurp has slept since the push: a turn open at sleep is dropped
+    (the sleep line names it), never a missed reply."""
+    push = None
+    for r in reversed(recs):
+        k = r.get("kind")
+        if k == "sleep":
+            return None                                  # #345: a turn open at sleep was dropped
+        if k == "push":
+            push = r
+            break
     if push is None or not push.get("to"):
         return None
     if now - float(push.get("ts") or 0) > RUNG8_STALE_S:
@@ -1138,8 +1237,9 @@ def _base_rate(recs: list[dict], eid: str) -> tuple[float, int, int]:
     """How often the other had replied by the reply check: (rate, k, n), with a
     Jeffreys prior -- 0.5 before any check, never 0/0 (#217)."""
     rc = _reply_checks(recs, eid)
-    k = int(sum(_reply_o(r) for r in rc))
-    return (k + 0.5) / (len(rc) + 1.0), k, len(rc)
+    n0, k0 = _r8_carry(recs, eid)                     # #345: the checks archived before the summary
+    k = int(sum(_reply_o(r) for r in rc)) + k0
+    return (k + 0.5) / (len(rc) + n0 + 1.0), k, len(rc) + n0
 
 
 def _recent_rate(recs: list[dict], eid: str) -> tuple[float, int, int]:
@@ -1195,16 +1295,17 @@ def _rung8_rows(recs: list[dict], eid: str, medium: str | None = None) -> list[d
     return rows
 
 
-def _r8_design(rows: list[dict]):
+def _r8_design(rows: list[dict], n0: int = 0, k0: int = 0):
     """p_self's inputs per check, from the checks BEFORE it only: the offset is
     the running (all-time) rate's logit; the features are an intercept, the
     recent rate's lean from it, the last outcome (+1 / -1, 0 before any) and
-    how fresh the other's last words were at the push (exp(-gap/SPOKE_S))."""
+    how fresh the other's last words were at the push (exp(-gap/SPOKE_S)).
+    #345: n0 / k0, the checks (and replies) archived before the first row."""
     off, X = np.zeros(len(rows)), np.zeros((len(rows), 4))
     past: list[float] = []
-    k = 0.0
+    k = float(k0)
     for i, r in enumerate(rows):
-        base = (k + 0.5) / (len(past) + 1.0)
+        base = (k + 0.5) / (len(past) + n0 + 1.0)
         w = past[-RUNG8_RECENT:]
         rr = (sum(w) + 0.5) / (len(w) + 1.0)
         last = (1.0 if past[-1] else -1.0) if past else 0.0
@@ -1234,7 +1335,7 @@ def _p_self(recs: list[dict], eid: str, push: dict) -> float:
     last_ch = next((float(r["ts"]) for r in reversed(recs) if r.get("kind") == "reach" and r.get("eid") == eid
                     and r.get("answer") == "changed" and float(r.get("ts") or 0) <= t), None)
     rows = rows + [{"o": None, "gap": _push_gap(push, last_ch)}]
-    off, X = _r8_design(rows)
+    off, X = _r8_design(rows, *_r8_carry(recs, eid))
     y = np.array([r["o"] for r in rows[:-1]], dtype=float)
     return round(_r8_predict(off, X, y, len(rows) - 1), 4)
 
@@ -1298,11 +1399,12 @@ def _rung8_series(recs: list[dict], eid: str) -> list[dict]:
     `w` (its slope: how much self listens) and `p`, self's prediction with
     the advisor heard (_advise; p_self when the advisor said nothing)."""
     rows = _rung8_rows(recs, eid)
+    n0, k0 = _r8_carry(recs, eid)                     # #345: the checks archived before the summary
     off = X = y = None
-    h = 0
-    k = 0.0
+    h = hash(("carry", n0, k0)) if n0 else 0
+    k = float(k0)
     for i, r in enumerate(rows):
-        r["rate"] = (k + 0.5) / (i + 1.0)
+        r["rate"] = (k + 0.5) / (n0 + i + 1.0)
         h = hash((h, r["ts"], r["o"], r["gap"]))
         if r["rec_p_self"] is not None:
             r["p_self"] = float(r["rec_p_self"])
@@ -1310,7 +1412,7 @@ def _rung8_series(recs: list[dict], eid: str) -> list[dict]:
             key = (eid, h)
             if key not in _P8_CACHE:
                 if off is None:
-                    off, X = _r8_design(rows)
+                    off, X = _r8_design(rows, n0, k0)
                     y = np.array([x["o"] for x in rows], dtype=float)
                 if len(_P8_CACHE) > 20000:
                     _P8_CACHE.clear()
@@ -2335,7 +2437,7 @@ def _dream_tick(srv, n: int, now: float) -> None:
         return
     recs = list(_read(srv))
     settings = dict(_settings(srv))
-    k = sum(1 for r in recs if r.get("kind") == "change")
+    k = _dreams(recs)
 
     def work():
         t = time.time()
@@ -2402,7 +2504,7 @@ def cycle(srv, now: float | None = None) -> dict | None:
         pos = _unit(cur + _seed_dir("birthplace", len(cur)))      # born near the current, not on it
     rt["last"] = now
     rt["burst"].append(now)
-    n = sum(1 for r in _read(srv) if r.get("kind") == "cycle") + 1
+    n = _cycles(_read(srv)) + 1
     seed = f"{n}"
     aim = None
     if 1 in _passed(_read(srv)):            # steer: earned by feeling itself
@@ -2873,6 +2975,12 @@ def _stalls(recs: list[dict]) -> list[int]:
     from the record's timestamps only (no boot marker); shared by curiosity
     and rung 5's noticing (#266)."""
     out, n, prev = [], 0, None
+    if recs and recs[0].get("kind") == SUMMARY:       # #345: the summary's lines carry their counts
+        st = [int(x) for x in recs[0].get("stalls") or ()]
+        out = [st[0] if st else 0] + st
+        n = st[-1] if st else 0
+        prev = next((float(r["ts"]) for r in reversed(recs[1:1 + len(st)]) if r.get("ts") is not None), None)
+        recs = recs[1 + len(st):]
     for r in recs:
         ts = r.get("ts")
         if ts is not None:
@@ -3151,11 +3259,14 @@ def _rung4(recs: list[dict], tempo: dict | None = None) -> dict:
     timed = [r for r in ans if r.get("timed")]
     if not timed:
         return {"crit": {"timed": 0.0, "news": 0.0, "calibration": 0.0}, "skill": 0.0, "passed": False}
-    last = timed[-40:]
+    last = timed[-RUNG4_LAST:]
     news = sum(r["answer"] == "changed" for r in last) / len(last)
     same = {r["eid"] for r in last}
     fixed = [r for r in ans if not r.get("timed") and r["eid"] in same]
-    base = (sum(r["answer"] == "changed" for r in fixed) / len(fixed)) if fixed else 0.0
+    cf = _carry(recs).get("fixed") or {}              # #345: the fixed-pace looks archived before the summary
+    nf = len(fixed) + sum(int((cf.get(e) or (0, 0))[0]) for e in same)
+    kf = sum(r["answer"] == "changed" for r in fixed) + sum(int((cf.get(e) or (0, 0))[1]) for e in same)
+    base = (kf / nf) if nf else 0.0
     need = min(0.5, base + 0.15)
     err = abs(sum(r["p"] for r in last) / len(last) - news)
     crit = {"timed": min(1.0, len(timed) / RUNG4_TIMED),
@@ -3362,9 +3473,10 @@ def _change_stats(srv, recs: list[dict]) -> dict:
     constants), its dreams, what it adopted, its last proposal."""
     lines = [r for r in recs if r.get("kind") == "change"]
     last = lines[-1] if lines else None
-    return {"settings": dict(_settings(srv)), "defaults": _defaults(), "dreams": len(lines),
-            "adopted": sum(1 for r in lines if r.get("verdict") == "adopted"),
-            "checks": sum(1 for r in recs if r.get("kind") == "change_check"),
+    cr = _carry(recs)                                 # #345: what was archived before the summary
+    return {"settings": dict(_settings(srv)), "defaults": _defaults(), "dreams": len(lines) + int(cr.get("change", 0)),
+            "adopted": sum(1 for r in lines if r.get("verdict") == "adopted"),   # every adoption is kept
+            "checks": sum(1 for r in recs if r.get("kind") == "change_check") + int(cr.get("change_check", 0)),
             "last": ({k: last.get(k) for k in ("ts", "setting", "from", "to", "verdict", "gain", "z", "reason",
                                                 "cost_s")} if last else None)}
 
@@ -3500,8 +3612,11 @@ def _speak_stats(recs: list[dict]) -> dict:
     ps = [r for r in recs if r.get("kind") == "push" and r.get("to") == to and r.get("speech")]
     p = _rung11(recs)
     last = next((r for r in reversed(ps) if r.get("speech") == "words"), None)
-    return {"words": sum(1 for r in ps if r["speech"] == "words"), "plain": sum(1 for r in ps if r["speech"] == "plain"),
-            "mute": sum(1 for r in ps if r["speech"] == "mute"), "last_words": last.get("words") if last else None,
+    ct = _to_carry(recs, to)                          # #345: its pushes archived before the summary
+    return {"words": sum(1 for r in ps if r["speech"] == "words") + ct.get("words", 0),
+            "plain": sum(1 for r in ps if r["speech"] == "plain") + ct.get("plain", 0),
+            "mute": sum(1 for r in ps if r["speech"] == "mute") + ct.get("mute", 0),
+            "last_words": last.get("words") if last else None,
             "window": p["n"], "n_words": p["n_words"], "n_plain": p["n_plain"], "rate_words": p["rate_words"],
             "rate_plain": p["rate_plain"], "lift": p["skill"], "z": p["z"], "false": p["false"],
             "timing_share": p["timing_share"], "timing_chance": p["timing_chance"], "timing_z": p["timing_z"]}
@@ -3681,11 +3796,11 @@ def status(srv) -> dict:
     heard = answered[-1]["ts"] if answered else None
     if medium == "toy":                          # #264: the other's last act, not a look that read a change
         heard = _last_acted(srv, now)
-    meets = {"pushes": len(pushes), "other": other, "medium": medium,
+    meets = {"pushes": len(pushes) + int(_carry(recs).get("push", 0)), "other": other, "medium": medium,
              "push_age": round(now - pushes[-1]["ts"], 3) if pushes else None,
              "heard_age": round(now - heard, 3) if heard is not None else None}
     return {"mode": rt["mode"], "limit": lim, "born": born, "held": rt["held"],
-            "cycles": sum(1 for r in recs if r.get("kind") == "cycle"),
+            "cycles": _cycles(recs),
             "rung": level, "level": level, "rung_name": ACHIEVEMENTS[latest]["name"] if latest else RUNG_NAMES[0],
             "next": opens, "earned": [{k: e[k] for k in ("id", "name", "ts")} for e in earned],
             "accepted": [i for i in ACHIEVEMENTS if i in acc], "awaiting": awaiting,          # #299
@@ -3755,7 +3870,7 @@ def recent(srv, n=30) -> list[dict]:
         n = 30
     n = max(1, min(n, RECENT_MAX))
     with _lock:
-        tail = _read(srv)[-n:]
+        tail = [r for r in _read(srv)[-(n + 1):] if r.get("kind") != SUMMARY][-n:]   # #345: never the summary
     return [dict(r) for r in reversed(tail)]
 
 
@@ -3832,7 +3947,8 @@ def _rung7_stats(recs: list[dict]) -> dict:
     its z (contingency), the reply rate against timing-blind's, the payoff
     and its t."""
     to = _other(recs)
-    pushes = sum(1 for r in recs if r.get("kind") == "push" and r.get("to") == to and r.get("aim") is not None)
+    pushes = sum(1 for r in recs if r.get("kind") == "push" and r.get("to") == to and r.get("aim") is not None) \
+        + _to_carry(recs, to).get("aim", 0)          # #345: its policy pushes archived before the summary
     rows = _turn_rows(recs, to) if to else []
     medium = _cur_medium(recs, to)
     clock = _cur_clock(recs, to, medium)
@@ -3866,8 +3982,12 @@ def _rung8_stats(recs: list[dict]) -> dict:
     base (all-time) and recent rates the model is told (#246)."""
     to = _other(recs)
     asked = [r for r in recs if r.get("kind") == "push" and r.get("asked") and r.get("to") == to]
-    checked = paired = 0
+    ct = _to_carry(recs, to)                          # #345: its asks archived before the summary
+    checked, paired = ct.get("checked", 0), ct.get("paired", 0)
+    dropped = _dropped(recs)
     for p in asked:
+        if float(p.get("ts") or 0) in dropped:
+            continue                                  # #345: dropped at sleep -- never checked, never missed
         look = _first_look_after(recs, to, float(p.get("ts") or 0))
         if look is None:
             continue
@@ -3880,7 +4000,7 @@ def _rung8_stats(recs: list[dict]) -> dict:
     def brier(rs, key):
         return round(sum((r["o"] - float(r[key])) ** 2 for r in rs) / len(rs), 4) if rs else None
     model = next((r["model"] for r in reversed(allrows) if r.get("p_llm") is not None), None)
-    return {"asked": len(asked), "checked": checked, "paired": paired,
+    return {"asked": len(asked) + ct.get("asked", 0), "checked": checked, "paired": paired,
             "pair_rate": round(paired / checked, 4) if checked else None,
             "checks": len(rows),
             "brier_self": brier(rows, "p_self"), "brier_mix": brier(rows, "p"),
@@ -3904,13 +4024,705 @@ def _curiosity_stats(recs: list[dict], top: int = 3) -> list[dict]:
 def _steer_stats(recs: list[dict]) -> dict | None:
     """How close it lands to its aim (last 20 steered cycles), against the
     same stride without leaning into the current."""
-    rs = [r for r in recs if r.get("kind") == "cycle" and "aim_err" in r][-20:]
+    rs = [r for r in recs if r.get("kind") == "cycle" and "aim_err" in r][-STEER_LAST:]
     if not rs:
         return None
     err = sum(r["aim_err"] for r in rs) / len(rs)
     naive = sum(r["aim_naive"] for r in rs) / len(rs)
     return {"err": round(err, 4), "naive": round(naive, 4),
             "skill": round(1.0 - err / naive, 4) if naive > 1e-9 else 0.0}
+
+
+# ---- #345 part 2: consolidation -- nothing raw stays through sleep ----------------------
+#
+# At the moment Blurp falls asleep (energy._fall_asleep) every raw line of the
+# waking period moves, unchanged, to the dated archive
+# self/archive/record-<UTC date of the line's own ts>.jsonl, and the working
+# record becomes ONE line: the summary,
+#
+#   {"kind": "summary", "id", "at", "n", "carry": {...}, "stalls": [...], "lines": [...]}
+#
+# `lines` are the windows the readers read (copies of archived lines, in record
+# order: _keep says which and why), `carry` the counts no window can give back
+# (_tally: the cycles, the pushes, the dreams and their checks, rung 8's checks
+# before its window, rung 4's fixed-pace looks, each other's asks, words and
+# policy pushes), `stalls` each window line's record-gap count (curiosity and
+# rung 5 read gaps between consecutive lines). _read hands readers the summary,
+# its lines, then the lines since: within every window the same record they
+# read before. The archive is for the dashboard and later analysis (history());
+# nothing on the cycle path reads it.
+#
+# RESTART SAFETY: the journal self/consolidating.json is written first (stage
+# "archive", with the archive files' sizes before), the archive appended and
+# synced, the manifest line appended, the new record written beside the old
+# one (record.jsonl.next) and synced, the journal set to "swap", the record
+# swapped in (os.replace), the journal removed. On load (_recover) a journal
+# at "archive" is undone (the archive cut back to its sizes) and the
+# consolidation redone from the untouched record; one at "swap" finishes the
+# swap. No line is lost or doubled.
+
+LAM_MAX = max(CHANGE_SETTINGS["lam_looks"])     # the most looks any rate fit reads (change itself's grid)
+_ALWAYS = ("birth", "rung", "achieve", "rung_void", "accept", "accept_migrated", "unlock", "unlock_built",
+           "rung7_restart", "fix", "audit")    # read whole by their readers; a few lines each
+
+
+def _day(ts) -> str:
+    import datetime as _dt
+    return _dt.datetime.fromtimestamp(float(ts), _dt.timezone.utc).strftime("%Y-%m-%d")
+
+
+def _ans_na(r: dict) -> bool:
+    return r.get("kind") == "reach" and r.get("answer") in ("changed", "unchanged") and not r.get("audit")
+
+
+class _Index:
+    """One pass over the record for _keep and _tally: each push's end (the
+    next push, or the first look at its other: T), each reply check's push,
+    each look's thing's last shift before it, words' cited looks, the turns
+    dropped at sleep, and each thing's looks for _first_look_after."""
+
+    def __init__(self, recs: list):
+        self.recs = recs
+        self.lo = 1 if recs and recs[0].get("kind") == SUMMARY else 0
+        self.T: dict = {}
+        self.push_of: dict = {}
+        self.shift_of: dict = {}
+        self.say_of: dict = {}
+        self.looks: dict = {}           # eid -> ([index], [prefix max ts])
+        self.dropped: dict = {}         # push ts -> its sleep line
+        pend = last_push = None
+        shift: dict = {}
+        say: dict = {}
+        for i in range(self.lo, len(recs)):
+            r = recs[i]
+            k = r.get("kind")
+            if k == "push":
+                if pend is not None:
+                    self.T[pend] = i
+                pend = last_push = i
+                a = r.get("about") or {}
+                if r.get("speech") == "words" and isinstance(a, dict):
+                    self.say_of[i] = say.get(a.get("eid"))
+            elif k == "reach":
+                e = r.get("eid")
+                if pend is not None and e == recs[pend].get("to"):
+                    self.T[pend] = i
+                    pend = None
+                if r.get("reply"):
+                    self.push_of[i] = last_push
+                self.shift_of[i] = shift.get(e)
+                ix, mx = self.looks.setdefault(e, ([], []))
+                t = float(r.get("ts") or 0)
+                ix.append(i)
+                mx.append(max(t, mx[-1]) if mx else t)
+                if r.get("answer") in SPEAK_SAY and not r.get("audit") and e:
+                    say[e] = i
+            elif k == "shift" and r.get("eid") is not None:
+                shift[r["eid"]] = i
+            elif k == "sleep":
+                d = r.get("dropped")
+                if isinstance(d, dict) and d.get("turn") is not None:
+                    self.dropped[float(d["turn"])] = i
+
+    def first_after(self, i: int):
+        """_first_look_after for push i: its other's first look stamped after it."""
+        import bisect
+        p = self.recs[i]
+        ix, mx = self.looks.get(p.get("to"), ([], []))
+        j = bisect.bisect_right(mx, float(p.get("ts") or 0))
+        return ix[j] if j < len(ix) else None
+
+
+def _keep(recs: list, ix: _Index | None = None) -> set:
+    """THE SUMMARY'S WINDOWS (#345): the record lines every reader reads, by
+    each reader's own constant -- no window of its own. Readers that count a
+    whole record are carried as counts (_tally) instead. -> indices."""
+    ix = ix or _Index(recs)
+    R, lo, N = recs, ix.lo, len(recs)
+    K: set = set()
+    add = K.add
+
+    def tail(pred, n, key=None, hi=None):
+        """The last n lines matching pred (per key), before hi."""
+        cnt: dict = {}
+        for i in range(N if hi is None else hi, lo, -1):
+            r = R[i - 1]
+            if not pred(r):
+                continue
+            kk = key(r) if key is not None else None
+            c = cnt.get(kk, 0)
+            if c < n:
+                add(i - 1)
+                cnt[kk] = c + 1
+            elif key is None:
+                break
+
+    def eid(r):
+        return r.get("eid")
+
+    def to(r):
+        return r.get("to")
+
+    def kind(k):
+        return lambda r: r.get("kind") == k
+
+    reach, push, cyc, shift, mirror = kind("reach"), kind("push"), kind("cycle"), kind("shift"), kind("mirror")
+    first: dict = {}
+    for i in range(lo, N):
+        r = R[i]
+        k = r.get("kind")
+        if k in _ALWAYS:
+            add(i)                                      # passes, voids, accepts, unlocks, audits, fixes
+        elif k == "reach" and r.get("timed"):
+            first.setdefault("timed", i)                # _rate_looks: from the first timed look on
+        elif k == "push" and _medium(r) == "toy":
+            first.setdefault("toy", i)                  # _rung6: chat as it stood at the switch
+        elif k == "change":
+            first.setdefault("change", i)               # _rung10: the honesty chain's start
+            if r.get("verdict") == "adopted":
+                add(i)                                  # ...and every adoption on it
+    K.update(first.values())
+    K.update(range(max(lo, N - TOY_SCAN), N))           # _toys, _off_field, recent(), the card: the last lines
+    # the cycles: rung 1, steering, a world that ever moved
+    tail(lambda r: cyc(r) and r.get("change") == "world", RUNG1_CYCLES)
+    tail(lambda r: cyc(r) and "aim_err" in r, STEER_LAST)
+    tail(lambda r: cyc(r) and not r.get("still"), 1)
+    # the looks: rungs 2-5, kinds, the split, the other's last words, a toy's log
+    tail(_ans_na, RUNG2_REACHES, key=eid)
+    tail(_ans_na, RUNG2_REACHES * 4)
+    tail(lambda r: reach(r) and not r.get("audit") and not r.get("audit5"), RUNG3_WINDOW, key=eid)
+    tail(lambda r: reach(r) and not r.get("audit"), RUNG3_WINDOW)
+    tail(lambda r: reach(r) and not r.get("audit") and r.get("steer"), RUNG3_LOOKS)
+    tail(lambda r: _ans_na(r) and r.get("timed"), max(RUNG4_LAST, RUNG4_TIMED))
+    tail(lambda r: r.get("watch5"), RUNG5_LOOKS)
+    tail(lambda r: reach(r) and r.get("answer") == "changed" and not r.get("audit"), 1, key=eid)
+    tail(lambda r: reach(r) and r.get("log_at") is not None, 1, key=eid)
+    tail(lambda r: reach(r) and r.get("reply") and not r.get("audit"), 1)
+    spoke: dict = {}
+    for i in range(lo, N):                              # _last_spoke: the latest time it read them changed
+        r = R[i]
+        if reach(r) and r.get("answer") == "changed":
+            t = float(r.get("ts") or 0)
+            if r.get("eid") not in spoke or t >= spoke[r.get("eid")][0]:
+                spoke[r.get("eid")] = (t, i)
+    K.update(i for _, i in spoke.values())
+    # shifts: rung 5's count, each thing's last (the rate fit, noticing)
+    tail(shift, RUNG5_SHIFTS)
+    tail(lambda r: shift(r) and r.get("eid") is not None, 1, key=eid)
+    # pushes: the other, rung 6's count, the current medium and clock, speak's last words
+    tail(push, 1)
+    tail(push, RUNG6_PUSHES, key=to)
+    tail(push, 1, key=lambda r: (r.get("to"), _medium(r)))
+    tail(lambda r: push(r) and r.get("speech") == "words", 1, key=to)
+    lp = next((i for i in range(N - 1, lo - 1, -1) if push(R[i])), None)
+    if lp is not None:                                  # _p_self at the latest push: each thing's last changed look by then
+        t, seen = float(R[lp].get("ts") or 0), set()
+        for i in range(N - 1, lo - 1, -1):
+            r = R[i]
+            if reach(r) and r.get("answer") == "changed" and r.get("eid") not in seen \
+                    and float(r.get("ts") or 0) <= t:
+                seen.add(r.get("eid"))
+                add(i)
+    for i in range(lo, N):                              # an ask still waiting for its look (never doubles a count)
+        r = R[i]
+        if push(r) and r.get("asked") and float(r.get("ts") or 0) not in ix.dropped and ix.first_after(i) is None:
+            add(i)
+    # the mirror: rung 9's fit and window, the current toy
+    tail(mirror, 1)
+    tail(mirror, MIRROR_FIT + MIRROR_OWN + MIRROR_PAST, key=lambda r: r.get("toy"))
+    keys9 = ("glass", "stranger", "p_glass", "b_glass", "p_stranger", "b_stranger")
+    tail(lambda r: mirror(r) and all(r.get(k) is not None for k in keys9), MIRROR_LOOKS, key=lambda r: r.get("toy"))
+    # rung 6 as it stood at the switch to the ball
+    ft = first.get("toy")
+    if ft is not None:
+        j = next((i for i in range(ft - 1, lo - 1, -1) if push(R[i])), None)
+        if j is not None:
+            add(j)
+            to6 = R[j].get("to")
+            tail(lambda r: push(r) and r.get("to") == to6, RUNG6_PUSHES, hi=ft)
+            tail(lambda r: _ans_na(r) and r.get("eid") == to6, max(RUNG6_HEARD, RUNG2_REACHES), hi=ft)
+            tail(_ans_na, RUNG2_REACHES * 4, hi=ft)
+    _keep_turns(R, lo, N, K)
+    _keep_rung8(R, lo, N, K)
+    _keep_rates(R, lo, N, K)
+    _keep_curiosity(R, lo, N, K)
+    # change itself: its window and the dreams' pending proposals, with their checks
+    tail(kind("change"), 2 * CHANGE_WINDOW)
+    props = {float(R[i].get("ts") or 0) for i in K if R[i].get("kind") == "change"}
+    for i in range(lo, N):
+        r = R[i]
+        if r.get("kind") == "change_check" and r.get("of") is not None and float(r["of"]) in props:
+            add(i)
+    _lean(ix, K)
+    if lo:
+        K.discard(0)                                    # the old summary itself is never a window line
+    return K
+
+
+def _keep_turns(R, lo, N, K) -> None:
+    """Rung 7's rows (push + its check) per other, medium and clock: the last
+    RUNG7_PUSHES + TURN_MEMORY; speak's rows per other: the last SPEAK_PUSHES,
+    and the turn rows its timing reads (TURN_MEMORY before its window)."""
+    turns: dict = {}
+    pend = None
+    for i in range(lo, N):
+        r = R[i]
+        k = r.get("kind")
+        if k == "push":
+            pend = i if (r.get("aim") is not None and r.get("dwell")) else None
+        elif k == "reach" and pend is not None and r.get("eid") == R[pend].get("to"):
+            if r.get("reply") and isinstance(r.get("replied"), bool):
+                p = R[pend]
+                turns.setdefault((p.get("to"), _medium(p), _clock_of(p)), []).append((pend, i))
+            pend = None
+    for rows in turns.values():
+        for a, b in rows[-(RUNG7_PUSHES + TURN_MEMORY):]:
+            K.update((a, b))
+    speak: dict = {}
+    pend = None
+    for i in range(lo, N):
+        r = R[i]
+        k = r.get("kind")
+        if k == "push":
+            pend = None
+            if r.get("to") and _medium(r) == "chat" and r.get("speech") in ("words", "plain"):
+                pend = i
+        elif k == "reach" and pend is not None and r.get("eid") == R[pend].get("to"):
+            if r.get("reply") and isinstance(r.get("replied"), bool):
+                speak.setdefault(R[pend].get("to"), []).append((pend, i))
+            pend = None
+    for who, rows in speak.items():
+        win = rows[-SPEAK_PUSHES:]
+        for a, b in win:
+            K.update((a, b))
+        at = {float(R[a].get("ts") or 0) for a, _ in win}
+        trows = [x for x in turns.get((who, "chat", 1), []) if sum(R[x[0]].get("dwell") or ()) > 0]
+        j = next((n for n, x in enumerate(trows) if float(R[x[0]].get("ts") or 0) in at), None)
+        if j is not None:
+            for a, b in trows[max(0, j - TURN_MEMORY):]:
+                K.update((a, b))
+
+
+def _keep_rung8(R, lo, N, K) -> None:
+    """Rung 8's reply checks per other, medium and clock (each with what set
+    its gap: its push, and that push's last changed look when it carries no
+    spoke_age): the last RUNG8_FIT + RUNG8_RECENT (p_self's fit and its
+    recent rate); the checks whose p is read -- the last RUNG8_LOOKS and the
+    advisor's last RUNG8_TRUST per model -- and, for one of those recorded
+    without its own p_self or calibration (before #254), the checks its
+    recomputation reads."""
+    order = sorted(range(lo, N), key=lambda i: float(R[i].get("ts") or 0))
+    gap: dict = {}
+    last_ch: dict = {}
+    combos: dict = {}
+    for i in order:
+        r = R[i]
+        k = r.get("kind")
+        if k == "push":
+            e = r.get("to")
+            dep = [i]
+            age = r.get("spoke_age")
+            if not (isinstance(age, (int, float)) and age >= 0) and _medium(r) != "toy" and e in last_ch:
+                dep.append(last_ch[e])
+            gap[e] = dep
+        elif k == "reach" and not r.get("audit"):
+            e = r.get("eid")
+            if r.get("reply") and _reply_o(r) is not None:
+                combos.setdefault((e, _medium(r), _clock_of(r)), []).append([i] + gap.get(e, []))
+            if r.get("answer") == "changed":
+                last_ch[e] = i
+    need = RUNG8_FIT + RUNG8_RECENT
+    for rows in combos.values():
+        ctx = set(range(max(0, len(rows) - need), len(rows)))      # the live p_self's fit and recent rate
+        win = range(max(0, len(rows) - RUNG8_LOOKS), len(rows))    # the checks whose p is read
+        by_model: dict = {}
+        for j, row in enumerate(rows):
+            if R[row[0]].get("p_llm") is not None:
+                by_model.setdefault(R[row[0]].get("llm_model"), []).append(j)
+        ps = set(win)                                    # ...and whose p_self is read:
+        for js in by_model.values():
+            ps.update(js[-RUNG8_TRUST:])                 # the advisor's calibration, per model
+        for j in win:
+            r = R[rows[j][0]]
+            cal = r.get("llm_cal")
+            if r.get("p_llm") is not None and not (isinstance(cal, (list, tuple)) and len(cal) == 2):
+                ps.update([x for x in by_model.get(r.get("llm_model"), []) if x < j][-RUNG8_TRUST:])
+        for j in ps:
+            if R[rows[j][0]].get("p_self") is None:      # recomputed from the RUNG8_FIT checks before it
+                ctx.update(range(max(0, j - need), j))
+        for j in ctx | ps:
+            K.update(rows[j])
+
+
+def _keep_rates(R, lo, N, K) -> None:
+    """The rate fits: each thing's last LAM_MAX fittable looks since its last
+    shift, and before it (its own, and the seat's) -- the live fit (_lam);
+    and the dream's (_replay_at): its last CHANGE_LOOKS rate-read looks and
+    the CHANGE_LOOKS after each proposal not yet checked, each with the
+    looks its fit reads at that moment."""
+    from collections import deque
+    fits = [i for i in range(lo, N) if _fittable(R[i])]
+    last_shift: dict = {}
+    for i in range(lo, N):
+        r = R[i]
+        if r.get("kind") == "shift":
+            last_shift[r.get("eid")] = float(r["ts"]) if r.get("ts") is not None else None
+    by: dict = {}
+    for i in fits:
+        by.setdefault(R[i]["eid"], []).append(i)
+    for e, mine in by.items():
+        since = last_shift.get(e)
+        K.update([i for i in mine if since is None or float(R[i]["ts"]) > since][-LAM_MAX:])
+        if since is not None:
+            K.update([i for i in mine if float(R[i]["ts"]) <= since][-LAM_MAX:])
+            K.update([i for i in fits if float(R[i]["ts"]) <= since][-LAM_MAX:])
+    idx = _rate_looks(R)
+    need = set(idx[-CHANGE_LOOKS:])
+    checked = {r.get("of") for r in R if r.get("kind") == "change_check"}
+    props = [r for r in R if r.get("kind") == "change"][-2 * CHANGE_WINDOW:]
+    for p in props:
+        if p.get("ts") not in checked and p.get("setting") in CHANGE_SETTINGS:
+            need.update([i for i in idx if float(R[i]["ts"]) > float(p["ts"])][:CHANGE_LOOKS])
+    if not need:
+        return
+    since: dict = {}
+    mine: dict = {}
+    seat = deque(maxlen=LAM_MAX)
+    at_shift: dict = {}
+    for i in range(lo, N):
+        r = R[i]
+        if i in need:
+            e = r.get("eid")
+            K.add(i)
+            K.update(since.get(e, ()))
+            if e in at_shift:
+                K.update(at_shift[e])
+        k = r.get("kind")
+        if k == "shift" and r.get("eid") is not None:
+            e = r["eid"]
+            at_shift[e] = [i] + list(mine.get(e, ())) + list(seat)
+            since[e] = deque(maxlen=LAM_MAX)
+        elif _fittable(r):
+            e = r["eid"]
+            since.setdefault(e, deque(maxlen=LAM_MAX)).append(i)
+            mine.setdefault(e, deque(maxlen=LAM_MAX)).append(i)
+            seat.append(i)
+
+
+def _keep_curiosity(R, lo, N, K) -> None:
+    """Curiosity's windows (_progress): each thing's last 2 x CURIO_WINDOW
+    ordinary looks that span no record gap, every look between them, and the
+    one before (whose gap count says whether the first spans one)."""
+    st = _stalls(R)
+    by: dict = {}
+    seen: dict = {}
+    for i in range(lo, N):
+        r = R[i]
+        if (r.get("kind") == "reach" and r.get("answer") in ("changed", "unchanged")
+                and not r.get("audit") and not r.get("audit5") and r.get("p") is not None):
+            e = r["eid"]
+            spans = e in seen and seen[e] != st[i]
+            seen[e] = st[i]
+            by.setdefault(e, []).append((i, spans))
+    for rows in by.values():
+        got = 0
+        j = len(rows)
+        while j > 0 and got < 2 * CURIO_WINDOW:
+            j -= 1
+            got += 0 if rows[j][1] else 1
+        K.update(i for i, _ in rows[max(0, j - 1):])
+
+
+def _lean(ix: _Index, K: set) -> None:
+    """Keep what the kept lines lean on, so no reader pairs them differently:
+    a push's end (the next push or its other's first look: T) and its first
+    look stamped after it; a reply check's push; a timed look's or a check's
+    last shift of its thing (the rate fit's start); words' cited look; the
+    sleep line that dropped a push."""
+    R = ix.recs
+    todo = list(K)
+    done: set = set()
+    while todo:
+        i = todo.pop()
+        if i in done:
+            continue
+        done.add(i)
+        r = R[i]
+        k = r.get("kind")
+        deps = []
+        if k == "push":
+            deps += [ix.T.get(i), ix.first_after(i), ix.dropped.get(float(r.get("ts") or 0)), ix.say_of.get(i)]
+        elif k == "reach":
+            if r.get("reply"):
+                deps.append(ix.push_of.get(i))
+            if _fittable(r) and (r.get("timed") or r.get("reply")):
+                deps.append(ix.shift_of.get(i))
+        for j in deps:
+            if j is not None and j not in K:
+                K.add(j)
+                todo.append(j)
+
+
+def _tally(recs: list, idxs, ix: _Index) -> dict:
+    """The counts the readers read over a whole record, over these lines."""
+    out: dict = {"cycle": 0, "push": 0, "change": 0, "change_check": 0, "to": {}, "r8": {}, "fixed": {}}
+    for i in idxs:
+        r = recs[i]
+        k = r.get("kind")
+        if k in ("cycle", "change", "change_check"):
+            out[k] += 1
+        elif k == "push":
+            out["push"] += 1
+            t = out["to"].setdefault(str(r.get("to")), {})
+
+            def inc(name):
+                t[name] = t.get(name, 0) + 1
+            if r.get("aim") is not None:
+                inc("aim")
+            if r.get("speech") in ("words", "plain", "mute"):
+                inc(r["speech"])
+            if r.get("asked"):
+                inc("asked")
+                if float(r.get("ts") or 0) not in ix.dropped:
+                    f = ix.first_after(i)
+                    if f is not None:
+                        inc("checked")
+                        look = recs[f]
+                        if look.get("p_llm") is not None and look.get("answer") in ("changed", "unchanged"):
+                            inc("paired")
+        elif k == "reach":
+            if r.get("reply") and not r.get("audit") and _reply_o(r) is not None:
+                c = out["r8"].setdefault(_r8_key(r.get("eid"), _medium(r), _clock_of(r)), [0, 0])
+                c[0] += 1
+                c[1] += int(_reply_o(r))
+            if _ans_na(r) and not r.get("timed"):
+                c = out["fixed"].setdefault(str(r.get("eid")), [0, 0])
+                c[0] += 1
+                c[1] += int(r["answer"] == "changed")
+    return out
+
+
+def _merge(a: dict, b: dict) -> dict:
+    """Counts added: numbers add, dicts merge, [n, k] pairs add."""
+    out = dict(a)
+    for k, v in b.items():
+        if isinstance(v, dict):
+            out[k] = _merge(out.get(k) or {}, v)
+        elif isinstance(v, list):
+            w = out.get(k) or [0] * len(v)
+            out[k] = [int(x) + int(y) for x, y in zip(w, v)]
+        else:
+            out[k] = int(out.get(k, 0)) + int(v)
+    return out
+
+
+def _sync_write(path: Path, data: bytes, mode: str = "ab") -> None:
+    with open(path, mode) as fh:
+        fh.write(data)
+        fh.flush()
+        os.fsync(fh.fileno())
+
+
+def _journal(srv, doc: dict) -> None:
+    """The consolidation's journal, synced before the step it announces."""
+    d = _dir(srv)
+    tmp = d / (CONSOLIDATING + ".tmp")
+    _sync_write(tmp, json.dumps(doc).encode(), "wb")
+    os.replace(tmp, d / CONSOLIDATING)
+
+
+def _c_append(path: Path, lines: list) -> None:
+    """Append raw lines to an archive file, synced."""
+    _sync_write(path, b"".join(ln + b"\n" for ln in lines))
+
+
+def _c_manifest(srv, entry: dict) -> None:
+    _sync_write(_dir(srv) / ARCHIVE / MANIFEST, (json.dumps(entry) + "\n").encode())
+
+
+def _c_swap(tmp: Path, p: Path) -> None:
+    os.replace(tmp, p)
+
+
+def _c_done(srv) -> None:
+    (_dir(srv) / CONSOLIDATING).unlink(missing_ok=True)
+
+
+def _undo(srv, j: dict) -> None:
+    """Cut the archive back to the sizes the journal holds (files it created go)."""
+    a = _dir(srv) / ARCHIVE
+    for name, size in list((j.get("sizes") or {}).items()) + [(MANIFEST, j.get("manifest"))]:
+        f = a / name
+        if size is None:
+            f.unlink(missing_ok=True)
+        elif f.exists():
+            with open(f, "r+b") as fh:
+                fh.truncate(int(size))
+    p = record_path(srv)
+    (p.with_name(p.name + ".next")).unlink(missing_ok=True)
+
+
+def _recover(srv) -> float | None:
+    """A consolidation the seat died in: finish the swap (journal at "swap"),
+    or undo the half-written archive (at "archive") and say when to redo it.
+    -> the redo's time, or None."""
+    d = _dir(srv)
+    j = _load_json(srv, CONSOLIDATING) if d is not None else None
+    if not isinstance(j, dict):
+        return None
+    p = record_path(srv)
+    tmp = p.with_name(p.name + ".next")
+    if j.get("stage") == "swap":
+        if tmp.exists():
+            os.replace(tmp, p)
+        (d / CONSOLIDATING).unlink(missing_ok=True)
+        return None
+    _undo(srv, j)
+    (d / CONSOLIDATING).unlink(missing_ok=True)
+    return float(j.get("at") or time.time())
+
+
+def consolidate(srv, now: float | None = None) -> dict | None:
+    """SLEEP'S CONSOLIDATION (#345 part 2): archive the waking period's raw
+    lines, unchanged, by their own UTC date, and leave the working record as
+    one summary line (its windows and counts). Run when Blurp falls asleep
+    (energy). -> {archived, kept, bytes, id}, or None when there is nothing
+    new or it failed (the record is then left whole, the archive as it was)."""
+    import uuid
+    now = time.time() if now is None else float(now)
+    p = record_path(srv)
+    if p is None or not p.exists():
+        return None
+    with _lock:
+        recs = _read(srv)
+        raw = [ln for ln in p.read_bytes().split(b"\n") if ln.strip()]
+        if raw and _head(recs):
+            raw = raw[1:]                           # the old summary: its lines are archived already
+        if not raw:
+            return None
+        cid = uuid.uuid4().hex
+        swapped = False
+        try:
+            ix = _Index(recs)
+            keep = sorted(_keep(recs, ix))
+            kept = set(keep)
+            gone = [i for i in range(ix.lo, len(recs)) if i not in kept]
+            st = _stalls(recs)
+            lines = [recs[i] for i in keep]
+            head = {"kind": SUMMARY, "id": cid, "at": now, "n": len(lines),
+                    "carry": _merge(_carry(recs), _tally(recs, gone, ix)), "stalls": [st[i] for i in keep]}
+            text = (json.dumps({**head, "lines": lines}) + "\n").encode()
+            runs: list = []
+            files: dict = {}
+            day = _day(now)
+            for ln in raw:
+                try:
+                    t = json.loads(ln).get("ts")
+                    day = _day(t) if t is not None else day
+                except (ValueError, AttributeError, TypeError, OverflowError, OSError):
+                    pass                            # no time of its own: its neighbour's day
+                name = f"record-{day}.jsonl"
+                files.setdefault(name, []).append(ln)
+                if runs and runs[-1][0] == name:
+                    runs[-1][1] += 1
+                else:
+                    runs.append([name, 1])
+            a = _dir(srv) / ARCHIVE
+            a.mkdir(parents=True, exist_ok=True)
+            j = {"id": cid, "at": now, "stage": "archive",
+                 "sizes": {n: ((a / n).stat().st_size if (a / n).exists() else None) for n in files},
+                 "manifest": (a / MANIFEST).stat().st_size if (a / MANIFEST).exists() else None}
+            _journal(srv, j)
+            for name, ls in files.items():
+                _c_append(a / name, ls)
+            _c_manifest(srv, {"id": cid, "at": now, "runs": runs})
+            tmp = p.with_name(p.name + ".next")
+            _sync_write(tmp, text, "wb")
+            _journal(srv, {**j, "stage": "swap"})
+            _c_swap(tmp, p)
+            swapped = True
+            _c_done(srv)
+        except Exception as e:                      # noqa: BLE001
+            import sys
+            print(f"[self] consolidation failed ({e!r}); the record stays whole", file=sys.stderr)
+            if not swapped:
+                j = _load_json(srv, CONSOLIDATING)
+                if isinstance(j, dict) and j.get("id") == cid:
+                    _undo(srv, j)
+                (_dir(srv) / CONSOLIDATING).unlink(missing_ok=True)
+                return None
+            (_dir(srv) / CONSOLIDATING).unlink(missing_ok=True)
+        rt = _rt(srv)
+        rt["recs"], rt["recs_bytes"] = [head] + lines, len(text)
+        for k in ("sheet", "dock", "off_field"):
+            rt.pop(k, None)
+        return {"archived": len(raw), "kept": len(lines), "bytes": len(text), "id": cid}
+
+
+def _open_at_sleep(srv, now: float) -> dict:
+    """#345: what is open as Blurp falls asleep, to be dropped -- a turn
+    awaiting its reply check ({"turn": its push's ts, "to"}). An open draft
+    would be named here too; none exists yet (#333)."""
+    push = _pending(_read(srv), now)
+    return {"turn": push.get("ts"), "to": push.get("to")} if push is not None else {}
+
+
+def _manifest(srv) -> list:
+    d = _dir(srv)
+    f = d / ARCHIVE / MANIFEST if d is not None else None
+    out = []
+    if f is not None and f.exists():
+        for ln in f.read_text().splitlines():
+            try:
+                out.append(json.loads(ln))
+            except ValueError:
+                pass
+    return out
+
+
+def archive_sig(srv) -> tuple:
+    """Which consolidations the archive holds (changes only when one is added)."""
+    m = _manifest(srv)
+    return (len(m), m[-1].get("id") if m else None)
+
+
+def _archive_lines(srv, manifest: list) -> list:
+    """The archived lines in the order they were written (the manifest's runs)."""
+    a = _dir(srv) / ARCHIVE
+    files: dict = {}
+    out = []
+    for entry in manifest:
+        for name, count in entry.get("runs") or ():
+            it = files.get(name)
+            if it is None:
+                it = files[name] = iter((a / name).read_bytes().split(b"\n"))
+            for _ in range(int(count)):
+                ln = next(it, None)
+                while ln is not None and not ln.strip():
+                    ln = next(it, None)
+                if ln is None:
+                    break
+                try:
+                    out.append(json.loads(ln))
+                except ValueError:
+                    pass                            # as _read: a line that isn't JSON is no line
+    return out
+
+
+def archived(srv) -> list:
+    """Every archived line, oldest first (read now, from disk; never on the cycle path)."""
+    return _archive_lines(srv, _manifest(srv))
+
+
+def history(srv) -> list:
+    """THE WHOLE RECORD (#345): the archive, then the lines since the last
+    sleep -- what the record was before consolidation, for the sheet and the
+    dock. Read from disk each time; never on the cycle path."""
+    with _lock:
+        recs = _read(srv)
+        new = list(recs[_head(recs):])
+        m = _manifest(srv)
+    return _archive_lines(srv, m) + new
 
 
 # ---- the thread -----------------------------------------------------------

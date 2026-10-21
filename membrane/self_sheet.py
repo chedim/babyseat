@@ -3,7 +3,10 @@
 What used to be an external dashboard ("Self's record", rebuilt hourly by a
 script outside the seat) computed in the seat, from self's record, status()
 and the toybox -- read-only, cached CACHE_S, served at GET
-/membrane/self/sheet. Laid out like an RPG character sheet:
+/membrane/self/sheet. #345: over self's WHOLE record (self_loop.history():
+the dated archives sleep moved the raw lines to, then the lines since --
+working hours, growth and trends are taken over its whole life); never on
+the cycle path. Laid out like an RPG character sheet:
 
   level, tree    #295: the achievements earned, and the skill tree -- each
                  achievement's branch, prerequisites (and why), state,
@@ -1029,8 +1032,7 @@ def _header(st: dict, recs: list, c: dict, t: dict, skill: dict | None = None, l
 def compute(srv, now: float | None = None) -> dict:
     """The whole sheet, fresh (no cache)."""
     now = time.time() if now is None else float(now)
-    with SL._lock:
-        recs = list(SL._read(srv))
+    recs = SL.history(srv)                                # #345: the whole record -- the archive + the lines since
     st = SL.status(srv)
     from . import energy as E
     tempo = SL._tempo(srv)
@@ -1219,6 +1221,21 @@ def _mirror_seen(recs: list) -> dict:
     return dict(p.get("labels") or {})
 
 
+def _archived_looks(srv) -> list:
+    """#345: the archived answered looks (thing, answer, p), read from the
+    archive once per sleep and kept while the dock is used -- its health and
+    learning numbers are over every look, the archived ones too. Never on the
+    cycle path."""
+    rt = SL._rt(srv)
+    sig = SL.archive_sig(srv)
+    hit = rt.get("dock_arch")
+    if hit is None or hit[0] != sig:
+        looks = [{"kind": "reach", "eid": r.get("eid"), "answer": r.get("answer"), "p": r.get("p")}
+                 for r in (SL.archived(srv) if sig[0] else []) if _answered(r)]
+        hit = rt["dock_arch"] = (sig, looks)
+    return hit[1]
+
+
 def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
     """Each toybox toy, live: its reading, its last change (who, how long
     ago), its health and its stats. Cached DOCK_CACHE_S per seat."""
@@ -1249,7 +1266,7 @@ def dock(srv, now: float | None = None, fresh: bool = False) -> dict:
     block_of = {t["eid"]: t["block"] for t in ents if t.get("toy") and t.get("block")}
     looks: dict[str, list] = {}
     by_block: dict[tuple, list] = {}
-    for r in recs:
+    for r in _archived_looks(srv) + recs[SL._head(recs):]:     # #345: every look, the archived ones too
         if _answered(r) and r.get("eid") in want:
             looks.setdefault(want[r["eid"]], []).append(r)
             if r["eid"] in block_of:

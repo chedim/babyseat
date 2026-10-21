@@ -1,12 +1,13 @@
 # Sleep, viewed from Blurp
 
-**Blurp now gets tired and sleeps (#345, part 1 of 3).** It has energy, falls
-asleep when one of its reserves runs out, rests, and wakes. Sleep does not
-consolidate anything yet: moving the record into archives behind summaries,
-dreaming in sleep, and paying energy back for confirmed predictions come in
-parts 2 and 3. The rest of this page is the viewpoint written before sleep
-was built (why Blurp didn't need it, and the signals to watch); it is not a
-claim about brains beyond the published findings it cites.
+**Blurp gets tired and sleeps (#345, part 1 of 3), and its sleep
+consolidates the day (part 2).** It has energy, falls asleep when one of its
+reserves runs out, rests, and wakes. As it falls asleep, the day's raw
+record moves to dated archives and only summaries stay in memory. Dreaming
+in sleep and paying energy back for confirmed predictions come in part 3.
+The second half of this page is the viewpoint written before sleep was built
+(why Blurp didn't need it, and the signals to watch); it is not a claim
+about brains beyond the published findings it cites.
 
 Blurp's "off" (sleep and wake in [selfgrowth.md](selfgrowth.md)) is not
 sleep. Off is the operator's switch: it runs nothing, and nothing is
@@ -65,10 +66,111 @@ Code: `membrane/energy.py`; the loop's `self_loop.step()`.
 | `ERROR_COST` | 0.01 | Approved. |
 | `RESTORE_PER_S` | 0.001 | Approved. |
 
-**Until part 2 archives the record, sleep doesn't shrink it.** If the record
-ever fills its cap, Blurp sleeps, wakes rested and falls asleep again on its
-next step. At today's sizes (tens of MB against a cap of GBs) that is far
-off.
+Since part 2, sleep empties the record (below), so the record reserve
+refills at every sleep. Before it, a record that filled its cap would put
+Blurp to sleep again on the first step after it woke.
+
+## Consolidation: nothing raw stays through sleep (built, #345 part 2)
+
+Code: `self_loop.consolidate()`, run from `energy._fall_asleep`. Tests:
+`tests/test_sleep_consolidate_345.py`.
+
+**At the moment Blurp falls asleep:**
+
+1. **Anything open is dropped.** A turn awaiting its reply check is dropped,
+   and the `sleep` line names it: `"dropped": {"turn": <its push's ts>,
+   "to": <the other>}` (`{}` when nothing was open). A dropped turn is not a
+   missed reply: no reply check follows it, so take turns and expect a reply
+   never score it, and the advisor's stats don't count it as checked. (Open
+   drafts arrive with #333; they will be dropped the same way.)
+2. **Every raw line of the waking period moves, unchanged, to its archive.**
+   The archive is `self/archive/record-<YYYY-MM-DD>.jsonl`, dated by each
+   line's own `ts` (UTC). Lines are appended byte for byte and synced; none
+   is edited or dropped. `self/archive/manifest.jsonl` gets one line per
+   sleep, `{"id", "at", "runs": [[file, count], ...]}`, which is the order
+   the lines were written in. Reading the runs back gives the record exactly
+   as it was, even where a line's date is out of order.
+3. **The working record is emptied down to one `summary` line:**
+
+   ```
+   {"kind": "summary", "id", "at", "n", "carry": {...}, "stalls": [...], "lines": [...]}
+   ```
+
+   `lines` are copies of the archived lines that the tests read (the
+   windows, below), in record order. `carry` holds the counts that no
+   window can give back. `stalls` gives each window line's count of record
+   gaps, because curiosity and noticing read the gaps between consecutive
+   lines. The summary is a record line rather than a sidecar file because
+   the readers are functions of the record list: they find the summary
+   where they already look, and the record stays one file swapped in one
+   step.
+
+**What the readers see.** `_read` returns the summary, its window lines,
+then the lines written since. Within every window, that is the same record
+the readers saw before. The equivalence tests run every test, skill, sheet,
+dock and card function on a long synthetic record before and after
+consolidation, after more lines, after a second sleep and after a restart,
+and require the same result every time. The record reserve recovers: in a
+30,000-cycle synthetic life the summary was 7% of the record (1.8 MB of
+24.6 MB).
+
+**The windows.** Each reader keeps what it reads, by its own constant. No
+window of its own was added (`STEER_LAST` and `RUNG4_LAST` only name the 20
+and 40 that `_steer_stats` and rung 4 already used).
+
+| Reader | What the summary keeps |
+|---|---|
+| `_toys`, `_off_field`, `recent()`, the card | the last `TOY_SCAN` (3000) lines, whole |
+| rung 1, steering, status | the last `RUNG1_CYCLES` world cycles, the last `STEER_LAST` steered cycles, the last cycle that wasn't still |
+| rung 2, the split, the audits | each thing's last `RUNG2_REACHES` answered looks, and the seat's last 4 × that (the base rate) |
+| kinds, rung 3 | each thing's last `RUNG3_WINDOW` looks, the seat's last `RUNG3_WINDOW`, and the last `RUNG3_LOOKS` steered |
+| rung 4 | the last `RUNG4_LAST` timed looks (the fixed-pace looks before them are carried as counts per thing) |
+| rung 5, noticing | the last `RUNG5_LOOKS` looks with noticing on, the last `RUNG5_SHIFTS` shifts, each thing's last shift |
+| rung 6 | the last `RUNG6_PUSHES` pushes per other, and the chat record as it stood at the switch to the ball (its last push, pushes, heard looks and base rate) |
+| rung 7 (take turns) | per other, medium and clock: the last `RUNG7_PUSHES` + `TURN_MEMORY` turns with their checks |
+| rung 8 (expect a reply) | per other, medium and clock: the last `RUNG8_FIT` + `RUNG8_RECENT` checks (and what set each one's gap); the advisor's last `RUNG8_TRUST` checks per model; for a check recorded without its own p_self or calibration (before #254), the checks it is recomputed from |
+| rung 9 (the mirror) | per mirror, its last `MIRROR_FIT` + `MIRROR_OWN` + `MIRROR_PAST` lines and its last `MIRROR_LOOKS` scored lines |
+| rung 10 (change itself) | the last 2 × `CHANGE_WINDOW` proposals and their checks, the first proposal and every adoption (the honesty chain), the last `CHANGE_LOOKS` rate-read looks and the `CHANGE_LOOKS` after each proposal not yet checked, each with the looks its rate fit reads (up to the longest window on the grid, 120) |
+| the live rate fit | each thing's last 120 fittable looks since its last shift, and before it (its own and the seat's) |
+| curiosity | each thing's last 2 × `CURIO_WINDOW` ordinary looks that span no gap, and the look before them |
+| rung 11 (speak) | per other, the last `SPEAK_PUSHES` pushes with words or plain, the looks their words cite, and the turns its timing reads (`TURN_MEMORY` before its window) |
+| passes, accepts, unlocks | every `birth`, `rung`, `achieve`, `rung_void`, `accept`, `accept_migrated`, `unlock`, `unlock_built`, `rung7_restart`, `fix` and `audit` line (a few each) |
+| the pairings | each kept push's next push or check, and its first look; each kept check's push; each kept timed look's or check's last shift; the sleep line that dropped a kept turn |
+
+**`carry`, the counts:** the cycles (so `n` continues), the pushes, the
+dreams and their checks, rung 8's checks and replies before its window (per
+other, medium and clock: the running rate's start), rung 4's fixed-pace looks
+per thing, and per other the policy pushes, asks (checked and paired), and
+words, plain and mute pushes.
+
+**Whole history: the sheet and the dock read the archive.** Working hours,
+the growth curve, the traits and their trends, each toy's error early and
+late, and a thing's learning verdict are taken over a thing's whole life.
+Halving a growing history can't be summed up ahead of time. So
+`self_sheet.compute()` (cached 30 s) reads `history()`: the archive by its
+manifest, then the working record's new lines. The dock (polled every few
+seconds) reads the archived looks once per sleep (`_archived_looks`: thing,
+answer and p per look) and keeps them while it is used. Both are off the
+cycle path: no cycle, status, test or practice reads the archive (a test
+checks this).
+
+**Restart safety.** The journal `self/consolidating.json` is written first,
+at stage `archive`, with the archive files' sizes before. Then the archive
+lines are appended and synced, the manifest line is appended, and the new
+record is written beside the old one (`record.jsonl.next`) and synced. The
+journal moves to `swap`, the record is swapped in (`os.replace`), and the
+journal is removed. A seat that dies at any step finishes on load:
+- at `archive`, the archive is cut back to its sizes and the consolidation
+  is redone from the untouched record;
+- at `swap`, the swap is finished.
+
+An error (a full disk) undoes the archive and leaves the record whole for
+the next sleep. No line is lost or doubled, in the working record or the
+archive. The tests kill the seat at each step.
+
+**What else lives outside the record** and so crosses a sleep untouched:
+`model.json`, `tempo.json`, `settings.json` (what change itself adopted),
+`energy.json`, `world.json`, `mode.json`.
 
 ## What sleep does for brains, and why Blurp is exempt
 

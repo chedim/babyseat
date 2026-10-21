@@ -49,8 +49,13 @@ Asleep is not the operator's off: the mode stays as it was.
 share(throttle, srv) is the person's CPU throttle x energy, for #343's
 pacing (a tired Blurp gets less CPU); nothing on main reads it yet.
 
-Later parts of #345: consolidation (archiving the record behind summaries)
-and the dream in sleep; refunds for confirmed predictions; the room's rhythm.
+CONSOLIDATION (#345 part 2): falling asleep drops what is open (a turn
+awaiting its reply check: the sleep line's `dropped`) and consolidates the
+day (self_loop.consolidate): every raw line to its dated archive, the
+working record down to one summary line, so the record reserve recovers.
+
+Later parts of #345: the dream in sleep; refunds for confirmed predictions;
+the room's rhythm.
 """
 from __future__ import annotations
 
@@ -226,8 +231,16 @@ def _changed(srv) -> None:
 
 
 def _fall_asleep(srv, st: dict, now: float, why: str, rs: dict) -> None:
+    """Falling asleep: what is open is dropped (named on the sleep line:
+    `dropped`, {} when nothing was), then the day is consolidated (#345 part
+    2: self_loop.consolidate -- the raw lines to the dated archive, the
+    working record down to its summary)."""
+    SL = _SL()
     st.update(asleep=True, since=now)
-    _SL()._append(srv, {"ts": now, "kind": "sleep", "why": why, "energy": st["energy"], "reserves": rs})
+    dropped = SL._open_at_sleep(srv, now)
+    SL._append(srv, {"ts": now, "kind": "sleep", "why": why, "energy": st["energy"], "reserves": rs,
+                     "dropped": dropped})
+    SL.consolidate(srv, now)
     _changed(srv)
 
 

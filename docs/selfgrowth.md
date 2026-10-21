@@ -97,7 +97,7 @@ rule.
   ball.
 - **It is not a self-model** to be scored. It is a loop that builds up a body
   of measured predictions about its world.
-- **It doesn't sleep.** Off is not sleep: nothing runs. Why it hasn't needed sleep yet, and what would change that: [sleep.md](sleep.md).
+- **Off is not sleep.** Off is the operator's switch: nothing runs. Blurp's own sleep (#345) comes when a reserve runs out; it rests, and its day's record moves to dated archives behind a summary: [sleep.md](sleep.md).
 - **It is not `seat:self`.** That is only the speaker tag: every line the seat
   says moves it. `self` is a separate entity that only its own acts move;
   mentions of it in the conversation never do.
@@ -197,7 +197,8 @@ Everything is in `<data dir>/self/` (`.membrane/self/` in a seat's directory):
 | file | what | after a restart |
 |---|---|---|
 | `mode.json` | the mode (off / on / watch) | kept: a seat wakes with the self it was given, and only that |
-| `record.jsonl` | append-only, never truncated, from birth: every cycle, reach, push, wait, shift, audit, error, each achievement earned and each accept (#299) | kept: earned stays earned, accepted stays accepted |
+| `record.jsonl` | append-only while awake, from birth: every cycle, reach, push, wait, shift, audit, error, each achievement earned and each accept (#299). At sleep (#345) its raw lines move to `archive/` and it keeps one summary line: the windows its tests read ([sleep.md](sleep.md)) | kept: earned stays earned, accepted stays accepted |
+| `archive/` | every raw record line, unchanged, in `record-<UTC date>.jsonl` files, and `manifest.jsonl` (the order they were written in) | kept: never edited, never read on the cycle path |
 | `model.json` | rung 1's learned model of the current that pushes it | kept |
 | `tempo.json` | per thing it reads: how often it had changed when self looked | kept |
 | `world.json` | Blurp's world (#337): the field ids it may look at or act on, each with when and why it joined | kept: it only grows |
