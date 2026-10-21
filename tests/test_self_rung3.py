@@ -87,6 +87,8 @@ def _seat(names=("always", "never", "half", "silent1", "silent2", "silent3"), li
                           properties={"name": name, "getter_script": "result = {'state': {'x': 1}}"})
         est.docs[e.eid] = e
     SL.bind(srv)
+    from tests._self_cap import world
+    world(srv)                              # #337: what it is handed to look at is in its world
     SL.set_mode(srv, "on")
     for r in (1, 2):                                   # rungs 1 and 2 already earned (their own tests pin them)
         SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9})

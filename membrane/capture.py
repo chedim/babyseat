@@ -92,10 +92,13 @@ class Capturer:
 
     # ---- the hooks (all non-blocking, all swallow) ----------------------------------
     def on_turn(self, query: str, prose: str = "", thought: str = "",
-                ts: float | None = None) -> None:
+                ts: float | None = None, session: str | None = None) -> None:
         """The user's message + the model's prose + its reasoning. Tool calls
-        ride on_calls (their full arguments), results on_tool_result."""
-        self._put(lambda: ST.split_turn(query, prose, None, thought, ts=ts), discourse=True)
+        ride on_calls (their full arguments), results on_tool_result.
+        `session` (#337) names the events' session instead of the idle-gap
+        heuristic: Blurp's private chat tags its lines blurp:<person>."""
+        self._put(lambda: ST.split_turn(query, prose, None, thought, ts=ts), discourse=True,
+                  session=session)
 
     def on_calls(self, query: str, calls: dict, ts: float | None = None) -> None:
         self._put(lambda: _served(ST.split_turn("", "", calls, ts=ts), query))
@@ -127,11 +130,11 @@ class Capturer:
         self._put(lambda: list(evs))
 
     # ---- the worker ------------------------------------------------------------------
-    def _put(self, build, discourse: bool = False) -> None:
+    def _put(self, build, discourse: bool = False, session: str | None = None) -> None:
         if self.mode == "off":
             return
         try:
-            item = (build, self.sessions.current())
+            item = (build, session or self.sessions.current())
             try:
                 self.q.put_nowait(item)
             except queue.Full:

@@ -494,6 +494,8 @@ def bind(srv) -> None:
             method_define(srv, est, None, None, on=ent.eid, method=meth, command=cmd)
     rt = _rt(srv)
     rt["mode"] = _load_mode(srv)
+    from . import self_world as _SW
+    _SW.bind(srv)                           # #337: its world (born, or migrated before #299's lines below)
     _migrate_accept(srv)                    # #299: once -- what was earned before acceptance counts as accepted
     rt["model"] = _load_model(srv)
     rt["tempo"] = _load_json(srv, "tempo.json") or {}
@@ -1497,6 +1499,9 @@ def _meet(srv, seed: str, now: float | None = None) -> None:
     if not turns and n % MEET_EVERY != 1:                   # rung 6: the timer
         return
     person = _CIO.recent_person(srv)                        # '' = the operator (no people)
+    from . import self_world as _SW
+    if not all(_in_world(srv, e) for e in _SW._chat_pair(person)):
+        return                                              # #337: a person outside its world is not met
     resp = _CIO.entity_in(srv, person)                      # the other, as a reach target
     to = resp.eid if resp is not None else _CIO.name_in(person)
     recs = _read(srv)
@@ -1538,7 +1543,7 @@ def _ball(srv) -> tuple[str, str] | None:
     found = []
     for eid, e in list(((est.docs if est is not None else None) or {}).items()):
         tb = (e.properties or {}).get("toybox") or {}
-        if tb.get("kind") == "ball" and tb.get("name") and not tb.get("block"):
+        if tb.get("kind") == "ball" and tb.get("name") and not tb.get("block") and _in_world(srv, eid):
             found.append((tb["name"] != _TB.BALL, tb["name"], eid))
     if not found:
         return None
@@ -1804,6 +1809,9 @@ def _reach(srv, target: str) -> dict:
     if ent is None:
         c["read"] = {"fired": False, "reason": "gone"}
         return {"rc": 0, "text": "nothing there"}
+    if not _in_world(srv, target):                         # #337: outside its world, nothing is read
+        c["read"] = {"fired": False, "reason": "outside its world"}
+        return {"rc": 0, "text": "not in its world"}
     tb = (ent.properties or {}).get("toybox") or {}
     if tb.get("name"):                                      # #244: the toy's log, before and after the look
         from . import toybox as _TB
@@ -1945,11 +1953,13 @@ def _mirror_move(move) -> float:
 
 
 def _mirror_toy(srv) -> str | None:
-    """The mirror self feeds: the first mirror toy by name; None without one."""
+    """The mirror self feeds: the first mirror toy by name in its world (#337);
+    None without one."""
     est = getattr(srv, "entity_store", None)
     names = sorted({str(((e.properties or {}).get("toybox") or {}).get("name") or "")
-                    for e in list(((est.docs if est is not None else None) or {}).values())
-                    if ((e.properties or {}).get("toybox") or {}).get("kind") == "mirror"} - {""})
+                    for eid, e in list(((est.docs if est is not None else None) or {}).items())
+                    if ((e.properties or {}).get("toybox") or {}).get("kind") == "mirror"
+                    and _in_world(srv, eid)} - {""})
     return names[0] if names else None
 
 
@@ -2459,12 +2469,22 @@ def _replies(srv) -> bool:
     return _available(srv, 7) or _available(srv, 8) or _available(srv, SPEAK_RUNG)   # #311: speak reads them too
 
 
+def _in_world(srv, eid: str) -> bool:
+    """#337: is this thing in Blurp's world? Every read Blurp makes asks."""
+    from . import self_world as _SW
+    try:
+        return _SW.has(srv, eid)
+    except Exception:
+        return False
+
+
 def _targets(srv) -> list[str]:
+    """What Blurp can look at: the things in its world (#337) with a getter."""
     from .night import effective_script
     est = srv.entity_store
     out = []
     for eid, e in list((est.docs or {}).items()):
-        if eid == _eid():
+        if eid == _eid() or not _in_world(srv, eid):
             continue
         try:
             code, _ = effective_script(est, e, "getter")
@@ -2917,7 +2937,7 @@ def _audit_tick(srv, now: float) -> None:
     audited = {r["eid"] for r in recs if r.get("kind") == "audit" and r.get("phase") == "end"
                and r.get("passed") is not None}
     for eid, st in _rung2_stats(recs, _tempo(srv)).items():
-        if eid in audited or not st["candidate"] or not st["auditable"]:
+        if eid in audited or not st["candidate"] or not st["auditable"] or not _in_world(srv, eid):
             continue
         until = time.time() + AUDIT_MAX_S
         _WA.pause_getter(eid, until)
@@ -3742,6 +3762,8 @@ def _toys(srv, recs: list[dict]) -> list[dict]:
         est = getattr(srv, "entity_store", None)
         found = []
         for eid, e in list(((est.docs if est is not None else None) or {}).items()):
+            if not _in_world(srv, eid):
+                continue                                       # #337: only the toys in its world
             name = _short(eid)
             word = name.startswith(TOY_WORDS)
             tb = (e.properties or {}).get("toybox") or {}

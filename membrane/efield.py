@@ -458,6 +458,10 @@ class EntityField:
         # (key, event doc, the vector of ALL its sentences) for every applied
         # event, boilerplate included (forewarn.py) -- cheap, never raise
         self.step_listeners: list = []
+        # #337: (key, event doc) for EVERY applied event, its session and
+        # mentions as stored, before any vector or boilerplate gate -- Blurp's
+        # world hears the room through it (self_world.on_event); cheap, never raise
+        self.event_listeners: list = []
         self.b = backend
         self.emb = embedder
         self.origin = origin
@@ -1194,6 +1198,11 @@ class EntityField:
 
     def _apply(self, key: str, ev: dict) -> None:
         stream, seq, ts = ev["stream"], int(ev["seq"]), ev.get("ts")
+        for fn in self.event_listeners:           # #337: who is listening hears every event
+            try:
+                fn(key, ev)
+            except Exception:
+                pass
         sids = ev.get("sids") or []
         got = self.b.get_multi("sentences", sids)
         X = [unit(got[s]["vec"]) if s in got else None for s in sids]

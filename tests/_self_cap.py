@@ -21,3 +21,15 @@ def cap(srv, n) -> bool:
     for i in [i for i in SL._earn_order(recs) if i in ids and i not in SL._accepted(recs)]:
         SL._append(srv, {"ts": time.time(), "kind": "accept", "id": i, "by": "test"})
     return ok
+
+
+def world(srv, *eids) -> list:
+    """#337: Blurp sees only its world (self_world). A test that hands self
+    things to look at puts them in its world -- the named eids, or every
+    entity in the store but self's own methods -- as an unlock or a chat
+    would on a seat."""
+    from membrane import self_world as SW
+    if not eids:
+        eids = [e for e, d in list(srv.entity_store.docs.items())
+                if not (d.properties or {}).get("method_of")]
+    return SW.join(srv, eids, "test")

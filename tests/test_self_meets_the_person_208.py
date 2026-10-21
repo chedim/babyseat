@@ -54,6 +54,8 @@ def _seat(passed=(1, 2, 3, 4, 5), limit=7):
     r.srv = srv
     srv._loop_runner = r
     SL.bind(srv)
+    from tests._self_cap import world
+    world(srv)                              # #337: what it is handed to look at is in its world
     SL.set_limit(srv, 1)
     for n in passed:
         SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": n, "skill": 0.9})
@@ -62,6 +64,9 @@ def _seat(passed=(1, 2, 3, 4, 5), limit=7):
 
 
 def _chat(r, owner="", updated=1000):
+    from membrane import self_world as SW
+    from tests._self_cap import world
+    world(r.srv, *SW._chat_pair(owner))     # #337: the person who chats is in self's world
     s = r.sessions.create(title="t")
     if owner:
         s["owner"] = owner
@@ -111,14 +116,16 @@ def test_when_the_person_changes_self_follows_push_and_reach_together():
     assert (a["eid"], a["to"]) == ("chat:out:ann", MEMBRANE_NS + "Component:chat:in:ann")
     assert (b["eid"], b["to"]) == ("chat:out:bob", MEMBRANE_NS + "Component:chat:in:bob")
     assert SL._rt(srv)["other"] == b["to"]
-    assert len(_assistant(r, ann)) == 1 and len(_assistant(r, bob)) == 1   # each line in its person's chat
+    pm_ann, pm_bob = CIO.blurp_chat(srv, "Ann", create=False), CIO.blurp_chat(srv, "Bob", create=False)
+    assert len(_assistant(r, pm_ann)) == 1 and len(_assistant(r, pm_bob)) == 1   # #337: each line in its person's PM
+    assert _assistant(r, ann) == [] and _assistant(r, bob) == []                   # ...never their coding chat
 
 
 def test_selfs_line_is_visibly_selfs():
     srv, r = _seat()
-    sid = _chat(r, "roomata-estorsky", updated=2000)
+    _chat(r, "roomata-estorsky", updated=2000)
     SL._meet(srv, "1", now=5000.0)
-    [m] = _assistant(r, sid)
+    [m] = _assistant(r, CIO.blurp_chat(srv, "roomata-estorsky", create=False))   # #337: its PM
     assert m["info"].get("from") == "self"
     text = "".join(p.get("text", "") for p in m["parts"] if p.get("type") == "text")
     assert text.startswith("\U0001F331")                    # the sprout: self, not the seat
