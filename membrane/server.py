@@ -2679,6 +2679,7 @@ def seat_read_url(srv, path_qs: str) -> str | None:
 
 
 from . import ui_serve as _UI
+from . import diag as _DIAG
 
 
 def make_handler(hub=None, sessions=None, messages=None, config=None,
@@ -2690,7 +2691,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
     hub = hub if hub is not None else SSEHub()
     config = config if config is not None else {}
 
-    class _Handler(BaseHTTPRequestHandler):
+    class _Handler(_DIAG.TimedHandler, BaseHTTPRequestHandler):   # #346: the timing ring
         protocol_version = "HTTP/1.1"
         seat = srv          # the seat object for the live-minds reads
 
@@ -2864,6 +2865,8 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
         def do_GET(self):
             if not self._jwt_door():
                 return                       # JWT mode: no valid token, no answer
+            if _DIAG.route(self, self.path.split("?", 1)[0]):
+                return                       # #346: /membrane/diag/*, localhost only
             if _UI.intercept(self):
                 return                       # standalone mode: the UI, its LAN door
             path = self.path.split("?", 1)[0]
@@ -3137,6 +3140,8 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
         def do_POST(self):
             if not self._jwt_door():
                 return                       # JWT mode: no valid token, no answer
+            if _DIAG.route(self, self.path.split("?", 1)[0]):
+                return                       # #346: /membrane/diag/*, localhost only
             if _UI.intercept(self):
                 return                       # standalone mode: the UI, its LAN door
             path = self.path.split("?", 1)[0]

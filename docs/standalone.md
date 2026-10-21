@@ -138,6 +138,44 @@ babyseat first, then removes the old membrane-seat's files, so an empty package
 would take the module with it). Both stay installed; to drop the old name later:
 `pip uninstall membrane-seat && pip install --force-reinstall babyseat`.
 
+## Diagnosing a slow seat
+
+The seat measures itself, without root (`membrane/diag.py`). Both ports answer
+`/membrane/diag/timing` and `/membrane/diag/profile`, from localhost only (a
+call from anywhere else gets 403).
+
+**Request timing** is off by default. Turn it on at launch with
+`MEMBRANE_TIMING=1`, or on a running seat:
+
+    curl -s -X POST localhost:4096/membrane/diag/timing -d '{"on": true}'
+    curl -s localhost:4096/membrane/diag/timing | python3 -m json.tool
+
+Both ports share one switch and one ring, which holds the last 4096 requests.
+The summary lists each route as `<port> <METHOD> <path>` (ids fold to `*`), with
+its `count` and its `p50`, `p90`, `max` and `total` in milliseconds, heaviest
+total first. `recent` lists the last 20 requests with their status and thread.
+A request slower than `slow_ms` (default 1000) also prints a `[timing] ...` line
+to the seat's log. Set the bar with `MEMBRANE_TIMING_SLOW_MS` or
+`-d '{"slow_ms": 500}'`. Clear the ring with `-d '{"reset": true}'` and turn
+timing off with `-d '{"on": false}'`. The `/event` streams count only when they
+end, so their durations are the length of a page's visit.
+
+**The profiler** samples every thread's Python stack 50 times a second, for up
+to 120 s; py-spy needs `sudo`, this does not. Run one profile at a time (a second
+one gets 409):
+
+    curl -s -X POST 'localhost:4096/membrane/diag/profile?seconds=60'
+    sleep 61; curl -s localhost:4096/membrane/diag/profile | python3 -m json.tool
+
+The status shows `samples`, the per-thread totals (`threads`) and the 30 hottest
+stacks (`top`). Page-request threads group under `Thread-* (process_request_thread)`.
+A thread that is waiting (on a lock, a queue or a socket) is sampled too, so a
+deep `threading.py:wait` tower means waiting, not work. The full result is in
+`<data dir>/diag/profile-<time>.collapsed` (its path is in `file`). It uses
+flamegraph.pl's collapsed format, so drop it on
+[speedscope.app](https://www.speedscope.app) or run
+`flamegraph.pl profile-….collapsed > flame.svg`.
+
 ## Bugs and ideas
 
 [github.com/chedim/membrane/issues](https://github.com/chedim/membrane/issues). Your

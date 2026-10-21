@@ -43,6 +43,7 @@ from . import efgate as _efg
 from . import entities as _ents
 from . import streams as _streams
 from . import efield as _efield_mod
+from . import diag as _DIAG                 # #346: the timing ring + the profiler
 from .entities import (EntityStore, QuantumEntity, MEMBRANE_NS,
                        CLASS_COMPONENT, CLASS_TOOL)
 
@@ -3951,7 +3952,7 @@ def _entity_points(srv, fld, m: int = 400) -> list[dict]:
             for i, d in enumerate(rows)]
 
 
-class MembraneOpenAIHandler(RAGProxyHandler):
+class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the timing ring
     """The RAG handler + the OpenAI-compatible surface: /v1/models,
     /v1/chat/completions (the RAG gate + the internal state/math intercept),
     /v1/embeddings (the field's own embedder), /membrane/state, and Ollama's
@@ -4019,6 +4020,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
         # the idle-exit timer -- an active seat never trips it
         self.server._last_request_ts = time.time()
         path = self.path.split("?")[0]
+        if _DIAG.route(self, path):
+            return                                    # #346: /membrane/diag/*, localhost only
         if path in ("/v1/models", "/v1/models/"):
             self._v1_models(); return
         if path in ("/membrane/state", "/state"):
@@ -4097,6 +4100,8 @@ class MembraneOpenAIHandler(RAGProxyHandler):
             return
         self.server._last_request_ts = time.time()
         path = self.path.split("?")[0]
+        if _DIAG.route(self, path):
+            return                                    # #346: /membrane/diag/*, localhost only
         if path == "/v1/chat/completions":
             self._stamp_chat_identity()
             self._v1_chat(); return
