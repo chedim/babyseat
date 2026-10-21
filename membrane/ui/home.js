@@ -1021,16 +1021,17 @@ const PAUSE_POLL_MS = 15000;
 
 /** The button's face from GET /membrane/seat/pause ({paused, enabled}; null:
  *  not read yet): its icon, title, aria-label and aria-pressed. What a pause
- *  stops is what the seat's lanes do while lanes.nerve_paused() holds. */
+ *  stops is what the seat's lanes do while lanes.nerve_paused() holds. The
+ *  icon is what a click does (#382): ⏸ while the seat runs, ▶ while paused. */
 function pauseView(st) {
-  if (!st) return { icon: "▶", pressed: "false", label: "the seat's pause",
+  if (!st) return { icon: "⏸", pressed: "false", label: "the seat's pause",
                     title: "the seat's pause -- reading its state…" };
-  if (st.enabled === false) return { icon: "▶", pressed: "false", label: "the seat's pause (switched off)",
+  if (st.enabled === false) return { icon: "⏸", pressed: "false", label: "the seat's pause (switched off)",
     title: "the pause is switched off on this seat (MEMBRANE_NERVE_PAUSE=0): pausing changes nothing" };
-  if (st.paused) return { icon: "⏸", pressed: "true", label: "the seat is paused: resume it",
+  if (st.paused) return { icon: "▶", pressed: "true", label: "the seat is paused: resume it",
     title: "the seat is paused -- click to resume: its acting lanes wake and what they held runs " +
            "(the loops' queued events, the night's deferred pass, the autonode's backlog). A restart resumes it too." };
-  return { icon: "▶", pressed: "false", label: "the seat is running: pause it",
+  return { icon: "⏸", pressed: "false", label: "the seat is running: pause it",
     title: "the seat is running -- click to pause its acting lanes: the loops, the dreamer, the thinker's ticks, " +
            "the night pass, the autonode, the idle judges, speech, " + SELF_NAME + "'s cycle and the scripts' model calls " +
            "stand down, and the LLM's entity and file writes are refused. Reads, memory, intend and your chat stay. " +

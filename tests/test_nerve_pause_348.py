@@ -1,7 +1,8 @@
 """#348: auto-chat goes; its ▶ button becomes the seat's pause (the nerve pause).
 
 The button in membrane home's top bar drives `srv.paused` (lanes.nerve_paused),
-the operator's stable point: ▶ while the seat runs, ⏸ while it is paused.
+the operator's stable point: ▶ while the seat runs, ⏸ while it is paused --
+#382 turned it round: the icon is what a click does, ⏸ while it runs, ▶ while paused.
 Pressing it pauses the acting lanes (the loops, the dreamer, the thinker's
 ticks, the night pass, the autonode, the idle judges, speech, Blurp's own
 cycle, the scripts' model calls) and pressing it again resumes them.
@@ -302,7 +303,7 @@ def _run(script, seat=None, refuse=None):
 @NODE
 def test_the_view_running_and_paused():
     run, held = _js("out = [M.pauseView({paused: false}), M.pauseView({paused: true})]")
-    assert run["icon"] == "▶" and held["icon"] == "⏸"
+    assert run["icon"] == "⏸" and held["icon"] == "▶"         # #382: the icon is the action
     assert run["pressed"] == "false" and held["pressed"] == "true"
     assert "running" in run["title"] and "click to pause" in run["title"]
     for lane in ("loops", "dreamer", "thinker", "night", "autonode", "judges", "speech", "restart"):
@@ -316,7 +317,7 @@ def test_the_view_running_and_paused():
 @NODE
 def test_the_view_before_the_seat_answers_and_with_the_switch_off():
     unknown, off = _js("out = [M.pauseView(null), M.pauseView({paused: false, enabled: false})]")
-    assert unknown["icon"] == "▶" and "reading" in unknown["title"]
+    assert unknown["icon"] == "⏸" and "reading" in unknown["title"]
     assert "MEMBRANE_NERVE_PAUSE" in off["title"]
 
 
@@ -324,7 +325,7 @@ def test_the_view_before_the_seat_answers_and_with_the_switch_off():
 def test_load_paints_the_seats_state():
     out = _run("await b.load(); return { look: look(), calls };", seat={"paused": True, "enabled": True})
     assert out["calls"] == [["GET", "/membrane/seat/pause"]]
-    assert out["look"]["icon"] == "⏸" and out["look"]["pressed"] == "true"
+    assert out["look"]["icon"] == "▶" and out["look"]["pressed"] == "true"
     assert "click to resume" in out["look"]["title"] and out["look"]["label"]
 
 
@@ -337,8 +338,8 @@ def test_a_click_toggles_and_repaints_from_the_reply():
       return { one, two, calls };""")
     posts = [c for c in out["calls"] if c[0] == "POST"]
     assert posts == [["POST", "/membrane/seat/pause", {"paused": True}], ["POST", "/membrane/seat/pause", {"paused": False}]]
-    assert out["one"]["icon"] == "⏸" and out["one"]["pressed"] == "true"
-    assert out["two"]["icon"] == "▶" and out["two"]["pressed"] == "false"
+    assert out["one"]["icon"] == "▶" and out["one"]["pressed"] == "true"
+    assert out["two"]["icon"] == "⏸" and out["two"]["pressed"] == "false"
 
 
 @NODE
@@ -346,14 +347,14 @@ def test_a_click_before_the_state_is_known_reads_first():
     out = _run("await b.click(); return { look: look(), calls };", seat={"paused": True, "enabled": True})
     assert out["calls"][0] == ["GET", "/membrane/seat/pause"]
     assert out["calls"][1] == ["POST", "/membrane/seat/pause", {"paused": False}]   # resume, not a second pause
-    assert out["look"]["icon"] == "▶"
+    assert out["look"]["icon"] == "⏸"
 
 
 @NODE
 def test_a_refusal_keeps_the_state_and_says_why():
     out = _run("await b.load(); await b.click(); return { look: look() };",
                refuse="the seat token is needed to pause the seat")
-    assert out["look"]["icon"] == "▶" and out["look"]["pressed"] == "false"
+    assert out["look"]["icon"] == "⏸" and out["look"]["pressed"] == "false"
     assert "the seat token is needed" in out["look"]["title"]
 
 
