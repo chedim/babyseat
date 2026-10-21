@@ -27,6 +27,11 @@
  * dreamer) is an avatar that flies to the entity it is processing or
  * touching with a tool, beams onto it while attached, and trails between.
  *
+ * THE CURRENT (#360): the field's current -- where attention is now -- as a
+ * gold trail of its recent spots (field.current frames; the head from the
+ * map answer), each fading as exp(-age / tau) with the seat's tau, the
+ * newest a glowing point. No current (nobody spoke lately): nothing drawn.
+ *
  * Controls: drag = orbit, right-drag / shift-drag / two fingers = pan,
  * wheel / pinch = zoom, click = the drawer, double-click = fly there.
  */
@@ -211,6 +216,47 @@ function depthFade(dist, camDist, R) {
 /** Is p on the camera's half of the ball (centre c)? Labels only there. */
 function nearSide(p, camPos, c) {
   return (p[0] - c[0]) * (camPos[0] - c[0]) + (p[1] - c[1]) * (camPos[1] - c[1]) + (p[2] - c[2]) * (camPos[2] - c[2]) >= 0;
+}
+
+// ---- #360: the current's trail (visual constants, not Blurp's; tau is the seat's)
+const CURRENT_TRAIL_MAX = 240;        // spots kept (one line geometry, preallocated)
+const CURRENT_TRAIL_FLOOR = 0.02;     // a spot fainter than this is dropped
+const CURRENT_RGB = [1.0, 0.82, 0.35];   // the page's gold (0xffd25a)
+const CURRENT_HEAD = 34;              // the head's glow, world units (the ball is F3_WORLD wide)
+const CURRENT_REFILL_MS = 250;        // the fade is minutes long: refill the line ~4x a second
+
+/** A spot's alpha at `ageS` seconds with the seat's tau: exp(-age / tau);
+ *  no tau, nothing drawn; a clock skew never brightens past the head. */
+function currentAlpha(ageS, tauS) {
+  if (!(tauS > 0)) return 0;
+  return Math.exp(-Math.max(0, ageS) / tauS);
+}
+
+/** Append the current's spot `p` (cube coords) seen at `tMs`, oldest first;
+ *  a repeat of the newest is skipped; at most `cap` kept (the oldest go). */
+function trailPush(trail, p, tMs, cap = CURRENT_TRAIL_MAX) {
+  const last = trail[trail.length - 1];
+  if (last && last.p[0] === p[0] && last.p[1] === p[1] && last.p[2] === p[2]) return trail;
+  trail.push({ p: [p[0], p[1], p[2]], t: tMs });
+  if (trail.length > cap) trail.splice(0, trail.length - cap);
+  return trail;
+}
+
+/** Fill one line geometry in place: world positions into P (xyz), RGBA into
+ *  C (rgb + the spot's alpha), oldest first; spots faded under the floor are
+ *  dropped from `trail` too. Returns how many vertices to draw. */
+function trailFill(trail, nowMs, tauS, P, C, rgb) {
+  let drop = 0;
+  while (drop < trail.length && currentAlpha((nowMs - trail[drop].t) / 1000, tauS) < CURRENT_TRAIL_FLOOR) drop++;
+  if (drop) trail.splice(0, drop);
+  const n = Math.min(trail.length, P.length / 3, C.length / 4);
+  for (let i = 0; i < n; i++) {
+    const q = trail[trail.length - n + i], w = cubeToWorld(q.p);
+    P[i * 3] = w[0]; P[i * 3 + 1] = w[1]; P[i * 3 + 2] = w[2];
+    C[i * 4] = rgb[0]; C[i * 4 + 1] = rgb[1]; C[i * 4 + 2] = rgb[2];
+    C[i * 4 + 3] = currentAlpha((nowMs - q.t) / 1000, tauS);
+  }
+  return n;
 }
 
 function tileRadius(l) { return (F3_WORLD / (1 << l)) * 0.8661; }
@@ -640,7 +686,8 @@ function faceOn(x, y, z, min, out) {
 
 const F3Logic = { faceOn, calmPose, amoebaActs, actLife, actAlive, LOOK_LANDS, poseFor, posesAt, addAct, pruneActs, bodyShape, POD_LEN,
   ghostDir, lookTarget, lookLabel, lookChip, GHOST_R, fnv32, snapshotOf, IDBCache, locateCandidates, tileKey, tileCenter, tileRadius, childrenOf, axesSpec, wantedTiles, TileCache, Avatar, parseSSE, cubeToWorld, F3_WORLD, edgePulsePairs, PULSE_COLORS,
-  fieldArea, inArea, arrowFor, layoutLabels, selfTag, shellCircles, frameBall, depthFade, nearSide, F3_SHELLS, F3_LABEL_CAP };
+  fieldArea, inArea, arrowFor, layoutLabels, selfTag, shellCircles, frameBall, depthFade, nearSide, F3_SHELLS, F3_LABEL_CAP,
+  currentAlpha, trailPush, trailFill, CURRENT_TRAIL_MAX, CURRENT_TRAIL_FLOOR };
 if (typeof module !== "undefined" && module.exports) module.exports = F3Logic;
 
 // ------------------------------------------------------------ three.js
@@ -780,6 +827,25 @@ class Field3DView {
       transparent: true, opacity: 0.85, depthWrite: false }));
     this.scene.add(this.ghosts);
     this.selNb = null;
+    // #360: the current's trail -- one preallocated line (RGBA: each spot's
+    // own fade) and a glowing head; filled from this.cur by _stepCurrent
+    const cg = new THREE.BufferGeometry();
+    this.curP = new Float32Array(CURRENT_TRAIL_MAX * 3); this.curC = new Float32Array(CURRENT_TRAIL_MAX * 4);
+    cg.setAttribute("position", new THREE.BufferAttribute(this.curP, 3));
+    cg.setAttribute("color", new THREE.BufferAttribute(this.curC, 4));
+    cg.setDrawRange(0, 0);
+    cg.boundingSphere = new THREE.Sphere(new THREE.Vector3(0, 0, 0), F3_WORLD * 2);
+    this.curLine = new THREE.Line(cg, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false }));
+    this.curLine.renderOrder = 3;
+    this.scene.add(this.curLine);
+    const hc = document.createElement("canvas"); hc.width = hc.height = 64;
+    const hx = hc.getContext("2d"), grd = hx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grd.addColorStop(0, "rgba(255,240,200,1)"); grd.addColorStop(0.3, "rgba(255,210,90,0.9)"); grd.addColorStop(1, "rgba(255,210,90,0)");
+    hx.fillStyle = grd; hx.fillRect(0, 0, 64, 64);
+    this.curHead = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(hc), transparent: true, depthWrite: false }));
+    this.curHead.renderOrder = 3; this.curHead.visible = false;
+    this.scene.add(this.curHead);
+    this.cur = { trail: [], head: null, tau: 0, dirty: false, filledAt: 0 };
     this.showEdges = true; this.showLabels = true;
     this._wire();
     this._ro = new ResizeObserver(() => this._resize());
@@ -814,6 +880,7 @@ class Field3DView {
   _fromSnapshot(snap) {
     this.stale = true;
     this.info = snap.meta; this.pid = snap.meta.pid; this.kinds = snap.meta.kinds || [];
+    this._setCurrent(null);
     this.kindRGB = this.kinds.map((k) => new this.THREE.Color(this.api.kindColor(k)));
     for (const [key, tile] of snap.tiles) if (tile && Array.isArray(tile.nodes)) this._ingest(key, tile);
     this._lastWant = 0;
@@ -845,6 +912,8 @@ class Field3DView {
     for (const k of [...this.cache.tiles.keys()]) this._unload(k);
     this.cache.clear(); this.known.clear(); this.pending.clear(); this.locateCache.clear();
     if (d.root) this._ingest(tileKey(0, 0, 0, 0), d.root);
+    this._setCurrent(null);                 // a new projection: the old spots were placed under the old fit
+    this._setCurrent(d.current);
     this._lastWant = 0;
     this._status();
     return d;
@@ -1076,6 +1145,7 @@ class Field3DView {
     this._stepRings(now);
     this._stepEdgePulses(now);
     this._stepAvatars(dt);
+    this._stepCurrent(now);
     this._stepSelf(now);
     this._stepBrain(now);
     this._layoutSelfLabels(now);
@@ -1426,6 +1496,8 @@ class Field3DView {
         const m = this.meta[s];
         if (m) m.act = { kind: c.kind || "", brief: c.brief || "", t0: now };
       }
+    } else if (t === "field.current" && p.pid === this.pid) {
+      this._setCurrent(p);
     } else if (t === "self.cycle" && p.pid === this.pid) {
       this._selfCycle(p, now);
     } else if (t === "field.born") {
@@ -1455,6 +1527,39 @@ class Field3DView {
     } else if (t === "mind.dreamer") {
       if (p.goal) this._attach("dreamer", p.goal, 6000);
     }
+  }
+
+  /** #360: the current's spot ({p, tau_s} from the map answer or a
+   *  field.current frame): onto the trail; no spot = the current faded or
+   *  nobody spoke lately -- nothing drawn. */
+  _setCurrent(c) {
+    const cur = this.cur;
+    if (!cur) return;
+    if (!c || !c.p || !(c.tau_s > 0)) { cur.trail.length = 0; cur.head = null; cur.dirty = true; return; }
+    cur.tau = c.tau_s; cur.head = c.p.slice(0, 3);
+    trailPush(cur.trail, cur.head, performance.now());
+    cur.dirty = true;
+  }
+
+  _stepCurrent(now) {
+    const cur = this.cur;
+    if (!cur || !this.curLine) return;
+    if (typeof document !== "undefined" && document.hidden) return;   // no work behind a hidden tab
+    if (cur.dirty || now - cur.filledAt > CURRENT_REFILL_MS) {
+      const n = cur.trail.length ? trailFill(cur.trail, now, cur.tau, this.curP, this.curC, CURRENT_RGB) : 0;
+      const g = this.curLine.geometry;
+      g.setDrawRange(0, n);
+      g.attributes.position.needsUpdate = true; g.attributes.color.needsUpdate = true;
+      cur.dirty = false; cur.filledAt = now;
+    }
+    const h = this.curHead;
+    h.visible = !!cur.head;
+    if (!h.visible) return;
+    const w = cubeToWorld(cur.head);
+    h.position.set(w[0], w[1], w[2]);
+    // the head glows; under reduced motion it holds still
+    const s = CURRENT_HEAD * (this.reducedMotion() ? 1 : 1 + 0.25 * Math.sin(now / 400));
+    h.scale.set(s, s, 1);
   }
 
   /** The orb under a screen point (within AVATAR_HIT_PX), nearest first. */

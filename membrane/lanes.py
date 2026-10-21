@@ -3921,6 +3921,18 @@ def field3d_projection(srv, axes: str = ""):
         return proj
 
 
+def field3d_answer(srv, axes: str = "") -> dict:
+    """GET /membrane/map/field3d's answer: the projection's meta, its root
+    tile, and the field's current under it (#360: {p, tau_s}; p None when
+    nobody spoke lately) -- a fresh view draws the trail's head at once."""
+    from . import fieldpulse as _FP
+    proj = field3d_projection(srv, axes)
+    out = proj.meta()
+    out["root"] = proj.tile(0, 0, 0, 0)
+    out["current"] = {"p": _FP.current_at(srv, proj), "tau_s": _FP.current_tau_s()}
+    return out
+
+
 def _entity_points(srv, fld, m: int = 400) -> list[dict]:
     """The viewer's cloud on the entity field: the top-m live states by mass,
     PCA 3D in the shared universe projection (the basis fit once per
@@ -4444,19 +4456,18 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
     def _map_field3d(self):
         """GET /membrane/map/field3d?axes=pc1,pc2,e:<eid>[:toward]: THE WHOLE
         FIELD IN 3D (field3d.build over every live entity) -> its pid +
-        meta; the viewer then pulls octree tiles by pid. Cached 60s per
-        axes; the last few projections stay servable for tiles."""
+        meta + the current's spot (#360); the viewer then pulls octree
+        tiles by pid. Cached 60s per axes; the last few projections stay
+        servable for tiles."""
         from urllib.parse import parse_qs
         qs = parse_qs(self.path.split("?", 1)[-1] if "?" in self.path else "")
         axes = (qs.get("axes") or [""])[0]
         try:
-            proj = field3d_projection(self.server, axes)
+            out = field3d_answer(self.server, axes)
         except LookupError as e:
             self._json_err_raw(503, str(e)); return
         except Exception as e:                          # noqa: BLE001
             self._json_err_raw(500, f"field3d failed: {e!r}"[:200]); return
-        out = proj.meta()
-        out["root"] = proj.tile(0, 0, 0, 0)
         self._json_out(out)
 
     def _massage_preview(self):

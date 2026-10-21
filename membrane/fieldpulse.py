@@ -13,6 +13,12 @@ hub, about once a second:
   field.moved   {pid, moves}         dirty entities re-placed into each
                                      cached 3D projection (field3d.place)
   field.born    {eids}               nursery -> live
+  field.current {pid, p, tau_s}      the field's current (efield.current())
+                                     placed into each cached projection --
+                                     sent when its spot moved, once with
+                                     p=null when it fades out (#360: the
+                                     viewer's gold trail; tau_s =
+                                     efield.CURRENT_TAU_S, the trail's fade)
   field.watch   {fires:[[eid,kind]]} a geometric watch fired
   mind.focus    {agent, eid, phase}  a watch loop took / let go of an entity
   mind.touch    {agent, eid, tool}   a tool call named an entity
@@ -40,6 +46,28 @@ GROUP_EIDS = 12
 MAX_MIND = 40
 RECENT_MAX = 4000            # (ts, eid) for the strangers' windows
 ENTITY_ARGS = ("spec", "eid", "entity", "key", "name", "id")
+CURRENT_ID = "current"        # #360: the id place() hashes when the axes see none of the current
+
+
+def current_at(srv, proj) -> list | None:
+    """#360: where the field's current sits under this projection (proj.place),
+    or None -- no field, or nobody spoke lately (efield.current() is None)."""
+    fld = getattr(srv, "efield", None)
+    try:
+        c = fld.current() if fld is not None else None
+    except Exception:
+        c = None
+    if c is None:
+        return None
+    try:
+        return proj.place(c, CURRENT_ID)
+    except Exception:
+        return None
+
+
+def current_tau_s() -> float:
+    from .efield import CURRENT_TAU_S
+    return float(CURRENT_TAU_S)
 
 
 def of(srv) -> "FieldPulse | None":
@@ -73,6 +101,7 @@ class FieldPulse:
         self._moved: dict[str, list] = {}
         self._mind: list = []
         self._self: tuple | None = None        # (points {name: vec}, stats) -- the latest cycle
+        self._cur_sent: dict[str, list | None] = {}   # #360: pid -> the current's spot last sent
         self._slots: dict[str, str] = {}       # loop agent -> loop-N
         self._sids: dict[str, str] = {}        # loop-N -> its (last) session: membrane home opens it
         self._dreams = collections.deque(maxlen=40)   # the dreamer's picks (text stays off the frames)
@@ -285,7 +314,25 @@ class FieldPulse:
                 out.append({"type": "self.cycle", "pid": pid, "points": placed, **stats})
             if not projs:
                 out.append({"type": "self.cycle", "pid": None, **stats})
+        out += self._current_frames()
         out += mind
+        return out
+
+    def _current_frames(self) -> list[dict]:
+        """#360: the current's spot in each cached projection, when it moved
+        (a still current sends nothing; a faded one says p=None once)."""
+        projs = dict(getattr(self.srv, "_field3d", None) or {})
+        out = []
+        for pid, proj in projs.items():
+            p = current_at(self.srv, proj)
+            if p == self._cur_sent.get(pid):
+                continue
+            self._cur_sent[pid] = p
+            out.append({"type": "field.current", "pid": pid,
+                        "p": None if p is None else [float(v) for v in p],
+                        "tau_s": current_tau_s()})
+        for pid in [k for k in self._cur_sent if k not in projs]:
+            self._cur_sent.pop(pid, None)      # an evicted projection
         return out
 
     def beat(self) -> int:
