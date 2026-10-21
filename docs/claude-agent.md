@@ -60,8 +60,8 @@ opencode) as an in-process SDK MCP server named `membrane`:
   WebFetch or any other built-in). No MCP servers from your config
   (`strict_mcp_config`) and no settings files or `CLAUDE.md`.
 - `MAX_TURNS = 4` caps the agent turns for one answer
-  (`membrane/claude_agent.py`). This value is awaiting the operator's
-  approval.
+  (`membrane/claude_agent.py`). When an answer hits it, you can press
+  Continue (see "The turn cap and Continue" below).
 - The turn's own tool definitions (the chat lane's surface) are not passed
   on. The reply never carries `tool_calls` for the caller to run, and the
   bullet-salvage that turns written calls into real ones stays off for
@@ -86,6 +86,35 @@ conversation goes in as the prompt, ending on the latest message. The reply
 comes back as an ordinary OpenAI response, streamed or buffered, with its
 usage. Each tool Claude ran rides the reply: a `membrane_tool` chunk when
 streamed, a `membrane_tools` list when buffered.
+
+## The turn cap and Continue
+
+An answer that reaches `MAX_TURNS` stops there. The SDK reports this as a
+result of subtype `error_max_turns`. membrane does not treat that as an
+error, and the answer is not cut off without a word:
+
+- The reply carries `membrane_capped: {session, turns}` (an SSE chunk when
+  streamed, a top-level key when buffered). `session` is the SDK's session
+  id.
+- The transcript row keeps it as `claudeCapped: {session, turns, continued}`.
+  The chat shows "Claude stopped at the turn cap (4 turns)" under the answer,
+  with a **Continue** button.
+- Continue posts the person's message `Continue` with
+  `claudeContinue: <message id>`. The seat claims that capped answer once
+  and starts a turn that resumes the **same** SDK session (the SDK's
+  `resume` option), with a short continue prompt. The turn gets the same
+  tools and options and another `MAX_TURNS` turns. If it hits the cap again,
+  the new answer offers its own Continue.
+- Nothing runs twice. Each capped answer can be continued only once: a
+  second press gets HTTP 409 and makes no call. The resumed session already
+  holds the earlier tool calls and their results, and none of them is run
+  again.
+- Continue is a person's action only. Nothing continues by itself, and a
+  session on a background lane (a watch loop, a mind) refuses it. Typing
+  "Continue" as an ordinary message does not resume a session.
+- Diagnostics: `GET /membrane/diag/claude-agent` (localhost only) returns
+  `{cap_hits, continues, max_turns}`. The counters live in RAM since the
+  seat's boot, so you can see whether 4 turns is too tight.
 
 ## What is learned, what is shown
 

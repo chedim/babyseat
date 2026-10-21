@@ -21,6 +21,16 @@ carries tool_calls for the caller to run. Each tool Claude ran rides the
 reply as a TOOL_KEY chunk (streamed) or TOOLS_KEY list (buffered), so the
 transcript shows it and the proxy captures it.
 
+THE TURN CAP AND CONTINUE (issue #389, approved 2026-10-21): an answer
+that reaches MAX_TURNS stops there. The SDK says so (a result of subtype
+error_max_turns): that is neither an error nor a silent cut. The reply
+carries CAPPED_KEY {session, turns}; the transcript row keeps it as CAP_MARK
+and the chat offers Continue. Continue is a person's action only (never
+automatic, never on a background lane): it resumes the SAME SDK session
+(the SDK's `resume`, RESUME_KEY on the turn) for another MAX_TURNS with the
+same tools and options, and each capped answer continues at most once.
+STATS counts cap hits and continues (RAM, /membrane/diag/claude-agent).
+
 LEARNED LIKE ANY MODEL (issue #389, the operator's 2026-10-21): Claude's
 reply, its reasoning and its tool calls and results are learned like any
 other model's. The transcript row keeps the Claude-made mark (MARK_KEY,
@@ -57,12 +67,45 @@ INSTALL_HINT = ("pip install 'babyseat[claude-agent]' (or: pip install "
 LOGIN_HINT = ("install Claude Code, run `claude` once to log in, then "
               "`membrane auth claude-agent`")
 STATUS_TIMEOUT_S = 20
-MAX_TURNS = 4                       # tool turns per answer (#389); AWAITING the
-                                    # operator's approval
+MAX_TURNS = 4                       # agent turns per answer (#389; approved
+                                    # 2026-10-21, with Continue)
 MCP_NAME = "membrane"               # the SDK MCP server's name: tools are
 TOOL_PREFIX = f"mcp__{MCP_NAME}__"  # mcp__membrane__<tool>
 TOOL_KEY = "membrane_tool"          # a streamed chunk: one tool Claude ran
 TOOLS_KEY = "membrane_tools"        # a buffered response: every tool Claude ran
+CAPPED_KEY = "membrane_capped"      # reply: the answer stopped at MAX_TURNS
+CAP_MARK = "claudeCapped"           # transcript row: {session, turns, continued}
+RESUME_KEY = "claude_resume"        # turn/body: resume this SDK session
+CONTINUE_FIELD = "claudeContinue"   # a person's POST: the capped message's id
+CONTINUE_TEXT = "Continue"          # the person's row a Continue adds
+CONTINUE_PROMPT = ("Continue the task from where you stopped at the turn "
+                   "limit.")
+MAX_TURNS_SUBTYPE = "error_max_turns"   # the SDK's result subtype at the cap
+
+
+class ContinueRefused(ValueError):
+    """A Continue that may not run: not capped, already continued, unknown,
+    or a background lane's."""
+
+
+_stats_lock = threading.Lock()
+STATS = {"cap_hits": 0, "continues": 0}     # diagnostics only (RAM)
+
+
+def _count(key: str) -> None:
+    with _stats_lock:
+        STATS[key] = STATS.get(key, 0) + 1
+
+
+def stats() -> dict:
+    with _stats_lock:
+        return dict(STATS)
+
+
+def reset_stats() -> None:
+    with _stats_lock:
+        for k in STATS:
+            STATS[k] = 0
 
 
 class Unavailable(RuntimeError):
@@ -306,8 +349,11 @@ def build_mcp_server(sdk, port):
                                      tools=tools)
 
 
-def build_options(sdk, system: str, model: str, stream: bool, port=None):
+def build_options(sdk, system: str, model: str, stream: bool, port=None,
+                  resume=None):
+    extra = {"resume": str(resume)} if resume else {}   # Continue: the same session
     return sdk.ClaudeAgentOptions(
+        **extra,
         system_prompt=system or None,
         tools=[],                  # Claude Code's built-in tools: off
         allowed_tools=tool_names(),  # only membrane's tools (#389)
@@ -344,13 +390,18 @@ def _bare(name: str) -> str:
     return n[len(TOOL_PREFIX):] if n.startswith(TOOL_PREFIX) else n
 
 
-async def _consume(sdk, messages, model, stream, put, port=None):
+async def _consume(sdk, messages, model, stream, put, port=None, resume=None):
     system, prompt = split_messages(messages)
-    opts = build_options(sdk, system, model, stream, port)
+    if resume:
+        prompt = CONTINUE_PROMPT         # the session already holds the task
+    opts = build_options(sdk, system, model, stream, port, resume)
     partial = False
     pending: dict = {}                   # tool_use id -> (name, input)
+    session = str(resume or "")
     async for m in sdk.query(prompt=prompt, options=opts):
         kind = type(m).__name__
+        if getattr(m, "session_id", None):
+            session = str(m.session_id)
         if kind == "StreamEvent":
             ev = getattr(m, "event", None) or {}
             if ev.get("type") == "content_block_delta":
@@ -386,6 +437,12 @@ async def _consume(sdk, messages, model, stream, put, port=None):
                               "output": _result_text(getattr(b, "content", None)),
                               "is_error": bool(getattr(b, "is_error", False))}))
         elif kind == "ResultMessage":
+            if getattr(m, "subtype", "") == MAX_TURNS_SUBTYPE:
+                # the turn cap: marked, never an error (#389)
+                _count("cap_hits")
+                put(("usage", _usage(getattr(m, "usage", None))))
+                put(("capped", {"session": session, "turns": MAX_TURNS}))
+                continue
             if getattr(m, "is_error", False):
                 why = getattr(m, "result", None) or getattr(m, "errors", None) \
                     or getattr(m, "subtype", "error")
@@ -396,7 +453,8 @@ async def _consume(sdk, messages, model, stream, put, port=None):
 _END = object()
 
 
-def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None):
+def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None,
+               resume=None):
     """The SDK's reply as ("text"|"reasoning"|"tool"|"usage", value) items,
     in order. `port` is this seat's proxy, where membrane's tools relay.
     The async SDK runs on its own thread and loop (the proxy's handler
@@ -406,7 +464,7 @@ def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None):
 
     def run():
         try:
-            asyncio.run(_consume(sdk, messages, model, stream, q.put, port))
+            asyncio.run(_consume(sdk, messages, model, stream, q.put, port, resume))
         except BaseException as e:          # carried to the reader
             q.put(("error", e))
         finally:
@@ -424,13 +482,17 @@ def iter_reply(messages, model: str, stream: bool = True, sdk=None, port=None):
 
 # ---- the reply as an OpenAI response ---------------------------------------------
 
-def _chunk(model: str, delta: dict, finish=None, usage=None, tool=None) -> bytes:
+def _chunk(model: str, delta: dict, finish=None, usage=None, tool=None,
+           capped=None) -> bytes:
+    side = tool is not None or capped is not None
     obj = {"id": "chatcmpl-claude-agent", "object": "chat.completion.chunk",
            "created": int(time.time()), "model": model, RESP_KEY: PROVIDER,
-           "choices": ([{"index": 0, "delta": delta, "finish_reason": finish}]
-                       if tool is None else [])}
+           "choices": ([] if side else
+                       [{"index": 0, "delta": delta, "finish_reason": finish}])}
     if tool is not None:
         obj[TOOL_KEY] = tool
+    if capped is not None:
+        obj[CAPPED_KEY] = capped
     if usage is not None:
         obj["usage"] = usage
     return b"data: " + json.dumps(obj).encode() + b"\n"
@@ -446,11 +508,13 @@ class SSEReply:
     abort) stops it. After the iteration: .tools (every tool Claude ran)
     and .failed (the turn failed: the reply is the error line)."""
 
-    def __init__(self, messages, model: str, sdk=None, port=None):
+    def __init__(self, messages, model: str, sdk=None, port=None, resume=None):
         self.messages, self.model, self.sdk, self.port = messages, model, sdk, port
+        self.resume = resume
         self.closed = False
         self.tools: list = []
         self.failed = False
+        self.capped = None
 
     def __enter__(self):
         return self
@@ -467,11 +531,16 @@ class SSEReply:
         first = True
         try:
             for kind, val in iter_reply(self.messages, self.model, True, self.sdk,
-                                        self.port):
+                                        self.port, self.resume):
                 if self.closed:
                     break
                 if kind == "usage":
                     usage = val
+                    continue
+                if kind == "capped":
+                    self.capped = val
+                    yield _chunk(self.model, {}, capped=val)
+                    yield b"\n"
                     continue
                 if kind == "tool":
                     self.tools.append(val)
@@ -500,10 +569,12 @@ class JSONReply:
     whole chat.completion body, with TOOLS_KEY when Claude ran tools.
     After read(): .tools and .failed, as SSEReply's."""
 
-    def __init__(self, messages, model: str, sdk=None, port=None):
+    def __init__(self, messages, model: str, sdk=None, port=None, resume=None):
         self.messages, self.model, self.sdk, self.port = messages, model, sdk, port
+        self.resume = resume
         self.tools: list = []
         self.failed = False
+        self.capped = None
 
     def __enter__(self):
         return self
@@ -518,8 +589,10 @@ class JSONReply:
         text, reasoning, usage = [], [], None
         try:
             for kind, val in iter_reply(self.messages, self.model, False, self.sdk,
-                                        self.port):
-                if kind == "text":
+                                        self.port, self.resume):
+                if kind == "capped":
+                    self.capped = val
+                elif kind == "text":
                     text.append(val)
                 elif kind == "reasoning":
                     reasoning.append(val)
@@ -542,19 +615,26 @@ class JSONReply:
             obj["usage"] = usage
         if self.tools:
             obj[TOOLS_KEY] = list(self.tools)
+        if self.capped is not None:
+            obj[CAPPED_KEY] = self.capped
         return json.dumps(obj).encode()
 
 
 def open_reply(body: dict, port=None):
     """The proxy's _open_backend for a claude-agent rung: the turn's
     messages (the caller's tool definitions dropped: Claude's tools are
-    membrane's, relaying to `port`) -> a streaming or buffered reply."""
+    membrane's, relaying to `port`) -> a streaming or buffered reply.
+    RESUME_KEY (a person's Continue, set by the turn runner) resumes that
+    SDK session for another MAX_TURNS."""
     sdk = check_available()
     model = str(body.get("model") or "")
     msgs = body.get("messages") or []
+    resume = str(body.get(RESUME_KEY) or "") or None
+    if resume:
+        _count("continues")
     if body.get("stream"):
-        return SSEReply(msgs, model, sdk, port)
-    return JSONReply(msgs, model, sdk, port)
+        return SSEReply(msgs, model, sdk, port, resume)
+    return JSONReply(msgs, model, sdk, port, resume)
 
 
 def captured_calls(tools) -> dict:

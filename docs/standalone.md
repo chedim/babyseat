@@ -185,8 +185,10 @@ would take the module with it). Both stay installed; to drop the old name later:
 ## Diagnosing a slow seat
 
 The seat measures itself, without root (`membrane/diag.py`). Both ports answer
-`/membrane/diag/timing` and `/membrane/diag/profile`, from localhost only (a
-call from anywhere else gets 403).
+`/membrane/diag/timing`, `/membrane/diag/profile` and
+`/membrane/diag/claude-agent`, from localhost only (a call from anywhere else
+gets 403). The last one counts the claude-agent rung's turn-cap hits and
+Continues ([claude-agent.md](claude-agent.md)).
 
 **Request timing** is off by default. Turn it on at launch with
 `MEMBRANE_TIMING=1`, or on a running seat:

@@ -1194,6 +1194,39 @@ class TurnRunner:
                   "time": {"start": now}}]
         return info, parts
 
+    def claude_continue(self, sid: str, mid: str) -> str:
+        """A PERSON'S CONTINUE (#389): claim the capped claude-agent answer
+        `mid` for one Continue and return its SDK session id. Raises
+        claude_agent.ContinueRefused on a background lane's session, a row
+        that is not capped, or one already continued (nothing runs twice)."""
+        from . import claude_agent as _CA
+        if not _CA.person_agent(self._turn_agent(sid, None)):
+            raise _CA.ContinueRefused("background lanes never continue a claude-agent answer")
+        lock = self.__dict__.setdefault("_claude_continue_lock", threading.Lock())
+        with lock:
+            row = self.messages.get_msg(sid, str(mid or ""))
+            info = (row or {}).get("info") or {}
+            cap = info.get(_CA.CAP_MARK)
+            if not isinstance(cap, dict) or not cap.get("session"):
+                raise _CA.ContinueRefused("that message did not stop at the turn cap")
+            if cap.get("continued"):
+                raise _CA.ContinueRefused("that answer was already continued")
+            info[_CA.CAP_MARK] = dict(cap, continued=True)
+            self.messages.append(sid, info, list(row.get("parts") or []))
+        self.hub.publish({"type": "message.updated", "info": dict(info),
+                          "sessionID": sid})
+        return str(cap["session"])
+
+    def claude_continue_row(self, sid: str, mid: str, session: str) -> dict:
+        """The person's Continue row (stored): the turn it starts resumes
+        `session` (claude_agent.RESUME_KEY)."""
+        from . import claude_agent as _CA
+        info, parts = self._mint_user_row(sid, _CA.CONTINUE_TEXT)
+        info[_CA.RESUME_KEY] = str(session)
+        info[_CA.CONTINUE_FIELD] = str(mid)
+        self.messages.append(sid, info, parts)
+        return info
+
     def _turn_agent(self, sid: str, user_info: dict | None) -> str:
         """The turn's agent (the lane gate's input): the turn's own agent
         wins, then the session doc's, then 'build'. A bare loop key
@@ -1991,6 +2024,15 @@ class TurnRunner:
             lane = _lane_of((self._agents or {}).get(sid))
             if tools and not _text_only:
                 body["tools"] = tools
+            # A PERSON'S CONTINUE (#389): the first round resumes the capped
+            # claude-agent session -- only on a person's lane, only to a
+            # claude-agent rung, never by itself
+            _resume = (user_info or {}).get("claude_resume") if rounds == 1 else None
+            if _resume:
+                from . import claude_agent as _CA
+                if _CA.is_claude_rung(getattr(self, "srv", None), turn_model) \
+                        and _CA.person_agent((self._agents or {}).get(sid)):
+                    body[_CA.RESUME_KEY] = str(_resume)
             mkpart({"type": "step-start"})
             live = {"text": None, "reasoning": None}
             # THE DELTAS, BATCHED (2026-10-11, the operator: "the whole chat dynamics
@@ -2108,6 +2150,13 @@ class TurnRunner:
                 a_info[_CA.MARK_KEY] = _CA.PROVIDER
                 for _t in resp.get(_CA.TOOLS_KEY) or []:
                     _agent_tool_part(_t)
+                # THE TURN CAP (#389): stopped at MAX_TURNS, not an error;
+                # the chat offers the person a Continue on this row
+                _cap = resp.get(_CA.CAPPED_KEY)
+                if isinstance(_cap, dict) and _cap.get("session"):
+                    a_info[_CA.CAP_MARK] = {"session": str(_cap["session"]),
+                                            "turns": int(_cap.get("turns") or _CA.MAX_TURNS),
+                                            "continued": False}
             _tokens_fill(a_info, resp)
             # THE INJECTION AS A CARD (2026-10-08, the operator: show it
             # like every tool call): what membrane added to this round --
@@ -2569,6 +2618,7 @@ def loopback_ladder(port: int, runner=None, cell=None):
         usage, ext, finish = None, None, None
         provider = None                      # the answering provider's stamp (#384)
         agent_tools = []                     # tools the claude-agent rung ran (#389)
+        capped = None                        # ...and its turn cap, when hit
         done = False
         with urllib.request.urlopen(req, timeout=CLOUD_TIMEOUT_S) as resp:
             for raw in resp:
@@ -2594,6 +2644,8 @@ def loopback_ladder(port: int, runner=None, cell=None):
                 if isinstance(d.get("membrane_tool"), dict):
                     agent_tools.append(d["membrane_tool"])
                     on_event("tool", d["membrane_tool"])
+                if isinstance(d.get("membrane_capped"), dict):
+                    capped = d["membrane_capped"]
                 for ch in d.get("choices") or []:
                     delta = ch.get("delta") or ch.get("message") or {}
                     if ch.get("finish_reason"):
@@ -2644,6 +2696,8 @@ def loopback_ladder(port: int, runner=None, cell=None):
             out["membrane_provider"] = provider
         if agent_tools:
             out["membrane_tools"] = agent_tools
+        if capped is not None:
+            out["membrane_capped"] = capped
         return out
     call.stream = stream
     return call
@@ -3463,7 +3517,19 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 if isinstance(p, dict) and p.get("type") == "text")
             if not text.strip():
                 return self._json_err(400, "message needs a text part")
+            # A PERSON'S CONTINUE (#389): the chat's button on a capped
+            # claude-agent answer; claimed once, refused on a loop's session
+            _cont = None
+            from . import claude_agent as _CA
+            if b.get(_CA.CONTINUE_FIELD):
+                try:
+                    _cont = (str(b[_CA.CONTINUE_FIELD]),
+                             runner.claude_continue(sid, str(b[_CA.CONTINUE_FIELD])))
+                except _CA.ContinueRefused as e:
+                    return self._json_err(409, str(e))
             user_info, row = self._record_user(sid, text, b)
+            if _cont is not None:
+                user_info[_CA.CONTINUE_FIELD], user_info[_CA.RESUME_KEY] = _cont
             # THE MESSAGE'S PICK STICKS (the chooser's last mile, the
             # operator's 'the chooser is ignored' exhibit): the POST's
             # body carries the TUI's CURRENT model; the message lane
