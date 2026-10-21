@@ -342,10 +342,34 @@ window and payoff, rung 8's pairs). On a phone the caption row is hidden to keep
 
 ### The 👶 panel: self's character sheet
 
-A 👶 tab sits at the left edge of the home view (clear of a phone's notch).
-It opens self's side panel: a column beside the field on a wide screen, a
+A tab sits at the left edge of the home view (clear of a phone's notch),
+showing Blurp's body (below). It opens self's side panel: a column beside the field on a wide screen, a
 full-screen overlay on a narrow one. Open or closed is remembered per browser.
 Esc or × closes it.
+
+**Blurp's body (#358).** The tab, the panel's header and each zoo card draw
+Blurp as the film draws it -- a soft gold body with a glow, a slight wobble,
+two eyes, a blink now and then, a small smile -- not as a 👶. It shows only
+what the seat reports:
+
+- **asleep** (the seat's card, `GET /membrane/self/card`: `awake` false --
+  switched off or asleep from tiredness, #345): the eyes close and z's drift
+  up beside it. Before the card loads (or from a seat without it) the 💤
+  toggle's state decides.
+- **energy** (the same card, 0..1): the glow scales from 30 % of the film's at
+  0 to the full glow at 1; a card without energy keeps the full glow.
+- **the look:** while self has a fresh look on the 3D field (the same 8 s
+  freshness as 👁 self's eyes), the eyes turn toward where that thing is on
+  the screen from the amoeba; with none they look straight ahead.
+
+The page re-reads the card every 15 s while the tab is visible (and at once
+after the 💤 toggle). One animation loop draws every body, and only while
+one is on the screen and the browser tab is visible: a hidden panel, a closed
+zoo or a background tab costs nothing. With *reduce motion* set, each body is
+a still frame (no wobble, blink or drifting z's), redrawn when what it shows
+changes. Light and dark alike: the body is the page's gold, the z's take the
+theme's text colour. The 3D field's amoeba keeps its own shape (a 3D body;
+the flat face does not fit it).
 
 The panel is laid out like an RPG character sheet: its structure, not its
 styling (membrane's own look, light and dark). Each section folds; the
