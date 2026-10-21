@@ -91,7 +91,7 @@ def _queued(srv, eid, prompt):
 
 
 # the pairs come one per push (#215): enough pushes for RUNG8_LOOKS reply checks
-CYCLES = (SL.RUNG8_LOOKS + 5) * SL.MEET_EVERY
+CYCLES = (SL.RUNG8_LOOKS + 5) * int(SL.MEET_EVERY / SL.PACE_S)   # #343: MEET_EVERY is s; cycles at 10 s
 
 
 @pytest.fixture(autouse=True)

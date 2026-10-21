@@ -128,7 +128,7 @@ BUILT_AT = {
     # change itself (#320): the dream and its test
     "change": {"pr": 326, "merged": _utc(2026, 10, 20, 20, 21, 28)},
 }
-RESTART_S = 3 * SL.PACE_S     # a record gap this long is a restart: the loop writes a line every PACE_S
+RESTART_S = 3 * SL.PACE_S     # a record gap this long is a restart: the loop wrote a line every PACE_S (#343: faster now)
 WALL_WHY = "no built skill to learn: {next} not built yet"
 RESTART7 = "restarted {day}: was grading the LLM, now grades " + NAME
 VOIDED = "rung {rung} passed {at} under the #254 bug: graded the LLM, not " + NAME + "; doesn't count"
@@ -165,20 +165,32 @@ CAVEAT = ("The child scale is an analogy, not a measurement: each open point is 
 
 def fastest_cycles() -> dict:
     """The fewest cycles each built rung's test needs once the rung below
-    passed (self_loop's constants): the fastest-possible line."""
+    passed (self_loop's constants): the fastest-possible line. #343: the gaps
+    are seconds now; they count here as cycles at PACE_S, the old 10 s pace
+    (a rung bound by counts can pass faster at today's pace)."""
     r2 = SL.RUNG2_REACHES + SL.AUDIT_REACHES
     return {1: SL.RUNG1_CYCLES, 2: r2, 3: SL.RUNG3_WINDOW - r2, 4: SL.RUNG4_TIMED,
-            5: SL.RUNG5_LOOKS, 6: SL.RUNG6_PUSHES * SL.MEET_EVERY, 7: SL.RUNG7_PUSHES * _turn_every(),
-            8: SL.RUNG8_LOOKS * _turn_every(),
-            9: SL.MIRROR_LAG + 3 + SL.MIRROR_MIN_FIT + SL.MIRROR_LOOKS,   # #312: the stranger's lag, the fit, the looks
-            10: SL.CHANGE_WINDOW * SL.CHANGE_EVERY,                       # #320: a day of dreams
-            11: SL.SPEAK_PUSHES * SL.MEET_EVERY}   # #311: speak is in chat
+            5: SL.RUNG5_LOOKS, 6: SL.RUNG6_PUSHES * _cycles(SL.MEET_EVERY), 7: SL.RUNG7_PUSHES * _cycles(_turn_every()),
+            8: SL.RUNG8_LOOKS * _cycles(_turn_every()),
+            9: _cycles(SL.MIRROR_LAG) + 3 + SL.MIRROR_MIN_FIT + SL.MIRROR_LOOKS,   # #312: the stranger's lag, the fit, the looks
+            10: SL.CHANGE_WINDOW * _cycles(SL.CHANGE_EVERY),                       # #320: a day of dreams
+            11: SL.SPEAK_PUSHES * _cycles(SL.MEET_EVERY)}   # #311: speak is in chat
 
 
-def _turn_every() -> int:
-    """Cycles between self's turns from rung 7 on: the ball's clock (#278), the
+def _cycles(s: float) -> int:
+    """#343: a gap in seconds as cycles at the old pace (PACE_S)."""
+    return int(round(s / SL.PACE_S))
+
+
+def _turn_every() -> float:
+    """Seconds between self's turns from rung 7 on: the ball's clock (#278), the
     turns' last medium (#333: the turns went with meet and roll)."""
     return SL.TOY_MEET_EVERY
+
+
+def _dur(s: float) -> str:
+    """#343: a gap for the needs line: s, min or h."""
+    return f"{s / 3600:g} h" if s >= 3600 else f"{s / 60:g} min" if s >= 60 else f"{s:g} s"
 
 
 def _needs() -> dict:
@@ -187,12 +199,12 @@ def _needs() -> dict:
             3: f"{SL.RUNG3_WINDOW} looks so its kinds can agree across halves",
             4: f"{SL.RUNG4_TIMED} timed looks",
             5: f"{SL.RUNG5_LOOKS} looks with noticing on, both audit shifts caught",
-            6: f"{SL.RUNG6_PUSHES} lines sent, {SL.MEET_EVERY} cycles apart",
-            7: f"{SL.RUNG7_PUSHES} timed turns with the ball with a reply check, at least {_turn_every()} cycles apart",
+            6: f"{SL.RUNG6_PUSHES} lines sent, {_dur(SL.MEET_EVERY)} apart",
+            7: f"{SL.RUNG7_PUSHES} timed turns with the ball with a reply check, at least {_dur(_turn_every())} apart",
             8: f"{SL.RUNG8_LOOKS} reply checks, one per line",
             9: f"{SL.MIRROR_LOOKS} looks at the mirror and the stranger, after the stranger's "
-               f"{SL.MIRROR_LAG}-move lag and {SL.MIRROR_MIN_FIT} to learn from",
-            10: (f"{SL.CHANGE_WINDOW} dreams, {SL.CHANGE_EVERY} cycles apart, each replaying its last "
+               f"{_dur(SL.MIRROR_LAG)} lag and {SL.MIRROR_MIN_FIT} to learn from",
+            10: (f"{SL.CHANGE_WINDOW} dreams, {_dur(SL.CHANGE_EVERY)} apart, each replaying its last "
                  f"{SL.CHANGE_LOOKS} timed looks; a change it adopted, checked on the {SL.CHANGE_LOOKS} looks after it"),
             11: (f"{SL.SPEAK_PUSHES} timed lines with a reply check, at least {SL.SPEAK_EACH} with words "
                  f"and {SL.SPEAK_EACH} plain")}

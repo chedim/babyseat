@@ -64,7 +64,8 @@ other's last act -- a person's poke on ANY toy -- is kept in one small file
 THE MIRROR (#312): rung 9's apparatus -- recognize itself. Self feeds it its
 own move each cycle (mirror_feed: one scalar, self_loop._mirror_move), and
 it has two sides: the GLASS shows the move from `delay` feeds back, the
-STRANGER self's own move from `lag` (MIRROR_LAG) feeds back -- the same
+STRANGER self's own move from `lag_s` (MIRROR_LAG) seconds before the glass's
+(#343: it was `lag` feeds, 187 at the old 10 s cycle) -- the same
 statistics, nothing to do with what self does now -- each plus seeded
 gaussian jitter (SD `jitter`). Its state keeps the moves it needs (a restart
 keeps them); its log flags the glass's change `by: self` and the stranger's
@@ -116,9 +117,9 @@ KINDS = {
     "mirror": {"about": "self's mirror (rung 9, #312): the glass shows self's own moves a moment late, and a "
                         "stranger beside it shows self's moves from half an hour ago -- the same moves, only "
                         "the glass follows what self does now",
-               "params": {"delay": 1, "lag": 187, "jitter": 0.1}, "clock": False},
+               "params": {"delay": 1, "lag_s": 1870.0, "jitter": 0.1}, "clock": False},
 }
-MIRROR_LAG = KINDS["mirror"]["params"]["lag"]   # #312: the stranger's replay, feeds back (self_loop.MIRROR_LAG)
+MIRROR_LAG = KINDS["mirror"]["params"]["lag_s"]   # #312: the stranger's replay, s behind the glass (self_loop.MIRROR_LAG; #343)
 ACTIONS = {"tower": ("knock", "rebuild"), "die": ("roll",), "drift": ("nudge",), "burst": ("nudge",),
            "ball": ("roll",)}
 RESERVED_BY = ("self", "world")         # only the toy itself and self's own looks write these
@@ -281,7 +282,7 @@ def _params(kind: str, given: dict | None) -> tuple[dict, int | None]:
         "every": lambda v: v > 0, "period": lambda v: v > 0, "window": lambda v: v > 0,
         "active": lambda v: 0 <= v <= 1, "min_s": lambda v: v > 0, "step": lambda v: v > 0,
         "p": lambda v: 0 < v <= 1, "faces": lambda v: 2 <= v <= 1000, "n": lambda v: 1 <= v <= TOWER_MAX,
-        "delay": lambda v: 1 <= v <= 10, "lag": lambda v: 10 <= v <= 10000, "jitter": lambda v: 0 <= v <= 10,
+        "delay": lambda v: 1 <= v <= 10, "lag_s": lambda v: 10 <= v <= 10000, "jitter": lambda v: 0 <= v <= 10,
     }
     for k, ok in checks.items():
         if k in out and not ok(out[k]):
@@ -598,9 +599,13 @@ def roll_self(name: str, now: float | None = None) -> dict:
 
 def mirror_feed(name: str, move: float, now: float | None = None) -> dict:
     """#312: self feeds its mirror this cycle's move (one scalar); the glass
-    then shows the move from `delay` feeds back, the stranger the one from
-    `lag` back, each with seeded jitter (None until it has one that old).
-    Self's loop is the only caller. -> {ok, name, glass, stranger} | {ok: False, error}."""
+    then shows the move from `delay` feeds back, the stranger the latest one
+    fed at least `lag_s` s before the glass's (#343: time, not feeds), each
+    with seeded jitter (None until it has one that old). The moves are kept
+    as [ts, move], only as far back as the stranger still shows; a mirror
+    from before #343 (`lag` in feeds, untimed moves) takes the default lag_s
+    and starts its moves afresh. Self's loop is the only caller.
+    -> {ok, name, glass, stranger} | {ok: False, error}."""
     now = time.time() if now is None else float(now)
     name = str(name or "").strip().lower()
     if not _path(name).exists():
@@ -610,12 +615,23 @@ def mirror_feed(name: str, move: float, now: float | None = None) -> dict:
         if st["kind"] != "mirror":
             return {"ok": False, "error": f"{name} is a {st['kind']}, not a mirror"}
         prm = st["params"]
-        d, lag, j = int(prm["delay"]), int(prm["lag"]), float(prm["jitter"])
-        moves = (list(st.get("moves") or []) + [float(move)])[-(d + lag + 1):]
+        if "lag_s" not in prm:                       # #343: a mirror from before (lag in feeds)
+            prm.pop("lag", None)
+            prm["lag_s"] = KINDS["mirror"]["params"]["lag_s"]
+        d, lag_s, j = int(prm["delay"]), float(prm["lag_s"]), float(prm["jitter"])
+        moves = [m for m in (st.get("moves") or []) if isinstance(m, list)] + [[now, float(move)]]
+        shown = {"glass": len(moves) - 1 - d if len(moves) > d else None, "stranger": None}
+        if shown["glass"] is not None:               # the latest move lag_s before the glass's
+            bound = moves[shown["glass"]][0] - lag_s
+            shown["stranger"] = next((i for i in range(shown["glass"], -1, -1) if moves[i][0] <= bound), None)
+        keep = shown["stranger"] or 0
+        if keep:                                     # nothing before it is shown again
+            moves = moves[keep:]
+            shown = {k: (None if i is None else i - keep) for k, i in shown.items()}
         st["moves"] = moves
-        for side, back, by in (("glass", d, "self"), ("stranger", d + lag, "world")):
-            if len(moves) > back:
-                v = round(moves[-1 - back] + j * _rng(st).gauss(0.0, 1.0), 4)
+        for side, by in (("glass", "self"), ("stranger", "world")):
+            if shown[side] is not None:
+                v = round(moves[shown[side]][1] + j * _rng(st).gauss(0.0, 1.0), 4)
                 st[side] = v
                 _note(st, now, by, "show", side=side, value=v)
             else:

@@ -155,13 +155,13 @@ def test_the_toy_medium_has_its_own_clock_and_the_chat_keeps_todays():
     assert SL.TOY_TURN_NAMES == ("0-20s", "20-60s", "1-3m", "3m+")
     assert len(SL.TOY_TURN_BINS) == len(SL.TURN_BINS)                  # the same bandit, the same 4 windows
     assert SL.TOY_TURN_BINS[0] >= 2 * SL.PACE_S                          # the first window spans two cycles
-    assert 1 <= SL.TOY_MEET_EVERY <= 3                                   # a turn at most every couple of cycles
-    assert SL.TOY_MEET_MAX * SL.PACE_S <= 600.0                          # an overdue cap of a few minutes
-    assert SL.TOY_MEET_MAX * SL.PACE_S > SL.TOY_TURN_BINS[-1] + SL.TOY_CHECK_S   # ...that still lets 3m+ be chosen
+    assert 1 <= SL.TOY_MEET_EVERY / SL.PACE_S <= 3                       # a turn at most every couple of (10 s) cycles (#343: s)
+    assert SL.TOY_MEET_MAX <= 600.0                                      # an overdue cap of a few minutes
+    assert SL.TOY_MEET_MAX > SL.TOY_TURN_BINS[-1] + SL.TOY_CHECK_S       # ...that still lets 3m+ be chosen
     assert SL.TOY_CHECK_S < SL.TOY_TURN_BINS[1]
     assert SL.TOY_CLOCK == 2
     # the chat medium: today's clock, untouched
-    assert (SL.MEET_EVERY, SL.MEET_MAX) == (30, 180)
+    assert (SL.MEET_EVERY, SL.MEET_MAX) == (300.0, 1800.0)                # #343: 30 and 180 cycles, in s
     assert SL.TURN_BINS == (120.0, 600.0, 1800.0) and SL.TURN_NAMES == ("0-2m", "2-10m", "10-30m", "30m+")
     assert SL.RUNG8_CHECK_S == 120.0
 
@@ -231,7 +231,7 @@ def test_dwell_counts_only_the_cycles_self_could_roll_in(monkeypatch):
         free = int(round((b["ts"] - chk["ts"]) / SL.PACE_S)) + 1          # from its check on, the ball back
         assert sum(b["dwell"]) <= free
         if chk["replied"]:
-            assert sum(b["dwell"]) == max(1, b["n"] - max(chk["n"], a["n"] + SL.TOY_MEET_EVERY) + 1)
+            assert sum(b["dwell"]) == max(1, b["n"] - max(chk["n"], a["n"] + SL.TOY_MEET_EVERY / SL.PACE_S) + 1)
 
 
 # ---- 3. a clean start: the window reads the current clock only --------------------------------
@@ -291,8 +291,8 @@ def test_the_simulation_plays_at_the_toy_clock():
     rows = SIM.drive_toy("rhythm", "policy", 24, 1)
     gaps = [b["ts"] - a["ts"] for a, b in zip(rows, rows[1:])]
     assert len(rows) / 24 > 10                                          # turns an hour: the old clock gave ~4
-    assert min(gaps) >= SL.TOY_MEET_EVERY * SL.PACE_S
-    assert max(gaps) <= SL.TOY_MEET_MAX * SL.PACE_S + SL.TOY_CHECK_S
+    assert min(gaps) >= SL.TOY_MEET_EVERY                               # #343: s (was cycles x PACE_S)
+    assert max(gaps) <= SL.TOY_MEET_MAX + SL.TOY_CHECK_S
     assert all(r["bin"] == SL._turn_bin(r["age"], SL.TOY_TURN_BINS) for r in rows)
     assert ("session", "policy") in SIM.TOY_CASES
 
@@ -312,10 +312,10 @@ def test_chance_still_never_passes_at_the_new_pace(seed):
 # ---- 5. the sheet and the page name the toy clock -------------------------------------------
 
 def test_the_sheet_counts_the_toy_clocks_pace():
-    assert str(SL.TOY_MEET_EVERY) in SS._needs()[7] and "ball" in SS._needs()[7]
+    assert SS._dur(SL.TOY_MEET_EVERY) in SS._needs()[7] and "ball" in SS._needs()[7]   # #343: "20 s"
     floors = SS.fastest_cycles()
-    assert floors[7] == SL.RUNG7_PUSHES * SL.TOY_MEET_EVERY
-    assert floors[8] == SL.RUNG8_LOOKS * SL.TOY_MEET_EVERY
+    assert floors[7] == SL.RUNG7_PUSHES * SL.TOY_MEET_EVERY / SL.PACE_S                 # cycles at the old pace
+    assert floors[8] == SL.RUNG8_LOOKS * SL.TOY_MEET_EVERY / SL.PACE_S
 
 
 def _js(expr, f="panel.js"):

@@ -154,7 +154,7 @@ def test_without_a_place_to_stand_and_no_current_nothing_runs():
 
 
 def test_the_nudges_happen_with_no_current(monkeypatch):
-    monkeypatch.setattr(SL, "AIM_HOLD", 2)                  # #333: a fresh aim (a thing) every other cycle
+    monkeypatch.setattr(SL, "AIM_HOLD", 2 * SL.PACE_S)      # #333: a fresh aim (a thing) every other cycle (#343: s)
     # (a nudge needs a held aim: it nudges only once its distance to it fell, decision 1)
     srv = _seat()
     SL._rt(srv)["isolate"] = set(SL._rt(srv)["isolate"]) | {"nudge"}

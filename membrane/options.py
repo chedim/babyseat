@@ -10,8 +10,9 @@ They live in the seat's settings.json (settings.py), so a restart keeps them.
 Per-device state (the last open chat tab, the camera) stays in the browser.
 
   self_cpu_share   Blurp's CPU share (#343): 0 < share <= 1, default 0.5. The
-                   self loop reads it with cpu_share() -- the file, validated
-                   on read -- so a write applies without a restart.
+                   self loop and the record cap read it with cpu_share(srv)
+                   -- the one reader: the file, validated on read -- so a
+                   write applies without a restart.
   current_tau_s    the field current's fade (efield.CURRENT_TAU_S, seconds):
                    READ-ONLY here. It is a threshold; changing it needs the
                    operator's approval (a code change, not an option).
@@ -21,7 +22,9 @@ Per-device state (the last open chat tab, the camera) stays in the browser.
 """
 from __future__ import annotations
 
+import json
 import math
+from pathlib import Path
 
 from . import settings as S
 
@@ -40,10 +43,24 @@ def _share_ok(v) -> bool:
             and math.isfinite(v) and 0 < v <= 1)
 
 
-def cpu_share() -> float:
-    """Blurp's CPU share as the seat has it (#343's loop reads this): the
-    settings file's value when it is valid, else the default."""
-    v = S.load().get(CPU_SHARE_KEY)
+def _settings_path(srv=None) -> Path:
+    """The seat's settings.json: beside the seat's self/ dir when a seat is
+    given (its data dir, where the models file sits), else settings.path()
+    (MEMBRANE_DATA_DIR) -- the same file on a running seat."""
+    mp = getattr(srv, "_models_path", None) if srv is not None else None
+    return Path(mp).parent / S.FILE if mp else S.path()
+
+
+def cpu_share(srv=None) -> float:
+    """Blurp's CPU share as the seat has it -- THE one reader (#343's loop,
+    self_loop.cpu_share, and #345's record cap delegate here): the settings
+    file's value when it is valid, else the default. Read on every call, so a
+    write applies without a restart."""
+    try:
+        raw = json.loads(_settings_path(srv).read_text())
+    except (OSError, ValueError):
+        raw = {}
+    v = raw.get(CPU_SHARE_KEY) if isinstance(raw, dict) else None
     return float(v) if _share_ok(v) else CPU_SHARE_DEFAULT
 
 

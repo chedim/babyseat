@@ -211,7 +211,7 @@ def _late_world(monkeypatch, lag):
     monkeypatch.setattr(SL, "_read_entity", lambda s, e, now: {"fired": True, "state": {"v": now}, "changed": False})
     srv = _seat()
     t0 = 5000.0
-    for i in range(SL.MEET_EVERY - 1):                 # one push, its reply check, before the next push
+    for i in range(int(SL.MEET_EVERY / SL.PACE_S) - 1):  # one push, its reply check, before the next (#343: 10 s cycles)
         clock["t"] = t0 + i * SL.PACE_S
         SL.cycle(srv, now=clock["t"])
     looks = [r for r in _record(srv) if r.get("kind") == "reach" and r.get("eid") == RESP and r["ts"] > t0]

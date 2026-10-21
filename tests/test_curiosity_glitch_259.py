@@ -135,4 +135,4 @@ def test_restart_detection_reads_timestamps_not_other_fields():
     recs = _run([("I", "changed", 1.0, 0.0)] * 3 + [("I", "unchanged", 0.99, 0.0)])
     recs[-1].update({"dt": 1e6, "why": "restart"})
     assert len(SL._ordinary_errors(recs)["I"]) == 4
-    assert SL.CURIO_GAP_S > SL.WAIT_EVERY * SL.PACE_S     # a recorded wait stretch is not a stall
+    assert SL.CURIO_GAP_S > SL.WAIT_EVERY                 # a recorded wait stretch is not a stall (#343: WAIT_EVERY is s)

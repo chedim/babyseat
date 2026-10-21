@@ -320,7 +320,7 @@ def _felt(toys=("ball", "die")):
 
 
 def test_once_feel_is_accepted_it_nudges_the_thing_it_aims_at_while_closing_in(monkeypatch):
-    monkeypatch.setattr(SL, "AIM_HOLD", 2)                       # many aims in a short test
+    monkeypatch.setattr(SL, "AIM_HOLD", 2 * 11.0)                # many aims in a short test: 2 cycles 11 s apart (#343: s)
     srv = _felt()
     outside = _cid("toy:elsewhere")                              # a spot on the field, outside its world
     srv.entity_store.upsert(QuantumEntity(eid=outside, cls="Component", properties={"name": "elsewhere"}),

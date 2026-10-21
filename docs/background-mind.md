@@ -465,9 +465,11 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   ([sleep.md](sleep.md)). It starts at birth (the first switch-on): scalars per
   cycle (step, push, gap, naive, the kind of change), errors, and each rung
   opening. Nothing before its birth is on it.
-- **The runaway guard.** Each cycle's change wakes the next, at least
-  `PACE_S` apart (`MEMBRANE_SELF_PACE_S`, default 10 s, floor 1 s) and at
-  most 30 a minute. Three failed cycles in a row hold the loop until the
+- **The pace and the runaway guard.** Each cycle's change wakes the next,
+  after a wait of the cycle's own duration × (1 / share − 1), `share` being
+  `self_cpu_share` in the seat's settings.json (default 0.5) × Blurp's energy
+  (#345), so a tired Blurp slows; at a share of 0 the loop waits for its 10 s
+  rest tick (#343: no fixed 10 s pace, no 30-a-minute cap any more). Three failed cycles in a row hold the loop until the
   operator's next toggle. A paused seat runs nothing.
 - **On the viewer.** Each cycle is drawn in the 3D field viewer as an amoeba:
   - **green**: from where it started to where it meant to go (its own push);

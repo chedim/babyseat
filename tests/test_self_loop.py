@@ -335,21 +335,8 @@ def test_mentions_never_move_it():
 
 
 # ---- the guard --------------------------------------------------------------
-
-def test_the_guard_keeps_the_pace():
-    srv = _seat()
-    SL.set_mode(srv, "on")
-    assert SL.cycle(srv, now=1000.0) is not None
-    assert SL.cycle(srv, now=1000.0 + SL.PACE_S / 2) is None
-
-
-def test_the_guard_caps_a_burst(monkeypatch):
-    monkeypatch.setattr(SL, "PACE_S", 0.1)
-    srv = _seat()
-    SL.set_mode(srv, "on")
-    ran = sum(1 for i in range(100) if SL.cycle(srv, now=1000.0 + i * 0.2) is not None)
-    assert ran == SL.BURST_PER_MIN
-
+# #343: the fixed pace and the burst cap are gone (decided): the loop's CPU share paces it
+# (test_cpu_share_343: the share's wait, no burst cap, the switch). The hold stays.
 
 def test_three_failed_cycles_hold_the_loop(monkeypatch):
     srv = _seat()

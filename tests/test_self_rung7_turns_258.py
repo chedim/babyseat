@@ -92,7 +92,8 @@ def _drive(kind, pusher, hours, seed):
     o = _Other(kind, seed)
     prng = random.Random(seed * 7 + 1)
     rows, pending, aim, best = [], None, None, None
-    since, dwell = SL.MEET_EVERY, [0] * NB
+    every, cap = SL.MEET_EVERY / SL.PACE_S, SL.MEET_MAX / SL.PACE_S   # #343: the gaps are s; this world steps 10 s cycles
+    since, dwell = every, [0] * NB
     for c in range(int(hours * 3600 / SL.PACE_S)):
         t = c * SL.PACE_S
         o.step(t)
@@ -100,7 +101,7 @@ def _drive(kind, pusher, hours, seed):
             pending["replied"] = pending.pop("_r")
             pending = None
         since += 1
-        if since < SL.MEET_EVERY:
+        if since < every:
             continue
         age = (t - o.last) if o.last is not None else None
         b = SL._turn_bin(age)
@@ -108,11 +109,11 @@ def _drive(kind, pusher, hours, seed):
         if pusher == "policy":
             if aim is None:
                 aim, best = SL._turn_choose(rows, random.Random(f"{seed}:{c}"))
-            go = b == aim or since >= SL.MEET_MAX
+            go = b == aim or since >= cap
         elif pusher == "timer":
             go, best = True, 0
         else:
-            go, best = prng.random() < 1.0 / SL.MEET_EVERY, 0
+            go, best = prng.random() < 1.0 / every, 0
         if not go:
             continue
         r = o.rng.random() < o.p_reply(age)

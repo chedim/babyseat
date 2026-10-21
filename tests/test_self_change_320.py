@@ -346,16 +346,28 @@ def test_it_dreams_only_while_change_is_open_and_on_its_beat(monkeypatch):
     calls = []
     monkeypatch.setattr(SL, "_dream", lambda recs, settings, now, k: calls.append(k) or [])
     srv = _timed_seat(10)
+    SL._rt(srv)["dream_at"] = 1e9 - SL.CHANGE_EVERY + 10.0         # #343: the beat is time -- a dream 10 s short of it
     SL._dream_tick(srv, n=SL.CHANGE_EVERY + 1, now=1e9)            # off the beat
     assert calls == []
-    SL._dream_tick(srv, n=SL.CHANGE_EVERY, now=1e9)
+    SL._dream_tick(srv, n=SL.CHANGE_EVERY, now=1e9 + 10.0)         # on it
     assert calls == [0]
     closed = _seat(rungs=(1, 2, 3, 4, 6), sub="closed")          # mirror not earned
     SL._dream_tick(closed, n=SL.CHANGE_EVERY, now=1e9)
     assert calls == [0]
     SL._rt(srv)["mode"] = "off"
-    SL._dream_tick(srv, n=2 * SL.CHANGE_EVERY, now=1e9)
+    SL._dream_tick(srv, n=2 * SL.CHANGE_EVERY, now=1e9 + 10.0 + SL.CHANGE_EVERY)   # on the beat, but off
     assert calls == [0]
+
+
+@pytest.mark.parametrize("step", [10.0, 1.0])
+def test_it_dreams_once_per_change_every_seconds_whatever_the_pace_343(monkeypatch, step):
+    monkeypatch.setattr(SL, "DREAM_THREAD", False)
+    calls = []
+    monkeypatch.setattr(SL, "_dream", lambda recs, settings, now, k: calls.append(now) or [])
+    srv = _timed_seat(10)
+    for i in range(int(2.5 * SL.CHANGE_EVERY / step)):
+        SL._dream_tick(srv, n=1 + i, now=1e9 + i * step)
+    assert calls == [1e9, 1e9 + SL.CHANGE_EVERY, 1e9 + 2 * SL.CHANGE_EVERY]   # an hour apart, at 10 s or 1 s cycles
 
 
 def test_an_adoption_changes_the_setting_the_file_and_the_record(monkeypatch, _data):
@@ -503,6 +515,7 @@ def test_the_loop_dreams_adopts_checks_and_earns_change_itself(monkeypatch):
     monkeypatch.setattr(SL, "DREAM_THREAD", False)
     monkeypatch.setattr(SL, "CHANGE_LOOKS", 500)
     monkeypatch.setattr(SL, "CHANGE_WINDOW", 8)
+    monkeypatch.setattr(SL, "CHANGE_EVERY", 0.0)     # #343: every tick below is on the beat (they were n multiples)
     srv = _seat()
     SL._rt(srv)["isolate"] = {"change"}
     SL._save_settings(srv, {**DEFAULTS, "lam_prior_looks": 10.0})
@@ -544,7 +557,7 @@ def test_the_sheet_says_the_criteria_in_words():
 
 def test_the_sheet_knows_when_it_was_built_and_how_fast_it_can_pass():
     assert SH.BUILT_AT["change"]["pr"] > 0 and SH.BUILT_AT["change"]["merged"] > 0
-    assert SH.fastest_cycles()[10] == SL.CHANGE_WINDOW * SL.CHANGE_EVERY
+    assert SH.fastest_cycles()[10] == SL.CHANGE_WINDOW * SL.CHANGE_EVERY / SL.PACE_S   # #343: s, as cycles at 10 s
     assert "dream" in SH._needs()[10]
     assert SH.SKILL_LABEL[10]
     assert "Siegler" in SH.CHILD[10][1]

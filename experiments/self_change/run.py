@@ -54,7 +54,7 @@ def main(path, since=None):
         if r.get("kind") != "cycle":
             continue
         cycles += 1
-        if cycles % SL.CHANGE_EVERY or r["ts"] < since:
+        if cycles % int(round(SL.CHANGE_EVERY / SL.PACE_S)) or r["ts"] < since:   # #343: CHANGE_EVERY is s
             continue
         snap = recs[:j + 1]
         k = sum(1 for x in lines if x["kind"] == "change")
