@@ -1,7 +1,7 @@
 """THE CLAUDE-AGENT RUNG (issue #384): Claude through the Claude Agent SDK.
 
 The SDK (`claude-agent-sdk`, an OPTIONAL extra: `pip install
-'membrane[claude-agent]'`) drives the local `claude` CLI with that CLI's own
+'babyseat[claude-agent]'`) drives the local `claude` CLI with that CLI's own
 login. membrane never reads the login's token and never calls an Anthropic
 API itself: a turn routed to a `claude-agent:<model>` rung is handed to the
 SDK's query() -- the turn's system messages as the system prompt, the rest
@@ -53,7 +53,7 @@ MARK_KEY = "madeBy"                 # transcript rows: info[MARK_KEY] == PROVIDE
 RESP_KEY = "membrane_provider"      # proxy responses/chunks: the answering provider
 ENABLED_MARK = "cli-login"          # what `membrane auth claude-agent` stores:
                                     # not a secret, only "use the CLI's login"
-INSTALL_HINT = ("pip install 'membrane[claude-agent]' (or: pip install "
+INSTALL_HINT = ("pip install 'babyseat[claude-agent]' (or: pip install "
                 "claude-agent-sdk)")
 LOGIN_HINT = ("install Claude Code, run `claude` once to log in, then "
               "`membrane auth claude-agent`")

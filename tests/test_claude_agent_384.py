@@ -607,3 +607,14 @@ class TestAbsorb(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_the_install_hint_names_the_package_on_pypi():
+    """The distribution is babyseat (0.7's rename); membrane is only the module."""
+    import tomllib
+    from pathlib import Path
+    from membrane import claude_agent as CA
+    root = Path(__file__).resolve().parent.parent
+    name = tomllib.loads((root / "pyproject.toml").read_text())["project"]["name"]
+    assert f"{name}[claude-agent]" in CA.INSTALL_HINT
+    assert f"{name}[claude-agent]" in (root / "docs" / "claude-agent.md").read_text()

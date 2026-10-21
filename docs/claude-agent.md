@@ -10,7 +10,7 @@ does not read that login's token and does not call an Anthropic API itself.
 ## Turning it on
 
 1. Install the optional extra on the seat's Python:
-   `pip install 'membrane[claude-agent]'` (or `pip install claude-agent-sdk`).
+   `pip install 'babyseat[claude-agent]'` (or `pip install claude-agent-sdk`).
 2. Install Claude Code and log in once: run `claude`, or `claude auth login`.
    The SDK also ships its own copy of the CLI. membrane uses the `claude`
    on your PATH first, and that bundled copy if there is none.
