@@ -677,6 +677,11 @@ def main() -> None:
         # at once and CPython 3.14 aborts on that (issue #121).
         _log_fh = SafeStderr(log_path)
         sys.stderr = _log_fh
+    else:
+        # #347: serve / standalone print to stdout and stderr from ~20 threads too;
+        # the same write-through guard, so a shutdown race can never SIGABRT
+        from .safestderr import install_safe_stdio
+        install_safe_stdio()
 
     backend = args.backend.rstrip("/")
     chat_models = _chat_capable_models(backend)
