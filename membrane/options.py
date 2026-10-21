@@ -15,7 +15,9 @@ Per-device state (the last open chat tab, the camera) stays in the browser.
   current_tau_s    the field current's fade (efield.CURRENT_TAU_S, seconds):
                    READ-ONLY here. It is a threshold; changing it needs the
                    operator's approval (a code change, not an option).
-  health           Blurp's health, 0..1 (#333): None until health exists.
+  energy           Blurp's energy, 0..1, and whether it is asleep (#345, #363):
+                   READ-ONLY, from energy.report() for the seat's self; None
+                   with no seat or no self yet. Energy replaced health.
 """
 from __future__ import annotations
 
@@ -28,7 +30,7 @@ CPU_SHARE_DEFAULT = 0.5
 WRITABLE = (CPU_SHARE_KEY,)
 READ_ONLY = {
     "current_tau_s": "current_tau_s is read-only: changing the current's fade needs the operator's approval",
-    "health": "health is read-only: it is Blurp's to report (#333), not a setting",
+    "energy": "energy is read-only: it is Blurp's to report (#345), not a setting",
 }
 TAU_NOTE = "changing it needs the operator's approval"
 
@@ -45,18 +47,25 @@ def cpu_share() -> float:
     return float(v) if _share_ok(v) else CPU_SHARE_DEFAULT
 
 
-def _health():
-    """Blurp's health (#333) -- not built yet: the window keeps its place."""
-    return None
+def _energy(srv):
+    """Blurp's energy and asleep (#363), or None: no seat, or no self yet."""
+    if srv is None:
+        return None
+    from . import energy as E
+    try:
+        r = E.report(srv)
+        return {"energy": float(r["energy"]), "asleep": bool(r["asleep"])}
+    except Exception:
+        return None
 
 
-def read() -> dict:
+def read(srv=None) -> dict:
     from .efield import CURRENT_TAU_S
     return {CPU_SHARE_KEY: cpu_share(),
             "defaults": {CPU_SHARE_KEY: CPU_SHARE_DEFAULT},
             "writable": list(WRITABLE),
             "current_tau_s": float(CURRENT_TAU_S), "current_tau_note": TAU_NOTE,
-            "health": _health()}
+            "energy": _energy(srv)}
 
 
 def apply(body) -> dict:

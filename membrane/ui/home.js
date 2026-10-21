@@ -751,14 +751,15 @@ function optionsRows(o) {
   o = o || {};
   const pct = optSharePct(o.self_cpu_share), def = optSharePct((o.defaults || {}).self_cpu_share);
   const tau = o.current_tau_s != null ? zooEsc(o.current_tau_s) + " s" : "?";
-  const health = o.health == null ? "not built yet (#333)" : Math.round(Number(o.health) * 100) + "%";
+  const en = o.energy && isFinite(Number(o.energy.energy)) ? o.energy : null;     // #363: energy replaced health
+  const energy = en ? Math.round(Number(en.energy) * 100) + "% · " + (en.asleep ? "asleep" : "awake") : "not running yet";
   return `<div class="orow"><label class="olab" for="opt-share">${zooEsc(SELF_NAME)}'s CPU share</label>` +
       `<output class="oval" for="opt-share">${pct}%</output>` +
       `<input id="opt-share" class="oshare" type="range" min="${OPT_SHARE_MIN}" max="${OPT_SHARE_MAX}" step="5" value="${pct}" ` +
       `aria-describedby="opt-share-h"><p class="ohint" id="opt-share-h">how much of one CPU its cycles may use (default ${def}%)</p></div>` +
     `<div class="orow"><span class="olab">the field current's fade</span><span class="oval">${tau}</span>` +
       `<p class="ohint">read-only: ${zooEsc(o.current_tau_note || "changing it needs the operator's approval")}</p></div>` +
-    `<div class="orow"><span class="olab">${zooEsc(SELF_NAME)}'s health</span><span class="oval">${zooEsc(health)}</span></div>`;
+    `<div class="orow"><span class="olab">${zooEsc(SELF_NAME)}'s energy</span><span class="oval">${zooEsc(energy)}</span></div>`;
 }
 
 class OptionsWindow {

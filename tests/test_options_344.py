@@ -52,8 +52,20 @@ class TestTheRead(unittest.TestCase):
         self.assertEqual(o["current_tau_s"], EF.CURRENT_TAU_S)
         self.assertEqual(o["current_tau_s"], 180.0)
         self.assertIn("approval", o["current_tau_note"])
-        self.assertIsNone(o["health"])
+        self.assertIsNone(o["energy"])                     # #363: no seat given, nothing to report
+        self.assertNotIn("health", o)                      # energy replaced health (#345)
         self.assertEqual(o["writable"], ["self_cpu_share"])
+        json.dumps(o)
+
+    def test_energy_comes_from_the_seat_363(self):
+        from membrane import energy as E
+        rep = {"energy": 0.873, "asleep": False, "reserves": {}, "pull": 0.1, "limiting": "energy"}
+        with _env(), mock.patch.object(E, "report", return_value=rep) as r:
+            o = O.read(srv=object())
+        r.assert_called_once()
+        self.assertEqual(o["energy"], {"energy": 0.873, "asleep": False})
+        with _env(), mock.patch.object(E, "report", side_effect=RuntimeError("no self yet")):
+            self.assertIsNone(O.read(srv=object())["energy"])   # a seat without a self: nothing, not a crash
         json.dumps(o)
 
     def test_it_is_a_seat_setting(self):
@@ -107,6 +119,9 @@ class TestTheWrite(unittest.TestCase):
             self.assertIn("approval", str(cm.exception))
             with self.assertRaises(ValueError):
                 O.apply({"health": 1.0})
+            with self.assertRaises(ValueError) as cm:
+                O.apply({"energy": 1.0})
+            self.assertIn("read-only", str(cm.exception))
             self.assertEqual(EF.CURRENT_TAU_S, 180.0)
 
     def test_unknown_and_empty_are_refused(self):
