@@ -76,7 +76,7 @@ built.
 
 [alzheimers.md](alzheimers.md) argues that the hippocampus is the **loop
 that writes** the present into lasting memory, not the store itself. In
-Blurp that loop is **sleep's consolidation** (#345 part 3, not built yet).
+Blurp that loop is **sleep's consolidation** (#345 part 2, built: [sleep.md](sleep.md)).
 At sleep, the day's raw record moves to dated archives. What Blurp knows
 crosses the night only as summaries, which carry exactly the windows its
 tests read: the last turns, each thing's last looks, the rung windows.
@@ -92,9 +92,10 @@ summaries are written:
 | Skill learning intact | Skills and the settings "change itself" keeps (in `self/settings.json`) persist |
 | Meets his researchers afresh | Meets each person afresh after every sleep: "expect a reply" starts over |
 
-The row about skills holds only if the settings live outside the record,
-which they do today. That is a claim worth checking when consolidation is
-built, not an assumption.
+The row about skills holds only if the settings live outside the record.
+Now that consolidation is built, that is checked: `settings.json`,
+`model.json` and `tempo.json` sit beside the record and no sleep touches
+them.
 
 ## The experiment
 
