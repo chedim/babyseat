@@ -1008,13 +1008,79 @@ function ballChimeNotes() {
 /** The hidden tab's title, flashing: the alert on even ticks, the page's own title on odd. */
 function titleFlash(base, text, tick) { return (Number(tick) || 0) % 2 ? base : text; }
 
-/** The ▶/⏸ auto-chat toggle's title (#318: no role any more -- auto-chat is
- *  the LLM's turn going on by itself; the toggle drives the chat overlay's
- *  person's session, never a mind's read-only view). */
-function autoTitle(a) {
-  return a && a.on
-    ? "auto-chat ON: the LLM works on by itself (round " + (a.rounds || 0) + ") -- click to pause"
-    : "auto-chat paused -- click to play (the LLM works on by itself, round after round; you can join any time)";
+// THE SEAT'S PAUSE (#348, decided 2026-10-21): the ▶ in the top bar is the
+// nerve pause (lanes.nerve_paused, the operator's stable point) -- ▶ while the
+// seat runs, ⏸ while it is paused. GET /membrane/seat/pause reads it (on load,
+// every PAUSE_POLL_MS -- the typed `pause` / `resume` and the battery move it
+// too -- and after every change); a post of {paused} sets it behind the owner's
+// door. RAM-only on the seat: a restart resumes, so the button shows ▶ again.
+// PauseButton takes its button and the two calls, so node drives it with
+// stubs (tests/test_nerve_pause_348.py).
+const PAUSE_PATH = "/membrane/seat/pause";
+const PAUSE_POLL_MS = 15000;
+
+/** The button's face from GET /membrane/seat/pause ({paused, enabled}; null:
+ *  not read yet): its icon, title, aria-label and aria-pressed. What a pause
+ *  stops is what the seat's lanes do while lanes.nerve_paused() holds. */
+function pauseView(st) {
+  if (!st) return { icon: "▶", pressed: "false", label: "the seat's pause",
+                    title: "the seat's pause -- reading its state…" };
+  if (st.enabled === false) return { icon: "▶", pressed: "false", label: "the seat's pause (switched off)",
+    title: "the pause is switched off on this seat (MEMBRANE_NERVE_PAUSE=0): pausing changes nothing" };
+  if (st.paused) return { icon: "⏸", pressed: "true", label: "the seat is paused: resume it",
+    title: "the seat is paused -- click to resume: its acting lanes wake and what they held runs " +
+           "(the loops' queued events, the night's deferred pass, the autonode's backlog). A restart resumes it too." };
+  return { icon: "▶", pressed: "false", label: "the seat is running: pause it",
+    title: "the seat is running -- click to pause its acting lanes: the loops, the dreamer, the thinker's ticks, " +
+           "the night pass, the autonode, the idle judges, speech, " + SELF_NAME + "'s cycle and the scripts' model calls " +
+           "stand down, and the LLM's entity and file writes are refused. Reads, memory, intend and your chat stay. " +
+           "Not remembered: a restart resumes." };
+}
+
+class PauseButton {
+  /** btn: the top bar's ▶ / ⏸; get(path) -> the JSON; post(path, body) -> the JSON, or throws (the reason). */
+  constructor({ btn, get, post }) {
+    Object.assign(this, { btn, get, post });
+    this.state = null;
+    this.busy = false;
+    this.paint();
+  }
+
+  paint(note) {
+    const v = pauseView(this.state), b = this.btn;
+    b.textContent = v.icon;
+    b.title = note ? v.title + " -- " + note : v.title;
+    b.setAttribute("aria-label", v.label);
+    b.setAttribute("aria-pressed", v.pressed);
+    if (b.classList) b.classList.toggle("on", v.pressed === "true");
+  }
+
+  /** Read the seat's pause and show it. -> the state, or null (the reason in the title). */
+  async load() {
+    try {
+      this.state = await this.get(PAUSE_PATH);
+      this.paint();
+    } catch (e) { this.paint("the seat did not answer (" + (e && e.message || e) + ")"); }
+    return this.state;
+  }
+
+  /** Pause a running seat, resume a paused one (read first when the state is
+   *  unknown), then show what the seat says. -> the new state, or null. */
+  async click() {
+    if (this.busy) return null;
+    this.busy = true;
+    try {
+      if (!this.state && !(await this.load())) return null;
+      try {
+        this.state = await this.post(PAUSE_PATH, { paused: !this.state.paused });
+        this.paint();
+        return this.state;
+      } catch (e) {
+        this.paint("not changed: " + (e && e.message || e));
+        return null;
+      }
+    } finally { this.busy = false; }
+  }
 }
 
 // BLURP'S BODY (#358, the operator liked the film's Blurp): where the page drew
@@ -1185,7 +1251,7 @@ class BlurpBodies {
   }
 }
 
-const HomeLogic = { autoTitle, cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep,
+const HomeLogic = { pauseView, PauseButton, PAUSE_PATH, cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep,
   brainLabel, brainCaption, unlockText, setSelfName, brainKey, brainFresh, actableLine, ACT_FRESH_S, brainTrail, trailAlpha, frameRadius, selfFrame, frameDistance, dampTo,
   freshLook, followsNow, followRates, SELF_HOLD_MS, lookAngles, selfCamAngles,
   followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit, zooAgo, zooCard, zooCards,
@@ -1849,7 +1915,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._hushTts(); this._tiltStop();
       this._listenKeys(false);
       clearInterval(this._follow);
-      clearInterval(this._autoT); clearInterval(this._selfT); clearInterval(this._selfPanelT);
+      clearInterval(this._pauseT); clearInterval(this._selfT); clearInterval(this._selfPanelT);
       clearInterval(this._brainT); clearInterval(this._dockT);
       clearTimeout(this._cycT); this._titleStop();                // #331
       if (this._bodies) this._bodies.pause(true);                      // #358: no frames while off the page
@@ -2660,17 +2726,6 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       } catch (e) { this._zooMsg.textContent = "the switch failed (" + (e && e.message || e) + ")"; }
     }
 
-    _paintAuto() {
-      const b = this._autoBtn; if (!b) return;
-      // the auto state lives in the panel element's chat-state object
-      // (panel.js's applyEvent writes st.auto on it)
-      const a = (this._chat && this._chat._chat && this._chat._chat.auto) || null;
-      const on = !!(a && a.on);
-      b.textContent = on ? "⏸" : "▶";
-      b.style.opacity = on ? "1" : ".5";
-      b.title = autoTitle(a);
-    }
-
     // ---------------------------------------------------------- HA's own UI, one button away
     _dock(mode) {
       // HA's frontend listens for this (the sidebar's docked / auto /
@@ -2759,7 +2814,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <button class="zoobtn" title="The zoo: this house's seats, each with its own ${nm} -- tap one to talk to it" aria-label="the zoo: this house's seats" aria-haspopup="dialog" aria-expanded="false" aria-controls="zoopanel">🦠</button>
           <button class="me" title="What the camera follows: activity (whichever mind is working, else where the field changes) · seat · you · ${nm} (the 🌱 loop, framed to what it is doing) · 👁 ${nm}'s eyes (looking out from it)">◎ activity</button>
           <button class="chatbtn" title="Show / hide the chat">💬</button>
-          <button class="autobtn" title="auto-chat" aria-label="auto-chat">▶</button>
+          <button class="pausebtn" title="the seat's pause -- reading its state…" aria-label="the seat's pause" aria-pressed="false">▶</button>
           <span class="selfstat" title="where ${nm} is now: its rung, the bar toward the next, what it waits on"></span>
           <button class="rungbell" aria-label="${nm}'s rungs and ball: the chime and notifications" aria-pressed="true">🔔</button>
           <button class="optbtn" title="Options: the seat's long-term settings" aria-label="options" aria-haspopup="dialog" aria-expanded="false" aria-controls="optpanel">⚙</button>
@@ -2854,7 +2909,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       // aim at there
       if (VIEW === "graph") {
         this._chatBox.classList.add("hidden");
-        $(".chatbtn").style.display = "none"; this._autoBtn.style.display = "none";
+        $(".chatbtn").style.display = "none";
       } else if (VIEW === "chat") {
         root.classList.add("view-chat");
       }
@@ -2883,21 +2938,21 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         e.currentTarget.classList.toggle("on", on);
         lsSet(LS_CHAT, on ? "1" : "0");
       });
-      // THE AUTO-CHAT, WHERE THE HAND IS (the operator's ask, 2026-10-13):
-      // the button used to live buried in the chat's side menu -- it drives
-      // now beside 💬, as a play/pause: ▶ starts a session's auto-chat,
-      // ⏸ ends it; shift-click plays the teach mode. The state it mirrors
-      // lives in the chat element (the panel owns the route).
-      this._autoBtn = $(".autobtn");
-      this._autoBtn.addEventListener("click", (e) => {
-        const c = this._chat;
-        if (!c || typeof c._toggleAuto !== "function") return;
-        Promise.resolve(c._toggleAuto(e.shiftKey ? "teach" : "explore"))
-          .catch(() => {})
-          .then(() => this._paintAuto());
-      });
-      this._paintAuto();
-      this._autoT = setInterval(() => this._paintAuto(), 1500);
+      // THE SEAT'S PAUSE (#348): the ▶ / ⏸ beside 💬 pauses and resumes the
+      // seat's acting lanes (PauseButton above); the chat's auto-run it
+      // drove before is gone. Read now, polled while the page is visible.
+      this._pause = new PauseButton({ btn: $(".pausebtn"), get: (p) => this._get(p),
+        post: async (p, b) => {
+          const r = await this._hass.fetchWithAuth(HSERVE + p, { method: "POST",
+            headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
+          let d = null; try { d = await r.json(); } catch (e) { /* no body */ }
+          if (!r.ok) throw new Error((d && d.error) || (r.status === 401 ? "the seat token is needed to pause the seat"
+            : r.status === 403 ? "only an admin pauses the seat" : String(r.status)));
+          return d;
+        } });
+      this._pause.btn.addEventListener("click", () => this._pause.click());
+      this._pause.load();
+      this._pauseT = setInterval(() => { if (document.visibilityState !== "hidden") this._pause.load(); }, PAUSE_POLL_MS);
       // #161 / #299: where self is (the exp bar); the 🌱 growth-limit chooser that
       // sat here gave way to acceptance -- sleep / wake is the 👶 panel's toggle
       this._selfStat = $(".selfstat");
@@ -3382,8 +3437,8 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       });
       // SPEECH AS IT COMES: Argus's words the moment each part closes (🔊 on, or
       // a turn you started by voice), membrane's own lines in its own voice (🔊 on)
-      // the reply finished (auto-chat keeps the chat busy forever: idle never
-      // comes) -- the voice turn is over; the wave rests once speech is done
+      // the reply finished (a busy chat may not go idle for a long while:
+      // don't wait for it) -- the voice turn is over; the wave rests once speech is done
       this._chat.addEventListener("ai-reply", () => {
         this._voiceTurn = false;
         setTimeout(() => { if (!this._speaking && !(this._speechQ || []).length) this._speechDone(); }, 400);
@@ -4199,7 +4254,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         this._qRunning = false;
         this._speaking = false;
         this._speakingWho = null;
-        if (!(this._speechQ || []).length) this._speechDone();   // auto-chat keeps the chat busy: don't wait for idle
+        if (!(this._speechQ || []).length) this._speechDone();   // a busy chat may stay busy: don't wait for idle
       }
     }
 

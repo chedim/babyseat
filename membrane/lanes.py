@@ -1331,20 +1331,29 @@ def _is_pause_query(q: str) -> bool:
                    "pause", "resume", "unpause")
 
 
+def nerve_set(srv, on: bool, by: str | None = None) -> bool:
+    """Pause (True) or resume (False) the seat: the flag and its audit line
+    ({"event": "nerve", "op": "pause"|"resume", "ts"} plus `by` when the
+    caller is known). The one setter the typed frames and membrane home's
+    button (#348, seat_panel.set_pause) share. RAM-only, like the flag."""
+    srv.paused = bool(on)
+    rec = {"event": "nerve", "op": "pause" if on else "resume", "ts": time.time()}
+    if by:
+        rec["by"] = str(by)
+    _write_audit(getattr(srv, "membrane", None), rec)
+    return srv.paused
+
+
 def _pause_cmd(srv, q: str) -> str:
     low = " ".join(q.split()).lower().rstrip("?.!")
     if low in (_RESUME_CANON, "resume", "unpause"):
-        srv.paused = False
-        _write_audit(srv.membrane, {"event": "nerve", "op": "resume",
-                                    "ts": time.time()})
+        nerve_set(srv, False)
         return ("[membrane-intercept] resumed: the loops' pool drains, "
                 "the dreamer wakes on its idle cadence, the thinker's "
                 "digest + ticks + the night's deferred bodies run, the "
                 "autonode scans and fires the accumulated diff as a "
                 "bounded burst.\n\n" + _INTERCEPT_MARKER)
-    srv.paused = True
-    _write_audit(srv.membrane, {"event": "nerve", "op": "pause",
-                                "ts": time.time()})
+    nerve_set(srv, True)
     return ("[membrane-intercept] paused: the acting lanes are down "
             "(loops, dreamer, thinker's ticks/digest/idle-think, the "
             "night's bodies, the autonode, the idle judges, speech "

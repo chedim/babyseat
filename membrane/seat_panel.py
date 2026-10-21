@@ -4,18 +4,17 @@ uptime and a beat count, nothing else). The seat's presence entity
 (membrane::presence, the one the roster already reads) now carries:
 
   state     refreshed every REFRESH_S: paused, the loops (running / cap),
-            auto-chat per session, the active models,
+            the active models,
             the seat's memory and the phone's free memory, live stream
             clients, failing scripts
   events    the last EVENTS_KEEP things that happened to the seat -- a boot,
-            a pause/resume, auto-chat on/off, an empty continuation (the
-            stall), memory pressure, a stream client cut off, a refused
+            a pause/resume, memory pressure, a stream client cut off, a refused
             action -- each also published on the hub (membrane.seat) and
             readable by watches like any entity's change
   controls  applied by the seat itself, operator-only (POST
             /membrane/seat/control, an HA admin through the relay):
             paused (the one switch every acting lane honours), loops_max,
-            auto-chat per session (a {role} is ignored: #318), the self loop (off / on /
+            the self loop (off / on /
             watch, #161; self_loop.py), accepting an achievement self
             earned (#299: {"accept": id}, which opens what it leads to;
             the record says who, caller()) and self's name on this seat
@@ -23,6 +22,11 @@ uptime and a beat count, nothing else). The seat's presence entity
             edit of these properties by a lane is not a control (the
             refresh writes the truth back) -- the stable point stays the
             operator's call, and he can never lift his own limits.
+  the pause membrane home's ▶ / ⏸ button reads and sets (#348): GET / POST
+            /membrane/seat/pause -- pause_state() and set_pause(), the same
+            flag and audit line as the typed `pause` / `resume`
+            (lanes.nerve_set). Auto-chat and its per-session switch are
+            gone (#348).
 """
 from __future__ import annotations
 
@@ -35,7 +39,7 @@ REFRESH_S = 15.0
 EVENTS_KEEP = 20
 MEM_LOW_MB = 350             # the phone's MemAvailable under this: pressure
 RSS_HIGH_MB = 2300           # the seat itself over this: pressure
-CONTROLS = ("paused", "loops_max", "auto", "self", "accept", "self_limit", "self_name")
+CONTROLS = ("paused", "loops_max", "self", "accept", "self_limit", "self_name")
 CALLER_MAX = 80              # #299: the longest caller name a record line keeps
 
 
@@ -137,16 +141,9 @@ def _runner(srv):
 def state(srv) -> dict:
     """The seat now, in one dict."""
     from .lanes import nerve_paused
-    from . import voice as V
     r = _runner(srv)
     loops = getattr(srv, "loops", None)
     rss, avail = _mem()
-    auto = {}
-    if r is not None:
-        for sid in set((getattr(r, "_auto", None) or {})):
-            s = V.auto_state(r, sid)
-            title = str(((r.sessions.get(sid) or {}).get("title")) or sid)[:40] if getattr(r, "sessions", None) else sid
-            auto[sid] = {"title": title, "on": s["on"], "mode": s["mode"], "rounds": s["rounds"]}
     failing = 0
     try:
         est = _est(srv)
@@ -159,7 +156,6 @@ def state(srv) -> dict:
         "paused": bool(nerve_paused(srv)),
         "loops": {"running": loops.running() if loops is not None else 0,
                   "max": getattr(loops, "max", None)},
-        "auto": auto,
         "models": dict(getattr(srv, "_active_models", None) or {}),
         "loops_model": str(getattr(r, "model", "") or "") if r is not None else "",
         "cortex_model": str(getattr(srv, "idle_cortex_model", "") or ""),
@@ -262,21 +258,37 @@ def caller(token_sub=None, relay_speaker=None, body=None) -> str:
     return "ha:" + p if p else "operator"
 
 
+def pause_state(srv) -> dict:
+    """#348: the pause as membrane home's button reads it -- `paused` is what
+    the lanes honour (lanes.nerve_paused), `enabled` False when the kill
+    switch MEMBRANE_NERVE_PAUSE=0 makes a pause a no-op on this seat."""
+    from .lanes import nerve_paused
+    return {"paused": bool(nerve_paused(srv)),
+            "enabled": os.environ.get("MEMBRANE_NERVE_PAUSE") != "0"}
+
+
+def set_pause(srv, on: bool, by: str = "operator") -> dict:
+    """#348: pause / resume the seat (the nerve pause): the flag and the
+    typed frames' audit line (lanes.nerve_set, with who), the seat's event.
+    RAM-only: a restart resumes. -> pause_state()."""
+    from .lanes import nerve_set
+    nerve_set(srv, bool(on), by=by)
+    note(srv, "paused" if srv.paused else "resumed", by=by)
+    try:                                           # the refresh's diff must not note it again "by decree"
+        _st = (_entity(srv).properties or {}).get("state")
+        if isinstance(_st, dict):
+            _st["paused"] = srv.paused
+    except Exception:
+        pass
+    return pause_state(srv)
+
+
 def control(srv, body: dict, by: str = "operator") -> dict:
     """The operator's switches, applied by the seat (never by an edit)."""
-    from . import voice as V
-    r = _runner(srv)
     done = {}
     if "paused" in body:
-        srv.paused = bool(body["paused"])
+        set_pause(srv, bool(body["paused"]), by=by)
         done["paused"] = srv.paused
-        note(srv, "paused" if srv.paused else "resumed", by=by)
-        try:                                       # the refresh's diff must not note it again "by decree"
-            _st = (_entity(srv).properties or {}).get("state")
-            if isinstance(_st, dict):
-                _st["paused"] = srv.paused
-        except Exception:
-            pass
     if "loops_max" in body and getattr(srv, "loops", None) is not None:
         try:
             n = max(1, min(8, int(body["loops_max"])))
@@ -313,10 +325,6 @@ def control(srv, body: dict, by: str = "operator") -> dict:
         if n is not None:
             done["self_name"] = n
             note(srv, "self-name", value=n, by=by)
-    sid = str(body.get("session") or "")
-    if sid and r is not None and r.sessions.get(sid) is not None:
-        if "auto" in body:
-            done["auto"] = V.auto_set(r, sid, bool(body["auto"]), str(body.get("mode") or "explore"))["on"]
     refresh(srv)
     return {"ok": True, "applied": done, "state": (_entity(srv).properties or {}).get("state")}
 

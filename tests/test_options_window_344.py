@@ -4,7 +4,8 @@ The window's logic is HomeLogic.OptionsWindow (membrane/ui/home.js), driven
 here in node with stub elements: the ⚙ button opens and closes it (Escape and
 × close it too), opening reads GET /membrane/options, the CPU share slider
 (10-100 %) posts {"self_cpu_share": pct/100} and the window shows the saved
-value or the seat's refusal. The 🔔 and ▶ buttons stay in the top bar.
+value or the seat's refusal. The 🔔 and ▶ buttons stay in the top bar (the ▶
+is the seat's pause since #348).
 """
 import json
 import re
@@ -147,7 +148,7 @@ def test_the_percent_helpers():
 def test_the_top_bar_keeps_the_bell_and_play_and_gains_the_gear():
     src = (UI / "home.js").read_text()
     top = re.search(r'<div class="top glass">(.*?)</div>', src, re.S).group(1)
-    for cls in ("autobtn", "rungbell", "optbtn"):
+    for cls in ("pausebtn", "rungbell", "optbtn"):        # #348: the ▶ is the seat's pause now
         assert f'class="{cls}"' in top, cls
     assert re.search(r'class="optbtn"[^>]*>⚙</button>', top)
     assert 'aria-controls="optpanel"' in top

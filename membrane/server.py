@@ -1034,12 +1034,6 @@ class TurnRunner:
         self._turn_activity = getattr(self, "_turn_activity", {}) or {}
         self._aborting.add(sid)
         (getattr(self, "_preempted", None) or set()).discard(sid)   # Stop is a stop, even after a preempt
-        try:                                     # Stop ends auto-chat too
-            from . import voice as _voice
-            if _voice.auto_on(self, sid):
-                _voice.auto_set(self, sid, False)
-        except Exception:
-            pass
         if sid in (getattr(self, "_busy", None) or {}):
             self._kill_turn_socket(sid)
             return
@@ -1077,8 +1071,7 @@ class TurnRunner:
         whenever there is a message"): the running turn of this session is cut
         now -- the abort flag (between rounds) + its model socket (a round
         blocked in the model) -- and its finally drains the queue, so the
-        person's message runs next. Unlike Stop, auto-chat stays on: the loop
-        goes on, with the person's message in it. False when nothing runs."""
+        person's message runs next. False when nothing runs."""
         running = sid in (getattr(self, "_turn_stops", None) or {}) or sid in (getattr(self, "_busy", None) or {})
         if not running:
             return False
@@ -1157,11 +1150,11 @@ class TurnRunner:
                 continue
             out.append({"role": role, "content": text[:HISTORY_TEXT_CAP]})
         win = out[-HISTORY_MAX_MESSAGES:]
-        # THE ANCHOR (2026-10-11, "why is auto-chat not auto-chatting?"): the
-        # auto-chat's continuations add only his own replies -- after 12 the
-        # window held no user message at all, and the backend answered an
-        # all-assistant conversation with nothing (done_reason 'load', 0
-        # tokens), every round. The last user message always rides first.
+        # THE ANCHOR (2026-10-11, "why is auto-chat not auto-chatting?"): a
+        # continuation (auto-chat's rounds until #348; a job's turn) adds
+        # only his own replies -- after 12 the window held no user message
+        # at all, and the backend answered an all-assistant conversation
+        # with nothing (done_reason 'load', 0 tokens), every round. The last user message always rides first.
         if anchor and win and not any(m["role"] == "user" for m in win):
             last_user = next((m for m in reversed(out) if m["role"] == "user"), None)
             win = [last_user or {"role": "user", "content": "(continue)"}] + win[1:]
@@ -1714,7 +1707,7 @@ class TurnRunner:
         except Exception:
             pass
         # THE TURN'S TRIGGER (outcome learning: a goal planted in an operator's
-        # turn is the operator's; in auto-chat or a loop it is the seat's own)
+        # turn is the operator's; in a continuation or a loop it is the seat's own)
         try:
             self._turn_origin = getattr(self, "_turn_origin", None) or {}
             self._turn_origin[sid] = turn_origin(text, user_info, user_parts,
@@ -1782,9 +1775,9 @@ class TurnRunner:
         history = self._prior_history(sid, str(user_info.get("id") or ""),
                                       anchor=bool(user_info.get("continueTurn"))) \
             if user_info else []
-        # A CONTINUATION (auto-chat -- 2026-10-11, the operator's
-        # option 2: "the turn just keeps going"): no message at all; the next
-        # round starts from the conversation as it stands, his own last reply last
+        # A CONTINUATION (a finished job's turn, jobs.py; auto-chat's rounds
+        # used it until #348): no message at all; the next round starts
+        # from the conversation as it stands, his own last reply last
         if not user_info.get("continueTurn"):
             history.append({"role": "user", "content": text})
         elif user_info.get("jobText"):
@@ -1792,11 +1785,7 @@ class TurnRunner:
             history.append({"role": "user", "content": str(user_info["jobText"])})
         # MEMBRANE'S OWN VOICE (the third participant): it speaks first,
         # in its own thread, outside the session's messages
-        # an auto-chat round aims from Argus's own last reply,
-        # not from its boilerplate prompt
         _aim_text = text
-        if user_info.get("autoTurn"):
-            _aim_text = (getattr(self, "_auto_aim", None) or {}).pop(sid, "") or text
         try:
             from . import voice as _voice
             if not user_info.get("voiceTurn"):       # the voice just spoke: it IS this turn
@@ -2440,7 +2429,7 @@ class TurnRunner:
                                "\n".join(p.get("text") or "" for p in parts
                                          if isinstance(p, dict) and p.get("type") == "text"),
                                _lane_end,
-                               parts=parts, auto_turn=bool((user_info or {}).get("autoTurn")))
+                               parts=parts)
             if _lane_end not in _voice._CHAT_LANES:      # the chat's guess rides its voice line
                 from . import predict as _predict
                 threading.Thread(target=_predict.end, args=(self, sid, list(parts)),
@@ -2623,12 +2612,12 @@ STREAM_ROUNDS = os.environ.get("MEMBRANE_STREAM_ROUNDS", "1") != "0"
 
 def turn_origin(text, user_info=None, parts=None, agent=None) -> str:
     """Who set this turn going: 'operator' (a person's message), 'auto'
-    (auto-chat / the voice), 'loop' (a watch loop, a goal pulse, a called
+    (a continuation / the voice), 'loop' (a watch loop, a goal pulse, a called
     turn) or 'model' (anything else)."""
     ui = user_info or {}
     if _from_person(text, parts):
         return "operator"
-    if ui.get("autoTurn") or ui.get("voiceTurn") or ui.get("continueTurn"):
+    if ui.get("voiceTurn") or ui.get("continueTurn"):
         return "auto"
     if _lane_of(agent) in ("listener", "plan") and str(agent or "") not in ("", "build", "plan"):
         return "loop"
@@ -2638,7 +2627,7 @@ def turn_origin(text, user_info=None, parts=None, agent=None) -> str:
 def _from_person(text, parts=None) -> bool:
     """Does this user message come from a PERSON -- the HA proxy's / calld's
     '[HA user: <name>]' speaker line, in the text or a part? (A loop's goal
-    pulse, the auto-chat's own lines and membrane's voice carry none.)"""
+    pulse, a continuation and membrane's voice carry none.)"""
     from .speakers import split_speaker
     if split_speaker(str(text or ""))[0]:
         return True
@@ -2943,9 +2932,6 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 if segments_len(segs) == 2:
                     if segs[1] in ("todo", "children"):
                         return self._json_out([])
-                    if segs[1] == "auto":
-                        from . import voice as _voice
-                        return self._json_out(_voice.auto_state(runner, sid) if runner else {"on": False})
                     if segs[1] == "predict":
                         # membrane's phantoms: its guesses of Argus's moves (predict.py)
                         from . import predict as _predict
@@ -3080,6 +3066,13 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     _ent = _SP._entity(psrv)
                     self._json_out({"state": _SP.state(psrv), "events": list(((_ent.properties or {}) if _ent else {}).get("events") or []),
                                     "controls": list(_SP.CONTROLS)})
+            elif path == "/membrane/seat/pause":
+                # #348: the nerve pause, as membrane home's ▶ / ⏸ reads it
+                from . import seat_panel as _SP
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                if psrv is None:
+                    return self._json_err(503, "no seat")
+                self._json_out(_SP.pause_state(psrv))
             elif path == "/membrane/options":
                 # #344: the seat-wide options (options.py) -- the ⚙ window's read
                 from . import options as _OPT
@@ -3267,6 +3260,23 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                                  relay_speaker=getattr(self, "_ui_speaker", "") if getattr(self, "_ui_relay", False) else None,
                                  body=b)
                 return self._json_out(_SP.control(psrv, b, by=_by))
+            if path == "/membrane/seat/pause":
+                # #348: membrane home's ▶ / ⏸ -- {"paused": true|false} pauses or
+                # resumes the seat's acting lanes (lanes.nerve_paused), the typed
+                # pause's audit line with who; RAM-only. The owner's door above
+                # gates it like every write (off-box: the seat token)
+                from . import seat_panel as _SP
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                if psrv is None:
+                    return self._json_err(503, "no seat")
+                b = self._read_body()
+                if not isinstance(b, dict) or not isinstance(b.get("paused"), bool):
+                    return self._json_out({"error": "the body is {\"paused\": true|false}"}, code=400)
+                _tok = self._jwt_person()
+                _by = _SP.caller(token_sub=_tok.sub if _tok is not None else None,
+                                 relay_speaker=getattr(self, "_ui_speaker", "") if getattr(self, "_ui_relay", False) else None,
+                                 body=b)
+                return self._json_out(_SP.set_pause(psrv, b["paused"], by=_by))
             if path == "/membrane/options":
                 # #344: the ⚙ window's write -- the writable options only,
                 # validated (a 400 with the reason; nothing written), then
@@ -3339,17 +3349,6 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 sid = segs[0]
                 if segments_len(segs) == 2:
                     action = segs[1]
-                    if action == "auto":
-                        # auto-chat: {on: bool, mode} -- the LLM's turn keeps going by itself
-                        # (an old client's {role} is ignored: the babble role is gone, #318)
-                        from . import voice as _voice
-                        if runner is None or sessions.get(sid) is None:
-                            return self._notfound()
-                        b = self._read_body()
-                        if "on" not in b:
-                            return self._json_out(_voice.auto_state(runner, sid))
-                        return self._json_out(_voice.auto_set(runner, sid, bool(b.get("on")),
-                                                              str(b.get("mode") or "explore")))
                     if action == "voice":
                         # the teaching: {id, vote: up|down, rewrite}
                         from . import voice as _voice

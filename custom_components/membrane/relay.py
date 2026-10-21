@@ -61,14 +61,15 @@ ALLOWED_PREFIXES = ("session", "config", "provider", "mcp")
 # its unscoped twin)
 ALLOWED_EXACT = ("global/health", "agent", "event", "membrane/models", "membrane/seat", "membrane/seat/control",
                  "membrane/voice", "membrane/voice/state", "membrane/jsexec/register", "membrane/jsexec/result",
-                 "membrane/toybox/poke")
+                 "membrane/toybox/poke", "membrane/seat/pause")
 # #244: the 👶 panel's play buttons -- the poke is tagged with the HA user, stamped here;
 # #299: the seat's switches too (an admin's accept of self's achievement names them on its record)
-PERSON_PATHS = ("membrane/toybox/poke", "membrane/seat/control")
+PERSON_PATHS = ("membrane/toybox/poke", "membrane/seat/control", "membrane/seat/pause")
 # the voice + JS routes: the person is the HA user, stamped here, never the page's word
 VOICE_PATHS = ("membrane/voice", "membrane/voice/state", "membrane/jsexec/register", "membrane/jsexec/result")
-# the minds' models: everyone reads, only an HA ADMIN switches them
-ADMIN_WRITE_EXACT = ("membrane/models", "membrane/seat/control")
+# the minds' models: everyone reads, only an HA ADMIN switches them -- the seat's
+# pause too (#348: membrane home's ▶ / ⏸)
+ADMIN_WRITE_EXACT = ("membrane/models", "membrane/seat/control", "membrane/seat/pause")
 # the field dashboard + the drawer: the seat's read surfaces the serve
 # relays (membrane/server.py SEAT_READ_PATHS) -- GET only, exact paths
 READ_ONLY_EXACT = ("membrane/state", "membrane/map/field",
@@ -401,7 +402,8 @@ class ServeProxyView(HomeAssistantView):
         if read_only_path(rest) and method != "GET":
             return web.Response(status=405, text="field reads are GET only")
         if rest in ADMIN_WRITE_EXACT and method != "GET" and not getattr(user, "is_admin", False):
-            return web.Response(status=403, text="only an admin switches the minds' models")
+            return web.Response(status=403, text="only an admin pauses the seat" if rest == "membrane/seat/pause"
+                                else "only an admin switches the minds' models")
         if rest in ADMIN_READ_EXACT and not getattr(user, "is_admin", False):
             return web.Response(status=403, text="only an admin reads the minds")
         if rest == "event":

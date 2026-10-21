@@ -1926,13 +1926,6 @@ def main() -> None:
                 if (not _reexec and not args.no_browser
                         and sys.stdin.isatty()):   # a restart's tab reconnects (#243)
                     _UIS.open_when_up(serve_port or 4096, _ui_url)
-            try:                           # auto-chat survives the restart
-                from . import voice as _voice_boot
-                _rs = _voice_boot.restore_state(runner)
-                if _rs:
-                    print(f"[seat] restored auto-chat {_rs.get('auto')}", file=sys.stderr)
-            except Exception as e:
-                print(f"[seat] auto-chat state not restored ({e})", file=sys.stderr)
             try:                           # the seat as a panel: state, events, controls
                 from . import seat_panel as _SP
                 _SP.start(srv)
