@@ -47,7 +47,7 @@ def save_api_key(provider: str, key: str, home: Path | None = None) -> Path:
 
 
 def _env_names(provider: str) -> tuple[str, ...]:
-    p = PROVIDERS.get(provider)
+    p = PROVIDERS.get(provider) or AGENT_PROVIDERS.get(provider)
     env = p.get("env") if p else None
     if env is None:
         return (provider.upper() + "_API_KEY",)
@@ -157,6 +157,26 @@ PROVIDERS: dict[str, dict] = {
     },
 }
 
+# ---- the agent-SDK providers (beside PROVIDERS, not API rows) ----------------
+# Claude through the Claude Agent SDK (issue #384): NOT an API. The SDK
+# drives the local `claude` CLI with that CLI's own login; membrane never
+# holds a key or token for it. `membrane auth claude-agent` checks the CLI
+# and stores only a non-secret "enabled" mark. The rungs are opt-in
+# (router.OPT_IN_BACKENDS) and text-only; their replies are never learned
+# (membrane/claude_agent.py, docs/claude-agent.md).
+AGENT_PROVIDERS: dict[str, dict] = {
+    "claude-agent": {
+        "kind": "agent-sdk",
+        "base": "",
+        "chat_path": "",
+        "models_path": "",
+        "auth_style": "none",
+        "env": ("MEMBRANE_CLAUDE_AGENT",),
+        "default_price": None,
+        "key_hint": "no key: the `claude` CLI's own login",
+    },
+}
+
 
 def _headers(provider: str, key: str) -> dict:
     """Outgoing auth headers for one provider's API call."""
@@ -212,8 +232,8 @@ def fetch_models_info(provider: str, key: str,
     prefer rungs with more room when prices tie.
     """
     prov = PROVIDERS.get(provider)
-    if not prov or not key:
-        return []
+    if not prov or not key or not prov.get("base"):
+        return []                      # no listing (the agent-sdk row)
     import urllib.request
     try:
         req = urllib.request.Request(

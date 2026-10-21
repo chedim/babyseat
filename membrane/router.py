@@ -118,6 +118,11 @@ AUTO_LOCAL = "autoselect-local"
 AUTO_LANES = (AUTO_CLOUD, AUTO_LOCAL)
 AUTO_ALIASES = ("@autoselect", "@autoselect-local")
 LANE_TOKENS = frozenset(AUTO_LANES + AUTO_ALIASES + (EXPLORE_LANE,))
+# OPT-IN providers (issue #384): their rungs never ride the router's own
+# choosing (autoselect, a price ceiling, the failover ladder) -- only the
+# operator's hand puts them there: a specific pick of the rung, or naming
+# it in Registry.opt_in (--ladder-include).
+OPT_IN_BACKENDS = frozenset(("claude-agent",))
 
 
 def normalize_lane(ceiling: str | None) -> str | None:
@@ -299,7 +304,8 @@ class Registry:
                  explore: float = 0.05, cloud_budget: float | None = None,
                  prefer_local: bool = False, max_local_gib: float =
                  MAX_LOCAL_GIB_DEFAULT,
-                 rng: random.Random | None = None):
+                 rng: random.Random | None = None,
+                 opt_in=None):
         self.backend = backend.rstrip("/")
         self.embedder = embedder
         self.state_path = Path(state_path) if state_path else None
@@ -307,6 +313,8 @@ class Registry:
         self.cloud_budget = cloud_budget    # money/day; None = uncapped
         self.prefer_local = prefer_local    # the classic ladder (offline)
         self.max_local_gib = max_local_gib  # never cold-load above this
+        # opt-in rungs the operator added to the ladder (OPT_IN_BACKENDS)
+        self.opt_in: set[str] = set(opt_in or ())
         self.spend_today = 0.0
         self.spend_day = time.strftime("%Y-%m-%d")
         self.records: dict[str, ModelRecord] = {}
@@ -708,7 +716,7 @@ class Registry:
                    if r.kind == "local" and fits(r)
                    and local_is_eligible(r)]
         clouds = [r for r in self.records.values()
-                  if r.kind == "cloud" and fits(r)]
+                  if r.kind == "cloud" and fits(r) and self.admitted(r)]
         if not allow_cloud:
             clouds = []
         elif max_price is not None:
@@ -799,6 +807,12 @@ class Registry:
     def _alive(self, rs: list) -> list:
         return [r for r in rs if self.outage(r.name) is None]
 
+    def admitted(self, r: ModelRecord) -> bool:
+        """May the router's own choosing reach this rung? An OPT_IN_BACKENDS
+        rung only when the operator named it in opt_in."""
+        return (r.backend not in OPT_IN_BACKENDS
+                or r.name in (getattr(self, "opt_in", None) or ()))
+
     def ladder(self, needs_tools: bool = False,
                ceiling: str | None = None,
                ctx_tokens: int = 0) -> list:
@@ -834,7 +848,8 @@ class Registry:
                  and self.context_holds(r, ctx_tokens)],
                 key=lambda r: (r.trials, r.name))
             return self._alive(locals_ or [min(
-                (r for r in self.records.values() if r.kind == "cloud"),
+                (r for r in self.records.values() if r.kind == "cloud"
+                 and self.admitted(r)),
                 key=lambda r: r.price(), default=None)] if locals_ else [])
         max_price, allow_cloud = self.ceiling_cap(lane)
         return self._ladder_under(needs_tools, max_price,
@@ -854,7 +869,7 @@ class Registry:
         def fits(r):
             return cap_ok(r) and self.context_holds(r, ctx_tokens)
         clouds = [r for r in self.records.values() if r.kind == "cloud"
-                  and fits(r)]
+                  and fits(r) and self.admitted(r)]
         if not allow_cloud:
             clouds = []
         elif max_price is not None:

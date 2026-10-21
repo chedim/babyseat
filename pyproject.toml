@@ -16,6 +16,7 @@ dependencies = ["numpy>=1.26"]
 [project.optional-dependencies]
 couchbase = ["couchbase>=4.6"]      # a Couchbase cluster for the field / peers; the default stores need none
 mdns = ["zeroconf"]                 # peers found on the LAN
+claude-agent = ["claude-agent-sdk"]  # Claude via the local `claude` CLI login (#384); its replies are never learned
 
 [project.urls]
 Homepage = "https://github.com/chedim/membrane"

@@ -314,7 +314,7 @@ pass through to Ollama unchanged.
 | `membrane connect` | (re)run shared-field onboarding for THIS project |
 | `membrane reset` | kill the seat on :11500 (or `--listen`), relaunch `membrane opencode` fresh |
 | `membrane install` | install `.opencode/skills/*` explicitly (+ `.gitignore` entry) |
-| `membrane auth` | store a cloud API key in `~/.membrane/auth.json` (600) — its models become routable rungs |
+| `membrane auth` | store a cloud API key in `~/.membrane/auth.json` (600) — its models become routable rungs; `membrane auth claude-agent` needs no key: it checks the `claude` CLI login and enables opt-in Claude rungs whose replies are shown, never learned ([docs/claude-agent.md](docs/claude-agent.md)) |
 | `membrane move` / `membrane migrate` | migrate the field between stores |
 | `python -m membrane.reembed` | move the field to another embedding model (re-embeds every live event, re-applies the log in order) |
 | `membrane update` | check the install source, show what changed, apply and re-exec |
@@ -533,6 +533,7 @@ lift "who 1,500 never-seen mentions were about" from MRR **0.210 → 0.539**
 | Doc | What's in it |
 |---|---|
 | [docs/standalone.md](docs/standalone.md) | **Standalone mode**: the web UI, the first run and the name, who can reach it, voice, `settings.json`, the ⚙ options window, the ⏸ / ▶ pause, updates, diagnosing a slow seat (request timing, the built-in profiler) |
+| [docs/claude-agent.md](docs/claude-agent.md) | **The claude-agent rung**: Claude through the Agent SDK and your `claude` login; enabling it, opt-in routing, text-only, what is learned (the person's side) vs shown (Claude's reply), the policy note |
 | [docs/docker.md](docs/docker.md) | **babyseat in Docker**: the public image `chedim/babyseat`, run recipes (Docker Desktop, Linux, Compose), env, the `/data` volume, ports, stopping |
 | [docs/auth.md](docs/auth.md) | **JWT mode (optional, off by default).** Turning it on, minting tokens, giving a client its token, the cookie login, who-said-it from the token, the seat's internal token, rotation, the threat model |
 | [docs/home-assistant.md](docs/home-assistant.md) | **babyseat in Home Assistant** (HACS): setup, the UI takeover, the Assist agent and sensors, what the seat may do in the house |

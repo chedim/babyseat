@@ -243,6 +243,12 @@ def _model_chat(srv):
              lane: str = "background") -> str:
         rec = router.records.get(model) if router is not None else None
         think = getattr(srv, "think", None)
+        from . import claude_agent as _CA
+        if _CA.is_claude_rung(router, model):
+            # issue #384: background lanes never use the claude-agent rung
+            print(f"[bg] {model}: background lanes never use the "
+                  f"claude-agent rung ({lane}); no call made", file=sys.stderr)
+            return ""
         if rec is not None and rec.backend:
             from .auth import PROVIDERS as _PROV
             prov = _PROV.get(rec.backend) or {}

@@ -508,6 +508,13 @@ def _build_ap():
                     help="override the relative money per turn for a cloud "
                          "model (substring match, repeatable), e.g. "
                          "--price glm-5.3-flash=1.0 --price claude=6.0")
+    ap.add_argument("--ladder-include", dest="ladder_include",
+                    action="append", default=[], metavar="MODEL",
+                    help="add an OPT-IN rung (the claude-agent ones, issue "
+                         "#384) to the router's own choosing (autoselect and "
+                         "the failover ladder); without it such a rung "
+                         "answers only when picked. Repeatable, e.g. "
+                         "--ladder-include claude-agent:haiku")
     ap.add_argument("--router-state", default=None, metavar="PATH",
                     help="where the router persists model records (wins, "
                          "imprints, latency EWMAs, calibration, spend); "
@@ -1556,7 +1563,8 @@ def main() -> None:
                 state_path=rstate, explore=float(args.explore),
                 cloud_budget=args.cloud_budget,
                 prefer_local=bool(args.prefer_local),
-                max_local_gib=float(args.max_local_gib))
+                max_local_gib=float(args.max_local_gib),
+                opt_in=set(getattr(args, "ladder_include", None) or ()))
             # Cloud providers as first-class backends: for every provider in
             # auth.PROVIDERS with a key configured (`membrane auth <p>` or
             # its env var), the provider's models register as cloud rungs
@@ -1567,9 +1575,31 @@ def main() -> None:
             from . import auth as _auth
             srv.cloud_keys = {}
             srv.cloud_models = []
-            for pname, prov in _auth.PROVIDERS.items():
+            for pname, prov in list(_auth.PROVIDERS.items()) \
+                    + list(_auth.AGENT_PROVIDERS.items()):
                 key = _auth.load_api_key(pname)
                 if not key:
+                    continue
+                if prov.get("kind") == "agent-sdk":
+                    # issue #384: Claude through the Agent SDK -- no key, no
+                    # listing; opt-in, text-only rungs whose replies are
+                    # shown and never learned (membrane/claude_agent.py)
+                    try:
+                        from . import claude_agent as _CA
+                        _CA.register_rungs(srv.router)
+                        srv.cloud_models.append(pname)
+                        try:
+                            _CA.check_available()
+                            _ok = "SDK + CLI found"
+                        except _CA.Unavailable as _ue:
+                            _ok = f"NOT usable yet: {_ue}"
+                        print(f"[opencode] {pname}: rungs "
+                              f"{', '.join(_CA.rung_names())} (opt-in, "
+                              f"text-only, never learned; {_ok})",
+                              file=sys.stderr)
+                    except Exception as p_e:
+                        print(f"[opencode] {pname} rungs skipped ({p_e})",
+                              file=sys.stderr)
                     continue
                 srv.cloud_keys[pname] = key      # memory only
                 try:

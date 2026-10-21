@@ -1953,6 +1953,15 @@ class TurnRunner:
                     turn_model = _am
             except Exception:
                 pass
+            # THE CLAUDE-AGENT RUNG IS A PERSON'S (issue #384): a loop or a
+            # mind pinned to it falls back to the seat's model
+            try:
+                from . import claude_agent as _CA
+                turn_model = _CA.guard_turn_model(
+                    getattr(self, "srv", None), turn_model,
+                    (self._agents or {}).get(sid), self.model)
+            except Exception:
+                pass
             # MEMBRANE PREDICTS THIS MOVE (predict.py): every round Argus takes
             # is guessed before the model runs -- a virtual action, never run
             try:
@@ -2054,6 +2063,13 @@ class TurnRunner:
             _thinking(self, sid, "end")
             msg = ((resp.get("choices") or [{}])[0].get("message")
                    or {})
+            # THE CLAUDE-MADE MARK (issue #384): the proxy stamps the
+            # answering provider; a Claude reply is shown (this row keeps
+            # it) and never fed to the field later (absorb/voice skip it)
+            from . import claude_agent as _CA
+            _ca_round = resp.get(_CA.RESP_KEY) == _CA.PROVIDER
+            if _ca_round:
+                a_info[_CA.MARK_KEY] = _CA.PROVIDER
             _tokens_fill(a_info, resp)
             # THE INJECTION AS A CARD (2026-10-08, the operator: show it
             # like every tool call): what membrane added to this round --
@@ -2074,7 +2090,7 @@ class TurnRunner:
             # in-turn; a bad object refuses honestly there, never
             # guesses. Real tool_calls beside bullets stay real: the
             # model already fired, more would double-execute.
-            if not tcs and self.tools is None and content:
+            if not tcs and self.tools is None and content and not _ca_round:
                 try:
                     from . import streams as _ST
                     _salv = _ST.emission_calls(content)
@@ -2088,7 +2104,8 @@ class TurnRunner:
             reason = "tool-calls" if tcs else "stop"
             try:
                 from . import predict as _predict
-                _predict.step_end(self, sid, list(tcs or []), content, step=rounds, mid=aid)
+                if not _ca_round:          # Claude's moves are never learned (#384)
+                    _predict.step_end(self, sid, list(tcs or []), content, step=rounds, mid=aid)
             except Exception:
                 pass
             if msg.get("reasoning") or msg.get("thinking"):
@@ -2425,11 +2442,13 @@ class TurnRunner:
         try:
             from . import voice as _voice
             _lane_end = _lane_of((self._agents or {}).get(sid))
+            from . import claude_agent as _CA
             _voice.on_turn_end(self, sid, text,
+                               "" if _CA.is_claude_made(a_info) else
                                "\n".join(p.get("text") or "" for p in parts
                                          if isinstance(p, dict) and p.get("type") == "text"),
                                _lane_end,
-                               parts=parts)
+                               parts=[] if _CA.is_claude_made(a_info) else parts)
             if _lane_end not in _voice._CHAT_LANES:      # the chat's guess rides its voice line
                 from . import predict as _predict
                 threading.Thread(target=_predict.end, args=(self, sid, list(parts)),
@@ -2512,6 +2531,7 @@ def loopback_ladder(port: int, runner=None, cell=None):
             method="POST", headers={"Content-Type": "application/json", **_JWT.internal_headers()})
         content, reasoning, tcs = [], [], {}
         usage, ext, finish = None, None, None
+        provider = None                      # the answering provider's stamp (#384)
         done = False
         with urllib.request.urlopen(req, timeout=CLOUD_TIMEOUT_S) as resp:
             for raw in resp:
@@ -2532,6 +2552,8 @@ def loopback_ladder(port: int, runner=None, cell=None):
                     continue
                 if d.get("usage"):
                     usage = d["usage"]
+                if d.get("membrane_provider"):
+                    provider = d["membrane_provider"]
                 for ch in d.get("choices") or []:
                     delta = ch.get("delta") or ch.get("message") or {}
                     if ch.get("finish_reason"):
@@ -2578,6 +2600,8 @@ def loopback_ladder(port: int, runner=None, cell=None):
                "usage": usage or {}}
         if ext is not None:
             out["membrane"] = ext
+        if provider:
+            out["membrane_provider"] = provider
         return out
     call.stream = stream
     return call
