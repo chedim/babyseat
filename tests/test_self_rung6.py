@@ -30,7 +30,7 @@ from membrane import watch_agents as WA  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
 
 DIM = 16
-RESP = MEMBRANE_NS + "Component:chat:in:operator"    # the other self meets
+RESP = MEMBRANE_NS + "Component:chat:operator"    # the other self meets
 
 
 class _World:
@@ -60,7 +60,7 @@ class _Chatter:
             return {"fired": True, "state": None, "changed": False, "paused": True}
         name = ent.eid.split(":")[-1]
         self.looks[name] = self.looks.get(name, 0) + 1
-        if "chat:in" in ent.eid:
+        if ":chat:" in ent.eid:
             return {"fired": True, "state": {"heard": self.looks[name]},
                     "changed": self.rng.random() < self.p}
         return {"fired": True, "state": {"v": self.looks[name]}, "changed": False}
@@ -85,7 +85,7 @@ def _seat(names=(), limit=6, passed=(1, 2, 3, 4, 5)):
         e = QuantumEntity(eid=MEMBRANE_NS + "Component:" + name, cls="Component",
                           properties={"name": name, "getter_script": "result = {'state': {'x': 1}}"})
         est.docs[e.eid] = e
-    CIO.entity_in(srv, CIO.OPERATOR)                   # the other self meets (a real reach target)
+    CIO.entity(srv, CIO.OPERATOR)                   # the other self meets (a real reach target)
     SL.bind(srv)
     cap(srv, 1)
     for r in passed:
@@ -119,7 +119,7 @@ def test_it_reaches_the_other_and_counts_its_answers(monkeypatch):
     monkeypatch.setattr(SL, "_read_entity", _Chatter())
     srv = _seat()
     _run(srv, 40)
-    assert [r for r in _kind(srv, "reach") if "chat:in" in r["eid"]]
+    assert [r for r in _kind(srv, "reach") if ":chat:" in r["eid"]]
     t = SL._tempo(srv)[RESP]
     assert t["answered"] > 0
 
@@ -162,8 +162,8 @@ def test_the_limit_holds_rung_six(monkeypatch):
 
 def test_chat_in_is_a_reachable_entity_that_hears():
     srv = _seat()
-    resp = CIO.entity_in(srv, CIO.OPERATOR)
-    assert resp is not None and resp.eid.endswith("chat:in:operator")
+    resp = CIO.entity(srv, CIO.OPERATOR)
+    assert resp is not None and resp.eid.endswith("chat:operator")
     assert (resp.properties or {}).get("getter_script")
     CIO.heard(srv, CIO.OPERATOR, "hello", "sid")
     assert (resp.properties or {}).get("heard_n") == 1

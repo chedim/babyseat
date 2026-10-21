@@ -1,12 +1,36 @@
-"""CHAT OUT (0.6.1, the operator: "add the field to push chat out messages like
-it can do with voice ... both, and the same should be for voice").
+"""THE CHAT THING (#333 part 3a; CHAT OUT since 0.6.1, the operator: "add the
+field to push chat out messages like it can do with voice ... both, and the
+same should be for voice").
 
-One entity per person, in the seat's own store, the twin of voice:out:
+One entity per person, in the seat's own store:
 
-  chat:out:<person>  on (default on) -- Argus WRITES to the person by setting
-                     its `say` property (an ordinary entity edit, no new
-                     tool): the line lands in their latest chat as an
-                     assistant message. `said` keeps what was posted.
+  chat:<person>  Component, chat_io "chat". Argus WRITES to the person by
+                 setting its `say` property (an ordinary entity edit, no new
+                 tool): the line lands in their latest chat as an assistant
+                 message, only while `on` (default on). `said` keeps what was
+                 posted. What the person says reaches `heard` (a ring) and
+                 `heard_n` / `heard_ts` / `session` (heard()); its getter
+                 reads `heard_n`, so Blurp's look at it reads news -- changed
+                 when the person said something since its last look. Only the
+                 person's lines are heard: Blurp's own sends never are, so its
+                 own line is never news (the chat stays an other). Blurp
+                 nudges it to speak (self_loop._nudge_chat: open a draft,
+                 send it). One field spot: curiosity about what changed lands
+                 on the same thing Blurp acts on.
+
+Until part 3a it was two: chat:out:<person> (Config, chat_io "out": the
+writing side, voice:out's twin) and chat:in:<person> (Component, chat_io
+"in": what the person said, the thing rung 6 looked at). THE MIGRATION
+(migrate(), once per seat at boot; and whatever first makes a person's chat
+thing, so the count never restarts): the chat thing copies heard / heard_n /
+heard_ts / session from chat:in and on / say / said from chat:out; both old
+entities get `merged_into` it (mark-don't-delete: the store resolves them to
+it, so an edit of chat:out:<person>.say -- an agent, a script, the lanes edit
+route -- keeps working); its field spot starts at chat:in's live state (where
+the person's speech put it), else chat:out's, else its first look places it;
+Blurp's world gains it as `migrated` (the old two stay members: the world
+only grows); tempo.json's chat:in key is renamed to it. The record is never
+rewritten: chat_of() reads an old line's eid as the chat thing it became.
 
 And the field's own way out: an entity's script may return `chat` and/or
 `voice` (with an optional `to`, a person) -- a watcher can tell you the garage
@@ -19,18 +43,19 @@ private chat (#337): that one is Blurp's alone.
 
 BLURP'S PRIVATE CHAT (#337, the PM with Blurp): one session per person,
 marked `blurp: true` (blurp_chat). Blurp's own lines (by="self"; since #333
-part 2 they are sends of its nudges at chat:out, self_loop._nudge_chat_out) land there,
-not in the person's newest chat, and the field hears them under the
-session tag blurp:<person> (blurp_tag). A message the person posts there
+part 2 they are sends of its nudges at the chat thing, self_loop._nudge_chat)
+land there, not in the person's newest chat, and the field hears them under
+the session tag blurp:<person> (blurp_tag). A message the person posts there
 runs no model turn and the voice does not answer (server.py,
 TurnRunner.blurp_message).
 
-Guard rails: a line only goes out while chat:out is on; one line per
+Guard rails: a line only goes out while the chat thing is on; one line per
 CHAT_GAP_S per person; an entity's script pushes at most once per
 SCRIPT_PUSH_GAP_S and never the same line twice in a row (a tick fires every
 second)."""
 from __future__ import annotations
 
+import re
 import threading
 import time
 
@@ -39,8 +64,15 @@ from .voice_io import _ring, slug
 CHAT_GAP_S = 2.0
 CHAT_MAX = 2000
 SCRIPT_PUSH_GAP_S = 30.0
-OPERATOR = "operator"             # the seat with no people: its operator's chat:out
+OPERATOR = "operator"             # the seat with no people: its operator's chat thing
 _BLURP_LOCK = threading.Lock()    # #337: one private chat per person, even when two ask at once
+_MIGRATE_LOCK = threading.RLock()
+
+_GETTER = (
+    "result = {'state': {'heard_n': int(membrane.me.properties.get('heard_n') or 0)}}"
+)
+FROM_IN = ("heard", "heard_n", "heard_ts", "session")     # the migration: what chat:in carries over
+FROM_OUT = ("on", "say", "said")                           # ...and chat:out
 
 
 def _key(person: str) -> str:
@@ -50,69 +82,196 @@ def _key(person: str) -> str:
 
 
 def name_of(person: str) -> str:
-    return f"chat:out:{_key(person)}"
+    """The chat thing's name: chat:<person>."""
+    return f"chat:{_key(person)}"
+
+
+def eid_of(person: str) -> str:
+    """The chat thing's store eid (exact: a name fragment like chat:alice would
+    also match an active-model:chat:alice)."""
+    from .entities import CLASS_COMPONENT, entity_id
+    return entity_id(CLASS_COMPONENT, name_of(person))
+
+
+def _old_eids(key: str) -> tuple[str, str]:
+    """A person's chat:in / chat:out eids from before part 3a."""
+    from .entities import CLASS_COMPONENT, CLASS_CONFIG, entity_id
+    return entity_id(CLASS_COMPONENT, f"chat:in:{key}"), entity_id(CLASS_CONFIG, f"chat:out:{key}")
+
+
+def _chat_re():
+    from .entities import CLASSES
+    cls = "|".join(re.escape(c) for c in CLASSES)
+    return re.compile(r"^(?:membrane::|m:)?(?:(?:%s):)?chat:(?:(?:in|out):)?([^:\s]+)$" % cls, re.I)
+
+
+_CHAT_RE = None
+
+
+def person_of(eid) -> str | None:
+    """The person whose chat this is, for any spelling of it -- the chat thing
+    (chat:<p>), the old chat:in:<p> / chat:out:<p>, a store eid or a field id;
+    None for anything else."""
+    global _CHAT_RE
+    if not isinstance(eid, str) or not eid:
+        return None
+    if _CHAT_RE is None:
+        _CHAT_RE = _chat_re()
+    m = _CHAT_RE.match(eid.strip())
+    return m.group(1).lower() if m else None
+
+
+def chat_of(eid):
+    """THE ALIAS for record readers: chat:in:<p> / chat:out:<p> (any spelling)
+    -> the chat thing's eid, chat:<p>; anything else is itself. Old lines keep
+    counting toward the same person."""
+    p = person_of(eid)
+    return eid if p is None else eid_of(p)
+
+
+def _place_from(srv, new_eid: str, olds) -> None:
+    """The chat thing's field spot starts at the first old one's live state."""
+    fld = getattr(srv, "efield", None)
+    get, seat = getattr(fld, "get", None), getattr(fld, "place_vec", None)
+    if get is None or seat is None:
+        return
+    from .eids import field_id
+    try:
+        st = get(field_id(new_eid))
+        if st is not None and st.tier == "live" and st.state is not None:
+            return
+        for old in olds:
+            o = get(field_id(old))
+            if o is not None and o.tier == "live" and o.state is not None:
+                seat(field_id(new_eid), o.state)
+                return
+    except Exception:
+        pass
+
+
+def _rename_tempo(srv, old: str, new: str) -> None:
+    """tempo.json (a state file): chat:in's rates become the chat thing's."""
+    try:
+        from . import self_loop as SL
+        t = SL._load_json(srv, "tempo.json")
+        if isinstance(t, dict) and old in t:
+            if new not in t:
+                t[new] = t[old]
+            t.pop(old, None)
+            SL._save_json(srv, "tempo.json", t)
+        live = SL._RT.get(id(srv), {}).get("tempo")
+        if isinstance(live, dict) and old in live:
+            live.setdefault(new, live[old])
+            live.pop(old, None)
+    except Exception:
+        pass
+
+
+def _migrate(srv, ent, key: str) -> bool:
+    """Fold a person's chat:in / chat:out into their chat thing (once: an old
+    entity already merged is left alone). -> whether anything was folded."""
+    est = srv.entity_store
+    old_in, old_out = (est.docs.get(e) for e in _old_eids(key))
+    olds = [o for o in (old_in, old_out)
+            if o is not None and not (o.properties or {}).get("merged_into")]
+    if not olds:
+        return False
+    pp = ent.properties or {}
+    for src, keys in ((old_in, FROM_IN), (old_out, FROM_OUT)):
+        if src is None or src not in olds:
+            continue
+        sp = src.properties or {}
+        for k in keys:
+            if k in sp:
+                pp[k] = list(sp[k]) if isinstance(sp[k], list) else sp[k]
+    ent.properties = pp
+    for o in olds:
+        op = o.properties or {}
+        op["merged_into"] = ent.eid
+        o.properties = op
+        est.upsert(o, embedder=None)
+    est.upsert(ent, embedder=None)
+    _place_from(srv, ent.eid, [o.eid for o in (old_in, old_out) if o is not None])
+    try:
+        from . import self_world as _SW
+        _SW.join(srv, [ent.eid], "migrated")
+    except Exception:
+        pass
+    if old_in is not None:
+        _rename_tempo(srv, old_in.eid, ent.eid)
+    return True
 
 
 def entity(srv, person: str, create: bool = True):
-    from .entities import CLASS_CONFIG
-    est = getattr(srv, "entity_store", None)
-    if est is None:
-        return None
-    nm = name_of(person)
-    ent = est._resolve_spec(nm)
-    if ent is None and create:
-        r = est.add(cls=CLASS_CONFIG, name=nm,
-                    summary=(f"CHAT OUT for {person or 'the operator'}: write to them -- edit this "
-                             "entity's properties.say with the message; it lands in their latest "
-                             "chat (only while `on`). A script can do the same by returning "
-                             "{'chat': '...', 'to': '<person>'}."))
-        ent = est.docs.get(r.get("eid", "")) if isinstance(r, dict) else None
-        if ent is not None:
-            ent.properties.update({"person": "" if nm.endswith(":" + OPERATOR) else slug(person),
-                                   "on": True, "chat_io": "out"})
-    return ent
-
-
-def name_in(person: str) -> str:
-    return f"chat:in:{_key(person)}"
-
-
-_IN_GETTER = (
-    "result = {'state': {'heard_n': int(membrane.me.properties.get('heard_n') or 0)}}"
-)
-
-
-def entity_in(srv, person: str, create: bool = True):
-    """THE OTHER SELF MEETS (rung 6): chat:in:<person> -- a normal reach
-    target. Its getter reads `heard_n`, so a new heard since self's last
-    look reads as `changed` (an answer); nothing new reads `unchanged`."""
+    """A person's chat thing, chat:<person> (made on first use; making it
+    folds in their old chat:in / chat:out, see the module doc)."""
     from .entities import CLASS_COMPONENT
     est = getattr(srv, "entity_store", None)
     if est is None:
         return None
-    nm = name_in(person)
-    ent = est._resolve_spec(nm)
-    if ent is None and create:
-        r = est.add(cls=CLASS_COMPONENT, name=nm,
-                    summary=(f"CHAT IN for {person or 'the operator'}: what the other says "
-                             "reaches `heard`; self reaches this to read it back."))
-        ent = est.docs.get(r.get("eid", "")) if isinstance(r, dict) else None
+    key = _key(person)
+    eid = eid_of(person)
+    with _MIGRATE_LOCK:
+        ent = est.docs.get(eid)
+        if ent is None and create:
+            r = est.add(cls=CLASS_COMPONENT, name=name_of(person),
+                        summary=(f"CHAT with {person or 'the operator'}: what they say reaches `heard` (a "
+                                 "look reads it as news); write to them by editing properties.say -- it "
+                                 "lands in their latest chat (only while `on`). A script can do the same "
+                                 "by returning {'chat': '...', 'to': '<person>'}."))
+            ent = est.docs.get(r.get("eid", "")) if isinstance(r, dict) else None
+            if ent is None:
+                return None
+            ent.properties.update({"person": "" if key == OPERATOR else slug(person),
+                                   "chat_io": "chat", "on": True, "heard_n": 0, "getter_script": _GETTER})
+            if not _migrate(srv, ent, key):
+                est.upsert(ent, embedder=None)               # its props on the next save
+            try:
+                est.flush()
+            except Exception:
+                pass
+        return ent
+
+
+def migrate(srv) -> dict:
+    """THE BOOT MIGRATION (once per seat; SL.bind): every person with an old
+    chat:in / chat:out not yet merged gets their chat thing. -> counts."""
+    est = getattr(srv, "entity_store", None)
+    if est is None:
+        return {}
+    keys = set()
+    for e in list((est.docs or {}).values()):
+        pp = e.properties or {}
+        if pp.get("chat_io") in ("in", "out") and not pp.get("merged_into"):
+            p = person_of(e.eid)
+            if p:
+                keys.add(p)
+    out = {"people": 0, "merged": 0}
+    for k in sorted(keys):
+        ent = entity(srv, "" if k == OPERATOR else k)
         if ent is not None:
-            ent.properties.update({"person": "" if nm.endswith(":" + OPERATOR) else slug(person),
-                                   "chat_io": "in", "heard_n": 0,
-                                   "getter_script": _IN_GETTER})
-    return ent
+            out["people"] += 1
+            _migrate(srv, ent, k)                              # a chat thing made before its pair was folded
+    out["merged"] = sum(1 for e in list((est.docs or {}).values())
+                        if (e.properties or {}).get("chat_io") in ("in", "out")
+                        and (e.properties or {}).get("merged_into"))
+    try:
+        est.flush()
+    except Exception:
+        pass
+    return out
 
 
 def heard(srv, person: str, text: str, sid: str = "") -> None:
-    """The other answered (or spoke) -- self's next look reads it as news,
-    and a sleeping Blurp wakes (#345)."""
+    """The person answered (or spoke) -- Blurp's next look at their chat thing
+    reads it as news, and a sleeping Blurp wakes (#345). Only a person's line
+    comes here: Blurp's own sends never do."""
     try:
         from . import energy as _E          # #345: a person speaking wakes a sleeping Blurp
         _E.person_spoke(srv, person)
     except Exception:
         pass
-    ent = entity_in(srv, person)
+    ent = entity(srv, person)
     if ent is None:
         return
     pp = ent.properties or {}
@@ -124,14 +283,35 @@ def heard(srv, person: str, text: str, sid: str = "") -> None:
     ent.properties = pp
 
 
-def ensure(srv, spec: str) -> None:
-    """The edit route's first step: an edit of chat:out:<person> that does
-    not exist yet creates it (Argus can write to anyone the seat knows)."""
+def ensure(srv, spec: str) -> str | None:
+    """The edit route's first step: an edit of a person's chat -- chat:<p> or
+    the old chat:out:<p> -- makes their chat thing when it does not exist yet
+    (Argus can write to anyone the seat knows) -> its exact eid, which the
+    route edits (None: not a chat). The old spelling keeps resolving to it: a
+    chat:out:<p> that never existed is made as a pointer (merged_into)."""
     s = str(spec or "").strip()
     if s.lower().startswith("membrane::"):
         s = s[len("membrane::"):]
-    if s.lower().startswith("chat:out:") and s[len("chat:out:"):].strip():
-        entity(srv, s[len("chat:out:"):].strip())
+    low = s.lower()
+    if low.startswith("chat:out:") and s[len("chat:out:"):].strip():
+        who = s[len("chat:out:"):].strip()
+    elif low.startswith("chat:") and ":" not in s[len("chat:"):] and s[len("chat:"):].strip() \
+            and s[len("chat:"):].strip().lower() not in ("in", "out"):
+        who = s[len("chat:"):].strip()
+    else:
+        return None
+    ent = entity(srv, "" if _key(who) == OPERATOR else who)
+    if ent is None:
+        return None
+    if low.startswith("chat:out:"):
+        est = srv.entity_store
+        out_eid = _old_eids(_key(who))[1]
+        if est.docs.get(out_eid) is None:
+            from .entities import CLASS_CONFIG, QuantumEntity
+            est.upsert(QuantumEntity(eid=out_eid, cls=CLASS_CONFIG, properties={
+                "name": f"chat:out:{_key(who)}", "merged_into": ent.eid,
+                "summary": f"the old name of {name_of(who)} (#333 part 3a)"}), embedder=None)
+    return ent.eid
 
 
 def _runner(srv):
@@ -200,13 +380,13 @@ def blurp_chat(srv, person: str, create: bool = True) -> str:
     """#337: the person's private chat with Blurp (the PM with Blurp) -- one
     session per person, marked `blurp: true`, made on first use; '' when
     there is none (create=False) or no runner. Opening it brings the
-    person's chat:in / chat:out into Blurp's world."""
+    person's chat thing into Blurp's world."""
     r = _runner(srv)
     if r is None or getattr(r, "sessions", None) is None:
         return ""
     rows = r.sessions.list()
-    # the owner as the person's sessions spell it (chat:out keeps only a
-    # slug; the JWT door compares the owner exactly)
+    # the owner as the person's sessions spell it (the chat thing keeps only
+    # a slug; the JWT door compares the owner exactly)
     who = str(person or "").strip()
     if who:
         who = next((str(x["owner"]) for x in reversed(rows)
@@ -278,10 +458,11 @@ def _post(srv, sid: str, text: str, by: str = "") -> None:
 
 
 def on_edit(srv, ent, by: str = "") -> dict | None:
-    """An edit of a chat:out entity's `say`: post it (or say why not). `by`
-    names a non-seat author (self's pushes, #208) for _post to mark."""
+    """An edit of a chat thing's `say` (an unmigrated chat:out's too): post it
+    (or say why not). `by` names a non-seat author (self's sends, #208) for
+    _post to mark."""
     pp = (getattr(ent, "properties", None) or {})
-    if pp.get("chat_io") != "out" or not str(pp.get("say") or "").strip():
+    if pp.get("chat_io") not in ("chat", "out") or not str(pp.get("say") or "").strip():
         return None
     text = str(pp.get("say") or "").strip()[:CHAT_MAX]
     person = str(pp.get("person") or "")
@@ -292,7 +473,7 @@ def on_edit(srv, ent, by: str = "") -> dict | None:
         ent.properties = pp
         return {"posted": False, "why": why}
     if not pp.get("on", True):
-        return _refuse("off", f"{person or 'the operator'}'s chat:out is off -- not posted")
+        return _refuse("off", f"{person or 'the operator'}'s chat is off -- not posted")
     now = time.time()
     if now - float(pp.get("said_ts") or 0) < CHAT_GAP_S:
         return _refuse("gap", f"too soon after the last message ({CHAT_GAP_S:g}s apart)")

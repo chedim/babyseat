@@ -363,7 +363,9 @@ to waking it and helping it climb is [selfgrowth.md](selfgrowth.md).
   - **Pass:** "went still" during the pause and "moves again" after it. The
     phases are capped at 1 h and 3 h; a still thing is looked at rarely, by
     rung 4's patience.
-- **Rung 6, meet an other.** Self's first outward act: it pushes a line
+- **Rung 6, meet an other** (history: #333 voided this wiring, and part 3a
+  folded `chat:in` / `chat:out` into one `chat:<person>`; see
+  [selfgrowth.md](selfgrowth.md)). Self's first outward act: it pushes a line
   ("self is here") to the chat of **the person who actually chats with the
   seat** — `chat:out:<person>`, where the person is whoever chatted last
   (chat_io's `recent_person`, the owner of the newest owned chat), and

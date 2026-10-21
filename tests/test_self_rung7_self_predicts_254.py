@@ -45,7 +45,7 @@ from membrane import chat_io as CIO  # noqa: E402
 from membrane import self_loop as SL  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
 
-RESP = MEMBRANE_NS + "Component:chat:in:operator"
+RESP = MEMBRANE_NS + "Component:chat:operator"
 N = 300                       # reply checks in a synthetic record
 
 
@@ -281,7 +281,7 @@ def _seat(passed=(1, 2, 3, 4, 5, 6, 7), limit=8):
     e = QuantumEntity(eid=MEMBRANE_NS + "Component:lamp", cls="Component",
                       properties={"name": "lamp", "getter_script": "result = {'state': {'x': 1}}"})
     est.docs[e.eid] = e
-    CIO.entity_in(srv, CIO.OPERATOR)
+    CIO.entity(srv, CIO.OPERATOR)
     SL.bind(srv)
     SL.set_limit(srv, 1)
     for r in passed:                                    # #258: rung 7 is take turns now

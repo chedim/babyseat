@@ -60,6 +60,7 @@ from __future__ import annotations
 import datetime as dt
 import time
 
+from . import chat_io as CIO
 from . import self_loop as SL
 from . import self_name as SN
 
@@ -339,8 +340,8 @@ def _clocks(recs: list, now: float) -> dict:
             e = to(r)
             if r.get("kind") == "push" and SL._medium(r) == "chat" and e and not e.endswith(":operator"):
                 n_push += 1
-            if r.get("kind") == "reach" and "chat:in:" in e and not e.endswith(":operator") \
-                    and r.get("answer") in ("changed", "unchanged"):
+            if r.get("kind") == "reach" and r.get("eid") and CIO.person_of(e) not in (None, CIO.OPERATOR) \
+                    and r.get("answer") in ("changed", "unchanged"):   # #333 3a: chat_of
                 n_look += 1
             if n_push >= SL.RUNG6_PUSHES and n_look >= SL.RUNG6_HEARD:
                 real6 = float(r["ts"])
@@ -582,7 +583,7 @@ TRAITS = (
 
 def _ordinary(r) -> bool:
     return (r.get("kind") == "reach" and r.get("answer") in ("changed", "unchanged") and r.get("p") is not None
-            and not r.get("audit") and not r.get("audit5"))
+            and not r.get("audit") and not r.get("audit5") and not r.get("nudged"))   # #333 3a: as curiosity reads
 
 
 def _miss(r) -> bool:
@@ -914,8 +915,10 @@ def _inventory(recs: list, st: dict, now: float) -> list:
 
 
 def _person(eid: str) -> str:
-    s = _short(eid)
-    return s.split("chat:in:", 1)[1] if "chat:in:" in s else s
+    """Whose chat a line's eid is -- the chat thing or its old chat:in / chat:out
+    (#333 part 3a: chat_io.person_of reads every spelling) -- else its short name."""
+    p = CIO.person_of(str(eid or ""))
+    return p if p is not None else _short(eid)
 
 
 def _relationships(recs: list, tempo: dict, st: dict) -> dict:
@@ -923,15 +926,20 @@ def _relationships(recs: list, tempo: dict, st: dict) -> dict:
     stats = SL._rung2_stats(recs, tempo)
     split = st.get("split") or {}
     rows: dict[str, dict] = {}
-    chat_eids = {str(r.get("to")) for r in recs if r.get("kind") == "push" and r.get("to")
+    # #333 part 3a: every spelling of a person's chat is their chat thing (chat_io.chat_of) --
+    # old chat:in lines and old pushes count toward the same person as the new looks
+    chat_eids = {CIO.chat_of(str(r.get("to"))) for r in recs if r.get("kind") == "push" and r.get("to")
                  and SL._medium(r) == "chat"}             # #264: a turn with the ball is no chat
-    chat_eids |= {str(r.get("eid")) for r in recs if r.get("kind") == "reach" and "chat:in:" in str(r.get("eid") or "")}
+    chat_eids |= {CIO.chat_of(str(r.get("eid"))) for r in recs if r.get("kind") == "reach"
+                  and CIO.person_of(str(r.get("eid") or "")) is not None}
+    cur = CIO.chat_of(current) if current else current
     for e in sorted(chat_eids):
-        rs = [r for r in recs if _answered(r) and r.get("eid") == e]
+        rs = [r for r in recs if _answered(r) and CIO.chat_of(r.get("eid")) == e]
         tail = rs[-SL.RUNG8_LOOKS:]
         who = _person(e)
-        rows[who] = {"who": who, "kind": "person", "current": e == current, "eid": e,
-                     "chat": {"lines": sum(1 for r in recs if r.get("kind") == "push" and r.get("to") == e),
+        rows[who] = {"who": who, "kind": "person", "current": e == cur, "eid": e,
+                     "chat": {"lines": sum(1 for r in recs if r.get("kind") == "push"
+                                       and CIO.chat_of(r.get("to")) == e),
                               "looks": len(rs),
                               "replied": _r(sum(r["answer"] == "changed" for r in rs) / len(rs), 4) if rs else None,
                               "brier": _r(_brier(tail), 4), "skill": (stats.get(e) or {}).get("skill"),

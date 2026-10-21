@@ -47,7 +47,7 @@ from tests._self_cap import cap  # noqa: E402
 from membrane import self_sheet as SS  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
 
-RESP = MEMBRANE_NS + "Component:chat:in:operator"
+RESP = MEMBRANE_NS + "Component:chat:operator"
 NB = len(SL.TURN_BINS) + 1
 
 
@@ -275,7 +275,7 @@ def _seat(passed=(1, 2, 3, 4, 5, 6), limit=7):
     e = QuantumEntity(eid=MEMBRANE_NS + "Component:lamp", cls="Component",
                       properties={"name": "lamp", "getter_script": "result = {'state': {'x': 1}}"})
     est.docs[e.eid] = e
-    CIO.entity_in(srv, CIO.OPERATOR)
+    CIO.entity(srv, CIO.OPERATOR)
     SL.bind(srv)
     cap(srv, 1)
     for r in passed:
@@ -301,14 +301,14 @@ class _Talker:
         due = [r for r in self.replies if r <= t]
         if t >= self.next or due:
             self.replies = [r for r in self.replies if r > t]
-            ent = CIO.entity_in(self.srv, CIO.OPERATOR)
+            ent = CIO.entity(self.srv, CIO.OPERATOR)
             ent.properties["heard_n"] = int(ent.properties.get("heard_n") or 0) + 1
             ent.properties["heard_ts"] = t
             if t >= self.next:
                 self.next = t + self.every
 
     def push(self, srv, text, person=""):
-        ent = CIO.entity_in(srv, CIO.OPERATOR)
+        ent = CIO.entity(srv, CIO.OPERATOR)
         h = ent.properties.get("heard_ts")
         if h is not None and self.t - h < 120.0:
             self.replies.append(self.t + 60.0)
@@ -338,7 +338,7 @@ def test_a_reply_check_does_not_count_lines_from_before_the_push(monkeypatch):
     # (self had not looked since), but that is not a reply
     srv = _seat()
     push = {"ts": 1000.0, "kind": "push", "n": 31, "to": RESP, "bin": 0, "aim": 0, "best": None, "dwell": [1, 0, 0, 0]}
-    ent = CIO.entity_in(srv, CIO.OPERATOR)
+    ent = CIO.entity(srv, CIO.OPERATOR)
     ent.properties["heard_ts"] = 970.0
     assert SL._replied(srv, push, 1130.0, "changed") is False
     ent.properties["heard_ts"] = 1050.0

@@ -48,6 +48,12 @@ class TestLabels(unittest.TestCase):
         self.assertEqual(self._l("chat:in:roomata-estorsky"), "roomata-estorsky")
         self.assertEqual(self._l("chat:in:operator"), "the operator")
 
+    def test_the_chat_thing_is_the_person_too(self):
+        """#333 part 3a: one chat:<person> replaced chat:in / chat:out."""
+        self.assertEqual(self._l("membrane::Component:chat:ann", me="ann"), "you")
+        self.assertEqual(self._l("chat:bob-k", me="ann"), "bob-k")
+        self.assertEqual(self._l("chat:operator", me="ann"), "the operator")
+
     def test_the_eye_toys_and_words(self):
         self.assertEqual(self._l("i"), "the eye")
         self.assertEqual(self._l("membrane::Component:toy:dice"), "dice")

@@ -3667,8 +3667,9 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 except Exception:
                     pass
             else:
-                # CHAT IN (chat_io.py, rung 6's other): an ordinary message
-                # stamps chat:in:<owner> -- self's next look at it reads news.
+                # CHAT IN (chat_io.py): an ordinary message stamps the owner's
+                # chat thing (chat:<owner>; chat:in until #333 part 3a) --
+                # Blurp's next look at it reads news.
                 try:
                     from . import chat_io as _CIO
                     _psrv = getattr(runner, "srv", None) if runner is not None else None

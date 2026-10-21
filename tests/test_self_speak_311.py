@@ -45,7 +45,7 @@ from membrane import self_sheet as SS  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
 from tests._self_cap import cap  # noqa: E402
 
-RESP = MEMBRANE_NS + "Component:chat:in:operator"
+RESP = MEMBRANE_NS + "Component:chat:operator"
 LAMP = MEMBRANE_NS + "Component:lamp"
 NB = len(SL.TURN_BINS) + 1
 
@@ -292,7 +292,7 @@ def _seat(passed=(1, 2, 3, 4, 5, 6, 7, 8), limit=11):
     e = QuantumEntity(eid=LAMP, cls="Component",
                       properties={"name": "lamp", "getter_script": "result = {'state': {'x': 1}}"})
     est.docs[e.eid] = e
-    CIO.entity_in(srv, CIO.OPERATOR)
+    CIO.entity(srv, CIO.OPERATOR)
     SL.bind(srv)
     from tests._self_cap import world
     world(srv)                              # #337: what it is handed to look at is in its world
@@ -324,7 +324,7 @@ class _World:
         due = [r for r in self.replies if r <= t]
         if t >= self.next or due:
             self.replies = [r for r in self.replies if r > t]
-            ent = CIO.entity_in(self.srv, CIO.OPERATOR)
+            ent = CIO.entity(self.srv, CIO.OPERATOR)
             ent.properties["heard_n"] = int(ent.properties.get("heard_n") or 0) + 1
             ent.properties["heard_ts"] = t
             if t >= self.next:

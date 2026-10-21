@@ -1810,7 +1810,7 @@ class Field3DView {
     const answered = a.heardAt != null && now - a.heardAt < 1400;
     if (a.other) {
       // THE PERSON SELF MEETS (#237): a labelled presence wherever their
-      // chat:in sits on the field (the field's edge until it is placed);
+      // chat thing (chat:<person>, chat:in until #333 part 3a) sits on the field (the field's edge until it is placed);
       // a push beams out to them, their reply flashes back to self
       const who = this.selfOther;
       if (who && who.p) a.other.position.set(who.p[0], who.p[1], who.p[2]);

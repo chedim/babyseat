@@ -2,7 +2,8 @@
 
 Blurp lives in a world of its own inside its seat's field: a grow-only
 membership list (self/world.json, canonical field ids). At birth it is Blurp
-itself and chat:in / chat:out for its person; a seat whose Blurp already has a
+itself and the chat thing of its person (chat:<person>; chat:in / chat:out
+until #333 part 3a); a seat whose Blurp already has a
 record is migrated (its chats and the toys it has). A toy joins when it is
 provisioned. Blurp HEARS THE ROOM (the operator, 2026-10-21): every discourse
 event the field applies after the world's birth -- the person's messages and
@@ -52,7 +53,7 @@ from _ef_fakes import FakeEmbedder  # noqa: E402
 DIM = 16
 COUNTER = "n = int((state.get('data') or {}).get('n', 0)) + 1\nresult = {'state': {'n': n}}"
 SELF = "m:self"
-CIN, COUT = "m:component:chat:in:operator", "m:config:chat:out:operator"
+CHAT = "m:component:chat:operator"          # #333 part 3a: the chat thing (chat:in + chat:out until then)
 
 
 class _World:
@@ -119,7 +120,7 @@ def _doc(srv):
 
 def test_a_fresh_world_is_itself_and_its_persons_chat():
     srv = _seat(names=("thing",))
-    assert SW.members(srv) == {SELF, CIN, COUT}
+    assert SW.members(srv) == {SELF, CHAT}
     doc = _doc(srv)
     assert {m["why"] for m in doc["members"].values()} == {"birth"}
     assert doc["born"] > 0
@@ -138,7 +139,7 @@ def test_store_eids_and_field_ids_compare_in_one_space():
 def test_a_blurp_with_a_record_is_migrated_with_its_chats_and_toys():
     srv = _seat(names=("sensor",), record=[{"ts": 1.0, "kind": "cycle", "n": 1}], toys=True)
     got = SW.members(srv)
-    assert SELF in got and CIN in got and COUT in got
+    assert SELF in got and CHAT in got
     assert field_id(MEMBRANE_NS + "Component:toy:fast") in got        # the toys it has stay
     assert "m:component:sensor" not in got                              # the coding memory does not
     assert _doc(srv)["members"][field_id(MEMBRANE_NS + "Component:toy:fast")]["why"] == "migrated"
@@ -151,7 +152,7 @@ def test_the_world_only_grows_and_survives_a_restart():
     SW.join(srv, ["w:ball"], "chat")                    # a member stays itself: first reason kept
     assert _doc(srv)["members"]["w:ball"]["why"] == "heard"
     srv2 = _seat(d=d)                                     # the same dir: a reboot
-    assert {SELF, CIN, COUT, "w:ball"} <= SW.members(srv2)
+    assert {SELF, CHAT, "w:ball"} <= SW.members(srv2)
 
 
 def test_a_toy_joins_when_it_is_provisioned():
@@ -227,7 +228,7 @@ def test_anything_said_in_any_chat_after_birth_joins_as_heard():
 
 def test_a_person_heard_speaking_brings_their_chat_into_the_world():
     """The operator, 2026-10-21: hearing someone speak, in any chat, adds that
-    person's chat:in / chat:out -- even a line that mentions nothing."""
+    person's chat thing -- even a line that mentions nothing."""
     srv = _seat()
     pair = {SW._fid(e) for e in SW._chat_pair("Mira")}
     assert not pair & SW.members(srv)
@@ -346,7 +347,7 @@ class TestBlurpsChat(unittest.TestCase):
         self.assertTrue(row["blurp"])
         self.assertEqual(row["owner"], "Ann")
         self.assertIn("PM with", row["title"])
-        self.assertTrue(SW.has(srv, "m:component:chat:in:ann") and SW.has(srv, "m:config:chat:out:ann"))
+        self.assertTrue(SW.has(srv, "m:component:chat:ann"))           # #333 part 3a: its chat thing
 
     def test_no_create_finds_nothing(self):
         srv, r, _ = _runner_seat()
@@ -396,15 +397,16 @@ class TestBlurpsChat(unittest.TestCase):
         r.run(CIO.blurp_chat(srv, "Ann"), "hi Blurp")        # Ann answers in it
         self.assertEqual(CIO.recent_person(srv), "Ann")
 
-    def test_a_message_in_another_chat_still_stamps_chat_in(self):
-        """The room (the operator, 2026-10-21): Blurp hears every chat -- chat:in
-        keeps its old rule; the PM is only where Blurp speaks."""
+    def test_a_message_in_another_chat_still_stamps_the_chat_thing(self):
+        """The room (the operator, 2026-10-21): Blurp hears every chat -- the
+        chat thing (chat:in until #333 part 3a) keeps its old rule; the PM is
+        only where Blurp speaks."""
         srv, r, _ = _runner_seat()
         h = _Route(srv, r)
         try:
             coding = r.sessions.create(title="code")
             code, _ = h.post(f"/session/{coding['id']}/message", {"parts": [{"type": "text", "text": "hi"}]})
-            ent = CIO.entity_in(srv, "", create=False)
+            ent = CIO.entity(srv, "", create=False)
             self.assertEqual(int(ent.properties["heard_n"]), 1)
             pm = CIO.blurp_chat(srv, "")
             h.post(f"/session/{pm}/message", {"parts": [{"type": "text", "text": "hello you"}]})
