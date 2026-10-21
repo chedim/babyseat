@@ -1092,7 +1092,7 @@ function sheetTime(s) {
 function sheetInventory(s) {
   const inv = s.inventory || [];
   if (!inv.length) return '<p class="muted">no toys (membrane toybox add &lt;kind&gt;)</p>';
-  return '<p class="note">play with them in the 🧸 dock under the 👶 tab</p><div class="wrap"><table class="tbl"><thead><tr><th>toy</th><th class="num">looks</th>' +
+  return '<p class="note">play with them in the 🧸 dock under ' + escText(SELF_NAME) + "'s tab</p>" + '<div class="wrap"><table class="tbl"><thead><tr><th>toy</th><th class="num">looks</th>' +
     '<th class="num">error</th><th>changed by</th></tr></thead><tbody>' + inv.map((t) =>
       '<tr><td><span class="dot ' + (HEALTH_DOT[t.health] || "idle") + '" title="' + escAttr(t.health) + '"></span>' + escText(t.name) +
       ' <span class="muted">' + escText(t.kind || "") + (t.seen_as ? " · seen as " + escText(t.seen_as) : "") + "</span></td>" +

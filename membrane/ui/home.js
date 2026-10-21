@@ -710,8 +710,12 @@ function zooCard(row, now) {
   const sub = on ? [c.rung_name, c.state].filter(Boolean).map(zooEsc).join(" · ") : "offline";
   const seat = [r.name, r.host && r.host !== r.name ? r.host : "", on ? zooAgo(c.last_activity, now) : ""].filter(Boolean).map(zooEsc).join(" · ");
   const title = r.active ? "the house talks to this seat" : on ? "talk to this seat (the whole house switches)" : "offline -- the house can still switch to it";
+  // #358: an online seat's Blurp drawn from its own card (asleep, energy when the card has it)
+  const pz = on ? blurpPose(c) : null;
+  const body = pz ? `<canvas class="zbody" width="48" height="48" aria-hidden="true" data-asleep="${pz.asleep ? 1 : 0}"` +
+    (typeof c.energy === "number" && isFinite(c.energy) ? ` data-energy="${zooEsc(c.energy)}"` : "") + "></canvas>" : "";
   return `<button type="button" class="${cls}" data-id="${zooEsc(r.id)}"${r.active ? ' aria-current="true"' : ""} title="${zooEsc(title)}">` +
-    `<span class="zrow"><span class="dot ${on ? "on" : "off"}" aria-hidden="true"></span><span class="zname">${zooEsc(who)}</span>${lv}</span>` +
+    `<span class="zrow"><span class="dot ${on ? "on" : "off"}" aria-hidden="true"></span>${body}<span class="zname">${zooEsc(who)}</span>${lv}</span>` +
     `<span class="zsub">${sub}</span><span class="zseat">${seat}</span></button>`;
 }
 
@@ -1013,6 +1017,174 @@ function autoTitle(a) {
     : "auto-chat paused -- click to play (the LLM works on by itself, round after round; you can join any time)";
 }
 
+// BLURP'S BODY (#358, the operator liked the film's Blurp): where the page drew
+// self as a 👶 -- the tab at the left edge, the panel's header -- and on each
+// zoo card, a small canvas draws the film's body: a soft gold ellipse with a
+// glow, a slight wobble, two eyes offset toward what it looks at, a blink now
+// and then, closed-eye arcs and drifting z's when asleep, a small smile.
+// Driven only by what the page already knows: the seat's card (GET
+// /membrane/self/card, #283/#345: awake, asleep, energy), else the sleep
+// toggle's state, and the look the 3D field shows (its direction on the
+// screen; no fresh look: the eyes look forward). The glow scales with energy.
+// Reduced motion: one still frame per change. One animation loop for every
+// body, running only while one is shown and the tab is visible.
+// Visual sizes and speeds only -- nothing here shapes Blurp's behaviour.
+const BODY_GOLD = "#d4a017", BODY_LIGHT = "#ffe28c", BODY_INK = "#1b1404";   // the page's gold (the exp bar, the celebration)
+const BODY_GLOW_MIN = 0.3;          // the glow at energy 0, as a share of the film's
+const BODY_EYE_K = 1.25;            // the eyes a little bigger than the film's: they are read at icon size
+const BODY_CARD_MS = 15000;         // how often the page re-reads the card while visible
+
+/** The pose from the seat's card (or, before it loads, the sleep toggle's
+ *  view) and a look angle on the screen (null: forward). asleep: the card's
+ *  own word (awake false), else its mode / the zoo's state; glow: 1 at full
+ *  energy down to BODY_GLOW_MIN at none; no energy on the card: the film's 1. */
+function blurpPose(card, view, look) {
+  let asleep = false, glow = 1;
+  if (card && typeof card === "object") {
+    if (typeof card.awake === "boolean") asleep = !card.awake;
+    else if (card.state) asleep = card.state === "asleep";
+    else asleep = card.mode === "off" || card.asleep === true;
+    if (typeof card.energy === "number" && isFinite(card.energy)) {
+      const e = Math.max(0, Math.min(1, card.energy));
+      glow = BODY_GLOW_MIN + (1 - BODY_GLOW_MIN) * e;
+    }
+  } else if (view && view.loaded) asleep = !view.on;
+  return { asleep, glow, look: typeof look === "number" && isFinite(look) ? look : null };
+}
+
+/** The eyes' offset toward a look angle (the film's s*.1 across, s*.08 down); none: forward. */
+function blurpEyes(look, s) {
+  if (typeof look !== "number" || !isFinite(look)) return { dx: 0, dy: 0 };
+  return { dx: Math.cos(look) * s * 0.1, dy: Math.sin(look) * s * 0.08 };
+}
+
+/** The screen direction from self to what it looks at (radians), or null
+ *  (either off screen, or the look on top of self). */
+function blurpLookAngle(from, to) {
+  if (!from || !to) return null;
+  const dx = to[0] - from[0], dy = to[1] - from[1];
+  if (Math.hypot(dx, dy) < 1) return null;
+  return Math.atan2(dy, dx);
+}
+
+/** The film's blink: an eye's height factor, 0.15 for a moment now and then. */
+function blurpBlink(t, side) { return Math.sin(t * 1.3 + side) > 0.985 ? 0.15 : 1; }
+
+/** The z's over a sleeping body, in body units from its centre: three rising
+ *  and fading on a 3 s cycle; still: one, half way up. */
+function blurpZs(t, still) {
+  const at = (p) => ({ dx: 0.9 + p * 0.5, dy: -0.6 - p * 1.1, a: Math.sin(p * Math.PI), k: 0.45 + 0.35 * p });
+  if (still) return [at(0.5)];
+  return [0, 1, 2].map((k) => at(((t / 3 + k / 3) % 1 + 1) % 1));
+}
+
+/** Animate only while a body is shown, the tab visible and motion allowed. */
+function blurpRuns(docHidden, shown, still) { return !docHidden && shown > 0 && !still; }
+
+/** Draw the body on a 2D context w x h (css px), at time t (s). o: {still,
+ *  z (the z's colour: the page's text colour)}. The film's blurp(), sized to the box. */
+function drawBlurp(g, w, h, t, pose, o) {
+  o = o || {};
+  const still = !!o.still, p = pose || {}, sleepy = p.asleep ? 1 : 0;
+  const glow = typeof p.glow === "number" ? p.glow : 1;
+  const tt = still ? 0 : t;
+  const s = Math.min(w, h) * 0.34, x = w / 2, y = h * 0.57;
+  const wob = still ? 0 : Math.sin(tt * 2.2) * (1 - sleepy * 0.7);
+  g.save();
+  const grd = g.createRadialGradient(x - s * 0.3, y - s * 0.4, s * 0.1, x, y, s * 1.1);
+  grd.addColorStop(0, BODY_LIGHT); grd.addColorStop(1, BODY_GOLD);
+  g.shadowColor = BODY_GOLD; g.shadowBlur = s * 0.4 * glow * (1 - sleepy * 0.6);
+  g.beginPath(); g.ellipse(x, y + s * 0.012 * wob, s * (1 + 0.016 * wob), s * (0.92 - 0.016 * wob), 0, 0, Math.PI * 2);
+  g.fillStyle = grd; g.fill();
+  g.shadowBlur = 0;
+  const e = blurpEyes(sleepy ? null : p.look, s);
+  for (const sx of [-1, 1]) {
+    const cx = x + sx * s * 0.32 + e.dx, cy = y - s * 0.12 + e.dy;
+    if (sleepy) {
+      g.beginPath(); g.arc(cx, cy, s * 0.11 * BODY_EYE_K, 0.15 * Math.PI, 0.85 * Math.PI);
+      g.lineWidth = Math.max(1, s * 0.05); g.strokeStyle = BODY_INK; g.stroke();
+    } else {
+      const blink = still ? 1 : blurpBlink(tt, sx);
+      g.beginPath(); g.ellipse(cx, cy, s * 0.1 * BODY_EYE_K, s * 0.13 * BODY_EYE_K * blink, 0, 0, Math.PI * 2);
+      g.fillStyle = BODY_INK; g.fill();
+    }
+  }
+  g.beginPath(); g.arc(x, y + s * 0.22, s * 0.12 * BODY_EYE_K, 0.15 * Math.PI, 0.85 * Math.PI);
+  g.lineWidth = Math.max(1, s * 0.045); g.strokeStyle = BODY_INK; g.stroke();
+  if (sleepy) {
+    g.fillStyle = o.z || BODY_GOLD; g.textAlign = "center"; g.textBaseline = "middle";
+    for (const z of blurpZs(tt, still)) {
+      g.globalAlpha = Math.max(0.15, z.a);
+      g.font = "600 " + Math.max(6, s * z.k * 1.4).toFixed(1) + "px sans-serif";
+      g.fillText("z", x + z.dx * s, y + z.dy * s);
+    }
+    g.globalAlpha = 1;
+  }
+  g.restore();
+}
+
+/** Every body on the page and the one loop that draws them. env (the page's,
+ *  or stubs under node): raf / caf, hidden() (the tab), still() (reduced
+ *  motion), now() (ms), observe(el, cb(shown)) -> unobserve, colours(el) -> {z}. */
+class BlurpBodies {
+  constructor(env) {
+    this.env = env;
+    this.items = new Map();
+    this._raf = 0;
+  }
+
+  add(cv, pose) {
+    if (!cv || this.items.has(cv)) { if (cv) this.set(cv, pose); return; }
+    const it = { pose: pose || blurpPose(null), shown: false, off: null };
+    this.items.set(cv, it);
+    it.off = this.env.observe(cv, (shown) => { it.shown = !!shown; if (shown) this._paint(cv, it); this.kick(); });
+  }
+
+  /** A new pose: a still page redraws it at once (a moving one on its next frame). */
+  set(cv, pose) {
+    const it = this.items.get(cv); if (!it) return;
+    pose = pose || blurpPose(null);
+    const same = it.pose && it.pose.asleep === pose.asleep && it.pose.glow === pose.glow && it.pose.look === pose.look;
+    it.pose = pose;
+    if (!same && it.shown && !this._raf) this._paint(cv, it);
+  }
+
+  drop(cv) {
+    const it = this.items.get(cv); if (!it) return;
+    if (it.off) it.off();
+    this.items.delete(cv);
+    this.kick();
+  }
+
+  /** Start or stop the loop for the page as it is now (the tab shown / hidden, a body shown / hidden). */
+  kick() {
+    let shown = 0;
+    for (const it of this.items.values()) if (it.shown) shown++;
+    const run = !this._paused && blurpRuns(this.env.hidden(), shown, this.env.still());
+    if (run && !this._raf) this._raf = this.env.raf((ts) => this._frame(ts));
+    else if (!run && this._raf) { this.env.caf(this._raf); this._raf = 0; }
+    if (!run) for (const [cv, it] of this.items) if (it.shown) this._paint(cv, it);
+  }
+
+  /** The page element left the document (true) or came back (false). */
+  pause(on) { this._paused = !!on; this.kick(); }
+
+  _frame() {
+    this._raf = 0;
+    for (const [cv, it] of this.items) if (it.shown) this._paint(cv, it);
+    this.kick();
+  }
+
+  _paint(cv, it) {
+    const g = cv.getContext && cv.getContext("2d"); if (!g) return;
+    const w = cv.clientWidth || cv.width, h = cv.clientHeight || cv.height;
+    const dpr = cv.width && w ? cv.width / w : 1;
+    if (g.setTransform) g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    if (g.clearRect) g.clearRect(0, 0, w, h);
+    drawBlurp(g, w, h, this.env.now() / 1000, it.pose, Object.assign({ still: this.env.still() }, this.env.colours(cv)));
+  }
+}
+
 const HomeLogic = { autoTitle, cubePoints, catchUp, personSlug, menuEntries, hotword, pickVoice, speakable, cleanTranscript, WAKE_RE, NAME_ANY_RE, downsample, wavBytes, speechChunks, tiltAxes, tiltOrbit, nextMode, FOLLOW_MODES, throughCenter, chaseAngles, angleStep,
   brainLabel, brainCaption, unlockText, setSelfName, brainKey, brainFresh, actableLine, ACT_FRESH_S, brainTrail, trailAlpha, frameRadius, selfFrame, frameDistance, dampTo,
   freshLook, followsNow, followRates, SELF_HOLD_MS, lookAngles, selfCamAngles,
@@ -1020,7 +1192,8 @@ const HomeLogic = { autoTitle, cubePoints, catchUp, personSlug, menuEntries, hot
   rungKey, rungVoided, rungToCelebrate, celebrateText, rungNotifyText, chimeOk, chimeNotes, notifyReady, bellView,
   achieveKey, achievementsToCelebrate, achieveText, acceptAskText, acceptToAsk, achieveNotifyBody,
   ballAlert, ballAlertText, ballNotifyBody, ballChimeNotes, titleFlash,
-  optSharePct, optShareFromPct, optionsRows, OptionsWindow };
+  optSharePct, optShareFromPct, optionsRows, OptionsWindow,
+  blurpPose, blurpEyes, blurpLookAngle, blurpBlink, blurpZs, blurpRuns, drawBlurp, BlurpBodies };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
 const HSTYLE = `
@@ -1144,6 +1317,10 @@ const HSTYLE = `
              width:40px; height:48px; padding:0; font-size:22px; line-height:1; border-radius:0 14px 14px 0;
              border:1px solid color-mix(in srgb, var(--divider-color,#888) 45%, transparent); border-left:0;
              background:color-mix(in srgb, var(--card-background-color,#111) 80%, transparent); }
+  /* #358: Blurp's body (a canvas) where the 👶 was; z's take the page's text colour */
+  .bbody { display:block; width:36px; height:36px; margin:auto; color:var(--primary-text-color,#e6e6e6); pointer-events:none; }
+  .bbody.sm { display:inline-block; width:26px; height:26px; margin:-6px 2px -8px -4px; vertical-align:middle; }
+  .zoopanel .zbody { flex:none; width:24px; height:24px; margin:-4px 0; color:var(--primary-text-color,#e6e6e6); }
   .babybtn.on { background:color-mix(in srgb, var(--primary-color,#3477d6) 35%, var(--card-background-color,#111)); }
   @media (hover: hover) { .babybtn:hover { background:color-mix(in srgb, var(--primary-color,#3477d6) 28%, var(--card-background-color,#111)); } }
   .babybtn:focus-visible, .selfpanel .spx:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:2px; }
@@ -1624,6 +1801,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._takeEarly();
       lsSet(LS_LEFT, "0");               // back on membrane: fresh starts land here again
       if (!this.shadowRoot.firstChild) this._render();
+      else if (this._bodies) this._bodies.pause(false);                 // #358: back on the page
       this._listenKeys(true);
       if (this._hass && !this._started) this._start();
       if (lsGet(LS_IMMERSIVE, "1") === "1") this._dock("always_hidden");
@@ -1640,6 +1818,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       clearInterval(this._autoT); clearInterval(this._selfT); clearInterval(this._selfPanelT);
       clearInterval(this._brainT); clearInterval(this._dockT);
       clearTimeout(this._cycT); this._titleStop();                // #331
+      if (this._bodies) this._bodies.pause(true);                      // #358: no frames while off the page
       if (this._brainVis) { document.removeEventListener("visibilitychange", this._brainVis); this._brainVis = null; }
       if (this._v3) { this._v3.stop(); this._v3 = null; }
       if (this._hidSidebar) this._dock("restore");
@@ -1665,6 +1844,77 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       }
     }
 
+    // BLURP'S BODY (#358): the tab's and the panel header's canvases (and the
+    // zoo's, _zooBodies), one loop for all (BlurpBodies): frames only while a
+    // body is on screen and the tab visible; reduced motion: a still frame
+    _wireBodies(root) {
+      const mq = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+      const cbs = new Map();
+      const io = typeof IntersectionObserver === "function"
+        ? new IntersectionObserver((es) => { for (const e of es) { const cb = cbs.get(e.target); if (cb) cb(e.isIntersecting); } }) : null;
+      this._bodies = new BlurpBodies({
+        raf: (f) => requestAnimationFrame(f), caf: (id) => cancelAnimationFrame(id),
+        hidden: () => !!document.hidden, still: () => !!(mq && mq.matches), now: () => performance.now(),
+        observe: (el, cb) => {
+          if (!io) { cb(true); return () => {}; }              // no observer: drawn as shown
+          cbs.set(el, cb); io.observe(el);
+          return () => { io.unobserve(el); cbs.delete(el); };
+        },
+        colours: (el) => ({ z: getComputedStyle(el).color || BODY_GOLD }),   // the z's: the theme's text colour
+      });
+      const kick = () => { if (this._bodies) this._bodies.kick(); };   // for the element's life (paused while detached)
+      document.addEventListener("visibilitychange", kick);
+      if (mq && mq.addEventListener) mq.addEventListener("change", kick);
+      this._bodyEls = Array.from(root.querySelectorAll("canvas.bbody"));
+      for (const cv of this._bodyEls) this._bodies.add(cv, this._bodyPose());
+      this._bodyTick();
+    }
+
+    _bodyPose() {
+      const c = this._chat;
+      const view = c && typeof c._selfView === "function" ? c._selfView() : null;
+      return blurpPose(this._bodyCard, view, this._bodyLook);
+    }
+
+    /** Every 1.5 s while the tab is visible: the look's direction on the
+     *  screen (self's fresh look on the 3D field; none: forward) and, every
+     *  BODY_CARD_MS, the seat's card (asleep, energy). */
+    _bodyTick() {
+      if (!this._bodies || document.hidden) return;
+      const v = this._v3;
+      let look = null;
+      if (v && typeof v.selfLookNow === "function" && typeof v.selfScreen === "function" && typeof v._project === "function") {
+        const lp = freshLook(v.selfLookNow());
+        if (lp) look = blurpLookAngle(v.selfScreen(), v._project(lp));
+      }
+      this._bodyLook = look;
+      if (this._hass && Date.now() - (this._bodyCardAt || 0) > BODY_CARD_MS) {
+        this._bodyCardAt = Date.now();
+        this._get("/membrane/self/card")
+          .then((d) => { if (d && typeof d === "object") this._bodyCard = d; this._bodyPaint(); })
+          .catch(() => {});                                  // an older seat: the sleep toggle's state
+      }
+      this._bodyPaint();
+    }
+
+    _bodyPaint() {
+      if (!this._bodies) return;
+      const p = this._bodyPose();
+      for (const cv of this._bodyEls || []) this._bodies.set(cv, p);
+    }
+
+    /** The zoo's cards were redrawn: their bodies replace the last ones. */
+    _zooBodies() {
+      if (!this._bodies) return;
+      for (const cv of this._zooEls || []) this._bodies.drop(cv);
+      this._zooEls = Array.from(this._zooList.querySelectorAll("canvas.zbody"));
+      for (const cv of this._zooEls) {
+        const en = cv.getAttribute("data-energy");
+        this._bodies.add(cv, blurpPose({ state: cv.getAttribute("data-asleep") === "1" ? "asleep" : "awake",
+                                         energy: en == null ? null : Number(en) }));
+      }
+    }
+
     /** #299: sleep or wake, from the 👶 panel's toggle; the seat's answer is shown 4 s. */
     _onSleep() {
       const c = this._chat;
@@ -1676,6 +1926,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         this._sleepBusy = false;
         if (out && !out.skipped) this._flashSelf(out.text);
         this._paintSelf();
+        this._bodyCardAt = 0; this._bodyTick();               // #358: the body opens or closes its eyes now
       });
     }
 
@@ -2349,6 +2600,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         const r = await this._hass.fetchWithAuth(HZOO);
         if (!r.ok) throw new Error(String(r.status));
         this._zooList.innerHTML = zooCards(await r.json());
+        this._zooBodies();                                    // #358: each seat's Blurp
       } catch (e) { this._zooMsg.textContent = "the zoo did not answer (" + (e && e.message || e) + ")"; }
     }
 
@@ -2482,9 +2734,9 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <p class="omsg" role="status" aria-live="polite"></p>
         </aside>
         <button class="babybtn" aria-label="${nm}: its character sheet and what it is doing" aria-expanded="false" aria-controls="selfpanel"
-                title="${nm} (#161): its character sheet -- level, attributes, quest, growth, toys, the others it met -- and what it is doing now">👶</button>
+                title="${nm} (#161): its character sheet -- level, attributes, quest, growth, toys, the others it met -- and what it is doing now"><canvas class="bbody" width="72" height="72" aria-hidden="true"></canvas></button>
         <aside class="selfpanel glass" id="selfpanel" aria-label="${nm}'s character sheet" hidden>
-          <div class="sphead"><span class="sptitle">👶 ${nm}</span><button class="spsleep" type="button" aria-pressed="false" disabled title="${nm} (#161): asleep or awake -- tap to switch">💤 asleep</button><button class="spx" aria-label="close ${nm}'s panel" title="Close">×</button></div>
+          <div class="sphead"><span class="sptitle"><canvas class="bbody sm" width="52" height="52" aria-hidden="true"></canvas> ${nm}</span><button class="spsleep" type="button" aria-pressed="false" disabled title="${nm} (#161): asleep or awake -- tap to switch">💤 asleep</button><button class="spx" aria-label="close ${nm}'s panel" title="Close">×</button></div>
           <div class="sptabs" role="tablist" aria-label="${nm}'s panel">
             <button type="button" class="sptab" role="tab" id="sptab-sheet" data-tab="sheet" aria-selected="true" aria-controls="sppane-sheet">Sheet</button>
             <button type="button" class="sptab" role="tab" id="sptab-tree" data-tab="tree" aria-selected="false" aria-controls="sppane-tree" tabindex="-1">Skill tree</button>
@@ -2605,7 +2857,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       // sat here gave way to acceptance -- sleep / wake is the 👶 panel's toggle
       this._selfStat = $(".selfstat");
       this._paintSelf();
-      this._selfT = setInterval(() => { this._paintSelf(); this._rungTick(); }, 1500);
+      this._selfT = setInterval(() => { this._paintSelf(); this._rungTick(); this._bodyTick(); }, 1500);
       // #289: the 🔔 (the rung chime + notifications) and the celebration
       this._bell = $(".rungbell"); this._cb = $(".celebrate"); this._cbText = $(".cb-t"); this._cbCanvas = $(".cb-c");
       // #299: the celebration's Accept -- real buttons, the one clickable part of the overlay
@@ -2644,6 +2896,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       }
       this._selfTab(lsGet(LS_SELFTAB, "sheet"));
       this._babyBtn.addEventListener("click", () => this._toggleSelfPanel());
+      this._wireBodies(root);                                 // #358: Blurp's body on the tab and the panel
       // the 🦠 zoo (#283): Home Assistant's seats; standalone is one seat
       this._zooBtn = $(".zoobtn"); this._zoo = $(".zoopanel"); this._zooList = $(".zlist"); this._zooMsg = $(".zmsg");
       if (window.MEMBRANE_STANDALONE) this._zooBtn.hidden = true;
@@ -2890,7 +3143,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           return;
         }
         this._msgEl.style.display = "";
-        this._msgEl.textContent = SELF_NAME + " is not moving yet — wake it (💤 in its 👶 panel) and talk to the seat";
+        this._msgEl.textContent = SELF_NAME + " is not moving yet — wake it (💤 in its panel, the tab at the left edge) and talk to the seat";
         setTimeout(() => { if (this._msgEl.textContent.startsWith(SELF_NAME + " is not")) this._msgEl.style.display = "none"; }, 6000);
         return;
       }

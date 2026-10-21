@@ -83,7 +83,8 @@ thinks about Blurps, it says "Blurp". A large prediction error is announced as
   that works exactly as before.
 - **Switch:** the 🦠 button in membrane home's top bar opens the zoo — a card per
   seat with its Blurp's name, Lv, rung, awake/asleep, a dot for reachable, its last
-  activity; tap a card to make that seat the house's (an admin's switch; the page
+  activity, and its Blurp drawn small (#358: eyes closed while it sleeps; the card the
+  integration relays has no energy yet, so the zoo's bodies keep a full glow); tap a card to make that seat the house's (an admin's switch; the page
   reloads onto it). Automations use the **`select.membrane_seat`** entity (one
   option per seat). A switch takes effect at once — no restart, the seats keep
   running.
