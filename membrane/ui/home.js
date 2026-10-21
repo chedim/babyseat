@@ -721,6 +721,104 @@ function zooCards(rows, now) {
     : '<p class="znone">no seats yet -- add one in the integration\'s options</p>';
 }
 
+// THE OPTIONS WINDOW (#344, decided 2026-10-21): the ⚙ in the top bar opens one
+// window for the seat-wide, long-term settings -- read with GET /membrane/options
+// when it opens, each change saved at once with a post to the same path
+// (membrane/options.py validates; a bad value comes back as the reason, shown
+// in the window). They live in the seat's
+// settings.json; per-device state (the chat tab, the camera) stays in the browser.
+// The 🔔 and ▶ stay in the top bar. OptionsWindow takes its elements and the two
+// calls, so node drives it with stubs (tests/test_options_window_344.py).
+const OPT_PATH = "/membrane/options";
+const OPT_SHARE_MIN = 10, OPT_SHARE_MAX = 100;           // the slider, in %
+
+/** Blurp's CPU share (0..1) as the slider's whole percent. */
+function optSharePct(share) {
+  const v = Number(share);
+  return Math.round((isFinite(v) && v > 0 ? v : 0.5) * 100);
+}
+
+/** The slider's percent as the share the seat takes: clamped to 10-100 %,
+ * two decimals; not a number -> the default 0.5. */
+function optShareFromPct(pct) {
+  const v = Number(pct);
+  if (pct === "" || pct == null || !isFinite(v)) return 0.5;
+  return Math.round(Math.min(OPT_SHARE_MAX, Math.max(OPT_SHARE_MIN, v))) / 100;
+}
+
+/** The window's rows from GET /membrane/options. */
+function optionsRows(o) {
+  o = o || {};
+  const pct = optSharePct(o.self_cpu_share), def = optSharePct((o.defaults || {}).self_cpu_share);
+  const tau = o.current_tau_s != null ? zooEsc(o.current_tau_s) + " s" : "?";
+  const health = o.health == null ? "not built yet (#333)" : Math.round(Number(o.health) * 100) + "%";
+  return `<div class="orow"><label class="olab" for="opt-share">${zooEsc(SELF_NAME)}'s CPU share</label>` +
+      `<output class="oval" for="opt-share">${pct}%</output>` +
+      `<input id="opt-share" class="oshare" type="range" min="${OPT_SHARE_MIN}" max="${OPT_SHARE_MAX}" step="5" value="${pct}" ` +
+      `aria-describedby="opt-share-h"><p class="ohint" id="opt-share-h">how much of one CPU its cycles may use (default ${def}%)</p></div>` +
+    `<div class="orow"><span class="olab">the field current's fade</span><span class="oval">${tau}</span>` +
+      `<p class="ohint">read-only: ${zooEsc(o.current_tau_note || "changing it needs the operator's approval")}</p></div>` +
+    `<div class="orow"><span class="olab">${zooEsc(SELF_NAME)}'s health</span><span class="oval">${zooEsc(health)}</span></div>`;
+}
+
+class OptionsWindow {
+  /** els: btn (the ⚙), panel, body (the rows), msg (the status line);
+   * get(path) -> the JSON; post(path, body) -> the JSON, or throws (the reason). */
+  constructor({ btn, panel, body, msg, get, post }) {
+    Object.assign(this, { btn, panel, body, msg, get, post });
+    this.state = null;
+  }
+
+  get open() { return !!this.panel && !this.panel.hidden; }
+
+  /** Open (re-reading the seat) or close; null = the other way round. */
+  async toggle(on) {
+    on = on == null ? !this.open : !!on;
+    this.panel.hidden = !on;
+    this.btn.classList.toggle("on", on);
+    this.btn.setAttribute("aria-expanded", on ? "true" : "false");
+    if (on) await this.load();
+  }
+
+  /** The window's keys: Escape closes it and gives the ⚙ the focus back. */
+  key(e) {
+    if (!e || e.key !== "Escape" || !this.open) return;
+    if (e.stopPropagation) e.stopPropagation();
+    this.toggle(false);
+    if (this.btn.focus) this.btn.focus();
+  }
+
+  async load() {
+    this.msg.textContent = "reading…";
+    try {
+      this.paint(await this.get(OPT_PATH));
+      this.msg.textContent = "";
+    } catch (e) { this.msg.textContent = "the seat did not answer (" + (e && e.message || e) + ")"; }
+  }
+
+  paint(o) {
+    this.state = o || this.state;
+    this.body.innerHTML = optionsRows(this.state);
+  }
+
+  /** The slider let go at `pct`: post the share, show what the seat saved
+   * (or its refusal, the rows back at its value). -> the saved options, or null. */
+  async setShare(pct) {
+    const share = optShareFromPct(pct);
+    this.msg.textContent = "saving…";
+    try {
+      const o = await this.post(OPT_PATH, { self_cpu_share: share });
+      this.paint(o);
+      this.msg.textContent = "saved: " + optSharePct(o.self_cpu_share) + "%";
+      return o;
+    } catch (e) {
+      this.paint(this.state);
+      this.msg.textContent = "not saved: " + (e && e.message || e);
+      return null;
+    }
+  }
+}
+
 // THE RUNG CELEBRATION (#289, the operator: "a rung is a milestone the
 // operator waits hours for; it should be unmissable"): a pass gets ~3 s over
 // the field (the amoeba bounces and glows, a burst in its colours, a caption;
@@ -920,7 +1018,8 @@ const HomeLogic = { autoTitle, cubePoints, catchUp, personSlug, menuEntries, hot
   followLabel, modeAfterTouch, eyesTarget, turnToward, eyesOrbit, zooAgo, zooCard, zooCards,
   rungKey, rungVoided, rungToCelebrate, celebrateText, rungNotifyText, chimeOk, chimeNotes, notifyReady, bellView,
   achieveKey, achievementsToCelebrate, achieveText, acceptAskText, acceptToAsk, achieveNotifyBody,
-  ballAlert, ballAlertText, ballNotifyBody, ballChimeNotes, titleFlash };
+  ballAlert, ballAlertText, ballNotifyBody, ballChimeNotes, titleFlash,
+  optSharePct, optShareFromPct, optionsRows, OptionsWindow };
 if (typeof module !== "undefined" && module.exports) module.exports = HomeLogic;
 
 const HSTYLE = `
@@ -1069,6 +1168,22 @@ const HSTYLE = `
               max-height:calc(100% - 150px); overflow:auto; overscroll-behavior:contain; border-radius:16px; padding:8px 10px 10px;
               background:color-mix(in srgb, var(--card-background-color,#111) 95%, transparent); font-size:13px; }
   .zoopanel[hidden], .top .zoobtn[hidden] { display:none; }
+  /* the ⚙ options window (#344): the seat's long-term settings, under the top bar */
+  .optpanel { position:absolute; z-index:6; top:64px; right:12px; width:min(360px, calc(100% - 32px));
+              max-height:calc(100% - 150px); overflow:auto; overscroll-behavior:contain; border-radius:16px; padding:8px 12px 10px;
+              background:color-mix(in srgb, var(--card-background-color,#111) 95%, transparent); font-size:13px; }
+  .optpanel[hidden] { display:none; }
+  .optpanel .ohead { display:flex; align-items:center; gap:8px; padding:2px 2px 6px; font-weight:600; }
+  .optpanel .ox { margin-left:auto; border:0; background:transparent; font-size:20px; line-height:1; padding:2px 8px; border-radius:8px; }
+  .optpanel .orow { display:grid; grid-template-columns:1fr auto; gap:2px 8px; align-items:center; padding:8px 2px;
+                    border-top:1px solid color-mix(in srgb, var(--divider-color,#888) 30%, transparent); }
+  .optpanel .olab { font-weight:600; min-width:0; overflow-wrap:anywhere; }
+  .optpanel .oval { font-variant-numeric:tabular-nums; white-space:nowrap; opacity:.9; }
+  .optpanel .oshare { grid-column:1 / -1; width:100%; min-width:0; margin:4px 0; accent-color:var(--primary-color,#3477d6); }
+  .optpanel .ohint { grid-column:1 / -1; margin:0; font-size:12px; opacity:.7; }
+  .optpanel .omsg { margin:4px 2px 0; font-size:12px; opacity:.85; }
+  .optpanel .omsg:empty { display:none; }
+  .optpanel .ox:focus-visible, .optpanel .oshare:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:2px; }
   .zoopanel .zhead { display:flex; align-items:center; gap:8px; padding:2px 2px 6px; font-weight:600; }
   .zoopanel .zx { margin-left:auto; border:0; background:transparent; font-size:20px; line-height:1; padding:2px 8px; border-radius:8px; }
   .zoopanel .zcard { display:flex; flex-direction:column; gap:2px; width:100%; text-align:left; margin:0 0 6px; padding:8px 10px;
@@ -1089,6 +1204,9 @@ const HSTYLE = `
   .zoopanel .zmsg { margin:4px 2px 0; font-size:12px; opacity:.8; }
   .zoopanel .zmsg:empty, .zoopanel .znone:empty { display:none; }
   @media (max-width: 760px) {
+    .optpanel { z-index:7; inset:0; width:auto; max-height:none; border-radius:0; border:0; background:var(--card-background-color,#111);
+                padding:calc(12px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right))
+                        calc(16px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); }
     .zoopanel { z-index:7; inset:0; width:auto; max-height:none; border-radius:0; border:0; background:var(--card-background-color,#111);
                 padding:calc(12px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right))
                         calc(16px + env(safe-area-inset-bottom)) calc(14px + env(safe-area-inset-left)); }
@@ -2346,6 +2464,7 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <button class="autobtn" title="auto-chat" aria-label="auto-chat">▶</button>
           <span class="selfstat" title="where ${nm} is now: its rung, the bar toward the next, what it waits on"></span>
           <button class="rungbell" aria-label="${nm}'s rungs and ball: the chime and notifications" aria-pressed="true">🔔</button>
+          <button class="optbtn" title="Options: the seat's long-term settings" aria-label="options" aria-haspopup="dialog" aria-expanded="false" aria-controls="optpanel">⚙</button>
           <button class="tilt" hidden title="Turn the view by tilting the device">📱</button>
           <span class="sbox"><input class="q" placeholder="search entities…" autocomplete="off"><div class="hits glass"></div></span>
           <span class="status"></span>
@@ -2355,6 +2474,11 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
           <div class="zhead"><span>🦠 the zoo</span><button class="zx" aria-label="close the zoo" title="Close">×</button></div>
           <div class="zlist"></div>
           <p class="zmsg" aria-live="polite"></p>
+        </aside>
+        <aside class="optpanel glass" id="optpanel" role="dialog" aria-label="options: the seat's long-term settings" hidden>
+          <div class="ohead"><span>⚙ options</span><button class="ox" aria-label="close the options" title="Close">×</button></div>
+          <div class="obody"></div>
+          <p class="omsg" role="status" aria-live="polite"></p>
         </aside>
         <button class="babybtn" aria-label="${nm}: its character sheet and what it is doing" aria-expanded="false" aria-controls="selfpanel"
                 title="${nm} (#161): its character sheet -- level, attributes, quest, growth, toys, the others it met -- and what it is doing now">👶</button>
@@ -2526,6 +2650,27 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       $(".zx").addEventListener("click", () => { this._toggleZoo(false); this._zooBtn.focus(); });
       this._zoo.addEventListener("keydown", (e) => {
         if (e.key === "Escape") { e.stopPropagation(); this._toggleZoo(false); this._zooBtn.focus(); }
+      });
+      // the ⚙ options window (#344): seat-wide settings, read on open, saved on change
+      this._optBtn = $(".optbtn");
+      this._opt = new OptionsWindow({ btn: this._optBtn, panel: $(".optpanel"), body: $(".obody"), msg: $(".omsg"),
+        get: (p) => this._get(p),
+        post: async (p, b) => {
+          const r = await this._hass.fetchWithAuth(HSERVE + p, { method: "POST",
+            headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) });
+          let d = null; try { d = await r.json(); } catch (e) { /* no body */ }
+          if (!r.ok) throw new Error((d && d.error) || (r.status === 401 ? "the seat token is needed to change options" : String(r.status)));
+          return d;
+        } });
+      this._optBtn.addEventListener("click", () => this._opt.toggle());
+      $(".ox").addEventListener("click", () => { this._opt.toggle(false); this._optBtn.focus(); });
+      this._opt.panel.addEventListener("keydown", (e) => this._opt.key(e));
+      this._optBtn.addEventListener("keydown", (e) => this._opt.key(e));   // Escape right after the click, focus still on ⚙
+      this._opt.panel.addEventListener("input", (e) => {          // the % follows the thumb
+        if (e.target.classList.contains("oshare")) { const o = this._opt.panel.querySelector(".oval"); if (o) o.textContent = e.target.value + "%"; }
+      });
+      this._opt.panel.addEventListener("change", (e) => {         // let go: save it
+        if (e.target.classList.contains("oshare")) this._opt.setShare(e.target.value);
       });
       this._zooList.addEventListener("click", (e) => {
         const c = e.target.closest(".zcard");

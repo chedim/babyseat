@@ -100,6 +100,28 @@ works for chat too).
 | `name`, `aliases` | the seat's agreed name (written by the seat when you agree on one) and what speech hears for it |
 | `stt` | `"browser"` (default) or a whisper-server URL |
 | `ui_lan_open` | `true` (default): the page reads without a login on the local network; writes from another machine need the [seat token](auth.md#the-seat-token) either way (ignored in [JWT mode](auth.md), where the token decides) |
+| `self_cpu_share` | Blurp's CPU share, `0 < share <= 1` (default `0.5`); set in the ⚙ options window (#343, #344) |
+
+## The options window (⚙)
+
+The ⚙ in membrane home's top bar opens the seat's long-term settings (#344).
+The 🔔 and ▶ stay in the top bar. The window reads `GET /membrane/options` when
+it opens and saves each change with `POST /membrane/options` at once; the seat
+validates it, and a bad value is refused (400) with the reason, which the
+window shows. They live in `settings.json`, so a restart keeps them. Per-device
+state (the last open chat tab, the camera) stays in the browser. On a phone the
+window fills the screen; × or Escape closes it.
+
+| Option | |
+|---|---|
+| Blurp's CPU share | a slider, 10–100 % (default 50 %): `self_cpu_share`. The self loop reads the file through `options.cpu_share()`, so a change needs no restart (#343 throttles the cycles to it) |
+| The field current's fade | read-only, `CURRENT_TAU_S` (180 s today): it is a threshold, and changing it needs the operator's approval |
+| Blurp's health | read-only, once it exists (#333); the row says "not built yet" until then |
+
+Writes go through the owner's door like every other write: from another
+machine they need the [seat token](auth.md#the-seat-token). Home Assistant's
+relay doesn't forward `/membrane/options` yet, so the window works in
+standalone mode.
 
 ## Updates
 
