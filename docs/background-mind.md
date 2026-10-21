@@ -111,9 +111,24 @@ the seat's ACTING lanes down — the stable point from which the operator
   child inherits it; honored only alongside `MEMBRANE_REEXEC`), and the new
   boot pauses with an audit line `by: "restart"`. The battery guard's own
   pause is not carried — the new boot's guard pauses again if the battery
-  is still critical — and the battery never lifts a pause it did not make. `membrane: pause` is honored only from the operator's chat
+  is still critical — and the battery never lifts a pause it did not make.
+  `membrane: pause` is honored only from the operator's chat
   (a listener loop can never pause the seat). Kill switch:
   `MEMBRANE_NERVE_PAUSE=0` (pause becomes a no-op).
+- **The battery guard** (`seat_panel._battery_guard`, Termux:API, read once a
+  minute): below `BATTERY_LOW` (20%) and not charging, an event; below
+  `BATTERY_CRITICAL` (8%) and not charging, the seat pauses itself
+  (`pause_by: "battery"`). Its own pause lifts only when the battery is
+  above 20% (`BATTERY_RESUME`) **and** still charging (#405) — plugging in is
+  not enough, and an unplug before the mark keeps it held. A person's resume
+  over the battery's pause, or while the last reading sits at or below 20%,
+  **disarms** the guard: it does not pause the seat again until the machine
+  is unplugged again (a charging → not-charging reading), which re-arms it;
+  a resume with a healthy battery leaves it armed. The arming lives in RAM
+  only: a re-exec or a cold start boots armed, so a seat restarted while
+  still critical and unplugged pauses again and the person resumes it once
+  more — a fresh boot errs toward the battery, since it has not seen the
+  person's word.
 - **The button** (#348): membrane home's top bar shows what a press does
   (#382): ⏸ while the seat runs, ▶ while it is paused. It reads
   `GET /membrane/seat/pause` (`{paused, enabled}`; `enabled` is false under
