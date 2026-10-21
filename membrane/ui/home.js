@@ -866,22 +866,29 @@ function bellView(s) {
 /** THE ONCE-PER-ROLL RULE: `toys` the dock's toys, `prev` what this page saw
  *  last ({name: {n, side}}; null: the page's first read). A roll of self's is
  *  its change count on the ball (`changes.self`) going up with the ball on
- *  your side and self its last mover -- so a fetch-and-re-roll of an overdue
- *  ball is a new roll, and the dock's optimistic roll-back (#325: the counts
- *  untouched) and its undo are none. A seat without counts: the side turning
- *  to yours. -> {alert: [names to alert], yours: [names on your side], seen}. */
+ *  your side and self its last mover -- and the dock's optimistic roll-back
+ *  (#325: the counts untouched) and its undo are none. #340: only a roll that
+ *  reaches a person who played since the last one is news -- a fetch-and-re-roll
+ *  of a ball you never rolled back stays quiet (it keeps glowing); a real
+ *  exchange between two reads (your roll-back, then self's) shows in the other
+ *  players' counts. A seat without counts: the side turning to yours.
+ *  -> {alert: [names to alert], yours: [names on your side], seen}. */
 function ballAlert(prev, toys) {
   const out = { alert: [], yours: [], seen: {} };
   for (const t of Array.isArray(toys) ? toys : []) {
     if (!t || t.kind !== "ball" || t.locked || !t.name) continue;
     const side = t.reading && typeof t.reading === "object" ? t.reading.side : t.reading;
     const c = t.changes && t.changes.self, n = typeof c === "number" && isFinite(c) ? c : null;
+    let o = 0;                                       // #340: the people's rolls of it (toybox.NOT_PEOPLE aside)
+    for (const [k, v] of Object.entries(t.changes || {}))
+      if (!["self", "world", "model"].includes(k) && typeof v === "number" && isFinite(v)) o += v;
     const was = prev && prev[t.name], yours = side === "other";
-    out.seen[t.name] = { n, side: side == null ? null : String(side) };
+    out.seen[t.name] = { n, o, side: side == null ? null : String(side) };
     if (!yours) continue;
     out.yours.push(t.name);
     if (!was || !(t.last && t.last.by === "self")) continue;
-    if (n != null && was.n != null ? n > was.n : was.side !== "other") out.alert.push(t.name);
+    const played = was.side !== "other" || o > (was.o || 0);      // #340: you played since the last roll
+    if (n != null && was.n != null ? n > was.n && played : was.side !== "other") out.alert.push(t.name);
   }
   return out;
 }
