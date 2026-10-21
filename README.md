@@ -1,5 +1,3 @@
-# babyseat (formerly membrane)
-
 ![babyseat](docs/logo/logo-1280x640.png)
 
 **Talk to it. It remembers.**
