@@ -24,10 +24,12 @@ Code: `membrane/energy.py`; the loop's `self_loop.step()`.
 - **Being awake costs energy**, every loop step: `BASAL_PER_S` per second
   awake plus `CPU_PER_S` per second of CPU the cycle used (measured with
   `time.thread_time()` on the loop's thread).
-- **An error costs 0.01** (`energy.error()`, recorded as an `error` line).
-  The acts that can be used wrongly (nudging the ball on the person's side,
-  a nudge a toy refuses, an empty send) arrive with #333, so nothing calls
-  it yet.
+- **An error costs 0.01** (`energy.error()`, recorded as an `error` line
+  with its `cost` and the energy left). Since #333 Blurp's nudge calls it:
+  a nudge the thing refuses (the ball while it is on the person's side, a
+  thing's own `nudge` method failing) and a nudge at anything outside its
+  world. The empty send (nudging `chat:out` with nothing in the draft)
+  arrives with the draft (#333, part 2).
 - **The sleep pull is 1 − the lowest reserve.** Each reserve runs from 1
   (full) to 0 (empty):
 

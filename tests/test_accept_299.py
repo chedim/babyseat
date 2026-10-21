@@ -40,9 +40,17 @@ from membrane import self_loop as SL  # noqa: E402
 from membrane import self_sheet as SS  # noqa: E402
 from membrane import toy_unlocks as TU  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
+from tests._self_cap import ladder3, rebuilt  # noqa: E402
 
 NODE = pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
 LIVE7 = ["feel", "reach", "kinds", "patience", "shift", "meet", "expect"]   # the live seat, 2026-10-19 (Lv 7)
+
+
+@pytest.fixture(autouse=True)
+def _whole_tree(monkeypatch):
+    """#333: acceptance walks the whole tree -- meet, turns, expect and mirror
+    built as their rebuild (part 3) will, their passes on ladder 3."""
+    rebuilt(monkeypatch)
 
 
 def _new_seat(d=None):
@@ -65,11 +73,13 @@ def _write_record(d, lines):
 
 def _live_record():
     """A synthetic copy of the live seat's history: born, rungs 1-6 as old
-    rung lines, then expect as an achieve line (#295) -- Lv 7, turns open."""
+    rung lines, then expect as an achieve line (#295) -- Lv 7, turns open.
+    #333: rungs 6-9 carry "ladder": 3 (untagged, they are the old wiring's
+    and void: test_nudge_333)."""
     out = [{"ts": 1.0, "kind": "birth", "by": "operator"}]
     out += [{"ts": 10.0 + n, "kind": "rung", "rung": n, "skill": 0.9} for n in range(1, 7)]
     out.append({"ts": 99.0, "kind": "achieve", "id": "expect", "rung": 8, "skill": 0.12})
-    return out
+    return ladder3(out)
 
 
 def _boot(lines=None, d=None):
@@ -125,7 +135,7 @@ def test_a_saved_limit_is_not_a_standing_acceptance():
     """mode.json said allow "all": after the migration a NEW pass still waits."""
     srv, d = _boot(_live_record())
     assert SL.mode(srv) == "on"                             # the saved mode survives
-    SL._append(srv, {"ts": 200.0, "kind": "achieve", "id": "turns", "rung": 7, "skill": 0.3})
+    SL._append(srv, {"ts": 200.0, "kind": "achieve", "id": "turns", "rung": 7, "skill": 0.3, "ladder": 3})
     st = SL.status(srv)
     assert st["level"] == 8 and st["awaiting"] == ["turns"] and "turns" not in st["accepted"]
 
@@ -164,7 +174,7 @@ def test_a_child_whose_parent_is_unaccepted_does_not_earn(monkeypatch):
     assert [r["id"] for r in _kinds(srv, "achieve")] == ["meet"]
     assert SL.status(srv)["awaiting"] == ["meet"]
     assert not SL._available(srv, 7) and not SL._available(srv, 8)
-    assert not SL._replies(srv) and not SL._toy_turns(srv)  # no reply checks, no ball rolls
+    assert not SL._replies(srv)                             # no reply checks (#333: the ball rolls went)
     SL.accept(srv, "meet", by="operator")
     SL._open_rungs(srv)
     assert {r["id"] for r in _kinds(srv, "achieve")} == {"meet", "turns", "expect"}
@@ -174,7 +184,7 @@ def test_asleep_nothing_is_open_and_acceptance_still_records():
     srv, d = _boot(_live_record())
     SL.set_mode(srv, "off")
     assert SL.status(srv)["allowed"] == [] and not SL._available(srv, 2)
-    SL._append(srv, {"ts": 200.0, "kind": "achieve", "id": "turns", "rung": 7, "skill": 0.3})
+    SL._append(srv, {"ts": 200.0, "kind": "achieve", "id": "turns", "rung": 7, "skill": 0.3, "ladder": 3})
     assert SL.accept(srv, "turns")["ok"]
     assert SL.mode(srv) == "off"                            # accepting never wakes it
 
@@ -183,7 +193,7 @@ def test_asleep_nothing_is_open_and_acceptance_still_records():
 
 def test_accept_refuses_unknown_and_unearned_ids_and_is_a_no_op_twice():
     srv, d = _boot(_live_record())
-    SL._append(srv, {"ts": 200.0, "kind": "achieve", "id": "turns", "rung": 7, "skill": 0.3})
+    SL._append(srv, {"ts": 200.0, "kind": "achieve", "id": "turns", "rung": 7, "skill": 0.3, "ladder": 3})
     bad = SL.accept(srv, "flying")
     assert not bad["ok"] and "unknown achievement" in bad["error"] and "turns" in bad["error"]
     no = SL.accept(srv, "mirror")
@@ -203,7 +213,7 @@ def test_accept_refuses_unknown_and_unearned_ids_and_is_a_no_op_twice():
 
 def test_the_control_route_accepts_and_says_who():
     srv, d = _boot(_live_record())
-    SL._append(srv, {"ts": 200.0, "kind": "achieve", "id": "turns", "rung": 7, "skill": 0.3})
+    SL._append(srv, {"ts": 200.0, "kind": "achieve", "id": "turns", "rung": 7, "skill": 0.3, "ladder": 3})
     assert "accept" in SP.CONTROLS
     out = SP.control(srv, {"accept": "turns"}, by="ha:alice")
     assert out["applied"]["accept"] == {"ok": True, "id": "turns", "name": SL.ACHIEVEMENTS["turns"]["name"],
@@ -236,8 +246,8 @@ def test_the_server_route_passes_the_caller_and_the_ha_relay_stamps_the_person()
 
 def test_self_limit_still_works_as_a_bulk_accept():
     srv, d = _boot(_live_record()[:-1])                     # rungs 1-6 migrated
-    SL._append(srv, {"ts": 200.0, "kind": "achieve", "id": "expect", "rung": 8, "skill": 0.3})
-    SL._append(srv, {"ts": 201.0, "kind": "achieve", "id": "turns", "rung": 7, "skill": 0.3})
+    SL._append(srv, {"ts": 200.0, "kind": "achieve", "id": "expect", "rung": 8, "skill": 0.3, "ladder": 3})
+    SL._append(srv, {"ts": 201.0, "kind": "achieve", "id": "turns", "rung": 7, "skill": 0.3, "ladder": 3})
     out = SP.control(srv, {"self_limit": "expect"}, by="operator")   # its closure: reach, meet, expect
     assert "self_limit" in out["applied"]
     assert [r["id"] for r in _kinds(srv, "accept")] == ["expect"]  # only the earned, unaccepted ones in it
@@ -286,7 +296,7 @@ def test_a_toy_unlocks_only_once_its_achievement_is_accepted(monkeypatch):
 
 def test_the_sheet_and_the_dock_carry_acceptance():
     srv, d = _boot(_live_record())
-    SL._append(srv, {"ts": 200.0, "kind": "achieve", "id": "turns", "rung": 7, "skill": 0.3})
+    SL._append(srv, {"ts": 200.0, "kind": "achieve", "id": "turns", "rung": 7, "skill": 0.3, "ladder": 3})
     sh = SS.compute(srv)
     assert sh["accepted"] == LIVE7 and sh["awaiting"] == ["turns"]
     for row in sh["tree"]:

@@ -33,7 +33,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import test_self_rung7_self_predicts_254 as P  # noqa: E402  (its synthetic others)
 import test_self_sheet_249 as S  # noqa: E402  (a seat that lived through the bugs)
 from membrane import self_loop as SL  # noqa: E402
-from _self_cap import cap  # noqa: E402
+from _self_cap import cap, rebuilt  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _whole_tree(monkeypatch):
+    """#333: meet, turns, expect and mirror built as their rebuild (part 3) will build them."""
+    rebuilt(monkeypatch)
 
 OLD7 = 100.0                 # the old scorer's rung 7 pass
 FIX = 200.0                  # the fixed rung 7's first cycle

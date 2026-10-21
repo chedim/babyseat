@@ -104,6 +104,7 @@ class Life:
         self.change_ts = []
         self.settings = {"lam_looks": 30, "lam_prior_looks": 3.0}
         self.mirror_k = 0
+        self.at = {}                    # step -> its ts (the passes the #333 voids name)
         self.lines.append({"ts": self.ts, "kind": "birth", "by": "operator"})
 
     def put(self, rec):
@@ -164,6 +165,12 @@ class Life:
         if n == 600:
             self.put({"ts": ts, "kind": "rung", "rung": 7, "skill": 0.1})          # an old ladder's pass
             self.put({"ts": ts, "kind": "rung_void", "rung": 7, "voids_ts": ts, "why": "#254"})
+        if n == 3000:                   # #333: the old wiring's passes, voided once, as a seat's boot writes them
+            for k, at in ((6, 820), (7, 2100), (8, 2600), (9, 2900)):
+                self.put({"ts": ts, "kind": "rung_void", "rung": k, "id": SL.RUNG_ID[k], "voids_ts": self.at[at],
+                          "issue": 333, "why": "#333"})
+        if n in rungs:
+            self.at[n] = ts
         if n == 830:
             self.put({"ts": ts, "kind": "rung7_restart", "issue": 254, "why": "x"})
             self.put({"ts": ts, "kind": "fix", "issue": 259, "why": "x"})

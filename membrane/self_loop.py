@@ -70,6 +70,16 @@ record without that line has had no new pass yet, so all it earned counts.
 `self_limit` (set_limit) stays for older callers, deprecated: a number, an id
 or "all" bulk-accepts the earned achievements in that closure (and wakes
 self); 0 / "off" puts it to sleep.
+
+THE NUDGE (#333): Blurp's one act on things, replacing meet's chat push and
+roll's ball. Once feel itself is accepted its aims are drawn among the field
+spots of the things in its world (#337), and each cycle it nudges the thing it
+aims at with its own stride (self::nudge -> _nudge_once); the thing decides
+what a nudge does (toybox.nudge, or a `nudge` method of its own), a nudge
+outside its world or one the thing refuses costs the error fee (energy.error),
+and each is a `nudge` line. meet, turns, expect and mirror were the
+developer's wiring: they are not built until they are rebuilt on the nudge,
+and their old passes no longer count (LADDER_V = 3, _void_old_wiring).
 """
 from __future__ import annotations
 
@@ -89,19 +99,25 @@ METHODS = {
     "expect": "self::expect {{seed}}",
     "notice": "self::notice {{seed}}",
     "reach": "self::reach {{target}}",
-    "meet": "self::meet {{to}}",
-    "roll": "self::roll {{toy}}",        # #264: its turn with the ball (rung 7 on), the shared ball only
+    "nudge": "self::nudge {{target}}",   # #333: its one act on a thing (meet's push and roll's ball went)
 }
-RUNG_NAMES = {0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart",
+RUNG_NAMES = {0: "sleep and wake", 1: "feel itself", 2: "look", 3: "tell things apart",
               4: "patience", 5: "notice the world changed", 6: "meet an other",
               7: "time its turn", 8: "expect a reply", 9: "recognize itself", 10: "change itself",
-              11: "speak"}
-LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)}   # the rungs built so far (#311: speak; #312: mirror; #320: change)
+              11: "speak", 13: "first reach"}
+LADDER = {n: RUNG_NAMES[n] for n in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)}   # the rungs with a test (#311: speak; #312: mirror; #320: change; #333: 6-9 being rebuilt on the nudge -- ACHIEVEMENTS' `built` says which run)
 # THE LADDER FLIP (#258): rung 7 was "understand an other" until the turn-taking rung went in
-# below it. A rung line above 6 counts only when it carries "ladder": LADDER_V -- a pass
-# recorded before the flip was the old numbering's (the record is never rewritten).
-LADDER_V = 2
+# below it. A `rung` line above 6 counts only when it carries "ladder": LADDER_FLIP or later --
+# a pass recorded before the flip was the old numbering's (the record is never rewritten).
+# THE NUDGE (#333), LADDER_V = 3: meet, turns, expect and mirror (REBUILT) were the
+# developer's wiring -- the other named by code, the act a fixed chat push or a ball roll, the
+# mirror fed every cycle (the audit in #333). A pass of theirs counts only when its line
+# (`rung` or `achieve`) carries "ladder": 3, so every Blurp drops to what it earned itself; the
+# old passes stay on the record, voided once by a `rung_void` line each (_void_old_wiring).
+LADDER_V = 3
+LADDER_FLIP = 2
 FLIPPED_FROM = 7
+REBUILT = (6, 7, 8, 9)
 
 # THE SKILL TREE (#295): the rungs are achievements with stable ids, a branch and REAL
 # prerequisites -- an edge only where a test reads data or machinery that another
@@ -114,9 +130,11 @@ ACHIEVEMENTS = {
              "child_age": "newborn",
              "child_ability": "tells its own touch from another's (Rochat & Hespos 1997)",
              "why_prereqs": "a root: its test reads only its own moves and the current's push"},
-    "reach": {"rung": 2, "name": "first reach", "branch": "world", "prereqs": (), "built": True,
+    # #333: rung 2's pass is kept as "look" (what its test reads: the looks); "first reach" is
+    # now the nudge skill below, whose kicks-move-a-mobile analogy this one carried (the id stays)
+    "reach": {"rung": 2, "name": "look", "branch": "world", "prereqs": (), "built": True,
               "child_age": "~2-3 mo",
-              "child_ability": "learns its kicks move a mobile (Rovee-Collier, contingency learning)",
+              "child_ability": "learns what to expect of each thing it looks at (Fantz 1964, habituation)",
               "why_prereqs": ("a root: its looks predict a thing from the thing's own tempo; nothing "
                               "of feel itself (the current, the steering) is read")},
     "kinds": {"rung": 3, "name": "tell things apart", "branch": "world", "prereqs": ("reach",), "built": True,
@@ -135,7 +153,7 @@ ACHIEVEMENTS = {
               "why_prereqs": ("first reach: its noticing reads the looks and each thing's long memory (the "
                               "tempo), and its audit pauses a moving thing self has looked at; it does not "
                               "read patience's rates (patience reads its shifts, not the other way)")},
-    "meet": {"rung": 6, "name": "meet an other", "branch": "others", "prereqs": ("reach",), "built": True,
+    "meet": {"rung": 6, "name": "meet an other", "branch": "others", "prereqs": ("reach",), "built": False,
              "child_age": "~3-5 mo",
              "child_ability": ("tells perfect self-contingency from imperfect social contingency "
                                "(Bahrick & Watson)"),
@@ -143,20 +161,20 @@ ACHIEVEMENTS = {
                              "self/other split is reach's own prediction skill; nothing of the sort, "
                              "patience or noticing is read")},
     # #300: the two "others" skills are named for what their tests measure (ids stay)
-    "turns": {"rung": 7, "name": "time its turn", "branch": "others", "prereqs": ("meet",), "built": True,
+    "turns": {"rung": 7, "name": "time its turn", "branch": "others", "prereqs": ("meet",), "built": False,
               "child_age": "~3-5 mo",
               "child_ability": ("times its turn in a proto-conversation: serve and return "
                                 "(Bateson 1975; Trevarthen 1979; Jaffe et al. 2001)"),
               "why_prereqs": ("meet an other: it times its pushes to the other meet found, through "
                               "meet's channel, and scores each by the reply check after it")},
-    "expect": {"rung": 8, "name": "expect a reply", "branch": "others", "prereqs": ("meet",), "built": True,
+    "expect": {"rung": 8, "name": "expect a reply", "branch": "others", "prereqs": ("meet",), "built": False,
                "child_age": "~2-3 mo",
                "child_ability": ("expects a caregiver's response: the still-face upset "
                                  "(Tronick et al. 1978)"),
                "why_prereqs": ("meet an other: it predicts whether the other meet found replies to a "
                                "push, read at the reply check after it; it does not need time its turn's "
                                "learned timing -- a push by the timer is checked and predicted the same")},
-    "mirror": {"rung": 9, "name": "recognize itself", "branch": "self", "prereqs": ("feel", "meet"), "built": True,
+    "mirror": {"rung": 9, "name": "recognize itself", "branch": "self", "prereqs": ("feel", "meet"), "built": False,
                "child_age": "~18 mo",
                "child_ability": "passes the mirror test (Amsterdam 1972)",
                "why_prereqs": ("feel itself: what the mirror shows is its own moves -- the body whose steering "
@@ -180,12 +198,23 @@ ACHIEVEMENTS = {
               "why_prereqs": ("its words take turns (time its turn: its timing is that skill's policy, and one "
                               "stage is that skill's contingency) with an other it can predict (expect a reply: "
                               "its outcome is the reply check after each push)")},
+    # #333: the nudge skill -- Blurp's one act on things. Practised once feel itself is
+    # accepted (each cycle it nudges the thing it aims at); its test comes with the rebuilt
+    # rungs, so it is not built yet. Rung 13 is its test's number (12 was taken by invent).
+    "nudge": {"rung": 13, "name": "first reach", "branch": "world", "prereqs": ("feel",), "built": False,
+              "child_age": "~2-3 mo",
+              "child_ability": "learns its kicks move a mobile (Rovee-Collier, contingency learning)",
+              "why_prereqs": ("feel itself: a nudge is its own move into a thing (the direction and the "
+                              "force are its stride), and it aims only once feel's pass switches steering on")},
     "invent": {"rung": 12, "name": "invent", "branch": "self", "prereqs": ("change", "speak"), "built": False,
                "child_age": "~5 y",
                "child_ability": "makes up games with its own rules",
                "why_prereqs": "not built yet; planned: rules of its own (change itself), said to others (speak)"},
 }
 RUNG_ID = {a["rung"]: i for i, a in ACHIEVEMENTS.items()}            # the record's rung numbers -> ids
+# #333: meet, turns, expect and mirror are not built until they are rebuilt on the nudge (see
+# LADDER_V); their practice (the chat push, the ball turns, the reply checks, the mirror feed)
+# runs only for a built skill, so it stops with them
 BUILT = [i for i, a in ACHIEVEMENTS.items() if a["built"]]
 
 try:
@@ -268,8 +297,8 @@ MEET_MAX = 180              # rung 7: a push waits at most this many cycles for 
 # ("toy"; a line without one is "chat"), and rungs 7 and 8 read only the current medium's turns.
 # Chat goes quiet until rung SPEAK_RUNG (speak) opens; rung 6 reads its chat record as it stood
 # at the switch (_rung6), so the silence can't read as slipping. Pass rates in experiments/rung7_turns.
-TOY_TURNS = True            # #264: rung 7's turns with the ball (tests of the chat medium switch it off)
-SPEAK_RUNG = 11             # ...chat is quiet from rung 7 until this rung (speak) opens
+# #333: the turns, the roll and the chat push are gone (the ball is played by nudging it); the
+# lines they wrote stay, and these readers read them as history.
 # SPEAK (#311): once speak opens, self's turns go back to chat (the switch above) and each push
 # is PLAIN (SPEAK_PLAIN, the content-free line it always pushed) or WORDS: a short referential
 # utterance naming the thing of its latest answered look and what that look found ("lamp:
@@ -515,6 +544,7 @@ def bind(srv) -> None:
     rt["mode"] = _load_mode(srv)
     from . import self_world as _SW
     _SW.bind(srv)                           # #337: its world (born, or migrated before #299's lines below)
+    _void_old_wiring(srv)                   # #333: once -- the old wiring's passes, voided on the record
     _migrate_accept(srv)                    # #299: once -- what was earned before acceptance counts as accepted
     rt["model"] = _load_model(srv)
     rt["tempo"] = _load_json(srv, "tempo.json") or {}
@@ -674,6 +704,44 @@ def _migrate_accept(srv) -> None:
         if not recs or any(r.get("kind") == "accept_migrated" for r in recs):
             return
         _append(srv, {"ts": time.time(), "kind": "accept_migrated", "ids": _earn_order(recs)})
+
+
+def _void_old_wiring(srv, now: float | None = None) -> list[dict]:
+    """#333, THE LEVEL DROP, once per record: every pass of a rebuilt rung (6-9:
+    meet, turns, expect, mirror) that counted before LADDER_V = 3 gets one
+    `rung_void` line ({rung, id, voids_ts, issue: 333, why}); the pass line
+    stays. _rung_lines already stops counting them -- the lines say so on the
+    record, for the sheet and the dock ("passed under the old wiring").
+    Nothing is written for a record with nothing to void. -> the lines written."""
+    with _lock:
+        recs = _read(srv)
+        old = _rung_lines(recs, old_wiring=True)
+        done = {(r.get("rung"), float(r.get("voids_ts") or 0)) for r in recs
+                if r.get("kind") == "rung_void" and r.get("issue") == 333}
+        now = time.time() if now is None else float(now)
+        out = []
+        for r in old:
+            key = (r["rung"], float(r.get("ts") or 0))
+            if key in done:
+                continue
+            done.add(key)
+            line = {"ts": now, "kind": "rung_void", "rung": r["rung"], "id": RUNG_ID.get(r["rung"]),
+                    "voids_ts": r.get("ts"), "issue": 333,
+                    "why": "#333: the developer's wiring, not Blurp's -- rebuilt on the nudge"}
+            _append(srv, line)
+            out.append(line)
+        return out
+
+
+def _old_wiring(recs: list[dict]) -> list[dict]:
+    """#333: the passes voided as the old wiring, first per achievement, in
+    tree order: {id, name, ts} -- "passed under the old wiring"."""
+    first: dict = {}
+    for r in _rung_lines(recs, old_wiring=True):
+        i = RUNG_ID.get(r["rung"])
+        if i is not None and i not in first:
+            first[i] = float(r.get("ts") or 0)
+    return [{"id": i, "name": ACHIEVEMENTS[i]["name"], "ts": first[i]} for i in ACHIEVEMENTS if i in first]
 
 
 def _earned(recs: list[dict]) -> set:
@@ -1060,17 +1128,6 @@ def _read_entity(srv, ent, now):
     can't). Tests swap it for a simulated world driven by the fake clock."""
     from . import watch_agents as _WA
     return _WA.entity_read_back(srv, ent, force=False, by="self")
-
-
-def _push_chat(srv, text: str, person: str = ""):
-    """THE SEAM: self's outward act -- push a line to the person's chat:out
-    ('' = the operator's), marked as self's (#208). Tests swap it."""
-    from . import chat_io as _CIO
-    ent = _CIO.entity(srv, person)
-    if ent is None:
-        return
-    ent.properties["say"] = text
-    _CIO.on_edit(srv, ent, by="self")
 
 
 def _parse_p(text) -> float | None:
@@ -1584,92 +1641,7 @@ def _rung8_prompt(srv, eid: str, n: int, now: float, medium: str = "chat") -> st
             "Answer in one line: VERDICT: <probability>")
 
 
-def _meet(srv, seed: str, now: float | None = None) -> None:
-    """RUNG 6's act: push a line to chat:out (the other answers). Practised
-    from the cycle once rung 6 is available, paced at MEET_EVERY cycles so it
-    doesn't spam chat:out's gap guard.
-
-    THE OTHER is the person who actually chats (#208): chat_io's own
-    recent_person (the owner of the newest owned chat), the operator only on
-    a seat with no people. It is resolved once per meet, so the push target
-    and the reach target move together when the person changes.
-
-    RUNG 7 (#258): once rung 7 is available the timer gives way to self's
-    own TIMING (_turn_push): it waits for the moment it has learned gets
-    replies. Same words, same cap.
-
-    RUNG 8 (#215, rung 7 until #258): once rung 8 is available, each push
-    asks the model once (async, capped by llm.request) whether the other will
-    have spoken by self's reply check; the push line records whether it went
-    out (`asked`).
-
-    #264: from rung 7 until rung SPEAK_RUNG opens, the turn is a roll of the
-    shared ball (_ball_turn) and no line goes to chat."""
-    try:
-        n = int(seed or 0)
-    except (TypeError, ValueError):
-        return                                   # not a cycle's seed: only the loop meets
-    import time
-    from . import chat_io as _CIO
-    now = time.time() if now is None else now
-    if _toy_turns(srv):                                     # #264: turns with the ball; chat is quiet
-        _ball_turn(srv, n, now)
-        return
-    turns = TURNS and _available(srv, 7)
-    if not turns and n % MEET_EVERY != 1:                   # rung 6: the timer
-        return
-    person = _CIO.recent_person(srv)                        # '' = the operator (no people)
-    from . import self_world as _SW
-    if not all(_in_world(srv, e) for e in _SW._chat_pair(person)):
-        return                                              # #337: a person outside its world is not met
-    resp = _CIO.entity_in(srv, person)                      # the other, as a reach target
-    to = resp.eid if resp is not None else _CIO.name_in(person)
-    recs = _read(srv)
-    spoke = _last_spoke(srv, recs, to, now) if _replies(srv) else None    # as known now (#254)
-    rec = {"ts": now, "kind": "push", "n": n, "eid": _CIO.name_of(person), "to": to}
-    if turns:                                               # rung 7: is this the moment? (#258)
-        when = _turn_push(srv, recs, to, n, None if spoke is None else now - spoke)
-        if when is None:
-            return
-        rec.update(when)
-    _rt(srv)["other"] = to                                  # rungs 7 and 8 read this one
-    text = SPEAK_PLAIN
-    if _available(srv, SPEAK_RUNG):                         # #311: its words, from its own record
-        said = _speak(recs, to, n)
-        text = said.pop("text")
-        rec.update(said)
-    _push_chat(srv, text, person)
-    if spoke is not None:
-        rec["spoke_age"] = round(now - spoke, 1)
-    if _available(srv, 8):                                  # rung 8: ask the model AT the push (#215)
-        rec["asked"] = _queued(_ask_llm(srv, to, _rung8_prompt(srv, to, n, now)))
-    _append(srv, rec)
-
-
 # ---- #264: the turns with the ball ---------------------------------------------------
-
-def _toy_turns(srv) -> bool:
-    """Self's turns are rolls of the ball, and chat is quiet: while take turns
-    may be practised (the ball's turns are its practice), until speak
-    (SPEAK_RUNG) opens."""
-    return TOY_TURNS and _available(srv, 7) and not _available(srv, SPEAK_RUNG)
-
-
-def _ball(srv) -> tuple[str, str] | None:
-    """The shared ball: (its eid, its toy name) -- toybox.BALL when it is
-    there, else the first ball by name; None on a seat with no ball."""
-    from . import toybox as _TB
-    est = getattr(srv, "entity_store", None)
-    found = []
-    for eid, e in list(((est.docs if est is not None else None) or {}).items()):
-        tb = (e.properties or {}).get("toybox") or {}
-        if tb.get("kind") == "ball" and tb.get("name") and not tb.get("block") and _in_world(srv, eid):
-            found.append((tb["name"] != _TB.BALL, tb["name"], eid))
-    if not found:
-        return None
-    _, name, eid = min(found)
-    return eid, name
-
 
 def _last_acted(srv, now: float) -> float | None:
     """When the other last acted, as self knows it (#264): a person's last
@@ -1678,75 +1650,6 @@ def _last_acted(srv, now: float) -> float | None:
     last = _TB.last_person_poke()
     ts = float(last["ts"]) if last else None
     return ts if ts is not None and 0 < ts <= now else None
-
-
-def _roll(srv, toy: str) -> dict:
-    """SELF'S TURN (#264), its own act: roll the shared ball to the other --
-    the ball only (any other toy is refused), from its own loop only."""
-    c = _ctx.cycle
-    ball = _ball(srv)
-    if ball is None or str(toy or "").strip().lower() != ball[1]:
-        return {"rc": 2, "text": f"self rolls the shared ball only, not {toy!r}"}
-    from . import toybox as _TB
-    out = _TB.roll_self(ball[1], now=c.get("now"))
-    if not out.get("ok"):
-        return {"rc": 1, "text": out.get("error") or "the roll failed"}
-    c["rolled"] = True
-    return {"rc": 0, "text": "rolled"}
-
-
-def _ball_turn(srv, n: int, now: float) -> None:
-    """RUNG 7 WITH THE BALL (#264): the bandit (_turn_push: the same draws)
-    picks the moment over the time since the other last acted; then self
-    rolls the ball to them through its own method (field-only: no chat line,
-    no shell) and the turn goes on the record as a `push` with medium "toy"
-    (the page's ripple and the reply check read that kind). Rung 8 may ask
-    its advisor at the turn, as at a push.
-
-    #278, on the ball's own clock (TOY_CLOCK): never before the last roll's
-    reply check came, and only with the ball back on self's side -- an
-    unreturned ball is fetched at the cap (TOY_MEET_MAX cycles after the
-    last turn). Only the cycles self could roll in count as its waiting time."""
-    ball = _ball(srv)
-    if ball is None:
-        return                                              # no ball, no turn (and still no chat)
-    eid, name = ball
-    recs = _read(srv)
-    if _pending(recs, now) is not None:
-        return                                              # #278: its last roll's check hasn't come
-    last = next((r for r in reversed(recs) if r.get("kind") == "push"), None)
-    waited = n - int(last.get("n") or 0) if last is not None else TOY_MEET_MAX
-    from . import toybox as _TB
-    if (_TB.peek(name) or {}).get("side") != "self" and waited < TOY_MEET_MAX:
-        return                                              # #278: the ball is with them; the cap fetches it
-    acted = _last_acted(srv, now)
-    age = None if acted is None else now - acted
-    when: dict = {}
-    if TURNS:
-        when = _turn_push(srv, recs, eid, n, age, clock=TOY_CLOCK)
-        if when is None:
-            return
-    elif waited < TOY_MEET_EVERY:                           # the timer (tests of the bare medium)
-        return
-    from .night import method_call
-    _ctx.cycle = {"srv": srv, "act": "roll", "now": now}
-    try:
-        out = method_call(srv, srv.entity_store, None, None, _eid(), "roll", {"toy": name})
-        rolled = bool(_ctx.cycle.get("rolled"))
-    finally:
-        _ctx.cycle = None
-    if not rolled:
-        _append(srv, {"ts": now, "kind": "error", "n": n, "act": "roll",
-                      "why": str(out.get("text") or out.get("head") or out.get("error") or "")[:200]})
-        return
-    _rt(srv)["other"] = eid
-    rec = {"ts": now, "kind": "push", "n": n, "medium": "toy", "clock": TOY_CLOCK, "eid": _eid(), "to": eid,
-           "toy": name, **when}
-    if age is not None:
-        rec["spoke_age"] = round(age, 1)                    # the other's last act, as known at the turn
-    if _available(srv, 8):                                  # rung 8: ask the advisor AT the turn (#215)
-        rec["asked"] = _queued(_ask_llm(srv, eid, _rung8_prompt(srv, eid, n, now, medium="toy")))
-    _append(srv, rec)
 
 
 # ---- rung 7 (#258): take turns -- self's own timing --------------------------------
@@ -1945,6 +1848,133 @@ def _reach(srv, target: str) -> dict:
     return {"rc": 0, "text": "reached"}
 
 
+# ---- #333: the nudge -- its one act on a thing ------------------------------------------
+#
+# Reach is infinite (a nudge is mental, not physical), but only a thing in Blurp's world (#337)
+# can be nudged: one outside is refused. THE THING decides what a nudge does -- a toy by its
+# kind (toybox.nudge: the ball rolls to the other side, a tower block topples or lifts, a die /
+# drift / burst changes; fast, slow, body and the mirror take none), any other thing by a
+# `nudge` method of its own (a cliffhanger method like any other), and a thing with neither
+# does nothing. The outcome is the line's rc: NUDGE_MOVED, NUDGE_NOTHING or NUDGE_REFUSED.
+# Using a thing wrong costs energy (energy.error, 0.01): a refused nudge (the ball while it is
+# on the person's side, a thing's own method failing) and a nudge outside its world. What the
+# thing did is never fed back: Blurp sees it only by looking.
+
+NUDGE_MOVED, NUDGE_NOTHING, NUDGE_REFUSED = 0, 1, 2
+
+
+def _practised(srv, i: str) -> bool:
+    """#333: a skill's practice runs -- awake, every prerequisite earned and
+    accepted -- whether its test is built yet or not (the nudge's test comes
+    with the rebuilt rungs). A test's `isolate` cuts it as it cuts the rest."""
+    rt = _rt(srv)
+    if rt["mode"] == "off" or i not in ACHIEVEMENTS:
+        return False
+    cap = rt.get("isolate")
+    if cap is not None and i not in cap:
+        return False
+    acc = _accepted(_read(srv))
+    return all(p in acc for p in ACHIEVEMENTS[i]["prereqs"])
+
+
+def _spot(srv, eid: str):
+    """A thing's live field spot (a unit vector), None when it has none."""
+    fld = getattr(srv, "efield", None)
+    get = getattr(fld, "get", None)
+    if get is None:
+        return None
+    try:
+        from .eids import field_id
+        st = get(field_id(eid))
+    except Exception:
+        return None
+    if st is None or st.tier != "live" or st.state is None:
+        return None
+    return _unit(st.state)
+
+
+def _spots(srv, dim: int) -> dict:
+    """#333: the field spots of the things in Blurp's world (itself left out):
+    store eid -> unit vector, only those that have one in this field's space."""
+    est = getattr(srv, "entity_store", None)
+    out = {}
+    for eid in list(((est.docs if est is not None else None) or {})):
+        if eid == _eid() or not _in_world(srv, eid):
+            continue
+        v = _spot(srv, eid)
+        if v is not None and len(v) == dim:
+            out[eid] = v
+    return out
+
+
+def _nudge(srv, target: str) -> dict:
+    """self::nudge -- the thing decides (see above); the outcome lands on the
+    cycle's context (`rc`, `did`), never in what Blurp reads."""
+    c = _ctx.cycle
+    est = srv.entity_store
+    ent = (est.docs or {}).get(target)
+    if ent is None:
+        c["rc"], c["did"] = NUDGE_NOTHING, "nothing there"
+        return {"rc": 0, "text": "nothing there"}
+    if not _in_world(srv, target):
+        c["rc"], c["did"] = NUDGE_REFUSED, "outside its world"
+        return {"rc": 0, "text": "not in its world"}
+    tb = (ent.properties or {}).get("toybox") or {}
+    if tb.get("name"):
+        from . import toybox as _TB
+        try:
+            out = _TB.nudge(tb["name"], block=tb.get("block"), now=c.get("now"))
+        except Exception as e:                              # noqa: BLE001
+            out = {"ok": False, "refused": False, "changed": False, "error": repr(e)}
+        c["rc"] = (NUDGE_REFUSED if out.get("refused") else NUDGE_MOVED if out.get("changed")
+                   else NUDGE_NOTHING)
+        c["did"] = str(out.get("did") or out.get("error") or "")
+        return {"rc": 0, "text": "nudged"}
+    from .night import method_call, resolve_method
+    if resolve_method(est, ent, "nudge")[0] is None:
+        c["rc"], c["did"] = NUDGE_NOTHING, "it takes no nudge"
+        return {"rc": 0, "text": "nudged"}
+    out = method_call(srv, est, None, None, target, "nudge", {})
+    c["rc"] = NUDGE_MOVED if out.get("rc") == 0 else NUDGE_REFUSED
+    c["did"] = str(out.get("head") or out.get("error") or out.get("outcome") or "")[:120]
+    return {"rc": 0, "text": "nudged"}
+
+
+def _nudge_once(srv, n: int, now: float, eid: str, move) -> None:
+    """#333, one nudge: Blurp's own move (`move`: its direction and its force,
+    the stride it chose this cycle) at a thing, through its own method; a
+    `nudge` line {n, ts, eid, dist, rc, aim, force, did}, and the error fee
+    for a nudge refused or outside its world. dist: how far its position is
+    from the thing's field spot (None when either has none) -- recorded,
+    nothing reads it yet."""
+    est = srv.entity_store
+    me = _entity(srv)
+    move = np.asarray(move if move is not None else [], dtype=float)
+    pos = np.asarray(me.position, dtype=float) if me is not None and me.position is not None else None
+    spot = _spot(srv, eid)
+    dist = (round(float(np.linalg.norm(_unit(pos) - spot)), 4)
+            if pos is not None and spot is not None and len(pos) == len(spot) else None)
+    from .night import method_call
+    _ctx.cycle = {"srv": srv, "act": "nudge", "now": now, "eid": eid}
+    try:
+        out = method_call(srv, est, None, None, me.eid, "nudge", {"target": eid})
+        c = _ctx.cycle
+    finally:
+        _ctx.cycle = None
+    if "rc" not in c:
+        _append(srv, {"ts": now, "kind": "error", "n": n, "act": "nudge",
+                      "why": str(out.get("head") or out.get("error") or "")[:200]})
+        return
+    rt = _rt(srv)
+    _append(srv, {"ts": now, "kind": "nudge", "n": n, "eid": eid, "dist": dist, "rc": c["rc"],
+                  "aim": rt.get("aim_n") if rt.get("aim_eid") == eid else None,
+                  "force": round(float(np.linalg.norm(move)), 4) if move.size else 0.0,
+                  "did": c.get("did") or ""})
+    if c["rc"] == NUDGE_REFUSED:
+        from . import energy as _E
+        _E.error(srv, f"nudge refused: {_short(eid)}: {c.get('did') or ''}", now=now)
+
+
 def _toy_by(recs: list[dict], eid: str, toy: dict) -> list[str]:
     """WHO CHANGED IT (#244), the ground truth on self's reach record: every
     `by` on the toy's log (its block's lines, for a block) since self's last
@@ -2049,7 +2079,7 @@ def from_command(rest: str) -> dict:
     if not parts or parts[0] not in METHODS:
         return {"rc": 2, "text": f"self has no method {parts[0] if parts else ''!r}"}
     fn = {"try": _try, "expect": _expect, "notice": _notice, "reach": _reach,
-          "meet": _meet, "roll": _roll}[parts[0]]   # looked up per call
+          "nudge": _nudge}[parts[0]]   # looked up per call
     srv = _ctx.cycle["srv"]
     return fn(srv, parts[1] if len(parts) > 1 else "0")
 
@@ -2510,7 +2540,16 @@ def cycle(srv, now: float | None = None) -> dict | None:
     if 1 in _passed(_read(srv)):            # steer: earned by feeling itself
         if (rt.get("aim") is None or rt.get("aim_count", 0) >= AIM_HOLD
                 or len(rt["aim"]) != len(pos)):
-            rt["aim"], rt["aim_n"], rt["aim_count"] = _unit(pos + AIM_REACH * _seed_dir(f"aim:{n}", len(pos))), n, 0
+            # #333: once it nudges, an aim is a thing of its world's field spot, at random among
+            # them (none on the field: a spot near where it is, as before, and nothing to nudge)
+            spots = _spots(srv, len(pos)) if _practised(srv, "nudge") else {}
+            if spots:
+                import random
+                eid = random.Random(f"aim:{n}").choice(sorted(spots))
+                rt["aim"], rt["aim_eid"] = spots[eid], eid
+            else:
+                rt["aim"], rt["aim_eid"] = _unit(pos + AIM_REACH * _seed_dir(f"aim:{n}", len(pos))), None
+            rt["aim_n"], rt["aim_count"] = n, 0
         rt["aim_count"] += 1
         aim = rt["aim"]
     from .night import method_call
@@ -2549,14 +2588,16 @@ def cycle(srv, now: float | None = None) -> dict | None:
         naive_land = _unit(pos + c["naive_mine"] + world)
         rec.update({"aim_n": rt["aim_n"], "aim_err": float(np.linalg.norm(c["observed"] - aim)),
                     "aim_naive": float(np.linalg.norm(naive_land - aim))})
+    if aim is not None and rt.get("aim_eid"):
+        rec["aim_eid"] = rt["aim_eid"]       # #333: the thing it aims at (and nudges)
     _append(srv, rec)
     est.upsert(ent, embedder=None)
     _mark_rung7_restart(srv, now)
     _mark_glitch_fix(srv, now)
+    if aim is not None and rt.get("aim_eid") and _practised(srv, "nudge"):
+        _nudge_once(srv, n, now, rt["aim_eid"], c["mine"])   # #333: its own move nudges what it aims at
     if _available(srv, 2):
         _reach_once(srv, est, ent, n, now)
-    if _available(srv, 6):
-        _meet(srv, str(n), now)
     if _available(srv, 9):
         _mirror_once(srv, n, now, c["observed"] - pos)      # #312: its move, to the mirror
     _dream_tick(srv, n, now)                                # #320: off the cycle's thread
@@ -2587,7 +2628,7 @@ def _replies(srv) -> bool:
     and a push records how long since the other last spoke -- the machinery
     both take turns (its reward) and understand an other (its outcome) read,
     so it runs while either may be practised."""
-    return _available(srv, 7) or _available(srv, 8) or _available(srv, SPEAK_RUNG)   # #311: speak reads them too
+    return _available(srv, 7) or _available(srv, 8) or _available(srv, 11)   # #311: speak reads them too
 
 
 def _in_world(srv, eid: str) -> bool:
@@ -3630,19 +3671,35 @@ SKILL_PASS = {1: RUNG1_SKILL, 2: RUNG2_SKILL, 3: RUNG2_SKILL, 4: None, 5: 1.0, 6
               7: RUNG7_PAY_MARGIN, 8: RUNG8_MARGIN, 9: BODY_SKILL, 10: CHANGE_MARGIN, 11: SPEAK_LIFT_MARGIN}
 
 
-def _rung_lines(recs: list[dict]) -> list[dict]:
+def _ladder_ok(r: dict, n) -> bool:
+    """A pass line's ladder is new enough for its rung: a rebuilt rung (#333,
+    REBUILT) needs LADDER_V; a `rung` line above 6 needs the #258 flip's."""
+    try:
+        v, n = int(r.get("ladder") or 0), int(n or 0)
+    except (TypeError, ValueError):
+        return False
+    if n in REBUILT:
+        return v >= LADDER_V
+    return r.get("kind") != "rung" or n < FLIPPED_FROM or v >= LADDER_FLIP
+
+
+def _rung_lines(recs: list[dict], old_wiring: bool = False) -> list[dict]:
     """The passes that count: every `rung` line except one with a later
     `rung_void` line for its rung (#254: a pass a broken test recorded stays
     on the append-only record but doesn't count; a later pass does), and --
     #258, the ladder flip -- a pass above rung 6 only when it carries
-    "ladder": LADDER_V (before the flip rung 7 was "understand an other": an
+    "ladder": 2 or later (before the flip rung 7 was "understand an other": an
     old pass is neither the new rung 7 nor rung 8).
 
     #295: an `achieve` line (the skill tree's pass) counts too, as its test's
-    rung (it carries `rung`; its id names it otherwise), under the same voids."""
+    rung (it carries `rung`; its id names it otherwise), under the same voids.
+
+    #333: a pass of a rebuilt rung (6-9) counts only with "ladder": 3.
+    old_wiring=True gives the passes that rule alone voids instead (what
+    counted before it): the voids' migration and the sheet read them."""
     voids: dict = {}
     for r in recs:
-        if r.get("kind") == "rung_void":
+        if r.get("kind") == "rung_void" and r.get("issue") != 333:   # #333's voids: the ladder rule below
             n = r.get("rung") if r.get("rung") is not None else ACHIEVEMENTS.get(r.get("id"), {}).get("rung")
             voids[n] = max(voids.get(n, 0.0), float(r.get("ts") or 0))
     out = []
@@ -3656,9 +3713,11 @@ def _rung_lines(recs: list[dict]) -> list[dict]:
                 r = {**r, "rung": n}
         elif k == "rung":
             n = r.get("rung")
-            if not (int(n or 0) < FLIPPED_FROM or r.get("ladder") == LADDER_V):
+            if not (int(n or 0) < FLIPPED_FROM or r.get("ladder") in (LADDER_FLIP, LADDER_V)):
                 continue
         else:
+            continue
+        if _ladder_ok(r, n) == old_wiring:                  # old_wiring: only what #333's rule voids
             continue
         if n in voids and float(r.get("ts") or 0) < voids[n]:
             continue
@@ -3687,7 +3746,8 @@ def _open_rungs(srv) -> None:
             n = ACHIEVEMENTS[i]["rung"]
             p = PROGRESS[n](recs, _tempo(srv))
             if p["passed"]:
-                line = {"ts": time.time(), "kind": "achieve", "id": i, "rung": n, "skill": p["skill"]}
+                line = {"ts": time.time(), "kind": "achieve", "id": i, "rung": n, "skill": p["skill"],
+                        "ladder": LADDER_V}                  # #333: a pass on the nudge's ladder
                 if p.get("eid"):
                     line["eid"] = p["eid"]
                 _append(srv, line)
@@ -3803,6 +3863,7 @@ def status(srv) -> dict:
             "cycles": _cycles(recs),
             "rung": level, "level": level, "rung_name": ACHIEVEMENTS[latest]["name"] if latest else RUNG_NAMES[0],
             "next": opens, "earned": [{k: e[k] for k in ("id", "name", "ts")} for e in earned],
+            "old_wiring": _old_wiring(recs),                                              # #333
             "accepted": [i for i in ACHIEVEMENTS if i in acc], "awaiting": awaiting,          # #299
             "allow": allow(srv), "allowed": [i for i in BUILT if i in allowed], "aim": aim_id,
             "bar": round(bar, 4), "waiting_on": waiting, "skill": prog.get("skill", r1["skill"]),

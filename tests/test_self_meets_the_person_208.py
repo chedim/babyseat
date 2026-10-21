@@ -58,7 +58,7 @@ def _seat(passed=(1, 2, 3, 4, 5), limit=7):
     world(srv)                              # #337: what it is handed to look at is in its world
     SL.set_limit(srv, 1)
     for n in passed:
-        SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": n, "skill": 0.9})
+        SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": n, "skill": 0.9, "ladder": SL.LADDER_V})
     SL.set_limit(srv, limit)
     return srv, r
 
@@ -85,51 +85,6 @@ def _pushes(srv):
 
 def _assistant(r, sid):
     return [m for m in r.messages.list(sid) if m["info"]["role"] == "assistant"]
-
-
-def test_self_meets_the_person_who_chats_not_the_operator_slot():
-    srv, r = _seat()
-    _chat(r, "roomata-estorsky", updated=2000)
-    SL._meet(srv, "1", now=5000.0)
-    p = _pushes(srv)[-1]
-    assert p["eid"] == "chat:out:roomata-estorsky"
-    assert p["to"] == ROOM_IN
-    assert SL._rt(srv)["other"] == ROOM_IN                 # rung 7 predicts the same one
-    assert ROOM_IN in srv.entity_store.docs                # a real reach target
-
-
-def test_a_seat_with_no_people_falls_back_to_the_operator():
-    srv, r = _seat()
-    _chat(r, "", updated=2000)
-    SL._meet(srv, "1", now=5000.0)
-    p = _pushes(srv)[-1]
-    assert p["eid"] == "chat:out:operator" and p["to"] == OP_IN
-
-
-def test_when_the_person_changes_self_follows_push_and_reach_together():
-    srv, r = _seat()
-    ann = _chat(r, "Ann", updated=2000)
-    SL._meet(srv, "1", now=5000.0)
-    bob = _chat(r, "Bob", updated=3000)                     # Bob chats later
-    SL._meet(srv, "31", now=6000.0)
-    a, b = _pushes(srv)[-2:]
-    assert (a["eid"], a["to"]) == ("chat:out:ann", MEMBRANE_NS + "Component:chat:in:ann")
-    assert (b["eid"], b["to"]) == ("chat:out:bob", MEMBRANE_NS + "Component:chat:in:bob")
-    assert SL._rt(srv)["other"] == b["to"]
-    pm_ann, pm_bob = CIO.blurp_chat(srv, "Ann", create=False), CIO.blurp_chat(srv, "Bob", create=False)
-    assert len(_assistant(r, pm_ann)) == 1 and len(_assistant(r, pm_bob)) == 1   # #337: each line in its person's PM
-    assert _assistant(r, ann) == [] and _assistant(r, bob) == []                   # ...never their coding chat
-
-
-def test_selfs_line_is_visibly_selfs():
-    srv, r = _seat()
-    _chat(r, "roomata-estorsky", updated=2000)
-    SL._meet(srv, "1", now=5000.0)
-    [m] = _assistant(r, CIO.blurp_chat(srv, "roomata-estorsky", create=False))   # #337: its PM
-    assert m["info"].get("from") == "self"
-    text = "".join(p.get("text", "") for p in m["parts"] if p.get("type") == "text")
-    assert text.startswith("\U0001F331")                    # the sprout: self, not the seat
-    assert all(p.get("from") == "self" for p in m["parts"])
 
 
 def test_an_ordinary_chat_out_line_is_not_marked_as_self():

@@ -89,7 +89,7 @@ def _seat(names=(), limit=6, passed=(1, 2, 3, 4, 5)):
     SL.bind(srv)
     cap(srv, 1)
     for r in passed:
-        SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9})
+        SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9, "ladder": SL.LADDER_V})
     cap(srv, limit)
     return srv
 
@@ -115,22 +115,8 @@ def _push_recs(to, n=None):
             for i in range(n)]
 
 
-def test_meet_pushes_a_line_to_chat_out(monkeypatch):
-    pushed = []
-    monkeypatch.setattr(SL, "_read_entity", _Chatter())
-    monkeypatch.setattr(SL, "_push_chat", lambda srv, text, person="": pushed.append(text))
-    srv = _seat()
-    _run(srv, 40)
-    pushes = _kind(srv, "push")
-    assert pushes and pushed
-    assert pushed[0] == "self is here"
-    assert pushes[0]["eid"].endswith("chat:out:operator")
-    assert pushes[0]["to"].endswith("chat:in:operator")
-
-
 def test_it_reaches_the_other_and_counts_its_answers(monkeypatch):
     monkeypatch.setattr(SL, "_read_entity", _Chatter())
-    monkeypatch.setattr(SL, "_push_chat", lambda srv, text, person="": None)
     srv = _seat()
     _run(srv, 40)
     assert [r for r in _kind(srv, "reach") if "chat:in" in r["eid"]]
@@ -140,7 +126,6 @@ def test_it_reaches_the_other_and_counts_its_answers(monkeypatch):
 
 def test_it_classes_the_imperfect_answerer_as_other(monkeypatch):
     monkeypatch.setattr(SL, "_read_entity", _Chatter())
-    monkeypatch.setattr(SL, "_push_chat", lambda srv, text, person="": None)
     srv = _seat()
     _run(srv, 200)
     assert SL._split(_record(srv), SL._tempo(srv))[RESP] == "other"
@@ -167,18 +152,8 @@ def test_an_imperfect_answerer_is_an_other():
     assert SL._split(recs, tempo)["other"] == "other"
 
 
-def test_rung_six_opens_after_pushes_and_heard(monkeypatch):
-    monkeypatch.setattr(SL, "_read_entity", _Chatter())
-    monkeypatch.setattr(SL, "_push_chat", lambda srv, text, person="": None)
-    srv = _seat()
-    _run(srv, 400)
-    assert 6 in [r["rung"] for r in _record(srv) if r["kind"] in ("rung", "achieve")]
-    assert SL.status(srv)["rung"] == 6
-
-
 def test_the_limit_holds_rung_six(monkeypatch):
     monkeypatch.setattr(SL, "_read_entity", _Chatter())
-    monkeypatch.setattr(SL, "_push_chat", lambda srv, text, person="": None)
     srv = _seat(limit=5)
     _run(srv, 400)
     assert not _kind(srv, "push")
@@ -214,3 +189,13 @@ def test_meet_ages_are_absent_before_any_exchange():
     m = SL.status(srv)["meets"]
     assert m["pushes"] == 0 and m["other"] is None
     assert m["push_age"] is None and m["heard_age"] is None
+
+
+@pytest.fixture(autouse=True)
+def _rebuilt_333(monkeypatch):
+    """#333: meet, turns, expect and mirror are not built until they are rebuilt
+    on the nudge (part 3); the scoring and the readers tested here run on the
+    tree as part 3 will build it, their passes on ladder 3 (the loop's old acts
+    -- meet's push, the ball's turns, the asks at a push -- are gone)."""
+    from tests._self_cap import rebuilt
+    rebuilt(monkeypatch)

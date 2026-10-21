@@ -405,16 +405,20 @@ def test_a_persons_knock_reads_to_self_as_a_change_it_did_not_cause(monkeypatch)
     assert _reaches(srv, whole)[-1]["by"] == [] and _reaches(srv, whole)[-1]["answer"] == "unchanged"
 
 
-def test_selfs_own_reach_is_tagged_self_on_its_record(monkeypatch):
+def test_selfs_own_nudge_is_tagged_self_on_its_record(monkeypatch):
     srv = _seat()
     TB.add(srv, "tower", params={"n": 5})
     t = _climb(srv, 1000.0)
     b4 = _eid("toy:tower:b4")
     monkeypatch.setattr(SL, "_targets", lambda srv: [b4])
     SL.cycle(srv, now=t)
+    assert _reaches(srv, b4)[-1]["by"] == []                         # #333: a look topples nothing
+    SL._nudge_once(srv, 0, t + 1, b4, None)                          # #333: self topples it by a nudge
+    SL.cycle(srv, now=t + SL.PACE_S)
     assert _reaches(srv, b4)[-1]["by"] == ["self"]
     TB.poke("toy:tower", "rebuild", 4, by="model")
-    SL.cycle(srv, now=t + SL.PACE_S)
+    SL._nudge_once(srv, 0, t + SL.PACE_S + 1, b4, None)
+    SL.cycle(srv, now=t + 2 * SL.PACE_S)
     assert _reaches(srv, b4)[-1]["by"] == ["model", "self"]          # the model lifted it, self toppled it again
 
 

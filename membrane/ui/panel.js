@@ -517,7 +517,7 @@ function selfView(st) {
 // Everything here only reads status() and self's record: nothing is claimed
 // about self that the record doesn't measure, and nothing here changes it
 // (the 🌱 sleep toggle and the operator's accept, #299, are the only switches).
-const SELF_RUNGS = { 0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart", 4: "patience",
+const SELF_RUNGS = { 0: "sleep and wake", 1: "feel itself", 2: "look", 3: "tell things apart", 4: "patience",
   5: "notice the world changed", 6: "meet an other", 7: "time its turn", 8: "expect a reply",
   9: "recognize itself", 10: "change itself", 11: "speak" };
 
@@ -1237,7 +1237,7 @@ function selfSheetHtml(s, open, nowS) {
 const TREE_BRANCHES = [["self", "Self"], ["world", "World"], ["others", "Others"]];
 const TREE_STATES = ["earned", "open", "locked", "unbuilt"];   // the seat's; "awaiting" (#299) is read from `accepted`
 const TREE_LADDER = [            // [id, name, branch, rung, prereqs]: the ladder read as a tree
-  ["feel", "feel itself", "self", 1, []], ["reach", "first reach", "world", 2, []],
+  ["feel", "feel itself", "self", 1, []], ["reach", "look", "world", 2, []],
   ["kinds", "tell things apart", "world", 3, ["reach"]], ["patience", "patience", "world", 4, ["kinds"]],
   ["shift", "notice the world changed", "world", 5, ["reach"]], ["meet", "meet an other", "others", 6, ["kinds"]],
   ["turns", "time its turn", "others", 7, ["meet"]], ["expect", "expect a reply", "others", 8, ["meet"]],

@@ -121,16 +121,8 @@ BUILT_AT = {
     "patience": {"pr": 180, "merged": _utc(2026, 10, 16, 16, 29, 14)},
     # its first test was there but could not notice a shift at the audit's floor: BUGS #191's window
     "shift": {"pr": 180, "merged": _utc(2026, 10, 16, 16, 29, 14)},
-    # rung 6; it talked to the empty operator slot until #209: BUGS #208's window
-    "meet": {"pr": 187, "merged": _utc(2026, 10, 16, 19, 24, 2)},
-    # take turns: #261 (#258, 07:26Z) timed chat pushes, #272 (#264, 12:53Z) moved the turns to the ball;
-    # #281 (#278) gave the ball its own clock and rung 7 reads only the current clock's turns
-    "turns": {"pr": 281, "merged": _utc(2026, 10, 19, 15, 19, 43)},
-    # understand an other: #256 (#254's fix, 06:11Z) graded self not the model, #261 moved it up to rung 8,
-    # #262 scored the reply, #272 the ball's turns; #281 (#278): it reads only the current clock's checks
-    "expect": {"pr": 281, "merged": _utc(2026, 10, 19, 15, 19, 43)},
-    # recognize itself (#312): the mirror toy and its test
-    "mirror": {"pr": 314, "merged": _utc(2026, 10, 20, 13, 21, 13)},
+    # #333: meet (PR #187), time its turn and expect a reply (#281) and recognize itself (#314) were the
+    # developer's wiring: not built until they are rebuilt on the nudge, so they are listed again then
     # speak (#311): its turns carry words from its record
     "speak": {"pr": 313, "merged": _utc(2026, 10, 20, 12, 55, 39)},
     # change itself (#320): the dream and its test
@@ -146,6 +138,9 @@ VOIDED_OLD = ("the old rung {rung} ({name}, now rung {now}) passed {at} under th
               "graded the LLM, not " + NAME + "; doesn't count")
 FLIPPED = ("the old rung {rung} ({name}, now rung {now}) passed {at}, before the ladder flip (#258); "
            "doesn't count: rung {rung} is now '{new}'")
+# #333: the audit's verdict on meet, turns, expect and mirror -- the developer's wiring
+OLD_WIRING = ("'{name}' (rung {rung}) passed {at} under the old wiring (#333): the code chose the other "
+              "and the act, not " + NAME + "; doesn't count until it passes again, rebuilt on the nudge")
 
 # the closest human ability and the age (months) it typically shows up --
 # rough, from developmental psychology; the growth curve's child scale
@@ -181,9 +176,9 @@ def fastest_cycles() -> dict:
 
 
 def _turn_every() -> int:
-    """Cycles between self's turns from rung 7 on: the ball's clock (#278) while
-    the turns are with the ball, else the chat's."""
-    return SL.TOY_MEET_EVERY if SL.TOY_TURNS else SL.MEET_EVERY
+    """Cycles between self's turns from rung 7 on: the ball's clock (#278), the
+    turns' last medium (#333: the turns went with meet and roll)."""
+    return SL.TOY_MEET_EVERY
 
 
 def _needs() -> dict:
@@ -1130,9 +1125,13 @@ def _voided(recs: list) -> list:
     for r in recs:
         if r.get("kind") == "rung_void" and isinstance(r.get("voids_ts"), (int, float)):
             n = r.get("rung")
+            if r.get("issue") == 333:
+                out.append(OLD_WIRING.format(rung=n, name=SL.RUNG_NAMES.get(n, ""), at=at(r["voids_ts"])))
+                said.add((n, float(r["voids_ts"])))
+                continue
             old = next((x for x in recs if x.get("kind") == "rung" and x.get("rung") == n
                         and float(x.get("ts") or 0) == float(r["voids_ts"])), None)
-            if isinstance(n, int) and n in OLD_NAMES and (old is None or old.get("ladder") != SL.LADDER_V):
+            if isinstance(n, int) and n in OLD_NAMES and (old is None or old.get("ladder") not in (SL.LADDER_FLIP, SL.LADDER_V)):
                 out.append(VOIDED_OLD.format(rung=n, name=OLD_NAMES[n], now=n + 1, at=at(r["voids_ts"])))
             else:
                 out.append(VOIDED.format(rung=n, at=at(r["voids_ts"])))
@@ -1140,7 +1139,7 @@ def _voided(recs: list) -> list:
     for r in recs:
         n = r.get("rung")
         if (r.get("kind") == "rung" and isinstance(n, int) and n >= SL.FLIPPED_FROM
-                and r.get("ladder") != SL.LADDER_V and (n, float(r.get("ts") or 0)) not in said):
+                and r.get("ladder") not in (SL.LADDER_FLIP, SL.LADDER_V) and (n, float(r.get("ts") or 0)) not in said):
             out.append(FLIPPED.format(rung=n, name=OLD_NAMES.get(n, SL.RUNG_NAMES.get(n + 1, "")), now=n + 1,
                                       at=at(r["ts"]), new=SL.RUNG_NAMES.get(n, "")))
     return out

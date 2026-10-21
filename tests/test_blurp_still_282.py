@@ -70,7 +70,6 @@ def _data(monkeypatch, tmp_path):
     monkeypatch.setenv("MEMBRANE_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setattr(WA, "_GETTER_LRU_S", 0.0)
     monkeypatch.setattr(TB, "_seat_alive", lambda: False)
-    monkeypatch.setattr(SL, "_push_chat", lambda *a, **k: (_ for _ in ()).throw(AssertionError("chat is quiet")))
     monkeypatch.setattr(SL, "_ask_llm", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no model at rung 7")))
     WA._getter_last_ts.clear()
     WA._getter_paused.clear()
@@ -99,7 +98,9 @@ def _seat(limit=7, placed=True):
     SL._append(srv, {"ts": 1.0, "kind": "audit", "rung": 5, "phase": "end", "eid": "x", "passed": True})
     cap(srv, limit)
     SL.set_mode(srv, "on")
-    TU.sync(srv)                                  # the ball (and the toys before it)
+    TU.sync(srv)                                  # the toys before it
+    if TB.peek(TB.BALL) is None:                  # #333: meet's pass no longer counts -- the ball, out as before
+        TB.add(srv, "ball", locked_ok=True)
     if placed:
         SL._entity(srv).position = [float(x) for x in _unit(3)]
     assert fld.current() is None                  # nobody has spoken since the boot
@@ -152,13 +153,16 @@ def test_without_a_place_to_stand_and_no_current_nothing_runs():
     assert _kind(srv, "cycle") == []
 
 
-def test_the_ball_turn_happens_with_no_current():
+def test_the_nudges_happen_with_no_current(monkeypatch):
+    monkeypatch.setattr(SL, "AIM_HOLD", 1)                  # #333: a fresh aim (a thing) every cycle
     srv = _seat()
-    _cycles(srv, 2 * SL.TOY_MEET_MAX)
-    turns = [r for r in _kind(srv, "push") if r.get("medium") == "toy"]
-    assert turns, "self rolls the ball to the person though nobody spoke"
-    assert TB.state(TB.BALL)["side"] == "other"
-    assert srv.efield.current() is None                     # self's own roll never pulls the current
+    SL._rt(srv)["isolate"] = set(SL._rt(srv)["isolate"]) | {"nudge"}
+    _cycles(srv, 40)
+    nudges = _kind(srv, "nudge")
+    assert nudges, "self nudges the things of its world though nobody spoke"
+    assert any(r["eid"] == BALL and r["rc"] == SL.NUDGE_MOVED for r in nudges)
+    assert TB.state(TB.BALL)["side"] == "other"             # the ball rolled to the person by a nudge
+    assert srv.efield.current() is None                     # self's own nudge never pulls the current
 
 
 # ---- the rung stats skip still cycles ----------------------------------------------------

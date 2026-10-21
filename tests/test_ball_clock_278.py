@@ -96,7 +96,7 @@ def _seat(limit=7):
     TB.bind(srv)
     cap(srv, 1)
     for r in (1, 2, 3, 4, 5, 6):
-        SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9})
+        SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9, "ladder": SL.LADDER_V})
     SL._append(srv, {"ts": 1.0, "kind": "audit", "rung": 5, "phase": "end", "eid": "x", "passed": True})
     cap(srv, limit)
     TU.sync(srv)                                  # the ball, unlocked at rung 6 (#267)
@@ -131,7 +131,6 @@ def _run(srv, cycles, player=None, t0=10_000.0, monkeypatch=None):
             player.saw_turn(now, None if last is None else now - last["ts"])
         return out
     monkeypatch.setattr(TB, "roll_self", roll)
-    monkeypatch.setattr(SL, "_push_chat", lambda *a, **k: (_ for _ in ()).throw(AssertionError("chat is quiet")))
     monkeypatch.setattr(SL, "_ask_llm", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no model at rung 7")))
     for i in range(cycles):
         t = t0 + i * SL.PACE_S
@@ -183,31 +182,6 @@ def test_the_bins_of_each_clock():
 
 # ---- 2. the pace on a seat: a rally in seconds ---------------------------------------------
 
-def test_a_player_who_rolls_it_back_gets_a_turn_within_seconds(monkeypatch):
-    srv = _seat()
-    _run(srv, 360, player=_Player(lambda age: 1.0, delay=7.0), monkeypatch=monkeypatch)   # an hour
-    ts = _turns(srv)
-    assert all(p["medium"] == "toy" and p["clock"] == SL.TOY_CLOCK for p in ts)
-    gaps = [b["ts"] - a["ts"] for a, b in zip(ts, ts[1:])]
-    assert len(ts) >= 40                                                  # was ~4 an hour on the chat's clock
-    assert min(b["n"] - a["n"] for a, b in zip(ts, ts[1:])) >= SL.TOY_MEET_EVERY
-    assert sorted(gaps)[len(gaps) // 2] <= 60.0                           # half of the turns within a minute
-    assert max(gaps) <= SL.TOY_MEET_MAX * SL.PACE_S
-    checks = _checks(srv)
-    assert checks and all(c["clock"] == SL.TOY_CLOCK and c["medium"] == "toy" for c in checks)
-    assert sum(c["replied"] for c in checks) >= 0.9 * len(checks)
-
-
-def test_every_turn_gets_its_check_before_the_next_turn(monkeypatch):
-    srv = _seat()
-    _run(srv, 600, player=_Player(lambda age: 0.5, delay=12.0, seed=3), monkeypatch=monkeypatch)
-    recs = SL._read(srv)
-    turns = [i for i, r in enumerate(recs) if r.get("kind") == "push"]
-    assert len(turns) >= 10
-    for a, b in zip(turns, turns[1:]):
-        between = [r for r in recs[a:b] if r.get("kind") == "reach" and r.get("eid") == BALL and r.get("reply")]
-        assert len(between) == 1                                         # its check, and only one, first
-
 
 def test_the_check_comes_as_soon_as_the_ball_is_back(monkeypatch):
     srv = _seat()
@@ -218,31 +192,6 @@ def test_the_check_comes_as_soon_as_the_ball_is_back(monkeypatch):
         chk = SL._first_look_after(recs, BALL, p["ts"])
         assert chk is not None and chk["reply"] and chk["replied"] is True
         assert chk["ts"] - p["ts"] <= SL.PACE_S + 1e-6                     # the next cycle, not TOY_CHECK_S later
-
-
-def test_an_unreturned_ball_is_checked_at_the_horizon_and_fetched_at_the_cap(monkeypatch):
-    srv = _seat()
-    _run(srv, 300, player=_Player(lambda age: 0.0), monkeypatch=monkeypatch)
-    recs = SL._read(srv)
-    ts = [r for r in recs if r.get("kind") == "push"]
-    assert len(ts) >= 5
-    assert all(b["n"] - a["n"] == SL.TOY_MEET_MAX for a, b in zip(ts, ts[1:]))   # it waits for the ball, the cap fetches it
-    for p in ts[1:]:
-        assert sum(p["dwell"]) == 1                                       # no cycle it could have rolled in before
-    for p in ts[:-1]:
-        chk = SL._first_look_after(recs, BALL, p["ts"])
-        assert chk["replied"] is False
-        assert SL.TOY_CHECK_S <= chk["ts"] - p["ts"] < SL.TOY_CHECK_S + SL.PACE_S + 1e-6
-
-
-def test_a_late_return_is_no_reply_but_the_ball_is_selfs_again(monkeypatch):
-    srv = _seat()
-    _run(srv, 300, player=_Player(lambda age: 1.0, delay=SL.TOY_CHECK_S + 15.0), monkeypatch=monkeypatch)
-    recs = SL._read(srv)
-    ts = [r for r in recs if r.get("kind") == "push"]
-    assert len(ts) >= 10
-    assert not any(c["replied"] for c in _checks(srv))                   # always back, never by the check
-    assert all(b["n"] - a["n"] < SL.TOY_MEET_MAX for a, b in zip(ts, ts[1:]))   # ...yet back: no fetch needed
 
 
 def test_only_a_persons_roll_within_the_horizon_is_a_reply():
@@ -288,7 +237,7 @@ def test_dwell_counts_only_the_cycles_self_could_roll_in(monkeypatch):
 # ---- 3. a clean start: the window reads the current clock only --------------------------------
 
 def _clock_record(old=40, new=12):
-    recs = [{"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9} for r in range(1, 7)]
+    recs = [{"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9, "ladder": SL.LADDER_V} for r in range(1, 7)]
     t = 1000.0
     for i in range(old):                                           # #264's turns, on the chat's clock
         recs.append({"ts": t, "kind": "push", "n": 1 + 30 * i, "medium": "toy", "to": BALL, "toy": TB.BALL,
@@ -369,14 +318,6 @@ def test_the_sheet_counts_the_toy_clocks_pace():
     assert floors[8] == SL.RUNG8_LOOKS * SL.TOY_MEET_EVERY
 
 
-def test_the_quest_log_shows_the_balls_bar(monkeypatch):
-    srv = _seat()
-    _run(srv, 300, player=_Player(lambda age: 0.6), monkeypatch=monkeypatch)
-    crit = {c["key"]: c["text"] for c in SS.sheet(srv, fresh=True)["quest"]["criteria"]}
-    assert f"→ {SL.TOY_RUNG7_PAY_Z:.1f}" in crit["payoff"] and SL.TOY_RUNG7_PAY_Z > SL.RUNG7_PAY_Z
-    assert SL._rung7(SL._read(srv))["clock"] == SL.TOY_CLOCK
-
-
 def _js(expr, f="panel.js"):
     js = ('const L=require(%r); process.stdout.write(JSON.stringify(%s))' % (str(UI / f), expr))
     return json.loads(subprocess.check_output(["node", "-e", js]))
@@ -393,3 +334,13 @@ class TestPage(unittest.TestCase):
         self.assertIn("2-10m", _js("L.selfLine(%s)" % json.dumps(old)))
         chat = {"kind": "push", "to": "x", "aim": 0, "bin": 0, "why": "aim"}
         self.assertIn("0-2m after they spoke", _js("L.selfLine(%s)" % json.dumps(chat)))
+
+
+@pytest.fixture(autouse=True)
+def _rebuilt_333(monkeypatch):
+    """#333: meet, turns, expect and mirror are not built until they are rebuilt
+    on the nudge (part 3); the scoring and the readers tested here run on the
+    tree as part 3 will build it, their passes on ladder 3 (the loop's old acts
+    -- meet's push, the ball's turns, the asks at a push -- are gone)."""
+    from tests._self_cap import rebuilt
+    rebuilt(monkeypatch)

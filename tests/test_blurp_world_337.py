@@ -194,14 +194,23 @@ def test_the_ball_and_the_mirror_outside_the_world_are_not_blurps():
     srv = _seat()
     for kind in ("ball", "mirror"):
         TB.add(srv, kind, locked_ok=True)
-    assert SL._ball(srv) is not None and SL._mirror_toy(srv) is not None
+    ball = MEMBRANE_NS + "Component:toy:ball"
+    assert SL._in_world(srv, ball) and SL._mirror_toy(srv) is not None   # #333: the ball is nudged, never rolled
     rt = SL._rt(srv)
     rt["world"]["members"] = {k: v for k, v in rt["world"]["members"].items() if "toy:" not in k}
-    assert SL._ball(srv) is None
+    assert not SL._in_world(srv, ball)                                   # ...so a nudge at it is refused
     assert SL._mirror_toy(srv) is None
 
 
 # ---- Blurp hears the room -------------------------------------------------------------
+
+def _blurp_line(srv, text, person):
+    """Blurp's own line to a person's chat:out, as the chat sees it (#333:
+    _push_chat went with meet; chat:out's own nudge will say it)."""
+    ent = CIO.entity(srv, person)
+    ent.properties["say"] = text
+    CIO.on_edit(srv, ent, by="self")
+
 
 def _ev(session, stream="discourse", role="user", mentions=("w:ball",), ts=None):
     return {"stream": stream, "role": role, "session": session, "ts": time.time() if ts is None else ts,
@@ -356,7 +365,7 @@ class TestBlurpsChat(unittest.TestCase):
         srv, r, _ = _runner_seat()
         coding = r.sessions.create(title="code")
         coding["owner"] = "Ann"
-        SL._push_chat(srv, "self is here", "Ann")
+        _blurp_line(srv, "self is here", "Ann")
         pm = CIO.blurp_chat(srv, "Ann", create=False)
         self.assertTrue(pm)
         self.assertEqual(_texts(r, pm), [CIO.SELF_MARK + " self is here"])
@@ -382,7 +391,7 @@ class TestBlurpsChat(unittest.TestCase):
         srv, r, _ = _runner_seat()
         bob = r.sessions.create(title="code")
         bob["owner"] = "Bob"
-        SL._push_chat(srv, "self is here", "Ann")          # Blurp opens Ann's PM and speaks there
+        _blurp_line(srv, "self is here", "Ann")            # Blurp opens Ann's PM and speaks there
         self.assertEqual(CIO.recent_person(srv), "Bob")
         r.run(CIO.blurp_chat(srv, "Ann"), "hi Blurp")        # Ann answers in it
         self.assertEqual(CIO.recent_person(srv), "Ann")
