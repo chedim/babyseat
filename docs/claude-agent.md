@@ -137,10 +137,10 @@ Claude's turn is learned like any other model's turn:
   router record has `backend: "claude-agent"`. The proxy stamps every
   response and chunk with `membrane_provider: "claude-agent"`, and the row
   mark comes from that stamp.
-- **Absorb** (importing external Claude Code and OpenCode sessions) keeps
-  its older, separate rule: a session answered by an Anthropic model is
-  skipped whole, and that includes a `claude-agent:*` model id or a marked
-  row.
+- **Absorb** (importing external Claude Code and OpenCode sessions)
+  learns sessions answered by Anthropic models like any other, and that
+  includes a `claude-agent:*` model id or a marked row. It keeps who
+  answered as provenance (#396).
 
 ## Policy
 

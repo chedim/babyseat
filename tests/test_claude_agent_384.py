@@ -12,7 +12,7 @@ in the SDK's loop (tests/test_claude_agent_tools_389.py).
 - opt-in: the router never escalates to it unless pinned or added to the
   ladder; background lanes never use it;
 - learned: the person's side and Claude's reply, like any model's (#389);
-  absorb's older Anthropic filter still skips the session. Shown: the
+  absorb learns the session too, keeping provenance (#396). Shown: the
   transcript keeps the reply, marked Claude-made by provider, not by model
   name;
 - a missing SDK or CLI is a clear error.
