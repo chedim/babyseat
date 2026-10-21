@@ -102,6 +102,8 @@ def _seat(names=("mastered", "learnable", "noise"), limit=3, passed=(1, 2)):
                           properties={"name": name, "getter_script": "result = {'state': {'x': 1}}"})
         est.docs[e.eid] = e
     SL.bind(srv)
+    from tests._self_cap import world
+    world(srv)                              # #337: what it is handed to look at is in its world
     cap(srv, 1)
     for r in passed:
         SL._append(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9})

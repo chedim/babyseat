@@ -773,6 +773,11 @@ def add(srv, kind: str, name: str | None = None, params: dict | None = None,
         eids += [_put(est, name, kind, block=b, n=st["params"]["n"]) for b in range(1, st["params"]["n"] + 1)]
     for eid in eids:
         place(srv, eid)
+    try:
+        from . import self_world as _SW
+        _SW.join(srv, eids, "toy")                 # #337: a toy provisioned joins Blurp's world
+    except Exception as e:                         # noqa: BLE001
+        print(f"[toybox] {name} not in self's world ({e!r})", file=sys.stderr)
     return {"ok": True, "name": name, "kind": kind, "params": st["params"], "seed": st["seed"], "eids": eids}
 
 

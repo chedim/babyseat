@@ -295,6 +295,8 @@ def _seat(passed=(1, 2, 3, 4, 5, 6, 7, 8), limit=11):
     est.docs[e.eid] = e
     CIO.entity_in(srv, CIO.OPERATOR)
     SL.bind(srv)
+    from tests._self_cap import world
+    world(srv)                              # #337: what it is handed to look at is in its world
     cap(srv, 1)
     for r in passed:
         line = {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9}

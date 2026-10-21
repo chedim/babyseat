@@ -96,6 +96,8 @@ class TestToys(unittest.TestCase):
         _thing(self.srv, "cradle:mobile", getter=False)                # a toy that lost its getter
         _thing(self.srv, "toy:mute")                                   # reads, but no answer
         _thing(self.srv, "f:/tmp/x.py")                                # not a toy
+        from tests._self_cap import world
+        world(self.srv)                                                # #337: all in self's world
         for i in range(4):
             _reach(self.srv, "w:fast", "changed" if i % 2 else "unchanged", 100.0 + i)
             _reach(self.srv, "toy:mute", "none", 200.0 + i)

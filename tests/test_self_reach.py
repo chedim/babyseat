@@ -74,6 +74,8 @@ def _seat(getters=(("moving", COUNTER), ("still", FIXED)), d=None, limit=2):
                           properties={"name": name, "getter_script": code})
         est.docs[e.eid] = e
     SL.bind(srv)
+    from tests._self_cap import world
+    world(srv)                              # #337: what it is handed to look at is in its world
     SL.set_limit(srv, 1)
     return srv
 

@@ -200,6 +200,7 @@ Everything is in `<data dir>/self/` (`.membrane/self/` in a seat's directory):
 | `record.jsonl` | append-only, never truncated, from birth: every cycle, reach, push, wait, shift, audit, error, each achievement earned and each accept (#299) | kept: earned stays earned, accepted stays accepted |
 | `model.json` | rung 1's learned model of the current that pushes it | kept |
 | `tempo.json` | per thing it reads: how often it had changed when self looked | kept |
+| `world.json` | Blurp's world (#337): the field ids it may look at or act on, each with when and why it joined | kept: it only grows |
 
 Its toys' state lives next door, in `<data dir>/toybox/` (see [Toys](#toys)),
 and is kept across a restart too.
@@ -218,6 +219,55 @@ poke on a toy pulls the current toward that toy under their own key
 (`toy:<person>`), one event's worth, exactly as a chat line does
 (`efield.pull_current`); self's rolls, the world's changes and the model's
 pokes never pull it.
+
+### Blurp's world and its private chat (#337)
+
+Blurp lives in a **world of its own inside its seat's field**. The field is
+the person's memory (their agents' codebase, their home) and is never wiped;
+Blurp's world is a **scope** over it: a membership list of canonical field ids
+(`eids.field_id`, so a store eid like `membrane::Component:toy:ball` and the
+field's `m:component:toy:ball` or a word `w:ball` compare in one space), kept
+in `self/world.json`, that **only grows** (`membrane/self_world.py`). Each
+member records when it joined and why:
+
+| why | who |
+|---|---|
+| `birth` | a new Blurp (no record yet): itself, and `chat:in` / `chat:out` of its person |
+| `migrated` | a Blurp that already had a record when its world was first made: itself, every person's `chat:in` / `chat:out`, and every toybox toy it has (it keeps its toys until the reset) |
+| `toy` | a toy, when it is provisioned (an unlock, or the operator's `toybox add`) |
+| `chat` | a person's chat pair when they open the PM with Blurp, and what a message in that chat mentions |
+| `heard` | **Blurp hears the room**: what any message the field applies after the world's birth mentions -- the person's words and the model's prose, in any chat; a person heard speaking brings their own chat:in / chat:out. Blurp's own lines are role `self` on the field, never the model's |
+| `seen` | **...and sees what the adults do**: what any tool call (an observation event) applied after the birth mentions or touches, in any session |
+
+The model's reasoning (neither said aloud nor done) adds nothing, and nothing
+from before the world's birth is heard or seen (a migrated world is born at
+its migration). The field hands every applied event to its
+`event_listeners`; the world reads the event's `mentions` (already field ids).
+
+**Every read Blurp makes is filtered through its world**: what it can look at
+(the reach targets, so curiosity, attention and patience choose among members
+only), a direct reach (a thing outside reads nothing: `outside its world`),
+the ball it rolls, the mirror it feeds, its toy list and blind audits, and the
+person it meets (a person whose chat pair is outside is not met). A thing
+outside the world is never looked at or acted on, however near it is. The
+field underneath stays whole: the person's agents keep everything.
+
+**The PM with Blurp.** Each person has one private chat with Blurp: a session
+marked `"blurp": true`, titled `PM with <name>`, made on first use by
+`POST /membrane/self/chat` (the caller's: the token's person, the page's
+speaker, the relay's `person`, else the operator; it returns the session row).
+A message there is stored and shown like any other, but **no model turn runs
+and the voice does not answer**; the field hears it under the session tag
+`blurp:<person>`. Blurp's own lines (its meets, `chat_io.on_edit` with
+`by="self"`) now land there instead of the person's newest chat, and the field
+hears them under the same tag. Lines anyone else writes to `chat:out` (the
+model, a script) still land in the person's newest chat, never the PM.
+`chat:in` still hears every chat the person writes in. Who Blurp meets is still whoever
+chatted last (`chat_io.recent_person`); in the PM that is the person's own
+last message there (`person_ts`), never the PM's making or Blurp's own lines.
+A person Blurp has not met in its world (their `chat:in` / `chat:out` are not
+members) is not met until they open the PM. (The page has no button
+for it yet: the chat is being redesigned as a chatroom with private messages.)
 
 ## Watching it grow
 
@@ -789,7 +839,7 @@ usually take hours, and the audits run on their own schedule.
 ### How self chooses what to read
 
 From rung 2 on, each cycle self reads one thing. The rung it has reached sets
-the **base**: at rung 2 any thing with a getter, evenly; at rung 3 a silent
+the **base**: at rung 2 any thing in its world (#337) with a getter, evenly; at rung 3 a silent
 thing with weight 0.05; at rung 4 only the things whose next change has become
 60% likely (or a silent one now and then), and nothing when none is due.
 

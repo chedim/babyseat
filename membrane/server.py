@@ -1223,6 +1223,30 @@ class TurnRunner:
             return sid[len("loop::"):] or "build"
         return "build"
 
+    def blurp_message(self, sid: str, text: str, user_info: dict) -> dict:
+        """BLURP'S PRIVATE CHAT (#337, the PM with Blurp): the person's message
+        is stored and shown like any other (the caller stored and announced
+        it), but no model turn runs and the voice does not answer -- the
+        membraneOnly path without the voice. The field hears it, tagged
+        blurp:<person> (Blurp's world grows by what it mentions)."""
+        try:
+            from . import chat_io as _CIO
+            _cap = getattr(getattr(self, "srv", None), "capturer", None)
+            if _cap is not None and str(text or "").strip():
+                _owner = str((self.sessions.get(sid) or {}).get("owner") or "")
+                _cap.on_turn(text, session=_CIO.blurp_tag(_owner))
+        except Exception:
+            pass
+        self._busy.pop(sid, None)
+        _row = (self.sessions.sessions or {}).get(sid)
+        if _row is not None:
+            _row["person_ts"] = int(time.time() * 1000)   # the person chatted here (chat_io.recent_person)
+        self.sessions.touch(sid)
+        self.hub.publish({"type": "session.status",
+                          "status": {"type": "idle"}, "sessionID": sid})
+        self.hub.publish({"type": "session.idle", "sessionID": sid})
+        return {"info": dict(user_info or {}), "parts": []}
+
     def run(self, sid: str, text: str, user_info: dict | None = None,
             user_parts: list | None = None, _drained: bool = False) -> dict:
         """THE GUARDED ENTRY, now a REAL QUEUE: a second message on a busy
@@ -1273,6 +1297,8 @@ class TurnRunner:
         if not user_info.get("continueTurn"):
             self._announce_user(sid, user_info, user_parts)
         user_info["_announced"] = True      # the inner's announce skips
+        if (self.sessions.get(sid) or {}).get("blurp"):
+            return self.blurp_message(sid, text, user_info)   # #337: no turn in Blurp's private chat
         guard = self._guard(sid)
         got = guard.acquire(blocking=False)
         if not got and _drained:
@@ -3137,6 +3163,28 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                     from . import self_sheet as _SHEET           # #249: the dock shows the poke at once
                     _SHEET.forget_dock(getattr(runner, "srv", None) if runner is not None else None)
                 return self._json_out(out, code=200 if out.get("ok") else 400)
+            if path == "/membrane/self/chat":
+                # #337: the caller's private chat with Blurp (the PM with
+                # Blurp), made on first use -- the session row (marked blurp).
+                # WHO, as the poke's: the token's person, the page's speaker
+                # line, the HA relay's stamped `person`, else the operator
+                from . import chat_io as _CIO
+                b = self._read_body()
+                psrv = getattr(runner, "srv", None) if runner is not None else None
+                if psrv is None:
+                    return self._json_err(503, "no seat")
+                _tok = self._jwt_person()
+                if _tok is not None:
+                    _who = _tok.sub
+                elif getattr(self, "_ui_relay", False):
+                    _who = str(getattr(self, "_ui_speaker", "") or "")
+                else:
+                    _who = str((b or {}).get("person") or "") if isinstance(b, dict) else ""
+                sid = _CIO.blurp_chat(psrv, _who)
+                row = sessions.get(sid) if sid else None
+                if row is None:
+                    return self._json_err(503, "no session store")
+                return self._json_out(row)
             if path in ("/membrane/jsexec/register", "/membrane/jsexec/result"):
                 # THE SEAT'S JS (jsexec.py): an opted-in tab registers, answers its jobs
                 from . import jsexec as _JS
@@ -3371,6 +3419,16 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
                 if _row is not None and _row.get("agent") != _ma:
                     _row["agent"] = _ma
                     sessions.flush()   # the public form (the lock's owned)
+            # #337: Blurp's private chat -- no speaker lane, no model turn
+            if (sessions.get(sid) or {}).get("blurp"):
+                runner._announce_user(sid, user_info, row["parts"])
+                result = runner.blurp_message(sid, text, user_info)
+                if async_:
+                    self.send_response(204)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                return self._json_out({"info": result["info"], "parts": []})
             # THE SPEAKER LANE (speaker.py): a spoken message runs in the seat's
             # speaker session, beside the chat -- it never cuts the chat's work
             _routed = None
