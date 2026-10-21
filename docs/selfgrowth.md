@@ -257,7 +257,8 @@ amoeba glows and hops, a burst of particles in its mint and gold, the caption
 asset files) and a browser notification ("Blurp earned understand an other",
 one per seat and achievement: tagged). With *reduce
 motion* on it is a still banner. It never blocks the page (a click anywhere
-ends it). The **🔔 / 🔕** in the top bar mutes the chime and the notifications,
+ends it). The **🔔 / 🔕** in the top bar mutes the chime and the notifications
+(the ball's too, #331),
 remembered per viewer; its first tap asks for notification permission (the
 browser wants a click for that) and later taps mute. The chime waits for the
 page's first click or key (autoplay rules). Notifications need a secure
@@ -521,8 +522,9 @@ open (#249). This is where you play with self.
 
 - **The ball comes first** (#264): a small court split by a line, the ball on
   self's half (left) or on yours (right, ringed). When it is on your side,
-  it's your turn: open it and **roll it back**. See
-  [Playing ball](#playing-ball-rung-7).
+  it's your turn: open it and **roll it back**; it glows while it waits for
+  you, and self's roll raises a toast with its own Roll it back button (#331).
+  See [Playing ball](#playing-ball-rung-7).
 - **Each icon shows its toy:** a tower as a small stack (fallen blocks
   dimmed), a die its face (⚀…⚅), drift a gauge, burst ✦ (bright while its
   window is active, dim while quiet), fast and slow their value, body its
@@ -1100,6 +1102,24 @@ back. That's the whole game.
   (right, ringed). On your side it's your turn: hover it (tap on a phone)
   and press **roll it back**. From a terminal:
   `membrane toybox poke toy:ball roll` (tagged `operator`, or `--as <name>`).
+- **You can't miss it** (#331). When self rolls you the ball, membrane home
+  says so: a toast at the top, `⚽ Blurp rolled you the ball`, with a big
+  **Roll it back** button (the dock's own roll: the ball moves at once); the
+  ball's dock icon (and the phone's 🧸) glows and pulses while the ball is on
+  your side (it glows still with *reduce motion*); a short two-note chime;
+  and while the tab is hidden, the tab's title flashes and a browser
+  notification comes (clicking it brings the page up). The page hears self's
+  cycles on its event stream and reads the ball at once, so it reacts within
+  a couple of seconds, hidden tab or not. It fires once per roll of self's
+  (an overdue ball fetched and rolled again is a new roll), never for your
+  own roll-back, and a ball already on your side when you open the page only
+  glows. The toast goes when the ball leaves your side (or on ✕). The 🔔 /
+  🔕 in the top bar mutes the chime and the notifications, as for an
+  [achievement](#the-exp-bar). Display-only: self's timing and rung 7's test
+  are untouched. Answering faster because you noticed is the point, and it
+  can't fake a pass: rung 7's contingency compares the windows self picked
+  against where your waiting time fell, so a reply that is uniformly faster
+  shifts both alike.
 - **Roll it back when you're around, not always.** Self is learning *when*
   you take your turn: after each roll it picks the moment it will wait for
   (how long since you last played: a roll of the ball, or a poke on any toy)
