@@ -566,10 +566,10 @@ class TestLoopbackCarriesTheProvider(unittest.TestCase):
         self.assertEqual(out["choices"][0]["message"]["content"], "Hi")
 
 
-# ---- absorb: the fail-closed rule extends to Claude-made rows -------------
+# ---- absorb: Claude-made rows are recognized; #396 absorbs them -----------
 
 class TestAbsorb(unittest.TestCase):
-    def test_a_claude_agent_rung_is_never_eligible(self):
+    def test_a_claude_agent_rung_is_recognized(self):
         from membrane import absorb as AB
         self.assertTrue(AB._is_anthropic_model("claude-agent:sonnet"))
         self.assertTrue(AB.is_claude_made_row({"role": "assistant", CA.MARK_KEY: CA.PROVIDER,
@@ -579,7 +579,8 @@ class TestAbsorb(unittest.TestCase):
         self.assertFalse(AB.is_claude_made_row({"role": "assistant", "providerID": "ollama",
                                                  "modelID": "qwen3:14b"}))
 
-    def test_an_opencode_session_with_a_claude_row_is_skipped_whole(self):
+    def test_an_opencode_session_with_a_claude_row_is_absorbed(self):
+        # #396 reversed the skip: the session is absorbed, the row marked
         import sqlite3
         import tempfile
         from membrane import absorb as AB
@@ -602,7 +603,9 @@ class TestAbsorb(unittest.TestCase):
                       (f"p{i}", mid, i, json.dumps({"type": "text", "text": text})))
         c.commit()
         c.close()
-        self.assertEqual(AB.opencode_sessions(d, 0.0, db=db), [])
+        got = AB.opencode_sessions(d, 0.0, db=db)
+        self.assertEqual([a.sid for a in got], ["ses1"])
+        self.assertEqual(got[0].rows[1].made_by, CA.PROVIDER)
 
 
 if __name__ == "__main__":

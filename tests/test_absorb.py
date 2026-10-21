@@ -1,9 +1,9 @@
 """SESSION ABSORPTION (part 1 of the autonode build): at boot the seat
 looks for sessions that ran in external agents since it last ran, imports
 them (chat rows + entity-field events) and auto-continues the newest.
-THE HARD FILTER: sessions answered by Anthropic's commercial models are
-ignored WHOLESALE -- eligible = Ollama-backed only, unknown model =
-skip (fail-closed)."""
+Who answered does not gate (issue #396): Anthropic-answered sessions are
+absorbed like any other, with their provenance kept
+(tests/test_absorb_anthropic_396.py)."""
 
 import json
 import os
@@ -112,9 +112,9 @@ class TestFilter(unittest.TestCase):
             "Qwen3-Coder:480b-cloud"))
         self.assertFalse(AB._is_anthropic_model("glm-5.3-flash:cloud"))
 
-    def test_a_claude_session_on_anthropic_models_is_dropped(self):
-        """THE OPERATOR'S RULE: one claude-* assistant line poisons the
-        WHOLE session -- it is never imported, not even partially."""
+    def test_a_claude_session_on_anthropic_models_is_collected(self):
+        """#396 reversed the old rule (one claude-* line dropped the whole
+        session): the session is collected, every row kept."""
         with tempfile.TemporaryDirectory() as d:
             home = Path(d)
             _write_claude_project(home, [
@@ -125,11 +125,14 @@ class TestFilter(unittest.TestCase):
                 _asst_line("2026-10-01T10:01:05.000Z", "qwen3-coder",
                            [{"type": "text", "text": "fine"}]),
             ])
-            self.assertEqual(AB.claude_sessions("/x/proj", 0, home=home), [])
+            got = AB.claude_sessions("/x/proj", 0, home=home)
+            self.assertEqual(len(got), 1)
+            self.assertEqual([r.text for r in got[0].rows],
+                             ["hello", "the answer", "more", "fine"])
 
-    def test_a_claude_session_with_unknown_model_is_dropped(self):
-        """FAIL-CLOSED: an assistant line with no model id means we
-        cannot prove it was not Anthropic -> drop."""
+    def test_a_claude_session_with_unknown_model_is_collected(self):
+        """The fail-closed drop guarded only against Anthropic (#396
+        lifted it): no model id is collected, marked provider 'unknown'."""
         with tempfile.TemporaryDirectory() as d:
             home = Path(d)
             _write_claude_project(home, [
@@ -139,7 +142,9 @@ class TestFilter(unittest.TestCase):
                  "message": {"role": "assistant", "id": "m1",
                              "content": [{"type": "text", "text": "?"}]}},
             ])
-            self.assertEqual(AB.claude_sessions("/x/proj", 0, home=home), [])
+            got = AB.claude_sessions("/x/proj", 0, home=home)
+            self.assertEqual(len(got), 1)
+            self.assertEqual(got[0].provider_id, "unknown")
 
     def test_an_ollama_backed_claude_session_survives(self):
         """`ollama launch claude` -- Claude Code on local models -- is
@@ -321,7 +326,9 @@ class TestOpencodeCollector(unittest.TestCase):
             self.assertEqual((c.call_id, c.name), ("call_1", "edit"))
             self.assertEqual(c.output, "wrote c.py")
 
-    def test_non_ollama_and_unknown_provider_drop_the_session(self):
+    def test_other_and_unknown_providers_drop_the_session(self):
+        # #396: anthropic joined ollama as an absorbed provider; any
+        # other provider, or a message with none, still drops the session
         with tempfile.TemporaryDirectory() as d:
             db = Path(d) / "opencode.db"
             rows = self._sess(provider="anthropic", sid="ses_anth",
@@ -349,8 +356,7 @@ class TestOpencodeCollector(unittest.TestCase):
                           {"id": "msg_a", "role": "assistant",
                            "ts_ms": 1759300001000,
                            # ollama session but a message with NO
-                           # provider -- missing is unknown, unknown
-                           # is anthropic's chance, so fail-closed
+                           # provider -- unknown, so the session drops
                            "parts": [{"type": "text", "text": "a"}]}]}]
             rows += [{"sid": "ses_ok", "directory": "/x/proj",
                       "title": "t", "updated_ms": 1759300000000,
@@ -366,7 +372,7 @@ class TestOpencodeCollector(unittest.TestCase):
             _mk_opencode_db(db, rows)
             got = AB.opencode_sessions("/x/proj", 0, db=db)
             sids = [a.sid for a in got]
-            self.assertEqual(sids, ["ses_ok"])
+            self.assertEqual(sorted(sids), ["ses_anth", "ses_ok"])
 
     def test_directory_mismatch_is_not_collected(self):
         with tempfile.TemporaryDirectory() as d:
