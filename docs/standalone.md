@@ -61,7 +61,12 @@ membrane home draws every entity in one ball, nested like Russian dolls (#362):
 
 The faint rings are the shells (the whole ball, two thirds, one third); the far
 side of the ball is dimmer; the heaviest entities on the near side carry
-labels, edged in their kind's colour. A picked entity axis (`e:<id>`) is the
+labels, edged in their kind's colour. The gold trail is the field's
+**current**, where attention is right now (#360): its recent spots in the ball,
+each fading as exp(−age / τ) with the seat's τ (`CURRENT_TAU_S`, 180 s), and the
+glowing head is where it is now. When no one has spoken lately, there is no
+current and no trail. The head comes with the projection, and the trail grows
+from the live `field.current` frames, which reach admins only. A picked entity axis (`e:<id>`) is the
 signed projection toward that entity, the same as `e:<id>:toward` (before the
 sphere it was the distance to it).
 
