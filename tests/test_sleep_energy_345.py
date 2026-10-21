@@ -417,8 +417,10 @@ class TestThePanelShowsIt(unittest.TestCase):
 
     def test_an_unknown_record_cap(self):
         html = self._html({"header": {"level": 1}, "energy": {"energy": 1.0, "asleep": False, "pull": 0.0,
-                                                               "limiting": "energy", "record_cap": None}})
-        self.assertIn("record cap unknown", html)
+                                                               "limiting": "energy", "record_cap": None,
+                                                               "reserves": {"energy": 1.0, "disk": 1.0, "awake": 1.0,
+                                                                            "record": 1.0}}})
+        self.assertIn("record room: cap unknown", html)       # #359: the Sleep block says it
 
     def test_an_older_seat_without_energy(self):
         self.assertNotIn("energy", self._html({"header": {"level": 1}}))

@@ -380,6 +380,20 @@ open or close is remembered per browser.
   **Lv N · <the latest skill it earned>** (#300: the level is the number of
   skills earned; never a rung), what it is **learning** now, the live exp bar,
   its age (hours since it woke) and its **working hours**.
+- **Sleep** (#359, under the nameplate; the film's sleep scene, made live):
+  four labelled bars from the sheet's `energy` section (`energy.report()`,
+  #345) -- **energy**, **disk**, **awake time** and **record room**, each
+  0-100 % of its reserve (1 = full, 0 = empty). The lowest one (the seat's
+  `limiting`, which breaks a tie) has its bar in the warning colour and a
+  **lowest** tag; below them, **pull = 1 − lowest = N%**. Beside the title:
+  awake or asleep, and since when (UTC) when the seat sends `since`. A
+  record cap the seat could not measure (`record_cap` null: the RAM reading
+  failed) reads full by design, and the row says **record room: cap
+  unknown**. Energy's bar is the page's gold, the others the primary
+  (field) colour; rounded bars 10 px high. Each bar is a `role="meter"` with
+  `aria-valuenow` 0-100 and the value as text. A seat without energy shows
+  no block; the nameplate keeps its one-line energy, pull and limiting
+  reserve at a glance.
 - **Attributes** (#300): a few **traits of self as a whole**, each measured
   from its own record -- never claimed, never a skill's test score, and they
   **gate nothing** (no pass line; nothing reads them to decide). Each shows

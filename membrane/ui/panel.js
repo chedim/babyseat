@@ -1141,13 +1141,58 @@ function skillStatHtml(sk) {
 
 /** #345: energy (0-100%), awake or asleep, the sleep pull and the reserve
  *  closest to running out -- one more fact on the nameplate ("" from a seat
- *  without energy). */
+ *  without energy); the bars and an unknown record cap are the Sleep
+ *  block's (#359). */
 function sheetEnergy(e) {
   if (!e || typeof e !== "object" || typeof e.energy !== "number") return "";
   const pct = Math.round(Math.max(0, Math.min(1, e.energy)) * 100);
   const pull = typeof e.pull === "number" ? " · pull " + Math.round(e.pull * 100) + "%" + (e.limiting ? " (" + escText(e.limiting) + ")" : "") : "";
-  const cap = "record_cap" in e && e.record_cap == null ? " · record cap unknown" : "";
-  return "<span>energy <b>" + pct + "%</b> · " + (e.asleep ? "asleep 💤" : "awake") + pull + cap + "</span>";
+  return "<span>energy <b>" + pct + "%</b> · " + (e.asleep ? "asleep 💤" : "awake") + pull + "</span>";
+}
+
+// #359: the film's sleep scene, made live -- the four reserves the seat's
+// energy report (#345, membrane/energy.py report()) sends, in its order
+const SLEEP_RESERVES = [["energy", "energy"], ["disk", "disk"], ["awake", "awake time"], ["record", "record room"]];
+
+/** The Sleep block's model from the sheet's `energy`: {rows: [{key, label,
+ *  value, pct, lowest, unknown, text}], lowest, pull_pct, asleep, since};
+ *  null from a seat without energy. The lowest is the seat's `limiting`
+ *  (its tie-break), else the smallest row; the pull is the seat's, else
+ *  1 - the lowest. A null record cap reads full by design: said, not hidden. */
+function sleepBars(e) {
+  if (!e || typeof e !== "object" || typeof e.energy !== "number") return null;
+  const rs = e.reserves && typeof e.reserves === "object" ? e.reserves : { energy: e.energy };
+  const rows = SLEEP_RESERVES.filter(([k]) => typeof rs[k] === "number" && isFinite(rs[k])).map(([key, label]) => {
+    const value = clamp01(rs[key]), pct = Math.round(value * 100);
+    const unknown = key === "record" && "record_cap" in e && e.record_cap == null;
+    return { key, label, value, pct, lowest: false, unknown, text: unknown ? "cap unknown (reads full)" : pct + "%" };
+  });
+  if (!rows.length) return null;
+  let low = rows.find((r) => r.key === e.limiting);
+  if (!low) low = rows.reduce((a, r) => (r.value < a.value ? r : a), rows[0]);
+  low.lowest = true;
+  const pull = typeof e.pull === "number" && isFinite(e.pull) ? clamp01(e.pull) : 1 - low.value;
+  return { rows, lowest: low.key, pull_pct: Math.round(pull * 100), asleep: !!e.asleep,
+           since: typeof e.since === "number" && isFinite(e.since) ? e.since : null };
+}
+
+/** The Sleep block's HTML ("" from a seat without energy): a labelled bar
+ *  per reserve (role=meter, aria values, the value as text), the lowest in
+ *  the warning colour with a "lowest" tag, the pull line, awake or asleep. */
+function sheetSleep(e) {
+  const m = sleepBars(e);
+  if (!m) return "";
+  const when = m.since != null ? utcShort(m.since * 1000) : "";
+  const state = (m.asleep ? "asleep 💤" : "awake") + (when ? ' <span class="muted">since ' + escText(when) + " UTC</span>" : "");
+  return '<div class="sleep"><div class="sleh"><span class="slt">Sleep</span><span class="sls' + (m.asleep ? " asleep" : "") + '">' + state + "</span></div>" +
+    m.rows.map((r) => {
+      const name = r.key === "record" && r.unknown ? "record room: cap unknown" : escText(r.label);
+      return '<div class="srow"><div class="sname">' + name + (r.lowest ? ' <span class="slow">lowest</span>' : "") + "</div>" +
+        '<div class="sval">' + (r.unknown ? "reads full" : r.pct + "%") + "</div>" +
+        '<div class="sbar' + (r.lowest ? " low" : "") + '" role="meter" aria-label="' + escAttr(r.label) + '" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' +
+        r.pct + '" aria-valuetext="' + escAttr(r.text + (r.lowest ? ", the lowest" : "")) + '"><span class="sfill s-' + r.key + '" style="width:' + r.pct + '%"></span></div></div>';
+    }).join("") +
+    '<div class="spull">pull = 1 − lowest = ' + m.pull_pct + "%</div></div>";
 }
 
 /** The whole sheet: the nameplate, then the sections as <details> (open:
@@ -1166,7 +1211,7 @@ function selfSheetHtml(s, open, nowS) {
     '<div class="facts"><span>age <b>' + hoursText(h.age_h) + '</b></span><span>working <b>' + hoursText(h.working_h) + "</b></span>" +
     (h.cycles ? "<span>" + h.cycles + " cycles</span><span>" + (h.looks || 0) + " looks</span><span>" + (h.lines_sent || 0) + " lines sent</span>" : "") +
     sheetEnergy(s.energy) +
-    "</div></div>"];
+    "</div></div>" + sheetSleep(s.energy)];
   if (s.empty) out.push('<p class="muted">' + escText(SELF_NAME) + ' has not been switched on yet: tap 💤 to wake it.</p>');
   const body = { attributes: sheetAttrs, quest: sheetQuest, growth: sheetGrowth,
                  time: sheetTime, inventory: sheetInventory, toys: sheetToys, relationships: sheetRelationships };
@@ -1831,7 +1876,7 @@ function offlineNotice(data, zoo) {
 }
 
 const AiPanelLogic = { offlineNotice, jsCompile, jsShow, voiceLogItems, seatView, selfView, selfExp, selfLine, selfName, setSelfName, selfLinesHtml, selfCardHtml, shortEid, connLabel, phantomHtml, isMove, loadPhantoms, guessHtml, autoSid, speakText, replyToSpeak, membraneLanding, ollamaModels, modelField, md, sseState, sseFeed, stripSpeaker, chatState, applyEvent, reconcileStatus, reloadDecision, toyActions, toyButtonsHtml,
-                       attrBar, hoursText, curveGeom, curveSvg, timeParts, sheetGrowth, sheetTime, selfSheetHtml, SHEET_SECTIONS, SHEET_OPEN,
+                       attrBar, hoursText, curveGeom, curveSvg, timeParts, sheetGrowth, sheetTime, selfSheetHtml, sheetSleep, sleepBars, SHEET_SECTIONS, SHEET_OPEN,
                        toyGlyph, toyAfterPoke, toyBadge, toyDockItem, toyDockHtml, toyPopoverHtml, BADGE_S, skillStatHtml, skillSigned,
                        levelUpText, unlockText, sheetToys, TOY_ICONS,
                        skillTree, treeLayout, nodeCard, nodeStateText, achievementsList, ringDash, childAge, renderSkillTree, TREE_LADDER,

@@ -53,7 +53,11 @@ Code: `membrane/energy.py`; the loop's `self_loop.step()`.
 - **Shown** on the self card (`/membrane/self/card`: `energy`, `asleep`,
   `pull`, `limiting`, `record_cap`, null when the RAM is unknown; `awake` is
   false while asleep, so the zoo shows it
-  asleep) and on the sheet's nameplate (`energy`: the reserves too).
+  asleep), on the sheet's nameplate (`energy`: energy, awake or asleep, the
+  pull and the limiting reserve) and in the sheet's **Sleep** block (#359):
+  the four reserves as bars, the lowest marked, `pull = 1 − lowest`, awake
+  or asleep since when, and "record room: cap unknown" when `record_cap` is
+  null (see docs/selfgrowth.md).
 - `energy.share(throttle, srv)` is the throttle × energy, for #343's
   pacing. Nothing reads it yet.
 
