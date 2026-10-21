@@ -579,13 +579,20 @@ RPG draws a skill tree:
 - **lanes by branch** (Self, World, Others), each skill below the ones
   it needs (locked and unbuilt ones too, in their own lane), with a line from
   every prerequisite (solid gold once that one is
-  earned, dashed while it isn't);
-- **earned** skills are filled gold with a 🏅 badge and the date they were
+  earned, dashed gold while it awaits your accept, dashed while it isn't);
+- **the film's look** (#361): **earned** skills are filled translucent gold with
+  a gold border, a 🏅 badge and the date they were
   earned; **earned, awaiting your accept** ones (#299) are dashed gold with a
   🎁 and "accept?", and their card has a **🏅 Accept** button that opens what
   they lead to; **open** ones (their test is running) glow, with a ring showing how
   far along their bar is; **locked** ones are dim with a 🔒; **unbuilt** ones are
-  dashed and say "not built yet";
+  dashed and say "not built yet". The gold follows the page's theme (darker on
+  a light theme, brighter on a dark one);
+- **a skill earned while you watch lights up**: when a repaint finds a skill
+  earned (or awaiting your accept) that the last repaint showed unearned, it
+  flashes gold once, its badge pops and the lines out of it brighten. Opening
+  the page or the tab lights nothing -- only a change seen while it is open --
+  and with reduced motion asked for (`prefers-reduced-motion`) nothing moves;
 - **hover, focus or tap a skill** for its card: what its test asks, its skill
   against its bar, when it was earned, what it needs first and why, and the
   closest child ability with the age it shows up -- labelled as an analogy, as
