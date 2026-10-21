@@ -87,7 +87,9 @@ def _mem() -> tuple[int | None, int | None]:
 BATTERY_EVERY_S = 60.0
 BATTERY_LOW = 20
 BATTERY_CRITICAL = 8
-BATTERY_RESUME = 15
+# #405 (decided 2026-10-21, operator-approved): the battery's own pause lifts
+# only ABOVE this mark AND while still charging -- plugging in is not enough
+BATTERY_RESUME = 20
 _bat = {"ts": 0.0, "val": None}
 
 
@@ -114,27 +116,45 @@ def _charging(b: dict) -> bool:
 
 def _battery_guard(srv, b, pp: dict) -> None:
     """Low: an event. Critical and not charging: the seat pauses itself (its
-    acting lanes drain the battery); charging back past BATTERY_RESUME: resumed
-    -- only a pause the battery made, never the operator's."""
+    acting lanes drain the battery); charging AND above BATTERY_RESUME (#405):
+    resumed -- only a pause the battery made, never the person's (#395).
+    A person's resume over the battery disarms the guard (battery_person_resumed);
+    the next unplug -- a charging -> not-charging reading -- re-arms it. The
+    arming and the last reading live on srv, RAM-only: a fresh boot is armed."""
     if not b or b.get("percentage") is None:
         return
     pct, chg = int(b["percentage"]), _charging(b)
+    if getattr(srv, "_bat_chg", None) and not chg:      # an unplug: the guard re-arms (#405)
+        srv.battery_disarmed = False
+    srv._bat_chg, srv._bat_pct = chg, pct
     if pct < BATTERY_LOW and not chg and not pp.get("_bat_low"):
         pp["_bat_low"] = True
         note(srv, "battery-low", percentage=pct, status=b.get("status"))
     elif (pct >= BATTERY_LOW or chg) and pp.get("_bat_low"):
         pp["_bat_low"] = False
-    if pct < BATTERY_CRITICAL and not chg and not getattr(srv, "paused", False):
+    if (pct < BATTERY_CRITICAL and not chg and not getattr(srv, "paused", False)
+            and not getattr(srv, "battery_disarmed", False)):
         srv.paused = True
         srv.pause_by = "battery"               # not the person's: a restart does not carry it (#395)
         pp["_bat_paused"] = True
         note(srv, "paused", by="battery", percentage=pct)
-    elif pp.get("_bat_paused") and chg and pct >= BATTERY_RESUME:
+    elif pp.get("_bat_paused") and chg and pct > BATTERY_RESUME:
         pp["_bat_paused"] = False
         if getattr(srv, "pause_by", None) == "battery":   # a stale flag never lifts the person's pause
             srv.paused = False
             srv.pause_by = None
             note(srv, "resumed", by="battery", percentage=pct)
+
+
+def battery_person_resumed(srv, was_by) -> None:
+    """#405: the person resumed the seat (lanes.nerve_set). Over the battery's
+    own pause, or while the last reading was in the guard's hold zone (at or
+    below BATTERY_RESUME), the person has overridden the battery: the guard
+    stands down until the next unplug. A resume with a healthy battery (or
+    none read yet) leaves the guard armed. RAM-only, like the pause."""
+    pct = getattr(srv, "_bat_pct", None)
+    if was_by == "battery" or (pct is not None and pct <= BATTERY_RESUME):
+        srv.battery_disarmed = True
 
 
 def _runner(srv):

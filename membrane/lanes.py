@@ -1364,9 +1364,17 @@ def nerve_set(srv, on: bool, by: str | None = None) -> bool:
     caller is known). The one setter the typed frames and membrane home's
     button (#348, seat_panel.set_pause) share. RAM-only, like the flag.
     The pause it sets is the person's (`pause_by`, #395): the one a restart
-    carries."""
+    carries. A resume over the battery's pause (or while it is low) disarms
+    the battery guard until the next unplug (#405)."""
+    was_by = getattr(srv, "pause_by", None)
     srv.paused = bool(on)
     srv.pause_by = "person" if on else None
+    if not on:                                  # #405: a resume over the battery disarms its guard
+        try:
+            from .seat_panel import battery_person_resumed
+            battery_person_resumed(srv, was_by)
+        except Exception:                       # noqa: BLE001
+            pass
     rec = {"event": "nerve", "op": "pause" if on else "resume", "ts": time.time()}
     if by:
         rec["by"] = str(by)

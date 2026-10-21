@@ -1015,7 +1015,9 @@ function titleFlash(base, text, tick) { return (Number(tick) || 0) % 2 ? base : 
 // every PAUSE_POLL_MS -- the typed `pause` / `resume` and the battery move it
 // too -- and after every change); a post of {paused} sets it behind the owner's
 // door. Never on disk: a requested restart keeps the person's pause (#395, the
-// re-exec carries it), a cold start runs. The battery's pause re-derives itself.
+// re-exec carries it), a cold start runs. The battery's pause re-derives itself;
+// it lifts only above 20% while charging, and a resume over it disarms the
+// battery guard until the phone is unplugged again (#405).
 // PauseButton takes its button and the two calls, so node drives it with
 // stubs (tests/test_nerve_pause_348.py).
 const PAUSE_PATH = "/membrane/seat/pause";

@@ -117,6 +117,8 @@ class TestTheBattery(unittest.TestCase):
         self._with(srv, 10, "CHARGING")
         self.assertTrue(srv.paused)                                       # not yet past the resume mark
         self._with(srv, 16, "CHARGING")
+        self.assertTrue(srv.paused)                                       # #405: not above 20% yet
+        self._with(srv, 21, "CHARGING")
         self.assertFalse(srv.paused)                                      # charging back: resumed
         kinds = [e["kind"] for e in srv.entity_store.docs[MEMBRANE_NS + "presence"].properties["events"]]
         self.assertIn("battery-low", kinds)
