@@ -28,8 +28,8 @@ Code: `membrane/energy.py`; the loop's `self_loop.step()`.
   with its `cost` and the energy left). Since #333 Blurp's nudge calls it:
   a nudge the thing refuses (the ball while it is on the person's side, a
   thing's own `nudge` method failing) and a nudge at anything outside its
-  world. The empty send (nudging `chat:out` with nothing in the draft)
-  arrives with the draft (#333, part 2).
+  world; and since #333 part 2, an empty send (nudging `chat:out` again
+  with nothing captured in the draft) and a send `chat:out` turns away.
 - **The sleep pull is 1 − the lowest reserve.** Each reserve runs from 1
   (full) to 0 (empty):
 
@@ -87,8 +87,9 @@ Code: `self_loop.consolidate()`, run from `energy._fall_asleep`. Tests:
    and the `sleep` line names it: `"dropped": {"turn": <its push's ts>,
    "to": <the other>}` (`{}` when nothing was open). A dropped turn is not a
    missed reply: no reply check follows it, so take turns and expect a reply
-   never score it, and the advisor's stats don't count it as checked. (Open
-   drafts arrive with #333; they will be dropped the same way.)
+   never score it, and the advisor's stats don't count it as checked. An
+   open draft (#333 part 2) is dropped too, named as `"draft": <the cycle it
+   opened at>, "moves": <how many nudges it had captured>`.
 2. **Every raw line of the waking period moves, unchanged, to its archive.**
    The archive is `self/archive/record-<YYYY-MM-DD>.jsonl`, dated by each
    line's own `ts` (UTC). Lines are appended byte for byte and synced; none

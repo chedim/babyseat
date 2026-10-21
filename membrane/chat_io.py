@@ -18,7 +18,8 @@ operator's own -- the newest chat that is not a loop's. Never Blurp's
 private chat (#337): that one is Blurp's alone.
 
 BLURP'S PRIVATE CHAT (#337, the PM with Blurp): one session per person,
-marked `blurp: true` (blurp_chat). Blurp's own lines (by="self") land there,
+marked `blurp: true` (blurp_chat). Blurp's own lines (by="self"; since #333
+part 2 they are sends of its nudges at chat:out, self_loop._nudge_chat_out) land there,
 not in the person's newest chat, and the field hears them under the
 session tag blurp:<person> (blurp_tag). A message the person posts there
 runs no model turn and the voice does not answer (server.py,

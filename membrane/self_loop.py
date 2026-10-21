@@ -86,7 +86,11 @@ thing it aims at (_closing: its distance to it fell since its previous cycle on
 the same aim) it nudges it with its own stride (self::nudge -> _nudge_once); the thing decides
 what a nudge does (toybox.nudge, or a `nudge` method of its own), a nudge
 outside its world or one the thing refuses costs the error fee (energy.error),
-and each is a `nudge` line. meet, turns, expect and mirror were the
+and each is a `nudge` line. Blurp SPEAKS by nudging chat:out (part 2): the first
+nudge opens a draft, nudges while it is open are captured instead of acting,
+and the next nudge at that chat:out sends the line NNLS picks over the
+sentences heard in the person's private chat (_nudge_chat_out, _compose).
+meet, turns, expect and mirror were the
 developer's wiring: they are not built until they are rebuilt on the nudge,
 and their old passes no longer count (LADDER_V = 3, _void_old_wiring).
 """
@@ -1949,6 +1953,22 @@ def _reach(srv, target: str) -> dict:
 
 NUDGE_MOVED, NUDGE_NOTHING, NUDGE_REFUSED = 0, 1, 2
 
+# ---- #333 part 2: speaking is composing by nudges on chat:out ---------------------------
+#
+# chat:out's own nudge holds a draft (RAM, rt["draft"]: the cycle it opened at, the chat:out
+# that opened it, the things captured in order and the sum of their positions): the first
+# nudge at a chat:out opens it; while it is open, a nudge at anything else moves nothing and
+# is CAPTURED as the move it would have made -- the thing's position as if nudged, which is
+# its own field spot while nudges move no field position (decision 2); the next nudge at the
+# same chat:out SENDS. The line is the inbound decomposition reversed: the captured positions
+# become one composed vector, and its non-negative fit (efield._nnls, #335) over the
+# sentences heard in the person's private chat with Blurp (#337) picks it -- echolalia, no
+# generator. It goes out as Blurp's own (chat_io.on_edit by="self"), which the field hears
+# like anyone's speech. An empty send is an error (the fee); an open draft is dropped at
+# sleep (_open_at_sleep) and by a restart.
+
+SAY_SENTENCES = 3       # THRESHOLD (awaiting the operator): at most this many heard sentences in one line
+
 
 def _practised(srv, i: str) -> bool:
     """#333: a skill's practice runs -- awake, every prerequisite earned and
@@ -1994,6 +2014,17 @@ def _spots(srv, dim: int) -> dict:
     return out
 
 
+def _place_chat_out(srv) -> None:
+    """#333 part 2: a chat:out of Blurp's world gets a field spot (its
+    summary, like a toy's first look places it -- _place_once: once per run),
+    so it is among the things Blurp aims at and nudges. It has no getter, so
+    no look ever placed it."""
+    est = getattr(srv, "entity_store", None)
+    for eid, e in list(((est.docs if est is not None else None) or {}).items()):
+        if (e.properties or {}).get("chat_io") == "out" and _in_world(srv, eid):
+            _place_once(srv, eid)
+
+
 def _nudge(srv, target: str) -> dict:
     """self::nudge -- the thing decides (see above); the outcome lands on the
     cycle's context (`rc`, `did`), never in what Blurp reads."""
@@ -2006,6 +2037,11 @@ def _nudge(srv, target: str) -> dict:
     if not _in_world(srv, target):
         c["rc"], c["did"] = NUDGE_REFUSED, "outside its world"
         return {"rc": 0, "text": "not in its world"}
+    dr = _rt(srv).get("draft")
+    if (ent.properties or {}).get("chat_io") == "out" and (dr is None or dr["eid"] == target):
+        return _nudge_chat_out(srv, ent, c)
+    if dr is not None:
+        return _capture(srv, target, dr, c)
     tb = (ent.properties or {}).get("toybox") or {}
     if tb.get("name"):
         from . import toybox as _TB
@@ -2025,6 +2061,75 @@ def _nudge(srv, target: str) -> dict:
     c["rc"] = NUDGE_MOVED if out.get("rc") == 0 else NUDGE_REFUSED
     c["did"] = str(out.get("head") or out.get("error") or out.get("outcome") or "")[:120]
     return {"rc": 0, "text": "nudged"}
+
+
+def _capture(srv, target: str, dr: dict, c: dict) -> dict:
+    """#333 part 2: a nudge while a draft is open moves nothing -- it is
+    captured as the thing's position as if nudged (its field spot: nudges move
+    no position yet), in order. A thing with no spot has no position: nothing
+    is captured."""
+    c["draft"] = dr["n"]
+    v = _spot(srv, target)
+    if v is None or (dr["sum"] is not None and len(v) != len(dr["sum"])):
+        c["rc"], c["did"] = NUDGE_NOTHING, "drafting: it has no spot, nothing captured"
+        return {"rc": 0, "text": "nudged"}
+    dr["sum"] = v.copy() if dr["sum"] is None else dr["sum"] + v
+    dr["eids"].append(target)
+    c["rc"], c["did"] = NUDGE_NOTHING, "drafting: captured into the draft"
+    return {"rc": 0, "text": "nudged"}
+
+
+def _nudge_chat_out(srv, ent, c: dict) -> dict:
+    """#333 part 2: chat:out's own nudge -- open a draft, or send the open one."""
+    rt = _rt(srv)
+    dr = rt.get("draft")
+    if dr is None:
+        rt["draft"] = {"n": c.get("n"), "eid": ent.eid, "eids": [], "sum": None}
+        c["rc"], c["did"], c["draft"] = NUDGE_MOVED, "draft opened", c.get("n")
+        return {"rc": 0, "text": "nudged"}
+    c["draft"], c["moves"], c["said"] = dr["n"], len(dr["eids"]), []
+    from . import energy as _E
+    if _paused(srv) or _E.asleep(srv):                      # never out of a paused (or sleeping) seat
+        c["rc"], c["did"] = NUDGE_NOTHING, "paused: not sent, the draft stays open"
+        return {"rc": 0, "text": "nudged"}
+    rt.pop("draft", None)                                  # a send closes the draft, whatever it says
+    if not dr["eids"]:
+        c["rc"], c["did"] = NUDGE_REFUSED, "an empty draft"
+        return {"rc": 0, "text": "nudged"}
+    from . import chat_io as CIO
+    person = str((ent.properties or {}).get("person") or "")
+    picked = _compose(srv, dr["sum"], CIO.blurp_tag(person))
+    if not picked:
+        c["rc"], c["did"] = NUDGE_NOTHING, "no heard words fit: nothing said"
+        return {"rc": 0, "text": "nudged"}
+    c["said"] = [sid for sid, _ in picked]
+    pp = ent.properties or {}
+    pp["say"] = " ".join(t for _, t in picked)
+    ent.properties = pp
+    out = CIO.on_edit(srv, ent, by="self") or {"posted": False, "why": "empty"}
+    if out.get("posted"):
+        c["rc"], c["did"] = NUDGE_MOVED, "sent"
+    else:
+        c["rc"], c["did"] = NUDGE_REFUSED, f"not sent: {out.get('why') or ''}"
+    return {"rc": 0, "text": "nudged"}
+
+
+def _compose(srv, total, session: str) -> list[tuple[str, str]]:
+    """#333 part 2: the line for a composed vector -- its non-negative fit
+    over the sentences heard in `session`, at most SAY_SENTENCES of them, the
+    heaviest first: [(sid, text)]; [] when nothing was heard or nothing fits."""
+    fld = getattr(srv, "efield", None)
+    heard = getattr(fld, "sentences_heard", None)
+    if heard is None or total is None:
+        return []
+    x = _unit(np.asarray(total, dtype=float))
+    rows = [(sid, t, v) for sid, t, v in heard(session) if t.strip() and len(v) == len(x)]
+    if not rows:
+        return []
+    from .efield import _nnls
+    w = _nnls(np.stack([v for _, _, v in rows], axis=1), x, max_on=SAY_SENTENCES)
+    order = [i for i in np.argsort(-w, kind="stable") if w[i] > 0.0][:SAY_SENTENCES]
+    return [(rows[i][0], rows[i][1]) for i in order]
 
 
 def _dist(srv, eid: str):
@@ -2063,7 +2168,7 @@ def _nudge_once(srv, n: int, now: float, eid: str, move) -> None:
     move = np.asarray(move if move is not None else [], dtype=float)
     dist = _dist(srv, eid)
     from .night import method_call
-    _ctx.cycle = {"srv": srv, "act": "nudge", "now": now, "eid": eid}
+    _ctx.cycle = {"srv": srv, "act": "nudge", "now": now, "eid": eid, "n": n}
     try:
         out = method_call(srv, est, None, None, me.eid, "nudge", {"target": eid})
         c = _ctx.cycle
@@ -2077,7 +2182,8 @@ def _nudge_once(srv, n: int, now: float, eid: str, move) -> None:
     _append(srv, {"ts": now, "kind": "nudge", "n": n, "eid": eid, "dist": dist, "rc": c["rc"],
                   "aim": rt.get("aim_n") if rt.get("aim_eid") == eid else None,
                   "force": round(float(np.linalg.norm(move)), 4) if move.size else 0.0,
-                  "did": c.get("did") or ""})
+                  "did": c.get("did") or ""}
+            | {k: c[k] for k in ("draft", "moves", "said") if k in c})   # part 2: the draft it touched
     if c["rc"] == NUDGE_REFUSED:
         from . import energy as _E
         _E.error(srv, f"nudge refused: {_short(eid)}: {c.get('did') or ''}", now=now)
@@ -2600,14 +2706,18 @@ def _dream_tick(srv, n: int, now: float) -> None:
 
 # ---- the cycle and its CPU share (#343) -----------------------------------------
 
-def _runs(srv) -> bool:
+def _paused(srv) -> bool:
+    """The seat's pause (lanes.nerve_paused; the bare flag when it can't say)."""
     from .lanes import nerve_paused
-    rt = _rt(srv)
     try:
-        paused = bool(nerve_paused(srv))
+        return bool(nerve_paused(srv))
     except Exception:
-        paused = bool(getattr(srv, "paused", False))
-    return rt["mode"] != "off" and not rt["held"] and not paused
+        return bool(getattr(srv, "paused", False))
+
+
+def _runs(srv) -> bool:
+    rt = _rt(srv)
+    return rt["mode"] != "off" and not rt["held"] and not _paused(srv)
 
 
 def cpu_share(srv) -> float:
@@ -2678,7 +2788,10 @@ def cycle(srv, now: float | None = None) -> dict | None:
                 or len(rt["aim"]) != len(pos)):
             # #333: once it nudges, an aim is a thing of its world's field spot, at random among
             # them (none on the field: a spot near where it is, as before, and nothing to nudge)
-            spots = _spots(srv, len(pos)) if _practised(srv, "nudge") else {}
+            nudges = _practised(srv, "nudge")
+            if nudges:
+                _place_chat_out(srv)                      # part 2: chat:out is a thing it can aim at
+            spots = _spots(srv, len(pos)) if nudges else {}
             if spots:
                 import random
                 eid = random.Random(f"aim:{n}").choice(sorted(spots))
@@ -4933,10 +5046,15 @@ def consolidate(srv, now: float | None = None) -> dict | None:
 
 def _open_at_sleep(srv, now: float) -> dict:
     """#345: what is open as Blurp falls asleep, to be dropped -- a turn
-    awaiting its reply check ({"turn": its push's ts, "to"}). An open draft
-    would be named here too; none exists yet (#333)."""
+    awaiting its reply check ({"turn": its push's ts, "to"}) and an open
+    draft (#333 part 2: {"draft": the cycle it opened at, "moves": how many
+    it had captured})."""
     push = _pending(_read(srv), now)
-    return {"turn": push.get("ts"), "to": push.get("to")} if push is not None else {}
+    out = {"turn": push.get("ts"), "to": push.get("to")} if push is not None else {}
+    dr = _rt(srv).pop("draft", None)
+    if dr is not None:
+        out.update({"draft": dr["n"], "moves": len(dr["eids"])})
+    return out
 
 
 def _manifest(srv) -> list:
