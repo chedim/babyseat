@@ -1,0 +1,49 @@
+<!doctype html><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,800&family=JetBrains+Mono:wght@400&display=block">
+<style>html,body{margin:0;background:transparent}canvas{display:block}</style>
+<canvas id="cv" width="1024" height="1024"></canvas>
+<script>
+const cv=document.getElementById("cv"), g=cv.getContext("2d"); const W=1024, H=1024;
+const C={ink:"#0b0e1c",deep:"#141a33",paper:"#e9ecf8",field:"#6fd6e8",gold:"#f2c45a"};
+const clamp=(x,a=0,b=1)=>Math.max(a,Math.min(b,x));
+let seed=7; const rnd=()=>(seed=(seed*16807)%2147483647)/2147483647;
+function dot(x,y,r,col,a=1,glow=0){g.save();g.globalAlpha=a;if(glow){g.shadowColor=col;g.shadowBlur=glow;}g.beginPath();g.arc(x,y,Math.max(.1,r),0,7);g.fillStyle=col;g.fill();g.restore();}
+function text(s,x,y,font,col,a=1){g.save();g.globalAlpha=a;g.font=font;g.fillStyle=col;g.textAlign="center";g.textBaseline="middle";g.fillText(s,x,y);g.restore();}
+const SPH = [];
+for (let i = 0; i < 420; i++) {
+  const y = 1 - (i + .5) / 420 * 2, r = Math.sqrt(1 - y * y), th = i * 2.39996;
+  SPH.push({ x: Math.cos(th) * r, y, z: Math.sin(th) * r, m: .4 + rnd() * .8 });
+}
+const NAMED = [
+  { i: 37, name: "f: self_loop.py" }, { i: 121, name: "w: sleep" }, { i: 203, name: "cmd: pytest" },
+  { i: 288, name: "sym: fit_weights" }, { i: 352, name: "w: ball" }, { i: 76, name: "f: efield.py" },
+  { i: 166, name: "person: you" }, { i: 251, name: "w: deploy" }];
+function proj(p, rot, cx, cy, R, tilt = .35) {
+  const c = Math.cos(rot), s = Math.sin(rot);
+  let x = p.x * c + p.z * s, z = -p.x * s + p.z * c, y = p.y;
+  const ct = Math.cos(tilt), st = Math.sin(tilt); const y2 = y * ct - z * st, z2 = y * st + z * ct;
+  const k = 1.9 / (2.6 - z2);
+  return { x: cx + x * R * k, y: cy + y2 * R * k, z: z2, k };
+}
+function field(t, cx, cy, R, opts = {}) {
+  const rot = t * .12 + (opts.rot0 || 0);
+  const pts = SPH.map((p, i) => ({ ...proj(p, rot, cx, cy, R), i, m: p.m }));
+  pts.sort((a, b) => a.z - b.z);
+  for (const p of pts) {
+    const lit = opts.lit ? opts.lit(p.i) : 0;
+    const depth = (p.z + 1) / 2;
+    dot(p.x, p.y, (2.2 + p.m * 2) * p.k * (1 + lit * 1.6), lit > .05 ? C.gold : C.field, (.18 + depth * .55) * (opts.a ?? 1) + lit * .5, lit * 30);
+  }
+  return pts;
+}
+
+
+document.fonts.load('800 100px "Bricolage Grotesque"').then(()=>document.fonts.load('400 30px "JetBrains Mono"')).then(()=>{
+  if (1) { const gr=g.createRadialGradient(W/2,H*.4,0,W/2,H*.4,W*.7); gr.addColorStop(0,C.deep); gr.addColorStop(.7,C.ink); gr.addColorStop(1,C.ink); g.fillStyle=gr; g.fillRect(0,0,W,H); }
+  const t=2.2, k=0.900000;
+  field(t, W/2, H*.5, 330*k, {lit:(i)=>NAMED.some(n=>n.i===i)? .4+.4*Math.sin(t*2+i):0});
+  text("babyseat", W/2, H*.47, "800 "+(150*k)+"px \"Bricolage Grotesque\", sans-serif", C.paper);
+  if (0) text("membrane · the memory inside", W/2, H*.54, "400 "+(34*k)+"px \"JetBrains Mono\", monospace", C.field);
+  document.title="done";
+});
+</script>
