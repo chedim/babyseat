@@ -538,8 +538,9 @@ tree** (#296); the arrow keys move between them and the one you chose is
 remembered per browser. The Skill tree tab draws self's achievements the way an
 RPG draws a skill tree:
 
-- **lanes by branch** (Self, World, Others, Later), each skill below the ones
-  it needs, with a line from every prerequisite (solid gold once that one is
+- **lanes by branch** (Self, World, Others), each skill below the ones
+  it needs (locked and unbuilt ones too, in their own lane), with a line from
+  every prerequisite (solid gold once that one is
   earned, dashed while it isn't);
 - **earned** skills are filled gold with a 🏅 badge and the date they were
   earned; **earned, awaiting your accept** ones (#299) are dashed gold with a

@@ -93,7 +93,7 @@ def test_the_tree_has_stable_ids_branches_and_real_edges():
     assert {br[a] for a in ("reach", "kinds", "patience", "shift")} == {"world"}
     assert {br[a] for a in ("meet", "turns", "expect")} == {"others"}
     assert {br[a] for a in ("mirror", "change")} == {"self"}          # #329: about self, beside feel
-    assert {br[a] for a in ("speak", "invent")} == {"later"}
+    assert br["speak"] == "others" and br["invent"] == "world"     # #353: no Later lane
     pre = {a: set(A[a]["prereqs"]) for a in A}
     assert pre["feel"] == set() and pre["reach"] == set()          # two roots: reaching never read feel's data
     assert pre["kinds"] == {"reach"}
@@ -231,7 +231,7 @@ def test_the_sheet_and_the_dock_carry_the_tree_and_the_level():
     for r in rows:
         assert set(r) >= CONTRACT, set(CONTRACT) - set(r)
         assert r["state"] in ("locked", "open", "earned", "unbuilt")
-        assert r["branch"] in ("self", "world", "others", "later")
+        assert r["branch"] in ("self", "world", "others")
         assert 0.0 <= r["bar"] <= 1.0
     by = {r["id"]: r for r in rows}
     assert by["kinds"]["state"] == "earned" and by["kinds"]["earned_at"].startswith("1970")
