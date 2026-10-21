@@ -108,19 +108,27 @@ channel a skill uses.
   did is never fed back: Blurp sees it only by looking.
 - **When Blurp nudges.** Once *feel itself* is accepted (the nudge skill's
   prerequisite), its aims are drawn **among the field spots of the things in
-  its world**, at random (held 30 cycles, as before), and each cycle it
-  nudges the thing it aims at with its own move: the direction and the force
-  are the stride it chose that cycle. With no thing on the field it aims into
-  space near where it is, as before, and nudges nothing. One nudge a cycle at
-  most. (Aims tilted by what nudges taught come later.)
+  its world**, at random (held 30 cycles, as before), and it nudges the
+  thing it aims at with its own move (the direction and the force are the
+  stride it chose that cycle) **only while it is getting closer to it**: its
+  distance to the aimed thing after this cycle's move fell, strictly, below
+  its distance after the previous cycle on the **same** aim (the operator's
+  decision 1). Otherwise it does not nudge that cycle, and pays nothing. A
+  new aim's first cycle (and the first cycle after a restart: the previous
+  distance is kept in RAM only) has nothing to compare, so no nudge. With no
+  thing on the field it aims into space near where it is, as before, and
+  nudges nothing. One nudge a cycle at most. (Aims tilted by what nudges
+  taught come later.)
 - **Errors cost energy** ([sleep.md](sleep.md)): 0.01 for each nudge
   refused (the ball on the person's side, a thing's own method failing) and
   each nudge outside its world, recorded as an `error` line with its `cost`.
+  A cycle that does not nudge costs nothing, so a ball sitting on the
+  person's side costs the fee only on the cycles Blurp closed in on it.
 - **The record:** each nudge is one `kind: "nudge"` line,
   `{n, ts, eid, dist, rc, aim, force, did}`: `rc` 0 = it changed, 1 =
   nothing happened, 2 = refused; `aim` the aim's cycle (`aim_n`); `dist`
-  how far Blurp's position is from the thing's field spot (recorded; nothing
-  reads it yet); `force` the length of its stride. The cycle line carries
+  how far Blurp's position is from the thing's field spot (the same
+  distance the closing-in check compares); `force` the length of its stride. The cycle line carries
   `aim_eid`, the thing it aims at. Old `push` lines stay, read as history.
 
 **The level drop (LADDER_V = 3).** The audit in #333 found meet, time its
