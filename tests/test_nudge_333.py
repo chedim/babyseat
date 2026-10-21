@@ -11,8 +11,9 @@ ball nudged while it is on the person's side, a nudge outside its world.
 Each nudge writes a `nudge` line: n, ts, eid, dist, rc, aim (and force).
 Once feel itself is accepted (the nudge skill's prerequisite), Blurp's aims
 are drawn among the field spots of the things in its world, at random, and
-each cycle it nudges the thing it aims at with its own move (the direction
-and the force are its stride).
+it nudges the thing it aims at with its own move (the direction and the
+force are its stride) on each cycle its distance to it fell (decision 1;
+tests/test_nudge_closing_333.py).
 
 THE LADDER (LADDER_V = 3): meet, turns, expect and mirror were the
 developer's wiring (the audit); their passes count only when a line carries
@@ -318,7 +319,7 @@ def _felt(toys=("ball", "die")):
     return srv
 
 
-def test_once_feel_is_accepted_each_cycle_nudges_the_thing_it_aims_at(monkeypatch):
+def test_once_feel_is_accepted_it_nudges_the_thing_it_aims_at_while_closing_in(monkeypatch):
     monkeypatch.setattr(SL, "AIM_HOLD", 2)                       # many aims in a short test
     srv = _felt()
     outside = _cid("toy:elsewhere")                              # a spot on the field, outside its world
@@ -330,10 +331,15 @@ def test_once_feel_is_accepted_each_cycle_nudges_the_thing_it_aims_at(monkeypatc
         SL.cycle(srv, now=T0 + 100 + 11 * k)
     ns = [r for r in _lines(srv) if r.get("kind") == "nudge"]
     cyc = [r for r in _lines(srv) if r.get("kind") == "cycle"]
-    assert len(ns) == len(cyc) == 80                             # one nudge a cycle
+    assert len(cyc) == 80
+    assert 0 < len(ns) < len(cyc)                                # at most one a cycle: only while closing in
+    assert len({r["n"] for r in ns}) == len(ns)
     assert {field_id(r["eid"]) for r in ns} == mine              # both things, never the outside one
-    for c, r in zip(cyc, ns):
-        assert r["n"] == c["n"] and r["aim"] == c["aim_n"] and field_id(c["aim_eid"]) == field_id(r["eid"])
+    by_n = {c["n"]: c for c in cyc}
+    for r in ns:
+        c = by_n[r["n"]]
+        assert r["aim"] == c["aim_n"] and field_id(c["aim_eid"]) == field_id(r["eid"])
+        assert c["n"] != c["aim_n"]                              # never an aim's first cycle
 
 
 def test_no_nudge_before_feel_is_accepted():

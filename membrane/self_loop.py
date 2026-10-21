@@ -73,8 +73,9 @@ self); 0 / "off" puts it to sleep.
 
 THE NUDGE (#333): Blurp's one act on things, replacing meet's chat push and
 roll's ball. Once feel itself is accepted its aims are drawn among the field
-spots of the things in its world (#337), and each cycle it nudges the thing it
-aims at with its own stride (self::nudge -> _nudge_once); the thing decides
+spots of the things in its world (#337), and on each cycle it closes in on the
+thing it aims at (_closing: its distance to it fell since its previous cycle on
+the same aim) it nudges it with its own stride (self::nudge -> _nudge_once); the thing decides
 what a nudge does (toybox.nudge, or a `nudge` method of its own), a nudge
 outside its world or one the thing refuses costs the error fee (energy.error),
 and each is a `nudge` line. meet, turns, expect and mirror were the
@@ -199,7 +200,7 @@ ACHIEVEMENTS = {
                               "stage is that skill's contingency) with an other it can predict (expect a reply: "
                               "its outcome is the reply check after each push)")},
     # #333: the nudge skill -- Blurp's one act on things. Practised once feel itself is
-    # accepted (each cycle it nudges the thing it aims at); its test comes with the rebuilt
+    # accepted (it nudges the thing it aims at while closing in on it); its test comes with the rebuilt
     # rungs, so it is not built yet. Rung 13 is its test's number (12 was taken by invent).
     "nudge": {"rung": 13, "name": "first reach", "branch": "world", "prereqs": ("feel",), "built": False,
               "child_age": "~2-3 mo",
@@ -1940,20 +1941,41 @@ def _nudge(srv, target: str) -> dict:
     return {"rc": 0, "text": "nudged"}
 
 
+def _dist(srv, eid: str):
+    """How far Blurp's position is from a thing's field spot (None when
+    either has none, or they live in different spaces)."""
+    me = _entity(srv)
+    pos = np.asarray(me.position, dtype=float) if me is not None and me.position is not None else None
+    spot = _spot(srv, eid)
+    return (round(float(np.linalg.norm(_unit(pos) - spot)), 4)
+            if pos is not None and spot is not None and len(pos) == len(spot) else None)
+
+
+def _closing(srv, eid: str) -> bool:
+    """#333, decision 1: is Blurp getting closer to what it aims at? Its
+    distance to the aimed thing now, against its previous cycle's distance to
+    the SAME aim (rt["aim_dist"]: (aim_n, eid, dist), RAM only). True only when it
+    strictly fell; a new aim's first cycle (or a restart) has no previous
+    distance, so False. Updates the previous distance either way."""
+    rt = _rt(srv)
+    d = _dist(srv, eid)
+    prev = rt.get("aim_dist")
+    rt["aim_dist"] = (rt.get("aim_n"), eid, d)
+    return (prev is not None and prev[0] == rt.get("aim_n") and prev[1] == eid
+            and prev[2] is not None and d is not None and d < prev[2])
+
+
 def _nudge_once(srv, n: int, now: float, eid: str, move) -> None:
     """#333, one nudge: Blurp's own move (`move`: its direction and its force,
     the stride it chose this cycle) at a thing, through its own method; a
     `nudge` line {n, ts, eid, dist, rc, aim, force, did}, and the error fee
     for a nudge refused or outside its world. dist: how far its position is
-    from the thing's field spot (None when either has none) -- recorded,
-    nothing reads it yet."""
+    from the thing's field spot (None when either has none); the cycle only
+    calls this while that distance is falling (_closing)."""
     est = srv.entity_store
     me = _entity(srv)
     move = np.asarray(move if move is not None else [], dtype=float)
-    pos = np.asarray(me.position, dtype=float) if me is not None and me.position is not None else None
-    spot = _spot(srv, eid)
-    dist = (round(float(np.linalg.norm(_unit(pos) - spot)), 4)
-            if pos is not None and spot is not None and len(pos) == len(spot) else None)
+    dist = _dist(srv, eid)
     from .night import method_call
     _ctx.cycle = {"srv": srv, "act": "nudge", "now": now, "eid": eid}
     try:
@@ -2594,8 +2616,10 @@ def cycle(srv, now: float | None = None) -> dict | None:
     est.upsert(ent, embedder=None)
     _mark_rung7_restart(srv, now)
     _mark_glitch_fix(srv, now)
-    if aim is not None and rt.get("aim_eid") and _practised(srv, "nudge"):
-        _nudge_once(srv, n, now, rt["aim_eid"], c["mine"])   # #333: its own move nudges what it aims at
+    if (aim is not None and rt.get("aim_eid") and _practised(srv, "nudge")
+            and _closing(srv, rt["aim_eid"])):
+        # #333: its own move nudges what it aims at -- only while it is getting closer to it
+        _nudge_once(srv, n, now, rt["aim_eid"], c["mine"])
     if _available(srv, 2):
         _reach_once(srv, est, ent, n, now)
     if _available(srv, 9):
