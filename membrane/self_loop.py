@@ -86,13 +86,25 @@ thing it aims at (_closing: its distance to it fell since its previous cycle on
 the same aim) it nudges it with its own stride (self::nudge -> _nudge_once); the thing decides
 what a nudge does (toybox.nudge, or a `nudge` method of its own), a nudge
 outside its world or one the thing refuses costs the error fee (energy.error),
-and each is a `nudge` line. Blurp SPEAKS by nudging chat:out (part 2): the first
-nudge opens a draft, nudges while it is open are captured instead of acting,
-and the next nudge at that chat:out sends the line NNLS picks over the
-sentences heard in the person's private chat (_nudge_chat_out, _compose).
-meet, turns, expect and mirror were the
+and each is a `nudge` line. Blurp SPEAKS by nudging a person's chat thing
+(chat_io: chat:<person>, one thing it both looks at and nudges since part 3a;
+part 2 nudged chat:out): the first nudge opens a draft, nudges while it is
+open are captured instead of acting, and the next nudge at that chat sends the
+line NNLS picks over the sentences heard in the person's private chat
+(_nudge_chat, _compose). meet, turns, expect and mirror were the
 developer's wiring: they are not built until they are rebuilt on the nudge,
 and their old passes no longer count (LADDER_V = 3, _void_old_wiring).
+
+NUDGE-AWARE LOOKS (#333 part 3a): each look records `nudged`, Blurp's own
+nudges at that thing since its previous look at it (it knows what it did:
+_nudge_state, <data dir>/self/nudged.json), and `p_n`, its nudge-aware
+prediction -- the tempo prediction p at k = 0; at k >= 1 the thing's own
+Jeffreys-smoothed changed share over its earlier looks in the same k bin
+(NUDGE_K_BINS), prequential. A thing nudged since its last look joins
+patience's candidates, weighed like a due thing by what the look can teach
+about p_n (_due). Nudged looks are kept out of rungs 2-5, the tempo, the rate
+fits and the look curiosity, as audits are (a reach line's `nudged`): the earned skills
+keep measuring each thing's own tempo, and a nudge cannot make patience slip.
 """
 from __future__ import annotations
 
@@ -585,10 +597,13 @@ def bind(srv) -> None:
     rt["mode"] = _load_mode(srv)
     from . import self_world as _SW
     _SW.bind(srv)                           # #337: its world (born, or migrated before #299's lines below)
+    from . import chat_io as _CIO
+    _CIO.migrate(srv)                       # #333 part 3a: once -- chat:in + chat:out -> the chat thing
     _void_old_wiring(srv)                   # #333: once -- the old wiring's passes, voided on the record
     _migrate_accept(srv)                    # #299: once -- what was earned before acceptance counts as accepted
     rt["model"] = _load_model(srv)
     rt["tempo"] = _load_json(srv, "tempo.json") or {}
+    rt["nudged"] = _load_json(srv, NUDGED_FILE) or {}   # #333 part 3a: nudges since each thing's last look
     rt["settings"] = _load_settings(srv)    # #320: what change itself adopted
 
 
@@ -1123,6 +1138,7 @@ def _expect(srv, seed: str) -> dict:
     if c.get("act") == "reach":
         lam, dt = c.get("lam"), c.get("dt")
         c["p"] = (1.0 - float(np.exp(-lam * dt))) if (lam and dt is not None) else _p_changed(srv, c["eid"])
+        c["p_n"] = _p_n(srv, c["eid"], int(c.get("nudged") or 0), c["p"])   # #333 part 3a: before it looks
         push = c.get("reply")                           # rung 7/8: this look answers a push's question
         if push is not None:
             recs = _read(srv)
@@ -1953,14 +1969,49 @@ def _reach(srv, target: str) -> dict:
 
 NUDGE_MOVED, NUDGE_NOTHING, NUDGE_REFUSED = 0, 1, 2
 
-# ---- #333 part 2: speaking is composing by nudges on chat:out ---------------------------
+# ---- #333 part 3a: nudge-aware looks -------------------------------------------------------
 #
-# chat:out's own nudge holds a draft (RAM, rt["draft"]: the cycle it opened at, the chat:out
-# that opened it, the things captured in order and the sum of their positions): the first
-# nudge at a chat:out opens it; while it is open, a nudge at anything else moves nothing and
-# is CAPTURED as the move it would have made -- the thing's position as if nudged, which is
-# its own field spot while nudges move no field position (decision 2); the next nudge at the
-# same chat:out SENDS. The line is the inbound decomposition reversed: the captured positions
+# Blurp counts its own nudges at each thing since its last look at it (it knows what it did;
+# _nudge_state: RAM, saved in NUDGED_FILE so a restart keeps it), and each look records that
+# count, `nudged: k`, and its nudge-aware prediction `p_n`: at k = 0 the tempo prediction p it
+# already makes; at k >= 1 the thing's own changed share over its earlier looks in the same k
+# bin, Jeffreys-smoothed ((changed + 0.5) / (looks + 1): 0.5 before any) and prequential -- the
+# bin learns from a look only after the look is scored. A nudged look (k >= 1) is kept out of
+# rungs 2-5, the tempo (it moves only `last`: when the thing was last read, where the next
+# look's interval starts), the rate fits and the look curiosity, as audits are.
+NUDGE_K_BINS = (1, 2)   # approved 2026-10-21: k = 1 and k >= 2 -- two toggles of a tower block undo each other
+NUDGED_FILE = "nudged.json"
+
+
+def _k_bin(k) -> int | None:
+    """The k bin a look's own nudges fall in (its lower edge); None at k = 0."""
+    k = int(k or 0)
+    edges = [b for b in NUDGE_K_BINS if k >= b]
+    return edges[-1] if edges else None
+
+
+def _nudge_state(srv) -> dict:
+    """eid -> {"k": nudges since its last look, "bins": {edge: [changed, looks]}}."""
+    return _rt(srv).setdefault("nudged", {})
+
+
+def _p_n(srv, eid: str, k: int, p: float) -> float:
+    """The nudge-aware prediction for a look after k of its own nudges."""
+    b = _k_bin(k)
+    if b is None:
+        return float(p)
+    c, n = ((_nudge_state(srv).get(eid) or {}).get("bins") or {}).get(str(b)) or (0, 0)
+    return (float(c) + 0.5) / (float(n) + 1.0)
+
+
+# ---- #333 part 2: speaking is composing by nudges on the chat --------------------------
+#
+# The chat thing's own nudge (chat_io: chat:<person>; chat:out's until part 3a) holds a draft
+# (RAM, rt["draft"]: the cycle it opened at, the chat that opened it, the things captured in
+# order and the sum of their positions): the first nudge at a chat opens it; while it is open,
+# a nudge at anything else moves nothing and is CAPTURED as the move it would have made -- the
+# thing's position as if nudged, which is its own field spot while nudges move no field
+# position (decision 2); the next nudge at the same chat SENDS. The line is the inbound decomposition reversed: the captured positions
 # become one composed vector, and its non-negative fit (efield._nnls, #335) over the
 # sentences heard in the person's private chat with Blurp (#337) picks it -- echolalia, no
 # generator. It goes out as Blurp's own (chat_io.on_edit by="self"), which the field hears
@@ -2005,24 +2056,13 @@ def _spots(srv, dim: int) -> dict:
     store eid -> unit vector, only those that have one in this field's space."""
     est = getattr(srv, "entity_store", None)
     out = {}
-    for eid in list(((est.docs if est is not None else None) or {})):
-        if eid == _eid() or not _in_world(srv, eid):
-            continue
+    for eid, e in list(((est.docs if est is not None else None) or {}).items()):
+        if eid == _eid() or (e.properties or {}).get("merged_into") or not _in_world(srv, eid):
+            continue                                       # part 3a: a merged thing is its survivor
         v = _spot(srv, eid)
         if v is not None and len(v) == dim:
             out[eid] = v
     return out
-
-
-def _place_chat_out(srv) -> None:
-    """#333 part 2: a chat:out of Blurp's world gets a field spot (its
-    summary, like a toy's first look places it -- _place_once: once per run),
-    so it is among the things Blurp aims at and nudges. It has no getter, so
-    no look ever placed it."""
-    est = getattr(srv, "entity_store", None)
-    for eid, e in list(((est.docs if est is not None else None) or {}).items()):
-        if (e.properties or {}).get("chat_io") == "out" and _in_world(srv, eid):
-            _place_once(srv, eid)
 
 
 def _nudge(srv, target: str) -> dict:
@@ -2038,8 +2078,8 @@ def _nudge(srv, target: str) -> dict:
         c["rc"], c["did"] = NUDGE_REFUSED, "outside its world"
         return {"rc": 0, "text": "not in its world"}
     dr = _rt(srv).get("draft")
-    if (ent.properties or {}).get("chat_io") == "out" and (dr is None or dr["eid"] == target):
-        return _nudge_chat_out(srv, ent, c)
+    if (ent.properties or {}).get("chat_io") in ("chat", "out") and (dr is None or dr["eid"] == target):
+        return _nudge_chat(srv, ent, c)
     if dr is not None:
         return _capture(srv, target, dr, c)
     tb = (ent.properties or {}).get("toybox") or {}
@@ -2079,8 +2119,9 @@ def _capture(srv, target: str, dr: dict, c: dict) -> dict:
     return {"rc": 0, "text": "nudged"}
 
 
-def _nudge_chat_out(srv, ent, c: dict) -> dict:
-    """#333 part 2: chat:out's own nudge -- open a draft, or send the open one."""
+def _nudge_chat(srv, ent, c: dict) -> dict:
+    """#333 part 2: the chat thing's own nudge (chat:out's until part 3a) --
+    open a draft, or send the open one."""
     rt = _rt(srv)
     dr = rt.get("draft")
     if dr is None:
@@ -2184,6 +2225,9 @@ def _nudge_once(srv, n: int, now: float, eid: str, move) -> None:
                   "force": round(float(np.linalg.norm(move)), 4) if move.size else 0.0,
                   "did": c.get("did") or ""}
             | {k: c[k] for k in ("draft", "moves", "said") if k in c})   # part 2: the draft it touched
+    st = _nudge_state(srv).setdefault(eid, {})              # part 3a: Blurp knows what it did
+    st["k"] = int(st.get("k") or 0) + 1
+    _save_json(srv, NUDGED_FILE, _nudge_state(srv))
     if c["rc"] == NUDGE_REFUSED:
         from . import energy as _E
         _E.error(srv, f"nudge refused: {_short(eid)}: {c.get('did') or ''}", now=now)
@@ -2233,7 +2277,23 @@ def _notice(srv, seed: str) -> dict:
     c = _ctx.cycle
     if c.get("act") == "reach":
         c["answer"], c["why"] = _answer(c.get("read") or {})
-        if not c.get("audit"):                               # inside an audit it learns nothing
+        k = int(c.get("nudged") or 0)
+        ns = _nudge_state(srv).get(c["eid"])
+        if ns is not None:                                   # #333 part 3a: a look, so its count starts again
+            ns["k"] = 0
+            b = _k_bin(k)
+            if b is not None and not c.get("audit") and c["answer"] != "none":
+                e = ns.setdefault("bins", {}).setdefault(str(b), [0, 0])   # learnt after it was scored
+                e[0] += int(c["answer"] == "changed")
+                e[1] += 1
+            if k:
+                _save_json(srv, NUDGED_FILE, _nudge_state(srv))
+        if k and not c.get("audit"):                         # a nudged look: only when it last read it
+            t = _tempo(srv).setdefault(c["eid"], {"changed": 0, "answered": 0})
+            if c["answer"] != "none":
+                t["last"] = c.get("now")
+                _save_json(srv, "tempo.json", _tempo(srv))
+        elif not c.get("audit"):                             # inside an audit it learns nothing
             t = _tempo(srv).setdefault(c["eid"], {"changed": 0, "answered": 0})
             if c["answer"] == "none":
                 t["none"] = int(t.get("none", 0)) + 1
@@ -2447,8 +2507,9 @@ def _save_settings(srv, doc: dict) -> None:
 
 
 def _fittable(r: dict) -> bool:
-    """A look _lam fits on: answered, outside every audit, with its dt."""
-    return (r.get("kind") == "reach" and not r.get("audit") and not r.get("audit5")
+    """A look _lam fits on: answered, outside every audit, not after its own
+    nudge (#333 part 3a), with its dt."""
+    return (r.get("kind") == "reach" and not r.get("audit") and not r.get("audit5") and not r.get("nudged")
             and r.get("answer") in ("changed", "unchanged") and bool(r.get("dt")))
 
 
@@ -2789,9 +2850,7 @@ def cycle(srv, now: float | None = None) -> dict | None:
             # #333: once it nudges, an aim is a thing of its world's field spot, at random among
             # them (none on the field: a spot near where it is, as before, and nothing to nudge)
             nudges = _practised(srv, "nudge")
-            if nudges:
-                _place_chat_out(srv)                      # part 2: chat:out is a thing it can aim at
-            spots = _spots(srv, len(pos)) if nudges else {}
+            spots = _spots(srv, len(pos)) if nudges else {}   # part 3a: the chat thing is placed like any looked-at thing
             if spots:
                 import random
                 eid = random.Random(f"aim:{n}").choice(sorted(spots))
@@ -2894,12 +2953,13 @@ def _in_world(srv, eid: str) -> bool:
 
 
 def _targets(srv) -> list[str]:
-    """What Blurp can look at: the things in its world (#337) with a getter."""
+    """What Blurp can look at: the things in its world (#337) with a getter
+    (#333 part 3a: never a merged one -- the old chat:in is its chat thing)."""
     from .night import effective_script
     est = srv.entity_store
     out = []
     for eid, e in list((est.docs or {}).items()):
-        if eid == _eid() or not _in_world(srv, eid):
+        if eid == _eid() or (e.properties or {}).get("merged_into") or not _in_world(srv, eid):
             continue
         try:
             code, _ = effective_script(est, e, "getter")
@@ -2954,9 +3014,10 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
     au = _rt(srv).get("audit")
     inside = bool(au and au.get("rung", 2) == 2 and au["eid"] == eid)
     in5 = bool(au and au.get("rung") == 5 and au["eid"] == eid)
+    k = int((_nudge_state(srv).get(eid) or {}).get("k") or 0)   # #333 part 3a: its own nudges since its last look
     from .night import method_call
     _ctx.cycle = {"srv": srv, "act": "reach", "eid": eid, "audit": inside, "now": now, "reply": reply,
-                  "lam": lam, "dt": (now - float(last)) if last is not None else None}
+                  "lam": lam, "dt": (now - float(last)) if last is not None else None, "nudged": k}
     try:
         outs = []
         for m, args in (("expect", {"seed": str(n)}), ("reach", {"target": eid}), ("notice", {"seed": str(n)})):
@@ -2973,7 +3034,8 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
         return
     rec = {"ts": now, "kind": "reach", "n": n, "eid": eid, "p": round(c["p"], 4),
            "answer": c["answer"], "why": c["why"],
-           "dt": (round(now - float(last), 3) if last is not None else None)}
+           "dt": (round(now - float(last), 3) if last is not None else None),
+           "nudged": k, "p_n": round(c["p_n"], 4)}
     try:
         from .eids import field_id
         rec["fid"] = field_id(eid)                       # #244: where the page finds it on the field
@@ -3000,12 +3062,13 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
             rec["llm_model"] = c["llm_model"]
         rec["llm_cal"] = list(c["llm_cal"])
         rec["p_mix"] = round(c["p_mix"], 4)
-    if timed and reply is None:                          # a reply check is not a patience-timed look
+    if timed and reply is None and not k:                # a reply check (or a nudged look) is not a patience-timed look
         rec["timed"] = True
         if lam:
             rec["lam"] = round(lam, 6)
     if steer:
-        rec["steer"] = True
+        if not k:                                        # #333 part 3a: a nudged look is not sorted
+            rec["steer"] = True
         pp = ent.properties or {}
         sd = dict(pp.get("script_data") or {})
         sd["kinds"] = {e: k for e, k in kinds.items() if k != "unknown"}
@@ -3019,19 +3082,19 @@ def _reach_once(srv, est, ent, n: int, now: float) -> None:
         ent.properties = pp
     if inside:
         rec["audit"] = True
-        if c["answer"] != "none":
+        if c["answer"] != "none" and not k:
             au["reaches"] += 1
             au["changes"] += int(c["answer"] == "changed")
     watch = _available(srv, 5)
-    if watch:
+    if watch and not k:
         rec["watch5"] = True
     if in5:
         rec["audit5"] = au["phase"]
-        if c["answer"] != "none":
+        if c["answer"] != "none" and not k:
             au["looks"] += 1
     _append(srv, rec)
     _place_once(srv, eid)
-    if watch and c["answer"] != "none" and not inside:
+    if watch and c["answer"] != "none" and not inside and not k:    # a nudged look is no evidence of a shift
         _shift_check(srv, eid, now)
     _audit_tick(srv, now)
     _audit5_tick(srv, now)
@@ -3084,7 +3147,7 @@ def _lam_looks(recs: list[dict]) -> tuple:
     for r in recs:
         k = r.get("kind")
         if k == "reach":
-            if (not r.get("audit") and not r.get("audit5")
+            if (not r.get("audit") and not r.get("audit5") and not r.get("nudged")
                     and r.get("answer") in ("changed", "unchanged") and r.get("dt")):
                 o = (r["eid"], r["ts"], float(r["dt"]), r["answer"] == "changed")
                 fit.append(o)
@@ -3144,7 +3207,7 @@ def _shift_check(srv, eid: str, now: float) -> None:
     since = _last_shift_ts(recs, eid)
     looks, spans, at = [], [], None           # #266: does each look's interval span a record gap?
     for r, st in zip(recs, _stalls(recs)):
-        if (r.get("kind") == "reach" and r.get("eid") == eid and not r.get("audit")
+        if (r.get("kind") == "reach" and r.get("eid") == eid and not r.get("audit") and not r.get("nudged")
                 and r.get("answer") in ("changed", "unchanged")):
             if since is None or r["ts"] > since:
                 looks.append(r["answer"] == "changed")
@@ -3225,8 +3288,11 @@ def _due(srv, recs, targets, kinds, now, rng):
     unsure the answer to THIS look is, the tilt whether looks at the thing have
     lately been turning surprise into a better model. Their product is the
     learning self expects from the look; either floor keeps a thing in play.
-    #346: it runs every cycle; the targets' rate fits share one pass over the
-    record within the call (_Scope, _lam_looks), never across calls."""
+    #333 part 3a, THE CHECK: a thing Blurp nudged since its last look joins
+    the candidates (silent or not, due or not), weighed by the entropy of its
+    nudge-aware p_n instead of its tempo p. #346: it runs every cycle; the
+    targets' rate fits share one pass over the record within the call
+    (_Scope, _lam_looks), never across calls."""
     s = _SCOPE.get()
     if s is None or s.recs is not recs or s.n != len(recs):      # #346: the targets' rate fits share one pass
         tok = _SCOPE.set(_Scope(recs))
@@ -3235,19 +3301,21 @@ def _due(srv, recs, targets, kinds, now, rng):
         finally:
             _SCOPE.reset(tok)
     tempo = _tempo(srv)
+    ns = _nudge_state(srv)
+    nudged = {e: int((ns.get(e) or {}).get("k") or 0) for e in targets}
     due = []
     for e in targets:
-        if kinds.get(e) == "silent":
+        if kinds.get(e) == "silent" and not nudged[e]:
             continue
         last = (tempo.get(e) or {}).get("last")
         lam = _lam_of(srv, recs, e)
-        if last is None or lam is None:
+        if last is None or lam is None or nudged[e]:   # #333 part 3a: nudged since its last look -- a check
             due.append((e, lam))
             continue
         wait = min(PATIENCE_MAX_S, max(PACE_S, -np.log(1.0 - PATIENCE_P) / lam))   # #343: a 10 s floor, as before
         if now - float(last) >= wait:
             due.append((e, lam))
-    silent = [e for e in targets if kinds.get(e) == "silent"]
+    silent = [e for e in targets if kinds.get(e) == "silent" and not nudged[e]]
     if silent and rng.random() < SILENT_WEIGHT:
         return rng.choice(silent), None
     if not due:
@@ -3255,7 +3323,11 @@ def _due(srv, recs, targets, kinds, now, rng):
     tilt = _curiosity(recs, [e for e, _ in due])   # #212: among the due, the frontier first
     if not ATTENTION:
         return rng.choices(due, weights=[tilt[e] for e, _ in due])[0]
-    weights = [max(INFO_FLOOR, _info(_due_p(srv, tempo, e, lam, now))) * tilt[e] for e, lam in due]
+
+    def p_of(e, lam):                              # a nudged thing: what the look can teach about p_n
+        p = _due_p(srv, tempo, e, lam, now)
+        return _p_n(srv, e, nudged[e], p) if nudged[e] else p
+    weights = [max(INFO_FLOOR, _info(p_of(e, lam))) * tilt[e] for e, lam in due]
     return rng.choices(due, weights=weights)[0]   # #266: what the look can teach x the frontier
 
 
@@ -3295,7 +3367,7 @@ def _ordinary_errors(recs: list[dict]) -> dict:
     seen = {}                               # per thing, the stall count at its last look
     for r, stalls in zip(recs, _stalls(recs)):
         if (r.get("kind") == "reach" and r.get("answer") in ("changed", "unchanged")
-                and not r.get("audit") and not r.get("audit5") and r.get("p") is not None):
+                and not r.get("audit") and not r.get("audit5") and not r.get("nudged") and r.get("p") is not None):
             eid = r["eid"]
             spans = eid in seen and seen[eid] != stalls
             seen[eid] = stalls
@@ -3468,7 +3540,7 @@ def _rung2_stats(recs: list[dict], tempo: dict) -> dict:
 
 def _rung2_stats_of(recs: list[dict], tempo: dict) -> dict:
     ans = [r for r in recs if r.get("kind") == "reach" and r.get("answer") in ("changed", "unchanged")
-           and not r.get("audit")]
+           and not r.get("audit") and not r.get("nudged")]
     if not ans:
         return {}
     pool = ans[-RUNG2_REACHES * 4:]
@@ -3515,7 +3587,7 @@ def _kinds(recs: list[dict], window: int = RUNG3_WINDOW) -> dict:
     unknown, before KIND_MIN looks."""
     by: dict[str, list] = {}
     for r in recs:
-        if r.get("kind") == "reach" and not r.get("audit") and not r.get("audit5"):
+        if r.get("kind") == "reach" and not r.get("audit") and not r.get("audit5") and not r.get("nudged"):
             by.setdefault(r["eid"], []).append(r["answer"])
     out = {}
     for eid, ans in by.items():
@@ -3539,7 +3611,7 @@ def _kind_rate(recs: list[dict], window: int = RUNG3_WINDOW) -> dict:
     what the two halves must agree on (a look's drift is not a new kind)."""
     by: dict[str, list] = {}
     for r in recs:
-        if r.get("kind") == "reach" and not r.get("audit") and not r.get("audit5"):
+        if r.get("kind") == "reach" and not r.get("audit") and not r.get("audit5") and not r.get("nudged"):
             by.setdefault(r["eid"], []).append(r["answer"])
     out = {}
     for eid, ans in by.items():
@@ -3577,7 +3649,7 @@ def _rung3(recs: list[dict], tempo: dict | None = None) -> dict:
     the two halves of the last RUNG3_WINDOW reaches, the no-answer share under
     RUNG3_FOCUS (focus), and rung 2's skill still holding -- over the moving
     (auditable) things only, so a still counter can't carry the bar."""
-    reaches = [r for r in recs if r.get("kind") == "reach" and not r.get("audit")]
+    reaches = [r for r in recs if r.get("kind") == "reach" and not r.get("audit") and not r.get("nudged")]
     steered = [r for r in reaches if r.get("steer")]
     looks = min(1.0, len(steered) / RUNG3_LOOKS)
     last = reaches[-RUNG3_WINDOW:]
@@ -3602,7 +3674,7 @@ def _rung4(recs: list[dict], tempo: dict | None = None) -> dict:
     (whichever is easier: a thing already newsy only has to stay so); and its
     predictions are calibrated (mean predicted chance within RUNG4_CALIB of
     the share that found news)."""
-    ans = [r for r in recs if r.get("kind") == "reach" and not r.get("audit")
+    ans = [r for r in recs if r.get("kind") == "reach" and not r.get("audit") and not r.get("nudged")
            and r.get("answer") in ("changed", "unchanged")]
     timed = [r for r in ans if r.get("timed")]
     if not timed:
@@ -4456,7 +4528,8 @@ def _day(ts) -> str:
 
 
 def _ans_na(r: dict) -> bool:
-    return r.get("kind") == "reach" and r.get("answer") in ("changed", "unchanged") and not r.get("audit")
+    return (r.get("kind") == "reach" and r.get("answer") in ("changed", "unchanged") and not r.get("audit")
+            and not r.get("nudged"))
 
 
 class _Index:
@@ -4574,8 +4647,9 @@ def _keep(recs: list, ix: _Index | None = None) -> set:
     # the looks: rungs 2-5, kinds, the split, the other's last words, a toy's log
     tail(_ans_na, RUNG2_REACHES, key=eid)
     tail(_ans_na, RUNG2_REACHES * 4)
-    tail(lambda r: reach(r) and not r.get("audit") and not r.get("audit5"), RUNG3_WINDOW, key=eid)
-    tail(lambda r: reach(r) and not r.get("audit"), RUNG3_WINDOW)
+    tail(lambda r: reach(r) and not r.get("audit") and not r.get("audit5") and not r.get("nudged"),
+         RUNG3_WINDOW, key=eid)
+    tail(lambda r: reach(r) and not r.get("audit") and not r.get("nudged"), RUNG3_WINDOW)
     tail(lambda r: reach(r) and not r.get("audit") and r.get("steer"), RUNG3_LOOKS)
     tail(lambda r: _ans_na(r) and r.get("timed"), max(RUNG4_LAST, RUNG4_TIMED))
     tail(lambda r: r.get("watch5"), RUNG5_LOOKS)
@@ -4803,7 +4877,7 @@ def _keep_curiosity(R, lo, N, K) -> None:
     for i in range(lo, N):
         r = R[i]
         if (r.get("kind") == "reach" and r.get("answer") in ("changed", "unchanged")
-                and not r.get("audit") and not r.get("audit5") and r.get("p") is not None):
+                and not r.get("audit") and not r.get("audit5") and not r.get("nudged") and r.get("p") is not None):
             e = r["eid"]
             spans = e in seen and seen[e] != st[i]
             seen[e] = st[i]

@@ -55,7 +55,7 @@ from membrane import watch_agents as WA  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
 
 DIM = 16
-RESP = MEMBRANE_NS + "Component:chat:in:operator"
+RESP = MEMBRANE_NS + "Component:chat:operator"
 UI = Path(__file__).resolve().parent.parent / "membrane" / "ui"
 
 # THE LIVE RECORD (copied, 2026-10-18; no live file is read here): the reply
@@ -96,7 +96,7 @@ def _seat():
     e = QuantumEntity(eid=MEMBRANE_NS + "Component:lamp", cls="Component",
                       properties={"name": "lamp", "getter_script": "result = {'state': {'x': 1}}"})
     est.docs[e.eid] = e
-    CIO.entity_in(srv, CIO.OPERATOR)
+    CIO.entity(srv, CIO.OPERATOR)
     SL.bind(srv)
     SL.set_limit(srv, 1)
     for r in (1, 2, 3, 4, 5, 6, 7):                     # #258: rung 7 is take turns now

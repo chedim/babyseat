@@ -3887,11 +3887,12 @@ def _active_model_hook(srv, est, spec, res) -> None:
                 est.upsert(ent, embedder=None)
     except Exception as e:                              # noqa: BLE001
         res["voice_out"] = {"spoken": False, "why": f"{type(e).__name__}: {e}"[:160]}
-    # CHAT OUT (chat_io.py): an edit of a chat:out entity's `say` is posted
+    # CHAT (chat_io.py): an edit of a chat thing's `say` is posted (#333 part 3a: the
+    # old chat:out:<person> resolves to it -- merged_into)
     try:
         from . import chat_io as CIO
         ent = est._resolve_spec(str(spec or "")) if est is not None else None
-        if ent is not None and (ent.properties or {}).get("chat_io") == "out":
+        if ent is not None and (ent.properties or {}).get("chat_io") in ("chat", "out"):
             out = CIO.on_edit(srv, ent)
             if out is not None:
                 res["chat_out"] = out
@@ -6668,9 +6669,9 @@ class MembraneOpenAIHandler(_DIAG.TimedHandler, RAGProxyHandler):   # #346: the 
             self._json_err_raw(400, f"properties must be an object, e.g. {{\"say\": \"...\"}} -- "
                                     f"got {type(_props).__name__}; nothing was set"); return
         body["properties"] = _props
-        try:                                         # chat:out:<person> is made on first use
+        try:                                         # a person's chat thing is made on first use
             from . import chat_io as _CIO
-            _CIO.ensure(srv, spec)
+            spec = _CIO.ensure(srv, spec) or spec    # ...and edited by its exact eid (#333 part 3a)
         except Exception:
             pass
         res = est.edit(spec, summary=body.get("summary"),

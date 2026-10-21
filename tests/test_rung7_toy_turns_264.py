@@ -51,7 +51,7 @@ from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E
 ROOT = Path(__file__).resolve().parent.parent
 UI = ROOT / "membrane" / "ui"
 NB = len(SL.TURN_BINS) + 1
-RESP = MEMBRANE_NS + "Component:chat:in:operator"
+RESP = MEMBRANE_NS + "Component:chat:operator"
 BALL = MEMBRANE_NS + "Component:" + TB.BALL
 NODE = unittest.skipUnless(shutil.which("node"), "node not installed")
 
@@ -191,7 +191,7 @@ def _seat(passed=(1, 2, 3, 4, 5, 6), limit=7, ball=True):
     e = QuantumEntity(eid=MEMBRANE_NS + "Component:lamp", cls="Component",
                       properties={"name": "lamp", "getter_script": "result = {'state': {'x': 1}}"})
     est.docs[e.eid] = e
-    CIO.entity_in(srv, CIO.OPERATOR)
+    CIO.entity(srv, CIO.OPERATOR)
     SL.bind(srv)
     TB.bind(srv)
     cap(srv, 1)
@@ -505,7 +505,7 @@ class _Chat:
         self.rng, self.talking = random.Random(seed), True
 
     def __call__(self, srv, ent, now):
-        if "chat:in" in ent.eid:
+        if ":chat:" in ent.eid:
             return {"fired": True, "state": {"x": 1}, "changed": self.talking and self.rng.random() < 0.4}
         if (ent.properties or {}).get("toybox"):
             return WA.entity_read_back(srv, ent, force=False, by="self")

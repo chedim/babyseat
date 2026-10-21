@@ -37,7 +37,7 @@ from membrane import watch_agents as WA  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
 
 DIM = 16
-RESP = MEMBRANE_NS + "Component:chat:in:operator"    # the other self understands
+RESP = MEMBRANE_NS + "Component:chat:operator"    # the other self understands
 
 
 class _World:
@@ -69,7 +69,7 @@ class _Chatter:
             return {"fired": True, "state": None, "changed": False, "paused": True}
         name = ent.eid.split(":")[-1]
         self.looks[name] = self.looks.get(name, 0) + 1
-        if "chat:in" in ent.eid:
+        if ":chat:" in ent.eid:
             changed = (self.looks[name] % 4) in (1, 2)     # C, C, U, U, C, C, ...
             return {"fired": True, "state": {"heard": self.looks[name]}, "changed": changed}
         return {"fired": True, "state": {"v": self.looks[name]}, "changed": False}
@@ -114,7 +114,7 @@ def _seat(names=(), limit=6, passed=(1, 2, 3, 4, 5)):
         e = QuantumEntity(eid=MEMBRANE_NS + "Component:" + name, cls="Component",
                           properties={"name": name, "getter_script": "result = {'state': {'x': 1}}"})
         est.docs[e.eid] = e
-    CIO.entity_in(srv, CIO.OPERATOR)                   # the other self understands (a real reach target)
+    CIO.entity(srv, CIO.OPERATOR)                   # the other self understands (a real reach target)
     SL.bind(srv)
     cap(srv, 1)
     for r in passed:

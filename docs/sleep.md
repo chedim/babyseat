@@ -28,8 +28,8 @@ Code: `membrane/energy.py`; the loop's `self_loop.step()`.
   with its `cost` and the energy left). Since #333 Blurp's nudge calls it:
   a nudge the thing refuses (the ball while it is on the person's side, a
   thing's own `nudge` method failing) and a nudge at anything outside its
-  world; and since #333 part 2, an empty send (nudging `chat:out` again
-  with nothing captured in the draft) and a send `chat:out` turns away.
+  world; and since #333 part 2, an empty send (nudging a person's chat
+  again with nothing captured in the draft) and a send the chat turns away.
 - **The sleep pull is 1 − the lowest reserve.** Each reserve runs from 1
   (full) to 0 (empty):
 

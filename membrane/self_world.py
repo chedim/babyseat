@@ -10,21 +10,24 @@ Blurp at <self dir>/world.json, that ONLY GROWS:
     {"born": <ts>, "members": {fid: {"ts": ..., "why": ...}}}
 
 WHO IS IN IT (`why`):
-  birth     a new Blurp (no record yet): itself, and chat:in / chat:out for
-            its person (whoever chats on the seat, else the operator);
+  birth     a new Blurp (no record yet): itself, and the chat thing
+            (chat_io: chat:<person>) of its person (whoever chats on the
+            seat, else the operator);
   migrated  a Blurp that already has a record when its world is first made:
-            itself, every person's chat:in / chat:out, and every toybox toy
-            it has -- so the live Blurp keeps its toys until the reset;
+            itself, every person's chat entities, and every toybox toy it
+            has -- so the live Blurp keeps its toys until the reset; and
+            (#333 part 3a) a person's chat thing when it folds in their old
+            chat:in / chat:out (chat_io.migrate: the two stay members);
   toy       a toy, when it is provisioned (toybox.add: an unlock, or the
             operator's own add);
-  chat      a person's chat pair when they open Blurp's private chat, and
+  chat      a person's chat thing when they open Blurp's private chat, and
             what a message in that chat (the person's or Blurp's own)
             mentions;
   heard     BLURP HEARS THE ROOM (the operator, 2026-10-21: a room with a
             baby and two adults, the person and the LLM): what any discourse
             event the field applies after the world's birth mentions -- the
             person's messages and the model's prose, in any chat -- and a
-            person heard speaking brings their own chat:in / chat:out;
+            person heard speaking brings their own chat thing;
   seen      ...and SEES WHAT THE ADULTS DO (the operator, 2026-10-21): what a
             tool call (an observation event) applied after the birth
             mentions or touches, in any session.
@@ -95,10 +98,10 @@ def _load(srv) -> dict | None:
 
 
 def _chat_pair(person: str) -> list[str]:
-    """chat:in / chat:out of a person, as the eids chat_io gives them."""
+    """A person's chat in Blurp's world: their one chat thing (#333 part 3a;
+    the chat:in / chat:out pair until then), as chat_io names it."""
     from . import chat_io as CIO
-    from .entities import CLASS_COMPONENT, CLASS_CONFIG, entity_id
-    return [entity_id(CLASS_COMPONENT, CIO.name_in(person)), entity_id(CLASS_CONFIG, CIO.name_of(person))]
+    return [CIO.eid_of(person)]
 
 
 def _first(srv, now: float) -> dict:
@@ -117,7 +120,7 @@ def _first(srv, now: float) -> dict:
         est = getattr(srv, "entity_store", None)
         for eid, e in list(((est.docs if est is not None else None) or {}).items()):
             pp = e.properties or {}
-            if pp.get("chat_io") in ("in", "out") or (pp.get("toybox") or {}).get("kind"):
+            if pp.get("chat_io") in ("in", "out", "chat") or (pp.get("toybox") or {}).get("kind"):
                 eids.append(eid)
     members = {}
     for e in eids:
@@ -176,7 +179,7 @@ def join(srv, eids, why: str, now: float | None = None) -> list[str]:
 
 
 def join_person(srv, person: str, why: str = "chat") -> list[str]:
-    """A person's chat:in / chat:out join (they opened Blurp's private chat)."""
+    """A person's chat thing joins (they opened Blurp's private chat)."""
     return join(srv, _chat_pair(person), why)
 
 

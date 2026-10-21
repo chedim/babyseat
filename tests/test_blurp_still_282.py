@@ -89,7 +89,7 @@ def _seat(limit=7, placed=True):
     e = QuantumEntity(eid=MEMBRANE_NS + "Component:lamp", cls="Component",
                       properties={"name": "lamp", "getter_script": "result = {'state': {'x': 1}}"})
     est.docs[e.eid] = e
-    CIO.entity_in(srv, CIO.OPERATOR)
+    CIO.entity(srv, CIO.OPERATOR)
     SL.bind(srv)
     TB.bind(srv)
     cap(srv, 1)

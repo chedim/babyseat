@@ -102,7 +102,7 @@ channel a skill uses.
   | 🗼 tower block | topples (with every standing block above it), or, fallen, lifts back |
   | 🎲 die / 〰️ drift / ✦ burst | rolls / steps one way or the other / takes a fresh value |
   | ⚡ fast, 🐢 slow, 🫧 body, 🪞 mirror, a tower as a whole | nothing |
-  | ✉️ a person's `chat:out` | opens a draft; the next nudge at it sends the draft ([speaking](#speaking-composing-by-nudges-on-chatout-333-part-2)) |
+  | ✉️ a person's chat thing, `chat:<person>` | opens a draft; the next nudge at it sends the draft ([speaking](#speaking-composing-by-nudges-on-the-chat-333-part-2)) |
   | a thing with a `nudge` method | runs it: done, or refused when it fails |
   | anything else | nothing |
 
@@ -120,13 +120,12 @@ channel a skill uses.
   distance is kept in RAM only) has nothing to compare, so no nudge. With no
   thing on the field it aims into space near where it is, as before, and
   nudges nothing. One nudge a cycle at most. (Aims tilted by what nudges
-  taught come later.) A `chat:out` of its world has no getter, so no look
-  ever placed it on the field: once Blurp nudges, each one is placed when
-  aims are drawn (its summary embedded, once per run, as a toy's first look
-  places it), so it is among the things Blurp aims at.
+  taught come later.) A person's chat thing has a getter (part 3a), so it is
+  placed on the field like any looked-at thing: by its first look, or, on a
+  migrated seat, where its old `chat:in` stood.
 - **Errors cost energy** ([sleep.md](sleep.md)): 0.01 for each nudge
   refused (the ball on the person's side, a thing's own method failing, an
-  empty draft sent, a send `chat:out` turns away) and each nudge outside its
+  empty draft sent, a send the chat turns away) and each nudge outside its
   world, recorded as an `error` line with its `cost`.
   A cycle that does not nudge costs nothing, so a ball sitting on the
   person's side costs the fee only on the cycles Blurp closed in on it.
@@ -140,15 +139,16 @@ channel a skill uses.
   opened at), and a send carries `moves` (how many nudges it captured) and
   `said` (the ids of the heard sentences the line is made of).
 
-### Speaking: composing by nudges on chat:out (#333, part 2)
+### Speaking: composing by nudges on the chat (#333, part 2)
 
-Blurp has no separate start or send: it speaks by nudging a person's
-`chat:out`, and `chat:out`'s own nudge holds the draft.
+Blurp has no separate start or send: it speaks by nudging a person's chat
+thing (`chat:<person>`; part 2 nudged `chat:out`, which part 3a folded into
+it), and the chat's own nudge holds the draft.
 
-- **The first nudge at a `chat:out` opens a draft** (`rc` 0, "draft
+- **The first nudge at a chat opens a draft** (`rc` 0, "draft
   opened"). Nothing is posted.
 - **While a draft is open, nudges don't move anything.** A nudge at any other
-  thing (the ball, a tower block, another person's `chat:out`) is **captured**
+  thing (the ball, a tower block, another person's chat) is **captured**
   into the draft as the move it would have made: the thing's position as if
   nudged, in order. Nudges move no field position yet (the operator's decision
   2), so that position is the thing's own field spot; a thing with no spot
@@ -156,7 +156,7 @@ Blurp has no separate start or send: it speaks by nudging a person's
   nothing: things that normally answer, like the ball, don't, which is how
   Blurp can learn composing mode by itself. The world gate still holds: a
   nudge outside its world is refused and costs the fee, drafting or not.
-- **The next nudge at the same `chat:out` sends.** The captured positions
+- **The next nudge at the same chat sends.** The captured positions
   become one composed vector (their sum), and its **non-negative fit** (NNLS,
   `efield._nnls`, the fit inbound messages get, #335) over the sentences heard
   in **that person's private chat with Blurp** (session `blurp:<person>`: the
@@ -166,11 +166,11 @@ Blurp has no separate start or send: it speaks by nudging a person's
   model talks *to* Blurp, never *as* it. Only the private chat is heard for
   this, so one person's words never reach another person.
 - **The line is Blurp's own:** `chat_io.on_edit(by="self")` posts it into the
-  private chat with the sprout mark and `"from": "self"`, under `chat:out`'s
+  private chat with the sprout mark and `"from": "self"`, under the chat's
   own rules (it must be `on`, at most one line per 2 s), and the field hears
   it as role `self`, which pulls the current like anyone's speech.
 - **Outcomes:** sent (`rc` 0); an **empty draft** (nothing captured) is
-  refused and costs the error fee; a send `chat:out` turns away (off, too
+  refused and costs the error fee; a send the chat turns away (off, too
   soon, no chat) is refused and costs the fee; nothing heard yet, or nothing
   heard that fits, says nothing (`rc` 1, free). Any send closes the draft.
 - **Never on a paused seat.** The cycle does not run while the seat is
@@ -179,6 +179,75 @@ Blurp has no separate start or send: it speaks by nudging a person's
 - **The draft lives in RAM.** It is dropped when Blurp falls asleep (named on
   the `sleep` line: `"dropped": {"draft": <its cycle>, "moves": <captured>}`)
   and by a restart.
+
+### One chat thing per person (#333, part 3a)
+
+Each person has **one** chat thing, `chat:<person>` (`membrane/chat_io.py`),
+in place of the old pair `chat:in:<person>` (a thing to look at, added for
+rung 6) and `chat:out:<person>` (a thing to write through, voice:out's twin
+since 0.6.1, nudged to speak in part 2):
+
+- **Its look reads news**, as `chat:in`'s getter did: `heard_n` changed or
+  not since Blurp's last look. Only the **person's** lines are heard
+  (`chat_io.heard`, from the chat route); Blurp's own sends never are, so its
+  own line is never news and the chat stays an other.
+- **Its nudge drafts and sends**, as `chat:out`'s did (above).
+- **It has one field spot**, so curiosity about what changed lands on the
+  same thing Blurp acts on. It is placed like any looked-at thing.
+- **Writing to the person** is unchanged for everyone else: edit its
+  `properties.say` (only while `on`). The old name keeps working:
+  `chat:out:<person>` resolves to the chat thing (`merged_into`), and the
+  edit route makes the chat thing on first use from either spelling and
+  edits it by its exact eid.
+
+**The migration** runs once per seat at boot (`chat_io.migrate`, from
+`self_loop.bind`), and whatever first makes a person's chat thing (a line
+they write before the boot's turn) folds their pair the same way:
+
+| what | how |
+|---|---|
+| the store | the chat thing copies `heard` / `heard_n` / `heard_ts` / `session` from `chat:in` and `on` / `say` / `said` from `chat:out`; both old entities get `merged_into` it and stay (mark, don't delete) |
+| the field spot | the chat thing starts at `chat:in`'s live state (where the person's speech put it), else `chat:out`'s; otherwise its first look places it |
+| `world.json` | the chat thing joins as `migrated`; the old two stay members (the world only grows). A new Blurp's birth and `join_person` add only the chat thing |
+| `tempo.json` | `chat:in`'s key is renamed to the chat thing: its rates are the person's own tempo |
+| the record | never rewritten. `chat_io.chat_of(eid)` reads `chat:in:<p>` / `chat:out:<p>` as `chat:<p>`, so the sheet's people (`_relationships`, the honest rung-6 count) still count old lines toward the same person; old `push` lines stay history |
+
+A merged entity is never looked at or aimed at (`_targets`, `_spots` skip
+it). voice:in / voice:out stay twins for now (a later issue may fold them the
+same way).
+
+### Nudge-aware looks (#333, part 3a)
+
+Each look (`reach` line) records **`nudged`**, Blurp's own nudges at that
+thing since its previous look at it (it knows what it did; every `nudge`
+line at the thing counts), and **`p_n`**, its nudge-aware prediction for
+that look:
+
+- `nudged` 0: `p_n` is the tempo prediction `p` it already makes;
+- `nudged` ≥ 1: the thing's own changed share over its earlier looks in the
+  same **k bin**, Jeffreys-smoothed, `(changed + 0.5) / (looks + 1)` (0.5
+  before any), **prequential**: a look is scored before its bin learns from
+  it. The bins are `NUDGE_K_BINS = (1, 2)`: one nudge, and two or more (two
+  toggles of a tower block undo each other, so "nudged twice" must not share
+  a bin with once).
+
+The counts live in `self/nudged.json` (kept across a restart).
+
+**The check.** A thing nudged since its last look joins patience's
+candidates (even a silent one, even before it is due), weighed like a due
+thing: `max(INFO_FLOOR, info(p_n)) × tilt`. An unsure outcome gets looked at;
+a known one only now and then. It is Blurp's own attention, never a forced
+look.
+
+**Kept apart.** Nudged looks (`nudged` ≥ 1) are kept out of rungs 2-5
+(look, kinds, patience, noticing: never `timed`, `steer` or `watch5`, never a
+shift check or an audit count), the tempo (a nudged look moves only `last`,
+when the thing was last read, where the next look's interval starts), the
+rate fits (λ, and the dream's replay) and the look curiosity, the way audits
+are. The earned skills keep measuring each thing's own tempo, and a nudge
+cannot make patience slip. The sleep's summary windows count ordinary looks
+too. Ground truth (`by` on a toy's looks) is recorded beside each look as
+before, never fed to Blurp.
 
 **The level drop (LADDER_V = 3).** The audit in #333 found meet, time its
 turn, expect a reply and recognize itself to be the developer's wiring (the
@@ -337,6 +406,7 @@ Everything is in `<data dir>/self/` (`.membrane/self/` in a seat's directory):
 | `archive/` | every raw record line, unchanged, in `record-<UTC date>.jsonl` files, and `manifest.jsonl` (the order they were written in) | kept: never edited, never read on the cycle path |
 | `model.json` | rung 1's learned model of the current that pushes it | kept |
 | `tempo.json` | per thing it reads: how often it had changed when self looked | kept |
+| `nudged.json` | per thing (#333 part 3a): its own nudges since its last look at it, and its changed share per nudge bin (`p_n`'s counts) | kept |
 | `world.json` | Blurp's world (#337): the field ids it may look at or act on, each with when and why it joined | kept: it only grows |
 
 Its toys' state lives next door, in `<data dir>/toybox/` (see [Toys](#toys)),
@@ -369,11 +439,11 @@ member records when it joined and why:
 
 | why | who |
 |---|---|
-| `birth` | a new Blurp (no record yet): itself, and `chat:in` / `chat:out` of its person |
-| `migrated` | a Blurp that already had a record when its world was first made: itself, every person's `chat:in` / `chat:out`, and every toybox toy it has (it keeps its toys until the reset) |
+| `birth` | a new Blurp (no record yet): itself, and the chat thing (`chat:<person>`) of its person |
+| `migrated` | a Blurp that already had a record when its world was first made: itself, every person's chat entities, and every toybox toy it has (it keeps its toys until the reset); and (#333 part 3a) a person's chat thing when it folds in their old `chat:in` / `chat:out`, which stay members |
 | `toy` | a toy, when it is provisioned (an unlock, or the operator's `toybox add`) |
-| `chat` | a person's chat pair when they open the PM with Blurp, and what a message in that chat mentions |
-| `heard` | **Blurp hears the room**: what any message the field applies after the world's birth mentions -- the person's words and the model's prose, in any chat; a person heard speaking brings their own chat:in / chat:out. Blurp's own lines are role `self` on the field, never the model's |
+| `chat` | a person's chat thing when they open the PM with Blurp, and what a message in that chat mentions |
+| `heard` | **Blurp hears the room**: what any message the field applies after the world's birth mentions -- the person's words and the model's prose, in any chat; a person heard speaking brings their own chat thing. Blurp's own lines are role `self` on the field, never the model's |
 | `seen` | **...and sees what the adults do**: what any tool call (an observation event) applied after the birth mentions or touches, in any session |
 
 The model's reasoning (neither said aloud nor done) adds nothing, and nothing
@@ -385,7 +455,7 @@ its migration). The field hands every applied event to its
 (the reach targets, so curiosity, attention and patience choose among members
 only), a direct reach (a thing outside reads nothing: `outside its world`),
 the ball it rolls, the mirror it feeds, its toy list and blind audits, and the
-person it meets (a person whose chat pair is outside is not met). A thing
+person it meets (a person whose chat thing is outside is not met). A thing
 outside the world is never looked at or acted on, however near it is. The
 field underneath stays whole: the person's agents keep everything.
 
@@ -396,14 +466,14 @@ speaker, the relay's `person`, else the operator; it returns the session row).
 A message there is stored and shown like any other, but **no model turn runs
 and the voice does not answer**; the field hears it under the session tag
 `blurp:<person>`. Blurp's own lines (since #333 part 2 its sends through
-`chat:out`, `chat_io.on_edit` with `by="self"`) land there instead of the person's newest chat, and the field
-hears them under the same tag. Lines anyone else writes to `chat:out` (the
+the chat thing, `chat_io.on_edit` with `by="self"`) land there instead of the person's newest chat, and the field
+hears them under the same tag. Lines anyone else writes to the chat (the
 model, a script) still land in the person's newest chat, never the PM.
-`chat:in` still hears every chat the person writes in. Who Blurp meets is still whoever
+The chat thing still hears every chat the person writes in. Who Blurp meets is still whoever
 chatted last (`chat_io.recent_person`); in the PM that is the person's own
 last message there (`person_ts`), never the PM's making or Blurp's own lines.
-A person Blurp has not met in its world (their `chat:in` / `chat:out` are not
-members) is not met until they open the PM. (The page has no button
+A person Blurp has not met in its world (their chat thing is not a member)
+is not met until they open the PM. (The page has no button
 for it yet: the chat is being redesigned as a chatroom with private messages.)
 
 ## Watching it grow

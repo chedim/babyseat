@@ -38,7 +38,7 @@ from membrane.entities import CLASS_CONFIG, MEMBRANE_NS, QuantumEntity, entity_i
 from tests.test_nudge_333 import DIM, T0, _cid, _lines, _seat  # noqa: F401
 from tests.test_nudge_333 import _data  # noqa: F401  autouse fixture
 
-COUT = entity_id(CLASS_CONFIG, CIO.name_of(""))          # the operator's chat:out (in a fresh world)
+COUT = CIO.eid_of("")                                    # the operator's chat thing (in a fresh world; chat:out until #333 part 3a)
 MOVE = np.full(DIM, 0.01)
 HEARD = ["the ball is red.", "i like the tower.", "dinner is at six.", "the cat sleeps.", "rain again today."]
 
@@ -254,16 +254,21 @@ def test_an_open_draft_is_dropped_at_sleep_and_named_on_the_sleep_line():
     assert "draft" not in SL._rt(srv)
 
 
-# ---- chat:out on the field, and the cycle ------------------------------------------------
+# ---- the chat on the field, and the cycle ------------------------------------------------
 
-def test_once_it_nudges_chat_out_gets_a_field_spot_so_it_can_be_aimed_at():
+def test_the_chat_things_first_look_places_it_so_it_can_be_aimed_at():
+    """#333 part 3a (spec change): the chat thing has a getter, so it is placed
+    like any looked-at thing -- by its first look (part 2 placed chat:out by hand)."""
     rec = [{"ts": T0, "kind": "birth", "by": "operator"},
            {"ts": T0 + 1, "kind": "achieve", "id": "feel", "rung": 1, "skill": 0.9}]
     srv, r = _chat_seat(record=rec)
     SL.set_mode(srv, "on")
     SL._rt(srv)["isolate"] = {"feel", "nudge"}
-    assert SL._spot(srv, COUT) is None
     SL.cycle(srv, now=T0 + 100)
+    assert SL._spot(srv, COUT) is None                        # no look yet: no spot
+    SL._rt(srv)["isolate"] = {"feel", "nudge", "reach"}
+    SL.cycle(srv, now=T0 + 111)
+    assert [x["eid"] for x in _lines(srv) if x.get("kind") == "reach"] == [COUT]
     assert SL._spot(srv, COUT) is not None
     assert COUT in SL._spots(srv, DIM)
 
@@ -276,7 +281,7 @@ def test_the_cycle_speaks_only_by_nudging_and_every_line_is_blurps(monkeypatch):
     _hear(srv, HEARD)
     _thing(srv, "lamp", HEARD[2])
     SL.set_mode(srv, "on")
-    SL._rt(srv)["isolate"] = {"feel", "nudge"}
+    SL._rt(srv)["isolate"] = {"feel", "nudge", "reach"}      # part 3a: its looks place the chat thing
     for k in range(200):
         SL.cycle(srv, now=T0 + 100 + 11 * k)
     ns = [x for x in _nudges(srv) if x["eid"] == COUT]

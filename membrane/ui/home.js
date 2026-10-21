@@ -95,7 +95,7 @@ function bShort(eid) { return String(eid == null ? "" : eid).replace(/^membrane:
 function brainLabel(eid, me) {
   if (eid == null || eid === "") return "?";
   const s = bShort(eid);
-  const m = /^chat:(?:in|out):(.+)$/.exec(s);
+  const m = /^chat:(?:(?:in|out):)?([^:]+)$/.exec(s);   // #333 part 3a: the chat thing, or its old chat:in / chat:out
   if (m) return me && m[1] === me ? "you" : m[1] === "operator" ? "the operator" : m[1];
   if (s === "i") return "the eye";
   const t = /^(?:toy|cradle):(.+)$/.exec(s);

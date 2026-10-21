@@ -1994,6 +1994,26 @@ class EntityField:
         self.flush()
         return True
 
+    def place_vec(self, eid: str, vec) -> bool | None:
+        """A FIELD SPOT FROM ANOTHER (#333 part 3a): like place(), seeded by a
+        vector already in the field's space -- the chat thing starts where its
+        old chat:in stood. -> True placed, False already live, None could not."""
+        if not eid or vec is None:
+            return None
+        v = np.asarray(vec, dtype=float)
+        if not v.size or not np.isfinite(v).all() or float(np.linalg.norm(v)) < 1e-12:
+            return None
+        st = self.get(eid)
+        if st is not None and st.tier == "live" and st.state is not None:
+            return False
+        if st is None:
+            st = EntityState(eid=eid, kind=eid.split(":", 1)[0], surface=eid.split(":", 1)[-1])
+            self._states[eid] = st
+        st.first_ts = st.first_ts if st.first_ts is not None else time.time()
+        self._materialize(st, seed=unpack_f16(pack_f16(unit(v))))
+        self.flush()
+        return True
+
     def event_by_number(self, n: int) -> tuple[str, dict] | None:
         for k, d in self.b.scan("events", {"origin": self.origin, "n": int(n)}, limit=1):
             return k, d
