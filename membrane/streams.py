@@ -333,6 +333,13 @@ def _obs(tool: str, args, result: str | None, call_id: str, served: str,
                  clipped=clipped)
 
 
+def self_line(text: str, ts: float | None = None) -> list[Event]:
+    """Blurp's own line (#337) -> one discourse event with role `self`: its
+    words stay its own on the field, never the model's prose."""
+    t = discourse_clean(clean(text))
+    return [Event(stream="discourse", role="self", text=t, ts=ts)] if t else []
+
+
 def split_turn(query: str, prose: str = "", calls: dict | None = None,
                thought: str = "", results: list | None = None,
                ts: float | None = None) -> list[Event]:

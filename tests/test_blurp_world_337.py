@@ -216,6 +216,39 @@ def test_anything_said_in_any_chat_after_birth_joins_as_heard():
     assert _doc(srv)["members"]["w:ball"]["why"] == "heard"
 
 
+def test_a_person_heard_speaking_brings_their_chat_into_the_world():
+    """The operator, 2026-10-21: hearing someone speak, in any chat, adds that
+    person's chat:in / chat:out -- even a line that mentions nothing."""
+    srv = _seat()
+    pair = {SW._fid(e) for e in SW._chat_pair("Mira")}
+    assert not pair & SW.members(srv)
+    ev = _ev("s:1:0", role="user", mentions=()) | {"speaker": ["person:mira", "Mira"]}
+    SW.on_event(srv, ev)
+    assert pair <= SW.members(srv)
+    assert {_doc(srv)["members"][f]["why"] for f in pair} == {"heard"}
+
+
+def test_a_persons_line_in_blurps_chat_brings_their_chat_as_chat():
+    srv = _seat()
+    pair = {SW._fid(e) for e in SW._chat_pair("Mira")}
+    SW.on_event(srv, _ev("blurp:mira", role="user", mentions=()) | {"speaker": ["person:mira", "Mira"]})
+    assert {_doc(srv)["members"][f]["why"] for f in pair} == {"chat"}
+
+
+def test_blurps_own_line_is_its_own_role_on_the_field():
+    """The operator, 2026-10-21: Blurp's lines are role `self` on the field, never
+    the model's prose -- its words stay its own."""
+    from membrane import streams as ST
+    evs = ST.self_line("ball: changed", ts=5.0)
+    assert [(e.stream, e.role, e.text) for e in evs] == [("discourse", "self", "ball: changed")]
+
+
+def test_blurps_own_line_in_its_chat_joins_as_chat():
+    srv = _seat()
+    SW.on_event(srv, _ev("blurp:operator", role="self", mentions=("w:kite",)))
+    assert _doc(srv)["members"]["w:kite"]["why"] == "chat"
+
+
 def test_what_is_said_in_blurps_chat_joins_as_chat():
     srv = _seat()
     SW.on_event(srv, _ev("blurp:operator", mentions=("w:kite",)))
@@ -272,6 +305,9 @@ class _Cap:
     def on_turn(self, query, prose="", thought="", ts=None, session=None):
         self.turns.append({"query": query, "prose": prose, "session": session})
 
+    def on_self(self, text, session=None, ts=None):
+        self.turns.append({"self": text, "session": session})
+
 
 def _runner_seat(complete=None):
     srv = _seat()
@@ -326,7 +362,7 @@ class TestBlurpsChat(unittest.TestCase):
         self.assertEqual(_texts(r, pm), [CIO.SELF_MARK + " self is here"])
         self.assertEqual(_texts(r, coding["id"]), [])
         self.assertEqual(srv.capturer.turns[-1]["session"], "blurp:ann")
-        self.assertIn("self is here", srv.capturer.turns[-1]["prose"])
+        self.assertIn("self is here", srv.capturer.turns[-1]["self"])     # Blurp's own role, never the model's
 
     def test_a_message_in_blurps_chat_runs_no_model_and_no_voice(self):
         srv, r, calls = _runner_seat()

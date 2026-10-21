@@ -240,7 +240,7 @@ def _hear_blurp(srv, person: str, text: str) -> None:
     if cap is None:
         return
     try:
-        cap.on_turn("", prose=text, session=blurp_tag(person))
+        cap.on_self(text, session=blurp_tag(person))      # its own role: never the model's prose
     except Exception:
         pass
 

@@ -236,7 +236,7 @@ member records when it joined and why:
 | `migrated` | a Blurp that already had a record when its world was first made: itself, every person's `chat:in` / `chat:out`, and every toybox toy it has (it keeps its toys until the reset) |
 | `toy` | a toy, when it is provisioned (an unlock, or the operator's `toybox add`) |
 | `chat` | a person's chat pair when they open the PM with Blurp, and what a message in that chat mentions |
-| `heard` | **Blurp hears the room**: what any message the field applies after the world's birth mentions -- the person's words and the model's prose, in any chat |
+| `heard` | **Blurp hears the room**: what any message the field applies after the world's birth mentions -- the person's words and the model's prose, in any chat; a person heard speaking brings their own chat:in / chat:out. Blurp's own lines are role `self` on the field, never the model's |
 | `seen` | **...and sees what the adults do**: what any tool call (an observation event) applied after the birth mentions or touches, in any session |
 
 The model's reasoning (neither said aloud nor done) adds nothing, and nothing

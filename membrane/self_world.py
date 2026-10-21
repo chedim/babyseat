@@ -23,7 +23,8 @@ WHO IS IN IT (`why`):
   heard     BLURP HEARS THE ROOM (the operator, 2026-10-21: a room with a
             baby and two adults, the person and the LLM): what any discourse
             event the field applies after the world's birth mentions -- the
-            person's messages and the model's prose, in any chat;
+            person's messages and the model's prose, in any chat -- and a
+            person heard speaking brings their own chat:in / chat:out;
   seen      ...and SEES WHAT THE ADULTS DO (the operator, 2026-10-21): what a
             tool call (an observation event) applied after the birth
             mentions or touches, in any session.
@@ -48,7 +49,7 @@ import threading
 import time
 
 FILE = "world.json"
-HEARD_ROLES = ("user", "model")     # speech in the room: the person's words and the model's prose
+HEARD_ROLES = ("user", "model", "self")   # speech in the room: the person's words, the model's prose, Blurp's own lines
 SEEN_STREAM = "observation"         # what the adults do: their tool calls
 BLURP_SESSION = "blurp:"            # the capture tag of Blurp's private chat (chat_io.blurp_tag)
 
@@ -197,6 +198,9 @@ def on_event(srv, ev: dict) -> list[str]:
     if ts < born(srv):
         return []
     ids = [m[0] for m in ev.get("mentions") or [] if isinstance(m, (list, tuple)) and m and m[0]]
+    spk = ev.get("speaker")                          # a person heard speaking brings their chat (the operator, 2026-10-21)
+    if not seen and isinstance(spk, (list, tuple)) and spk and str(spk[0]).startswith("person:"):
+        ids += _chat_pair(str(spk[0]).split(":", 1)[1])
     if not ids:
         return []
     why = ("seen" if seen else

@@ -100,6 +100,10 @@ class Capturer:
         self._put(lambda: ST.split_turn(query, prose, None, thought, ts=ts), discourse=True,
                   session=session)
 
+    def on_self(self, text: str, session: str | None = None, ts: float | None = None) -> None:
+        """Blurp's own line (#337): role `self`, never the model's prose."""
+        self._put(lambda: ST.self_line(text, ts=ts), discourse=True, session=session)
+
     def on_calls(self, query: str, calls: dict, ts: float | None = None) -> None:
         self._put(lambda: _served(ST.split_turn("", "", calls, ts=ts), query))
 
