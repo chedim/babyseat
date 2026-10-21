@@ -19,7 +19,7 @@ UI = ROOT / "membrane" / "ui"
 NODE = pytest.mark.skipif(not shutil.which("node"), reason="node not installed")
 
 OPTS = {"self_cpu_share": 0.5, "defaults": {"self_cpu_share": 0.5}, "current_tau_s": 180.0,
-        "current_tau_note": "changing it needs the operator's approval", "health": None,
+        "current_tau_note": "changing it needs the operator's approval", "energy": None,
         "writable": ["self_cpu_share"]}
 
 # stub elements + a fake seat; `script` runs inside an async main and returns a value
@@ -92,7 +92,8 @@ def test_opening_paints_the_rows():
     html = out["html"]
     assert 'type="range"' in html and 'min="10"' in html and 'max="100"' in html and 'value="50"' in html
     assert "180" in html and "approval" in html        # the fade, read-only
-    assert "#333" in html                               # Blurp's health: its place, not built yet
+    assert "energy" in html and "not running yet" in html   # #363: energy where health was, none reported yet
+    assert "#333" not in html and "health" not in html
 
 
 @NODE
@@ -151,3 +152,13 @@ def test_the_top_bar_keeps_the_bell_and_play_and_gains_the_gear():
     assert re.search(r'class="optbtn"[^>]*>⚙</button>', top)
     assert 'aria-controls="optpanel"' in top
     assert 'class="optpanel glass" id="optpanel"' in src
+
+
+@NODE
+def test_the_energy_row_shows_percent_and_asleep_363():
+    r = dict(OPTS, energy={"energy": 0.873, "asleep": False})
+    out = _run("await w.toggle(); return { html: body.innerHTML };", reply=r)
+    assert "87%" in out["html"] and "awake" in out["html"]
+    r = dict(OPTS, energy={"energy": 0.2, "asleep": True})
+    out = _run("await w.toggle(); return { html: body.innerHTML };", reply=r)
+    assert "20%" in out["html"] and "asleep" in out["html"]
