@@ -2094,15 +2094,24 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       this._dockTick();
     }
 
+    // #373: each read carries the poke count it started under (_dockSeq, bumped
+    // by every poke); a read that started before the latest poke never paints
+    // over the poke's result, and one asked for while such a stale read is in
+    // flight runs as soon as it lands.
     async _dockTick(force) {
       const c = this._chat;
-      if ((document.hidden && !force) || this._dockBusy || !c || typeof c._toyState !== "function") return;
-      this._dockBusy = true;
+      if ((document.hidden && !force) || !c || typeof c._toyState !== "function") return;
+      const seq = this._dockSeq || 0;
+      if (this._dockBusy) { if (this._dockBusySeq !== seq) this._dockAgain = true; return; }
+      this._dockBusy = true; this._dockBusySeq = seq;
       try {
         const toys = await c._toyState();
         this._takeName(c);                                 // #277: so does the dock
-        if (toys) this._paintDock(toys);
-      } finally { this._dockBusy = false; }
+        if (toys && seq === (this._dockSeq || 0)) this._paintDock(toys);
+      } finally {
+        this._dockBusy = false;
+        if (this._dockAgain) { this._dockAgain = false; this._dockTick(true); }
+      }
     }
 
     /** #277: the seat's name for self, from the chat's last sheet / dock
@@ -2290,14 +2299,17 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
       const toy = btn.getAttribute("data-poke-toy"), action = btn.getAttribute("data-poke-action");
       const arg = btn.getAttribute("data-poke-arg");
       btn.disabled = true;
+      this._dockSeq = (this._dockSeq || 0) + 1;            // #373: a read from before this poke is stale
       // #325: paint the expected result at once; the seat's reading replaces it, a failure puts it back
       const before = this._dockToys, guess = typeof c._toyAfterPoke === "function" && before;
       if (guess) this._paintDock(c._toyAfterPoke(before, toy, action, null));
       let out;
       try { out = await c._toyPoke(toy, action, arg); } catch (err) { out = { ok: false, error: String(err) }; }
       btn.disabled = false;
+      this._dockSeq++;                                     // ...and so is one that started during it
       if (guess && !out.ok) this._paintDock(before);
       else if (guess && out.reading != null && this._dockToys) this._paintDock(c._toyAfterPoke(this._dockToys, toy, action, out.reading));
+      if (out.ok) this._dockTick(true);                    // #373: every successful poke reads the toys again
       const say = out.ok
         ? "✓ " + action + " " + toy + (out.block ? " block " + out.block : "") + " → " + JSON.stringify(out.reading || {}) + " (by " + out.by + ")"
         : "✗ " + (out.error || "the poke failed");
@@ -2306,7 +2318,6 @@ if (typeof HTMLElement !== "undefined" && typeof customElements !== "undefined" 
         this._dockRes[toy] = { ok: !!out.ok, text: say };
         this._dockPopHtml = null;
         this._dockPaintPop();
-        if (out.ok) this._dockTick();
         return out;
       }
       const el = this._spPlay;
