@@ -29,6 +29,9 @@ and the toybox -- read-only, cached CACHE_S, served at GET
                  players -- how predictable each is -- and the body set
   toys           #267: every toybox kind, unlocked or locked, the rung that
                  unlocks it and what it will teach (toy_unlocks)
+  energy         #345: energy.report() -- energy 0..1, asleep, the reserves
+                 (energy, disk, awake, record), the sleep pull and the
+                 limiting reserve
 
 WORKING HOURS. Running time is the time the record kept growing: a gap over
 GAP_S between two lines (and the tail since the last line) is time self was
@@ -1029,6 +1032,7 @@ def compute(srv, now: float | None = None) -> dict:
     with SL._lock:
         recs = list(SL._read(srv))
     st = SL.status(srv)
+    from . import energy as E
     tempo = SL._tempo(srv)
     progs = {n: fn(recs, tempo) for n, fn in SL.PROGRESS.items()}
     c = _clocks(recs, now)
@@ -1059,7 +1063,8 @@ def compute(srv, now: float | None = None) -> dict:
             "skills": skills, "slipping": _slipping(tr, progs, recs),
             "quest": quest, "achievements": ach,
             "growth": _growth(c, ach), "time": t, "inventory": _inventory(recs, st, now),
-            "relationships": _relationships(recs, tempo, st), "toys": _toys_section(recs)}
+            "relationships": _relationships(recs, tempo, st), "toys": _toys_section(recs),
+            "energy": E.report(srv)}                     # #345: energy, asleep, the reserves, the pull
 
 
 def tree(recs: list, st: dict, progs: dict | None = None) -> list:
@@ -1150,7 +1155,7 @@ def empty() -> dict:
             "attributes": traits([]), "skills": [], "slipping": [],
             "quest": {"rung": None, "criteria": []}, "achievements": [],
             "growth": _growth(c, []), "time": _time(c), "inventory": [],
-            "relationships": {"others": [], "body": [], "other": []}, "toys": []}
+            "relationships": {"others": [], "body": [], "other": []}, "toys": [], "energy": None}
 
 
 def sheet(srv, now: float | None = None, fresh: bool = False) -> dict:
@@ -1171,23 +1176,30 @@ def sheet(srv, now: float | None = None, fresh: bool = False) -> dict:
 def card(srv, now: float | None = None) -> dict:
     """#283: the zoo's card -- self on this seat in a few fields, cheap
     enough to poll across seats (GET /membrane/self/card): the name, the
-    level and its rung's name, the mode (awake = not off) and the record's
-    last line (its time, ISO; None before self's first line). The level is
-    the sheet's (cached CACHE_S); the mode and the last line are live."""
+    level and its rung's name, the mode (awake = not off and not asleep,
+    #345) and the record's last line (its time, ISO; None before self's
+    first line); #345: its energy (0..1), asleep, the sleep pull, the
+    limiting reserve and the record cap (bytes; None = unknown). The level is the sheet's (cached CACHE_S); the mode,
+    the energy and the last line are live."""
     now = time.time() if now is None else float(now)
     name = SN.current()
     if srv is None:
         return {"name": name, "level": 0, "rung_name": SL.RUNG_NAMES.get(0, ""), "next": [], "mode": "off",
-                "awake": False, "last_activity": None, "generated": now}
+                "awake": False, "last_activity": None, "generated": now,
+                "energy": None, "asleep": False, "pull": None, "limiting": None, "record_cap": None}
     h = sheet(srv, now).get("header") or {}
     mode = SL.mode(srv)
     with SL._lock:
         recs = SL._read(srv)
         mine = next((r for r in reversed(recs) if r.get("kind") not in SL.OPERATOR_KINDS), None)   # #299: not an accept
         last = float(mine.get("ts") or 0) if mine else None
+    from . import energy as E
+    en = E.report(srv)                                   # #345: live, like the mode
     return {"name": name, "level": h.get("level") or 0, "rung_name": h.get("rung_name") or "",
-            "next": list(h.get("next") or []), "mode": mode, "awake": mode != "off",
-            "last_activity": iso(last) if last else None, "generated": now}
+            "next": list(h.get("next") or []), "mode": mode, "awake": mode != "off" and not en["asleep"],
+            "last_activity": iso(last) if last else None, "generated": now,
+            "energy": en["energy"], "asleep": en["asleep"], "pull": en["pull"], "limiting": en["limiting"],
+            "record_cap": en["record_cap"]}                # None: the RAM couldn't be read (no cap)
 
 
 # ---- the dock: the toys alone, light enough to poll ---------------------------------

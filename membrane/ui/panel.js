@@ -1139,6 +1139,17 @@ function skillStatHtml(sk) {
     (t != null ? '<div class="skt">' + arrow + " " + skillSigned(t) + " in the last hour</div>" : "") + "</div>" + sparkSvg(sk.series, "skspark", pass) + "</div>";
 }
 
+/** #345: energy (0-100%), awake or asleep, the sleep pull and the reserve
+ *  closest to running out -- one more fact on the nameplate ("" from a seat
+ *  without energy). */
+function sheetEnergy(e) {
+  if (!e || typeof e !== "object" || typeof e.energy !== "number") return "";
+  const pct = Math.round(Math.max(0, Math.min(1, e.energy)) * 100);
+  const pull = typeof e.pull === "number" ? " · pull " + Math.round(e.pull * 100) + "%" + (e.limiting ? " (" + escText(e.limiting) + ")" : "") : "";
+  const cap = "record_cap" in e && e.record_cap == null ? " · record cap unknown" : "";
+  return "<span>energy <b>" + pct + "%</b> · " + (e.asleep ? "asleep 💤" : "awake") + pull + cap + "</span>";
+}
+
 /** The whole sheet: the nameplate, then the sections as <details> (open:
  *  the remembered choice per section, else SHEET_OPEN). nowS: unused for
  *  now (every age is the seat's). */
@@ -1154,6 +1165,7 @@ function selfSheetHtml(s, open, nowS) {
     '<div class="xpslot"></div>' +
     '<div class="facts"><span>age <b>' + hoursText(h.age_h) + '</b></span><span>working <b>' + hoursText(h.working_h) + "</b></span>" +
     (h.cycles ? "<span>" + h.cycles + " cycles</span><span>" + (h.looks || 0) + " looks</span><span>" + (h.lines_sent || 0) + " lines sent</span>" : "") +
+    sheetEnergy(s.energy) +
     "</div></div>"];
   if (s.empty) out.push('<p class="muted">' + escText(SELF_NAME) + ' has not been switched on yet: tap 💤 to wake it.</p>');
   const body = { attributes: sheetAttrs, quest: sheetQuest, growth: sheetGrowth,

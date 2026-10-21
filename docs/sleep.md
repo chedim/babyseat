@@ -1,12 +1,74 @@
 # Sleep, viewed from Blurp
 
-**Blurp doesn't sleep, and so far it hasn't needed to.** This page says why,
-what would change that, and the signal to watch for each change. It is a
-viewpoint with one measurement in it, not a model of sleep: nothing here is
-a claim about brains beyond the published findings it cites.
+**Blurp now gets tired and sleeps (#345, part 1 of 3).** It has energy, falls
+asleep when one of its reserves runs out, rests, and wakes. Sleep does not
+consolidate anything yet: moving the record into archives behind summaries,
+dreaming in sleep, and paying energy back for confirmed predictions come in
+parts 2 and 3. The rest of this page is the viewpoint written before sleep
+was built (why Blurp didn't need it, and the signals to watch); it is not a
+claim about brains beyond the published findings it cites.
 
 Blurp's "off" (sleep and wake in [selfgrowth.md](selfgrowth.md)) is not
-sleep. Off runs nothing, and nothing is processed while it's off.
+sleep. Off is the operator's switch: it runs nothing, and nothing is
+processed while it's off. Asleep is Blurp's own state, and the mode stays as
+it was.
+
+## Energy, sleep and wake (built, #345 part 1)
+
+Code: `membrane/energy.py`; the loop's `self_loop.step()`.
+
+- **Energy** runs from 0 to 1 (shown as 0–100%) and is stored with Blurp
+  (`self/energy.json`). A restart neither refills nor drains it, and time
+  while the loop is off, paused or held doesn't count.
+- **Being awake costs energy**, every loop step: `BASAL_PER_S` per second
+  awake plus `CPU_PER_S` per second of CPU the cycle used (measured with
+  `time.thread_time()` on the loop's thread).
+- **An error costs 0.01** (`energy.error()`, recorded as an `error` line).
+  The acts that can be used wrongly (nudging the ball on the person's side,
+  a nudge a toy refuses, an empty send) arrive with #333, so nothing calls
+  it yet.
+- **The sleep pull is 1 − the lowest reserve.** Each reserve runs from 1
+  (full) to 0 (empty):
+
+  | Reserve | Full | Empty |
+  |---|---|---|
+  | energy | 1.0 | 0 |
+  | disk | the free space on the volume holding `self/` when Blurp last woke | no free space |
+  | awake | just woke | `AWAKE_LEN_S` awake |
+  | record | an empty record in memory | the record cap |
+
+  The record cap is derived, not a constant: the person's CPU share
+  (`self_cpu_share`, default 50%) × the RAM available when Blurp woke, so
+  the throttle that bounds its CPU also bounds its memory. RAM is read from
+  `/proc/meminfo` (Linux, Android), `os.sysconf` or macOS's `vm_stat`. With
+  no reading there is no cap: the reserve reads full and never puts Blurp to
+  sleep. The record's size is the bytes of the lines it holds in memory.
+- **Falling asleep:** when a reserve reaches 0, a `sleep` line records which
+  one (`why`) and the energy. While asleep no cycle runs, and energy comes
+  back at 0.001 a second (empty to full in about 17 minutes).
+- **Waking:** at full energy (`why: rested`) or when a person speaks in a
+  chat or by voice (`why: spoke`, `who`). Blurp's own lines and the model's
+  don't wake it. Waking starts a fresh day: the free disk space and the
+  record cap are measured again and the awake clock restarts.
+- **Shown** on the self card (`/membrane/self/card`: `energy`, `asleep`,
+  `pull`, `limiting`, `record_cap`, null when the RAM is unknown; `awake` is
+  false while asleep, so the zoo shows it
+  asleep) and on the sheet's nameplate (`energy`: the reserves too).
+- `energy.share(throttle, srv)` is the throttle × energy, for #343's
+  pacing. Nothing reads it yet.
+
+| Constant | Value | Why |
+|---|---|---|
+| `BASAL_PER_S` | 1 / 16 h | A rested, idle Blurp runs out after a human waking day. Part 2 sets it from the room's measured rhythm. |
+| `CPU_PER_S` | 1 / 16 h | A second of CPU costs as much as a second awake, so at a 50% share Blurp tires 1.5× as fast (about 10.7 h). |
+| `AWAKE_LEN_S` | 16 h | A placeholder for the room's usual awake stretch (part 2). |
+| `ERROR_COST` | 0.01 | Approved. |
+| `RESTORE_PER_S` | 0.001 | Approved. |
+
+**Until part 2 archives the record, sleep doesn't shrink it.** If the record
+ever fills its cap, Blurp sleeps, wakes rested and falls asleep again on its
+next step. At today's sizes (tens of MB against a cap of GBs) that is far
+off.
 
 ## What sleep does for brains, and why Blurp is exempt
 
