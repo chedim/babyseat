@@ -793,6 +793,12 @@ def main() -> None:
             _serve_socket.listen(128)
     srv = ThreadingHTTPServer((proxy_bind_host(args), listen), MembraneOpenAIHandler)
     srv.membrane = mem
+    srv.paused = False                 # a cold start runs; a restart's re-exec keeps the person's pause (#395)
+    try:
+        from .restarts import apply_carried_pause as _apply_carried_pause
+        _apply_carried_pause(srv)
+    except Exception as e:
+        print(f"[seat] the restart's pause not applied ({e})", file=sys.stderr)
     srv.viewer = bool(args.viewer)   # dev field viewer at /viewer (OFF default)
     # THE STATELESS LLM (the field is the only memory): --no-context
     # strips the transcript history per turn; coherence comes from the
@@ -2353,7 +2359,7 @@ def main() -> None:
         except Exception:
             pass
         from .restarts import reexec_if_requested
-        reexec_if_requested()           # #151: a self-restart comes back
+        reexec_if_requested(srv)        # #151: a self-restart comes back (#395: the person's pause too)
 
 
 if __name__ == "__main__":

@@ -103,9 +103,15 @@ the seat's ACTING lanes down — the stable point from which the operator
   [entity-field.md](entity-field.md) — the queue + the ISA pipeline).
   One method call goes through the pause: `presence.restart` (#388) — a
   staged deploy never waits for a resume.
-- **RAM-only**: a restart unpauses (a persisted pause is a stuck seat —
-  a paused-looking seat the roster can't wake is the failure mode this
-  avoids). `membrane: pause` is honored only from the operator's chat
+- **Never on disk** (a persisted pause is a stuck seat — a paused-looking
+  seat the roster can't wake is the failure mode this avoids): a cold start
+  runs. A requested restart (`presence.restart`, the re-exec) keeps the
+  person's pause (#395): the old process hands it to the new one through
+  the environment (`MEMBRANE_REEXEC_PAUSED`, read and cleared at boot so no
+  child inherits it; honored only alongside `MEMBRANE_REEXEC`), and the new
+  boot pauses with an audit line `by: "restart"`. The battery guard's own
+  pause is not carried — the new boot's guard pauses again if the battery
+  is still critical — and the battery never lifts a pause it did not make. `membrane: pause` is honored only from the operator's chat
   (a listener loop can never pause the seat). Kill switch:
   `MEMBRANE_NERVE_PAUSE=0` (pause becomes a no-op).
 - **The button** (#348): membrane home's top bar shows what a press does
@@ -118,7 +124,7 @@ the seat's ACTING lanes down — the stable point from which the operator
   Assistant: an admin), and it writes the same audit line as the typed
   frames (`{"event": "nerve", "op": "pause"|"resume"}`, plus `by`: who
   pressed it) and a `paused` / `resumed` event on the seat panel. It is
-  the same RAM-only flag, so after a restart the button shows ⏸. The button
+  the same flag, so after a restart it shows what the seat came back as. The button
   drove auto-chat until #348; auto-chat is gone (the LLM acts unprompted
   through its own field scripts, #338).
 

@@ -126,12 +126,15 @@ def _battery_guard(srv, b, pp: dict) -> None:
         pp["_bat_low"] = False
     if pct < BATTERY_CRITICAL and not chg and not getattr(srv, "paused", False):
         srv.paused = True
+        srv.pause_by = "battery"               # not the person's: a restart does not carry it (#395)
         pp["_bat_paused"] = True
         note(srv, "paused", by="battery", percentage=pct)
     elif pp.get("_bat_paused") and chg and pct >= BATTERY_RESUME:
-        srv.paused = False
         pp["_bat_paused"] = False
-        note(srv, "resumed", by="battery", percentage=pct)
+        if getattr(srv, "pause_by", None) == "battery":   # a stale flag never lifts the person's pause
+            srv.paused = False
+            srv.pause_by = None
+            note(srv, "resumed", by="battery", percentage=pct)
 
 
 def _runner(srv):
@@ -270,7 +273,7 @@ def pause_state(srv) -> dict:
 def set_pause(srv, on: bool, by: str = "operator") -> dict:
     """#348: pause / resume the seat (the nerve pause): the flag and the
     typed frames' audit line (lanes.nerve_set, with who), the seat's event.
-    RAM-only: a restart resumes. -> pause_state()."""
+    Never on disk; a restart keeps it (#395), a cold start runs. -> pause_state()."""
     from .lanes import nerve_set
     nerve_set(srv, bool(on), by=by)
     note(srv, "paused" if srv.paused else "resumed", by=by)

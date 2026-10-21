@@ -5,8 +5,9 @@ The pause's write gate (lanes._paused_write_refused) stood in front of the whole
 staged deploy waited for a resume. Pinned here:
   - POST /membrane/method/call presence.restart goes through while paused;
   - every other method call/define still answers 423 while paused;
-  - the pause stays RAM-only: the restart's reply says the seat comes back
-    running, and nothing about the pause is written to disk.
+  - nothing about the pause is written to disk; the restart's reply says the
+    seat comes back paused (#395 changed the spec: the person's pause is
+    carried through the re-exec's environment, tests/test_pause_carry_395.py).
 """
 import json
 import os
@@ -87,13 +88,13 @@ class TestRestartWhilePaused(unittest.TestCase):
                                         "command": "echo hi"})
         self.assertEqual(code, 423, out)
 
-    def test_the_reply_says_the_seat_comes_back_running(self):
+    def test_the_reply_says_the_seat_comes_back_paused(self):
         self.srv.paused = True
         before = set(os.listdir(self.tmp.name))
         with mock.patch.object(RS.threading, "Thread"), mock.patch("membrane.seat_panel.note"):
             out = RS.do_restart(self.srv, "new code", delay_s=0)
         self.assertEqual(out["rc"], 0)
-        self.assertIn("unpaused", out["text"])
+        self.assertIn("comes back paused", out["text"])         # #395 (was "unpaused", #388)
         new = set(os.listdir(self.tmp.name)) - before
         for name in new:                                    # only the restart's own reason file
             self.assertNotIn("paus", Path(self.tmp.name, name).read_text().lower(), name)

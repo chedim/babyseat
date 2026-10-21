@@ -421,12 +421,38 @@ RESTART = {"requested": False}
 
 # #243: the re-exec'd boot's word that it IS a restart (no new browser tab)
 REEXEC_ENV = "MEMBRANE_REEXEC"
+# #395: the person's pause, handed to the re-exec'd boot (the environment, never disk)
+PAUSE_ENV = "MEMBRANE_REEXEC_PAUSED"
+_BOOT: dict = {}                           # this boot's reads of the markers
 
 
 def was_reexec() -> bool:
     """True once on the boot a requested restart re-exec'd; the marker is
     cleared on read so nothing launched later inherits it."""
-    return os.environ.pop(REEXEC_ENV, None) == "1"
+    got = os.environ.pop(REEXEC_ENV, None) == "1"
+    _BOOT["reexec"] = _BOOT.get("reexec", False) or got
+    return got
+
+
+def carried_pause() -> bool:
+    """#395: True when the restart that re-exec'd this boot left the person's
+    pause on. Only a re-exec carries it: on a cold start a stray marker is
+    ignored (a persisted pause = a stuck seat). The marker is cleared on read,
+    so no child process inherits it."""
+    val = os.environ.pop(PAUSE_ENV, None)
+    reexec = os.environ.get(REEXEC_ENV) == "1" or bool(_BOOT.get("reexec"))
+    return val == "1" and reexec
+
+
+def apply_carried_pause(srv) -> bool:
+    """#395: the seat's boot takes the pause the restart carried -- the same
+    setter as the person's own press, its audit line by "restart"."""
+    if not carried_pause():
+        return False
+    from .lanes import nerve_set
+    nerve_set(srv, True, by="restart")
+    print("[seat] paused: the restart kept the pause", file=sys.stderr)
+    return True
 
 
 def restart_line() -> str | None:
@@ -435,13 +461,25 @@ def restart_line() -> str | None:
     return "[seat] restarting (re-exec)" if RESTART["requested"] else None
 
 
-def reexec_if_requested() -> None:
+def reexec_if_requested(srv=None) -> None:
     """The last line of the seat's teardown: a requested restart re-execs the
     same command (same pid, same terminal -- ctrl+c still stops it; a
-    supervisor waiting on the process just sees it continue)."""
+    supervisor waiting on the process just sees it continue). The person's
+    pause rides along in the environment (#395); the battery's does not --
+    the new boot's battery guard re-derives it."""
     if not RESTART["requested"]:
         return
     os.environ[REEXEC_ENV] = "1"           # the next boot skips the browser (#243)
+    carry = False
+    try:
+        from .lanes import person_paused
+        carry = srv is not None and person_paused(srv)
+    except Exception:
+        pass
+    if carry:
+        os.environ[PAUSE_ENV] = "1"
+    else:
+        os.environ.pop(PAUSE_ENV, None)
     os.execv(sys.executable,
              [sys.executable, "-m", "membrane.opencode"] + sys.argv[1:])
 
@@ -470,6 +508,14 @@ def do_restart(srv, why: str, delay_s: float = 2.0) -> dict:
         os.kill(os.getpid(), signal.SIGTERM)
     threading.Thread(target=bye, daemon=True, name="restart").start()
     text = f"restarting in {delay_s:g}s -- you'll get a notice when the seat is back"
-    if getattr(srv, "paused", False):           # #388: the pause is RAM-only
-        text += " (the seat is paused now; the pause is not carried over -- it comes back unpaused)"
+    try:
+        from .lanes import person_paused
+        kept = person_paused(srv)
+    except Exception:
+        kept = False
+    if kept:                                    # #395: the person's pause rides the re-exec
+        text += " (the seat is paused now; the pause is kept -- it comes back paused)"
+    elif getattr(srv, "paused", False):         # the battery's pause re-derives on the new boot
+        text += (" (the battery paused the seat; that pause is not carried -- "
+                 "the new boot pauses again if the battery is still low)")
     return {"rc": 0, "text": text}

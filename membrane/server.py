@@ -3287,7 +3287,7 @@ def make_handler(hub=None, sessions=None, messages=None, config=None,
             if path == "/membrane/seat/pause":
                 # #348: membrane home's ▶ / ⏸ -- {"paused": true|false} pauses or
                 # resumes the seat's acting lanes (lanes.nerve_paused), the typed
-                # pause's audit line with who; RAM-only. The owner's door above
+                # pause's audit line with who; never on disk (a restart carries it, #395). The owner's door above
                 # gates it like every write (off-box: the seat token)
                 from . import seat_panel as _SP
                 psrv = getattr(runner, "srv", None) if runner is not None else None
