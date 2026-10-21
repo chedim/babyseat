@@ -139,8 +139,11 @@ Claude's turn is learned like any other model's turn:
   mark comes from that stamp.
 - **Absorb** (importing external Claude Code and OpenCode sessions)
   learns sessions answered by Anthropic models like any other, and that
-  includes a `claude-agent:*` model id or a marked row. It keeps who
-  answered as provenance (#396).
+  includes a `claude-agent:*` model id or a marked row. It learns
+  OpenCode sessions from every provider too (#404), and keeps who
+  answered, per row, as provenance (#396). The one provider it skips is
+  the seat's own (OpenCode provider `membrane`), so the seat's turns do
+  not come back to it.
 
 ## Policy
 

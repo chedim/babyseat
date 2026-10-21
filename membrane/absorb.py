@@ -11,9 +11,20 @@ Provenance stays: the session doc and every assistant row keep the model
 id and provider that answered (`anthropic` for claude-*/anthropic model
 ids, `ollama` for local ones, `unknown` when a Claude Code line names no
 model), and a claude-agent row keeps its `madeBy` mark. OpenCode sessions
-are eligible on ABSORB_PROVIDERS only (other providers, and membrane
-itself, stay out). Sessions the old rule skipped are rescanned ONCE past
-the watermark (marker version 2; see absorb()).
+from EVERY provider are eligible (issue #404), each assistant row keeping
+the provider that answered it (`unknown` when the message names none),
+except SEAT_PROVIDER: `membrane` is the provider the seat writes into the
+OpenCode config it launches, so such a session is the seat's own traffic
+and absorbing it would feed the seat its own turns back.
+
+Claude Code's transcript folder is the cwd with every character that is
+not a letter or a digit replaced by '-' (issue #401); the older form
+(only '/' replaced) is still read, so nothing that ever matched stops
+matching.
+
+Sessions an older rule skipped (the Anthropic filter of #396, the
+provider allowlist of #404, the folder name of #401) are rescanned ONCE
+past the watermark (marker version 3; see absorb()).
 
 Conventions: opencode session/message ids are kept verbatim; claude ids
 are namespaced `xcl_` (their uuids are unique per line). Import marks
@@ -28,6 +39,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -94,8 +106,8 @@ class AbsorbSession:
 
 # ---- provenance (no longer a filter, issue #396) -------------------------------
 
-ABSORB_PROVIDERS = ("ollama", "anthropic")   # opencode providers absorbed
-MARKER_VERSION = 2       # 2 = the old-rule rescan is done (issue #396)
+SEAT_PROVIDER = "membrane"   # the seat's own opencode provider: never absorbed
+MARKER_VERSION = 3       # 2 = the #396 rescan is done; 3 = the #401/#404 one
 
 
 def _is_anthropic_model(model_id: str | None) -> bool:
@@ -132,7 +144,21 @@ def _claude_provider(model: str | None) -> str:
 
 
 def _project_slug(cwd: str) -> str:
+    """Claude Code's transcript folder name for `cwd`: every character
+    that is not an ASCII letter or digit becomes '-' (issue #401)."""
+    return re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
+
+
+def _old_project_slug(cwd: str) -> str:
+    """The pre-#401 form (only '/' replaced), still read."""
     return str(cwd).replace("/", "-")
+
+
+def _project_slugs(cwd: str) -> list[str]:
+    """The folders to read: Claude Code's name first, then the old form
+    when it differs."""
+    new, old = _project_slug(cwd), _old_project_slug(cwd)
+    return [new] if new == old else [new, old]
 
 
 def _iso_s(ts: str) -> float:
@@ -169,17 +195,26 @@ def claude_sessions(cwd: str, since_s: float,
     `since_s`. Sidechains, subagent dirs, compact/meta lines and noise
     line types are skipped."""
     base = home if home is not None else Path.home() / ".claude" / "projects"
-    proj = base / _project_slug(cwd)
-    if not proj.is_dir():
-        return []
-    out = []
-    for fp in sorted(proj.glob("*.jsonl")):
-        try:
-            a = _parse_claude_file(fp)
-        except Exception:
+    slugs = _project_slugs(cwd)
+    old_slug = _old_project_slug(cwd)
+    out, seen = [], set()
+    for slug in slugs:
+        proj = base / slug
+        if not proj.is_dir():
             continue
-        if a is not None and a.rows and a.updated_ms / 1000.0 > since_s:
-            out.append(a)
+        for fp in sorted(proj.glob("*.jsonl")):
+            if fp.stem in seen:
+                continue                 # one session, listed once
+            try:
+                a = _parse_claude_file(fp)
+            except Exception:
+                continue
+            if a is not None and a.rows and a.updated_ms / 1000.0 > since_s:
+                seen.add(fp.stem)
+                if slug != old_slug:
+                    # the pre-#401 code never read this folder
+                    a.old_rule_skipped = True
+                out.append(a)
     out.sort(key=lambda a: a.updated_ms, reverse=True)
     return out
 
@@ -287,8 +322,9 @@ def opencode_sessions(cwd: str, since_s: float,
                       db: Path | None = None) -> list[AbsorbSession]:
     """Read ~/.local/share/opencode/opencode.db READ-ONLY (a live WAL
     db; a missing/locked db degrades to zero sessions, never a raise).
-    Eligible: session.directory == cwd, model.providerID in
-    ABSORB_PROVIDERS (both on the session and EVERY assistant message).
+    Eligible: session.directory == cwd, any provider (#404) except
+    SEAT_PROVIDER, on the session or on ANY assistant message (the seat's
+    own traffic). A missing provider id is recorded as `unknown`.
     Anthropic-answered sessions are absorbed like any other (#396).
     """
     path = Path(db) if db is not None else (
@@ -311,10 +347,10 @@ def opencode_sessions(cwd: str, since_s: float,
                     sm = json.loads(model_json or "{}")
                 except Exception:
                     sm = {}
-                prov = str(sm.get("providerID") or "")
+                prov = str(sm.get("providerID") or "") or "unknown"
                 mid = str(sm.get("modelID") or "")
-                if prov not in ABSORB_PROVIDERS:
-                    continue
+                if prov == SEAT_PROVIDER:
+                    continue                     # the seat's own traffic
                 rows = _opencode_rows(conn, sid, prov)
                 if not rows:
                     continue
@@ -324,6 +360,8 @@ def opencode_sessions(cwd: str, since_s: float,
                 a = AbsorbSession(
                     "opencode", str(sid), str(title or ""),
                     int(created or 0), int(updated or 0), mid, prov, rows,
+                    # any non-ollama provider (or none) was dropped by
+                    # the #396 filter or the #404 allowlist: rescan it
                     old_rule_skipped=(prov != "ollama"
                                       or _is_anthropic_model(mid)
                                       or any(r.role == "assistant" and (
@@ -358,9 +396,8 @@ def _opencode_rows(conn, sid: str, prov: str) -> list[TurnRow]:
             continue
         if role == "assistant":
             mprov = str(d.get("providerID") or "")
-            mmid = str(d.get("modelID") or "")
-            if mprov not in ABSORB_PROVIDERS:
-                return []                        # unknown provider, whole sid
+            if mprov == SEAT_PROVIDER:
+                return []                        # the seat's own, whole sid
         parts = conn.execute(
             "SELECT data FROM part WHERE message_id = ?"
             " ORDER BY time_created, id", (mid,)).fetchall()
@@ -386,7 +423,8 @@ def _opencode_rows(conn, sid: str, prov: str) -> list[TurnRow]:
         rows.append(TurnRow(str(mid), role, ts_ms, "".join(text),
                             "".join(thought), calls,
                             str(d.get("modelID") or "") if asst else "",
-                            str(d.get("providerID") or "") if asst else "",
+                            (str(d.get("providerID") or "") or "unknown")
+                            if asst else "",
                             _made_by(d) if asst else ""))
         if len(rows) >= ABSORB_MAX_ROWS:
             break
@@ -635,9 +673,11 @@ def absorb(sessions, messages, efield, cwd: str, marker_path: str,
     mk = load_marker(marker_path)
     since = float(mk.get("last_run_ts") or 0.0)
     known = mk.get("sessions") or {}
-    # THE ONE-TIME RESCAN (#396): a marker older than MARKER_VERSION was
-    # stamped by a seat that skipped Anthropic-answered sessions, so the
-    # watermark hides them. Until the rescan drains, such a session that
+    # THE ONE-TIME RESCAN (#396, again for #401/#404): a marker older
+    # than MARKER_VERSION was stamped by a seat that skipped sessions an
+    # older rule dropped (Anthropic-answered, a provider off the old
+    # allowlist, a folder the old name missed), so the watermark hides
+    # them. Until the rescan drains, such a session that
     # the marker does not know is eligible whatever its age; known
     # sessions keep their per-session watermark (no re-import).
     rescan = bool(mk) and int(mk.get("version") or 1) < MARKER_VERSION
