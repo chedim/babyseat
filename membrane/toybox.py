@@ -42,13 +42,19 @@ self already has) is refused.
 
 THE KIT (KINDS): fast / slow / burst / drift / die change on their own clock
 (the thinker's tick; a read never changes them), body changes only when self
-looks at it, and the tower changes only when self reaches one of its blocks.
+looks at it, and the tower changes when self nudges one of its blocks (#333;
+by its reach until then) or someone knocks or rebuilds one.
+
+SELF'S NUDGE (#333): self acts on a toy by nudging it (nudge(): the toy
+decides -- the ball rolls to the other side, refused while it is there; a
+tower block topples or lifts; die, drift and burst change; fast, slow, body
+and the mirror take none). Every change a nudge makes is `by: self`.
 
 THE BALL (#264): rung 7's turn toy -- serve and return with an object, before
 words. Its state is whose side it is on (`self` / `other`), its last mover
 (`by`) and when (`at`), and the last PERSON who rolled it (`other_by`,
 `other_at`: a reply's ground truth). Self rolls it to the other on its turn
-(roll_self, `by: self` -- the only way that tag lands on it); a person rolls
+(a nudge since #333, roll_self before, `by: self`); a person rolls
 it back (poke); the model may roll it too (`by: model`), which is never the
 other's turn. It has no clock, and a look never moves it. Exactly one shared
 ball (BALL) is provisioned once, by toy_unlocks when rung 6 passes (#267). The
@@ -102,7 +108,7 @@ KINDS = {
             "params": {"p": 1 / 60, "faces": 6}, "clock": True},
     "body": {"about": "changes only because self looked at it -- the body/other test case",
              "params": {}, "clock": False},
-    "tower": {"about": "n blocks: self topples a block (and the ones above it) by reaching it, and lifts a fallen one by reaching it; only self's reaches change it",
+    "tower": {"about": "n blocks: self topples a block (and the ones above it) by nudging it, and lifts a fallen one by nudging it; a look changes nothing",
               "params": {"n": 5}, "clock": False},
     "ball": {"about": "a ball self and the other roll back and forth (rung 7's turns, #264): self rolls it to "
                       "you on its turn; roll it back when it is on your side",
@@ -356,8 +362,9 @@ def _reading(st: dict, block: int | None = None) -> dict:
 
 def read(name: str, by: str = "", now: float | None = None, block: int | None = None) -> dict:
     """One look at a toy (its getter): the minimal reading, after whatever
-    the look itself does -- body changes on self's look, a tower block is
-    toppled or lifted by self's reach; every other look changes nothing."""
+    the look itself does -- body changes on self's look; every other look
+    changes nothing (#333: self topples or lifts a tower block by nudging it,
+    nudge(), no longer by looking)."""
     now = time.time() if now is None else float(now)
     mine = by == "self"
     with _locked(name):
@@ -372,18 +379,74 @@ def read(name: str, by: str = "", now: float | None = None, block: int | None = 
             st["value"] = _other(st, 0, 99)
             _note(st, now, "self", "change", value=st["value"])
             _save(st)
-        elif mine and k == "tower" and block is not None:
+        return _reading(st, block)
+
+
+def nudge(name: str, block: int | None = None, now: float | None = None) -> dict:
+    """SELF'S NUDGE (#333): the toy decides what a nudge does -- the ball rolls
+    to the other side (refused while it is there: self can't roll a ball it
+    hasn't got), a tower block topples (it and the standing blocks above it)
+    or, fallen, lifts; a die rolls, a drift steps (a coin for the way), a burst
+    takes a fresh value. fast and slow run on their own clock, body changes
+    only on self's look, the mirror shows moves: a nudge does nothing to them,
+    nor to a tower as a whole. Every change is `by: self`.
+    -> {ok, name, changed, refused, did, reading} | {ok: False, error}."""
+    now = time.time() if now is None else float(now)
+    name = str(name or "").strip().lower()
+    if not _path(name).exists():
+        return {"ok": False, "changed": False, "refused": False, "error": f"no toy named {name!r}"}
+    with _locked(name):
+        st = _load(name)
+        k = st["kind"]
+        changed, refused, did = True, False, ""
+        if k == "ball":
+            if st["side"] != "self":
+                changed, refused, did = False, True, f"{name} is on the other's side"
+            else:
+                st.update(side="other", by="self", at=now)
+                _note(st, now, "self", "roll", side="other")
+                did = "rolled"
+        elif k == "tower" and block is not None:
             bl = st["blocks"]
-            if bl[block - 1]["standing"]:
-                fell = [i + 1 for i in range(block - 1, len(bl)) if bl[i]["standing"]]
+            b = int(block)
+            if not 1 <= b <= len(bl):
+                return {"ok": False, "changed": False, "refused": False,
+                        "error": f"{name} has blocks 1..{len(bl)}, not {block}"}
+            if bl[b - 1]["standing"]:
+                fell = [i + 1 for i in range(b - 1, len(bl)) if bl[i]["standing"]]
                 for i in fell:
                     bl[i - 1].update(standing=False, by="self", at=now, falls=int(bl[i - 1]["falls"]) + 1)
-                _note(st, now, "self", "topple", block=block, blocks=fell)
+                _note(st, now, "self", "topple", block=b, blocks=fell)
+                did = "toppled"
             else:
-                bl[block - 1].update(standing=True, by="self", at=now)
-                _note(st, now, "self", "lift", block=block)
+                bl[b - 1].update(standing=True, by="self", at=now)
+                _note(st, now, "self", "lift", block=b)
+                did = "lifted"
+        elif k == "die":
+            cur, faces = st["value"], int(st["params"]["faces"])
+            v = _rng(st).randint(1, faces - 1)
+            st["value"] = v + 1 if v >= cur else v
+            _note(st, now, "self", "change", act="nudge", value=st["value"])
+            did = "rolled"
+        elif k == "drift":
+            prm = st["params"]
+            step = prm["step"] if _rng(st).random() < 0.5 else -prm["step"]
+            v = st["value"] + step
+            if not prm["lo"] <= v <= prm["hi"]:
+                v = st["value"] - step                       # a wall: it bounces
+            st["value"] = v
+            _note(st, now, "self", "change", act="nudge", value=v)
+            did = "stepped"
+        elif k == "burst":
+            st["value"] = _other(st, 0, 99)
+            _note(st, now, "self", "change", act="nudge", value=st["value"])
+            did = "changed"
+        else:
+            changed, did = False, "it takes no nudge"
+        if changed:
             _save(st)
-        return _reading(st, block)
+        return {"ok": True, "name": name, "changed": changed, "refused": refused, "did": did,
+                "reading": _reading(st, int(block) if k == "tower" and block is not None else None)}
 
 
 def who(by) -> str:
@@ -707,8 +770,8 @@ def _put(est, name: str, kind: str, block: int | None = None, n: int = 0) -> str
     from .entities import CLASS_COMPONENT, QuantumEntity, entity_id
     ename = f"{name}:b{block}" if block else name
     if kind == "tower":
-        about = (f"block {block} of {n} of the tower {name} (1 is the bottom): reach it to topple it and the "
-                 "blocks above it; reach a fallen one to lift it back" if block else
+        about = (f"block {block} of {n} of the tower {name} (1 is the bottom): nudge it to topple it and the "
+                 "blocks above it; nudge a fallen one to lift it back" if block else
                  f"a tower of {n} blocks ({name}:b1..b{n}); reading it counts the standing ones")
     else:
         about = KINDS[kind]["about"]

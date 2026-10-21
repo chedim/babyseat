@@ -206,15 +206,6 @@ def test_exploration_keeps_a_floor():
         assert aims.count(b) / 4000 >= 0.5 * SL.TURN_EXPLORE / NB
 
 
-def test_the_source_has_no_scripted_reply_after_they_speak():
-    import inspect
-    src = inspect.getsource(SL._meet) + inspect.getsource(SL._turn_push) + inspect.getsource(SL._turn_choose)
-    assert "_turn_push" in inspect.getsource(SL._meet) and "_turn_choose" in inspect.getsource(SL._turn_push)
-    # the push waits for the bin Thompson drew (or the cap), never a constant bin
-    for bad in ("== 0 and", "aim = 0", "bin == 0", "b == 0"):
-        assert bad not in src
-
-
 # ---- 3. the test: passable by turn-taking, not by a coin or a timer -------------------
 
 @pytest.mark.parametrize("seed", [1, 2, 3])
@@ -288,7 +279,7 @@ def _seat(passed=(1, 2, 3, 4, 5, 6), limit=7):
     cap(srv, 1)
     for r in passed:
         line = {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9}
-        if r >= 7:
+        if r >= 6:                      # #333: rungs 6-9 on ladder 3
             line["ladder"] = SL.LADDER_V
         SL._append(srv, line)
     SL._append(srv, {"ts": 1.0, "kind": "audit", "rung": 5, "phase": "end", "eid": "x", "passed": True})
@@ -330,7 +321,6 @@ class _Talker:
 
 def _run(srv, talker, cycles, t0=10_000.0, monkeypatch=None):
     monkeypatch.setattr(SL, "_read_entity", talker.read)
-    monkeypatch.setattr(SL, "_push_chat", talker.push)
     monkeypatch.setattr(SL, "_ask_llm", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no model at rung 7")))
     for i in range(cycles):
         t = t0 + i * SL.PACE_S
@@ -340,37 +330,6 @@ def _run(srv, talker, cycles, t0=10_000.0, monkeypatch=None):
 
 def _pushes(srv):
     return [r for r in SL._read(srv) if r.get("kind") == "push"]
-
-
-def test_pushes_carry_the_policy_and_hold_the_cap(monkeypatch):
-    srv = _seat()
-    _run(srv, _Talker(srv), 1500, monkeypatch=monkeypatch)
-    ps = _pushes(srv)
-    assert len(ps) >= 6
-    for p in ps:
-        assert p["bin"] in range(NB) and p["aim"] in range(NB)
-        assert p["why"] in ("aim", "overdue")
-        assert p["why"] == "overdue" or p["bin"] == p["aim"]
-        assert len(p["dwell"]) == NB and sum(p["dwell"]) >= 1
-        assert not p.get("asked")                                   # the model is rung 8's, not rung 7's
-    ns = [p["n"] for p in ps]
-    assert all(b - a >= SL.MEET_EVERY for a, b in zip(ns, ns[1:]))  # never more often than the timer did
-    assert all(b - a <= SL.MEET_MAX for a, b in zip(ns, ns[1:]))    # and never silent past the wait's cap
-    hours = 1500 * SL.PACE_S / 3600.0
-    assert len(ps) <= hours * 3600.0 / (SL.MEET_EVERY * SL.PACE_S) + 1
-
-
-def test_the_reply_check_records_whether_they_spoke_after_the_push(monkeypatch):
-    srv = _seat()
-    _run(srv, _Talker(srv, every=300.0), 1500, monkeypatch=monkeypatch)
-    recs = SL._read(srv)
-    checks = [r for r in recs if r.get("kind") == "reach" and r.get("reply")]
-    assert checks and all(isinstance(r.get("replied"), bool) for r in checks)
-    for c in checks:
-        push = next(p for p in reversed(recs) if p.get("kind") == "push" and p["ts"] < c["ts"])
-        if not c["replied"]:
-            continue
-        assert c["ts"] - push["ts"] >= SL.RUNG8_CHECK_S
 
 
 def test_a_reply_check_does_not_count_lines_from_before_the_push(monkeypatch):
@@ -387,17 +346,6 @@ def test_a_reply_check_does_not_count_lines_from_before_the_push(monkeypatch):
     assert SL._replied(srv, push, 1130.0, "changed") is True        # no heard_ts: the look's answer
 
 
-def test_rung_seven_reads_the_record(monkeypatch):
-    srv = _seat()
-    _run(srv, _Talker(srv, every=600.0), 1500, monkeypatch=monkeypatch)
-    rows = SL._turn_rows(SL._read(srv), RESP)
-    assert rows and all(r["replied"] in (True, False) for r in rows)
-    out = SL._rung7(SL._read(srv))
-    assert set(out["crit"]) == {"pushes", "contingency", "payoff"}
-    assert out["crit"]["pushes"] == pytest.approx(min(1.0, len(rows) / SL.RUNG7_PUSHES))
-    assert out["passed"] is False                                    # far too few pushes yet
-
-
 def test_timer_pushes_never_count_for_rung_seven():
     recs = []
     for i in range(150):
@@ -407,14 +355,6 @@ def test_timer_pushes_never_count_for_rung_seven():
                      "replied": True})
     assert SL._turn_rows(recs, RESP) == []
     assert SL._rung7(recs)["passed"] is False
-
-
-def test_before_rung_six_passes_the_timer_still_paces_rung_six(monkeypatch):
-    srv = _seat(passed=(1, 2, 3, 4, 5), limit=6)
-    _run(srv, _Talker(srv), 200, monkeypatch=monkeypatch)
-    ps = _pushes(srv)
-    assert ps and all(p["n"] % SL.MEET_EVERY == 1 for p in ps)       # rung 6 unchanged
-    assert all("aim" not in p and "spoke_age" not in p for p in ps)
 
 
 # ---- 5. the record: the voided pass, the ladder's numbering ---------------------------
@@ -457,7 +397,7 @@ def test_a_new_pass_is_written_as_its_achievement(monkeypatch):
 
 def test_the_numbering():
     assert [SL.RUNG_NAMES[n] for n in range(7)] == [
-        "sleep and wake", "feel itself", "first reach", "tell things apart", "patience",
+        "sleep and wake", "feel itself", "look", "tell things apart", "patience",   # #333: rung 2 is the look
         "notice the world changed", "meet an other"]                  # rungs 0-6 unchanged
     assert SL.RUNG_NAMES[7] == "time its turn" and SL.RUNG_NAMES[8] == "expect a reply"   # #300: named for their tests
     assert SL.RUNG_NAMES[9] == "recognize itself"
@@ -540,38 +480,17 @@ def test_a_check_from_before_the_flip_counts_for_neither_rung():
     assert SL._turn_rows(recs, RESP) == []
 
 
-def test_on_a_seat_a_line_before_the_push_is_no_reply_for_rung_eight(monkeypatch):
-    monkeypatch.setattr(SL, "TURNS", False)                         # the timer: the push lands at cycle 1
-    srv = _seat(passed=(1, 2, 3, 4, 5, 6, 7), limit=8)
-    t0 = 10_000.0
-    ent = CIO.entity_in(srv, CIO.OPERATOR)
-    ent.properties["heard_n"] = 0
-    seen, clock = {}, {"t": t0}
-
-    def read(srv_, e, now):
-        st = (e.properties or {}).get("heard_n")
-        last = seen.get(e.eid, 0)
-        seen[e.eid] = st
-        return {"fired": True, "state": {"n": st}, "changed": st != last}
-
-    def push(srv_, text, person=""):
-        # they spoke 30 s before this push, after self's last look at them
-        ent.properties["heard_n"] = 1
-        ent.properties["heard_ts"] = clock["t"] - 30.0
-    monkeypatch.setattr(SL, "_read_entity", read)
-    monkeypatch.setattr(SL, "_push_chat", push)
-    monkeypatch.setattr(SL, "_ask_llm", lambda *a, **k: {"rc": 1, "text": "off"})
-    for i in range(25):                                             # ...and never after it
-        clock["t"] = t0 + i * SL.PACE_S
-        SL.cycle(srv, now=clock["t"])
-    recs = SL._read(srv)
-    check = next(r for r in recs if r.get("kind") == "reach" and r.get("reply"))
-    assert check["answer"] == "changed" and check["replied"] is False
-    assert [r["o"] for r in SL._rung8_rows(recs, RESP)] == [0.0]
-
-
 @pytest.fixture(autouse=True)
 def _chat_medium(monkeypatch):
     """These are the chat medium's tests (a line to chat:out is the turn): #264 moved
     rung 7's turns to the ball by default, so they switch the toy medium off."""
-    monkeypatch.setattr(SL, "TOY_TURNS", False)
+
+
+@pytest.fixture(autouse=True)
+def _rebuilt_333(monkeypatch):
+    """#333: meet, turns, expect and mirror are not built until they are rebuilt
+    on the nudge (part 3); the scoring and the readers tested here run on the
+    tree as part 3 will build it, their passes on ladder 3 (the loop's old acts
+    -- meet's push, the ball's turns, the asks at a push -- are gone)."""
+    from tests._self_cap import rebuilt
+    rebuilt(monkeypatch)

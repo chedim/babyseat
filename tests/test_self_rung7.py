@@ -138,34 +138,6 @@ def _kind(srv, k):
     return [r for r in _record(srv) if r["kind"] == k]
 
 
-def test_a_reach_at_the_other_carries_the_models_prediction(monkeypatch):
-    chatter = _Chatter()
-    monkeypatch.setattr(SL, "_read_entity", chatter)
-    monkeypatch.setattr(SL, "_llm_pred", _llm_pred(chatter))
-    monkeypatch.setattr(SL, "_ask_llm", _queued)
-    srv = _seat(limit=8, passed=(1, 2, 3, 4, 5, 6, 7))
-    _run(srv, 60)
-    reaches = [r for r in _kind(srv, "reach") if r["eid"] == RESP]
-    assert reaches
-    with_llm = [r for r in reaches if "p_llm" in r]
-    assert with_llm
-    assert all("p" in r for r in reaches)                      # habit still there, same look
-    assert all(0.0 <= r["p_llm"] <= 1.0 for r in with_llm)
-
-
-def test_rung_eight_opens_with_an_advisor_that_knows_the_phase(monkeypatch):
-    # #254: the advisor earns its weight on the record and self's mix passes
-    chatter = _Chatter()
-    monkeypatch.setattr(SL, "_read_entity", chatter)
-    monkeypatch.setattr(SL, "_llm_pred", _llm_pred(chatter))
-    monkeypatch.setattr(SL, "_ask_llm", _queued)
-    srv = _seat(limit=8, passed=(1, 2, 3, 4, 5, 6, 7))
-    _run(srv, CYCLES)
-    assert 8 in [r["rung"] for r in _record(srv) if r["kind"] in ("rung", "achieve")]
-    assert SL.status(srv)["rung"] == 8
-    assert SL.status(srv)["rung8"]["advisor_weight"] > 0.5
-
-
 def _checks(outcomes, p_llm=None):
     """A record of reply checks at the other: one push and its check each."""
     recs, t = [], 1000.0
@@ -217,4 +189,13 @@ def test_the_limit_holds_rung_eight(monkeypatch):
 def _chat_medium(monkeypatch):
     """These are the chat medium's tests (a line to chat:out is the turn): #264 moved
     rung 7's turns to the ball by default, so they switch the toy medium off."""
-    monkeypatch.setattr(SL, "TOY_TURNS", False)
+
+
+@pytest.fixture(autouse=True)
+def _rebuilt_333(monkeypatch):
+    """#333: meet, turns, expect and mirror are not built until they are rebuilt
+    on the nudge (part 3); the scoring and the readers tested here run on the
+    tree as part 3 will build it, their passes on ladder 3 (the loop's old acts
+    -- meet's push, the ball's turns, the asks at a push -- are gone)."""
+    from tests._self_cap import rebuilt
+    rebuilt(monkeypatch)

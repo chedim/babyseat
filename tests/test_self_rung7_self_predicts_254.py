@@ -49,7 +49,6 @@ RESP = MEMBRANE_NS + "Component:chat:in:operator"
 N = 300                       # reply checks in a synthetic record
 
 
-
 @pytest.fixture(autouse=True)
 def _timer(monkeypatch):
     monkeypatch.setattr(SL, "TURNS", False)          # #258: the timer's pace (see the module doc)
@@ -135,25 +134,6 @@ def test_p_self_is_computed_from_the_record_only_with_no_llm_call(monkeypatch):
 def test_p_self_with_no_history_is_a_coin():
     push = {"ts": 1.0, "kind": "push", "to": RESP}
     assert SL._p_self([push], RESP, push) == pytest.approx(0.5)
-
-
-def test_a_reply_check_records_p_self_without_a_model(monkeypatch):
-    srv = _seat()
-    t = 5000.0
-    seen = []
-
-    def read(srv_, ent, now):
-        seen.append(now)
-        return {"fired": True, "state": {"n": len(seen)}, "changed": len(seen) % 2 == 0}
-    monkeypatch.setattr(SL, "_read_entity", read)
-    monkeypatch.setattr(SL, "_push_chat", lambda *a, **k: None)
-    for i in range(3 * SL.MEET_EVERY):
-        SL.cycle(srv, now=t + i * SL.PACE_S)
-    checks = [r for r in SL._read(srv) if r.get("kind") == "reach" and r.get("reply")]
-    assert checks
-    assert all("p_self" in r and 0.0 < r["p_self"] < 1.0 for r in checks)
-    assert not [r for r in checks if r.get("p_llm") is not None]     # no model on this seat
-    assert all(r.get("p_mix") is None for r in checks)
 
 
 # ---- 2. no LLM: passable on structure, not on a coin ------------------------------
@@ -361,4 +341,13 @@ def test_a_legacy_check_gets_its_p_self_recomputed_from_the_record():
 def _chat_medium(monkeypatch):
     """These are the chat medium's tests (a line to chat:out is the turn): #264 moved
     rung 7's turns to the ball by default, so they switch the toy medium off."""
-    monkeypatch.setattr(SL, "TOY_TURNS", False)
+
+
+@pytest.fixture(autouse=True)
+def _rebuilt_333(monkeypatch):
+    """#333: meet, turns, expect and mirror are not built until they are rebuilt
+    on the nudge (part 3); the scoring and the readers tested here run on the
+    tree as part 3 will build it, their passes on ladder 3 (the loop's old acts
+    -- meet's push, the ball's turns, the asks at a push -- are gone)."""
+    from tests._self_cap import rebuilt
+    rebuilt(monkeypatch)

@@ -72,7 +72,7 @@ def _seat(rungs=(1, 2, 6), world=None, mirror=True, sub=""):
     SL._append(srv, {"ts": 1.0, "kind": "birth", "by": "test"})
     for n in rungs:
         line = {"ts": 1.0 + n, "kind": "rung", "rung": n, "skill": 0.9}
-        if n >= 7:
+        if n >= 6:                      # #333: rungs 6-9 on ladder 3
             line["ladder"] = SL.LADDER_V
         SL._append(srv, line)
     rt = SL._rt(srv)
@@ -382,3 +382,13 @@ def test_the_popover_offers_no_pokes():
     h = _js("L.toyPopoverHtml(%s, null)" % json.dumps(_mirror_toy()))
     assert "data-poke-action" not in h
     assert "its own moves" in h
+
+
+@pytest.fixture(autouse=True)
+def _rebuilt_333(monkeypatch):
+    """#333: meet, turns, expect and mirror are not built until they are rebuilt
+    on the nudge (part 3); the scoring and the readers tested here run on the
+    tree as part 3 will build it, their passes on ladder 3 (the loop's old acts
+    -- meet's push, the ball's turns, the asks at a push -- are gone)."""
+    from tests._self_cap import rebuilt
+    rebuilt(monkeypatch)

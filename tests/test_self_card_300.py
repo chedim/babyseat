@@ -28,6 +28,19 @@ from membrane import self_loop as SL  # noqa: E402
 from membrane import self_sheet as SH  # noqa: E402
 from tests.test_self_sheet_249 import T0, H, _lived, _seat, _sheet  # noqa: E402
 from tests.test_skill_tree_295 import _seat as _tree_seat  # noqa: E402
+from tests._self_cap import start_rebuilt, stop_rebuilt  # noqa: E402
+
+_REBUILT: list = []
+
+
+def setUpModule():
+    """#333: the card is tested on the whole tree (meet, turns, expect and mirror
+    built as their rebuild, part 3, will build them; passes on ladder 3)."""
+    _REBUILT[:] = start_rebuilt()
+
+
+def tearDownModule():
+    stop_rebuilt(_REBUILT)
 
 UI = ROOT / "membrane" / "ui"
 NODE = unittest.skipUnless(shutil.which("node"), "node not installed")
@@ -170,7 +183,7 @@ class TestSkillsOnTheCard(unittest.TestCase):
         sl = {x["id"]: x for x in s["slipping"]}
         self.assertIn("reach", sl)                      # no looks at w:fast on this record
         self.assertNotIn("feel", sl)
-        self.assertIn("first reach", sl["reach"]["text"])
+        self.assertIn("look", sl["reach"]["text"])        # #333: rung 2's pass is the look
 
 
 # ---- 3. the header and the zoo's card: skills, not rungs --------------------------------
@@ -226,7 +239,8 @@ class TestTreeLabel(unittest.TestCase):
     def test_one_the_accept_holds_says_so(self):            # #299: the limit's job is the operator's accept
         srv = _tree_seat(rungs=(1, 2, 3, 4, 5), lines=[{"ts": 9.5, "kind": "accept_migrated",
                                                          "ids": ["feel", "reach", "kinds", "patience", "shift"]},
-                                                        {"ts": 9.6, "kind": "achieve", "id": "meet", "rung": 6, "skill": 1.0}])
+                                                        {"ts": 9.6, "kind": "achieve", "id": "meet", "rung": 6, "skill": 1.0,
+                                                         "ladder": 3}])
         recs = SL._read(srv)
         t = {n["id"]: n for n in SH.tree(recs, SL.status(srv))}
         self.assertEqual(t["turns"]["state"], "locked")

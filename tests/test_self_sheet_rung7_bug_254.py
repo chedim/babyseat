@@ -24,6 +24,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import test_self_sheet_249 as S  # noqa: E402  (its fixtures: a seat that lived through the bugs)
 from membrane import self_loop as SL  # noqa: E402
 from membrane import self_sheet as SH  # noqa: E402
+from _self_cap import start_rebuilt, stop_rebuilt  # noqa: E402
+
+_REBUILT: list = []
+
+
+def setUpModule():
+    """#333: meet, turns, expect and mirror built as their rebuild (part 3) will
+    build them; the passes of rungs 6-9 here are on ladder 3."""
+    _REBUILT[:] = start_rebuilt()
+
+
+def tearDownModule():
+    stop_rebuilt(_REBUILT)
 
 H, T0 = S.H, S.T0
 NOW = T0 + 12 * H
@@ -78,7 +91,7 @@ class TestRung7BugWindow(unittest.TestCase):
         S._cycles(srv, t0 + 1, t0 + 3 * H)
         S._put(srv, {"ts": t0 + 0.1 * H, "kind": "rung7_restart", "issue": 254})
         for n, h in ((1, 0.2), (2, 0.5), (3, 0.6), (4, 0.7), (5, 1.0), (6, 1.5)):
-            S._put(srv, {"ts": t0 + h * H, "kind": "rung", "rung": n, "skill": 1.0, "eid": S.ALICE})
+            S._put(srv, {"ts": t0 + h * H, "kind": "rung", "rung": n, "skill": 1.0, "eid": S.ALICE, "ladder": SL.LADDER_V})
         S._put(srv, {"ts": t0 + 1.2 * H, "kind": "push", "to": S.ALICE})
         self.assertIsNone(_bug(S._sheet(srv, t0 + 3 * H)))
 
@@ -106,7 +119,7 @@ class TestRung7RestartMark(unittest.TestCase):
     def test_the_loop_writes_the_restart_once_past_rung_6(self):
         srv = S._seat()
         for r in (1, 2, 3, 4, 5, 6):
-            S._put(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9})
+            S._put(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9, "ladder": SL.LADDER_V})
         SL._mark_rung7_restart(srv, 50.0)
         SL._mark_rung7_restart(srv, 60.0)
         SL._RT.pop(id(srv), None)                                  # a restart: runtime gone

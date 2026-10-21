@@ -197,7 +197,7 @@ def _seat(passed=(1, 2, 3, 4, 5, 6), limit=7, ball=True):
     cap(srv, 1)
     for r in passed:
         line = {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9}
-        if r >= 7:
+        if r >= 6:                      # #333: rungs 6-9 on ladder 3
             line["ladder"] = SL.LADDER_V
         SL._append(srv, line)
     SL._append(srv, {"ts": 1.0, "kind": "audit", "rung": 5, "phase": "end", "eid": "x", "passed": True})
@@ -209,7 +209,7 @@ def _seat(passed=(1, 2, 3, 4, 5, 6), limit=7, ball=True):
 
 def _rung(srv, n):
     line = {"ts": 2.0, "kind": "rung", "rung": n, "skill": 0.9}
-    if n >= 7:
+    if n >= 6:                      # #333: rungs 6-9 on ladder 3
         line["ladder"] = SL.LADDER_V
     SL._append(srv, line)
 
@@ -259,7 +259,6 @@ def test_a_removed_ball_stays_removed_and_an_existing_one_is_kept(tmp_path, monk
     TB.add(srv2, "ball", name="toy:red-ball")
     TU.sync(srv2)
     assert _ball_names() == ["toy:red-ball"]                        # a ball is there already
-    assert SL._ball(srv2)[1] == "toy:red-ball"
 
 
 def test_a_seat_that_unlocked_the_ball_before_it_was_built_gets_it_once(tmp_path):
@@ -274,7 +273,6 @@ def test_a_seat_that_unlocked_the_ball_before_it_was_built_gets_it_once(tmp_path
     TU.sync(srv)
     assert _ball_names() == []                                      # not brought back
     assert len([r for r in SL._read(srv) if r.get("kind") == "unlock_built"]) == 1
-
 
 
 # ---- 3. self's turn: a field-only act -----------------------------------------------
@@ -315,7 +313,6 @@ def _run(srv, cycles, player=None, t0=10_000.0, monkeypatch=None, chat=None):
             player.saw_turn(now, None if last is None else now - last["ts"])
         return out
     monkeypatch.setattr(TB, "roll_self", roll)
-    monkeypatch.setattr(SL, "_push_chat", chat or (lambda *a, **k: (_ for _ in ()).throw(AssertionError("chat is quiet"))))
     monkeypatch.setattr(SL, "_ask_llm", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no model at rung 7")))
     for i in range(cycles):
         t = t0 + i * SL.PACE_S
@@ -329,58 +326,6 @@ def _turns(srv):
     return [r for r in SL._read(srv) if r.get("kind") == "push"]
 
 
-def test_self_rolls_the_ball_through_its_own_method_never_chat_or_shell(monkeypatch):
-    srv = _seat()
-    import subprocess as _sp
-    monkeypatch.setattr(_sp, "Popen", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no shell")))
-    calls = []
-    import membrane.night as N
-    real = N.method_call
-
-    def spy(srv_, est, a, b, eid, meth, args):
-        calls.append((eid, meth, dict(args)))
-        return real(srv_, est, a, b, eid, meth, args)
-    monkeypatch.setattr(N, "method_call", spy)
-    _run(srv, 400, monkeypatch=monkeypatch)
-    ts = _turns(srv)
-    assert len(ts) >= 2
-    for p in ts:
-        assert p["medium"] == "toy" and p["to"] == BALL and p["toy"] == TB.BALL
-        assert p["eid"] == SL._eid()                                    # the act is self's own
-        assert p["why"] in ("aim", "overdue") and p["aim"] in range(NB) and len(p["dwell"]) == NB
-        assert "spoke_age" not in p                                    # nobody has acted yet
-    rolls = [c for c in calls if c[1] == "roll"]
-    assert len(rolls) == len(ts) and all(c[0] == SL._eid() and c[2] == {"toy": TB.BALL} for c in rolls)
-    log = TB.state(TB.BALL)["log"]
-    assert [e["by"] for e in log] == ["self"] * len(ts)
-    assert "roll" in SL.METHODS and SL.METHODS["roll"] == "self::roll {{toy}}"
-
-
-def test_selfs_roll_refuses_anything_but_the_shared_ball(monkeypatch):
-    srv = _seat()
-    TB.add(srv, "die", name="toy:die")
-    SL._ctx.cycle = {"srv": srv, "act": "roll", "now": 5.0}
-    try:
-        assert SL.from_command("roll toy:die")["rc"] != 0
-        assert SL.from_command("roll " + TB.BALL)["rc"] == 0
-    finally:
-        SL._ctx.cycle = None
-    SL._ctx.cycle = None
-    assert SL.from_command("roll " + TB.BALL)["rc"] != 0                 # only its own loop rolls it
-    assert [e["by"] for e in TB.state(TB.BALL)["log"]] == ["self"]
-    assert TB.state("toy:die")["log"] == []
-
-
-def test_the_turns_keep_the_balls_pace(monkeypatch):
-    # #278: the ball's own clock (was the chat's MEET_EVERY..MEET_MAX)
-    srv = _seat()
-    _run(srv, 1500, player=_Player(lambda age: 0.7), monkeypatch=monkeypatch)
-    ns = [p["n"] for p in _turns(srv)]
-    assert len(ns) >= 6
-    assert all(b - a >= SL.TOY_MEET_EVERY for a, b in zip(ns, ns[1:]))  # never faster than the roll cap
-    assert all(b - a <= SL.TOY_MEET_MAX for a, b in zip(ns, ns[1:]))
-
-
 def test_no_ball_no_turn_and_still_no_chat(monkeypatch):
     srv = _seat()
     TB.remove(srv, TB.BALL)                                         # the operator took it away
@@ -389,17 +334,6 @@ def test_no_ball_no_turn_and_still_no_chat(monkeypatch):
 
 
 # ---- 4. the other's turn: a person's roll, after self's, by the check ------------------
-
-def test_the_reply_check_reads_a_persons_roll_back(monkeypatch):
-    srv = _seat()
-    _run(srv, 1500, player=_Player(lambda age: 0.6), monkeypatch=monkeypatch)
-    recs = SL._read(srv)
-    checks = [r for r in recs if r.get("kind") == "reach" and r.get("reply")]
-    assert checks and all(r["eid"] == BALL and r["medium"] == "toy" and isinstance(r["replied"], bool)
-                          for r in checks)
-    assert any(r["replied"] for r in checks) and not all(r["replied"] for r in checks)
-    later = [p for p in _turns(srv) if "spoke_age" in p]
-    assert later                                                    # the other's last act, as self knew it
 
 
 def _turn(ts):
@@ -471,24 +405,6 @@ def test_the_policy_learns_to_wait_for_a_late_player(seed):
     assert sum(r["replied"] for r in rows[-300:]) / 300 > sum(r["replied"] for r in timer[-300:]) / 300
 
 
-def test_on_a_seat_it_learns_the_window_from_real_rolls(monkeypatch, tmp_path):
-    # the same real path (self::roll, the ball's files, the reply check): a
-    # player who also rolls a die every ~20 min, and rolls the ball back only
-    # when the turn comes 2-10 min after their last act -- or only 10-30 min after
-    def learned(back, seed):
-        monkeypatch.setenv("MEMBRANE_DATA_DIR", str(tmp_path / f"seat{seed}"))   # a seat of its own
-        srv = _seat()
-        TB.add(srv, "die", name="toy:die")
-        _run(srv, 1500, player=_Player(back, seed=seed, play_every=1200.0), monkeypatch=monkeypatch)   # #278: ~4 h at the ball's pace
-        rows = SL._turn_rows(SL._read(srv), BALL)
-        return rows, _best(rows)
-    # #278: the ball's windows -- 20-60 s, or only 1-3 min, after their last act
-    soon, b1 = learned(lambda age: 0.9 if age is not None and 20.0 <= age < 60.0 else 0.05, 3)
-    late, b2 = learned(lambda age: 0.9 if age is not None and 60.0 <= age < 180.0 else 0.05, 4)
-    assert len(soon) >= 25 and len(late) >= 25
-    assert (b1, b2) == (1, 2)
-
-
 # ---- 6. the test: a rhythmic partner passes, a coin and a timer don't --------------------
 
 def _ever_passes(rows):
@@ -517,7 +433,7 @@ def test_a_timer_never_passes(seed):
 # ---- 7. chat turns and toy turns never share a window -----------------------------------
 
 def _mixed_record(chat=150, toy=30):
-    recs = [{"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9} for r in range(1, 7)]
+    recs = [{"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9, "ladder": SL.LADDER_V} for r in range(1, 7)]
     t = 1000.0
     for i in range(chat):
         recs.append({"ts": t, "kind": "push", "n": 1 + 30 * i, "to": RESP, "bin": 0, "aim": 0, "best": 0,
@@ -596,50 +512,6 @@ class _Chat:
         return {"fired": True, "state": {"v": 1}, "changed": False}
 
 
-def test_chat_pushes_stop_and_rung_six_holds_through_the_silence(monkeypatch):
-    srv = _seat(passed=(1, 2, 3, 4, 5), limit=6)
-    chat = _Chat()
-    monkeypatch.setattr(SL, "_read_entity", chat)
-    lines = []
-    t = _run(srv, 600, monkeypatch=monkeypatch, chat=lambda s, text, person="": lines.append(text))
-    assert lines and 6 in SL._passed(SL._read(srv))                  # rung 6, met in chat as before
-    pushed = len(lines)
-    cap(srv, 7)                                             # rung 7: turns with the ball
-    chat.talking = False                                             # ...and the chat falls silent
-    _run(srv, 1500, t0=t, monkeypatch=monkeypatch, chat=lambda s, text, person="": lines.append(text))
-    assert len(lines) == pushed                                      # not one more chat line
-    recs = SL._read(srv)
-    toy = [r for r in recs if r.get("kind") == "push" and r.get("medium") == "toy"]
-    assert toy and all(r["to"] == BALL for r in toy)
-    st = SL.status(srv)
-    assert st["rung"] == 6 and st["slipping"] is False
-    assert SL._rung6(recs)["passed"] and SL._rung6(recs)["eid"] == RESP
-    # a long silence WOULD read rung 6 slipping: the chat's last looks all
-    # `unchanged`, predicted near-perfectly -- a body. Read as of the switch,
-    # it holds; read over everything (no turn with the ball), it slips
-    end = recs[-1]["ts"]
-    silent = [{"ts": end + 60.0 * i, "kind": "reach", "eid": RESP, "answer": "unchanged", "p": 0.02}
-              for i in range(1, 26)]
-    assert SL._rung6(recs + silent)["passed"] is True
-    talk = [r for r in recs if not (r.get("kind") == "push" and r.get("medium") == "toy")]
-    assert SL._split(talk + silent)[RESP] == "body"
-    assert SL._rung6(talk + silent)["passed"] is False
-
-
-def test_until_rung_eleven_opens():
-    assert SL.SPEAK_RUNG == 11 and SL.RUNG_NAMES[11] == "speak"
-    assert SL.SPEAK_RUNG in SL.LADDER                                 # #311: built -- chat stays quiet until it OPENS
-
-
-def test_a_seat_below_rung_seven_still_meets_in_chat(monkeypatch):
-    srv = _seat(passed=(1, 2, 3, 4, 5), limit=6)
-    monkeypatch.setattr(SL, "_read_entity", _Chat())
-    lines = []
-    _run(srv, 200, monkeypatch=monkeypatch, chat=lambda s, text, person="": lines.append(text))
-    assert lines and all(not r.get("medium") for r in _turns(srv))
-    assert TB.peek(TB.BALL) is None or TB.state(TB.BALL)["log"] == []     # no ball before rung 6, no roll
-
-
 # ---- 9. the dock and the sheet ------------------------------------------------------------
 
 def test_the_dock_puts_the_ball_first_and_says_whose_side(monkeypatch):
@@ -650,26 +522,6 @@ def test_the_dock_puts_the_ball_first_and_says_whose_side(monkeypatch):
     assert d["toys"][0]["kind"] == "ball" and d["toys"][0]["name"] == TB.BALL
     assert d["toys"][0]["reading"] == {"side": "other"}
     assert d["toys"][0]["last"]["by"] == "self"
-
-
-def test_the_quest_log_says_turns_are_with_the_ball(monkeypatch):
-    srv = _seat()
-    _run(srv, 600, player=_Player(lambda age: 0.6), monkeypatch=monkeypatch)
-    s = SS.sheet(srv, fresh=True)
-    assert s["quest"]["rung"] == 7
-    first = s["quest"]["criteria"][0]["text"]
-    assert "ball" in first and "turns" in first
-    assert s["header"]["lines_sent"] == 0                          # a roll is not a line
-    assert not any(o["who"].endswith("toy:ball") for o in s["relationships"]["others"])
-    assert "ball" in SS._needs()[7]
-
-
-def test_the_status_carries_the_medium(monkeypatch):
-    srv = _seat()
-    _run(srv, 600, player=_Player(lambda age: 0.6), monkeypatch=monkeypatch)
-    st = SL.status(srv)
-    assert st["rung7"]["medium"] == "toy"
-    assert st["meets"]["medium"] == "toy" and st["meets"]["other"] == BALL
 
 
 # ---- 10. the page: the dock's ball, its popover, the amoeba (node) -----------------------
@@ -742,3 +594,13 @@ class TestDocs(unittest.TestCase):
         self.assertIn("roll it back", doc)
         self.assertIn("`ball`", doc)
         self.assertIn("natural rhythm", doc)
+
+
+@pytest.fixture(autouse=True)
+def _rebuilt_333(monkeypatch):
+    """#333: meet, turns, expect and mirror are not built until they are rebuilt
+    on the nudge (part 3); the scoring and the readers tested here run on the
+    tree as part 3 will build it, their passes on ladder 3 (the loop's old acts
+    -- meet's push, the ball's turns, the asks at a push -- are gone)."""
+    from tests._self_cap import rebuilt
+    rebuilt(monkeypatch)

@@ -21,6 +21,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import test_self_sheet_249 as S  # noqa: E402
 from membrane import self_loop as SL  # noqa: E402
 from membrane import self_sheet as SH  # noqa: E402
+from _self_cap import start_rebuilt, stop_rebuilt  # noqa: E402
+
+_REBUILT: list = []
+
+
+def setUpModule():
+    """#333: meet, turns, expect and mirror built as their rebuild (part 3) will
+    build them; the passes of rungs 6-9 here are on ladder 3."""
+    _REBUILT[:] = start_rebuilt()
+
+
+def tearDownModule():
+    stop_rebuilt(_REBUILT)
 
 H = S.H
 MERGE212 = dt.datetime(2026, 10, 18, 20, 17, 24, tzinfo=dt.timezone.utc).timestamp()
@@ -43,7 +56,7 @@ def _young(srv, upto=6):
     for n, t in ((1, B0 + 0.1 * H), (2, B0 + 0.2 * H), (3, B0 + 0.3 * H), (4, B0 + 0.5 * H),
                  (5, B0 + 1.0 * H), (6, R6)):
         if n <= upto:
-            S._put(srv, {"ts": t, "kind": "rung", "rung": n, "skill": 1.0, "eid": S.ALICE})
+            S._put(srv, {"ts": t, "kind": "rung", "rung": n, "skill": 1.0, "eid": S.ALICE, "ladder": SL.LADDER_V})
     SL._RT.pop(id(srv), None)
     SL.bind(srv)
     return srv
@@ -129,7 +142,7 @@ class TestTheFixMark(unittest.TestCase):
     def test_the_loop_writes_the_fix_once_past_rung_2(self):
         srv = S._seat()
         for r in (1, 2):
-            S._put(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9})
+            S._put(srv, {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9, "ladder": SL.LADDER_V})
         SL._mark_glitch_fix(srv, 50.0)
         SL._mark_glitch_fix(srv, 60.0)
         SL._RT.pop(id(srv), None)                          # a restart: runtime gone

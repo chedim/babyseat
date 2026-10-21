@@ -110,7 +110,6 @@ def test_speak_is_built_under_turns_and_expect():
     assert SL.PROGRESS[11] is SL._rung11
     assert SL.SKILL_PASS[11] == SL.SPEAK_LIFT_MARGIN
     assert 11 in SL.LADDER and SL.LADDER[11] == "speak"
-    assert SL.SPEAK_RUNG == 11
 
 
 def test_the_child_analogy_is_what_the_test_measures():
@@ -300,7 +299,7 @@ def _seat(passed=(1, 2, 3, 4, 5, 6, 7, 8), limit=11):
     cap(srv, 1)
     for r in passed:
         line = {"ts": 1.0, "kind": "rung", "rung": r, "skill": 0.9}
-        if r >= 7:
+        if r >= 6:                      # #333: rungs 6-9 on ladder 3
             line["ladder"] = SL.LADDER_V
         SL._append(srv, line)
     SL._append(srv, {"ts": 1.0, "kind": "audit", "rung": 5, "phase": "end", "eid": "x", "passed": True})
@@ -346,7 +345,6 @@ class _World:
 
 def _run(srv, world, cycles, monkeypatch, t0=10_000.0, model=None):
     monkeypatch.setattr(SL, "_read_entity", world.read)
-    monkeypatch.setattr(SL, "_push_chat", world.push)
     monkeypatch.setattr(SL, "_ask_llm", model or (lambda *a, **k: {"rc": 1, "text": "off"}))
     for i in range(cycles):
         t = t0 + i * SL.PACE_S
@@ -356,55 +354,20 @@ def _run(srv, world, cycles, monkeypatch, t0=10_000.0, model=None):
 
 def test_speak_stays_locked_until_turns_is_accepted():
     srv = _seat(passed=(1, 2, 3, 4, 5, 6, 8))                       # time its turn not earned
-    assert not SL._available(srv, SL.SPEAK_RUNG)
+    assert not SL._available(srv, 11)
     st = SL.status(srv)
     assert "speak" not in st["next"]
     row = {r["id"]: r for r in SS.tree(SL._read(srv), st)}["speak"]
     assert row["state"] == "locked" and row["built"] is True and "time its turn" in row["waiting_on"]
     srv = _seat()
-    SL._append(srv, {"ts": 2.0, "kind": "achieve", "id": "turns", "rung": 7, "skill": 0.1})
-    assert SL._available(srv, SL.SPEAK_RUNG)                         # cap() accepted what it earned
+    SL._append(srv, {"ts": 2.0, "kind": "achieve", "id": "turns", "rung": 7, "skill": 0.1, "ladder": 3})
+    assert SL._available(srv, 11)                         # cap() accepted what it earned
     # an earned, unaccepted turns opens nothing (#299)
     srv = _seat(passed=(1, 2, 3, 4, 5, 6, 8), limit=11)
-    SL._append(srv, {"ts": 2.0, "kind": "achieve", "id": "turns", "rung": 7, "skill": 0.1})
-    assert not SL._available(srv, SL.SPEAK_RUNG)
+    SL._append(srv, {"ts": 2.0, "kind": "achieve", "id": "turns", "rung": 7, "skill": 0.1, "ladder": 3})
+    assert not SL._available(srv, 11)
     row = {r["id"]: r for r in SS.tree(SL._read(srv), SL.status(srv))}["speak"]
     assert row["state"] == "locked" and row["waiting_on"].startswith("your accept of ")
-
-
-def test_on_a_seat_its_turns_go_back_to_chat_with_its_own_words(monkeypatch):
-    srv = _seat()
-    asked = []
-
-    def model(srv_, eid, prompt):
-        asked.append(prompt)
-        return {"rc": 1, "text": "off"}
-    w = _World(srv)
-    _run(srv, w, 2500, monkeypatch, model=model)
-    recs = SL._read(srv)
-    ps = [r for r in recs if r.get("kind") == "push"]
-    assert len(ps) >= 15
-    assert all(SL._medium(p) == "chat" and p.get("to") == RESP for p in ps)        # no ball: chat again
-    assert all(p["speech"] in ("words", "plain", "mute") for p in ps)
-    said = [p for p in ps if p["speech"] == "words"]
-    assert said and any(p["speech"] == "plain" for p in ps)
-    # what reached the chat is exactly what the record says it pushed
-    assert w.lines == [p["words"] if p["speech"] == "words" else SL.SPEAK_PLAIN for p in ps]
-    for p in said:
-        assert p["words"] == SL._speak_words(p["about"]["eid"], p["about"]["answer"])
-        assert p["about"]["eid"] not in (RESP, SL._eid())
-    assert SL._rung11(recs)["false"] == 0 and SL._rung11(recs)["crit"]["truth"] == 1.0
-    for p in ps:                                                    # the timing is rung 7's policy
-        assert p["aim"] in range(NB) and p["why"] in ("aim", "overdue")
-    assert asked                                                    # rung 8's advisor is asked...
-    assert all(a not in w.lines for a in asked)                     # ...and never speaks
-
-
-def test_before_speak_opens_the_turns_stay_with_the_ball(monkeypatch):
-    srv = _seat(limit=8)
-    assert SL._toy_turns(srv) and not SL._available(srv, SL.SPEAK_RUNG)
-    srv = _seat()
-    assert not SL._toy_turns(srv)
 
 
 def test_status_and_the_sheet_show_speak(monkeypatch):
@@ -431,4 +394,13 @@ def test_status_and_the_sheet_show_speak(monkeypatch):
 @pytest.fixture(autouse=True)
 def _seed_turns(monkeypatch):
     """The toy medium stays on (the seat's default): speak's opening is what moves the turns to chat."""
-    monkeypatch.setattr(SL, "TOY_TURNS", True)
+
+
+@pytest.fixture(autouse=True)
+def _rebuilt_333(monkeypatch):
+    """#333: meet, turns, expect and mirror are not built until they are rebuilt
+    on the nudge (part 3); the scoring and the readers tested here run on the
+    tree as part 3 will build it, their passes on ladder 3 (the loop's old acts
+    -- meet's push, the ball's turns, the asks at a push -- are gone)."""
+    from tests._self_cap import rebuilt
+    rebuilt(monkeypatch)

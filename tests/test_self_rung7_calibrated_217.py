@@ -170,32 +170,6 @@ def test_the_prompt_carries_no_chat_text():
     assert "self is here" not in p
 
 
-def test_a_base_rate_echoing_model_answers_the_base_rate_at_the_look(monkeypatch):
-    """The prompt, end to end: a fake model that echoes the base rate it was
-    told lands that number, and the reply check pairs it."""
-    srv = _seat()
-    _history(srv, [1, 0, 0, 0], t0=100.0)
-    asked = []
-
-    def model(srv_, eid, prompt):
-        asked.append(prompt)
-        _land(srv_, clock["t"] + 5.0, f"VERDICT: {_base_rate(prompt):.3f}")
-        return {"rc": 0, "text": f"queued: a loop takes it up on {eid}"}
-
-    clock = {"t": 0.0}
-    monkeypatch.setattr(SL, "_ask_llm", model)
-    monkeypatch.setattr(SL, "_push_chat", lambda *a, **k: None)
-    monkeypatch.setattr(SL, "_read_entity", lambda s, e, now: {"fired": True, "state": {"v": now}, "changed": False})
-    t0 = 5000.0
-    for i in range(30):
-        clock["t"] = t0 + i * SL.PACE_S
-        SL.cycle(srv, now=clock["t"])
-    assert asked
-    looks = [r for r in _record(srv) if r.get("kind") == "reach" and r.get("eid") == RESP and r["ts"] > t0]
-    assert looks and looks[0].get("reply") is True
-    assert looks[0]["p_llm"] == pytest.approx((1 + 0.5) / (4 + 1), abs=0.001)
-
-
 # ---- 1b. the answer, parsed robustly ---------------------------------------------
 
 @pytest.mark.parametrize("text,p", [
@@ -234,7 +208,6 @@ def _late_world(monkeypatch, lag):
         return {"rc": 0, "text": f"queued: a loop takes it up on {eid}"}
 
     monkeypatch.setattr(SL, "_ask_llm", model)
-    monkeypatch.setattr(SL, "_push_chat", lambda *a, **k: None)
     monkeypatch.setattr(SL, "_read_entity", lambda s, e, now: {"fired": True, "state": {"v": now}, "changed": False})
     srv = _seat()
     t0 = 5000.0
@@ -243,31 +216,6 @@ def _late_world(monkeypatch, lag):
         SL.cycle(srv, now=clock["t"])
     looks = [r for r in _record(srv) if r.get("kind") == "reach" and r.get("eid") == RESP and r["ts"] > t0]
     return pushes, looks
-
-
-def test_an_early_answer_is_checked_at_the_usual_time(monkeypatch):
-    pushes, looks = _late_world(monkeypatch, lag=10.0)
-    assert len(pushes) == 1 and looks
-    assert looks[0]["ts"] - pushes[0] < SL.RUNG8_CHECK_S + 2 * SL.PACE_S    # no extra wait
-    assert looks[0].get("p_llm") == pytest.approx(0.3)
-
-
-def test_an_answer_landing_within_the_grace_is_paired(monkeypatch):
-    lag = SL.RUNG8_CHECK_S + SL.RUNG8_GRACE_S / 2
-    pushes, looks = _late_world(monkeypatch, lag=lag)
-    assert looks and looks[0].get("reply") is True
-    assert looks[0]["ts"] - pushes[0] >= lag                    # it waited for the answer...
-    assert looks[0]["ts"] - pushes[0] <= SL.RUNG8_CHECK_S + SL.RUNG8_GRACE_S + 2 * SL.PACE_S
-    assert looks[0].get("p_llm") == pytest.approx(0.3)          # ...and paired it
-
-
-def test_an_answer_landing_after_the_grace_is_not_paired(monkeypatch):
-    lag = SL.RUNG8_CHECK_S + SL.RUNG8_GRACE_S + 60.0
-    pushes, looks = _late_world(monkeypatch, lag=lag)
-    assert looks and looks[0].get("reply") is True
-    assert looks[0]["ts"] - pushes[0] <= SL.RUNG8_CHECK_S + SL.RUNG8_GRACE_S + 2 * SL.PACE_S   # bounded
-    assert looks[0].get("p_llm") is None                       # it hadn't landed by the look
-    assert not [r for r in looks if r.get("p_llm") is not None]  # and no later look pairs it
 
 
 def test_the_grace_stays_under_the_stale_bound():
@@ -356,4 +304,13 @@ def test_the_panel_title_shows_rung_eight():
 def _chat_medium(monkeypatch):
     """These are the chat medium's tests (a line to chat:out is the turn): #264 moved
     rung 7's turns to the ball by default, so they switch the toy medium off."""
-    monkeypatch.setattr(SL, "TOY_TURNS", False)
+
+
+@pytest.fixture(autouse=True)
+def _rebuilt_333(monkeypatch):
+    """#333: meet, turns, expect and mirror are not built until they are rebuilt
+    on the nudge (part 3); the scoring and the readers tested here run on the
+    tree as part 3 will build it, their passes on ladder 3 (the loop's old acts
+    -- meet's push, the ball's turns, the asks at a push -- are gone)."""
+    from tests._self_cap import rebuilt
+    rebuilt(monkeypatch)

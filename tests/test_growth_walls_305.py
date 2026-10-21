@@ -222,11 +222,11 @@ class TestTheTable(unittest.TestCase):
             else:
                 self.assertNotIn(i, SH.BUILT_AT, i)
 
-    def test_turns_and_expect_read_the_balls_clock(self):
-        # #278 (PR #281): rungs 7 and 8 read only the current clock's turns and checks
-        self.assertEqual(SH.BUILT_AT["turns"]["pr"], 281)
-        self.assertEqual(SH.BUILT_AT["expect"]["pr"], 281)
-        self.assertEqual(SH.iso(SH.BUILT_AT["expect"]["merged"]), "2026-10-19T15:19:43+00:00")
+    def test_the_old_wiring_is_not_built(self):
+        # #333: meet, time its turn (PR #281), expect a reply (#281) and recognize itself (#314) were the
+        # developer's wiring -- not built until they are rebuilt on the nudge
+        for i in ("meet", "turns", "expect", "mirror"):
+            self.assertNotIn(i, SH.BUILT_AT, i)
 
 
 def _js(expr):

@@ -101,7 +101,7 @@ function brainLabel(eid, me) {
   return t ? t[1] : s;
 }
 
-const BRAIN_RUNGS = { 0: "sleep and wake", 1: "feel itself", 2: "first reach", 3: "tell things apart", 4: "patience",
+const BRAIN_RUNGS = { 0: "sleep and wake", 1: "feel itself", 2: "look", 3: "tell things apart", 4: "patience",
   5: "notice the world changed", 6: "meet an other", 7: "time its turn", 8: "expect a reply",
   9: "recognize itself", 10: "change itself", 11: "speak" };   // #258: the ladder flip
 // #295, THE SKILL TREE: each achievement's id and the rung number its test kept on the

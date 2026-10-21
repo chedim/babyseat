@@ -248,16 +248,16 @@ def test_the_readings_are_minimal():
 
 # ---- the tower ------------------------------------------------------------------
 
-def test_tower_topples_from_the_reached_block_up_and_only_self_does_it():
+def test_tower_topples_from_the_nudged_block_up_and_only_self_does_it():
     TB.create("tower", "toy:tower", {"n": 5}, now=0.0)
-    for by in ("model", "field", "world"):
+    for by in ("model", "field", "world", "self"):                  # #333: self's look changes nothing either
         assert TB.read("toy:tower", by=by, now=1.0, block=3) == {"standing": True}
     assert all(b["standing"] for b in TB.state("toy:tower")["blocks"])
-    assert TB.read("toy:tower", by="self", now=2.0, block=3) == {"standing": False}
+    assert TB.nudge("toy:tower", block=3, now=2.0)["reading"] == {"standing": False}   # #333: its nudge does
     bl = TB.state("toy:tower")["blocks"]
     assert [b["standing"] for b in bl] == [True, True, False, False, False]
     assert all(b["by"] == "self" and b["at"] == 2.0 for b in bl[2:])
-    assert TB.read("toy:tower", by="self", now=3.0, block=4) == {"standing": True}   # a fallen block: lifted
+    assert TB.nudge("toy:tower", block=4, now=3.0)["reading"] == {"standing": True}   # a fallen block: lifted
     assert [b["standing"] for b in TB.state("toy:tower")["blocks"]] == [True, True, False, True, False]
     assert TB.read("toy:tower", by="model", now=4.0) == {"standing": 3}              # the whole: a count
     assert {e["by"] for e in _log("toy:tower")} == {"self"}
@@ -281,7 +281,7 @@ def test_a_restart_continues_the_same_run(tmp_path, monkeypatch):
 def test_a_seat_restart_keeps_the_toys_and_their_state(_data):
     srv = _seat()
     TB.add(srv, "tower", params={"n": 3})
-    TB.read("toy:tower", by="self", now=5.0, block=2)
+    TB.nudge("toy:tower", block=2, now=5.0)                     # #333: self topples it by a nudge
     srv.entity_store.flush()
     TB._forget()
     srv2 = _seat()
@@ -291,7 +291,7 @@ def test_a_seat_restart_keeps_the_toys_and_their_state(_data):
 
 # ---- end to end: self's reach through the real self loop --------------------------
 
-def test_tower_through_selfs_real_reach_path(monkeypatch):
+def test_tower_through_selfs_real_nudge_path(monkeypatch):
     srv = _seat()
     TB.add(srv, "tower", params={"n": 5})        # #267: on the bench before birth (it unlocks at rung 3)
     cap(srv, 1)
@@ -303,6 +303,10 @@ def test_tower_through_selfs_real_reach_path(monkeypatch):
     cap(srv, 2)
     b = {k: _eid(f"toy:tower:b{k}") for k in range(1, 6)}
     monkeypatch.setattr(SL, "_targets", lambda srv: [b[3]])
+    SL.cycle(srv, now=t)                                          # #333: a look, and nothing moves
+    t += SL.PACE_S
+    assert all(x["standing"] for x in TB.state("toy:tower")["blocks"])
+    SL._nudge_once(srv, 0, t - 1.0, b[3], None)                   # its nudge, through self::nudge
     SL.cycle(srv, now=t)
     t += SL.PACE_S
     reach = [r for r in SL._read(srv) if r.get("kind") == "reach"][-1]
@@ -314,6 +318,9 @@ def test_tower_through_selfs_real_reach_path(monkeypatch):
     WA.entity_read_back(srv, srv.entity_store.docs[b[1]], by="model")
     assert TB.state("toy:tower")["blocks"][0]["standing"] is True
     monkeypatch.setattr(SL, "_targets", lambda srv: [b[4]])
+    SL.cycle(srv, now=t)
+    t += SL.PACE_S
+    SL._nudge_once(srv, 0, t - 1.0, b[4], None)
     SL.cycle(srv, now=t)
     reach = [r for r in SL._read(srv) if r.get("kind") == "reach"][-1]
     assert reach["eid"] == b[4] and reach["answer"] == "changed"

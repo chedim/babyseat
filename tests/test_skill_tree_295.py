@@ -32,12 +32,23 @@ from membrane import self_loop as SL  # noqa: E402
 from membrane import self_sheet as SS  # noqa: E402
 from membrane import toy_unlocks as TU  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS, QuantumEntity  # noqa: E402
+from tests._self_cap import rebuilt  # noqa: E402
 
 OTHER = MEMBRANE_NS + "Component:chat:in:someone"
 BUILT = ["feel", "reach", "kinds", "patience", "shift", "meet", "turns", "expect", "mirror", "change",
-         "speak"]   # #311, #312, #320
-LATER = ["mirror", "change", "speak", "invent"]
+         "speak"]   # #311, #312, #320 -- the tree the mechanics below walk (_whole_tree)
+LATER = ["mirror", "change", "speak", "nudge", "invent"]    # #333: first reach, the nudge skill
 ORDER = ["feel", "reach", "kinds", "patience", "shift", "meet", "turns", "expect"] + LATER   # the tree's order
+
+
+@pytest.fixture(autouse=True)
+def _whole_tree(request, monkeypatch):
+    """#333: meet, turns, expect and mirror are not built until they are rebuilt
+    on the nudge (part 3); the tree's mechanics are tested on the whole tree,
+    built as part 3 will build it, their passes on ladder 3. The tree's own
+    contract (the first test) reads the real one."""
+    if request.node.name != "test_the_tree_has_stable_ids_branches_and_real_edges":
+        rebuilt(monkeypatch)
 CONTRACT = {"id", "name", "branch", "prereqs", "built", "state", "earned_at", "skill", "bar",
             "waiting_on", "child_age", "child_ability", "why_prereqs"}
 
@@ -55,8 +66,8 @@ def _seat(rungs=(), limit=None, lines=()):
     SL._append(srv, {"ts": 1.0, "kind": "birth", "by": "test"})
     for n in rungs:
         line = {"ts": 1.0 + n, "kind": "rung", "rung": n, "skill": 0.9}
-        if n >= 7:
-            line["ladder"] = SL.LADDER_V
+        if n >= 6:
+            line["ladder"] = SL.LADDER_V        # #333: rungs 6-9 count on ladder 3
         SL._append(srv, line)
     for ln in lines:
         SL._append(srv, ln)
@@ -87,7 +98,8 @@ def _expect_passes_turns_not(t0=1000.0, n=110):
 def test_the_tree_has_stable_ids_branches_and_real_edges():
     A = SL.ACHIEVEMENTS
     assert list(A) == ORDER
-    assert [a for a in A if A[a]["built"]] == BUILT
+    assert [a for a in A if A[a]["built"]] == [a for a in BUILT if a not in ("meet", "turns", "expect", "mirror")]   # #333
+    assert A["nudge"]["prereqs"] == ("feel",) and not A["nudge"]["built"]    # #333: first reach, its test to come
     br = {a: A[a]["branch"] for a in A}
     assert br["feel"] == "self"
     assert {br[a] for a in ("reach", "kinds", "patience", "shift")} == {"world"}
@@ -135,7 +147,7 @@ def test_old_rung_lines_count_as_their_achievements_and_the_void_holds():
 def test_a_post_flip_rung_line_counts_and_an_achieve_line_counts():
     srv = _seat(rungs=(1, 2, 3, 4, 5, 6, 7))
     assert "turns" in SL._earned(SL._read(srv))
-    SL._append(srv, {"ts": 99.0, "kind": "achieve", "id": "expect", "skill": 0.3})
+    SL._append(srv, {"ts": 99.0, "kind": "achieve", "id": "expect", "skill": 0.3, "ladder": 3})
     assert SL._earned(SL._read(srv)) == set(BUILT) - {"speak", "mirror", "change"}
     assert 8 in SL._passed(SL._read(srv))                          # the toys and the bug windows read rung numbers
 
@@ -173,9 +185,9 @@ def test_the_reply_checks_run_for_either_sibling():
     srv = _seat(rungs=(2, 6))                                       # meet earned and accepted: both siblings open
     assert SL._available(srv, 8) and SL._available(srv, 7)
     assert SL._replies(srv)
-    assert SL._toy_turns(srv)                                      # the ball's turns are take turns' practice
     srv = _seat(rungs=(2,), lines=[{"ts": 2.5, "kind": "accept_migrated", "ids": ["reach"]},
-                                   {"ts": 9.0, "kind": "achieve", "id": "meet", "rung": 6, "skill": 1.0}])
+                                   {"ts": 9.0, "kind": "achieve", "id": "meet", "rung": 6, "skill": 1.0,
+                                    "ladder": 3}])
     assert not SL._replies(srv)                                    # #299: meet earned, not accepted: no reply checks
     SL.accept(srv, "meet")
     assert SL._replies(srv)

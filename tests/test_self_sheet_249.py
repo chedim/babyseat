@@ -43,6 +43,7 @@ from membrane import self_loop as SL  # noqa: E402
 from membrane import self_sheet as SH  # noqa: E402
 from membrane import toybox as TB  # noqa: E402
 from membrane.entities import EntityStore, MEMBRANE_NS  # noqa: E402
+from tests._self_cap import OLD_BUILT_AT, start_rebuilt, stop_rebuilt  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 UI = ROOT / "membrane" / "ui"
@@ -54,6 +55,20 @@ T0 = dt.datetime(2026, 10, 16, 13, 0, 0, tzinfo=dt.timezone.utc).timestamp()
 FIX191 = dt.datetime(2026, 10, 16, 21, 43, 37, tzinfo=dt.timezone.utc).timestamp()
 OP = MEMBRANE_NS + "Component:chat:in:operator"
 ALICE = MEMBRANE_NS + "Component:chat:in:alice"
+
+
+_REBUILT: list = []
+
+
+def setUpModule():
+    """#333: the sheet is tested on the whole tree -- meet, turns, expect and
+    mirror built as their rebuild on the nudge (part 3) will build them, the
+    lived seat's passes of theirs on ladder 3."""
+    _REBUILT[:] = start_rebuilt()
+
+
+def tearDownModule():
+    stop_rebuilt(_REBUILT)
 
 
 def _seat():
@@ -92,7 +107,7 @@ def _lived(srv):
     _put(srv, {"ts": T0 + 9.0 * H, "kind": "rung", "rung": 5, "skill": 1.0})
     for i in range(10):                                           # to the empty slot
         _put(srv, {"ts": T0 + 9.0 * H + 60 + i * 60, "kind": "push", "eid": "chat:out:operator", "to": OP})
-    _put(srv, {"ts": T0 + 9.5 * H, "kind": "rung", "rung": 6, "skill": 1.0, "eid": OP})
+    _put(srv, {"ts": T0 + 9.5 * H, "kind": "rung", "rung": 6, "skill": 1.0, "eid": OP, "ladder": SL.LADDER_V})
     # the person: 10 lines to alice and 20 answered looks at her
     t = T0 + 9.8 * H
     for i in range(10):
@@ -119,7 +134,7 @@ def _sheet(srv, now):
 # 2026-10-16 13:00Z, before rung 1's test merged (13:07Z): where a test reads
 # only the downtime or a bug window, it runs with this (the walls are
 # test_growth_walls_305's)
-BUILT_FROM_BIRTH = {i: {**m, "merged": 0.0} for i, m in SH.BUILT_AT.items()}
+BUILT_FROM_BIRTH = {i: {**m, "merged": 0.0} for i, m in {**SH.BUILT_AT, **OLD_BUILT_AT}.items()}   # #333: the whole tree
 
 
 def _lived8(srv):
@@ -221,7 +236,7 @@ class TestAchievements(unittest.TestCase):
             a = {x["rung"]: x for x in _sheet(self.srv, T0 + 12 * H)["achievements"]}
         self.assertEqual(sorted(a), [1, 2, 3, 4, 5, 6])
         self.assertEqual(a[2]["skill"], 0.3)
-        self.assertEqual(a[2]["name"], "first reach")
+        self.assertEqual(a[2]["name"], "look")                         # #333: rung 2's pass is the look
         self.assertEqual(a[2]["at"], "2026-10-16T15:30:00+00:00")
         self.assertAlmostEqual(a[1]["working_h"], 0.5, places=2)
         self.assertAlmostEqual(a[2]["wall_h"], 2.5, places=2)

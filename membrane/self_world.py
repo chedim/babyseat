@@ -39,8 +39,9 @@ field hands each applied event to its `event_listeners` (efield._apply);
 bind() registers on_event there.
 
 EVERY READ BLURP MAKES IS FILTERED THROUGH IT (self_loop: the reach targets,
-a direct reach, the ball, the mirror, the toys list, the blind audit, the
-meet's other). A thing outside the world is never looked at or acted on."""
+a direct reach, the mirror, the toys list, the blind audit; #333: its aims and
+its nudges -- a nudge outside its world is refused and costs the error fee).
+A thing outside the world is never looked at or acted on."""
 from __future__ import annotations
 
 import json
