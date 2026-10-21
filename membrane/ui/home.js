@@ -1583,7 +1583,8 @@ const HSTYLE = `
   .selfpanel .sptab[aria-selected="true"] { opacity:1; border-bottom-color:var(--primary-color,#3477d6); }
   .selfpanel .sptab:focus-visible, .sktree .sknode:focus-visible { outline:2px solid var(--primary-color,#3477d6); outline-offset:2px; }
   .selfpanel .sppane[hidden] { display:none; }
-  .sktree { --sk-earned:#d4a017; }
+  /* #361: the film's look -- its gold, leaning dark on a light theme and bright on a dark one */
+  .sktree { --sk-earned:color-mix(in srgb, #f2c45a 72%, var(--primary-text-color,#ddd)); }
   .sktree .skhdr { display:flex; align-items:center; gap:10px; padding:8px 12px; margin:2px 0 6px; border-radius:12px;
                    border:1px solid color-mix(in srgb, var(--divider-color,#888) 60%, transparent);
                    background:color-mix(in srgb, var(--primary-color,#3477d6) 8%, transparent); }
@@ -1597,8 +1598,9 @@ const HSTYLE = `
   .sktree .skedges { position:absolute; inset:0; overflow:visible; }
   .sktree .sklane { stroke:color-mix(in srgb, var(--divider-color,#888) 25%, transparent); stroke-width:1; }
   .sktree .sklanel { position:absolute; top:4px; text-align:center; font-size:10.5px; letter-spacing:.06em; text-transform:uppercase; opacity:.6; }
-  .sktree .skedge { fill:none; stroke:color-mix(in srgb, var(--primary-text-color,#ddd) 35%, transparent); stroke-width:1.5; stroke-dasharray:4 4; }
-  .sktree .skedge.earned { stroke:var(--sk-earned); stroke-dasharray:none; opacity:.85; }
+  .sktree .skedge { fill:none; stroke:color-mix(in srgb, var(--primary-text-color,#ddd) 30%, transparent); stroke-width:2; stroke-dasharray:5 5; }
+  .sktree .skedge.earned { stroke:var(--sk-earned); stroke-dasharray:none; opacity:.9; }
+  .sktree .skedge.awaiting { stroke:var(--sk-earned); opacity:.7; }
   .sktree .sknode { position:absolute; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
                     padding:3px 4px; border-radius:12px; font:inherit; font-size:11px; line-height:1.15; color:inherit; text-align:center;
                     cursor:pointer; overflow:hidden; border:1.5px solid color-mix(in srgb, var(--divider-color,#888) 60%, transparent);
@@ -1606,11 +1608,13 @@ const HSTYLE = `
   .sktree .sknode .skic { font-size:14px; line-height:1; height:18px; display:grid; place-items:center; }
   .sktree .sknode .sknm { font-weight:600; overflow-wrap:anywhere; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
   .sktree .sknode .sksub { font-size:10px; opacity:.75; font-variant-numeric:tabular-nums; }
-  .sktree .sknode.earned { border-color:var(--sk-earned); background:color-mix(in srgb, var(--sk-earned) 26%, var(--card-background-color,#111)); }
+  .sktree .sknode.earned { border-color:var(--sk-earned); border-width:2px; background:color-mix(in srgb, var(--sk-earned) 22%, var(--card-background-color,#111)); }
   .sktree .sknode.open { border-color:var(--primary-color,#3477d6);
                          box-shadow:0 0 0 2px color-mix(in srgb, var(--primary-color,#3477d6) 30%, transparent),
                                     0 0 12px color-mix(in srgb, var(--primary-color,#3477d6) 45%, transparent); }
-  .sktree .sknode.locked { opacity:.5; }
+  .sktree .sknode.locked { opacity:.55; color:var(--secondary-text-color,inherit);
+                           background:color-mix(in srgb, var(--primary-text-color,#ddd) 5%, var(--card-background-color,#111)); }
+  .sktree .sknode.locked .skic { opacity:.7; }
   .sktree .sknode.unbuilt { opacity:.55; border-style:dashed; background:transparent; }
   .sktree .sknode.sel { outline:2px solid color-mix(in srgb, var(--primary-text-color,#ddd) 60%, transparent); outline-offset:1px; }
   .sktree .skring .skrt { fill:none; stroke:color-mix(in srgb, var(--primary-text-color,#ddd) 20%, transparent); stroke-width:2.5; }
@@ -1619,6 +1623,16 @@ const HSTYLE = `
     .sktree .sknode.open { animation:skglow 2.6s ease-in-out infinite alternate; }
     @keyframes skglow { to { box-shadow:0 0 0 2px color-mix(in srgb, var(--primary-color,#3477d6) 45%, transparent),
                                        0 0 18px color-mix(in srgb, var(--primary-color,#3477d6) 60%, transparent); } }
+    /* #361: a skill earned while the page is open lights up once */
+    .sktree .sknode.lit { animation:skearn 1.6s ease-out 1; }
+    .sktree .sknode.lit .skic { animation:skearnic 1.6s ease-out 1; }
+    .sktree .skedge.lit { animation:skearned 1.6s ease-out 1; }
+    @keyframes skearn { 0% { box-shadow:0 0 0 0 transparent; }
+                        25% { box-shadow:0 0 0 4px color-mix(in srgb, var(--sk-earned) 55%, transparent), 0 0 24px var(--sk-earned);
+                              background:color-mix(in srgb, var(--sk-earned) 55%, var(--card-background-color,#111)); }
+                        100% { box-shadow:0 0 0 0 transparent; } }
+    @keyframes skearnic { 0% { transform:scale(.6); } 30% { transform:scale(1.35); } 100% { transform:scale(1); } }
+    @keyframes skearned { 0% { stroke-dashoffset:0; opacity:.3; stroke-width:2; } 30% { opacity:1; stroke-width:4; } 100% { opacity:.9; stroke-width:2; } }
   }
   .sktree .skcard { padding:8px 10px; border-radius:12px; margin:0 0 8px; font-size:12px;
                     background:color-mix(in srgb, var(--primary-color,#3477d6) 6%, transparent); }

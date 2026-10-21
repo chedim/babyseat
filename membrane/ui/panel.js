@@ -1346,7 +1346,7 @@ function treeLayout(nodes) {
       const y1 = a.y + hh, y2 = n.y - hh, my = r1((y1 + y2) / 2);
       d = "M" + a.x + "," + y1 + " C" + a.x + "," + my + " " + n.x + "," + my + " " + n.x + "," + y2;
     }
-    edges.push({ from: p, to: n.id, d, earned: a.state === "earned" });
+    edges.push({ from: p, to: n.id, d, earned: a.state === "earned", fromState: a.state });
   }
   const rows = Math.max(0, ...out.map((n) => n.row));
   return { W: TREE_PAD * 2 + lanes.length * TREE_LANE_W, H: TREE_TOP + rows * TREE_ROW_H + TREE_NODE_H + TREE_PAD,
@@ -1403,6 +1403,41 @@ function ringDash(bar, r) {
   return { c, on: c * clamp01(Number(bar)) };
 }
 
+// ---- #361: the film's look. An edge is solid gold once its prerequisite is
+// earned, gold but dashed while that one awaits your accept, dashed
+// otherwise; a skill that turns earned while the page is open lights up
+// once (this render's states against the last one's), never on a load.
+const isEarnedState = (s) => s === "earned" || s === "awaiting";
+
+/** A render's states: {id: state}. */
+function treeStates(nodes) {
+  const out = {};
+  for (const n of nodes || []) if (n && n.id != null) out[n.id] = n.state;
+  return out;
+}
+
+/** The ids that turned earned (or earned, awaiting your accept) since the
+ *  render whose states are `prev`; no previous render lights nothing, and a
+ *  node that render never saw is no change it saw. */
+function newlyEarned(prev, nodes) {
+  if (!prev || typeof prev !== "object") return [];
+  return (nodes || []).filter((n) => n && n.id in prev && isEarnedState(n.state) && !isEarnedState(prev[n.id])).map((n) => n.id);
+}
+
+/** An edge's classes: earned (solid gold), awaiting (dashed gold) or plain
+ *  (dashed); `lit` when it leaves a newly earned skill. */
+function edgeClass(e, lit) {
+  const st = e.fromState || (e.earned ? "earned" : "");
+  return "skedge" + (st === "earned" ? " earned" : st === "awaiting" ? " awaiting" : "")
+    + ((lit || []).includes(e.from) ? " lit" : "");
+}
+
+/** A node's classes: its state, then `sel` (the chosen one) and `lit` (newly earned). */
+function nodeClass(n, o) {
+  o = o || {};
+  return "sknode " + n.state + (o.sel != null && o.sel === n.id ? " sel" : "") + ((o.lit || []).includes(n.id) ? " lit" : "");
+}
+
 const TREE_ICON = { earned: "🏅", awaiting: "🎁", locked: "🔒", unbuilt: "◌" };
 const SVGNS = "http://www.w3.org/2000/svg";
 
@@ -1432,6 +1467,8 @@ function renderSkillTree(doc, root, sheet, sel) {
   const m = skillTree(sheet);
   if (!m) { root.appendChild(el("p", "muted", "the skill tree is not reachable right now")); return; }
   const L = treeLayout(m.nodes);
+  const lit = newlyEarned(sel._states, m.nodes);                    // #361: what turned earned since the last render
+  sel._states = treeStates(m.nodes);
   const hdr = root.appendChild(el("div", "skhdr"));
   hdr.appendChild(el("span", "nm", m.name));
   hdr.appendChild(el("span", "lvb", "Lv " + m.level));
@@ -1450,10 +1487,10 @@ function renderSkillTree(doc, root, sheet, sel) {
     const lab = cv.appendChild(el("div", "sklanel", ln.label));
     lab.setAttribute("style", "left:" + (ln.x - TREE_LANE_W / 2) + "px;width:" + TREE_LANE_W + "px");
   }
-  for (const e of L.edges) svg.appendChild(svgEl("path", { class: "skedge" + (e.earned ? " earned" : ""), d: e.d }));
+  for (const e of L.edges) svg.appendChild(svgEl("path", { class: edgeClass(e, lit), d: e.d }));
   const btns = {};
   for (const n of L.nodes) {
-    const b = cv.appendChild(el("button", "sknode " + n.state));
+    const b = cv.appendChild(el("button", nodeClass(n, { lit })));
     b.setAttribute("type", "button");
     b.setAttribute("data-id", n.id);
     b.setAttribute("aria-label", n.name + ": " + nodeStateText(n));
@@ -1479,7 +1516,7 @@ function renderSkillTree(doc, root, sheet, sel) {
   card.setAttribute("aria-label", "the chosen skill");
   const paintCard = () => {
     card.textContent = "";
-    for (const id in btns) btns[id].className = "sknode " + L.nodes.find((n) => n.id === id).state + (id === sel.id ? " sel" : "");
+    for (const id in btns) btns[id].className = nodeClass(L.nodes.find((n) => n.id === id), { sel: sel.id, lit });
     const c = nodeCard(L.nodes.find((n) => n.id === sel.id), m.nodes);
     if (!c) { card.appendChild(el("p", "muted", "hover, focus or tap a skill to see it")); return; }
     card.appendChild(el("p", "skct", c.title));
@@ -1880,6 +1917,7 @@ const AiPanelLogic = { offlineNotice, jsCompile, jsShow, voiceLogItems, seatView
                        toyGlyph, toyAfterPoke, toyBadge, toyDockItem, toyDockHtml, toyPopoverHtml, BADGE_S, skillStatHtml, skillSigned,
                        levelUpText, unlockText, sheetToys, TOY_ICONS,
                        skillTree, treeLayout, nodeCard, nodeStateText, achievementsList, ringDash, childAge, renderSkillTree, TREE_LADDER,
+                       treeStates, newlyEarned, edgeClass, nodeClass,
                        loadRows, loadVoice, voiceHtml, voiceTurnText, toolView, shouldStick, fmtElapsed, fmtUsage };
 if (typeof module !== "undefined" && module.exports) module.exports = AiPanelLogic;
 
